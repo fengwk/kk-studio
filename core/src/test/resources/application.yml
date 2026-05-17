@@ -1,0 +1,55 @@
+spring:
+
+  application:
+    # 应用名称
+    name: kk-studio
+
+  sql:
+    init:
+      schema-locations:
+        - classpath:schema-h2.sql
+
+  datasource:
+    multi:
+      primary:
+        primary: true
+        # 使用h2驱动
+        driver-class-name: org.h2.Driver
+        # 使用这个jdbc连接将会以MySQL模式连接到h2内存数据库
+        url: jdbc:h2:mem:test;DB_CLOSE_DELAY=-1;MODE=MySQL;DATABASE_TO_LOWER=TRUE
+        # 指定的默认的用户名SA，防止h2出现认证异常
+        # 详见，org.h2.engine.Database.setMasterUser
+        username: SA
+
+  data:
+    # 测试的redis服务
+    redis:
+      host: 127.0.0.1
+      port: 6379
+
+  mybatis:
+    mapper-locations: classpath:**/*Mapper.xml
+    type-aliases-package: fun.fengwk.kkstudio.**.model
+    configuration:
+      map-underscore-to-camel-case: true
+
+  # 测试时关闭nacos配置
+  cloud:
+    nacos:
+      config:
+        enabled: false
+
+convention:
+  snowflake-id:
+    # 雪花id开始时间，固定不可变
+    initial-timestamp: 1702214261706
+    # 测试必须指定workId，测试使用的内嵌redis不支持lua脚本
+    worker-id: 0
+
+kk-circle:
+  ai:
+    image:
+      gpt-image-2:
+        url: https://webai2api.kk1.fun/api/gpt-image-2
+        api-key: ${TOOLS_API_KEY}
+        timeout-ms: 180000
