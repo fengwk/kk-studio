@@ -27,6 +27,7 @@
         <project.reporting.outputEncoding>utf-8</project.reporting.outputEncoding>
         <kk-studio.version>1.0.0</kk-studio.version>
         <gateway.version>1.0.8</gateway.version>
+        <aws.sdk.version>2.29.52</aws.sdk.version>
         <langchain4j.version>1.11.7</langchain4j.version>
     </properties>
 
@@ -51,6 +52,13 @@
                 <groupId>fun.fengwk.gateway</groupId>
                 <artifactId>gateway-share</artifactId>
                 <version>${gateway.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${aws.sdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
             </dependency>
             <dependency>
                 <groupId>dev.langchain4j</groupId>
