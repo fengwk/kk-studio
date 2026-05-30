@@ -28,7 +28,7 @@
         <kk-studio.version>1.0.0</kk-studio.version>
         <gateway.version>1.0.8</gateway.version>
         <aws.sdk.version>2.29.52</aws.sdk.version>
-        <langchain4j.version>1.11.7</langchain4j.version>
+        <langchain4j.version>1.15.1</langchain4j.version>
     </properties>
 
     <dependencyManagement>
