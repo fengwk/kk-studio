@@ -3,10 +3,12 @@ package fun.fengwk.kkstudio.core.agent.runtime.provider;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
+import org.springframework.stereotype.Component;
 
 /**
  * @author fengwk
  */
+@Component
 public class ProviderManagerImpl implements ProviderManager {
 
     private final Map<ProviderType, Function<ProviderConfig, Provider>> providerFactoryMap;

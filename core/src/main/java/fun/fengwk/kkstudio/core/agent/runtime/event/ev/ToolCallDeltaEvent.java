@@ -8,7 +8,10 @@ import lombok.Data;
 @Data
 public class ToolCallDeltaEvent extends Event {
 
+    /** tool call id。 */
     private String id;
+
+    /** 工具执行结果增量。 */
     private String partialResult;
 
     @Override

@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.core.agent.runtime.event.ev;
 
-import dev.langchain4j.data.message.UserMessage;
 import lombok.Data;
 
 import java.util.List;
@@ -11,8 +10,11 @@ import java.util.List;
 @Data
 public class MessageStartEvent extends Event {
 
-    // TODO 可以抽象为新的消息数据结构和 langchain4j 解耦
-    private List<UserMessage> messageList;
+    /** 本轮 turn 消费的 taskId 列表，用于排查重复消费和多节点竞态。 */
+    private List<String> taskIdList;
+
+    /** 本轮新增的用户消息文本。 */
+    private List<String> userMessageList;
 
     @Override
     public EventType getEventType() {

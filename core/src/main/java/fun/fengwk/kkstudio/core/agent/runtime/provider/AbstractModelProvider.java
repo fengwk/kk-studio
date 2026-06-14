@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.agent.runtime.provider;
 
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.request.DefaultChatRequestParameters;
 
 import java.util.List;
 import java.util.Objects;
@@ -22,7 +23,24 @@ public abstract class AbstractModelProvider implements Provider {
     }
 
     protected ChatRequest.Builder setParameters(ChatRequest.Builder builder, ModelRequestConfig modelConfig) {
-        return builder;
+        DefaultChatRequestParameters.Builder<?> parametersBuilder = DefaultChatRequestParameters.builder();
+        applyCommonParameters(parametersBuilder, modelConfig);
+        return builder.parameters(parametersBuilder.build());
+    }
+
+    protected void applyCommonParameters(DefaultChatRequestParameters.Builder<?> builder, ModelRequestConfig modelConfig) {
+        builder
+            .modelName(modelConfig.getModelName())
+            .temperature(modelConfig.getTemperature())
+            .topP(modelConfig.getTopP())
+            .topK(modelConfig.getTopK())
+            .frequencyPenalty(modelConfig.getFrequencyPenalty())
+            .presencePenalty(modelConfig.getPresencePenalty())
+            .maxOutputTokens(modelConfig.getMaxOutputTokens())
+            .stopSequences(modelConfig.getStopSequences())
+            .toolSpecifications(modelConfig.getToolSpecifications())
+            .toolChoice(modelConfig.getToolChoice())
+            .responseFormat(modelConfig.getResponseFormat());
     }
 
     @Override

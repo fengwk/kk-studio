@@ -1,9 +1,7 @@
 package fun.fengwk.kkstudio.core.agent.runtime.event.ev;
 
-import fun.fengwk.kkstudio.core.agent.runtime.tool.ToolCallRequest;
 import lombok.Data;
 
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -12,14 +10,12 @@ import java.util.Map;
 @Data
 public class MessageEndEvent extends Event {
 
-    private String text;
-    private String thinking;
-    private List<ToolCallRequest> toolCallRequests;
+    /** assistant message 结束边界。完整内容由本 message 内的 delta/tool_call_end 事件重建。 */
     private Map<String, Object> attributes;
 
     @Override
     public EventType getEventType() {
-        return EventType.message_delta;
+        return EventType.message_end;
     }
 
 }

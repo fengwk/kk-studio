@@ -1,0 +1,38 @@
+package fun.fengwk.kkstudio.agent.provider;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Function;
+
+/**
+ * ProviderManager 的默认实现。
+ *
+ * @author fengwk
+ */
+public class ProviderManagerImpl implements ProviderManager {
+
+    /**
+     * provider 类型到 provider 工厂的映射表。
+     */
+    private final Map<ProviderType, Function<ProviderInfo, Provider>> providerFactoryMap;
+
+    public ProviderManagerImpl() {
+        Map<ProviderType, Function<ProviderInfo, Provider>> providerFactoryMap = new HashMap<>();
+        providerFactoryMap.put(ProviderType.openai, OpenAiModelProvider::new);
+        providerFactoryMap.put(ProviderType.openai_response, OpenAiResponseModelProvider::new);
+        providerFactoryMap.put(ProviderType.anthropic, AnthropicModelProvider::new);
+        providerFactoryMap.put(ProviderType.google, GoogleModelProvider::new);
+        this.providerFactoryMap = providerFactoryMap;
+    }
+
+    @Override
+    public Provider getProvider(ProviderInfo providerInfo) {
+        Function<ProviderInfo, Provider> factory = providerFactoryMap.get(providerInfo.getProviderType());
+        if (factory == null) {
+            throw new IllegalArgumentException("Unsupported model provider type: " + providerInfo.getProviderType());
+        }
+
+        return factory.apply(providerInfo);
+    }
+
+}

@@ -18,6 +18,7 @@
         <module>share</module>
         <module>core</module>
         <module>web</module>
+        <module>agent</module>
     </modules>
 
     <properties>
