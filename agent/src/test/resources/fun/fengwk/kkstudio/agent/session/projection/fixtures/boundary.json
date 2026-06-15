@@ -1,0 +1,391 @@
+[
+  {
+    "name": "empty_events",
+    "events": [],
+    "expected": {
+      "messages": []
+    }
+  },
+  {
+    "name": "null_events_input",
+    "events": null,
+    "expected": {
+      "messages": []
+    }
+  },
+  {
+    "name": "ignores_null_event_null_type_and_blank_prompt",
+    "events": [
+      null,
+      {
+        "payload": {
+          "userMessages": ["ghost"]
+        }
+      },
+      {
+        "eventType": "set_agent_info",
+        "payload": {
+          "agentName": "assistant",
+          "systemPrompt": "   "
+        }
+      },
+      {
+        "eventType": "set_model_info",
+        "payload": {
+          "provider": "openai",
+          "model": "gpt-test",
+          "variant": "high"
+        }
+      }
+    ],
+    "expected": {
+      "agentInfo": {
+        "agentName": "assistant",
+        "systemPrompt": "   "
+      },
+      "modelInfo": {
+        "provider": "openai",
+        "model": "gpt-test",
+        "variant": "high"
+      },
+      "messages": []
+    }
+  },
+  {
+    "name": "assistant_start_without_user_messages_then_end",
+    "events": [
+      {
+        "eventType": "assistant_start",
+        "payload": {}
+      },
+      {
+        "eventType": "assistant_end",
+        "payload": {}
+      }
+    ],
+    "expected": {
+      "messages": [
+        {
+          "type": "ai",
+          "text": "",
+          "toolCalls": []
+        }
+      ]
+    }
+  },
+  {
+    "name": "agent_info_without_system_prompt",
+    "events": [
+      {
+        "eventType": "set_agent_info",
+        "payload": {
+          "agentName": "assistant"
+        }
+      }
+    ],
+    "expected": {
+      "agentInfo": {
+        "agentName": "assistant"
+      },
+      "messages": []
+    }
+  },
+  {
+    "name": "assistant_start_skips_null_user_message",
+    "events": [
+      {
+        "eventType": "assistant_start",
+        "payload": {
+          "userMessages": ["hello", null, "world"]
+        }
+      },
+      {
+        "eventType": "assistant_end",
+        "payload": {}
+      }
+    ],
+    "expected": {
+      "messages": [
+        {
+          "type": "user",
+          "text": "hello"
+        },
+        {
+          "type": "user",
+          "text": "world"
+        },
+        {
+          "type": "ai",
+          "text": "",
+          "toolCalls": []
+        }
+      ]
+    }
+  },
+  {
+    "name": "orphan_assistant_events_ignored",
+    "events": [
+      {
+        "eventType": "assistant_delta",
+        "payload": {
+          "textDelta": "orphan"
+        }
+      },
+      {
+        "eventType": "assistant_end",
+        "payload": {}
+      },
+      {
+        "eventType": "error",
+        "payload": {
+          "message": "ignored"
+        }
+      }
+    ],
+    "expected": {
+      "messages": []
+    }
+  },
+  {
+    "name": "malformed_payload_types_ignored",
+    "events": [
+      {
+        "eventType": "set_agent_info",
+        "payloadType": "unknown",
+        "payload": {
+          "ignored": true
+        }
+      },
+      {
+        "eventType": "set_model_info",
+        "payloadType": "unknown",
+        "payload": {
+          "ignored": true
+        }
+      },
+      {
+        "eventType": "assistant_delta",
+        "payloadType": "assistant_start",
+        "payload": {
+          "userMessages": ["ghost"]
+        }
+      },
+      {
+        "eventType": "assistant_start",
+        "payloadType": "unknown",
+        "payload": {
+          "ignored": true
+        }
+      },
+      {
+        "eventType": "tool_start",
+        "payloadType": "error",
+        "payload": {
+          "message": "bad"
+        }
+      },
+      {
+        "eventType": "tool_delta",
+        "payloadType": "assistant_delta",
+        "payload": {
+          "textDelta": "bad"
+        }
+      },
+      {
+        "eventType": "tool_end",
+        "payloadType": "assistant_start",
+        "payload": {
+          "userMessages": ["bad"]
+        }
+      }
+    ],
+    "expected": {
+      "messages": []
+    }
+  },
+  {
+    "name": "error_and_abort_with_unknown_payload_are_ignored",
+    "events": [
+      {
+        "eventType": "assistant_start",
+        "payload": {
+          "userMessages": []
+        }
+      },
+      {
+        "eventType": "error",
+        "payloadType": "unknown",
+        "payload": {
+          "ignored": true
+        }
+      },
+      {
+        "eventType": "abort",
+        "payloadType": "unknown",
+        "payload": {
+          "ignored": true
+        }
+      },
+      {
+        "eventType": "assistant_end",
+        "payload": {}
+      }
+    ],
+    "expected": {
+      "messages": [
+        {
+          "type": "ai",
+          "text": "",
+          "toolCalls": []
+        }
+      ]
+    }
+  },
+  {
+    "name": "tool_end_without_content",
+    "events": [
+      {
+        "eventType": "tool_start",
+        "payload": {
+          "toolCallId": "call_1",
+          "toolName": "bash",
+          "arguments": "{}"
+        }
+      },
+      {
+        "eventType": "tool_end",
+        "payload": {
+          "toolCallId": "call_1"
+        }
+      }
+    ],
+    "expected": {
+      "messages": [
+        {
+          "type": "tool",
+          "id": "call_1",
+          "toolName": "bash",
+          "contents": [
+            {
+              "type": "text",
+              "text": ""
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "assistant_error_without_existing_text",
+    "events": [
+      {
+        "eventType": "assistant_start",
+        "payload": {
+          "userMessages": []
+        }
+      },
+      {
+        "eventType": "error",
+        "payload": {
+          "message": "failed"
+        }
+      }
+    ],
+    "expected": {
+      "messages": [
+        {
+          "type": "ai",
+          "text": "failed",
+          "toolCalls": []
+        }
+      ]
+    }
+  },
+  {
+    "name": "tool_error_without_existing_text",
+    "events": [
+      {
+        "eventType": "tool_start",
+        "payload": {
+          "toolCallId": "call_1",
+          "toolName": "bash",
+          "arguments": "{}"
+        }
+      },
+      {
+        "eventType": "error",
+        "payload": {
+          "toolCallId": "call_1",
+          "message": "failed"
+        }
+      }
+    ],
+    "expected": {
+      "messages": [
+        {
+          "type": "tool",
+          "id": "call_1",
+          "toolName": "bash",
+          "contents": [
+            {
+              "type": "text",
+              "text": "failed"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "latest_agent_model_fact_overwrite",
+    "events": [
+      {
+        "eventType": "set_agent_info",
+        "payload": {
+          "agentName": "assistant-1",
+          "systemPrompt": "sys-1"
+        }
+      },
+      {
+        "eventType": "set_model_info",
+        "payload": {
+          "provider": "openai",
+          "model": "gpt-1",
+          "variant": "low"
+        }
+      },
+      {
+        "eventType": "set_agent_info",
+        "payload": {
+          "agentName": "assistant-2",
+          "systemPrompt": "sys-2"
+        }
+      },
+      {
+        "eventType": "set_model_info",
+        "payload": {
+          "provider": "anthropic",
+          "model": "claude-1",
+          "variant": "high"
+        }
+      }
+    ],
+    "expected": {
+      "agentInfo": {
+        "agentName": "assistant-2",
+        "systemPrompt": "sys-2"
+      },
+      "modelInfo": {
+        "provider": "anthropic",
+        "model": "claude-1",
+        "variant": "high"
+      },
+      "messages": [
+        {
+          "type": "system",
+          "text": "sys-2"
+        }
+      ]
+    }
+  }
+]

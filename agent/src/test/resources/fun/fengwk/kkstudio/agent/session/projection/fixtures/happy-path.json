@@ -1,0 +1,312 @@
+[
+  {
+    "name": "assistant_full_projection",
+    "events": [
+      {
+        "eventType": "set_agent_info",
+        "payload": {
+          "agentName": "assistant",
+          "systemPrompt": "sys"
+        }
+      },
+      {
+        "eventType": "set_model_info",
+        "payload": {
+          "provider": "openai",
+          "model": "gpt-test",
+          "variant": "high"
+        }
+      },
+      {
+        "eventType": "assistant_start",
+        "payload": {
+          "userMessages": ["hello", "world"]
+        }
+      },
+      {
+        "eventType": "assistant_delta",
+        "payload": {
+          "textDelta": "Hi",
+          "thinkingDelta": "Think"
+        }
+      },
+      {
+        "eventType": "assistant_delta",
+        "payload": {
+          "toolCallsDelta": [
+            {
+              "index": 0,
+              "toolCallDelta": {
+                "toolCallId": "call_1",
+                "toolName": "get_weather",
+                "argumentsDelta": "{\"city\":\""
+              }
+            }
+          ]
+        }
+      },
+      {
+        "eventType": "assistant_delta",
+        "payload": {
+          "toolCallsDelta": [
+            {
+              "index": 0,
+              "toolCallDelta": {
+                "argumentsDelta": "Munich\"}"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "eventType": "assistant_end",
+        "payload": {}
+      }
+    ],
+    "expected": {
+      "agentInfo": {
+        "agentName": "assistant",
+        "systemPrompt": "sys"
+      },
+      "modelInfo": {
+        "provider": "openai",
+        "model": "gpt-test",
+        "variant": "high"
+      },
+      "messages": [
+        {
+          "type": "system",
+          "text": "sys"
+        },
+        {
+          "type": "user",
+          "text": "hello"
+        },
+        {
+          "type": "user",
+          "text": "world"
+        },
+        {
+          "type": "ai",
+          "text": "Hi",
+          "thinking": "Think",
+          "toolCalls": [
+            {
+              "id": "call_1",
+              "name": "get_weather",
+              "arguments": "{\"city\":\"Munich\"}"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "assistant_tool_calls_without_text",
+    "events": [
+      {
+        "eventType": "assistant_start",
+        "payload": {
+          "userMessages": []
+        }
+      },
+      {
+        "eventType": "assistant_delta",
+        "payload": {
+          "toolCallsDelta": [
+            {
+              "index": 0,
+              "toolCallDelta": {
+                "toolCallId": "call_1",
+                "toolName": "bash",
+                "argumentsDelta": "{}"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "eventType": "assistant_end",
+        "payload": {}
+      }
+    ],
+    "expected": {
+      "messages": [
+        {
+          "type": "ai",
+          "toolCalls": [
+            {
+              "id": "call_1",
+              "name": "bash",
+              "arguments": "{}"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "tool_mixed_media_contents",
+    "events": [
+      {
+        "eventType": "tool_start",
+        "payload": {
+          "toolCallId": "call_1",
+          "toolName": "media",
+          "arguments": "{}"
+        }
+      },
+      {
+        "eventType": "tool_delta",
+        "payload": {
+          "toolCallId": "call_1",
+          "contentDeltas": [
+            {
+              "index": 0,
+              "contentDelta": {
+                "type": "text",
+                "text": "hello "
+              }
+            },
+            {
+              "index": 1,
+              "contentDelta": {
+                "type": "image",
+                "data": "img-a",
+                "mime": "image/png",
+                "name": "a.png"
+              }
+            },
+            {
+              "index": 2,
+              "contentDelta": {
+                "type": "audio",
+                "data": "aud-a",
+                "mime": "audio/mpeg",
+                "name": "a.mp3"
+              }
+            },
+            {
+              "index": 3,
+              "contentDelta": {
+                "type": "video",
+                "data": "vid-a",
+                "mime": "video/mp4",
+                "name": "a.mp4"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "eventType": "tool_delta",
+        "payload": {
+          "toolCallId": "call_1",
+          "contentDeltas": [
+            {
+              "index": 0,
+              "contentDelta": {
+                "type": "text",
+                "text": "world"
+              }
+            },
+            {
+              "index": 1,
+              "contentDelta": {
+                "type": "image",
+                "data": "img-b",
+                "mime": "image/jpeg",
+                "name": "b.jpg"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "eventType": "tool_end",
+        "payload": {
+          "toolCallId": "call_1"
+        }
+      }
+    ],
+    "expected": {
+      "messages": [
+        {
+          "type": "tool",
+          "id": "call_1",
+          "toolName": "media",
+          "contents": [
+            {
+              "type": "text",
+              "text": "hello world"
+            },
+            {
+              "type": "image",
+              "data": "img-a",
+              "mime": "image/png"
+            },
+            {
+              "type": "audio",
+              "data": "aud-a",
+              "mime": "audio/mpeg"
+            },
+            {
+              "type": "video",
+              "data": "vid-a",
+              "mime": "video/mp4"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "tool_single_text_result",
+    "events": [
+      {
+        "eventType": "tool_start",
+        "payload": {
+          "toolCallId": "call_1",
+          "toolName": "bash",
+          "arguments": "{}"
+        }
+      },
+      {
+        "eventType": "tool_delta",
+        "payload": {
+          "toolCallId": "call_1",
+          "contentDeltas": [
+            {
+              "index": 0,
+              "contentDelta": {
+                "type": "text",
+                "text": "one"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "eventType": "tool_end",
+        "payload": {
+          "toolCallId": "call_1"
+        }
+      }
+    ],
+    "expected": {
+      "messages": [
+        {
+          "type": "tool",
+          "id": "call_1",
+          "toolName": "bash",
+          "contents": [
+            {
+              "type": "text",
+              "text": "one"
+            }
+          ]
+        }
+      ]
+    }
+  }
+]
