@@ -2,7 +2,9 @@ package fun.fengwk.kkstudio.agent.provider;
 
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
 import dev.langchain4j.model.chat.request.DefaultChatRequestParameters;
+import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
 
 import java.util.List;
 import java.util.Objects;
@@ -48,6 +50,11 @@ public abstract class AbstractModelProvider implements Provider {
     @Override
     public ProviderType getProviderType() {
         return getProviderInfo().getProviderType();
+    }
+
+    @Override
+    public AssistantMetadata toAssistantMetadata(ChatResponseMetadata metadata) {
+        return Provider.toCommonAssistantMetadata(metadata);
     }
 
     private void applyCommonParameters(DefaultChatRequestParameters.Builder<?> builder, ModelRequestConfig modelConfig) {

@@ -8,13 +8,14 @@ import dev.langchain4j.model.chat.response.PartialThinking;
 import dev.langchain4j.model.chat.response.PartialThinkingContext;
 import dev.langchain4j.model.chat.response.PartialToolCall;
 import dev.langchain4j.model.chat.response.PartialToolCallContext;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.chat.response.StreamingHandle;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
-import fun.fengwk.kkstudio.agent.runtime.AssistantMetadataMapper;
-import fun.fengwk.kkstudio.agent.runtime.ToolCallMapper;
+import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
+import fun.fengwk.kkstudio.agent.session.payload.AssistantUsage;
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCallDelta;
@@ -28,14 +29,13 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public interface Provider {
 
-    ToolCallMapper TOOL_CALL_MAPPER = new ToolCallMapper();
-    AssistantMetadataMapper ASSISTANT_METADATA_MAPPER = new AssistantMetadataMapper();
-
     ProviderType getProviderType();
 
     ChatRequest buildChatRequest(List<ChatMessage> chatMessageList, ModelRequestConfig modelConfig);
 
     StreamingChatModel getChatModel();
+
+    AssistantMetadata toAssistantMetadata(ChatResponseMetadata metadata);
 
     default AssistantResponseHandle asyncChat(List<ChatMessage> chatMessageList,
                                              ModelRequestConfig modelConfig,
@@ -75,13 +75,9 @@ public interface Provider {
                 if (partialToolCall == null) {
                     return;
                 }
-                ToolCallDelta toolCallDelta = new ToolCallDelta();
-                toolCallDelta.setToolCallId(partialToolCall.id());
-                toolCallDelta.setToolName(partialToolCall.name());
-                toolCallDelta.setArgumentsDelta(partialToolCall.partialArguments());
                 IndexedToolCallDelta indexedToolCallDelta = new IndexedToolCallDelta();
                 indexedToolCallDelta.setIndex(partialToolCall.index());
-                indexedToolCallDelta.setToolCallDelta(toolCallDelta);
+                indexedToolCallDelta.setToolCallDelta(toToolCallDelta(partialToolCall));
                 handler.onToolCallDelta(indexedToolCallDelta, responseHandle);
             }
 
@@ -90,7 +86,7 @@ public interface Provider {
                 if (completeToolCall == null) {
                     return;
                 }
-                ToolCall toolCall = TOOL_CALL_MAPPER.from(completeToolCall.toolExecutionRequest());
+                ToolCall toolCall = toToolCall(completeToolCall.toolExecutionRequest());
                 handler.onToolCallComplete(completeToolCall.index(), toolCall, responseHandle);
             }
 
@@ -99,13 +95,13 @@ public interface Provider {
                 List<ToolCall> toolCalls = completeResponse == null || completeResponse.aiMessage() == null
                     ? List.of()
                     : completeResponse.aiMessage().toolExecutionRequests().stream()
-                        .map(TOOL_CALL_MAPPER::from)
+                        .map(Provider.this::toToolCall)
                         .toList();
                 AssistantResponse response = AssistantResponse.builder()
                     .text(completeResponse == null || completeResponse.aiMessage() == null ? null : completeResponse.aiMessage().text())
                     .thinking(completeResponse == null || completeResponse.aiMessage() == null ? null : completeResponse.aiMessage().thinking())
                     .toolCalls(toolCalls)
-                    .metadata(completeResponse == null ? null : ASSISTANT_METADATA_MAPPER.from(completeResponse.metadata()))
+                    .metadata(completeResponse == null ? null : toAssistantMetadata(completeResponse.metadata()))
                     .build();
                 handler.onComplete(response, responseHandle);
             }
@@ -116,6 +112,48 @@ public interface Provider {
             }
         });
         return responseHandle;
+    }
+
+    private ToolCall toToolCall(dev.langchain4j.agent.tool.ToolExecutionRequest request) {
+        if (request == null) {
+            return null;
+        }
+        ToolCall toolCall = new ToolCall();
+        toolCall.setToolCallId(request.id());
+        toolCall.setToolName(request.name());
+        toolCall.setArguments(request.arguments());
+        return toolCall;
+    }
+
+    private ToolCallDelta toToolCallDelta(PartialToolCall partialToolCall) {
+        ToolCallDelta toolCallDelta = new ToolCallDelta();
+        toolCallDelta.setToolCallId(partialToolCall.id());
+        toolCallDelta.setToolName(partialToolCall.name());
+        toolCallDelta.setArgumentsDelta(partialToolCall.partialArguments());
+        return toolCallDelta;
+    }
+
+    static AssistantMetadata toCommonAssistantMetadata(ChatResponseMetadata metadata) {
+        if (metadata == null) {
+            return null;
+        }
+        AssistantMetadata assistantMetadata = new AssistantMetadata();
+        assistantMetadata.setId(metadata.id());
+        assistantMetadata.setModelName(metadata.modelName());
+        assistantMetadata.setFinishReason(metadata.finishReason() == null ? null : metadata.finishReason().name());
+        assistantMetadata.setUsage(toCommonAssistantUsage(metadata.tokenUsage()));
+        return assistantMetadata;
+    }
+
+    private static AssistantUsage toCommonAssistantUsage(dev.langchain4j.model.output.TokenUsage tokenUsage) {
+        if (tokenUsage == null) {
+            return null;
+        }
+        AssistantUsage usage = new AssistantUsage();
+        usage.setInputTokens(tokenUsage.inputTokenCount());
+        usage.setOutputTokens(tokenUsage.outputTokenCount());
+        usage.setTotalTokens(tokenUsage.totalTokenCount());
+        return usage;
     }
 
     final class DefaultAssistantResponseHandle implements AssistantResponseHandle {
