@@ -8,14 +8,13 @@ import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandle;
 import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandler;
 import fun.fengwk.kkstudio.agent.provider.ProviderManager;
 import fun.fengwk.kkstudio.agent.provider.ProviderRegistry;
-import fun.fengwk.kkstudio.agent.runtime.SessionEventMessageProjector;
-import fun.fengwk.kkstudio.agent.runtime.SessionEventProjection;
-import fun.fengwk.kkstudio.agent.runtime.ToolCallMapper;
 import fun.fengwk.kkstudio.agent.session.Branch;
 import fun.fengwk.kkstudio.agent.session.Session;
 import fun.fengwk.kkstudio.agent.session.SessionEvent;
 import fun.fengwk.kkstudio.agent.session.SessionEventType;
 import fun.fengwk.kkstudio.agent.session.SessionManager;
+import fun.fengwk.kkstudio.agent.session.projection.SessionEventMessageProjector;
+import fun.fengwk.kkstudio.agent.session.projection.SessionEventProjection;
 import fun.fengwk.kkstudio.agent.session.payload.AbortPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantEndPayload;
@@ -56,7 +55,6 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public class Agent {
 
-    private final ToolCallMapper toolCallMapper = new ToolCallMapper();
     private final UserRequestQueue userRequestQueue;
     private final AgentEventHandler agentEventHandler;
     private final ToolRegistry toolRegistry;
@@ -474,7 +472,7 @@ public class Agent {
                 toolState.closed = true;
                 continue;
             }
-            ToolExecutionRequest request = toolCallMapper.toToolExecutionRequest(toolCall);
+            ToolExecutionRequest request = toToolExecutionRequest(toolCall);
             try {
                 ToolExecutionHandle handle = tool.asyncExecute(request, new ToolExecutionHandler() {
                     @Override
@@ -700,6 +698,17 @@ public class Agent {
         }
         String message = error.getMessage();
         return message == null || message.isBlank() ? error.getClass().getSimpleName() : message;
+    }
+
+    private ToolExecutionRequest toToolExecutionRequest(ToolCall toolCall) {
+        if (toolCall == null) {
+            return null;
+        }
+        return ToolExecutionRequest.builder()
+            .id(toolCall.getToolCallId())
+            .name(toolCall.getToolName())
+            .arguments(toolCall.getArguments())
+            .build();
     }
 
     private void refreshProjection() {

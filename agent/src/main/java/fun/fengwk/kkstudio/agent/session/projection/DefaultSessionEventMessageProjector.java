@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.agent.runtime;
+package fun.fengwk.kkstudio.agent.session.projection;
 
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
 import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
 import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContentDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContentType;
@@ -50,8 +49,6 @@ import java.util.TreeMap;
  */
 public class DefaultSessionEventMessageProjector implements SessionEventMessageProjector {
 
-    private final ToolCallMapper toolCallMapper = new ToolCallMapper();
-
     @Override
     public SessionEventProjection project(List<SessionEvent> branchEvents) {
         List<ChatMessage> chatMessages = new ArrayList<>();
@@ -71,17 +68,30 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
                 continue;
             }
 
-            switch (eventType) {
-                case set_agent_info -> agentInfo = branchEvent.getPayload() instanceof SetAgentInfoPayload payload ? payload : agentInfo;
-                case set_model_info -> modelInfo = branchEvent.getPayload() instanceof SetModelInfoPayload payload ? payload : modelInfo;
-                case assistant_start -> onAssistantStart(branchEvent, openStates, chatMessages);
-                case assistant_delta -> onAssistantDelta(branchEvent, openStates);
-                case assistant_end -> onAssistantEnd(openStates, chatMessages);
-                case tool_start -> onToolStart(branchEvent, openStates);
-                case tool_delta -> onToolDelta(branchEvent, openStates);
-                case tool_end -> onToolEnd(branchEvent, openStates, chatMessages);
-                case error -> onError(branchEvent, openStates, chatMessages);
-                case abort -> onAbort(branchEvent, openStates, chatMessages);
+            if (eventType == SessionEventType.set_agent_info) {
+                if (branchEvent.getPayload() instanceof SetAgentInfoPayload payload) {
+                    agentInfo = payload;
+                }
+            } else if (eventType == SessionEventType.set_model_info) {
+                if (branchEvent.getPayload() instanceof SetModelInfoPayload payload) {
+                    modelInfo = payload;
+                }
+            } else if (eventType == SessionEventType.assistant_start) {
+                onAssistantStart(branchEvent, openStates, chatMessages);
+            } else if (eventType == SessionEventType.assistant_delta) {
+                onAssistantDelta(branchEvent, openStates);
+            } else if (eventType == SessionEventType.assistant_end) {
+                onAssistantEnd(openStates, chatMessages);
+            } else if (eventType == SessionEventType.tool_start) {
+                onToolStart(branchEvent, openStates);
+            } else if (eventType == SessionEventType.tool_delta) {
+                onToolDelta(branchEvent, openStates);
+            } else if (eventType == SessionEventType.tool_end) {
+                onToolEnd(branchEvent, openStates, chatMessages);
+            } else if (eventType == SessionEventType.error) {
+                onError(branchEvent, openStates, chatMessages);
+            } else if (eventType == SessionEventType.abort) {
+                onAbort(branchEvent, openStates, chatMessages);
             }
         }
 
@@ -356,22 +366,22 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
     }
 
     private ToolExecutionRequest toToolExecutionRequest(ToolCallState toolCallState) {
-        ToolCall toolCall = new ToolCall();
-        toolCall.setToolCallId(toolCallState.toolCallId);
-        toolCall.setToolName(toolCallState.toolName);
-        toolCall.setArguments(toolCallState.arguments.toString());
-        return toolCallMapper.toToolExecutionRequest(toolCall);
+        return ToolExecutionRequest.builder()
+            .id(toolCallState.toolCallId)
+            .name(toolCallState.toolName)
+            .arguments(toolCallState.arguments.toString())
+            .build();
     }
 
     private ToolExecutionResultMessage buildToolResultMessage(ToolState toolState) {
         List<Content> contents = new ArrayList<>();
         for (ToolContentAccumulator accumulator : toolState.contents) {
-            if (accumulator == null || accumulator.type == null) {
+            if (accumulator == null) {
                 continue;
             }
             if (accumulator.type == ToolContentType.text) {
                 contents.add(TextContent.from(accumulator.text.toString()));
-            } else if (isMediaType(accumulator.type)) {
+            } else {
                 contents.add(toMediaContent(accumulator));
             }
         }
@@ -390,18 +400,24 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
     }
 
     private Content toMediaContent(ToolContentAccumulator accumulator) {
-        String mime = accumulator.mime == null ? "application/octet-stream" : accumulator.mime;
-        String data = accumulator.data == null ? "" : accumulator.data;
-        if (accumulator.type == ToolContentType.image || mime.startsWith("image/")) {
-            return ImageContent.from(data, mime);
+        if (accumulator.data == null || accumulator.data.isBlank() || accumulator.mime == null || accumulator.mime.isBlank()) {
+            return toMediaFallback(accumulator);
         }
-        if (accumulator.type == ToolContentType.audio || mime.startsWith("audio/")) {
-            return AudioContent.from(data, mime);
+        if (accumulator.type == ToolContentType.image && accumulator.mime.startsWith("image/")) {
+            return ImageContent.from(accumulator.data, accumulator.mime);
         }
-        if (accumulator.type == ToolContentType.video || mime.startsWith("video/")) {
-            return VideoContent.from(data, mime);
+        if (accumulator.type == ToolContentType.audio && accumulator.mime.startsWith("audio/")) {
+            return AudioContent.from(accumulator.data, accumulator.mime);
         }
-        String name = accumulator.name == null ? "media" : accumulator.name;
+        if (accumulator.type == ToolContentType.video && accumulator.mime.startsWith("video/")) {
+            return VideoContent.from(accumulator.data, accumulator.mime);
+        }
+        return toMediaFallback(accumulator);
+    }
+
+    private Content toMediaFallback(ToolContentAccumulator accumulator) {
+        String name = accumulator.name == null || accumulator.name.isBlank() ? "media" : accumulator.name;
+        String mime = accumulator.mime == null || accumulator.mime.isBlank() ? "unknown" : accumulator.mime;
         return TextContent.from("[media] " + name + " (" + mime + ")");
     }
 

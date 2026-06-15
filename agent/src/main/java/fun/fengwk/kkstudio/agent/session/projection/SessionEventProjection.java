@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.agent.runtime;
+package fun.fengwk.kkstudio.agent.session.projection;
 
 import dev.langchain4j.data.message.ChatMessage;
 import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
