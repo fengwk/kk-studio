@@ -12,7 +12,6 @@ import fun.fengwk.kkstudio.agent.provider.ProviderInfo;
 import fun.fengwk.kkstudio.agent.provider.ProviderManager;
 import fun.fengwk.kkstudio.agent.provider.ProviderRegistry;
 import fun.fengwk.kkstudio.agent.provider.ProviderType;
-import fun.fengwk.kkstudio.agent.runtime.DefaultSessionEventMessageProjector;
 import fun.fengwk.kkstudio.agent.session.Branch;
 import fun.fengwk.kkstudio.agent.session.Session;
 import fun.fengwk.kkstudio.agent.session.SessionEvent;
@@ -26,6 +25,7 @@ import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContentDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContentType;
+import fun.fengwk.kkstudio.agent.session.projection.DefaultSessionEventMessageProjector;
 import fun.fengwk.kkstudio.agent.session.repo.SessionEventRepository;
 import fun.fengwk.kkstudio.agent.session.repo.SessionRepository;
 import fun.fengwk.kkstudio.agent.tool.Tool;
@@ -222,6 +222,11 @@ public class AgentMainLoopTest {
         @Override
         public dev.langchain4j.model.chat.StreamingChatModel getChatModel() {
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata toAssistantMetadata(dev.langchain4j.model.chat.response.ChatResponseMetadata metadata) {
+            return Provider.toCommonAssistantMetadata(metadata);
         }
 
         @Override

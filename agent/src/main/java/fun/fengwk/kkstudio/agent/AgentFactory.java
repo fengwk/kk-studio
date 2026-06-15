@@ -3,12 +3,12 @@ package fun.fengwk.kkstudio.agent;
 import fun.fengwk.kkstudio.agent.model.ModelRegistry;
 import fun.fengwk.kkstudio.agent.provider.ProviderManager;
 import fun.fengwk.kkstudio.agent.provider.ProviderRegistry;
-import fun.fengwk.kkstudio.agent.runtime.SessionEventMessageProjector;
-import fun.fengwk.kkstudio.agent.runtime.SessionEventProjection;
 import fun.fengwk.kkstudio.agent.session.Branch;
 import fun.fengwk.kkstudio.agent.session.Session;
 import fun.fengwk.kkstudio.agent.session.SessionEvent;
 import fun.fengwk.kkstudio.agent.session.SessionManager;
+import fun.fengwk.kkstudio.agent.session.projection.SessionEventMessageProjector;
+import fun.fengwk.kkstudio.agent.session.projection.SessionEventProjection;
 import fun.fengwk.kkstudio.agent.tool.ToolRegistry;
 
 import java.util.List;

@@ -484,7 +484,7 @@ assistant 本身没有并发，不需要多异步同步。
   - 负责 agent/model 选择解析与运行时 provider/request config 装配
 - `SessionManager`
   - 负责 branch 视角历史读取与事件追加
-- `SessionEventMessageProjector`
+- `session.projection.SessionEventMessageProjector`
   - 负责事件重放与消息投影
 
 这样可以避免把配置解析、事件推进、流式回调适配全部塞进一个超大类中。
