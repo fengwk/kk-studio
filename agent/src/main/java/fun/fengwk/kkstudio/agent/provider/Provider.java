@@ -1,6 +1,12 @@
 package fun.fengwk.kkstudio.agent.provider;
 
+import dev.langchain4j.agent.tool.ToolSpecification;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.request.DefaultChatRequestParameters;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
 import dev.langchain4j.model.chat.response.CompleteToolCall;
 import dev.langchain4j.model.chat.response.PartialResponse;
 import dev.langchain4j.model.chat.response.PartialResponseContext;
@@ -8,18 +14,18 @@ import dev.langchain4j.model.chat.response.PartialThinking;
 import dev.langchain4j.model.chat.response.PartialThinkingContext;
 import dev.langchain4j.model.chat.response.PartialToolCall;
 import dev.langchain4j.model.chat.response.PartialToolCallContext;
-import dev.langchain4j.model.chat.response.ChatResponseMetadata;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.chat.response.StreamingHandle;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.model.chat.StreamingChatModel;
-import dev.langchain4j.model.chat.request.ChatRequest;
+import fun.fengwk.kkstudio.agent.model.ModelInfo;
+import fun.fengwk.kkstudio.agent.model.Variant;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantUsage;
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCallDelta;
+import fun.fengwk.kkstudio.agent.tool.ToolInfo;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -31,26 +37,37 @@ public interface Provider {
 
     ProviderType getProviderType();
 
-    ChatRequest buildChatRequest(List<ChatMessage> chatMessageList, ModelRequestConfig modelConfig);
+    /**
+     * 由实现类根据 ModelInfo + Variant + toolSpecifications 构造 LangChain4j 的 ChatRequest。
+     */
+    ChatRequest buildChatRequest(List<ChatMessage> chatMessageList,
+                                 ModelInfo modelInfo,
+                                 Variant variant,
+                                 List<ToolSpecification> toolSpecifications);
 
     StreamingChatModel getChatModel();
 
     AssistantMetadata toAssistantMetadata(ChatResponseMetadata metadata);
 
     default AssistantResponseHandle asyncChat(List<ChatMessage> chatMessageList,
-                                             ModelRequestConfig modelConfig,
+                                             ModelInfo modelInfo,
+                                             Variant variant,
+                                             List<ToolInfo> toolInfos,
                                              AssistantResponseHandler handler) {
         if (chatMessageList == null) {
             throw new IllegalArgumentException("chatMessageList must not be null");
         }
-        if (modelConfig == null) {
-            throw new IllegalArgumentException("modelConfig must not be null");
+        if (modelInfo == null) {
+            throw new IllegalArgumentException("modelInfo must not be null");
+        }
+        if (variant == null) {
+            throw new IllegalArgumentException("variant must not be null");
         }
         if (handler == null) {
             throw new IllegalArgumentException("handler must not be null");
         }
 
-        ChatRequest request = buildChatRequest(chatMessageList, modelConfig);
+        ChatRequest request = buildChatRequest(chatMessageList, modelInfo, variant, resolveToolSpecifications(toolInfos));
         DefaultAssistantResponseHandle responseHandle = new DefaultAssistantResponseHandle();
         getChatModel().chat(request, new StreamingChatResponseHandler() {
             @Override
@@ -154,6 +171,23 @@ public interface Provider {
         usage.setOutputTokens(tokenUsage.outputTokenCount());
         usage.setTotalTokens(tokenUsage.totalTokenCount());
         return usage;
+    }
+
+    static List<ToolSpecification> resolveToolSpecifications(List<ToolInfo> toolInfos) {
+        if (toolInfos == null || toolInfos.isEmpty()) {
+            return List.of();
+        }
+        List<ToolSpecification> result = new ArrayList<>();
+        for (ToolInfo toolInfo : toolInfos) {
+            if (toolInfo == null) {
+                continue;
+            }
+            result.add(ToolSpecification.builder()
+                .name(toolInfo.getName())
+                .description(toolInfo.getDescription())
+                .build());
+        }
+        return result;
     }
 
     final class DefaultAssistantResponseHandle implements AssistantResponseHandle {

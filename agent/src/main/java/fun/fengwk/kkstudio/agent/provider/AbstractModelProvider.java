@@ -1,9 +1,12 @@
 package fun.fengwk.kkstudio.agent.provider;
 
+import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponseMetadata;
 import dev.langchain4j.model.chat.request.DefaultChatRequestParameters;
+import fun.fengwk.kkstudio.agent.model.ModelInfo;
+import fun.fengwk.kkstudio.agent.model.Variant;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
 
 import java.util.List;
@@ -29,19 +32,25 @@ public abstract class AbstractModelProvider implements Provider {
     }
 
     protected DefaultChatRequestParameters.Builder<?> setParameters(
-        DefaultChatRequestParameters.Builder<?> parametersBuilder, ModelRequestConfig modelConfig) {
+        DefaultChatRequestParameters.Builder<?> parametersBuilder,
+        ModelInfo modelInfo,
+        Variant variant,
+        List<ToolSpecification> toolSpecifications) {
         return parametersBuilder;
     }
 
     @Override
-    public ChatRequest buildChatRequest(List<ChatMessage> chatMessageList, ModelRequestConfig modelConfig) {
+    public ChatRequest buildChatRequest(List<ChatMessage> chatMessageList,
+                                        ModelInfo modelInfo,
+                                        Variant variant,
+                                        List<ToolSpecification> toolSpecifications) {
         ChatRequest.Builder builder = ChatRequest.builder()
-            .modelName(modelConfig.getModelName())
+            .modelName(modelInfo.getName())
             .messages(chatMessageList);
 
         DefaultChatRequestParameters.Builder<?> parametersBuilder = newParametersBuilder();
-        applyCommonParameters(parametersBuilder, modelConfig);
-        setParameters(parametersBuilder, modelConfig);
+        applyCommonParameters(parametersBuilder, modelInfo, variant, toolSpecifications);
+        setParameters(parametersBuilder, modelInfo, variant, toolSpecifications);
         builder.parameters(parametersBuilder.build());
 
         return builder.build();
@@ -57,19 +66,20 @@ public abstract class AbstractModelProvider implements Provider {
         return Provider.toCommonAssistantMetadata(metadata);
     }
 
-    private void applyCommonParameters(DefaultChatRequestParameters.Builder<?> builder, ModelRequestConfig modelConfig) {
+    private void applyCommonParameters(DefaultChatRequestParameters.Builder<?> builder,
+                                       ModelInfo modelInfo,
+                                       Variant variant,
+                                       List<ToolSpecification> toolSpecifications) {
         builder
-            .modelName(modelConfig.getModelName())
-            .temperature(modelConfig.getTemperature())
-            .topP(modelConfig.getTopP())
-            .topK(modelConfig.getTopK())
-            .frequencyPenalty(modelConfig.getFrequencyPenalty())
-            .presencePenalty(modelConfig.getPresencePenalty())
-            .maxOutputTokens(modelConfig.getMaxOutputTokens())
-            .stopSequences(modelConfig.getStopSequences())
-            .toolSpecifications(modelConfig.getToolSpecifications())
-            .toolChoice(modelConfig.getToolChoice())
-            .responseFormat(modelConfig.getResponseFormat());
+            .modelName(modelInfo.getName())
+            .temperature(variant.getTemperature())
+            .topP(variant.getTopP())
+            .topK(variant.getTopK())
+            .frequencyPenalty(variant.getFrequencyPenalty())
+            .presencePenalty(variant.getPresencePenalty())
+            .maxOutputTokens(variant.getMaxOutputTokens())
+            .stopSequences(variant.getStopSequences())
+            .toolSpecifications(toolSpecifications);
     }
 
 }

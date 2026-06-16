@@ -6,7 +6,6 @@ import fun.fengwk.kkstudio.agent.model.Variant;
 import fun.fengwk.kkstudio.agent.provider.AssistantResponse;
 import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandle;
 import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandler;
-import fun.fengwk.kkstudio.agent.provider.ModelRequestConfig;
 import fun.fengwk.kkstudio.agent.provider.Provider;
 import fun.fengwk.kkstudio.agent.provider.ProviderInfo;
 import fun.fengwk.kkstudio.agent.provider.ProviderManager;
@@ -215,7 +214,9 @@ public class AgentMainLoopTest {
 
         @Override
         public dev.langchain4j.model.chat.request.ChatRequest buildChatRequest(List<dev.langchain4j.data.message.ChatMessage> chatMessageList,
-                                                                               ModelRequestConfig modelConfig) {
+                                                                               fun.fengwk.kkstudio.agent.model.ModelInfo modelInfo,
+                                                                               fun.fengwk.kkstudio.agent.model.Variant variant,
+                                                                               List<dev.langchain4j.agent.tool.ToolSpecification> toolSpecifications) {
             throw new UnsupportedOperationException();
         }
 
@@ -231,7 +232,9 @@ public class AgentMainLoopTest {
 
         @Override
         public AssistantResponseHandle asyncChat(List<dev.langchain4j.data.message.ChatMessage> chatMessageList,
-                                                 ModelRequestConfig modelConfig,
+                                                 fun.fengwk.kkstudio.agent.model.ModelInfo modelInfo,
+                                                 fun.fengwk.kkstudio.agent.model.Variant variant,
+                                                 List<fun.fengwk.kkstudio.agent.tool.ToolInfo> toolInfos,
                                                  AssistantResponseHandler handler) {
             Consumer<AssistantResponseHandler> script = scripts.poll();
             if (script != null) {

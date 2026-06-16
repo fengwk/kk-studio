@@ -466,6 +466,8 @@ assistant 本身没有并发，不需要多异步同步。
 - 通用参数直接平铺
 - provider 专有参数直接使用 `Map<String, Object> providerOptions`
 
+`Variant` 是运行时模型请求参数的**唯一载体**，由 `AgentRuntimeConfigResolver` 解析后直接交给 `Provider.asyncChat(...)`。不再存在中间的 `ModelRequestConfig` 之类的搬运结构，`Provider` 内部自行把 `Variant + tool specifications` 翻译成 LangChain4j 的 `ChatRequest`。
+
 ### 13.4 ToolRegistry
 
 负责：

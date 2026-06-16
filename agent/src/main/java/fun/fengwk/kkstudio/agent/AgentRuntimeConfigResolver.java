@@ -1,11 +1,8 @@
 package fun.fengwk.kkstudio.agent;
 
-import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
 import fun.fengwk.kkstudio.agent.model.ModelRegistry;
 import fun.fengwk.kkstudio.agent.model.Variant;
-import fun.fengwk.kkstudio.agent.provider.ModelRequestConfig;
 import fun.fengwk.kkstudio.agent.provider.Provider;
 import fun.fengwk.kkstudio.agent.provider.ProviderInfo;
 import fun.fengwk.kkstudio.agent.provider.ProviderManager;
@@ -79,39 +76,26 @@ public class AgentRuntimeConfigResolver {
             throw new IllegalArgumentException("provider info not found: " + resolvedProvider);
         }
         Provider runtimeProvider = providerManager.getProvider(providerInfo);
-        ModelRequestConfig modelRequestConfig = buildModelRequestConfig(modelInfo, variantInfo, latestAgentInfo);
+        List<ToolInfo> toolInfos = resolveToolInfos(latestAgentInfo == null ? List.of() : latestAgentInfo.getTools());
         return ResolvedRuntimeConfig.builder()
             .agentInfo(latestAgentInfo)
             .agentPayload(agentPayload)
             .modelPayload(modelPayload)
             .provider(runtimeProvider)
-            .modelRequestConfig(modelRequestConfig)
+            .modelInfo(modelInfo)
+            .variant(variantInfo)
+            .toolInfos(toolInfos)
             .resolvedProvider(resolvedProvider)
             .resolvedModel(resolvedModel)
             .resolvedVariant(variantInfo.getName())
             .build();
     }
 
-    private ModelRequestConfig buildModelRequestConfig(ModelInfo modelInfo, Variant variantInfo, AgentInfo latestAgentInfo) {
-        List<ToolSpecification> toolSpecifications = resolveToolSpecifications(latestAgentInfo == null ? List.of() : latestAgentInfo.getTools());
-        return ModelRequestConfig.builder()
-            .modelName(modelInfo.getName())
-            .temperature(variantInfo.getTemperature())
-            .topP(variantInfo.getTopP())
-            .topK(variantInfo.getTopK())
-            .frequencyPenalty(variantInfo.getFrequencyPenalty())
-            .presencePenalty(variantInfo.getPresencePenalty())
-            .maxOutputTokens(variantInfo.getMaxOutputTokens())
-            .stopSequences(variantInfo.getStopSequences())
-            .toolSpecifications(toolSpecifications.isEmpty() ? null : toolSpecifications)
-            .build();
-    }
-
-    private List<ToolSpecification> resolveToolSpecifications(List<String> toolNames) {
+    private List<ToolInfo> resolveToolInfos(List<String> toolNames) {
         if (toolNames == null || toolNames.isEmpty()) {
             return List.of();
         }
-        List<ToolSpecification> result = new ArrayList<>();
+        List<ToolInfo> result = new ArrayList<>();
         for (String toolName : toolNames) {
             if (toolName == null || toolName.isBlank()) {
                 continue;
@@ -120,11 +104,7 @@ public class AgentRuntimeConfigResolver {
             if (toolInfo == null) {
                 continue;
             }
-            result.add(ToolSpecification.builder()
-                .name(toolInfo.getName())
-                .description(toolInfo.getDescription())
-                .parameters(JsonObjectSchema.builder().build())
-                .build());
+            result.add(toolInfo);
         }
         return result;
     }
@@ -178,7 +158,9 @@ public class AgentRuntimeConfigResolver {
         private final SetAgentInfoPayload agentPayload;
         private final SetModelInfoPayload modelPayload;
         private final Provider provider;
-        private final ModelRequestConfig modelRequestConfig;
+        private final ModelInfo modelInfo;
+        private final Variant variant;
+        private final List<ToolInfo> toolInfos;
         private final String resolvedProvider;
         private final String resolvedModel;
         private final String resolvedVariant;

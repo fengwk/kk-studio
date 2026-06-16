@@ -320,37 +320,42 @@ public class Agent {
         currentRun.activeAssistant = attemptState;
 
         try {
-            AssistantResponseHandle handle = runtimeConfig.getProvider().asyncChat(projectedMessages, runtimeConfig.getModelRequestConfig(), new AssistantResponseHandler() {
-                @Override
-                public void onTextDelta(String textDelta, AssistantResponseHandle handle) {
-                    enqueueSignal(new AssistantTextDeltaSignal(attemptState, textDelta));
-                }
+            AssistantResponseHandle handle = runtimeConfig.getProvider().asyncChat(
+                projectedMessages,
+                runtimeConfig.getModelInfo(),
+                runtimeConfig.getVariant(),
+                runtimeConfig.getToolInfos(),
+                new AssistantResponseHandler() {
+                    @Override
+                    public void onTextDelta(String textDelta, AssistantResponseHandle handle) {
+                        enqueueSignal(new AssistantTextDeltaSignal(attemptState, textDelta));
+                    }
 
-                @Override
-                public void onThinkingDelta(String thinkingDelta, AssistantResponseHandle handle) {
-                    enqueueSignal(new AssistantThinkingDeltaSignal(attemptState, thinkingDelta));
-                }
+                    @Override
+                    public void onThinkingDelta(String thinkingDelta, AssistantResponseHandle handle) {
+                        enqueueSignal(new AssistantThinkingDeltaSignal(attemptState, thinkingDelta));
+                    }
 
-                @Override
-                public void onToolCallDelta(IndexedToolCallDelta toolCallDelta, AssistantResponseHandle handle) {
-                    enqueueSignal(new AssistantToolCallDeltaSignal(attemptState, toolCallDelta));
-                }
+                    @Override
+                    public void onToolCallDelta(IndexedToolCallDelta toolCallDelta, AssistantResponseHandle handle) {
+                        enqueueSignal(new AssistantToolCallDeltaSignal(attemptState, toolCallDelta));
+                    }
 
-                @Override
-                public void onToolCallComplete(Integer index, ToolCall toolCall, AssistantResponseHandle handle) {
-                    enqueueSignal(new AssistantToolCallCompleteSignal(attemptState, index, toolCall));
-                }
+                    @Override
+                    public void onToolCallComplete(Integer index, ToolCall toolCall, AssistantResponseHandle handle) {
+                        enqueueSignal(new AssistantToolCallCompleteSignal(attemptState, index, toolCall));
+                    }
 
-                @Override
-                public void onComplete(AssistantResponse response, AssistantResponseHandle handle) {
-                    enqueueSignal(new AssistantCompleteSignal(attemptState, response));
-                }
+                    @Override
+                    public void onComplete(AssistantResponse response, AssistantResponseHandle handle) {
+                        enqueueSignal(new AssistantCompleteSignal(attemptState, response));
+                    }
 
-                @Override
-                public void onError(Throwable error, AssistantResponseHandle handle) {
-                    enqueueSignal(new AssistantErrorSignal(attemptState, error));
-                }
-            });
+                    @Override
+                    public void onError(Throwable error, AssistantResponseHandle handle) {
+                        enqueueSignal(new AssistantErrorSignal(attemptState, error));
+                    }
+                });
             attemptState.handle = handle;
         } catch (Throwable error) {
             enqueueSignal(new AssistantErrorSignal(attemptState, error));
