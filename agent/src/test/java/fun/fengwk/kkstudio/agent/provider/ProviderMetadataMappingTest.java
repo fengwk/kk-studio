@@ -15,6 +15,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  */
 public class ProviderMetadataMappingTest {
 
+    /**
+     * 校验 Anthropic provider 能补齐 cacheRead/cacheWrite token 映射。
+     */
     @Test
     public void testAnthropicProviderMapsCacheUsage() {
         AnthropicModelProvider provider = new AnthropicModelProvider(ProviderInfo.builder()
@@ -44,6 +47,9 @@ public class ProviderMetadataMappingTest {
         assertEquals(5, assistantMetadata.getUsage().getCacheWriteTokens());
     }
 
+    /**
+     * 校验 OpenAI provider 能补齐 cachedTokens -> cacheReadTokens 映射。
+     */
     @Test
     public void testOpenAiProviderMapsCachedReadTokens() {
         OpenAiModelProvider provider = new OpenAiModelProvider(ProviderInfo.builder()
