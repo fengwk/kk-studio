@@ -8,6 +8,11 @@ import java.time.Duration;
 /**
  * ProviderInfo 表示一个 provider 的连接与超时配置。
  *
+ * 语义说明：
+ * - 这是 provider 层的稳定输入配置。
+ * - 它不承载模型参数，也不承载 Variant 请求参数。
+ * - 新增 provider 时，优先确认当前字段是否已足够描述连接信息；只有确实不足时再扩展。
+ *
  * @author fengwk
  */
 @Builder

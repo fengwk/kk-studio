@@ -4,20 +4,35 @@ import dev.langchain4j.model.anthropic.AnthropicStreamingChatModel;
 import dev.langchain4j.model.anthropic.AnthropicTokenUsage;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.response.ChatResponseMetadata;
+import fun.fengwk.kkstudio.agent.model.ModelInfo;
+import fun.fengwk.kkstudio.agent.model.Variant;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantUsage;
 
 /**
+ * Anthropic provider。
+ *
+ * 实现特点：
+ * - 使用 AnthropicStreamingChatModel。
+ * - 额外补充 Anthropic cacheRead/cacheCreation token 映射。
+ *
  * @author fengwk
  */
 public class AnthropicModelProvider extends AbstractModelProvider {
 
+    /**
+     * 使用给定连接配置创建 Anthropic provider。
+     */
     protected AnthropicModelProvider(ProviderInfo providerInfo) {
         super(providerInfo);
     }
 
+    /**
+     * 构造 Anthropic 对应的底层 StreamingChatModel。
+     */
     @Override
-    protected StreamingChatModel getChatModel() {
+    protected StreamingChatModel getChatModel(ModelInfo modelInfo,
+                                              Variant variant) {
         return AnthropicStreamingChatModel.builder()
             .baseUrl(getProviderInfo().getBaseUrl())
             .apiKey(getProviderInfo().getApiKey())
@@ -26,6 +41,9 @@ public class AnthropicModelProvider extends AbstractModelProvider {
             .build();
     }
 
+    /**
+     * 在通用 metadata 基础上补充 Anthropic cache token 映射。
+     */
     @Override
     protected AssistantMetadata toAssistantMetadata(ChatResponseMetadata metadata) {
         AssistantMetadata assistantMetadata = super.toAssistantMetadata(metadata);

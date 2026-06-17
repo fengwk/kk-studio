@@ -16,6 +16,9 @@ public class ProviderManagerImpl implements ProviderManager {
      */
     private final Map<ProviderType, Function<ProviderInfo, Provider>> providerFactoryMap;
 
+    /**
+     * 初始化默认 provider 工厂映射。
+     */
     public ProviderManagerImpl() {
         Map<ProviderType, Function<ProviderInfo, Provider>> providerFactoryMap = new HashMap<>();
         providerFactoryMap.put(ProviderType.openai, OpenAiModelProvider::new);
@@ -26,6 +29,9 @@ public class ProviderManagerImpl implements ProviderManager {
     }
 
     @Override
+    /**
+     * 根据 ProviderInfo 解析并创建 Provider 实例。
+     */
     public Provider getProvider(ProviderInfo providerInfo) {
         Function<ProviderInfo, Provider> factory = providerFactoryMap.get(providerInfo.getProviderType());
         if (factory == null) {

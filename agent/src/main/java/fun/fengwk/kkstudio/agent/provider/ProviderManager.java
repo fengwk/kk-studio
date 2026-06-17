@@ -11,6 +11,9 @@ package fun.fengwk.kkstudio.agent.provider;
  */
 public interface ProviderManager {
 
+    /**
+     * 根据 ProviderInfo 创建对应的 Provider 实例。
+     */
     Provider getProvider(ProviderInfo providerInfo);
 
 }
