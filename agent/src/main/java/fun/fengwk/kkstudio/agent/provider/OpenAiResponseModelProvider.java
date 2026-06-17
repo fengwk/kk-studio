@@ -13,7 +13,7 @@ public class OpenAiResponseModelProvider extends AbstractModelProvider {
     }
 
     @Override
-    public StreamingChatModel getChatModel() {
+    protected StreamingChatModel getChatModel() {
         return OpenAiOfficialResponsesStreamingChatModel.builder()
             .baseUrl(getProviderInfo().getBaseUrl())
             .apiKey(getProviderInfo().getApiKey())

@@ -17,7 +17,7 @@ public class AnthropicModelProvider extends AbstractModelProvider {
     }
 
     @Override
-    public StreamingChatModel getChatModel() {
+    protected StreamingChatModel getChatModel() {
         return AnthropicStreamingChatModel.builder()
             .baseUrl(getProviderInfo().getBaseUrl())
             .apiKey(getProviderInfo().getApiKey())
@@ -27,7 +27,7 @@ public class AnthropicModelProvider extends AbstractModelProvider {
     }
 
     @Override
-    public AssistantMetadata toAssistantMetadata(ChatResponseMetadata metadata) {
+    protected AssistantMetadata toAssistantMetadata(ChatResponseMetadata metadata) {
         AssistantMetadata assistantMetadata = super.toAssistantMetadata(metadata);
         if (assistantMetadata == null || metadata == null || !(metadata.tokenUsage() instanceof AnthropicTokenUsage tokenUsage)) {
             return assistantMetadata;

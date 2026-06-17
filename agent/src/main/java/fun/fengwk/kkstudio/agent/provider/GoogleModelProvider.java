@@ -13,7 +13,7 @@ public class GoogleModelProvider extends AbstractModelProvider {
     }
 
     @Override
-    public StreamingChatModel getChatModel() {
+    protected StreamingChatModel getChatModel() {
         return GoogleAiGeminiStreamingChatModel.builder()
             .baseUrl(getProviderInfo().getBaseUrl())
             .apiKey(getProviderInfo().getApiKey())

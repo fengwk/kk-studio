@@ -213,24 +213,6 @@ public class AgentMainLoopTest {
         }
 
         @Override
-        public dev.langchain4j.model.chat.request.ChatRequest buildChatRequest(List<dev.langchain4j.data.message.ChatMessage> chatMessageList,
-                                                                               fun.fengwk.kkstudio.agent.model.ModelInfo modelInfo,
-                                                                               fun.fengwk.kkstudio.agent.model.Variant variant,
-                                                                               List<dev.langchain4j.agent.tool.ToolSpecification> toolSpecifications) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public dev.langchain4j.model.chat.StreamingChatModel getChatModel() {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata toAssistantMetadata(dev.langchain4j.model.chat.response.ChatResponseMetadata metadata) {
-            return Provider.toCommonAssistantMetadata(metadata);
-        }
-
-        @Override
         public AssistantResponseHandle asyncChat(List<dev.langchain4j.data.message.ChatMessage> chatMessageList,
                                                  fun.fengwk.kkstudio.agent.model.ModelInfo modelInfo,
                                                  fun.fengwk.kkstudio.agent.model.Variant variant,
