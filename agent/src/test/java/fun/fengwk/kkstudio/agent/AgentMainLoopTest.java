@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.agent;
 
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dev.langchain4j.data.message.ChatMessage;
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
 import fun.fengwk.kkstudio.agent.model.ModelRegistry;
 import fun.fengwk.kkstudio.agent.model.Variant;
@@ -33,6 +35,7 @@ import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandle;
 import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandler;
 import fun.fengwk.kkstudio.agent.tool.ToolInfo;
 import fun.fengwk.kkstudio.agent.tool.ToolRegistry;
+import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -94,9 +97,9 @@ public class AgentMainLoopTest {
             .text("final")
             .metadata(new AssistantMetadata())
             .build(), noopHandle()));
-        context.toolRegistry.registerTool("bash", ToolInfo.builder().name("bash").description("bash").inputSchema("{}").build(), new Tool() {
+        context.toolRegistry.registerTool("bash", ToolInfo.builder().name("bash").description("bash").inputSchema(ToolParamsSchema.builder().build()).build(), new Tool() {
             @Override
-            public ToolExecutionHandle asyncExecute(dev.langchain4j.agent.tool.ToolExecutionRequest toolExecutionRequest,
+            public ToolExecutionHandle asyncExecute(ToolExecutionRequest toolExecutionRequest,
                                                     ToolExecutionHandler toolExecutionHandler) {
                 ToolContentDelta delta = new ToolContentDelta();
                 delta.setType(ToolContentType.text);
@@ -213,10 +216,10 @@ public class AgentMainLoopTest {
         }
 
         @Override
-        public AssistantResponseHandle asyncChat(List<dev.langchain4j.data.message.ChatMessage> chatMessageList,
-                                                 fun.fengwk.kkstudio.agent.model.ModelInfo modelInfo,
-                                                 fun.fengwk.kkstudio.agent.model.Variant variant,
-                                                 List<fun.fengwk.kkstudio.agent.tool.ToolInfo> toolInfos,
+        public AssistantResponseHandle asyncChat(List<ChatMessage> chatMessageList,
+                                                 ModelInfo modelInfo,
+                                                 Variant variant,
+                                                 List<ToolInfo> toolInfos,
                                                  AssistantResponseHandler handler) {
             Consumer<AssistantResponseHandler> script = scripts.poll();
             if (script != null) {

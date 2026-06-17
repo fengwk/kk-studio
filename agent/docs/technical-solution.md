@@ -476,6 +476,14 @@ assistant 本身没有并发，不需要多异步同步。
 - `getToolInfo(name)`
 - `getTool(name)`
 
+`ToolInfo` 中：
+
+- `name`
+- `description`
+- `inputSchema: ToolParamsSchema`
+
+`ToolParamsSchema` 表示工具顶层参数对象；若参数内部还有 object 字段，则继续使用 `ToolObjectSchema` 作为嵌套 schema 节点。provider 再统一把这套自有 schema 模型翻译成底层 SDK 的 `ToolSpecification.parameters`。这样工具目录层不直接依赖 LangChain4j 的 schema 类型。
+
 ## 14. 当前代码结构
 
 第一版代码职责拆分为：
