@@ -1,4 +1,6 @@
-# Agent 模块技术方案
+# Agent 执行内核
+
+本文是整体技术方案的一部分，描述 `agent` 模块内部执行内核。
 
 ## 1. 目标
 
@@ -12,14 +14,12 @@ Agent 模块采用 `SessionEvent` 单层事件流模型，统一支撑：
 - 工具超时与取消
 - 异常恢复与显式取消
 
-第一版保持 KISS：
+模型特征：
 
-- 不引入 DAG merge
-- 不引入 `loop_start / loop_end`
-- 不在持久化层保存多份完整消息快照
-- 不在持久化 session/model/tool 事件中保存 LangChain4j 对象
-- 不让 LangChain4j 接管 Agent 主循环
-- 不在第一阶段实现具体内置工具
+- 使用单层 branch 继续执行模型。
+- 使用 assistant/tool 生命周期表达循环边界。
+- 持久化层只保存事件事实与必要元信息。
+- LangChain4j 仅保留在 provider 边界。
 
 ## 2. 核心原则
 
@@ -95,7 +95,7 @@ Agent 模块采用 `SessionEvent` 单层事件流模型，统一支撑：
 - cancel 管理
 - 向 Agent 回流 tool signal
 
-### 2.6 Agent 核心不依赖 LangChain4j runtime
+### 2.6 Agent 核心与 LangChain4j 依赖边界
 
 `Agent`、`agent.session`、`agent.tool` 核心 SPI 必须保持 LangChain4j-free。
 
@@ -106,17 +106,17 @@ Agent 模块采用 `SessionEvent` 单层事件流模型，统一支撑：
 - `Provider.asyncChat(...)` 入参使用 `List<AgentMessage>`
 - `AbstractModelProvider` 在 provider 包内部把 `AgentMessage` 转换为 LangChain4j `ChatMessage`
 
-允许依赖 LangChain4j 的边界：
+LangChain4j 依赖边界：
 
 - `agent.provider` 把 `AgentMessage` 转成 LangChain4j `ChatMessage`
 - `agent.provider` 把 `ToolInfo` 转成 LangChain4j `ToolSpecification`
-- 后续可选 adapter 把 LangChain4j `@Tool` 方法包装成 kk-studio `Tool`
+- adapter 包把 LangChain4j `@Tool` 方法包装成 kk-studio `Tool`
 
-禁止：
+核心 SPI 保持：
 
-- `Agent` / `SessionEventProjection` / `Provider` 接口暴露 LangChain4j 类型
-- `Tool` / `ToolRegistry` / `ToolCallRequest` / `ToolExecutionHandler` 直接使用 LangChain4j 类型
-- 引入 LangChain4j `ToolService` 接管 Agent 主循环
+- `Agent` / `SessionEventProjection` / `Provider` 接口不暴露 LangChain4j 类型
+- `Tool` / `ToolRegistry` / `ToolCallRequest` / `ToolExecutionHandler` 不直接使用 LangChain4j 类型
+- Agent 主循环由 kk-studio runtime 负责推进
 
 ### 2.7 Runtime 负责工具生命周期裁决
 
@@ -136,7 +136,7 @@ Runtime 负责：
 
 ### 3.1 Session
 
-第一版 `Session` 仅保留：
+`Session` 保留：
 
 - `sessionId`
 - `currentHeadEventId`
@@ -191,7 +191,7 @@ tool_end | tool_error
 
 ## 4. 事件类型
 
-第一版 `SessionEventType` 为：
+`SessionEventType` 为：
 
 - `set_agent_info`
 - `set_model_info`
@@ -205,9 +205,7 @@ tool_end | tool_error
 - `tool_error`
 - `abort`
 
-旧的通用 `error` 事件移除，不做历史兼容。
-
-当前处于未上线开发阶段，事件模型以干净重构为准。
+旧的通用 `error` 事件移除。
 
 ## 5. 配置事件
 
@@ -226,8 +224,8 @@ payload：
 语义：
 
 - 记录的是实际展开后的 agent 信息
-- replay 不依赖 registry 的未来状态
-- 不投影成业务消息，但会在投影时生成当前 system message
+- replay 不依赖 registry 的外部变更
+- 不投影成业务消息，但会在投影时生成 system message
 
 ### 5.2 set_model_info
 
@@ -412,15 +410,10 @@ Projector 看到 `abort` 时：
 
 ### 9.1 submit
 
-`submit` 仅负责：
+`submit` 的语义：
 
 - 入队
 - 触发主 loop 尝试启动
-
-不负责：
-
-- 同步等待结果
-- 返回运行句柄
 
 ### 9.2 loop 启动
 
@@ -532,7 +525,7 @@ assistant_start
 
 ### 12.1 包结构
 
-第一阶段目标包结构：
+包结构：
 
 ```text
 agent.tool
@@ -944,7 +937,7 @@ Agent 创建 listener 时通过闭包绑定自己的 `ToolExecutionState`，再�
 - `registerAgent(AgentInfo)`
 - `getAgent(name)`
 
-`AgentInfo` 第一版包含：
+`AgentInfo` 包含：
 
 - `name`
 - `systemPrompt`
@@ -1002,36 +995,26 @@ Agent 创建 listener 时通过闭包绑定自己的 `ToolExecutionState`，再�
 
 `ToolParamsSchema` 表示工具顶层参数对象；若参数内部还有 object 字段，则继续使用 `ToolObjectSchema` 作为嵌套 schema 节点。provider 再统一把这套自有 schema 模型翻译成底层 SDK 的 `ToolSpecification.parameters`。这样工具目录层不直接依赖 LangChain4j 的 schema 类型。
 
-## 19. LangChain4j 调研结论
+## 19. LangChain4j 边界
 
-LangChain4j tool 能力可借鉴但不直接作为核心基座。
+LangChain4j 在系统中的职责是 provider 边界适配。
 
-可借鉴：
+采用方式：
 
-- `ToolSpecification + ToolExecutor` 的规格与执行分离
-- `@Tool / @P` 的声明式工具元数据
-- JSON arguments 到 Java 方法参数的 coercion 规则
-- ToolProvider 的 filter / mapper / wrapper 思路
+- 使用 `ToolSpecification + ToolExecutor` 的规格与执行分离思路。
+- 使用声明式元数据表达 tool schema 与参数信息。
+- 使用 provider 包完成 `AgentMessage`、tool schema、模型请求参数到底层 SDK 的映射。
+- 使用 adapter 包兼容 LangChain4j `@Tool` 方法并输出 kk-studio `ToolRegistration`。
 
-不直接复用：
+边界约束：
 
-- `ToolService`
-- `AiServiceStreamingResponseHandler`
-- LangChain4j `ToolProvider` 作为 Agent 核心 registry
-- LangChain4j `DefaultToolExecutor` 作为 Agent 核心 executor
+- `ToolService` 不参与 Agent 主循环。
+- `AiServiceStreamingResponseHandler` 不参与核心事件模型。
+- LangChain4j 类型不扩散到 `agent` 核心 SPI。
 
-原因：
+## 20. 代码结构
 
-- LangChain4j tool service 会接管 LLM/tool tight loop
-- 默认模型偏 final result，不是 event-sourced streaming-first
-- streaming handler 不能自然按每个工具完成即时落事件并继续 Agent 自有状态机
-- 会把 LangChain4j 类型扩散到核心 tool SPI
-
-后续如果需要兼容 LangChain4j `@Tool` 方法，应新增 adapter 包，输出 kk-studio `ToolRegistration`，不改变核心 SPI。
-
-## 20. 当前代码结构目标
-
-第一版代码职责拆分为：
+代码职责拆分为：
 
 - `Agent`
   - 负责主链异步状态机与 event 串行推进
@@ -1050,77 +1033,3 @@ LangChain4j tool 能力可借鉴但不直接作为核心基座。
   - 负责 `AgentMessage` 到 LangChain4j `ChatMessage` 的边界适配与 tool specification 映射
 
 这样可以避免把配置解析、事件推进、流式回调适配、工具执行控制全部塞进一个超大类中。
-
-## 21. 开发阶段改造顺序
-
-### 21.1 Session error/abort 事件重构
-
-1. 修改 `SessionEventType`
-2. 删除 `ErrorPayload`
-3. 新增 `AssistantErrorPayload`
-4. 新增 `ToolErrorPayload`
-5. 修改 `AbortPayload`，移除 `toolCallId`
-6. 修改 `SessionEventValidator`
-7. 修改 projector 与 fixtures
-8. 修改 Agent 写事件逻辑
-
-### 21.2 Tool SPI 解耦
-
-1. 新增 `ToolCallRequest`
-2. 修改 `Tool.asyncExecute` 入参
-3. 修改 `ToolExecutionHandler`，移除 context
-4. 修改 `ToolExecutionHandle`，增加 `isCancelled()`
-5. 新增 `NoopToolExecutionHandle`
-6. 删除不再需要的 `ToolExecutionContext`
-
-### 21.3 Registry 基座
-
-1. 新增 `ToolRegistration`
-2. 扩展 `ToolRegistry`
-3. 新增 `DefaultToolRegistry`
-4. 注册时校验 `timeoutSeconds >= 0`
-5. 增加 list 能力与稳定排序
-
-### 21.4 ToolCallExecutor
-
-1. 新增 `ToolCallExecutor`
-2. 新增 `ManagedToolExecutionHandle`
-3. 新增 `GuardedToolExecutionHandler`
-4. 新增 `ToolTimeoutException`
-5. 接入 `ExecutorService`
-6. 接入 `AgentScheduler`
-7. 修改 `AgentFactory` 与 `Agent` 构造参数，注入 `ToolCallExecutor`
-8. 修改 Agent 使用 executor 启动 tool
-
-### 21.5 测试与覆盖率
-
-核心测试至少覆盖：
-
-- `assistant_error` 生命周期
-- `tool_error` 生命周期与 `isError=true` 投影
-- run-level `abort` 关闭多个 open tools
-- abort 发生在 retry delay 阶段
-- abort 发生在 tool batch 启动前检查
-- tool not found 展示字典序 available tools
-- timeout 写 `tool_error` 并 cancel
-- timeout=0 不注册 timeout
-- `timeoutSeconds < 0` 注册失败
-- asyncExecute 返回 null 写 `tool_error`
-- cancel 抛异常 warn+continue
-- 重复 complete/error warn+ignore
-- terminal 后 partial warn+ignore
-- invalid partial / complete 转 `tool_error`
-- delta + complete gap 补齐
-- `Agent` event append 仍保持串行
-
-## 22. 第一版不做的事情
-
-- DAG merge
-- Session 父子层级
-- loop_start / loop_end
-- provider/model fallback
-- tool retry 策略
-- 具体内置工具实现
-- MCP tool provider
-- LangChain4j `@Tool` adapter
-- projection 级别的复杂多视图展示模型

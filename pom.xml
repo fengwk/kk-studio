@@ -19,6 +19,7 @@
         <module>core</module>
         <module>web</module>
         <module>agent</module>
+        <module>daemon</module>
     </modules>
 
     <properties>
@@ -37,6 +38,16 @@
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
                 <artifactId>kk-studio-share</artifactId>
+                <version>${kk-studio.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>fun.fengwk.kk-studio</groupId>
+                <artifactId>kk-studio-agent</artifactId>
+                <version>${kk-studio.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>fun.fengwk.kk-studio</groupId>
+                <artifactId>kk-studio-daemon</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>
