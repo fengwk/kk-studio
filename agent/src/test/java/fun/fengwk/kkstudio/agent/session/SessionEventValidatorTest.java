@@ -3,13 +3,14 @@ package fun.fengwk.kkstudio.agent.session;
 import fun.fengwk.kkstudio.agent.session.payload.AbortPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantEndPayload;
+import fun.fengwk.kkstudio.agent.session.payload.AssistantErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantStartPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.Payload;
 import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
 import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolEndPayload;
+import fun.fengwk.kkstudio.agent.session.payload.ToolErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolStartPayload;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -129,10 +130,11 @@ public class SessionEventValidatorTest {
             Arguments.of(SessionEventType.assistant_start, new AssistantStartPayload()),
             Arguments.of(SessionEventType.assistant_delta, new AssistantDeltaPayload()),
             Arguments.of(SessionEventType.assistant_end, new AssistantEndPayload()),
+            Arguments.of(SessionEventType.assistant_error, new AssistantErrorPayload()),
             Arguments.of(SessionEventType.tool_start, new ToolStartPayload()),
             Arguments.of(SessionEventType.tool_delta, new ToolDeltaPayload()),
             Arguments.of(SessionEventType.tool_end, new ToolEndPayload()),
-            Arguments.of(SessionEventType.error, new ErrorPayload()),
+            Arguments.of(SessionEventType.tool_error, new ToolErrorPayload()),
             Arguments.of(SessionEventType.abort, new AbortPayload())
         );
     }

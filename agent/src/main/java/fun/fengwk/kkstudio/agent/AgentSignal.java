@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.agent;
 
 import fun.fengwk.kkstudio.agent.provider.AssistantResponse;
+import fun.fengwk.kkstudio.agent.session.Branch;
+import fun.fengwk.kkstudio.agent.session.SessionEvent;
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
@@ -14,6 +16,7 @@ import java.util.List;
  * @author fengwk
  */
 sealed interface AgentSignal permits StartLoopSignal, RetryAssistantSignal, AbortSignal,
+    SwitchBranchSignal,
     AssistantTextDeltaSignal, AssistantThinkingDeltaSignal, AssistantToolCallDeltaSignal,
     AssistantToolCallCompleteSignal, AssistantCompleteSignal, AssistantErrorSignal,
     ToolPartialSignal, ToolCompleteSignal, ToolErrorSignal {
@@ -36,6 +39,12 @@ record RetryAssistantSignal(AgentRunContext runContext) implements AgentSignal {
  * 触发显式取消的控制信号。
  */
 record AbortSignal(String reason) implements AgentSignal {
+}
+
+/**
+ * 切换当前分支的控制信号。
+ */
+record SwitchBranchSignal(Branch branch, List<SessionEvent> branchEvents) implements AgentSignal {
 }
 
 /**

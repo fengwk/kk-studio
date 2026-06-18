@@ -121,6 +121,34 @@
     }
   },
   {
+    "name": "empty_assistant_delta_ignored",
+    "events": [
+      {
+        "eventType": "assistant_start",
+        "payload": {
+          "userMessages": []
+        }
+      },
+      {
+        "eventType": "assistant_delta",
+        "payload": {}
+      },
+      {
+        "eventType": "assistant_end",
+        "payload": {}
+      }
+    ],
+    "expected": {
+      "messages": [
+        {
+          "type": "ai",
+          "text": "",
+          "toolCalls": []
+        }
+      ]
+    }
+  },
+  {
     "name": "orphan_assistant_events_ignored",
     "events": [
       {
@@ -134,7 +162,7 @@
         "payload": {}
       },
       {
-        "eventType": "error",
+        "eventType": "assistant_error",
         "payload": {
           "message": "ignored"
         }
@@ -177,7 +205,7 @@
       },
       {
         "eventType": "tool_start",
-        "payloadType": "error",
+        "payloadType": "tool_error",
         "payload": {
           "message": "bad"
         }
@@ -208,7 +236,7 @@
     }
   },
   {
-    "name": "error_and_abort_with_unknown_payload_are_ignored",
+    "name": "assistant_error_and_abort_with_unknown_payload_are_ignored",
     "events": [
       {
         "eventType": "assistant_start",
@@ -217,7 +245,7 @@
         }
       },
       {
-        "eventType": "error",
+        "eventType": "assistant_error",
         "payloadType": "unknown",
         "payload": {
           "ignored": true
@@ -280,6 +308,51 @@
     }
   },
   {
+    "name": "blank_tool_start_identity_ignored",
+    "events": [
+      {
+        "eventType": "tool_start",
+        "payload": {
+          "toolCallId": "",
+          "toolName": "bash",
+          "arguments": "{}"
+        }
+      },
+      {
+        "eventType": "tool_start",
+        "payload": {
+          "toolCallId": "call_2",
+          "toolName": " ",
+          "arguments": "{}"
+        }
+      },
+      {
+        "eventType": "tool_delta",
+        "payload": {
+          "toolCallId": "call_2",
+          "contentDeltas": [
+            {
+              "index": 0,
+              "contentDelta": {
+                "type": "text",
+                "text": "ignored"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "eventType": "tool_end",
+        "payload": {
+          "toolCallId": "call_2"
+        }
+      }
+    ],
+    "expected": {
+      "messages": []
+    }
+  },
+  {
     "name": "assistant_error_without_existing_text",
     "events": [
       {
@@ -289,7 +362,7 @@
         }
       },
       {
-        "eventType": "error",
+        "eventType": "assistant_error",
         "payload": {
           "message": "failed"
         }
@@ -317,7 +390,7 @@
         }
       },
       {
-        "eventType": "error",
+        "eventType": "tool_error",
         "payload": {
           "toolCallId": "call_1",
           "message": "failed"
@@ -330,6 +403,7 @@
           "type": "tool",
           "id": "call_1",
           "toolName": "bash",
+          "isError": true,
           "contents": [
             {
               "type": "text",

@@ -68,16 +68,23 @@ public enum SessionEventType {
     tool_end,
 
     /**
-     * 运行失败事件。
+     * assistant 调用失败事件。
      *
-     * 语义：表示一次可感知、可恢复的失败事实。
+     * 语义：表示当前 assistant 调用异常闭合。
      */
-    error,
+    assistant_error,
+
+    /**
+     * 工具调用失败事件。
+     *
+     * 语义：表示指定 tool call 异常闭合。
+     */
+    tool_error,
 
     /**
      * 用户取消事件。
      *
-     * 语义：表示用户主动中断当前工作链路。
+     * 语义：表示用户主动中断当前 run。
      */
     abort,
 

@@ -279,6 +279,16 @@ public class SessionManagerImplTest {
     }
 
     /**
+     * 校验 session 缺失时 CAS 返回 false 而不是创建新 session。
+     */
+    @Test
+    public void testCompareAndSetCurrentHeadEventIdReturnsFalseWhenSessionMissing() {
+        SessionManagerImpl sessionManager = new SessionManagerImpl(new InMemorySessionRepository(), new InMemorySessionEventRepository());
+
+        assertFalse(sessionManager.compareAndSetCurrentHeadEventId("missing", SessionEvent.ROOT_EVENT_ID, "ev_1"));
+    }
+
+    /**
      * 校验 CAS 更新默认 head 时拒绝空白参数。
      */
     @Test

@@ -3,13 +3,14 @@ package fun.fengwk.kkstudio.agent.session;
 import fun.fengwk.kkstudio.agent.session.payload.AbortPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantEndPayload;
+import fun.fengwk.kkstudio.agent.session.payload.AssistantErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantStartPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.Payload;
 import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
 import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolEndPayload;
+import fun.fengwk.kkstudio.agent.session.payload.ToolErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolStartPayload;
 
 /**
@@ -78,10 +79,11 @@ public final class SessionEventValidator {
             case assistant_start -> AssistantStartPayload.class;
             case assistant_delta -> AssistantDeltaPayload.class;
             case assistant_end -> AssistantEndPayload.class;
+            case assistant_error -> AssistantErrorPayload.class;
             case tool_start -> ToolStartPayload.class;
             case tool_delta -> ToolDeltaPayload.class;
             case tool_end -> ToolEndPayload.class;
-            case error -> ErrorPayload.class;
+            case tool_error -> ToolErrorPayload.class;
             case abort -> AbortPayload.class;
         };
     }

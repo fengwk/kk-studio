@@ -9,4 +9,6 @@ public interface ToolExecutionHandle {
 
     void cancel();
 
+    boolean isCancelled();
+
 }

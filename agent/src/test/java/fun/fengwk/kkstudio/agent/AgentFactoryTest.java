@@ -19,16 +19,18 @@ import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
 import fun.fengwk.kkstudio.agent.session.projection.DefaultSessionEventMessageProjector;
 import fun.fengwk.kkstudio.agent.session.repo.SessionEventRepository;
 import fun.fengwk.kkstudio.agent.session.repo.SessionRepository;
-import fun.fengwk.kkstudio.agent.tool.Tool;
-import fun.fengwk.kkstudio.agent.tool.ToolInfo;
-import fun.fengwk.kkstudio.agent.tool.ToolRegistry;
+import fun.fengwk.kkstudio.agent.tool.DefaultToolRegistry;
+import fun.fengwk.kkstudio.agent.tool.execution.ToolCallExecutor;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -64,6 +66,8 @@ public class AgentFactoryTest {
         sessionRepository.compareAndSetCurrentHeadEventId(session.getSessionId(), SessionEvent.ROOT_EVENT_ID, branch.headEventId());
 
         AgentFactory agentFactory = new AgentFactory();
+        AgentScheduler scheduler = (delay, task) -> () -> {
+        };
         Agent agent = agentFactory.load(
             session.getSessionId(),
             "assistant",
@@ -73,15 +77,15 @@ public class AgentFactoryTest {
             new InMemoryUserRequestQueue(),
             event -> {
             },
-            new InMemoryToolRegistry(),
+            new DefaultToolRegistry(),
+            new ToolCallExecutor(new DirectExecutorService(), scheduler),
             sessionManager,
             new DefaultSessionEventMessageProjector(),
             new InMemoryAgentRegistry(),
             new InMemoryModelRegistry(),
             new InMemoryProviderRegistry(),
             new ProviderManagerImpl(),
-            (delay, task) -> () -> {
-            },
+            scheduler,
             ModelRetryConfig.builder()
                 .maxRetries(1)
                 .baseDelay(Duration.ofMillis(10))
@@ -96,24 +100,6 @@ public class AgentFactoryTest {
         assertEquals("sys", agent.getCurrentAgentInfo().getSystemPrompt());
         assertEquals("openai", agent.getCurrentModelInfo().getProvider());
         assertEquals("gpt-test", agent.getCurrentModelInfo().getModel());
-    }
-
-    private static class InMemoryToolRegistry implements ToolRegistry {
-
-        @Override
-        public void registerTool(String name, ToolInfo toolInfo, Tool tool) {
-        }
-
-        @Override
-        public ToolInfo getToolInfo(String name) {
-            return null;
-        }
-
-        @Override
-        public Tool getTool(String name) {
-            return null;
-        }
-
     }
 
     private static class InMemorySessionRepository implements SessionRepository {
@@ -140,6 +126,43 @@ public class AgentFactoryTest {
 
         private void save(Session session) {
             sessionById.put(session.getSessionId(), session);
+        }
+
+    }
+
+    private static class DirectExecutorService extends AbstractExecutorService {
+
+        private boolean shutdown;
+
+        @Override
+        public void shutdown() {
+            shutdown = true;
+        }
+
+        @Override
+        public List<Runnable> shutdownNow() {
+            shutdown = true;
+            return Collections.emptyList();
+        }
+
+        @Override
+        public boolean isShutdown() {
+            return shutdown;
+        }
+
+        @Override
+        public boolean isTerminated() {
+            return shutdown;
+        }
+
+        @Override
+        public boolean awaitTermination(long timeout, TimeUnit unit) {
+            return shutdown;
+        }
+
+        @Override
+        public void execute(Runnable command) {
+            command.run();
         }
 
     }

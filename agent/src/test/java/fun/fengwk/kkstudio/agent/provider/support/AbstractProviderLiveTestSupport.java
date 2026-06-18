@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.agent.provider.support;
 
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.UserMessage;
+import fun.fengwk.kkstudio.agent.message.AgentUserMessage;
 import fun.fengwk.kkstudio.agent.provider.AssistantResponse;
 import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandle;
 import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandler;
@@ -120,7 +119,7 @@ public abstract class AbstractProviderLiveTestSupport extends AbstractProviderTe
         AtomicReference<Throwable> errorRef = new AtomicReference<>();
 
         provider.asyncChat(
-            List.<ChatMessage>of(UserMessage.from(prompt)),
+            List.of(new AgentUserMessage(prompt)),
             modelInfo(),
             variant(),
             toolInfos,

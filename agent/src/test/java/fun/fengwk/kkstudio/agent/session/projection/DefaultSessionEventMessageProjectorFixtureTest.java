@@ -2,29 +2,26 @@ package fun.fengwk.kkstudio.agent.session.projection;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.AudioContent;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.Content;
-import dev.langchain4j.data.message.ImageContent;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.TextContent;
-import dev.langchain4j.data.message.ToolExecutionResultMessage;
-import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.data.message.VideoContent;
+import fun.fengwk.kkstudio.agent.message.AgentAssistantMessage;
+import fun.fengwk.kkstudio.agent.message.AgentMessage;
+import fun.fengwk.kkstudio.agent.message.AgentSystemMessage;
+import fun.fengwk.kkstudio.agent.message.AgentToolMessage;
+import fun.fengwk.kkstudio.agent.message.AgentUserMessage;
 import fun.fengwk.kkstudio.agent.session.SessionEvent;
 import fun.fengwk.kkstudio.agent.session.SessionEventType;
 import fun.fengwk.kkstudio.agent.session.payload.AbortPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantEndPayload;
+import fun.fengwk.kkstudio.agent.session.payload.AssistantErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantStartPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.Payload;
 import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
 import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
+import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
+import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
 import fun.fengwk.kkstudio.agent.session.payload.ToolDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolEndPayload;
+import fun.fengwk.kkstudio.agent.session.payload.ToolErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolStartPayload;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.api.Test;
@@ -71,7 +68,7 @@ public class DefaultSessionEventMessageProjectorFixtureTest {
     public void testEmptyProjectionMessagesAreImmutable() {
         SessionEventProjection projection = projector.project(List.of());
 
-        assertThrows(UnsupportedOperationException.class, () -> projection.messages().add(UserMessage.from("bad")));
+        assertThrows(UnsupportedOperationException.class, () -> projection.messages().add(new AgentUserMessage("bad")));
     }
 
     /**
@@ -86,7 +83,7 @@ public class DefaultSessionEventMessageProjectorFixtureTest {
 
         SessionEventProjection projection = projector.project(List.of(start, end));
 
-        assertThrows(UnsupportedOperationException.class, () -> projection.messages().add(UserMessage.from("bad")));
+        assertThrows(UnsupportedOperationException.class, () -> projection.messages().add(new AgentUserMessage("bad")));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -189,10 +186,11 @@ public class DefaultSessionEventMessageProjectorFixtureTest {
             case "assistant_start" -> OBJECT_MAPPER.convertValue(payloadNode, AssistantStartPayload.class);
             case "assistant_delta" -> OBJECT_MAPPER.convertValue(payloadNode, AssistantDeltaPayload.class);
             case "assistant_end" -> OBJECT_MAPPER.convertValue(payloadNode, AssistantEndPayload.class);
+            case "assistant_error" -> OBJECT_MAPPER.convertValue(payloadNode, AssistantErrorPayload.class);
             case "tool_start" -> OBJECT_MAPPER.convertValue(payloadNode, ToolStartPayload.class);
             case "tool_delta" -> OBJECT_MAPPER.convertValue(payloadNode, ToolDeltaPayload.class);
             case "tool_end" -> OBJECT_MAPPER.convertValue(payloadNode, ToolEndPayload.class);
-            case "error" -> OBJECT_MAPPER.convertValue(payloadNode, ErrorPayload.class);
+            case "tool_error" -> OBJECT_MAPPER.convertValue(payloadNode, ToolErrorPayload.class);
             case "abort" -> OBJECT_MAPPER.convertValue(payloadNode, AbortPayload.class);
             case "unknown" -> new UnknownPayload();
             default -> throw new IllegalArgumentException("unsupported payloadType: " + payloadType);
@@ -214,46 +212,38 @@ public class DefaultSessionEventMessageProjectorFixtureTest {
             projection.messages().stream().map(this::snapshotMessage).toList());
     }
 
-    private MessageSnapshot snapshotMessage(ChatMessage chatMessage) {
-        if (chatMessage instanceof SystemMessage systemMessage) {
-            return new MessageSnapshot("system", systemMessage.text(), null, null, null, null, null);
+    private MessageSnapshot snapshotMessage(AgentMessage chatMessage) {
+        if (chatMessage instanceof AgentSystemMessage systemMessage) {
+            return new MessageSnapshot("system", systemMessage.text(), null, null, null, null, null, null);
         }
-        if (chatMessage instanceof UserMessage userMessage) {
-            return new MessageSnapshot("user", userMessage.singleText(), null, null, null, null, null);
+        if (chatMessage instanceof AgentUserMessage userMessage) {
+            return new MessageSnapshot("user", userMessage.text(), null, null, null, null, null, null);
         }
-        if (chatMessage instanceof AiMessage aiMessage) {
-            List<ToolCallSnapshot> toolCalls = aiMessage.toolExecutionRequests().stream()
+        if (chatMessage instanceof AgentAssistantMessage assistantMessage) {
+            List<ToolCallSnapshot> toolCalls = assistantMessage.toolCalls().stream()
                 .map(this::snapshotToolCall)
                 .toList();
-            return new MessageSnapshot("ai", aiMessage.text(), aiMessage.thinking(), null, null, toolCalls, null);
+            return new MessageSnapshot("ai", assistantMessage.text(), assistantMessage.thinking(), null, null, toolCalls, null, null);
         }
-        if (chatMessage instanceof ToolExecutionResultMessage toolMessage) {
+        if (chatMessage instanceof AgentToolMessage toolMessage) {
             List<ContentSnapshot> contents = toolMessage.contents().stream()
                 .map(this::snapshotContent)
                 .toList();
-            return new MessageSnapshot("tool", null, null, toolMessage.id(), toolMessage.toolName(), null, contents);
+            return new MessageSnapshot("tool", null, null, toolMessage.id(), toolMessage.toolName(), null, contents, toolMessage.error() ? true : null);
         }
         throw new IllegalArgumentException("unsupported chatMessage: " + chatMessage.getClass().getName());
     }
 
-    private ToolCallSnapshot snapshotToolCall(ToolExecutionRequest request) {
-        return new ToolCallSnapshot(request.id(), request.name(), request.arguments());
+    private ToolCallSnapshot snapshotToolCall(ToolCall request) {
+        return new ToolCallSnapshot(request.getToolCallId(), request.getToolName(), request.getArguments());
     }
 
-    private ContentSnapshot snapshotContent(Content content) {
-        if (content instanceof TextContent textContent) {
-            return new ContentSnapshot("text", textContent.text(), null, null);
-        }
-        if (content instanceof ImageContent imageContent) {
-            return new ContentSnapshot("image", null, imageContent.image().base64Data(), imageContent.image().mimeType());
-        }
-        if (content instanceof AudioContent audioContent) {
-            return new ContentSnapshot("audio", null, audioContent.audio().base64Data(), audioContent.audio().mimeType());
-        }
-        if (content instanceof VideoContent videoContent) {
-            return new ContentSnapshot("video", null, videoContent.video().base64Data(), videoContent.video().mimeType());
-        }
-        throw new IllegalArgumentException("unsupported content: " + content.getClass().getName());
+    private ContentSnapshot snapshotContent(ToolContent content) {
+        return new ContentSnapshot(
+            content.getType() == null ? null : content.getType().name(),
+            content.getText(),
+            content.getData(),
+            content.getMime());
     }
 
     private record ProjectionSnapshot(AgentInfoSnapshot agentInfo,
@@ -276,10 +266,11 @@ public class DefaultSessionEventMessageProjectorFixtureTest {
     private record MessageSnapshot(String type,
                                    String text,
                                    String thinking,
-                                   String id,
-                                   String toolName,
-                                   List<ToolCallSnapshot> toolCalls,
-                                   List<ContentSnapshot> contents) {
+                                    String id,
+                                    String toolName,
+                                    List<ToolCallSnapshot> toolCalls,
+                                    List<ContentSnapshot> contents,
+                                    Boolean isError) {
     }
 
     private record ToolCallSnapshot(String id,

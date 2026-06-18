@@ -1,32 +1,29 @@
 package fun.fengwk.kkstudio.agent.session.projection;
 
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.AudioContent;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.Content;
-import dev.langchain4j.data.message.ImageContent;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.TextContent;
-import dev.langchain4j.data.message.ToolExecutionResultMessage;
-import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.data.message.VideoContent;
+import fun.fengwk.kkstudio.agent.message.AgentAssistantMessage;
+import fun.fengwk.kkstudio.agent.message.AgentMessage;
+import fun.fengwk.kkstudio.agent.message.AgentSystemMessage;
+import fun.fengwk.kkstudio.agent.message.AgentToolMessage;
+import fun.fengwk.kkstudio.agent.message.AgentUserMessage;
 import fun.fengwk.kkstudio.agent.session.SessionEvent;
 import fun.fengwk.kkstudio.agent.session.SessionEventType;
 import fun.fengwk.kkstudio.agent.session.payload.AbortPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantEndPayload;
+import fun.fengwk.kkstudio.agent.session.payload.AssistantErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantStartPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
 import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
 import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
+import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCallDelta;
+import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContentDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContentType;
 import fun.fengwk.kkstudio.agent.session.payload.ToolDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolEndPayload;
+import fun.fengwk.kkstudio.agent.session.payload.ToolErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolStartPayload;
 import lombok.extern.slf4j.Slf4j;
 
@@ -35,7 +32,6 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.TreeMap;
 
 /**
@@ -44,7 +40,7 @@ import java.util.TreeMap;
  * 语义说明：
  * - 默认实现按事件栈闭合 assistant / tool 生命周期。
  * - assistant 与 tool 的完整内容都由 delta 重放得到。
- * - end 事件负责闭合边界；error / abort 负责异常闭合并追加投影消息。
+ * - end 事件负责闭合边界；assistant_error / tool_error / abort 负责异常闭合并追加投影消息。
  * - set_agent_info / set_model_info 负责更新当前配置事实。
  *
  * @author fengwk
@@ -64,7 +60,7 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
             return new SessionEventProjection(null, null, List.of());
         }
 
-        List<ChatMessage> chatMessages = new ArrayList<>();
+        List<AgentMessage> chatMessages = new ArrayList<>();
         SetAgentInfoPayload agentInfo = null;
         SetModelInfoPayload modelInfo = null;
         Deque<OpenState> openStates = new ArrayDeque<>();
@@ -95,8 +91,10 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
                 onToolDelta(branchEvent, openStates);
             } else if (eventType == SessionEventType.tool_end) {
                 onToolEnd(branchEvent, openStates, chatMessages);
-            } else if (eventType == SessionEventType.error) {
-                onError(branchEvent, openStates, chatMessages);
+            } else if (eventType == SessionEventType.assistant_error) {
+                onAssistantError(branchEvent, openStates, chatMessages);
+            } else if (eventType == SessionEventType.tool_error) {
+                onToolError(branchEvent, openStates, chatMessages);
             } else if (eventType == SessionEventType.abort) {
                 onAbort(branchEvent, openStates, chatMessages);
             }
@@ -105,7 +103,7 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
         projectInterruptedOpenStates(openStates, chatMessages);
 
         if (agentInfo != null && agentInfo.getSystemPrompt() != null && !agentInfo.getSystemPrompt().isBlank()) {
-            chatMessages.add(0, SystemMessage.from(agentInfo.getSystemPrompt()));
+            chatMessages.add(0, new AgentSystemMessage(agentInfo.getSystemPrompt()));
         }
 
         return new SessionEventProjection(agentInfo, modelInfo, List.copyOf(chatMessages));
@@ -127,7 +125,7 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
         return currentModelInfo;
     }
 
-    private void onAssistantStart(SessionEvent event, Deque<OpenState> openStates, List<ChatMessage> chatMessages) {
+    private void onAssistantStart(SessionEvent event, Deque<OpenState> openStates, List<AgentMessage> chatMessages) {
         if (event.getPayload() instanceof AssistantStartPayload payload) {
             appendUserMessages(event, payload, chatMessages);
         } else {
@@ -136,7 +134,7 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
         openStates.addLast(new AssistantState(event));
     }
 
-    private void appendUserMessages(SessionEvent event, AssistantStartPayload payload, List<ChatMessage> chatMessages) {
+    private void appendUserMessages(SessionEvent event, AssistantStartPayload payload, List<AgentMessage> chatMessages) {
         if (payload.getUserMessages() == null) {
             return;
         }
@@ -145,7 +143,7 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
                 warn(event, "null_user_message");
                 continue;
             }
-            chatMessages.add(UserMessage.userMessage(userMessage));
+            chatMessages.add(new AgentUserMessage(userMessage));
         }
     }
 
@@ -183,7 +181,7 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
             && (payload.getToolCallsDelta() == null || payload.getToolCallsDelta().isEmpty());
     }
 
-    private void onAssistantEnd(SessionEvent event, Deque<OpenState> openStates, List<ChatMessage> chatMessages) {
+    private void onAssistantEnd(SessionEvent event, Deque<OpenState> openStates, List<AgentMessage> chatMessages) {
         if (!(event.getPayload() instanceof AssistantEndPayload)) {
             warn(event, "invalid_assistant_end_payload");
             return;
@@ -193,7 +191,7 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
             warn(event, "orphan_assistant_end");
             return;
         }
-        chatMessages.add(buildAiMessage(event, assistantState));
+        chatMessages.add(buildAssistantMessage(event, assistantState));
         chatMessages.addAll(assistantState.delayedToolMessages);
     }
 
@@ -232,7 +230,7 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
         }
     }
 
-    private void onToolEnd(SessionEvent event, Deque<OpenState> openStates, List<ChatMessage> chatMessages) {
+    private void onToolEnd(SessionEvent event, Deque<OpenState> openStates, List<AgentMessage> chatMessages) {
         if (!(event.getPayload() instanceof ToolEndPayload payload)) {
             warn(event, "invalid_tool_end_payload");
             return;
@@ -250,71 +248,69 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
         appendToolResultMessage(event, ownerAssistant, toolState, chatMessages);
     }
 
-    private void onError(SessionEvent event, Deque<OpenState> openStates, List<ChatMessage> chatMessages) {
-        if (event.getPayload() instanceof ErrorPayload payload) {
-            closeWithMessage(event, openStates, chatMessages, payload.getMessage(), normalizeToolCallId(payload.getToolCallId()));
+    private void onAssistantError(SessionEvent event, Deque<OpenState> openStates, List<AgentMessage> chatMessages) {
+        String message = null;
+        if (event.getPayload() instanceof AssistantErrorPayload payload) {
+            message = payload.getMessage();
         } else {
-            warn(event, "invalid_error_payload");
-            closeWithMessage(event, openStates, chatMessages, null, null);
+            warn(event, "invalid_assistant_error_payload");
         }
-    }
-
-    private void onAbort(SessionEvent event, Deque<OpenState> openStates, List<ChatMessage> chatMessages) {
-        if (event.getPayload() instanceof AbortPayload payload) {
-            closeWithMessage(event, openStates, chatMessages, payload.getReason(), normalizeToolCallId(payload.getToolCallId()));
-        } else {
-            warn(event, "invalid_abort_payload");
-            closeWithMessage(event, openStates, chatMessages, null, null);
-        }
-    }
-
-    private String normalizeToolCallId(String toolCallId) {
-        return isBlank(toolCallId) ? null : toolCallId;
-    }
-
-    private void closeWithMessage(SessionEvent event,
-                                  Deque<OpenState> openStates,
-                                  List<ChatMessage> chatMessages,
-                                  String closingMessage,
-                                  String toolCallId) {
-        OpenState openState;
-        AssistantState ownerAssistant = null;
-        if (toolCallId == null) {
-            openState = openStates.pollLast();
-            if (openState instanceof ToolState) {
-                ownerAssistant = findLastAssistantState(openStates);
-            }
-        } else {
-            ownerAssistant = findOwningAssistantState(openStates, toolCallId);
-            openState = removeToolState(openStates, toolCallId);
-            if (openState == null) {
-                warn(event, "missing_target_tool_to_close");
-                return;
-            }
-        }
-        if (openState == null) {
-            warn(event, "no_open_state_to_close");
+        AssistantState assistantState = removeLastAssistantState(openStates);
+        if (assistantState == null) {
+            warn(event, "orphan_assistant_error");
             return;
         }
-        if (openState instanceof AssistantState assistantState) {
-            appendAssistantClosingMessage(assistantState, closingMessage);
-            chatMessages.add(buildAiMessage(event, assistantState));
-            chatMessages.addAll(assistantState.delayedToolMessages);
-        } else if (openState instanceof ToolState toolState) {
-            appendToolClosingMessage(toolState, closingMessage);
-            appendToolResultMessage(event, ownerAssistant, toolState, chatMessages);
-        }
+        appendAssistantClosingMessage(assistantState, message);
+        chatMessages.add(buildAssistantMessage(event, assistantState));
+        chatMessages.addAll(assistantState.delayedToolMessages);
     }
 
-    private void projectInterruptedOpenStates(Deque<OpenState> openStates, List<ChatMessage> chatMessages) {
-        for (OpenState openState : openStates) {
+    private void onToolError(SessionEvent event, Deque<OpenState> openStates, List<AgentMessage> chatMessages) {
+        if (!(event.getPayload() instanceof ToolErrorPayload payload)) {
+            warn(event, "invalid_tool_error_payload");
+            return;
+        }
+        if (isBlank(payload.getToolCallId())) {
+            warn(event, "missing_tool_error_tool_call_id");
+            return;
+        }
+        AssistantState ownerAssistant = findOwningAssistantState(openStates, payload.getToolCallId());
+        ToolState toolState = removeToolState(openStates, payload.getToolCallId());
+        if (toolState == null) {
+            warn(event, "orphan_tool_error");
+            return;
+        }
+        appendToolClosingMessage(toolState, payload.getMessage());
+        appendToolResultMessage(event, ownerAssistant, toolState, chatMessages, true);
+    }
+
+    private void onAbort(SessionEvent event, Deque<OpenState> openStates, List<AgentMessage> chatMessages) {
+        if (!(event.getPayload() instanceof AbortPayload)) {
+            warn(event, "invalid_abort_payload");
+        }
+        closeInterruptedOpenStates(openStates, chatMessages, false);
+    }
+
+    private void projectInterruptedOpenStates(Deque<OpenState> openStates, List<AgentMessage> chatMessages) {
+        closeInterruptedOpenStates(openStates, chatMessages, true);
+    }
+
+    private void closeInterruptedOpenStates(Deque<OpenState> openStates,
+                                            List<AgentMessage> chatMessages,
+                                            boolean warnInterrupted) {
+        while (!openStates.isEmpty()) {
+            OpenState openState = openStates.pollFirst();
             if (openState instanceof AssistantState assistantState) {
-                warn(assistantState.startEvent, "interrupted_assistant_open_state");
+                if (warnInterrupted) {
+                    warn(assistantState.startEvent, "interrupted_assistant_open_state");
+                }
                 appendAssistantClosingMessage(assistantState, ASSISTANT_INTERRUPTED_MESSAGE);
-                chatMessages.add(buildAiMessage(assistantState.startEvent, assistantState));
+                chatMessages.add(buildAssistantMessage(assistantState.startEvent, assistantState));
                 chatMessages.addAll(assistantState.delayedToolMessages);
             } else if (openState instanceof ToolState toolState) {
-                warn(toolState.startEvent, "interrupted_tool_open_state");
+                if (warnInterrupted) {
+                    warn(toolState.startEvent, "interrupted_tool_open_state");
+                }
                 appendToolClosingMessage(toolState, TOOL_INTERRUPTED_MESSAGE);
                 chatMessages.add(buildToolResultMessage(toolState.startEvent, toolState));
             }
@@ -556,67 +552,63 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
         toolState.contents.put(nextIndex, accumulator);
     }
 
-    private AiMessage buildAiMessage(SessionEvent event, AssistantState assistantState) {
-        List<ToolExecutionRequest> toolExecutionRequests = new ArrayList<>();
+    private AgentAssistantMessage buildAssistantMessage(SessionEvent event, AssistantState assistantState) {
+        List<ToolCall> toolCalls = new ArrayList<>();
         for (ToolCallState toolCallState : assistantState.toolCalls.values()) {
-            ToolExecutionRequest request = toToolExecutionRequest(event, toolCallState);
-            if (request != null) {
-                toolExecutionRequests.add(request);
+            ToolCall toolCall = toToolCall(event, toolCallState);
+            if (toolCall != null) {
+                toolCalls.add(toolCall);
             }
         }
         String text = assistantState.text.isEmpty() ? null : assistantState.text.toString();
         String thinking = assistantState.thinking.isEmpty() ? null : assistantState.thinking.toString();
-
-        AiMessage.Builder builder = AiMessage.builder()
-            .toolExecutionRequests(toolExecutionRequests);
-        if (text != null || toolExecutionRequests.isEmpty()) {
-            builder.text(text == null ? "" : text);
-        }
-        if (thinking != null) {
-            builder.thinking(thinking);
-        }
-        return builder.build();
+        String projectedText = text != null || toolCalls.isEmpty() ? text == null ? "" : text : null;
+        return new AgentAssistantMessage(projectedText, thinking, toolCalls);
     }
 
-    private ToolExecutionRequest toToolExecutionRequest(SessionEvent event, ToolCallState toolCallState) {
+    private ToolCall toToolCall(SessionEvent event, ToolCallState toolCallState) {
         if (isBlank(toolCallState.toolCallId) || isBlank(toolCallState.toolName)) {
             warn(event, "incomplete_tool_call_skipped");
             return null;
         }
-        return ToolExecutionRequest.builder()
-            .id(toolCallState.toolCallId)
-            .name(toolCallState.toolName)
-            .arguments(toolCallState.arguments.toString())
-            .build();
+        ToolCall toolCall = new ToolCall();
+        toolCall.setToolCallId(toolCallState.toolCallId);
+        toolCall.setToolName(toolCallState.toolName);
+        toolCall.setArguments(toolCallState.arguments.toString());
+        return toolCall;
     }
 
-    private ToolExecutionResultMessage buildToolResultMessage(SessionEvent event, ToolState toolState) {
-        List<Content> contents = new ArrayList<>();
+    private AgentToolMessage buildToolResultMessage(SessionEvent event, ToolState toolState) {
+        return buildToolResultMessage(event, toolState, false);
+    }
+
+    private AgentToolMessage buildToolResultMessage(SessionEvent event, ToolState toolState, boolean isError) {
+        List<ToolContent> contents = new ArrayList<>();
         for (ToolContentAccumulator accumulator : toolState.contents.values()) {
-            Content content = toContent(event, accumulator);
+            ToolContent content = toContent(event, accumulator);
             if (content != null) {
                 contents.add(content);
             }
         }
-
-        ToolExecutionResultMessage.Builder builder = ToolExecutionResultMessage.builder()
-            .id(toolState.toolCallId)
-            .toolName(toolState.toolName);
         if (contents.isEmpty()) {
-            builder.text("");
-        } else if (contents.size() == 1 && contents.get(0) instanceof TextContent textContent) {
-            builder.text(textContent.text());
-        } else {
-            builder.contents(contents);
+            contents.add(newTextContent(""));
         }
-        return builder.build();
+        return new AgentToolMessage(toolState.toolCallId, toolState.toolName, contents, isError);
+    }
+
+    private void appendToolResultMessage(SessionEvent event,
+                                          AssistantState ownerAssistant,
+                                          ToolState toolState,
+                                           List<AgentMessage> chatMessages) {
+        appendToolResultMessage(event, ownerAssistant, toolState, chatMessages, false);
     }
 
     private void appendToolResultMessage(SessionEvent event,
                                          AssistantState ownerAssistant,
                                          ToolState toolState,
-                                         List<ChatMessage> chatMessages) {
-        ToolExecutionResultMessage message = buildToolResultMessage(event, toolState);
+                                         List<AgentMessage> chatMessages,
+                                         boolean isError) {
+        AgentToolMessage message = buildToolResultMessage(event, toolState, isError);
         if (ownerAssistant == null) {
             chatMessages.add(message);
             return;
@@ -624,24 +616,27 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
         ownerAssistant.delayedToolMessages.add(message);
     }
 
-    private Content toContent(SessionEvent event, ToolContentAccumulator accumulator) {
+    private ToolContent toContent(SessionEvent event, ToolContentAccumulator accumulator) {
         if (accumulator.type == ToolContentType.text) {
-            return TextContent.from(accumulator.text.toString());
+            return newTextContent(accumulator.text.toString());
         }
         if (isInvalidMedia(accumulator)) {
             warn(event, "invalid_media_content_skipped");
             return null;
         }
-        if (accumulator.type == ToolContentType.image) {
-            return ImageContent.from(accumulator.data, accumulator.mime);
-        }
-        if (accumulator.type == ToolContentType.audio) {
-            return AudioContent.from(accumulator.data, accumulator.mime);
-        }
-        if (accumulator.type == ToolContentType.video) {
-            return VideoContent.from(accumulator.data, accumulator.mime);
-        }
-        return null;
+        ToolContent content = new ToolContent();
+        content.setType(accumulator.type);
+        content.setData(accumulator.data);
+        content.setMime(accumulator.mime);
+        content.setName(accumulator.name);
+        return content;
+    }
+
+    private ToolContent newTextContent(String text) {
+        ToolContent content = new ToolContent();
+        content.setType(ToolContentType.text);
+        content.setText(text);
+        return content;
     }
 
     private boolean isInvalidMedia(ToolContentAccumulator accumulator) {
@@ -680,7 +675,7 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
         private final StringBuilder text = new StringBuilder();
         private final StringBuilder thinking = new StringBuilder();
         private final TreeMap<Integer, ToolCallState> toolCalls = new TreeMap<>();
-        private final List<ChatMessage> delayedToolMessages = new ArrayList<>();
+        private final List<AgentMessage> delayedToolMessages = new ArrayList<>();
 
         private AssistantState(SessionEvent startEvent) {
             this.startEvent = startEvent;

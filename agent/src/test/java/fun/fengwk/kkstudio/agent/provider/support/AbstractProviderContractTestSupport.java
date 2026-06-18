@@ -2,8 +2,7 @@ package fun.fengwk.kkstudio.agent.provider.support;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.UserMessage;
+import fun.fengwk.kkstudio.agent.message.AgentUserMessage;
 import fun.fengwk.kkstudio.agent.provider.AssistantResponse;
 import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandle;
 import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandler;
@@ -64,7 +63,7 @@ public abstract class AbstractProviderContractTestSupport extends AbstractProvid
             List<ToolInfo> toolInfos = contractCase.requiresTool() ? List.of(echoTool()) : List.of();
 
             provider.asyncChat(
-                List.<ChatMessage>of(UserMessage.from(contractCase.prompt())),
+                List.of(new AgentUserMessage(contractCase.prompt())),
                 modelInfo(),
                 variant(),
                 toolInfos,

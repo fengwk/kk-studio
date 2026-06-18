@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.agent.session.projection;
 
-import dev.langchain4j.data.message.ChatMessage;
+import fun.fengwk.kkstudio.agent.message.AgentMessage;
 import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
 import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
 
@@ -12,6 +12,6 @@ import java.util.List;
  * @author fengwk
  */
 public record SessionEventProjection(SetAgentInfoPayload agentInfo,
-                                     SetModelInfoPayload modelInfo,
-                                     List<ChatMessage> messages) {
+                                      SetModelInfoPayload modelInfo,
+                                      List<AgentMessage> messages) {
 }

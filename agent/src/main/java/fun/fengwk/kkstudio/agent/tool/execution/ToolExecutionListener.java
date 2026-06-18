@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.agent.tool;
+package fun.fengwk.kkstudio.agent.tool.execution;
 
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
@@ -6,16 +6,11 @@ import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
 import java.util.List;
 
 /**
- * ToolExecutionHandler 表示工具执行过程中的流式回调。
- *
- * 语义说明：
- * - onPartial 推送结果增量。
- * - onComplete 推送最终完整结果。
- * - onError 推送异常结束。
+ * ToolExecutionListener 接收受控工具执行产生的回流信号。
  *
  * @author fengwk
  */
-public interface ToolExecutionHandler {
+public interface ToolExecutionListener {
 
     void onPartial(List<IndexedToolContentDelta> partial);
 

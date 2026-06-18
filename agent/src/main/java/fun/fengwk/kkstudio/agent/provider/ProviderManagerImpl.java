@@ -28,11 +28,14 @@ public class ProviderManagerImpl implements ProviderManager {
         this.providerFactoryMap = providerFactoryMap;
     }
 
-    @Override
     /**
      * 根据 ProviderInfo 解析并创建 Provider 实例。
      */
+    @Override
     public Provider getProvider(ProviderInfo providerInfo) {
+        if (providerInfo == null) {
+            throw new IllegalArgumentException("providerInfo must not be null");
+        }
         Function<ProviderInfo, Provider> factory = providerFactoryMap.get(providerInfo.getProviderType());
         if (factory == null) {
             throw new IllegalArgumentException("Unsupported model provider type: " + providerInfo.getProviderType());

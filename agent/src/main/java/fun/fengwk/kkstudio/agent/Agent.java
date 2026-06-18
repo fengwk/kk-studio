@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.agent;
 
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
-import dev.langchain4j.data.message.ChatMessage;
+import fun.fengwk.kkstudio.agent.message.AgentMessage;
 import fun.fengwk.kkstudio.agent.model.ModelRegistry;
 import fun.fengwk.kkstudio.agent.provider.AssistantResponse;
 import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandle;
@@ -18,27 +17,26 @@ import fun.fengwk.kkstudio.agent.session.projection.SessionEventProjection;
 import fun.fengwk.kkstudio.agent.session.payload.AbortPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantEndPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
+import fun.fengwk.kkstudio.agent.session.payload.AssistantErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantStartPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
 import fun.fengwk.kkstudio.agent.session.payload.Payload;
 import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
 import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
-import fun.fengwk.kkstudio.agent.session.payload.ToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContentDelta;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContentType;
 import fun.fengwk.kkstudio.agent.session.payload.ToolDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolEndPayload;
+import fun.fengwk.kkstudio.agent.session.payload.ToolErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolStartPayload;
-import fun.fengwk.kkstudio.agent.tool.Tool;
-import fun.fengwk.kkstudio.agent.tool.ToolExecutionContext;
+import fun.fengwk.kkstudio.agent.tool.ToolCallRequest;
 import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandle;
-import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandler;
 import fun.fengwk.kkstudio.agent.tool.ToolRegistry;
+import fun.fengwk.kkstudio.agent.tool.ToolRegistration;
+import fun.fengwk.kkstudio.agent.tool.execution.ToolCallExecutor;
+import fun.fengwk.kkstudio.agent.tool.execution.ToolExecutionListener;
+import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -53,11 +51,13 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * @author fengwk
  */
+@Slf4j
 public class Agent {
 
     private final UserRequestQueue userRequestQueue;
     private final AgentEventHandler agentEventHandler;
     private final ToolRegistry toolRegistry;
+    private final ToolCallExecutor toolCallExecutor;
     private final SessionManager sessionManager;
     private final SessionEventMessageProjector sessionEventMessageProjector;
     private final AgentRuntimeConfigResolver runtimeConfigResolver;
@@ -69,7 +69,7 @@ public class Agent {
     private Session session;
     private Branch branch;
     private List<SessionEvent> branchEvents;
-    private List<ChatMessage> projectedMessages;
+    private List<AgentMessage> projectedMessages;
     private SetAgentInfoPayload currentAgentInfo;
     private SetModelInfoPayload currentModelInfo;
     private String agentName;
@@ -87,10 +87,11 @@ public class Agent {
                  String provider,
                  String model,
                  String variant,
-                 UserRequestQueue userRequestQueue,
-                 AgentEventHandler agentEventHandler,
-                 ToolRegistry toolRegistry,
-                 SessionManager sessionManager,
+                  UserRequestQueue userRequestQueue,
+                  AgentEventHandler agentEventHandler,
+                  ToolRegistry toolRegistry,
+                  ToolCallExecutor toolCallExecutor,
+                  SessionManager sessionManager,
                  SessionEventMessageProjector sessionEventMessageProjector,
                  AgentRegistry agentRegistry,
                  ModelRegistry modelRegistry,
@@ -110,6 +111,7 @@ public class Agent {
         this.userRequestQueue = requireNonNull(userRequestQueue, "userRequestQueue");
         this.agentEventHandler = requireNonNull(agentEventHandler, "agentEventHandler");
         this.toolRegistry = requireNonNull(toolRegistry, "toolRegistry");
+        this.toolCallExecutor = requireNonNull(toolCallExecutor, "toolCallExecutor");
         this.sessionManager = requireNonNull(sessionManager, "sessionManager");
         this.sessionEventMessageProjector = requireNonNull(sessionEventMessageProjector, "sessionEventMessageProjector");
         this.runtimeConfigResolver = new AgentRuntimeConfigResolver(
@@ -136,7 +138,7 @@ public class Agent {
         return List.copyOf(branchEvents);
     }
 
-    public List<ChatMessage> getProjectedMessages() {
+    public List<AgentMessage> getProjectedMessages() {
         return projectedMessages;
     }
 
@@ -185,11 +187,7 @@ public class Agent {
         if (branchEvents == null) {
             throw new IllegalArgumentException("branchEvents must not be null");
         }
-        this.branch = branch;
-        this.branchEvents = new ArrayList<>(branchEvents);
-        this.currentRun = null;
-        this.statusRef.set(AgentStatus.idle);
-        refreshProjection();
+        enqueueSignal(new SwitchBranchSignal(branch, List.copyOf(branchEvents)));
     }
 
     public SessionEventProjection projection() {
@@ -237,19 +235,26 @@ public class Agent {
      * 串行消费全部待处理信号，确保 branch event 追加不并发。
      */
     private void drainSignals() {
-        if (!drainingSignals.compareAndSet(false, true)) {
-            return;
-        }
-        try {
-            AgentSignal signal;
-            while ((signal = signalQueue.poll()) != null) {
-                handleSignal(signal);
+        while (true) {
+            if (!drainingSignals.compareAndSet(false, true)) {
+                return;
             }
-        } finally {
-            drainingSignals.set(false);
+            try {
+                AgentSignal signal;
+                while ((signal = signalQueue.poll()) != null) {
+                    try {
+                        handleSignal(signal);
+                    } catch (Throwable error) {
+                        failCurrentRun(error);
+                    }
+                }
+            } finally {
+                drainingSignals.set(false);
+            }
             if (!signalQueue.isEmpty()) {
-                drainSignals();
+                continue;
             }
+            return;
         }
     }
 
@@ -260,6 +265,8 @@ public class Agent {
             onRetryAssistant(retryAssistantSignal);
         } else if (signal instanceof AbortSignal abortSignal) {
             onAbort(abortSignal);
+        } else if (signal instanceof SwitchBranchSignal switchBranchSignal) {
+            onSwitchBranch(switchBranchSignal);
         } else if (signal instanceof AssistantTextDeltaSignal textDeltaSignal) {
             onAssistantTextDelta(textDeltaSignal);
         } else if (signal instanceof AssistantThinkingDeltaSignal thinkingDeltaSignal) {
@@ -306,20 +313,31 @@ public class Agent {
         startAssistantAttempt(List.of());
     }
 
+    private void onSwitchBranch(SwitchBranchSignal signal) {
+        cancelCurrentRunResources();
+        currentRun = null;
+        statusRef.set(AgentStatus.idle);
+        this.branch = signal.branch();
+        this.branchEvents = new ArrayList<>(signal.branchEvents());
+        refreshProjection();
+        if (!userRequestQueue.isEmpty()) {
+            triggerMainLoop();
+        }
+    }
+
     private void startAssistantAttempt(List<String> userMessages) {
         if (currentRun == null || currentRun.aborted) {
             return;
         }
 
-        AgentRuntimeConfigResolver.ResolvedRuntimeConfig runtimeConfig = resolveRuntimeConfig();
-        AssistantStartPayload assistantStartPayload = new AssistantStartPayload();
-        assistantStartPayload.setUserMessages(userMessages);
-        appendEvent(SessionEventType.assistant_start, assistantStartPayload);
-
         AssistantAttemptState attemptState = new AssistantAttemptState(currentRun);
-        currentRun.activeAssistant = attemptState;
-
         try {
+            AgentRuntimeConfigResolver.ResolvedRuntimeConfig runtimeConfig = resolveRuntimeConfig();
+            AssistantStartPayload assistantStartPayload = new AssistantStartPayload();
+            assistantStartPayload.setUserMessages(userMessages);
+            appendEvent(SessionEventType.assistant_start, assistantStartPayload);
+            currentRun.activeAssistant = attemptState;
+
             AssistantResponseHandle handle = runtimeConfig.getProvider().asyncChat(
                 projectedMessages,
                 runtimeConfig.getModelInfo(),
@@ -358,7 +376,11 @@ public class Agent {
                 });
             attemptState.handle = handle;
         } catch (Throwable error) {
-            enqueueSignal(new AssistantErrorSignal(attemptState, error));
+            if (isActiveAssistant(attemptState)) {
+                enqueueSignal(new AssistantErrorSignal(attemptState, error));
+            } else {
+                failCurrentRun(error);
+            }
         }
     }
 
@@ -436,7 +458,7 @@ public class Agent {
         currentRun.activeAssistant = null;
         signal.attemptState().handle = null;
 
-        appendEvent(SessionEventType.error, newErrorPayload(null, toErrorMessage(signal.error())));
+        appendEvent(SessionEventType.assistant_error, newAssistantErrorPayload(toErrorMessage(signal.error())));
         if (currentRun.aborted) {
             releaseLoop();
             return;
@@ -460,6 +482,9 @@ public class Agent {
         }
         currentRun.toolStates.clear();
         for (ToolCall toolCall : toolCalls) {
+            if (currentRun == null || currentRun.aborted) {
+                break;
+            }
             if (toolCall == null) {
                 continue;
             }
@@ -471,33 +496,34 @@ public class Agent {
 
             ToolExecutionState toolState = new ToolExecutionState(currentRun, toolCall);
             currentRun.toolStates.put(toolCall.getToolCallId(), toolState);
-            Tool tool = toolRegistry.getTool(toolCall.getToolName());
-            if (tool == null) {
-                appendEvent(SessionEventType.error, newErrorPayload(toolCall.getToolCallId(), "tool not found: " + toolCall.getToolName()));
+            ToolRegistration registration = toolRegistry.get(toolCall.getToolName());
+            if (registration == null) {
+                appendEvent(SessionEventType.tool_error, newToolErrorPayload(
+                    toolCall.getToolCallId(), newToolNotFoundMessage(toolCall.getToolName())));
                 toolState.closed = true;
                 continue;
             }
-            ToolExecutionRequest request = toToolExecutionRequest(toolCall);
             try {
-                ToolExecutionHandle handle = tool.asyncExecute(request, new ToolExecutionHandler() {
+                ToolCallRequest request = toToolCallRequest(toolCall, registration);
+                ToolExecutionHandle handle = toolCallExecutor.execute(registration, request, new ToolExecutionListener() {
                     @Override
-                    public void onPartial(List<IndexedToolContentDelta> partial, ToolExecutionContext ignored) {
+                    public void onPartial(List<IndexedToolContentDelta> partial) {
                         enqueueSignal(new ToolPartialSignal(toolState, partial));
                     }
 
                     @Override
-                    public void onComplete(List<ToolContent> result, ToolExecutionContext ignored) {
+                    public void onComplete(List<ToolContent> result) {
                         enqueueSignal(new ToolCompleteSignal(toolState, result));
                     }
 
                     @Override
-                    public void onError(Throwable error, ToolExecutionContext ignored) {
+                    public void onError(Throwable error) {
                         enqueueSignal(new ToolErrorSignal(toolState, error));
                     }
                 });
                 toolState.handle = handle;
             } catch (Throwable error) {
-                appendEvent(SessionEventType.error, newErrorPayload(toolCall.getToolCallId(), toErrorMessage(error)));
+                appendEvent(SessionEventType.tool_error, newToolErrorPayload(toolCall.getToolCallId(), toErrorMessage(error)));
                 toolState.closed = true;
             }
         }
@@ -541,7 +567,8 @@ public class Agent {
             return;
         }
         signal.toolState().handle = null;
-        appendEvent(SessionEventType.error, newErrorPayload(signal.toolState().toolCall.getToolCallId(), toErrorMessage(signal.error())));
+        appendEvent(SessionEventType.tool_error, newToolErrorPayload(
+            signal.toolState().toolCall.getToolCallId(), toErrorMessage(signal.error())));
         signal.toolState().closed = true;
         maybeContinueAfterToolBatch();
     }
@@ -561,30 +588,8 @@ public class Agent {
         if (currentRun == null) {
             return;
         }
-        currentRun.aborted = true;
-        if (currentRun.scheduledTask != null) {
-            currentRun.scheduledTask.cancel();
-            currentRun.scheduledTask = null;
-        }
-        if (currentRun.activeAssistant != null) {
-            if (currentRun.activeAssistant.handle != null) {
-                currentRun.activeAssistant.handle.cancel();
-            }
-            appendEvent(SessionEventType.abort, newAbortPayload(null, signal.reason()));
-            currentRun.activeAssistant = null;
-            releaseLoop();
-            return;
-        }
-        for (ToolExecutionState toolState : currentRun.toolStates.values()) {
-            if (toolState.closed) {
-                continue;
-            }
-            if (toolState.handle != null) {
-                toolState.handle.cancel();
-            }
-            appendEvent(SessionEventType.abort, newAbortPayload(toolState.toolCall.getToolCallId(), signal.reason()));
-            toolState.closed = true;
-        }
+        cancelCurrentRunResources();
+        appendEvent(SessionEventType.abort, newAbortPayload(signal.reason()));
         releaseLoop();
     }
 
@@ -597,6 +602,32 @@ public class Agent {
         statusRef.set(AgentStatus.idle);
         if (!userRequestQueue.isEmpty()) {
             triggerMainLoop();
+        }
+    }
+
+    private void failCurrentRun(Throwable error) {
+        log.error("[agent] current run failed unexpectedly", error);
+        cancelCurrentRunResources();
+        releaseLoop();
+    }
+
+    private void cancelCurrentRunResources() {
+        if (currentRun != null) {
+            currentRun.aborted = true;
+            if (currentRun.scheduledTask != null) {
+                safeCancel(currentRun.scheduledTask);
+                currentRun.scheduledTask = null;
+            }
+            if (currentRun.activeAssistant != null && currentRun.activeAssistant.handle != null) {
+                safeCancel(currentRun.activeAssistant.handle);
+            }
+            currentRun.activeAssistant = null;
+            for (ToolExecutionState toolState : currentRun.toolStates.values()) {
+                if (!toolState.closed && toolState.handle != null) {
+                    safeCancel(toolState.handle);
+                }
+                toolState.closed = true;
+            }
         }
     }
 
@@ -662,7 +693,7 @@ public class Agent {
 
     private boolean allToolsClosed() {
         if (currentRun == null) {
-            return true;
+            return false;
         }
         for (ToolExecutionState toolState : currentRun.toolStates.values()) {
             if (!toolState.closed) {
@@ -683,16 +714,21 @@ public class Agent {
             && !currentRun.aborted;
     }
 
-    private ErrorPayload newErrorPayload(String toolCallId, String message) {
-        ErrorPayload payload = new ErrorPayload();
+    private AssistantErrorPayload newAssistantErrorPayload(String message) {
+        AssistantErrorPayload payload = new AssistantErrorPayload();
+        payload.setMessage(message);
+        return payload;
+    }
+
+    private ToolErrorPayload newToolErrorPayload(String toolCallId, String message) {
+        ToolErrorPayload payload = new ToolErrorPayload();
         payload.setToolCallId(toolCallId);
         payload.setMessage(message);
         return payload;
     }
 
-    private AbortPayload newAbortPayload(String toolCallId, String reason) {
+    private AbortPayload newAbortPayload(String reason) {
         AbortPayload payload = new AbortPayload();
-        payload.setToolCallId(toolCallId);
         payload.setReason(reason);
         return payload;
     }
@@ -705,15 +741,45 @@ public class Agent {
         return message == null || message.isBlank() ? error.getClass().getSimpleName() : message;
     }
 
-    private ToolExecutionRequest toToolExecutionRequest(ToolCall toolCall) {
+    private String newToolNotFoundMessage(String toolName) {
+        List<String> toolNames = toolRegistry.listToolNames();
+        String availableTools = toolNames.isEmpty() ? "none" : String.join(", ", toolNames);
+        return "tool not found: " + toolName + ". Available tools: " + availableTools + ".";
+    }
+
+    private ToolCallRequest toToolCallRequest(ToolCall toolCall, ToolRegistration registration) {
         if (toolCall == null) {
             return null;
         }
-        return ToolExecutionRequest.builder()
-            .id(toolCall.getToolCallId())
-            .name(toolCall.getToolName())
-            .arguments(toolCall.getArguments())
-            .build();
+        return new ToolCallRequest(
+            toolCall.getToolCallId(),
+            toolCall.getToolName(),
+            toolCall.getArguments(),
+            registration.getToolInfo().getInputSchema());
+    }
+
+    private void safeCancel(AssistantResponseHandle handle) {
+        try {
+            handle.cancel();
+        } catch (Throwable error) {
+            log.warn("[agent] assistant cancel failed", error);
+        }
+    }
+
+    private void safeCancel(ToolExecutionHandle handle) {
+        try {
+            handle.cancel();
+        } catch (Throwable error) {
+            log.warn("[agent] tool cancel failed", error);
+        }
+    }
+
+    private void safeCancel(ScheduledTask scheduledTask) {
+        try {
+            scheduledTask.cancel();
+        } catch (Throwable error) {
+            log.warn("[agent] scheduled task cancel failed", error);
+        }
     }
 
     private void refreshProjection() {

@@ -25,6 +25,16 @@ public class ProviderManagerImplTest {
     }
 
     /**
+     * 校验缺失 ProviderInfo 时不会退化为 NPE。
+     */
+    @Test
+    public void testRejectsNullProviderInfo() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+            () -> providerManager.getProvider(null));
+        assertEquals("providerInfo must not be null", exception.getMessage());
+    }
+
+    /**
      * 校验未知 ProviderType 会抛出明确异常。
      */
     @Test

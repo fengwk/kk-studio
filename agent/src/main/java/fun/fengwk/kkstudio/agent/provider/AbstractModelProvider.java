@@ -2,7 +2,16 @@ package fun.fengwk.kkstudio.agent.provider;
 
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.AudioContent;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.Content;
+import dev.langchain4j.data.message.ImageContent;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.TextContent;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.data.message.VideoContent;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.DefaultChatRequestParameters;
@@ -26,6 +35,11 @@ import dev.langchain4j.model.chat.response.PartialToolCallContext;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.chat.response.StreamingHandle;
 import dev.langchain4j.model.output.TokenUsage;
+import fun.fengwk.kkstudio.agent.message.AgentAssistantMessage;
+import fun.fengwk.kkstudio.agent.message.AgentMessage;
+import fun.fengwk.kkstudio.agent.message.AgentSystemMessage;
+import fun.fengwk.kkstudio.agent.message.AgentToolMessage;
+import fun.fengwk.kkstudio.agent.message.AgentUserMessage;
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
 import fun.fengwk.kkstudio.agent.model.Variant;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
@@ -33,6 +47,8 @@ import fun.fengwk.kkstudio.agent.session.payload.AssistantUsage;
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCallDelta;
+import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
+import fun.fengwk.kkstudio.agent.session.payload.ToolContentType;
 import fun.fengwk.kkstudio.agent.tool.ToolInfo;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolArraySchema;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolBooleanSchema;
@@ -127,12 +143,12 @@ public abstract class AbstractModelProvider implements Provider {
     /**
      * 将重放后的上下文、模型信息、变体参数与工具描述翻译为 LangChain4j ChatRequest。
      */
-    protected ChatRequest buildChatRequest(List<ChatMessage> chatMessageList,
+    protected ChatRequest buildChatRequest(List<AgentMessage> messages,
                                            ModelInfo modelInfo,
                                            Variant variant,
                                            List<ToolSpecification> toolSpecifications) {
         ChatRequest.Builder builder = ChatRequest.builder()
-            .messages(chatMessageList);
+            .messages(toLangChainMessages(messages));
 
         DefaultChatRequestParameters.Builder<?> parametersBuilder = newParametersBuilder();
         applyCommonParameters(parametersBuilder, modelInfo, variant, toolSpecifications);
@@ -140,6 +156,137 @@ public abstract class AbstractModelProvider implements Provider {
         builder.parameters(parametersBuilder.build());
 
         return builder.build();
+    }
+
+    private List<ChatMessage> toLangChainMessages(List<AgentMessage> messages) {
+        List<ChatMessage> chatMessages = new ArrayList<>();
+        for (AgentMessage message : messages) {
+            if (message == null) {
+                throw new IllegalArgumentException("messages must not contain null");
+            }
+            chatMessages.add(toLangChainMessage(message));
+        }
+        return chatMessages;
+    }
+
+    private ChatMessage toLangChainMessage(AgentMessage message) {
+        if (message instanceof AgentSystemMessage systemMessage) {
+            return SystemMessage.from(emptyIfNull(systemMessage.text()));
+        }
+        if (message instanceof AgentUserMessage userMessage) {
+            return UserMessage.userMessage(emptyIfNull(userMessage.text()));
+        }
+        if (message instanceof AgentAssistantMessage assistantMessage) {
+            return toLangChainAiMessage(assistantMessage);
+        }
+        if (message instanceof AgentToolMessage toolMessage) {
+            return toLangChainToolMessage(toolMessage);
+        }
+        throw new IllegalArgumentException("unsupported agent message: " + message.getClass().getName());
+    }
+
+    private AiMessage toLangChainAiMessage(AgentAssistantMessage message) {
+        List<ToolExecutionRequest> toolExecutionRequests = new ArrayList<>();
+        for (ToolCall toolCall : message.toolCalls()) {
+            ToolExecutionRequest request = toToolExecutionRequest(toolCall);
+            if (request != null) {
+                toolExecutionRequests.add(request);
+            }
+        }
+
+        AiMessage.Builder builder = AiMessage.builder()
+            .toolExecutionRequests(toolExecutionRequests);
+        if (message.text() != null || toolExecutionRequests.isEmpty()) {
+            builder.text(emptyIfNull(message.text()));
+        }
+        if (message.thinking() != null) {
+            builder.thinking(message.thinking());
+        }
+        return builder.build();
+    }
+
+    private ToolExecutionRequest toToolExecutionRequest(ToolCall toolCall) {
+        if (toolCall == null || isBlank(toolCall.getToolCallId()) || isBlank(toolCall.getToolName())) {
+            return null;
+        }
+        return ToolExecutionRequest.builder()
+            .id(toolCall.getToolCallId())
+            .name(toolCall.getToolName())
+            .arguments(emptyIfNull(toolCall.getArguments()))
+            .build();
+    }
+
+    private ToolExecutionResultMessage toLangChainToolMessage(AgentToolMessage message) {
+        List<Content> contents = new ArrayList<>();
+        for (ToolContent toolContent : message.contents()) {
+            Content content = toLangChainContent(toolContent);
+            if (content != null) {
+                contents.add(content);
+            }
+        }
+
+        ToolExecutionResultMessage.Builder builder = ToolExecutionResultMessage.builder()
+            .id(message.id())
+            .toolName(message.toolName());
+        if (message.error()) {
+            builder.isError(true);
+        }
+        if (contents.isEmpty()) {
+            builder.text("");
+        } else if (contents.size() == 1 && contents.get(0) instanceof TextContent textContent) {
+            builder.text(textContent.text());
+        } else {
+            builder.contents(contents);
+        }
+        return builder.build();
+    }
+
+    private Content toLangChainContent(ToolContent toolContent) {
+        if (toolContent == null || toolContent.getType() == null) {
+            return null;
+        }
+        if (toolContent.getType() == ToolContentType.text) {
+            return TextContent.from(emptyIfNull(toolContent.getText()));
+        }
+        if (isInvalidMedia(toolContent)) {
+            throw new IllegalArgumentException("invalid media content: type=" + toolContent.getType()
+                + ", mime=" + toolContent.getMime());
+        }
+        if (toolContent.getType() == ToolContentType.image) {
+            return ImageContent.from(toolContent.getData(), toolContent.getMime());
+        }
+        if (toolContent.getType() == ToolContentType.audio) {
+            return AudioContent.from(toolContent.getData(), toolContent.getMime());
+        }
+        if (toolContent.getType() == ToolContentType.video) {
+            return VideoContent.from(toolContent.getData(), toolContent.getMime());
+        }
+        return null;
+    }
+
+    private boolean isInvalidMedia(ToolContent toolContent) {
+        if (toolContent.getData() == null || toolContent.getData().isBlank()
+            || toolContent.getMime() == null || toolContent.getMime().isBlank()) {
+            return true;
+        }
+        if (toolContent.getType() == ToolContentType.image) {
+            return !toolContent.getMime().startsWith("image/");
+        }
+        if (toolContent.getType() == ToolContentType.audio) {
+            return !toolContent.getMime().startsWith("audio/");
+        }
+        if (toolContent.getType() == ToolContentType.video) {
+            return !toolContent.getMime().startsWith("video/");
+        }
+        return true;
+    }
+
+    private String emptyIfNull(String value) {
+        return value == null ? "" : value;
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     /**
@@ -152,13 +299,13 @@ public abstract class AbstractModelProvider implements Provider {
      * - 把底层 SDK 回调桥接为统一的 AssistantResponseHandler 事件
      */
     @Override
-    public AssistantResponseHandle asyncChat(List<ChatMessage> chatMessageList,
-                                             ModelInfo modelInfo,
-                                             Variant variant,
-                                             List<ToolInfo> toolInfos,
-                                             AssistantResponseHandler handler) {
-        if (chatMessageList == null) {
-            throw new IllegalArgumentException("chatMessageList must not be null");
+    public AssistantResponseHandle asyncChat(List<AgentMessage> messages,
+                                              ModelInfo modelInfo,
+                                              Variant variant,
+                                              List<ToolInfo> toolInfos,
+                                              AssistantResponseHandler handler) {
+        if (messages == null) {
+            throw new IllegalArgumentException("messages must not be null");
         }
         if (modelInfo == null) {
             throw new IllegalArgumentException("modelInfo must not be null");
@@ -170,7 +317,7 @@ public abstract class AbstractModelProvider implements Provider {
             throw new IllegalArgumentException("handler must not be null");
         }
 
-        ChatRequest request = buildChatRequest(chatMessageList, modelInfo, variant, resolveToolSpecifications(toolInfos));
+        ChatRequest request = buildChatRequest(messages, modelInfo, variant, resolveToolSpecifications(toolInfos));
         DefaultAssistantResponseHandle responseHandle = new DefaultAssistantResponseHandle();
         ToolCallCompatibilityNormalizer toolCallNormalizer = new ToolCallCompatibilityNormalizer();
         AtomicBoolean providerCompatibilityFailed = new AtomicBoolean();

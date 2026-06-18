@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.agent.session.SessionManager;
 import fun.fengwk.kkstudio.agent.session.projection.SessionEventMessageProjector;
 import fun.fengwk.kkstudio.agent.session.projection.SessionEventProjection;
 import fun.fengwk.kkstudio.agent.tool.ToolRegistry;
+import fun.fengwk.kkstudio.agent.tool.execution.ToolCallExecutor;
 
 import java.util.List;
 
@@ -25,10 +26,11 @@ public class AgentFactory {
                       String provider,
                       String model,
                       String variant,
-                      UserRequestQueue userRequestQueue,
-                      AgentEventHandler agentEventHandler,
-                      ToolRegistry toolRegistry,
-                      SessionManager sessionManager,
+                       UserRequestQueue userRequestQueue,
+                       AgentEventHandler agentEventHandler,
+                       ToolRegistry toolRegistry,
+                       ToolCallExecutor toolCallExecutor,
+                       SessionManager sessionManager,
                       SessionEventMessageProjector sessionEventMessageProjector,
                       AgentRegistry agentRegistry,
                       ModelRegistry modelRegistry,
@@ -50,6 +52,9 @@ public class AgentFactory {
         }
         if (toolRegistry == null) {
             throw new IllegalArgumentException("toolRegistry must not be null");
+        }
+        if (toolCallExecutor == null) {
+            throw new IllegalArgumentException("toolCallExecutor must not be null");
         }
         if (sessionManager == null) {
             throw new IllegalArgumentException("sessionManager must not be null");
@@ -97,6 +102,7 @@ public class AgentFactory {
             userRequestQueue,
             agentEventHandler,
             toolRegistry,
+            toolCallExecutor,
             sessionManager,
             sessionEventMessageProjector,
             agentRegistry,

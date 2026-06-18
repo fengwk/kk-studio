@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.agent.provider;
 
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
@@ -19,6 +17,8 @@ import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.chat.response.StreamingHandle;
 import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.output.TokenUsage;
+import fun.fengwk.kkstudio.agent.message.AgentMessage;
+import fun.fengwk.kkstudio.agent.message.AgentUserMessage;
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
 import fun.fengwk.kkstudio.agent.model.Variant;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
@@ -58,7 +58,7 @@ public class AbstractModelProviderAsyncChatBridgeTest {
         AtomicReference<Throwable> errorRef = new AtomicReference<>();
 
         provider.asyncChat(
-            List.<ChatMessage>of(UserMessage.from("hello")),
+            userMessages(),
             ModelInfo.builder().provider("openai").name("gpt-test").build(),
             Variant.builder().name("high").build(),
             List.<ToolInfo>of(),
@@ -119,7 +119,7 @@ public class AbstractModelProviderAsyncChatBridgeTest {
         CapturingHandler handler = new CapturingHandler();
 
         provider.asyncChat(
-            List.<ChatMessage>of(UserMessage.from("hello")),
+            userMessages(),
             ModelInfo.builder().provider("openai").name("gpt-test").build(),
             Variant.builder().name("high").build(),
             List.<ToolInfo>of(),
@@ -136,6 +136,26 @@ public class AbstractModelProviderAsyncChatBridgeTest {
     }
 
     /**
+     * 校验同一 index 在 partial 阶段暴露不同 raw id 时保留首次 canonical id。
+     */
+    @Test
+    public void testKeepsCanonicalToolCallIdWhenPartialIdConflicts() {
+        TestProvider provider = new TestProvider(new ConflictingPartialToolCallIdStreamingChatModel());
+        CapturingHandler handler = new CapturingHandler();
+
+        provider.asyncChat(
+            userMessages(),
+            ModelInfo.builder().provider("openai").name("gpt-test").build(),
+            Variant.builder().name("high").build(),
+            List.<ToolInfo>of(),
+            handler);
+
+        assertEquals(2, handler.toolCallDeltas.size());
+        assertEquals("call_1", handler.toolCallDeltas.get(0).getToolCallDelta().getToolCallId());
+        assertEquals("call_1", handler.toolCallDeltas.get(1).getToolCallDelta().getToolCallId());
+    }
+
+    /**
      * 校验 complete 回调已有 provider id、最终 response 缺失 id 时会复用前者，避免同一 tool call 产生两个 id。
      */
     @Test
@@ -144,7 +164,7 @@ public class AbstractModelProviderAsyncChatBridgeTest {
         CapturingHandler handler = new CapturingHandler();
 
         provider.asyncChat(
-            List.<ChatMessage>of(UserMessage.from("hello")),
+            userMessages(),
             ModelInfo.builder().provider("openai").name("gpt-test").build(),
             Variant.builder().name("high").build(),
             List.<ToolInfo>of(),
@@ -158,6 +178,27 @@ public class AbstractModelProviderAsyncChatBridgeTest {
     }
 
     /**
+     * 校验同一 index 暴露不同 toolName 时保留首次 canonical toolName。
+     */
+    @Test
+    public void testKeepsCanonicalToolNameWhenNameConflicts() {
+        TestProvider provider = new TestProvider(new ConflictingToolNameStreamingChatModel());
+        CapturingHandler handler = new CapturingHandler();
+
+        provider.asyncChat(
+            userMessages(),
+            ModelInfo.builder().provider("openai").name("gpt-test").build(),
+            Variant.builder().name("high").build(),
+            List.<ToolInfo>of(),
+            handler);
+
+        assertEquals(1, handler.completeToolCalls.size());
+        assertEquals("echo", handler.completeToolCalls.get(0).getToolName());
+        assertNotNull(handler.response);
+        assertEquals("echo", handler.response.getToolCalls().get(0).getToolName());
+    }
+
+    /**
      * 校验 provider 层会丢弃缺失 name 的畸形 tool call，避免无执行意图的调用污染上层状态。
      */
     @Test
@@ -166,7 +207,7 @@ public class AbstractModelProviderAsyncChatBridgeTest {
         CapturingHandler handler = new CapturingHandler();
 
         provider.asyncChat(
-            List.<ChatMessage>of(UserMessage.from("hello")),
+            userMessages(),
             ModelInfo.builder().provider("openai").name("gpt-test").build(),
             Variant.builder().name("high").build(),
             List.<ToolInfo>of(),
@@ -186,7 +227,7 @@ public class AbstractModelProviderAsyncChatBridgeTest {
         CapturingHandler handler = new CapturingHandler();
 
         provider.asyncChat(
-            List.<ChatMessage>of(UserMessage.from("hello")),
+            userMessages(),
             ModelInfo.builder().provider("openai").name("gpt-test").build(),
             Variant.builder().name("high").build(),
             List.<ToolInfo>of(),
@@ -207,7 +248,7 @@ public class AbstractModelProviderAsyncChatBridgeTest {
         CapturingHandler handler = new CapturingHandler();
 
         provider.asyncChat(
-            List.<ChatMessage>of(UserMessage.from("hello")),
+            userMessages(),
             ModelInfo.builder().provider("openai").name("gpt-test").build(),
             Variant.builder().name("high").build(),
             List.<ToolInfo>of(),
@@ -229,7 +270,7 @@ public class AbstractModelProviderAsyncChatBridgeTest {
         CapturingHandler handler = new CapturingHandler();
 
         provider.asyncChat(
-            List.<ChatMessage>of(UserMessage.from("hello")),
+            userMessages(),
             ModelInfo.builder().provider("openai").name("gpt-test").build(),
             Variant.builder().name("high").build(),
             List.<ToolInfo>of(),
@@ -252,7 +293,7 @@ public class AbstractModelProviderAsyncChatBridgeTest {
         CapturingHandler handler = new CapturingHandler();
 
         provider.asyncChat(
-            List.<ChatMessage>of(UserMessage.from("hello")),
+            userMessages(),
             ModelInfo.builder().provider("openai").name("gpt-test").build(),
             Variant.builder().name("high").build(),
             List.<ToolInfo>of(),
@@ -272,7 +313,7 @@ public class AbstractModelProviderAsyncChatBridgeTest {
         CapturingHandler handler = new CapturingHandler();
 
         provider.asyncChat(
-            List.<ChatMessage>of(UserMessage.from("hello")),
+            userMessages(),
             ModelInfo.builder().provider("openai").name("gpt-test").build(),
             Variant.builder().name("high").build(),
             List.<ToolInfo>of(),
@@ -291,7 +332,7 @@ public class AbstractModelProviderAsyncChatBridgeTest {
         DeferredStreamingChatModel model = new DeferredStreamingChatModel();
         TestProvider provider = new TestProvider(model);
         AssistantResponseHandle handle = provider.asyncChat(
-            List.<ChatMessage>of(UserMessage.from("hello")),
+            userMessages(),
             ModelInfo.builder().provider("openai").name("gpt-test").build(),
             Variant.builder().name("high").build(),
             List.<ToolInfo>of(),
@@ -312,7 +353,7 @@ public class AbstractModelProviderAsyncChatBridgeTest {
         DeferredStreamingChatModel model = new DeferredStreamingChatModel();
         TestProvider provider = new TestProvider(model);
         AssistantResponseHandle handle = provider.asyncChat(
-            List.<ChatMessage>of(UserMessage.from("hello")),
+            userMessages(),
             ModelInfo.builder().name("gpt-test").build(),
             Variant.builder().name("high").build(),
             List.<ToolInfo>of(),
@@ -331,9 +372,13 @@ public class AbstractModelProviderAsyncChatBridgeTest {
     public void testValidatesArguments() {
         TestProvider provider = new TestProvider(new DeferredStreamingChatModel());
         assertThrows(IllegalArgumentException.class, () -> provider.asyncChat(null, ModelInfo.builder().name("m").build(), Variant.builder().name("v").build(), List.of(), new NoopHandler()));
-        assertThrows(IllegalArgumentException.class, () -> provider.asyncChat(List.of(UserMessage.from("hi")), null, Variant.builder().name("v").build(), List.of(), new NoopHandler()));
-        assertThrows(IllegalArgumentException.class, () -> provider.asyncChat(List.of(UserMessage.from("hi")), ModelInfo.builder().name("m").build(), null, List.of(), new NoopHandler()));
-        assertThrows(IllegalArgumentException.class, () -> provider.asyncChat(List.of(UserMessage.from("hi")), ModelInfo.builder().name("m").build(), Variant.builder().name("v").build(), List.of(), null));
+        assertThrows(IllegalArgumentException.class, () -> provider.asyncChat(List.of(new AgentUserMessage("hi")), null, Variant.builder().name("v").build(), List.of(), new NoopHandler()));
+        assertThrows(IllegalArgumentException.class, () -> provider.asyncChat(List.of(new AgentUserMessage("hi")), ModelInfo.builder().name("m").build(), null, List.of(), new NoopHandler()));
+        assertThrows(IllegalArgumentException.class, () -> provider.asyncChat(List.of(new AgentUserMessage("hi")), ModelInfo.builder().name("m").build(), Variant.builder().name("v").build(), List.of(), null));
+    }
+
+    private static List<AgentMessage> userMessages() {
+        return List.of(new AgentUserMessage("hello"));
     }
 
     private static final class TestProvider extends AbstractModelProvider {
@@ -429,6 +474,61 @@ public class AbstractModelProviderAsyncChatBridgeTest {
                 .aiMessage(AiMessage.builder()
                     .toolExecutionRequests(List.of(ToolExecutionRequest.builder()
                         .name("echo")
+                        .arguments("{\"text\":\"OK\"}")
+                        .build()))
+                    .build())
+                .build());
+        }
+
+    }
+
+    private static final class ConflictingPartialToolCallIdStreamingChatModel implements StreamingChatModel {
+
+        /**
+         * 模拟同一 index 在 partial 阶段先后暴露不同 raw id。
+         */
+        @Override
+        public void doChat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+            TestStreamingHandle streamingHandle = new TestStreamingHandle();
+            handler.onPartialToolCall(PartialToolCall.builder()
+                .index(0)
+                .id("call_1")
+                .name("echo")
+                .partialArguments("{\"text\":")
+                .build(), new PartialToolCallContext(streamingHandle));
+            handler.onPartialToolCall(PartialToolCall.builder()
+                .index(0)
+                .id("call_2")
+                .name("echo")
+                .partialArguments("\"OK\"}")
+                .build(), new PartialToolCallContext(streamingHandle));
+        }
+
+    }
+
+    private static final class ConflictingToolNameStreamingChatModel implements StreamingChatModel {
+
+        /**
+         * 模拟同一 index 在 partial 与 complete 阶段暴露不同工具名。
+         */
+        @Override
+        public void doChat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+            handler.onPartialToolCall(PartialToolCall.builder()
+                .index(0)
+                .id("call_1")
+                .name("echo")
+                .partialArguments("{\"text\":\"OK\"}")
+                .build(), new PartialToolCallContext(new TestStreamingHandle()));
+            handler.onCompleteToolCall(new CompleteToolCall(0, ToolExecutionRequest.builder()
+                .id("call_1")
+                .name("search")
+                .arguments("{\"text\":\"OK\"}")
+                .build()));
+            handler.onCompleteResponse(ChatResponse.builder()
+                .aiMessage(AiMessage.builder()
+                    .toolExecutionRequests(List.of(ToolExecutionRequest.builder()
+                        .id("call_1")
+                        .name("search")
                         .arguments("{\"text\":\"OK\"}")
                         .build()))
                     .build())

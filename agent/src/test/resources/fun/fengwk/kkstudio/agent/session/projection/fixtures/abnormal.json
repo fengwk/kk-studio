@@ -1,6 +1,6 @@
 [
   {
-    "name": "assistant_abort_closure",
+    "name": "assistant_abort_interruption_marker",
     "events": [
       {
         "eventType": "assistant_start",
@@ -29,7 +29,7 @@
         },
         {
           "type": "ai",
-          "text": "partial\nstopped",
+          "text": "partial\n[assistant response interrupted]",
           "toolCalls": []
         }
       ]
@@ -62,7 +62,7 @@
         }
       },
       {
-        "eventType": "error",
+        "eventType": "tool_error",
         "payload": {
           "toolCallId": "call_1",
           "message": "tool failed"
@@ -75,6 +75,7 @@
           "type": "tool",
           "id": "call_1",
           "toolName": "bash",
+          "isError": true,
           "contents": [
             {
               "type": "text",
@@ -135,7 +136,7 @@
         }
       },
       {
-        "eventType": "error",
+        "eventType": "tool_error",
         "payload": {
           "toolCallId": "call_1",
           "message": "failed-1"
@@ -154,6 +155,7 @@
           "type": "tool",
           "id": "call_1",
           "toolName": "bash-1",
+          "isError": true,
           "contents": [
             {
               "type": "text",
@@ -622,7 +624,7 @@
     }
   },
   {
-    "name": "blank_closing_messages_do_not_append_text",
+    "name": "run_level_abort_uses_interruption_markers",
     "events": [
       {
         "eventType": "assistant_start",
@@ -653,7 +655,6 @@
       {
         "eventType": "abort",
         "payload": {
-          "toolCallId": "call_1",
           "reason": ""
         }
       }
@@ -662,7 +663,7 @@
       "messages": [
         {
           "type": "ai",
-          "text": "partial",
+          "text": "partial\n[assistant response interrupted]",
           "toolCalls": []
         },
         {
@@ -672,7 +673,7 @@
           "contents": [
             {
               "type": "text",
-              "text": ""
+              "text": "[tool execution interrupted]"
             }
           ]
         }
@@ -680,7 +681,7 @@
     }
   },
   {
-    "name": "close_with_blank_tool_call_id_treats_as_top_close",
+    "name": "run_level_abort_ignores_tool_call_id",
     "events": [
       {
         "eventType": "tool_start",
@@ -708,7 +709,6 @@
       {
         "eventType": "abort",
         "payload": {
-          "toolCallId": "",
           "reason": "stop"
         }
       }
@@ -722,7 +722,7 @@
           "contents": [
             {
               "type": "text",
-              "text": "partial\nstop"
+              "text": "partial\n[tool execution interrupted]"
             }
           ]
         }
@@ -820,7 +820,7 @@
         }
       },
       {
-        "eventType": "error",
+        "eventType": "tool_error",
         "payload": {
           "toolCallId": "call_1",
           "message": "failed"
@@ -833,6 +833,7 @@
           "type": "tool",
           "id": "call_1",
           "toolName": "bash",
+          "isError": true,
           "contents": [
             {
               "type": "text",
@@ -887,7 +888,7 @@
         }
       },
       {
-        "eventType": "error",
+        "eventType": "tool_error",
         "payload": {
           "toolCallId": "call_1"
         }
@@ -899,6 +900,7 @@
           "type": "tool",
           "id": "call_1",
           "toolName": "bash",
+          "isError": true,
           "contents": [
             {
               "type": "text",
@@ -938,7 +940,7 @@
         }
       },
       {
-        "eventType": "error",
+        "eventType": "tool_error",
         "payload": {
           "toolCallId": "call_1",
           "message": "failed"
@@ -951,6 +953,7 @@
           "type": "tool",
           "id": "call_1",
           "toolName": "media",
+          "isError": true,
           "contents": [
             {
               "type": "image",

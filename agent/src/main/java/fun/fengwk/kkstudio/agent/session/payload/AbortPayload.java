@@ -11,11 +11,6 @@ import lombok.Data;
 public class AbortPayload implements Payload {
 
     /**
-     * 若本次中断闭合的是 tool，则记录对应 toolCallId。
-     */
-    private String toolCallId;
-
-    /**
      * 本次中断的原因说明。
      */
     private String reason;

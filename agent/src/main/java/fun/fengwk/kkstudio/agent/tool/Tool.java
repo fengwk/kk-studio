@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.agent.tool;
 
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
-
 /**
  * Tool 表示一类可流式执行的工具。
  *
@@ -14,7 +12,7 @@ import dev.langchain4j.agent.tool.ToolExecutionRequest;
  */
 public interface Tool {
 
-    ToolExecutionHandle asyncExecute(ToolExecutionRequest toolExecutionRequest, ToolExecutionHandler toolExecutionHandler);
+    ToolExecutionHandle asyncExecute(ToolCallRequest request, ToolExecutionHandler handler);
 
     default long timeoutSeconds() {
         return 0L;

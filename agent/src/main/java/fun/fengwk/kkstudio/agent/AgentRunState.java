@@ -162,6 +162,9 @@ final class ToolExecutionState {
                 continue;
             }
             int index = indexedToolContentDelta.getIndex();
+            if (index < 0) {
+                continue;
+            }
             while (contents.size() <= index) {
                 contents.add(null);
             }
