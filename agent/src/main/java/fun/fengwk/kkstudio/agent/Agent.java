@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.agent;
 
 import fun.fengwk.kkstudio.agent.message.AgentMessage;
+import fun.fengwk.kkstudio.agent.message.AgentUserMessage;
 import fun.fengwk.kkstudio.agent.model.ModelRegistry;
 import fun.fengwk.kkstudio.agent.provider.AssistantResponse;
 import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandle;
@@ -333,13 +334,14 @@ public class Agent {
         AssistantAttemptState attemptState = new AssistantAttemptState(currentRun);
         try {
             AgentRuntimeConfigResolver.ResolvedRuntimeConfig runtimeConfig = resolveRuntimeConfig();
+            List<AgentMessage> messagesForModel = withUserMessages(projectedMessages, userMessages);
             AssistantStartPayload assistantStartPayload = new AssistantStartPayload();
             assistantStartPayload.setUserMessages(userMessages);
             appendEvent(SessionEventType.assistant_start, assistantStartPayload);
             currentRun.activeAssistant = attemptState;
 
             AssistantResponseHandle handle = runtimeConfig.getProvider().asyncChat(
-                projectedMessages,
+                messagesForModel,
                 runtimeConfig.getModelInfo(),
                 runtimeConfig.getVariant(),
                 runtimeConfig.getToolInfos(),
@@ -382,6 +384,19 @@ public class Agent {
                 failCurrentRun(error);
             }
         }
+    }
+
+    private List<AgentMessage> withUserMessages(List<AgentMessage> messages, List<String> userMessages) {
+        if (userMessages == null || userMessages.isEmpty()) {
+            return List.copyOf(messages);
+        }
+        List<AgentMessage> result = new ArrayList<>(messages);
+        for (String userMessage : userMessages) {
+            if (userMessage != null && !userMessage.isBlank()) {
+                result.add(new AgentUserMessage(userMessage));
+            }
+        }
+        return List.copyOf(result);
     }
 
     private void onAssistantTextDelta(AssistantTextDeltaSignal signal) {

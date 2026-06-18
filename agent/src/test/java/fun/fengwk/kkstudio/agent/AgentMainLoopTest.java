@@ -1,6 +1,9 @@
 package fun.fengwk.kkstudio.agent;
 
 import fun.fengwk.kkstudio.agent.message.AgentMessage;
+import fun.fengwk.kkstudio.agent.message.AgentAssistantMessage;
+import fun.fengwk.kkstudio.agent.message.AgentSystemMessage;
+import fun.fengwk.kkstudio.agent.message.AgentUserMessage;
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
 import fun.fengwk.kkstudio.agent.model.ModelRegistry;
 import fun.fengwk.kkstudio.agent.model.Variant;
@@ -59,6 +62,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -226,6 +230,43 @@ public class AgentMainLoopTest {
         ), context.eventTypes());
         AssistantStartPayload secondStart = (AssistantStartPayload) context.events.get(8).getPayload();
         assertEquals(List.of(), secondStart.getUserMessages());
+        assertEquals(AgentStatus.idle, agent.getStatus());
+    }
+
+    @Test
+    public void testSecondUserRequestUsesProjectedConversationContext() {
+        RecordingContext context = new RecordingContext();
+        context.provider.enqueue(handler -> handler.onComplete(AssistantResponse.builder()
+            .text("first answer")
+            .metadata(new AssistantMetadata())
+            .build(), noopHandle()));
+        context.provider.enqueue(handler -> handler.onComplete(AssistantResponse.builder()
+            .text("second answer")
+            .metadata(new AssistantMetadata())
+            .build(), noopHandle()));
+
+        Agent agent = context.newAgent();
+        agent.submit(UserRequest.userRequest("first question"));
+        agent.submit(UserRequest.userRequest("second question"));
+
+        assertEquals(2, context.provider.receivedMessages.size());
+        List<AgentMessage> firstCallMessages = context.provider.receivedMessages.get(0);
+        assertEquals(2, firstCallMessages.size());
+        AgentSystemMessage firstSystem = assertInstanceOf(AgentSystemMessage.class, firstCallMessages.get(0));
+        AgentUserMessage firstUser = assertInstanceOf(AgentUserMessage.class, firstCallMessages.get(1));
+        assertEquals("sys", firstSystem.text());
+        assertEquals("first question", firstUser.text());
+
+        List<AgentMessage> secondCallMessages = context.provider.receivedMessages.get(1);
+        assertEquals(4, secondCallMessages.size());
+        AgentSystemMessage secondSystem = assertInstanceOf(AgentSystemMessage.class, secondCallMessages.get(0));
+        AgentUserMessage replayedUser = assertInstanceOf(AgentUserMessage.class, secondCallMessages.get(1));
+        AgentAssistantMessage replayedAssistant = assertInstanceOf(AgentAssistantMessage.class, secondCallMessages.get(2));
+        AgentUserMessage secondUser = assertInstanceOf(AgentUserMessage.class, secondCallMessages.get(3));
+        assertEquals("sys", secondSystem.text());
+        assertEquals("first question", replayedUser.text());
+        assertEquals("first answer", replayedAssistant.text());
+        assertEquals("second question", secondUser.text());
         assertEquals(AgentStatus.idle, agent.getStatus());
     }
 
@@ -433,6 +474,7 @@ public class AgentMainLoopTest {
 
     private static final class StubProvider implements Provider {
         private final Queue<Consumer<AssistantResponseHandler>> scripts = new ArrayDeque<>();
+        private final List<List<AgentMessage>> receivedMessages = new ArrayList<>();
         private AssistantResponseHandle nextHandle = noopHandle();
         private AssistantResponseHandler lastHandler;
 
@@ -455,6 +497,7 @@ public class AgentMainLoopTest {
                                                   Variant variant,
                                                   List<ToolInfo> toolInfos,
                                                   AssistantResponseHandler handler) {
+            receivedMessages.add(List.copyOf(messages));
             lastHandler = handler;
             Consumer<AssistantResponseHandler> script = scripts.poll();
             if (script != null) {
