@@ -6,6 +6,7 @@ import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.PasswordAuthentication;
+import java.net.Proxy;
 import java.net.ProxySelector;
 import java.net.SocketAddress;
 import java.net.URI;
@@ -16,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * 解析标准代理环境变量。
@@ -47,16 +49,16 @@ public final class ProxySettings {
     public ProxySelector toProxySelector() {
         return new ProxySelector() {
             @Override
-            public List<java.net.Proxy> select(URI uri) {
+            public List<Proxy> select(URI uri) {
                 if (uri == null) {
                     throw new IllegalArgumentException("uri must not be null");
                 }
                 if (shouldBypass(uri)) {
-                    return List.of(java.net.Proxy.NO_PROXY);
+                    return List.of(Proxy.NO_PROXY);
                 }
                 ProxyTarget proxy = proxyForScheme(uri.getScheme());
                 if (proxy == null) {
-                    return List.of(java.net.Proxy.NO_PROXY);
+                    return List.of(Proxy.NO_PROXY);
                 }
                 return List.of(proxy.toJavaNetProxy());
             }
@@ -164,50 +166,50 @@ public final class ProxySettings {
         return List.copyOf(rules);
     }
 
-    private static java.util.Optional<NoProxyRule> parseNoProxyRule(String token) {
+    private static Optional<NoProxyRule> parseNoProxyRule(String token) {
         if ("*".equals(token)) {
-            return java.util.Optional.of(host -> true);
+            return Optional.of(host -> true);
         }
         if (token.startsWith(".")) {
             String normalizedSuffix = token.substring(1).trim().toLowerCase(Locale.ROOT);
             if (isValidHostToken(normalizedSuffix)) {
-                return java.util.Optional.of(host -> host.equals(normalizedSuffix) || host.endsWith("." + normalizedSuffix));
+                return Optional.of(host -> host.equals(normalizedSuffix) || host.endsWith("." + normalizedSuffix));
             }
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
         if (token.contains("/")) {
             return parseIpv4CidrRule(token);
         }
         if (isValidIpv4(token)) {
-            return java.util.Optional.of(host -> host.equals(token));
+            return Optional.of(host -> host.equals(token));
         }
         String normalizedHost = token.trim().toLowerCase(Locale.ROOT);
         if (isValidHostToken(normalizedHost)) {
-            return java.util.Optional.of(host -> host.equals(normalizedHost));
+            return Optional.of(host -> host.equals(normalizedHost));
         }
-        return java.util.Optional.empty();
+        return Optional.empty();
     }
 
-    private static java.util.Optional<NoProxyRule> parseIpv4CidrRule(String token) {
+    private static Optional<NoProxyRule> parseIpv4CidrRule(String token) {
         int separator = token.indexOf('/');
         if (separator <= 0 || separator == token.length() - 1) {
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
         String address = token.substring(0, separator).trim();
         String prefixText = token.substring(separator + 1).trim();
         if (!isValidIpv4(address)) {
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
         try {
             int prefixLength = Integer.parseInt(prefixText);
             if (prefixLength < 0 || prefixLength > 32) {
-                return java.util.Optional.empty();
+                return Optional.empty();
             }
             int subnetMask = prefixLength == 0 ? 0 : -1 << (32 - prefixLength);
             int expectedAddress = ipv4ToInt(address) & subnetMask;
-            return java.util.Optional.of(host -> isValidIpv4(host) && (ipv4ToInt(host) & subnetMask) == expectedAddress);
+            return Optional.of(host -> isValidIpv4(host) && (ipv4ToInt(host) & subnetMask) == expectedAddress);
         } catch (NumberFormatException e) {
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
     }
 
@@ -305,11 +307,11 @@ public final class ProxySettings {
 
     private record ProxyTarget(String scheme, String host, int port, String username, String password) {
 
-        private java.net.Proxy toJavaNetProxy() {
-            java.net.Proxy.Type type = "socks".equalsIgnoreCase(scheme) || "socks5".equalsIgnoreCase(scheme)
-                    ? java.net.Proxy.Type.SOCKS
-                    : java.net.Proxy.Type.HTTP;
-            return new java.net.Proxy(type, new InetSocketAddress(host, port));
+        private Proxy toJavaNetProxy() {
+            Proxy.Type type = "socks".equalsIgnoreCase(scheme) || "socks5".equalsIgnoreCase(scheme)
+                    ? Proxy.Type.SOCKS
+                    : Proxy.Type.HTTP;
+            return new Proxy(type, new InetSocketAddress(host, port));
         }
 
     }
