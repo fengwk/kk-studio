@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.agent.provider.fixtures.ProviderTestFixtures.Provider
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
 import fun.fengwk.kkstudio.agent.tool.ToolInfo;
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -33,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  *
  * @author fengwk
  */
+@Slf4j
 @Tag("provider-live")
 public abstract class AbstractProviderLiveTestSupport extends AbstractProviderTestSupport {
 
@@ -68,7 +70,21 @@ public abstract class AbstractProviderLiveTestSupport extends AbstractProviderTe
      */
     private void assertLiveCase(ProviderTestFixtures.ProviderLiveCase liveCase) throws Exception {
         List<ToolInfo> toolInfos = liveCase.requiresTool() ? List.of(echoTool()) : List.of();
+        log.info("[{} live] prompt={}", providerName(), liveCase.prompt());
+        log.info("[{} live] requiresTool={}", providerName(), liveCase.requiresTool());
         LiveResult result = invoke(liveCase.prompt(), toolInfos);
+
+        log.info("[{} live] textDeltas={}", providerName(), result.textDeltas());
+        if (result.thinkingDeltas() != null && !result.thinkingDeltas().isBlank()) {
+            log.info("[{} live] thinkingDeltas={}", providerName(), result.thinkingDeltas());
+        }
+        log.info("[{} live] completedToolCalls={}", providerName(), result.completedToolCalls());
+        if (result.response() != null) {
+            log.info("[{} live] response.text={}", providerName(), result.response().getText());
+            log.info("[{} live] response.thinking={}", providerName(), result.response().getThinking());
+            log.info("[{} live] response.metadata={}", providerName(), result.response().getMetadata());
+            log.info("[{} live] response.toolCalls={}", providerName(), result.response().getToolCalls());
+        }
 
         assertNotNull(result.response());
         assertCommonMetadata(result.response().getMetadata());

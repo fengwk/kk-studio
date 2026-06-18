@@ -13,6 +13,8 @@
  * - provider.support：测试基座类（AbstractProviderTestSupport / Live / Contract）。
  *   不参与真正测试，仅供真正测试继承。
  * - provider.fixtures：测试 fixture 加载与 JSON 资源。
+ * - provider.live：真实供应商集成测试，依赖环境变量；
+ *   缺失环境变量时由 Assumptions 自动跳过。
  *
  * 维护约定：
  * - 真正测试类保持在 provider 根包，基座 / fixtures 沉到子包。

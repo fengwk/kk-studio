@@ -49,8 +49,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * AbstractModelProvider 提供基于 LangChain4j StreamingChatModel 的通用实现。
@@ -69,6 +72,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * @author fengwk
  */
+@Slf4j
 public abstract class AbstractModelProvider implements Provider {
 
     private final ProviderInfo providerInfo;
@@ -168,6 +172,7 @@ public abstract class AbstractModelProvider implements Provider {
 
         ChatRequest request = buildChatRequest(chatMessageList, modelInfo, variant, resolveToolSpecifications(toolInfos));
         DefaultAssistantResponseHandle responseHandle = new DefaultAssistantResponseHandle();
+        ToolCallCompatibilityNormalizer toolCallNormalizer = new ToolCallCompatibilityNormalizer();
         getChatModel(modelInfo, variant).chat(request, new StreamingChatResponseHandler() {
             @Override
             public void onPartialResponse(PartialResponse partialResponse, PartialResponseContext context) {
@@ -202,17 +207,21 @@ public abstract class AbstractModelProvider implements Provider {
                 if (completeToolCall == null) {
                     return;
                 }
-                ToolCall toolCall = toToolCall(completeToolCall.toolExecutionRequest());
+                ToolCall toolCall = toolCallNormalizer.normalize("onCompleteToolCall",
+                    completeToolCall.index(),
+                    toToolCall(completeToolCall.toolExecutionRequest()));
+                if (toolCall == null) {
+                    return;
+                }
                 handler.onToolCallComplete(completeToolCall.index(), toolCall, responseHandle);
             }
 
             @Override
             public void onCompleteResponse(ChatResponse completeResponse) {
-                List<ToolCall> toolCalls = completeResponse == null || completeResponse.aiMessage() == null
+                List<ToolExecutionRequest> toolExecutionRequests = completeResponse == null || completeResponse.aiMessage() == null
                     ? List.of()
-                    : completeResponse.aiMessage().toolExecutionRequests().stream()
-                        .map(AbstractModelProvider.this::toToolCall)
-                        .toList();
+                    : completeResponse.aiMessage().toolExecutionRequests();
+                List<ToolCall> toolCalls = toolCallNormalizer.normalizeCompleteResponse(toolExecutionRequests);
                 AssistantResponse response = AssistantResponse.builder()
                     .text(completeResponse == null || completeResponse.aiMessage() == null ? null : completeResponse.aiMessage().text())
                     .thinking(completeResponse == null || completeResponse.aiMessage() == null ? null : completeResponse.aiMessage().thinking())
@@ -420,6 +429,153 @@ public abstract class AbstractModelProvider implements Provider {
         toolCall.setToolName(request.name());
         toolCall.setArguments(request.arguments());
         return toolCall;
+    }
+
+    /**
+     * 对 LangChain4j 暴露出的 tool call 差异做 provider 层兼容归一。
+     *
+     * 兼容原则：
+     * - toolName 缺失表示没有可执行工具意图，直接丢弃；
+     * - toolCallId 缺失但 toolName 存在时，为上层事件流生成内部兼容 id。
+     *
+     * 生成 id 只能保证本次 agent 运行内的事件关联，不代表上游 provider 原生返回了该 id。
+     * 如果对应 provider 在回放时严格要求原始 call id，兼容 id 可能导致下一轮请求失败或语义偏差，
+     * 因此所有兼容分支都必须打印 warn 日志。
+     */
+    private final class ToolCallCompatibilityNormalizer {
+
+        private final Map<Integer, String> canonicalToolCallIdsByIndex = new LinkedHashMap<>();
+        private final List<String> canonicalToolCallIdsInCompleteOrder = new ArrayList<>();
+        private int nextUnknownIndex = -1;
+
+        /**
+         * 归一完整响应中的 tool call 列表，并尽量复用流式 complete 回调中生成过的兼容 id。
+         */
+        private synchronized List<ToolCall> normalizeCompleteResponse(List<ToolExecutionRequest> requests) {
+            if (requests == null || requests.isEmpty()) {
+                return List.of();
+            }
+            List<ToolCall> result = new ArrayList<>();
+            for (int i = 0; i < requests.size(); i++) {
+                ToolCall toolCall = normalize("onCompleteResponse", i, i, toToolCall(requests.get(i)));
+                if (toolCall != null) {
+                    result.add(toolCall);
+                }
+            }
+            return result;
+        }
+
+        /**
+         * 归一单个 tool call，返回 null 表示该调用无可执行语义且已被丢弃。
+         */
+        private synchronized ToolCall normalize(String source, Integer index, ToolCall toolCall) {
+            return normalize(source, index, null, toolCall);
+        }
+
+        private ToolCall normalize(String source, Integer index, Integer responseIndex, ToolCall toolCall) {
+            if (toolCall == null) {
+                warnDropMalformedToolCall(source, index, null, null, null, "missing_tool_call");
+                return null;
+            }
+            if (toolCall.getToolName() == null || toolCall.getToolName().isBlank()) {
+                warnDropMalformedToolCall(source,
+                    index,
+                    toolCall.getToolCallId(),
+                    toolCall.getToolName(),
+                    toolCall.getArguments(),
+                    "missing_tool_name");
+                return null;
+            }
+            toolCall.setToolCallId(resolveCanonicalToolCallId(source, index, responseIndex, toolCall));
+            return toolCall;
+        }
+
+        private String resolveCanonicalToolCallId(String source, Integer index, Integer responseIndex, ToolCall toolCall) {
+            String rawToolCallId = normalizeBlank(toolCall.getToolCallId());
+            Integer normalizedIndex = index == null ? nextUnknownIndex-- : index;
+            String existingToolCallId = null;
+            if (responseIndex != null && responseIndex < canonicalToolCallIdsInCompleteOrder.size()) {
+                existingToolCallId = canonicalToolCallIdsInCompleteOrder.get(responseIndex);
+            }
+            if (existingToolCallId == null) {
+                existingToolCallId = canonicalToolCallIdsByIndex.get(normalizedIndex);
+            }
+            if (existingToolCallId != null) {
+                if (rawToolCallId != null && !rawToolCallId.equals(existingToolCallId)) {
+                    log.warn("[provider] keep canonical toolCallId despite conflicting id: providerType={} "
+                            + "source={} index={} canonicalToolCallId={} rawToolCallId={} toolName={} arguments={} "
+                            + "reason=conflicting_tool_call_id; provider/langchain4j exposed different ids for "
+                            + "the same logical tool call, canonical id is kept for internal event consistency",
+                        getProviderType(),
+                        source,
+                        index,
+                        existingToolCallId,
+                        rawToolCallId,
+                        toolCall.getToolName(),
+                        toolCall.getArguments());
+                }
+                if (rawToolCallId == null) {
+                    warnFillMissingToolCallId(source, index, existingToolCallId, toolCall, "reused_canonical_tool_call_id");
+                }
+                return existingToolCallId;
+            }
+
+            String canonicalToolCallId = rawToolCallId == null ? newCompatibilityToolCallId(normalizedIndex) : rawToolCallId;
+            canonicalToolCallIdsByIndex.put(normalizedIndex, canonicalToolCallId);
+            if (responseIndex == null) {
+                canonicalToolCallIdsInCompleteOrder.add(canonicalToolCallId);
+            }
+            if (rawToolCallId == null) {
+                warnFillMissingToolCallId(source, index, canonicalToolCallId, toolCall, "generated_compatibility_tool_call_id");
+            }
+            return canonicalToolCallId;
+        }
+
+        private String newCompatibilityToolCallId(Integer index) {
+            String indexPart = index == null ? "unknown" : String.valueOf(index);
+            return "compat_" + getProviderType() + "_" + indexPart + "_" + UUID.randomUUID().toString().replace("-", "");
+        }
+
+        private String normalizeBlank(String value) {
+            return value == null || value.isBlank() ? null : value;
+        }
+
+        private void warnFillMissingToolCallId(String source,
+                                               Integer index,
+                                               String canonicalToolCallId,
+                                               ToolCall toolCall,
+                                               String reason) {
+            log.warn("[provider] fill missing toolCallId: providerType={} source={} index={} "
+                    + "canonicalToolCallId={} toolName={} arguments={} reason={}; provider/langchain4j returned "
+                    + "a tool call without id, filled id is used only for internal correlation and may cause "
+                    + "upstream replay issues if the provider requires its original id",
+                getProviderType(),
+                source,
+                index,
+                canonicalToolCallId,
+                toolCall.getToolName(),
+                toolCall.getArguments(),
+                reason);
+        }
+
+        private void warnDropMalformedToolCall(String source,
+                                               Integer index,
+                                               String toolCallId,
+                                               String toolName,
+                                               String arguments,
+                                               String reason) {
+            log.warn("[provider] drop malformed tool call: providerType={} source={} index={} toolCallId={} "
+                    + "toolName={} arguments={} reason={}; provider/langchain4j returned a tool call without "
+                    + "executable tool intent, this tool call will not be executed and may indicate a provider compatibility issue",
+                getProviderType(),
+                source,
+                index,
+                toolCallId,
+                toolName,
+                arguments,
+                reason);
+        }
+
     }
 
     /**

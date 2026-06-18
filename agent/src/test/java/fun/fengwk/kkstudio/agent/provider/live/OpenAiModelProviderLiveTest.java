@@ -1,18 +1,19 @@
-package fun.fengwk.kkstudio.agent.provider;
+package fun.fengwk.kkstudio.agent.provider.live;
 
+import fun.fengwk.kkstudio.agent.provider.ProviderType;
 import fun.fengwk.kkstudio.agent.provider.support.AbstractProviderLiveTestSupport;
 
 /**
  * @author fengwk
  */
-public class AnthropicModelProviderLiveTest extends AbstractProviderLiveTestSupport {
+public class OpenAiModelProviderLiveTest extends AbstractProviderLiveTestSupport {
 
     /**
-     * 指定当前 live test 目标为 Anthropic 兼容 provider。
+     * 指定当前 live test 目标为 OpenAI 兼容 provider。
      */
     @Override
     protected ProviderType providerType() {
-        return ProviderType.anthropic;
+        return ProviderType.openai;
     }
 
     /**
@@ -20,23 +21,23 @@ public class AnthropicModelProviderLiveTest extends AbstractProviderLiveTestSupp
      */
     @Override
     protected String providerName() {
-        return "anthropic";
+        return "openai";
     }
 
     /**
-     * 返回 Anthropic 测试使用的 BASE_URL 环境变量名。
+     * 返回 OpenAI 兼容协议测试使用的 BASE_URL 环境变量名。
      */
     @Override
     protected String baseUrlEnvName() {
-        return "TEST_ANTHROPIC_BASE_URL";
+        return "TEST_OPENAI_BASE_URL";
     }
 
     /**
-     * 返回 Anthropic 测试使用的 API_KEY 环境变量名。
+     * 返回 OpenAI 兼容协议测试使用的 API_KEY 环境变量名。
      */
     @Override
     protected String apiKeyEnvName() {
-        return "TEST_ANTHROPIC_API_KEY";
+        return "TEST_OPENAI_API_KEY";
     }
 
     /**

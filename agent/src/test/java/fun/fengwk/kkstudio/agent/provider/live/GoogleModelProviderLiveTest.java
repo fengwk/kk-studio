@@ -1,18 +1,19 @@
-package fun.fengwk.kkstudio.agent.provider;
+package fun.fengwk.kkstudio.agent.provider.live;
 
+import fun.fengwk.kkstudio.agent.provider.ProviderType;
 import fun.fengwk.kkstudio.agent.provider.support.AbstractProviderLiveTestSupport;
 
 /**
  * @author fengwk
  */
-public class OpenAiModelProviderLiveTest extends AbstractProviderLiveTestSupport {
+public class GoogleModelProviderLiveTest extends AbstractProviderLiveTestSupport {
 
     /**
-     * 指定当前 live test 目标为 OpenAI 兼容 provider。
+     * 指定当前 live test 目标为 Google Gemini provider。
      */
     @Override
     protected ProviderType providerType() {
-        return ProviderType.openai;
+        return ProviderType.google;
     }
 
     /**
@@ -20,23 +21,23 @@ public class OpenAiModelProviderLiveTest extends AbstractProviderLiveTestSupport
      */
     @Override
     protected String providerName() {
-        return "openai";
+        return "google";
     }
 
     /**
-     * 返回 OpenAI 兼容协议测试使用的 BASE_URL 环境变量名。
+     * 返回 Google Gemini 测试使用的 BASE_URL 环境变量名。
      */
     @Override
     protected String baseUrlEnvName() {
-        return "TEST_OPENAI_BASE_URL";
+        return "TEST_GOOGLE_GEMINI_BASE_URL";
     }
 
     /**
-     * 返回 OpenAI 兼容协议测试使用的 API_KEY 环境变量名。
+     * 返回 Google Gemini 测试使用的 API_KEY 环境变量名。
      */
     @Override
     protected String apiKeyEnvName() {
-        return "TEST_OPENAI_API_KEY";
+        return "TEST_GOOGLE_GEMINI_API_KEY";
     }
 
     /**
@@ -44,7 +45,7 @@ public class OpenAiModelProviderLiveTest extends AbstractProviderLiveTestSupport
      */
     @Override
     protected String modelName() {
-        return "MiniMax-M2.7";
+        return "gemini-3.5-flash";
     }
 
 }

@@ -111,6 +111,73 @@ public class AbstractModelProviderAsyncChatBridgeTest {
     }
 
     /**
+     * 校验 provider 层会为缺失 id 但存在 name 的 tool call 生成兼容 id，并在 complete/response 间保持一致。
+     */
+    @Test
+    public void testGeneratesCompatibilityToolCallIdWhenMissing() {
+        TestProvider provider = new TestProvider(new IdlessToolCallStreamingChatModel());
+        CapturingHandler handler = new CapturingHandler();
+
+        provider.asyncChat(
+            List.<ChatMessage>of(UserMessage.from("hello")),
+            ModelInfo.builder().provider("openai").name("gpt-test").build(),
+            Variant.builder().name("high").build(),
+            List.<ToolInfo>of(),
+            handler);
+
+        assertEquals(1, handler.completeToolCalls.size());
+        assertNotNull(handler.response);
+        assertEquals(1, handler.response.getToolCalls().size());
+        String generatedId = handler.completeToolCalls.get(0).getToolCallId();
+        assertNotNull(generatedId);
+        assertTrue(generatedId.startsWith("compat_openai_0_"));
+        assertEquals(generatedId, handler.response.getToolCalls().get(0).getToolCallId());
+        assertEquals("echo", handler.response.getToolCalls().get(0).getToolName());
+    }
+
+    /**
+     * 校验 complete 回调已有 provider id、最终 response 缺失 id 时会复用前者，避免同一 tool call 产生两个 id。
+     */
+    @Test
+    public void testReusesCompleteToolCallIdWhenResponseMissesId() {
+        TestProvider provider = new TestProvider(new IdfulCompleteIdlessResponseStreamingChatModel());
+        CapturingHandler handler = new CapturingHandler();
+
+        provider.asyncChat(
+            List.<ChatMessage>of(UserMessage.from("hello")),
+            ModelInfo.builder().provider("openai").name("gpt-test").build(),
+            Variant.builder().name("high").build(),
+            List.<ToolInfo>of(),
+            handler);
+
+        assertEquals(1, handler.completeToolCalls.size());
+        assertNotNull(handler.response);
+        assertEquals(1, handler.response.getToolCalls().size());
+        assertEquals("call_1", handler.completeToolCalls.get(0).getToolCallId());
+        assertEquals("call_1", handler.response.getToolCalls().get(0).getToolCallId());
+    }
+
+    /**
+     * 校验 provider 层会丢弃缺失 name 的畸形 tool call，避免无执行意图的调用污染上层状态。
+     */
+    @Test
+    public void testDropsMalformedToolCallWithoutName() {
+        TestProvider provider = new TestProvider(new NamelessToolCallStreamingChatModel());
+        CapturingHandler handler = new CapturingHandler();
+
+        provider.asyncChat(
+            List.<ChatMessage>of(UserMessage.from("hello")),
+            ModelInfo.builder().provider("openai").name("gpt-test").build(),
+            Variant.builder().name("high").build(),
+            List.<ToolInfo>of(),
+            handler);
+
+        assertEquals(0, handler.completeToolCalls.size());
+        assertNotNull(handler.response);
+        assertEquals(0, handler.response.getToolCalls().size());
+    }
+
+    /**
      * 校验在真实 StreamingHandle 绑定前先 cancel()，取消信号仍会在绑定后传播。
      */
     @Test
@@ -197,6 +264,74 @@ public class AbstractModelProviderAsyncChatBridgeTest {
 
     }
 
+    private static final class IdlessToolCallStreamingChatModel implements StreamingChatModel {
+
+        /**
+         * 模拟底层 provider 返回 name/arguments 完整但 id 缺失的 tool call。
+         */
+        @Override
+        public void doChat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+            handler.onCompleteToolCall(new CompleteToolCall(0, ToolExecutionRequest.builder()
+                .name("echo")
+                .arguments("{\"text\":\"OK\"}")
+                .build()));
+            handler.onCompleteResponse(ChatResponse.builder()
+                .aiMessage(AiMessage.builder()
+                    .toolExecutionRequests(List.of(ToolExecutionRequest.builder()
+                        .name("echo")
+                        .arguments("{\"text\":\"OK\"}")
+                        .build()))
+                    .build())
+                .build());
+        }
+
+    }
+
+    private static final class IdfulCompleteIdlessResponseStreamingChatModel implements StreamingChatModel {
+
+        /**
+         * 模拟同一个 tool call 在流式 complete 中有 id，但最终 response 中缺失 id 的兼容性问题。
+         */
+        @Override
+        public void doChat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+            handler.onCompleteToolCall(new CompleteToolCall(0, ToolExecutionRequest.builder()
+                .id("call_1")
+                .name("echo")
+                .arguments("{\"text\":\"OK\"}")
+                .build()));
+            handler.onCompleteResponse(ChatResponse.builder()
+                .aiMessage(AiMessage.builder()
+                    .toolExecutionRequests(List.of(ToolExecutionRequest.builder()
+                        .name("echo")
+                        .arguments("{\"text\":\"OK\"}")
+                        .build()))
+                    .build())
+                .build());
+        }
+
+    }
+
+    private static final class NamelessToolCallStreamingChatModel implements StreamingChatModel {
+
+        /**
+         * 模拟底层 provider 或 LangChain4j 误发没有 name 的占位 tool call。
+         */
+        @Override
+        public void doChat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+            handler.onCompleteToolCall(new CompleteToolCall(0, ToolExecutionRequest.builder()
+                .arguments("{}")
+                .build()));
+            handler.onCompleteResponse(ChatResponse.builder()
+                .aiMessage(AiMessage.builder()
+                    .toolExecutionRequests(List.of(ToolExecutionRequest.builder()
+                        .arguments("{}")
+                        .build()))
+                    .build())
+                .build());
+        }
+
+    }
+
     private static final class DeferredStreamingChatModel implements StreamingChatModel {
 
         private StreamingChatResponseHandler handler;
@@ -237,6 +372,57 @@ public class AbstractModelProviderAsyncChatBridgeTest {
         @Override
         public boolean isCancelled() {
             return cancelled;
+        }
+
+    }
+
+    private static final class CapturingHandler implements AssistantResponseHandler {
+
+        private final List<ToolCall> completeToolCalls = new ArrayList<>();
+        private AssistantResponse response;
+
+        /**
+         * 忽略文本增量。
+         */
+        @Override
+        public void onTextDelta(String textDelta, AssistantResponseHandle handle) {
+        }
+
+        /**
+         * 忽略 thinking 增量。
+         */
+        @Override
+        public void onThinkingDelta(String thinkingDelta, AssistantResponseHandle handle) {
+        }
+
+        /**
+         * 忽略 tool call 增量。
+         */
+        @Override
+        public void onToolCallDelta(IndexedToolCallDelta toolCallDelta, AssistantResponseHandle handle) {
+        }
+
+        /**
+         * 收集完整 tool call。
+         */
+        @Override
+        public void onToolCallComplete(Integer index, ToolCall toolCall, AssistantResponseHandle handle) {
+            completeToolCalls.add(toolCall);
+        }
+
+        /**
+         * 收集最终 assistant 响应。
+         */
+        @Override
+        public void onComplete(AssistantResponse response, AssistantResponseHandle handle) {
+            this.response = response;
+        }
+
+        /**
+         * 测试不期望错误回调。
+         */
+        @Override
+        public void onError(Throwable error, AssistantResponseHandle handle) {
         }
 
     }
