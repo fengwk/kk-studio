@@ -260,6 +260,11 @@
           ]
         },
         {
+          "type": "ai",
+          "text": "[assistant response interrupted]",
+          "toolCalls": []
+        },
+        {
           "type": "tool",
           "id": "call_2",
           "toolName": "bash-2",
@@ -520,6 +525,11 @@
         {
           "type": "user",
           "text": "hello"
+        },
+        {
+          "type": "ai",
+          "text": "partial\n[assistant response interrupted]",
+          "toolCalls": []
         }
       ]
     }
@@ -596,7 +606,19 @@
       }
     ],
     "expected": {
-      "messages": []
+      "messages": [
+        {
+          "type": "tool",
+          "id": "call_1",
+          "toolName": "bash",
+          "contents": [
+            {
+              "type": "text",
+              "text": "partial\n[tool execution interrupted]"
+            }
+          ]
+        }
+      ]
     }
   },
   {
@@ -1061,23 +1083,7 @@
           "contents": [
             {
               "type": "text",
-              "text": "[media] missing-data.png (image/png)"
-            },
-            {
-              "type": "text",
-              "text": "[media] missing-mime.mp3 (unknown)"
-            },
-            {
-              "type": "text",
-              "text": "[media] wrong-mime.mp4 (application/octet-stream)"
-            },
-            {
-              "type": "text",
-              "text": "[media] media (audio/mpeg)"
-            },
-            {
-              "type": "text",
-              "text": "[media] wrong-mime.mp3 (image/png)"
+              "text": ""
             }
           ]
         }
@@ -1137,11 +1143,7 @@
           "contents": [
             {
               "type": "text",
-              "text": "[media] media (image/png)"
-            },
-            {
-              "type": "text",
-              "text": "[media] media (unknown)"
+              "text": ""
             }
           ]
         }
@@ -1188,6 +1190,150 @@
           "id": "call_1",
           "toolName": "bash",
           "contents": [
+            {
+              "type": "text",
+              "text": "tail"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "tool_result_delayed_until_owning_assistant_closes",
+    "events": [
+      {
+        "eventType": "assistant_start",
+        "payload": {
+          "userMessages": []
+        }
+      },
+      {
+        "eventType": "assistant_delta",
+        "payload": {
+          "toolCallsDelta": [
+            {
+              "index": 0,
+              "toolCallDelta": {
+                "toolCallId": "call_1",
+                "toolName": "echo",
+                "argumentsDelta": "{}"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "eventType": "tool_start",
+        "payload": {
+          "toolCallId": "call_1",
+          "toolName": "echo",
+          "arguments": "{}"
+        }
+      },
+      {
+        "eventType": "tool_delta",
+        "payload": {
+          "toolCallId": "call_1",
+          "contentDeltas": [
+            {
+              "index": 0,
+              "contentDelta": {
+                "type": "text",
+                "text": "result"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "eventType": "tool_end",
+        "payload": {
+          "toolCallId": "call_1"
+        }
+      },
+      {
+        "eventType": "assistant_end",
+        "payload": {}
+      }
+    ],
+    "expected": {
+      "messages": [
+        {
+          "type": "ai",
+          "toolCalls": [
+            {
+              "id": "call_1",
+              "name": "echo",
+              "arguments": "{}"
+            }
+          ]
+        },
+        {
+          "type": "tool",
+          "id": "call_1",
+          "toolName": "echo",
+          "contents": [
+            {
+              "type": "text",
+              "text": "result"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "negative_tool_content_index_is_sorted_like_regular_key",
+    "events": [
+      {
+        "eventType": "tool_start",
+        "payload": {
+          "toolCallId": "call_1",
+          "toolName": "bash",
+          "arguments": "{}"
+        }
+      },
+      {
+        "eventType": "tool_delta",
+        "payload": {
+          "toolCallId": "call_1",
+          "contentDeltas": [
+            {
+              "index": 1,
+              "contentDelta": {
+                "type": "text",
+                "text": "tail"
+              }
+            },
+            {
+              "index": -1,
+              "contentDelta": {
+                "type": "text",
+                "text": "head"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "eventType": "tool_end",
+        "payload": {
+          "toolCallId": "call_1"
+        }
+      }
+    ],
+    "expected": {
+      "messages": [
+        {
+          "type": "tool",
+          "id": "call_1",
+          "toolName": "bash",
+          "contents": [
+            {
+              "type": "text",
+              "text": "head"
+            },
             {
               "type": "text",
               "text": "tail"

@@ -54,19 +54,15 @@ public class SessionEvent {
     private LocalDateTime createTime;
 
     public static SessionEvent newEvent(String sessionId, SessionEventType eventType, String parentEventId, Payload payload) {
-        if (sessionId == null || sessionId.isBlank()) {
-            throw new IllegalArgumentException("sessionId must not be blank");
-        }
-        if (eventType == null) {
-            throw new IllegalArgumentException("eventType must not be null");
-        }
+        SessionEventValidator.validateNewEventInput(sessionId, eventType, parentEventId, payload);
         SessionEvent event = new SessionEvent();
         event.setSessionId(sessionId);
         event.setEventId(IdGenerator.newEventId());
         event.setEventType(eventType);
-        event.setParentEventId(parentEventId == null ? ROOT_EVENT_ID : parentEventId);
+        event.setParentEventId(parentEventId);
         event.setPayload(payload);
         event.setCreateTime(LocalDateTime.now());
+        SessionEventValidator.validateCompleteEvent(event);
         return event;
     }
 

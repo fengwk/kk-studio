@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.agent.session.payload.ToolDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolEndPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolStartPayload;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
@@ -41,6 +42,7 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * 基于 JSON fixture 的 DefaultSessionEventMessageProjector 回归测试。
@@ -54,10 +56,48 @@ public class DefaultSessionEventMessageProjectorFixtureTest {
 
     private final DefaultSessionEventMessageProjector projector = new DefaultSessionEventMessageProjector();
 
+    /**
+     * 校验 null 输入会失败，避免调用方误把缺失 branchEvents 当成空 branch。
+     */
+    @Test
+    public void testProjectRejectsNullBranchEvents() {
+        assertThrows(IllegalArgumentException.class, () -> projector.project(null));
+    }
+
+    /**
+     * 校验空投影返回的消息列表不可变。
+     */
+    @Test
+    public void testEmptyProjectionMessagesAreImmutable() {
+        SessionEventProjection projection = projector.project(List.of());
+
+        assertThrows(UnsupportedOperationException.class, () -> projection.messages().add(UserMessage.from("bad")));
+    }
+
+    /**
+     * 校验非空投影返回的消息列表不可变。
+     */
+    @Test
+    public void testNonEmptyProjectionMessagesAreImmutable() {
+        AssistantStartPayload startPayload = new AssistantStartPayload();
+        startPayload.setUserMessages(List.of("hello"));
+        SessionEvent start = SessionEvent.newEvent("se_test", SessionEventType.assistant_start, SessionEvent.ROOT_EVENT_ID, startPayload);
+        SessionEvent end = SessionEvent.newEvent("se_test", SessionEventType.assistant_end, start.getEventId(), new AssistantEndPayload());
+
+        SessionEventProjection projection = projector.project(List.of(start, end));
+
+        assertThrows(UnsupportedOperationException.class, () -> projection.messages().add(UserMessage.from("bad")));
+    }
+
     @ParameterizedTest(name = "{0}")
     @MethodSource("fixtures")
     public void testProjectionFixture(String name, JsonNode fixture) throws Exception {
         List<SessionEvent> events = buildEvents(fixture.get("events"));
+        if (fixture.hasNonNull("expectedException")) {
+            assertThrows(Class.forName(fixture.get("expectedException").asText()).asSubclass(Throwable.class),
+                () -> projector.project(events));
+            return;
+        }
         ProjectionSnapshot expected = OBJECT_MAPPER.treeToValue(fixture.get("expected"), ProjectionSnapshot.class);
 
         SessionEventProjection actualProjection = projector.project(events);

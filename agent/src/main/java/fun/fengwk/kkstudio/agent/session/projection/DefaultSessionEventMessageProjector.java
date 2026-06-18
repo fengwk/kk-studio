@@ -6,11 +6,11 @@ import dev.langchain4j.data.message.AudioContent;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.Content;
 import dev.langchain4j.data.message.ImageContent;
+import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.TextContent;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.data.message.VideoContent;
-import dev.langchain4j.data.message.SystemMessage;
 import fun.fengwk.kkstudio.agent.session.SessionEvent;
 import fun.fengwk.kkstudio.agent.session.SessionEventType;
 import fun.fengwk.kkstudio.agent.session.payload.AbortPayload;
@@ -28,12 +28,14 @@ import fun.fengwk.kkstudio.agent.session.payload.ToolContentType;
 import fun.fengwk.kkstudio.agent.session.payload.ToolDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolEndPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolStartPayload;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.TreeMap;
 
 /**
@@ -47,41 +49,46 @@ import java.util.TreeMap;
  *
  * @author fengwk
  */
+@Slf4j
 public class DefaultSessionEventMessageProjector implements SessionEventMessageProjector {
+
+    private static final String ASSISTANT_INTERRUPTED_MESSAGE = "[assistant response interrupted]";
+    private static final String TOOL_INTERRUPTED_MESSAGE = "[tool execution interrupted]";
 
     @Override
     public SessionEventProjection project(List<SessionEvent> branchEvents) {
+        if (branchEvents == null) {
+            throw new IllegalArgumentException("branchEvents must not be null");
+        }
+        if (branchEvents.isEmpty()) {
+            return new SessionEventProjection(null, null, List.of());
+        }
+
         List<ChatMessage> chatMessages = new ArrayList<>();
         SetAgentInfoPayload agentInfo = null;
         SetModelInfoPayload modelInfo = null;
-        if (branchEvents == null || branchEvents.isEmpty()) {
-            return new SessionEventProjection(null, null, chatMessages);
-        }
-
         Deque<OpenState> openStates = new ArrayDeque<>();
         for (SessionEvent branchEvent : branchEvents) {
             if (branchEvent == null) {
+                warn(null, "null_event");
                 continue;
             }
             SessionEventType eventType = branchEvent.getEventType();
             if (eventType == null) {
+                warn(branchEvent, "missing_event_type");
                 continue;
             }
 
             if (eventType == SessionEventType.set_agent_info) {
-                if (branchEvent.getPayload() instanceof SetAgentInfoPayload payload) {
-                    agentInfo = payload;
-                }
+                agentInfo = onSetAgentInfo(branchEvent, agentInfo);
             } else if (eventType == SessionEventType.set_model_info) {
-                if (branchEvent.getPayload() instanceof SetModelInfoPayload payload) {
-                    modelInfo = payload;
-                }
+                modelInfo = onSetModelInfo(branchEvent, modelInfo);
             } else if (eventType == SessionEventType.assistant_start) {
                 onAssistantStart(branchEvent, openStates, chatMessages);
             } else if (eventType == SessionEventType.assistant_delta) {
                 onAssistantDelta(branchEvent, openStates);
             } else if (eventType == SessionEventType.assistant_end) {
-                onAssistantEnd(openStates, chatMessages);
+                onAssistantEnd(branchEvent, openStates, chatMessages);
             } else if (eventType == SessionEventType.tool_start) {
                 onToolStart(branchEvent, openStates);
             } else if (eventType == SessionEventType.tool_delta) {
@@ -95,6 +102,8 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
             }
         }
 
+        projectInterruptedOpenStates(openStates, chatMessages);
+
         if (agentInfo != null && agentInfo.getSystemPrompt() != null && !agentInfo.getSystemPrompt().isBlank()) {
             chatMessages.add(0, SystemMessage.from(agentInfo.getSystemPrompt()));
         }
@@ -102,23 +111,56 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
         return new SessionEventProjection(agentInfo, modelInfo, List.copyOf(chatMessages));
     }
 
-    private void onAssistantStart(SessionEvent event, Deque<OpenState> openStates, List<ChatMessage> chatMessages) {
-        if (event.getPayload() instanceof AssistantStartPayload payload && payload.getUserMessages() != null) {
-            for (String userMessage : payload.getUserMessages()) {
-                if (userMessage != null) {
-                    chatMessages.add(UserMessage.userMessage(userMessage));
-                }
-            }
+    private SetAgentInfoPayload onSetAgentInfo(SessionEvent event, SetAgentInfoPayload currentAgentInfo) {
+        if (event.getPayload() instanceof SetAgentInfoPayload payload) {
+            return payload;
         }
-        openStates.addLast(new AssistantState());
+        warn(event, "invalid_set_agent_info_payload");
+        return currentAgentInfo;
+    }
+
+    private SetModelInfoPayload onSetModelInfo(SessionEvent event, SetModelInfoPayload currentModelInfo) {
+        if (event.getPayload() instanceof SetModelInfoPayload payload) {
+            return payload;
+        }
+        warn(event, "invalid_set_model_info_payload");
+        return currentModelInfo;
+    }
+
+    private void onAssistantStart(SessionEvent event, Deque<OpenState> openStates, List<ChatMessage> chatMessages) {
+        if (event.getPayload() instanceof AssistantStartPayload payload) {
+            appendUserMessages(event, payload, chatMessages);
+        } else {
+            warn(event, "invalid_assistant_start_payload");
+        }
+        openStates.addLast(new AssistantState(event));
+    }
+
+    private void appendUserMessages(SessionEvent event, AssistantStartPayload payload, List<ChatMessage> chatMessages) {
+        if (payload.getUserMessages() == null) {
+            return;
+        }
+        for (String userMessage : payload.getUserMessages()) {
+            if (userMessage == null) {
+                warn(event, "null_user_message");
+                continue;
+            }
+            chatMessages.add(UserMessage.userMessage(userMessage));
+        }
     }
 
     private void onAssistantDelta(SessionEvent event, Deque<OpenState> openStates) {
         if (!(event.getPayload() instanceof AssistantDeltaPayload payload)) {
+            warn(event, "invalid_assistant_delta_payload");
             return;
         }
         AssistantState assistantState = findLastAssistantState(openStates);
         if (assistantState == null) {
+            warn(event, "orphan_assistant_delta");
+            return;
+        }
+        if (isEmptyAssistantDelta(payload)) {
+            warn(event, "empty_assistant_delta");
             return;
         }
 
@@ -130,81 +172,178 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
         }
         if (payload.getToolCallsDelta() != null) {
             for (IndexedToolCallDelta indexedToolCallDelta : payload.getToolCallsDelta()) {
-                applyToolCallDelta(assistantState, indexedToolCallDelta);
+                applyToolCallDelta(event, assistantState, indexedToolCallDelta);
             }
         }
     }
 
-    private void onAssistantEnd(Deque<OpenState> openStates, List<ChatMessage> chatMessages) {
-        AssistantState assistantState = removeLastAssistantState(openStates);
-        if (assistantState == null) {
+    private boolean isEmptyAssistantDelta(AssistantDeltaPayload payload) {
+        return payload.getTextDelta() == null
+            && payload.getThinkingDelta() == null
+            && (payload.getToolCallsDelta() == null || payload.getToolCallsDelta().isEmpty());
+    }
+
+    private void onAssistantEnd(SessionEvent event, Deque<OpenState> openStates, List<ChatMessage> chatMessages) {
+        if (!(event.getPayload() instanceof AssistantEndPayload)) {
+            warn(event, "invalid_assistant_end_payload");
             return;
         }
-        chatMessages.add(buildAiMessage(assistantState));
+        AssistantState assistantState = removeLastAssistantState(openStates);
+        if (assistantState == null) {
+            warn(event, "orphan_assistant_end");
+            return;
+        }
+        chatMessages.add(buildAiMessage(event, assistantState));
+        chatMessages.addAll(assistantState.delayedToolMessages);
     }
 
     private void onToolStart(SessionEvent event, Deque<OpenState> openStates) {
         if (!(event.getPayload() instanceof ToolStartPayload payload)) {
+            warn(event, "invalid_tool_start_payload");
             return;
         }
-        ToolState toolState = new ToolState();
-        toolState.toolCallId = payload.getToolCallId();
-        toolState.toolName = payload.getToolName();
-        openStates.addLast(toolState);
+        if (isBlank(payload.getToolCallId()) || isBlank(payload.getToolName())) {
+            warn(event, "invalid_tool_start_identity");
+            return;
+        }
+        openStates.addLast(new ToolState(event, payload.getToolCallId(), payload.getToolName()));
     }
 
     private void onToolDelta(SessionEvent event, Deque<OpenState> openStates) {
         if (!(event.getPayload() instanceof ToolDeltaPayload payload)) {
+            warn(event, "invalid_tool_delta_payload");
+            return;
+        }
+        if (isBlank(payload.getToolCallId())) {
+            warn(event, "missing_tool_delta_tool_call_id");
             return;
         }
         ToolState toolState = findToolState(openStates, payload.getToolCallId());
-        if (toolState == null || payload.getContentDeltas() == null) {
+        if (toolState == null) {
+            warn(event, "orphan_tool_delta");
+            return;
+        }
+        if (payload.getContentDeltas() == null || payload.getContentDeltas().isEmpty()) {
+            warn(event, "empty_tool_delta");
             return;
         }
         for (IndexedToolContentDelta indexedToolContentDelta : payload.getContentDeltas()) {
-            applyToolContentDelta(toolState, indexedToolContentDelta);
+            applyToolContentDelta(event, toolState, indexedToolContentDelta);
         }
     }
 
     private void onToolEnd(SessionEvent event, Deque<OpenState> openStates, List<ChatMessage> chatMessages) {
         if (!(event.getPayload() instanceof ToolEndPayload payload)) {
+            warn(event, "invalid_tool_end_payload");
             return;
         }
+        if (isBlank(payload.getToolCallId())) {
+            warn(event, "missing_tool_end_tool_call_id");
+            return;
+        }
+        AssistantState ownerAssistant = findOwningAssistantState(openStates, payload.getToolCallId());
         ToolState toolState = removeToolState(openStates, payload.getToolCallId());
         if (toolState == null) {
+            warn(event, "orphan_tool_end");
             return;
         }
-        chatMessages.add(buildToolResultMessage(toolState));
+        appendToolResultMessage(event, ownerAssistant, toolState, chatMessages);
     }
 
     private void onError(SessionEvent event, Deque<OpenState> openStates, List<ChatMessage> chatMessages) {
-        String message = event.getPayload() instanceof ErrorPayload payload ? payload.getMessage() : null;
-        String toolCallId = event.getPayload() instanceof ErrorPayload payload ? payload.getToolCallId() : null;
-        closeWithMessage(openStates, chatMessages, message, toolCallId);
+        if (event.getPayload() instanceof ErrorPayload payload) {
+            closeWithMessage(event, openStates, chatMessages, payload.getMessage(), normalizeToolCallId(payload.getToolCallId()));
+        } else {
+            warn(event, "invalid_error_payload");
+            closeWithMessage(event, openStates, chatMessages, null, null);
+        }
     }
 
     private void onAbort(SessionEvent event, Deque<OpenState> openStates, List<ChatMessage> chatMessages) {
-        String reason = event.getPayload() instanceof AbortPayload payload ? payload.getReason() : null;
-        String toolCallId = event.getPayload() instanceof AbortPayload payload ? payload.getToolCallId() : null;
-        closeWithMessage(openStates, chatMessages, reason, toolCallId);
+        if (event.getPayload() instanceof AbortPayload payload) {
+            closeWithMessage(event, openStates, chatMessages, payload.getReason(), normalizeToolCallId(payload.getToolCallId()));
+        } else {
+            warn(event, "invalid_abort_payload");
+            closeWithMessage(event, openStates, chatMessages, null, null);
+        }
     }
 
-    private void closeWithMessage(Deque<OpenState> openStates, List<ChatMessage> chatMessages, String closingMessage, String toolCallId) {
-        OpenState openState = toolCallId == null || toolCallId.isBlank()
-            ? openStates.pollLast()
-            : removeToolState(openStates, toolCallId);
+    private String normalizeToolCallId(String toolCallId) {
+        return isBlank(toolCallId) ? null : toolCallId;
+    }
+
+    private void closeWithMessage(SessionEvent event,
+                                  Deque<OpenState> openStates,
+                                  List<ChatMessage> chatMessages,
+                                  String closingMessage,
+                                  String toolCallId) {
+        OpenState openState;
+        AssistantState ownerAssistant = null;
+        if (toolCallId == null) {
+            openState = openStates.pollLast();
+            if (openState instanceof ToolState) {
+                ownerAssistant = findLastAssistantState(openStates);
+            }
+        } else {
+            ownerAssistant = findOwningAssistantState(openStates, toolCallId);
+            openState = removeToolState(openStates, toolCallId);
+            if (openState == null) {
+                warn(event, "missing_target_tool_to_close");
+                return;
+            }
+        }
+        if (openState == null) {
+            warn(event, "no_open_state_to_close");
+            return;
+        }
         if (openState instanceof AssistantState assistantState) {
             appendAssistantClosingMessage(assistantState, closingMessage);
-            chatMessages.add(buildAiMessage(assistantState));
+            chatMessages.add(buildAiMessage(event, assistantState));
+            chatMessages.addAll(assistantState.delayedToolMessages);
         } else if (openState instanceof ToolState toolState) {
             appendToolClosingMessage(toolState, closingMessage);
-            chatMessages.add(buildToolResultMessage(toolState));
+            appendToolResultMessage(event, ownerAssistant, toolState, chatMessages);
+        }
+    }
+
+    private void projectInterruptedOpenStates(Deque<OpenState> openStates, List<ChatMessage> chatMessages) {
+        for (OpenState openState : openStates) {
+            if (openState instanceof AssistantState assistantState) {
+                warn(assistantState.startEvent, "interrupted_assistant_open_state");
+                appendAssistantClosingMessage(assistantState, ASSISTANT_INTERRUPTED_MESSAGE);
+                chatMessages.add(buildAiMessage(assistantState.startEvent, assistantState));
+                chatMessages.addAll(assistantState.delayedToolMessages);
+            } else if (openState instanceof ToolState toolState) {
+                warn(toolState.startEvent, "interrupted_tool_open_state");
+                appendToolClosingMessage(toolState, TOOL_INTERRUPTED_MESSAGE);
+                chatMessages.add(buildToolResultMessage(toolState.startEvent, toolState));
+            }
         }
     }
 
     private AssistantState findLastAssistantState(Deque<OpenState> openStates) {
         for (Iterator<OpenState> iterator = openStates.descendingIterator(); iterator.hasNext(); ) {
             OpenState openState = iterator.next();
+            if (openState instanceof AssistantState assistantState) {
+                return assistantState;
+            }
+        }
+        return null;
+    }
+
+    private AssistantState findOwningAssistantState(Deque<OpenState> openStates, String toolCallId) {
+        if (isBlank(toolCallId)) {
+            return null;
+        }
+        boolean foundTool = false;
+        for (Iterator<OpenState> iterator = openStates.descendingIterator(); iterator.hasNext(); ) {
+            OpenState openState = iterator.next();
+            if (!foundTool) {
+                if (openState instanceof ToolState toolState && toolCallId.equals(toolState.toolCallId)) {
+                    foundTool = true;
+                }
+                continue;
+            }
             if (openState instanceof AssistantState assistantState) {
                 return assistantState;
             }
@@ -230,7 +369,7 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
     }
 
     private ToolState findToolState(Deque<OpenState> openStates, String toolCallId) {
-        if (toolCallId == null || toolCallId.isBlank()) {
+        if (isBlank(toolCallId)) {
             return null;
         }
         for (Iterator<OpenState> iterator = openStates.descendingIterator(); iterator.hasNext(); ) {
@@ -243,7 +382,7 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
     }
 
     private ToolState removeToolState(Deque<OpenState> openStates, String toolCallId) {
-        if (toolCallId == null || toolCallId.isBlank()) {
+        if (isBlank(toolCallId)) {
             return null;
         }
         Deque<OpenState> buffer = new ArrayDeque<>();
@@ -262,60 +401,130 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
         return result;
     }
 
-    private void applyToolCallDelta(AssistantState assistantState, IndexedToolCallDelta indexedToolCallDelta) {
-        if (indexedToolCallDelta == null || indexedToolCallDelta.getIndex() == null || indexedToolCallDelta.getToolCallDelta() == null) {
+    private void applyToolCallDelta(SessionEvent event, AssistantState assistantState, IndexedToolCallDelta indexedToolCallDelta) {
+        if (indexedToolCallDelta == null) {
+            warn(event, "null_tool_call_delta_item");
             return;
         }
-        ToolCallState toolCallState = assistantState.toolCalls.computeIfAbsent(indexedToolCallDelta.getIndex(), key -> new ToolCallState());
+        if (indexedToolCallDelta.getIndex() == null) {
+            warn(event, "missing_tool_call_delta_index");
+            return;
+        }
+        if (indexedToolCallDelta.getToolCallDelta() == null) {
+            warn(event, "missing_tool_call_delta_payload");
+            return;
+        }
         ToolCallDelta toolCallDelta = indexedToolCallDelta.getToolCallDelta();
-        if (toolCallDelta.getToolCallId() != null) {
-            toolCallState.toolCallId = toolCallDelta.getToolCallId();
+        if (toolCallDelta.getToolCallId() == null
+            && toolCallDelta.getToolName() == null
+            && toolCallDelta.getArgumentsDelta() == null) {
+            warn(event, "empty_tool_call_delta_item");
+            return;
         }
-        if (toolCallDelta.getToolName() != null) {
-            toolCallState.toolName = toolCallDelta.getToolName();
-        }
+
+        ToolCallState toolCallState = assistantState.toolCalls.computeIfAbsent(indexedToolCallDelta.getIndex(), key -> new ToolCallState());
+        applyStableField(event, "tool_call_id_conflict", toolCallState.toolCallId, toolCallDelta.getToolCallId(), value -> toolCallState.toolCallId = value);
+        applyStableField(event, "tool_name_conflict", toolCallState.toolName, toolCallDelta.getToolName(), value -> toolCallState.toolName = value);
         if (toolCallDelta.getArgumentsDelta() != null) {
             toolCallState.arguments.append(toolCallDelta.getArgumentsDelta());
         }
     }
 
-    private void applyToolContentDelta(ToolState toolState, IndexedToolContentDelta indexedToolContentDelta) {
-        if (indexedToolContentDelta == null || indexedToolContentDelta.getIndex() == null || indexedToolContentDelta.getContentDelta() == null) {
+    private void applyStableField(SessionEvent event,
+                                  String conflictReason,
+                                  String currentValue,
+                                  String newValue,
+                                  StableFieldSetter setter) {
+        if (newValue == null) {
             return;
         }
-        int index = indexedToolContentDelta.getIndex();
-        while (toolState.contents.size() <= index) {
-            toolState.contents.add(null);
+        if (currentValue == null) {
+            setter.set(newValue);
+            return;
         }
-        ToolContentAccumulator current = toolState.contents.get(index);
+        if (!currentValue.equals(newValue)) {
+            warn(event, conflictReason);
+        }
+    }
+
+    private void applyToolContentDelta(SessionEvent event, ToolState toolState, IndexedToolContentDelta indexedToolContentDelta) {
+        if (indexedToolContentDelta == null) {
+            warn(event, "null_tool_content_delta_item");
+            return;
+        }
+        if (indexedToolContentDelta.getIndex() == null) {
+            warn(event, "missing_tool_content_delta_index");
+            return;
+        }
+        if (indexedToolContentDelta.getContentDelta() == null) {
+            warn(event, "missing_tool_content_delta_payload");
+            return;
+        }
         ToolContentDelta contentDelta = indexedToolContentDelta.getContentDelta();
         if (contentDelta.getType() == null) {
+            warn(event, "missing_tool_content_type");
             return;
         }
-
-        if (current == null) {
-            current = new ToolContentAccumulator();
-            current.type = contentDelta.getType();
-            toolState.contents.set(index, current);
+        if (contentDelta.getType() == ToolContentType.text) {
+            applyTextContentDelta(event, toolState, indexedToolContentDelta.getIndex(), contentDelta);
+        } else {
+            applyMediaContentDelta(event, toolState, indexedToolContentDelta.getIndex(), contentDelta);
         }
+    }
 
-        if (current.type == ToolContentType.text && contentDelta.getType() == ToolContentType.text) {
-            if (contentDelta.getText() != null) {
-                current.text.append(contentDelta.getText());
-            }
+    private void applyTextContentDelta(SessionEvent event, ToolState toolState, Integer index, ToolContentDelta contentDelta) {
+        if (contentDelta.getText() == null) {
+            warn(event, "missing_text_content_delta");
             return;
         }
+        ToolContentAccumulator accumulator = getOrCreateContentAccumulator(event, toolState, index, ToolContentType.text);
+        if (accumulator == null) {
+            return;
+        }
+        accumulator.text.append(contentDelta.getText());
+    }
 
-        if (isMediaType(current.type) && current.type == contentDelta.getType()) {
-            if (current.data == null) {
-                current.data = contentDelta.getData();
-            }
-            if (current.mime == null) {
-                current.mime = contentDelta.getMime();
-            }
-            if (current.name == null) {
-                current.name = contentDelta.getName();
-            }
+    private void applyMediaContentDelta(SessionEvent event, ToolState toolState, Integer index, ToolContentDelta contentDelta) {
+        ToolContentAccumulator accumulator = getOrCreateContentAccumulator(event, toolState, index, contentDelta.getType());
+        if (accumulator == null) {
+            return;
+        }
+        setMediaField(event, "media_data_conflict", accumulator.data, contentDelta.getData(), value -> accumulator.data = value);
+        setMediaField(event, "media_mime_conflict", accumulator.mime, contentDelta.getMime(), value -> accumulator.mime = value);
+        setMediaField(event, "media_name_conflict", accumulator.name, contentDelta.getName(), value -> accumulator.name = value);
+    }
+
+    private ToolContentAccumulator getOrCreateContentAccumulator(SessionEvent event,
+                                                                 ToolState toolState,
+                                                                 Integer index,
+                                                                 ToolContentType type) {
+        ToolContentAccumulator accumulator = toolState.contents.get(index);
+        if (accumulator == null) {
+            accumulator = new ToolContentAccumulator(type);
+            toolState.contents.put(index, accumulator);
+            return accumulator;
+        }
+        if (accumulator.type != type) {
+            warn(event, "tool_content_type_conflict");
+            return null;
+        }
+        return accumulator;
+    }
+
+    private void setMediaField(SessionEvent event,
+                               String conflictReason,
+                               String currentValue,
+                               String newValue,
+                               StableFieldSetter setter) {
+        if (newValue == null) {
+            return;
+        }
+        if (currentValue == null) {
+            setter.set(newValue);
+            return;
+        }
+        if (!currentValue.equals(newValue)) {
+            warn(event, conflictReason);
         }
     }
 
@@ -333,7 +542,7 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
         if (closingMessage == null || closingMessage.isBlank()) {
             return;
         }
-        ToolContentAccumulator last = toolState.contents.isEmpty() ? null : toolState.contents.get(toolState.contents.size() - 1);
+        ToolContentAccumulator last = toolState.contents.isEmpty() ? null : toolState.contents.lastEntry().getValue();
         if (last != null && last.type == ToolContentType.text) {
             if (!last.text.isEmpty()) {
                 last.text.append(System.lineSeparator());
@@ -341,16 +550,20 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
             last.text.append(closingMessage);
             return;
         }
-        ToolContentAccumulator accumulator = new ToolContentAccumulator();
-        accumulator.type = ToolContentType.text;
+        int nextIndex = toolState.contents.isEmpty() ? 0 : toolState.contents.lastKey() + 1;
+        ToolContentAccumulator accumulator = new ToolContentAccumulator(ToolContentType.text);
         accumulator.text.append(closingMessage);
-        toolState.contents.add(accumulator);
+        toolState.contents.put(nextIndex, accumulator);
     }
 
-    private AiMessage buildAiMessage(AssistantState assistantState) {
-        List<ToolExecutionRequest> toolExecutionRequests = assistantState.toolCalls.values().stream()
-            .map(this::toToolExecutionRequest)
-            .toList();
+    private AiMessage buildAiMessage(SessionEvent event, AssistantState assistantState) {
+        List<ToolExecutionRequest> toolExecutionRequests = new ArrayList<>();
+        for (ToolCallState toolCallState : assistantState.toolCalls.values()) {
+            ToolExecutionRequest request = toToolExecutionRequest(event, toolCallState);
+            if (request != null) {
+                toolExecutionRequests.add(request);
+            }
+        }
         String text = assistantState.text.isEmpty() ? null : assistantState.text.toString();
         String thinking = assistantState.thinking.isEmpty() ? null : assistantState.thinking.toString();
 
@@ -365,7 +578,11 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
         return builder.build();
     }
 
-    private ToolExecutionRequest toToolExecutionRequest(ToolCallState toolCallState) {
+    private ToolExecutionRequest toToolExecutionRequest(SessionEvent event, ToolCallState toolCallState) {
+        if (isBlank(toolCallState.toolCallId) || isBlank(toolCallState.toolName)) {
+            warn(event, "incomplete_tool_call_skipped");
+            return null;
+        }
         return ToolExecutionRequest.builder()
             .id(toolCallState.toolCallId)
             .name(toolCallState.toolName)
@@ -373,16 +590,12 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
             .build();
     }
 
-    private ToolExecutionResultMessage buildToolResultMessage(ToolState toolState) {
+    private ToolExecutionResultMessage buildToolResultMessage(SessionEvent event, ToolState toolState) {
         List<Content> contents = new ArrayList<>();
-        for (ToolContentAccumulator accumulator : toolState.contents) {
-            if (accumulator == null) {
-                continue;
-            }
-            if (accumulator.type == ToolContentType.text) {
-                contents.add(TextContent.from(accumulator.text.toString()));
-            } else {
-                contents.add(toMediaContent(accumulator));
+        for (ToolContentAccumulator accumulator : toolState.contents.values()) {
+            Content content = toContent(event, accumulator);
+            if (content != null) {
+                contents.add(content);
             }
         }
 
@@ -399,45 +612,92 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
         return builder.build();
     }
 
-    private Content toMediaContent(ToolContentAccumulator accumulator) {
-        if (accumulator.data == null || accumulator.data.isBlank() || accumulator.mime == null || accumulator.mime.isBlank()) {
-            return toMediaFallback(accumulator);
+    private void appendToolResultMessage(SessionEvent event,
+                                         AssistantState ownerAssistant,
+                                         ToolState toolState,
+                                         List<ChatMessage> chatMessages) {
+        ToolExecutionResultMessage message = buildToolResultMessage(event, toolState);
+        if (ownerAssistant == null) {
+            chatMessages.add(message);
+            return;
         }
-        if (accumulator.type == ToolContentType.image && accumulator.mime.startsWith("image/")) {
+        ownerAssistant.delayedToolMessages.add(message);
+    }
+
+    private Content toContent(SessionEvent event, ToolContentAccumulator accumulator) {
+        if (accumulator.type == ToolContentType.text) {
+            return TextContent.from(accumulator.text.toString());
+        }
+        if (isInvalidMedia(accumulator)) {
+            warn(event, "invalid_media_content_skipped");
+            return null;
+        }
+        if (accumulator.type == ToolContentType.image) {
             return ImageContent.from(accumulator.data, accumulator.mime);
         }
-        if (accumulator.type == ToolContentType.audio && accumulator.mime.startsWith("audio/")) {
+        if (accumulator.type == ToolContentType.audio) {
             return AudioContent.from(accumulator.data, accumulator.mime);
         }
-        if (accumulator.type == ToolContentType.video && accumulator.mime.startsWith("video/")) {
+        if (accumulator.type == ToolContentType.video) {
             return VideoContent.from(accumulator.data, accumulator.mime);
         }
-        return toMediaFallback(accumulator);
+        return null;
     }
 
-    private Content toMediaFallback(ToolContentAccumulator accumulator) {
-        String name = accumulator.name == null || accumulator.name.isBlank() ? "media" : accumulator.name;
-        String mime = accumulator.mime == null || accumulator.mime.isBlank() ? "unknown" : accumulator.mime;
-        return TextContent.from("[media] " + name + " (" + mime + ")");
+    private boolean isInvalidMedia(ToolContentAccumulator accumulator) {
+        if (accumulator.data == null || accumulator.data.isBlank() || accumulator.mime == null || accumulator.mime.isBlank()) {
+            return true;
+        }
+        if (accumulator.type == ToolContentType.image) {
+            return !accumulator.mime.startsWith("image/");
+        }
+        if (accumulator.type == ToolContentType.audio) {
+            return !accumulator.mime.startsWith("audio/");
+        }
+        if (accumulator.type == ToolContentType.video) {
+            return !accumulator.mime.startsWith("video/");
+        }
+        return true;
     }
 
-    private boolean isMediaType(ToolContentType type) {
-        return type == ToolContentType.image || type == ToolContentType.audio || type == ToolContentType.video;
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private void warn(SessionEvent event, String reason) {
+        log.warn("[session-projection] recover malformed session event: sessionId={} eventId={} eventType={} reason={}",
+            event == null ? null : event.getSessionId(),
+            event == null ? null : event.getEventId(),
+            event == null ? null : event.getEventType(),
+            reason);
     }
 
     private sealed interface OpenState permits AssistantState, ToolState {
     }
 
     private static final class AssistantState implements OpenState {
+        private final SessionEvent startEvent;
         private final StringBuilder text = new StringBuilder();
         private final StringBuilder thinking = new StringBuilder();
         private final TreeMap<Integer, ToolCallState> toolCalls = new TreeMap<>();
+        private final List<ChatMessage> delayedToolMessages = new ArrayList<>();
+
+        private AssistantState(SessionEvent startEvent) {
+            this.startEvent = startEvent;
+        }
     }
 
     private static final class ToolState implements OpenState {
-        private String toolCallId;
-        private String toolName;
-        private final List<ToolContentAccumulator> contents = new ArrayList<>();
+        private final SessionEvent startEvent;
+        private final String toolCallId;
+        private final String toolName;
+        private final TreeMap<Integer, ToolContentAccumulator> contents = new TreeMap<>();
+
+        private ToolState(SessionEvent startEvent, String toolCallId, String toolName) {
+            this.startEvent = startEvent;
+            this.toolCallId = toolCallId;
+            this.toolName = toolName;
+        }
     }
 
     private static final class ToolCallState {
@@ -447,11 +707,21 @@ public class DefaultSessionEventMessageProjector implements SessionEventMessageP
     }
 
     private static final class ToolContentAccumulator {
-        private ToolContentType type;
+        private final ToolContentType type;
         private final StringBuilder text = new StringBuilder();
         private String data;
         private String mime;
         private String name;
+
+        private ToolContentAccumulator(ToolContentType type) {
+            this.type = type;
+        }
+    }
+
+    private interface StableFieldSetter {
+
+        void set(String value);
+
     }
 
 }

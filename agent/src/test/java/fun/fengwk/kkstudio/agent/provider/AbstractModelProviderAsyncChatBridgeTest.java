@@ -178,6 +178,112 @@ public class AbstractModelProviderAsyncChatBridgeTest {
     }
 
     /**
+     * 校验 tool call 有语义内容但缺失 name 时会触发错误，而不是当作空占位静默丢弃。
+     */
+    @Test
+    public void testFailsWhenSemanticToolCallMissesName() {
+        TestProvider provider = new TestProvider(new SemanticNamelessToolCallStreamingChatModel());
+        CapturingHandler handler = new CapturingHandler();
+
+        provider.asyncChat(
+            List.<ChatMessage>of(UserMessage.from("hello")),
+            ModelInfo.builder().provider("openai").name("gpt-test").build(),
+            Variant.builder().name("high").build(),
+            List.<ToolInfo>of(),
+            handler);
+
+        assertNotNull(handler.error);
+        assertTrue(handler.error.getMessage().contains("missing_tool_name"));
+        assertNull(handler.response);
+        assertEquals(0, handler.completeToolCalls.size());
+    }
+
+    /**
+     * 校验同一 raw toolCallId 后续暴露不同 index 时保留首次 canonical index，避免 delta/complete 分裂。
+     */
+    @Test
+    public void testKeepsCanonicalIndexWhenRawToolCallIdConflictsWithLaterIndex() {
+        TestProvider provider = new TestProvider(new ConflictingToolCallIndexStreamingChatModel());
+        CapturingHandler handler = new CapturingHandler();
+
+        provider.asyncChat(
+            List.<ChatMessage>of(UserMessage.from("hello")),
+            ModelInfo.builder().provider("openai").name("gpt-test").build(),
+            Variant.builder().name("high").build(),
+            List.<ToolInfo>of(),
+            handler);
+
+        assertEquals(1, handler.toolCallDeltas.size());
+        assertEquals(0, handler.toolCallDeltas.get(0).getIndex());
+        assertEquals(1, handler.completeToolCallIndexes.size());
+        assertEquals(0, handler.completeToolCallIndexes.get(0));
+        assertEquals("call_1", handler.completeToolCalls.get(0).getToolCallId());
+    }
+
+    /**
+     * 校验底层回调中的 null tool call 与 null complete response 不会破坏统一响应桥接。
+     */
+    @Test
+    public void testIgnoresNullToolCallsAndHandlesNullCompleteResponse() {
+        TestProvider provider = new TestProvider(new NullCallbackStreamingChatModel());
+        CapturingHandler handler = new CapturingHandler();
+
+        provider.asyncChat(
+            List.<ChatMessage>of(UserMessage.from("hello")),
+            ModelInfo.builder().provider("openai").name("gpt-test").build(),
+            Variant.builder().name("high").build(),
+            List.<ToolInfo>of(),
+            handler);
+
+        assertEquals(0, handler.toolCallDeltas.size());
+        assertEquals(0, handler.completeToolCalls.size());
+        assertNotNull(handler.response);
+        assertNull(handler.response.getText());
+        assertEquals(0, handler.response.getToolCalls().size());
+        assertNull(handler.error);
+    }
+
+    /**
+     * 校验兼容失败后会阻断后续 partial/complete 回调，避免同一次请求产生多种终态。
+     */
+    @Test
+    public void testCompatibilityFailureSuppressesLaterCallbacks() {
+        TestProvider provider = new TestProvider(new FailThenContinueStreamingChatModel());
+        CapturingHandler handler = new CapturingHandler();
+
+        provider.asyncChat(
+            List.<ChatMessage>of(UserMessage.from("hello")),
+            ModelInfo.builder().provider("openai").name("gpt-test").build(),
+            Variant.builder().name("high").build(),
+            List.<ToolInfo>of(),
+            handler);
+
+        assertNotNull(handler.error);
+        assertEquals(0, handler.textDeltas.size());
+        assertNull(handler.response);
+    }
+
+    /**
+     * 校验最终 response 中出现有语义但缺 name 的 tool call 时也会走兼容失败。
+     */
+    @Test
+    public void testCompleteResponseCompatibilityFailure() {
+        TestProvider provider = new TestProvider(new ResponseSemanticNamelessToolCallStreamingChatModel());
+        CapturingHandler handler = new CapturingHandler();
+
+        provider.asyncChat(
+            List.<ChatMessage>of(UserMessage.from("hello")),
+            ModelInfo.builder().provider("openai").name("gpt-test").build(),
+            Variant.builder().name("high").build(),
+            List.<ToolInfo>of(),
+            handler);
+
+        assertNotNull(handler.error);
+        assertTrue(handler.error.getMessage().contains("missing_tool_name"));
+        assertNull(handler.response);
+    }
+
+    /**
      * 校验在真实 StreamingHandle 绑定前先 cancel()，取消信号仍会在绑定后传播。
      */
     @Test
@@ -195,6 +301,26 @@ public class AbstractModelProviderAsyncChatBridgeTest {
         handle.cancel();
         assertTrue(handle.isCancelled());
         model.emitPartialText("hi");
+        assertTrue(model.streamingHandle.isCancelled());
+    }
+
+    /**
+     * 校验真实 StreamingHandle 绑定后 cancel() 会立即传播到底层。
+     */
+    @Test
+    public void testCancelAfterBindPropagatesToStreamingHandle() {
+        DeferredStreamingChatModel model = new DeferredStreamingChatModel();
+        TestProvider provider = new TestProvider(model);
+        AssistantResponseHandle handle = provider.asyncChat(
+            List.<ChatMessage>of(UserMessage.from("hello")),
+            ModelInfo.builder().name("gpt-test").build(),
+            Variant.builder().name("high").build(),
+            List.<ToolInfo>of(),
+            new NoopHandler());
+
+        model.emitPartialText("hi");
+        assertFalse(model.streamingHandle.isCancelled());
+        handle.cancel();
         assertTrue(model.streamingHandle.isCancelled());
     }
 
@@ -311,6 +437,116 @@ public class AbstractModelProviderAsyncChatBridgeTest {
 
     }
 
+    private static final class SemanticNamelessToolCallStreamingChatModel implements StreamingChatModel {
+
+        /**
+         * 模拟完整 tool call 有 arguments 语义但缺失 name，provider 层无法执行。
+         */
+        @Override
+        public void doChat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+            handler.onCompleteToolCall(new CompleteToolCall(0, ToolExecutionRequest.builder()
+                .arguments("{\"text\":\"OK\"}")
+                .build()));
+            handler.onCompleteResponse(ChatResponse.builder()
+                .aiMessage(AiMessage.builder().text("should be ignored").build())
+                .build());
+        }
+
+    }
+
+    private static final class ConflictingToolCallIndexStreamingChatModel implements StreamingChatModel {
+
+        /**
+         * 模拟同一个 raw id 在 partial 与 complete 阶段暴露不同 index 的兼容性问题。
+         */
+        @Override
+        public void doChat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+            handler.onPartialToolCall(PartialToolCall.builder()
+                .index(0)
+                .id("call_1")
+                .name("echo")
+                .partialArguments("{\"text\":")
+                .build(), new PartialToolCallContext(new TestStreamingHandle()));
+            handler.onCompleteToolCall(new CompleteToolCall(1, ToolExecutionRequest.builder()
+                .id("call_1")
+                .name("echo")
+                .arguments("{\"text\":\"OK\"}")
+                .build()));
+            handler.onCompleteResponse(ChatResponse.builder()
+                .aiMessage(AiMessage.builder()
+                    .toolExecutionRequests(List.of(ToolExecutionRequest.builder()
+                        .id("call_1")
+                        .name("echo")
+                        .arguments("{\"text\":\"OK\"}")
+                        .build()))
+                    .build())
+                .build());
+        }
+
+    }
+
+    private static final class NullCallbackStreamingChatModel implements StreamingChatModel {
+
+        /**
+         * 模拟底层实现偶发空回调对象。
+         */
+        @Override
+        public void doChat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+            handler.onPartialToolCall(null, new PartialToolCallContext(new TestStreamingHandle()));
+            handler.onCompleteToolCall(null);
+            handler.onCompleteResponse(null);
+        }
+
+    }
+
+    private static final class FailThenContinueStreamingChatModel implements StreamingChatModel {
+
+        /**
+         * 先触发不可兼容 tool call，再继续发出回调；provider 应只向上层传播 error。
+         */
+        @Override
+        public void doChat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+            handler.onCompleteToolCall(new CompleteToolCall(0, ToolExecutionRequest.builder()
+                .arguments("{\"text\":\"OK\"}")
+                .build()));
+            handler.onPartialResponse(new PartialResponse("ignored"), new PartialResponseContext(new TestStreamingHandle()));
+            handler.onPartialThinking(new PartialThinking("ignored"), new PartialThinkingContext(new TestStreamingHandle()));
+            handler.onPartialToolCall(PartialToolCall.builder()
+                .index(0)
+                .name("echo")
+                .partialArguments("{}")
+                .build(), new PartialToolCallContext(new TestStreamingHandle()));
+            handler.onCompleteToolCall(new CompleteToolCall(0, ToolExecutionRequest.builder()
+                .id("ignored")
+                .name("echo")
+                .arguments("{}")
+                .build()));
+            handler.onCompleteResponse(ChatResponse.builder()
+                .aiMessage(AiMessage.builder().text("ignored").build())
+                .build());
+            handler.onError(new IllegalStateException("ignored"));
+        }
+
+    }
+
+    private static final class ResponseSemanticNamelessToolCallStreamingChatModel implements StreamingChatModel {
+
+        /**
+         * 模拟最终 response 中携带不可执行 tool call。
+         */
+        @Override
+        public void doChat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+            handler.onCompleteResponse(ChatResponse.builder()
+                .aiMessage(AiMessage.builder()
+                    .toolExecutionRequests(List.of(ToolExecutionRequest.builder()
+                        .arguments("{\"text\":\"OK\"}")
+                        .build()))
+                    .build())
+                .build());
+        }
+
+    }
+
     private static final class NamelessToolCallStreamingChatModel implements StreamingChatModel {
 
         /**
@@ -378,14 +614,19 @@ public class AbstractModelProviderAsyncChatBridgeTest {
 
     private static final class CapturingHandler implements AssistantResponseHandler {
 
+        private final List<String> textDeltas = new ArrayList<>();
+        private final List<IndexedToolCallDelta> toolCallDeltas = new ArrayList<>();
+        private final List<Integer> completeToolCallIndexes = new ArrayList<>();
         private final List<ToolCall> completeToolCalls = new ArrayList<>();
         private AssistantResponse response;
+        private Throwable error;
 
         /**
          * 忽略文本增量。
          */
         @Override
         public void onTextDelta(String textDelta, AssistantResponseHandle handle) {
+            textDeltas.add(textDelta);
         }
 
         /**
@@ -400,6 +641,7 @@ public class AbstractModelProviderAsyncChatBridgeTest {
          */
         @Override
         public void onToolCallDelta(IndexedToolCallDelta toolCallDelta, AssistantResponseHandle handle) {
+            toolCallDeltas.add(toolCallDelta);
         }
 
         /**
@@ -407,6 +649,7 @@ public class AbstractModelProviderAsyncChatBridgeTest {
          */
         @Override
         public void onToolCallComplete(Integer index, ToolCall toolCall, AssistantResponseHandle handle) {
+            completeToolCallIndexes.add(index);
             completeToolCalls.add(toolCall);
         }
 
@@ -423,6 +666,7 @@ public class AbstractModelProviderAsyncChatBridgeTest {
          */
         @Override
         public void onError(Throwable error, AssistantResponseHandle handle) {
+            this.error = error;
         }
 
     }

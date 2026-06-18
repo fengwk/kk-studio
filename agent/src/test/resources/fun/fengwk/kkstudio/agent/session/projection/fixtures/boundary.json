@@ -9,9 +9,7 @@
   {
     "name": "null_events_input",
     "events": null,
-    "expected": {
-      "messages": []
-    }
+    "expectedException": "java.lang.IllegalArgumentException"
   },
   {
     "name": "ignores_null_event_null_type_and_blank_prompt",
@@ -200,7 +198,13 @@
       }
     ],
     "expected": {
-      "messages": []
+      "messages": [
+        {
+          "type": "ai",
+          "text": "[assistant response interrupted]",
+          "toolCalls": []
+        }
+      ]
     }
   },
   {

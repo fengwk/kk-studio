@@ -173,9 +173,13 @@ public abstract class AbstractModelProvider implements Provider {
         ChatRequest request = buildChatRequest(chatMessageList, modelInfo, variant, resolveToolSpecifications(toolInfos));
         DefaultAssistantResponseHandle responseHandle = new DefaultAssistantResponseHandle();
         ToolCallCompatibilityNormalizer toolCallNormalizer = new ToolCallCompatibilityNormalizer();
+        AtomicBoolean providerCompatibilityFailed = new AtomicBoolean();
         getChatModel(modelInfo, variant).chat(request, new StreamingChatResponseHandler() {
             @Override
             public void onPartialResponse(PartialResponse partialResponse, PartialResponseContext context) {
+                if (providerCompatibilityFailed.get()) {
+                    return;
+                }
                 responseHandle.bind(context.streamingHandle());
                 if (partialResponse != null && partialResponse.text() != null) {
                     handler.onTextDelta(partialResponse.text(), responseHandle);
@@ -184,6 +188,9 @@ public abstract class AbstractModelProvider implements Provider {
 
             @Override
             public void onPartialThinking(PartialThinking partialThinking, PartialThinkingContext context) {
+                if (providerCompatibilityFailed.get()) {
+                    return;
+                }
                 responseHandle.bind(context.streamingHandle());
                 if (partialThinking != null && partialThinking.text() != null) {
                     handler.onThinkingDelta(partialThinking.text(), responseHandle);
@@ -192,36 +199,66 @@ public abstract class AbstractModelProvider implements Provider {
 
             @Override
             public void onPartialToolCall(PartialToolCall partialToolCall, PartialToolCallContext context) {
-                responseHandle.bind(context.streamingHandle());
-                if (partialToolCall == null) {
+                if (providerCompatibilityFailed.get()) {
                     return;
                 }
-                IndexedToolCallDelta indexedToolCallDelta = new IndexedToolCallDelta();
-                indexedToolCallDelta.setIndex(partialToolCall.index());
-                indexedToolCallDelta.setToolCallDelta(toToolCallDelta(partialToolCall));
+                responseHandle.bind(context.streamingHandle());
+                IndexedToolCallDelta indexedToolCallDelta;
+                try {
+                    indexedToolCallDelta = toolCallNormalizer.normalizePartialToolCall(partialToolCall);
+                } catch (ProviderCompatibilityException error) {
+                    failProviderCompatibility(error);
+                    return;
+                }
+                if (indexedToolCallDelta == null) {
+                    return;
+                }
                 handler.onToolCallDelta(indexedToolCallDelta, responseHandle);
             }
 
             @Override
             public void onCompleteToolCall(CompleteToolCall completeToolCall) {
+                if (providerCompatibilityFailed.get()) {
+                    return;
+                }
                 if (completeToolCall == null) {
                     return;
                 }
-                ToolCall toolCall = toolCallNormalizer.normalize("onCompleteToolCall",
-                    completeToolCall.index(),
-                    toToolCall(completeToolCall.toolExecutionRequest()));
+                NormalizedToolCall normalizedToolCall;
+                try {
+                    normalizedToolCall = toolCallNormalizer.normalize("onCompleteToolCall",
+                        completeToolCall.index(),
+                        null,
+                        toToolCall(completeToolCall.toolExecutionRequest()));
+                } catch (ProviderCompatibilityException error) {
+                    failProviderCompatibility(error);
+                    return;
+                }
+                if (normalizedToolCall == null) {
+                    return;
+                }
+                ToolCall toolCall = normalizedToolCall.toolCall();
                 if (toolCall == null) {
                     return;
                 }
-                handler.onToolCallComplete(completeToolCall.index(), toolCall, responseHandle);
+                handler.onToolCallComplete(normalizedToolCall.index(), toolCall, responseHandle);
             }
 
             @Override
             public void onCompleteResponse(ChatResponse completeResponse) {
+                if (providerCompatibilityFailed.get()) {
+                    return;
+                }
                 List<ToolExecutionRequest> toolExecutionRequests = completeResponse == null || completeResponse.aiMessage() == null
                     ? List.of()
                     : completeResponse.aiMessage().toolExecutionRequests();
-                List<ToolCall> toolCalls = toolCallNormalizer.normalizeCompleteResponse(toolExecutionRequests);
+                List<ToolCall> toolCalls;
+                try {
+                    toolCalls = toolCallNormalizer.normalizeCompleteResponse(toolExecutionRequests);
+                } catch (ProviderCompatibilityException error) {
+                    failProviderCompatibility(error);
+                    return;
+                }
                 AssistantResponse response = AssistantResponse.builder()
                     .text(completeResponse == null || completeResponse.aiMessage() == null ? null : completeResponse.aiMessage().text())
                     .thinking(completeResponse == null || completeResponse.aiMessage() == null ? null : completeResponse.aiMessage().thinking())
@@ -233,6 +270,17 @@ public abstract class AbstractModelProvider implements Provider {
 
             @Override
             public void onError(Throwable error) {
+                if (providerCompatibilityFailed.get()) {
+                    return;
+                }
+                handler.onError(error, responseHandle);
+            }
+
+            private void failProviderCompatibility(ProviderCompatibilityException error) {
+                if (!providerCompatibilityFailed.compareAndSet(false, true)) {
+                    return;
+                }
+                responseHandle.cancel();
                 handler.onError(error, responseHandle);
             }
         });
@@ -442,14 +490,62 @@ public abstract class AbstractModelProvider implements Provider {
      * 如果对应 provider 在回放时严格要求原始 call id，兼容 id 可能导致下一轮请求失败或语义偏差，
      * 因此所有兼容分支都必须打印 warn 日志。
      */
+    private record NormalizedToolCall(Integer index, ToolCall toolCall) {
+    }
+
     private final class ToolCallCompatibilityNormalizer {
 
         private final Map<Integer, String> canonicalToolCallIdsByIndex = new LinkedHashMap<>();
+        private final Map<String, Integer> indexesByRawToolCallId = new LinkedHashMap<>();
+        private final Map<Integer, String> toolNamesByIndex = new LinkedHashMap<>();
         private final List<String> canonicalToolCallIdsInCompleteOrder = new ArrayList<>();
-        private int nextUnknownIndex = -1;
+        private int nextSyntheticIndex = -1;
 
         /**
-         * 归一完整响应中的 tool call 列表，并尽量复用流式 complete 回调中生成过的兼容 id。
+         * 归一局部 tool call 增量；缺少稳定关联键时直接失败，避免静默拼错 arguments。
+         */
+        private synchronized IndexedToolCallDelta normalizePartialToolCall(PartialToolCall partialToolCall) {
+            if (partialToolCall == null) {
+                return null;
+            }
+            String rawToolCallId = normalizeBlank(partialToolCall.id());
+            String toolName = normalizeBlank(partialToolCall.name());
+            String argumentsDelta = partialToolCall.partialArguments();
+            if (toolName == null && isEmptyToolCallSentinel(rawToolCallId, argumentsDelta)) {
+                warnDropEmptyToolCallSentinel("onPartialToolCall", partialToolCall.index(), rawToolCallId, argumentsDelta);
+                return null;
+            }
+            Integer index = resolveDeltaIndex("onPartialToolCall",
+                partialToolCall.index(),
+                null,
+                rawToolCallId,
+                toolName,
+                argumentsDelta);
+            if (index == null) {
+                return null;
+            }
+            if (toolName != null) {
+                toolName = registerToolName("onPartialToolCall", index, toolName, rawToolCallId, argumentsDelta);
+            }
+
+            ToolCallDelta toolCallDelta = new ToolCallDelta();
+            if (rawToolCallId != null) {
+                toolCallDelta.setToolCallId(registerRawToolCallId("onPartialToolCall", index, rawToolCallId, toolName, argumentsDelta));
+            }
+            toolCallDelta.setToolName(toolName);
+            toolCallDelta.setArgumentsDelta(argumentsDelta);
+            if (toolCallDelta.getToolCallId() == null && toolCallDelta.getToolName() == null && toolCallDelta.getArgumentsDelta() == null) {
+                return null;
+            }
+
+            IndexedToolCallDelta indexedToolCallDelta = new IndexedToolCallDelta();
+            indexedToolCallDelta.setIndex(index);
+            indexedToolCallDelta.setToolCallDelta(toolCallDelta);
+            return indexedToolCallDelta;
+        }
+
+        /**
+         * 归一完整响应中的 tool call 列表，并尽量复用流式 complete 回调中确定的 canonical id。
          */
         private synchronized List<ToolCall> normalizeCompleteResponse(List<ToolExecutionRequest> requests) {
             if (requests == null || requests.isEmpty()) {
@@ -457,48 +553,132 @@ public abstract class AbstractModelProvider implements Provider {
             }
             List<ToolCall> result = new ArrayList<>();
             for (int i = 0; i < requests.size(); i++) {
-                ToolCall toolCall = normalize("onCompleteResponse", i, i, toToolCall(requests.get(i)));
-                if (toolCall != null) {
-                    result.add(toolCall);
+                NormalizedToolCall normalizedToolCall = normalize("onCompleteResponse", i, i, toToolCall(requests.get(i)));
+                if (normalizedToolCall != null) {
+                    result.add(normalizedToolCall.toolCall());
                 }
             }
             return result;
         }
 
         /**
-         * 归一单个 tool call，返回 null 表示该调用无可执行语义且已被丢弃。
+         * 归一单个完整 tool call，返回 null 表示该调用是可安全丢弃的空 sentinel。
          */
-        private synchronized ToolCall normalize(String source, Integer index, ToolCall toolCall) {
-            return normalize(source, index, null, toolCall);
-        }
-
-        private ToolCall normalize(String source, Integer index, Integer responseIndex, ToolCall toolCall) {
+        private synchronized NormalizedToolCall normalize(String source,
+                                                          Integer index,
+                                                          Integer responseIndex,
+                                                          ToolCall toolCall) {
             if (toolCall == null) {
-                warnDropMalformedToolCall(source, index, null, null, null, "missing_tool_call");
-                return null;
+                throw incompatible(source, index, null, null, null, "missing_tool_call");
             }
-            if (toolCall.getToolName() == null || toolCall.getToolName().isBlank()) {
-                warnDropMalformedToolCall(source,
-                    index,
-                    toolCall.getToolCallId(),
-                    toolCall.getToolName(),
-                    toolCall.getArguments(),
-                    "missing_tool_name");
-                return null;
+
+            String rawToolCallId = normalizeBlank(toolCall.getToolCallId());
+            String toolName = normalizeBlank(toolCall.getToolName());
+            String arguments = toolCall.getArguments();
+            if (toolName == null) {
+                if (isEmptyToolCallSentinel(rawToolCallId, arguments)) {
+                    warnDropEmptyToolCallSentinel(source, index, rawToolCallId, arguments);
+                    return null;
+                }
+                throw incompatible(source, index, rawToolCallId, toolName, arguments, "missing_tool_name");
             }
-            toolCall.setToolCallId(resolveCanonicalToolCallId(source, index, responseIndex, toolCall));
-            return toolCall;
+
+            Integer normalizedIndex = resolveDeltaIndex(source, index, responseIndex, rawToolCallId, toolName, arguments);
+            if (normalizedIndex == null) {
+                throw incompatible(source, index, rawToolCallId, toolName, arguments, "missing_both_index_and_tool_call_id");
+            }
+            toolName = registerToolName(source, normalizedIndex, toolName, rawToolCallId, arguments);
+            toolCall.setToolCallId(resolveCanonicalToolCallId(source, normalizedIndex, responseIndex, rawToolCallId, toolName, arguments));
+            toolCall.setToolName(toolName);
+            return new NormalizedToolCall(normalizedIndex, toolCall);
         }
 
-        private String resolveCanonicalToolCallId(String source, Integer index, Integer responseIndex, ToolCall toolCall) {
-            String rawToolCallId = normalizeBlank(toolCall.getToolCallId());
-            Integer normalizedIndex = index == null ? nextUnknownIndex-- : index;
+        private Integer resolveDeltaIndex(String source,
+                                          Integer index,
+                                          Integer responseIndex,
+                                          String rawToolCallId,
+                                          String toolName,
+                                          String arguments) {
+            if (rawToolCallId != null) {
+                Integer existingIndex = indexesByRawToolCallId.get(rawToolCallId);
+                if (existingIndex != null) {
+                    if (index != null && !existingIndex.equals(index)) {
+                        log.warn("[provider] keep canonical toolCall index despite conflicting index: providerType={} "
+                                + "source={} canonicalIndex={} rawIndex={} toolCallId={} toolName={} arguments={} "
+                                + "reason=conflicting_tool_call_index",
+                            getProviderType(),
+                            source,
+                            existingIndex,
+                            index,
+                            rawToolCallId,
+                            toolName,
+                            arguments);
+                    }
+                    return existingIndex;
+                }
+            }
+            if (index != null) {
+                if (rawToolCallId != null) {
+                    indexesByRawToolCallId.putIfAbsent(rawToolCallId, index);
+                }
+                return index;
+            }
+            if (responseIndex != null) {
+                return responseIndex;
+            }
+            if (rawToolCallId == null) {
+                throw incompatible(source, null, null, toolName, arguments, "missing_both_index_and_tool_call_id");
+            }
+            Integer existingIndex = indexesByRawToolCallId.get(rawToolCallId);
+            if (existingIndex != null) {
+                return existingIndex;
+            }
+            Integer syntheticIndex = nextSyntheticIndex--;
+            indexesByRawToolCallId.put(rawToolCallId, syntheticIndex);
+            log.warn("[provider] generated compatibility toolCall index: providerType={} source={} "
+                    + "syntheticIndex={} toolCallId={} toolName={} arguments={} reason=missing_tool_call_index; "
+                    + "provider/langchain4j returned a tool call delta without index, raw toolCallId is used to keep deltas correlated",
+                getProviderType(),
+                source,
+                syntheticIndex,
+                rawToolCallId,
+                toolName,
+                arguments);
+            return syntheticIndex;
+        }
+
+        private String registerToolName(String source, Integer index, String toolName, String toolCallId, String arguments) {
+            String existingToolName = toolNamesByIndex.get(index);
+            if (existingToolName == null) {
+                toolNamesByIndex.put(index, toolName);
+                return toolName;
+            }
+            if (!existingToolName.equals(toolName)) {
+                log.warn("[provider] keep canonical toolName despite conflicting name: providerType={} source={} "
+                        + "index={} canonicalToolName={} rawToolName={} toolCallId={} arguments={} reason=conflicting_tool_name",
+                    getProviderType(),
+                    source,
+                    index,
+                    existingToolName,
+                    toolName,
+                    toolCallId,
+                    arguments);
+            }
+            return existingToolName;
+        }
+
+        private String resolveCanonicalToolCallId(String source,
+                                                  Integer index,
+                                                  Integer responseIndex,
+                                                  String rawToolCallId,
+                                                  String toolName,
+                                                  String arguments) {
             String existingToolCallId = null;
             if (responseIndex != null && responseIndex < canonicalToolCallIdsInCompleteOrder.size()) {
                 existingToolCallId = canonicalToolCallIdsInCompleteOrder.get(responseIndex);
             }
             if (existingToolCallId == null) {
-                existingToolCallId = canonicalToolCallIdsByIndex.get(normalizedIndex);
+                existingToolCallId = canonicalToolCallIdsByIndex.get(index);
             }
             if (existingToolCallId != null) {
                 if (rawToolCallId != null && !rawToolCallId.equals(existingToolCallId)) {
@@ -511,29 +691,55 @@ public abstract class AbstractModelProvider implements Provider {
                         index,
                         existingToolCallId,
                         rawToolCallId,
-                        toolCall.getToolName(),
-                        toolCall.getArguments());
+                        toolName,
+                        arguments);
                 }
                 if (rawToolCallId == null) {
-                    warnFillMissingToolCallId(source, index, existingToolCallId, toolCall, "reused_canonical_tool_call_id");
+                    warnFillMissingToolCallId(source, index, existingToolCallId, toolName, arguments, "reused_canonical_tool_call_id");
                 }
                 return existingToolCallId;
             }
 
-            String canonicalToolCallId = rawToolCallId == null ? newCompatibilityToolCallId(normalizedIndex) : rawToolCallId;
-            canonicalToolCallIdsByIndex.put(normalizedIndex, canonicalToolCallId);
+            String canonicalToolCallId = rawToolCallId == null ? newCompatibilityToolCallId(index) : rawToolCallId;
+            canonicalToolCallIdsByIndex.put(index, canonicalToolCallId);
+            if (rawToolCallId != null) {
+                indexesByRawToolCallId.putIfAbsent(rawToolCallId, index);
+            }
             if (responseIndex == null) {
                 canonicalToolCallIdsInCompleteOrder.add(canonicalToolCallId);
             }
             if (rawToolCallId == null) {
-                warnFillMissingToolCallId(source, index, canonicalToolCallId, toolCall, "generated_compatibility_tool_call_id");
+                warnFillMissingToolCallId(source, index, canonicalToolCallId, toolName, arguments, "generated_compatibility_tool_call_id");
             }
             return canonicalToolCallId;
         }
 
+        private String registerRawToolCallId(String source, Integer index, String rawToolCallId, String toolName, String arguments) {
+            String existingToolCallId = canonicalToolCallIdsByIndex.get(index);
+            if (existingToolCallId != null && !existingToolCallId.equals(rawToolCallId)) {
+                log.warn("[provider] keep canonical toolCallId despite conflicting partial id: providerType={} "
+                        + "source={} index={} canonicalToolCallId={} rawToolCallId={} toolName={} arguments={} "
+                        + "reason=conflicting_tool_call_id",
+                    getProviderType(),
+                    source,
+                    index,
+                    existingToolCallId,
+                    rawToolCallId,
+                    toolName,
+                    arguments);
+                return existingToolCallId;
+            }
+            canonicalToolCallIdsByIndex.putIfAbsent(index, rawToolCallId);
+            indexesByRawToolCallId.putIfAbsent(rawToolCallId, index);
+            return canonicalToolCallIdsByIndex.get(index);
+        }
+
+        private boolean isEmptyToolCallSentinel(String rawToolCallId, String arguments) {
+            return rawToolCallId == null && (arguments == null || arguments.isBlank() || "{}".equals(arguments));
+        }
+
         private String newCompatibilityToolCallId(Integer index) {
-            String indexPart = index == null ? "unknown" : String.valueOf(index);
-            return "compat_" + getProviderType() + "_" + indexPart + "_" + UUID.randomUUID().toString().replace("-", "");
+            return "compat_" + getProviderType() + "_" + index + "_" + UUID.randomUUID().toString().replace("-", "");
         }
 
         private String normalizeBlank(String value) {
@@ -543,7 +749,8 @@ public abstract class AbstractModelProvider implements Provider {
         private void warnFillMissingToolCallId(String source,
                                                Integer index,
                                                String canonicalToolCallId,
-                                               ToolCall toolCall,
+                                               String toolName,
+                                               String arguments,
                                                String reason) {
             log.warn("[provider] fill missing toolCallId: providerType={} source={} index={} "
                     + "canonicalToolCallId={} toolName={} arguments={} reason={}; provider/langchain4j returned "
@@ -553,40 +760,49 @@ public abstract class AbstractModelProvider implements Provider {
                 source,
                 index,
                 canonicalToolCallId,
-                toolCall.getToolName(),
-                toolCall.getArguments(),
-                reason);
-        }
-
-        private void warnDropMalformedToolCall(String source,
-                                               Integer index,
-                                               String toolCallId,
-                                               String toolName,
-                                               String arguments,
-                                               String reason) {
-            log.warn("[provider] drop malformed tool call: providerType={} source={} index={} toolCallId={} "
-                    + "toolName={} arguments={} reason={}; provider/langchain4j returned a tool call without "
-                    + "executable tool intent, this tool call will not be executed and may indicate a provider compatibility issue",
-                getProviderType(),
-                source,
-                index,
-                toolCallId,
                 toolName,
                 arguments,
                 reason);
         }
 
+        private void warnDropEmptyToolCallSentinel(String source, Integer index, String toolCallId, String arguments) {
+            log.warn("[provider] drop empty tool call sentinel: providerType={} source={} index={} "
+                    + "toolCallId={} toolName=null arguments={} reason=empty_tool_call_sentinel; "
+                    + "provider/langchain4j returned a non-executable placeholder tool call",
+                getProviderType(),
+                source,
+                index,
+                toolCallId,
+                arguments);
+        }
+
+        private ProviderCompatibilityException incompatible(String source,
+                                                           Integer index,
+                                                           String toolCallId,
+                                                           String toolName,
+                                                           String arguments,
+                                                           String reason) {
+            String message = "incompatible provider tool call: providerType=" + getProviderType()
+                + ", source=" + source
+                + ", index=" + index
+                + ", toolCallId=" + toolCallId
+                + ", toolName=" + toolName
+                + ", arguments=" + arguments
+                + ", reason=" + reason;
+            log.warn("[provider] {}", message);
+            return new ProviderCompatibilityException(message);
+        }
+
     }
 
-    /**
-     * 将 LangChain4j PartialToolCall 转换为持久化 ToolCallDelta。
-     */
-    private ToolCallDelta toToolCallDelta(PartialToolCall partialToolCall) {
-        ToolCallDelta toolCallDelta = new ToolCallDelta();
-        toolCallDelta.setToolCallId(partialToolCall.id());
-        toolCallDelta.setToolName(partialToolCall.name());
-        toolCallDelta.setArgumentsDelta(partialToolCall.partialArguments());
-        return toolCallDelta;
+    private static final class ProviderCompatibilityException extends RuntimeException {
+
+        private static final long serialVersionUID = 1L;
+
+        private ProviderCompatibilityException(String message) {
+            super(message);
+        }
+
     }
 
     protected static final class DefaultAssistantResponseHandle implements AssistantResponseHandle {

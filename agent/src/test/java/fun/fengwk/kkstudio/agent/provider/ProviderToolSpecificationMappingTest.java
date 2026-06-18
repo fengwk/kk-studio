@@ -11,6 +11,7 @@ import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.model.chat.request.json.JsonStringSchema;
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
 import fun.fengwk.kkstudio.agent.model.Variant;
+import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
 import fun.fengwk.kkstudio.agent.tool.ToolInfo;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolArraySchema;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolBooleanSchema;
@@ -19,9 +20,12 @@ import fun.fengwk.kkstudio.agent.tool.schema.ToolIntegerSchema;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolNumberSchema;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolObjectSchema;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.agent.tool.schema.ToolSchemaElement;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolStringSchema;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -110,6 +114,49 @@ public class ProviderToolSpecificationMappingTest {
         assertNull(specifications.get(0).parameters());
     }
 
+    /**
+     * 校验工具列表为空或包含 null 元素时会被安全忽略。
+     */
+    @Test
+    public void testResolveToolSpecificationsSkipsEmptyAndNullToolInfo() {
+        TestProvider provider = new TestProvider();
+        List<ToolInfo> toolInfos = new ArrayList<>();
+        toolInfos.add(null);
+
+        assertEquals(List.of(), provider.exposeResolveToolSpecifications(null));
+        assertEquals(List.of(), provider.exposeResolveToolSpecifications(List.of()));
+        assertEquals(List.of(), provider.exposeResolveToolSpecifications(toolInfos));
+    }
+
+    /**
+     * 校验 schema properties 中的 null key/value 会被跳过。
+     */
+    @Test
+    public void testResolveToolSpecificationsSkipsNullSchemaProperties() {
+        TestProvider provider = new TestProvider();
+        Map<String, ToolSchemaElement> properties = new LinkedHashMap<>();
+        properties.put("keyword", ToolStringSchema.builder().description("keyword").build());
+        properties.put(null, ToolStringSchema.builder().description("ignored key").build());
+        properties.put("ignoredValue", null);
+        ToolInfo toolInfo = ToolInfo.builder()
+            .name("search_files")
+            .inputSchema(ToolParamsSchema.builder().properties(properties).build())
+            .build();
+
+        JsonObjectSchema parameters = provider.exposeResolveToolSpecifications(List.of(toolInfo)).get(0).parameters();
+
+        assertEquals(1, parameters.properties().size());
+        assertInstanceOf(JsonStringSchema.class, parameters.properties().get("keyword"));
+    }
+
+    /**
+     * 校验 metadata 为空时不会构造伪 metadata。
+     */
+    @Test
+    public void testToCommonAssistantMetadataAllowsNull() {
+        assertNull(new TestProvider().exposeToCommonAssistantMetadata());
+    }
+
     private static final class TestProvider extends AbstractModelProvider {
 
         /**
@@ -124,6 +171,13 @@ public class ProviderToolSpecificationMappingTest {
          */
         private List<ToolSpecification> exposeResolveToolSpecifications(List<ToolInfo> toolInfos) {
             return resolveToolSpecifications(toolInfos);
+        }
+
+        /**
+         * 暴露受保护的 metadata 映射供测试调用。
+         */
+        private AssistantMetadata exposeToCommonAssistantMetadata() {
+            return toCommonAssistantMetadata(null);
         }
 
         /**

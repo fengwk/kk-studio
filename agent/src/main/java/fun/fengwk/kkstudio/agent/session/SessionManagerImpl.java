@@ -6,8 +6,10 @@ import fun.fengwk.kkstudio.agent.session.repo.SessionEventRepository;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * SessionManager 的默认实现。
@@ -48,26 +50,42 @@ public class SessionManagerImpl implements SessionManager {
             throw new IllegalArgumentException("branch must not be null");
         }
 
+        Session session = sessionRepository.getSession(branch.sessionId());
+        if (session == null) {
+            throw new IllegalArgumentException("session not found: " + branch.sessionId());
+        }
+        if (SessionEvent.ROOT_EVENT_ID.equals(branch.headEventId())) {
+            return Collections.emptyList();
+        }
+
         List<SessionEvent> sessionEvents = sessionEventRepository.listBySessionId(branch.sessionId());
         if (sessionEvents == null || sessionEvents.isEmpty()) {
-            return Collections.emptyList();
+            throw new IllegalStateException("branch head not found: " + branch.headEventId());
         }
 
         Map<String, SessionEvent> eventById = new HashMap<>();
         for (SessionEvent event : sessionEvents) {
-            if (event != null) {
-                eventById.put(event.getEventId(), event);
-            }
+            eventById.put(event.getEventId(), event);
         }
 
         List<SessionEvent> branchEvents = new ArrayList<>();
         SessionEvent current = eventById.get(branch.headEventId());
+        if (current == null) {
+            throw new IllegalStateException("branch head not found: " + branch.headEventId());
+        }
+        Set<String> visitedEventIds = new HashSet<>();
         while (current != null) {
+            if (!visitedEventIds.add(current.getEventId())) {
+                throw new IllegalStateException("cycle detected in branch events: " + current.getEventId());
+            }
             branchEvents.add(current);
             if (current.getParentEventId() == null || SessionEvent.ROOT_EVENT_ID.equals(current.getParentEventId())) {
                 break;
             }
             current = eventById.get(current.getParentEventId());
+            if (current == null) {
+                throw new IllegalStateException("parent event not found: " + branchEvents.get(branchEvents.size() - 1).getParentEventId());
+            }
         }
         Collections.reverse(branchEvents);
         return List.copyOf(branchEvents);
@@ -81,6 +99,7 @@ public class SessionManagerImpl implements SessionManager {
         if (event == null) {
             throw new IllegalArgumentException("event must not be null");
         }
+        SessionEventValidator.validateCompleteEvent(event);
         if (!branch.sessionId().equals(event.getSessionId())) {
             throw new IllegalArgumentException("branch.sessionId does not match event.sessionId");
         }
