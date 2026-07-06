@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.agent.session.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -20,6 +21,7 @@ import fun.fengwk.kkstudio.share.model.AgentSessionDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionEventDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionHeadDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionMessageCreateDTO;
+import fun.fengwk.kkstudio.share.model.AgentSessionUpdateDTO;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
@@ -43,6 +45,7 @@ import fun.fengwk.kkstudio.share.model.AgentSessionDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionEventDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionHeadDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionMessageCreateDTO;
+import fun.fengwk.kkstudio.share.model.AgentSessionUpdateDTO;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
@@ -143,6 +146,29 @@ public class AgentSessionServiceTest {
     List<AgentSessionEventDTO> events =
         agentSessionService.listEvents(created.getSessionId(), null);
     assertTrue(events.isEmpty());
+  }
+
+  @Test
+  public void shouldNormalizeSessionTitleWhenUpdatingSession() {
+    AgentSessionCreateDTO createDTO = new AgentSessionCreateDTO();
+    createDTO.setAgentName("default-assistant");
+    createDTO.setTitle("Original Session");
+    AgentSessionDTO session = agentSessionService.createSession(createDTO);
+
+    AgentSessionUpdateDTO renameDTO = new AgentSessionUpdateDTO();
+    renameDTO.setTitle("  Renamed Session  ");
+    AgentSessionUpdateDTO clearDTO = new AgentSessionUpdateDTO();
+    clearDTO.setTitle("   ");
+
+    // 更新链路负责裁剪标题，并允许通过空白标题清空展示名。
+    AgentSessionDTO renamedSession =
+        agentSessionService.updateSession("  " + session.getSessionId() + "  ", renameDTO);
+    assertEquals("Renamed Session", renamedSession.getTitle());
+
+    AgentSessionDTO clearedSession =
+        agentSessionService.updateSession(session.getSessionId(), clearDTO);
+    assertNull(clearedSession.getTitle());
+    assertNull(agentSessionService.getSession(session.getSessionId()).getTitle());
   }
 
   @Test
@@ -306,6 +332,9 @@ public class AgentSessionServiceTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> agentSessionService.createMessage(session.getSessionId(), blankMessageDTO));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> agentSessionService.updateSession(session.getSessionId(), null));
     assertThrows(IllegalArgumentException.class, () -> agentSessionService.listHeads(" "));
     assertThrows(IllegalArgumentException.class, () -> agentSessionService.listEvents(" ", null));
     assertThrows(
