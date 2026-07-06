@@ -2,6 +2,50 @@
 
 本文是整体技术方案的一部分，描述 `agent` 模块内部执行内核。
 
+## 快速导航
+
+| 主题 | 章节 | 关注点 |
+| --- | --- | --- |
+| 设计目标与原则 | 1 - 2 | 事实来源、Delta、错误、Abort、LangChain4j 边界 |
+| 术语与事件 | 3 - 8 | Session、Branch、Run、Assistant / Tool / Abort 事件 |
+| 主循环与重试 | 9 - 11 | submit、turn 结构、配置刷新、retry 语义 |
+| Tool 基座与执行 | 12 - 16 | Tool SPI、ToolCallExecutor、batch、异步协调 |
+| 投影与注册表 | 17 - 18 | SessionEventProjection、Agent / Provider / Model / Tool Registry |
+| 外部依赖与结构 | 19 - 20 | LangChain4j 边界、代码组织 |
+
+## 执行总览
+
+```mermaid
+flowchart TD
+    A[UserRequest] --> B[Agent.submit]
+    B --> C[基于 SessionEventProjection 重建上下文]
+    C --> D[Provider.asyncChat]
+    D --> E[追加 assistant_start / assistant_delta / assistant_end 或 assistant_error]
+    E --> F{是否产生 tool calls}
+    F -- 否 --> G[进入下一轮或结束]
+    F -- 是 --> H[ToolCallExecutor 并发执行工具]
+    H --> I[回流 Agent 串行追加 tool_start / tool_delta / tool_end 或 tool_error]
+    I --> G
+    G --> J[必要时 retry / abort / terminal]
+```
+
+## 生命周期矩阵
+
+| 对象 | 开始事件 | 增量事件 | 成功结束 | 错误结束 | 取消语义 | 内容事实来源 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Assistant | `assistant_start` | `assistant_delta` | `assistant_end` | `assistant_error` | `abort` 在 run 级别取消 | `assistant_delta` |
+| Tool | `tool_start` | `tool_delta` | `tool_end` | `tool_error` | `abort` 同时取消所有 active tools | `tool_delta` |
+| Run | `submit` 触发 | 由 assistant / tool 事件推进 | terminal 状态 | terminal 状态 | `abort` 记录用户取消事实 | `SessionEvent` |
+
+## 事件族总表
+
+| 事件族 | 事件 | 作用 |
+| --- | --- | --- |
+| 配置事件 | `set_agent_info`、`set_model_info` | 刷新执行上下文 |
+| Assistant 事件 | `assistant_start`、`assistant_delta`、`assistant_end`、`assistant_error` | 表达 assistant 生命周期 |
+| Tool 事件 | `tool_start`、`tool_delta`、`tool_end`、`tool_error` | 表达 tool 生命周期 |
+| Abort 事件 | `abort` | 记录 run 级用户取消事实 |
+
 ## 1. 目标
 
 Agent 模块采用 `SessionEvent` 单层事件流模型，统一支撑：
