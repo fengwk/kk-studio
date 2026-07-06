@@ -89,6 +89,7 @@ public class MysqlAgentRunRepository implements AgentRunRepository {
     }
 
     AgentRun run = new AgentRun();
+    run.setId(runDO.getId());
     run.setRunId(runDO.getRunId());
     run.setSessionId(runDO.getSessionId());
     run.setTriggerEventId(runDO.getTriggerEventId());
