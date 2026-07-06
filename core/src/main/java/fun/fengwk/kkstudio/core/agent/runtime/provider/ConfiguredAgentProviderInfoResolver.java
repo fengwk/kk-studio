@@ -1,12 +1,9 @@
 package fun.fengwk.kkstudio.core.agent.runtime.provider;
 
-import fun.fengwk.kkstudio.agent.provider.ProviderInfo;
-import fun.fengwk.kkstudio.core.agent.runtime.configuration.AgentRuntimeProperties;
 import lombok.AllArgsConstructor;
 
 import fun.fengwk.kkstudio.agent.provider.ProviderInfo;
 import fun.fengwk.kkstudio.core.agent.runtime.configuration.AgentRuntimeProperties;
-import lombok.AllArgsConstructor;
 
 /**
  * @author fengwk

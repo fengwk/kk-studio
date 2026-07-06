@@ -5,42 +5,17 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import fun.fengwk.kkstudio.core.ai.image.configuration.GptImage2Properties;
-import fun.fengwk.kkstudio.core.ai.image.model.GptImage2Response;
-import fun.fengwk.kkstudio.core.ai.image.model.GptImage2Size;
-import fun.fengwk.kkstudio.core.ai.image.model.ImageData;
-import java.io.IOException;
-import java.net.Authenticator;
-import java.net.CookieHandler;
-import java.net.ProxySelector;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpClient.Version;
-import java.net.http.HttpHeaders;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.net.http.WebSocket;
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Flow;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLParameters;
-import javax.net.ssl.SSLSession;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.ai.image.configuration.GptImage2Properties;
 import fun.fengwk.kkstudio.core.ai.image.model.GptImage2Response;
 import fun.fengwk.kkstudio.core.ai.image.model.GptImage2Size;
 import fun.fengwk.kkstudio.core.ai.image.model.ImageData;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLSession;
+
 import java.io.IOException;
 import java.net.Authenticator;
 import java.net.CookieHandler;
@@ -64,10 +39,6 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Flow;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLParameters;
-import javax.net.ssl.SSLSession;
-import org.junit.jupiter.api.Test;
 
 /**
  * @author fengwk

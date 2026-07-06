@@ -4,22 +4,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.kkstudio.agent.AgentInfo;
-import fun.fengwk.kkstudio.agent.model.ModelInfo;
-import fun.fengwk.kkstudio.agent.model.Variant;
-import fun.fengwk.kkstudio.agent.provider.ProviderInfo;
-import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 import org.springframework.stereotype.Component;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.agent.AgentInfo;
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
 import fun.fengwk.kkstudio.agent.model.Variant;
@@ -27,10 +13,10 @@ import fun.fengwk.kkstudio.agent.provider.ProviderInfo;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import org.springframework.stereotype.Component;
 
 /**
  * EmbeddedAgentRuntimeMetadataFactory 负责 runtime 所需 provider/model/agent 元数据的组装。

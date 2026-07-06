@@ -5,20 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
-import fun.fengwk.kkstudio.agent.message.AgentUserMessage;
-import fun.fengwk.kkstudio.agent.provider.AssistantResponse;
-import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandle;
-import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandler;
-import fun.fengwk.kkstudio.agent.provider.Provider;
-import fun.fengwk.kkstudio.agent.provider.fixtures.ProviderTestFixtures;
-import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
-import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
-import fun.fengwk.kkstudio.agent.tool.ToolInfo;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -33,15 +19,12 @@ import fun.fengwk.kkstudio.agent.provider.fixtures.ProviderTestFixtures;
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
 import fun.fengwk.kkstudio.agent.tool.ToolInfo;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import lombok.extern.slf4j.Slf4j;
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
 
 /**
  * Provider live test 公共基座。

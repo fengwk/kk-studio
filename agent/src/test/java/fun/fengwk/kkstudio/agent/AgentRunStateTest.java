@@ -3,14 +3,6 @@ package fun.fengwk.kkstudio.agent;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
-import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
-import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
-import fun.fengwk.kkstudio.agent.session.payload.ToolCallDelta;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContentDelta;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContentType;
-import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
@@ -20,8 +12,8 @@ import fun.fengwk.kkstudio.agent.session.payload.ToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContentDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContentType;
+
 import java.util.List;
-import org.junit.jupiter.api.Test;
 
 /**
  * AgentRunState 内部 gap 计算的边界测试。

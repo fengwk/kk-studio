@@ -1,12 +1,9 @@
 package fun.fengwk.kkstudio.agent.tool;
 
-import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
 import lombok.Builder;
 import lombok.Data;
 
 import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
-import lombok.Builder;
-import lombok.Data;
 
 /**
  * ToolInfo 表示一个工具的可执行描述信息。

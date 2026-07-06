@@ -14,34 +14,8 @@ import dev.langchain4j.model.chat.request.json.JsonIntegerSchema;
 import dev.langchain4j.model.chat.request.json.JsonNumberSchema;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.model.chat.request.json.JsonStringSchema;
-import fun.fengwk.kkstudio.agent.model.ModelInfo;
-import fun.fengwk.kkstudio.agent.model.Variant;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
-import fun.fengwk.kkstudio.agent.tool.ToolInfo;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolArraySchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolBooleanSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolEnumSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolNumberSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolObjectSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolSchemaElement;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolStringSchema;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.model.chat.StreamingChatModel;
-import dev.langchain4j.model.chat.request.json.JsonArraySchema;
-import dev.langchain4j.model.chat.request.json.JsonBooleanSchema;
-import dev.langchain4j.model.chat.request.json.JsonEnumSchema;
-import dev.langchain4j.model.chat.request.json.JsonIntegerSchema;
-import dev.langchain4j.model.chat.request.json.JsonNumberSchema;
-import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
-import dev.langchain4j.model.chat.request.json.JsonStringSchema;
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
 import fun.fengwk.kkstudio.agent.model.Variant;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
@@ -55,11 +29,11 @@ import fun.fengwk.kkstudio.agent.tool.schema.ToolObjectSchema;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolSchemaElement;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolStringSchema;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
 
 /**
  * @author fengwk

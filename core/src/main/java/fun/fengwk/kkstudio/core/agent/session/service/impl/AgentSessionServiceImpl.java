@@ -2,31 +2,10 @@ package fun.fengwk.kkstudio.core.agent.session.service.impl;
 
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
-import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.core.agent.run.service.AgentRunService;
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionHeadRepository;
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionRepository;
-import fun.fengwk.kkstudio.core.agent.session.service.AgentSessionService;
-import fun.fengwk.kkstudio.core.agent.session.service.converter.AgentSessionConverter;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSession;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionHead;
-import fun.fengwk.kkstudio.core.agent.support.AgentIdentifierGenerator;
-import fun.fengwk.kkstudio.share.model.AgentSessionCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionEventDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionHeadDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionMessageCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionUpdateDTO;
-import java.time.LocalDateTime;
-import java.util.List;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.convention4j.api.page.Page;
-import fun.fengwk.convention4j.api.page.PageQuery;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.run.service.AgentRunService;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
@@ -44,11 +23,9 @@ import fun.fengwk.kkstudio.share.model.AgentSessionEventDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionHeadDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionUpdateDTO;
+
 import java.time.LocalDateTime;
 import java.util.List;
-import lombok.AllArgsConstructor;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * @author fengwk

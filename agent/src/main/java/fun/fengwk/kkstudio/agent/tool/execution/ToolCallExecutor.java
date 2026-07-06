@@ -6,17 +6,7 @@ import fun.fengwk.kkstudio.agent.tool.Tool;
 import fun.fengwk.kkstudio.agent.tool.ToolCallRequest;
 import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandle;
 import fun.fengwk.kkstudio.agent.tool.ToolRegistration;
-import java.time.Duration;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
-import java.util.concurrent.atomic.AtomicReference;
 
-import fun.fengwk.kkstudio.agent.AgentScheduler;
-import fun.fengwk.kkstudio.agent.ScheduledTask;
-import fun.fengwk.kkstudio.agent.tool.Tool;
-import fun.fengwk.kkstudio.agent.tool.ToolCallRequest;
-import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandle;
-import fun.fengwk.kkstudio.agent.tool.ToolRegistration;
 import java.time.Duration;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;

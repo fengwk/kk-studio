@@ -6,10 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import fun.fengwk.kkstudio.core.storage.configuration.S3StorageProperties;
-import java.io.ByteArrayInputStream;
-import java.lang.reflect.Proxy;
-import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -19,16 +15,10 @@ import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 
 import fun.fengwk.kkstudio.core.storage.configuration.S3StorageProperties;
+
 import java.io.ByteArrayInputStream;
 import java.lang.reflect.Proxy;
 import java.util.function.Function;
-import org.junit.jupiter.api.Test;
-import software.amazon.awssdk.core.ResponseBytes;
-import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.GetObjectResponse;
-import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
-import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
-import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 
 /**
  * {@link S3StorageService} 单元测试.

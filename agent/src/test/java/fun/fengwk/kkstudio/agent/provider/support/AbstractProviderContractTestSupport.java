@@ -6,32 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-import fun.fengwk.kkstudio.agent.message.AgentUserMessage;
-import fun.fengwk.kkstudio.agent.provider.AssistantResponse;
-import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandle;
-import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandler;
-import fun.fengwk.kkstudio.agent.provider.Provider;
-import fun.fengwk.kkstudio.agent.provider.ProviderManagerImpl;
-import fun.fengwk.kkstudio.agent.provider.fixtures.ProviderTestFixtures;
-import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
-import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
-import fun.fengwk.kkstudio.agent.tool.ToolInfo;
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.InetSocketAddress;
-import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
 import fun.fengwk.kkstudio.agent.message.AgentUserMessage;
 import fun.fengwk.kkstudio.agent.provider.AssistantResponse;
 import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandle;
@@ -42,6 +19,7 @@ import fun.fengwk.kkstudio.agent.provider.fixtures.ProviderTestFixtures;
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
 import fun.fengwk.kkstudio.agent.tool.ToolInfo;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
@@ -53,8 +31,6 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
 
 /**
  * Provider HTTP 契约测试公共基座。

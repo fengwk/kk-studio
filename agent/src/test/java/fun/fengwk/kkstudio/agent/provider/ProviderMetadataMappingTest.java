@@ -7,15 +7,9 @@ import dev.langchain4j.model.anthropic.AnthropicTokenUsage;
 import dev.langchain4j.model.chat.response.ChatResponseMetadata;
 import dev.langchain4j.model.openai.OpenAiTokenUsage;
 import dev.langchain4j.model.output.FinishReason;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
 import org.junit.jupiter.api.Test;
 
-import dev.langchain4j.model.anthropic.AnthropicTokenUsage;
-import dev.langchain4j.model.chat.response.ChatResponseMetadata;
-import dev.langchain4j.model.openai.OpenAiTokenUsage;
-import dev.langchain4j.model.output.FinishReason;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
-import org.junit.jupiter.api.Test;
 
 /**
  * @author fengwk

@@ -4,27 +4,14 @@ import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.response.ChatResponseMetadata;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiTokenUsage;
-import fun.fengwk.kkstudio.agent.message.AgentMessage;
-import fun.fengwk.kkstudio.agent.model.ModelInfo;
-import fun.fengwk.kkstudio.agent.model.Variant;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantUsage;
-import fun.fengwk.kkstudio.agent.tool.ToolInfo;
-import java.net.URI;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 
-import dev.langchain4j.model.chat.StreamingChatModel;
-import dev.langchain4j.model.chat.response.ChatResponseMetadata;
-import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
-import dev.langchain4j.model.openai.OpenAiTokenUsage;
 import fun.fengwk.kkstudio.agent.message.AgentMessage;
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
 import fun.fengwk.kkstudio.agent.model.Variant;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantUsage;
 import fun.fengwk.kkstudio.agent.tool.ToolInfo;
+
 import java.net.URI;
 import java.util.List;
 import java.util.Locale;

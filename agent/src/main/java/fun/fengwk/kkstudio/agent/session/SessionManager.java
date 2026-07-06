@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.agent.session;
 
 import java.util.List;
 
-import java.util.List;
-
 /**
  * SessionManager 协调 session tree 的读取、追加与默认 head 更新。
  *

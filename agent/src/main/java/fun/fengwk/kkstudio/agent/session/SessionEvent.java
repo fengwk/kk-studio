@@ -1,14 +1,11 @@
 package fun.fengwk.kkstudio.agent.session;
 
-import fun.fengwk.kkstudio.agent.session.payload.Payload;
-import fun.fengwk.kkstudio.agent.util.IdGenerator;
-import java.time.LocalDateTime;
 import lombok.Data;
 
 import fun.fengwk.kkstudio.agent.session.payload.Payload;
 import fun.fengwk.kkstudio.agent.util.IdGenerator;
+
 import java.time.LocalDateTime;
-import lombok.Data;
 
 /**
  * SessionEvent 是 session tree 中的持久化事件。

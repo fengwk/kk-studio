@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.agent;
 
 import fun.fengwk.kkstudio.agent.session.SessionEvent;
 
-import fun.fengwk.kkstudio.agent.session.SessionEvent;
-
 /**
  * 当前回调用于向外发布 session tree 上新增的持久化 event。
  *

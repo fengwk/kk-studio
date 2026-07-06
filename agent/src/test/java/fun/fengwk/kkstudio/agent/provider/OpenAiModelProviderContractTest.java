@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.agent.provider;
 
 import fun.fengwk.kkstudio.agent.provider.support.AbstractProviderContractTestSupport;
 
-import fun.fengwk.kkstudio.agent.provider.support.AbstractProviderContractTestSupport;
-
 /**
  * @author fengwk
  */

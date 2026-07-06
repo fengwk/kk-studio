@@ -1,20 +1,14 @@
 package fun.fengwk.kkstudio.agent.tool.execution;
 
-import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
-import fun.fengwk.kkstudio.agent.tool.ToolCallRequest;
-import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandler;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
 import fun.fengwk.kkstudio.agent.tool.ToolCallRequest;
 import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandler;
+
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
-import lombok.extern.slf4j.Slf4j;
 
 /**
  * GuardedToolExecutionHandler 保护 Agent 不受非法或迟到工具回调影响。

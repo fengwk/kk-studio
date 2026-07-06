@@ -1,16 +1,12 @@
 package fun.fengwk.kkstudio.agent.tool.execution;
 
-import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandle;
-import java.util.concurrent.Future;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandle;
+
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import lombok.extern.slf4j.Slf4j;
 
 /**
  * ManagedToolExecutionHandle 统一管理 worker future 与工具下游取消句柄。

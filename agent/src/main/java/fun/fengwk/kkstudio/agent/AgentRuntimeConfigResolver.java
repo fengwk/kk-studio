@@ -1,19 +1,5 @@
 package fun.fengwk.kkstudio.agent;
 
-import fun.fengwk.kkstudio.agent.model.ModelInfo;
-import fun.fengwk.kkstudio.agent.model.ModelRegistry;
-import fun.fengwk.kkstudio.agent.model.Variant;
-import fun.fengwk.kkstudio.agent.provider.Provider;
-import fun.fengwk.kkstudio.agent.provider.ProviderInfo;
-import fun.fengwk.kkstudio.agent.provider.ProviderManager;
-import fun.fengwk.kkstudio.agent.provider.ProviderRegistry;
-import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
-import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
-import fun.fengwk.kkstudio.agent.tool.ToolInfo;
-import fun.fengwk.kkstudio.agent.tool.ToolRegistry;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
 import lombok.Builder;
 import lombok.Data;
 
@@ -28,11 +14,10 @@ import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
 import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
 import fun.fengwk.kkstudio.agent.tool.ToolInfo;
 import fun.fengwk.kkstudio.agent.tool.ToolRegistry;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import lombok.Builder;
-import lombok.Data;
 
 /**
  * AgentRuntimeConfigResolver 负责把当前 agent/model 选择解析为实际运行配置。

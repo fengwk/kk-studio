@@ -1,19 +1,13 @@
 package fun.fengwk.kkstudio.core.agent.runtime.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.kkstudio.agent.session.SessionEvent;
-import fun.fengwk.kkstudio.agent.session.repo.SessionEventRepository;
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
-import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
-import java.util.List;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.agent.session.SessionEvent;
 import fun.fengwk.kkstudio.agent.session.repo.SessionEventRepository;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
 import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
+
 import java.util.List;
 
 final class CoreSessionEventRepositoryAdapter implements SessionEventRepository {

@@ -8,9 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import fun.fengwk.convention4j.common.json.JsonUtils;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.convention4j.common.json.JsonUtils;
-import org.junit.jupiter.api.Test;
-
 /**
  * {@link GptImage2Request} 单元测试.
  *

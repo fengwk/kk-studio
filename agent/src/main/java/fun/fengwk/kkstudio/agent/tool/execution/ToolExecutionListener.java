@@ -2,10 +2,7 @@ package fun.fengwk.kkstudio.agent.tool.execution;
 
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
-import java.util.List;
 
-import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
 import java.util.List;
 
 /**

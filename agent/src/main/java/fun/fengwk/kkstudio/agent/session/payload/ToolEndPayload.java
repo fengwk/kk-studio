@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.agent.session.payload;
 
 import lombok.Data;
 
-import lombok.Data;
-
 /**
  * tool_end 事件的持久化内容。
  *

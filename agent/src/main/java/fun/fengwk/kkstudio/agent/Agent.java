@@ -1,49 +1,5 @@
 package fun.fengwk.kkstudio.agent;
 
-import fun.fengwk.kkstudio.agent.message.AgentMessage;
-import fun.fengwk.kkstudio.agent.message.AgentUserMessage;
-import fun.fengwk.kkstudio.agent.model.ModelRegistry;
-import fun.fengwk.kkstudio.agent.provider.AssistantResponse;
-import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandle;
-import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandler;
-import fun.fengwk.kkstudio.agent.provider.ProviderManager;
-import fun.fengwk.kkstudio.agent.provider.ProviderRegistry;
-import fun.fengwk.kkstudio.agent.session.Branch;
-import fun.fengwk.kkstudio.agent.session.Session;
-import fun.fengwk.kkstudio.agent.session.SessionEvent;
-import fun.fengwk.kkstudio.agent.session.SessionEventType;
-import fun.fengwk.kkstudio.agent.session.SessionManager;
-import fun.fengwk.kkstudio.agent.session.payload.AbortPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantDeltaPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantEndPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantErrorPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantStartPayload;
-import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
-import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
-import fun.fengwk.kkstudio.agent.session.payload.Payload;
-import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
-import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
-import fun.fengwk.kkstudio.agent.session.payload.ToolDeltaPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolEndPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolErrorPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolStartPayload;
-import fun.fengwk.kkstudio.agent.session.projection.SessionEventMessageProjector;
-import fun.fengwk.kkstudio.agent.session.projection.SessionEventProjection;
-import fun.fengwk.kkstudio.agent.tool.ToolCallRequest;
-import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandle;
-import fun.fengwk.kkstudio.agent.tool.ToolRegistration;
-import fun.fengwk.kkstudio.agent.tool.ToolRegistry;
-import fun.fengwk.kkstudio.agent.tool.execution.ToolCallExecutor;
-import fun.fengwk.kkstudio.agent.tool.execution.ToolExecutionListener;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.agent.message.AgentMessage;
@@ -83,6 +39,7 @@ import fun.fengwk.kkstudio.agent.tool.ToolRegistration;
 import fun.fengwk.kkstudio.agent.tool.ToolRegistry;
 import fun.fengwk.kkstudio.agent.tool.execution.ToolCallExecutor;
 import fun.fengwk.kkstudio.agent.tool.execution.ToolExecutionListener;
+
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -90,7 +47,6 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import lombok.extern.slf4j.Slf4j;
 
 /**
  * Agent 是一次会话执行上下文的承载对象。

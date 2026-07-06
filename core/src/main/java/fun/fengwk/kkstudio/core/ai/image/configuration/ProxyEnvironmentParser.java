@@ -4,10 +4,6 @@ import java.net.URI;
 import java.util.Locale;
 import java.util.Map;
 
-import java.net.URI;
-import java.util.Locale;
-import java.util.Map;
-
 /** ProxyEnvironmentParser 负责解析标准代理环境变量中的 proxy target。 */
 final class ProxyEnvironmentParser {
 

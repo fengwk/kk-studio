@@ -3,9 +3,6 @@ package fun.fengwk.kkstudio.agent.tool.schema;
 import lombok.Builder;
 import lombok.Data;
 
-import lombok.Builder;
-import lombok.Data;
-
 /**
  * ToolNumberSchema 表示浮点数类型参数。
  *

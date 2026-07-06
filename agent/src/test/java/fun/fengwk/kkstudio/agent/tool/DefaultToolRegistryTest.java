@@ -5,13 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
-import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
+
 import java.util.List;
-import org.junit.jupiter.api.Test;
 
 /**
  * DefaultToolRegistry 的注册校验测试。

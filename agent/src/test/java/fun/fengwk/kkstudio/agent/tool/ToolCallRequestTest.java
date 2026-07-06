@@ -4,16 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import fun.fengwk.kkstudio.agent.tool.schema.ToolArraySchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolBooleanSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolEnumSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolNumberSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolObjectSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolStringSchema;
-import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.agent.tool.schema.ToolArraySchema;
@@ -24,9 +14,9 @@ import fun.fengwk.kkstudio.agent.tool.schema.ToolNumberSchema;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolObjectSchema;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolStringSchema;
+
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
 
 /**
  * ToolCallRequest 的输入规范化测试。

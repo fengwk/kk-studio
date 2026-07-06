@@ -103,7 +103,7 @@
                         </googleJavaFormat>
                         <removeUnusedImports/>
                         <importOrder>
-                            <order>,\fun\.fengwk\.kkstudio,|javax\.|java\.</order>
+                            <order>\#,,fun.fengwk.kkstudio,javax,java</order>
                         </importOrder>
                     </java>
                 </configuration>

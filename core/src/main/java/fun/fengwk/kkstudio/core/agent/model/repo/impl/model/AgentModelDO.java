@@ -1,10 +1,8 @@
 package fun.fengwk.kkstudio.core.agent.model.repo.impl.model;
 
-import java.time.LocalDateTime;
 import lombok.Data;
 
 import java.time.LocalDateTime;
-import lombok.Data;
 
 /**
  * @author fengwk

@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.core.agent.support;
 
 import fun.fengwk.convention4j.springboot.starter.snowflake.GlobalSnowflakeIdGenerator;
 
-import fun.fengwk.convention4j.springboot.starter.snowflake.GlobalSnowflakeIdGenerator;
-
 /**
  * 资源 id 生成器。
  *

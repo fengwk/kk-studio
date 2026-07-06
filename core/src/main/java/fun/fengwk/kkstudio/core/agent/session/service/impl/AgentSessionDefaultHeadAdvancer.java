@@ -1,12 +1,5 @@
 package fun.fengwk.kkstudio.core.agent.session.service.impl;
 
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionHeadRepository;
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionRepository;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSession;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
-import java.time.LocalDateTime;
-import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -16,11 +9,9 @@ import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionHeadRepository;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionRepository;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSession;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
+
 import java.time.LocalDateTime;
 import java.util.List;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 /**
  * AgentSessionDefaultHeadAdvancer 负责把默认 head 推进到当前会话的最新事件。

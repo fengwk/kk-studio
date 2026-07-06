@@ -1,36 +1,5 @@
 package fun.fengwk.kkstudio.agent.session.projection;
 
-import fun.fengwk.kkstudio.agent.message.AgentAssistantMessage;
-import fun.fengwk.kkstudio.agent.message.AgentMessage;
-import fun.fengwk.kkstudio.agent.message.AgentSystemMessage;
-import fun.fengwk.kkstudio.agent.message.AgentToolMessage;
-import fun.fengwk.kkstudio.agent.message.AgentUserMessage;
-import fun.fengwk.kkstudio.agent.session.SessionEvent;
-import fun.fengwk.kkstudio.agent.session.SessionEventType;
-import fun.fengwk.kkstudio.agent.session.payload.AbortPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantDeltaPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantEndPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantErrorPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantStartPayload;
-import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
-import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
-import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
-import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
-import fun.fengwk.kkstudio.agent.session.payload.ToolCallDelta;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContentDelta;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContentType;
-import fun.fengwk.kkstudio.agent.session.payload.ToolDeltaPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolEndPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolErrorPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolStartPayload;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
-import java.util.Iterator;
-import java.util.List;
-import java.util.TreeMap;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.agent.message.AgentAssistantMessage;
@@ -58,13 +27,13 @@ import fun.fengwk.kkstudio.agent.session.payload.ToolDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolEndPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolStartPayload;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.Iterator;
 import java.util.List;
 import java.util.TreeMap;
-import lombok.extern.slf4j.Slf4j;
 
 /**
  * SessionEventMessageProjector 的默认实现。

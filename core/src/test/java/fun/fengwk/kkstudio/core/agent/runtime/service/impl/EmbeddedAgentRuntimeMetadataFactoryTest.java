@@ -6,19 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.kkstudio.agent.AgentInfo;
-import fun.fengwk.kkstudio.agent.model.ModelInfo;
-import fun.fengwk.kkstudio.agent.model.Variant;
-import fun.fengwk.kkstudio.agent.provider.ProviderType;
-import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
-import java.time.Duration;
-import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.agent.AgentInfo;
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
 import fun.fengwk.kkstudio.agent.model.Variant;
@@ -26,10 +15,10 @@ import fun.fengwk.kkstudio.agent.provider.ProviderType;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
+
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
 
 /**
  * EmbeddedAgentRuntimeMetadataFactory 的聚焦行为测试。

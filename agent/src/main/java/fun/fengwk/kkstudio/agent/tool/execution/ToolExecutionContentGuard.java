@@ -4,16 +4,7 @@ import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContentDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContentType;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.function.Consumer;
 
-import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContentDelta;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContentType;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;

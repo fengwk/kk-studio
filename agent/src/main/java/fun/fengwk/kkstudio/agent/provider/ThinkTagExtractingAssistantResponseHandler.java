@@ -2,10 +2,7 @@ package fun.fengwk.kkstudio.agent.provider;
 
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
-import java.util.Objects;
 
-import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
-import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
 import java.util.Objects;
 
 /** 把正文中的 <think>...</think> 兜底拆到 thinking 通道，避免泄漏给用户可见文本。 */

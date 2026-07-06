@@ -1,18 +1,13 @@
 package fun.fengwk.kkstudio.core.agent.runtime.configuration;
 
-import fun.fengwk.kkstudio.agent.provider.ProviderType;
-import java.time.Duration;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import fun.fengwk.kkstudio.agent.provider.ProviderType;
+
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import lombok.Data;
-import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
  * @author fengwk

@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.agent;
 
 import lombok.Data;
 
-import lombok.Data;
-
 /**
  * UserRequest 表示一次待处理的用户输入。
  *

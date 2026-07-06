@@ -3,17 +3,13 @@ package fun.fengwk.kkstudio.core.agent.session.service.impl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
-import java.util.ArrayList;
-import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
+
 import java.util.ArrayList;
 import java.util.List;
-import org.junit.jupiter.api.Test;
 
 /**
  * AgentSessionEventBranchLoader 的聚焦行为测试。

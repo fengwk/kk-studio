@@ -1,12 +1,5 @@
 package fun.fengwk.kkstudio.core.agent.runtime.service.impl;
 
-import fun.fengwk.kkstudio.agent.Agent;
-import fun.fengwk.kkstudio.agent.AgentStatus;
-import fun.fengwk.kkstudio.agent.UserRequest;
-import fun.fengwk.kkstudio.core.agent.run.service.AgentRunService;
-import fun.fengwk.kkstudio.core.agent.runtime.service.AgentRunRuntimeService;
-import java.time.Duration;
-import java.util.concurrent.Executor;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -17,12 +10,9 @@ import fun.fengwk.kkstudio.agent.AgentStatus;
 import fun.fengwk.kkstudio.agent.UserRequest;
 import fun.fengwk.kkstudio.core.agent.run.service.AgentRunService;
 import fun.fengwk.kkstudio.core.agent.runtime.service.AgentRunRuntimeService;
+
 import java.time.Duration;
 import java.util.concurrent.Executor;
-import lombok.AllArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.stereotype.Service;
 
 /**
  * @author fengwk

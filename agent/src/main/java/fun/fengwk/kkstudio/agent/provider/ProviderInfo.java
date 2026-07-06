@@ -1,12 +1,9 @@
 package fun.fengwk.kkstudio.agent.provider;
 
-import java.time.Duration;
 import lombok.Builder;
 import lombok.Data;
 
 import java.time.Duration;
-import lombok.Builder;
-import lombok.Data;
 
 /**
  * ProviderInfo 表示一个 provider 的连接与超时配置。

@@ -3,9 +3,6 @@ package fun.fengwk.kkstudio.agent.tool.schema;
 import lombok.Builder;
 import lombok.Data;
 
-import lombok.Builder;
-import lombok.Data;
-
 /**
  * ToolBooleanSchema 表示布尔类型参数。
  *

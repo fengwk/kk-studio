@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.agent.session.payload;
 
 import lombok.Data;
 
-import lombok.Data;
-
 /**
  * 带槽位索引的工具内容增量。
  *

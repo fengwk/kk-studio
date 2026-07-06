@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.agent.session.payload;
 
 import lombok.Data;
 
-import lombok.Data;
-
 /**
  * assistant 工具调用的完整内容。
  *

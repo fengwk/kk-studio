@@ -5,17 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import fun.fengwk.kkstudio.agent.tool.NoopToolExecutionHandle;
-import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandle;
-import java.util.concurrent.FutureTask;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.agent.tool.NoopToolExecutionHandle;
 import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandle;
+
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.junit.jupiter.api.Test;
 
 /**
  * ManagedToolExecutionHandle 的资源绑定与取消测试。

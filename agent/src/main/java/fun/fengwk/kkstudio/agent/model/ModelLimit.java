@@ -3,9 +3,6 @@ package fun.fengwk.kkstudio.agent.model;
 import lombok.Builder;
 import lombok.Data;
 
-import lombok.Builder;
-import lombok.Data;
-
 /**
  * ModelLimit 表示模型的输入输出限制。
  *

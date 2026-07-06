@@ -1,11 +1,5 @@
 package fun.fengwk.kkstudio.core.agent.session.service.converter;
 
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSession;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionHead;
-import fun.fengwk.kkstudio.share.model.AgentSessionDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionEventDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionHeadDTO;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSession;
@@ -14,7 +8,6 @@ import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionHead;
 import fun.fengwk.kkstudio.share.model.AgentSessionDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionEventDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionHeadDTO;
-import org.springframework.stereotype.Component;
 
 /**
  * @author fengwk

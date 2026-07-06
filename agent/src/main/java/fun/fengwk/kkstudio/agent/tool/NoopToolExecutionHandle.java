@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.agent.tool;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import java.util.concurrent.atomic.AtomicBoolean;
-
 /**
  * NoopToolExecutionHandle 表示没有下游资源需要取消的工具执行句柄。
  *

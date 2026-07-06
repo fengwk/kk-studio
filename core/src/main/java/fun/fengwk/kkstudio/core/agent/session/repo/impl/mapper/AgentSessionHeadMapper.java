@@ -1,8 +1,6 @@
 package fun.fengwk.kkstudio.core.agent.session.repo.impl.mapper;
 
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
-import fun.fengwk.kkstudio.core.agent.session.repo.impl.model.AgentSessionHeadDO;
-import java.util.List;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -11,16 +9,9 @@ import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
-import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
 import fun.fengwk.kkstudio.core.agent.session.repo.impl.model.AgentSessionHeadDO;
+
 import java.util.List;
-import org.apache.ibatis.annotations.Insert;
-import org.apache.ibatis.annotations.Mapper;
-import org.apache.ibatis.annotations.Param;
-import org.apache.ibatis.annotations.Result;
-import org.apache.ibatis.annotations.Results;
-import org.apache.ibatis.annotations.Select;
-import org.apache.ibatis.annotations.Update;
 
 /**
  * @author fengwk

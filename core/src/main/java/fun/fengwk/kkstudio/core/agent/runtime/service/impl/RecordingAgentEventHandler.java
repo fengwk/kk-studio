@@ -4,10 +4,6 @@ import fun.fengwk.kkstudio.agent.AgentEventHandler;
 import fun.fengwk.kkstudio.agent.session.SessionEvent;
 import fun.fengwk.kkstudio.agent.session.SessionEventType;
 
-import fun.fengwk.kkstudio.agent.AgentEventHandler;
-import fun.fengwk.kkstudio.agent.session.SessionEvent;
-import fun.fengwk.kkstudio.agent.session.SessionEventType;
-
 final class RecordingAgentEventHandler implements AgentEventHandler {
 
   private SessionEventType lastEventType;

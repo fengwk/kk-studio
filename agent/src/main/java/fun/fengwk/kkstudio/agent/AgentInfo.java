@@ -1,12 +1,9 @@
 package fun.fengwk.kkstudio.agent;
 
-import java.util.List;
 import lombok.Builder;
 import lombok.Data;
 
 import java.util.List;
-import lombok.Builder;
-import lombok.Data;
 
 /**
  * AgentInfo 表示一个 agent 的展开配置。

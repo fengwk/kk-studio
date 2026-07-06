@@ -1,14 +1,10 @@
 package fun.fengwk.kkstudio.agent.model;
 
-import java.util.List;
-import java.util.Map;
 import lombok.Builder;
 import lombok.Data;
 
 import java.util.List;
 import java.util.Map;
-import lombok.Builder;
-import lombok.Data;
 
 /**
  * Variant 表示模型的一种请求参数变体。

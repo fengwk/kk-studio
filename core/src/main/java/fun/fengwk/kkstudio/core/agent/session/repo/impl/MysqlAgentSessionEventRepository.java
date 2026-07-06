@@ -1,11 +1,5 @@
 package fun.fengwk.kkstudio.core.agent.session.repo.impl;
 
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
-import fun.fengwk.kkstudio.core.agent.session.repo.impl.mapper.AgentSessionEventMapper;
-import fun.fengwk.kkstudio.core.agent.session.repo.impl.model.AgentSessionEventDO;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
-import java.util.List;
-import java.util.stream.Collectors;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
@@ -13,10 +7,9 @@ import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
 import fun.fengwk.kkstudio.core.agent.session.repo.impl.mapper.AgentSessionEventMapper;
 import fun.fengwk.kkstudio.core.agent.session.repo.impl.model.AgentSessionEventDO;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
+
 import java.util.List;
 import java.util.stream.Collectors;
-import lombok.AllArgsConstructor;
-import org.springframework.stereotype.Repository;
 
 /**
  * @author fengwk

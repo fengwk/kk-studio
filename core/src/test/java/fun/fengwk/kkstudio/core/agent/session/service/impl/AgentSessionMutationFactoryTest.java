@@ -5,22 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSession;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionHead;
-import fun.fengwk.kkstudio.share.model.AgentSessionCreateDTO;
-import java.time.LocalDateTime;
 import org.junit.jupiter.api.Test;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSession;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionHead;
 import fun.fengwk.kkstudio.share.model.AgentSessionCreateDTO;
+
 import java.time.LocalDateTime;
-import org.junit.jupiter.api.Test;
 
 /**
  * AgentSessionMutationFactory 的聚焦行为测试。

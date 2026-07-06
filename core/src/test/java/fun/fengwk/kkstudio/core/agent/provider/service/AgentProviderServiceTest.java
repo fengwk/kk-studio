@@ -7,20 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
-import fun.fengwk.kkstudio.core.CoreTestApplication;
-import fun.fengwk.kkstudio.core.agent.model.service.AgentModelService;
-import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentModelDTO;
-import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
-import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
-import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
-import fun.fengwk.convention4j.api.page.Page;
-import fun.fengwk.convention4j.api.page.PageQuery;
 import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.agent.model.service.AgentModelService;
 import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
@@ -28,10 +18,8 @@ import fun.fengwk.kkstudio.share.model.AgentModelDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
+
 import java.util.List;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest(classes = CoreTestApplication.class)
 public class AgentProviderServiceTest {

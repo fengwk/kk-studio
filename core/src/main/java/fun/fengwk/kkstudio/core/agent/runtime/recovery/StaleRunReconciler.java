@@ -1,13 +1,6 @@
 package fun.fengwk.kkstudio.core.agent.runtime.recovery;
 
-import fun.fengwk.kkstudio.core.agent.run.repo.AgentRunRepository;
-import fun.fengwk.kkstudio.core.agent.run.service.AgentRunService;
-import fun.fengwk.kkstudio.core.agent.run.service.model.AgentRun;
-import fun.fengwk.kkstudio.share.model.AgentRunDTO;
 import jakarta.annotation.PostConstruct;
-import java.time.Duration;
-import java.time.LocalDateTime;
-import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -16,13 +9,10 @@ import fun.fengwk.kkstudio.core.agent.run.repo.AgentRunRepository;
 import fun.fengwk.kkstudio.core.agent.run.service.AgentRunService;
 import fun.fengwk.kkstudio.core.agent.run.service.model.AgentRun;
 import fun.fengwk.kkstudio.share.model.AgentRunDTO;
-import jakarta.annotation.PostConstruct;
+
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
 
 /**
  * 启动时把长时间停留在 queued / running 的 run 标记为 failed。

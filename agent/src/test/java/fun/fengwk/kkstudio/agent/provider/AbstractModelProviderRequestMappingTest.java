@@ -21,40 +21,8 @@ import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.DefaultChatRequestParameters;
 import dev.langchain4j.model.chat.request.ToolChoice;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
-import fun.fengwk.kkstudio.agent.message.AgentAssistantMessage;
-import fun.fengwk.kkstudio.agent.message.AgentMessage;
-import fun.fengwk.kkstudio.agent.message.AgentSystemMessage;
-import fun.fengwk.kkstudio.agent.message.AgentToolMessage;
-import fun.fengwk.kkstudio.agent.message.AgentUserMessage;
-import fun.fengwk.kkstudio.agent.model.ModelInfo;
-import fun.fengwk.kkstudio.agent.model.Variant;
-import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContentType;
-import fun.fengwk.kkstudio.agent.tool.ToolInfo;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolObjectSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolStringSchema;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
-import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.AudioContent;
-import dev.langchain4j.data.message.ImageContent;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.TextContent;
-import dev.langchain4j.data.message.ToolExecutionResultMessage;
-import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.data.message.VideoContent;
-import dev.langchain4j.model.chat.StreamingChatModel;
-import dev.langchain4j.model.chat.request.ChatRequest;
-import dev.langchain4j.model.chat.request.DefaultChatRequestParameters;
-import dev.langchain4j.model.chat.request.ToolChoice;
-import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import fun.fengwk.kkstudio.agent.message.AgentAssistantMessage;
 import fun.fengwk.kkstudio.agent.message.AgentMessage;
 import fun.fengwk.kkstudio.agent.message.AgentSystemMessage;
@@ -69,10 +37,10 @@ import fun.fengwk.kkstudio.agent.tool.ToolInfo;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolObjectSchema;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolStringSchema;
+
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
 
 /**
  * @author fengwk

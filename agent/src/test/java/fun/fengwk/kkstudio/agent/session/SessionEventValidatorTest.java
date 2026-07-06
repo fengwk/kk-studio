@@ -4,20 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import fun.fengwk.kkstudio.agent.session.payload.AbortPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantDeltaPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantEndPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantErrorPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantStartPayload;
-import fun.fengwk.kkstudio.agent.session.payload.Payload;
-import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
-import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolDeltaPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolEndPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolErrorPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolStartPayload;
-import java.time.LocalDateTime;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -35,12 +21,9 @@ import fun.fengwk.kkstudio.agent.session.payload.ToolDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolEndPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolStartPayload;
+
 import java.time.LocalDateTime;
 import java.util.stream.Stream;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * 校验 Session、Branch 与 SessionEvent 写入前不变量。

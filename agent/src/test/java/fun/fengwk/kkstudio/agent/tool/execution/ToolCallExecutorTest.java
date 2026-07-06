@@ -6,28 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import fun.fengwk.kkstudio.agent.AgentScheduler;
-import fun.fengwk.kkstudio.agent.ScheduledTask;
-import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContentDelta;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContentType;
-import fun.fengwk.kkstudio.agent.tool.NoopToolExecutionHandle;
-import fun.fengwk.kkstudio.agent.tool.Tool;
-import fun.fengwk.kkstudio.agent.tool.ToolCallRequest;
-import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandle;
-import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandler;
-import fun.fengwk.kkstudio.agent.tool.ToolInfo;
-import fun.fengwk.kkstudio.agent.tool.ToolRegistration;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.concurrent.AbstractExecutorService;
-import java.util.concurrent.FutureTask;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.agent.AgentScheduler;
@@ -44,6 +22,7 @@ import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandler;
 import fun.fengwk.kkstudio.agent.tool.ToolInfo;
 import fun.fengwk.kkstudio.agent.tool.ToolRegistration;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
+
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -52,7 +31,6 @@ import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
-import org.junit.jupiter.api.Test;
 
 /**
  * ToolCallExecutor 的工具生命周期边界测试。

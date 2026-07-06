@@ -3,9 +3,6 @@ package fun.fengwk.kkstudio.agent.tool.schema;
 import lombok.Builder;
 import lombok.Data;
 
-import lombok.Builder;
-import lombok.Data;
-
 /**
  * ToolStringSchema 表示字符串类型参数。
  *

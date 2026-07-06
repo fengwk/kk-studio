@@ -1,12 +1,9 @@
 package fun.fengwk.kkstudio.core.agent.support;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
 import org.springframework.stereotype.Component;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
-import org.springframework.stereotype.Component;
 
 /**
  * AgentEditableSupport 负责标准化 agent 管理面的字符串与 JSON 可编辑字段。

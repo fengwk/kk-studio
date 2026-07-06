@@ -6,20 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.kkstudio.agent.provider.ProviderType;
-import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
-import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
 import org.junit.jupiter.api.Test;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.agent.provider.ProviderType;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
-import org.junit.jupiter.api.Test;
 
 /**
  * AgentProviderMutationFactory 的聚焦行为测试。

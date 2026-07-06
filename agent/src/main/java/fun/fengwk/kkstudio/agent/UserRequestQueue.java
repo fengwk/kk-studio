@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.agent;
 
 import java.util.List;
 
-import java.util.List;
-
 /**
  * UserRequestQueue 表示 Agent 的输入缓冲区。
  *

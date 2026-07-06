@@ -2,15 +2,6 @@ package fun.fengwk.kkstudio.core.agent.run.service.impl;
 
 import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextRunId;
 
-import fun.fengwk.kkstudio.core.agent.run.repo.AgentRunRepository;
-import fun.fengwk.kkstudio.core.agent.run.service.AgentRunService;
-import fun.fengwk.kkstudio.core.agent.run.service.converter.AgentRunConverter;
-import fun.fengwk.kkstudio.core.agent.run.service.model.AgentRun;
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionRepository;
-import fun.fengwk.kkstudio.share.model.AgentRunDTO;
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.stream.Collectors;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -20,11 +11,10 @@ import fun.fengwk.kkstudio.core.agent.run.service.converter.AgentRunConverter;
 import fun.fengwk.kkstudio.core.agent.run.service.model.AgentRun;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionRepository;
 import fun.fengwk.kkstudio.share.model.AgentRunDTO;
+
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
-import lombok.AllArgsConstructor;
-import org.springframework.stereotype.Service;
 
 /**
  * @author fengwk

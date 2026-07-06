@@ -1,10 +1,8 @@
 package fun.fengwk.kkstudio.agent.session;
 
-import fun.fengwk.kkstudio.agent.util.IdGenerator;
 import lombok.Data;
 
 import fun.fengwk.kkstudio.agent.util.IdGenerator;
-import lombok.Data;
 
 /**
  * Session 表示一棵 session tree 的元数据与默认工作位置。

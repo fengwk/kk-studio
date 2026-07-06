@@ -4,12 +4,7 @@ import fun.fengwk.kkstudio.agent.session.SessionEvent;
 import fun.fengwk.kkstudio.agent.session.projection.DefaultSessionEventMessageProjector;
 import fun.fengwk.kkstudio.agent.session.projection.SessionEventMessageProjector;
 import fun.fengwk.kkstudio.agent.session.projection.SessionEventProjection;
-import java.util.List;
 
-import fun.fengwk.kkstudio.agent.session.SessionEvent;
-import fun.fengwk.kkstudio.agent.session.projection.DefaultSessionEventMessageProjector;
-import fun.fengwk.kkstudio.agent.session.projection.SessionEventMessageProjector;
-import fun.fengwk.kkstudio.agent.session.projection.SessionEventProjection;
 import java.util.List;
 
 final class CoreSessionEventMessageProjector implements SessionEventMessageProjector {

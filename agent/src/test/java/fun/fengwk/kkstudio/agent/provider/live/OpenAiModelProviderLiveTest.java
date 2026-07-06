@@ -3,9 +3,6 @@ package fun.fengwk.kkstudio.agent.provider.live;
 import fun.fengwk.kkstudio.agent.provider.ProviderType;
 import fun.fengwk.kkstudio.agent.provider.support.AbstractProviderLiveTestSupport;
 
-import fun.fengwk.kkstudio.agent.provider.ProviderType;
-import fun.fengwk.kkstudio.agent.provider.support.AbstractProviderLiveTestSupport;
-
 /**
  * @author fengwk
  */

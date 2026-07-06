@@ -8,30 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
-import fun.fengwk.kkstudio.core.CoreTestApplication;
-import fun.fengwk.kkstudio.core.agent.run.service.AgentRunService;
-import fun.fengwk.kkstudio.core.agent.runtime.service.AgentRunRuntimeService;
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
-import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
-import fun.fengwk.kkstudio.core.testing.StubProviderManager;
-import fun.fengwk.kkstudio.share.model.AgentRunDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionEventDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionHeadDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionMessageCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionUpdateDTO;
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
-import fun.fengwk.convention4j.api.page.Page;
-import fun.fengwk.convention4j.api.page.PageQuery;
 import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.agent.run.service.AgentRunService;
 import fun.fengwk.kkstudio.core.agent.runtime.service.AgentRunRuntimeService;
@@ -46,13 +27,10 @@ import fun.fengwk.kkstudio.share.model.AgentSessionEventDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionHeadDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionUpdateDTO;
+
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 
 /**
  * @author fengwk

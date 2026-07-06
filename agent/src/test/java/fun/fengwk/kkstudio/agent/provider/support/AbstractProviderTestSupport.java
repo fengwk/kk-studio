@@ -2,20 +2,6 @@ package fun.fengwk.kkstudio.agent.provider.support;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-import fun.fengwk.kkstudio.agent.model.ModelInfo;
-import fun.fengwk.kkstudio.agent.model.Variant;
-import fun.fengwk.kkstudio.agent.provider.Provider;
-import fun.fengwk.kkstudio.agent.provider.ProviderInfo;
-import fun.fengwk.kkstudio.agent.provider.ProviderManager;
-import fun.fengwk.kkstudio.agent.provider.ProviderManagerImpl;
-import fun.fengwk.kkstudio.agent.provider.ProviderType;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
-import fun.fengwk.kkstudio.agent.tool.ToolInfo;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolStringSchema;
-import java.time.Duration;
-import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Assumptions;
 
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
@@ -29,10 +15,10 @@ import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
 import fun.fengwk.kkstudio.agent.tool.ToolInfo;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolStringSchema;
+
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Assumptions;
 
 /**
  * Provider 测试公共基座。

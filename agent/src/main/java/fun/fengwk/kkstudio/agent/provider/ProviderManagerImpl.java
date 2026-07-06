@@ -4,10 +4,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.function.Function;
-
 /**
  * ProviderManager 的默认实现。
  *

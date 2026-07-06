@@ -5,43 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.kkstudio.agent.message.AgentAssistantMessage;
-import fun.fengwk.kkstudio.agent.message.AgentMessage;
-import fun.fengwk.kkstudio.agent.message.AgentSystemMessage;
-import fun.fengwk.kkstudio.agent.message.AgentToolMessage;
-import fun.fengwk.kkstudio.agent.message.AgentUserMessage;
-import fun.fengwk.kkstudio.agent.session.SessionEvent;
-import fun.fengwk.kkstudio.agent.session.SessionEventType;
-import fun.fengwk.kkstudio.agent.session.payload.AbortPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantDeltaPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantEndPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantErrorPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantStartPayload;
-import fun.fengwk.kkstudio.agent.session.payload.Payload;
-import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
-import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
-import fun.fengwk.kkstudio.agent.session.payload.ToolDeltaPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolEndPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolErrorPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolStartPayload;
-import java.net.URL;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.agent.message.AgentAssistantMessage;
 import fun.fengwk.kkstudio.agent.message.AgentMessage;
 import fun.fengwk.kkstudio.agent.message.AgentSystemMessage;
@@ -63,6 +31,7 @@ import fun.fengwk.kkstudio.agent.session.payload.ToolDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolEndPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolStartPayload;
+
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -72,10 +41,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * 基于 JSON fixture 的 DefaultSessionEventMessageProjector 回归测试。

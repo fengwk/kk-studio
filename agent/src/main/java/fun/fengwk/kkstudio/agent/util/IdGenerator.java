@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.agent.util;
 
 import java.util.UUID;
 
-import java.util.UUID;
-
 /**
  * @author fengwk
  */

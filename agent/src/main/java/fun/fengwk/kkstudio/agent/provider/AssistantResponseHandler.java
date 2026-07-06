@@ -3,9 +3,6 @@ package fun.fengwk.kkstudio.agent.provider;
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
 
-import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
-import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
-
 /**
  * AssistantResponseHandler 表示 assistant 流式回调协议。
  *

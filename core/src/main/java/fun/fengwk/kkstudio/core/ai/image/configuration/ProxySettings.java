@@ -12,18 +12,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import java.io.IOException;
-import java.net.Authenticator;
-import java.net.PasswordAuthentication;
-import java.net.Proxy;
-import java.net.ProxySelector;
-import java.net.SocketAddress;
-import java.net.URI;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-
 /** 解析标准代理环境变量。 */
 public final class ProxySettings {
 

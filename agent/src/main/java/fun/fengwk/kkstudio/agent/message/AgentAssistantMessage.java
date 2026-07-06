@@ -1,9 +1,7 @@
 package fun.fengwk.kkstudio.agent.message;
 
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
-import java.util.List;
 
-import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
 import java.util.List;
 
 /**

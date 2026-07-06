@@ -9,37 +9,21 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionHeadRepository;
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionRepository;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSession;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionHead;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
-import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
-import fun.fengwk.convention4j.api.page.Page;
-import fun.fengwk.convention4j.api.page.PageQuery;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionHeadRepository;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionRepository;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSession;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionHead;
+
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
-import org.slf4j.LoggerFactory;
 
 /**
  * AgentSessionDefaultHeadAdvancer 的聚焦行为测试。

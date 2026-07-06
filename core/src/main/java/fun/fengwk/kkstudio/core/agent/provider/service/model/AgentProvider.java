@@ -1,14 +1,11 @@
 package fun.fengwk.kkstudio.core.agent.provider.service.model;
 
-import fun.fengwk.kkstudio.agent.provider.ProviderType;
-import java.time.Duration;
-import java.time.LocalDateTime;
 import lombok.Data;
 
 import fun.fengwk.kkstudio.agent.provider.ProviderType;
+
 import java.time.Duration;
 import java.time.LocalDateTime;
-import lombok.Data;
 
 /**
  * @author fengwk

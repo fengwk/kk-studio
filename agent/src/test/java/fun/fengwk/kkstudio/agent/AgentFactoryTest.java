@@ -3,34 +3,6 @@ package fun.fengwk.kkstudio.agent;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-import fun.fengwk.kkstudio.agent.model.ModelInfo;
-import fun.fengwk.kkstudio.agent.model.ModelRegistry;
-import fun.fengwk.kkstudio.agent.model.Variant;
-import fun.fengwk.kkstudio.agent.provider.ProviderInfo;
-import fun.fengwk.kkstudio.agent.provider.ProviderManagerImpl;
-import fun.fengwk.kkstudio.agent.provider.ProviderRegistry;
-import fun.fengwk.kkstudio.agent.provider.ProviderType;
-import fun.fengwk.kkstudio.agent.session.Branch;
-import fun.fengwk.kkstudio.agent.session.Session;
-import fun.fengwk.kkstudio.agent.session.SessionEvent;
-import fun.fengwk.kkstudio.agent.session.SessionEventType;
-import fun.fengwk.kkstudio.agent.session.SessionManager;
-import fun.fengwk.kkstudio.agent.session.SessionManagerImpl;
-import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
-import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
-import fun.fengwk.kkstudio.agent.session.projection.DefaultSessionEventMessageProjector;
-import fun.fengwk.kkstudio.agent.session.repo.SessionEventRepository;
-import fun.fengwk.kkstudio.agent.session.repo.SessionRepository;
-import fun.fengwk.kkstudio.agent.tool.DefaultToolRegistry;
-import fun.fengwk.kkstudio.agent.tool.execution.ToolCallExecutor;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.AbstractExecutorService;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
@@ -53,6 +25,7 @@ import fun.fengwk.kkstudio.agent.session.repo.SessionEventRepository;
 import fun.fengwk.kkstudio.agent.session.repo.SessionRepository;
 import fun.fengwk.kkstudio.agent.tool.DefaultToolRegistry;
 import fun.fengwk.kkstudio.agent.tool.execution.ToolCallExecutor;
+
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -61,7 +34,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.TimeUnit;
-import org.junit.jupiter.api.Test;
 
 /**
  * @author fengwk

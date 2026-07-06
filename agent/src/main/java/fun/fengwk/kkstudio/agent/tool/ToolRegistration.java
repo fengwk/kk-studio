@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.agent.tool;
 
 import lombok.Data;
 
-import lombok.Data;
-
 /**
  * ToolRegistration 聚合工具描述与工具实现。
  *

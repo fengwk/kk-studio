@@ -3,13 +3,6 @@ package fun.fengwk.kkstudio.core.agent.runtime.configuration;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-import fun.fengwk.kkstudio.agent.provider.ProviderManager;
-import fun.fengwk.kkstudio.agent.provider.ProviderManagerImpl;
-import fun.fengwk.kkstudio.core.agent.runtime.provider.AgentProviderInfoResolver;
-import fun.fengwk.kkstudio.core.agent.runtime.provider.ConfiguredAgentProviderInfoResolver;
-import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ScheduledExecutorService;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
 
@@ -17,11 +10,10 @@ import fun.fengwk.kkstudio.agent.provider.ProviderManager;
 import fun.fengwk.kkstudio.agent.provider.ProviderManagerImpl;
 import fun.fengwk.kkstudio.core.agent.runtime.provider.AgentProviderInfoResolver;
 import fun.fengwk.kkstudio.core.agent.runtime.provider.ConfiguredAgentProviderInfoResolver;
+
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
-import org.junit.jupiter.api.Test;
-import org.springframework.core.task.SimpleAsyncTaskExecutor;
 
 /**
  * @author fengwk

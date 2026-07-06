@@ -1,10 +1,8 @@
 package fun.fengwk.kkstudio.agent.session.payload;
 
-import java.util.List;
 import lombok.Data;
 
 import java.util.List;
-import lombok.Data;
 
 /**
  * assistant_delta 事件的持久化内容。

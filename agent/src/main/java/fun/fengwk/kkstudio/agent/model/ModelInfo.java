@@ -1,12 +1,9 @@
 package fun.fengwk.kkstudio.agent.model;
 
-import java.util.List;
 import lombok.Builder;
 import lombok.Data;
 
 import java.util.List;
-import lombok.Builder;
-import lombok.Data;
 
 /**
  * ModelInfo 表示一个模型的基础信息与可用 variants。

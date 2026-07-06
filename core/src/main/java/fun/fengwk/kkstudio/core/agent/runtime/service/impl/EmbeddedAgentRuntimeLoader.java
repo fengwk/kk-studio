@@ -1,38 +1,11 @@
 package fun.fengwk.kkstudio.core.agent.runtime.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.kkstudio.agent.Agent;
-import fun.fengwk.kkstudio.agent.AgentEventHandler;
-import fun.fengwk.kkstudio.agent.AgentFactory;
-import fun.fengwk.kkstudio.agent.AgentScheduler;
-import fun.fengwk.kkstudio.agent.ModelRetryConfig;
-import fun.fengwk.kkstudio.agent.UserRequestQueue;
-import fun.fengwk.kkstudio.agent.provider.ProviderInfo;
-import fun.fengwk.kkstudio.agent.provider.ProviderManager;
-import fun.fengwk.kkstudio.agent.session.SessionManager;
-import fun.fengwk.kkstudio.agent.session.SessionManagerImpl;
-import fun.fengwk.kkstudio.agent.tool.DefaultToolRegistry;
-import fun.fengwk.kkstudio.agent.tool.ToolRegistry;
-import fun.fengwk.kkstudio.agent.tool.execution.ToolCallExecutor;
-import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.core.agent.model.repo.AgentModelRepository;
-import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
-import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionHeadRepository;
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionRepository;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSession;
-import java.time.Duration;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ScheduledExecutorService;
 import lombok.AllArgsConstructor;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.agent.Agent;
 import fun.fengwk.kkstudio.agent.AgentEventHandler;
 import fun.fengwk.kkstudio.agent.AgentFactory;
@@ -56,13 +29,10 @@ import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionHeadRepository;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionRepository;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSession;
+
 import java.time.Duration;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
-import lombok.AllArgsConstructor;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.support.TransactionTemplate;
 
 /** 负责按当前 session 配置装配一个可执行的 embedded agent runtime。 */
 @AllArgsConstructor

@@ -10,16 +10,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
-import java.net.InetAddress;
-import java.net.URI;
-import java.net.UnknownHostException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Optional;
-
 /** NoProxyRules 负责解析并匹配标准 no_proxy 规则。 */
 final class NoProxyRules {
 

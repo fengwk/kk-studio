@@ -1,13 +1,5 @@
 package fun.fengwk.kkstudio.core.agent.runtime.configuration;
 
-import fun.fengwk.kkstudio.agent.provider.ProviderManager;
-import fun.fengwk.kkstudio.agent.provider.ProviderManagerImpl;
-import fun.fengwk.kkstudio.core.agent.runtime.provider.AgentProviderInfoResolver;
-import fun.fengwk.kkstudio.core.agent.runtime.provider.ConfiguredAgentProviderInfoResolver;
-import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -18,15 +10,11 @@ import fun.fengwk.kkstudio.agent.provider.ProviderManager;
 import fun.fengwk.kkstudio.agent.provider.ProviderManagerImpl;
 import fun.fengwk.kkstudio.core.agent.runtime.provider.AgentProviderInfoResolver;
 import fun.fengwk.kkstudio.core.agent.runtime.provider.ConfiguredAgentProviderInfoResolver;
+
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.core.task.SimpleAsyncTaskExecutor;
 
 /**
  * @author fengwk

@@ -1,16 +1,11 @@
 package fun.fengwk.kkstudio.core.agent.definition.service.converter;
 
-import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.share.model.AgentDefinitionDTO;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionDTO;
-import org.springframework.stereotype.Component;
 
 /**
  * @author fengwk

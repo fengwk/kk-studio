@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.core.agent.session.repo.impl.model;
 
 import lombok.Data;
 
-import lombok.Data;
-
 /**
  * @author fengwk
  */

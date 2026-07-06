@@ -1,14 +1,10 @@
 package fun.fengwk.kkstudio.agent.tool.schema;
 
-import java.util.List;
-import java.util.Map;
 import lombok.Builder;
 import lombok.Data;
 
 import java.util.List;
 import java.util.Map;
-import lombok.Builder;
-import lombok.Data;
 
 /**
  * ToolObjectSchema 表示对象类型输入结构。

@@ -3,9 +3,6 @@ package fun.fengwk.kkstudio.core.agent.runtime.service.impl;
 import fun.fengwk.kkstudio.agent.AgentInfo;
 import fun.fengwk.kkstudio.agent.AgentRegistry;
 
-import fun.fengwk.kkstudio.agent.AgentInfo;
-import fun.fengwk.kkstudio.agent.AgentRegistry;
-
 final class SingleAgentRegistry implements AgentRegistry {
 
   private final AgentInfo agentInfo;

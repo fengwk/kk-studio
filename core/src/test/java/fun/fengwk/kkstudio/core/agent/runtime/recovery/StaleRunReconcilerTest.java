@@ -4,20 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import fun.fengwk.kkstudio.core.CoreTestApplication;
-import fun.fengwk.kkstudio.core.agent.run.repo.AgentRunRepository;
-import fun.fengwk.kkstudio.core.agent.run.repo.impl.mapper.AgentRunMapper;
-import fun.fengwk.kkstudio.core.agent.run.repo.impl.model.AgentRunDO;
-import fun.fengwk.kkstudio.core.agent.run.service.AgentRunService;
-import fun.fengwk.kkstudio.core.agent.run.service.model.AgentRun;
-import fun.fengwk.kkstudio.core.agent.session.service.AgentSessionService;
-import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
-import fun.fengwk.kkstudio.share.model.AgentRunDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionDTO;
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -33,12 +19,10 @@ import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
 import fun.fengwk.kkstudio.share.model.AgentRunDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionDTO;
+
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 
 /**
  * 验证 StaleRunReconciler 在启动时把 stale run 标记为 failed，新鲜 run 不受影响。

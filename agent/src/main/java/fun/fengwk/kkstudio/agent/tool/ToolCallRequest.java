@@ -3,23 +3,8 @@ package fun.fengwk.kkstudio.agent.tool;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolArraySchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolBooleanSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolEnumSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolNumberSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolObjectSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolSchemaElement;
-import fun.fengwk.kkstudio.agent.tool.schema.ToolStringSchema;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
 import lombok.Data;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolArraySchema;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolBooleanSchema;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolEnumSchema;
@@ -29,10 +14,10 @@ import fun.fengwk.kkstudio.agent.tool.schema.ToolObjectSchema;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolSchemaElement;
 import fun.fengwk.kkstudio.agent.tool.schema.ToolStringSchema;
+
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import lombok.Data;
 
 /**
  * ToolCallRequest 表示一次工具调用请求。

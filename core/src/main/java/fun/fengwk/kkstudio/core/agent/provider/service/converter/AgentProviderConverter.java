@@ -1,14 +1,11 @@
 package fun.fengwk.kkstudio.core.agent.provider.service.converter;
 
-import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
-import java.time.Duration;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
+
 import java.time.Duration;
-import org.springframework.stereotype.Component;
 
 /**
  * @author fengwk
