@@ -1,3 +1,5 @@
 export { CreateCard, SearchField, StateBlock, TabButton } from '@/features/ai/AiConsoleCommonCards'
-export { AgentResourceCard, ModelResourceCard, ProviderResourceCard } from '@/features/ai/AiConsoleResourceCards'
+export { AgentResourceCard } from '@/features/ai/AiAgentResourceCard'
+export { ModelResourceCard } from '@/features/ai/AiModelResourceCard'
+export { ProviderResourceCard } from '@/features/ai/AiProviderResourceCard'
 export { SessionCard } from '@/features/ai/AiConsoleSessionCard'
