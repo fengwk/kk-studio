@@ -8,7 +8,7 @@ import {
   editModelEditorPlan,
   editProviderEditorPlan,
   type ResourceEditorPlan,
-} from '@/features/ai/ai-console-page-helpers'
+} from '@/features/ai/ai-resource-editor-plans'
 import type { AgentDraft, ConfirmModalState, ModelDraft, ProviderDraft, ResourceModal } from '@/features/ai/ai-console-types'
 import { normalizeAgentDraftSelection, normalizeModelDraftDefaultVariant, normalizeModelDraftProvider } from '@/features/ai/ai-draft-normalizers'
 import type { AgentResourceId } from '@/shared/api/contracts'

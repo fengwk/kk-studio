@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { aiConsoleTabs, resolveSessionAgentName } from '@/features/ai/ai-console-page-helpers'
 import {
-  aiConsoleTabs,
   buildResourceSubmitPlan,
   createAgentEditorPlan,
   createModelEditorPlan,
@@ -8,8 +8,7 @@ import {
   editAgentEditorPlan,
   editModelEditorPlan,
   editProviderEditorPlan,
-  resolveSessionAgentName,
-} from '@/features/ai/ai-console-page-helpers'
+} from '@/features/ai/ai-resource-editor-plans'
 
 describe('ai-console-page-helpers', () => {
   it('resolves the preferred session agent name', () => {
