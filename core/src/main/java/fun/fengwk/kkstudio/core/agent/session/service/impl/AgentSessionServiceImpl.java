@@ -1,10 +1,5 @@
 package fun.fengwk.kkstudio.core.agent.session.service.impl;
 
-import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextEventId;
-import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextHeadId;
-import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextSessionId;
-
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
@@ -29,12 +24,10 @@ import fun.fengwk.kkstudio.share.model.AgentSessionUpdateDTO;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
@@ -59,7 +52,6 @@ import fun.fengwk.kkstudio.share.model.AgentSessionUpdateDTO;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -72,7 +64,6 @@ public class AgentSessionServiceImpl implements AgentSessionService {
 
   private static final String DEFAULT_HEAD_NAME = "default";
   private static final String USER_MESSAGE_EVENT_TYPE = "user_message";
-  private static final String TEXT_PAYLOAD_TYPE = "text";
 
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentSessionRepository agentSessionRepository;
@@ -80,7 +71,7 @@ public class AgentSessionServiceImpl implements AgentSessionService {
   private final AgentSessionEventRepository agentSessionEventRepository;
   private final AgentRunService agentRunService;
   private final AgentSessionConverter agentSessionConverter;
-  private final ObjectMapper objectMapper;
+  private final AgentSessionMutationFactory sessionMutationFactory;
   private final AgentSessionDefaultHeadAdvancer sessionDefaultHeadAdvancer;
   private final AgentSessionEventBranchLoader sessionEventBranchLoader;
 
@@ -98,7 +89,7 @@ public class AgentSessionServiceImpl implements AgentSessionService {
     this.agentSessionEventRepository = agentSessionEventRepository;
     this.agentRunService = agentRunService;
     this.agentSessionConverter = agentSessionConverter;
-    this.objectMapper = objectMapper;
+    this.sessionMutationFactory = new AgentSessionMutationFactory(objectMapper);
     this.sessionDefaultHeadAdvancer =
         new AgentSessionDefaultHeadAdvancer(
             agentSessionRepository,
@@ -118,32 +109,15 @@ public class AgentSessionServiceImpl implements AgentSessionService {
   @Override
   public AgentSessionDTO createSession(AgentSessionCreateDTO createDTO) {
     validateCreateDTO(createDTO);
-    AgentDefinition agent = agentDefinitionRepository.getByName(createDTO.getAgentName());
-    if (agent == null) {
-      throw new IllegalArgumentException("agent not found: " + createDTO.getAgentName());
-    }
+    AgentDefinition agent = requireAgent(createDTO.getAgentName());
 
     LocalDateTime now = LocalDateTime.now();
-    AgentSession session = new AgentSession();
-    session.setId(nextSessionId());
-    session.setSessionId(AgentIdentifierGenerator.newSessionId());
-    session.setAgentId(agent.getId());
-    session.setAgentName(agent.getName());
-    session.setTitle(createDTO.getTitle());
-    session.setStatus("active");
-    session.setCurrentHeadEventId(AgentSessionEvent.ROOT_EVENT_ID);
-    session.setCreateTime(now);
-    session.setUpdateTime(now);
+    AgentSession session = sessionMutationFactory.newSession(agent, createDTO, now);
     if (!agentSessionRepository.add(session)) {
       throw new IllegalStateException("create session failed");
     }
 
-    AgentSessionHead sessionHead = new AgentSessionHead();
-    sessionHead.setId(nextHeadId());
-    sessionHead.setHeadId(AgentIdentifierGenerator.newHeadId());
-    sessionHead.setSessionId(session.getSessionId());
-    sessionHead.setHeadName(DEFAULT_HEAD_NAME);
-    sessionHead.setHeadEventId(AgentSessionEvent.ROOT_EVENT_ID);
+    AgentSessionHead sessionHead = sessionMutationFactory.newDefaultHead(session.getSessionId());
     if (!agentSessionHeadRepository.add(sessionHead)) {
       throw new IllegalStateException("create session head failed");
     }
@@ -185,23 +159,17 @@ public class AgentSessionServiceImpl implements AgentSessionService {
   @Override
   public AgentSessionEventDTO createMessage(
       String sessionId, AgentSessionMessageCreateDTO createDTO) {
-    if (createDTO == null || createDTO.getContent() == null || createDTO.getContent().isBlank()) {
-      throw new IllegalArgumentException("content must not be blank");
-    }
-    requireSession(sessionId);
+    String content = requireMessageContent(createDTO);
+    AgentSession session = requireSession(sessionId);
 
     String runId = AgentIdentifierGenerator.newRunId();
-    AgentSessionEvent userEvent = new AgentSessionEvent();
-    userEvent.setId(nextEventId());
-    userEvent.setEventId(AgentIdentifierGenerator.newEventId());
-    userEvent.setSessionId(sessionId);
-    userEvent.setParentEventId(
-        agentSessionRepository.getBySessionId(sessionId).getCurrentHeadEventId());
-    userEvent.setRunId(runId);
-    userEvent.setEventType(USER_MESSAGE_EVENT_TYPE);
-    userEvent.setPayloadType(TEXT_PAYLOAD_TYPE);
-    userEvent.setPayloadJson(serializeMessagePayload(createDTO.getContent()));
-    userEvent.setCreateTime(LocalDateTime.now());
+    AgentSessionEvent userEvent =
+        sessionMutationFactory.newUserMessageEvent(
+            session.getSessionId(),
+            session.getCurrentHeadEventId(),
+            runId,
+            content,
+            LocalDateTime.now());
     if (!agentSessionEventRepository.add(userEvent)) {
       throw new IllegalStateException("append user message event failed");
     }
@@ -236,6 +204,14 @@ public class AgentSessionServiceImpl implements AgentSessionService {
         agentSessionEventRepository.listBySessionIdAfterEventId(sessionId, afterEventId));
   }
 
+  private AgentDefinition requireAgent(String agentName) {
+    AgentDefinition agent = agentDefinitionRepository.getByName(agentName);
+    if (agent == null) {
+      throw new IllegalArgumentException("agent not found: " + agentName);
+    }
+    return agent;
+  }
+
   private List<AgentSessionEventDTO> convertEvents(List<AgentSessionEvent> events) {
     List<AgentSessionEventDTO> result = new ArrayList<>(events.size());
     for (AgentSessionEvent event : events) {
@@ -265,19 +241,18 @@ public class AgentSessionServiceImpl implements AgentSessionService {
     return session;
   }
 
+  private String requireMessageContent(AgentSessionMessageCreateDTO createDTO) {
+    if (createDTO == null || createDTO.getContent() == null || createDTO.getContent().isBlank()) {
+      throw new IllegalArgumentException("content must not be blank");
+    }
+    return createDTO.getContent();
+  }
+
   private void validateCreateDTO(AgentSessionCreateDTO createDTO) {
     if (createDTO == null
         || createDTO.getAgentName() == null
         || createDTO.getAgentName().isBlank()) {
       throw new IllegalArgumentException("agentName must not be blank");
-    }
-  }
-
-  private String serializeMessagePayload(String content) {
-    try {
-      return objectMapper.writeValueAsString(Map.of("content", content));
-    } catch (JsonProcessingException e) {
-      throw new IllegalStateException("serialize message payload failed", e);
     }
   }
 
