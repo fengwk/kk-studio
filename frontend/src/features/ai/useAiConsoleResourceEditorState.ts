@@ -6,8 +6,8 @@ import {
   editAgentEditorPlan,
   editModelEditorPlan,
   editProviderEditorPlan,
-  type ResourceEditorPlan,
-} from '@/features/ai/ai-resource-editor-plans'
+} from '@/features/ai/ai-resource-editor-open-plans'
+import type { ResourceEditorPlan } from '@/features/ai/ai-resource-editor-plan-types'
 import type { AgentDraft, ModelDraft, ProviderDraft, ResourceModal } from '@/features/ai/ai-console-types'
 import { normalizeAgentDraftSelection, normalizeModelDraftDefaultVariant, normalizeModelDraftProvider } from '@/features/ai/ai-draft-normalizers'
 import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, AgentResourceId } from '@/shared/api/contracts'

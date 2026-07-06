@@ -1,5 +1,5 @@
 import { useState, type FormEventHandler } from 'react'
-import { buildResourceSubmitPlan } from '@/features/ai/ai-resource-editor-plans'
+import { buildResourceSubmitPlan } from '@/features/ai/ai-resource-editor-submit-plans'
 import type { ConfirmModalState } from '@/features/ai/ai-console-types'
 import type { AgentResourceId } from '@/shared/api/contracts'
 import { useAiConsoleResourceEditorState } from '@/features/ai/useAiConsoleResourceEditorState'
