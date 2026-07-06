@@ -9,9 +9,11 @@ import org.springframework.transaction.support.TransactionTemplate;
 import fun.fengwk.kkstudio.agent.Agent;
 import fun.fengwk.kkstudio.agent.AgentEventHandler;
 import fun.fengwk.kkstudio.agent.AgentFactory;
+import fun.fengwk.kkstudio.agent.AgentInfo;
 import fun.fengwk.kkstudio.agent.AgentScheduler;
 import fun.fengwk.kkstudio.agent.ModelRetryConfig;
 import fun.fengwk.kkstudio.agent.UserRequestQueue;
+import fun.fengwk.kkstudio.agent.model.ModelInfo;
 import fun.fengwk.kkstudio.agent.provider.ProviderInfo;
 import fun.fengwk.kkstudio.agent.provider.ProviderManager;
 import fun.fengwk.kkstudio.agent.session.SessionManager;
@@ -19,11 +21,8 @@ import fun.fengwk.kkstudio.agent.session.SessionManagerImpl;
 import fun.fengwk.kkstudio.agent.tool.DefaultToolRegistry;
 import fun.fengwk.kkstudio.agent.tool.ToolRegistry;
 import fun.fengwk.kkstudio.agent.tool.execution.ToolCallExecutor;
-import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.core.agent.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionHeadRepository;
@@ -38,18 +37,13 @@ import java.util.concurrent.ScheduledExecutorService;
 @AllArgsConstructor
 @Component
 final class EmbeddedAgentRuntimeLoader {
-
-  private static final String DEFAULT_VARIANT = "default";
-
-  private final AgentDefinitionRepository agentDefinitionRepository;
-  private final AgentModelRepository agentModelRepository;
-  private final AgentProviderRepository agentProviderRepository;
   private final AgentSessionRepository agentSessionRepository;
   private final AgentSessionHeadRepository agentSessionHeadRepository;
   private final AgentSessionEventRepository agentSessionEventRepository;
   private final ProviderManager providerManager;
   private final ObjectMapper objectMapper;
   private final TransactionTemplate transactionTemplate;
+  private final EmbeddedAgentRuntimeReferenceResolver runtimeReferenceResolver;
   private final EmbeddedAgentRuntimeMetadataFactory runtimeMetadataFactory;
 
   @Qualifier("agentToolWorkerExecutorService")
@@ -59,10 +53,16 @@ final class EmbeddedAgentRuntimeLoader {
   private final ScheduledExecutorService agentRuntimeScheduledExecutorService;
 
   Agent load(String runId, String sessionId, AgentEventHandler eventHandler) {
-    AgentSession session = requireSession(sessionId);
-    AgentDefinition agentDefinition = requireAgentDefinition(session.getAgentId());
-    AgentProvider agentProvider = requireProvider(agentDefinition.getDefaultProviderId());
-    AgentModel agentModel = requireModel(agentDefinition.getDefaultModelId());
+    EmbeddedAgentRuntimeReferenceResolver.RuntimeReferences references =
+        runtimeReferenceResolver.resolve(sessionId);
+    AgentSession session = references.session();
+    AgentDefinition agentDefinition = references.agentDefinition();
+    AgentProvider agentProvider = references.provider();
+    AgentModel agentModel = references.model();
+    AgentInfo agentInfo =
+        runtimeMetadataFactory.toAgentInfo(
+            agentDefinition, agentProvider.getName(), agentModel.getName());
+    ModelInfo modelInfo = runtimeMetadataFactory.toModelInfo(agentModel, agentProvider.getName());
     ProviderInfo providerInfo = runtimeMetadataFactory.toProviderInfo(agentProvider);
 
     ToolRegistry toolRegistry = new DefaultToolRegistry();
@@ -83,18 +83,15 @@ final class EmbeddedAgentRuntimeLoader {
         agentDefinition.getName(),
         agentProvider.getName(),
         agentModel.getName(),
-        defaultVariant(agentDefinition.getDefaultVariant()),
+        agentInfo.getDefaultVariant(),
         userRequestQueue,
         eventHandler,
         toolRegistry,
         toolCallExecutor,
         sessionManager,
         new CoreSessionEventMessageProjector(),
-        new SingleAgentRegistry(
-            runtimeMetadataFactory.toAgentInfo(
-                agentDefinition, agentProvider.getName(), agentModel.getName())),
-        new SingleModelRegistry(
-            runtimeMetadataFactory.toModelInfo(agentModel, agentProvider.getName())),
+        new SingleAgentRegistry(agentInfo),
+        new SingleModelRegistry(modelInfo),
         new SingleProviderRegistry(agentProvider.getName(), providerInfo),
         providerManager,
         agentScheduler,
@@ -104,41 +101,5 @@ final class EmbeddedAgentRuntimeLoader {
             .maxDelay(Duration.ZERO)
             .multiplier(2D)
             .build());
-  }
-
-  private AgentSession requireSession(String sessionId) {
-    AgentSession session = agentSessionRepository.getBySessionId(sessionId);
-    if (session == null) {
-      throw new IllegalArgumentException("session not found: " + sessionId);
-    }
-    return session;
-  }
-
-  private AgentDefinition requireAgentDefinition(long agentId) {
-    AgentDefinition agentDefinition = agentDefinitionRepository.getById(agentId);
-    if (agentDefinition == null) {
-      throw new IllegalArgumentException("agent not found: " + agentId);
-    }
-    return agentDefinition;
-  }
-
-  private AgentProvider requireProvider(long providerId) {
-    AgentProvider provider = agentProviderRepository.getById(providerId);
-    if (provider == null) {
-      throw new IllegalArgumentException("provider config not found: " + providerId);
-    }
-    return provider;
-  }
-
-  private AgentModel requireModel(long modelId) {
-    AgentModel model = agentModelRepository.getById(modelId);
-    if (model == null) {
-      throw new IllegalArgumentException("model config not found: " + modelId);
-    }
-    return model;
-  }
-
-  private String defaultVariant(String variant) {
-    return variant != null && !variant.isBlank() ? variant : DEFAULT_VARIANT;
   }
 }
