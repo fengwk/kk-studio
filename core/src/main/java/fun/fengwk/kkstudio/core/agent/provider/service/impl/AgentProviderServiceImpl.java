@@ -1,37 +1,27 @@
 package fun.fengwk.kkstudio.core.agent.provider.service.impl;
 
-import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextProviderId;
-
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
-import fun.fengwk.kkstudio.agent.provider.ProviderType;
 import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.service.AgentProviderService;
 import fun.fengwk.kkstudio.core.agent.provider.service.converter.AgentProviderConverter;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
-import fun.fengwk.kkstudio.share.model.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
-import java.time.Duration;
 import lombok.AllArgsConstructor;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
-import fun.fengwk.kkstudio.agent.provider.ProviderType;
 import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.service.AgentProviderService;
 import fun.fengwk.kkstudio.core.agent.provider.service.converter.AgentProviderConverter;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
-import fun.fengwk.kkstudio.share.model.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
-import java.time.Duration;
 import lombok.AllArgsConstructor;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
@@ -41,10 +31,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class AgentProviderServiceImpl implements AgentProviderService {
 
-  private static final long DEFAULT_TIMEOUT_MILLIS = 60_000L;
-
   private final AgentProviderRepository agentProviderRepository;
   private final AgentProviderConverter agentProviderConverter;
+  private final AgentProviderMutationFactory providerMutationFactory;
 
   @Override
   public Page<AgentProviderDTO> pageProviders(PageQuery pageQuery) {
@@ -53,15 +42,13 @@ public class AgentProviderServiceImpl implements AgentProviderService {
 
   @Override
   public AgentProviderDTO createProvider(AgentProviderCreateDTO createDTO) {
-    validateEditable(createDTO, true);
-    if (agentProviderRepository.getByName(trimToNull(createDTO.getName())) != null) {
-      throw new IllegalArgumentException(
-          "agent provider name already exists: " + createDTO.getName());
+    AgentProviderMutationFactory.Mutation mutation =
+        providerMutationFactory.newCreateMutation(createDTO);
+    if (agentProviderRepository.getByName(mutation.name()) != null) {
+      throw new IllegalArgumentException("agent provider name already exists: " + mutation.name());
     }
-    AgentProvider provider = toProvider(createDTO);
-    long nid = nextProviderId();
-    LoggerFactory.getLogger(getClass()).info("nextProviderId={}", nid);
-    provider.setId(nid);
+
+    AgentProvider provider = providerMutationFactory.newProvider(mutation);
     if (!agentProviderRepository.create(provider)) {
       throw new IllegalStateException("create agent provider failed");
     }
@@ -70,28 +57,15 @@ public class AgentProviderServiceImpl implements AgentProviderService {
 
   @Override
   public AgentProviderDTO updateProvider(long id, AgentProviderUpdateDTO updateDTO) {
-    if (id <= 0) {
-      throw new IllegalArgumentException("agent provider id must be positive");
+    AgentProvider existing = requireProvider(id);
+    AgentProviderMutationFactory.Mutation mutation =
+        providerMutationFactory.newUpdateMutation(existing.getName(), updateDTO);
+    if (!existing.getName().equals(mutation.name())
+        && agentProviderRepository.getByName(mutation.name()) != null) {
+      throw new IllegalArgumentException("agent provider name already exists: " + mutation.name());
     }
-    validateEditable(updateDTO, false);
-    AgentProvider existing = agentProviderRepository.getById(id);
-    if (existing == null) {
-      throw new IllegalArgumentException("agent provider not found: " + id);
-    }
-    String newName =
-        updateDTO.getName() == null || updateDTO.getName().isBlank()
-            ? existing.getName()
-            : updateDTO.getName();
-    if (!existing.getName().equals(newName) && agentProviderRepository.getByName(newName) != null) {
-      throw new IllegalArgumentException("agent provider name already exists: " + newName);
-    }
-    existing.setName(newName);
-    existing.setDescription(trimToNull(updateDTO.getDescription()));
-    existing.setProviderType(toProviderType(updateDTO.getProviderType()));
-    existing.setBaseUrl(trimToNull(updateDTO.getBaseUrl()));
-    existing.setApiKey(trimToNull(updateDTO.getApiKey()));
-    existing.setTimeout(toDuration(updateDTO.getTimeoutMillis()));
-    existing.setStreamIdleTimeout(toDuration(updateDTO.getStreamIdleTimeoutMillis()));
+
+    providerMutationFactory.apply(existing, mutation);
     if (!agentProviderRepository.updateById(existing)) {
       throw new IllegalStateException("update agent provider failed: " + id);
     }
@@ -100,12 +74,7 @@ public class AgentProviderServiceImpl implements AgentProviderService {
 
   @Override
   public void deleteProvider(long id) {
-    if (id <= 0) {
-      throw new IllegalArgumentException("agent provider id must be positive");
-    }
-    if (agentProviderRepository.getById(id) == null) {
-      throw new IllegalArgumentException("agent provider not found: " + id);
-    }
+    requireProvider(id);
     if (agentProviderRepository.hasModels(id)) {
       throw new IllegalStateException("agent provider in use by models: " + id);
     }
@@ -117,53 +86,14 @@ public class AgentProviderServiceImpl implements AgentProviderService {
     }
   }
 
-  private void validateEditable(
-      AgentProviderEditablePropertiesDTO properties, boolean requireName) {
-    if (properties == null) {
-      throw new IllegalArgumentException("agent provider body must not be null");
+  private AgentProvider requireProvider(long id) {
+    if (id <= 0) {
+      throw new IllegalArgumentException("agent provider id must be positive");
     }
-    if (requireName && (properties.getName() == null || properties.getName().isBlank())) {
-      throw new IllegalArgumentException("agent provider name must not be blank");
+    AgentProvider provider = agentProviderRepository.getById(id);
+    if (provider == null) {
+      throw new IllegalArgumentException("agent provider not found: " + id);
     }
-    if (properties.getProviderType() == null || properties.getProviderType().isBlank()) {
-      throw new IllegalArgumentException("agent provider providerType must not be null");
-    }
-    toProviderType(properties.getProviderType());
-  }
-
-  private AgentProvider toProvider(AgentProviderEditablePropertiesDTO properties) {
-    AgentProvider provider = new AgentProvider();
-    provider.setName(trimToNull(properties.getName()));
-    provider.setDescription(trimToNull(properties.getDescription()));
-    provider.setProviderType(toProviderType(properties.getProviderType()));
-    provider.setBaseUrl(trimToNull(properties.getBaseUrl()));
-    provider.setApiKey(trimToNull(properties.getApiKey()));
-    provider.setTimeout(toDuration(properties.getTimeoutMillis()));
-    provider.setStreamIdleTimeout(toDuration(properties.getStreamIdleTimeoutMillis()));
     return provider;
-  }
-
-  private Duration toDuration(Long millis) {
-    long value = millis == null ? DEFAULT_TIMEOUT_MILLIS : millis;
-    if (value <= 0) {
-      throw new IllegalArgumentException("timeout millis must be positive");
-    }
-    return Duration.ofMillis(value);
-  }
-
-  private ProviderType toProviderType(String providerType) {
-    try {
-      return ProviderType.valueOf(providerType.trim());
-    } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException("unsupported providerType: " + providerType, e);
-    }
-  }
-
-  private String trimToNull(String value) {
-    if (value == null) {
-      return null;
-    }
-    String trimmed = value.trim();
-    return trimmed.isEmpty() ? null : trimmed;
   }
 }
