@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.agent.session.payload;
 
 import lombok.Data;
 
+import lombok.Data;
+
 /**
  * assistant_end 事件的持久化内容。
  *
@@ -10,9 +12,6 @@ import lombok.Data;
 @Data
 public class AssistantEndPayload implements Payload {
 
-    /**
-     * assistant 结束元信息。
-     */
-    private AssistantMetadata metadata;
-
+  /** assistant 结束元信息。 */
+  private AssistantMetadata metadata;
 }

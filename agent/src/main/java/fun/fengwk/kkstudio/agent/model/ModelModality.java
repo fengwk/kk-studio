@@ -6,10 +6,8 @@ package fun.fengwk.kkstudio.agent.model;
  * @author fengwk
  */
 public enum ModelModality {
-
-    text,
-    image,
-    audio,
-    video,
-
+  text,
+  image,
+  audio,
+  video,
 }

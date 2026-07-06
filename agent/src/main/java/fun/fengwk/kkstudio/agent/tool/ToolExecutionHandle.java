@@ -7,8 +7,7 @@ package fun.fengwk.kkstudio.agent.tool;
  */
 public interface ToolExecutionHandle {
 
-    void cancel();
+  void cancel();
 
-    boolean isCancelled();
-
+  boolean isCancelled();
 }

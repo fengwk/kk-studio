@@ -5,5 +5,5 @@ package fun.fengwk.kkstudio.agent.message;
  *
  * @author fengwk
  */
-public sealed interface AgentMessage permits AgentSystemMessage, AgentUserMessage, AgentAssistantMessage, AgentToolMessage {
-}
+public sealed interface AgentMessage
+    permits AgentSystemMessage, AgentUserMessage, AgentAssistantMessage, AgentToolMessage {}

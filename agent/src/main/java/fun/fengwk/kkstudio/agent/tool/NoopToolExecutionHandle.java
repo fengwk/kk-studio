@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.agent.tool;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
 /**
  * NoopToolExecutionHandle 表示没有下游资源需要取消的工具执行句柄。
  *
@@ -9,16 +11,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public class NoopToolExecutionHandle implements ToolExecutionHandle {
 
-    private final AtomicBoolean cancelled = new AtomicBoolean();
+  private final AtomicBoolean cancelled = new AtomicBoolean();
 
-    @Override
-    public void cancel() {
-        cancelled.set(true);
-    }
+  @Override
+  public void cancel() {
+    cancelled.set(true);
+  }
 
-    @Override
-    public boolean isCancelled() {
-        return cancelled.get();
-    }
-
+  @Override
+  public boolean isCancelled() {
+    return cancelled.get();
+  }
 }

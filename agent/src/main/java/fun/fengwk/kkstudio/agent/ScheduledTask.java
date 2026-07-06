@@ -7,9 +7,6 @@ package fun.fengwk.kkstudio.agent;
  */
 public interface ScheduledTask {
 
-    /**
-     * 取消本次调度。
-     */
-    void cancel();
-
+  /** 取消本次调度。 */
+  void cancel();
 }

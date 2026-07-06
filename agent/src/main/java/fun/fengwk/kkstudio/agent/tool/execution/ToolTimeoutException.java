@@ -7,27 +7,26 @@ package fun.fengwk.kkstudio.agent.tool.execution;
  */
 public class ToolTimeoutException extends RuntimeException {
 
-    private final String toolCallId;
-    private final String toolName;
-    private final long timeoutSeconds;
+  private final String toolCallId;
+  private final String toolName;
+  private final long timeoutSeconds;
 
-    public ToolTimeoutException(String toolCallId, String toolName, long timeoutSeconds) {
-        super("tool timeout after " + timeoutSeconds + " seconds: " + toolName);
-        this.toolCallId = toolCallId;
-        this.toolName = toolName;
-        this.timeoutSeconds = timeoutSeconds;
-    }
+  public ToolTimeoutException(String toolCallId, String toolName, long timeoutSeconds) {
+    super("tool timeout after " + timeoutSeconds + " seconds: " + toolName);
+    this.toolCallId = toolCallId;
+    this.toolName = toolName;
+    this.timeoutSeconds = timeoutSeconds;
+  }
 
-    public String getToolCallId() {
-        return toolCallId;
-    }
+  public String getToolCallId() {
+    return toolCallId;
+  }
 
-    public String getToolName() {
-        return toolName;
-    }
+  public String getToolName() {
+    return toolName;
+  }
 
-    public long getTimeoutSeconds() {
-        return timeoutSeconds;
-    }
-
+  public long getTimeoutSeconds() {
+    return timeoutSeconds;
+  }
 }

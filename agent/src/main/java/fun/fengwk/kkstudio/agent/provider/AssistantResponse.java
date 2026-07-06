@@ -2,10 +2,15 @@ package fun.fengwk.kkstudio.agent.provider;
 
 import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
+import java.util.List;
 import lombok.Builder;
 import lombok.Data;
 
+import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
+import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
 import java.util.List;
+import lombok.Builder;
+import lombok.Data;
 
 /**
  * AssistantResponse 表示一次 assistant complete 回调给出的最终完整结果。
@@ -16,24 +21,15 @@ import java.util.List;
 @Data
 public class AssistantResponse {
 
-    /**
-     * 最终完整文本。
-     */
-    private final String text;
+  /** 最终完整文本。 */
+  private final String text;
 
-    /**
-     * 最终完整 thinking。
-     */
-    private final String thinking;
+  /** 最终完整 thinking。 */
+  private final String thinking;
 
-    /**
-     * 最终完整工具调用列表。
-     */
-    private final List<ToolCall> toolCalls;
+  /** 最终完整工具调用列表。 */
+  private final List<ToolCall> toolCalls;
 
-    /**
-     * assistant 结束元信息。
-     */
-    private final AssistantMetadata metadata;
-
+  /** assistant 结束元信息。 */
+  private final AssistantMetadata metadata;
 }

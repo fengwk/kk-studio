@@ -6,10 +6,8 @@ package fun.fengwk.kkstudio.agent.session.payload;
  * @author fengwk
  */
 public enum ToolContentType {
-
-    text,
-    image,
-    audio,
-    video,
-
+  text,
+  image,
+  audio,
+  video,
 }

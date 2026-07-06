@@ -6,7 +6,6 @@ package fun.fengwk.kkstudio.agent;
  * @author fengwk
  */
 public enum AgentStatus {
-
-    idle, busy;
-
+  idle,
+  busy;
 }

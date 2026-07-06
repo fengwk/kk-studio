@@ -2,7 +2,10 @@ package fun.fengwk.kkstudio.agent.tool.execution;
 
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
+import java.util.List;
 
+import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
+import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
 import java.util.List;
 
 /**
@@ -12,10 +15,9 @@ import java.util.List;
  */
 public interface ToolExecutionListener {
 
-    void onPartial(List<IndexedToolContentDelta> partial);
+  void onPartial(List<IndexedToolContentDelta> partial);
 
-    void onComplete(List<ToolContent> result);
+  void onComplete(List<ToolContent> result);
 
-    void onError(Throwable error);
-
+  void onError(Throwable error);
 }

@@ -30,7 +30,7 @@
     "requiresTool": true,
     "bodyContains": [
       "contract-openai-response",
-      "\"gpt-5.4\"",
+      "\"MiniMax-M2.7\"",
       "\"echo\"",
       "\"text\""
     ],
@@ -60,7 +60,7 @@
   {
     "providerName": "google",
     "baseUrlPath": "/v1beta",
-    "expectedPath": "/v1beta/models/gemini-3.5-flash:streamGenerateContent?alt=sse",
+    "expectedPath": "/v1beta/models/MiniMax-M2.7:streamGenerateContent?alt=sse",
     "authHeaderName": "x-goog-api-key",
     "authHeaderValuePrefix": "",
     "requiredHeaderNames": [],

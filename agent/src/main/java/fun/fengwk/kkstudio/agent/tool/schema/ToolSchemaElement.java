@@ -5,12 +5,15 @@ package fun.fengwk.kkstudio.agent.tool.schema;
  *
  * @author fengwk
  */
-public sealed interface ToolSchemaElement permits ToolStringSchema, ToolIntegerSchema, ToolNumberSchema,
-    ToolBooleanSchema, ToolEnumSchema, ToolArraySchema, ToolObjectSchema {
+public sealed interface ToolSchemaElement
+    permits ToolStringSchema,
+        ToolIntegerSchema,
+        ToolNumberSchema,
+        ToolBooleanSchema,
+        ToolEnumSchema,
+        ToolArraySchema,
+        ToolObjectSchema {
 
-    /**
-     * 节点描述。
-     */
-    String getDescription();
-
+  /** 节点描述。 */
+  String getDescription();
 }

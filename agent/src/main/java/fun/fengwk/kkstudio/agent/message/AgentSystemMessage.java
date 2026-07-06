@@ -5,5 +5,4 @@ package fun.fengwk.kkstudio.agent.message;
  *
  * @author fengwk
  */
-public record AgentSystemMessage(String text) implements AgentMessage {
-}
+public record AgentSystemMessage(String text) implements AgentMessage {}

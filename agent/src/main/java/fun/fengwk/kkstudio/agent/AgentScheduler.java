@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.agent;
 
 import java.time.Duration;
 
+import java.time.Duration;
+
 /**
  * AgentScheduler 负责注册一次性的异步延迟触发。
  *
@@ -9,9 +11,6 @@ import java.time.Duration;
  */
 public interface AgentScheduler {
 
-    /**
-     * 在指定延迟后调度一次任务。
-     */
-    ScheduledTask schedule(Duration delay, Runnable task);
-
+  /** 在指定延迟后调度一次任务。 */
+  ScheduledTask schedule(Duration delay, Runnable task);
 }

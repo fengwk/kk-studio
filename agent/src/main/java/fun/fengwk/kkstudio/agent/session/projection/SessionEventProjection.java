@@ -3,7 +3,11 @@ package fun.fengwk.kkstudio.agent.session.projection;
 import fun.fengwk.kkstudio.agent.message.AgentMessage;
 import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
 import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
+import java.util.List;
 
+import fun.fengwk.kkstudio.agent.message.AgentMessage;
+import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
+import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
 import java.util.List;
 
 /**
@@ -11,7 +15,5 @@ import java.util.List;
  *
  * @author fengwk
  */
-public record SessionEventProjection(SetAgentInfoPayload agentInfo,
-                                      SetModelInfoPayload modelInfo,
-                                      List<AgentMessage> messages) {
-}
+public record SessionEventProjection(
+    SetAgentInfoPayload agentInfo, SetModelInfoPayload modelInfo, List<AgentMessage> messages) {}

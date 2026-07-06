@@ -427,8 +427,8 @@
       {
         "eventType": "set_model_info",
         "payload": {
-          "provider": "openai",
-          "model": "gpt-1",
+          "provider": "minimax",
+          "model": "MiniMax-M2.7",
           "variant": "low"
         }
       },
@@ -442,8 +442,8 @@
       {
         "eventType": "set_model_info",
         "payload": {
-          "provider": "anthropic",
-          "model": "claude-1",
+          "provider": "minimax",
+          "model": "MiniMax-M2.7",
           "variant": "high"
         }
       }
@@ -454,8 +454,8 @@
         "systemPrompt": "sys-2"
       },
       "modelInfo": {
-        "provider": "anthropic",
-        "model": "claude-1",
+        "provider": "minimax",
+        "model": "MiniMax-M2.7",
         "variant": "high"
       },
       "messages": [
