@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
@@ -19,7 +21,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
@@ -34,6 +39,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 /**
  * AgentSessionDefaultHeadAdvancer 的聚焦行为测试。
@@ -141,6 +147,42 @@ public class AgentSessionDefaultHeadAdvancerTest {
     assertEquals("session not found: se_missing", error.getMessage());
   }
 
+  /** 校验开启 debug 日志时，事件遍历分支仍然可以稳定推进默认 head。 */
+  @Test
+  public void shouldAdvanceWithDebugLoggingEnabled() {
+    Logger logger = (Logger) LoggerFactory.getLogger(AgentSessionDefaultHeadAdvancer.class);
+    Level previousLevel = logger.getLevel();
+    logger.setLevel(Level.DEBUG);
+    try {
+      InMemorySessionRepository sessionRepository = new InMemorySessionRepository();
+      InMemorySessionHeadRepository sessionHeadRepository = new InMemorySessionHeadRepository();
+      InMemorySessionEventRepository sessionEventRepository = new InMemorySessionEventRepository();
+      AgentSessionDefaultHeadAdvancer advancer =
+          new AgentSessionDefaultHeadAdvancer(
+              sessionRepository, sessionHeadRepository, sessionEventRepository, "default");
+
+      AgentSession session = new AgentSession();
+      session.setSessionId("se_debug");
+      session.setCurrentHeadEventId("root");
+      sessionRepository.sessions.put(session.getSessionId(), session);
+
+      sessionEventRepository.addEvent(
+          event(
+              session.getSessionId(),
+              1L,
+              "ev_debug",
+              "rn_debug",
+              LocalDateTime.of(2026, 1, 1, 10, 0, 0)));
+
+      advancer.advanceToLatest(session.getSessionId());
+
+      assertEquals("ev_debug", sessionRepository.lastCurrentHeadEventId);
+      assertEquals("ev_debug", sessionHeadRepository.lastHeadEventId);
+    } finally {
+      logger.setLevel(previousLevel);
+    }
+  }
+
   /** 校验构造入参必须完整，避免基座协作者在运行时带着空依赖工作。 */
   @Test
   public void shouldRejectInvalidConstructorArguments() {
@@ -163,6 +205,11 @@ public class AgentSessionDefaultHeadAdvancerTest {
         () ->
             new AgentSessionDefaultHeadAdvancer(
                 sessionRepository, sessionHeadRepository, null, "default"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new AgentSessionDefaultHeadAdvancer(
+                sessionRepository, sessionHeadRepository, sessionEventRepository, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
