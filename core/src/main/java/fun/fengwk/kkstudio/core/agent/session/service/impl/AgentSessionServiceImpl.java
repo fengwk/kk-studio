@@ -11,7 +11,6 @@ import fun.fengwk.convention4j.api.page.PageQuery;
 import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.run.service.AgentRunService;
-import fun.fengwk.kkstudio.core.agent.runtime.service.AgentRunRuntimeService;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionHeadRepository;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionRepository;
@@ -29,16 +28,9 @@ import fun.fengwk.kkstudio.share.model.AgentSessionMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionUpdateDTO;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
-import lombok.AllArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,7 +41,6 @@ import fun.fengwk.convention4j.api.page.PageQuery;
 import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.run.service.AgentRunService;
-import fun.fengwk.kkstudio.core.agent.runtime.service.AgentRunRuntimeService;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionHeadRepository;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionRepository;
@@ -67,27 +58,17 @@ import fun.fengwk.kkstudio.share.model.AgentSessionMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionUpdateDTO;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
-import lombok.AllArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * @author fengwk
  */
-@AllArgsConstructor
 @Service
 public class AgentSessionServiceImpl implements AgentSessionService {
-
-  private static final Logger log = LoggerFactory.getLogger(AgentSessionServiceImpl.class);
 
   private static final String DEFAULT_HEAD_NAME = "default";
   private static final String USER_MESSAGE_EVENT_TYPE = "user_message";
@@ -98,9 +79,35 @@ public class AgentSessionServiceImpl implements AgentSessionService {
   private final AgentSessionHeadRepository agentSessionHeadRepository;
   private final AgentSessionEventRepository agentSessionEventRepository;
   private final AgentRunService agentRunService;
-  private final AgentRunRuntimeService agentRunRuntimeService;
   private final AgentSessionConverter agentSessionConverter;
   private final ObjectMapper objectMapper;
+  private final AgentSessionDefaultHeadAdvancer sessionDefaultHeadAdvancer;
+  private final AgentSessionEventBranchLoader sessionEventBranchLoader;
+
+  public AgentSessionServiceImpl(
+      AgentDefinitionRepository agentDefinitionRepository,
+      AgentSessionRepository agentSessionRepository,
+      AgentSessionHeadRepository agentSessionHeadRepository,
+      AgentSessionEventRepository agentSessionEventRepository,
+      AgentRunService agentRunService,
+      AgentSessionConverter agentSessionConverter,
+      ObjectMapper objectMapper) {
+    this.agentDefinitionRepository = agentDefinitionRepository;
+    this.agentSessionRepository = agentSessionRepository;
+    this.agentSessionHeadRepository = agentSessionHeadRepository;
+    this.agentSessionEventRepository = agentSessionEventRepository;
+    this.agentRunService = agentRunService;
+    this.agentSessionConverter = agentSessionConverter;
+    this.objectMapper = objectMapper;
+    this.sessionDefaultHeadAdvancer =
+        new AgentSessionDefaultHeadAdvancer(
+            agentSessionRepository,
+            agentSessionHeadRepository,
+            agentSessionEventRepository,
+            DEFAULT_HEAD_NAME);
+    this.sessionEventBranchLoader =
+        new AgentSessionEventBranchLoader(agentSessionEventRepository, USER_MESSAGE_EVENT_TYPE);
+  }
 
   @Override
   public Page<AgentSessionDTO> pageSessions(PageQuery pageQuery) {
@@ -200,41 +207,8 @@ public class AgentSessionServiceImpl implements AgentSessionService {
     }
 
     agentRunService.createQueuedRun(runId, sessionId, userEvent.getEventId());
-    advanceHeadToLatest(sessionId);
+    sessionDefaultHeadAdvancer.advanceToLatest(sessionId);
     return convertEvent(userEvent);
-  }
-
-  private void advanceHeadToLatest(String sessionId) {
-    doAdvanceHeadToLatest(sessionId);
-  }
-
-  private void doAdvanceHeadToLatest(String sessionId) {
-    List<AgentSessionEvent> all = agentSessionEventRepository.listBySessionId(sessionId);
-    if (log.isDebugEnabled()) {
-      log.debug("advance all events count={}", all.size());
-      for (AgentSessionEvent event : all) {
-        log.debug("event id={} type={}", event.getId(), event.getEventType());
-      }
-    }
-    if (all.isEmpty()) {
-      return;
-    }
-    AgentSessionEvent latest = all.get(0);
-    for (AgentSessionEvent e : all) {
-      if (e.getCreateTime() == null) {
-        continue;
-      }
-      if (latest.getCreateTime() == null || e.getCreateTime().isAfter(latest.getCreateTime())) {
-        latest = e;
-      }
-    }
-    agentSessionRepository.compareAndSetCurrentHeadEventId(
-        sessionId,
-        agentSessionRepository.getBySessionId(sessionId).getCurrentHeadEventId(),
-        latest.getEventId(),
-        LocalDateTime.now());
-    // also push the default head's head_event_id
-    agentSessionHeadRepository.updateHeadEventId(sessionId, DEFAULT_HEAD_NAME, latest.getEventId());
   }
 
   @Override
@@ -252,46 +226,17 @@ public class AgentSessionServiceImpl implements AgentSessionService {
     if (effectiveHead == null || effectiveHead.isBlank()) {
       effectiveHead = session.getCurrentHeadEventId();
     }
-    List<AgentSessionEvent> branch = loadBranchEvents(sessionId, effectiveHead);
-    // 合并当前 head 对应 run 的 user_message（如果 user_message 不在 branch chain 里）。
-    // 历史同步流下 user_message.parentEventId=root 而 agent 事件链也是 root，user_message
-    // 与 agent 链平行存在，所以 listEvents 需要单独 merge 它。
-    // 现在异步流下 user_message.parentEventId 已经被 head 提前推到 user_message 自身，
-    // agent 事件链把 user_message 作为祖先包含进去，这里就要去重以免出现两次。
-    String runId = branch.isEmpty() ? null : branch.get(branch.size() - 1).getRunId();
-    Set<String> branchEventIds = new HashSet<>();
-    for (AgentSessionEvent e : branch) {
-      branchEventIds.add(e.getEventId());
-    }
-    List<AgentSessionEvent> events = new ArrayList<>();
-    if (runId != null) {
-      for (AgentSessionEvent e : agentSessionEventRepository.listBySessionId(sessionId)) {
-        if (USER_MESSAGE_EVENT_TYPE.equals(e.getEventType())
-            && runId.equals(e.getRunId())
-            && !branchEventIds.contains(e.getEventId())) {
-          events.add(e);
-        }
-      }
-    }
-    events.addAll(branch);
-    events.sort(
-        (a, b) -> {
-          long ai = a.getId() == null ? 0 : a.getId();
-          long bi = b.getId() == null ? 0 : b.getId();
-          return Long.compare(ai, bi);
-        });
-    List<AgentSessionEventDTO> result = new ArrayList<>(events.size());
-    for (AgentSessionEvent event : events) {
-      result.add(convertEvent(event));
-    }
-    return result;
+    return convertEvents(sessionEventBranchLoader.load(sessionId, effectiveHead));
   }
 
   @Override
   public List<AgentSessionEventDTO> listEventsAfter(String sessionId, String afterEventId) {
     requireSession(sessionId);
-    List<AgentSessionEvent> events =
-        agentSessionEventRepository.listBySessionIdAfterEventId(sessionId, afterEventId);
+    return convertEvents(
+        agentSessionEventRepository.listBySessionIdAfterEventId(sessionId, afterEventId));
+  }
+
+  private List<AgentSessionEventDTO> convertEvents(List<AgentSessionEvent> events) {
     List<AgentSessionEventDTO> result = new ArrayList<>(events.size());
     for (AgentSessionEvent event : events) {
       result.add(convertEvent(event));
@@ -330,68 +275,10 @@ public class AgentSessionServiceImpl implements AgentSessionService {
 
   private String serializeMessagePayload(String content) {
     try {
-      return objectMapper.writeValueAsString(
-          new HashMap<String, Object>() {
-            {
-              put("content", content);
-            }
-          });
+      return objectMapper.writeValueAsString(Map.of("content", content));
     } catch (JsonProcessingException e) {
       throw new IllegalStateException("serialize message payload failed", e);
     }
-  }
-
-  private List<AgentSessionEvent> loadUserMessagesOnly(String sessionId) {
-    return agentSessionEventRepository.listBySessionId(sessionId).stream()
-        .filter(e -> USER_MESSAGE_EVENT_TYPE.equals(e.getEventType()))
-        .sorted(
-            (a, b) ->
-                Long.compare(a.getId() == null ? 0 : a.getId(), b.getId() == null ? 0 : b.getId()))
-        .collect(Collectors.toList());
-  }
-
-  private List<AgentSessionEvent> loadBranchEvents(String sessionId, String headEventId) {
-    if (headEventId == null
-        || headEventId.isBlank()
-        || AgentSessionEvent.ROOT_EVENT_ID.equals(headEventId)) {
-      return loadUserMessagesOnly(sessionId);
-    }
-    List<AgentSessionEvent> all = agentSessionEventRepository.listBySessionId(sessionId);
-    if (all.isEmpty()) {
-      throw new IllegalStateException("session has no events: " + sessionId);
-    }
-    Map<String, AgentSessionEvent> byId = new HashMap<>();
-    for (AgentSessionEvent event : all) {
-      byId.put(event.getEventId(), event);
-    }
-    if (!byId.containsKey(headEventId)) {
-      throw new IllegalStateException("head event not found: " + headEventId);
-    }
-    List<AgentSessionEvent> branch = new ArrayList<>();
-    Set<String> visited = new HashSet<>();
-    String cursor = headEventId;
-    if (log.isDebugEnabled()) {
-      log.debug("loadBranchEvents walking from {}", cursor);
-    }
-    while (cursor != null) {
-      if (!visited.add(cursor)) {
-        throw new IllegalStateException("cycle detected at event: " + cursor);
-      }
-      AgentSessionEvent event = byId.get(cursor);
-      if (event == null) {
-        throw new IllegalStateException("missing event: " + cursor);
-      }
-      branch.add(event);
-      cursor = event.getParentEventId();
-      if (AgentSessionEvent.ROOT_EVENT_ID.equals(cursor)) {
-        break;
-      }
-    }
-    Collections.reverse(branch);
-    if (log.isDebugEnabled()) {
-      log.debug("loadBranchEvents branch size={}", branch.size());
-    }
-    return branch;
   }
 
   private AgentSessionHeadDTO convertHead(AgentSessionHead head) {
