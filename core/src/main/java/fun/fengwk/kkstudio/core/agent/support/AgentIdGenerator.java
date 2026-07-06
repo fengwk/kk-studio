@@ -1,0 +1,51 @@
+package fun.fengwk.kkstudio.core.agent.support;
+
+import fun.fengwk.convention4j.springboot.starter.snowflake.GlobalSnowflakeIdGenerator;
+
+import fun.fengwk.convention4j.springboot.starter.snowflake.GlobalSnowflakeIdGenerator;
+
+/**
+ * 资源 id 生成器。
+ *
+ * @author fengwk
+ */
+public final class AgentIdGenerator {
+
+  public static final String AGENT_PROVIDER = "agent_provider";
+  public static final String AGENT_MODEL = "agent_model";
+  public static final String AGENT_DEFINITION = "agent_definition";
+  public static final String AGENT_SESSION = "agent_session";
+  public static final String AGENT_SESSION_EVENT = "agent_session_event";
+  public static final String AGENT_SESSION_HEAD = "agent_session_head";
+  public static final String AGENT_RUN = "agent_run";
+
+  private AgentIdGenerator() {}
+
+  public static long nextProviderId() {
+    return GlobalSnowflakeIdGenerator.next(AGENT_PROVIDER);
+  }
+
+  public static long nextModelId() {
+    return GlobalSnowflakeIdGenerator.next(AGENT_MODEL);
+  }
+
+  public static long nextAgentId() {
+    return GlobalSnowflakeIdGenerator.next(AGENT_DEFINITION);
+  }
+
+  public static long nextSessionId() {
+    return GlobalSnowflakeIdGenerator.next(AGENT_SESSION);
+  }
+
+  public static long nextEventId() {
+    return GlobalSnowflakeIdGenerator.next(AGENT_SESSION_EVENT);
+  }
+
+  public static long nextHeadId() {
+    return GlobalSnowflakeIdGenerator.next(AGENT_SESSION_HEAD);
+  }
+
+  public static long nextRunId() {
+    return GlobalSnowflakeIdGenerator.next(AGENT_RUN);
+  }
+}

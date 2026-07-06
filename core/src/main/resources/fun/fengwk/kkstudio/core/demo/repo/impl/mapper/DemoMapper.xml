@@ -1,5 +1,46 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="fun.fengwk.kkstudio.core.demo.repo.impl.mapper.DemoMapper">
-    
+
+    <select id="pageAll" resultType="fun.fengwk.kkstudio.core.demo.repo.impl.model.DemoDO">
+        select `gmt_modified` as `gmtModified`,
+               `name` as `name`,
+               `id` as `id`,
+               `gmt_create` as `gmtCreate`,
+               `version` as `version`
+        from `demo`
+        limit #{offset}, #{limit}
+    </select>
+
+    <select id="countAll" resultType="long">
+        select count(*)
+        from `demo`
+    </select>
+
+    <delete id="deleteById" parameterType="long">
+        delete from `demo`
+        <where>
+            `id` = #{id}
+        </where>
+    </delete>
+
+    <insert id="insertSelective" parameterType="fun.fengwk.kkstudio.core.demo.repo.impl.model.DemoDO">
+        insert into `demo`
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="gmtModified != null">`gmt_modified`,</if>
+            <if test="name != null">`name`,</if>
+            <if test="id != null">`id`,</if>
+            <if test="gmtCreate != null">`gmt_create`,</if>
+            <if test="version != null">`version`,</if>
+        </trim>
+        values
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="gmtModified != null">#{gmtModified},</if>
+            <if test="name != null">#{name},</if>
+            <if test="id != null">#{id},</if>
+            <if test="gmtCreate != null">#{gmtCreate},</if>
+            <if test="version != null">#{version},</if>
+        </trim>
+    </insert>
+
 </mapper>

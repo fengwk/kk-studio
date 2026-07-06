@@ -14,16 +14,6 @@ spring:
       # gson GsonHttpMessageConvertersConfiguration
       preferred-json-mapper: jackson
 
-  data:
-    # redis连接配置
-    redis:
-      # 替换为redis {host}
-      host: {host}
-      # 替换为redis {port}
-      port: {port}
-      # 替换为redis {password}
-      password: {password}
-
   # mysql连接配置
   datasource:
     driver-class-name: com.mysql.jdbc.Driver
@@ -102,6 +92,8 @@ convention:
   snowflake-id:
     # 雪花id开始时间，固定不可变
     initial-timestamp: 1702214261706
+    # 当前 MVP 固定 worker id，不依赖 Redis 申请 worker id
+    worker-id: 0
 
   i18n:
     # i18n properties文件名称
