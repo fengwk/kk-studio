@@ -2,11 +2,14 @@ package fun.fengwk.kkstudio.core.ai.image.configuration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.net.Authenticator;
 import java.net.InetSocketAddress;
+import java.net.PasswordAuthentication;
 import java.net.Proxy;
 import java.net.ProxySelector;
 import java.net.URI;
@@ -14,7 +17,9 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
+import java.net.Authenticator;
 import java.net.InetSocketAddress;
+import java.net.PasswordAuthentication;
 import java.net.Proxy;
 import java.net.ProxySelector;
 import java.net.URI;
@@ -77,6 +82,40 @@ public class ProxySettingsTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> ProxySettings.fromEnvironment(Map.of("http_proxy", "http://:8080")));
+  }
+
+  @Test
+  public void shouldCreateProxyAuthenticatorOnlyWhenCredentialsExist() throws Exception {
+    ProxySettings withCredential =
+        ProxySettings.fromEnvironment(
+            Map.of("HTTPS_PROXY", "https://alice:secret@secure.example:8443"));
+    ProxySettings withoutCredential =
+        ProxySettings.fromEnvironment(Map.of("HTTPS_PROXY", "https://secure.example:8443"));
+
+    Authenticator authenticator = withCredential.toAuthenticator();
+    assertTrue(withCredential.isEnabled());
+    assertTrue(authenticator != null);
+    try {
+      Authenticator.setDefault(authenticator);
+      // 通过 JDK 代理认证回调验证凭据仅在代理请求时暴露。
+      PasswordAuthentication passwordAuthentication =
+          Authenticator.requestPasswordAuthentication(
+              "secure.example",
+              null,
+              8443,
+              "https",
+              "",
+              "",
+              URI.create("https://api.example").toURL(),
+              Authenticator.RequestorType.PROXY);
+      assertTrue(passwordAuthentication != null);
+      assertEquals("alice", passwordAuthentication.getUserName());
+      assertEquals("secret", new String(passwordAuthentication.getPassword()));
+    } finally {
+      Authenticator.setDefault(null);
+    }
+
+    assertNull(withoutCredential.toAuthenticator());
   }
 
   private void assertProxy(List<Proxy> proxies, Proxy.Type type, String host, int port) {
