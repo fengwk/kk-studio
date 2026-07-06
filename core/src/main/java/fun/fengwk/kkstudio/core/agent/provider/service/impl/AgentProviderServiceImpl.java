@@ -34,6 +34,7 @@ public class AgentProviderServiceImpl implements AgentProviderService {
   private final AgentProviderRepository agentProviderRepository;
   private final AgentProviderConverter agentProviderConverter;
   private final AgentProviderMutationFactory providerMutationFactory;
+  private final AgentProviderGuard providerGuard;
 
   @Override
   public Page<AgentProviderDTO> pageProviders(PageQuery pageQuery) {
@@ -44,10 +45,7 @@ public class AgentProviderServiceImpl implements AgentProviderService {
   public AgentProviderDTO createProvider(AgentProviderCreateDTO createDTO) {
     AgentProviderMutationFactory.Mutation mutation =
         providerMutationFactory.newCreateMutation(createDTO);
-    if (agentProviderRepository.getByName(mutation.name()) != null) {
-      throw new IllegalArgumentException("agent provider name already exists: " + mutation.name());
-    }
-
+    providerGuard.ensureNameAvailable(mutation.name());
     AgentProvider provider = providerMutationFactory.newProvider(mutation);
     if (!agentProviderRepository.create(provider)) {
       throw new IllegalStateException("create agent provider failed");
@@ -57,14 +55,10 @@ public class AgentProviderServiceImpl implements AgentProviderService {
 
   @Override
   public AgentProviderDTO updateProvider(long id, AgentProviderUpdateDTO updateDTO) {
-    AgentProvider existing = requireProvider(id);
+    AgentProvider existing = providerGuard.requireProvider(id);
     AgentProviderMutationFactory.Mutation mutation =
         providerMutationFactory.newUpdateMutation(existing.getName(), updateDTO);
-    if (!existing.getName().equals(mutation.name())
-        && agentProviderRepository.getByName(mutation.name()) != null) {
-      throw new IllegalArgumentException("agent provider name already exists: " + mutation.name());
-    }
-
+    providerGuard.ensureNameAvailable(existing.getName(), mutation.name());
     providerMutationFactory.apply(existing, mutation);
     if (!agentProviderRepository.updateById(existing)) {
       throw new IllegalStateException("update agent provider failed: " + id);
@@ -74,26 +68,10 @@ public class AgentProviderServiceImpl implements AgentProviderService {
 
   @Override
   public void deleteProvider(long id) {
-    requireProvider(id);
-    if (agentProviderRepository.hasModels(id)) {
-      throw new IllegalStateException("agent provider in use by models: " + id);
-    }
-    if (agentProviderRepository.hasAgents(id)) {
-      throw new IllegalStateException("agent provider in use by agents: " + id);
-    }
+    providerGuard.requireProvider(id);
+    providerGuard.ensureDeletable(id);
     if (!agentProviderRepository.deleteById(id)) {
       throw new IllegalStateException("delete agent provider failed: " + id);
     }
-  }
-
-  private AgentProvider requireProvider(long id) {
-    if (id <= 0) {
-      throw new IllegalArgumentException("agent provider id must be positive");
-    }
-    AgentProvider provider = agentProviderRepository.getById(id);
-    if (provider == null) {
-      throw new IllegalArgumentException("agent provider not found: " + id);
-    }
-    return provider;
   }
 }
