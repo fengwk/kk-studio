@@ -5,17 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.fail;
 
-import fun.fengwk.kkstudio.agent.model.ModelInfo;
-import fun.fengwk.kkstudio.agent.model.Variant;
-import fun.fengwk.kkstudio.agent.provider.AssistantResponse;
-import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandle;
-import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandler;
-import fun.fengwk.kkstudio.agent.provider.Provider;
-import fun.fengwk.kkstudio.agent.provider.ProviderType;
-import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
-import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
@@ -27,9 +16,9 @@ import fun.fengwk.kkstudio.agent.provider.Provider;
 import fun.fengwk.kkstudio.agent.provider.ProviderType;
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
+
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
-import org.junit.jupiter.api.Test;
 
 /**
  * @author fengwk

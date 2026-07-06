@@ -10,13 +10,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
-import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentModelUpdateDTO;
-import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
-import fun.fengwk.kkstudio.web.WebTestApplication;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -24,8 +17,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
@@ -33,12 +24,6 @@ import fun.fengwk.kkstudio.share.model.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
 import fun.fengwk.kkstudio.web.WebTestApplication;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * @author fengwk

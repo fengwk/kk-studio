@@ -4,23 +4,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import fun.fengwk.kkstudio.agent.provider.ProviderInfo;
-import fun.fengwk.kkstudio.agent.provider.ProviderManager;
-import fun.fengwk.kkstudio.agent.provider.ProviderType;
-import fun.fengwk.kkstudio.core.agent.runtime.provider.AgentProviderInfoResolver;
-import java.time.Duration;
-import java.util.concurrent.Executor;
-import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.agent.provider.ProviderInfo;
 import fun.fengwk.kkstudio.agent.provider.ProviderManager;
 import fun.fengwk.kkstudio.agent.provider.ProviderType;
 import fun.fengwk.kkstudio.core.agent.runtime.provider.AgentProviderInfoResolver;
+
 import java.time.Duration;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
-import org.junit.jupiter.api.Test;
 
 /**
  * @author fengwk
