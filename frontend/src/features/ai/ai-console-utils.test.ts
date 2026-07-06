@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  applyModelSelection,
-  emptyAgentDraft,
-  emptyModelDraft,
-  emptyProviderDraft,
   filterAgents,
   filterModels,
   filterProviders,
@@ -12,6 +8,12 @@ import {
   formatJsonSummary,
   includesSearch,
   resourceTitle,
+  toSessionTitleUpdate,
+} from '@/features/ai/ai-console-utils'
+import {
+  emptyAgentDraft,
+  emptyModelDraft,
+  emptyProviderDraft,
   toAgentDraft,
   toEditableAgent,
   toEditableAgentUpdate,
@@ -19,10 +21,9 @@ import {
   toEditableModelUpdate,
   toEditableProvider,
   toEditableProviderUpdate,
-  toSessionTitleUpdate,
   toModelDraft,
   toProviderDraft,
-} from '@/features/ai/ai-console-utils'
+} from '@/features/ai/ai-resource-draft-codecs'
 
 describe('ai-console-utils', () => {
   it('builds editable drafts from DTOs and default factories', () => {
@@ -373,30 +374,6 @@ describe('ai-console-utils', () => {
     expect(resourceTitle({ kind: 'provider', mode: 'create' })).toBe('新建 Provider')
     expect(resourceTitle({ kind: 'model', mode: 'edit' })).toBe('编辑 Model')
     expect(resourceTitle({ kind: 'agent', mode: 'create' })).toBe('新建 Agent')
-    expect(
-      applyModelSelection(
-        emptyAgentDraft(),
-        'minimax/MiniMax-M2.7',
-        [
-          {
-            id: 'model-1',
-            providerId: 'provider-1',
-            providerName: 'minimax',
-            name: 'MiniMax-M2.7',
-            description: null,
-            capabilitiesJson: null,
-            limitJson: null,
-            pricingJson: null,
-            defaultVariant: 'creative',
-            variantsJson: '[{"name":"creative"},{"name":"default"}]',
-            createTime: '2026-06-20T02:00:00',
-            updateTime: '2026-06-20T02:00:00',
-          },
-        ],
-      ),
-    ).toMatchObject({ defaultProvider: 'minimax', defaultModel: 'MiniMax-M2.7', defaultVariant: 'creative' })
-    expect(applyModelSelection(emptyAgentDraft(), 'invalid')).toEqual(emptyAgentDraft())
-
     expect(formatJsonSummary(null)).toBe('default')
     expect(formatJsonSummary('[{"name":"default"}]')).toBe('1 item')
     expect(formatJsonSummary('{"vision":true,"audio":false}')).toBe('2 keys')

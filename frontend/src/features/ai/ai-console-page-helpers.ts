@@ -13,7 +13,7 @@ import {
   toEditableProviderUpdate,
   toModelDraft,
   toProviderDraft,
-} from '@/features/ai/ai-console-utils'
+} from '@/features/ai/ai-resource-draft-codecs'
 import type {
   AgentDefinitionCreateDTO,
   AgentDefinitionDTO,

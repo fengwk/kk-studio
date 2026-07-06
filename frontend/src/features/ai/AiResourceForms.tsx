@@ -3,7 +3,7 @@ import { StringListEditor, VariantListEditor } from '@/features/ai/AiResourceFie
 import { CapabilitiesSection, LimitsSection, PricingSection } from '@/features/ai/AiResourceMetadataSections'
 import type { AgentDraft, ModelDraft, ProviderDraft, VariantDraft } from '@/features/ai/ai-console-types'
 import { applyAgentModelSelection, variantOptionsFromDraft, variantOptionsFromModel } from '@/features/ai/ai-draft-normalizers'
-import { emptyAgentDraft } from '@/features/ai/ai-console-utils'
+import { emptyAgentDraft } from '@/features/ai/ai-resource-draft-codecs'
 import { blankVariant } from '@/features/ai/ai-resource-form-drafts'
 import { providerTypes } from '@/features/ai/ai-console-types'
 
