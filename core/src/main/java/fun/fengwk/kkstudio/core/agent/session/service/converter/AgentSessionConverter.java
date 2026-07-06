@@ -1,11 +1,19 @@
 package fun.fengwk.kkstudio.core.agent.session.service.converter;
 
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSession;
+import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
+import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionHead;
 import fun.fengwk.kkstudio.share.model.AgentSessionDTO;
+import fun.fengwk.kkstudio.share.model.AgentSessionEventDTO;
+import fun.fengwk.kkstudio.share.model.AgentSessionHeadDTO;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSession;
+import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
+import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionHead;
 import fun.fengwk.kkstudio.share.model.AgentSessionDTO;
+import fun.fengwk.kkstudio.share.model.AgentSessionEventDTO;
+import fun.fengwk.kkstudio.share.model.AgentSessionHeadDTO;
 import org.springframework.stereotype.Component;
 
 /**
@@ -28,5 +36,33 @@ public class AgentSessionConverter {
     sessionDTO.setCreateTime(session.getCreateTime());
     sessionDTO.setUpdateTime(session.getUpdateTime());
     return sessionDTO;
+  }
+
+  public AgentSessionEventDTO convert(AgentSessionEvent event) {
+    if (event == null) {
+      return null;
+    }
+    AgentSessionEventDTO eventDTO = new AgentSessionEventDTO();
+    eventDTO.setEventId(event.getEventId());
+    eventDTO.setSessionId(event.getSessionId());
+    eventDTO.setParentEventId(event.getParentEventId());
+    eventDTO.setRunId(event.getRunId());
+    eventDTO.setEventType(event.getEventType());
+    eventDTO.setPayloadType(event.getPayloadType());
+    eventDTO.setPayloadJson(event.getPayloadJson());
+    eventDTO.setCreateTime(event.getCreateTime());
+    return eventDTO;
+  }
+
+  public AgentSessionHeadDTO convert(AgentSessionHead head) {
+    if (head == null) {
+      return null;
+    }
+    AgentSessionHeadDTO headDTO = new AgentSessionHeadDTO();
+    headDTO.setHeadId(head.getHeadId());
+    headDTO.setSessionId(head.getSessionId());
+    headDTO.setHeadName(head.getHeadName());
+    headDTO.setHeadEventId(head.getHeadEventId());
+    return headDTO;
   }
 }

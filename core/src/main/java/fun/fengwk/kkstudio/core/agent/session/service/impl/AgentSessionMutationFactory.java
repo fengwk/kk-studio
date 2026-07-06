@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.core.agent.support.AgentIdentifierGenerator;
 import fun.fengwk.kkstudio.share.model.AgentSessionCreateDTO;
 import java.time.LocalDateTime;
 import java.util.Map;
+import org.springframework.stereotype.Component;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,12 +26,14 @@ import fun.fengwk.kkstudio.core.agent.support.AgentIdentifierGenerator;
 import fun.fengwk.kkstudio.share.model.AgentSessionCreateDTO;
 import java.time.LocalDateTime;
 import java.util.Map;
+import org.springframework.stereotype.Component;
 
 /**
  * AgentSessionMutationFactory 负责组装会话写路径上的持久化对象。
  *
  * @author fengwk
  */
+@Component
 final class AgentSessionMutationFactory {
 
   private static final String DEFAULT_HEAD_NAME = "default";

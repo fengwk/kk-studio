@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionHeadRepository;
@@ -19,30 +20,30 @@ import java.time.LocalDateTime;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 /**
  * AgentSessionDefaultHeadAdvancer 负责把默认 head 推进到当前会话的最新事件。
  *
  * @author fengwk
  */
+@Component
 final class AgentSessionDefaultHeadAdvancer {
 
   private static final Logger log = LoggerFactory.getLogger(AgentSessionDefaultHeadAdvancer.class);
+  private static final String DEFAULT_HEAD_NAME = "default";
 
   private final AgentSessionRepository sessionRepository;
   private final AgentSessionHeadRepository sessionHeadRepository;
   private final AgentSessionEventRepository sessionEventRepository;
-  private final String defaultHeadName;
 
   AgentSessionDefaultHeadAdvancer(
       AgentSessionRepository sessionRepository,
       AgentSessionHeadRepository sessionHeadRepository,
-      AgentSessionEventRepository sessionEventRepository,
-      String defaultHeadName) {
+      AgentSessionEventRepository sessionEventRepository) {
     this.sessionRepository = requireNonNull(sessionRepository, "sessionRepository");
     this.sessionHeadRepository = requireNonNull(sessionHeadRepository, "sessionHeadRepository");
     this.sessionEventRepository = requireNonNull(sessionEventRepository, "sessionEventRepository");
-    this.defaultHeadName = requireNonBlank(defaultHeadName, "defaultHeadName");
   }
 
   void advanceToLatest(String sessionId) {
@@ -64,7 +65,7 @@ final class AgentSessionDefaultHeadAdvancer {
     }
     sessionRepository.compareAndSetCurrentHeadEventId(
         sessionId, session.getCurrentHeadEventId(), latestEvent.getEventId(), LocalDateTime.now());
-    sessionHeadRepository.updateHeadEventId(sessionId, defaultHeadName, latestEvent.getEventId());
+    sessionHeadRepository.updateHeadEventId(sessionId, DEFAULT_HEAD_NAME, latestEvent.getEventId());
   }
 
   private AgentSessionEvent findLatestEvent(List<AgentSessionEvent> events) {
@@ -86,13 +87,6 @@ final class AgentSessionDefaultHeadAdvancer {
   private static <T> T requireNonNull(T value, String name) {
     if (value == null) {
       throw new IllegalArgumentException(name + " must not be null");
-    }
-    return value;
-  }
-
-  private static String requireNonBlank(String value, String name) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(name + " must not be blank");
     }
     return value;
   }

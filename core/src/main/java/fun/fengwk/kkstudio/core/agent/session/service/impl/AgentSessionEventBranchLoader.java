@@ -13,6 +13,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
@@ -27,26 +28,26 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 /**
  * AgentSessionEventBranchLoader 负责按 head 装载会话分支，并在需要时补回并行的 user_message。
  *
  * @author fengwk
  */
+@Component
 final class AgentSessionEventBranchLoader {
 
   private static final Logger log = LoggerFactory.getLogger(AgentSessionEventBranchLoader.class);
+  private static final String USER_MESSAGE_EVENT_TYPE = "user_message";
 
   private static final Comparator<AgentSessionEvent> EVENT_ORDER =
       Comparator.comparingLong(event -> event.getId() == null ? 0L : event.getId());
 
   private final AgentSessionEventRepository sessionEventRepository;
-  private final String userMessageEventType;
 
-  AgentSessionEventBranchLoader(
-      AgentSessionEventRepository sessionEventRepository, String userMessageEventType) {
+  AgentSessionEventBranchLoader(AgentSessionEventRepository sessionEventRepository) {
     this.sessionEventRepository = requireNonNull(sessionEventRepository, "sessionEventRepository");
-    this.userMessageEventType = requireNonBlank(userMessageEventType, "userMessageEventType");
   }
 
   List<AgentSessionEvent> load(String sessionId, String headEventId) {
@@ -55,7 +56,7 @@ final class AgentSessionEventBranchLoader {
         || headEventId.isBlank()
         || AgentSessionEvent.ROOT_EVENT_ID.equals(headEventId)) {
       return allEvents.stream()
-          .filter(event -> userMessageEventType.equals(event.getEventType()))
+          .filter(event -> USER_MESSAGE_EVENT_TYPE.equals(event.getEventType()))
           .sorted(EVENT_ORDER)
           .collect(Collectors.toList());
     }
@@ -118,7 +119,7 @@ final class AgentSessionEventBranchLoader {
 
     List<AgentSessionEvent> merged = new ArrayList<>();
     for (AgentSessionEvent event : allEvents) {
-      if (userMessageEventType.equals(event.getEventType())
+      if (USER_MESSAGE_EVENT_TYPE.equals(event.getEventType())
           && runId.equals(event.getRunId())
           && !branchEventIds.contains(event.getEventId())) {
         merged.add(event);
@@ -132,13 +133,6 @@ final class AgentSessionEventBranchLoader {
   private static <T> T requireNonNull(T value, String name) {
     if (value == null) {
       throw new IllegalArgumentException(name + " must not be null");
-    }
-    return value;
-  }
-
-  private static String requireNonBlank(String value, String name) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(name + " must not be blank");
     }
     return value;
   }

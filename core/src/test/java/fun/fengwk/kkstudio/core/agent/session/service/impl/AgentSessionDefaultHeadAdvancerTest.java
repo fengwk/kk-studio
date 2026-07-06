@@ -56,7 +56,7 @@ public class AgentSessionDefaultHeadAdvancerTest {
     InMemorySessionEventRepository sessionEventRepository = new InMemorySessionEventRepository();
     AgentSessionDefaultHeadAdvancer advancer =
         new AgentSessionDefaultHeadAdvancer(
-            sessionRepository, sessionHeadRepository, sessionEventRepository, "default");
+            sessionRepository, sessionHeadRepository, sessionEventRepository);
 
     AgentSession session = new AgentSession();
     session.setSessionId("se_1");
@@ -89,7 +89,7 @@ public class AgentSessionDefaultHeadAdvancerTest {
     InMemorySessionEventRepository sessionEventRepository = new InMemorySessionEventRepository();
     AgentSessionDefaultHeadAdvancer advancer =
         new AgentSessionDefaultHeadAdvancer(
-            sessionRepository, sessionHeadRepository, sessionEventRepository, "default");
+            sessionRepository, sessionHeadRepository, sessionEventRepository);
 
     AgentSession session = new AgentSession();
     session.setSessionId("se_2");
@@ -110,7 +110,7 @@ public class AgentSessionDefaultHeadAdvancerTest {
     InMemorySessionEventRepository sessionEventRepository = new InMemorySessionEventRepository();
     AgentSessionDefaultHeadAdvancer advancer =
         new AgentSessionDefaultHeadAdvancer(
-            sessionRepository, sessionHeadRepository, sessionEventRepository, "default");
+            sessionRepository, sessionHeadRepository, sessionEventRepository);
 
     AgentSession session = new AgentSession();
     session.setSessionId("se_3");
@@ -136,7 +136,7 @@ public class AgentSessionDefaultHeadAdvancerTest {
     InMemorySessionEventRepository sessionEventRepository = new InMemorySessionEventRepository();
     AgentSessionDefaultHeadAdvancer advancer =
         new AgentSessionDefaultHeadAdvancer(
-            sessionRepository, sessionHeadRepository, sessionEventRepository, "default");
+            sessionRepository, sessionHeadRepository, sessionEventRepository);
 
     sessionEventRepository.addEvent(
         event("se_missing", 1L, "ev_1", "rn_1", LocalDateTime.of(2026, 1, 1, 10, 0, 0)));
@@ -159,7 +159,7 @@ public class AgentSessionDefaultHeadAdvancerTest {
       InMemorySessionEventRepository sessionEventRepository = new InMemorySessionEventRepository();
       AgentSessionDefaultHeadAdvancer advancer =
           new AgentSessionDefaultHeadAdvancer(
-              sessionRepository, sessionHeadRepository, sessionEventRepository, "default");
+              sessionRepository, sessionHeadRepository, sessionEventRepository);
 
       AgentSession session = new AgentSession();
       session.setSessionId("se_debug");
@@ -194,27 +194,13 @@ public class AgentSessionDefaultHeadAdvancerTest {
         IllegalArgumentException.class,
         () ->
             new AgentSessionDefaultHeadAdvancer(
-                null, sessionHeadRepository, sessionEventRepository, "default"));
+                null, sessionHeadRepository, sessionEventRepository));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new AgentSessionDefaultHeadAdvancer(
-                sessionRepository, null, sessionEventRepository, "default"));
+        () -> new AgentSessionDefaultHeadAdvancer(sessionRepository, null, sessionEventRepository));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new AgentSessionDefaultHeadAdvancer(
-                sessionRepository, sessionHeadRepository, null, "default"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new AgentSessionDefaultHeadAdvancer(
-                sessionRepository, sessionHeadRepository, sessionEventRepository, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new AgentSessionDefaultHeadAdvancer(
-                sessionRepository, sessionHeadRepository, sessionEventRepository, " "));
+        () -> new AgentSessionDefaultHeadAdvancer(sessionRepository, sessionHeadRepository, null));
   }
 
   private static AgentSessionEvent event(

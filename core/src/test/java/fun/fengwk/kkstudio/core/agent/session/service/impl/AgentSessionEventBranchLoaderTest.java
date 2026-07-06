@@ -27,7 +27,7 @@ public class AgentSessionEventBranchLoaderTest {
   public void shouldLoadRootHeadAsOrderedUserMessagesOnly() {
     InMemorySessionEventRepository sessionEventRepository = new InMemorySessionEventRepository();
     AgentSessionEventBranchLoader loader =
-        new AgentSessionEventBranchLoader(sessionEventRepository, "user_message");
+        new AgentSessionEventBranchLoader(sessionEventRepository);
 
     sessionEventRepository.addEvent(event(2L, "ev_assistant", "root", "rn_1", "assistant_start"));
     sessionEventRepository.addEvent(event(3L, "ev_user_2", "root", "rn_2", "user_message"));
@@ -43,7 +43,7 @@ public class AgentSessionEventBranchLoaderTest {
   public void shouldMergeParallelUserMessageIntoBranch() {
     InMemorySessionEventRepository sessionEventRepository = new InMemorySessionEventRepository();
     AgentSessionEventBranchLoader loader =
-        new AgentSessionEventBranchLoader(sessionEventRepository, "user_message");
+        new AgentSessionEventBranchLoader(sessionEventRepository);
 
     sessionEventRepository.addEvent(event(1L, "ev_user", "root", "rn_1", "user_message"));
     sessionEventRepository.addEvent(event(2L, "ev_start", "root", "rn_1", "assistant_start"));
@@ -59,7 +59,7 @@ public class AgentSessionEventBranchLoaderTest {
   public void shouldRejectCyclicBranch() {
     InMemorySessionEventRepository sessionEventRepository = new InMemorySessionEventRepository();
     AgentSessionEventBranchLoader loader =
-        new AgentSessionEventBranchLoader(sessionEventRepository, "user_message");
+        new AgentSessionEventBranchLoader(sessionEventRepository);
 
     sessionEventRepository.addEvent(event(1L, "ev_a", "ev_b", "rn_1", "assistant_start"));
     sessionEventRepository.addEvent(event(2L, "ev_b", "ev_a", "rn_1", "assistant_delta"));
