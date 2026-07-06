@@ -32,10 +32,12 @@
             <groupId>fun.fengwk.convention4j</groupId>
             <artifactId>convention4j-tracer-reactor</artifactId>
         </dependency>
+        <!-- 当前 MVP 固定 convention.snowflake-id.worker-id，不依赖 Redis 申请 worker id。
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
+        -->
         <dependency>
             <groupId>org.mybatis.spring.boot</groupId>
             <artifactId>mybatis-spring-boot-starter</artifactId>
@@ -47,6 +49,11 @@
         <dependency>
             <groupId>mysql</groupId>
             <artifactId>mysql-connector-java</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
@@ -77,5 +84,14 @@
             <artifactId>convention4j-spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
-    </dependencies>
+</dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
 </project>
