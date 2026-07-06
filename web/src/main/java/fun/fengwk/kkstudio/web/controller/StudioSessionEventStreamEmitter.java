@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import lombok.AllArgsConstructor;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -18,7 +17,6 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** 统一封装 session 事件流的 SSE 轮询、去重、心跳与空闲收口逻辑。 */
-@AllArgsConstructor
 @Component
 final class StudioSessionEventStreamEmitter {
 
@@ -30,8 +28,16 @@ final class StudioSessionEventStreamEmitter {
   private final AgentSessionService agentSessionService;
   private final AgentRunService agentRunService;
 
-  @Qualifier("agentEventStreamTaskExecutor")
   private final Executor eventStreamTaskExecutor;
+
+  StudioSessionEventStreamEmitter(
+      AgentSessionService agentSessionService,
+      AgentRunService agentRunService,
+      @Qualifier("agentEventStreamTaskExecutor") Executor eventStreamTaskExecutor) {
+    this.agentSessionService = agentSessionService;
+    this.agentRunService = agentRunService;
+    this.eventStreamTaskExecutor = eventStreamTaskExecutor;
+  }
 
   SseEmitter openStream(String sessionId, String headEventId, Long idleTimeoutMillis) {
     agentSessionService.getSession(sessionId);
