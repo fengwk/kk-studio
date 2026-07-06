@@ -103,7 +103,7 @@ buildNumber.properties
 
 node_modules
 dist
+coverage
+.opencode/
 
 *.pid
-
-!scripts/*.jar
