@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.agent.session.service.impl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
@@ -93,6 +94,80 @@ public class AgentSessionDefaultHeadAdvancerTest {
 
     assertNull(sessionRepository.lastCurrentHeadEventId);
     assertNull(sessionHeadRepository.lastHeadEventId);
+  }
+
+  /** 校验当首个事件缺少 createTime 时，后续带时间戳的事件仍然可以成为最新事件。 */
+  @Test
+  public void shouldAdvanceWhenLatestStartsWithMissingCreateTime() {
+    InMemorySessionRepository sessionRepository = new InMemorySessionRepository();
+    InMemorySessionHeadRepository sessionHeadRepository = new InMemorySessionHeadRepository();
+    InMemorySessionEventRepository sessionEventRepository = new InMemorySessionEventRepository();
+    AgentSessionDefaultHeadAdvancer advancer =
+        new AgentSessionDefaultHeadAdvancer(
+            sessionRepository, sessionHeadRepository, sessionEventRepository, "default");
+
+    AgentSession session = new AgentSession();
+    session.setSessionId("se_3");
+    session.setCurrentHeadEventId("root");
+    sessionRepository.sessions.put(session.getSessionId(), session);
+
+    sessionEventRepository.addEvent(event(session.getSessionId(), 1L, "ev_old", "rn_1", null));
+    sessionEventRepository.addEvent(
+        event(
+            session.getSessionId(), 2L, "ev_new", "rn_1", LocalDateTime.of(2026, 1, 1, 10, 1, 0)));
+
+    advancer.advanceToLatest(session.getSessionId());
+
+    assertEquals("ev_new", sessionRepository.lastCurrentHeadEventId);
+    assertEquals("ev_new", sessionHeadRepository.lastHeadEventId);
+  }
+
+  /** 校验当 session 已丢失时会明确失败，而不是静默吞掉 head 推进异常。 */
+  @Test
+  public void shouldRejectMissingSessionWhenAdvancing() {
+    InMemorySessionRepository sessionRepository = new InMemorySessionRepository();
+    InMemorySessionHeadRepository sessionHeadRepository = new InMemorySessionHeadRepository();
+    InMemorySessionEventRepository sessionEventRepository = new InMemorySessionEventRepository();
+    AgentSessionDefaultHeadAdvancer advancer =
+        new AgentSessionDefaultHeadAdvancer(
+            sessionRepository, sessionHeadRepository, sessionEventRepository, "default");
+
+    sessionEventRepository.addEvent(
+        event("se_missing", 1L, "ev_1", "rn_1", LocalDateTime.of(2026, 1, 1, 10, 0, 0)));
+
+    IllegalStateException error =
+        assertThrows(IllegalStateException.class, () -> advancer.advanceToLatest("se_missing"));
+
+    assertEquals("session not found: se_missing", error.getMessage());
+  }
+
+  /** 校验构造入参必须完整，避免基座协作者在运行时带着空依赖工作。 */
+  @Test
+  public void shouldRejectInvalidConstructorArguments() {
+    InMemorySessionRepository sessionRepository = new InMemorySessionRepository();
+    InMemorySessionHeadRepository sessionHeadRepository = new InMemorySessionHeadRepository();
+    InMemorySessionEventRepository sessionEventRepository = new InMemorySessionEventRepository();
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new AgentSessionDefaultHeadAdvancer(
+                null, sessionHeadRepository, sessionEventRepository, "default"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new AgentSessionDefaultHeadAdvancer(
+                sessionRepository, null, sessionEventRepository, "default"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new AgentSessionDefaultHeadAdvancer(
+                sessionRepository, sessionHeadRepository, null, "default"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new AgentSessionDefaultHeadAdvancer(
+                sessionRepository, sessionHeadRepository, sessionEventRepository, " "));
   }
 
   private static AgentSessionEvent event(
