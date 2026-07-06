@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState, type FormEventHandler } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useState, type FormEventHandler } from 'react'
 import {
   buildResourceSubmitPlan,
   createAgentEditorPlan,
@@ -12,18 +11,9 @@ import {
 } from '@/features/ai/ai-console-page-helpers'
 import type { AgentDraft, ConfirmModalState, ModelDraft, ProviderDraft, ResourceModal } from '@/features/ai/ai-console-types'
 import { normalizeAgentDraftSelection, normalizeModelDraftDefaultVariant, normalizeModelDraftProvider } from '@/features/ai/ai-draft-normalizers'
-import { agentService } from '@/shared/api/agent-service'
-import type {
-  AgentDefinitionCreateDTO,
-  AgentDefinitionUpdateDTO,
-  AgentModelCreateDTO,
-  AgentModelUpdateDTO,
-  AgentProviderCreateDTO,
-  AgentProviderUpdateDTO,
-  AgentResourceId,
-} from '@/shared/api/contracts'
-import { queryKeys } from '@/shared/lib/query-keys'
-import { useInvalidateMutation } from '@/features/ai/useInvalidateMutation'
+import type { AgentResourceId } from '@/shared/api/contracts'
+import { useAiConsoleResourceMutations } from '@/features/ai/useAiConsoleResourceMutations'
+import { useAiConsoleResourceQueries } from '@/features/ai/useAiConsoleResourceQueries'
 
 export function useAiConsoleResourceController() {
   const [resourceModal, setResourceModal] = useState<ResourceModal | null>(null)
@@ -32,79 +22,13 @@ export function useAiConsoleResourceController() {
   const [modelDraft, setModelDraft] = useState<ModelDraft>(() => createModelEditorPlan([], []).modelDraft)
   const [agentDraft, setAgentDraft] = useState<AgentDraft>(() => createAgentEditorPlan([]).agentDraft)
 
-  const providersQuery = useQuery({
-    queryKey: queryKeys.providers.list,
-    queryFn: () => agentService.listProviders(),
-  })
-
-  const modelsQuery = useQuery({
-    queryKey: queryKeys.models.list,
-    queryFn: () => agentService.listModels(),
-  })
-
-  const agentsQuery = useQuery({
-    queryKey: queryKeys.agents.list,
-    queryFn: () => agentService.listAgents(),
-  })
-
-  const providers = useMemo(() => providersQuery.data?.results ?? [], [providersQuery.data?.results])
-  const models = useMemo(() => modelsQuery.data?.results ?? [], [modelsQuery.data?.results])
-  const agents = useMemo(() => agentsQuery.data?.results ?? [], [agentsQuery.data?.results])
+  const { providersQuery, modelsQuery, agentsQuery, providers, models, agents } = useAiConsoleResourceQueries()
 
   const closeResourceModal = () => setResourceModal(null)
-
-  const createProviderMutation = useInvalidateMutation({
-    mutationFn: (provider: AgentProviderCreateDTO) => agentService.createProvider(provider),
-    invalidateQueryKeys: [queryKeys.providers.list],
-    onSuccess: closeResourceModal,
-  })
-
-  const updateProviderMutation = useInvalidateMutation({
-    mutationFn: ({ id, data }: { id: AgentResourceId; data: AgentProviderUpdateDTO }) => agentService.updateProvider(id, data),
-    invalidateQueryKeys: [queryKeys.providers.list, queryKeys.models.list, queryKeys.agents.list],
-    onSuccess: closeResourceModal,
-  })
-
-  const deleteProviderMutation = useInvalidateMutation({
-    mutationFn: (id: AgentResourceId) => agentService.deleteProvider(id),
-    invalidateQueryKeys: [queryKeys.providers.list, queryKeys.models.list, queryKeys.agents.list],
-    onSuccess: () => setDeleteConfirm(null),
-  })
-
-  const createModelMutation = useInvalidateMutation({
-    mutationFn: (model: AgentModelCreateDTO) => agentService.createModel(model),
-    invalidateQueryKeys: [queryKeys.models.list],
-    onSuccess: closeResourceModal,
-  })
-
-  const updateModelMutation = useInvalidateMutation({
-    mutationFn: ({ id, data }: { id: AgentResourceId; data: AgentModelUpdateDTO }) => agentService.updateModel(id, data),
-    invalidateQueryKeys: [queryKeys.models.list, queryKeys.agents.list],
-    onSuccess: closeResourceModal,
-  })
-
-  const deleteModelMutation = useInvalidateMutation({
-    mutationFn: (id: AgentResourceId) => agentService.deleteModel(id),
-    invalidateQueryKeys: [queryKeys.models.list, queryKeys.agents.list],
-    onSuccess: () => setDeleteConfirm(null),
-  })
-
-  const createAgentMutation = useInvalidateMutation({
-    mutationFn: (agent: AgentDefinitionCreateDTO) => agentService.createAgent(agent),
-    invalidateQueryKeys: [queryKeys.agents.list],
-    onSuccess: closeResourceModal,
-  })
-
-  const updateAgentMutation = useInvalidateMutation({
-    mutationFn: ({ id, data }: { id: AgentResourceId; data: AgentDefinitionUpdateDTO }) => agentService.updateAgent(id, data),
-    invalidateQueryKeys: [queryKeys.agents.list, queryKeys.sessions.list],
-    onSuccess: closeResourceModal,
-  })
-
-  const deleteAgentMutation = useInvalidateMutation({
-    mutationFn: (id: AgentResourceId) => agentService.deleteAgent(id),
-    invalidateQueryKeys: [queryKeys.agents.list, queryKeys.sessions.list],
-    onSuccess: () => setDeleteConfirm(null),
+  const closeDeleteConfirm = () => setDeleteConfirm(null)
+  const mutations = useAiConsoleResourceMutations({
+    onResourceSaved: closeResourceModal,
+    onDeleteCompleted: closeDeleteConfirm,
   })
 
   useEffect(() => {
@@ -179,7 +103,7 @@ export function useAiConsoleResourceController() {
       description: `将删除 Provider ${providerName}。`,
       confirmLabel: '确认删除',
       tone: 'danger',
-      onConfirm: () => deleteProviderMutation.mutate(providerId),
+      onConfirm: () => mutations.deleteProvider(providerId),
     })
   }
 
@@ -189,7 +113,7 @@ export function useAiConsoleResourceController() {
       description: `将删除 Model ${providerName}/${modelName}。`,
       confirmLabel: '确认删除',
       tone: 'danger',
-      onConfirm: () => deleteModelMutation.mutate(modelId),
+      onConfirm: () => mutations.deleteModel(modelId),
     })
   }
 
@@ -199,7 +123,7 @@ export function useAiConsoleResourceController() {
       description: `将删除 Agent ${agentName}。已有会话会保留，但不能再用该 Agent 新建运行。`,
       confirmLabel: '确认删除',
       tone: 'danger',
-      onConfirm: () => deleteAgentMutation.mutate(agentId),
+      onConfirm: () => mutations.deleteAgent(agentId),
     })
   }
 
@@ -213,26 +137,26 @@ export function useAiConsoleResourceController() {
 
     if (plan.kind === 'provider') {
       if (plan.mode === 'edit') {
-        updateProviderMutation.mutate({ id: plan.id, data: plan.data })
+        mutations.updateProvider(plan.id, plan.data)
       } else {
-        createProviderMutation.mutate(plan.data)
+        mutations.createProvider(plan.data)
       }
       return
     }
 
     if (plan.kind === 'model') {
       if (plan.mode === 'edit') {
-        updateModelMutation.mutate({ id: plan.id, data: plan.data })
+        mutations.updateModel(plan.id, plan.data)
       } else {
-        createModelMutation.mutate(plan.data)
+        mutations.createModel(plan.data)
       }
       return
     }
 
     if (plan.mode === 'edit') {
-      updateAgentMutation.mutate({ id: plan.id, data: plan.data })
+      mutations.updateAgent(plan.id, plan.data)
     } else {
-      createAgentMutation.mutate(plan.data)
+      mutations.createAgent(plan.data)
     }
   }
 
@@ -243,19 +167,10 @@ export function useAiConsoleResourceController() {
     providers,
     models,
     agents,
-    resourceMutationError:
-      createProviderMutation.error ||
-      updateProviderMutation.error ||
-      deleteProviderMutation.error ||
-      createModelMutation.error ||
-      updateModelMutation.error ||
-      deleteModelMutation.error ||
-      createAgentMutation.error ||
-      updateAgentMutation.error ||
-      deleteAgentMutation.error,
-    providerDeletePending: deleteProviderMutation.isPending,
-    modelDeletePending: deleteModelMutation.isPending,
-    agentDeletePending: deleteAgentMutation.isPending,
+    resourceMutationError: mutations.resourceMutationError,
+    providerDeletePending: mutations.providerDeletePending,
+    modelDeletePending: mutations.modelDeletePending,
+    agentDeletePending: mutations.agentDeletePending,
     resourceEditorModal: {
       modal: resourceModal,
       providers,
@@ -263,13 +178,7 @@ export function useAiConsoleResourceController() {
       providerDraft,
       modelDraft,
       agentDraft,
-      pending:
-        createProviderMutation.isPending ||
-        updateProviderMutation.isPending ||
-        createModelMutation.isPending ||
-        updateModelMutation.isPending ||
-        createAgentMutation.isPending ||
-        updateAgentMutation.isPending,
+      pending: mutations.resourceEditorPending,
       onClose: closeResourceModal,
       onProviderDraftChange: setProviderDraft,
       onModelDraftChange: setModelDraft,
@@ -278,8 +187,8 @@ export function useAiConsoleResourceController() {
     },
     deleteConfirmModal: {
       modal: deleteConfirm,
-      pending: deleteProviderMutation.isPending || deleteModelMutation.isPending || deleteAgentMutation.isPending,
-      onClose: () => setDeleteConfirm(null),
+      pending: mutations.deleteConfirmPending,
+      onClose: closeDeleteConfirm,
     },
     openCreateProvider,
     openEditProvider,
