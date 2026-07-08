@@ -16,7 +16,7 @@ merge into agent_model (
     1, 1, 'MiniMax-M2.7',
     'MiniMax-M2.7 model for local development and real-agent verification.',
     null, null, null,
-    'default', '[{"name":"default","temperature":0.1,"maxOutputTokens":256}]',
+    'default', '[{"name":"default","temperature":1.0,"topP":0.95,"maxOutputTokens":16384}]',
     current_timestamp(), current_timestamp(), 0
 );
 
