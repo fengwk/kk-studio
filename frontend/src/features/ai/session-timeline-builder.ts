@@ -1,6 +1,12 @@
 import type { AgentSessionEventDTO } from '@/shared/api/contracts'
 import { asRecord, getString, parsePayload } from '@/features/ai/session-event-payload'
-import { appendAssistantDelta, beginAssistantAttempt, finalizeAssistant, type AssistantProjectionState } from '@/features/ai/session-timeline-assistant'
+import {
+  appendAssistantTextDelta,
+  appendAssistantThinkingDelta,
+  beginAssistantAttempt,
+  finalizeAssistant,
+  type AssistantProjectionState,
+} from '@/features/ai/session-timeline-assistant'
 import { appendToolDelta, finalizeTool, startToolProjection, type ToolProjectionState } from '@/features/ai/session-timeline-tools'
 import type { DialogueMessage, RuntimeContext, SessionTimeline } from '@/features/ai/session-event-types'
 
@@ -35,9 +41,20 @@ export function buildSessionTimeline(events: AgentSessionEventDTO[]): SessionTim
       case 'assistant_start':
         activeAssistant = beginAssistantAttempt(activeAssistant, messages, event)
         break
-      case 'assistant_delta':
-        activeAssistant = appendAssistantDelta(activeAssistant, messages, event, getString(payload.textDelta))
+      case 'assistant_delta': {
+        // textDelta and thinkingDelta are mutually exclusive within a single
+        // assistant_delta event, but either may be present across events, so
+        // dispatch each independently.
+        const textDelta = getString(payload.textDelta)
+        const thinkingDelta = getString(payload.thinkingDelta)
+        if (textDelta) {
+          activeAssistant = appendAssistantTextDelta(activeAssistant, messages, event, textDelta)
+        }
+        if (thinkingDelta) {
+          activeAssistant = appendAssistantThinkingDelta(activeAssistant, messages, event, thinkingDelta)
+        }
         break
+      }
       case 'assistant_end':
         activeAssistant = finalizeAssistant(activeAssistant, messages, event, 'done', asRecord(payload.metadata))
         break

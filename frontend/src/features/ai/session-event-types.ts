@@ -22,6 +22,10 @@ interface BaseDialogueMessage {
 export interface TextDialogueMessage extends BaseDialogueMessage {
   role: 'user' | 'assistant' | 'system'
   text: string
+  // Optional assistant thinking text. Only present when the assistant actually
+  // emitted thinking during this attempt; absent for plain text responses and
+  // for non-assistant roles.
+  thinking?: string
   metadata?: Record<string, unknown>
 }
 

@@ -1143,6 +1143,60 @@ textarea::placeholder {
   line-height: 1.65;
 }
 
+.msg-thinking {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  background: rgba(39, 39, 42, 0.6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+  color: var(--fg-muted);
+}
+
+.msg-thinking summary {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  outline: none;
+}
+
+.msg-thinking summary::-webkit-details-marker {
+  display: none;
+}
+
+.msg-thinking summary svg {
+  width: 12px;
+  height: 12px;
+  transition: transform 0.15s ease;
+}
+
+.msg-thinking[open] summary svg {
+  transform: rotate(0deg);
+}
+
+.msg-thinking:not([open]) summary svg {
+  transform: rotate(-90deg);
+}
+
+.msg-thinking-body {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: rgba(9, 9, 11, 0.6);
+  border-radius: var(--radius-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 320px;
+  overflow-y: auto;
+  color: var(--fg-dim);
+}
+
+
 .tool-message {
   display: flex;
   flex-direction: column;

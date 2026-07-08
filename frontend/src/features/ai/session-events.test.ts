@@ -178,6 +178,48 @@ describe('session-events', () => {
     expect(timeline.messages[0]).toMatchObject({ role: 'user', runId: null, text: '' })
     expect(timeline.messages[1]).toMatchObject({ role: 'assistant', text: 'Assistant failed', status: 'error' })
   })
+
+
+  it('captures thinking deltas emitted alongside visible assistant text', () => {
+    const timeline = buildSessionTimeline([
+      event("e1", "assistant_start", {}, "run-1"),
+      event("e2", "assistant_delta", { textDelta: "final " }, "run-1"),
+      event("e3", "assistant_delta", { thinkingDelta: "verify " }, "run-1"),
+      event("e4", "assistant_delta", { textDelta: "answer" }, "run-1"),
+      event("e5", "assistant_delta", { thinkingDelta: "more thinking" }, "run-1"),
+      event("e6", "assistant_end", {}, "run-1"),
+    ])
+
+    expect(timeline.messages).toHaveLength(1)
+    expect(timeline.messages[0]).toMatchObject({
+      role: "assistant",
+      text: "final answer",
+      thinking: "verify more thinking",
+      status: "done",
+    })
+  })
+
+  it('flushes thinking that arrives before the first text delta', () => {
+    // Providers like MiniMax reasoning models stream thinking deltas first and
+    // only start emitting text once the model commits to an answer. The early
+    // thinking must still be preserved on the resulting message.
+    const timeline = buildSessionTimeline([
+      event("e1", "assistant_start", {}, "run-1"),
+      event("e2", "assistant_delta", { thinkingDelta: "step 1 " }, "run-1"),
+      event("e3", "assistant_delta", { thinkingDelta: "step 2 " }, "run-1"),
+      event("e4", "assistant_delta", { textDelta: "final answer" }, "run-1"),
+      event("e5", "assistant_delta", { thinkingDelta: "verify" }, "run-1"),
+      event("e6", "assistant_end", {}, "run-1"),
+    ])
+
+    expect(timeline.messages).toHaveLength(1)
+    expect(timeline.messages[0]).toMatchObject({
+      role: "assistant",
+      text: "final answer",
+      thinking: "step 1 step 2 verify",
+      status: "done",
+    })
+  })
 })
 
 function event(eventId: string, eventType: string, payload: Record<string, unknown>, runId: string | null): AgentSessionEventDTO {
