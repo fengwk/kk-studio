@@ -508,6 +508,19 @@ public class AgentMainLoopTest {
           };
       ToolCallExecutor toolCallExecutor =
           new ToolCallExecutor(new DirectExecutorService(), scheduler);
+      AgentRuntimeConfigResolver resolver = new AgentRuntimeConfigResolver(
+          agentRegistry,
+          new StubModelRegistry(),
+          new StubProviderRegistry(),
+          providerInfo -> provider,
+          toolRegistry);
+      AgentFactory.Dependencies deps = new AgentFactory.Dependencies(
+          toolRegistry,
+          toolCallExecutor,
+          sessionManager,
+          new DefaultSessionEventMessageProjector(),
+          events::add,
+          resolver);
       return agentFactory.load(
           session.getSessionId(),
           "assistant",
@@ -515,17 +528,9 @@ public class AgentMainLoopTest {
           "gpt-test",
           "high",
           userRequestQueue,
-          events::add,
-          toolRegistry,
-          toolCallExecutor,
-          sessionManager,
-          new DefaultSessionEventMessageProjector(),
-          agentRegistry,
-          new StubModelRegistry(),
-          new StubProviderRegistry(),
-          providerInfo -> provider,
           scheduler,
-          modelRetryConfig);
+          modelRetryConfig,
+          deps);
     }
 
     private List<SessionEventType> eventTypes() {

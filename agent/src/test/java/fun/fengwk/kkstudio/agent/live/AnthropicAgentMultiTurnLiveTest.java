@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.agent.AgentEventHandler;
 import fun.fengwk.kkstudio.agent.AgentFactory;
 import fun.fengwk.kkstudio.agent.AgentInfo;
 import fun.fengwk.kkstudio.agent.AgentRegistry;
+import fun.fengwk.kkstudio.agent.AgentRuntimeConfigResolver;
 import fun.fengwk.kkstudio.agent.AgentScheduler;
 import fun.fengwk.kkstudio.agent.AgentStatus;
 import fun.fengwk.kkstudio.agent.ModelRetryConfig;
@@ -184,6 +185,20 @@ public class AnthropicAgentMultiTurnLiveTest {
             task.run();
             return () -> {};
           };
+      DefaultToolRegistry toolRegistry = new DefaultToolRegistry();
+      AgentRuntimeConfigResolver resolver = new AgentRuntimeConfigResolver(
+          new LiveAgentRegistry(),
+          new LiveModelRegistry(),
+          new LiveProviderRegistry(providerManager.providerInfo),
+          providerManager,
+          toolRegistry);
+      AgentFactory.Dependencies deps = new AgentFactory.Dependencies(
+          toolRegistry,
+          new ToolCallExecutor(new DirectExecutorService(), scheduler),
+          sessionManager,
+          new DefaultSessionEventMessageProjector(),
+          new RecordingAgentEventHandler(events),
+          resolver);
       return new AgentFactory()
           .load(
               session.getSessionId(),
@@ -192,17 +207,9 @@ public class AnthropicAgentMultiTurnLiveTest {
               MODEL,
               VARIANT,
               new InMemoryUserRequestQueue(),
-              new RecordingAgentEventHandler(events),
-              new DefaultToolRegistry(),
-              new ToolCallExecutor(new DirectExecutorService(), scheduler),
-              sessionManager,
-              new DefaultSessionEventMessageProjector(),
-              new LiveAgentRegistry(),
-              new LiveModelRegistry(),
-              new LiveProviderRegistry(providerManager.providerInfo),
-              providerManager,
               scheduler,
-              ModelRetryConfig.builder().maxRetries(0).build());
+              ModelRetryConfig.builder().maxRetries(0).build(),
+              deps);
     }
 
     private List<SessionEventType> eventTypes() {

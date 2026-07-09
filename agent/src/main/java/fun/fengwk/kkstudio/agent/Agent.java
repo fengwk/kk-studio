@@ -3,42 +3,15 @@ package fun.fengwk.kkstudio.agent;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.agent.message.AgentMessage;
-import fun.fengwk.kkstudio.agent.message.AgentUserMessage;
-import fun.fengwk.kkstudio.agent.model.ModelRegistry;
-import fun.fengwk.kkstudio.agent.provider.AssistantResponse;
-import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandle;
-import fun.fengwk.kkstudio.agent.provider.AssistantResponseHandler;
-import fun.fengwk.kkstudio.agent.provider.ProviderManager;
-import fun.fengwk.kkstudio.agent.provider.ProviderRegistry;
 import fun.fengwk.kkstudio.agent.session.Branch;
 import fun.fengwk.kkstudio.agent.session.Session;
-import fun.fengwk.kkstudio.agent.session.SessionEvent;
 import fun.fengwk.kkstudio.agent.session.SessionEventType;
-import fun.fengwk.kkstudio.agent.session.SessionManager;
+import fun.fengwk.kkstudio.agent.session.SessionEvent;
 import fun.fengwk.kkstudio.agent.session.payload.AbortPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantDeltaPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantEndPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantErrorPayload;
-import fun.fengwk.kkstudio.agent.session.payload.AssistantStartPayload;
-import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
-import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
-import fun.fengwk.kkstudio.agent.session.payload.Payload;
 import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
 import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
-import fun.fengwk.kkstudio.agent.session.payload.ToolDeltaPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolEndPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolErrorPayload;
-import fun.fengwk.kkstudio.agent.session.payload.ToolStartPayload;
-import fun.fengwk.kkstudio.agent.session.projection.SessionEventMessageProjector;
 import fun.fengwk.kkstudio.agent.session.projection.SessionEventProjection;
-import fun.fengwk.kkstudio.agent.tool.ToolCallRequest;
-import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandle;
-import fun.fengwk.kkstudio.agent.tool.ToolRegistration;
-import fun.fengwk.kkstudio.agent.tool.ToolRegistry;
-import fun.fengwk.kkstudio.agent.tool.execution.ToolCallExecutor;
-import fun.fengwk.kkstudio.agent.tool.execution.ToolExecutionListener;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -49,31 +22,30 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Agent 是一次会话执行上下文的承载对象。
+ * Agent 是主链异步状态机：CAS 调度、信号队列与 drain、对外 API。
+ *
+ * <p>会话视图与事件持久化委托给 {@link AgentSessionWriter}；assistant 调用生命周期委托给
+ * {@link AgentAssistantRunner}；tool batch 生命周期委托给 {@link AgentToolOrchestrator}；
+ * 运行时配置解析通过 {@link AgentRuntimeConfigResolver} 由本类持有并在每次主循环转
+ * assistant 之前调用。
  *
  * @author fengwk
  */
 @Slf4j
 public class Agent {
 
-  private final UserRequestQueue userRequestQueue;
-  private final AgentEventHandler agentEventHandler;
-  private final ToolRegistry toolRegistry;
-  private final ToolCallExecutor toolCallExecutor;
-  private final SessionManager sessionManager;
-  private final SessionEventMessageProjector sessionEventMessageProjector;
+  private final AgentSessionWriter writer;
+  private final AgentAssistantRunner assistant;
+  private final AgentToolOrchestrator tools;
   private final AgentRuntimeConfigResolver runtimeConfigResolver;
+  private final UserRequestQueue userRequestQueue;
   private final AgentScheduler agentScheduler;
   private final ModelRetryConfig modelRetryConfig;
+
   private final AtomicReference<AgentStatus> statusRef = new AtomicReference<>(AgentStatus.idle);
   private final AtomicBoolean drainingSignals = new AtomicBoolean();
   private final ConcurrentLinkedQueue<AgentSignal> signalQueue = new ConcurrentLinkedQueue<>();
-  private Session session;
-  private Branch branch;
-  private List<SessionEvent> branchEvents;
-  private List<AgentMessage> projectedMessages;
-  private SetAgentInfoPayload currentAgentInfo;
-  private SetModelInfoPayload currentModelInfo;
+
   private String agentName;
   private String provider;
   private String model;
@@ -81,78 +53,54 @@ public class Agent {
   private AgentRunContext currentRun;
 
   public Agent(
-      Session session,
-      Branch branch,
-      List<SessionEvent> branchEvents,
-      SetAgentInfoPayload currentAgentInfo,
-      SetModelInfoPayload currentModelInfo,
+      AgentSessionWriter writer,
+      AgentAssistantRunner assistant,
+      AgentToolOrchestrator tools,
+      AgentRuntimeConfigResolver runtimeConfigResolver,
+      UserRequestQueue userRequestQueue,
+      AgentScheduler agentScheduler,
+      ModelRetryConfig modelRetryConfig,
       String agentName,
       String provider,
       String model,
-      String variant,
-      UserRequestQueue userRequestQueue,
-      AgentEventHandler agentEventHandler,
-      ToolRegistry toolRegistry,
-      ToolCallExecutor toolCallExecutor,
-      SessionManager sessionManager,
-      SessionEventMessageProjector sessionEventMessageProjector,
-      AgentRegistry agentRegistry,
-      ModelRegistry modelRegistry,
-      ProviderRegistry providerRegistry,
-      ProviderManager providerManager,
-      AgentScheduler agentScheduler,
-      ModelRetryConfig modelRetryConfig) {
-    this.session = requireNonNull(session, "session");
-    this.branch = requireNonNull(branch, "branch");
-    this.branchEvents = new ArrayList<>(requireNonNull(branchEvents, "branchEvents"));
-    this.currentAgentInfo = currentAgentInfo;
-    this.currentModelInfo = currentModelInfo;
+      String variant) {
+    this.writer = requireNonNull(writer, "writer");
+    this.assistant = requireNonNull(assistant, "assistant");
+    this.tools = requireNonNull(tools, "tools");
+    this.runtimeConfigResolver = requireNonNull(runtimeConfigResolver, "runtimeConfigResolver");
+    this.userRequestQueue = requireNonNull(userRequestQueue, "userRequestQueue");
+    this.agentScheduler = requireNonNull(agentScheduler, "agentScheduler");
+    this.modelRetryConfig = requireNonNull(modelRetryConfig, "modelRetryConfig");
     this.agentName = requireNonBlank(agentName, "agentName");
     this.provider = provider;
     this.model = model;
     this.variant = variant;
-    this.userRequestQueue = requireNonNull(userRequestQueue, "userRequestQueue");
-    this.agentEventHandler = requireNonNull(agentEventHandler, "agentEventHandler");
-    this.toolRegistry = requireNonNull(toolRegistry, "toolRegistry");
-    this.toolCallExecutor = requireNonNull(toolCallExecutor, "toolCallExecutor");
-    this.sessionManager = requireNonNull(sessionManager, "sessionManager");
-    this.sessionEventMessageProjector =
-        requireNonNull(sessionEventMessageProjector, "sessionEventMessageProjector");
-    this.runtimeConfigResolver =
-        new AgentRuntimeConfigResolver(
-            requireNonNull(agentRegistry, "agentRegistry"),
-            requireNonNull(modelRegistry, "modelRegistry"),
-            requireNonNull(providerRegistry, "providerRegistry"),
-            requireNonNull(providerManager, "providerManager"),
-            toolRegistry);
-    this.agentScheduler = requireNonNull(agentScheduler, "agentScheduler");
-    this.modelRetryConfig = requireNonNull(modelRetryConfig, "modelRetryConfig");
-    this.projectedMessages = List.of();
-    refreshProjection();
   }
 
+  // ========== 公开 API（保持签名不变） ==========
+
   public Session getSession() {
-    return session;
+    return writer.getSession();
   }
 
   public Branch getBranch() {
-    return branch;
+    return writer.getBranch();
   }
 
   public List<SessionEvent> getBranchEvents() {
-    return List.copyOf(branchEvents);
+    return writer.getBranchEvents();
   }
 
   public List<AgentMessage> getProjectedMessages() {
-    return projectedMessages;
+    return writer.getProjectedMessages();
   }
 
   public SetAgentInfoPayload getCurrentAgentInfo() {
-    return currentAgentInfo;
+    return writer.getCurrentAgentInfo();
   }
 
   public SetModelInfoPayload getCurrentModelInfo() {
-    return currentModelInfo;
+    return writer.getCurrentModelInfo();
   }
 
   public String getAgentName() {
@@ -171,6 +119,7 @@ public class Agent {
     this.provider = provider;
     this.model = model;
     this.variant = variant;
+    assistant.setModelSelection(provider, model, variant);
   }
 
   public void submit(UserRequest userRequest) {
@@ -196,47 +145,17 @@ public class Agent {
   }
 
   public SessionEventProjection projection() {
-    return sessionEventMessageProjector.projectForRuntime(branchEvents);
+    return writer.projection();
   }
 
-  protected SessionEvent appendEvent(SessionEventType eventType, Payload payload) {
-    if (eventType == null) {
-      throw new IllegalArgumentException("eventType must not be null");
-    }
+  // ========== 信号队列与 drain ==========
 
-    String previousHeadEventId = branch.headEventId();
-    SessionEvent event =
-        SessionEvent.newEvent(session.getSessionId(), eventType, previousHeadEventId, payload);
-    branch = sessionManager.appendEvent(branch, event);
-    branchEvents.add(event);
-
-    if (sessionManager.compareAndSetCurrentHeadEventId(
-        session.getSessionId(), previousHeadEventId, branch.headEventId())) {
-      session.setCurrentHeadEventId(branch.headEventId());
-    }
-
-    refreshProjection();
-    agentEventHandler.onEvent(event);
-    return event;
-  }
-
-  /** 当队列非空且当前空闲时，尝试启动一次主 loop。 */
-  private void triggerMainLoop() {
-    if (userRequestQueue.isEmpty()) {
-      return;
-    }
-    if (!statusRef.compareAndSet(AgentStatus.idle, AgentStatus.busy)) {
-      return;
-    }
-    enqueueSignal(StartLoopSignal.INSTANCE);
-  }
-
-  private void enqueueSignal(AgentSignal signal) {
+  /** 给协作者调用：把 provider/tool callback 包成的信号入队。 */
+  void enqueueSignal(AgentSignal signal) {
     signalQueue.offer(signal);
     drainSignals();
   }
 
-  /** 串行消费全部待处理信号，确保 branch event 追加不并发。 */
   private void drainSignals() {
     while (true) {
       if (!drainingSignals.compareAndSet(false, true)) {
@@ -270,28 +189,39 @@ public class Agent {
       onAbort(abortSignal);
     } else if (signal instanceof SwitchBranchSignal switchBranchSignal) {
       onSwitchBranch(switchBranchSignal);
-    } else if (signal instanceof AssistantTextDeltaSignal textDeltaSignal) {
-      onAssistantTextDelta(textDeltaSignal);
-    } else if (signal instanceof AssistantThinkingDeltaSignal thinkingDeltaSignal) {
-      onAssistantThinkingDelta(thinkingDeltaSignal);
-    } else if (signal instanceof AssistantToolCallDeltaSignal toolCallDeltaSignal) {
-      onAssistantToolCallDelta(toolCallDeltaSignal);
-    } else if (signal instanceof AssistantToolCallCompleteSignal toolCallCompleteSignal) {
-      onAssistantToolCallComplete(toolCallCompleteSignal);
-    } else if (signal instanceof AssistantCompleteSignal assistantCompleteSignal) {
-      onAssistantComplete(assistantCompleteSignal);
-    } else if (signal instanceof AssistantErrorSignal assistantErrorSignal) {
-      onAssistantError(assistantErrorSignal);
-    } else if (signal instanceof ToolPartialSignal toolPartialSignal) {
-      onToolPartial(toolPartialSignal);
-    } else if (signal instanceof ToolCompleteSignal toolCompleteSignal) {
-      onToolComplete(toolCompleteSignal);
-    } else if (signal instanceof ToolErrorSignal toolErrorSignal) {
-      onToolError(toolErrorSignal);
+    } else if (signal instanceof AssistantTextDeltaSignal t) {
+      assistant.onTextDelta(currentRun, t);
+    } else if (signal instanceof AssistantThinkingDeltaSignal t) {
+      assistant.onThinkingDelta(currentRun, t);
+    } else if (signal instanceof AssistantToolCallDeltaSignal t) {
+      assistant.onToolCallDelta(currentRun, t);
+    } else if (signal instanceof AssistantToolCallCompleteSignal t) {
+      assistant.onToolCallComplete(currentRun, t);
+    } else if (signal instanceof AssistantCompleteSignal c) {
+      assistant.onComplete(currentRun, c);
+    } else if (signal instanceof AssistantErrorSignal e) {
+      onAssistantError(e);
+    } else if (signal instanceof ToolPartialSignal p) {
+      tools.onPartial(currentRun, p);
+    } else if (signal instanceof ToolCompleteSignal c) {
+      tools.onComplete(currentRun, c);
+    } else if (signal instanceof ToolErrorSignal e) {
+      tools.onError(currentRun, e);
     }
   }
 
-  /** 启动一轮新的主 loop。 */
+  // ========== 主循环启动/终止 ==========
+
+  private void triggerMainLoop() {
+    if (userRequestQueue.isEmpty()) {
+      return;
+    }
+    if (!statusRef.compareAndSet(AgentStatus.idle, AgentStatus.busy)) {
+      return;
+    }
+    enqueueSignal(StartLoopSignal.INSTANCE);
+  }
+
   private void onStartLoop() {
     if (currentRun != null) {
       return;
@@ -302,340 +232,36 @@ public class Agent {
       return;
     }
     currentRun = new AgentRunContext();
-    currentRun.retryCount = 0;
     startAssistantAttempt(userMessages);
   }
 
   private void onRetryAssistant(RetryAssistantSignal signal) {
-    if (currentRun != signal.runContext() || currentRun == null || currentRun.aborted) {
+    if (currentRun == null || currentRun != signal.runContext() || currentRun.aborted) {
       return;
     }
     currentRun.scheduledTask = null;
     startAssistantAttempt(List.of());
   }
 
-  private void onSwitchBranch(SwitchBranchSignal signal) {
-    cancelCurrentRunResources();
-    currentRun = null;
-    statusRef.set(AgentStatus.idle);
-    this.branch = signal.branch();
-    this.branchEvents = new ArrayList<>(signal.branchEvents());
-    refreshProjection();
-    if (!userRequestQueue.isEmpty()) {
-      triggerMainLoop();
-    }
-  }
-
-  private void startAssistantAttempt(List<String> userMessages) {
-    if (currentRun == null || currentRun.aborted) {
-      return;
-    }
-
-    AssistantAttemptState attemptState = new AssistantAttemptState(currentRun);
-    try {
-      AgentRuntimeConfigResolver.ResolvedRuntimeConfig runtimeConfig = resolveRuntimeConfig();
-      List<AgentMessage> messagesForModel = withUserMessages(projectedMessages, userMessages);
-      AssistantStartPayload assistantStartPayload = new AssistantStartPayload();
-      assistantStartPayload.setUserMessages(userMessages);
-      appendEvent(SessionEventType.assistant_start, assistantStartPayload);
-      currentRun.activeAssistant = attemptState;
-
-      AssistantResponseHandle handle =
-          runtimeConfig
-              .getProvider()
-              .asyncChat(
-                  messagesForModel,
-                  runtimeConfig.getModelInfo(),
-                  runtimeConfig.getVariant(),
-                  runtimeConfig.getToolInfos(),
-                  new AssistantResponseHandler() {
-                    @Override
-                    public void onTextDelta(String textDelta, AssistantResponseHandle handle) {
-                      enqueueSignal(new AssistantTextDeltaSignal(attemptState, textDelta));
-                    }
-
-                    @Override
-                    public void onThinkingDelta(
-                        String thinkingDelta, AssistantResponseHandle handle) {
-                      enqueueSignal(new AssistantThinkingDeltaSignal(attemptState, thinkingDelta));
-                    }
-
-                    @Override
-                    public void onToolCallDelta(
-                        IndexedToolCallDelta toolCallDelta, AssistantResponseHandle handle) {
-                      enqueueSignal(new AssistantToolCallDeltaSignal(attemptState, toolCallDelta));
-                    }
-
-                    @Override
-                    public void onToolCallComplete(
-                        Integer index, ToolCall toolCall, AssistantResponseHandle handle) {
-                      enqueueSignal(
-                          new AssistantToolCallCompleteSignal(attemptState, index, toolCall));
-                    }
-
-                    @Override
-                    public void onComplete(
-                        AssistantResponse response, AssistantResponseHandle handle) {
-                      enqueueSignal(new AssistantCompleteSignal(attemptState, response));
-                    }
-
-                    @Override
-                    public void onError(Throwable error, AssistantResponseHandle handle) {
-                      enqueueSignal(new AssistantErrorSignal(attemptState, error));
-                    }
-                  });
-      attemptState.handle = handle;
-    } catch (Throwable error) {
-      if (isActiveAssistant(attemptState)) {
-        enqueueSignal(new AssistantErrorSignal(attemptState, error));
-      } else {
-        failCurrentRun(error);
-      }
-    }
-  }
-
-  private List<AgentMessage> withUserMessages(
-      List<AgentMessage> messages, List<String> userMessages) {
-    if (userMessages == null || userMessages.isEmpty()) {
-      return List.copyOf(messages);
-    }
-    List<AgentMessage> result = new ArrayList<>(messages);
-    for (String userMessage : userMessages) {
-      if (userMessage != null && !userMessage.isBlank()) {
-        result.add(new AgentUserMessage(userMessage));
-      }
-    }
-    return List.copyOf(result);
-  }
-
-  private void onAssistantTextDelta(AssistantTextDeltaSignal signal) {
-    if (!isActiveAssistant(signal.attemptState())
-        || signal.textDelta() == null
-        || signal.textDelta().isEmpty()) {
-      return;
-    }
-    signal.attemptState().text.append(signal.textDelta());
-    AssistantDeltaPayload payload = new AssistantDeltaPayload();
-    payload.setTextDelta(signal.textDelta());
-    appendEvent(SessionEventType.assistant_delta, payload);
-  }
-
-  private void onAssistantThinkingDelta(AssistantThinkingDeltaSignal signal) {
-    if (!isActiveAssistant(signal.attemptState())
-        || signal.thinkingDelta() == null
-        || signal.thinkingDelta().isEmpty()) {
-      return;
-    }
-    signal.attemptState().thinking.append(signal.thinkingDelta());
-    AssistantDeltaPayload payload = new AssistantDeltaPayload();
-    payload.setThinkingDelta(signal.thinkingDelta());
-    appendEvent(SessionEventType.assistant_delta, payload);
-  }
-
-  private void onAssistantToolCallDelta(AssistantToolCallDeltaSignal signal) {
-    if (!isActiveAssistant(signal.attemptState()) || signal.toolCallDelta() == null) {
-      return;
-    }
-    signal.attemptState().applyToolCallDelta(signal.toolCallDelta());
-    AssistantDeltaPayload payload = new AssistantDeltaPayload();
-    payload.setToolCallsDelta(List.of(signal.toolCallDelta()));
-    appendEvent(SessionEventType.assistant_delta, payload);
-  }
-
-  private void onAssistantToolCallComplete(AssistantToolCallCompleteSignal signal) {
-    if (!isActiveAssistant(signal.attemptState())
-        || signal.index() == null
-        || signal.toolCall() == null) {
-      return;
-    }
-    List<IndexedToolCallDelta> gap =
-        signal.attemptState().computeToolCallGap(signal.index(), signal.toolCall());
-    if (!gap.isEmpty()) {
-      AssistantDeltaPayload payload = new AssistantDeltaPayload();
-      payload.setToolCallsDelta(gap);
-      appendEvent(SessionEventType.assistant_delta, payload);
-    }
-  }
-
-  /** 处理 assistant 完整结束，并决定进入 tool 阶段还是直接结束本轮 loop。 */
-  private void onAssistantComplete(AssistantCompleteSignal signal) {
-    if (!isActiveAssistant(signal.attemptState())) {
-      return;
-    }
-    currentRun.activeAssistant = null;
-    signal.attemptState().handle = null;
-
-    AssistantResponse response =
-        signal.response() == null ? AssistantResponse.builder().build() : signal.response();
-    appendAssistantCompletionGap(signal.attemptState(), response);
-    AssistantEndPayload assistantEndPayload = new AssistantEndPayload();
-    assistantEndPayload.setMetadata(response.getMetadata());
-    appendEvent(SessionEventType.assistant_end, assistantEndPayload);
-
-    currentRun.retryCount = 0;
-    List<ToolCall> toolCalls =
-        response.getToolCalls() == null ? List.of() : response.getToolCalls();
-    if (toolCalls.isEmpty()) {
-      finishAfterFinalAnswer();
-      return;
-    }
-    startToolBatch(toolCalls);
-  }
-
-  private void onAssistantError(AssistantErrorSignal signal) {
-    if (!isActiveAssistant(signal.attemptState())) {
-      return;
-    }
-    currentRun.activeAssistant = null;
-    signal.attemptState().handle = null;
-
-    appendEvent(
-        SessionEventType.assistant_error, newAssistantErrorPayload(toErrorMessage(signal.error())));
-    if (currentRun.aborted) {
-      releaseLoop();
-      return;
-    }
-    if (currentRun.retryCount >= modelRetryConfig.getMaxRetries()) {
-      releaseLoop();
-      return;
-    }
-    currentRun.retryCount++;
-    Duration delay = modelRetryConfig.nextDelay(currentRun.retryCount);
-    AgentRunContext runContext = currentRun;
-    currentRun.scheduledTask =
-        agentScheduler.schedule(delay, () -> enqueueSignal(new RetryAssistantSignal(runContext)));
-  }
-
-  /** 启动当前 assistant 产出的整批 tool call。 */
-  private void startToolBatch(List<ToolCall> toolCalls) {
-    if (currentRun == null || currentRun.aborted) {
-      return;
-    }
-    currentRun.toolStates.clear();
-    for (ToolCall toolCall : toolCalls) {
-      if (currentRun == null || currentRun.aborted) {
-        break;
-      }
-      if (toolCall == null) {
-        continue;
-      }
-      ToolStartPayload toolStartPayload = new ToolStartPayload();
-      toolStartPayload.setToolCallId(toolCall.getToolCallId());
-      toolStartPayload.setToolName(toolCall.getToolName());
-      toolStartPayload.setArguments(toolCall.getArguments());
-      appendEvent(SessionEventType.tool_start, toolStartPayload);
-
-      ToolExecutionState toolState = new ToolExecutionState(currentRun, toolCall);
-      currentRun.toolStates.put(toolCall.getToolCallId(), toolState);
-      ToolRegistration registration = toolRegistry.get(toolCall.getToolName());
-      if (registration == null) {
-        appendEvent(
-            SessionEventType.tool_error,
-            newToolErrorPayload(
-                toolCall.getToolCallId(), newToolNotFoundMessage(toolCall.getToolName())));
-        toolState.closed = true;
-        continue;
-      }
-      try {
-        ToolCallRequest request = toToolCallRequest(toolCall, registration);
-        ToolExecutionHandle handle =
-            toolCallExecutor.execute(
-                registration,
-                request,
-                new ToolExecutionListener() {
-                  @Override
-                  public void onPartial(List<IndexedToolContentDelta> partial) {
-                    enqueueSignal(new ToolPartialSignal(toolState, partial));
-                  }
-
-                  @Override
-                  public void onComplete(List<ToolContent> result) {
-                    enqueueSignal(new ToolCompleteSignal(toolState, result));
-                  }
-
-                  @Override
-                  public void onError(Throwable error) {
-                    enqueueSignal(new ToolErrorSignal(toolState, error));
-                  }
-                });
-        toolState.handle = handle;
-      } catch (Throwable error) {
-        appendEvent(
-            SessionEventType.tool_error,
-            newToolErrorPayload(toolCall.getToolCallId(), toErrorMessage(error)));
-        toolState.closed = true;
-      }
-    }
-    if (allToolsClosed()) {
-      startAssistantAttempt(harvestUserMessages());
-    }
-  }
-
-  private void onToolPartial(ToolPartialSignal signal) {
-    if (!isActiveTool(signal.toolState())
-        || signal.contentDeltas() == null
-        || signal.contentDeltas().isEmpty()) {
-      return;
-    }
-    signal.toolState().applyContentDeltas(signal.contentDeltas());
-    ToolDeltaPayload toolDeltaPayload = new ToolDeltaPayload();
-    toolDeltaPayload.setToolCallId(signal.toolState().toolCall.getToolCallId());
-    toolDeltaPayload.setContentDeltas(signal.contentDeltas());
-    appendEvent(SessionEventType.tool_delta, toolDeltaPayload);
-  }
-
-  private void onToolComplete(ToolCompleteSignal signal) {
-    if (!isActiveTool(signal.toolState())) {
-      return;
-    }
-    signal.toolState().handle = null;
-    List<IndexedToolContentDelta> gap = signal.toolState().computeGap(signal.contents());
-    if (!gap.isEmpty()) {
-      ToolDeltaPayload toolDeltaPayload = new ToolDeltaPayload();
-      toolDeltaPayload.setToolCallId(signal.toolState().toolCall.getToolCallId());
-      toolDeltaPayload.setContentDeltas(gap);
-      appendEvent(SessionEventType.tool_delta, toolDeltaPayload);
-    }
-    ToolEndPayload toolEndPayload = new ToolEndPayload();
-    toolEndPayload.setToolCallId(signal.toolState().toolCall.getToolCallId());
-    appendEvent(SessionEventType.tool_end, toolEndPayload);
-    signal.toolState().closed = true;
-    maybeContinueAfterToolBatch();
-  }
-
-  private void onToolError(ToolErrorSignal signal) {
-    if (!isActiveTool(signal.toolState())) {
-      return;
-    }
-    signal.toolState().handle = null;
-    appendEvent(
-        SessionEventType.tool_error,
-        newToolErrorPayload(
-            signal.toolState().toolCall.getToolCallId(), toErrorMessage(signal.error())));
-    signal.toolState().closed = true;
-    maybeContinueAfterToolBatch();
-  }
-
-  private void maybeContinueAfterToolBatch() {
-    if (currentRun == null || currentRun.aborted || !allToolsClosed()) {
-      return;
-    }
-    currentRun.retryCount = 0;
-    startAssistantAttempt(harvestUserMessages());
-  }
-
-  /** 处理当前 loop 的显式取消。 */
   private void onAbort(AbortSignal signal) {
     if (currentRun == null) {
       return;
     }
     cancelCurrentRunResources();
-    appendEvent(SessionEventType.abort, newAbortPayload(signal.reason()));
+    AbortPayload payload = new AbortPayload();
+    payload.setReason(signal.reason());
+    writer.appendEvent(SessionEventType.abort, payload);
     releaseLoop();
   }
 
-  private void finishAfterFinalAnswer() {
-    releaseLoop();
+  private void onSwitchBranch(SwitchBranchSignal signal) {
+    cancelCurrentRunResources();
+    currentRun = null;
+    statusRef.set(AgentStatus.idle);
+    writer.switchBranch(signal.branch(), signal.branchEvents());
+    if (!userRequestQueue.isEmpty()) {
+      triggerMainLoop();
+    }
   }
 
   private void releaseLoop() {
@@ -653,72 +279,113 @@ public class Agent {
   }
 
   private void cancelCurrentRunResources() {
-    if (currentRun != null) {
-      currentRun.aborted = true;
-      if (currentRun.scheduledTask != null) {
-        safeCancel(currentRun.scheduledTask);
-        currentRun.scheduledTask = null;
-      }
-      if (currentRun.activeAssistant != null && currentRun.activeAssistant.handle != null) {
-        safeCancel(currentRun.activeAssistant.handle);
-      }
-      currentRun.activeAssistant = null;
-      for (ToolExecutionState toolState : currentRun.toolStates.values()) {
-        if (!toolState.closed && toolState.handle != null) {
-          safeCancel(toolState.handle);
-        }
-        toolState.closed = true;
-      }
+    if (currentRun == null) {
+      return;
     }
+    currentRun.aborted = true;
+    if (currentRun.scheduledTask != null) {
+      try {
+        currentRun.scheduledTask.cancel();
+      } catch (RuntimeException error) {
+        log.warn("[agent] scheduled task cancel failed", error);
+      }
+      currentRun.scheduledTask = null;
+    }
+    assistant.cancelActive(currentRun);
+    currentRun.activeAssistant = null;
+    tools.cancelAll(currentRun);
   }
 
-  /** 在每次实际 assistant 调用前刷新最新运行配置，并在变化时落配置事件。 */
-  private AgentRuntimeConfigResolver.ResolvedRuntimeConfig resolveRuntimeConfig() {
-    AgentRuntimeConfigResolver.ResolvedRuntimeConfig runtimeConfig =
-        runtimeConfigResolver.resolve(agentName, provider, model, variant);
-    SetAgentInfoPayload latestAgentPayload = runtimeConfig.getAgentPayload();
-    if (!Objects.equals(latestAgentPayload, currentAgentInfo)) {
-      appendEvent(SessionEventType.set_agent_info, latestAgentPayload);
-      currentAgentInfo = latestAgentPayload;
+  // ========== assistant 启动（含运行时配置刷新） ==========
+
+  private void startAssistantAttempt(List<String> userMessages) {
+    if (currentRun == null || currentRun.aborted) {
+      return;
+    }
+    AgentRuntimeConfigResolver.ResolvedRuntimeConfig runtimeConfig;
+    try {
+      runtimeConfig = resolveRuntimeConfig();
+    } catch (RuntimeException error) {
+      // runtime config 解析失败 → assistant 还未真正发起调用，不写 event，直接 failCurrentRun
+      // （与旧实现保持一致：failCurrentRun 不写事件，仅释放 loop）
+      if (!currentRun.aborted) {
+        failCurrentRun(error);
+      }
+      return;
     }
 
-    SetModelInfoPayload latestModelPayload = runtimeConfig.getModelPayload();
-    if (!Objects.equals(latestModelPayload, currentModelInfo)) {
-      appendEvent(SessionEventType.set_model_info, latestModelPayload);
-      currentModelInfo = latestModelPayload;
-    }
+    // 把解析结果回写到内部 selection（与旧实现一致）
     this.provider = runtimeConfig.getResolvedProvider();
     this.model = runtimeConfig.getResolvedModel();
     this.variant = runtimeConfig.getResolvedVariant();
+    assistant.setModelSelection(this.provider, this.model, this.variant);
+
+    assistant.startAttempt(currentRun, runtimeConfig, userMessages);
+  }
+
+  /** 解析运行时配置并按需落 set_agent_info / set_model_info event。 */
+  private AgentRuntimeConfigResolver.ResolvedRuntimeConfig resolveRuntimeConfig() {
+    AgentRuntimeConfigResolver.ResolvedRuntimeConfig runtimeConfig =
+        runtimeConfigResolver.resolve(agentName, provider, model, variant);
+    if (!Objects.equals(runtimeConfig.getAgentPayload(), writer.getCurrentAgentInfo())) {
+      writer.appendEvent(
+          SessionEventType.set_agent_info,
+          runtimeConfig.getAgentPayload());
+    }
+    if (!Objects.equals(runtimeConfig.getModelPayload(), writer.getCurrentModelInfo())) {
+      writer.appendEvent(
+          SessionEventType.set_model_info,
+          runtimeConfig.getModelPayload());
+    }
     return runtimeConfig;
   }
 
-  private void appendAssistantCompletionGap(
-      AssistantAttemptState attemptState, AssistantResponse response) {
-    List<IndexedToolCallDelta> toolCallGaps =
-        attemptState.computeToolCallGaps(response.getToolCalls());
-    String textGap = AgentTextDelta.gap(attemptState.text.toString(), response.getText());
-    String thinkingGap =
-        AgentTextDelta.gap(attemptState.thinking.toString(), response.getThinking());
-    if ((textGap == null || textGap.isEmpty())
-        && (thinkingGap == null || thinkingGap.isEmpty())
-        && toolCallGaps.isEmpty()) {
+  /**
+   * assistant error 信号处理：先把 error 信号交给 runner 写事件 + 清状态，然后由本类决定
+   * 是否 abort / 调度 retry。
+   */
+  private void onAssistantError(AssistantErrorSignal signal) {
+    assistant.onError(currentRun, signal);
+    if (currentRun == null || currentRun.aborted) {
+      releaseLoop();
       return;
     }
-    AssistantDeltaPayload payload = new AssistantDeltaPayload();
-    if (textGap != null && !textGap.isEmpty()) {
-      attemptState.text.append(textGap);
-      payload.setTextDelta(textGap);
+    if (currentRun.retryCount >= modelRetryConfig.getMaxRetries()) {
+      releaseLoop();
+      return;
     }
-    if (thinkingGap != null && !thinkingGap.isEmpty()) {
-      attemptState.thinking.append(thinkingGap);
-      payload.setThinkingDelta(thinkingGap);
-    }
-    if (!toolCallGaps.isEmpty()) {
-      payload.setToolCallsDelta(toolCallGaps);
-    }
-    appendEvent(SessionEventType.assistant_delta, payload);
+    currentRun.retryCount++;
+    Duration delay = modelRetryConfig.nextDelay(currentRun.retryCount);
+    AgentRunContext runContext = currentRun;
+    currentRun.scheduledTask =
+        agentScheduler.schedule(delay, () -> enqueueSignal(new RetryAssistantSignal(runContext)));
   }
+
+  // ========== tool batch 收尾协调 ==========
+
+  /** 由 AgentToolOrchestrator 在 all tools closed 时回调。 */
+  void continueAssistantFromToolBatch() {
+    if (currentRun == null || currentRun.aborted) {
+      return;
+    }
+    currentRun.retryCount = 0;
+    startAssistantAttempt(harvestUserMessages());
+  }
+
+  /** 由 AgentAssistantRunner 在 onComplete 后回调，启动 tool batch。 */
+  void startToolBatch(List<ToolCall> toolCalls) {
+    if (currentRun == null || currentRun.aborted) {
+      return;
+    }
+    if (toolCalls == null || toolCalls.isEmpty()) {
+      // 既然 assistant 已经完成且没有 tool call，就此结束本轮
+      releaseLoop();
+      return;
+    }
+    tools.startBatch(currentRun, toolCalls);
+  }
+
+  // ========== helpers ==========
 
   private List<String> harvestUserMessages() {
     List<UserRequest> requests = userRequestQueue.pollAll();
@@ -734,48 +401,6 @@ public class Agent {
     return messages;
   }
 
-  private boolean allToolsClosed() {
-    if (currentRun == null) {
-      return false;
-    }
-    for (ToolExecutionState toolState : currentRun.toolStates.values()) {
-      if (!toolState.closed) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  private boolean isActiveAssistant(AssistantAttemptState attemptState) {
-    return currentRun != null && currentRun.activeAssistant == attemptState && !currentRun.aborted;
-  }
-
-  private boolean isActiveTool(ToolExecutionState toolState) {
-    return currentRun != null
-        && currentRun.toolStates.get(toolState.toolCall.getToolCallId()) == toolState
-        && !toolState.closed
-        && !currentRun.aborted;
-  }
-
-  private AssistantErrorPayload newAssistantErrorPayload(String message) {
-    AssistantErrorPayload payload = new AssistantErrorPayload();
-    payload.setMessage(message);
-    return payload;
-  }
-
-  private ToolErrorPayload newToolErrorPayload(String toolCallId, String message) {
-    ToolErrorPayload payload = new ToolErrorPayload();
-    payload.setToolCallId(toolCallId);
-    payload.setMessage(message);
-    return payload;
-  }
-
-  private AbortPayload newAbortPayload(String reason) {
-    AbortPayload payload = new AbortPayload();
-    payload.setReason(reason);
-    return payload;
-  }
-
   private String toErrorMessage(Throwable error) {
     if (error == null) {
       return "unknown error";
@@ -784,66 +409,14 @@ public class Agent {
     return message == null || message.isBlank() ? error.getClass().getSimpleName() : message;
   }
 
-  private String newToolNotFoundMessage(String toolName) {
-    List<String> toolNames = toolRegistry.listToolNames();
-    String availableTools = toolNames.isEmpty() ? "none" : String.join(", ", toolNames);
-    return "tool not found: " + toolName + ". Available tools: " + availableTools + ".";
-  }
-
-  private ToolCallRequest toToolCallRequest(ToolCall toolCall, ToolRegistration registration) {
-    if (toolCall == null) {
-      return null;
-    }
-    return new ToolCallRequest(
-        toolCall.getToolCallId(),
-        toolCall.getToolName(),
-        toolCall.getArguments(),
-        registration.getToolInfo().getInputSchema());
-  }
-
-  private void safeCancel(AssistantResponseHandle handle) {
-    try {
-      handle.cancel();
-    } catch (Throwable error) {
-      log.warn("[agent] assistant cancel failed", error);
-    }
-  }
-
-  private void safeCancel(ToolExecutionHandle handle) {
-    try {
-      handle.cancel();
-    } catch (Throwable error) {
-      log.warn("[agent] tool cancel failed", error);
-    }
-  }
-
-  private void safeCancel(ScheduledTask scheduledTask) {
-    try {
-      scheduledTask.cancel();
-    } catch (Throwable error) {
-      log.warn("[agent] scheduled task cancel failed", error);
-    }
-  }
-
-  private void refreshProjection() {
-    SessionEventProjection projection = projection();
-    if (projection.agentInfo() != null) {
-      this.currentAgentInfo = projection.agentInfo();
-    }
-    if (projection.modelInfo() != null) {
-      this.currentModelInfo = projection.modelInfo();
-    }
-    this.projectedMessages = projection.messages();
-  }
-
-  private <T> T requireNonNull(T value, String name) {
+  private static <T> T requireNonNull(T value, String name) {
     if (value == null) {
       throw new IllegalArgumentException(name + " must not be null");
     }
     return value;
   }
 
-  private String requireNonBlank(String value, String name) {
+  private static String requireNonBlank(String value, String name) {
     if (value == null || value.isBlank()) {
       throw new IllegalArgumentException(name + " must not be blank");
     }

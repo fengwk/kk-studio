@@ -10,12 +10,16 @@ import fun.fengwk.kkstudio.agent.Agent;
 import fun.fengwk.kkstudio.agent.AgentEventHandler;
 import fun.fengwk.kkstudio.agent.AgentFactory;
 import fun.fengwk.kkstudio.agent.AgentInfo;
+import fun.fengwk.kkstudio.agent.AgentRegistry;
+import fun.fengwk.kkstudio.agent.AgentRuntimeConfigResolver;
 import fun.fengwk.kkstudio.agent.AgentScheduler;
 import fun.fengwk.kkstudio.agent.ModelRetryConfig;
 import fun.fengwk.kkstudio.agent.UserRequestQueue;
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
+import fun.fengwk.kkstudio.agent.model.ModelRegistry;
 import fun.fengwk.kkstudio.agent.provider.ProviderInfo;
 import fun.fengwk.kkstudio.agent.provider.ProviderManager;
+import fun.fengwk.kkstudio.agent.provider.ProviderRegistry;
 import fun.fengwk.kkstudio.agent.session.SessionManager;
 import fun.fengwk.kkstudio.agent.session.SessionManagerImpl;
 import fun.fengwk.kkstudio.agent.tool.DefaultToolRegistry;
@@ -78,6 +82,17 @@ final class EmbeddedAgentRuntimeLoader {
                 runId, agentSessionEventRepository, objectMapper));
     UserRequestQueue userRequestQueue = new InMemoryUserRequestQueue();
     AgentFactory agentFactory = new AgentFactory();
+
+    AgentRegistry agentRegistry = new SingleAgentRegistry(agentInfo);
+    ModelRegistry modelRegistry = new SingleModelRegistry(modelInfo);
+    ProviderRegistry providerRegistry = new SingleProviderRegistry(agentProvider.getName(), providerInfo);
+    AgentRuntimeConfigResolver runtimeConfigResolver = new AgentRuntimeConfigResolver(
+        agentRegistry, modelRegistry, providerRegistry, providerManager, toolRegistry);
+
+    AgentFactory.Dependencies deps = new AgentFactory.Dependencies(
+        toolRegistry, toolCallExecutor, sessionManager,
+        new CoreSessionEventMessageProjector(), eventHandler, runtimeConfigResolver);
+
     return agentFactory.load(
         sessionId,
         agentDefinition.getName(),
@@ -85,21 +100,13 @@ final class EmbeddedAgentRuntimeLoader {
         agentModel.getName(),
         agentInfo.getDefaultVariant(),
         userRequestQueue,
-        eventHandler,
-        toolRegistry,
-        toolCallExecutor,
-        sessionManager,
-        new CoreSessionEventMessageProjector(),
-        new SingleAgentRegistry(agentInfo),
-        new SingleModelRegistry(modelInfo),
-        new SingleProviderRegistry(agentProvider.getName(), providerInfo),
-        providerManager,
         agentScheduler,
         ModelRetryConfig.builder()
             .maxRetries(0)
             .baseDelay(Duration.ZERO)
             .maxDelay(Duration.ZERO)
             .multiplier(2D)
-            .build());
+            .build(),
+        deps);
   }
 }

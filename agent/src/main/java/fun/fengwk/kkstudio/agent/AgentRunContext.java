@@ -19,6 +19,8 @@ import java.util.TreeMap;
 /**
  * AgentRunContext 表示一次主链运行中的可变状态。
  *
+ * <p>被 Agent 状态机、assistant runner、tool orchestrator 共享，避免反向依赖。
+ *
  * @author fengwk
  */
 final class AgentRunContext {
@@ -32,7 +34,7 @@ final class AgentRunContext {
   /** 当前已注册但尚未触发的重试调度任务。 */
   ScheduledTask scheduledTask;
 
-  /** 当前活跃的 assistant 尝试状态。 */
+  /** 当前活跃的 assistant 尝试状态（null 表示等待 retry delay 或无活动）。 */
   AssistantAttemptState activeAssistant;
 
   /** 当前 loop 中全部 toolCallId 对应的执行状态。 */
@@ -201,7 +203,6 @@ final class ToolExecutionState {
         accumulator.type = toolContent.getType();
         contents.set(i, accumulator);
       }
-
       ToolContentDelta delta = new ToolContentDelta();
       delta.setType(toolContent.getType());
       if (toolContent.getType() == ToolContentType.text) {
