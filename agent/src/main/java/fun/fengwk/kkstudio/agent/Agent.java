@@ -291,10 +291,18 @@ public class Agent {
       }
       currentRun.scheduledTask = null;
     }
-    // 协作者内部各自 best-effort 取消 handle，不抛异常
-    assistant.cancelActive(currentRun);
+    // 协作者内部各自 best-effort 取消 handle
+    try {
+      assistant.cancelActive(currentRun);
+    } catch (RuntimeException error) {
+      log.warn("[agent] assistant cancel failed", error);
+    }
     currentRun.activeAssistant = null;
-    tools.cancelAll(currentRun);
+    try {
+      tools.cancelAll(currentRun);
+    } catch (RuntimeException error) {
+      log.warn("[agent] tool cancel failed", error);
+    }
   }
 
   // ========== assistant 启动（含运行时配置刷新） ==========

@@ -44,8 +44,6 @@ import java.util.function.Consumer;
 final class AgentAssistantRunner {
 
   private final AgentSessionWriter writer;
-  private final AgentScheduler agentScheduler;
-  private final ModelRetryConfig modelRetryConfig;
   private final Consumer<AgentSignal> enqueueSignal;
   private final Consumer<List<ToolCall>> onToolCallsReady;
 
@@ -55,16 +53,12 @@ final class AgentAssistantRunner {
 
   AgentAssistantRunner(
       AgentSessionWriter writer,
-      AgentScheduler agentScheduler,
-      ModelRetryConfig modelRetryConfig,
       String provider,
       String model,
       String variant,
       Consumer<AgentSignal> enqueueSignal,
       Consumer<List<ToolCall>> onToolCallsReady) {
     this.writer = requireNonNull(writer, "writer");
-    this.agentScheduler = requireNonNull(agentScheduler, "agentScheduler");
-    this.modelRetryConfig = requireNonNull(modelRetryConfig, "modelRetryConfig");
     this.enqueueSignal = requireNonNull(enqueueSignal, "enqueueSignal");
     this.onToolCallsReady = requireNonNull(onToolCallsReady, "onToolCallsReady");
     this.provider = provider;

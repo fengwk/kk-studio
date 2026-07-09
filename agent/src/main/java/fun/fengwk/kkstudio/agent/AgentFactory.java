@@ -89,8 +89,6 @@ public class AgentFactory {
 
     AgentAssistantRunner assistant = new AgentAssistantRunner(
         writer,
-        agentScheduler,
-        modelRetryConfig,
         provider, model, variant,
         holder.enqueueSignal,
         holder.startToolBatch);

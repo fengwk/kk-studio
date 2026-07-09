@@ -23,7 +23,7 @@ import java.util.function.Consumer;
 /**
  * AgentToolOrchestrator 负责一次 tool batch 的完整生命周期。
  *
- * <p>从 Agent 中剥离的职责：
+ * <p>职责范围：
  * <ul>
  *   <li>tool_start 事件写入与 ToolExecutionState 创建</li>
  *   <li>tool delta 流式回调</li>
@@ -31,8 +31,6 @@ import java.util.function.Consumer;
  *   <li>tool not found 处理与稳定错误文本</li>
  *   <li>全部 tool 终态聚合</li>
  * </ul>
- *
- * <p>ToolExecutionState / ToolContentAccumulator 暂时从 AgentRunState 引用（步骤 2 迁移）。
  *
  * @author fengwk
  */
