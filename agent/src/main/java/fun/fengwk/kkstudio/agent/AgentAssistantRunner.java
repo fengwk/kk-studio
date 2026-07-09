@@ -27,7 +27,7 @@ import java.util.function.Consumer;
  *   <li>调用 provider.asyncChat 启动流</li>
  *   <li>处理流式 delta（text / thinking / toolCallDelta / toolCallComplete）</li>
  *   <li>处理 complete（含 gap 补齐）+ toolCalls 路由</li>
- *   <li>处理 error + 指数退避重试</li>
+ *   <li>处理 error 事件（写 assistant_error event + 清状态）</li>
  *   <li>取消时释放 handle</li>
  * </ul>
  *
@@ -35,6 +35,7 @@ import java.util.function.Consumer;
  * <ul>
  *   <li>解析运行时配置（由 Agent 调用 AgentRuntimeConfigResolver 完成）</li>
  *   <li>管理 retry task（由 Agent 持有）</li>
+ *   <li>决定是否 abort / 调度 retry（由 Agent 状态机决定）</li>
  *   <li>维护 run 级状态（AgentRunContext 由 Agent 持有）</li>
  * </ul>
  *

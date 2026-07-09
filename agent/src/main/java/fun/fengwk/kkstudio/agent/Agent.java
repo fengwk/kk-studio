@@ -291,6 +291,7 @@ public class Agent {
       }
       currentRun.scheduledTask = null;
     }
+    // 协作者内部各自 best-effort 取消 handle，不抛异常
     assistant.cancelActive(currentRun);
     currentRun.activeAssistant = null;
     tools.cancelAll(currentRun);

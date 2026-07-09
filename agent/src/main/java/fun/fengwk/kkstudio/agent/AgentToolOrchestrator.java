@@ -136,7 +136,8 @@ final class AgentToolOrchestrator {
         try {
           toolState.handle.cancel();
         } catch (RuntimeException error) {
-          // best-effort
+          // best-effort：与 Agent.safeCancel 行为一致，但 orchestrator 不持有 logger，
+          // 让 Agent 在 cancelCurrentRunResources 那一层做 logging。
         }
       }
       toolState.closed = true;
