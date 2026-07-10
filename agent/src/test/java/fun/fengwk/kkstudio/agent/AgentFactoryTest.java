@@ -35,6 +35,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -206,18 +207,21 @@ public class AgentFactoryTest {
 
   private static class InMemoryUserRequestQueue implements UserRequestQueue {
 
-    private final List<UserRequest> requests = new ArrayList<>();
+    private final ConcurrentLinkedQueue<UserRequest> requests = new ConcurrentLinkedQueue<>();
 
     @Override
     public void submit(UserRequest userRequest) {
-      requests.add(userRequest);
+      requests.offer(userRequest);
     }
 
     @Override
     public List<UserRequest> pollAll() {
-      List<UserRequest> copied = List.copyOf(requests);
-      requests.clear();
-      return copied;
+      List<UserRequest> drained = new ArrayList<>();
+      UserRequest request;
+      while ((request = requests.poll()) != null) {
+        drained.add(request);
+      }
+      return List.copyOf(drained);
     }
 
     @Override

@@ -4,7 +4,6 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * Variant 表示模型的一种请求参数变体。
@@ -38,12 +37,6 @@ public class Variant {
   /** 存在惩罚参数。 */
   private final Double presencePenalty;
 
-  /** 随机种子。 */
-  private final Integer seed;
-
   /** 停止序列列表。 */
   private final List<String> stopSequences;
-
-  /** provider 专有参数键值表。 */
-  private final Map<String, Object> providerOptions;
 }

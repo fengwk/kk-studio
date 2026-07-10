@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.core.agent.runtime.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
@@ -16,7 +15,6 @@ import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * EmbeddedAgentRuntimeMetadataFactory 负责 runtime 所需 provider/model/agent 元数据的组装。
@@ -27,8 +25,6 @@ import java.util.Map;
 final class EmbeddedAgentRuntimeMetadataFactory {
 
   private static final String DEFAULT_VARIANT = "default";
-  private static final TypeReference<Map<String, Object>> MAP_TYPE_REFERENCE =
-      new TypeReference<>() {};
 
   private final ObjectMapper objectMapper;
 
@@ -117,9 +113,6 @@ final class EmbeddedAgentRuntimeMetadataFactory {
     if (node.hasNonNull("presencePenalty")) {
       builder.presencePenalty(node.get("presencePenalty").asDouble());
     }
-    if (node.hasNonNull("seed")) {
-      builder.seed(node.get("seed").asInt());
-    }
     if (node.hasNonNull("stopSequences") && node.get("stopSequences").isArray()) {
       List<String> stopSequences = new ArrayList<>();
       for (JsonNode sequence : node.get("stopSequences")) {
@@ -128,15 +121,6 @@ final class EmbeddedAgentRuntimeMetadataFactory {
         }
       }
       builder.stopSequences(List.copyOf(stopSequences));
-    }
-    if (node.hasNonNull("providerOptions") && node.get("providerOptions").isObject()) {
-      try {
-        Map<String, Object> providerOptions =
-            objectMapper.convertValue(node.get("providerOptions"), MAP_TYPE_REFERENCE);
-        builder.providerOptions(providerOptions);
-      } catch (IllegalArgumentException e) {
-        throw new IllegalArgumentException("parse variant providerOptions failed", e);
-      }
     }
     return builder.build();
   }

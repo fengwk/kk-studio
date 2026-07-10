@@ -140,7 +140,9 @@ final class AgentAssistantRunner {
   }
 
   void onToolCallDelta(AgentRunContext runContext, AssistantToolCallDeltaSignal signal) {
-    if (!isActiveAssistant(runContext, signal.attemptState()) || signal.toolCallDelta() == null) {
+    if (!isActiveAssistant(runContext, signal.attemptState())
+        || signal.toolCallDelta() == null
+        || !isUsableToolCallIndex(signal.toolCallDelta().getIndex())) {
       return;
     }
     signal.attemptState().applyToolCallDelta(signal.toolCallDelta());
@@ -151,7 +153,7 @@ final class AgentAssistantRunner {
 
   void onToolCallComplete(AgentRunContext runContext, AssistantToolCallCompleteSignal signal) {
     if (!isActiveAssistant(runContext, signal.attemptState())
-        || signal.index() == null
+        || !isUsableToolCallIndex(signal.index())
         || signal.toolCall() == null) {
       return;
     }
@@ -292,6 +294,10 @@ final class AgentAssistantRunner {
     return runContext != null
         && runContext.activeAssistant == attemptState
         && !runContext.aborted;
+  }
+
+  private static boolean isUsableToolCallIndex(Integer index) {
+    return index != null && index >= 0;
   }
 
   private static AssistantErrorPayload newAssistantErrorPayload(String message) {

@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
 
 /**
  * EmbeddedAgentRuntimeMetadataFactory 的聚焦行为测试。
@@ -50,7 +49,7 @@ public class EmbeddedAgentRuntimeMetadataFactoryTest {
     assertEquals(List.of("writer"), agentInfo.getSkills());
   }
 
-  /** 校验会从 model variantsJson 里恢复 variant 细节与 providerOptions。 */
+  /** 校验会从 model variantsJson 里恢复受运行时支持的 variant 参数。 */
   @Test
   public void shouldBuildModelInfoWithParsedVariants() {
     EmbeddedAgentRuntimeMetadataFactory factory = newFactory();
@@ -64,8 +63,7 @@ public class EmbeddedAgentRuntimeMetadataFactoryTest {
             "name": "stable",
             "maxOutputTokens": 4096,
             "temperature": 0.7,
-            "stopSequences": ["END"],
-            "providerOptions": {"mode": "json"}
+            "stopSequences": ["END"]
           }
         ]
         """);
@@ -81,7 +79,6 @@ public class EmbeddedAgentRuntimeMetadataFactoryTest {
     assertEquals(4096, variant.getMaxOutputTokens());
     assertEquals(0.7D, variant.getTemperature());
     assertEquals(List.of("END"), variant.getStopSequences());
-    assertEquals(Map.of("mode", "json"), variant.getProviderOptions());
   }
 
   /** 校验 provider/model 解析遇到非法配置时会明确失败，而不是静默生成错误 metadata。 */

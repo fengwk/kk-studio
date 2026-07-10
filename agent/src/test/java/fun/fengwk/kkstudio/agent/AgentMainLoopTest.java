@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.agent.session.SessionEventType;
 import fun.fengwk.kkstudio.agent.session.SessionManager;
 import fun.fengwk.kkstudio.agent.session.SessionManagerImpl;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantDeltaPayload;
+import fun.fengwk.kkstudio.agent.session.payload.AssistantEndPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantStartPayload;
@@ -66,6 +67,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -489,6 +491,32 @@ public class AgentMainLoopTest {
     assertEquals(AgentStatus.idle, agent.getStatus());
   }
 
+  /** 校验 branch head 与传入 event 链不一致时，当前运行时视图不会切换。 */
+  @Test
+  public void testSwitchBranchRejectsIncompleteEventChain() {
+    RecordingContext context = new RecordingContext();
+    Agent agent = context.newAgent();
+    SessionEvent start =
+        SessionEvent.newEvent(
+            context.session.getSessionId(),
+            SessionEventType.assistant_start,
+            SessionEvent.ROOT_EVENT_ID,
+            new AssistantStartPayload());
+    SessionEvent end =
+        SessionEvent.newEvent(
+            context.session.getSessionId(),
+            SessionEventType.assistant_end,
+            start.getEventId(),
+            new AssistantEndPayload());
+    Branch branch = Branch.newBranch(context.session.getSessionId(), end.getEventId());
+
+    assertThrows(IllegalArgumentException.class, () -> agent.switchBranch(branch, List.of(start)));
+    assertThrows(IllegalArgumentException.class, () -> agent.switchBranch(branch, List.of(end, start)));
+
+    assertEquals(SessionEvent.ROOT_EVENT_ID, agent.getBranch().headEventId());
+    assertEquals(List.of(), agent.getBranchEvents());
+  }
+
   /** 校验 abort 会取消等待中的 retry，并忽略已入队的迟到 retry callback。 */
   @Test
   public void testAbortDuringRetryDelayCancelsRetryAndIgnoresLateCallback() {
@@ -702,6 +730,45 @@ public class AgentMainLoopTest {
     assertEquals("custom", agent.getCurrentModelInfo().getProvider());
     assertTrue(!agent.getBranchEvents().isEmpty());
     assertEquals(3, agent.projection().messages().size());
+  }
+
+  /** 校验运行中的公开配置更新会在当前 attempt 结束后由 signal drain 串行生效。 */
+  @Test
+  public void testConfigurationUpdateDuringAttemptAppliesToRetry() {
+    RecordingContext context = new RecordingContext();
+    AtomicReference<Agent> agentRef = new AtomicReference<>();
+    context.provider.enqueue(
+        handler -> {
+          agentRef.get().setAgentName("renamed");
+          agentRef.get().setModelSelection("custom", "custom-model", "high");
+          handler.onError(new IllegalStateException("retry"), noopHandle());
+        });
+    context.provider.enqueue(
+        handler ->
+            handler.onComplete(
+                AssistantResponse.builder().text("done").metadata(new AssistantMetadata()).build(),
+                noopHandle()));
+
+    Agent agent = context.newAgent();
+    agentRef.set(agent);
+    agent.submit(UserRequest.userRequest("hello"));
+
+    assertEquals("renamed", agent.getAgentName());
+    assertEquals(
+        List.of(
+            SessionEventType.set_agent_info,
+            SessionEventType.set_model_info,
+            SessionEventType.assistant_start,
+            SessionEventType.assistant_error,
+            SessionEventType.set_agent_info,
+            SessionEventType.set_model_info,
+            SessionEventType.assistant_start,
+            SessionEventType.assistant_delta,
+            SessionEventType.assistant_end),
+        context.eventTypes());
+    assertEquals("renamed", agent.getCurrentAgentInfo().getAgentName());
+    assertEquals("custom", agent.getCurrentModelInfo().getProvider());
+    assertEquals("custom-model", agent.getCurrentModelInfo().getModel());
   }
 
   @Test
@@ -1032,18 +1099,21 @@ public class AgentMainLoopTest {
   }
 
   private static final class InMemoryUserRequestQueue implements UserRequestQueue {
-    private final List<UserRequest> requests = new ArrayList<>();
+    private final Queue<UserRequest> requests = new ConcurrentLinkedQueue<>();
 
     @Override
     public void submit(UserRequest userRequest) {
-      requests.add(userRequest);
+      requests.offer(userRequest);
     }
 
     @Override
     public List<UserRequest> pollAll() {
-      List<UserRequest> copied = List.copyOf(requests);
-      requests.clear();
-      return copied;
+      List<UserRequest> drained = new ArrayList<>();
+      UserRequest request;
+      while ((request = requests.poll()) != null) {
+        drained.add(request);
+      }
+      return List.copyOf(drained);
     }
 
     @Override

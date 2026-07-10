@@ -57,6 +57,30 @@ public class AgentRunContextTest {
     assertTrue(attemptState.computeToolCallGap(0, complete).isEmpty());
   }
 
+  /** 校验负 tool call index 不会写入累加状态，最终结果仍以合法 index 补齐。 */
+  @Test
+  public void testAssistantToolCallStateIgnoresNegativeIndex() {
+    AssistantAttemptState attemptState = new AssistantAttemptState();
+    ToolCallDelta partial = new ToolCallDelta();
+    partial.setToolCallId("call_1");
+    partial.setToolName("echo");
+    partial.setArgumentsDelta("{}");
+    IndexedToolCallDelta indexedPartial = new IndexedToolCallDelta();
+    indexedPartial.setIndex(-1);
+    indexedPartial.setToolCallDelta(partial);
+    attemptState.applyToolCallDelta(indexedPartial);
+
+    ToolCall complete = new ToolCall();
+    complete.setToolCallId("call_1");
+    complete.setToolName("echo");
+    complete.setArguments("{}");
+
+    List<IndexedToolCallDelta> gap = attemptState.computeToolCallGap(0, complete);
+    assertEquals(1, gap.size());
+    assertEquals(0, gap.get(0).getIndex());
+    assertEquals(1, attemptState.toolCalls.size());
+  }
+
   /** 校验 media complete 会补齐完整内容，非法 content delta 不会污染已有槽位。 */
   @Test
   public void testToolContentGapCompletesMediaAndIgnoresInvalidDeltas() {

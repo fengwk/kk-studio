@@ -17,6 +17,8 @@ import java.util.List;
  */
 sealed interface AgentSignal
     permits StartLoopSignal,
+        SetAgentNameSignal,
+        SetModelSelectionSignal,
         RetryAssistantSignal,
         AbortSignal,
         SwitchBranchSignal,
@@ -34,6 +36,12 @@ sealed interface AgentSignal
 enum StartLoopSignal implements AgentSignal {
   INSTANCE
 }
+
+/** 更新当前 Agent 名称的控制信号。 */
+record SetAgentNameSignal(String agentName) implements AgentSignal {}
+
+/** 更新当前模型选择的控制信号。 */
+record SetModelSelectionSignal(String provider, String model, String variant) implements AgentSignal {}
 
 /** 触发 assistant 重试的延迟回流信号。 */
 record RetryAssistantSignal(AgentRunContext runContext) implements AgentSignal {}

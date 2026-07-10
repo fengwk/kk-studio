@@ -49,14 +49,13 @@ import fun.fengwk.kkstudio.agent.tool.ToolInfo;
 import fun.fengwk.kkstudio.agent.tool.execution.ToolCallExecutor;
 
 import java.time.Duration;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -316,7 +315,7 @@ public class AnthropicAgentMultiTurnLiveTest {
   }
 
   private static final class InMemoryUserRequestQueue implements UserRequestQueue {
-    private final Queue<UserRequest> requests = new ArrayDeque<>();
+    private final ConcurrentLinkedQueue<UserRequest> requests = new ConcurrentLinkedQueue<>();
 
     @Override
     public void submit(UserRequest userRequest) {
@@ -325,9 +324,12 @@ public class AnthropicAgentMultiTurnLiveTest {
 
     @Override
     public List<UserRequest> pollAll() {
-      List<UserRequest> result = new ArrayList<>(requests);
-      requests.clear();
-      return result;
+      List<UserRequest> drained = new ArrayList<>();
+      UserRequest request;
+      while ((request = requests.poll()) != null) {
+        drained.add(request);
+      }
+      return List.copyOf(drained);
     }
 
     @Override

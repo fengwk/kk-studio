@@ -53,6 +53,7 @@ final class AssistantAttemptState {
   void applyToolCallDelta(IndexedToolCallDelta indexedToolCallDelta) {
     if (indexedToolCallDelta == null
         || indexedToolCallDelta.getIndex() == null
+        || indexedToolCallDelta.getIndex() < 0
         || indexedToolCallDelta.getToolCallDelta() == null) {
       return;
     }
@@ -71,7 +72,7 @@ final class AssistantAttemptState {
   }
 
   List<IndexedToolCallDelta> computeToolCallGap(Integer index, ToolCall toolCall) {
-    if (index == null || toolCall == null) {
+    if (index == null || index < 0 || toolCall == null) {
       return List.of();
     }
     ToolCallState toolCallState = toolCalls.computeIfAbsent(index, key -> new ToolCallState());

@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.agent.session.Branch;
 import fun.fengwk.kkstudio.agent.session.Session;
 import fun.fengwk.kkstudio.agent.session.SessionEventType;
 import fun.fengwk.kkstudio.agent.session.SessionEvent;
+import fun.fengwk.kkstudio.agent.session.SessionEventValidator;
 import fun.fengwk.kkstudio.agent.session.payload.AbortPayload;
 import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
 import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
@@ -15,8 +16,10 @@ import fun.fengwk.kkstudio.agent.session.projection.SessionEventProjection;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -46,10 +49,7 @@ public class Agent {
   private final AtomicBoolean drainingSignals = new AtomicBoolean();
   private final ConcurrentLinkedQueue<AgentSignal> signalQueue = new ConcurrentLinkedQueue<>();
 
-  private String agentName;
-  private String provider;
-  private String model;
-  private String variant;
+  private volatile RuntimeSelection runtimeSelection;
   private AgentRunContext currentRun;
 
   Agent(
@@ -71,10 +71,8 @@ public class Agent {
     this.userRequestQueue = requireNonNull(userRequestQueue, "userRequestQueue");
     this.agentScheduler = requireNonNull(agentScheduler, "agentScheduler");
     this.modelRetryConfig = requireNonNull(modelRetryConfig, "modelRetryConfig");
-    this.agentName = requireNonBlank(agentName, "agentName");
-    this.provider = provider;
-    this.model = model;
-    this.variant = variant;
+    this.runtimeSelection =
+        new RuntimeSelection(requireNonBlank(agentName, "agentName"), provider, model, variant);
   }
 
   // ========== 公开 API（保持签名不变） ==========
@@ -104,21 +102,25 @@ public class Agent {
   }
 
   public String getAgentName() {
-    return agentName;
+    return runtimeSelection.agentName();
   }
 
   public AgentStatus getStatus() {
     return statusRef.get();
   }
 
+  /**
+   * 通过 signal drain 更新 agent 名称，在下一次 assistant attempt 前生效。
+   */
   public void setAgentName(String agentName) {
-    this.agentName = requireNonBlank(agentName, "agentName");
+    enqueueSignal(new SetAgentNameSignal(requireNonBlank(agentName, "agentName")));
   }
 
+  /**
+   * 通过 signal drain 更新模型选择，在下一次 assistant attempt 前生效。
+   */
   public void setModelSelection(String provider, String model, String variant) {
-    this.provider = provider;
-    this.model = model;
-    this.variant = variant;
+    enqueueSignal(new SetModelSelectionSignal(provider, model, variant));
   }
 
   public void submit(UserRequest userRequest) {
@@ -133,6 +135,9 @@ public class Agent {
     enqueueSignal(new AbortSignal(reason));
   }
 
+  /**
+   * 切换到当前 session 内、且与指定 head 完整一致的 branch event 链。
+   */
   public void switchBranch(Branch branch, List<SessionEvent> branchEvents) {
     if (branch == null) {
       throw new IllegalArgumentException("branch must not be null");
@@ -144,13 +149,9 @@ public class Agent {
     if (!sessionId.equals(branch.sessionId())) {
       throw new IllegalArgumentException("branch does not belong to current session");
     }
-    List<SessionEvent> copiedBranchEvents = List.copyOf(branchEvents);
-    for (SessionEvent branchEvent : copiedBranchEvents) {
-      if (!sessionId.equals(branchEvent.getSessionId())) {
-        throw new IllegalArgumentException("branch event does not belong to current session");
-      }
-    }
-    enqueueSignal(new SwitchBranchSignal(branch, copiedBranchEvents));
+    List<SessionEvent> copiedBranchEvents = new ArrayList<>(branchEvents);
+    validateBranchEventChain(branch, copiedBranchEvents, sessionId);
+    enqueueSignal(new SwitchBranchSignal(branch, List.copyOf(copiedBranchEvents)));
   }
 
   public SessionEventProjection projection() {
@@ -192,6 +193,10 @@ public class Agent {
   private void handleSignal(AgentSignal signal) {
     if (signal instanceof StartLoopSignal) {
       onStartLoop();
+    } else if (signal instanceof SetAgentNameSignal setAgentNameSignal) {
+      onSetAgentName(setAgentNameSignal);
+    } else if (signal instanceof SetModelSelectionSignal setModelSelectionSignal) {
+      onSetModelSelection(setModelSelectionSignal);
     } else if (signal instanceof RetryAssistantSignal retryAssistantSignal) {
       onRetryAssistant(retryAssistantSignal);
     } else if (signal instanceof AbortSignal abortSignal) {
@@ -220,6 +225,15 @@ public class Agent {
   }
 
   // ========== 主循环启动/终止 ==========
+
+  private void onSetAgentName(SetAgentNameSignal signal) {
+    runtimeSelection = runtimeSelection.withAgentName(signal.agentName());
+  }
+
+  private void onSetModelSelection(SetModelSelectionSignal signal) {
+    runtimeSelection =
+        runtimeSelection.withModelSelection(signal.provider(), signal.model(), signal.variant());
+  }
 
   private void triggerMainLoop() {
     if (userRequestQueue.isEmpty()) {
@@ -327,17 +341,21 @@ public class Agent {
       return;
     }
 
-    this.provider = runtimeConfig.getResolvedProvider();
-    this.model = runtimeConfig.getResolvedModel();
-    this.variant = runtimeConfig.getResolvedVariant();
+    runtimeSelection =
+        runtimeSelection.withModelSelection(
+            runtimeConfig.getResolvedProvider(),
+            runtimeConfig.getResolvedModel(),
+            runtimeConfig.getResolvedVariant());
 
     assistant.startAttempt(currentRun, runtimeConfig, userMessages);
   }
 
   /** 解析运行时配置并按需落 set_agent_info / set_model_info event。 */
   private AgentRuntimeConfigResolver.ResolvedRuntimeConfig resolveRuntimeConfig() {
+    RuntimeSelection selection = runtimeSelection;
     AgentRuntimeConfigResolver.ResolvedRuntimeConfig runtimeConfig =
-        runtimeConfigResolver.resolve(agentName, provider, model, variant);
+        runtimeConfigResolver.resolve(
+            selection.agentName(), selection.provider(), selection.model(), selection.variant());
     if (!Objects.equals(runtimeConfig.getAgentPayload(), writer.getCurrentAgentInfo())) {
       writer.appendEvent(
           SessionEventType.set_agent_info,
@@ -412,6 +430,53 @@ public class Agent {
       }
     }
     return messages;
+  }
+
+  private static void validateBranchEventChain(
+      Branch branch, List<SessionEvent> branchEvents, String sessionId) {
+    if (SessionEvent.ROOT_EVENT_ID.equals(branch.headEventId())) {
+      if (!branchEvents.isEmpty()) {
+        throw new IllegalArgumentException("root branch must not contain events");
+      }
+      return;
+    }
+    if (branchEvents.isEmpty()) {
+      throw new IllegalArgumentException("branch events must contain branch head");
+    }
+
+    String expectedParentEventId = SessionEvent.ROOT_EVENT_ID;
+    Set<String> eventIds = new HashSet<>();
+    for (SessionEvent branchEvent : branchEvents) {
+      if (branchEvent == null) {
+        throw new IllegalArgumentException("branch events must not contain null");
+      }
+      SessionEventValidator.validateCompleteEvent(branchEvent);
+      if (!sessionId.equals(branchEvent.getSessionId())) {
+        throw new IllegalArgumentException("branch event does not belong to current session");
+      }
+      if (!eventIds.add(branchEvent.getEventId())) {
+        throw new IllegalArgumentException("branch events must not contain duplicate eventId");
+      }
+      if (!expectedParentEventId.equals(branchEvent.getParentEventId())) {
+        throw new IllegalArgumentException("branch events must form a parent chain from root");
+      }
+      expectedParentEventId = branchEvent.getEventId();
+    }
+    if (!branch.headEventId().equals(expectedParentEventId)) {
+      throw new IllegalArgumentException("branch head does not match branch events");
+    }
+  }
+
+  private record RuntimeSelection(String agentName, String provider, String model, String variant) {
+
+    private RuntimeSelection withAgentName(String newAgentName) {
+      return new RuntimeSelection(newAgentName, provider, model, variant);
+    }
+
+    private RuntimeSelection withModelSelection(
+        String newProvider, String newModel, String newVariant) {
+      return new RuntimeSelection(agentName, newProvider, newModel, newVariant);
+    }
   }
 
   private static <T> T requireNonNull(T value, String name) {

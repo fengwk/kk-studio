@@ -54,7 +54,7 @@
 | `default_variant` | 默认 variant |
 | `variants_json` | `Variant` JSON 数组 |
 
-`variants_json` 承载模型请求参数，例如 `temperature`、`maxOutputTokens`、`topP`、`providerOptions`。
+`variants_json` 承载当前运行时支持的通用模型请求参数，例如 `temperature`、`maxOutputTokens`、`topP`、`topK`、`frequencyPenalty`、`presencePenalty` 与 `stopSequences`。
 
 ## `agent_definition`
 

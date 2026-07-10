@@ -197,6 +197,8 @@ Runtime 负责：
 - `sessionId`
 - `headEventId`
 
+通过 `switchBranch(...)` 切换时，传入 event 链必须属于同一 session、从 `root` 连续连接，且最后一个 eventId 与 `headEventId` 相同。
+
 ### 3.3 Run
 
 一次 run 从成功 CAS `idle -> busy` 开始，到释放 loop 结束。
@@ -327,6 +329,7 @@ payload：
 
 - `assistant_delta` 是 assistant 文本、thinking、tool calls 的内容来源
 - provider 的 partial tool call 差异必须在 provider 边界或 Agent gap 逻辑中归一
+- 自定义 `Provider` 回调若携带缺失或负数 `index`，Agent 不写入该 delta，避免污染事件流槽位
 
 ### 6.3 assistant_end
 
@@ -461,6 +464,7 @@ Projector 看到 `abort` 时：
 
 - 入队
 - 触发主 loop 尝试启动
+- `UserRequestQueue` 必须支持外部提交线程与 Agent signal drain 并发访问；与一次收割并发提交的请求可进入本轮或下一轮
 
 ### 9.2 loop 启动
 
@@ -490,6 +494,8 @@ pull all user messages
 - final answer 后先释放 loop，再重新检查队列并触发新 loop
 
 ## 10. Assistant 调用前的配置刷新
+
+`setAgentName(...)` 与 `setModelSelection(...)` 通过 signal queue 进入同一个 drain；一次更新作为完整 selection snapshot 生效，不会与正在读取的 provider/model/variant 组合交叉。
 
 每次实际 assistant 调用前：
 
@@ -1024,10 +1030,7 @@ Agent 创建 listener 时通过闭包绑定自己的 `ToolExecutionState`，再�
 
 运行时再从 `ModelInfo` 中解析 `variant`。
 
-`Variant` 中：
-
-- 通用参数直接平铺
-- provider 专有参数直接使用 `Map<String, Object> providerOptions`
+`Variant` 中只保存当前运行时支持的通用请求参数；provider 负责映射其支持的参数子集。
 
 `Variant` 是运行时模型请求参数的唯一载体，由 `AgentRuntimeConfigResolver` 解析后直接交给 `Provider.asyncChat(...)`。不再存在中间的 `ModelRequestConfig` 之类的搬运结构，`Provider` 内部自行把 `AgentMessage + Variant + tool specifications` 翻译成 LangChain4j 的 `ChatRequest`。
 
