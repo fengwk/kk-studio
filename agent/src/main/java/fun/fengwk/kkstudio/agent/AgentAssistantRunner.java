@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.agent;
 
+import lombok.extern.slf4j.Slf4j;
+
 import fun.fengwk.kkstudio.agent.message.AgentMessage;
 import fun.fengwk.kkstudio.agent.message.AgentUserMessage;
 import fun.fengwk.kkstudio.agent.provider.AssistantResponse;
@@ -13,7 +15,6 @@ import fun.fengwk.kkstudio.agent.session.payload.AssistantStartPayload;
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -41,36 +42,20 @@ import java.util.function.Consumer;
  *
  * @author fengwk
  */
+@Slf4j
 final class AgentAssistantRunner {
 
   private final AgentSessionWriter writer;
   private final Consumer<AgentSignal> enqueueSignal;
   private final Consumer<List<ToolCall>> onToolCallsReady;
 
-  private String provider;
-  private String model;
-  private String variant;
-
   AgentAssistantRunner(
       AgentSessionWriter writer,
-      String provider,
-      String model,
-      String variant,
       Consumer<AgentSignal> enqueueSignal,
       Consumer<List<ToolCall>> onToolCallsReady) {
     this.writer = requireNonNull(writer, "writer");
     this.enqueueSignal = requireNonNull(enqueueSignal, "enqueueSignal");
     this.onToolCallsReady = requireNonNull(onToolCallsReady, "onToolCallsReady");
-    this.provider = provider;
-    this.model = model;
-    this.variant = variant;
-  }
-
-  /** 更新 model 选择（来自 setModelSelection 调用）。 */
-  void setModelSelection(String provider, String model, String variant) {
-    this.provider = provider;
-    this.model = model;
-    this.variant = variant;
   }
 
   /** 取消当前 attempt 的 provider handle（best-effort）。 */
@@ -79,12 +64,7 @@ final class AgentAssistantRunner {
         ? null
         : runContext.activeAssistant.handle;
     if (handle != null) {
-      try {
-        handle.cancel();
-      } catch (RuntimeException error) {
-        // best-effort，警告后继续
-        // Agent logger 由 Agent 在外层处理
-      }
+      cancel(handle);
     }
   }
 
@@ -98,11 +78,9 @@ final class AgentAssistantRunner {
     if (runContext == null || runContext.aborted) {
       return;
     }
-    if (runtimeConfig == null) {
-      return;
-    }
+    requireNonNull(runtimeConfig, "runtimeConfig");
 
-    AssistantAttemptState attemptState = new AssistantAttemptState(runContext);
+    AssistantAttemptState attemptState = new AssistantAttemptState();
     runContext.activeAssistant = attemptState;
 
     List<AgentMessage> messagesForModel = withUserMessages(writer.getProjectedMessages(), userMessages);
@@ -120,11 +98,18 @@ final class AgentAssistantRunner {
                   runtimeConfig.getVariant(),
                   runtimeConfig.getToolInfos(),
                   new RunnerResponseHandler(attemptState));
-      attemptState.handle = handle;
-    } catch (RuntimeException error) {
-      if (isActiveAssistant(runContext, attemptState)) {
-        enqueueSignal.accept(new AssistantErrorSignal(attemptState, error));
+      if (handle == null) {
+        enqueueAssistantErrorIfActive(
+            runContext,
+            attemptState,
+            new IllegalStateException("provider asyncChat returned null handle"));
+      } else if (isActiveAssistant(runContext, attemptState)) {
+        attemptState.handle = handle;
+      } else {
+        cancel(handle);
       }
+    } catch (RuntimeException error) {
+      enqueueAssistantErrorIfActive(runContext, attemptState, error);
     }
   }
 
@@ -198,18 +183,21 @@ final class AgentAssistantRunner {
     onToolCallsReady.accept(toolCalls);
   }
 
-  void onError(AgentRunContext runContext, AssistantErrorSignal signal) {
+  /**
+   * 写入 error 并关闭当前 attempt。
+   *
+   * @return 本信号是否属于当前活跃 attempt
+   */
+  boolean onError(AgentRunContext runContext, AssistantErrorSignal signal) {
     if (!isActiveAssistant(runContext, signal.attemptState())) {
-      return;
+      return false;
     }
     runContext.activeAssistant = null;
     signal.attemptState().handle = null;
 
     writer.appendEvent(
         SessionEventType.assistant_error, newAssistantErrorPayload(toErrorMessage(signal.error())));
-
-    // 重试决策交给 Agent：runner 只写 error 事件并清状态。
-    // Agent 决定是否 abort / 调度 retry。
+    return true;
   }
 
   // --- internal ---
@@ -252,6 +240,21 @@ final class AgentAssistantRunner {
       }
     }
     return List.copyOf(result);
+  }
+
+  private void enqueueAssistantErrorIfActive(
+      AgentRunContext runContext, AssistantAttemptState attemptState, RuntimeException error) {
+    if (isActiveAssistant(runContext, attemptState)) {
+      enqueueSignal.accept(new AssistantErrorSignal(attemptState, error));
+    }
+  }
+
+  private void cancel(AssistantResponseHandle handle) {
+    try {
+      handle.cancel();
+    } catch (RuntimeException error) {
+      log.warn("[agent] assistant cancel failed", error);
+    }
   }
 
   private static boolean isActiveAssistant(AgentRunContext runContext, AssistantAttemptState attemptState) {

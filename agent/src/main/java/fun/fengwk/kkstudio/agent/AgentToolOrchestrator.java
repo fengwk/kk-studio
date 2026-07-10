@@ -1,12 +1,12 @@
 package fun.fengwk.kkstudio.agent;
 
+import lombok.extern.slf4j.Slf4j;
+
 import fun.fengwk.kkstudio.agent.session.SessionEventType;
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
 import fun.fengwk.kkstudio.agent.tool.ToolCallRequest;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContentDelta;
-import fun.fengwk.kkstudio.agent.session.payload.ToolContentType;
 import fun.fengwk.kkstudio.agent.session.payload.ToolDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolEndPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolErrorPayload;
@@ -34,6 +34,7 @@ import java.util.function.Consumer;
  *
  * @author fengwk
  */
+@Slf4j
 final class AgentToolOrchestrator {
 
   private final AgentSessionWriter writer;
@@ -134,8 +135,10 @@ final class AgentToolOrchestrator {
         try {
           toolState.handle.cancel();
         } catch (RuntimeException error) {
-          // best-effort：与 Agent.safeCancel 行为一致，但 orchestrator 不持有 logger，
-          // 让 Agent 在 cancelCurrentRunResources 那一层做 logging。
+          log.warn(
+              "[agent] tool cancel failed: toolCallId={}",
+              toolState.toolCall.getToolCallId(),
+              error);
         }
       }
       toolState.closed = true;
@@ -151,7 +154,7 @@ final class AgentToolOrchestrator {
     toolStartPayload.setArguments(toolCall.getArguments());
     writer.appendEvent(SessionEventType.tool_start, toolStartPayload);
 
-    ToolExecutionState toolState = new ToolExecutionState(runContext, toolCall);
+    ToolExecutionState toolState = new ToolExecutionState(toolCall);
     runContext.toolStates.put(toolCall.getToolCallId(), toolState);
     ToolRegistration registration = toolRegistry.get(toolCall.getToolName());
     if (registration == null) {

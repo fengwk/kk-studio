@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.agent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -312,6 +313,116 @@ public class AgentMainLoopTest {
     assertEquals(AgentStatus.idle, agent.getStatus());
   }
 
+  /** 校验重新装载同一 session 后，下一次调用会重放已持久化的完整上下文。 */
+  @Test
+  public void testReloadedAgentReplaysPersistedConversation() {
+    RecordingContext context = new RecordingContext();
+    context.provider.enqueue(
+        handler ->
+            handler.onComplete(
+                AssistantResponse.builder()
+                    .text("first answer")
+                    .metadata(new AssistantMetadata())
+                    .build(),
+                noopHandle()));
+    context.provider.enqueue(
+        handler ->
+            handler.onComplete(
+                AssistantResponse.builder()
+                    .text("second answer")
+                    .metadata(new AssistantMetadata())
+                    .build(),
+                noopHandle()));
+
+    Agent firstAgent = context.newAgent();
+    firstAgent.submit(UserRequest.userRequest("first question"));
+
+    Agent reloadedAgent = context.newAgent();
+    reloadedAgent.submit(UserRequest.userRequest("second question"));
+
+    assertEquals(2, context.provider.receivedMessages.size());
+    List<AgentMessage> reloadedMessages = context.provider.receivedMessages.get(1);
+    assertEquals(4, reloadedMessages.size());
+    assertEquals("sys", assertInstanceOf(AgentSystemMessage.class, reloadedMessages.get(0)).text());
+    assertEquals("first question", assertInstanceOf(AgentUserMessage.class, reloadedMessages.get(1)).text());
+    assertEquals(
+        "first answer",
+        assertInstanceOf(AgentAssistantMessage.class, reloadedMessages.get(2)).text());
+    assertEquals("second question", assertInstanceOf(AgentUserMessage.class, reloadedMessages.get(3)).text());
+    assertEquals(AgentStatus.idle, reloadedAgent.getStatus());
+  }
+
+  /** 校验 provider 未返回取消 handle 时，当前 attempt 会以 assistant_error 闭合。 */
+  @Test
+  public void testNullAssistantHandleClosesAttemptWithError() {
+    RecordingContext context = new RecordingContext();
+    context.modelRetryConfig =
+        ModelRetryConfig.builder()
+            .maxRetries(0)
+            .baseDelay(Duration.ZERO)
+            .maxDelay(Duration.ZERO)
+            .multiplier(2D)
+            .build();
+    context.provider.nextHandle(null);
+    context.provider.enqueue(handler -> {});
+
+    Agent agent = context.newAgent();
+    agent.submit(UserRequest.userRequest("hello"));
+
+    assertEquals(
+        List.of(
+            SessionEventType.set_agent_info,
+            SessionEventType.set_model_info,
+            SessionEventType.assistant_start,
+            SessionEventType.assistant_error),
+        context.eventTypes());
+    assertEquals(AgentStatus.idle, agent.getStatus());
+  }
+
+  /** 校验同一 attempt 的迟到 error 不会重复调度 retry。 */
+  @Test
+  public void testLateAssistantErrorDoesNotRescheduleRetry() {
+    RecordingContext context = new RecordingContext();
+    context.modelRetryConfig =
+        ModelRetryConfig.builder()
+            .maxRetries(2)
+            .baseDelay(Duration.ofSeconds(1))
+            .maxDelay(Duration.ofSeconds(1))
+            .multiplier(2D)
+            .build();
+    List<Runnable> scheduledTasks = new ArrayList<>();
+    context.scheduler =
+        (delay, task) -> {
+          scheduledTasks.add(task);
+          return () -> scheduledTasks.remove(task);
+        };
+    context.provider.enqueue(handler -> {});
+    context.provider.enqueue(
+        handler ->
+            handler.onComplete(
+                AssistantResponse.builder().text("done").metadata(new AssistantMetadata()).build(),
+                noopHandle()));
+
+    Agent agent = context.newAgent();
+    agent.submit(UserRequest.userRequest("hello"));
+    AssistantResponseHandler firstHandler = context.provider.lastHandler;
+
+    firstHandler.onError(new RuntimeException("first"), noopHandle());
+    firstHandler.onError(new RuntimeException("late"), noopHandle());
+
+    assertEquals(1, scheduledTasks.size());
+    assertEquals(AgentStatus.busy, agent.getStatus());
+    assertEquals(
+        1,
+        context.events.stream()
+            .filter(event -> event.getEventType() == SessionEventType.assistant_error)
+            .count());
+
+    scheduledTasks.get(0).run();
+
+    assertEquals(AgentStatus.idle, agent.getStatus());
+  }
+
   @Test
   public void testInvalidToolArgumentsFailBeforeToolExecution() {
     RecordingContext context = new RecordingContext();
@@ -389,6 +500,8 @@ public class AgentMainLoopTest {
 
     assertTrue(handle.isCancelled());
     assertEquals(AgentStatus.idle, agent.getStatus());
+    assertNull(agent.getCurrentAgentInfo());
+    assertNull(agent.getCurrentModelInfo());
     List<SessionEventType> eventTypesAfterSwitch = context.eventTypes();
     context.provider.lastHandler.onComplete(
         AssistantResponse.builder().text("late").metadata(new AssistantMetadata()).build(), handle);
@@ -484,6 +597,17 @@ public class AgentMainLoopTest {
     private final DefaultToolRegistry toolRegistry = new DefaultToolRegistry();
     private final StubProvider provider = new StubProvider();
     private final StubAgentRegistry agentRegistry = new StubAgentRegistry();
+    private final InMemorySessionRepository sessionRepository = new InMemorySessionRepository();
+    private final InMemorySessionEventRepository sessionEventRepository =
+        new InMemorySessionEventRepository();
+    private final SessionManager sessionManager =
+        new SessionManagerImpl(sessionRepository, sessionEventRepository);
+    private final Session session = Session.newSession();
+    private AgentScheduler scheduler =
+        (delay, task) -> {
+          task.run();
+          return () -> {};
+        };
     private ModelRetryConfig modelRetryConfig =
         ModelRetryConfig.builder()
             .maxRetries(1)
@@ -492,20 +616,12 @@ public class AgentMainLoopTest {
             .multiplier(2D)
             .build();
 
-    private Agent newAgent() {
-      InMemorySessionRepository sessionRepository = new InMemorySessionRepository();
-      InMemorySessionEventRepository sessionEventRepository = new InMemorySessionEventRepository();
-      SessionManager sessionManager =
-          new SessionManagerImpl(sessionRepository, sessionEventRepository);
-      Session session = Session.newSession();
+    private RecordingContext() {
       sessionRepository.save(session);
+    }
 
+    private Agent newAgent() {
       AgentFactory agentFactory = new AgentFactory();
-      AgentScheduler scheduler =
-          (delay, task) -> {
-            task.run();
-            return () -> {};
-          };
       ToolCallExecutor toolCallExecutor =
           new ToolCallExecutor(new DirectExecutorService(), scheduler);
       AgentRuntimeConfigResolver resolver = new AgentRuntimeConfigResolver(

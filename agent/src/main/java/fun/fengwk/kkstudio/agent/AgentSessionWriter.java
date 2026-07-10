@@ -16,45 +16,41 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * AgentSessionWriter 封装 session 视图维护与事件追加。
+ * AgentSessionWriter 维护当前 branch 的投影视图并串行追加事件。
  *
- * <p>把原本散落在 Agent 中的 session / branch / branchEvents / currentAgentInfo / currentModelInfo /
- * projectedMessages 状态连同 sessionManager / sessionEventMessageProjector / agentEventHandler 三个依赖
- * 集中到本类，避免 Agent 同时持有多组相关字段。
+ * <p>session、branch、branchEvents 与由其派生的 agent/model/messages 缓存始终来自同一条
+ * branch event 链。每次构造、切换分支和追加事件后都会重新建立完整投影。
  *
  * @author fengwk
  */
 final class AgentSessionWriter {
 
+  private final Session session;
   private final SessionManager sessionManager;
   private final SessionEventMessageProjector sessionEventMessageProjector;
   private final AgentEventHandler agentEventHandler;
 
-  private Session session;
   private Branch branch;
   private List<SessionEvent> branchEvents;
   private SetAgentInfoPayload currentAgentInfo;
   private SetModelInfoPayload currentModelInfo;
-  private List<AgentMessage> projectedMessages = List.of();
+  private List<AgentMessage> projectedMessages;
 
   AgentSessionWriter(
       Session session,
       Branch branch,
       List<SessionEvent> branchEvents,
-      SetAgentInfoPayload currentAgentInfo,
-      SetModelInfoPayload currentModelInfo,
       SessionManager sessionManager,
       SessionEventMessageProjector sessionEventMessageProjector,
       AgentEventHandler agentEventHandler) {
     this.session = requireNonNull(session, "session");
     this.branch = requireNonNull(branch, "branch");
     this.branchEvents = new ArrayList<>(requireNonNull(branchEvents, "branchEvents"));
-    this.currentAgentInfo = currentAgentInfo;
-    this.currentModelInfo = currentModelInfo;
     this.sessionManager = requireNonNull(sessionManager, "sessionManager");
     this.sessionEventMessageProjector =
         requireNonNull(sessionEventMessageProjector, "sessionEventMessageProjector");
     this.agentEventHandler = requireNonNull(agentEventHandler, "agentEventHandler");
+    refreshProjection();
   }
 
   Session getSession() {
@@ -120,14 +116,10 @@ final class AgentSessionWriter {
     return event;
   }
 
-  void refreshProjection() {
+  private void refreshProjection() {
     SessionEventProjection projection = projection();
-    if (projection.agentInfo() != null) {
-      this.currentAgentInfo = projection.agentInfo();
-    }
-    if (projection.modelInfo() != null) {
-      this.currentModelInfo = projection.modelInfo();
-    }
+    this.currentAgentInfo = projection.agentInfo();
+    this.currentModelInfo = projection.modelInfo();
     this.projectedMessages = projection.messages();
   }
 

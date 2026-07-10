@@ -1,10 +1,12 @@
 package fun.fengwk.kkstudio.agent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.agent.message.AgentSystemMessage;
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
 import fun.fengwk.kkstudio.agent.model.ModelRegistry;
 import fun.fengwk.kkstudio.agent.model.Variant;
@@ -117,6 +119,10 @@ public class AgentFactoryTest {
     assertEquals("sys", agent.getCurrentAgentInfo().getSystemPrompt());
     assertEquals("openai", agent.getCurrentModelInfo().getProvider());
     assertEquals("gpt-test", agent.getCurrentModelInfo().getModel());
+    assertEquals(1, agent.getProjectedMessages().size());
+    assertEquals(
+        "sys",
+        assertInstanceOf(AgentSystemMessage.class, agent.getProjectedMessages().get(0)).text());
   }
 
   private static class InMemorySessionRepository implements SessionRepository {

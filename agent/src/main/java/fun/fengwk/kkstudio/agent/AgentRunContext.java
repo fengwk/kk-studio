@@ -44,15 +44,10 @@ final class AgentRunContext {
 /** AssistantAttemptState 表示一次 assistant 尝试的流式累加状态。 */
 final class AssistantAttemptState {
 
-  final AgentRunContext runContext;
   final StringBuilder text = new StringBuilder();
   final StringBuilder thinking = new StringBuilder();
   final TreeMap<Integer, ToolCallState> toolCalls = new TreeMap<>();
   AssistantResponseHandle handle;
-
-  AssistantAttemptState(AgentRunContext runContext) {
-    this.runContext = runContext;
-  }
 
   /** 应用一条 tool call 增量到当前 assistant 累加状态。 */
   void applyToolCallDelta(IndexedToolCallDelta indexedToolCallDelta) {
@@ -129,14 +124,12 @@ final class ToolCallState {
 /** ToolExecutionState 表示单个 tool call 的执行与结果累加状态。 */
 final class ToolExecutionState {
 
-  final AgentRunContext runContext;
   final ToolCall toolCall;
   final List<ToolContentAccumulator> contents = new ArrayList<>();
   ToolExecutionHandle handle;
   boolean closed;
 
-  ToolExecutionState(AgentRunContext runContext, ToolCall toolCall) {
-    this.runContext = runContext;
+  ToolExecutionState(ToolCall toolCall) {
     this.toolCall = toolCall;
   }
 

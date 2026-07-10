@@ -119,7 +119,7 @@ Agent 模块采用 `SessionEvent` 单层事件流模型，统一支撑：
 - 若存在 open assistant/tool，投影时由 projector 为 open state 追加中断文本
 - 若没有 open assistant/tool，例如等待 retry delay 阶段，`abort` 只记录用户取消事实，不生成 LLM 消息
 
-### 2.5 Agent 是唯一 event append 入口
+### 2.5 Agent 运行时串行推进 event
 
 同一 branch 上：
 
@@ -127,7 +127,8 @@ Agent 模块采用 `SessionEvent` 单层事件流模型，统一支撑：
 - assistant 调用无并发
 - 多个 `toolCallId` 可以并行执行
 - 多个 tool callback 可以交错到达
-- 但回流到 Agent 后必须串行落 event
+- callback 回流到 Agent 后由单个 signal drain 串行处理
+- 运行时协作者只能通过 `AgentSessionWriter` 追加 event
 
 `ToolCallExecutor` 不直接写 `SessionEvent`。
 
@@ -1058,15 +1059,31 @@ LangChain4j 在系统中的职责是 provider 边界适配。
 
 ## 20. 代码结构
 
-代码职责拆分为：
+`agent` 根包的运行时由一个公开入口和三个 package-private 协作者组成：
 
 - `Agent`
-  - 负责主链异步状态机与 event 串行推进
+  - 负责公开 API、主链状态机、signal drain、retry、abort 与 branch 切换协调
+  - 每次 assistant 调用前解析运行时配置，并决定是否持久化配置变化
+- `AgentSessionWriter`
+  - 持有当前 session/branch/event 链及其完整投影缓存
+  - 在构造、切换 branch 和追加 event 后重建 agent/model/messages 投影
+  - 是运行时追加 session event 的唯一实现入口
+- `AgentAssistantRunner`
+  - 负责单次 assistant attempt 的 start、stream delta、complete、error 与 cancel
+  - 将 provider callback 转换为 `AgentSignal`
+- `AgentToolOrchestrator`
+  - 负责一批 tool call 的 start、delta、complete、error 与 cancel
+  - 将 tool callback 转换为 `AgentSignal`
+- `AgentRunContext`
+  - 承载一个主链 run 的 retry、active assistant 和 tool execution 状态
+  - 仅由上述运行时协作者共享
 - `AgentRuntimeConfigResolver`
   - 负责 agent/model 选择解析与运行时 provider/request config 装配
+- `AgentFactory`
+  - 从 session tree 读取 branch event 链并装配 `Agent` 运行时
 - `ToolCallExecutor`
   - 负责单个 tool call 的隔离执行、timeout、callback 防御和 cancel 管理
-  - 由外部注入 `Agent`，不由 `Agent` 内部创建
+  - 由外部注入 Agent 运行时
 - `SessionManager`
   - 负责 branch 视角历史读取与事件追加
 - `session.projection.SessionEventMessageProjector`
@@ -1076,4 +1093,4 @@ LangChain4j 在系统中的职责是 provider 边界适配。
 - `provider.AbstractModelProvider`
   - 负责 `AgentMessage` 到 LangChain4j `ChatMessage` 的边界适配与 tool specification 映射
 
-这样可以避免把配置解析、事件推进、流式回调适配、工具执行控制全部塞进一个超大类中。
+`AgentSignal` 是 provider/tool 异步回调与主状态机之间的唯一交接协议。所有 event 写入都在 signal drain 内完成，因此 event 链保持串行，同时 tool 可以在运行时并发执行。

@@ -119,7 +119,6 @@ public class Agent {
     this.provider = provider;
     this.model = model;
     this.variant = variant;
-    assistant.setModelSelection(provider, model, variant);
   }
 
   public void submit(UserRequest userRequest) {
@@ -291,18 +290,9 @@ public class Agent {
       }
       currentRun.scheduledTask = null;
     }
-    // 协作者内部各自 best-effort 取消 handle
-    try {
-      assistant.cancelActive(currentRun);
-    } catch (RuntimeException error) {
-      log.warn("[agent] assistant cancel failed", error);
-    }
+    assistant.cancelActive(currentRun);
     currentRun.activeAssistant = null;
-    try {
-      tools.cancelAll(currentRun);
-    } catch (RuntimeException error) {
-      log.warn("[agent] tool cancel failed", error);
-    }
+    tools.cancelAll(currentRun);
   }
 
   // ========== assistant 启动（含运行时配置刷新） ==========
@@ -315,19 +305,16 @@ public class Agent {
     try {
       runtimeConfig = resolveRuntimeConfig();
     } catch (RuntimeException error) {
-      // runtime config 解析失败 → assistant 还未真正发起调用，不写 event，直接 failCurrentRun
-      // （与旧实现保持一致：failCurrentRun 不写事件，仅释放 loop）
+      // runtime config 解析失败时 assistant 尚未启动，直接释放当前 loop。
       if (!currentRun.aborted) {
         failCurrentRun(error);
       }
       return;
     }
 
-    // 把解析结果回写到内部 selection（与旧实现一致）
     this.provider = runtimeConfig.getResolvedProvider();
     this.model = runtimeConfig.getResolvedModel();
     this.variant = runtimeConfig.getResolvedVariant();
-    assistant.setModelSelection(this.provider, this.model, this.variant);
 
     assistant.startAttempt(currentRun, runtimeConfig, userMessages);
   }
@@ -354,7 +341,9 @@ public class Agent {
    * 是否 abort / 调度 retry。
    */
   private void onAssistantError(AssistantErrorSignal signal) {
-    assistant.onError(currentRun, signal);
+    if (!assistant.onError(currentRun, signal)) {
+      return;
+    }
     if (currentRun == null || currentRun.aborted) {
       releaseLoop();
       return;
@@ -408,14 +397,6 @@ public class Agent {
       }
     }
     return messages;
-  }
-
-  private String toErrorMessage(Throwable error) {
-    if (error == null) {
-      return "unknown error";
-    }
-    String message = error.getMessage();
-    return message == null || message.isBlank() ? error.getClass().getSimpleName() : message;
   }
 
   private static <T> T requireNonNull(T value, String name) {

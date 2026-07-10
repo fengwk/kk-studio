@@ -6,7 +6,6 @@ import fun.fengwk.kkstudio.agent.session.SessionEvent;
 import fun.fengwk.kkstudio.agent.session.SessionManager;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
 import fun.fengwk.kkstudio.agent.session.projection.SessionEventMessageProjector;
-import fun.fengwk.kkstudio.agent.session.projection.SessionEventProjection;
 import fun.fengwk.kkstudio.agent.tool.ToolRegistry;
 import fun.fengwk.kkstudio.agent.tool.execution.ToolCallExecutor;
 
@@ -18,7 +17,7 @@ import java.util.function.Consumer;
  *
  * <p>实际工作：在内部构建 {@link AgentSessionWriter} / {@link AgentAssistantRunner} /
  * {@link AgentToolOrchestrator} / {@link AgentRuntimeConfigResolver} 四个协作者，
- * 然后构造 {@link Agent}。AgentFactory 不再"空转校验"，校验下沉到各协作者和 Agent 自身。
+ * 然后构造 {@link Agent}。
  *
  * @author fengwk
  */
@@ -32,6 +31,22 @@ public class AgentFactory {
       SessionEventMessageProjector sessionEventMessageProjector,
       AgentEventHandler agentEventHandler,
       AgentRuntimeConfigResolver runtimeConfigResolver) {
+
+    public Dependencies {
+      requireNonNull(toolRegistry, "toolRegistry");
+      requireNonNull(toolCallExecutor, "toolCallExecutor");
+      requireNonNull(sessionManager, "sessionManager");
+      requireNonNull(sessionEventMessageProjector, "sessionEventMessageProjector");
+      requireNonNull(agentEventHandler, "agentEventHandler");
+      requireNonNull(runtimeConfigResolver, "runtimeConfigResolver");
+    }
+
+    private static <T> T requireNonNull(T value, String name) {
+      if (value == null) {
+        throw new IllegalArgumentException(name + " must not be null");
+      }
+      return value;
+    }
   }
 
   public Agent load(
@@ -69,12 +84,14 @@ public class AgentFactory {
     }
     Branch branch = session.currentBranch();
     List<SessionEvent> branchEvents = deps.sessionManager().loadBranchEvents(branch);
-    SessionEventProjection projection = deps.sessionEventMessageProjector().project(branchEvents);
 
     AgentSessionWriter writer = new AgentSessionWriter(
-        session, branch, branchEvents,
-        projection.agentInfo(), projection.modelInfo(),
-        deps.sessionManager(), deps.sessionEventMessageProjector(), deps.agentEventHandler());
+        session,
+        branch,
+        branchEvents,
+        deps.sessionManager(),
+        deps.sessionEventMessageProjector(),
+        deps.agentEventHandler());
 
     // 构造 Agent 协作者时需要先有 Agent 自身（用于 enqueueSignal / startToolBatch / continueAssistant 回调）。
     // 用 holder 解决循环引用。
@@ -89,7 +106,6 @@ public class AgentFactory {
 
     AgentAssistantRunner assistant = new AgentAssistantRunner(
         writer,
-        provider, model, variant,
         holder.enqueueSignal,
         holder.startToolBatch);
 

@@ -16,11 +16,11 @@ import fun.fengwk.kkstudio.agent.session.payload.ToolContentType;
 import java.util.List;
 
 /**
- * AgentRunState 内部 gap 计算的边界测试。
+ * AgentRunContext 关联状态对象的 gap 计算边界测试。
  *
  * @author fengwk
  */
-public class AgentRunStateTest {
+public class AgentRunContextTest {
 
   /** 校验文本 gap 只补 suffix；当前内容不是完整内容前缀时使用完整内容修正。 */
   @Test
@@ -34,7 +34,7 @@ public class AgentRunStateTest {
   /** 校验 assistant tool call complete 会补齐缺失字段与 arguments suffix。 */
   @Test
   public void testAssistantToolCallGapCompletesMissingFields() {
-    AssistantAttemptState attemptState = new AssistantAttemptState(new AgentRunContext());
+    AssistantAttemptState attemptState = new AssistantAttemptState();
     ToolCallDelta partial = new ToolCallDelta();
     partial.setArgumentsDelta("{\"text\":");
     IndexedToolCallDelta indexedPartial = new IndexedToolCallDelta();
@@ -62,7 +62,7 @@ public class AgentRunStateTest {
   public void testToolContentGapCompletesTextSuffix() {
     ToolCall toolCall = new ToolCall();
     toolCall.setToolCallId("call_1");
-    ToolExecutionState toolState = new ToolExecutionState(new AgentRunContext(), toolCall);
+    ToolExecutionState toolState = new ToolExecutionState(toolCall);
     ToolContentDelta partial = new ToolContentDelta();
     partial.setType(ToolContentType.text);
     partial.setText("hel");
