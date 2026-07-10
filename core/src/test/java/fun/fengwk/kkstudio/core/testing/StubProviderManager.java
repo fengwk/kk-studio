@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
@@ -26,9 +28,18 @@ public class StubProviderManager implements ProviderManager {
 
   private final Queue<Consumer<AssistantResponseHandler>> scripts = new ConcurrentLinkedQueue<>();
   private final Provider provider = new StubProvider();
+  private final AtomicReference<AssistantResponseHandle> nextHandle =
+      new AtomicReference<>(noopHandle());
+  private volatile RuntimeException providerResolutionFailure;
 
   public void reset() {
     scripts.clear();
+    nextHandle.set(noopHandle());
+    providerResolutionFailure = null;
+  }
+
+  public void failProviderResolution(String message) {
+    providerResolutionFailure = new IllegalStateException(message);
   }
 
   public void enqueueText(String text) {
@@ -61,35 +72,48 @@ public class StubProviderManager implements ProviderManager {
   public PausableScript enqueuePausableText(String text) {
     PausableScript script = new PausableScript(text);
     scripts.offer(
-        handler ->
-            new Thread(
-                    () -> {
-                      handler.onTextDelta("", noopHandle());
-                      try {
-                        script.releaseLatch.await();
-                      } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        return;
-                      }
-                      handler.onComplete(
-                          AssistantResponse.builder()
-                              .text(text)
-                              .metadata(new AssistantMetadata())
-                              .build(),
-                          noopHandle());
-                    },
-                    "stub-provider-pausable")
-                .start());
+        handler -> {
+          nextHandle.set(script.handle);
+          new Thread(
+                  () -> {
+                    handler.onTextDelta("", script.handle);
+                    try {
+                      script.releaseLatch.await();
+                    } catch (InterruptedException e) {
+                      Thread.currentThread().interrupt();
+                      return;
+                    }
+                    handler.onComplete(
+                        AssistantResponse.builder()
+                            .text(text)
+                            .metadata(new AssistantMetadata())
+                            .build(),
+                        script.handle);
+                    script.completionLatch.countDown();
+                  },
+                  "stub-provider-pausable")
+              .start();
+        });
     return script;
   }
 
   public static final class PausableScript {
     private final CountDownLatch releaseLatch = new CountDownLatch(1);
+    private final CountDownLatch completionLatch = new CountDownLatch(1);
+    private final CancellableHandle handle = new CancellableHandle();
 
     PausableScript(String text) {}
 
     public void release() {
       releaseLatch.countDown();
+    }
+
+    public boolean awaitCompletion(long timeout, TimeUnit unit) throws InterruptedException {
+      return completionLatch.await(timeout, unit);
+    }
+
+    public boolean isCancelled() {
+      return handle.isCancelled();
     }
   }
 
@@ -99,6 +123,10 @@ public class StubProviderManager implements ProviderManager {
 
   @Override
   public Provider getProvider(ProviderInfo providerInfo) {
+    RuntimeException failure = providerResolutionFailure;
+    if (failure != null) {
+      throw failure;
+    }
     return provider;
   }
 
@@ -128,6 +156,20 @@ public class StubProviderManager implements ProviderManager {
     };
   }
 
+  private static final class CancellableHandle implements AssistantResponseHandle {
+    private volatile boolean cancelled;
+
+    @Override
+    public void cancel() {
+      cancelled = true;
+    }
+
+    @Override
+    public boolean isCancelled() {
+      return cancelled;
+    }
+  }
+
   private final class StubProvider implements Provider {
 
     @Override
@@ -143,7 +185,7 @@ public class StubProviderManager implements ProviderManager {
         List<ToolInfo> toolInfos,
         AssistantResponseHandler handler) {
       nextScript().accept(handler);
-      return noopHandle();
+      return nextHandle.getAndSet(noopHandle());
     }
   }
 }

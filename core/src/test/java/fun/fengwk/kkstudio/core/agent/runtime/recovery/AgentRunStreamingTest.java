@@ -134,6 +134,76 @@ public class AgentRunStreamingTest {
     }
   }
 
+  /** 校验 run 等待失败会 abort Agent、持久化 abort，并忽略之后的 provider complete。 */
+  @Test
+  public void shouldAbortAgentWhenRunWaitDoesNotReachIdle() throws InterruptedException {
+    StubProviderManager.PausableScript stub =
+        stubProviderManager.enqueuePausableText("late response");
+    ExecutorService executorService =
+        Executors.newSingleThreadExecutor(
+            runnable -> new Thread(runnable, "agent-run-timeout-test"));
+    AgentSessionDTO session = createSession();
+    AgentSessionMessageCreateDTO createDTO = new AgentSessionMessageCreateDTO();
+    createDTO.setContent("please wait");
+    AgentSessionEventDTO createdEvent =
+        agentSessionService.createMessage(session.getSessionId(), createDTO);
+    Future<?> runFuture =
+        executorService.submit(
+            () ->
+                agentRunRuntimeService.scheduleQueuedRun(
+                    createdEvent.getRunId(), session.getSessionId(), createDTO.getContent()));
+    try {
+      waitForAssistantStart(session.getSessionId(), createdEvent.getRunId());
+
+      assertTrue(runFuture.cancel(true));
+      waitForRunCompleted(createdEvent.getRunId());
+
+      assertEquals("failed", agentRunService.getRun(createdEvent.getRunId()).getStatus());
+      assertTrue(stub.isCancelled());
+      List<AgentSessionEventDTO> eventsBeforeLateComplete =
+          agentSessionService.listEvents(session.getSessionId(), null);
+      assertEquals("abort", eventsBeforeLateComplete.get(eventsBeforeLateComplete.size() - 1).getEventType());
+
+      stub.release();
+      assertTrue(stub.awaitCompletion(5, TimeUnit.SECONDS));
+
+      List<AgentSessionEventDTO> eventsAfterLateComplete =
+          agentSessionService.listEvents(session.getSessionId(), null);
+      assertEquals(eventsBeforeLateComplete.size(), eventsAfterLateComplete.size());
+      assertEquals("abort", eventsAfterLateComplete.get(eventsAfterLateComplete.size() - 1).getEventType());
+    } finally {
+      stub.release();
+      runFuture.cancel(true);
+      executorService.shutdownNow();
+    }
+  }
+
+  private void waitForRunCompleted(String runId) throws InterruptedException {
+    long deadline = System.currentTimeMillis() + 5000L;
+    while (System.currentTimeMillis() < deadline) {
+      AgentRunDTO run = agentRunService.getRun(runId);
+      if (run != null && ("succeeded".equals(run.getStatus()) || "failed".equals(run.getStatus()))) {
+        return;
+      }
+      Thread.sleep(10L);
+    }
+    fail("run did not reach a terminal status within 5s: " + runId);
+  }
+
+  private void waitForAssistantStart(String sessionId, String runId) throws InterruptedException {
+    long deadline = System.currentTimeMillis() + 5000L;
+    while (System.currentTimeMillis() < deadline) {
+      AgentRunDTO run = agentRunService.getRun(runId);
+      List<AgentSessionEventDTO> events = agentSessionService.listEvents(sessionId, null);
+      boolean started = events.stream().anyMatch(event -> "assistant_start".equals(event.getEventType()));
+      if (started && run != null && "running".equals(run.getStatus())) {
+        return;
+      }
+      Thread.sleep(10L);
+    }
+    fail("assistant did not start within 5s: " + runId);
+  }
+
   private AgentSessionDTO createSession() {
     AgentSessionCreateDTO createDTO = new AgentSessionCreateDTO();
     createDTO.setAgentName("default-assistant");

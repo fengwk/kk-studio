@@ -240,6 +240,30 @@ public class AgentSessionServiceTest {
     assertTrue(events.get(4).getPayloadJson().contains("provider timeout"));
   }
 
+  /** 校验 Agent 运行时配置失败通过 failure callback 收敛为 failed，而非 succeeded。 */
+  @Test
+  public void shouldMarkRunFailedWhenProviderResolutionFails() throws InterruptedException {
+    stubProviderManager.failProviderResolution("provider resolution failed");
+
+    AgentSessionCreateDTO createDTO = new AgentSessionCreateDTO();
+    createDTO.setAgentName("default-assistant");
+    createDTO.setTitle("Runtime Configuration Failure Session");
+    AgentSessionDTO session = agentSessionService.createSession(createDTO);
+
+    AgentSessionMessageCreateDTO createMessageDTO = new AgentSessionMessageCreateDTO();
+    createMessageDTO.setContent("Please resolve provider");
+    AgentSessionEventDTO createdEvent =
+        agentSessionService.createMessage(session.getSessionId(), createMessageDTO);
+    agentRunRuntimeService.scheduleQueuedRun(
+        createdEvent.getRunId(), session.getSessionId(), createMessageDTO.getContent());
+    waitForRunCompleted(createdEvent.getRunId());
+
+    assertEquals("failed", agentRunService.getRun(createdEvent.getRunId()).getStatus());
+    List<AgentSessionEventDTO> events = agentSessionService.listEvents(session.getSessionId(), null);
+    assertEquals(1, events.size());
+    assertEquals("user_message", events.get(0).getEventType());
+  }
+
   @Test
   public void shouldListEventsAfterSpecifiedEventId() throws InterruptedException {
     stubProviderManager.enqueueText("Agent reply");

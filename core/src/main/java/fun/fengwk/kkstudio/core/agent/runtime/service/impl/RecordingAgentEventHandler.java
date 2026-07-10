@@ -6,7 +6,8 @@ import fun.fengwk.kkstudio.agent.session.SessionEventType;
 
 final class RecordingAgentEventHandler implements AgentEventHandler {
 
-  private SessionEventType lastEventType;
+  private volatile SessionEventType lastEventType;
+  private volatile boolean runFailed;
 
   @Override
   public void onEvent(SessionEvent event) {
@@ -15,8 +16,14 @@ final class RecordingAgentEventHandler implements AgentEventHandler {
     }
   }
 
+  @Override
+  public void onFailure(Throwable error) {
+    runFailed = true;
+  }
+
   boolean isTerminalFailure() {
-    return lastEventType == SessionEventType.assistant_error
+    return runFailed
+        || lastEventType == SessionEventType.assistant_error
         || lastEventType == SessionEventType.tool_error
         || lastEventType == SessionEventType.abort;
   }

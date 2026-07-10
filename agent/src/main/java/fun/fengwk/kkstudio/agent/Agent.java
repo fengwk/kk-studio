@@ -52,7 +52,7 @@ public class Agent {
   private String variant;
   private AgentRunContext currentRun;
 
-  public Agent(
+  Agent(
       AgentSessionWriter writer,
       AgentAssistantRunner assistant,
       AgentToolOrchestrator tools,
@@ -140,7 +140,17 @@ public class Agent {
     if (branchEvents == null) {
       throw new IllegalArgumentException("branchEvents must not be null");
     }
-    enqueueSignal(new SwitchBranchSignal(branch, List.copyOf(branchEvents)));
+    String sessionId = writer.getSession().getSessionId();
+    if (!sessionId.equals(branch.sessionId())) {
+      throw new IllegalArgumentException("branch does not belong to current session");
+    }
+    List<SessionEvent> copiedBranchEvents = List.copyOf(branchEvents);
+    for (SessionEvent branchEvent : copiedBranchEvents) {
+      if (!sessionId.equals(branchEvent.getSessionId())) {
+        throw new IllegalArgumentException("branch event does not belong to current session");
+      }
+    }
+    enqueueSignal(new SwitchBranchSignal(branch, copiedBranchEvents));
   }
 
   public SessionEventProjection projection() {
@@ -273,6 +283,11 @@ public class Agent {
 
   private void failCurrentRun(Throwable error) {
     log.error("[agent] current run failed unexpectedly", error);
+    try {
+      writer.notifyFailure(error);
+    } catch (RuntimeException notificationError) {
+      log.warn("[agent] failure notification failed", notificationError);
+    }
     cancelCurrentRunResources();
     releaseLoop();
   }

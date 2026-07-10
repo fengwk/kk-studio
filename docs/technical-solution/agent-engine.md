@@ -107,15 +107,15 @@ Agent 模块采用 `SessionEvent` 单层事件流模型，统一支撑：
 - 被错误事件闭合后，不再写对应 `assistant_end` / `tool_end`
 - 已存在 delta 仍参与重放
 
-### 2.4 Abort 是 run-level 用户取消事实
+### 2.4 Abort 是 run-level 取消事实
 
-`abort` 表示用户取消当前 run，不按 assistant/tool 拆分。
+`abort` 表示当前 run 被请求取消，不按 assistant/tool 拆分。用户显式取消和宿主 runtime 超时都复用该事件；`reason` 记录取消来源。
 
 语义：
 
 - `abort` 不携带 `toolCallId`
 - 一个 `abort` 同时取消当前 run 中所有 active assistant / tools / retry timer
-- `abort` 是用户行为事实，不是某个 tool call 的错误事实
+- `abort` 是 run-level 取消事实，不是某个 tool call 的错误事实
 - 若存在 open assistant/tool，投影时由 projector 为 open state 追加中断文本
 - 若没有 open assistant/tool，例如等待 retry delay 阶段，`abort` 只记录用户取消事实，不生成 LLM 消息
 
@@ -129,6 +129,8 @@ Agent 模块采用 `SessionEvent` 单层事件流模型，统一支撑：
 - 多个 tool callback 可以交错到达
 - callback 回流到 Agent 后由单个 signal drain 串行处理
 - 运行时协作者只能通过 `AgentSessionWriter` 追加 event
+- 若 Agent 在无法写出终态 event 的内部失败中释放当前 run，会通过 `AgentEventHandler.onFailure(...)`
+  通知宿主 runtime 将对应 run 标记为失败
 
 `ToolCallExecutor` 不直接写 `SessionEvent`。
 
@@ -422,7 +424,7 @@ payload：
 
 语义：
 
-- 仅由用户显式取消触发
+- 由用户显式取消或宿主 runtime 超时触发
 - 是 run-level 事件，不携带 `toolCallId`
 - abort 发生后：
   - 取消 active assistant handle
@@ -890,6 +892,10 @@ tool not found: {toolName}. Available tools: none.
 
 Provider 层封装自己的 handler 协议，不让 Agent 直接依赖 LangChain4j 回调细节。
 
+assistant complete 在写入 `assistant_end` 前校验最终 `toolCalls`：每个调用必须有非空 `toolCallId`、
+非空 `toolName`，且 batch 内 id 唯一。校验失败时当前 attempt 写 `assistant_error`，并沿用普通 retry
+策略；不会写出无法关联的 tool event。
+
 回调类型：
 
 - text delta
@@ -960,6 +966,10 @@ Agent 创建 listener 时通过闭包绑定自己的 `ToolExecutionState`，再�
 ## 17. 投影规则
 
 `SessionEventMessageProjector` 负责把 branch event 流投影为当前消息上下文。
+
+`AgentSessionWriter` 持有当前 branch 的投影缓存。构造时建立初始投影；追加 event 或切换 branch
+只标记缓存为 dirty，下一次读取 messages、agent/model 配置或完整 projection 时才完整重放。这样保持
+投影作为唯一事实来源，同时避免每条 streaming delta 都重复扫描整个 branch event 链。
 
 规则：
 

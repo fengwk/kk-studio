@@ -57,6 +57,35 @@ public class AgentRunContextTest {
     assertTrue(attemptState.computeToolCallGap(0, complete).isEmpty());
   }
 
+  /** 校验 media complete 会补齐完整内容，非法 content delta 不会污染已有槽位。 */
+  @Test
+  public void testToolContentGapCompletesMediaAndIgnoresInvalidDeltas() {
+    ToolCall toolCall = new ToolCall();
+    toolCall.setToolCallId("call_1");
+    ToolExecutionState toolState = new ToolExecutionState(toolCall);
+    ToolContent complete = new ToolContent();
+    complete.setType(ToolContentType.image);
+    complete.setData("base64-data");
+    complete.setMime("image/png");
+    complete.setName("chart.png");
+
+    List<IndexedToolContentDelta> gap = toolState.computeGap(List.of(complete));
+
+    assertEquals(1, gap.size());
+    assertEquals(ToolContentType.image, gap.get(0).getContentDelta().getType());
+    assertEquals("base64-data", gap.get(0).getContentDelta().getData());
+
+    IndexedToolContentDelta invalidIndex = new IndexedToolContentDelta();
+    invalidIndex.setIndex(-1);
+    invalidIndex.setContentDelta(gap.get(0).getContentDelta());
+    IndexedToolContentDelta missingType = new IndexedToolContentDelta();
+    missingType.setIndex(0);
+    missingType.setContentDelta(new ToolContentDelta());
+    toolState.applyContentDeltas(List.of(invalidIndex, missingType, gap.get(0)));
+
+    assertTrue(toolState.computeGap(List.of(complete)).isEmpty());
+  }
+
   /** 校验 tool result complete 会补齐文本 suffix，并跳过已完整内容。 */
   @Test
   public void testToolContentGapCompletesTextSuffix() {

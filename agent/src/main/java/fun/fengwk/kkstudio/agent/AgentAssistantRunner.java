@@ -16,7 +16,9 @@ import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Consumer;
 
 /**
@@ -166,11 +168,17 @@ final class AgentAssistantRunner {
     if (!isActiveAssistant(runContext, signal.attemptState())) {
       return;
     }
+    AssistantResponse response =
+        signal.response() == null ? AssistantResponse.builder().build() : signal.response();
+    String toolCallError = validateToolCalls(response.getToolCalls());
+    if (toolCallError != null) {
+      enqueueAssistantErrorIfActive(
+          runContext, signal.attemptState(), new IllegalArgumentException(toolCallError));
+      return;
+    }
     runContext.activeAssistant = null;
     signal.attemptState().handle = null;
 
-    AssistantResponse response =
-        signal.response() == null ? AssistantResponse.builder().build() : signal.response();
     appendAssistantCompletionGap(signal.attemptState(), response);
 
     AssistantEndPayload assistantEndPayload = new AssistantEndPayload();
@@ -201,6 +209,29 @@ final class AgentAssistantRunner {
   }
 
   // --- internal ---
+
+  private static String validateToolCalls(List<ToolCall> toolCalls) {
+    if (toolCalls == null || toolCalls.isEmpty()) {
+      return null;
+    }
+    Set<String> toolCallIds = new HashSet<>();
+    for (int index = 0; index < toolCalls.size(); index++) {
+      ToolCall toolCall = toolCalls.get(index);
+      if (toolCall == null) {
+        return "assistant tool call must not be null: index=" + index;
+      }
+      if (toolCall.getToolCallId() == null || toolCall.getToolCallId().isBlank()) {
+        return "assistant tool call id must not be blank: index=" + index;
+      }
+      if (toolCall.getToolName() == null || toolCall.getToolName().isBlank()) {
+        return "assistant tool name must not be blank: index=" + index;
+      }
+      if (!toolCallIds.add(toolCall.getToolCallId())) {
+        return "assistant tool call id must be unique: " + toolCall.getToolCallId();
+      }
+    }
+    return null;
+  }
 
   private void appendAssistantCompletionGap(
       AssistantAttemptState attemptState, AssistantResponse response) {

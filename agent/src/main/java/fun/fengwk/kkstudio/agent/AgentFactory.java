@@ -16,7 +16,7 @@ import java.util.function.Consumer;
  * AgentFactory 负责从 session tree 装配 Agent 运行态视图。
  *
  * <p>实际工作：在内部构建 {@link AgentSessionWriter} / {@link AgentAssistantRunner} /
- * {@link AgentToolOrchestrator} / {@link AgentRuntimeConfigResolver} 四个协作者，
+ * {@link AgentToolOrchestrator} 三个协作者，使用注入的 {@link AgentRuntimeConfigResolver}，
  * 然后构造 {@link Agent}。
  *
  * @author fengwk

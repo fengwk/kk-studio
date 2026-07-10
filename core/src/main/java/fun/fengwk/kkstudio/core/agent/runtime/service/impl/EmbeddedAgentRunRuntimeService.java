@@ -63,6 +63,7 @@ public class EmbeddedAgentRunRuntimeService implements AgentRunRuntimeService {
         }
       } else {
         log.warn("Execute queued run timed out, runId: {}, sessionId: {}", runId, sessionId);
+        agent.abort("run timed out");
         agentRunService.markFailed(runId);
       }
     } catch (Exception e) {

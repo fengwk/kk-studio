@@ -19,7 +19,8 @@ import java.util.List;
  * AgentSessionWriter 维护当前 branch 的投影视图并串行追加事件。
  *
  * <p>session、branch、branchEvents 与由其派生的 agent/model/messages 缓存始终来自同一条
- * branch event 链。每次构造、切换分支和追加事件后都会重新建立完整投影。
+ * branch event 链。构造时建立初始投影；切换分支或追加事件后标记缓存为 dirty，在下一次读取
+ * 投影数据时重新建立完整投影。
  *
  * @author fengwk
  */
@@ -35,6 +36,8 @@ final class AgentSessionWriter {
   private SetAgentInfoPayload currentAgentInfo;
   private SetModelInfoPayload currentModelInfo;
   private List<AgentMessage> projectedMessages;
+  private SessionEventProjection currentProjection;
+  private boolean projectionDirty;
 
   AgentSessionWriter(
       Session session,
@@ -66,19 +69,28 @@ final class AgentSessionWriter {
   }
 
   SetAgentInfoPayload getCurrentAgentInfo() {
+    ensureProjection();
     return currentAgentInfo;
   }
 
   SetModelInfoPayload getCurrentModelInfo() {
+    ensureProjection();
     return currentModelInfo;
   }
 
   List<AgentMessage> getProjectedMessages() {
+    ensureProjection();
     return projectedMessages;
   }
 
   SessionEventProjection projection() {
-    return sessionEventMessageProjector.projectForRuntime(branchEvents);
+    ensureProjection();
+    return currentProjection;
+  }
+
+  /** 通知当前 run 的未持久化失败。 */
+  void notifyFailure(Throwable error) {
+    agentEventHandler.onFailure(error);
   }
 
   /** 切换当前 branch 视图。 */
@@ -89,9 +101,12 @@ final class AgentSessionWriter {
     if (newBranchEvents == null) {
       throw new IllegalArgumentException("branchEvents must not be null");
     }
+    if (!session.getSessionId().equals(newBranch.sessionId())) {
+      throw new IllegalArgumentException("branch does not belong to current session");
+    }
     this.branch = newBranch;
     this.branchEvents = new ArrayList<>(newBranchEvents);
-    refreshProjection();
+    markProjectionDirty();
   }
 
   /** 在当前 branch 上追加一个新 event，并刷新投影。 */
@@ -111,16 +126,30 @@ final class AgentSessionWriter {
       session.setCurrentHeadEventId(branch.headEventId());
     }
 
-    refreshProjection();
+    markProjectionDirty();
     agentEventHandler.onEvent(event);
     return event;
   }
 
+  private void ensureProjection() {
+    if (projectionDirty) {
+      refreshProjection();
+    }
+  }
+
+  private void markProjectionDirty() {
+    projectionDirty = true;
+  }
+
   private void refreshProjection() {
-    SessionEventProjection projection = projection();
-    this.currentAgentInfo = projection.agentInfo();
-    this.currentModelInfo = projection.modelInfo();
-    this.projectedMessages = projection.messages();
+    SessionEventProjection projection = sessionEventMessageProjector.projectForRuntime(branchEvents);
+    List<AgentMessage> messages = List.copyOf(projection.messages());
+    this.currentProjection =
+        new SessionEventProjection(projection.agentInfo(), projection.modelInfo(), messages);
+    this.currentAgentInfo = currentProjection.agentInfo();
+    this.currentModelInfo = currentProjection.modelInfo();
+    this.projectedMessages = messages;
+    this.projectionDirty = false;
   }
 
   private static <T> T requireNonNull(T value, String name) {

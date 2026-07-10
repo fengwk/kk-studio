@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.agent;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,7 @@ import fun.fengwk.kkstudio.agent.session.SessionEventType;
 import fun.fengwk.kkstudio.agent.session.SessionManager;
 import fun.fengwk.kkstudio.agent.session.SessionManagerImpl;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantDeltaPayload;
+import fun.fengwk.kkstudio.agent.session.payload.AssistantErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantMetadata;
 import fun.fengwk.kkstudio.agent.session.payload.AssistantStartPayload;
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolCallDelta;
@@ -37,8 +39,11 @@ import fun.fengwk.kkstudio.agent.session.payload.ToolCallDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContentDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContentType;
+import fun.fengwk.kkstudio.agent.session.payload.ToolDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolErrorPayload;
 import fun.fengwk.kkstudio.agent.session.projection.DefaultSessionEventMessageProjector;
+import fun.fengwk.kkstudio.agent.session.projection.SessionEventMessageProjector;
+import fun.fengwk.kkstudio.agent.session.projection.SessionEventProjection;
 import fun.fengwk.kkstudio.agent.session.repo.SessionEventRepository;
 import fun.fengwk.kkstudio.agent.session.repo.SessionRepository;
 import fun.fengwk.kkstudio.agent.tool.DefaultToolRegistry;
@@ -423,6 +428,282 @@ public class AgentMainLoopTest {
     assertEquals(AgentStatus.idle, agent.getStatus());
   }
 
+  /** 校验 provider 返回缺失 tool call identity 时，当前 attempt 以 assistant_error 闭合。 */
+  @Test
+  public void testMalformedToolCallClosesAssistantWithError() {
+    RecordingContext context = new RecordingContext();
+    context.modelRetryConfig =
+        ModelRetryConfig.builder()
+            .maxRetries(0)
+            .baseDelay(Duration.ZERO)
+            .maxDelay(Duration.ZERO)
+            .multiplier(2D)
+            .build();
+    ToolCall toolCall = new ToolCall();
+    toolCall.setToolName("bash");
+    toolCall.setArguments("{}");
+    context.provider.enqueue(
+        handler ->
+            handler.onComplete(
+                AssistantResponse.builder()
+                    .toolCalls(List.of(toolCall))
+                    .metadata(new AssistantMetadata())
+                    .build(),
+                noopHandle()));
+
+    Agent agent = context.newAgent();
+    agent.submit(UserRequest.userRequest("hello"));
+
+    assertEquals(
+        List.of(
+            SessionEventType.set_agent_info,
+            SessionEventType.set_model_info,
+            SessionEventType.assistant_start,
+            SessionEventType.assistant_error),
+        context.eventTypes());
+    AssistantErrorPayload errorPayload = (AssistantErrorPayload) context.events.get(3).getPayload();
+    assertEquals("assistant tool call id must not be blank: index=0", errorPayload.getMessage());
+    assertEquals(AgentStatus.idle, agent.getStatus());
+  }
+
+  /** 校验非当前 session 的 branch 不会取消或污染当前 Agent。 */
+  @Test
+  public void testSwitchBranchRejectsForeignSession() {
+    RecordingContext context = new RecordingContext();
+    Agent agent = context.newAgent();
+    Branch foreignBranch = Branch.newBranch("se_foreign", SessionEvent.ROOT_EVENT_ID);
+
+    assertThrows(IllegalArgumentException.class, () -> agent.switchBranch(foreignBranch, List.of()));
+    SessionEvent foreignEvent =
+        SessionEvent.newEvent(
+            "se_foreign",
+            SessionEventType.assistant_start,
+            SessionEvent.ROOT_EVENT_ID,
+            new AssistantStartPayload());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> agent.switchBranch(agent.getBranch(), List.of(foreignEvent)));
+
+    assertEquals(context.session.getSessionId(), agent.getBranch().sessionId());
+    assertEquals(List.of(), context.eventTypes());
+    assertEquals(AgentStatus.idle, agent.getStatus());
+  }
+
+  /** 校验 abort 会取消等待中的 retry，并忽略已入队的迟到 retry callback。 */
+  @Test
+  public void testAbortDuringRetryDelayCancelsRetryAndIgnoresLateCallback() {
+    RecordingContext context = new RecordingContext();
+    context.modelRetryConfig =
+        ModelRetryConfig.builder()
+            .maxRetries(1)
+            .baseDelay(Duration.ofSeconds(1))
+            .maxDelay(Duration.ofSeconds(1))
+            .multiplier(2D)
+            .build();
+    AtomicReference<Runnable> retryTask = new AtomicReference<>();
+    AtomicBoolean retryCancelled = new AtomicBoolean();
+    context.scheduler =
+        (delay, task) -> {
+          retryTask.set(task);
+          return () -> retryCancelled.set(true);
+        };
+    context.provider.enqueue(handler -> handler.onError(new RuntimeException("retry"), noopHandle()));
+
+    Agent agent = context.newAgent();
+    agent.submit(UserRequest.userRequest("hello"));
+    agent.abort("stop");
+
+    assertTrue(retryCancelled.get());
+    assertEquals(AgentStatus.idle, agent.getStatus());
+    List<SessionEventType> eventTypesAfterAbort = context.eventTypes();
+    assertEquals(SessionEventType.abort, eventTypesAfterAbort.get(eventTypesAfterAbort.size() - 1));
+
+    retryTask.get().run();
+
+    assertEquals(eventTypesAfterAbort, context.eventTypes());
+    assertEquals(AgentStatus.idle, agent.getStatus());
+  }
+
+  /** 校验 streaming delta 只使投影缓存变 dirty，不会逐 event 反复重放整个 branch。 */
+  @Test
+  public void testProjectionRefreshesOnDemandAfterStreamingDeltas() {
+    RecordingContext context = new RecordingContext();
+    CountingProjector projector = new CountingProjector();
+    context.projector = projector;
+    context.provider.enqueue(
+        handler -> {
+          AssistantResponseHandle handle = noopHandle();
+          handler.onTextDelta("a", handle);
+          handler.onTextDelta("b", handle);
+          handler.onComplete(
+              AssistantResponse.builder().text("ab").metadata(new AssistantMetadata()).build(),
+              handle);
+        });
+
+    Agent agent = context.newAgent();
+    agent.submit(UserRequest.userRequest("hello"));
+
+    assertEquals(6, context.events.size());
+    assertTrue(projector.runtimeProjectionCount < context.events.size());
+
+    int projectionCountBeforeRead = projector.runtimeProjectionCount;
+    assertEquals(3, agent.getProjectedMessages().size());
+    assertEquals(projectionCountBeforeRead + 1, projector.runtimeProjectionCount);
+  }
+
+  /** 校验正常完成但未发送 delta 的 tool result 会以 gap 写入 tool_delta。 */
+  @Test
+  public void testToolCompleteWritesMissingContentGap() {
+    RecordingContext context = new RecordingContext();
+    ToolCall toolCall = new ToolCall();
+    toolCall.setToolCallId("call_1");
+    toolCall.setToolName("bash");
+    toolCall.setArguments("{}");
+    context.provider.enqueue(
+        handler ->
+            handler.onComplete(
+                AssistantResponse.builder()
+                    .toolCalls(List.of(toolCall))
+                    .metadata(new AssistantMetadata())
+                    .build(),
+                noopHandle()));
+    context.provider.enqueue(
+        handler ->
+            handler.onComplete(
+                AssistantResponse.builder().text("final").metadata(new AssistantMetadata()).build(),
+                noopHandle()));
+    context.toolRegistry.registerTool(
+        "bash",
+        ToolInfo.builder()
+            .name("bash")
+            .description("bash")
+            .inputSchema(ToolParamsSchema.builder().build())
+            .build(),
+        (request, handler) -> {
+          ToolContent content = new ToolContent();
+          content.setType(ToolContentType.text);
+          content.setText("result");
+          handler.onComplete(List.of(content));
+          return noopToolHandle();
+        });
+
+    Agent agent = context.newAgent();
+    agent.submit(UserRequest.userRequest("hello"));
+
+    assertEquals(SessionEventType.tool_delta, context.events.get(6).getEventType());
+    ToolDeltaPayload toolDeltaPayload = (ToolDeltaPayload) context.events.get(6).getPayload();
+    assertEquals("result", toolDeltaPayload.getContentDeltas().get(0).getContentDelta().getText());
+    assertEquals(SessionEventType.tool_end, context.events.get(7).getEventType());
+    assertEquals(AgentStatus.idle, agent.getStatus());
+  }
+
+  /** 校验 tool callback error 会关闭指定 tool，并继续后续 assistant attempt。 */
+  @Test
+  public void testToolCallbackErrorClosesToolAndContinuesAssistant() {
+    RecordingContext context = new RecordingContext();
+    ToolCall toolCall = new ToolCall();
+    toolCall.setToolCallId("call_1");
+    toolCall.setToolName("bash");
+    toolCall.setArguments("{}");
+    context.provider.enqueue(
+        handler ->
+            handler.onComplete(
+                AssistantResponse.builder()
+                    .toolCalls(List.of(toolCall))
+                    .metadata(new AssistantMetadata())
+                    .build(),
+                noopHandle()));
+    context.provider.enqueue(
+        handler ->
+            handler.onComplete(
+                AssistantResponse.builder().text("final").metadata(new AssistantMetadata()).build(),
+                noopHandle()));
+    context.toolRegistry.registerTool(
+        "bash",
+        ToolInfo.builder()
+            .name("bash")
+            .description("bash")
+            .inputSchema(ToolParamsSchema.builder().build())
+            .build(),
+        (request, handler) -> {
+          handler.onError(new IllegalStateException("tool failed"));
+          return noopToolHandle();
+        });
+
+    Agent agent = context.newAgent();
+    agent.submit(UserRequest.userRequest("hello"));
+
+    assertEquals(SessionEventType.tool_error, context.events.get(6).getEventType());
+    ToolErrorPayload errorPayload = (ToolErrorPayload) context.events.get(6).getPayload();
+    assertEquals("tool failed", errorPayload.getMessage());
+    assertEquals(SessionEventType.assistant_start, context.events.get(7).getEventType());
+    assertEquals(AgentStatus.idle, agent.getStatus());
+  }
+
+  /** 校验 unknown tool 仍写完整 tool 生命周期，并将稳定错误上下文回流给 assistant。 */
+  @Test
+  public void testToolNotFoundWritesErrorAndContinuesAssistant() {
+    RecordingContext context = new RecordingContext();
+    ToolCall toolCall = new ToolCall();
+    toolCall.setToolCallId("call_1");
+    toolCall.setToolName("missing");
+    toolCall.setArguments("{}");
+    context.provider.enqueue(
+        handler ->
+            handler.onComplete(
+                AssistantResponse.builder()
+                    .toolCalls(List.of(toolCall))
+                    .metadata(new AssistantMetadata())
+                    .build(),
+                noopHandle()));
+    context.provider.enqueue(
+        handler ->
+            handler.onComplete(
+                AssistantResponse.builder().text("final").metadata(new AssistantMetadata()).build(),
+                noopHandle()));
+
+    Agent agent = context.newAgent();
+    agent.submit(UserRequest.userRequest("hello"));
+
+    assertEquals(SessionEventType.tool_start, context.events.get(5).getEventType());
+    assertEquals(SessionEventType.tool_error, context.events.get(6).getEventType());
+    ToolErrorPayload errorPayload = (ToolErrorPayload) context.events.get(6).getPayload();
+    assertEquals("tool not found: missing. Available tools: none.", errorPayload.getMessage());
+    assertEquals(SessionEventType.assistant_start, context.events.get(7).getEventType());
+    assertEquals(AgentStatus.idle, agent.getStatus());
+  }
+
+  /** 校验公开运行时配置与视图访问器会通过同一 branch projection 返回当前事实。 */
+  @Test
+  public void testPublicConfigurationAndProjectionAccessors() {
+    RecordingContext context = new RecordingContext();
+    context.provider.enqueue(
+        handler ->
+            handler.onComplete(
+                AssistantResponse.builder().text("done").metadata(new AssistantMetadata()).build(),
+                noopHandle()));
+    Agent agent = context.newAgent();
+
+    assertEquals("assistant", agent.getAgentName());
+    assertEquals(List.of(), agent.getBranchEvents());
+    assertEquals(List.of(), agent.projection().messages());
+    assertThrows(IllegalArgumentException.class, () -> agent.setAgentName(" "));
+    assertThrows(IllegalArgumentException.class, () -> agent.submit(null));
+    assertThrows(IllegalArgumentException.class, () -> agent.switchBranch(null, List.of()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> agent.switchBranch(agent.getBranch(), null));
+
+    agent.setAgentName("renamed");
+    agent.setModelSelection("custom", "model", "high");
+    agent.submit(UserRequest.userRequest("hello"));
+
+    assertEquals("renamed", agent.getCurrentAgentInfo().getAgentName());
+    assertEquals("custom", agent.getCurrentModelInfo().getProvider());
+    assertTrue(!agent.getBranchEvents().isEmpty());
+    assertEquals(3, agent.projection().messages().size());
+  }
+
   @Test
   public void testInvalidToolArgumentsFailBeforeToolExecution() {
     RecordingContext context = new RecordingContext();
@@ -572,6 +853,7 @@ public class AgentMainLoopTest {
     agent.submit(UserRequest.userRequest("hello"));
 
     assertEquals(List.of(), context.eventTypes());
+    assertTrue(context.failure.get() instanceof IllegalStateException);
     assertEquals(AgentStatus.idle, agent.getStatus());
   }
 
@@ -603,6 +885,8 @@ public class AgentMainLoopTest {
     private final SessionManager sessionManager =
         new SessionManagerImpl(sessionRepository, sessionEventRepository);
     private final Session session = Session.newSession();
+    private final AtomicReference<Throwable> failure = new AtomicReference<>();
+    private SessionEventMessageProjector projector = new DefaultSessionEventMessageProjector();
     private AgentScheduler scheduler =
         (delay, task) -> {
           task.run();
@@ -634,8 +918,18 @@ public class AgentMainLoopTest {
           toolRegistry,
           toolCallExecutor,
           sessionManager,
-          new DefaultSessionEventMessageProjector(),
-          events::add,
+          projector,
+          new AgentEventHandler() {
+            @Override
+            public void onEvent(SessionEvent event) {
+              events.add(event);
+            }
+
+            @Override
+            public void onFailure(Throwable error) {
+              failure.set(error);
+            }
+          },
           resolver);
       return agentFactory.load(
           session.getSessionId(),
@@ -651,6 +945,23 @@ public class AgentMainLoopTest {
 
     private List<SessionEventType> eventTypes() {
       return events.stream().map(SessionEvent::getEventType).toList();
+    }
+  }
+
+  private static final class CountingProjector implements SessionEventMessageProjector {
+    private final DefaultSessionEventMessageProjector delegate =
+        new DefaultSessionEventMessageProjector();
+    private int runtimeProjectionCount;
+
+    @Override
+    public SessionEventProjection project(List<SessionEvent> branchEvents) {
+      return delegate.project(branchEvents);
+    }
+
+    @Override
+    public SessionEventProjection projectForRuntime(List<SessionEvent> branchEvents) {
+      runtimeProjectionCount++;
+      return delegate.projectForRuntime(branchEvents);
     }
   }
 
