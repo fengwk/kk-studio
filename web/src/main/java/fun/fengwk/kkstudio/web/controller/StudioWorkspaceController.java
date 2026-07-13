@@ -35,6 +35,11 @@ public class StudioWorkspaceController {
     return Results.ok(workspaceService.pageWorkspaces(new PageQuery(pageNumber, pageSize)));
   }
 
+  @GetMapping("/{workspaceId}")
+  public Result<WorkspaceDTO> getWorkspace(@PathVariable long workspaceId) {
+    return Results.ok(workspaceService.getWorkspace(workspaceId));
+  }
+
   @PostMapping
   public Result<WorkspaceDTO> createWorkspace(@RequestBody WorkspaceCreateDTO createDTO) {
     return Results.created(workspaceService.createWorkspace(createDTO));

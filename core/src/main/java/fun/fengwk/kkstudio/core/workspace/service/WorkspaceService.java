@@ -14,6 +14,8 @@ public interface WorkspaceService {
 
   Page<WorkspaceDTO> pageWorkspaces(PageQuery pageQuery);
 
+  WorkspaceDTO getWorkspace(long id);
+
   WorkspaceDTO createWorkspace(WorkspaceCreateDTO createDTO);
 
   WorkspaceDTO updateWorkspace(long id, WorkspaceUpdateDTO updateDTO);

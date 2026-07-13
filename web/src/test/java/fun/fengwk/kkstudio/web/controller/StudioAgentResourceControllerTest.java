@@ -16,13 +16,13 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
+import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.WorkspaceCreateDTO;
 import fun.fengwk.kkstudio.web.WebTestApplication;
 
 import java.util.List;
-import java.util.Map;
 
 /** HTTP contract test for workspace routing, string IDs, and credential redaction. */
 @AutoConfigureMockMvc
@@ -36,6 +36,10 @@ public class StudioAgentResourceControllerTest {
   public void shouldUseWorkspaceRoutesAndNeverReturnCredential() throws Exception {
     String suffix = Long.toString(System.nanoTime());
     String workspaceId = createWorkspace("web-workspace-" + suffix);
+    mockMvc
+        .perform(get("/api/workspaces/{workspaceId}", workspaceId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.id").value(workspaceId));
 
     AgentProviderCreateDTO provider = new AgentProviderCreateDTO();
     provider.setName("provider-" + suffix);
@@ -76,7 +80,9 @@ public class StudioAgentResourceControllerTest {
     config.setTools(List.of("browser"));
     config.setSkills(List.of("java"));
     config.setAllowedSubagents(List.of("reviewer"));
-    config.setExecutionPolicy(Map.of("approval", "ask"));
+    AgentExecutionPolicyDTO policy = new AgentExecutionPolicyDTO();
+    policy.setMaxTurns(8);
+    config.setExecutionPolicy(policy);
     AgentDefinitionCreateDTO agent = new AgentDefinitionCreateDTO();
     agent.setName("agent-" + suffix);
     agent.setModelId(modelId);
@@ -89,7 +95,8 @@ public class StudioAgentResourceControllerTest {
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.data.id").isString())
         .andExpect(jsonPath("$.data.modelId").value(modelId))
-        .andExpect(jsonPath("$.data.config.allowedSubagents[0]").value("reviewer"));
+        .andExpect(jsonPath("$.data.config.allowedSubagents[0]").value("reviewer"))
+        .andExpect(jsonPath("$.data.config.executionPolicy.maxTurns").value(8));
 
     mockMvc
         .perform(get("/api/agent/providers"))

@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.core.workspace.service.WorkspaceService;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionDTO;
+import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
@@ -22,7 +23,6 @@ import fun.fengwk.kkstudio.share.model.WorkspaceCreateDTO;
 import fun.fengwk.kkstudio.share.model.WorkspaceDTO;
 
 import java.util.List;
-import java.util.Map;
 
 /** Agent definition configuration is structured and model references are workspace-scoped. */
 @SpringBootTest(classes = CoreTestApplication.class)
@@ -52,7 +52,7 @@ public class AgentDefinitionServiceTest {
     assertEquals(List.of("browser"), definition.getConfig().getTools());
     assertEquals(List.of("java"), definition.getConfig().getSkills());
     assertEquals(List.of("reviewer"), definition.getConfig().getAllowedSubagents());
-    assertEquals("ask", definition.getConfig().getExecutionPolicy().get("approval"));
+    assertEquals(8, definition.getConfig().getExecutionPolicy().getMaxTurns());
 
     agentDefinitionService.deleteAgent(firstId, id(definition.getId()));
     agentModelService.deleteModel(firstId, id(firstModel.getId()));
@@ -88,7 +88,9 @@ public class AgentDefinitionServiceTest {
     config.setTools(List.of("browser"));
     config.setSkills(List.of("java"));
     config.setAllowedSubagents(List.of("reviewer"));
-    config.setExecutionPolicy(Map.of("approval", "ask"));
+    AgentExecutionPolicyDTO policy = new AgentExecutionPolicyDTO();
+    policy.setMaxTurns(8);
+    config.setExecutionPolicy(policy);
     AgentDefinitionCreateDTO dto = new AgentDefinitionCreateDTO();
     dto.setName(name);
     dto.setModelId(modelId);

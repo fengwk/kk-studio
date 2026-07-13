@@ -35,6 +35,11 @@ public class WorkspaceServiceImpl implements WorkspaceService {
   }
 
   @Override
+  public WorkspaceDTO getWorkspace(long id) {
+    return workspaceConverter.convert(requireWorkspace(id));
+  }
+
+  @Override
   public WorkspaceDTO createWorkspace(WorkspaceCreateDTO createDTO) {
     String name = requireName(createDTO == null ? null : createDTO.getName());
     ensureNameAvailable(name);
@@ -59,7 +64,9 @@ public class WorkspaceServiceImpl implements WorkspaceService {
       ensureNameAvailable(name);
     }
     workspace.setName(name);
-    workspace.setSettingsJson(normalizeSettings(updateDTO.getSettingsJson()));
+    if (updateDTO.getSettingsJson() != null) {
+      workspace.setSettingsJson(normalizeSettings(updateDTO.getSettingsJson()));
+    }
     if (!workspaceRepository.updateById(workspace)) {
       throw new IllegalStateException("update workspace failed: " + id);
     }

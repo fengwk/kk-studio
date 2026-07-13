@@ -10,9 +10,9 @@ import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionEditablePropertiesDTO;
+import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * Normalizes the persisted agent definition and serializes its structured execution configuration.
@@ -84,8 +84,25 @@ final class AgentDefinitionMutationFactory {
     result.setTools(normalizeStrings(result.getTools()));
     result.setSkills(normalizeStrings(result.getSkills()));
     result.setAllowedSubagents(normalizeStrings(result.getAllowedSubagents()));
-    result.setExecutionPolicy(result.getExecutionPolicy() == null ? Map.of() : Map.copyOf(result.getExecutionPolicy()));
+    result.setExecutionPolicy(normalizePolicy(result.getExecutionPolicy()));
     return result;
+  }
+
+  private AgentExecutionPolicyDTO normalizePolicy(AgentExecutionPolicyDTO policy) {
+    AgentExecutionPolicyDTO result = policy == null ? new AgentExecutionPolicyDTO() : policy;
+    validatePositive(result.getMaxTurns(), "executionPolicy.maxTurns");
+    validatePositive(result.getMaxDepth(), "executionPolicy.maxDepth");
+    validatePositive(result.getMaxDirectSubagents(), "executionPolicy.maxDirectSubagents");
+    validatePositive(result.getMaxTotalSubagents(), "executionPolicy.maxTotalSubagents");
+    validatePositive(result.getIdleTimeoutMillis(), "executionPolicy.idleTimeoutMillis");
+    validatePositive(result.getRunTimeoutMillis(), "executionPolicy.runTimeoutMillis");
+    return result;
+  }
+
+  private void validatePositive(Number value, String fieldName) {
+    if (value != null && value.longValue() <= 0) {
+      throw new IllegalArgumentException(fieldName + " must be positive");
+    }
   }
 
   private List<String> normalizeStrings(List<String> values) {
