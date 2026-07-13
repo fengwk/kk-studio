@@ -88,7 +88,7 @@ public final class SessionEntryJsonCodec {
         fields(node, "summary", "firstKeptEntryId", "tokensBefore", "detailsJson");
         yield new CompactionEntryPayload(
             text(node, "summary"),
-            text(node, "firstKeptEntryId"),
+            positiveLong(node, "firstKeptEntryId"),
             nonNegativeInt(node, "tokensBefore"),
             jsonObjectText(node, "detailsJson"));
       }
@@ -250,7 +250,9 @@ public final class SessionEntryJsonCodec {
       case "tool_call" -> {
         fields(node, "type", "toolCallId", "toolName", "argumentsJson");
         yield new ToolCallMessageContent(
-            text(node, "toolCallId"), text(node, "toolName"), jsonObjectText(node, "argumentsJson"));
+            text(node, "toolCallId"),
+            text(node, "toolName"),
+            jsonObjectText(node, "argumentsJson"));
       }
       case "tool_result" -> {
         fields(node, "type", "toolCallId", "contents", "error", "detailsJson");
@@ -258,13 +260,18 @@ public final class SessionEntryJsonCodec {
         List<AgentMessageContent> result = new ArrayList<>(contents.size());
         for (JsonNode item : contents) {
           AgentMessageContent content = decodeContent(item);
-          if (content instanceof ToolCallMessageContent || content instanceof ToolResultMessageContent) {
-            throw new IllegalArgumentException("tool result contents cannot nest tool calls or results");
+          if (content instanceof ToolCallMessageContent
+              || content instanceof ToolResultMessageContent) {
+            throw new IllegalArgumentException(
+                "tool result contents cannot nest tool calls or results");
           }
           result.add(content);
         }
         yield new ToolResultMessageContent(
-            text(node, "toolCallId"), result, bool(node, "error"), jsonObjectText(node, "detailsJson"));
+            text(node, "toolCallId"),
+            result,
+            bool(node, "error"),
+            jsonObjectText(node, "detailsJson"));
       }
       case "artifact" -> {
         fields(node, "type", "artifactId", "mediaType", "preview");
@@ -273,7 +280,9 @@ public final class SessionEntryJsonCodec {
           throw new IllegalArgumentException("preview must be text or null");
         }
         yield new ArtifactMessageContent(
-            text(node, "artifactId"), text(node, "mediaType"), preview.isNull() ? null : preview.textValue());
+            text(node, "artifactId"),
+            text(node, "mediaType"),
+            preview.isNull() ? null : preview.textValue());
       }
       default -> throw new IllegalArgumentException("unknown agent message content type: " + type);
     };
@@ -351,10 +360,24 @@ public final class SessionEntryJsonCodec {
 
   private static int nonNegativeInt(ObjectNode node, String field) {
     JsonNode value = node.get(field);
-    if (value == null || !value.canConvertToInt() || !value.isIntegralNumber() || value.intValue() < 0) {
+    if (value == null
+        || !value.canConvertToInt()
+        || !value.isIntegralNumber()
+        || value.intValue() < 0) {
       throw new IllegalArgumentException(field + " must be a non-negative integer");
     }
     return value.intValue();
+  }
+
+  private static long positiveLong(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value == null
+        || !value.canConvertToLong()
+        || !value.isIntegralNumber()
+        || value.longValue() <= 0) {
+      throw new IllegalArgumentException(field + " must be a positive integer");
+    }
+    return value.longValue();
   }
 
   private static void fields(ObjectNode node, String... expected) {

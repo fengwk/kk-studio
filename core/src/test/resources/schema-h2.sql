@@ -99,33 +99,38 @@ create table if not exists agent_run (
 );
 
 create table if not exists harness_session (
-    id                 bigint not null,
-    session_id         varchar(64) not null,
-    workspace_id       bigint not null,
-    parent_session_id  varchar(64),
-    leaf_entry_id      varchar(64),
-    gmt_create         timestamp(3) not null default current_timestamp(),
-    gmt_modified       timestamp(3) not null default current_timestamp(),
-    version            bigint not null default 0,
-    primary key (id),
-    unique (session_id)
+    id                    bigint not null,
+    workspace_id          bigint not null,
+    agent_definition_id   bigint,
+    title                 varchar(256),
+    leaf_entry_id         bigint,
+    active_run_id         bigint,
+    parent_session_id     bigint,
+    root_session_id       bigint not null,
+    parent_invocation_id  bigint,
+    depth                 integer not null,
+    yolo_enabled          boolean not null,
+    gmt_create            timestamp(3) not null default current_timestamp(),
+    gmt_modified          timestamp(3) not null default current_timestamp(),
+    version               bigint not null default 0,
+    primary key (id)
 );
 
 create index if not exists idx_harness_session_workspace on harness_session (workspace_id);
+create index if not exists idx_harness_session_root on harness_session (root_session_id);
 
 create table if not exists harness_session_entry (
     id               bigint not null,
-    entry_id         varchar(64) not null,
-    session_id       varchar(64) not null,
-    parent_entry_id  varchar(64),
+    session_id       bigint not null,
+    parent_entry_id  bigint,
+    run_id           bigint,
     entry_type       varchar(32) not null,
     payload_json     text not null,
     gmt_create       timestamp(3) not null default current_timestamp(),
-    gmt_modified     timestamp(3) not null default current_timestamp(),
-    version          bigint not null default 0,
-    primary key (id),
-    unique (entry_id)
+    primary key (id)
 );
 
-create index if not exists idx_harness_session_entry_session_parent
-    on harness_session_entry (session_id, parent_entry_id);
+create index if not exists idx_harness_session_entry_session_id
+    on harness_session_entry (session_id, id);
+create index if not exists idx_harness_session_entry_parent on harness_session_entry (parent_entry_id);
+create index if not exists idx_harness_session_entry_run on harness_session_entry (run_id, id);

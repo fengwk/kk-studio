@@ -99,30 +99,35 @@ create table if not exists agent_run (
 ) engine=InnoDB default charset=utf8mb4 comment='agent run';
 
 create table if not exists harness_session (
-    id                 bigint not null comment '主键',
-    session_id         varchar(64) not null comment 'session 业务 id',
-    workspace_id       bigint not null comment '所属 workspace',
-    parent_session_id  varchar(64) null comment 'fork 源 session',
-    leaf_entry_id      varchar(64) null comment '唯一活动 leaf',
-    gmt_create         datetime(3) not null default current_timestamp(3) comment '创建时间',
-    gmt_modified       datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
-    version            bigint not null default '0' comment '数据版本号',
+    id                    bigint not null comment '唯一业务与主键',
+    workspace_id          bigint not null comment '所属 workspace',
+    agent_definition_id   bigint null comment '创建时 agent definition',
+    title                 varchar(256) null comment '标题',
+    leaf_entry_id         bigint null comment '唯一活动 leaf',
+    active_run_id         bigint null comment '活动 run',
+    parent_session_id     bigint null comment '父 session',
+    root_session_id       bigint not null comment '根 session',
+    parent_invocation_id  bigint null comment '创建此 child 的 invocation',
+    depth                 int not null comment 'subagent 深度',
+    yolo_enabled          bit not null comment 'root YOLO 开关',
+    gmt_create            datetime(3) not null default current_timestamp(3) comment '创建时间',
+    gmt_modified          datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
+    version               bigint not null default '0' comment '数据版本号',
     primary key (id),
-    unique key uk_harness_session_session_id (session_id),
-    key idx_harness_session_workspace (workspace_id)
+    key idx_harness_session_workspace (workspace_id),
+    key idx_harness_session_root (root_session_id)
 ) engine=InnoDB default charset=utf8mb4 comment='harness session';
 
 create table if not exists harness_session_entry (
-    id               bigint not null comment '主键',
-    entry_id         varchar(64) not null comment 'entry 业务 id',
-    session_id       varchar(64) not null comment '所属 session',
-    parent_entry_id  varchar(64) null comment '父 entry',
+    id               bigint not null comment '唯一业务与主键',
+    session_id       bigint not null comment '所属 session',
+    parent_entry_id  bigint null comment '父 entry',
+    run_id           bigint null comment '写入 entry 的 run',
     entry_type       varchar(32) not null comment '语义 entry 类型',
     payload_json     longtext not null comment '语义 payload JSON',
     gmt_create       datetime(3) not null default current_timestamp(3) comment '创建时间',
-    gmt_modified     datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
-    version          bigint not null default '0' comment '数据版本号',
     primary key (id),
-    unique key uk_harness_session_entry_entry_id (entry_id),
-    key idx_harness_session_entry_session_parent (session_id, parent_entry_id)
+    key idx_harness_session_entry_session_id (session_id, id),
+    key idx_harness_session_entry_parent (parent_entry_id),
+    key idx_harness_session_entry_run (run_id, id)
 ) engine=InnoDB default charset=utf8mb4 comment='harness session entry';

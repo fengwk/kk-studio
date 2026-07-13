@@ -7,7 +7,6 @@ import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Result;
-import org.apache.ibatis.annotations.ResultMap;
 import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
@@ -17,43 +16,58 @@ public interface HarnessSessionMapper extends BaseMapper {
   @Insert(
       """
       insert into harness_session (
-          id, session_id, workspace_id, parent_session_id, leaf_entry_id, gmt_create, gmt_modified, version
+          id, workspace_id, agent_definition_id, title, leaf_entry_id, active_run_id,
+          parent_session_id, root_session_id, parent_invocation_id, depth, yolo_enabled,
+          gmt_create, gmt_modified, version
       ) values (
-          #{id}, #{sessionId}, #{workspaceId}, #{parentSessionId}, #{leafEntryId},
-          #{createTime}, #{createTime}, 0
+          #{id}, #{workspaceId}, #{agentDefinitionId}, #{title}, #{leafEntryId}, #{activeRunId},
+          #{parentSessionId}, #{rootSessionId}, #{parentInvocationId}, #{depth}, #{yoloEnabled},
+          #{createTime}, #{updateTime}, #{version}
       )
       """)
   int insert(HarnessSessionDO session);
 
   @Select(
       """
-      select id, session_id, workspace_id, parent_session_id, leaf_entry_id, gmt_create as create_time
+      select id, workspace_id, agent_definition_id, title, leaf_entry_id, active_run_id,
+             parent_session_id, root_session_id, parent_invocation_id, depth, yolo_enabled,
+             version, gmt_create as create_time, gmt_modified as update_time
       from harness_session
-      where session_id = #{sessionId}
+      where id = #{sessionId}
       """)
   @Results(
       id = "harnessSessionResultMap",
       value = {
         @Result(column = "id", property = "id"),
-        @Result(column = "session_id", property = "sessionId"),
         @Result(column = "workspace_id", property = "workspaceId"),
-        @Result(column = "parent_session_id", property = "parentSessionId"),
+        @Result(column = "agent_definition_id", property = "agentDefinitionId"),
+        @Result(column = "title", property = "title"),
         @Result(column = "leaf_entry_id", property = "leafEntryId"),
-        @Result(column = "create_time", property = "createTime")
+        @Result(column = "active_run_id", property = "activeRunId"),
+        @Result(column = "parent_session_id", property = "parentSessionId"),
+        @Result(column = "root_session_id", property = "rootSessionId"),
+        @Result(column = "parent_invocation_id", property = "parentInvocationId"),
+        @Result(column = "depth", property = "depth"),
+        @Result(column = "yolo_enabled", property = "yoloEnabled"),
+        @Result(column = "version", property = "version"),
+        @Result(column = "create_time", property = "createTime"),
+        @Result(column = "update_time", property = "updateTime")
       })
-  HarnessSessionDO find(@Param("sessionId") String sessionId);
+  HarnessSessionDO find(@Param("sessionId") long sessionId);
 
   @Update(
       """
       update harness_session
-      set leaf_entry_id = #{newLeafEntryId}, gmt_modified = #{updateTime}
-      where session_id = #{sessionId}
+      set leaf_entry_id = #{newLeafEntryId}, gmt_modified = #{updateTime}, version = version + 1
+      where id = #{sessionId}
+        and version = #{expectedVersion}
         and ((#{expectedLeafEntryId} is null and leaf_entry_id is null)
              or leaf_entry_id = #{expectedLeafEntryId})
       """)
   int compareAndSetLeaf(
-      @Param("sessionId") String sessionId,
-      @Param("expectedLeafEntryId") String expectedLeafEntryId,
-      @Param("newLeafEntryId") String newLeafEntryId,
+      @Param("sessionId") long sessionId,
+      @Param("expectedLeafEntryId") Long expectedLeafEntryId,
+      @Param("expectedVersion") long expectedVersion,
+      @Param("newLeafEntryId") Long newLeafEntryId,
       @Param("updateTime") LocalDateTime updateTime);
 }

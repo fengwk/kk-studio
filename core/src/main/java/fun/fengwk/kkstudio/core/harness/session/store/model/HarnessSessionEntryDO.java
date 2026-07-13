@@ -6,9 +6,9 @@ import lombok.Data;
 @Data
 public class HarnessSessionEntryDO {
   private Long id;
-  private String entryId;
-  private String sessionId;
-  private String parentEntryId;
+  private Long sessionId;
+  private Long parentEntryId;
+  private Long runId;
   private String entryType;
   private String payloadJson;
   private LocalDateTime createTime;

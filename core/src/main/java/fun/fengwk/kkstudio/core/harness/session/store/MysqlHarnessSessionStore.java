@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.core.harness.session.store;
 
-import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionEntryMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
@@ -13,7 +12,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryStore;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionLeafConflictException;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionStore;
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -26,7 +24,7 @@ import java.util.Set;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
-/** MySQL/H2 的新语义 Session Tree Store；路径读取只按 entry id 回溯，不读取 Run Event。 */
+/** MySQL/H2 的新语义 Session Tree Store；路径读取只按 Entry 主键回溯，不读取 Run Event。 */
 @Repository
 public class MysqlHarnessSessionStore implements SessionStore, SessionEntryStore {
   private final HarnessSessionMapper sessionMapper;
@@ -40,14 +38,17 @@ public class MysqlHarnessSessionStore implements SessionStore, SessionEntryStore
   }
 
   @Override
-  public Optional<Session> find(String sessionId) {
+  public Optional<Session> find(long sessionId) {
     return Optional.ofNullable(sessionMapper.find(sessionId)).map(this::toSession);
   }
 
   @Override
   public void create(Session session) {
-    if (session.parentSessionId() != null || session.leafEntryId() != null) {
-      throw new IllegalArgumentException("a newly created session must have neither parent nor leaf");
+    if (session.parentSessionId() != null
+        || session.leafEntryId() != null
+        || session.rootSessionId() != session.id()
+        || session.depth() != 0) {
+      throw new IllegalArgumentException("a root session must have neither parent nor leaf");
     }
     sessionMapper.insert(toDO(session));
   }
@@ -57,11 +58,13 @@ public class MysqlHarnessSessionStore implements SessionStore, SessionEntryStore
   public void createFork(Session session, List<SessionEntry> entries) {
     entries = List.copyOf(entries);
     if (session.parentSessionId() == null) {
-      throw new IllegalArgumentException("a fork must reference its source session");
+      throw new IllegalArgumentException("a child session must reference its parent session");
     }
     Session parent = requireSession(session.parentSessionId());
-    if (parent.workspaceId() != session.workspaceId()) {
-      throw new InvalidSessionTreeException("a fork cannot cross workspaces");
+    if (parent.workspaceId() != session.workspaceId()
+        || parent.rootSessionId() != session.rootSessionId()
+        || parent.depth() + 1 != session.depth()) {
+      throw new InvalidSessionTreeException("child session hierarchy is inconsistent");
     }
     validateFork(session, entries);
     sessionMapper.insert(toDO(session));
@@ -72,48 +75,59 @@ public class MysqlHarnessSessionStore implements SessionStore, SessionEntryStore
 
   @Override
   @Transactional
-  public void append(SessionEntry entry, String expectedLeafEntryId) {
-    if (!entry.sessionId().equals(requireSession(entry.sessionId()).sessionId())) {
-      throw new IllegalArgumentException("entry session does not exist");
+  public void append(SessionEntry entry, Long expectedLeafEntryId, long expectedSessionVersion) {
+    Session current = requireSession(entry.sessionId());
+    if (current.version() != expectedSessionVersion) {
+      throw new SessionLeafConflictException(entry.sessionId(), expectedLeafEntryId);
     }
     if (!Objects.equals(entry.parentEntryId(), expectedLeafEntryId)) {
       throw new InvalidSessionTreeException("entry parent must equal the expected leaf");
     }
-    if (expectedLeafEntryId != null && entryMapper.find(entry.sessionId(), expectedLeafEntryId) == null) {
+    if (expectedLeafEntryId != null
+        && entryMapper.find(entry.sessionId(), expectedLeafEntryId) == null) {
       throw new InvalidSessionTreeException("entry parent does not belong to session");
     }
     entryMapper.insert(toDO(entry));
     if (sessionMapper.compareAndSetLeaf(
-            entry.sessionId(), expectedLeafEntryId, entry.entryId(), LocalDateTime.now(ZoneOffset.UTC))
+            entry.sessionId(),
+            expectedLeafEntryId,
+            expectedSessionVersion,
+            entry.id(),
+            LocalDateTime.now(ZoneOffset.UTC))
         != 1) {
       throw new SessionLeafConflictException(entry.sessionId(), expectedLeafEntryId);
     }
   }
 
   @Override
-  public boolean compareAndSetLeaf(String sessionId, String expectedLeafEntryId, String newLeafEntryId) {
-    requireSession(sessionId);
+  public boolean compareAndSetLeaf(
+      long sessionId, Long expectedLeafEntryId, long expectedSessionVersion, Long newLeafEntryId) {
+    Session current = requireSession(sessionId);
+    if (current.version() != expectedSessionVersion) {
+      return false;
+    }
     if (newLeafEntryId != null && entryMapper.find(sessionId, newLeafEntryId) == null) {
       throw new InvalidSessionTreeException("new leaf does not belong to session");
     }
     return sessionMapper.compareAndSetLeaf(
-            sessionId, expectedLeafEntryId, newLeafEntryId, LocalDateTime.now(ZoneOffset.UTC))
+            sessionId,
+            expectedLeafEntryId,
+            expectedSessionVersion,
+            newLeafEntryId,
+            LocalDateTime.now(ZoneOffset.UTC))
         == 1;
   }
 
   @Override
-  public Optional<SessionEntry> find(String sessionId, String entryId) {
+  public Optional<SessionEntry> find(long sessionId, long entryId) {
     return Optional.ofNullable(entryMapper.find(sessionId, entryId)).map(this::toEntry);
   }
 
   @Override
-  public List<SessionEntry> loadPath(String sessionId, String leafEntryId) {
-    if (leafEntryId == null || leafEntryId.isBlank()) {
-      throw new IllegalArgumentException("leafEntryId must not be blank");
-    }
+  public List<SessionEntry> loadPath(long sessionId, long leafEntryId) {
     List<SessionEntry> reversePath = new ArrayList<>();
-    Set<String> visited = new HashSet<>();
-    String entryId = leafEntryId;
+    Set<Long> visited = new HashSet<>();
+    Long entryId = leafEntryId;
     while (entryId != null) {
       if (!visited.add(entryId)) {
         throw new InvalidSessionTreeException("cycle detected in session entry path");
@@ -129,41 +143,56 @@ public class MysqlHarnessSessionStore implements SessionStore, SessionEntryStore
     return List.copyOf(reversePath);
   }
 
-  private Session requireSession(String sessionId) {
-    return find(sessionId).orElseThrow(() -> new IllegalArgumentException("unknown session: " + sessionId));
+  @Override
+  public List<SessionEntry> listChildren(long sessionId, Long parentEntryId) {
+    return entryMapper.listChildren(sessionId, parentEntryId).stream().map(this::toEntry).toList();
+  }
+
+  private Session requireSession(long sessionId) {
+    return find(sessionId)
+        .orElseThrow(() -> new IllegalArgumentException("unknown session: " + sessionId));
   }
 
   private void validateFork(Session session, List<SessionEntry> entries) {
-    String expectedParent = null;
+    Long expectedParent = null;
     for (SessionEntry entry : entries) {
-      if (!entry.sessionId().equals(session.sessionId())
+      if (entry.sessionId() != session.id()
           || !Objects.equals(entry.parentEntryId(), expectedParent)) {
-        throw new InvalidSessionTreeException("fork entries must be a root-to-leaf chain in the target session");
+        throw new InvalidSessionTreeException(
+            "fork entries must be a root-to-leaf chain in the target session");
       }
-      expectedParent = entry.entryId();
+      expectedParent = entry.id();
     }
     if (!Objects.equals(session.leafEntryId(), expectedParent)) {
-      throw new InvalidSessionTreeException("fork session leaf does not match cloned path");
+      throw new InvalidSessionTreeException("child session leaf does not match cloned path");
     }
   }
 
   private HarnessSessionDO toDO(Session session) {
     HarnessSessionDO target = new HarnessSessionDO();
-    target.setId(AgentIdGenerator.nextHarnessSessionId());
-    target.setSessionId(session.sessionId());
+    target.setId(session.id());
     target.setWorkspaceId(session.workspaceId());
-    target.setParentSessionId(session.parentSessionId());
+    target.setAgentDefinitionId(session.agentDefinitionId());
+    target.setTitle(session.title());
     target.setLeafEntryId(session.leafEntryId());
+    target.setActiveRunId(session.activeRunId());
+    target.setParentSessionId(session.parentSessionId());
+    target.setRootSessionId(session.rootSessionId());
+    target.setParentInvocationId(session.parentInvocationId());
+    target.setDepth(session.depth());
+    target.setYoloEnabled(session.yoloEnabled());
+    target.setVersion(session.version());
     target.setCreateTime(LocalDateTime.ofInstant(session.createdAt(), ZoneOffset.UTC));
+    target.setUpdateTime(LocalDateTime.ofInstant(session.updatedAt(), ZoneOffset.UTC));
     return target;
   }
 
   private HarnessSessionEntryDO toDO(SessionEntry entry) {
     HarnessSessionEntryDO target = new HarnessSessionEntryDO();
-    target.setId(AgentIdGenerator.nextHarnessSessionEntryId());
-    target.setEntryId(entry.entryId());
+    target.setId(entry.id());
     target.setSessionId(entry.sessionId());
     target.setParentEntryId(entry.parentEntryId());
+    target.setRunId(entry.runId());
     target.setEntryType(entry.type().value());
     target.setPayloadJson(payloadCodec.encode(entry.payload()));
     target.setCreateTime(LocalDateTime.ofInstant(entry.createdAt(), ZoneOffset.UTC));
@@ -172,19 +201,29 @@ public class MysqlHarnessSessionStore implements SessionStore, SessionEntryStore
 
   private Session toSession(HarnessSessionDO source) {
     return new Session(
-        source.getSessionId(),
+        source.getId(),
         source.getWorkspaceId(),
-        source.getParentSessionId(),
+        source.getAgentDefinitionId(),
+        source.getTitle(),
         source.getLeafEntryId(),
-        source.getCreateTime().toInstant(ZoneOffset.UTC));
+        source.getActiveRunId(),
+        source.getParentSessionId(),
+        source.getRootSessionId(),
+        source.getParentInvocationId(),
+        source.getDepth(),
+        source.getYoloEnabled(),
+        source.getVersion(),
+        source.getCreateTime().toInstant(ZoneOffset.UTC),
+        source.getUpdateTime().toInstant(ZoneOffset.UTC));
   }
 
   private SessionEntry toEntry(HarnessSessionEntryDO source) {
     SessionEntryType type = SessionEntryType.fromValue(source.getEntryType());
     return new SessionEntry(
-        source.getEntryId(),
+        source.getId(),
         source.getSessionId(),
         source.getParentEntryId(),
+        source.getRunId(),
         type,
         payloadCodec.decode(type, source.getPayloadJson()),
         source.getCreateTime().toInstant(ZoneOffset.UTC));

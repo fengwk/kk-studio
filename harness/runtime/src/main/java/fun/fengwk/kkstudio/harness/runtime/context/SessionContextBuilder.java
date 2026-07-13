@@ -33,7 +33,7 @@ public final class SessionContextBuilder {
         extensions.stream().sorted(Comparator.comparingInt(ContextTransform::priority)).toList();
   }
 
-  public SessionContext build(String sessionId) {
+  public SessionContext build(long sessionId) {
     Session session =
         sessionStore
             .find(sessionId)
@@ -41,7 +41,8 @@ public final class SessionContextBuilder {
     if (session.leafEntryId() == null) {
       throw new ContextProjectionException("session has no active leaf");
     }
-    ContextState state = defaultTransform.transform(entryStore.loadPath(sessionId, session.leafEntryId()));
+    ContextState state =
+        defaultTransform.transform(entryStore.loadPath(sessionId, session.leafEntryId()));
     for (ContextTransform extension : extensions) {
       state = Objects.requireNonNull(extension.transform(state), "context transform result");
     }

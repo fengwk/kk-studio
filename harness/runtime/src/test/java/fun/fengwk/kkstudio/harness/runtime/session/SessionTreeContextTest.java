@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -26,45 +27,89 @@ import org.junit.jupiter.api.Test;
 class SessionTreeContextTest {
   private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
 
-  /** 覆盖回退到祖先后追加分支，以及 fork 时不跨 Session 复用 Entry。 */
+  /** sibling A -> sibling B -> sibling A checkout 必须保持单 leaf CAS，并能列出两个分支。 */
   @Test
-  void shouldNavigateBranchAndForkWithIndependentEntries() {
+  void shouldCheckoutSiblingBranchesAndListChildren() {
     InMemoryStore store = new InMemoryStore();
-    SequenceIds ids = new SequenceIds();
-    SessionTree tree = new SessionTree(store, store, ids, Clock.fixed(NOW, ZoneOffset.UTC));
-    tree.create("session-1", 1L);
+    SessionTree tree = tree(store);
+    Session session = tree.create(1L, 10L, "root", true);
+    SessionEntry snapshot = append(tree, session.id(), null, snapshotPayload());
+    SessionEntry branchA = append(tree, session.id(), snapshot.id(), user("A"));
 
-    SessionEntry snapshot =
-        append(tree, "session-1", null, new AgentSnapshotEntryPayload(snapshot()));
-    SessionEntry original = append(tree, "session-1", snapshot.entryId(), user("original"));
-    assertTrue(tree.navigate("session-1", original.entryId(), snapshot.entryId()));
-    SessionEntry branch = append(tree, "session-1", snapshot.entryId(), user("branch"));
+    assertTrue(tree.checkout(session.id(), branchA.id(), snapshot.id()));
+    SessionEntry branchB = append(tree, session.id(), snapshot.id(), user("B"));
+    assertTrue(tree.checkout(session.id(), branchB.id(), branchA.id()));
 
-    Session fork = tree.fork("session-1", branch.entryId());
-    assertEquals("session-1", fork.parentSessionId());
-    assertEquals(1L, fork.workspaceId());
-    assertEquals(2, store.loadPath(fork.sessionId(), fork.leafEntryId()).size());
-    assertFalse(store.loadPath(fork.sessionId(), fork.leafEntryId()).contains(snapshot));
-    assertThrows(
-        InvalidSessionTreeException.class,
-        () -> tree.navigate("session-1", branch.entryId(), original.entryId()));
+    assertEquals(branchA.id(), store.find(session.id()).orElseThrow().leafEntryId());
+    assertEquals(
+        List.of(branchA.id(), branchB.id()),
+        tree.listChildren(session.id(), snapshot.id()).stream().map(SessionEntry::id).toList());
   }
 
-  /** 覆盖过期 leaf 的 append 被拒绝且不会改变当前 leaf。 */
+  /** checkout 必须拒绝跨 Session、断链和循环目标。 */
+  @Test
+  void shouldRejectInvalidCheckoutTargets() {
+    InMemoryStore store = new InMemoryStore();
+    SessionTree tree = tree(store);
+    Session first = tree.create(1L, null, null, false);
+    Session second = tree.create(1L, null, null, false);
+    SessionEntry firstRoot = append(tree, first.id(), null, snapshotPayload());
+    SessionEntry secondRoot = append(tree, second.id(), null, snapshotPayload());
+
+    assertThrows(
+        InvalidSessionTreeException.class,
+        () -> tree.checkout(first.id(), firstRoot.id(), secondRoot.id()));
+
+    long missingParent = 999_999L;
+    SessionEntry broken = entry(800L, first.id(), missingParent, user("broken"));
+    store.putEntry(broken);
+    assertThrows(
+        InvalidSessionTreeException.class,
+        () -> tree.checkout(first.id(), firstRoot.id(), broken.id()));
+
+    SessionEntry cycleA = entry(801L, first.id(), 802L, user("cycle-a"));
+    SessionEntry cycleB = entry(802L, first.id(), 801L, user("cycle-b"));
+    store.putEntry(cycleA);
+    store.putEntry(cycleB);
+    assertThrows(
+        InvalidSessionTreeException.class,
+        () -> tree.checkout(first.id(), firstRoot.id(), cycleA.id()));
+  }
+
+  /** fork 复制 active path，使用新 bigint Entry id，并冻结 child hierarchy 字段。 */
+  @Test
+  void shouldForkWithIndependentEntriesAndHierarchy() {
+    InMemoryStore store = new InMemoryStore();
+    SessionTree tree = tree(store);
+    Session source = tree.create(7L, 11L, "source", true);
+    SessionEntry snapshot = append(tree, source.id(), null, snapshotPayload());
+    SessionEntry leaf = append(tree, source.id(), snapshot.id(), user("message"));
+
+    Session fork = tree.fork(source.id(), leaf.id());
+    List<SessionEntry> clone = store.loadPath(fork.id(), fork.leafEntryId());
+
+    assertEquals(source.id(), fork.parentSessionId());
+    assertEquals(source.id(), fork.rootSessionId());
+    assertEquals(1, fork.depth());
+    assertEquals(source.workspaceId(), fork.workspaceId());
+    assertFalse(fork.yoloEnabled());
+    assertEquals(2, clone.size());
+    assertNotEquals(snapshot.id(), clone.get(0).id());
+  }
+
+  /** 过期 leaf/version 的 append 被拒绝且不会改变当前 leaf。 */
   @Test
   void shouldRejectStaleLeafCompareAndSet() {
     InMemoryStore store = new InMemoryStore();
-    SessionTree tree =
-        new SessionTree(store, store, new SequenceIds(), Clock.fixed(NOW, ZoneOffset.UTC));
-    tree.create("session-1", 1L);
-    SessionEntry first =
-        append(tree, "session-1", null, new AgentSnapshotEntryPayload(snapshot()));
+    SessionTree tree = tree(store);
+    Session session = tree.create(1L, null, null, false);
+    SessionEntry first = append(tree, session.id(), null, snapshotPayload());
 
-    assertFalse(tree.append("session-1", null, new SessionEntryDraft(user("stale"))).appended());
-    assertEquals(first.entryId(), store.find("session-1").orElseThrow().leafEntryId());
+    assertFalse(tree.append(session.id(), null, new SessionEntryDraft(user("stale"))).appended());
+    assertEquals(first.id(), store.find(session.id()).orElseThrow().leafEntryId());
   }
 
-  /** 编解码覆盖带 Artifact preview 的 ToolResult，并拒绝未知或坏 JSON payload。 */
+  /** 编解码覆盖 Artifact preview，并拒绝坏 payload 和字符串 compaction id。 */
   @Test
   void shouldRoundTripPayloadAndRejectMalformedPayload() {
     SessionEntryJsonCodec codec = new SessionEntryJsonCodec();
@@ -81,59 +126,135 @@ class SessionTreeContextTest {
                     "{}")));
     String json = codec.encode(new MessageEntryPayload(toolMessage));
 
-    assertEquals(new MessageEntryPayload(toolMessage), codec.decode(SessionEntryType.MESSAGE, json));
+    assertEquals(
+        new MessageEntryPayload(toolMessage), codec.decode(SessionEntryType.MESSAGE, json));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(SessionEntryType.MESSAGE, "{\"message\":{\"role\":\"USER\",\"contents\":[]}}"));
+        () ->
+            codec.decode(
+                SessionEntryType.MESSAGE, "{\"message\":{\"role\":\"USER\",\"contents\":[]}}"));
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(SessionEntryType.LABEL, "{\"label\":\"x\",\"unknown\":true}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                SessionEntryType.COMPACTION,
+                "{\"summary\":\"x\",\"firstKeptEntryId\":\"2\",\"tokensBefore\":1,\"detailsJson\":\"{}\"}"));
   }
 
-  /** 验证 compaction 仅改变投影视图，custom 不入模型而 custom_message 会入模型。 */
+  /** latest compaction = summary + 其祖先 firstKept..前一项 + compaction 后新 entries。 */
   @Test
-  void shouldBuildCompactedContextWithCustomMessageOnly() {
+  void shouldBuildContextFromLatestCompactionAncestorBoundary() {
     InMemoryStore store = new InMemoryStore();
+    long sessionId = 1L;
     List<SessionEntry> path =
         List.of(
-            entry("e1", null, new AgentSnapshotEntryPayload(snapshot())),
-            entry("e2", "e1", user("discarded")),
-            entry("e3", "e2", new CustomEntryPayload("trace", "{}")),
-            entry("e4", "e3", new CompactionEntryPayload("history", "e5", 42, "{}")),
-            entry("e5", "e4", user("kept")),
+            entry(1L, sessionId, null, snapshotPayload()),
+            entry(2L, sessionId, 1L, user("discarded")),
+            entry(3L, sessionId, 2L, user("old-kept")),
+            entry(4L, sessionId, 3L, new CompactionEntryPayload("old", 3L, 20, "{}")),
+            entry(5L, sessionId, 4L, user("latest-kept-1")),
+            entry(6L, sessionId, 5L, user("latest-kept-2")),
+            entry(7L, sessionId, 6L, new CompactionEntryPayload("latest", 5L, 40, "{}")),
+            entry(8L, sessionId, 7L, new CustomEntryPayload("trace", "{}")),
             entry(
-                "e6",
-                "e5",
+                9L,
+                sessionId,
+                8L,
                 new CustomMessageEntryPayload(
-                    new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("extension"))))),
-            entry("e7", "e6", new ModelChangeEntryPayload("model-2", "fast")));
-    store.put(new Session("session-1", 1L, null, "e7", NOW), path);
-    SessionContextBuilder builder =
-        new SessionContextBuilder(store, store, new DefaultContextTransform(), List.of(SessionTreeContextTest::identity));
+                    new AgentMessage(
+                        AgentMessageRole.USER, List.of(new TextMessageContent("custom"))))),
+            entry(10L, sessionId, 9L, user("after")),
+            entry(11L, sessionId, 10L, new ModelChangeEntryPayload("model-2", "fast")));
+    store.put(session(sessionId, 11L), path);
 
-    SessionContext context = builder.build("session-1");
+    SessionContext context = builder(store).build(sessionId);
+
     assertEquals("model-2", context.config().modelId());
     assertEquals("fast", context.config().variant());
     assertEquals(
-        List.of("system", "Session summary:\nhistory", "kept", "extension"),
-        context.messages().stream()
-            .map(message -> ((TextMessageContent) message.contents().get(0)).text())
-            .toList());
+        List.of(
+            "system",
+            "Session summary:\nlatest",
+            "latest-kept-1",
+            "latest-kept-2",
+            "custom",
+            "after"),
+        texts(context));
+  }
+
+  /** 非祖先 firstKept 的最新 compaction 无效，回退到上一个有效 compaction 且不投影坏摘要。 */
+  @Test
+  void shouldIgnoreCompactionWithNonAncestorFirstKept() {
+    InMemoryStore store = new InMemoryStore();
+    long sessionId = 2L;
+    List<SessionEntry> path =
+        List.of(
+            entry(21L, sessionId, null, snapshotPayload()),
+            entry(22L, sessionId, 21L, user("kept")),
+            entry(23L, sessionId, 22L, new CompactionEntryPayload("valid", 22L, 10, "{}")),
+            entry(24L, sessionId, 23L, user("between")),
+            entry(25L, sessionId, 24L, new CompactionEntryPayload("invalid", 99L, 30, "{}")),
+            entry(26L, sessionId, 25L, user("after")));
+    store.put(session(sessionId, 26L), path);
+
+    assertEquals(
+        List.of("system", "Session summary:\nvalid", "kept", "between", "after"),
+        texts(builder(store).build(sessionId)));
+  }
+
+  /** 仅存在非法 self/future 边界时不应用 compaction，也不把非法摘要送入模型。 */
+  @Test
+  void shouldOmitInvalidCompactionsWithoutValidFallback() {
+    InMemoryStore store = new InMemoryStore();
+    long sessionId = 3L;
+    List<SessionEntry> path =
+        List.of(
+            entry(31L, sessionId, null, snapshotPayload()),
+            entry(32L, sessionId, 31L, user("before")),
+            entry(33L, sessionId, 32L, new CompactionEntryPayload("self", 33L, 10, "{}")),
+            entry(34L, sessionId, 33L, new CompactionEntryPayload("future", 35L, 20, "{}")),
+            entry(35L, sessionId, 34L, user("after")));
+    store.put(session(sessionId, 35L), path);
+
+    assertEquals(List.of("system", "before", "after"), texts(builder(store).build(sessionId)));
+  }
+
+  private static SessionTree tree(InMemoryStore store) {
+    return new SessionTree(store, store, new SequenceIds(), Clock.fixed(NOW, ZoneOffset.UTC));
+  }
+
+  private static SessionContextBuilder builder(InMemoryStore store) {
+    return new SessionContextBuilder(
+        store, store, new DefaultContextTransform(), List.of(SessionTreeContextTest::identity));
   }
 
   private static ContextState identity(ContextState state) {
     return state;
   }
 
+  private static List<String> texts(SessionContext context) {
+    return context.messages().stream()
+        .map(message -> ((TextMessageContent) message.contents().get(0)).text())
+        .toList();
+  }
+
   private static SessionEntry append(
-      SessionTree tree, String sessionId, String expectedLeaf, SessionEntryPayload payload) {
-    return tree
-        .append(sessionId, expectedLeaf, new SessionEntryDraft(payload))
-        .entry();
+      SessionTree tree, long sessionId, Long expectedLeaf, SessionEntryPayload payload) {
+    AppendResult result = tree.append(sessionId, expectedLeaf, new SessionEntryDraft(payload));
+    assertTrue(result.appended());
+    return result.entry();
   }
 
   private static AgentSnapshot snapshot() {
-    return new AgentSnapshot("system", "model-1", "default", List.of("read"), List.of(), List.of(), "{}");
+    return new AgentSnapshot(
+        "system", "model-1", "default", List.of("read"), List.of(), List.of(), "{}");
+  }
+
+  private static AgentSnapshotEntryPayload snapshotPayload() {
+    return new AgentSnapshotEntryPayload(snapshot());
   }
 
   private static MessageEntryPayload user(String text) {
@@ -141,94 +262,94 @@ class SessionTreeContextTest {
         new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text))));
   }
 
-  private static SessionEntry entry(String id, String parent, SessionEntryPayload payload) {
-    return new SessionEntry(id, "session-1", parent, payload.type(), payload, NOW);
+  private static SessionEntry entry(
+      long id, long sessionId, Long parent, SessionEntryPayload payload) {
+    return new SessionEntry(id, sessionId, parent, null, payload.type(), payload, NOW);
+  }
+
+  private static Session session(long id, Long leafEntryId) {
+    return new Session(
+        id, 1L, 10L, "test", leafEntryId, null, null, id, null, 0, false, 0, NOW, NOW);
   }
 
   private static final class SequenceIds implements SessionIdGenerator {
-    private int session;
-    private int entry;
+    private long session = 100L;
+    private long entry = 1_000L;
 
     @Override
-    public String newSessionId() {
-      return "fork-" + ++session;
+    public long newSessionId() {
+      return ++session;
     }
 
     @Override
-    public String newEntryId() {
-      return "entry-" + ++entry;
+    public long newEntryId() {
+      return ++entry;
     }
   }
 
   private static final class InMemoryStore implements SessionStore, SessionEntryStore {
-    private final Map<String, Session> sessions = new HashMap<>();
-    private final Map<String, SessionEntry> entries = new HashMap<>();
+    private final Map<Long, Session> sessions = new HashMap<>();
+    private final Map<Long, SessionEntry> entries = new HashMap<>();
 
     @Override
-    public Optional<Session> find(String sessionId) {
+    public Optional<Session> find(long sessionId) {
       return Optional.ofNullable(sessions.get(sessionId));
     }
 
     @Override
     public void create(Session session) {
-      if (sessions.putIfAbsent(session.sessionId(), session) != null) {
+      if (sessions.putIfAbsent(session.id(), session) != null) {
         throw new IllegalArgumentException("duplicate session");
       }
     }
 
     @Override
     public void createFork(Session session, List<SessionEntry> clone) {
-      create(session);
-      for (SessionEntry entry : clone) {
-        entries.put(entry.entryId(), entry);
-      }
+      sessions.put(session.id(), session);
+      clone.forEach(entry -> entries.put(entry.id(), entry));
     }
 
     @Override
-    public void append(SessionEntry entry, String expectedLeafEntryId) {
+    public void append(SessionEntry entry, Long expectedLeafEntryId, long expectedSessionVersion) {
       Session session = sessions.get(entry.sessionId());
-      if (session == null || !Objects.equals(session.leafEntryId(), expectedLeafEntryId)) {
+      if (session == null
+          || session.version() != expectedSessionVersion
+          || !Objects.equals(session.leafEntryId(), expectedLeafEntryId)) {
         throw new SessionLeafConflictException(entry.sessionId(), expectedLeafEntryId);
       }
-      entries.put(entry.entryId(), entry);
-      sessions.put(
-          session.sessionId(),
-          new Session(
-              session.sessionId(),
-              session.workspaceId(),
-              session.parentSessionId(),
-              entry.entryId(),
-              session.createdAt()));
+      entries.put(entry.id(), entry);
+      sessions.put(session.id(), withLeaf(session, entry.id()));
     }
 
     @Override
-    public boolean compareAndSetLeaf(String sessionId, String expectedLeafEntryId, String newLeafEntryId) {
+    public boolean compareAndSetLeaf(
+        long sessionId,
+        Long expectedLeafEntryId,
+        long expectedSessionVersion,
+        Long newLeafEntryId) {
       Session session = sessions.get(sessionId);
-      if (session == null || !Objects.equals(session.leafEntryId(), expectedLeafEntryId)) {
+      if (session == null
+          || session.version() != expectedSessionVersion
+          || !Objects.equals(session.leafEntryId(), expectedLeafEntryId)) {
         return false;
       }
-      sessions.put(
-          sessionId,
-          new Session(
-              sessionId,
-              session.workspaceId(),
-              session.parentSessionId(),
-              newLeafEntryId,
-              session.createdAt()));
+      sessions.put(sessionId, withLeaf(session, newLeafEntryId));
       return true;
     }
 
     @Override
-    public Optional<SessionEntry> find(String sessionId, String entryId) {
+    public Optional<SessionEntry> find(long sessionId, long entryId) {
       SessionEntry entry = entries.get(entryId);
-      return entry != null && entry.sessionId().equals(sessionId) ? Optional.of(entry) : Optional.empty();
+      return entry != null && entry.sessionId() == sessionId
+          ? Optional.of(entry)
+          : Optional.empty();
     }
 
     @Override
-    public List<SessionEntry> loadPath(String sessionId, String leafEntryId) {
+    public List<SessionEntry> loadPath(long sessionId, long leafEntryId) {
       List<SessionEntry> result = new ArrayList<>();
-      Set<String> seen = new HashSet<>();
-      String id = leafEntryId;
+      Set<Long> seen = new HashSet<>();
+      Long id = leafEntryId;
       while (id != null) {
         if (!seen.add(id)) {
           throw new InvalidSessionTreeException("cycle");
@@ -242,9 +363,42 @@ class SessionTreeContextTest {
       return result;
     }
 
+    @Override
+    public List<SessionEntry> listChildren(long sessionId, Long parentEntryId) {
+      return entries.values().stream()
+          .filter(
+              entry ->
+                  entry.sessionId() == sessionId
+                      && Objects.equals(entry.parentEntryId(), parentEntryId))
+          .sorted((left, right) -> Long.compare(left.id(), right.id()))
+          .toList();
+    }
+
     void put(Session session, List<SessionEntry> path) {
-      sessions.put(session.sessionId(), session);
-      path.forEach(entry -> entries.put(entry.entryId(), entry));
+      sessions.put(session.id(), session);
+      path.forEach(entry -> entries.put(entry.id(), entry));
+    }
+
+    void putEntry(SessionEntry entry) {
+      entries.put(entry.id(), entry);
+    }
+
+    private Session withLeaf(Session session, Long leafEntryId) {
+      return new Session(
+          session.id(),
+          session.workspaceId(),
+          session.agentDefinitionId(),
+          session.title(),
+          leafEntryId,
+          session.activeRunId(),
+          session.parentSessionId(),
+          session.rootSessionId(),
+          session.parentInvocationId(),
+          session.depth(),
+          session.yoloEnabled(),
+          session.version() + 1,
+          session.createdAt(),
+          NOW);
     }
   }
 }
