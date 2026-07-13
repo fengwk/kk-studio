@@ -29,12 +29,24 @@ import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolArraySchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolBooleanSchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolNumberSchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolObjectSchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolSchemaElement;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 import java.time.Duration;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -198,15 +210,85 @@ public final class DaemonRuntime implements AutoCloseable {
     ObjectNode payload = envelopeCodec.createPayload();
     ArrayNode tools = payload.putArray("tools");
     for (ToolDescriptor descriptor : toolRegistry.descriptors()) {
-      ObjectNode tool = tools.addObject();
-      tool.put("name", descriptor.name());
-      tool.put("version", descriptor.version());
-      tool.put("description", descriptor.description());
-      tool.put("executionMode", descriptor.executionMode().name());
-      tool.put("sideEffect", descriptor.sideEffect().name());
-      tool.put("timeoutMillis", descriptor.timeout().toMillis());
+      writeDescriptor(tools.addObject(), descriptor);
     }
     send(DaemonMessageType.CAPABILITIES, null, envelopeCodec.writeJson(payload));
+  }
+
+  private void writeDescriptor(ObjectNode target, ToolDescriptor descriptor) {
+    target.put("name", descriptor.name());
+    target.put("version", descriptor.version());
+    target.put("description", descriptor.description());
+    target.put("rendererKey", descriptor.rendererKey());
+    target.put("executionMode", descriptor.executionMode().name());
+    target.put("sideEffect", descriptor.sideEffect().name());
+    target.put("timeoutMillis", descriptor.timeout().toMillis());
+    target.set("inputSchema", schemaPayload(descriptor.inputSchema()));
+  }
+
+  private ObjectNode schemaPayload(ToolParamsSchema schema) {
+    ObjectNode target = envelopeCodec.createPayload();
+    writeObjectSchema(
+        target,
+        "object",
+        schema.description(),
+        schema.properties(),
+        schema.required(),
+        schema.additionalProperties());
+    return target;
+  }
+
+  private ObjectNode schemaPayload(ToolSchemaElement schema) {
+    ObjectNode target = envelopeCodec.createPayload();
+    if (schema instanceof ToolStringSchema) {
+      target.put("type", "string");
+    } else if (schema instanceof ToolIntegerSchema) {
+      target.put("type", "integer");
+    } else if (schema instanceof ToolNumberSchema) {
+      target.put("type", "number");
+    } else if (schema instanceof ToolBooleanSchema) {
+      target.put("type", "boolean");
+    } else if (schema instanceof ToolEnumSchema enumSchema) {
+      target.put("type", "string");
+      ArrayNode values = target.putArray("enum");
+      enumSchema.values().forEach(values::add);
+    } else if (schema instanceof ToolArraySchema arraySchema) {
+      target.put("type", "array");
+      target.set("items", schemaPayload(arraySchema.items()));
+    } else if (schema instanceof ToolObjectSchema objectSchema) {
+      writeObjectSchema(
+          target,
+          "object",
+          objectSchema.description(),
+          objectSchema.properties(),
+          objectSchema.required(),
+          objectSchema.additionalProperties());
+      return target;
+    } else {
+      throw new IllegalArgumentException("unsupported tool schema: " + schema.getClass());
+    }
+    if (schema.description() != null) {
+      target.put("description", schema.description());
+    }
+    return target;
+  }
+
+  private void writeObjectSchema(
+      ObjectNode target,
+      String type,
+      String description,
+      Map<String, ToolSchemaElement> properties,
+      Set<String> required,
+      boolean additionalProperties) {
+    target.put("type", type);
+    if (description != null) {
+      target.put("description", description);
+    }
+    ObjectNode wireProperties = target.putObject("properties");
+    properties.forEach((name, schema) -> wireProperties.set(name, schemaPayload(schema)));
+    ArrayNode wireRequired = target.putArray("required");
+    required.forEach(wireRequired::add);
+    target.put("additionalProperties", additionalProperties);
   }
 
   private void sendReady() {
@@ -220,16 +302,27 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   private void onMessage(long generation, String rawMessage) {
-    if (!isCurrent(generation)) {
+    ActiveConnection connection = activeConnection.get();
+    if (connection == null || connection.generation() != generation) {
       return;
     }
     try {
       DaemonEnvelope envelope = envelopeCodec.decode(rawMessage);
       verifyScope(envelope);
       switch (envelope.messageType()) {
-        case INVOKE -> handleInvoke(envelope);
-        case CANCEL -> handleCancel(envelope);
+        case INVOKE -> {
+          requireInvocationId(envelope);
+          InvokePayload payload = readInvokePayload(envelope);
+          connection.acceptInboundSequence(envelope.sequence());
+          processInvoke(envelope, payload);
+        }
+        case CANCEL -> {
+          requireInvocationId(envelope);
+          connection.acceptInboundSequence(envelope.sequence());
+          processCancel(envelope);
+        }
         case WELCOME, ACK, ERROR -> {
+          connection.acceptInboundSequence(envelope.sequence());
           // Cloud control messages do not alter local invocation facts.
         }
         default -> throw new DaemonProtocolException("unexpected inbound messageType: " + envelope.messageType());
@@ -246,8 +339,12 @@ public final class DaemonRuntime implements AutoCloseable {
     }
   }
 
-  private void handleInvoke(DaemonEnvelope envelope) {
+  private void processInvoke(DaemonEnvelope envelope, InvokePayload payload) {
     sendAck(envelope.sequence());
+    handleInvoke(envelope, payload);
+  }
+
+  private void handleInvoke(DaemonEnvelope envelope, InvokePayload payload) {
     DaemonInvocationJournalStart start = journal.start(envelope.invocationId());
     if (!start.created()) {
       replay(start.entry(), envelope.invocationId());
@@ -255,18 +352,22 @@ public final class DaemonRuntime implements AutoCloseable {
     }
 
     try {
-      InvokePayload payload = readInvokePayload(envelope);
       Tool tool =
           toolRegistry
               .find(payload.toolName())
               .orElseThrow(
                   () -> new IllegalArgumentException("unknown local tool: " + payload.toolName()));
       ToolDescriptor descriptor = tool.descriptor();
+      if (!descriptor.version().equals(payload.toolVersion())) {
+        throw new IllegalArgumentException(
+            "toolVersion does not match local descriptor: " + payload.toolVersion());
+      }
+      Duration timeout = resolveTimeout(payload.timeout(), descriptor);
       ToolExecutionRequest request =
           new ToolExecutionRequest(
               descriptor,
               new ToolCall(envelope.invocationId(), payload.toolName(), payload.argumentsJson()),
-              payload.timeout());
+              timeout);
       RunningInvocation invocation = new RunningInvocation(envelope.invocationId());
       running.put(envelope.invocationId(), invocation);
       if (!isRunning(envelope.invocationId()) || !invocation.begin()) {
@@ -276,15 +377,21 @@ public final class DaemonRuntime implements AutoCloseable {
       send(DaemonMessageType.STARTED, envelope.invocationId(), "{}");
       ToolExecutionHandle handle = tool.execute(request, new InvocationListener(invocation));
       invocation.setHandle(Objects.requireNonNull(handle, "tool execution handle"));
+      scheduleTimeout(invocation, timeout);
     } catch (RuntimeException error) {
       terminal(
           envelope.invocationId(),
-          new DaemonTerminalMessage(DaemonMessageType.FAILED, errorPayload(error)));
+          new DaemonTerminalMessage(DaemonMessageType.FAILED, errorPayload(error)),
+          false);
     }
   }
 
-  private void handleCancel(DaemonEnvelope envelope) {
+  private void processCancel(DaemonEnvelope envelope) {
     sendAck(envelope.sequence());
+    handleCancel(envelope);
+  }
+
+  private void handleCancel(DaemonEnvelope envelope) {
     Optional<DaemonInvocationJournalEntry> entry = journal.find(envelope.invocationId());
     if (entry.isEmpty()) {
       return;
@@ -293,13 +400,10 @@ public final class DaemonRuntime implements AutoCloseable {
       replay(entry.get(), envelope.invocationId());
       return;
     }
-    RunningInvocation invocation = running.remove(envelope.invocationId());
-    if (invocation != null) {
-      invocation.cancel();
-    }
     terminal(
         envelope.invocationId(),
-        new DaemonTerminalMessage(DaemonMessageType.CANCELLED, "{\"reason\":\"cancelled\"}"));
+        new DaemonTerminalMessage(DaemonMessageType.CANCELLED, "{\"reason\":\"cancelled\"}"),
+        true);
   }
 
   private void replay(DaemonInvocationJournalEntry entry, String invocationId) {
@@ -311,11 +415,47 @@ public final class DaemonRuntime implements AutoCloseable {
     send(terminal.messageType(), invocationId, terminal.payloadJson());
   }
 
-  private void terminal(String invocationId, DaemonTerminalMessage message) {
+  private void terminal(String invocationId, DaemonTerminalMessage message, boolean cancelHandle) {
+    RunningInvocation invocation = running.get(invocationId);
+    if (invocation != null && !invocation.claimTerminal(cancelHandle)) {
+      return;
+    }
     if (journal.complete(invocationId, message)) {
-      running.remove(invocationId);
+      if (invocation == null) {
+        running.remove(invocationId);
+      } else {
+        running.remove(invocationId, invocation);
+      }
       send(message.messageType(), invocationId, message.payloadJson());
     }
+  }
+
+  private void scheduleTimeout(RunningInvocation invocation, Duration timeout) {
+    ScheduledFuture<?> deadline =
+        scheduler.schedule(
+            () ->
+                terminal(
+                    invocation.invocationId(),
+                    new DaemonTerminalMessage(
+                        DaemonMessageType.FAILED,
+                        "{\"message\":\"tool execution timed out after "
+                            + timeout.toMillis()
+                            + "ms\"}"),
+                    true),
+            timeout.toNanos(),
+            TimeUnit.NANOSECONDS);
+    invocation.setDeadline(deadline);
+  }
+
+  /**
+   * 0 timeoutMillis 表示不覆盖 descriptor；descriptor 未设置 deadline 时回退 daemon 默认值，确保
+   * 每次 invocation 都有有效 deadline。
+   */
+  private Duration resolveTimeout(Duration requestedTimeout, ToolDescriptor descriptor) {
+    if (!requestedTimeout.isZero()) {
+      return requestedTimeout;
+    }
+    return descriptor.timeout().isZero() ? config.defaultToolTimeout() : descriptor.timeout();
   }
 
   private InvokePayload readInvokePayload(DaemonEnvelope envelope) {
@@ -327,6 +467,7 @@ public final class DaemonRuntime implements AutoCloseable {
     long timeoutMillis = optionalNonNegativeLong(payload, "timeoutMillis", config.defaultToolTimeout().toMillis());
     return new InvokePayload(
         requiredPayloadText(payload, "toolName"),
+        requiredPayloadText(payload, "toolVersion"),
         envelopeCodec.writeJson(arguments),
         Duration.ofMillis(timeoutMillis));
   }
@@ -340,6 +481,12 @@ public final class DaemonRuntime implements AutoCloseable {
       throw new DaemonProtocolException("INVOKE payload." + fieldName + " must be a non-negative long");
     }
     return value.longValue();
+  }
+
+  private void requireInvocationId(DaemonEnvelope envelope) {
+    if (envelope.invocationId() == null || envelope.invocationId().isBlank()) {
+      throw new DaemonProtocolException(envelope.messageType() + " requires a non-blank invocationId");
+    }
   }
 
   private String requiredPayloadText(ObjectNode payload, String fieldName) {
@@ -397,11 +544,6 @@ public final class DaemonRuntime implements AutoCloseable {
     return envelopeCodec.writeJson(payload.get("value"));
   }
 
-  private boolean isCurrent(long generation) {
-    ActiveConnection connection = activeConnection.get();
-    return connection != null && connection.generation() == generation;
-  }
-
   @Override
   public void close() {
     if (!started.compareAndSet(true, false)) {
@@ -440,19 +582,22 @@ public final class DaemonRuntime implements AutoCloseable {
             invocation.invocationId(),
             new DaemonTerminalMessage(
                 DaemonMessageType.FAILED,
-                "{\"message\":\"tool result toolCallId does not match invocationId\"}"));
+                "{\"message\":\"tool result toolCallId does not match invocationId\"}"),
+            false);
         return;
       }
       terminal(
           invocation.invocationId(),
-          new DaemonTerminalMessage(DaemonMessageType.COMPLETED, resultPayload(result)));
+          new DaemonTerminalMessage(DaemonMessageType.COMPLETED, resultPayload(result)),
+          false);
     }
 
     @Override
     public void onError(Throwable error) {
       terminal(
           invocation.invocationId(),
-          new DaemonTerminalMessage(DaemonMessageType.FAILED, errorPayload(error)));
+          new DaemonTerminalMessage(DaemonMessageType.FAILED, errorPayload(error)),
+          false);
     }
   }
 
@@ -522,7 +667,9 @@ public final class DaemonRuntime implements AutoCloseable {
     private final String invocationId;
     private final AtomicBoolean cancelled = new AtomicBoolean();
     private final AtomicBoolean begun = new AtomicBoolean();
+    private final AtomicBoolean terminal = new AtomicBoolean();
     private final AtomicReference<ToolExecutionHandle> handle = new AtomicReference<>();
+    private final AtomicReference<ScheduledFuture<?>> deadline = new AtomicReference<>();
 
     private RunningInvocation(String invocationId) {
       this.invocationId = invocationId;
@@ -543,6 +690,26 @@ public final class DaemonRuntime implements AutoCloseable {
       }
     }
 
+    private boolean claimTerminal(boolean cancelHandle) {
+      if (!terminal.compareAndSet(false, true)) {
+        return false;
+      }
+      ScheduledFuture<?> timeout = deadline.getAndSet(null);
+      if (timeout != null) {
+        timeout.cancel(false);
+      }
+      if (cancelHandle) {
+        cancel();
+      }
+      return true;
+    }
+
+    private void setDeadline(ScheduledFuture<?> value) {
+      if (!deadline.compareAndSet(null, value) || terminal.get()) {
+        value.cancel(false);
+      }
+    }
+
     private void cancel() {
       if (cancelled.compareAndSet(false, true)) {
         ToolExecutionHandle value = handle.get();
@@ -553,7 +720,42 @@ public final class DaemonRuntime implements AutoCloseable {
     }
   }
 
-  private record ActiveConnection(long generation, DaemonConnection connection) {}
+  private static final class ActiveConnection {
 
-  private record InvokePayload(String toolName, String argumentsJson, Duration timeout) {}
+    private final long generation;
+    private final DaemonConnection connection;
+    private long lastInboundSequence = -1;
+
+    private ActiveConnection(long generation, DaemonConnection connection) {
+      this.generation = generation;
+      this.connection = connection;
+    }
+
+    private long generation() {
+      return generation;
+    }
+
+    private DaemonConnection connection() {
+      return connection;
+    }
+
+    private synchronized void acceptInboundSequence(long sequence) {
+      if (lastInboundSequence < 0 || sequence == lastInboundSequence + 1) {
+        lastInboundSequence = sequence;
+        return;
+      }
+      if (sequence == lastInboundSequence) {
+        return;
+      }
+      if (sequence < lastInboundSequence) {
+        throw new DaemonProtocolException("inbound sequence moved backwards: " + sequence);
+      }
+      throw new DaemonProtocolException(
+          "inbound sequence must immediately follow " + lastInboundSequence + ": " + sequence);
+    }
+  }
+
+  private record InvokePayload(
+      String toolName, String toolVersion, String argumentsJson, Duration timeout) {}
+
 }

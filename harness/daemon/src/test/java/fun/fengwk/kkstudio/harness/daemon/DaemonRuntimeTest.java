@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
@@ -71,7 +72,18 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    assertMessageTypes(transport.takeMessages(3), HELLO, CAPABILITIES, READY);
+    List<DaemonEnvelope> handshake = transport.takeMessages(3);
+    assertMessageTypes(handshake, HELLO, CAPABILITIES, READY);
+    JsonNode descriptor = codec.readPayload(handshake.get(1)).path("tools").get(0);
+    assertEquals("test", descriptor.path("name").asText());
+    assertEquals("1.0.0", descriptor.path("version").asText());
+    assertEquals("test", descriptor.path("rendererKey").asText());
+    assertEquals("ENVIRONMENT", descriptor.path("executionMode").asText());
+    assertEquals("READ_ONLY", descriptor.path("sideEffect").asText());
+    assertEquals(10_000, descriptor.path("timeoutMillis").asLong());
+    assertEquals("object", descriptor.path("inputSchema").path("type").asText());
+    assertTrue(descriptor.path("inputSchema").path("properties").isObject());
+    assertTrue(descriptor.path("inputSchema").path("required").isArray());
 
     transport.disconnect();
     transport.awaitConnections(1);
@@ -150,7 +162,73 @@ class DaemonRuntimeTest {
             "bad-payload",
             2,
             "{\"toolName\":\"test\",\"arguments\":[]}"));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+  }
+
+  /** 缺失 invocationId 在 codec 边界失败，不得触达 journal 或 Tool SPI。 */
+  @Test
+  void rejectsInvokeWithoutInvocationIdBeforeSideEffects() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.receiveRaw(
+        "{\"protocolVersion\":1,\"messageType\":\"INVOKE\",\"workspaceId\":\"workspace\","
+            + "\"environmentId\":\"environment\",\"sequence\":1,\"payload\":{\"toolName\":\"test\","
+            + "\"toolVersion\":\"1.0.0\",\"arguments\":{}}}");
+
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    transport.receiveRaw(
+        "{\"protocolVersion\":1,\"messageType\":\"CANCEL\",\"workspaceId\":\"workspace\","
+            + "\"environmentId\":\"environment\",\"sequence\":1,\"payload\":{}}");
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    assertEquals(0, tool.executions.get());
+    transport.receive(invoke("valid-after-missing-id", 1));
+    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+  }
+
+  /** 当前连接只接受连续 sequence；最新 envelope 的重复会 ACK 并复用 invocation journal。 */
+  @Test
+  void rejectsOutOfOrderSequenceAndHandlesLatestDuplicateIdempotently() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    DaemonEnvelope invoke = invoke("sequence-invocation", 4);
+    transport.receive(invoke);
+    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    transport.receive(invoke);
+    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    assertEquals(1, tool.executions.get());
+
+    transport.receive(invoke("backward", 3));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    transport.receive(invoke("jump", 6));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    transport.receive(cancel("sequence-invocation", 5));
+    assertMessageTypes(transport.takeMessages(2), ACK, CANCELLED);
+  }
+
+  /** Cloud 声明的工具版本必须匹配本地 descriptor，避免以错误参数契约启动 Tool。 */
+  @Test
+  void rejectsMismatchedToolVersion() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.receive(invoke("version-mismatch", 1, "test", "2.0.0", 1000));
+
     assertMessageTypes(transport.takeMessages(2), ACK, DaemonMessageType.FAILED);
+    assertEquals(0, tool.executions.get());
   }
 
   /** 重复 INVOKE 仅重放 STARTED 或终态，不得再次调用本地 Tool。 */
@@ -185,6 +263,50 @@ class DaemonRuntimeTest {
     transport.receive(invoke);
     assertMessageTypes(transport.takeMessages(2), ACK, COMPLETED);
     assertEquals(1, tool.executions.get());
+  }
+
+  /** Runtime 在 deadline 主动 cancel Tool，并阻止 timeout 后的完成回调覆盖 FAILED。 */
+  @Test
+  void enforcesTimeoutAndGuardsLateCompletion() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.receive(invoke("timeout", 1, "test", "1.0.0", 30));
+    transport.takeMessages(2);
+
+    List<DaemonEnvelope> terminal = transport.takeMessages(1);
+    assertMessageTypes(terminal, DaemonMessageType.FAILED);
+    assertTrue(terminal.get(0).payloadJson().contains("timed out"));
+    assertEquals(1, tool.handle.cancelCalls.get());
+    tool.complete(new ToolResult("timeout", List.of(), false, "{}", false));
+    assertFalse(transport.hasMessages());
+  }
+
+  /** 0 timeout 使用 descriptor timeout，完成或取消时 deadline 必须被撤销。 */
+  @Test
+  void resolvesZeroTimeoutAndCancelsDeadlineAfterCompletionOrCancellation() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.receive(invoke("zero-timeout", 1, "test", "1.0.0", 0));
+    transport.takeMessages(2);
+    assertEquals(Duration.ofSeconds(10), tool.request.effectiveTimeout());
+    tool.complete(new ToolResult("zero-timeout", List.of(), false, "{}", false));
+    assertMessageTypes(transport.takeMessages(1), COMPLETED);
+
+    transport.receive(invoke("cancel-before-timeout", 2, "test", "1.0.0", 30));
+    transport.takeMessages(2);
+    transport.receive(cancel("cancel-before-timeout", 3));
+    assertMessageTypes(transport.takeMessages(2), ACK, CANCELLED);
+    assertFalse(transport.awaitMessage(Duration.ofMillis(80)));
   }
 
   /** 流式结果必须保留 JSON 与 Artifact 等非文本内容的结构。 */
@@ -293,6 +415,11 @@ class DaemonRuntimeTest {
   }
 
   private DaemonEnvelope invoke(String invocationId, long sequence, String toolName) {
+    return invoke(invocationId, sequence, toolName, "1.0.0", 1000);
+  }
+
+  private DaemonEnvelope invoke(
+      String invocationId, long sequence, String toolName, String toolVersion, long timeoutMillis) {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION_1,
         DaemonMessageType.INVOKE,
@@ -300,7 +427,13 @@ class DaemonRuntimeTest {
         "environment",
         invocationId,
         sequence,
-        "{\"toolName\":\"" + toolName + "\",\"arguments\":{},\"timeoutMillis\":1000}");
+        "{\"toolName\":\""
+            + toolName
+            + "\",\"toolVersion\":\""
+            + toolVersion
+            + "\",\"arguments\":{},\"timeoutMillis\":"
+            + timeoutMillis
+            + "}");
   }
 
   private DaemonEnvelope cancel(String invocationId, long sequence) {
@@ -343,7 +476,11 @@ class DaemonRuntimeTest {
     }
 
     private void receive(DaemonEnvelope envelope) {
-      listener.onMessage(codec.encode(envelope));
+      receiveRaw(codec.encode(envelope));
+    }
+
+    private void receiveRaw(String message) {
+      listener.onMessage(message);
     }
 
     private void disconnect() {
@@ -373,6 +510,10 @@ class DaemonRuntimeTest {
 
     private boolean hasMessages() {
       return !sent.isEmpty();
+    }
+
+    private boolean awaitMessage(Duration timeout) throws InterruptedException {
+      return sent.poll(timeout.toMillis(), TimeUnit.MILLISECONDS) != null;
     }
 
     private final class FakeConnection implements DaemonConnection {
@@ -412,6 +553,7 @@ class DaemonRuntimeTest {
     private final AtomicInteger executions = new AtomicInteger();
     private final TestHandle handle = new TestHandle();
     private volatile ToolExecutionListener listener;
+    private volatile ToolExecutionRequest request;
 
     @Override
     public ToolDescriptor descriptor() {
@@ -421,6 +563,7 @@ class DaemonRuntimeTest {
     @Override
     public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
       executions.incrementAndGet();
+      this.request = request;
       this.listener = listener;
       return handle;
     }

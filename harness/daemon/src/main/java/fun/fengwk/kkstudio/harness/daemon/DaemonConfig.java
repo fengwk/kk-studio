@@ -30,7 +30,7 @@ public record DaemonConfig(
     if (initialReconnectDelay.compareTo(maxReconnectDelay) > 0) {
       throw new IllegalArgumentException("initialReconnectDelay must not exceed maxReconnectDelay");
     }
-    defaultToolTimeout = requireNonNegative(defaultToolTimeout, "defaultToolTimeout");
+    defaultToolTimeout = requirePositive(defaultToolTimeout, "defaultToolTimeout");
   }
 
   /** 从 JVM system properties 读取可直接启动的最小配置。 */
