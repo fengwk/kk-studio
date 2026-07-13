@@ -42,6 +42,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -88,6 +89,19 @@ class DaemonRuntimeTest {
     assertMessageTypes(List.of(transport.takeNextMessage()), DaemonMessageType.HEARTBEAT);
   }
 
+  /** 首次连接失败后必须按重连生命周期再次尝试并完成握手。 */
+  @Test
+  void reconnectsAfterConnectionFailure() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    transport.failNextConnection();
+    runtime = runtime(transport, new TestTool());
+
+    runtime.start();
+    transport.awaitConnections(2);
+
+    assertMessageTypes(transport.takeMessages(3), HELLO, CAPABILITIES, READY);
+  }
+
   /** 未注册工具必须以 FAILED 终态返回，而不是让协议处理线程失败。 */
   @Test
   void returnsFailedTerminalForUnknownTool() throws InterruptedException {
@@ -102,6 +116,38 @@ class DaemonRuntimeTest {
     List<DaemonEnvelope> messages = transport.takeMessages(2);
     assertMessageTypes(messages, ACK, DaemonMessageType.FAILED);
     assertTrue(messages.get(1).payloadJson().contains("unknown local tool"));
+  }
+
+  /** 引用错误的 Environment 或非法 INVOKE payload 必须得到明确 ERROR/FAILED 响应。 */
+  @Test
+  void rejectsWrongScopeAndMalformedInvocationPayload() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestTool());
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.receive(
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION_1,
+            DaemonMessageType.INVOKE,
+            "workspace",
+            "other-environment",
+            "wrong-scope",
+            1,
+            "{\"toolName\":\"test\",\"arguments\":{}}"));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+
+    transport.receive(
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION_1,
+            DaemonMessageType.INVOKE,
+            "workspace",
+            "environment",
+            "bad-payload",
+            2,
+            "{\"toolName\":\"test\",\"arguments\":[]}"));
+    assertMessageTypes(transport.takeMessages(2), ACK, DaemonMessageType.FAILED);
   }
 
   /** 重复 INVOKE 仅重放 STARTED 或终态，不得再次调用本地 Tool。 */
@@ -136,6 +182,27 @@ class DaemonRuntimeTest {
     transport.receive(invoke);
     assertMessageTypes(transport.takeMessages(2), ACK, COMPLETED);
     assertEquals(1, tool.executions.get());
+  }
+
+  /** Tool error 和错误关联 ID 的完成回调都必须收敛为 FAILED。 */
+  @Test
+  void convertsToolErrorsAndMismatchedResultsToFailedTerminal() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.receive(invoke("tool-error", 1));
+    transport.takeMessages(2);
+    tool.error(new IllegalStateException("tool failed"));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.FAILED);
+
+    transport.receive(invoke("wrong-result", 2));
+    transport.takeMessages(2);
+    tool.complete(new ToolResult("another-id", List.of(), false, "{}", false));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.FAILED);
   }
 
   /** PARTIAL 必须流式转发，CANCEL 后迟到 complete callback 不能覆盖 CANCELLED 终态。 */
@@ -222,15 +289,23 @@ class DaemonRuntimeTest {
 
     private final Semaphore connections = new Semaphore(0);
     private final LinkedBlockingQueue<String> sent = new LinkedBlockingQueue<>();
+    private final AtomicBoolean failNextConnection = new AtomicBoolean();
     private volatile DaemonTransportListener listener;
     private volatile FakeConnection connection;
 
     @Override
     public CompletionStage<DaemonConnection> connect(DaemonTransportListener listener) {
       this.listener = listener;
-      connection = new FakeConnection();
       connections.release();
+      if (failNextConnection.compareAndSet(true, false)) {
+        return CompletableFuture.failedFuture(new IllegalStateException("connection failed"));
+      }
+      connection = new FakeConnection();
       return CompletableFuture.completedFuture(connection);
+    }
+
+    private void failNextConnection() {
+      failNextConnection.set(true);
     }
 
     private void receive(DaemonEnvelope envelope) {
@@ -322,6 +397,10 @@ class DaemonRuntimeTest {
 
     private void complete(ToolResult result) {
       listener.onComplete(result);
+    }
+
+    private void error(Throwable error) {
+      listener.onError(error);
     }
   }
 
