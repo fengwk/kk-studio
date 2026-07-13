@@ -1263,6 +1263,7 @@
     state.references = [true, true, false];
     state.forceThreadScroll = false;
     agentPrompt.value = '';
+    resizeAgentInput();
     stage.classList.remove('hand-tool', 'panning', 'dragging-node');
     setThreadOpen(false);
     setAddMenuOpen(false);
@@ -1279,10 +1280,12 @@
   }
 
   function showView(view) {
+    const editorActive = view === 'editor';
     state.activeView = view;
-    $('#libraryView').classList.toggle('active', view === 'library');
-    $('#editorView').classList.toggle('active', view === 'editor');
-    if (view === 'editor') {
+    document.body.classList.toggle('editor-active', editorActive);
+    $('#libraryView').classList.toggle('active', !editorActive);
+    $('#editorView').classList.toggle('active', editorActive);
+    if (editorActive) {
       (window.requestAnimationFrame || ((callback) => callback()))(fitView);
     }
   }
@@ -1321,7 +1324,7 @@
     `,
     roadmap: `
       <p class="panel-section-title">从验证到生态</p>
-      <article class="insight-card phase"><span class="phase-index">A</span><div><h3>交互原型</h3><p>黑灰画布、底部 Agent Dock、媒体生成和结果落位，验证产品表达。</p></div></article>
+      <article class="insight-card phase"><span class="phase-index">A</span><div><h3>交互原型</h3><p>中性暗色 Stage、底部 Agent Dock、媒体生成和结果落位，验证产品表达。</p></div></article>
       <article class="insight-card phase"><span class="phase-index">B</span><div><h3>画布 MVP</h3><p>持久化、统一命令历史、素材引用、自动保存和节点/动作注册表。</p></div></article>
       <article class="insight-card phase"><span class="phase-index">C</span><div><h3>Agent 原生能力</h3><p>选区/整图上下文、SSE 状态、画布命令、暂停重试与来源追踪。</p></div></article>
       <article class="insight-card phase"><span class="phase-index">D</span><div><h3>协作与生态</h3><p>实时协作、只读分享、创作回放、Playbook / Skill 市场与用量策略。</p></div></article>
@@ -1405,8 +1408,13 @@
   }
 
   function resizeAgentInput() {
+    const minimumHeight = 37;
+    const maximumHeight = 104;
     agentPrompt.style.height = 'auto';
-    agentPrompt.style.height = `${Math.min(agentPrompt.scrollHeight, 104)}px`;
+    const measuredHeight = Number(agentPrompt.scrollHeight) || minimumHeight;
+    const nextHeight = Math.max(minimumHeight, Math.min(measuredHeight, maximumHeight));
+    agentPrompt.style.height = `${nextHeight}px`;
+    agentPrompt.style.overflowY = measuredHeight > maximumHeight ? 'auto' : 'hidden';
   }
 
   function handleAddAction(action) {
