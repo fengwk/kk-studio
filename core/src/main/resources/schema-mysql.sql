@@ -131,3 +131,35 @@ create table if not exists harness_session_entry (
     key idx_harness_session_entry_parent (parent_entry_id),
     key idx_harness_session_entry_run (run_id, id)
 ) engine=InnoDB default charset=utf8mb4 comment='harness session entry';
+
+create table if not exists harness_run (
+    id                  bigint not null comment '唯一业务与主键',
+    session_id          bigint not null comment '所属 session',
+    trigger_entry_id    bigint not null comment '触发 user entry',
+    status              varchar(32) not null comment 'durable run 状态',
+    turn_index          int not null comment '已完成 turn 数',
+    attempt             int not null comment '已 claim attempt 数',
+    event_sequence      bigint not null comment '最后分配的 event sequence',
+    lease_owner         varchar(128) null comment '当前 worker',
+    lease_until         datetime(3) null comment 'lease 截止时间',
+    next_attempt_at     datetime(3) not null comment '下次可 claim 时间',
+    cancel_requested_at datetime(3) null comment '取消请求时间',
+    gmt_create          datetime(3) not null default current_timestamp(3) comment '创建时间',
+    started_at          datetime(3) null comment '首次开始时间',
+    finished_at         datetime(3) null comment '终态时间',
+    gmt_modified        datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
+    primary key (id),
+    key idx_harness_run_claim (status, next_attempt_at, lease_until, id)
+) engine=InnoDB default charset=utf8mb4 comment='harness durable run';
+
+create table if not exists harness_run_event (
+    id           bigint not null comment '唯一业务与主键',
+    run_id       bigint not null comment '所属 run',
+    sequence     bigint not null comment 'run 内线性 sequence',
+    event_type   varchar(64) not null comment '事件类型',
+    payload_json longtext not null comment '含 schemaVersion 的 payload',
+    gmt_create   datetime(3) not null default current_timestamp(3) comment '创建时间',
+    primary key (id),
+    unique key uk_harness_run_event_sequence (run_id, sequence),
+    key idx_harness_run_event_run (run_id, id)
+) engine=InnoDB default charset=utf8mb4 comment='harness run event journal';

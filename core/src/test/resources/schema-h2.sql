@@ -134,3 +134,38 @@ create index if not exists idx_harness_session_entry_session_id
     on harness_session_entry (session_id, id);
 create index if not exists idx_harness_session_entry_parent on harness_session_entry (parent_entry_id);
 create index if not exists idx_harness_session_entry_run on harness_session_entry (run_id, id);
+
+create table if not exists harness_run (
+    id                  bigint not null,
+    session_id          bigint not null,
+    trigger_entry_id    bigint not null,
+    status              varchar(32) not null,
+    turn_index          integer not null,
+    attempt             integer not null,
+    event_sequence      bigint not null,
+    lease_owner         varchar(128),
+    lease_until         timestamp(3),
+    next_attempt_at     timestamp(3) not null,
+    cancel_requested_at timestamp(3),
+    gmt_create          timestamp(3) not null default current_timestamp(),
+    started_at          timestamp(3),
+    finished_at         timestamp(3),
+    gmt_modified        timestamp(3) not null default current_timestamp(),
+    primary key (id)
+);
+
+create index if not exists idx_harness_run_claim
+    on harness_run (status, next_attempt_at, lease_until, id);
+
+create table if not exists harness_run_event (
+    id           bigint not null,
+    run_id       bigint not null,
+    sequence     bigint not null,
+    event_type   varchar(64) not null,
+    payload_json text not null,
+    gmt_create   timestamp(3) not null default current_timestamp(),
+    primary key (id),
+    unique (run_id, sequence)
+);
+
+create index if not exists idx_harness_run_event_run on harness_run_event (run_id, id);

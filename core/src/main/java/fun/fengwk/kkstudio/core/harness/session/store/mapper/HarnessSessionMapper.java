@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Result;
+import org.apache.ibatis.annotations.ResultMap;
 import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
@@ -54,6 +55,60 @@ public interface HarnessSessionMapper extends BaseMapper {
         @Result(column = "update_time", property = "updateTime")
       })
   HarnessSessionDO find(@Param("sessionId") long sessionId);
+
+  @Select(
+      """
+      select id, workspace_id, agent_definition_id, title, leaf_entry_id, active_run_id,
+             parent_session_id, root_session_id, parent_invocation_id, depth, yolo_enabled,
+             version, gmt_create as create_time, gmt_modified as update_time
+      from harness_session
+      where id = #{sessionId}
+      for update
+      """)
+  @ResultMap("harnessSessionResultMap")
+  HarnessSessionDO findForUpdate(@Param("sessionId") long sessionId);
+
+  @Update(
+      """
+      update harness_session
+      set leaf_entry_id = #{newLeafEntryId}, active_run_id = #{runId},
+          gmt_modified = #{updateTime}, version = version + 1
+      where id = #{sessionId} and active_run_id is null
+        and ((#{expectedLeafEntryId} is null and leaf_entry_id is null)
+          or leaf_entry_id = #{expectedLeafEntryId})
+      """)
+  int attachRun(
+      @Param("sessionId") long sessionId,
+      @Param("expectedLeafEntryId") Long expectedLeafEntryId,
+      @Param("newLeafEntryId") long newLeafEntryId,
+      @Param("runId") long runId,
+      @Param("updateTime") LocalDateTime updateTime);
+
+  @Update(
+      """
+      update harness_session
+      set leaf_entry_id = #{newLeafEntryId}, gmt_modified = #{updateTime}, version = version + 1
+      where id = #{sessionId} and active_run_id = #{runId}
+        and ((#{expectedLeafEntryId} is null and leaf_entry_id is null)
+          or leaf_entry_id = #{expectedLeafEntryId})
+      """)
+  int advanceActiveRunLeaf(
+      @Param("sessionId") long sessionId,
+      @Param("runId") long runId,
+      @Param("expectedLeafEntryId") Long expectedLeafEntryId,
+      @Param("newLeafEntryId") long newLeafEntryId,
+      @Param("updateTime") LocalDateTime updateTime);
+
+  @Update(
+      """
+      update harness_session
+      set active_run_id = null, gmt_modified = #{updateTime}, version = version + 1
+      where id = #{sessionId} and active_run_id = #{runId}
+      """)
+  int clearActiveRun(
+      @Param("sessionId") long sessionId,
+      @Param("runId") long runId,
+      @Param("updateTime") LocalDateTime updateTime);
 
   @Update(
       """
