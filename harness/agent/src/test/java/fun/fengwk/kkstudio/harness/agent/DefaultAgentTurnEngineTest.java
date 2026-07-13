@@ -11,13 +11,17 @@ import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -34,9 +38,11 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import org.junit.jupiter.api.Test;
 
 class DefaultAgentTurnEngineTest {
@@ -161,6 +167,106 @@ class DefaultAgentTurnEngineTest {
     assertTrue(handler.failed);
   }
 
+  /** 没有 reset 事件时，final text snapshot 与已投递 partial 不一致必须 fail fast。 */
+  @Test
+  void rejectsConflictingFinalTextSnapshot() {
+    FakeModelProvider provider =
+        FakeModelProvider.sequence()
+            .delta(new ProviderStreamEvent.TextDelta("partial"))
+            .complete(response("authoritative", "", List.of(), ProviderStopReason.COMPLETED))
+            .build();
+    RecordingHandler handler = new RecordingHandler();
+
+    new DefaultAgentTurnEngine(provider).execute(request(), handler);
+
+    assertEquals(List.of("started", "delta", "failed"), handler.events);
+    assertTrue(handler.failed);
+    assertEquals(null, handler.result);
+  }
+
+  /** tool call 的 id/name/arguments 与 final snapshot 冲突时不能把两个值静默拼接。 */
+  @Test
+  void rejectsConflictingFinalToolCallSnapshot() {
+    FakeModelProvider provider =
+        FakeModelProvider.sequence()
+            .delta(new ProviderStreamEvent.ToolCallDelta(0, "call-1", "read", "{\"path\":\"a"))
+            .complete(
+                response(
+                    "",
+                    "",
+                    List.of(new ProviderToolCall("call-2", "read", "{\"path\":\"README.md\"}")),
+                    ProviderStopReason.TOOL_CALLS))
+            .build();
+    RecordingHandler handler = new RecordingHandler();
+
+    new DefaultAgentTurnEngine(provider).execute(request(), handler);
+
+    assertEquals(List.of("started", "delta", "failed"), handler.events);
+    assertTrue(handler.failed);
+    assertEquals(null, handler.result);
+  }
+
+  /** Provider 在 stream() 返回前同步完成时，Engine 仍能绑定并只投递一次 completed。 */
+  @Test
+  void completesWhenProviderCallsBackSynchronously() {
+    FakeModelProvider provider =
+        FakeModelProvider.sequence()
+            .complete(response("ok", "", List.of(), ProviderStopReason.COMPLETED))
+            .build();
+    RecordingHandler handler = new RecordingHandler();
+
+    AgentTurnHandle handle = new DefaultAgentTurnEngine(provider).execute(request(), handler);
+
+    assertFalse(handle.isCancelled());
+    assertEquals(List.of("started", "delta", "completed"), handler.events);
+    assertEquals("ok", handler.result.assistantMessage().text());
+  }
+
+  /** cancel 发生在第一条 Provider 回调前时，后续 complete/error 都不能突破已选择的失败终态。 */
+  @Test
+  void cancelBeforeFirstCallbackSuppressesBothTerminalCallbacks() {
+    ManualModelProvider provider = new ManualModelProvider();
+    RecordingHandler handler = new RecordingHandler();
+    AgentTurnHandle handle = new DefaultAgentTurnEngine(provider).execute(request(), handler);
+
+    handle.cancel();
+    provider.complete(response("ignored", "", List.of(), ProviderStopReason.COMPLETED));
+    provider.fail(new ProviderException(ProviderErrorKind.TRANSIENT, "ignored"));
+
+    assertTrue(provider.stream.isCancelled());
+    assertEquals(List.of("started", "failed"), handler.events);
+  }
+
+  /** complete/error 并发竞争由 terminal CAS 仲裁，handler 最终只能收到一个终态。 */
+  @Test
+  void completeAndErrorRaceDeliversExactlyOneTerminal() throws InterruptedException {
+    ManualModelProvider provider = new ManualModelProvider();
+    RecordingHandler handler = new RecordingHandler();
+    new DefaultAgentTurnEngine(provider).execute(request(), handler);
+    CountDownLatch start = new CountDownLatch(1);
+    Thread completed =
+        new Thread(
+            () -> {
+              await(start);
+              provider.complete(response("ok", "", List.of(), ProviderStopReason.COMPLETED));
+            });
+    Thread failed =
+        new Thread(
+            () -> {
+              await(start);
+              provider.fail(new ProviderException(ProviderErrorKind.TRANSIENT, "network"));
+            });
+    completed.start();
+    failed.start();
+    start.countDown();
+    completed.join();
+    failed.join();
+
+    long terminals = handler.events.stream().filter(event -> !"started".equals(event)).count();
+    assertEquals(1, terminals);
+    assertTrue(handler.events.contains("completed") || handler.events.contains("failed"));
+  }
+
   /** Provider 工具声明保留所有受支持 JSON schema 节点，避免 schema 在模型边界丢失。 */
   @Test
   void serializesEverySupportedToolSchema() {
@@ -254,11 +360,40 @@ class DefaultAgentTurnEngineTest {
         text, thinking, calls, stopReason, usage, new ModelCost("USD", BigDecimal.ONE));
   }
 
+  private static void await(CountDownLatch latch) {
+    try {
+      latch.await();
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      throw new AssertionError(error);
+    }
+  }
+
+  private static final class ManualModelProvider implements ModelProvider {
+
+    private final FakeModelProvider.FakeStream stream = new FakeModelProvider.FakeStream();
+    private ProviderStreamHandler handler;
+
+    @Override
+    public ProviderStream stream(ProviderRequest request, ProviderStreamHandler handler) {
+      this.handler = handler;
+      return stream;
+    }
+
+    private void complete(ProviderResponse response) {
+      handler.onComplete(response, stream);
+    }
+
+    private void fail(ProviderException error) {
+      handler.onError(error, stream);
+    }
+  }
+
   private static final class RecordingHandler implements AgentTurnEventHandler {
 
-    private final List<String> events = new ArrayList<>();
-    private AgentTurnResult result;
-    private boolean failed;
+    private final List<String> events = Collections.synchronizedList(new ArrayList<>());
+    private volatile AgentTurnResult result;
+    private volatile boolean failed;
 
     @Override
     public void onStarted() {

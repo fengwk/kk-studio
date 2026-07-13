@@ -292,9 +292,14 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
       }
     }
 
+    /** 最终快照只能补全已发送的前缀；事件协议没有 reset，因此发现任何分歧立即失败， 不能向已消费 partial 的 handler 静默交付另一份语义结果。 */
     private void emitFinalGaps(ProviderResponse response) {
       emitTextGap(text, response.text(), true);
       emitTextGap(thinking, response.thinking(), false);
+      if (partialToolCalls.keySet().stream()
+          .anyMatch(index -> index >= response.toolCalls().size())) {
+        throw new IllegalArgumentException("final response omits a streamed tool call");
+      }
       for (int index = 0; index < response.toolCalls().size(); index++) {
         ProviderToolCall complete = response.toolCalls().get(index);
         PartialToolCall partial =
@@ -307,7 +312,12 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
     }
 
     private void emitTextGap(StringBuilder received, String complete, boolean isText) {
-      if (complete.startsWith(received.toString()) && complete.length() > received.length()) {
+      String partial = received.toString();
+      if (!complete.startsWith(partial)) {
+        throw new IllegalArgumentException(
+            "final response conflicts with streamed " + (isText ? "text" : "thinking"));
+      }
+      if (complete.length() > received.length()) {
         String gap = complete.substring(received.length());
         received.append(gap);
         handler.onDelta(
@@ -378,7 +388,10 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
 
     private static String gap(StringBuilder received, String complete) {
       String value = received.toString();
-      if (!complete.startsWith(value) || complete.length() == value.length()) {
+      if (!complete.startsWith(value)) {
+        throw new IllegalArgumentException("final tool call conflicts with streamed data");
+      }
+      if (complete.length() == value.length()) {
         return null;
       }
       String gap = complete.substring(value.length());

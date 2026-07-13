@@ -61,6 +61,14 @@ class ProviderContractTest {
         IllegalArgumentException.class,
         () ->
             new ProviderMessage(
+                ProviderMessageRole.TOOL,
+                List.of(
+                    new ProviderToolResultBlock("call-1", "read", List.of(), false, "{}"),
+                    new ProviderToolResultBlock("call-2", "read", List.of(), false, "{}"))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ProviderMessage(
                 ProviderMessageRole.USER, List.of(new ProviderToolCallBlock(call))));
   }
 

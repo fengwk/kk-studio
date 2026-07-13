@@ -27,8 +27,9 @@ public record ProviderMessage(ProviderMessageRole role, List<ProviderContentBloc
       throw new IllegalArgumentException("tool result blocks are only allowed for TOOL messages");
     }
     if (role == ProviderMessageRole.TOOL
-        && contents.stream().anyMatch(block -> !(block instanceof ProviderToolResultBlock))) {
-      throw new IllegalArgumentException("TOOL messages may only contain tool result blocks");
+        && (contents.size() != 1 || !(contents.get(0) instanceof ProviderToolResultBlock))) {
+      throw new IllegalArgumentException(
+          "TOOL messages must contain exactly one provider tool result block");
     }
   }
 }
