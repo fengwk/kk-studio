@@ -173,6 +173,8 @@ abstract class LangChainModelProvider implements ModelProvider {
         .temperature(request.variant().temperature())
         .topP(request.variant().topP())
         .topK(request.variant().topK())
+        .frequencyPenalty(request.variant().frequencyPenalty())
+        .presencePenalty(request.variant().presencePenalty())
         .stopSequences(request.variant().stopSequences())
         .toolSpecifications(tools(request.tools()))
         .build();

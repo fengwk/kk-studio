@@ -9,6 +9,8 @@ public record ModelVariant(
     Double temperature,
     Double topP,
     Integer topK,
+    Double frequencyPenalty,
+    Double presencePenalty,
     List<String> stopSequences) {
 
   public ModelVariant {
@@ -28,5 +30,16 @@ public record ModelVariant(
       throw new IllegalArgumentException("topK must be positive");
     }
     stopSequences = stopSequences == null ? List.of() : List.copyOf(stopSequences);
+  }
+
+  /** 保持早期 Model 契约调用方仅声明原有六项参数时的构造方式。 */
+  public ModelVariant(
+      String name,
+      Integer maxOutputTokens,
+      Double temperature,
+      Double topP,
+      Integer topK,
+      List<String> stopSequences) {
+    this(name, maxOutputTokens, temperature, topP, topK, null, null, stopSequences);
   }
 }
