@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.core.agent.model.service.converter;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.share.model.AgentModelDTO;
 
 /**
@@ -12,20 +11,21 @@ import fun.fengwk.kkstudio.share.model.AgentModelDTO;
 @Component
 public class AgentModelConverter {
 
-  public AgentModelDTO convert(AgentModel model, AgentProvider provider) {
+  public AgentModelDTO convert(AgentModel model) {
     if (model == null) {
       return null;
     }
-    AgentModelDTO modelDTO = new AgentModelDTO();
-    modelDTO.setId(model.getId());
-    modelDTO.setProviderId(model.getProviderId());
-    modelDTO.setProviderName(provider == null ? null : provider.getName());
-    modelDTO.setName(model.getName());
-    modelDTO.setDescription(model.getDescription());
-    modelDTO.setDefaultVariant(model.getDefaultVariant());
-    modelDTO.setVariantsJson(model.getVariantsJson());
-    modelDTO.setCreateTime(model.getCreateTime());
-    modelDTO.setUpdateTime(model.getUpdateTime());
-    return modelDTO;
+    AgentModelDTO dto = new AgentModelDTO();
+    dto.setId(Long.toString(model.getId()));
+    dto.setWorkspaceId(Long.toString(model.getWorkspaceId()));
+    dto.setProviderId(Long.toString(model.getProviderId()));
+    dto.setName(model.getName());
+    dto.setDescription(model.getDescription());
+    dto.setCapabilitiesJson(model.getCapabilitiesJson());
+    dto.setConfigJson(model.getConfigJson());
+    dto.setVersion(model.getVersion());
+    dto.setCreateTime(model.getCreateTime());
+    dto.setUpdateTime(model.getUpdateTime());
+    return dto;
   }
 }

@@ -11,13 +11,14 @@ import java.time.LocalDateTime;
 public class AgentDefinitionDO {
 
   private Long id;
+  private Long workspaceId;
   private String name;
   private String description;
   private String systemPrompt;
-  private Long defaultProviderId;
-  private Long defaultModelId;
-  private String defaultVariant;
-  private String toolsJson;
+  private Long modelId;
+  private String variant;
+  private String configJson;
+  private Long version;
   private LocalDateTime createTime;
   private LocalDateTime updateTime;
 }

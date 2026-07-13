@@ -8,9 +8,8 @@ import lombok.Data;
 @Data
 public class AgentModelEditablePropertiesDTO {
 
-    private String name;
-    private String description;
-    private String defaultVariant;
-    private String variantsJson;
-
+  private String name;
+  private String description;
+  private String capabilitiesJson;
+  private String configJson;
 }

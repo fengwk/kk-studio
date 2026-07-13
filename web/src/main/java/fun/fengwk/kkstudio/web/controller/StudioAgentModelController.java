@@ -20,11 +20,9 @@ import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelUpdateDTO;
 
-/**
- * @author fengwk
- */
+/** Workspace-scoped model CRUD API. */
 @AllArgsConstructor
-@RequestMapping("/api/agent/models")
+@RequestMapping("/api/workspaces/{workspaceId}/models")
 @RestController
 public class StudioAgentModelController {
 
@@ -32,25 +30,29 @@ public class StudioAgentModelController {
 
   @GetMapping
   public Result<Page<AgentModelDTO>> pageModels(
+      @PathVariable long workspaceId,
       @RequestParam(value = "pageNumber", defaultValue = "1") int pageNumber,
       @RequestParam(value = "pageSize", defaultValue = "50") int pageSize) {
-    return Results.ok(agentModelService.pageModels(new PageQuery(pageNumber, pageSize)));
+    return Results.ok(agentModelService.pageModels(workspaceId, new PageQuery(pageNumber, pageSize)));
   }
 
   @PostMapping
-  public Result<AgentModelDTO> createModel(@RequestBody AgentModelCreateDTO createDTO) {
-    return Results.created(agentModelService.createModel(createDTO));
+  public Result<AgentModelDTO> createModel(
+      @PathVariable long workspaceId, @RequestBody AgentModelCreateDTO createDTO) {
+    return Results.created(agentModelService.createModel(workspaceId, createDTO));
   }
 
   @PutMapping("/{id}")
   public Result<AgentModelDTO> updateModel(
-      @PathVariable("id") long id, @RequestBody AgentModelUpdateDTO updateDTO) {
-    return Results.ok(agentModelService.updateModel(id, updateDTO));
+      @PathVariable long workspaceId,
+      @PathVariable long id,
+      @RequestBody AgentModelUpdateDTO updateDTO) {
+    return Results.ok(agentModelService.updateModel(workspaceId, id, updateDTO));
   }
 
   @DeleteMapping("/{id}")
-  public Result<Void> deleteModel(@PathVariable("id") long id) {
-    agentModelService.deleteModel(id);
+  public Result<Void> deleteModel(@PathVariable long workspaceId, @PathVariable long id) {
+    agentModelService.deleteModel(workspaceId, id);
     return Results.noContent();
   }
 }

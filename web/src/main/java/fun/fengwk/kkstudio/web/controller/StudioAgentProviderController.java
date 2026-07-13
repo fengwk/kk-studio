@@ -20,11 +20,9 @@ import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
 
-/**
- * @author fengwk
- */
+/** Workspace-scoped provider CRUD API. */
 @AllArgsConstructor
-@RequestMapping("/api/agent/providers")
+@RequestMapping("/api/workspaces/{workspaceId}/providers")
 @RestController
 public class StudioAgentProviderController {
 
@@ -32,25 +30,30 @@ public class StudioAgentProviderController {
 
   @GetMapping
   public Result<Page<AgentProviderDTO>> pageProviders(
+      @PathVariable long workspaceId,
       @RequestParam(value = "pageNumber", defaultValue = "1") int pageNumber,
       @RequestParam(value = "pageSize", defaultValue = "50") int pageSize) {
-    return Results.ok(agentProviderService.pageProviders(new PageQuery(pageNumber, pageSize)));
+    return Results.ok(
+        agentProviderService.pageProviders(workspaceId, new PageQuery(pageNumber, pageSize)));
   }
 
   @PostMapping
-  public Result<AgentProviderDTO> createProvider(@RequestBody AgentProviderCreateDTO createDTO) {
-    return Results.created(agentProviderService.createProvider(createDTO));
+  public Result<AgentProviderDTO> createProvider(
+      @PathVariable long workspaceId, @RequestBody AgentProviderCreateDTO createDTO) {
+    return Results.created(agentProviderService.createProvider(workspaceId, createDTO));
   }
 
   @PutMapping("/{id}")
   public Result<AgentProviderDTO> updateProvider(
-      @PathVariable("id") long id, @RequestBody AgentProviderUpdateDTO updateDTO) {
-    return Results.ok(agentProviderService.updateProvider(id, updateDTO));
+      @PathVariable long workspaceId,
+      @PathVariable long id,
+      @RequestBody AgentProviderUpdateDTO updateDTO) {
+    return Results.ok(agentProviderService.updateProvider(workspaceId, id, updateDTO));
   }
 
   @DeleteMapping("/{id}")
-  public Result<Void> deleteProvider(@PathVariable("id") long id) {
-    agentProviderService.deleteProvider(id);
+  public Result<Void> deleteProvider(@PathVariable long workspaceId, @PathVariable long id) {
+    agentProviderService.deleteProvider(workspaceId, id);
     return Results.noContent();
   }
 }

@@ -12,11 +12,11 @@ import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
  */
 public interface AgentProviderService {
 
-  Page<AgentProviderDTO> pageProviders(PageQuery pageQuery);
+  Page<AgentProviderDTO> pageProviders(long workspaceId, PageQuery pageQuery);
 
-  AgentProviderDTO createProvider(AgentProviderCreateDTO createDTO);
+  AgentProviderDTO createProvider(long workspaceId, AgentProviderCreateDTO createDTO);
 
-  AgentProviderDTO updateProvider(long id, AgentProviderUpdateDTO updateDTO);
+  AgentProviderDTO updateProvider(long workspaceId, long id, AgentProviderUpdateDTO updateDTO);
 
-  void deleteProvider(long id);
+  void deleteProvider(long workspaceId, long id);
 }

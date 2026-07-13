@@ -10,14 +10,15 @@ import java.time.LocalDateTime;
 @Data
 public class AgentProviderDTO {
 
-    private Long id;
-    private String name;
-    private String description;
-    private String providerType;
-    private String baseUrl;
-    private String apiKey;
-    private Long timeoutMillis;
-    private LocalDateTime createTime;
-    private LocalDateTime updateTime;
-
+  private String id;
+  private String workspaceId;
+  private String name;
+  private String description;
+  private String providerType;
+  private String baseUrl;
+  private boolean configured;
+  private String configJson;
+  private Long version;
+  private LocalDateTime createTime;
+  private LocalDateTime updateTime;
 }

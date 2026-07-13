@@ -11,11 +11,13 @@ import java.time.LocalDateTime;
 public class AgentModelDO {
 
   private Long id;
+  private Long workspaceId;
   private Long providerId;
   private String name;
   private String description;
-  private String defaultVariant;
-  private String variantsJson;
+  private String capabilitiesJson;
+  private String configJson;
+  private Long version;
   private LocalDateTime createTime;
   private LocalDateTime updateTime;
 }

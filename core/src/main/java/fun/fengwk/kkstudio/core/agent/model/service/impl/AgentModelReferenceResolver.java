@@ -8,7 +8,7 @@ import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 
-/** 统一处理 agent model 服务依赖的实体解析、唯一性校验与删除前校验。 */
+/** Resolves scoped model and provider references. */
 @AllArgsConstructor
 @Component
 final class AgentModelReferenceResolver {
@@ -16,51 +16,36 @@ final class AgentModelReferenceResolver {
   private final AgentModelRepository agentModelRepository;
   private final AgentProviderRepository agentProviderRepository;
 
-  AgentModel requireModel(long id) {
-    if (id <= 0) {
-      throw new IllegalArgumentException("agent model id must be positive");
-    }
-    AgentModel model = agentModelRepository.getById(id);
+  AgentModel requireModel(long workspaceId, long id) {
+    AgentModel model = agentModelRepository.getByWorkspaceIdAndId(workspaceId, id);
     if (model == null) {
-      throw new IllegalArgumentException("agent model not found: " + id);
+      throw new IllegalArgumentException("agent model not found in workspace: " + id);
     }
     return model;
   }
 
-  AgentProvider resolveProvider(long providerId) {
-    return agentProviderRepository.getById(providerId);
-  }
-
-  AgentProvider requireProvider(long providerId) {
-    AgentProvider provider = resolveProvider(providerId);
+  AgentProvider requireProvider(long workspaceId, long id) {
+    AgentProvider provider = agentProviderRepository.getByWorkspaceIdAndId(workspaceId, id);
     if (provider == null) {
-      throw new IllegalStateException("agent provider not found: " + providerId);
+      throw new IllegalArgumentException("agent provider not found in workspace: " + id);
     }
     return provider;
   }
 
-  AgentProvider requireProviderByName(String providerName) {
-    AgentProvider provider = agentProviderRepository.getByName(providerName);
-    if (provider == null) {
-      throw new IllegalArgumentException("agent provider not found: " + providerName);
-    }
-    return provider;
-  }
-
-  void ensureNameAvailable(long providerId, String name) {
-    if (agentModelRepository.getByProviderIdAndName(providerId, name) != null) {
-      throw new IllegalArgumentException("agent model name already exists: " + name);
+  void ensureNameAvailable(long workspaceId, String name) {
+    if (agentModelRepository.getByWorkspaceIdAndName(workspaceId, name) != null) {
+      throw new IllegalArgumentException("agent model name already exists in workspace: " + name);
     }
   }
 
-  void ensureNameAvailable(long providerId, String currentName, String nextName) {
+  void ensureNameAvailable(long workspaceId, String currentName, String nextName) {
     if (!currentName.equals(nextName)) {
-      ensureNameAvailable(providerId, nextName);
+      ensureNameAvailable(workspaceId, nextName);
     }
   }
 
-  void ensureDeletable(long id) {
-    if (agentModelRepository.hasAgents(id)) {
+  void ensureDeletable(long workspaceId, long id) {
+    if (agentModelRepository.hasAgents(workspaceId, id)) {
       throw new IllegalStateException("agent model in use by agents: " + id);
     }
   }

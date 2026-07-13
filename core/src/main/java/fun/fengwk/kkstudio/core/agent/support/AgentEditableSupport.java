@@ -53,6 +53,13 @@ public final class AgentEditableSupport {
     }
   }
 
+  public void validateJsonObject(String json, String fieldName) {
+    if (trimToNull(json) == null) {
+      throw new IllegalArgumentException(fieldName + " must be a JSON object");
+    }
+    validateJsonObjectOrNull(json, fieldName);
+  }
+
   public void validateJsonObjectOrNull(String json, String fieldName) {
     String trimmed = trimToNull(json);
     if (trimmed == null) {

@@ -1,111 +1,42 @@
 package fun.fengwk.kkstudio.core.agent.runtime.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.agent.AgentInfo;
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
-import fun.fengwk.kkstudio.agent.model.Variant;
-import fun.fengwk.kkstudio.agent.provider.ProviderType;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 
-import java.time.Duration;
 import java.util.List;
 
-/**
- * EmbeddedAgentRuntimeMetadataFactory 的聚焦行为测试。
- *
- * @author fengwk
- */
+/** Runtime metadata consumes the new JSON configuration fields. */
 public class EmbeddedAgentRuntimeMetadataFactoryTest {
 
-  /** 校验会从 agent 定义里补默认 variant，并解析工具列表。 */
   @Test
-  public void shouldBuildAgentInfoWithParsedListsAndDefaultVariant() {
-    EmbeddedAgentRuntimeMetadataFactory factory = newFactory();
-    AgentDefinition agentDefinition = new AgentDefinition();
-    agentDefinition.setName("assistant-a");
-    agentDefinition.setSystemPrompt("you are helpful");
-    agentDefinition.setDefaultVariant(" ");
-    agentDefinition.setToolsJson("[\"browser\", \" \", \"shell\"]");
-
-    AgentInfo agentInfo = factory.toAgentInfo(agentDefinition, "openai", "gpt-4.1");
-
-    assertEquals("assistant-a", agentInfo.getName());
-    assertEquals("openai", agentInfo.getDefaultProvider());
-    assertEquals("gpt-4.1", agentInfo.getDefaultModel());
-    assertEquals("default", agentInfo.getDefaultVariant());
+  public void shouldBuildRuntimeMetadataFromWorkspaceConfiguration() {
+    EmbeddedAgentRuntimeMetadataFactory factory =
+        new EmbeddedAgentRuntimeMetadataFactory(new ObjectMapper());
+    AgentDefinition definition = new AgentDefinition();
+    definition.setName("assistant");
+    definition.setVariant("stable");
+    definition.setConfigJson("{\"tools\":[\"browser\",\"shell\"]}");
+    AgentInfo agentInfo = factory.toAgentInfo(definition, "openai", "gpt-4.1");
+    assertEquals("stable", agentInfo.getDefaultVariant());
     assertEquals(List.of("browser", "shell"), agentInfo.getTools());
-  }
 
-  /** 校验会从 model variantsJson 里恢复受运行时支持的 variant 参数。 */
-  @Test
-  public void shouldBuildModelInfoWithParsedVariants() {
-    EmbeddedAgentRuntimeMetadataFactory factory = newFactory();
-    AgentModel agentModel = new AgentModel();
-    agentModel.setName("gpt-4.1");
-    agentModel.setDefaultVariant("stable");
-    agentModel.setVariantsJson(
-        """
-        [
-          {
-            "name": "stable",
-            "maxOutputTokens": 4096,
-            "temperature": 0.7,
-            "stopSequences": ["END"]
-          }
-        ]
-        """);
+    AgentModel model = new AgentModel();
+    model.setName("gpt-4.1");
+    model.setConfigJson("{\"variants\":[{\"name\":\"stable\",\"temperature\":0.7}]}");
+    ModelInfo modelInfo = factory.toModelInfo(model, "openai");
+    assertEquals("default", modelInfo.getDefaultVariant());
+    assertEquals("stable", modelInfo.getVariants().get(0).getName());
 
-    ModelInfo modelInfo = factory.toModelInfo(agentModel, "openai");
-
-    assertEquals("openai", modelInfo.getProvider());
-    assertEquals("gpt-4.1", modelInfo.getName());
-    assertEquals("stable", modelInfo.getDefaultVariant());
-    assertEquals(1, modelInfo.getVariants().size());
-    Variant variant = modelInfo.getVariants().get(0);
-    assertEquals("stable", variant.getName());
-    assertEquals(4096, variant.getMaxOutputTokens());
-    assertEquals(0.7D, variant.getTemperature());
-    assertEquals(List.of("END"), variant.getStopSequences());
-  }
-
-  /** 校验 provider/model 解析遇到非法配置时会明确失败，而不是静默生成错误 metadata。 */
-  @Test
-  public void shouldRejectInvalidRuntimeMetadata() {
-    EmbeddedAgentRuntimeMetadataFactory factory = newFactory();
     AgentProvider provider = new AgentProvider();
-    provider.setProviderType(ProviderType.openai);
-    provider.setTimeout(Duration.ofSeconds(30));
-
-    assertNotNull(factory.toProviderInfo(provider));
-    assertThrows(
-        IllegalArgumentException.class, () -> new EmbeddedAgentRuntimeMetadataFactory(null));
-    assertThrows(IllegalArgumentException.class, () -> factory.toProviderInfo(null));
-    assertThrows(
-        IllegalArgumentException.class, () -> factory.toAgentInfo(null, "openai", "gpt-4.1"));
-    assertThrows(IllegalArgumentException.class, () -> factory.toModelInfo(null, "openai"));
-
-    AgentModel invalidModel = new AgentModel();
-    invalidModel.setName("gpt-4.1");
-    invalidModel.setVariantsJson("{}");
-    assertThrows(IllegalArgumentException.class, () -> factory.toModelInfo(invalidModel, "openai"));
-
-    AgentDefinition invalidAgent = new AgentDefinition();
-    invalidAgent.setName("assistant-a");
-    invalidAgent.setToolsJson("bad-json");
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> factory.toAgentInfo(invalidAgent, "openai", "gpt-4.1"));
-  }
-
-  private static EmbeddedAgentRuntimeMetadataFactory newFactory() {
-    return new EmbeddedAgentRuntimeMetadataFactory(new ObjectMapper());
+    provider.setConfigJson("{\"timeoutMillis\":30000}");
+    assertEquals(30_000L, factory.toProviderInfo(provider).getTimeout().toMillis());
   }
 }

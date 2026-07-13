@@ -1,36 +1,47 @@
 package fun.fengwk.kkstudio.core.agent.definition.service.converter;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionDTO;
 
 /**
  * @author fengwk
  */
+@AllArgsConstructor
 @Component
 public class AgentDefinitionConverter {
 
-  public AgentDefinitionDTO convert(
-      AgentDefinition agentDefinition, AgentProvider provider, AgentModel model) {
-    if (agentDefinition == null) {
+  private final ObjectMapper objectMapper;
+
+  public AgentDefinitionDTO convert(AgentDefinition definition) {
+    if (definition == null) {
       return null;
     }
-    AgentDefinitionDTO agentDefinitionDTO = new AgentDefinitionDTO();
-    agentDefinitionDTO.setId(agentDefinition.getId());
-    agentDefinitionDTO.setName(agentDefinition.getName());
-    agentDefinitionDTO.setDescription(agentDefinition.getDescription());
-    agentDefinitionDTO.setSystemPrompt(agentDefinition.getSystemPrompt());
-    agentDefinitionDTO.setDefaultProviderId(agentDefinition.getDefaultProviderId());
-    agentDefinitionDTO.setDefaultProviderName(provider == null ? null : provider.getName());
-    agentDefinitionDTO.setDefaultModelId(agentDefinition.getDefaultModelId());
-    agentDefinitionDTO.setDefaultModelName(model == null ? null : model.getName());
-    agentDefinitionDTO.setDefaultVariant(agentDefinition.getDefaultVariant());
-    agentDefinitionDTO.setToolsJson(agentDefinition.getToolsJson());
-    agentDefinitionDTO.setCreateTime(agentDefinition.getCreateTime());
-    agentDefinitionDTO.setUpdateTime(agentDefinition.getUpdateTime());
-    return agentDefinitionDTO;
+    AgentDefinitionDTO dto = new AgentDefinitionDTO();
+    dto.setId(Long.toString(definition.getId()));
+    dto.setWorkspaceId(Long.toString(definition.getWorkspaceId()));
+    dto.setName(definition.getName());
+    dto.setDescription(definition.getDescription());
+    dto.setSystemPrompt(definition.getSystemPrompt());
+    dto.setModelId(Long.toString(definition.getModelId()));
+    dto.setVariant(definition.getVariant());
+    dto.setConfig(readConfig(definition.getConfigJson()));
+    dto.setVersion(definition.getVersion());
+    dto.setCreateTime(definition.getCreateTime());
+    dto.setUpdateTime(definition.getUpdateTime());
+    return dto;
+  }
+
+  private AgentDefinitionConfigDTO readConfig(String configJson) {
+    try {
+      return objectMapper.readValue(configJson, AgentDefinitionConfigDTO.class);
+    } catch (JsonProcessingException e) {
+      throw new IllegalStateException("stored agent definition config is invalid", e);
+    }
   }
 }

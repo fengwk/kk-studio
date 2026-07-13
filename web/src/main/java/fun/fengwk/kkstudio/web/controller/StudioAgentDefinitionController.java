@@ -20,11 +20,9 @@ import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
 
-/**
- * @author fengwk
- */
+/** Workspace-scoped agent definition CRUD API. */
 @AllArgsConstructor
-@RequestMapping("/api/agent/agents")
+@RequestMapping("/api/workspaces/{workspaceId}/agents")
 @RestController
 public class StudioAgentDefinitionController {
 
@@ -32,25 +30,29 @@ public class StudioAgentDefinitionController {
 
   @GetMapping
   public Result<Page<AgentDefinitionDTO>> pageAgents(
+      @PathVariable long workspaceId,
       @RequestParam(value = "pageNumber", defaultValue = "1") int pageNumber,
       @RequestParam(value = "pageSize", defaultValue = "50") int pageSize) {
-    return Results.ok(agentDefinitionService.pageAgents(new PageQuery(pageNumber, pageSize)));
+    return Results.ok(agentDefinitionService.pageAgents(workspaceId, new PageQuery(pageNumber, pageSize)));
   }
 
   @PostMapping
-  public Result<AgentDefinitionDTO> createAgent(@RequestBody AgentDefinitionCreateDTO createDTO) {
-    return Results.created(agentDefinitionService.createAgent(createDTO));
+  public Result<AgentDefinitionDTO> createAgent(
+      @PathVariable long workspaceId, @RequestBody AgentDefinitionCreateDTO createDTO) {
+    return Results.created(agentDefinitionService.createAgent(workspaceId, createDTO));
   }
 
   @PutMapping("/{id}")
   public Result<AgentDefinitionDTO> updateAgent(
-      @PathVariable("id") long id, @RequestBody AgentDefinitionUpdateDTO updateDTO) {
-    return Results.ok(agentDefinitionService.updateAgent(id, updateDTO));
+      @PathVariable long workspaceId,
+      @PathVariable long id,
+      @RequestBody AgentDefinitionUpdateDTO updateDTO) {
+    return Results.ok(agentDefinitionService.updateAgent(workspaceId, id, updateDTO));
   }
 
   @DeleteMapping("/{id}")
-  public Result<Void> deleteAgent(@PathVariable("id") long id) {
-    agentDefinitionService.deleteAgent(id);
+  public Result<Void> deleteAgent(@PathVariable long workspaceId, @PathVariable long id) {
+    agentDefinitionService.deleteAgent(workspaceId, id);
     return Results.noContent();
   }
 }

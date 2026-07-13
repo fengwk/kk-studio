@@ -12,11 +12,11 @@ import fun.fengwk.kkstudio.share.model.AgentModelUpdateDTO;
  */
 public interface AgentModelService {
 
-  Page<AgentModelDTO> pageModels(PageQuery pageQuery);
+  Page<AgentModelDTO> pageModels(long workspaceId, PageQuery pageQuery);
 
-  AgentModelDTO createModel(AgentModelCreateDTO createDTO);
+  AgentModelDTO createModel(long workspaceId, AgentModelCreateDTO createDTO);
 
-  AgentModelDTO updateModel(long id, AgentModelUpdateDTO updateDTO);
+  AgentModelDTO updateModel(long workspaceId, long id, AgentModelUpdateDTO updateDTO);
 
-  void deleteModel(long id);
+  void deleteModel(long workspaceId, long id);
 }

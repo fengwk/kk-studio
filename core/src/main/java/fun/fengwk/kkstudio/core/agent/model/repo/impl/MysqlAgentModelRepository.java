@@ -23,12 +23,12 @@ public class MysqlAgentModelRepository implements AgentModelRepository {
   private final AgentModelMapper agentModelMapper;
 
   @Override
-  public Page<AgentModel> page(PageQuery pageQuery) {
+  public Page<AgentModel> page(long workspaceId, PageQuery pageQuery) {
     long offset = Pages.queryOffset(pageQuery);
     int limit = Pages.queryLimit(pageQuery);
-    List<AgentModelDO> result = agentModelMapper.pageAll(offset, limit);
-    long totalCount = agentModelMapper.countAll();
-    return Pages.page(pageQuery, result, totalCount).map(this::convert);
+    List<AgentModelDO> results = agentModelMapper.pageByWorkspaceId(workspaceId, offset, limit);
+    return Pages.page(pageQuery, results, agentModelMapper.countByWorkspaceId(workspaceId))
+        .map(this::convert);
   }
 
   @Override
@@ -37,8 +37,13 @@ public class MysqlAgentModelRepository implements AgentModelRepository {
   }
 
   @Override
-  public AgentModel getByProviderIdAndName(long providerId, String name) {
-    return convert(agentModelMapper.getByProviderIdAndName(providerId, name));
+  public AgentModel getByWorkspaceIdAndId(long workspaceId, long id) {
+    return convert(agentModelMapper.getByWorkspaceIdAndId(workspaceId, id));
+  }
+
+  @Override
+  public AgentModel getByWorkspaceIdAndName(long workspaceId, String name) {
+    return convert(agentModelMapper.getByWorkspaceIdAndName(workspaceId, name));
   }
 
   @Override
@@ -52,42 +57,45 @@ public class MysqlAgentModelRepository implements AgentModelRepository {
   }
 
   @Override
-  public boolean deleteById(long id) {
-    return agentModelMapper.deleteById(id) == 1;
+  public boolean deleteByWorkspaceIdAndId(long workspaceId, long id) {
+    return agentModelMapper.deleteByWorkspaceIdAndId(workspaceId, id) == 1;
   }
 
   @Override
-  public boolean hasAgents(long modelId) {
-    return agentModelMapper.countAgentsByModelId(modelId) > 0;
+  public boolean hasAgents(long workspaceId, long modelId) {
+    return agentModelMapper.countAgentsByModelId(workspaceId, modelId) > 0;
   }
 
   private AgentModelDO convert(AgentModel model) {
     if (model == null) {
       return null;
     }
-    AgentModelDO modelDO = new AgentModelDO();
-    modelDO.setId(model.getId());
-    modelDO.setProviderId(model.getProviderId());
-    modelDO.setName(model.getName());
-    modelDO.setDescription(model.getDescription());
-    modelDO.setDefaultVariant(model.getDefaultVariant());
-    modelDO.setVariantsJson(model.getVariantsJson());
-    return modelDO;
+    AgentModelDO result = new AgentModelDO();
+    result.setId(model.getId());
+    result.setWorkspaceId(model.getWorkspaceId());
+    result.setProviderId(model.getProviderId());
+    result.setName(model.getName());
+    result.setDescription(model.getDescription());
+    result.setCapabilitiesJson(model.getCapabilitiesJson());
+    result.setConfigJson(model.getConfigJson());
+    return result;
   }
 
-  private AgentModel convert(AgentModelDO modelDO) {
-    if (modelDO == null) {
+  private AgentModel convert(AgentModelDO model) {
+    if (model == null) {
       return null;
     }
-    AgentModel model = new AgentModel();
-    model.setId(modelDO.getId());
-    model.setProviderId(modelDO.getProviderId());
-    model.setName(modelDO.getName());
-    model.setDescription(modelDO.getDescription());
-    model.setDefaultVariant(modelDO.getDefaultVariant());
-    model.setVariantsJson(modelDO.getVariantsJson());
-    model.setCreateTime(modelDO.getCreateTime());
-    model.setUpdateTime(modelDO.getUpdateTime());
-    return model;
+    AgentModel result = new AgentModel();
+    result.setId(model.getId());
+    result.setWorkspaceId(model.getWorkspaceId());
+    result.setProviderId(model.getProviderId());
+    result.setName(model.getName());
+    result.setDescription(model.getDescription());
+    result.setCapabilitiesJson(model.getCapabilitiesJson());
+    result.setConfigJson(model.getConfigJson());
+    result.setVersion(model.getVersion());
+    result.setCreateTime(model.getCreateTime());
+    result.setUpdateTime(model.getUpdateTime());
+    return result;
   }
 }

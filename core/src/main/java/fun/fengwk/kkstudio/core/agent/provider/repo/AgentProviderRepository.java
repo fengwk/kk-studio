@@ -10,19 +10,19 @@ import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
  */
 public interface AgentProviderRepository {
 
-  Page<AgentProvider> page(PageQuery pageQuery);
+  Page<AgentProvider> page(long workspaceId, PageQuery pageQuery);
 
   AgentProvider getById(long id);
 
-  AgentProvider getByName(String name);
+  AgentProvider getByWorkspaceIdAndId(long workspaceId, long id);
+
+  AgentProvider getByWorkspaceIdAndName(long workspaceId, String name);
 
   boolean create(AgentProvider provider);
 
   boolean updateById(AgentProvider provider);
 
-  boolean deleteById(long id);
+  boolean deleteByWorkspaceIdAndId(long workspaceId, long id);
 
-  boolean hasModels(long providerId);
-
-  boolean hasAgents(long providerId);
+  boolean hasModels(long workspaceId, long providerId);
 }

@@ -10,9 +10,13 @@ import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
  */
 public interface AgentDefinitionRepository {
 
-  Page<AgentDefinition> page(PageQuery pageQuery);
+  Page<AgentDefinition> page(long workspaceId, PageQuery pageQuery);
 
   AgentDefinition getById(long id);
+
+  AgentDefinition getByWorkspaceIdAndId(long workspaceId, long id);
+
+  AgentDefinition getByWorkspaceIdAndName(long workspaceId, String name);
 
   AgentDefinition getByName(String name);
 
@@ -20,5 +24,5 @@ public interface AgentDefinitionRepository {
 
   boolean updateById(AgentDefinition agentDefinition);
 
-  boolean deleteById(long id);
+  boolean deleteByWorkspaceIdAndId(long workspaceId, long id);
 }

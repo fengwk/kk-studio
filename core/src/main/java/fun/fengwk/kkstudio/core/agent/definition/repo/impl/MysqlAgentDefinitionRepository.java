@@ -23,17 +23,27 @@ public class MysqlAgentDefinitionRepository implements AgentDefinitionRepository
   private final AgentDefinitionMapper agentDefinitionMapper;
 
   @Override
-  public Page<AgentDefinition> page(PageQuery pageQuery) {
+  public Page<AgentDefinition> page(long workspaceId, PageQuery pageQuery) {
     long offset = Pages.queryOffset(pageQuery);
     int limit = Pages.queryLimit(pageQuery);
-    List<AgentDefinitionDO> result = agentDefinitionMapper.pageAll(offset, limit);
-    long totalCount = agentDefinitionMapper.countAll();
-    return Pages.page(pageQuery, result, totalCount).map(this::convert);
+    List<AgentDefinitionDO> results = agentDefinitionMapper.pageByWorkspaceId(workspaceId, offset, limit);
+    return Pages.page(pageQuery, results, agentDefinitionMapper.countByWorkspaceId(workspaceId))
+        .map(this::convert);
   }
 
   @Override
   public AgentDefinition getById(long id) {
     return convert(agentDefinitionMapper.getById(id));
+  }
+
+  @Override
+  public AgentDefinition getByWorkspaceIdAndId(long workspaceId, long id) {
+    return convert(agentDefinitionMapper.getByWorkspaceIdAndId(workspaceId, id));
+  }
+
+  @Override
+  public AgentDefinition getByWorkspaceIdAndName(long workspaceId, String name) {
+    return convert(agentDefinitionMapper.getByWorkspaceIdAndName(workspaceId, name));
   }
 
   @Override
@@ -52,41 +62,42 @@ public class MysqlAgentDefinitionRepository implements AgentDefinitionRepository
   }
 
   @Override
-  public boolean deleteById(long id) {
-    return agentDefinitionMapper.deleteById(id) == 1;
+  public boolean deleteByWorkspaceIdAndId(long workspaceId, long id) {
+    return agentDefinitionMapper.deleteByWorkspaceIdAndId(workspaceId, id) == 1;
   }
 
-  private AgentDefinitionDO convert(AgentDefinition agentDefinition) {
-    if (agentDefinition == null) {
+  private AgentDefinitionDO convert(AgentDefinition definition) {
+    if (definition == null) {
       return null;
     }
-    AgentDefinitionDO agentDefinitionDO = new AgentDefinitionDO();
-    agentDefinitionDO.setId(agentDefinition.getId());
-    agentDefinitionDO.setName(agentDefinition.getName());
-    agentDefinitionDO.setDescription(agentDefinition.getDescription());
-    agentDefinitionDO.setSystemPrompt(agentDefinition.getSystemPrompt());
-    agentDefinitionDO.setDefaultProviderId(agentDefinition.getDefaultProviderId());
-    agentDefinitionDO.setDefaultModelId(agentDefinition.getDefaultModelId());
-    agentDefinitionDO.setDefaultVariant(agentDefinition.getDefaultVariant());
-    agentDefinitionDO.setToolsJson(agentDefinition.getToolsJson());
-    return agentDefinitionDO;
+    AgentDefinitionDO result = new AgentDefinitionDO();
+    result.setId(definition.getId());
+    result.setWorkspaceId(definition.getWorkspaceId());
+    result.setName(definition.getName());
+    result.setDescription(definition.getDescription());
+    result.setSystemPrompt(definition.getSystemPrompt());
+    result.setModelId(definition.getModelId());
+    result.setVariant(definition.getVariant());
+    result.setConfigJson(definition.getConfigJson());
+    return result;
   }
 
-  private AgentDefinition convert(AgentDefinitionDO agentDefinitionDO) {
-    if (agentDefinitionDO == null) {
+  private AgentDefinition convert(AgentDefinitionDO definition) {
+    if (definition == null) {
       return null;
     }
-    AgentDefinition agentDefinition = new AgentDefinition();
-    agentDefinition.setId(agentDefinitionDO.getId());
-    agentDefinition.setName(agentDefinitionDO.getName());
-    agentDefinition.setDescription(agentDefinitionDO.getDescription());
-    agentDefinition.setSystemPrompt(agentDefinitionDO.getSystemPrompt());
-    agentDefinition.setDefaultProviderId(agentDefinitionDO.getDefaultProviderId());
-    agentDefinition.setDefaultModelId(agentDefinitionDO.getDefaultModelId());
-    agentDefinition.setDefaultVariant(agentDefinitionDO.getDefaultVariant());
-    agentDefinition.setToolsJson(agentDefinitionDO.getToolsJson());
-    agentDefinition.setCreateTime(agentDefinitionDO.getCreateTime());
-    agentDefinition.setUpdateTime(agentDefinitionDO.getUpdateTime());
-    return agentDefinition;
+    AgentDefinition result = new AgentDefinition();
+    result.setId(definition.getId());
+    result.setWorkspaceId(definition.getWorkspaceId());
+    result.setName(definition.getName());
+    result.setDescription(definition.getDescription());
+    result.setSystemPrompt(definition.getSystemPrompt());
+    result.setModelId(definition.getModelId());
+    result.setVariant(definition.getVariant());
+    result.setConfigJson(definition.getConfigJson());
+    result.setVersion(definition.getVersion());
+    result.setCreateTime(definition.getCreateTime());
+    result.setUpdateTime(definition.getUpdateTime());
+    return result;
   }
 }

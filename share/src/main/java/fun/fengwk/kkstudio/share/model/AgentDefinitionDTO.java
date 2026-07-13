@@ -10,17 +10,15 @@ import java.time.LocalDateTime;
 @Data
 public class AgentDefinitionDTO {
 
-    private Long id;
-    private String name;
-    private String description;
-    private String systemPrompt;
-    private Long defaultProviderId;
-    private String defaultProviderName;
-    private Long defaultModelId;
-    private String defaultModelName;
-    private String defaultVariant;
-    private String toolsJson;
-    private LocalDateTime createTime;
-    private LocalDateTime updateTime;
-
+  private String id;
+  private String workspaceId;
+  private String name;
+  private String description;
+  private String systemPrompt;
+  private String modelId;
+  private String variant;
+  private AgentDefinitionConfigDTO config;
+  private Long version;
+  private LocalDateTime createTime;
+  private LocalDateTime updateTime;
 }

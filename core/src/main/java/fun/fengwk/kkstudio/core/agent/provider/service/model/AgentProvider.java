@@ -4,7 +4,6 @@ import lombok.Data;
 
 import fun.fengwk.kkstudio.agent.provider.ProviderType;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
 
 /**
@@ -14,12 +13,14 @@ import java.time.LocalDateTime;
 public class AgentProvider {
 
   private Long id;
+  private Long workspaceId;
   private String name;
   private String description;
   private ProviderType providerType;
   private String baseUrl;
-  private String apiKey;
-  private Duration timeout;
+  private String credential;
+  private String configJson;
+  private Long version;
   private LocalDateTime createTime;
   private LocalDateTime updateTime;
 }

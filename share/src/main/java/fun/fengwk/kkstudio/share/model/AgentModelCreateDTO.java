@@ -10,6 +10,5 @@ import lombok.EqualsAndHashCode;
 @EqualsAndHashCode(callSuper = true)
 public class AgentModelCreateDTO extends AgentModelEditablePropertiesDTO {
 
-    private String provider;
-
+  private String providerId;
 }

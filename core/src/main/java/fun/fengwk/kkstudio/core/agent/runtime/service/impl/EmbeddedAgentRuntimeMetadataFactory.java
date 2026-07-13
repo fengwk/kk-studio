@@ -13,78 +13,76 @@ import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * EmbeddedAgentRuntimeMetadataFactory 负责 runtime 所需 provider/model/agent 元数据的组装。
- *
- * @author fengwk
- */
+/** Builds legacy runtime metadata from the workspace-scoped configuration model. */
 @Component
 final class EmbeddedAgentRuntimeMetadataFactory {
 
   private static final String DEFAULT_VARIANT = "default";
+  private static final long DEFAULT_TIMEOUT_MILLIS = 60_000L;
 
   private final ObjectMapper objectMapper;
 
   EmbeddedAgentRuntimeMetadataFactory(ObjectMapper objectMapper) {
-    if (objectMapper == null) {
-      throw new IllegalArgumentException("objectMapper must not be null");
-    }
     this.objectMapper = objectMapper;
   }
 
-  ProviderInfo toProviderInfo(AgentProvider agentProvider) {
-    requireNonNull(agentProvider, "agentProvider");
+  ProviderInfo toProviderInfo(AgentProvider provider) {
     return ProviderInfo.builder()
-        .providerType(agentProvider.getProviderType())
-        .baseUrl(agentProvider.getBaseUrl())
-        .apiKey(agentProvider.getApiKey())
-        .timeout(agentProvider.getTimeout())
+        .providerType(provider.getProviderType())
+        .baseUrl(provider.getBaseUrl())
+        .apiKey(provider.getCredential())
+        .timeout(Duration.ofMillis(timeoutMillis(provider.getConfigJson())))
         .build();
   }
 
-  AgentInfo toAgentInfo(AgentDefinition agentDefinition, String providerName, String modelName) {
-    requireNonNull(agentDefinition, "agentDefinition");
+  AgentInfo toAgentInfo(AgentDefinition definition, String providerName, String modelName) {
     return AgentInfo.builder()
-        .name(agentDefinition.getName())
-        .systemPrompt(agentDefinition.getSystemPrompt())
+        .name(definition.getName())
+        .systemPrompt(definition.getSystemPrompt())
         .defaultProvider(providerName)
         .defaultModel(modelName)
-        .defaultVariant(firstNonBlank(agentDefinition.getDefaultVariant(), DEFAULT_VARIANT))
-        .tools(parseStringList(agentDefinition.getToolsJson()))
+        .defaultVariant(firstNonBlank(definition.getVariant(), DEFAULT_VARIANT))
+        .tools(parseStringListField(definition.getConfigJson(), "tools"))
         .build();
   }
 
-  ModelInfo toModelInfo(AgentModel agentModel, String providerName) {
-    requireNonNull(agentModel, "agentModel");
+  ModelInfo toModelInfo(AgentModel model, String providerName) {
     return ModelInfo.builder()
         .provider(providerName)
-        .name(agentModel.getName())
-        .defaultVariant(firstNonBlank(agentModel.getDefaultVariant(), DEFAULT_VARIANT))
-        .variants(parseVariants(agentModel.getVariantsJson()))
+        .name(model.getName())
+        .defaultVariant(DEFAULT_VARIANT)
+        .variants(parseVariants(model.getConfigJson()))
         .build();
   }
 
-  private List<Variant> parseVariants(String variantsJson) {
-    if (variantsJson == null || variantsJson.isBlank()) {
-      return List.of(Variant.builder().name(DEFAULT_VARIANT).build());
-    }
+  private long timeoutMillis(String configJson) {
     try {
-      JsonNode root = objectMapper.readTree(variantsJson);
-      if (!root.isArray()) {
-        throw new IllegalArgumentException("variantsJson must be a JSON array");
-      }
-      List<Variant> variants = new ArrayList<>();
-      for (JsonNode node : root) {
-        variants.add(toVariant(node));
-      }
-      return variants.isEmpty()
-          ? List.of(Variant.builder().name(DEFAULT_VARIANT).build())
-          : List.copyOf(variants);
+      JsonNode root = objectMapper.readTree(configJson);
+      return root.path("timeoutMillis").canConvertToLong()
+          ? root.path("timeoutMillis").asLong(DEFAULT_TIMEOUT_MILLIS)
+          : DEFAULT_TIMEOUT_MILLIS;
     } catch (JsonProcessingException e) {
-      throw new IllegalArgumentException("parse model variantsJson failed", e);
+      throw new IllegalStateException("stored provider config is invalid", e);
+    }
+  }
+
+  private List<Variant> parseVariants(String configJson) {
+    try {
+      JsonNode variants = objectMapper.readTree(configJson).path("variants");
+      if (!variants.isArray() || variants.isEmpty()) {
+        return List.of(Variant.builder().name(DEFAULT_VARIANT).build());
+      }
+      List<Variant> result = new ArrayList<>();
+      for (JsonNode node : variants) {
+        result.add(toVariant(node));
+      }
+      return List.copyOf(result);
+    } catch (JsonProcessingException e) {
+      throw new IllegalStateException("stored model config is invalid", e);
     }
   }
 
@@ -109,24 +107,12 @@ final class EmbeddedAgentRuntimeMetadataFactory {
     if (node.hasNonNull("presencePenalty")) {
       builder.presencePenalty(node.get("presencePenalty").asDouble());
     }
-    if (node.hasNonNull("stopSequences") && node.get("stopSequences").isArray()) {
-      List<String> stopSequences = new ArrayList<>();
-      for (JsonNode sequence : node.get("stopSequences")) {
-        if (sequence.isTextual()) {
-          stopSequences.add(sequence.asText());
-        }
-      }
-      builder.stopSequences(List.copyOf(stopSequences));
-    }
     return builder.build();
   }
 
-  private List<String> parseStringList(String json) {
-    if (json == null || json.isBlank()) {
-      return List.of();
-    }
+  private List<String> parseStringListField(String json, String field) {
     try {
-      JsonNode root = objectMapper.readTree(json);
+      JsonNode root = objectMapper.readTree(json).path(field);
       if (!root.isArray()) {
         return List.of();
       }
@@ -138,33 +124,22 @@ final class EmbeddedAgentRuntimeMetadataFactory {
       }
       return List.copyOf(result);
     } catch (JsonProcessingException e) {
-      throw new IllegalArgumentException("parse agent string list failed", e);
+      throw new IllegalStateException("stored agent definition config is invalid", e);
     }
   }
 
   private String textValue(JsonNode node, String fieldName) {
-    if (node == null || !node.hasNonNull(fieldName) || !node.get(fieldName).isTextual()) {
-      return null;
-    }
-    return node.get(fieldName).asText();
+    return node.hasNonNull(fieldName) && node.get(fieldName).isTextual()
+        ? node.get(fieldName).asText()
+        : null;
   }
 
   private String firstNonBlank(String... values) {
-    if (values == null) {
-      return null;
-    }
     for (String value : values) {
       if (value != null && !value.isBlank()) {
         return value;
       }
     }
     return null;
-  }
-
-  private static <T> T requireNonNull(T value, String name) {
-    if (value == null) {
-      throw new IllegalArgumentException(name + " must not be null");
-    }
-    return value;
   }
 }

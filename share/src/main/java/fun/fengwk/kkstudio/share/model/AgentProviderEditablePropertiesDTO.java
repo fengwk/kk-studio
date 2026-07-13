@@ -8,11 +8,10 @@ import lombok.Data;
 @Data
 public class AgentProviderEditablePropertiesDTO {
 
-    private String name;
-    private String description;
-    private String providerType;
-    private String baseUrl;
-    private String apiKey;
-    private Long timeoutMillis;
-
+  private String name;
+  private String description;
+  private String providerType;
+  private String baseUrl;
+  private String credential;
+  private String configJson;
 }

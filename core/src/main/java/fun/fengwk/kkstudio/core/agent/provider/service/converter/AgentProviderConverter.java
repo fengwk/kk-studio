@@ -5,8 +5,6 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
 
-import java.time.Duration;
-
 /**
  * @author fengwk
  */
@@ -17,21 +15,18 @@ public class AgentProviderConverter {
     if (provider == null) {
       return null;
     }
-    AgentProviderDTO providerDTO = new AgentProviderDTO();
-    providerDTO.setId(provider.getId());
-    providerDTO.setName(provider.getName());
-    providerDTO.setDescription(provider.getDescription());
-    providerDTO.setProviderType(
-        provider.getProviderType() == null ? null : provider.getProviderType().name());
-    providerDTO.setBaseUrl(provider.getBaseUrl());
-    providerDTO.setApiKey(provider.getApiKey());
-    providerDTO.setTimeoutMillis(toMillis(provider.getTimeout()));
-    providerDTO.setCreateTime(provider.getCreateTime());
-    providerDTO.setUpdateTime(provider.getUpdateTime());
-    return providerDTO;
-  }
-
-  private Long toMillis(Duration duration) {
-    return duration == null ? null : duration.toMillis();
+    AgentProviderDTO dto = new AgentProviderDTO();
+    dto.setId(Long.toString(provider.getId()));
+    dto.setWorkspaceId(Long.toString(provider.getWorkspaceId()));
+    dto.setName(provider.getName());
+    dto.setDescription(provider.getDescription());
+    dto.setProviderType(provider.getProviderType().name());
+    dto.setBaseUrl(provider.getBaseUrl());
+    dto.setConfigured(provider.getCredential() != null && !provider.getCredential().isBlank());
+    dto.setConfigJson(provider.getConfigJson());
+    dto.setVersion(provider.getVersion());
+    dto.setCreateTime(provider.getCreateTime());
+    dto.setUpdateTime(provider.getUpdateTime());
+    return dto;
   }
 }

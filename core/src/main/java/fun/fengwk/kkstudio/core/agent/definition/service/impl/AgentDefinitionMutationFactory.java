@@ -2,16 +2,20 @@ package fun.fengwk.kkstudio.core.agent.definition.service.impl;
 
 import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextAgentId;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
-import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
+import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionEditablePropertiesDTO;
-import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
+
+import java.util.List;
+import java.util.Map;
 
 /**
- * AgentDefinitionMutationFactory 负责 agent 定义写路径的入参校验、标准化与实体组装。
+ * Normalizes the persisted agent definition and serializes its structured execution configuration.
  *
  * @author fengwk
  */
@@ -19,110 +23,90 @@ import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
 final class AgentDefinitionMutationFactory {
 
   private static final String DEFAULT_VARIANT = "default";
-  private static final String EMPTY_ARRAY_JSON = "[]";
 
   private final AgentEditableSupport editableSupport;
+  private final ObjectMapper objectMapper;
 
-  AgentDefinitionMutationFactory(AgentEditableSupport editableSupport) {
-    if (editableSupport == null) {
-      throw new IllegalArgumentException("editableSupport must not be null");
-    }
+  AgentDefinitionMutationFactory(AgentEditableSupport editableSupport, ObjectMapper objectMapper) {
     this.editableSupport = editableSupport;
+    this.objectMapper = objectMapper;
   }
 
-  Mutation newCreateMutation(AgentDefinitionCreateDTO createDTO) {
-    validateEditable(createDTO, true);
-    return new Mutation(
-        editableSupport.trimToNull(createDTO.getName()),
-        editableSupport.trimToNull(createDTO.getDescription()),
-        editableSupport.trimToNull(createDTO.getSystemPrompt()),
-        editableSupport.trimToNull(createDTO.getDefaultProvider()),
-        editableSupport.trimToNull(createDTO.getDefaultModel()),
-        editableSupport.firstNonBlank(createDTO.getDefaultVariant(), DEFAULT_VARIANT),
-        editableSupport.firstNonBlank(createDTO.getToolsJson(), EMPTY_ARRAY_JSON));
+  AgentDefinition newAgent(long workspaceId, long modelId, AgentDefinitionEditablePropertiesDTO properties) {
+    if (workspaceId <= 0 || modelId <= 0) {
+      throw new IllegalArgumentException("workspaceId and modelId must be positive");
+    }
+    Mutation mutation = newMutation(properties, null, null, true);
+    AgentDefinition definition = new AgentDefinition();
+    definition.setId(nextAgentId());
+    definition.setWorkspaceId(workspaceId);
+    definition.setModelId(modelId);
+    apply(definition, mutation);
+    return definition;
   }
 
-  Mutation newUpdateMutation(String currentName, AgentDefinitionUpdateDTO updateDTO) {
-    requireNonBlank(currentName, "currentName");
-    validateEditable(updateDTO, false);
-    return new Mutation(
-        editableSupport.firstNonBlank(updateDTO.getName(), currentName),
-        editableSupport.trimToNull(updateDTO.getDescription()),
-        editableSupport.trimToNull(updateDTO.getSystemPrompt()),
-        editableSupport.trimToNull(updateDTO.getDefaultProvider()),
-        editableSupport.trimToNull(updateDTO.getDefaultModel()),
-        editableSupport.firstNonBlank(updateDTO.getDefaultVariant(), DEFAULT_VARIANT),
-        editableSupport.firstNonBlank(updateDTO.getToolsJson(), EMPTY_ARRAY_JSON));
+  void update(AgentDefinition definition, AgentDefinitionEditablePropertiesDTO properties) {
+    apply(definition, newMutation(properties, definition.getName(), definition.getConfigJson(), false));
   }
 
-  AgentDefinition newAgent(long providerId, long modelId, Mutation mutation) {
-    requirePositive(providerId, "providerId");
-    requirePositive(modelId, "modelId");
-    requireNonNull(mutation, "mutation");
-    AgentDefinition agent = new AgentDefinition();
-    agent.setId(nextAgentId());
-    apply(agent, providerId, modelId, mutation);
-    return agent;
+  private void apply(AgentDefinition definition, Mutation mutation) {
+    definition.setName(mutation.name());
+    definition.setDescription(mutation.description());
+    definition.setSystemPrompt(mutation.systemPrompt());
+    definition.setVariant(mutation.variant());
+    definition.setConfigJson(mutation.configJson());
   }
 
-  void apply(AgentDefinition agent, long providerId, long modelId, Mutation mutation) {
-    requireNonNull(agent, "agent");
-    requirePositive(providerId, "providerId");
-    requirePositive(modelId, "modelId");
-    requireNonNull(mutation, "mutation");
-    agent.setName(mutation.name());
-    agent.setDescription(mutation.description());
-    agent.setSystemPrompt(mutation.systemPrompt());
-    agent.setDefaultProviderId(providerId);
-    agent.setDefaultModelId(modelId);
-    agent.setDefaultVariant(mutation.defaultVariant());
-    agent.setToolsJson(mutation.toolsJson());
-  }
-
-  private void validateEditable(
-      AgentDefinitionEditablePropertiesDTO properties, boolean requireName) {
+  private Mutation newMutation(
+      AgentDefinitionEditablePropertiesDTO properties,
+      String fallbackName,
+      String existingConfigJson,
+      boolean creating) {
     if (properties == null) {
       throw new IllegalArgumentException("agent definition body must not be null");
     }
-    if (requireName && editableSupport.trimToNull(properties.getName()) == null) {
+    String name = editableSupport.firstNonBlank(properties.getName(), fallbackName);
+    if (name == null) {
       throw new IllegalArgumentException("agent name must not be blank");
     }
-    if (editableSupport.trimToNull(properties.getDefaultProvider()) == null) {
-      throw new IllegalArgumentException("agent defaultProvider must not be blank");
-    }
-    if (editableSupport.trimToNull(properties.getDefaultModel()) == null) {
-      throw new IllegalArgumentException("agent defaultModel must not be blank");
-    }
-    editableSupport.validateJsonArray(
-        editableSupport.firstNonBlank(properties.getToolsJson(), EMPTY_ARRAY_JSON), "toolsJson");
+    AgentDefinitionConfigDTO config = properties.getConfig();
+    String configJson = config == null && !creating ? existingConfigJson : writeConfig(normalizeConfig(config));
+    return new Mutation(
+        name,
+        editableSupport.trimToNull(properties.getDescription()),
+        editableSupport.trimToNull(properties.getSystemPrompt()),
+        editableSupport.firstNonBlank(properties.getVariant(), DEFAULT_VARIANT),
+        configJson);
   }
 
-  private static <T> T requireNonNull(T value, String name) {
-    if (value == null) {
-      throw new IllegalArgumentException(name + " must not be null");
-    }
-    return value;
+  private AgentDefinitionConfigDTO normalizeConfig(AgentDefinitionConfigDTO config) {
+    AgentDefinitionConfigDTO result = config == null ? new AgentDefinitionConfigDTO() : config;
+    result.setTools(normalizeStrings(result.getTools()));
+    result.setSkills(normalizeStrings(result.getSkills()));
+    result.setAllowedSubagents(normalizeStrings(result.getAllowedSubagents()));
+    result.setExecutionPolicy(result.getExecutionPolicy() == null ? Map.of() : Map.copyOf(result.getExecutionPolicy()));
+    return result;
   }
 
-  private static void requirePositive(long value, String name) {
-    if (value <= 0) {
-      throw new IllegalArgumentException(name + " must be positive");
+  private List<String> normalizeStrings(List<String> values) {
+    if (values == null) {
+      return List.of();
     }
+    return values.stream()
+        .map(editableSupport::trimToNull)
+        .filter(value -> value != null)
+        .distinct()
+        .toList();
   }
 
-  private static String requireNonBlank(String value, String name) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(name + " must not be blank");
+  private String writeConfig(AgentDefinitionConfigDTO config) {
+    try {
+      return objectMapper.writeValueAsString(config);
+    } catch (JsonProcessingException e) {
+      throw new IllegalArgumentException("agent definition config cannot be serialized", e);
     }
-    return value;
   }
 
   record Mutation(
-      String name,
-      String description,
-      String systemPrompt,
-      String defaultProvider,
-      String defaultModel,
-      String defaultVariant,
-      String toolsJson) {}
+      String name, String description, String systemPrompt, String variant, String configJson) {}
 }

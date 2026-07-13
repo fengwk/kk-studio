@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionRepository;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSession;
 
-/** 统一处理 embedded runtime 装载前的 session、agent、provider、model 解引用。 */
+/** Resolves legacy sessions through their workspace-scoped configuration graph. */
 @AllArgsConstructor
 @Component
 final class EmbeddedAgentRuntimeReferenceResolver {
@@ -24,10 +24,11 @@ final class EmbeddedAgentRuntimeReferenceResolver {
 
   RuntimeReferences resolve(String sessionId) {
     AgentSession session = requireSession(sessionId);
-    AgentDefinition agentDefinition = requireAgentDefinition(session.getAgentId());
-    AgentProvider provider = requireProvider(agentDefinition.getDefaultProviderId());
-    AgentModel model = requireModel(agentDefinition.getDefaultModelId());
-    return new RuntimeReferences(session, agentDefinition, provider, model);
+    AgentDefinition definition = requireAgentDefinition(session.getAgentId());
+    AgentModel model = requireModel(definition.getModelId());
+    AgentProvider provider = requireProvider(model.getProviderId());
+    ensureSameWorkspace(definition, model, provider);
+    return new RuntimeReferences(session, definition, provider, model);
   }
 
   private AgentSession requireSession(String sessionId) {
@@ -39,11 +40,19 @@ final class EmbeddedAgentRuntimeReferenceResolver {
   }
 
   private AgentDefinition requireAgentDefinition(long agentId) {
-    AgentDefinition agentDefinition = agentDefinitionRepository.getById(agentId);
-    if (agentDefinition == null) {
+    AgentDefinition definition = agentDefinitionRepository.getById(agentId);
+    if (definition == null) {
       throw new IllegalArgumentException("agent not found: " + agentId);
     }
-    return agentDefinition;
+    return definition;
+  }
+
+  private AgentModel requireModel(long modelId) {
+    AgentModel model = agentModelRepository.getById(modelId);
+    if (model == null) {
+      throw new IllegalArgumentException("model config not found: " + modelId);
+    }
+    return model;
   }
 
   private AgentProvider requireProvider(long providerId) {
@@ -54,12 +63,12 @@ final class EmbeddedAgentRuntimeReferenceResolver {
     return provider;
   }
 
-  private AgentModel requireModel(long modelId) {
-    AgentModel model = agentModelRepository.getById(modelId);
-    if (model == null) {
-      throw new IllegalArgumentException("model config not found: " + modelId);
+  private void ensureSameWorkspace(
+      AgentDefinition definition, AgentModel model, AgentProvider provider) {
+    if (!definition.getWorkspaceId().equals(model.getWorkspaceId())
+        || !model.getWorkspaceId().equals(provider.getWorkspaceId())) {
+      throw new IllegalStateException("runtime configuration crosses workspaces");
     }
-    return model;
   }
 
   record RuntimeReferences(

@@ -1,106 +1,84 @@
 package fun.fengwk.kkstudio.core.agent.provider.service;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import fun.fengwk.kkstudio.core.CoreTestApplication;
-import fun.fengwk.kkstudio.core.agent.model.service.AgentModelService;
-import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentModelDTO;
+
+import java.util.Arrays;
+import fun.fengwk.kkstudio.core.workspace.service.WorkspaceService;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
+import fun.fengwk.kkstudio.share.model.WorkspaceCreateDTO;
+import fun.fengwk.kkstudio.share.model.WorkspaceDTO;
 
-import java.util.List;
-
+/** Service tests prove workspace-local uniqueness and credential redaction. */
 @SpringBootTest(classes = CoreTestApplication.class)
 public class AgentProviderServiceTest {
 
+  @Autowired private WorkspaceService workspaceService;
   @Autowired private AgentProviderService agentProviderService;
 
-  @Autowired private AgentModelService agentModelService;
-
   @Test
-  public void shouldCreateUpdateAndDeleteProvider() {
-    String suffix = String.valueOf(System.nanoTime());
-    Page<AgentProviderDTO> baseline = agentProviderService.pageProviders(new PageQuery(1, 200));
+  public void shouldScopeNamesAndRedactCredential() {
+    String suffix = Long.toString(System.nanoTime());
+    WorkspaceDTO first = createWorkspace("provider-first-" + suffix);
+    WorkspaceDTO second = createWorkspace("provider-second-" + suffix);
+    long firstId = id(first.getId());
+    long secondId = id(second.getId());
+    AgentProviderDTO provider = agentProviderService.createProvider(firstId, provider("shared", "secret"));
 
-    AgentProviderCreateDTO createDTO = new AgentProviderCreateDTO();
-    createDTO.setName("provider_" + suffix);
-    createDTO.setDescription("Primary provider");
-    createDTO.setProviderType("openai");
-    createDTO.setBaseUrl("https://example.invalid/v1");
-    createDTO.setApiKey("test-key");
-    createDTO.setTimeoutMillis(30_000L);
-
-    // 创建链路必须校验 provider 名称唯一，并把对外返回字段标准化。
-    AgentProviderDTO created = agentProviderService.createProvider(createDTO);
-    assertNotNull(created.getId());
-    assertEquals(createDTO.getName(), created.getName());
-    assertEquals(createDTO.getDescription(), created.getDescription());
-    assertEquals(createDTO.getProviderType(), created.getProviderType());
-    assertEquals(createDTO.getBaseUrl(), created.getBaseUrl());
-    assertEquals(createDTO.getTimeoutMillis(), created.getTimeoutMillis());
-
-    AgentProviderUpdateDTO updateDTO = new AgentProviderUpdateDTO();
-    updateDTO.setName("provider_updated_" + suffix);
-    updateDTO.setDescription("Updated provider");
-    updateDTO.setProviderType("openai");
-    updateDTO.setBaseUrl("https://example.invalid/v2");
-    updateDTO.setApiKey("test-key-updated");
-    updateDTO.setTimeoutMillis(40_000L);
-
-    // 更新链路必须同步刷新配置字段，并维持唯一名称约束。
-    AgentProviderDTO updated = agentProviderService.updateProvider(created.getId(), updateDTO);
-    assertEquals(updateDTO.getName(), updated.getName());
-    assertEquals(updateDTO.getDescription(), updated.getDescription());
-    assertEquals(updateDTO.getBaseUrl(), updated.getBaseUrl());
-    assertEquals(updateDTO.getApiKey(), updated.getApiKey());
-    assertEquals(updateDTO.getTimeoutMillis(), updated.getTimeoutMillis());
-
-    agentProviderService.deleteProvider(created.getId());
-    Page<AgentProviderDTO> afterDelete = agentProviderService.pageProviders(new PageQuery(1, 200));
-    List<AgentProviderDTO> providers = afterDelete.getResults();
-    assertEquals(baseline.getTotalCount(), afterDelete.getTotalCount());
-    assertTrue(providers.stream().noneMatch(provider -> created.getId().equals(provider.getId())));
-  }
-
-  @Test
-  public void shouldRejectDeletingProviderInUseByModels() {
-    String suffix = String.valueOf(System.nanoTime());
-    AgentProviderDTO provider = createProvider("provider_guard_" + suffix);
-    AgentModelDTO model = createModel(provider.getName(), "model_guard_" + suffix);
-
-    // 删除链路必须阻止移除仍承载 model 的 provider，避免模型归属悬空。
+    // The query DTO exposes only configured state, never the credential itself.
+    assertTrue(provider.isConfigured());
+    assertFalse(hasProperty(provider, "credential"));
     assertThrows(
-        IllegalStateException.class, () -> agentProviderService.deleteProvider(provider.getId()));
+        IllegalArgumentException.class,
+        () -> agentProviderService.createProvider(firstId, provider("shared", "another")));
+    agentProviderService.createProvider(secondId, provider("shared", null));
 
-    agentModelService.deleteModel(model.getId());
-    agentProviderService.deleteProvider(provider.getId());
+    AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
+    update.setProviderType("openai");
+    update.setCredential("rotated-secret");
+    AgentProviderDTO updated = agentProviderService.updateProvider(firstId, id(provider.getId()), update);
+    assertTrue(updated.isConfigured());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> agentProviderService.updateProvider(secondId, id(provider.getId()), update));
+
+    agentProviderService.deleteProvider(firstId, id(provider.getId()));
+    agentProviderService.deleteProvider(secondId, id(agentProviderService.pageProviders(secondId, new PageQuery(1, 10)).getResults().get(0).getId()));
+    workspaceService.deleteWorkspace(firstId);
+    workspaceService.deleteWorkspace(secondId);
   }
 
-  private AgentProviderDTO createProvider(String name) {
-    AgentProviderCreateDTO createDTO = new AgentProviderCreateDTO();
-    createDTO.setName(name);
-    createDTO.setProviderType("openai");
-    createDTO.setBaseUrl("https://example.invalid/v1");
-    createDTO.setApiKey("test-key");
-    return agentProviderService.createProvider(createDTO);
+  private WorkspaceDTO createWorkspace(String name) {
+    WorkspaceCreateDTO dto = new WorkspaceCreateDTO();
+    dto.setName(name);
+    return workspaceService.createWorkspace(dto);
   }
 
-  private AgentModelDTO createModel(String providerName, String name) {
-    AgentModelCreateDTO createDTO = new AgentModelCreateDTO();
-    createDTO.setProvider(providerName);
-    createDTO.setName(name);
-    createDTO.setVariantsJson("[{\"name\":\"default\"}]");
-    return agentModelService.createModel(createDTO);
+  private AgentProviderCreateDTO provider(String name, String credential) {
+    AgentProviderCreateDTO dto = new AgentProviderCreateDTO();
+    dto.setName(name);
+    dto.setProviderType("openai");
+    dto.setBaseUrl("https://example.invalid/v1");
+    dto.setCredential(credential);
+    return dto;
+  }
+
+  private boolean hasProperty(AgentProviderDTO provider, String property) {
+    return Arrays.stream(provider.getClass().getDeclaredFields())
+        .anyMatch(field -> field.getName().equals(property));
+  }
+
+  private long id(String value) {
+    return Long.parseLong(value);
   }
 }

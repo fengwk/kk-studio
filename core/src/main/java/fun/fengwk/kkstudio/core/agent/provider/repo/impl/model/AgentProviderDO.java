@@ -13,12 +13,14 @@ import java.time.LocalDateTime;
 public class AgentProviderDO {
 
   private Long id;
+  private Long workspaceId;
   private String name;
   private String description;
   private ProviderType providerType;
   private String baseUrl;
-  private String apiKey;
-  private Long timeoutMillis;
+  private String credential;
+  private String configJson;
+  private Long version;
   private LocalDateTime createTime;
   private LocalDateTime updateTime;
 }

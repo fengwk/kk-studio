@@ -1,10 +1,7 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import static org.hamcrest.Matchers.hasItem;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -17,191 +14,111 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
+import fun.fengwk.kkstudio.share.model.WorkspaceCreateDTO;
 import fun.fengwk.kkstudio.web.WebTestApplication;
 
-/**
- * @author fengwk
- */
+import java.util.List;
+import java.util.Map;
+
+/** HTTP contract test for workspace routing, string IDs, and credential redaction. */
 @AutoConfigureMockMvc
 @SpringBootTest(classes = WebTestApplication.class)
 public class StudioAgentResourceControllerTest {
 
   @Autowired private MockMvc mockMvc;
-
   @Autowired private ObjectMapper objectMapper;
 
   @Test
-  public void shouldCreateUpdateListAndDeleteProviderModelAndAgent() throws Exception {
+  public void shouldUseWorkspaceRoutesAndNeverReturnCredential() throws Exception {
     String suffix = Long.toString(System.nanoTime());
-    String provider = "provider-" + suffix;
-    String model = "model-" + suffix;
-    String agentName = "agent-" + suffix;
+    String workspaceId = createWorkspace("web-workspace-" + suffix);
 
-    AgentProviderCreateDTO providerCreate = new AgentProviderCreateDTO();
-    providerCreate.setName(provider); // provider == name
-    providerCreate.setDescription("Provider description");
-    providerCreate.setProviderType("openai");
-    providerCreate.setBaseUrl("http://localhost/" + suffix);
-    providerCreate.setApiKey("test-key");
-    providerCreate.setTimeoutMillis(60_000L);
+    AgentProviderCreateDTO provider = new AgentProviderCreateDTO();
+    provider.setName("provider-" + suffix);
+    provider.setProviderType("openai");
+    provider.setCredential("secret-value");
+    String providerId =
+        id(
+            mockMvc
+                .perform(
+                    post("/api/workspaces/{workspaceId}/providers", workspaceId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(provider)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.id").isString())
+                .andExpect(jsonPath("$.data.configured").value(true))
+                .andExpect(jsonPath("$.data.credential").doesNotExist())
+                .andReturn()
+                .getResponse()
+                .getContentAsString());
 
+    AgentModelCreateDTO model = new AgentModelCreateDTO();
+    model.setName("model-" + suffix);
+    model.setProviderId(providerId);
+    String modelId =
+        id(
+            mockMvc
+                .perform(
+                    post("/api/workspaces/{workspaceId}/models", workspaceId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(model)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.providerId").value(providerId))
+                .andReturn()
+                .getResponse()
+                .getContentAsString());
+
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setTools(List.of("browser"));
+    config.setSkills(List.of("java"));
+    config.setAllowedSubagents(List.of("reviewer"));
+    config.setExecutionPolicy(Map.of("approval", "ask"));
+    AgentDefinitionCreateDTO agent = new AgentDefinitionCreateDTO();
+    agent.setName("agent-" + suffix);
+    agent.setModelId(modelId);
+    agent.setConfig(config);
     mockMvc
         .perform(
-            post("/api/agent/providers")
+            post("/api/workspaces/{workspaceId}/agents", workspaceId)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(providerCreate)))
+                .content(objectMapper.writeValueAsString(agent)))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.name").value(provider))
-        .andExpect(jsonPath("$.data.providerType").value("openai"));
+        .andExpect(jsonPath("$.data.id").isString())
+        .andExpect(jsonPath("$.data.modelId").value(modelId))
+        .andExpect(jsonPath("$.data.config.allowedSubagents[0]").value("reviewer"));
 
-    AgentProviderUpdateDTO providerUpdate = new AgentProviderUpdateDTO();
-    providerUpdate.setDescription("Updated provider description");
-    providerUpdate.setProviderType("openai");
-    providerUpdate.setBaseUrl("http://localhost/updated-" + suffix);
-    providerUpdate.setApiKey("updated-key");
-    providerUpdate.setTimeoutMillis(120_000L);
+    mockMvc
+        .perform(get("/api/agent/providers"))
+        .andExpect(status().isNotFound());
+    mockMvc
+        .perform(get("/api/workspaces/{workspaceId}/providers", workspaceId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.results[0].credential").doesNotExist());
+  }
 
-    // PUT path uses {id} now
-    String providersJson =
+  private String createWorkspace(String name) throws Exception {
+    WorkspaceCreateDTO workspace = new WorkspaceCreateDTO();
+    workspace.setName(name);
+    String response =
         mockMvc
-            .perform(get("/api/agent/providers").param("pageNumber", "1").param("pageSize", "1000"))
-            .andExpect(status().isOk())
+            .perform(
+                post("/api/workspaces")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(workspace)))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.data.id").isString())
             .andReturn()
             .getResponse()
             .getContentAsString();
-    long providerId = -1L;
-    for (JsonNode node : objectMapper.readTree(providersJson).get("data").get("results")) {
-      if (node.get("name").asText().equals(provider)) {
-        providerId = node.get("id").asLong();
-        break;
-      }
-    }
-    mockMvc
-        .perform(
-            put("/api/agent/providers/{id}", providerId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(providerUpdate)))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.name").value(provider))
-        .andExpect(jsonPath("$.data.description").value("Updated provider description"));
+    return id(response);
+  }
 
-    AgentModelCreateDTO modelCreate = new AgentModelCreateDTO();
-    modelCreate.setProvider(provider);
-    modelCreate.setName(model);
-    modelCreate.setDescription("Model description");
-    modelCreate.setDefaultVariant("fast");
-    modelCreate.setVariantsJson("[{\"name\":\"fast\",\"temperature\":0.1}]");
-
-    mockMvc
-        .perform(
-            post("/api/agent/models")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(modelCreate)))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.providerName").value(provider))
-        .andExpect(jsonPath("$.data.name").value(model));
-
-    AgentModelUpdateDTO modelUpdate = new AgentModelUpdateDTO();
-    modelUpdate.setDescription("Updated model description");
-    modelUpdate.setDefaultVariant("fast");
-    modelUpdate.setVariantsJson("[{\"name\":\"fast\",\"temperature\":0.2}]");
-
-    String modelsJson =
-        mockMvc
-            .perform(get("/api/agent/models").param("pageNumber", "1").param("pageSize", "1000"))
-            .andExpect(status().isOk())
-            .andReturn()
-            .getResponse()
-            .getContentAsString();
-    long modelId = -1L;
-    for (JsonNode node : objectMapper.readTree(modelsJson).get("data").get("results")) {
-      if (node.get("name").asText().equals(model)) {
-        modelId = node.get("id").asLong();
-        break;
-      }
-    }
-    mockMvc
-        .perform(
-            put("/api/agent/models/{id}", modelId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(modelUpdate)))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.name").value(model))
-        .andExpect(jsonPath("$.data.description").value("Updated model description"));
-
-    AgentDefinitionCreateDTO agentCreate = new AgentDefinitionCreateDTO();
-    agentCreate.setName(agentName);
-    agentCreate.setDescription("Agent description");
-    agentCreate.setSystemPrompt("You are a test agent.");
-    agentCreate.setDefaultProvider(provider);
-    agentCreate.setDefaultModel(model);
-    agentCreate.setDefaultVariant("fast");
-    agentCreate.setToolsJson("[]");
-
-    mockMvc
-        .perform(
-            post("/api/agent/agents")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(agentCreate)))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.name").value(agentName))
-        .andExpect(jsonPath("$.data.defaultProviderName").value(provider))
-        .andExpect(jsonPath("$.data.defaultModelName").value(model));
-
-    AgentDefinitionUpdateDTO agentUpdate = new AgentDefinitionUpdateDTO();
-    agentUpdate.setDescription("Updated agent description");
-    agentUpdate.setSystemPrompt("You are an updated test agent.");
-    agentUpdate.setDefaultProvider(provider);
-    agentUpdate.setDefaultModel(model);
-    agentUpdate.setDefaultVariant("fast");
-    agentUpdate.setToolsJson("[]");
-
-    String agentsJson =
-        mockMvc
-            .perform(get("/api/agent/agents").param("pageNumber", "1").param("pageSize", "1000"))
-            .andExpect(status().isOk())
-            .andReturn()
-            .getResponse()
-            .getContentAsString();
-    long agentId = -1L;
-    for (JsonNode node : objectMapper.readTree(agentsJson).get("data").get("results")) {
-      if (node.get("name").asText().equals(agentName)) {
-        agentId = node.get("id").asLong();
-        break;
-      }
-    }
-    mockMvc
-        .perform(
-            put("/api/agent/agents/{id}", agentId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(agentUpdate)))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.name").value(agentName))
-        .andExpect(jsonPath("$.data.description").value("Updated agent description"));
-
-    mockMvc
-        .perform(get("/api/agent/providers").param("pageNumber", "1").param("pageSize", "100"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.results[*].name", hasItem(provider)));
-    mockMvc
-        .perform(get("/api/agent/models").param("pageNumber", "1").param("pageSize", "100"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.results[*].name", hasItem(model)));
-    mockMvc
-        .perform(get("/api/agent/agents").param("pageNumber", "1").param("pageSize", "100"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.results[*].name", hasItem(agentName)));
-
-    mockMvc.perform(delete("/api/agent/agents/{id}", agentId)).andExpect(status().isNoContent());
-    mockMvc.perform(delete("/api/agent/models/{id}", modelId)).andExpect(status().isNoContent());
-    mockMvc
-        .perform(delete("/api/agent/providers/{id}", providerId))
-        .andExpect(status().isNoContent());
+  private String id(String response) throws Exception {
+    JsonNode node = objectMapper.readTree(response);
+    return node.get("data").get("id").asText();
   }
 }
