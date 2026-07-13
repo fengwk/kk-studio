@@ -16,6 +16,9 @@ import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJourna
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
+import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
+import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
+import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
@@ -182,6 +185,37 @@ class DaemonRuntimeTest {
     transport.receive(invoke);
     assertMessageTypes(transport.takeMessages(2), ACK, COMPLETED);
     assertEquals(1, tool.executions.get());
+  }
+
+  /** 流式结果必须保留 JSON 与 Artifact 等非文本内容的结构。 */
+  @Test
+  void serializesJsonAndArtifactToolContents() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.receive(invoke("structured-content", 1));
+    transport.takeMessages(2);
+    tool.partial(
+        new ToolResult(
+            "structured-content",
+            List.of(
+                new JsonToolContent("[1,2]"),
+                new ArtifactToolContent(new ArtifactRef("artifact", "application/json", 2))),
+            false,
+            "{}",
+            false));
+
+    List<DaemonEnvelope> messages = transport.takeMessages(1);
+    assertMessageTypes(messages, PARTIAL);
+    String payload = messages.get(0).payloadJson();
+    assertTrue(payload.contains("\"type\":\"json\""));
+    assertTrue(payload.contains("\"json\":[1,2]"));
+    assertTrue(payload.contains("\"type\":\"artifact\""));
+    assertTrue(payload.contains("\"artifactId\":\"artifact\""));
   }
 
   /** Tool error 和错误关联 ID 的完成回调都必须收敛为 FAILED。 */
