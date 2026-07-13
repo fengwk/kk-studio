@@ -11,8 +11,8 @@
   <div class="app-shell">
     <header class="app-header">
       <button class="brand" data-view="library" aria-label="返回画布库"><span class="brand-mark">K</span><span>KK Studio</span></button>
-      <nav class="top-nav" aria-label="主导航"><button>AI</button><button class="active" data-view="library">画布</button><button>资产</button></nav>
-      <div class="header-actions"><button class="icon-button" id="researchButton" aria-label="打开调研与架构说明">⌘</button><button class="avatar" aria-label="当前工作区">FL</button></div>
+      <nav class="top-nav" aria-label="主导航"><button id="aiNavButton">AI</button><button class="active" data-view="library">画布</button><button id="assetsNavButton">资产</button></nav>
+      <div class="header-actions"><button class="icon-button" id="researchButton" aria-label="打开调研与架构说明">⌘</button><button class="avatar" id="workspaceAvatar" aria-label="当前工作区">FL</button></div>
     </header>
 
     <main>
@@ -29,7 +29,7 @@
             <button class="primary-button" id="createFromIdea">从想法创建 <span>→</span></button>
           </div>
           <section class="template-section" aria-labelledby="templateTitle">
-            <div class="section-heading"><h2 id="templateTitle">从模板快速开始</h2><button class="text-button">全部模板 <span>→</span></button></div>
+            <div class="section-heading"><h2 id="templateTitle">从模板快速开始</h2><button class="text-button" id="allTemplatesButton">全部模板 <span>→</span></button></div>
             <div class="template-grid">
               <button class="template-card" data-template="空白画布"><span class="template-icon blank">＋</span><strong>空白画布</strong><small>从任意内容开始</small></button>
               <button class="template-card selected" data-template="研究与归纳"><span class="template-icon research">⌘</span><strong>研究与归纳</strong><small>资料 → 洞察 → 方案</small></button>
@@ -39,7 +39,7 @@
             </div>
           </section>
           <section class="canvas-library" aria-labelledby="canvasTitle">
-            <div class="section-heading library-toolbar"><div><h2 id="canvasTitle">你的画布</h2><div class="filter-tabs" role="tablist"><button class="active" data-library-filter="all">全部 <span>12</span></button><button data-library-filter="mine">我的 <span>8</span></button><button data-library-filter="collab">与我协作 <span>4</span></button></div></div><div class="library-controls"><button class="search-button" id="searchCanvases">⌕ 搜索画布</button><button class="icon-button" id="gridViewButton" aria-label="切换画布网格">▦</button></div></div>
+            <div class="section-heading library-toolbar"><div><h2 id="canvasTitle">你的画布</h2><div class="filter-tabs" role="tablist" aria-label="画布筛选"><button class="active" role="tab" aria-selected="true" data-library-filter="all">全部 <span>12</span></button><button role="tab" aria-selected="false" data-library-filter="mine">我的 <span>8</span></button><button role="tab" aria-selected="false" data-library-filter="collab">与我协作 <span>4</span></button></div></div><div class="library-controls"><button class="search-button" id="searchCanvases">⌕ 搜索画布</button><button class="icon-button" id="gridViewButton" aria-label="切换画布网格">▦</button></div></div>
             <div class="project-grid">
               <button class="project-card feature" data-open-editor data-library-owner="collab"><span class="project-state running">● 1 个任务进行中</span><div class="project-preview research-preview"><i></i><i></i><i></i><i></i><b>竞品研究</b></div><strong>竞品研究与产品方案</strong><small>18 个对象 · 刚刚编辑</small><div class="project-footer"><span>FL · KK</span><span>↗</span></div></button>
               <button class="project-card" data-open-editor data-library-owner="mine"><div class="project-preview visual-preview"><i></i><i></i><i></i></div><strong>产品视觉方向探索</strong><small>24 个对象 · 昨天</small><div class="project-footer"><span>FL</span><span>···</span></div></button>
@@ -54,11 +54,11 @@
         <header class="editor-header">
           <button class="back-button" data-view="library">← <span>画布库</span></button><span class="header-divider"></span>
           <div class="document-title"><strong>竞品研究与产品方案</strong><span id="saveState">已保存</span></div>
-          <div class="editor-actions"><button id="helpButton">?</button><button id="shareButton">分享</button><button id="exportButton">导出</button><button class="icon-button">···</button></div>
+          <div class="editor-actions"><button id="helpButton" aria-label="查看快捷操作">?</button><button id="shareButton">分享</button><button id="exportButton">导出</button><button class="icon-button" id="editorMoreButton" aria-label="更多编辑器操作">···</button></div>
         </header>
         <div class="editor-layout" id="editorLayout">
           <aside class="tool-rail" aria-label="画布工具">
-            <button class="tool active" id="selectTool" data-tool="select" title="选择 (V)">↖</button><button class="tool" id="handTool" data-tool="hand" title="平移 (H)">✋</button><button class="tool" title="文本 (T)">T</button><button class="tool" title="添加对象">＋</button><button class="tool" title="创建 Frame">□</button><span></span><button class="tool command-tool" id="openCopilotTool" title="打开 Copilot (Ctrl/⌘ K)">⌘<small>K</small></button>
+            <button class="tool active" id="selectTool" data-tool="select" title="选择 (V)" aria-label="选择工具" aria-pressed="true">↖</button><button class="tool" id="handTool" data-tool="hand" title="平移 (H)" aria-label="手形平移工具" aria-pressed="false">✋</button><button class="tool" id="textTool" title="创建文本 (T)" aria-label="创建文本">T</button><button class="tool" id="addObjectTool" title="添加对象" aria-label="添加对象">＋</button><button class="tool" id="frameTool" title="创建 Frame" aria-label="创建 Frame">□</button><span></span><button class="tool command-tool" id="openCopilotTool" title="打开 Copilot (Ctrl/⌘ K)" aria-label="打开 Canvas Copilot">⌘<small>K</small></button>
           </aside>
           <section class="canvas-stage" id="canvasStage" aria-label="无限画布。拖动对象，滚轮缩放，按空格或中键平移。">
             <div class="canvas-world" id="canvasWorld">
@@ -75,7 +75,7 @@
             <div class="copilot-body">
               <div class="context-card"><div class="context-card-header"><span>上下文</span><span class="context-count" id="contextCount">3 个对象</span></div><div class="context-switch" role="radiogroup"><button class="active" id="selectionContext" aria-pressed="true">◉ 当前选区</button><button id="wholeContext" aria-pressed="false">○ 整张画布</button></div><p id="contextDescription">网页、截图和研究资料将作为本次输入。</p></div>
               <label class="task-label" for="copilotPrompt">下一步想完成什么？</label><textarea id="copilotPrompt" rows="4">提取竞品定位，生成功能矩阵和 MVP 页面方向</textarea><button class="run-button" id="runAgent"><span>✦</span> 运行 Agent <kbd>⌘ ↵</kbd></button>
-              <div class="run-overview"><div class="run-overview-heading"><strong>运行</strong><button id="resetDemo">重置演示</button></div><div class="run-summary"><span class="pulse-dot"></span><div><strong id="runSummaryTitle">研究与归纳</strong><small id="runSummaryState">已完成 · 4 个结果</small></div><button>···</button></div></div>
+              <div class="run-overview"><div class="run-overview-heading"><strong>运行</strong><button id="resetDemo">重置演示</button></div><div class="run-summary"><span class="pulse-dot"></span><div><strong id="runSummaryTitle">研究与归纳</strong><small id="runSummaryState">已完成 · 4 个结果</small></div><div class="run-controls"><button id="pauseRun" type="button">暂停</button><button id="retryRun" type="button">重试</button></div></div></div>
               <div class="copilot-tip"><span>⌘K</span><p>选中资料后发起任务，结果会稳定落在输入右侧并保留来源。</p></div>
             </div>
           </aside>
@@ -86,13 +86,13 @@
     </main>
   </div>
 
-  <aside class="side-panel hidden" id="researchPanel" aria-label="调研与架构说明">
+  <aside class="side-panel hidden" id="researchPanel" aria-label="调研与架构说明" aria-hidden="true" inert>
     <div class="panel-header"><div><span class="eyebrow">产品研究</span><h2>为什么这样设计？</h2></div><button class="icon-button" id="closeResearch" aria-label="关闭说明">×</button></div>
-    <div class="panel-tabs"><button class="active" data-panel-tab="research">竞品洞察</button><button data-panel-tab="architecture">方案基座</button><button data-panel-tab="roadmap">分期计划</button></div>
+    <div class="panel-tabs" role="tablist" aria-label="调研内容"><button class="active" role="tab" aria-selected="true" data-panel-tab="research">竞品洞察</button><button role="tab" aria-selected="false" data-panel-tab="architecture">方案基座</button><button role="tab" aria-selected="false" data-panel-tab="roadmap">分期计划</button></div>
     <div class="panel-content" id="panelContent"></div>
   </aside>
 
-  <dialog class="help-dialog" id="helpDialog"><div class="dialog-header"><div><span class="eyebrow">快捷操作</span><h2>在画布中保持专注</h2></div><button class="icon-button" id="closeHelp">×</button></div><div class="shortcut-grid"><div><kbd>Esc</kbd><span>清除选择或关闭浮层</span></div><div><kbd>Delete</kbd><span>删除选中的对象</span></div><div><kbd>0</kbd><span>适应全部内容</span></div><div><kbd>1</kbd><span>回到 100% 缩放</span></div><div><kbd>F</kbd><span>聚焦当前选区</span></div><div><kbd>⌘ / Ctrl K</kbd><span>打开 Canvas Copilot</span></div><div><kbd>Space + 拖动</kbd><span>平移画布</span></div><div><kbd>Shift + 点击</kbd><span>追加或取消选择</span></div></div></dialog>
+  <dialog class="help-dialog" id="helpDialog"><div class="dialog-header"><div><span class="eyebrow">快捷操作</span><h2>在画布中保持专注</h2></div><button class="icon-button" id="closeHelp" aria-label="关闭快捷操作">×</button></div><div class="shortcut-grid"><div><kbd>Esc</kbd><span>清除选择或关闭浮层</span></div><div><kbd>Delete</kbd><span>删除选中的对象</span></div><div><kbd>V / H / T</kbd><span>选择、手形平移或创建文本</span></div><div><kbd>0</kbd><span>适应全部内容</span></div><div><kbd>1</kbd><span>回到 100% 缩放</span></div><div><kbd>F</kbd><span>聚焦当前选区</span></div><div><kbd>⌘ / Ctrl K</kbd><span>打开 Canvas Copilot</span></div><div><kbd>Space + 拖动</kbd><span>平移画布</span></div><div><kbd>Shift + 点击</kbd><span>追加或取消选择</span></div></div></dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="app.js"></script>

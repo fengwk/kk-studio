@@ -32,6 +32,7 @@
   const initialRelations = [
     ['web', 'run'], ['image', 'run'], ['file', 'run'], ['note', 'run'], ['run', 'matrix'], ['run', 'result-a'], ['run', 'result-b'], ['matrix', 'direction']
   ];
+  const defaultContextIds = ['web', 'image', 'file'];
 
   const state = {
     nodes: clone(initialNodes),
@@ -78,9 +79,11 @@
     if (node.type === 'run') {
       const progress = node.progress || 0;
       const isRunning = node.status === 'running';
-      const statusText = isRunning ? `运行中 · ${progress}/${node.total}` : '已完成 · 4/4';
+      const isPaused = node.status === 'paused';
+      const statusText = isRunning ? `运行中 · ${progress}/${node.total}` : isPaused ? `已暂停 · ${progress}/${node.total}` : `已完成 · ${progress}/${node.total}`;
       const steps = ['提取定位与目标用户', '归纳交互与对象', '生成能力矩阵', '形成 MVP 页面方向'];
-      return `<div class="node-content"><div class="run-header">${label('✦', 'Agent Run')}<span class="run-status">${statusText}</span></div><div class="node-title">${escapeHTML(node.title)}</div><div class="run-steps">${steps.map((step, index) => `<div class="run-step ${index < progress ? 'done' : ''} ${isRunning && index === progress ? 'current' : ''}"><b>${index < progress ? '✓' : index === progress && isRunning ? '●' : '○'}</b>${step}</div>`).join('')}</div><div class="run-progress"><i style="width:${(progress / node.total) * 100}%"></i></div></div>`;
+      const control = isRunning ? '<button class="run-node-control" data-run-action="pause" type="button">暂停</button>' : isPaused ? '<button class="run-node-control" data-run-action="resume" type="button">继续</button>' : '<button class="run-node-control" data-run-action="retry" type="button">重试</button>';
+      return `<div class="node-content"><div class="run-header">${label('✦', 'Agent Run')}<span class="run-status">${statusText}</span></div><div class="node-title">${escapeHTML(node.title)}</div><div class="run-steps">${steps.map((step, index) => `<div class="run-step ${index < progress ? 'done' : ''} ${isRunning && index === progress ? 'current' : ''}"><b>${index < progress ? '✓' : index === progress && isRunning ? '●' : '○'}</b>${step}</div>`).join('')}</div><div class="run-progress"><i style="width:${(progress / node.total) * 100}%"></i></div><div class="run-node-controls">${control}</div></div>`;
     }
     if (node.type === 'matrix') {
       const cells = ['能力', 'Neo', 'Miro', '目标', '整图上下文', '—', '✓', '✓', '过程可见', '△', '△', '✓', '结果落位', '△', '✓', '✓'];
@@ -95,6 +98,13 @@
   function renderNodes() {
     nodesLayer.innerHTML = state.nodes.map((node) => `<article class="canvas-node node-${node.type} ${state.selected.has(node.id) ? 'selected' : ''} ${node.status === 'running' ? 'running' : ''}" data-node-id="${node.id}" style="transform:translate(${node.x}px,${node.y}px);width:${node.width}px;height:${node.height}px">${nodeMarkup(node)}</article>`).join('');
     nodesLayer.querySelectorAll('.canvas-node').forEach((element) => element.addEventListener('pointerdown', onNodePointerDown));
+    nodesLayer.querySelectorAll('[data-run-action]').forEach((button) => {
+      button.addEventListener('pointerdown', (event) => event.stopPropagation());
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        handleRunAction(button.dataset.runAction);
+      });
+    });
   }
 
   function edgePath(source, target) {
@@ -117,8 +127,35 @@
     }).join('');
   }
 
+  function getContextInfo() {
+    if (state.context === 'whole') {
+      return { count: state.nodes.length, description: '整张画布的对象、结构和已有结果将作为本次输入。', source: '整张画布' };
+    }
+    const selected = state.nodes.filter((node) => state.selected.has(node.id));
+    if (selected.length) {
+      return { count: selected.length, description: `${selected.length} 个选中对象将作为本次输入，并保留来源关系。`, source: `当前选区（${selected.length} 个对象）` };
+    }
+    const defaults = state.nodes.filter((node) => defaultContextIds.includes(node.id));
+    return { count: defaults.length, description: defaults.length ? '网页、截图和研究资料将作为本次输入。' : '暂无默认资料对象；请选中对象或使用整张画布。', source: defaults.length ? `默认资料（${defaults.length} 个对象）` : '默认资料（0 个对象）' };
+  }
+
+  function updateContextUI() {
+    const info = getContextInfo();
+    contextCount.textContent = `${info.count} 个对象`;
+    contextDescription.textContent = info.description;
+    const selection = state.context === 'selection';
+    $('#selectionContext').classList.toggle('active', selection);
+    $('#wholeContext').classList.toggle('active', !selection);
+    $('#selectionContext').setAttribute('aria-pressed', selection);
+    $('#wholeContext').setAttribute('aria-pressed', !selection);
+    return info;
+  }
+
   function updateViewport() {
-    const { x, y, scale } = state.viewport;
+    const scale = Number.isFinite(state.viewport.scale) ? state.viewport.scale : 0.6;
+    const x = Number.isFinite(state.viewport.x) ? state.viewport.x : 0;
+    const y = Number.isFinite(state.viewport.y) ? state.viewport.y : 0;
+    state.viewport = { x, y, scale };
     world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
     stage.style.backgroundSize = `${22 * scale}px ${22 * scale}px`;
     stage.style.backgroundPosition = `${x % (22 * scale)}px ${y % (22 * scale)}px`;
@@ -135,12 +172,13 @@
   }
 
   function updateSelectionToolbar() {
-    if (state.selected.size === 0) {
+    const selectedNodes = state.nodes.filter((node) => state.selected.has(node.id));
+    if (selectedNodes.length === 0) {
       selectionToolbar.classList.add('hidden');
       selectionStatus.textContent = '未选择对象';
+      updateContextUI();
       return;
     }
-    const selectedNodes = state.nodes.filter((node) => state.selected.has(node.id));
     const first = selectedNodes[0];
     const bounds = selectionBounds(selectedNodes);
     const x = state.viewport.x + (bounds.x + bounds.width / 2) * state.viewport.scale;
@@ -148,9 +186,8 @@
     selectionToolbar.style.left = `${Math.max(115, Math.min(stage.clientWidth - 145, x))}px`;
     selectionToolbar.style.top = `${Math.max(8, y)}px`;
     selectionToolbar.classList.remove('hidden');
-    selectionStatus.textContent = state.selected.size === 1 ? `已选择：${first.title}` : `已选择 ${state.selected.size} 个对象`;
-    contextCount.textContent = `${state.selected.size} 个对象`;
-    if (state.context === 'selection') contextDescription.textContent = `${state.selected.size} 个选中对象将作为本次输入，并保留来源关系。`;
+    selectionStatus.textContent = selectedNodes.length === 1 ? `已选择：${first.title}` : `已选择 ${selectedNodes.length} 个对象`;
+    updateContextUI();
   }
 
   function render() {
@@ -161,11 +198,12 @@
   }
 
   function selectionBounds(nodes) {
+    if (!nodes || nodes.length === 0) return null;
     const left = Math.min(...nodes.map((node) => node.x));
     const top = Math.min(...nodes.map((node) => node.y));
     const right = Math.max(...nodes.map((node) => node.x + node.width));
     const bottom = Math.max(...nodes.map((node) => node.y + node.height));
-    return { x: left, y: top, width: right - left, height: bottom - top };
+    return { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
   }
 
   function setSelection(ids, append = false) {
@@ -193,8 +231,13 @@
     event.preventDefault();
     event.stopPropagation();
     const id = event.currentTarget.dataset.nodeId;
-    if (event.shiftKey) setSelection([id], true);
-    else if (!state.selected.has(id)) setSelection([id]);
+    if (event.shiftKey) {
+      const removingFromSelection = state.selected.has(id);
+      setSelection([id], true);
+      if (removingFromSelection) return;
+    } else if (!state.selected.has(id)) {
+      setSelection([id]);
+    }
     const origin = stagePoint(event);
     const moving = state.nodes.filter((node) => state.selected.has(node.id));
     const startPositions = moving.map((node) => ({ id: node.id, x: node.x, y: node.y }));
@@ -242,10 +285,18 @@
   }
 
   function fitView() {
-    const visible = state.nodes.filter((node) => node.type !== 'frame');
-    const bounds = selectionBounds(visible);
+    const content = state.nodes.filter((node) => node.type !== 'frame');
+    const bounds = selectionBounds(content.length ? content : state.nodes);
+    if (!bounds) {
+      state.viewport = { x: stage.clientWidth / 2 - worldSize.width * 0.3, y: stage.clientHeight / 2 - worldSize.height * 0.3, scale: 0.6 };
+      updateViewport();
+      showToast('画布暂无内容，已保持稳定视图');
+      return;
+    }
     const padding = 105;
-    const scale = Math.min(1, Math.max(0.28, Math.min((stage.clientWidth - padding) / bounds.width, (stage.clientHeight - padding) / bounds.height)));
+    const availableWidth = Math.max(1, stage.clientWidth - padding);
+    const availableHeight = Math.max(1, stage.clientHeight - padding);
+    const scale = Math.min(1, Math.max(0.28, Math.min(availableWidth / bounds.width, availableHeight / bounds.height)));
     state.viewport.scale = scale;
     state.viewport.x = (stage.clientWidth - bounds.width * scale) / 2 - bounds.x * scale;
     state.viewport.y = (stage.clientHeight - bounds.height * scale) / 2 - bounds.y * scale;
@@ -267,7 +318,9 @@
 
   function deleteSelection() {
     if (!state.selected.size) return;
-    const count = state.selected.size;
+    const selectedIds = [...state.selected];
+    const count = selectedIds.length;
+    if (selectedIds.includes('run')) stopRunTimer();
     state.nodes = state.nodes.filter((node) => !state.selected.has(node.id));
     state.relations = state.relations.filter(([source, target]) => !state.selected.has(source) && !state.selected.has(target));
     state.selected.clear();
@@ -323,14 +376,26 @@
   function setTool(tool) {
     state.tool = tool;
     stage.classList.toggle('hand-tool', tool === 'hand');
-    $$('[data-tool]').forEach((button) => button.classList.toggle('active', button.dataset.tool === tool));
+    $$('[data-tool]').forEach((button) => {
+      const active = button.dataset.tool === tool;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
     showToast(tool === 'hand' ? '手形工具：拖动空白区域平移画布' : '选择工具：拖动空白区域框选对象');
   }
 
   function installPanAndZoom() {
     let pan = null;
-    window.addEventListener('keydown', (event) => { if (event.code === 'Space' && !isTyping(event.target)) state.spaceDown = true; });
-    window.addEventListener('keyup', (event) => { if (event.code === 'Space') state.spaceDown = false; });
+    window.addEventListener('keydown', (event) => {
+      if (event.code !== 'Space' || state.activeView !== 'editor' || isInteractiveControl(event.target)) return;
+      event.preventDefault();
+      state.spaceDown = true;
+    });
+    window.addEventListener('keyup', (event) => {
+      if (event.code !== 'Space') return;
+      if (state.spaceDown) event.preventDefault();
+      state.spaceDown = false;
+    });
     stage.addEventListener('pointerdown', (event) => {
       const isInteractiveOverlay = event.target.closest('.selection-toolbar, .canvas-controls, .copilot-peek');
       const isBlankCanvas = !event.target.closest('.canvas-node') && !isInteractiveOverlay;
@@ -350,6 +415,10 @@
     const endPan = () => { pan = null; stage.classList.remove('panning'); };
     stage.addEventListener('pointerup', endPan);
     stage.addEventListener('pointercancel', endPan);
+    window.addEventListener('blur', () => {
+      state.spaceDown = false;
+      endPan();
+    });
     stage.addEventListener('wheel', (event) => {
       event.preventDefault();
       if (event.ctrlKey || event.metaKey) zoomAt(event.clientX, event.clientY, state.viewport.scale * (event.deltaY > 0 ? 0.9 : 1.11));
@@ -358,60 +427,133 @@
   }
 
   function isTyping(target) {
-    return ['INPUT', 'TEXTAREA'].includes(target.tagName) || target.isContentEditable;
+    return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName) || Boolean(target?.isContentEditable);
+  }
+
+  function isInteractiveControl(target) {
+    return isTyping(target) || Boolean(target?.closest?.('button'));
+  }
+
+  function countRunOutputs() {
+    return state.nodes.filter((node) => node.type === 'matrix' || node.type === 'result' || node.id === 'direction').length;
   }
 
   function updateRunSummary() {
     const run = findNode('run');
-    if (!run) return;
+    const runButton = $('#runAgent');
+    const pauseButton = $('#pauseRun');
+    const retryButton = $('#retryRun');
+    if (!run) {
+      $('#runSummaryTitle').textContent = 'Agent Run 已删除';
+      $('#runSummaryState').textContent = '请重置演示以恢复运行对象';
+      runButton.disabled = false;
+      runButton.innerHTML = '<span>✦</span> Agent Run 已删除';
+      pauseButton.disabled = true;
+      retryButton.disabled = true;
+      $('.pulse-dot').classList.remove('running');
+      return;
+    }
     const running = run.status === 'running';
+    const paused = run.status === 'paused';
+    const input = run.inputSource ? ` · 输入：${run.inputSource}` : '';
+    const resultCount = countRunOutputs();
     $('#runSummaryTitle').textContent = run.title;
-    $('#runSummaryState').textContent = running ? `正在执行第 ${Math.min(run.progress + 1, run.total)} 步 · 来源可追溯` : `已完成 · ${state.nodes.filter((node) => node.type === 'result' || node.type === 'matrix').length} 个结果`;
+    $('#runSummaryState').textContent = running ? `正在执行第 ${Math.min(run.progress + 1, run.total)} 步${input}` : paused ? `已暂停于第 ${run.progress}/${run.total} 步${input}` : `已完成 · ${resultCount} 个结果${input}`;
+    runButton.disabled = running;
+    const readyLabel = run.inputSource ? '重新运行 Agent' : '运行 Agent';
+    runButton.innerHTML = running ? '<span>✦</span> Agent 运行中…' : paused ? '<span>✦</span> 继续 Agent' : `<span>✦</span> ${readyLabel} <kbd>⌘ ↵</kbd>`;
+    pauseButton.disabled = !running && !paused;
+    pauseButton.textContent = paused ? '继续' : '暂停';
+    retryButton.disabled = running;
     $('.pulse-dot').classList.toggle('running', running);
   }
 
-  function startAgentRun() {
-    const run = findNode('run');
-    if (!run || state.runTimer) return;
-    const selectedSources = state.nodes.filter((node) => state.selected.has(node.id) && node.id !== 'run');
-    const source = selectedSources[0] || findNode('frame');
-    run.status = 'running';
-    run.progress = 0;
-    run.total = 4;
-    state.selected.clear();
-    state.selected.add('run');
-    const oldGenerated = state.nodes.filter((node) => node.generated).map((node) => node.id);
+  function stopRunTimer() {
+    if (state.runTimer) window.clearInterval(state.runTimer);
+    state.runTimer = null;
+  }
+
+  function removeGeneratedResults() {
+    const generatedIds = state.nodes.filter((node) => node.generated).map((node) => node.id);
     state.nodes = state.nodes.filter((node) => !node.generated);
-    state.relations = state.relations.filter(([from, to]) => !oldGenerated.includes(from) && !oldGenerated.includes(to));
+    state.relations = state.relations.filter(([from, to]) => !generatedIds.includes(from) && !generatedIds.includes(to));
+  }
+
+  function finishAgentRun(run) {
+    stopRunTimer();
+    if (!findNode(run.id)) return;
+    run.status = 'succeeded';
+    const result = {
+      id: `generated-${Date.now()}`, type: 'result', x: run.x + run.width + 95, y: run.y + 250,
+      width: 196, height: 178, title: 'MVP 页面方向 C', copy: 'Copilot 生成的新结果，固定落在来源右侧。', variant: '新', generated: true
+    };
+    state.nodes.push(result);
+    state.relations.push([run.id, result.id]);
+    state.selected.clear();
+    state.selected.add(result.id);
     render();
-    showToast(`Agent 已读取「${source.title}」，开始在画布中工作`);
-    let step = 0;
+    markSaved();
+    showToast('任务完成：新结果已落在 Agent Run 右侧');
+  }
+
+  function scheduleRun(run) {
+    stopRunTimer();
     state.runTimer = window.setInterval(() => {
-      step += 1;
-      run.progress = step;
-      render();
-      if (step >= run.total) {
-        window.clearInterval(state.runTimer);
-        state.runTimer = null;
-        run.status = 'succeeded';
-        const result = {
-          id: `generated-${Date.now()}`, type: 'result', x: run.x + run.width + 95, y: run.y + 250,
-          width: 196, height: 178, title: 'MVP 页面方向 C', copy: 'Copilot 生成的新结果，固定落在来源右侧。', variant: '新', generated: true
-        };
-        state.nodes.push(result);
-        state.relations.push([run.id, result.id]);
-        state.selected.clear();
-        state.selected.add(result.id);
-        render();
-        markSaved();
-        showToast('任务完成：新结果已落在 Agent Run 右侧');
+      if (findNode(run.id) !== run || run.status !== 'running') {
+        stopRunTimer();
+        return;
       }
+      run.progress += 1;
+      if (run.progress >= run.total) finishAgentRun(run);
+      else render();
     }, 620);
   }
 
+  function startAgentRun({ retry = false } = {}) {
+    const run = findNode('run');
+    if (!run) {
+      showToast('Agent Run 已被删除；请重置演示后再运行');
+      return;
+    }
+    if (run.status === 'running') return;
+    if (run.status === 'paused' && !retry) {
+      run.status = 'running';
+      scheduleRun(run);
+      render();
+      showToast(`Agent 从第 ${run.progress + 1} 步继续执行`);
+      return;
+    }
+    stopRunTimer();
+    const context = retry && run.inputSource ? { source: run.inputSource } : getContextInfo();
+    removeGeneratedResults();
+    run.status = 'running';
+    run.progress = 0;
+    run.total = 4;
+    run.inputSource = context.source;
+    state.selected.clear();
+    state.selected.add('run');
+    render();
+    scheduleRun(run);
+    showToast(`Agent 已读取${context.source}，开始在画布中工作`);
+  }
+
+  function pauseAgentRun() {
+    const run = findNode('run');
+    if (!run || run.status !== 'running') return;
+    stopRunTimer();
+    run.status = 'paused';
+    render();
+    showToast(`Agent 已暂停在第 ${run.progress}/${run.total} 步`);
+  }
+
+  function handleRunAction(action) {
+    if (action === 'pause') pauseAgentRun();
+    else if (action === 'resume') startAgentRun();
+    else if (action === 'retry') startAgentRun({ retry: true });
+  }
+
   function resetDemo() {
-    if (state.runTimer) window.clearInterval(state.runTimer);
-    state.runTimer = null;
+    stopRunTimer();
     state.nodes = clone(initialNodes);
     state.relations = [...initialRelations];
     state.selected.clear();
@@ -423,13 +565,7 @@
 
   function setContext(mode) {
     state.context = mode;
-    const selection = mode === 'selection';
-    $('#selectionContext').classList.toggle('active', selection);
-    $('#wholeContext').classList.toggle('active', !selection);
-    $('#selectionContext').setAttribute('aria-pressed', selection);
-    $('#wholeContext').setAttribute('aria-pressed', !selection);
-    contextCount.textContent = selection ? `${state.selected.size || 3} 个对象` : `${state.nodes.length} 个对象`;
-    contextDescription.textContent = selection ? (state.selected.size ? '选中对象将作为本次输入，并保留来源关系。' : '资料 Frame 中的 3 个对象将作为本次输入。') : 'Agent 将理解整张画布的对象、结构和已有结果。';
+    updateContextUI();
   }
 
   function showView(view) {
@@ -458,7 +594,7 @@
       <p class="panel-section-title">对象模型</p><div class="model-flow">Workspace <span>→</span> Project <span>→</span> CanvasDocument <span>→</span> CanvasItem / Relation / AgentRun</div>
       <article class="insight-card"><h3>扩展协议</h3><ul class="protocol-list"><li>节点注册：schema、默认数据、渲染、检查器与迁移</li><li>动作注册：接受对象、输入输出、结果落位策略</li><li>Skill：能力、执行模式、成本和可见性</li><li>Importer / Exporter / Previewer / Indexer 独立扩展</li></ul></article>
       <article class="insight-card"><h3>React Flow 初步选型</h3><p>MIT 许可，适合富 DOM 节点和 Agent 状态；内置拖拽、视口、多选、MiniMap、Controls。它只承担交互渲染，领域模型保持独立。</p></article>
-      <article class="insight-card"><h3>AGPL 风险</h3><p>本地 infinite-canvas 为 AGPL-3.0。网络提供服务可能触发对应源代码义务，<strong>仅作为行为和模块边界参考，不直接复制源码。</strong></p></article>`,
+      <article class="insight-card"><h3>AGPL 风险</h3><p>本地 infinite-canvas 为 AGPL-3.0。若修改版支持远程网络交互，§13 要求向相关用户提供获取对应源码的机会；具体边界需法务评估。<strong>仅作为行为和模块边界参考，不直接复制源码。</strong></p></article>`,
     roadmap: `
       <p class="panel-section-title">从验证到生态</p>
       <article class="insight-card phase"><span class="phase-index">A</span><div><h3>交互原型</h3><p>画布库、基础操作、Copilot、Agent Run 和结果落位，验证产品表达。</p></div></article>
@@ -467,17 +603,44 @@
       <article class="insight-card phase"><span class="phase-index">D</span><div><h3>协作与生态</h3><p>实时协作、只读分享、创作回放、Playbook / Skill 市场与用量策略。</p></div></article>`
   };
 
+  function setResearchOpen(open) {
+    const panel = $('#researchPanel');
+    panel.classList.toggle('hidden', !open);
+    panel.setAttribute('aria-hidden', String(!open));
+    panel.inert = !open;
+    if (!open) panel.setAttribute('inert', '');
+    else panel.removeAttribute('inert');
+  }
+
   function openResearch(tab = 'research') {
-    $('#researchPanel').classList.remove('hidden');
+    setResearchOpen(true);
     setPanelTab(tab);
   }
   function setPanelTab(tab) {
-    $$('.panel-tabs button').forEach((button) => button.classList.toggle('active', button.dataset.panelTab === tab));
+    $$('.panel-tabs button').forEach((button) => {
+      const selected = button.dataset.panelTab === tab;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-selected', String(selected));
+    });
     $('#panelContent').innerHTML = panelData[tab];
   }
 
+  function setCopilotOpen(open, focusPrompt = false) {
+    editorLayout.classList.toggle('copilot-collapsed', !open);
+    const copilot = $('#copilot');
+    copilot.setAttribute('aria-hidden', String(!open));
+    copilot.inert = !open;
+    if (!open) copilot.setAttribute('inert', '');
+    else copilot.removeAttribute('inert');
+    if (open && focusPrompt && state.activeView === 'editor') window.setTimeout(() => $('#copilotPrompt').focus(), 0);
+  }
+
   function filterLibrary(filter) {
-    $$('[data-library-filter]').forEach((button) => button.classList.toggle('active', button.dataset.libraryFilter === filter));
+    $$('[data-library-filter]').forEach((button) => {
+      const selected = button.dataset.libraryFilter === filter;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-selected', String(selected));
+    });
     $$('[data-library-owner]').forEach((card) => { card.hidden = filter !== 'all' && card.dataset.libraryOwner !== filter; });
     showToast(filter === 'all' ? '正在展示全部画布' : filter === 'mine' ? '正在展示我的画布' : '正在展示协作画布');
   }
@@ -487,8 +650,7 @@
     if (action === 'edit') {
       showToast('编辑模式已准备就绪（原型模拟）');
     } else if (action === 'ai') {
-      editorLayout.classList.remove('copilot-collapsed');
-      window.setTimeout(() => $('#copilotPrompt').focus(), 0);
+      setCopilotOpen(true, true);
       showToast('Copilot 已读取当前选区');
     } else if (action === 'context') {
       setContext('selection');
@@ -496,6 +658,17 @@
     } else if (action === 'more') {
       showToast('更多对象操作将在检查器中提供（原型模拟）');
     }
+  }
+
+  function createTextNode() {
+    const scale = state.viewport.scale;
+    const x = Math.round((stage.clientWidth / 2 - state.viewport.x) / scale - 120);
+    const y = Math.round((stage.clientHeight / 2 - state.viewport.y) / scale - 52);
+    const node = { id: `text-${Date.now()}`, type: 'text', x, y, width: 240, height: 104, title: '新建文本', copy: '在完整产品中可直接编辑此文本。', meta: '文本 · 新建' };
+    state.nodes.push(node);
+    setSelection([node.id]);
+    markSaved();
+    showToast('已在当前视口中心创建文本对象');
   }
 
   function bindControls() {
@@ -507,16 +680,26 @@
     $$('[data-library-filter]').forEach((button) => button.addEventListener('click', () => filterLibrary(button.dataset.libraryFilter)));
     $('#searchCanvases').addEventListener('click', () => showToast('画布搜索将在完整产品中打开命令搜索（原型模拟）'));
     $('#gridViewButton').addEventListener('click', () => showToast('当前使用网格视图（原型模拟）'));
+    $('#allTemplatesButton').addEventListener('click', () => showToast('全部模板库将在完整产品中打开（原型模拟）'));
+    $('#aiNavButton').addEventListener('click', () => showToast('AI 控制台入口将在完整产品中打开（原型模拟）'));
+    $('#assetsNavButton').addEventListener('click', () => showToast('资产库入口将在完整产品中打开（原型模拟）'));
+    $('#workspaceAvatar').addEventListener('click', () => showToast('工作区菜单将在完整产品中打开（原型模拟）'));
     $('#researchButton').addEventListener('click', () => openResearch());
     $('#libraryResearchButton').addEventListener('click', () => openResearch());
-    $('#closeResearch').addEventListener('click', () => $('#researchPanel').classList.add('hidden'));
+    $('#closeResearch').addEventListener('click', () => setResearchOpen(false));
     $$('.panel-tabs button').forEach((button) => button.addEventListener('click', () => setPanelTab(button.dataset.panelTab)));
-    $('#collapseCopilot').addEventListener('click', () => editorLayout.classList.add('copilot-collapsed'));
-    $('#expandCopilot').addEventListener('click', () => { editorLayout.classList.remove('copilot-collapsed'); requestAnimationFrame(fitView); });
-    $('#openCopilotTool').addEventListener('click', () => { editorLayout.classList.remove('copilot-collapsed'); $('#copilotPrompt').focus(); });
+    $('#collapseCopilot').addEventListener('click', () => setCopilotOpen(false));
+    $('#expandCopilot').addEventListener('click', () => { setCopilotOpen(true); requestAnimationFrame(fitView); });
+    $('#openCopilotTool').addEventListener('click', () => setCopilotOpen(true, true));
     $('#selectionContext').addEventListener('click', () => setContext('selection'));
     $('#wholeContext').addEventListener('click', () => setContext('whole'));
     $('#runAgent').addEventListener('click', startAgentRun);
+    $('#pauseRun').addEventListener('click', () => {
+      const run = findNode('run');
+      if (run && run.status === 'paused') startAgentRun();
+      else pauseAgentRun();
+    });
+    $('#retryRun').addEventListener('click', () => startAgentRun({ retry: true }));
     $('#resetDemo').addEventListener('click', resetDemo);
     $('#zoomIn').addEventListener('click', () => zoomAt(stage.getBoundingClientRect().left + stage.clientWidth / 2, stage.getBoundingClientRect().top + stage.clientHeight / 2, state.viewport.scale * 1.15));
     $('#zoomOut').addEventListener('click', () => zoomAt(stage.getBoundingClientRect().left + stage.clientWidth / 2, stage.getBoundingClientRect().top + stage.clientHeight / 2, state.viewport.scale / 1.15));
@@ -524,11 +707,15 @@
     $('#resetZoom').addEventListener('click', () => zoomAt(stage.getBoundingClientRect().left + stage.clientWidth / 2, stage.getBoundingClientRect().top + stage.clientHeight / 2, 1));
     $('#selectTool').addEventListener('click', () => setTool('select'));
     $('#handTool').addEventListener('click', () => setTool('hand'));
+    $('#textTool').addEventListener('click', createTextNode);
+    $('#addObjectTool').addEventListener('click', () => showToast('添加对象面板将在完整产品中提供（原型模拟）'));
+    $('#frameTool').addEventListener('click', () => showToast('创建 Frame 将在完整产品中提供（原型模拟）'));
     $$('.selection-toolbar [data-action]').forEach((button) => button.addEventListener('click', () => handleToolbarAction(button.dataset.action)));
     $('#helpButton').addEventListener('click', () => $('#helpDialog').showModal());
     $('#closeHelp').addEventListener('click', () => $('#helpDialog').close());
     $('#shareButton').addEventListener('click', () => showToast('分享链接已复制（原型模拟）'));
     $('#exportButton').addEventListener('click', () => showToast('导出 PNG / PDF / JSON 将在完整产品中提供（原型模拟）'));
+    $('#editorMoreButton').addEventListener('click', () => showToast('更多编辑器操作将在完整产品中提供（原型模拟）'));
     stage.addEventListener('pointerdown', onStagePointerDown);
     window.addEventListener('resize', updateViewport);
     window.addEventListener('keydown', onKeyboardShortcut);
@@ -538,14 +725,13 @@
     const modifier = event.metaKey || event.ctrlKey;
     if (modifier && event.key.toLowerCase() === 'k') {
       event.preventDefault();
-      editorLayout.classList.remove('copilot-collapsed');
-      if (state.activeView === 'editor') $('#copilotPrompt').focus();
+      setCopilotOpen(true, true);
       return;
     }
     if (modifier && event.key === 'Enter' && state.activeView === 'editor') { event.preventDefault(); startAgentRun(); return; }
     if (isTyping(event.target)) return;
     if (event.key === 'Escape') {
-      if (!$('#researchPanel').classList.contains('hidden')) $('#researchPanel').classList.add('hidden');
+      if (!$('#researchPanel').classList.contains('hidden')) setResearchOpen(false);
       else if ($('#helpDialog').open) $('#helpDialog').close();
       else { state.selected.clear(); render(); }
     }
@@ -554,11 +740,16 @@
     if (event.key === '0') { event.preventDefault(); fitView(); }
     if (event.key === '1') { event.preventDefault(); zoomAt(stage.getBoundingClientRect().left + stage.clientWidth / 2, stage.getBoundingClientRect().top + stage.clientHeight / 2, 1); }
     if (event.key.toLowerCase() === 'f') { event.preventDefault(); focusSelection(); }
+    if (event.key.toLowerCase() === 'v') { event.preventDefault(); setTool('select'); }
+    if (event.key.toLowerCase() === 'h') { event.preventDefault(); setTool('hand'); }
+    if (event.key.toLowerCase() === 't') { event.preventDefault(); createTextNode(); }
   }
 
   function init() {
     bindControls();
     installPanAndZoom();
+    setResearchOpen(false);
+    setCopilotOpen(true);
     render();
     setContext('selection');
   }
