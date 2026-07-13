@@ -5,6 +5,7 @@ import type { SessionTimeline } from '@/features/ai/session-events'
 import type { AgentDefinitionDTO, AgentRunDTO, AgentSessionDTO } from '@/shared/api/contracts'
 
 export function ChatPanel({
+  workspaceId,
   sessions,
   agentsByName,
   activeSessionId,
@@ -24,6 +25,7 @@ export function ChatPanel({
   onDraftChange,
   onSubmit,
 }: {
+  workspaceId: string
   sessions: AgentSessionDTO[]
   agentsByName: Map<string, AgentDefinitionDTO>
   activeSessionId: string
@@ -45,7 +47,7 @@ export function ChatPanel({
 }) {
   return (
     <section className="chat-shell">
-      <ChatSidebar sessions={sessions} agentsByName={agentsByName} activeSessionId={activeSessionId} title={title} onBack={onBack} />
+      <ChatSidebar workspaceId={workspaceId} sessions={sessions} agentsByName={agentsByName} activeSessionId={activeSessionId} title={title} onBack={onBack} />
 
       <main className="chat-main">
         <ChatRuntimeBar session={session} agent={agent} timeline={timeline} runs={runs} activeRun={activeRun} />

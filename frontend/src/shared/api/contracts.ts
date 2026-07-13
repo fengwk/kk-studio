@@ -16,6 +16,15 @@ export type BackendDateTime = string | number[] | null
 
 export type AgentResourceId = number | string
 
+export interface WorkspaceDTO {
+  id: string
+  name: string
+  settingsJson: string | null
+  version: number | null
+  createTime: BackendDateTime
+  updateTime: BackendDateTime
+}
+
 export interface AgentProviderDTO {
   id: AgentResourceId
   name: string

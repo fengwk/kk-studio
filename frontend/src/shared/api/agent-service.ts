@@ -17,73 +17,91 @@ import type {
   AgentSessionMessageCreateDTO,
   AgentSessionUpdateDTO,
   PageResult,
+  WorkspaceDTO,
 } from '@/shared/api/contracts'
 
 export function createAgentService(client: HttpClient = apiClient) {
   return {
-    listProviders: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentProviderDTO>> =>
-      client.get('/agent/providers', { params: { pageNumber, pageSize } }),
+    listWorkspaces: (pageNumber = 1, pageSize = 50): Promise<PageResult<WorkspaceDTO>> =>
+      client.get('/workspaces', { params: { pageNumber, pageSize } }),
 
-    createProvider: (data: AgentProviderCreateDTO): Promise<AgentProviderDTO> => client.post('/agent/providers', data),
+    listProviders: (workspaceId: string, pageNumber = 1, pageSize = 50): Promise<PageResult<AgentProviderDTO>> =>
+      client.get(`/workspaces/${encodeURIComponent(workspaceId)}/providers`, { params: { pageNumber, pageSize } }),
 
-    updateProvider: (id: AgentResourceId, data: AgentProviderUpdateDTO): Promise<AgentProviderDTO> =>
-      client.put(`/agent/providers/${encodeURIComponent(String(id))}`, data),
+    createProvider: (workspaceId: string, data: AgentProviderCreateDTO): Promise<AgentProviderDTO> =>
+      client.post(`/workspaces/${encodeURIComponent(workspaceId)}/providers`, data),
 
-    deleteProvider: (id: AgentResourceId): Promise<void> =>
-      client.delete(`/agent/providers/${encodeURIComponent(String(id))}`),
+    updateProvider: (workspaceId: string, id: AgentResourceId, data: AgentProviderUpdateDTO): Promise<AgentProviderDTO> =>
+      client.put(`/workspaces/${encodeURIComponent(workspaceId)}/providers/${encodeURIComponent(String(id))}`, data),
 
-    listModels: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentModelDTO>> =>
-      client.get('/agent/models', { params: { pageNumber, pageSize } }),
+    deleteProvider: (workspaceId: string, id: AgentResourceId): Promise<void> =>
+      client.delete(`/workspaces/${encodeURIComponent(workspaceId)}/providers/${encodeURIComponent(String(id))}`),
 
-    createModel: (data: AgentModelCreateDTO): Promise<AgentModelDTO> => client.post('/agent/models', data),
+    listModels: (workspaceId: string, pageNumber = 1, pageSize = 50): Promise<PageResult<AgentModelDTO>> =>
+      client.get(`/workspaces/${encodeURIComponent(workspaceId)}/models`, { params: { pageNumber, pageSize } }),
 
-    updateModel: (id: AgentResourceId, data: AgentModelUpdateDTO): Promise<AgentModelDTO> =>
-      client.put(`/agent/models/${encodeURIComponent(String(id))}`, data),
+    createModel: (workspaceId: string, data: AgentModelCreateDTO): Promise<AgentModelDTO> =>
+      client.post(`/workspaces/${encodeURIComponent(workspaceId)}/models`, data),
 
-    deleteModel: (id: AgentResourceId): Promise<void> =>
-      client.delete(`/agent/models/${encodeURIComponent(String(id))}`),
+    updateModel: (workspaceId: string, id: AgentResourceId, data: AgentModelUpdateDTO): Promise<AgentModelDTO> =>
+      client.put(`/workspaces/${encodeURIComponent(workspaceId)}/models/${encodeURIComponent(String(id))}`, data),
 
-    listAgents: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentDefinitionDTO>> =>
-      client.get('/agent/agents', { params: { pageNumber, pageSize } }),
+    deleteModel: (workspaceId: string, id: AgentResourceId): Promise<void> =>
+      client.delete(`/workspaces/${encodeURIComponent(workspaceId)}/models/${encodeURIComponent(String(id))}`),
 
-    createAgent: (data: AgentDefinitionCreateDTO): Promise<AgentDefinitionDTO> => client.post('/agent/agents', data),
+    listAgents: (workspaceId: string, pageNumber = 1, pageSize = 50): Promise<PageResult<AgentDefinitionDTO>> =>
+      client.get(`/workspaces/${encodeURIComponent(workspaceId)}/agents`, { params: { pageNumber, pageSize } }),
 
-    updateAgent: (id: AgentResourceId, data: AgentDefinitionUpdateDTO): Promise<AgentDefinitionDTO> =>
-      client.put(`/agent/agents/${encodeURIComponent(String(id))}`, data),
+    createAgent: (workspaceId: string, data: AgentDefinitionCreateDTO): Promise<AgentDefinitionDTO> =>
+      client.post(`/workspaces/${encodeURIComponent(workspaceId)}/agents`, data),
 
-    deleteAgent: (id: AgentResourceId): Promise<void> =>
-      client.delete(`/agent/agents/${encodeURIComponent(String(id))}`),
+    updateAgent: (workspaceId: string, id: AgentResourceId, data: AgentDefinitionUpdateDTO): Promise<AgentDefinitionDTO> =>
+      client.put(`/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(String(id))}`, data),
 
+    deleteAgent: (workspaceId: string, id: AgentResourceId): Promise<void> =>
+      client.delete(`/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(String(id))}`),
+
+    // Session endpoints remain on the legacy API until T15 moves them.
     listSessions: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentSessionDTO>> =>
       client.get('/agent/sessions', { params: { pageNumber, pageSize } }),
-
     createSession: (data: AgentSessionCreateDTO): Promise<AgentSessionDTO> => client.post('/agent/sessions', data),
-
-    getSession: (sessionId: string): Promise<AgentSessionDTO> => client.get(`/agent/sessions/${sessionId}`),
-
+    getSession: (sessionId: string): Promise<AgentSessionDTO> => client.get(`/agent/sessions/${encodeURIComponent(sessionId)}`),
     updateSession: (sessionId: string, data: AgentSessionUpdateDTO): Promise<AgentSessionDTO> =>
-      client.put(`/agent/sessions/${sessionId}`, data),
-
-    deleteSession: (sessionId: string): Promise<void> => client.delete(`/agent/sessions/${sessionId}`),
-
+      client.put(`/agent/sessions/${encodeURIComponent(sessionId)}`, data),
+    deleteSession: (sessionId: string): Promise<void> => client.delete(`/agent/sessions/${encodeURIComponent(sessionId)}`),
     createMessage: (sessionId: string, data: AgentSessionMessageCreateDTO): Promise<AgentSessionEventDTO> =>
-      client.post(`/agent/sessions/${sessionId}/messages`, data),
-
+      client.post(`/agent/sessions/${encodeURIComponent(sessionId)}/messages`, data),
     listEvents: (sessionId: string, headEventId?: string): Promise<AgentSessionEventDTO[]> =>
-      client.get(`/agent/sessions/${sessionId}/events`, { params: headEventId ? { headEventId } : undefined }),
-
-    listRuns: (sessionId: string): Promise<AgentRunDTO[]> => client.get(`/agent/sessions/${sessionId}/runs`),
-
+      client.get(`/agent/sessions/${encodeURIComponent(sessionId)}/events`, { params: headEventId ? { headEventId } : undefined }),
+    listRuns: (sessionId: string): Promise<AgentRunDTO[]> => client.get(`/agent/sessions/${encodeURIComponent(sessionId)}/runs`),
     createEventStream: (sessionId: string, headEventId?: string): EventSource => {
       const params = new URLSearchParams()
       if (headEventId) {
         params.set('headEventId', headEventId)
       }
       const query = params.toString()
-      const url = `${apiBaseUrl}/agent/sessions/${encodeURIComponent(sessionId)}/events/stream${query ? `?${query}` : ''}`
-      return new EventSource(url)
+      return new EventSource(`${apiBaseUrl}/agent/sessions/${encodeURIComponent(sessionId)}/events/stream${query ? `?${query}` : ''}`)
     },
   }
 }
 
 export const agentService = createAgentService()
+
+/**
+ * Temporary boundary for the legacy Session API. T15 can replace this adapter
+ * with workspace-scoped endpoints without changing feature controllers.
+ */
+export function createWorkspaceSessionApi(workspaceId: string, service = agentService) {
+  return {
+    workspaceId,
+    list: () => service.listSessions(),
+    create: (data: AgentSessionCreateDTO) => service.createSession(data),
+    get: (sessionId: string) => service.getSession(sessionId),
+    update: (sessionId: string, data: AgentSessionUpdateDTO) => service.updateSession(sessionId, data),
+    remove: (sessionId: string) => service.deleteSession(sessionId),
+    createMessage: (sessionId: string, data: AgentSessionMessageCreateDTO) => service.createMessage(sessionId, data),
+    listEvents: (sessionId: string, headEventId?: string) => service.listEvents(sessionId, headEventId),
+    listRuns: (sessionId: string) => service.listRuns(sessionId),
+    createEventStream: (sessionId: string, headEventId?: string) => service.createEventStream(sessionId, headEventId),
+  }
+}

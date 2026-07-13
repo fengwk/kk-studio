@@ -1,20 +1,15 @@
 import { useDeferredValue, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { aiConsoleTabs } from '@/features/ai/ai-console-page-helpers'
-import type { AiConsoleTab } from '@/features/ai/ai-console-types'
-import { tabRoutes } from '@/features/ai/ai-console-types'
 import { filterAgents, filterModels, filterProviders, filterSessions } from '@/features/ai/ai-console-utils'
 import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO } from '@/shared/api/contracts'
 import { useAiConsoleResourceController } from '@/features/ai/useAiConsoleResourceController'
 import { useAiConsoleSessionController } from '@/features/ai/useAiConsoleSessionController'
 
-export function useAiConsoleController() {
-  const navigate = useNavigate()
+export function useAiConsoleController(workspaceId: string) {
   const [search, setSearch] = useState('')
   const deferredSearch = useDeferredValue(search.trim().toLowerCase())
 
-  const resourceController = useAiConsoleResourceController()
-  const sessionController = useAiConsoleSessionController(resourceController.agents)
+  const resourceController = useAiConsoleResourceController(workspaceId)
+  const sessionController = useAiConsoleSessionController(workspaceId, resourceController.agents)
 
   const agentsByName = useMemo(() => new Map(resourceController.agents.map((agent) => [agent.name, agent])), [resourceController.agents])
   const filteredSessions = useMemo(
@@ -43,9 +38,8 @@ export function useAiConsoleController() {
     busy,
     error,
     mutationError,
-    navigateToTab: (tab: AiConsoleTab) => navigate(tabRoutes[tab]),
-    tabs: aiConsoleTabs,
     chatPanelProps: {
+      workspaceId,
       sessions: filteredSessions,
       agentsByName,
       deletePending: sessionController.sessionDeletePending,

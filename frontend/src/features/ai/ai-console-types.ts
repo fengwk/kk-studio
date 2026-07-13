@@ -1,7 +1,5 @@
 import type { AgentResourceId } from '@/shared/api/contracts'
 
-export type AiConsoleTab = 'chat' | 'agent' | 'model' | 'provider'
-
 export interface ProviderDraft {
   name: string
   description: string
@@ -55,19 +53,5 @@ export type ResourceModal =
   | { kind: 'provider'; mode: 'create' | 'edit'; id?: AgentResourceId }
   | { kind: 'model'; mode: 'create' | 'edit'; id?: AgentResourceId }
   | { kind: 'agent'; mode: 'create' | 'edit'; id?: AgentResourceId }
-
-export const tabRoutes: Record<AiConsoleTab, string> = {
-  chat: '/agent/sessions',
-  agent: '/agent/agents',
-  model: '/agent/models',
-  provider: '/agent/providers',
-}
-
-export const tabLabels: Record<AiConsoleTab, string> = {
-  chat: 'Chat',
-  agent: 'Agent',
-  model: 'Model',
-  provider: 'Provider',
-}
 
 export const providerTypes = ['openai', 'openai_response', 'anthropic', 'google']

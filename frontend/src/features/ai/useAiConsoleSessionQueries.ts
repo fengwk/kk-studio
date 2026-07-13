@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
-import { agentService } from '@/shared/api/agent-service'
+import { createWorkspaceSessionApi } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 
-export function useAiConsoleSessionQueries() {
+export function useAiConsoleSessionQueries(workspaceId: string) {
+  const sessionApi = createWorkspaceSessionApi(workspaceId)
   const sessionsQuery = useQuery({
-    queryKey: queryKeys.sessions.list,
-    queryFn: () => agentService.listSessions(),
+    queryKey: queryKeys.sessions.list(workspaceId),
+    queryFn: sessionApi.list,
   })
 
   return {

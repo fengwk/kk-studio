@@ -6,7 +6,7 @@ import type { ConfirmModalState } from '@/features/ai/ai-console-types'
 import { useAiConsoleSessionMutations } from '@/features/ai/useAiConsoleSessionMutations'
 import { useAiConsoleSessionQueries } from '@/features/ai/useAiConsoleSessionQueries'
 
-export function useAiConsoleSessionController(agents: AgentDefinitionDTO[]) {
+export function useAiConsoleSessionController(workspaceId: string, agents: AgentDefinitionDTO[]) {
   const navigate = useNavigate()
   const [chatModalOpen, setChatModalOpen] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<ConfirmModalState | null>(null)
@@ -15,14 +15,15 @@ export function useAiConsoleSessionController(agents: AgentDefinitionDTO[]) {
   const [sessionTitle, setSessionTitle] = useState('')
   const [sessionEditTitle, setSessionEditTitle] = useState('')
 
-  const { sessionsQuery, sessions } = useAiConsoleSessionQueries()
+  const { sessionsQuery, sessions } = useAiConsoleSessionQueries(workspaceId)
   const sessionMutations = useAiConsoleSessionMutations({
+    workspaceId,
     selectedAgentName,
     sessionTitle,
     onSessionCreated: async (session) => {
       setChatModalOpen(false)
       setSessionTitle('')
-      navigate(`/agent/sessions/${session.sessionId}`)
+      navigate(`/workspaces/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(session.sessionId)}`)
     },
     onSessionUpdated: () => {
       setSessionEditId(null)

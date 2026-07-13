@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { aiConsoleTabs, resolveSessionAgentName } from '@/features/ai/ai-console-page-helpers'
+import { resolveSessionAgentName } from '@/features/ai/ai-console-page-helpers'
 import {
   buildResourceSubmitPlan,
   createAgentEditorPlan,
@@ -18,7 +18,6 @@ describe('ai-console-page-helpers', () => {
     expect(resolveSessionAgentName(undefined, 'selected-agent', agents)).toBe('selected-agent')
     expect(resolveSessionAgentName(undefined, '', agents)).toBe('default-assistant')
     expect(resolveSessionAgentName(undefined, '', [])).toBe('')
-    expect(aiConsoleTabs).toEqual(['chat', 'agent', 'model', 'provider'])
   })
 
   it('builds create and edit editor plans with fallbacks', () => {

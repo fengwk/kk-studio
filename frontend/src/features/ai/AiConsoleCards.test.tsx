@@ -11,29 +11,13 @@ import {
   SearchField,
   SessionCard,
   StateBlock,
-  TabButton,
 } from '@/features/ai/AiConsoleCards'
 
 describe('AiConsoleCards', () => {
-  it('renders all tab variants and updates search field', async () => {
+  it('updates the search field', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
-    render(
-      <>
-        <div role="tablist" aria-label="AI resources">
-          <TabButton tab="chat" activeTab="model" onClick={() => undefined} />
-          <TabButton tab="agent" activeTab="model" onClick={() => undefined} />
-          <TabButton tab="model" activeTab="model" onClick={() => undefined} />
-          <TabButton tab="provider" activeTab="model" onClick={() => undefined} />
-        </div>
-        <SearchFieldHarness onChange={onChange} />
-      </>,
-    )
-
-    expect(screen.getByRole('tab', { name: 'Chat' })).not.toHaveClass('active')
-    expect(screen.getByRole('tab', { name: 'Agent' })).not.toHaveClass('active')
-    expect(screen.getByRole('tab', { name: 'Model' })).toHaveClass('active')
-    expect(screen.getByRole('tab', { name: 'Provider' })).not.toHaveClass('active')
+    render(<SearchFieldHarness onChange={onChange} />)
 
     await user.type(screen.getByPlaceholderText('搜索资源...'), 'mini')
     expect(onChange).toHaveBeenLastCalledWith('mini')
@@ -54,6 +38,7 @@ describe('AiConsoleCards', () => {
     const onDelete = vi.fn()
     renderWithRouter(
       <SessionCard
+        workspaceId="workspace-1"
         session={{
           sessionId: 'session-1',
           agentId: 'agent-1',
@@ -72,7 +57,7 @@ describe('AiConsoleCards', () => {
     expect(screen.getAllByText('default-assistant').length).toBeGreaterThan(0)
 
     await user.click(screen.getByRole('button', { name: '进入会话 session-1' }))
-    expect(screen.getByTestId('location')).toHaveTextContent('/agent/sessions/session-1')
+    expect(screen.getByTestId('location')).toHaveTextContent('/workspaces/workspace-1/sessions/session-1')
 
     await user.click(screen.getByRole('button', { name: '编辑 Chat session-1' }))
     await user.click(screen.getByRole('button', { name: '删除 Chat session-1' }))
@@ -83,6 +68,7 @@ describe('AiConsoleCards', () => {
   it('uses agent name override and disables pending session deletion', () => {
     renderWithRouter(
       <SessionCard
+        workspaceId="workspace-1"
         session={{
           sessionId: 'session-2',
           agentId: 'agent-1',
@@ -249,7 +235,7 @@ describe('AiConsoleCards', () => {
 
 function renderWithRouter(element: ReactNode) {
   return render(
-    <MemoryRouter initialEntries={['/agent/sessions']}>
+    <MemoryRouter initialEntries={['/workspaces/workspace-1/sessions']}>
       <Routes>
         <Route path="*" element={<>{element}<LocationProbe /></>} />
       </Routes>

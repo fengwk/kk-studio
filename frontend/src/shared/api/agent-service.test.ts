@@ -12,19 +12,21 @@ function createClient(): HttpClient {
 }
 
 describe('agentService', () => {
-  it('maps resource list requests to provider/model/agent/session backend paths', async () => {
+  it('maps workspace resources to workspace-scoped paths and retains legacy session paths', async () => {
     const client = createClient()
     const service = createAgentService(client)
 
-    await service.listProviders(2, 20)
-    await service.listModels(3, 30)
-    await service.listAgents(4, 40)
+    await service.listWorkspaces(1, 10)
+    await service.listProviders('workspace 1', 2, 20)
+    await service.listModels('workspace 1', 3, 30)
+    await service.listAgents('workspace 1', 4, 40)
     await service.listSessions(5, 50)
 
-    expect(client.get).toHaveBeenNthCalledWith(1, '/agent/providers', { params: { pageNumber: 2, pageSize: 20 } })
-    expect(client.get).toHaveBeenNthCalledWith(2, '/agent/models', { params: { pageNumber: 3, pageSize: 30 } })
-    expect(client.get).toHaveBeenNthCalledWith(3, '/agent/agents', { params: { pageNumber: 4, pageSize: 40 } })
-    expect(client.get).toHaveBeenNthCalledWith(4, '/agent/sessions', { params: { pageNumber: 5, pageSize: 50 } })
+    expect(client.get).toHaveBeenNthCalledWith(1, '/workspaces', { params: { pageNumber: 1, pageSize: 10 } })
+    expect(client.get).toHaveBeenNthCalledWith(2, '/workspaces/workspace%201/providers', { params: { pageNumber: 2, pageSize: 20 } })
+    expect(client.get).toHaveBeenNthCalledWith(3, '/workspaces/workspace%201/models', { params: { pageNumber: 3, pageSize: 30 } })
+    expect(client.get).toHaveBeenNthCalledWith(4, '/workspaces/workspace%201/agents', { params: { pageNumber: 4, pageSize: 40 } })
+    expect(client.get).toHaveBeenNthCalledWith(5, '/agent/sessions', { params: { pageNumber: 5, pageSize: 50 } })
   })
 
   it('maps provider, model and agent mutations to id-based CRUD endpoints', async () => {
@@ -54,25 +56,25 @@ describe('agentService', () => {
     const updateModelBody = { defaultVariant: 'fast' }
     const updateAgentBody = { description: 'updated' }
 
-    await service.createProvider(providerBody)
-    await service.updateProvider(101, updateProviderBody)
-    await service.deleteProvider(101)
-    await service.createModel(modelBody)
-    await service.updateModel(202, updateModelBody)
-    await service.deleteModel(202)
-    await service.createAgent(agentBody)
-    await service.updateAgent(303, updateAgentBody)
-    await service.deleteAgent(303)
+    await service.createProvider('workspace-1', providerBody)
+    await service.updateProvider('workspace-1', 101, updateProviderBody)
+    await service.deleteProvider('workspace-1', 101)
+    await service.createModel('workspace-1', modelBody)
+    await service.updateModel('workspace-1', 202, updateModelBody)
+    await service.deleteModel('workspace-1', 202)
+    await service.createAgent('workspace-1', agentBody)
+    await service.updateAgent('workspace-1', 303, updateAgentBody)
+    await service.deleteAgent('workspace-1', 303)
 
-    expect(client.post).toHaveBeenNthCalledWith(1, '/agent/providers', providerBody)
-    expect(client.put).toHaveBeenNthCalledWith(1, '/agent/providers/101', updateProviderBody)
-    expect(client.delete).toHaveBeenNthCalledWith(1, '/agent/providers/101')
-    expect(client.post).toHaveBeenNthCalledWith(2, '/agent/models', modelBody)
-    expect(client.put).toHaveBeenNthCalledWith(2, '/agent/models/202', updateModelBody)
-    expect(client.delete).toHaveBeenNthCalledWith(2, '/agent/models/202')
-    expect(client.post).toHaveBeenNthCalledWith(3, '/agent/agents', agentBody)
-    expect(client.put).toHaveBeenNthCalledWith(3, '/agent/agents/303', updateAgentBody)
-    expect(client.delete).toHaveBeenNthCalledWith(3, '/agent/agents/303')
+    expect(client.post).toHaveBeenNthCalledWith(1, '/workspaces/workspace-1/providers', providerBody)
+    expect(client.put).toHaveBeenNthCalledWith(1, '/workspaces/workspace-1/providers/101', updateProviderBody)
+    expect(client.delete).toHaveBeenNthCalledWith(1, '/workspaces/workspace-1/providers/101')
+    expect(client.post).toHaveBeenNthCalledWith(2, '/workspaces/workspace-1/models', modelBody)
+    expect(client.put).toHaveBeenNthCalledWith(2, '/workspaces/workspace-1/models/202', updateModelBody)
+    expect(client.delete).toHaveBeenNthCalledWith(2, '/workspaces/workspace-1/models/202')
+    expect(client.post).toHaveBeenNthCalledWith(3, '/workspaces/workspace-1/agents', agentBody)
+    expect(client.put).toHaveBeenNthCalledWith(3, '/workspaces/workspace-1/agents/303', updateAgentBody)
+    expect(client.delete).toHaveBeenNthCalledWith(3, '/workspaces/workspace-1/agents/303')
   })
 
   it('maps session detail, edit, delete, events, runs and message requests', async () => {

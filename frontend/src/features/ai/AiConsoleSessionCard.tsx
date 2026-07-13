@@ -4,12 +4,14 @@ import { formatBackendDate } from '@/features/ai/ai-console-utils'
 import type { AgentDefinitionDTO, AgentSessionDTO } from '@/shared/api/contracts'
 
 export function SessionCard({
+  workspaceId,
   session,
   agent,
   onEdit,
   onDelete,
   deletePending,
 }: {
+  workspaceId: string
   session: AgentSessionDTO
   agent?: AgentDefinitionDTO
   onEdit: () => void
@@ -40,7 +42,7 @@ export function SessionCard({
           className="action-enter-btn green"
           type="button"
           aria-label={`进入会话 ${sessionLabel}`}
-          onClick={() => navigate(`/agent/sessions/${session.sessionId}`)}
+          onClick={() => navigate(`/workspaces/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(session.sessionId)}`)}
         >
           <ChevronRight aria-hidden="true" />
           进入会话

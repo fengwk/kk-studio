@@ -43,18 +43,18 @@ describe('useAiConsoleResourceController', () => {
     vi.mocked(agentService.deleteModel).mockResolvedValue(undefined)
     vi.mocked(agentService.createAgent).mockResolvedValue(currentAgent)
     vi.mocked(agentService.deleteAgent).mockResolvedValue(undefined)
-    vi.mocked(agentService.updateProvider).mockImplementation(async (_id, data) => {
+    vi.mocked(agentService.updateProvider).mockImplementation(async (_workspaceId, _id, data) => {
       currentProvider = { ...currentProvider, ...data, name: data.name ?? currentProvider.name }
       currentModel = { ...currentModel, providerName: currentProvider.name }
       currentAgent = { ...currentAgent, defaultProviderName: currentProvider.name }
       return currentProvider
     })
-    vi.mocked(agentService.updateModel).mockImplementation(async (_id, data) => {
+    vi.mocked(agentService.updateModel).mockImplementation(async (_workspaceId, _id, data) => {
       currentModel = { ...currentModel, ...data, name: data.name ?? currentModel.name }
       currentAgent = { ...currentAgent, defaultModelName: currentModel.name }
       return currentModel
     })
-    vi.mocked(agentService.updateAgent).mockImplementation(async (_id, data) => {
+    vi.mocked(agentService.updateAgent).mockImplementation(async (_workspaceId, _id, data) => {
       currentAgent = {
         ...currentAgent,
         ...data,
@@ -81,7 +81,7 @@ describe('useAiConsoleResourceController', () => {
     await user.click(screen.getByRole('button', { name: 'submit' }))
 
     await waitFor(() => {
-      expect(agentService.updateProvider).toHaveBeenCalledWith('provider-1', expect.objectContaining({ name: 'stub-renamed' }))
+      expect(agentService.updateProvider).toHaveBeenCalledWith('workspace-1', 'provider-1', expect.objectContaining({ name: 'stub-renamed' }))
       expect(agentService.listModels).toHaveBeenCalledTimes(2)
       expect(agentService.listAgents).toHaveBeenCalledTimes(2)
     })
@@ -93,7 +93,7 @@ describe('useAiConsoleResourceController', () => {
     await user.click(screen.getByRole('button', { name: 'submit' }))
 
     await waitFor(() => {
-      expect(agentService.updateModel).toHaveBeenCalledWith('model-1', expect.objectContaining({ name: 'acceptance-stub-renamed' }))
+      expect(agentService.updateModel).toHaveBeenCalledWith('workspace-1', 'model-1', expect.objectContaining({ name: 'acceptance-stub-renamed' }))
       expect(agentService.listAgents).toHaveBeenCalledTimes(3)
     })
 
@@ -114,9 +114,9 @@ describe('useAiConsoleResourceController', () => {
     await user.type(screen.getByTestId('agent-description'), 'edited description')
 
     act(() => {
-      queryClient.setQueryData(queryKeys.models.list, page([{ ...currentModel, providerName: 'stub-v2', name: 'acceptance-stub-v2' }]))
+      queryClient.setQueryData(queryKeys.models.list('workspace-1'), page([{ ...currentModel, providerName: 'stub-v2', name: 'acceptance-stub-v2' }]))
       queryClient.setQueryData(
-        queryKeys.agents.list,
+        queryKeys.agents.list('workspace-1'),
         page([{ ...currentAgent, defaultProviderName: 'stub-v2', defaultModelName: 'acceptance-stub-v2' }]),
       )
     })
@@ -129,7 +129,7 @@ describe('useAiConsoleResourceController', () => {
 })
 
 function ResourceControllerHarness() {
-  const controller = useAiConsoleResourceController()
+  const controller = useAiConsoleResourceController('workspace-1')
   const modal = controller.resourceEditorModal.modal
   const ready = !controller.providersQuery.isLoading && !controller.modelsQuery.isLoading && !controller.agentsQuery.isLoading
 

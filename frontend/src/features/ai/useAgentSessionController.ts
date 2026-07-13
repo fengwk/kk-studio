@@ -5,19 +5,19 @@ import { useAgentSessionMessageMutation } from '@/features/ai/useAgentSessionMes
 import { useAgentSessionQueries } from '@/features/ai/useAgentSessionQueries'
 import { useChatTranscriptAutoScroll } from '@/features/ai/useChatTranscriptAutoScroll'
 
-export function useAgentSessionController(sessionId: string) {
+export function useAgentSessionController(workspaceId: string, sessionId: string) {
   const [draft, setDraft] = useState('')
   const bodyRef = useRef<HTMLDivElement>(null)
 
-  const { sessions, agents, session, events, runs, sessionQuery, eventsQuery } = useAgentSessionQueries(sessionId)
-  const createMessageMutation = useAgentSessionMessageMutation(sessionId, () => setDraft(''))
+  const { sessions, agents, session, events, runs, sessionQuery, eventsQuery } = useAgentSessionQueries(workspaceId, sessionId)
+  const createMessageMutation = useAgentSessionMessageMutation(workspaceId, sessionId, () => setDraft(''))
   const agentsByName = new Map(agents.map((agent) => [agent.name, agent]))
   const timeline = buildSessionTimeline(events)
   const activeRun = hasActiveRun(runs)
   const currentAgent = session ? agentsByName.get(session.agentName) : undefined
 
   useChatTranscriptAutoScroll(bodyRef, timeline.messages.length, events.length)
-  useAgentSessionEventStream(sessionId, eventsQuery.isSuccess)
+  useAgentSessionEventStream(workspaceId, sessionId, eventsQuery.isSuccess)
 
   function submitMessage() {
     const content = draft.trim()

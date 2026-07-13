@@ -7,8 +7,8 @@ import { AgentSessionPage } from '@/features/ai/AgentSessionPage'
 import { agentService } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 
-vi.mock('@/shared/api/agent-service', () => ({
-  agentService: {
+vi.mock('@/shared/api/agent-service', () => {
+  const agentService = {
     listAgents: vi.fn(),
     listSessions: vi.fn(),
     getSession: vi.fn(),
@@ -16,8 +16,19 @@ vi.mock('@/shared/api/agent-service', () => ({
     listRuns: vi.fn(),
     createMessage: vi.fn(),
     createEventStream: vi.fn(),
-  },
-}))
+  }
+  return {
+    agentService,
+    createWorkspaceSessionApi: () => ({
+      list: () => agentService.listSessions(),
+      get: (sessionId: string) => agentService.getSession(sessionId),
+      createMessage: (sessionId: string, data: unknown) => agentService.createMessage(sessionId, data),
+      listEvents: (sessionId: string) => agentService.listEvents(sessionId),
+      listRuns: (sessionId: string) => agentService.listRuns(sessionId),
+      createEventStream: (sessionId: string) => agentService.createEventStream(sessionId),
+    }),
+  }
+})
 
 class FakeEventSource {
   private readonly listeners = new Map<string, Array<(event: MessageEvent<string>) => void>>()
@@ -211,7 +222,7 @@ describe('AgentSessionPage', () => {
       })
     })
 
-    expect(queryClient.getQueryData(queryKeys.sessions.events('session-1'))).toEqual([
+    expect(queryClient.getQueryData(queryKeys.sessions.events('workspace-1', 'session-1'))).toEqual([
       {
         eventId: 'event-stream-1',
         sessionId: 'session-1',
@@ -492,7 +503,7 @@ describe('AgentSessionPage', () => {
   })
 
   it('skips session-specific queries when session id is missing', async () => {
-    renderSession({ initialEntries: ['/agent/sessions'], routePath: '/agent/sessions' })
+    renderSession({ initialEntries: ['/workspaces/workspace-1/sessions'], routePath: '/workspaces/:workspaceId/sessions' })
 
     await waitFor(() => {
       expect(agentService.listAgents).toHaveBeenCalled()
@@ -508,8 +519,8 @@ describe('AgentSessionPage', () => {
 })
 
 function renderSession({
-  initialEntries = ['/agent/sessions/session-1'],
-  routePath = '/agent/sessions/:sessionId',
+  initialEntries = ['/workspaces/workspace-1/sessions/session-1'],
+  routePath = '/workspaces/:workspaceId/sessions/:sessionId',
 }: {
   initialEntries?: string[]
   routePath?: string

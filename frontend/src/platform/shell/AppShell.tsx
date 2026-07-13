@@ -1,26 +1,20 @@
-import { Bot, ChevronDown, Grid2X2, Menu, UserRound } from 'lucide-react'
+import { Bot, Grid2X2, UserRound } from 'lucide-react'
 import type { PropsWithChildren } from 'react'
 import { Link } from 'react-router-dom'
+import { WorkspaceSelector } from '@/features/workspaces/WorkspaceSelector'
 
-export function AppShell({ children }: PropsWithChildren) {
+export function AppShell({ workspaceId, children }: PropsWithChildren<{ workspaceId: string }>) {
   return (
     <div className="app-frame">
       <header className="topbar">
         <div className="topbar-left">
-          <Link to="/agent/sessions" className="brand">
-            KK Studio
-          </Link>
+          <Link to="/workspaces" className="brand">KK Studio</Link>
           <div className="divider" />
-          <div className="workspace">
-            <Menu aria-hidden="true" className="icon-main" />
-            <span>Cloud Runtime</span>
-            <ChevronDown aria-hidden="true" className="icon-chev" />
-          </div>
+          <WorkspaceSelector workspaceId={workspaceId} />
         </div>
-
         <div className="topbar-center">
           <nav className="topnav" aria-label="Primary">
-            <Link className="active" to="/agent/sessions">
+            <Link className="active" to={`/workspaces/${encodeURIComponent(workspaceId)}/sessions`}>
               <Bot aria-hidden="true" />
               <span>AI</span>
             </Link>
@@ -30,12 +24,7 @@ export function AppShell({ children }: PropsWithChildren) {
             </button>
           </nav>
         </div>
-
-        <div className="topbar-right">
-          <div className="avatar" title="KK Studio">
-            <UserRound aria-hidden="true" />
-          </div>
-        </div>
+        <div className="topbar-right"><div className="avatar" title="KK Studio"><UserRound aria-hidden="true" /></div></div>
       </header>
       <main className="stage">{children}</main>
     </div>
