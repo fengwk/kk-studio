@@ -16,6 +16,8 @@ public final class AgentIdGenerator {
   public static final String AGENT_SESSION = "agent_session";
   public static final String AGENT_SESSION_EVENT = "agent_session_event";
   public static final String AGENT_RUN = "agent_run";
+  public static final String HARNESS_SESSION = "harness_session";
+  public static final String HARNESS_SESSION_ENTRY = "harness_session_entry";
 
   private AgentIdGenerator() {}
 
@@ -45,5 +47,13 @@ public final class AgentIdGenerator {
 
   public static long nextRunId() {
     return GlobalSnowflakeIdGenerator.next(AGENT_RUN);
+  }
+
+  public static long nextHarnessSessionId() {
+    return GlobalSnowflakeIdGenerator.next(HARNESS_SESSION);
+  }
+
+  public static long nextHarnessSessionEntryId() {
+    return GlobalSnowflakeIdGenerator.next(HARNESS_SESSION_ENTRY);
   }
 }

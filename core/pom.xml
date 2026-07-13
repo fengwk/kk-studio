@@ -21,6 +21,10 @@
             <artifactId>kk-studio-agent</artifactId>
         </dependency>
         <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-runtime</artifactId>
+        </dependency>
+        <dependency>
             <groupId>fun.fengwk.convention4j</groupId>
             <artifactId>convention4j-spring-boot-starter</artifactId>
         </dependency>
