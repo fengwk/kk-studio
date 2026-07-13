@@ -213,7 +213,7 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
       if (!terminal.compareAndSet(false, true)) {
         return;
       }
-      if (cancelled.get() || response.stopReason() == ProviderStopReason.CANCELLED) {
+      if (cancelled.get()) {
         handler.onFailed(
             new ProviderException(ProviderErrorKind.CANCELLED, "assistant turn cancelled"));
         return;
@@ -221,14 +221,24 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
       try {
         AgentTurnResult result;
         synchronized (this) {
-          emitFinalGaps(response);
-          List<ToolCall> calls = validateToolCalls(response);
-          validateStopReason(response, calls);
-          result =
-              new AgentTurnResult(
-                  new AgentAssistantMessage(response.text(), response.thinking(), calls), response);
+          validateStopReason(response);
+          if (response.stopReason() == ProviderStopReason.CANCELLED) {
+            result = null;
+          } else {
+            emitFinalGaps(response);
+            List<ToolCall> calls = validateToolCalls(response);
+            result =
+                new AgentTurnResult(
+                    new AgentAssistantMessage(response.text(), response.thinking(), calls),
+                    response);
+          }
         }
-        handler.onCompleted(result);
+        if (result == null) {
+          handler.onFailed(
+              new ProviderException(ProviderErrorKind.CANCELLED, "assistant turn cancelled"));
+        } else {
+          handler.onCompleted(result);
+        }
       } catch (RuntimeException error) {
         handler.onFailed(
             new ProviderException(
@@ -348,12 +358,17 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
       return List.copyOf(calls);
     }
 
-    private void validateStopReason(ProviderResponse response, List<ToolCall> calls) {
-      if (response.stopReason() == ProviderStopReason.LENGTH && !calls.isEmpty()) {
-        throw new IllegalArgumentException("length-limited response must not execute tool calls");
+    private void validateStopReason(ProviderResponse response) {
+      boolean hasToolCalls = !response.toolCalls().isEmpty();
+      if (response.stopReason() == ProviderStopReason.TOOL_CALLS) {
+        if (!hasToolCalls) {
+          throw new IllegalArgumentException("tool-call response requires tool calls");
+        }
+        return;
       }
-      if (response.stopReason() == ProviderStopReason.TOOL_CALLS && calls.isEmpty()) {
-        throw new IllegalArgumentException("tool-call response requires tool calls");
+      if (hasToolCalls) {
+        throw new IllegalArgumentException(
+            "only TOOL_CALLS stop reason may return executable tool calls");
       }
     }
   }

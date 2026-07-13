@@ -79,25 +79,71 @@ class DefaultAgentTurnEngineTest {
     assertFalse(handler.failed);
   }
 
-  /** 截断响应携带工具调用时必须失败，避免 Runtime 将不完整参数交给执行层。 */
+  /** 只有 TOOL_CALLS 结束原因可以携带调用，其他结束原因必须在投递 final gap 前失败。 */
   @Test
-  void rejectsLengthLimitedToolCalls() {
+  void rejectsToolCallsForEveryOtherStopReason() {
+    for (ProviderStopReason stopReason :
+        List.of(
+            ProviderStopReason.COMPLETED,
+            ProviderStopReason.LENGTH,
+            ProviderStopReason.CONTENT_FILTER,
+            ProviderStopReason.OTHER,
+            ProviderStopReason.CANCELLED)) {
+      FakeModelProvider provider =
+          FakeModelProvider.sequence()
+              .complete(
+                  response(
+                      "",
+                      "",
+                      List.of(new ProviderToolCall("call-1", "read", "{\"path\":\"README.md\"}")),
+                      stopReason))
+              .build();
+      RecordingHandler handler = new RecordingHandler();
+
+      new DefaultAgentTurnEngine(provider).execute(request(), handler);
+
+      assertTrue(handler.failed, stopReason.name());
+      assertEquals(List.of("started", "failed"), handler.events, stopReason.name());
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, handler.failure.kind(), stopReason.name());
+      assertEquals(null, handler.result, stopReason.name());
+    }
+  }
+
+  /** TOOL_CALLS 没有完整调用时必须由 Turn Engine 拒绝。 */
+  @Test
+  void rejectsToolCallsStopReasonWithoutCalls() {
     FakeModelProvider provider =
         FakeModelProvider.sequence()
-            .complete(
-                response(
-                    "",
-                    "",
-                    List.of(new ProviderToolCall("call-1", "read", "{\"path\":\"README.md\"}")),
-                    ProviderStopReason.LENGTH))
+            .complete(response("", "", List.of(), ProviderStopReason.TOOL_CALLS))
             .build();
     RecordingHandler handler = new RecordingHandler();
 
     new DefaultAgentTurnEngine(provider).execute(request(), handler);
 
+    assertEquals(List.of("started", "failed"), handler.events);
     assertTrue(handler.failed);
-    assertEquals(1, handler.events.stream().filter("failed"::equals).count());
-    assertFalse(handler.events.contains("completed"));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, handler.failure.kind());
+    assertEquals(null, handler.result);
+  }
+
+  /** CONTENT_FILTER/OTHER 不携带调用时仍是完整 Turn，由上层 Run 决定后续策略。 */
+  @Test
+  void completesContentFilterAndOtherWithoutToolCalls() {
+    for (ProviderStopReason stopReason :
+        List.of(ProviderStopReason.CONTENT_FILTER, ProviderStopReason.OTHER)) {
+      FakeModelProvider provider =
+          FakeModelProvider.sequence()
+              .complete(response("provider-result", "", List.of(), stopReason))
+              .build();
+      RecordingHandler handler = new RecordingHandler();
+
+      new DefaultAgentTurnEngine(provider).execute(request(), handler);
+
+      assertEquals(List.of("started", "delta", "completed"), handler.events, stopReason.name());
+      assertEquals("provider-result", handler.result.assistantMessage().text());
+      assertEquals(stopReason, handler.result.providerResponse().stopReason());
+      assertFalse(handler.failed, stopReason.name());
+    }
   }
 
   /** 未声明工具、非法 JSON 或 schema 不匹配都在 Turn 内失败，不会产生可执行结果。 */
@@ -393,6 +439,7 @@ class DefaultAgentTurnEngineTest {
 
     private final List<String> events = Collections.synchronizedList(new ArrayList<>());
     private volatile AgentTurnResult result;
+    private volatile ProviderException failure;
     private volatile boolean failed;
 
     @Override
@@ -414,6 +461,7 @@ class DefaultAgentTurnEngineTest {
     @Override
     public void onFailed(ProviderException error) {
       events.add("failed");
+      failure = error;
       failed = true;
     }
   }

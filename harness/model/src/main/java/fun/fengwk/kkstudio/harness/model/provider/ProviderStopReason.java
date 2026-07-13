@@ -5,5 +5,7 @@ public enum ProviderStopReason {
   COMPLETED,
   TOOL_CALLS,
   LENGTH,
+  CONTENT_FILTER,
+  OTHER,
   CANCELLED
 }

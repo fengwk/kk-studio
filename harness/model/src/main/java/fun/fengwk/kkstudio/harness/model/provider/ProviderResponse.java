@@ -25,8 +25,5 @@ public record ProviderResponse(
     stopReason = Objects.requireNonNull(stopReason, "stopReason");
     usage = Objects.requireNonNull(usage, "usage");
     cost = Objects.requireNonNull(cost, "cost");
-    if (stopReason == ProviderStopReason.TOOL_CALLS && toolCalls.isEmpty()) {
-      throw new IllegalArgumentException("TOOL_CALLS stop reason requires complete tool calls");
-    }
   }
 }

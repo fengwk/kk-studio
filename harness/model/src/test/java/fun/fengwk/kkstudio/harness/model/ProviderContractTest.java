@@ -92,17 +92,17 @@ class ProviderContractTest {
         () -> new ProviderStreamEvent.ToolCallDelta(-1, "call-1", null, null));
   }
 
-  /** 完整响应必须携带非空 usage/cost，且 TOOL_CALLS 结束原因必须给出完整调用。 */
+  /** 完整响应必须携带非空 usage/cost，并原样保留由 Turn Engine 校验的结束原因。 */
   @Test
-  void requiresCompleteResponseAccountingAndToolCalls() {
+  void requiresCompleteResponseAccountingAndPreservesStopReason() {
     ModelUsage usage = new ModelUsage(1, 2, 0, 0, 0);
     ModelCost cost = new ModelCost("USD", BigDecimal.ZERO);
 
     assertThrows(
         NullPointerException.class,
         () -> new ProviderResponse("", "", List.of(), ProviderStopReason.COMPLETED, null, cost));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ProviderResponse("", "", List.of(), ProviderStopReason.TOOL_CALLS, usage, cost));
+    ProviderResponse response =
+        new ProviderResponse("", "", List.of(), ProviderStopReason.TOOL_CALLS, usage, cost);
+    assertEquals(ProviderStopReason.TOOL_CALLS, response.stopReason());
   }
 }

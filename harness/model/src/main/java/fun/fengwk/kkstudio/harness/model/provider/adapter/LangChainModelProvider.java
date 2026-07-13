@@ -388,7 +388,9 @@ abstract class LangChainModelProvider implements ModelProvider {
     TokenUsage usage =
         response == null || response.metadata() == null ? null : response.metadata().tokenUsage();
     ModelUsage modelUsage = toUsage(usage);
-    ProviderStopReason stopReason = toStopReason(response, calls);
+    FinishReason finishReason =
+        response == null || response.metadata() == null ? null : response.metadata().finishReason();
+    ProviderStopReason stopReason = toStopReason(finishReason, !calls.isEmpty());
     String text =
         response == null || response.aiMessage() == null ? "" : response.aiMessage().text();
     String thinking =
@@ -430,14 +432,17 @@ abstract class LangChainModelProvider implements ModelProvider {
     return new ModelUsage(input, output, 0, 0, 0);
   }
 
-  private static ProviderStopReason toStopReason(
-      ChatResponse response, List<ProviderToolCall> calls) {
-    if (response != null
-        && response.metadata() != null
-        && response.metadata().finishReason() == FinishReason.LENGTH) {
-      return ProviderStopReason.LENGTH;
+  static ProviderStopReason toStopReason(FinishReason finishReason, boolean hasToolCalls) {
+    if (finishReason == null) {
+      return hasToolCalls ? ProviderStopReason.TOOL_CALLS : ProviderStopReason.COMPLETED;
     }
-    return calls.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS;
+    return switch (finishReason) {
+      case STOP -> ProviderStopReason.COMPLETED;
+      case LENGTH -> ProviderStopReason.LENGTH;
+      case TOOL_EXECUTION -> ProviderStopReason.TOOL_CALLS;
+      case CONTENT_FILTER -> ProviderStopReason.CONTENT_FILTER;
+      case OTHER -> ProviderStopReason.OTHER;
+    };
   }
 
   private static ProviderErrorKind classify(Throwable error, ProviderStream stream) {
