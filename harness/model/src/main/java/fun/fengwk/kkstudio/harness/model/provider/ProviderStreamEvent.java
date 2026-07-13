@@ -22,13 +22,26 @@ public sealed interface ProviderStreamEvent
     }
   }
 
-  /** 以源顺序索引标识的完整工具调用增量。 */
-  record ToolCallDelta(int index, ProviderToolCall toolCall) implements ProviderStreamEvent {
+  /**
+   * 以源顺序索引标识的工具调用增量。
+   *
+   * <p>id、name、argumentsJson 都是可选的增量片段，至少一个必须存在；完整调用只由 {@link ProviderResponse} 提供。
+   */
+  record ToolCallDelta(int index, String id, String name, String argumentsJson)
+      implements ProviderStreamEvent {
     public ToolCallDelta {
       if (index < 0) {
         throw new IllegalArgumentException("index must not be negative");
       }
-      toolCall = Objects.requireNonNull(toolCall, "toolCall");
+      if (id == null && name == null && argumentsJson == null) {
+        throw new IllegalArgumentException("tool call delta must contain at least one field");
+      }
+      if (id != null && id.isBlank()) {
+        throw new IllegalArgumentException("id must not be blank when present");
+      }
+      if (name != null && name.isBlank()) {
+        throw new IllegalArgumentException("name must not be blank when present");
+      }
     }
   }
 }

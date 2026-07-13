@@ -42,6 +42,29 @@ class ToolContractTest {
                 .validateFor(descriptor));
   }
 
+  /** 工具版本必须稳定，缺省 rendererKey 使用工具名，显式 key 则保持原值。 */
+  @Test
+  void definesStableVersionAndRendererIdentity() {
+    ToolDescriptor defaultRenderer = descriptor();
+    ToolDescriptor customRenderer = descriptor("workspace-search");
+
+    assertEquals("1.0.0", defaultRenderer.version());
+    assertEquals("search", defaultRenderer.rendererKey());
+    assertEquals("workspace-search", customRenderer.rendererKey());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolDescriptor(
+                "search",
+                "",
+                "Search",
+                null,
+                schema(),
+                ToolExecutionMode.CLOUD,
+                ToolSideEffect.READ_ONLY,
+                Duration.ZERO));
+  }
+
   /** 执行请求必须复用 descriptor 校验，并在没有覆盖时使用 descriptor 超时。 */
   @Test
   void validatesExecutionCallAndResolvesDefaultTimeout() {
@@ -57,6 +80,21 @@ class ToolContractTest {
         () ->
             new ToolExecutionRequest(
                 descriptor(), new ToolCall("call-1", "other", "{}"), Duration.ofSeconds(1)));
+  }
+
+  /** 结果 details 必须是 JSON object，terminate 只作为 runtime 内存提示保留。 */
+  @Test
+  void validatesStructuredDetailsAndPreservesTerminateHint() {
+    ToolResult result =
+        new ToolResult(
+            "call-1", List.of(new TextToolContent("done")), false, "{\"exitCode\":0}", true);
+
+    assertEquals("{\"exitCode\":0}", result.detailsJson());
+    assertEquals(true, result.terminate());
+    assertEquals("{}", new ToolResult("call-1", List.of(), false, null, false).detailsJson());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ToolResult("call-1", List.of(), false, "[]", false));
   }
 
   /** invocation 生命周期消息必须带 invocation ID，连接级消息则无需该字段。 */
@@ -79,23 +117,31 @@ class ToolContractTest {
   }
 
   private ToolDescriptor descriptor() {
-    ToolParamsSchema schema =
-        new ToolParamsSchema(
-            "search input",
-            Map.of(
-                "query",
-                new ToolStringSchema("search query"),
-                "formats",
-                new ToolArraySchema(
-                    "output formats", new ToolEnumSchema("format", List.of("text", "json")))),
-            Set.of("query"),
-            false);
+    return descriptor(null);
+  }
+
+  private ToolDescriptor descriptor(String rendererKey) {
     return new ToolDescriptor(
         "search",
+        "1.0.0",
         "Search the workspace",
-        schema,
+        rendererKey,
+        schema(),
         ToolExecutionMode.CLOUD,
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(10));
+  }
+
+  private ToolParamsSchema schema() {
+    return new ToolParamsSchema(
+        "search input",
+        Map.of(
+            "query",
+            new ToolStringSchema("search query"),
+            "formats",
+            new ToolArraySchema(
+                "output formats", new ToolEnumSchema("format", List.of("text", "json")))),
+        Set.of("query"),
+        false);
   }
 }

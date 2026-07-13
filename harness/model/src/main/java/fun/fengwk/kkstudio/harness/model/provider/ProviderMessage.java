@@ -1,20 +1,34 @@
 package fun.fengwk.kkstudio.harness.model.provider;
 
+import java.util.List;
 import java.util.Objects;
 
-/** 已完成语义消息到特定 Provider 请求消息的转换结果。 */
-public record ProviderMessage(ProviderMessageRole role, String content, String toolCallId) {
+/** 已完成语义消息到 Provider 请求消息的无损、Provider 无关表示。 */
+public record ProviderMessage(ProviderMessageRole role, List<ProviderContentBlock> contents) {
 
   public ProviderMessage {
     role = Objects.requireNonNull(role, "role");
-    if (content == null) {
-      throw new IllegalArgumentException("content must not be null");
+    contents = List.copyOf(Objects.requireNonNull(contents, "contents"));
+    if (contents.isEmpty()) {
+      throw new IllegalArgumentException("contents must not be empty");
     }
-    if (role == ProviderMessageRole.TOOL && (toolCallId == null || toolCallId.isBlank())) {
-      throw new IllegalArgumentException("toolCallId must not be blank for TOOL messages");
+    validateRoleContents(role, contents);
+  }
+
+  private static void validateRoleContents(
+      ProviderMessageRole role, List<ProviderContentBlock> contents) {
+    boolean hasToolCall = contents.stream().anyMatch(ProviderToolCallBlock.class::isInstance);
+    boolean hasToolResult = contents.stream().anyMatch(ProviderToolResultBlock.class::isInstance);
+    if (hasToolCall && role != ProviderMessageRole.ASSISTANT) {
+      throw new IllegalArgumentException(
+          "tool call blocks are only allowed for ASSISTANT messages");
     }
-    if (role != ProviderMessageRole.TOOL && toolCallId != null) {
-      throw new IllegalArgumentException("toolCallId is only allowed for TOOL messages");
+    if (hasToolResult && role != ProviderMessageRole.TOOL) {
+      throw new IllegalArgumentException("tool result blocks are only allowed for TOOL messages");
+    }
+    if (role == ProviderMessageRole.TOOL
+        && contents.stream().anyMatch(block -> !(block instanceof ProviderToolResultBlock))) {
+      throw new IllegalArgumentException("TOOL messages may only contain tool result blocks");
     }
   }
 }

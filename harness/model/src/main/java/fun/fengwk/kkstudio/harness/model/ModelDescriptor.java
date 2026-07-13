@@ -9,6 +9,9 @@ public record ModelDescriptor(
     String providerId,
     String modelId,
     String displayName,
+    long contextWindow,
+    long maxOutputTokens,
+    Set<ModelInputModality> inputModalities,
     Set<ModelCapability> capabilities,
     List<ModelVariant> variants,
     ModelPricing pricing) {
@@ -17,8 +20,24 @@ public record ModelDescriptor(
     providerId = requireNonBlank(providerId, "providerId");
     modelId = requireNonBlank(modelId, "modelId");
     displayName = requireNonBlank(displayName, "displayName");
+    if (contextWindow <= 0) {
+      throw new IllegalArgumentException("contextWindow must be positive");
+    }
+    if (maxOutputTokens <= 0 || maxOutputTokens > contextWindow) {
+      throw new IllegalArgumentException("maxOutputTokens must be in (0, contextWindow]");
+    }
+    inputModalities = Set.copyOf(Objects.requireNonNull(inputModalities, "inputModalities"));
+    if (inputModalities.isEmpty()) {
+      throw new IllegalArgumentException("inputModalities must not be empty");
+    }
     capabilities = Set.copyOf(Objects.requireNonNull(capabilities, "capabilities"));
     variants = List.copyOf(Objects.requireNonNull(variants, "variants"));
+    if (variants.stream()
+        .anyMatch(
+            variant ->
+                variant.maxOutputTokens() != null && variant.maxOutputTokens() > maxOutputTokens)) {
+      throw new IllegalArgumentException("variant maxOutputTokens must not exceed model maximum");
+    }
     pricing = Objects.requireNonNull(pricing, "pricing");
   }
 

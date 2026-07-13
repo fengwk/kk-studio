@@ -19,21 +19,22 @@ public record ModelCost(String currency, BigDecimal amount) {
     }
   }
 
+  /** 根据每种 Provider 用量类别的适用单价计算成本。 */
   public static ModelCost calculate(ModelPricing pricing, ModelUsage usage) {
     Objects.requireNonNull(pricing, "pricing");
     Objects.requireNonNull(usage, "usage");
-    long billableInputTokens = usage.inputTokens() - usage.cachedInputTokens();
     BigDecimal amount =
-        pricing
-            .inputPerMillionTokens()
-            .multiply(BigDecimal.valueOf(billableInputTokens))
-            .add(
-                pricing
-                    .cachedInputPerMillionTokens()
-                    .multiply(BigDecimal.valueOf(usage.cachedInputTokens())))
-            .add(
-                pricing.outputPerMillionTokens().multiply(BigDecimal.valueOf(usage.outputTokens())))
-            .divide(ONE_MILLION, 12, RoundingMode.HALF_UP);
-    return new ModelCost(pricing.currency(), amount);
+        cost(pricing.inputPerMillionTokens(), usage.inputTokens())
+            .add(cost(pricing.outputPerMillionTokens(), usage.outputTokens()))
+            .add(cost(pricing.cacheReadPerMillionTokens(), usage.cacheReadTokens()))
+            .add(cost(pricing.cacheWritePerMillionTokens(), usage.cacheWriteTokens()))
+            .add(cost(pricing.reasoningPerMillionTokens(), usage.reasoningTokens()));
+    return new ModelCost(pricing.currency(), amount.setScale(12, RoundingMode.HALF_UP));
+  }
+
+  private static BigDecimal cost(BigDecimal pricePerMillionTokens, long tokens) {
+    return pricePerMillionTokens
+        .multiply(BigDecimal.valueOf(tokens))
+        .divide(ONE_MILLION, 12, RoundingMode.HALF_UP);
   }
 }

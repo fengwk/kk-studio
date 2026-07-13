@@ -3,12 +3,14 @@ package fun.fengwk.kkstudio.harness.model;
 import java.math.BigDecimal;
 import java.util.Objects;
 
-/** 每百万 token 的模型价格，用于可重现地计算请求成本。 */
+/** 每百万 token 的模型价格，按 Provider 报告的用量类别分别计费。 */
 public record ModelPricing(
     String currency,
     BigDecimal inputPerMillionTokens,
     BigDecimal outputPerMillionTokens,
-    BigDecimal cachedInputPerMillionTokens) {
+    BigDecimal cacheReadPerMillionTokens,
+    BigDecimal cacheWritePerMillionTokens,
+    BigDecimal reasoningPerMillionTokens) {
 
   public ModelPricing {
     if (currency == null || currency.isBlank()) {
@@ -16,8 +18,12 @@ public record ModelPricing(
     }
     inputPerMillionTokens = requireNonNegative(inputPerMillionTokens, "inputPerMillionTokens");
     outputPerMillionTokens = requireNonNegative(outputPerMillionTokens, "outputPerMillionTokens");
-    cachedInputPerMillionTokens =
-        requireNonNegative(cachedInputPerMillionTokens, "cachedInputPerMillionTokens");
+    cacheReadPerMillionTokens =
+        requireNonNegative(cacheReadPerMillionTokens, "cacheReadPerMillionTokens");
+    cacheWritePerMillionTokens =
+        requireNonNegative(cacheWritePerMillionTokens, "cacheWritePerMillionTokens");
+    reasoningPerMillionTokens =
+        requireNonNegative(reasoningPerMillionTokens, "reasoningPerMillionTokens");
   }
 
   private static BigDecimal requireNonNegative(BigDecimal value, String name) {
