@@ -314,20 +314,22 @@ public final class DaemonRuntime implements AutoCloseable {
     try {
       DaemonEnvelope envelope = envelopeCodec.decode(rawMessage);
       verifyScope(envelope);
+      InboundEnvelopeIdentity identity =
+          InboundEnvelopeIdentity.from(envelope, envelopeCodec.readPayload(envelope));
       switch (envelope.messageType()) {
         case INVOKE -> {
           requireInvocationId(envelope);
           InvokePayload payload = readInvokePayload(envelope);
-          connection.acceptInboundSequence(envelope.sequence());
+          connection.acceptInboundEnvelope(identity);
           processInvoke(envelope, payload);
         }
         case CANCEL -> {
           requireInvocationId(envelope);
-          connection.acceptInboundSequence(envelope.sequence());
+          connection.acceptInboundEnvelope(identity);
           processCancel(envelope);
         }
         case WELCOME, ACK, ERROR -> {
-          connection.acceptInboundSequence(envelope.sequence());
+          connection.acceptInboundEnvelope(identity);
           // Cloud control messages do not alter local invocation facts.
         }
         default -> throw new DaemonProtocolException(
@@ -470,8 +472,7 @@ public final class DaemonRuntime implements AutoCloseable {
     if (arguments == null || !arguments.isObject()) {
       throw new DaemonProtocolException("INVOKE payload.arguments must be a JSON object");
     }
-    long timeoutMillis =
-        optionalNonNegativeLong(payload, "timeoutMillis", config.defaultToolTimeout().toMillis());
+    long timeoutMillis = optionalNonNegativeLong(payload, "timeoutMillis", 0);
     return new InvokePayload(
         requiredPayloadText(payload, "toolName"),
         requiredPayloadText(payload, "toolVersion"),
@@ -747,7 +748,7 @@ public final class DaemonRuntime implements AutoCloseable {
     private final long generation;
     private final DaemonConnection connection;
     private final AtomicBoolean ready = new AtomicBoolean();
-    private long lastInboundSequence = -1;
+    private InboundEnvelopeIdentity lastInboundIdentity;
 
     private ActiveConnection(long generation, DaemonConnection connection) {
       this.generation = generation;
@@ -770,19 +771,49 @@ public final class DaemonRuntime implements AutoCloseable {
       return ready.get() && connection.isOpen();
     }
 
-    private synchronized void acceptInboundSequence(long sequence) {
-      if (lastInboundSequence < 0 || sequence == lastInboundSequence + 1) {
-        lastInboundSequence = sequence;
+    private synchronized void acceptInboundEnvelope(InboundEnvelopeIdentity identity) {
+      if (lastInboundIdentity == null
+          || identity.sequence() == lastInboundIdentity.sequence() + 1) {
+        lastInboundIdentity = identity;
         return;
       }
-      if (sequence == lastInboundSequence) {
-        return;
+      if (identity.sequence() == lastInboundIdentity.sequence()) {
+        if (identity.equals(lastInboundIdentity)) {
+          return;
+        }
+        throw new DaemonProtocolException(
+            "inbound sequence reused by a conflicting envelope: " + identity.sequence());
       }
-      if (sequence < lastInboundSequence) {
-        throw new DaemonProtocolException("inbound sequence moved backwards: " + sequence);
+      if (identity.sequence() < lastInboundIdentity.sequence()) {
+        throw new DaemonProtocolException(
+            "inbound sequence moved backwards: " + identity.sequence());
       }
       throw new DaemonProtocolException(
-          "inbound sequence must immediately follow " + lastInboundSequence + ": " + sequence);
+          "inbound sequence must immediately follow "
+              + lastInboundIdentity.sequence()
+              + ": "
+              + identity.sequence());
+    }
+  }
+
+  private record InboundEnvelopeIdentity(
+      int protocolVersion,
+      DaemonMessageType messageType,
+      String workspaceId,
+      String environmentId,
+      String invocationId,
+      long sequence,
+      JsonNode payload) {
+
+    private static InboundEnvelopeIdentity from(DaemonEnvelope envelope, JsonNode payload) {
+      return new InboundEnvelopeIdentity(
+          envelope.protocolVersion(),
+          envelope.messageType(),
+          envelope.workspaceId(),
+          envelope.environmentId(),
+          envelope.invocationId(),
+          envelope.sequence(),
+          payload);
     }
   }
 

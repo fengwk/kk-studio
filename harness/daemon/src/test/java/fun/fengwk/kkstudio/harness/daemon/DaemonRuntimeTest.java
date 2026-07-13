@@ -244,9 +244,9 @@ class DaemonRuntimeTest {
     assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
   }
 
-  /** 当前连接只接受连续 sequence；最新 envelope 的重复会 ACK 并复用 invocation journal。 */
+  /** 当前连接只接受连续 sequence；完全相同的最新 envelope 重发会 ACK 并复用 journal。 */
   @Test
-  void rejectsOutOfOrderSequenceAndHandlesLatestDuplicateIdempotently()
+  void rejectsOutOfOrderSequenceAndHandlesIdenticalReplayIdempotently()
       throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     TestTool tool = new TestTool();
@@ -268,6 +268,33 @@ class DaemonRuntimeTest {
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     transport.receive(cancel("sequence-invocation", 5));
     assertMessageTypes(transport.takeMessages(2), ACK, CANCELLED);
+  }
+
+  /** 相同 sequence 的 messageType、invocationId 或 payload 冲突必须在任何副作用前拒绝。 */
+  @Test
+  void rejectsConflictingEnvelopeThatReusesLatestSequence() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.receive(invoke("original", 4));
+    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+
+    transport.receive(invoke("different-invocation", 4));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    transport.receive(invoke("original", 4, "test", "1.0.0", 2000));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    transport.receive(cancel("original", 4));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    assertEquals(1, tool.executions.get());
+    assertEquals(0, tool.handle.cancelCalls.get());
+
+    transport.receive(invoke("different-invocation", 5));
+    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    assertEquals(2, tool.executions.get());
   }
 
   /** WELCOME/ACK/ERROR 只推进连接 sequence，不创建 invocation 或发送额外响应。 */
@@ -360,6 +387,38 @@ class DaemonRuntimeTest {
     assertEquals(1, tool.handle.cancelCalls.get());
     tool.complete(new ToolResult("timeout", List.of(), false, "{}", false));
     assertFalse(transport.hasMessages());
+  }
+
+  /** 缺省 timeoutMillis 表示不覆盖，必须优先使用 Tool descriptor timeout。 */
+  @Test
+  void omittedTimeoutUsesDescriptorTimeout() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool, Duration.ofMinutes(1), Duration.ofSeconds(30));
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.receive(invokeWithoutTimeout("omitted-descriptor-timeout", 1, "test", "1.0.0"));
+    transport.takeMessages(2);
+
+    assertEquals(Duration.ofSeconds(10), tool.request.effectiveTimeout());
+  }
+
+  /** timeoutMillis 缺省且 descriptor 为 0 时，必须回退 daemon 默认 timeout。 */
+  @Test
+  void omittedTimeoutFallsBackToDaemonDefault() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    DefaultTimeoutTool tool = new DefaultTimeoutTool();
+    runtime = runtime(transport, tool, Duration.ofMinutes(1), Duration.ofSeconds(12));
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.receive(invokeWithoutTimeout("omitted-default-timeout", 1, "fallback", "1.0.0"));
+    transport.takeMessages(2);
+
+    assertEquals(Duration.ofSeconds(12), tool.request.effectiveTimeout());
   }
 
   /** 0 timeout 使用 descriptor timeout，完成或取消时 deadline 必须被撤销。 */
@@ -509,6 +568,11 @@ class DaemonRuntimeTest {
   }
 
   private DaemonRuntime runtime(FakeTransport transport, Tool tool, Duration heartbeatInterval) {
+    return runtime(transport, tool, heartbeatInterval, Duration.ofSeconds(10));
+  }
+
+  private DaemonRuntime runtime(
+      FakeTransport transport, Tool tool, Duration heartbeatInterval, Duration defaultToolTimeout) {
     DaemonToolRegistry registry = new DaemonToolRegistry();
     registry.register(tool);
     return new DaemonRuntime(
@@ -520,7 +584,7 @@ class DaemonRuntimeTest {
             heartbeatInterval,
             Duration.ZERO,
             Duration.ofSeconds(1),
-            Duration.ofSeconds(10)),
+            defaultToolTimeout),
         transport,
         registry,
         new InMemoryDaemonInvocationJournal(),
@@ -551,6 +615,22 @@ class DaemonRuntimeTest {
             + "\",\"arguments\":{},\"timeoutMillis\":"
             + timeoutMillis
             + "}");
+  }
+
+  private DaemonEnvelope invokeWithoutTimeout(
+      String invocationId, long sequence, String toolName, String toolVersion) {
+    return new DaemonEnvelope(
+        DaemonProtocol.VERSION_1,
+        DaemonMessageType.INVOKE,
+        "workspace",
+        "environment",
+        invocationId,
+        sequence,
+        "{\"toolName\":\""
+            + toolName
+            + "\",\"toolVersion\":\""
+            + toolVersion
+            + "\",\"arguments\":{}}");
   }
 
   private DaemonEnvelope control(DaemonMessageType messageType, long sequence) {
