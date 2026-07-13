@@ -5,8 +5,8 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.agent.message.AgentMessage;
 import fun.fengwk.kkstudio.agent.session.Branch;
 import fun.fengwk.kkstudio.agent.session.Session;
-import fun.fengwk.kkstudio.agent.session.SessionEventType;
 import fun.fengwk.kkstudio.agent.session.SessionEvent;
+import fun.fengwk.kkstudio.agent.session.SessionEventType;
 import fun.fengwk.kkstudio.agent.session.SessionEventValidator;
 import fun.fengwk.kkstudio.agent.session.payload.AbortPayload;
 import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
@@ -27,10 +27,9 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Agent 是主链异步状态机：CAS 调度、信号队列与 drain、对外 API。
  *
- * <p>会话视图与事件持久化委托给 {@link AgentSessionWriter}；assistant 调用生命周期委托给
- * {@link AgentAssistantRunner}；tool batch 生命周期委托给 {@link AgentToolOrchestrator}；
- * 运行时配置解析通过 {@link AgentRuntimeConfigResolver} 由本类持有并在每次主循环转
- * assistant 之前调用。
+ * <p>会话视图与事件持久化委托给 {@link AgentSessionWriter}；assistant 调用生命周期委托给 {@link AgentAssistantRunner}；tool
+ * batch 生命周期委托给 {@link AgentToolOrchestrator}； 运行时配置解析通过 {@link AgentRuntimeConfigResolver}
+ * 由本类持有并在每次主循环转 assistant 之前调用。
  *
  * @author fengwk
  */
@@ -109,16 +108,12 @@ public class Agent {
     return statusRef.get();
   }
 
-  /**
-   * 通过 signal drain 更新 agent 名称，在下一次 assistant attempt 前生效。
-   */
+  /** 通过 signal drain 更新 agent 名称，在下一次 assistant attempt 前生效。 */
   public void setAgentName(String agentName) {
     enqueueSignal(new SetAgentNameSignal(requireNonBlank(agentName, "agentName")));
   }
 
-  /**
-   * 通过 signal drain 更新模型选择，在下一次 assistant attempt 前生效。
-   */
+  /** 通过 signal drain 更新模型选择，在下一次 assistant attempt 前生效。 */
   public void setModelSelection(String provider, String model, String variant) {
     enqueueSignal(new SetModelSelectionSignal(provider, model, variant));
   }
@@ -135,9 +130,7 @@ public class Agent {
     enqueueSignal(new AbortSignal(reason));
   }
 
-  /**
-   * 切换到当前 session 内、且与指定 head 完整一致的 branch event 链。
-   */
+  /** 切换到当前 session 内、且与指定 head 完整一致的 branch event 链。 */
   public void switchBranch(Branch branch, List<SessionEvent> branchEvents) {
     if (branch == null) {
       throw new IllegalArgumentException("branch must not be null");
@@ -357,22 +350,15 @@ public class Agent {
         runtimeConfigResolver.resolve(
             selection.agentName(), selection.provider(), selection.model(), selection.variant());
     if (!Objects.equals(runtimeConfig.getAgentPayload(), writer.getCurrentAgentInfo())) {
-      writer.appendEvent(
-          SessionEventType.set_agent_info,
-          runtimeConfig.getAgentPayload());
+      writer.appendEvent(SessionEventType.set_agent_info, runtimeConfig.getAgentPayload());
     }
     if (!Objects.equals(runtimeConfig.getModelPayload(), writer.getCurrentModelInfo())) {
-      writer.appendEvent(
-          SessionEventType.set_model_info,
-          runtimeConfig.getModelPayload());
+      writer.appendEvent(SessionEventType.set_model_info, runtimeConfig.getModelPayload());
     }
     return runtimeConfig;
   }
 
-  /**
-   * assistant error 信号处理：先把 error 信号交给 runner 写事件 + 清状态，然后由本类决定
-   * 是否 abort / 调度 retry。
-   */
+  /** assistant error 信号处理：先把 error 信号交给 runner 写事件 + 清状态，然后由本类决定 是否 abort / 调度 retry。 */
   private void onAssistantError(AssistantErrorSignal signal) {
     if (!assistant.onError(currentRun, signal)) {
       return;

@@ -18,12 +18,6 @@ public class SetAgentInfoPayload implements Payload {
   /** 当前生效的 system prompt。 */
   private String systemPrompt;
 
-  /** 当前可用工具名称列表。 */
+  /** 当前 Agent 声明的工具名称列表。 */
   private List<String> tools;
-
-  /** 当前可用子代理名称列表。 */
-  private List<String> subagents;
-
-  /** 当前启用技能名称列表。 */
-  private List<String> skills;
 }

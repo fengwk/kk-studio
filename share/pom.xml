@@ -35,13 +35,6 @@
         </developer>
     </developers>
 
-    <dependencies>
-        <dependency>
-            <groupId>fun.fengwk.convention4j</groupId>
-            <artifactId>convention4j-api</artifactId>
-        </dependency>
-    </dependencies>
-
     <build>
         <plugins>
             <plugin>

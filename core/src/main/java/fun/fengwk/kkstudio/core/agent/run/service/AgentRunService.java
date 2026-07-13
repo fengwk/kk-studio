@@ -22,4 +22,6 @@ public interface AgentRunService {
   List<AgentRunDTO> listRuns(String sessionId);
 
   boolean hasActiveRun(String sessionId);
+
+  void deleteRunsBySessionId(String sessionId);
 }

@@ -18,9 +18,8 @@ import java.util.List;
 /**
  * AgentSessionWriter 维护当前 branch 的投影视图并串行追加事件。
  *
- * <p>session、branch、branchEvents 与由其派生的 agent/model/messages 缓存始终来自同一条
- * branch event 链。构造时建立初始投影；切换分支或追加事件后标记缓存为 dirty，在下一次读取
- * 投影数据时重新建立完整投影。
+ * <p>session、branch、branchEvents 与由其派生的 agent/model/messages 缓存始终来自同一条 branch event
+ * 链。构造时建立初始投影；切换分支或追加事件后标记缓存为 dirty，在下一次读取 投影数据时重新建立完整投影。
  *
  * @author fengwk
  */
@@ -142,7 +141,8 @@ final class AgentSessionWriter {
   }
 
   private void refreshProjection() {
-    SessionEventProjection projection = sessionEventMessageProjector.projectForRuntime(branchEvents);
+    SessionEventProjection projection =
+        sessionEventMessageProjector.projectForRuntime(branchEvents);
     List<AgentMessage> messages = List.copyOf(projection.messages());
     this.currentProjection =
         new SessionEventProjection(projection.agentInfo(), projection.modelInfo(), messages);

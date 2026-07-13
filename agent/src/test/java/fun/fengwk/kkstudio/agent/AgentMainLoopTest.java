@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.agent.message.AgentAssistantMessage;
 import fun.fengwk.kkstudio.agent.message.AgentMessage;
 import fun.fengwk.kkstudio.agent.message.AgentSystemMessage;
+import fun.fengwk.kkstudio.agent.message.AgentToolMessage;
 import fun.fengwk.kkstudio.agent.message.AgentUserMessage;
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
 import fun.fengwk.kkstudio.agent.model.ModelRegistry;
@@ -351,11 +352,14 @@ public class AgentMainLoopTest {
     List<AgentMessage> reloadedMessages = context.provider.receivedMessages.get(1);
     assertEquals(4, reloadedMessages.size());
     assertEquals("sys", assertInstanceOf(AgentSystemMessage.class, reloadedMessages.get(0)).text());
-    assertEquals("first question", assertInstanceOf(AgentUserMessage.class, reloadedMessages.get(1)).text());
+    assertEquals(
+        "first question", assertInstanceOf(AgentUserMessage.class, reloadedMessages.get(1)).text());
     assertEquals(
         "first answer",
         assertInstanceOf(AgentAssistantMessage.class, reloadedMessages.get(2)).text());
-    assertEquals("second question", assertInstanceOf(AgentUserMessage.class, reloadedMessages.get(3)).text());
+    assertEquals(
+        "second question",
+        assertInstanceOf(AgentUserMessage.class, reloadedMessages.get(3)).text());
     assertEquals(AgentStatus.idle, reloadedAgent.getStatus());
   }
 
@@ -475,7 +479,8 @@ public class AgentMainLoopTest {
     Agent agent = context.newAgent();
     Branch foreignBranch = Branch.newBranch("se_foreign", SessionEvent.ROOT_EVENT_ID);
 
-    assertThrows(IllegalArgumentException.class, () -> agent.switchBranch(foreignBranch, List.of()));
+    assertThrows(
+        IllegalArgumentException.class, () -> agent.switchBranch(foreignBranch, List.of()));
     SessionEvent foreignEvent =
         SessionEvent.newEvent(
             "se_foreign",
@@ -511,7 +516,8 @@ public class AgentMainLoopTest {
     Branch branch = Branch.newBranch(context.session.getSessionId(), end.getEventId());
 
     assertThrows(IllegalArgumentException.class, () -> agent.switchBranch(branch, List.of(start)));
-    assertThrows(IllegalArgumentException.class, () -> agent.switchBranch(branch, List.of(end, start)));
+    assertThrows(
+        IllegalArgumentException.class, () -> agent.switchBranch(branch, List.of(end, start)));
 
     assertEquals(SessionEvent.ROOT_EVENT_ID, agent.getBranch().headEventId());
     assertEquals(List.of(), agent.getBranchEvents());
@@ -535,7 +541,8 @@ public class AgentMainLoopTest {
           retryTask.set(task);
           return () -> retryCancelled.set(true);
         };
-    context.provider.enqueue(handler -> handler.onError(new RuntimeException("retry"), noopHandle()));
+    context.provider.enqueue(
+        handler -> handler.onError(new RuntimeException("retry"), noopHandle()));
 
     Agent agent = context.newAgent();
     agent.submit(UserRequest.userRequest("hello"));
@@ -672,6 +679,7 @@ public class AgentMainLoopTest {
   @Test
   public void testToolNotFoundWritesErrorAndContinuesAssistant() {
     RecordingContext context = new RecordingContext();
+    context.agentRegistry.tools = List.of("missing");
     ToolCall toolCall = new ToolCall();
     toolCall.setToolCallId("call_1");
     toolCall.setToolName("missing");
@@ -693,11 +701,79 @@ public class AgentMainLoopTest {
     Agent agent = context.newAgent();
     agent.submit(UserRequest.userRequest("hello"));
 
+    assertEquals(List.of("missing"), agent.getCurrentAgentInfo().getTools());
+    assertEquals(List.of(), context.provider.receivedToolInfos.get(0));
     assertEquals(SessionEventType.tool_start, context.events.get(5).getEventType());
     assertEquals(SessionEventType.tool_error, context.events.get(6).getEventType());
     ToolErrorPayload errorPayload = (ToolErrorPayload) context.events.get(6).getPayload();
     assertEquals("tool not found: missing. Available tools: none.", errorPayload.getMessage());
     assertEquals(SessionEventType.assistant_start, context.events.get(7).getEventType());
+    assertEquals(AgentStatus.idle, agent.getStatus());
+  }
+
+  /** 校验当前 Agent 未支持的已注册工具按不存在处理，并把支持列表回流给下一轮。 */
+  @Test
+  public void testUnavailableRegisteredToolReturnsSupportedToolsAndContinuesAssistant() {
+    RecordingContext context = new RecordingContext();
+    context.agentRegistry.tools = List.of("read");
+    AtomicInteger bashInvocations = new AtomicInteger();
+    context.toolRegistry.registerTool(
+        "read",
+        ToolInfo.builder()
+            .name("read")
+            .description("read")
+            .inputSchema(ToolParamsSchema.builder().build())
+            .build(),
+        (request, handler) -> noopToolHandle());
+    context.toolRegistry.registerTool(
+        "bash",
+        ToolInfo.builder()
+            .name("bash")
+            .description("bash")
+            .inputSchema(ToolParamsSchema.builder().build())
+            .build(),
+        (request, handler) -> {
+          bashInvocations.incrementAndGet();
+          return noopToolHandle();
+        });
+
+    ToolCall toolCall = new ToolCall();
+    toolCall.setToolCallId("call_1");
+    toolCall.setToolName("bash");
+    toolCall.setArguments("{}");
+    context.provider.enqueue(
+        handler ->
+            handler.onComplete(
+                AssistantResponse.builder()
+                    .toolCalls(List.of(toolCall))
+                    .metadata(new AssistantMetadata())
+                    .build(),
+                noopHandle()));
+    context.provider.enqueue(
+        handler ->
+            handler.onComplete(
+                AssistantResponse.builder()
+                    .text("recovered")
+                    .metadata(new AssistantMetadata())
+                    .build(),
+                noopHandle()));
+
+    Agent agent = context.newAgent();
+    agent.submit(UserRequest.userRequest("hello"));
+
+    assertEquals(
+        List.of("read"),
+        context.provider.receivedToolInfos.get(0).stream().map(ToolInfo::getName).toList());
+    assertEquals(0, bashInvocations.get());
+    assertEquals(SessionEventType.tool_start, context.events.get(5).getEventType());
+    assertEquals(SessionEventType.tool_error, context.events.get(6).getEventType());
+    ToolErrorPayload errorPayload = (ToolErrorPayload) context.events.get(6).getPayload();
+    assertEquals("tool not found: bash. Available tools: read.", errorPayload.getMessage());
+    assertEquals(SessionEventType.assistant_start, context.events.get(7).getEventType());
+    AgentToolMessage toolMessage =
+        assertInstanceOf(AgentToolMessage.class, context.provider.receivedMessages.get(1).get(3));
+    assertTrue(toolMessage.error());
+    assertEquals(errorPayload.getMessage(), toolMessage.contents().get(0).getText());
     assertEquals(AgentStatus.idle, agent.getStatus());
   }
 
@@ -718,9 +794,7 @@ public class AgentMainLoopTest {
     assertThrows(IllegalArgumentException.class, () -> agent.setAgentName(" "));
     assertThrows(IllegalArgumentException.class, () -> agent.submit(null));
     assertThrows(IllegalArgumentException.class, () -> agent.switchBranch(null, List.of()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> agent.switchBranch(agent.getBranch(), null));
+    assertThrows(IllegalArgumentException.class, () -> agent.switchBranch(agent.getBranch(), null));
 
     agent.setAgentName("renamed");
     agent.setModelSelection("custom", "model", "high");
@@ -975,29 +1049,30 @@ public class AgentMainLoopTest {
       AgentFactory agentFactory = new AgentFactory();
       ToolCallExecutor toolCallExecutor =
           new ToolCallExecutor(new DirectExecutorService(), scheduler);
-      AgentRuntimeConfigResolver resolver = new AgentRuntimeConfigResolver(
-          agentRegistry,
-          new StubModelRegistry(),
-          new StubProviderRegistry(),
-          providerInfo -> provider,
-          toolRegistry);
-      AgentFactory.Dependencies deps = new AgentFactory.Dependencies(
-          toolRegistry,
-          toolCallExecutor,
-          sessionManager,
-          projector,
-          new AgentEventHandler() {
-            @Override
-            public void onEvent(SessionEvent event) {
-              events.add(event);
-            }
+      AgentRuntimeConfigResolver resolver =
+          new AgentRuntimeConfigResolver(
+              agentRegistry,
+              new StubModelRegistry(),
+              new StubProviderRegistry(),
+              providerInfo -> provider,
+              toolRegistry);
+      AgentFactory.Dependencies deps =
+          new AgentFactory.Dependencies(
+              toolCallExecutor,
+              sessionManager,
+              projector,
+              new AgentEventHandler() {
+                @Override
+                public void onEvent(SessionEvent event) {
+                  events.add(event);
+                }
 
-            @Override
-            public void onFailure(Throwable error) {
-              failure.set(error);
-            }
-          },
-          resolver);
+                @Override
+                public void onFailure(Throwable error) {
+                  failure.set(error);
+                }
+              },
+              resolver);
       return agentFactory.load(
           session.getSessionId(),
           "assistant",
@@ -1035,6 +1110,7 @@ public class AgentMainLoopTest {
   private static final class StubProvider implements Provider {
     private final Queue<Consumer<AssistantResponseHandler>> scripts = new ArrayDeque<>();
     private final List<List<AgentMessage>> receivedMessages = new ArrayList<>();
+    private final List<List<ToolInfo>> receivedToolInfos = new ArrayList<>();
     private AssistantResponseHandle nextHandle = noopHandle();
     private AssistantResponseHandler lastHandler;
 
@@ -1059,6 +1135,7 @@ public class AgentMainLoopTest {
         List<ToolInfo> toolInfos,
         AssistantResponseHandler handler) {
       receivedMessages.add(List.copyOf(messages));
+      receivedToolInfos.add(toolInfos == null ? List.of() : List.copyOf(toolInfos));
       lastHandler = handler;
       Consumer<AssistantResponseHandler> script = scripts.poll();
       if (script != null) {
@@ -1160,6 +1237,7 @@ public class AgentMainLoopTest {
 
   private static final class StubAgentRegistry implements AgentRegistry {
     private boolean fail;
+    private List<String> tools = List.of("bash");
 
     @Override
     public void registerAgent(AgentInfo agentInfo) {}
@@ -1175,7 +1253,7 @@ public class AgentMainLoopTest {
           .defaultProvider("openai")
           .defaultModel("gpt-test")
           .defaultVariant("high")
-          .tools(List.of("bash"))
+          .tools(tools)
           .build();
     }
   }
@@ -1206,7 +1284,6 @@ public class AgentMainLoopTest {
           .baseUrl("http://localhost")
           .apiKey("test")
           .timeout(Duration.ofSeconds(30))
-          .streamIdleTimeout(Duration.ofSeconds(30))
           .build();
     }
   }

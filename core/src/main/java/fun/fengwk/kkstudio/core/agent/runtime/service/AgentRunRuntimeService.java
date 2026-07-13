@@ -6,6 +6,4 @@ package fun.fengwk.kkstudio.core.agent.runtime.service;
 public interface AgentRunRuntimeService {
 
   void scheduleQueuedRun(String runId, String sessionId, String content);
-
-  void executeQueuedRun(String runId, String sessionId, String content);
 }

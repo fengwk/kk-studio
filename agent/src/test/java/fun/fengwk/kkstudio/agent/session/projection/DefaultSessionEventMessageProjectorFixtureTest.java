@@ -234,16 +234,16 @@ public class DefaultSessionEventMessageProjectorFixtureTest {
       return null;
     }
 
-    JsonNode payloadTypeNode = eventNode.get("payloadType");
-    String payloadType =
-        payloadTypeNode == null || payloadTypeNode.isNull()
+    JsonNode payloadClassNode = eventNode.get("payloadClass");
+    String payloadClass =
+        payloadClassNode == null || payloadClassNode.isNull()
             ? eventNode.path("eventType").asText(null)
-            : payloadTypeNode.asText();
-    if (payloadType == null) {
+            : payloadClassNode.asText();
+    if (payloadClass == null) {
       return null;
     }
 
-    return switch (payloadType) {
+    return switch (payloadClass) {
       case "set_agent_info" -> OBJECT_MAPPER.convertValue(payloadNode, SetAgentInfoPayload.class);
       case "set_model_info" -> OBJECT_MAPPER.convertValue(payloadNode, SetModelInfoPayload.class);
       case "assistant_start" -> OBJECT_MAPPER.convertValue(
@@ -259,7 +259,7 @@ public class DefaultSessionEventMessageProjectorFixtureTest {
       case "tool_error" -> OBJECT_MAPPER.convertValue(payloadNode, ToolErrorPayload.class);
       case "abort" -> OBJECT_MAPPER.convertValue(payloadNode, AbortPayload.class);
       case "unknown" -> new UnknownPayload();
-      default -> throw new IllegalArgumentException("unsupported payloadType: " + payloadType);
+      default -> throw new IllegalArgumentException("unsupported payloadClass: " + payloadClass);
     };
   }
 
@@ -270,9 +270,7 @@ public class DefaultSessionEventMessageProjectorFixtureTest {
             : new AgentInfoSnapshot(
                 projection.agentInfo().getAgentName(),
                 projection.agentInfo().getSystemPrompt(),
-                projection.agentInfo().getTools(),
-                projection.agentInfo().getSubagents(),
-                projection.agentInfo().getSkills()),
+                projection.agentInfo().getTools()),
         projection.modelInfo() == null
             ? null
             : new ModelInfoSnapshot(
@@ -336,12 +334,7 @@ public class DefaultSessionEventMessageProjectorFixtureTest {
   private record ProjectionSnapshot(
       AgentInfoSnapshot agentInfo, ModelInfoSnapshot modelInfo, List<MessageSnapshot> messages) {}
 
-  private record AgentInfoSnapshot(
-      String agentName,
-      String systemPrompt,
-      List<String> tools,
-      List<String> subagents,
-      List<String> skills) {}
+  private record AgentInfoSnapshot(String agentName, String systemPrompt, List<String> tools) {}
 
   private record ModelInfoSnapshot(String provider, String model, String variant) {}
 

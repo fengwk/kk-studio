@@ -209,8 +209,7 @@ sync_seeded_minimax_provider() {
       providerType: $providerType,
       baseUrl: $baseUrl,
       apiKey: $apiKey,
-      timeoutMillis: 120000,
-      streamIdleTimeoutMillis: 120000
+      timeoutMillis: 120000
     }')
   step "Syncing seeded MiniMax provider"
   curl -fsS -X PUT "$BACKEND_URL/api/agent/providers/1" \

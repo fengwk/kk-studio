@@ -21,7 +21,7 @@ export function resourceTitle(modal: ResourceModal): string {
 export function filterSessions(sessions: AgentSessionDTO[], agentsByName: Map<string, AgentDefinitionDTO>, search: string): AgentSessionDTO[] {
   return sessions.filter((session) => {
     const agent = agentsByName.get(session.agentName)
-    return includesSearch(`${session.sessionId} ${session.title ?? ''} ${session.status} ${session.agentName} ${agent?.name ?? ''}`, search)
+    return includesSearch(`${session.sessionId} ${session.title ?? ''} ${session.agentName} ${agent?.name ?? ''}`, search)
   })
 }
 

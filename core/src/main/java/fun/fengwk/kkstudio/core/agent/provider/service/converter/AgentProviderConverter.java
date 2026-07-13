@@ -26,7 +26,6 @@ public class AgentProviderConverter {
     providerDTO.setBaseUrl(provider.getBaseUrl());
     providerDTO.setApiKey(provider.getApiKey());
     providerDTO.setTimeoutMillis(toMillis(provider.getTimeout()));
-    providerDTO.setStreamIdleTimeoutMillis(toMillis(provider.getStreamIdleTimeout()));
     providerDTO.setCreateTime(provider.getCreateTime());
     providerDTO.setUpdateTime(provider.getUpdateTime());
     return providerDTO;

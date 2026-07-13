@@ -20,7 +20,6 @@ public class AgentProvider {
   private String baseUrl;
   private String apiKey;
   private Duration timeout;
-  private Duration streamIdleTimeout;
   private LocalDateTime createTime;
   private LocalDateTime updateTime;
 }

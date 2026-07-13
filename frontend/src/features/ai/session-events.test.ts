@@ -199,6 +199,7 @@ describe('session-events', () => {
     })
   })
 
+
   it('flushes thinking that arrives before the first text delta', () => {
     // Providers like MiniMax reasoning models stream thinking deltas first and
     // only start emitting text once the model commits to an answer. The early
@@ -233,11 +234,11 @@ function rawEvent(eventId: string, eventType: string, payloadJson: string | null
     parentEventId: 'root',
     runId,
     eventType,
-    payloadType: 'json',
     payloadJson,
     createTime: '2026-06-20T02:00:00',
   }
 }
+
 
 function run(status: string): AgentRunDTO {
   return {

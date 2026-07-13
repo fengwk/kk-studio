@@ -74,7 +74,6 @@ describe('ai-console-page-helpers', () => {
           baseUrl: ' https://api.minimax.io/v1 ',
           apiKey: ' secret ',
           timeoutMillis: '120000',
-          streamIdleTimeoutMillis: 'oops',
         },
         modelDraft: emptyModelDraft(),
         agentDraft: emptyAgentDraft(),
@@ -90,7 +89,6 @@ describe('ai-console-page-helpers', () => {
         baseUrl: 'https://api.minimax.io/v1',
         apiKey: 'secret',
         timeoutMillis: 120000,
-        streamIdleTimeoutMillis: null,
       },
     })
 
@@ -104,9 +102,6 @@ describe('ai-console-page-helpers', () => {
           description: ' chat model ',
           defaultVariant: ' default ',
           variants: [{ id: 'variant-1', name: ' default ', temperature: '0.1', maxOutputTokens: '256', extras: [] }],
-          capabilities: [],
-          limits: [],
-          pricing: [],
         },
         agentDraft: emptyAgentDraft(),
       },
@@ -118,9 +113,6 @@ describe('ai-console-page-helpers', () => {
         provider: 'minimax',
         name: 'MiniMax-M2.7',
         description: 'chat model',
-        capabilitiesJson: null,
-        limitJson: null,
-        pricingJson: null,
         defaultVariant: 'default',
         variantsJson: '[{"name":"default","temperature":0.1,"maxOutputTokens":256}]',
       },
@@ -139,8 +131,6 @@ describe('ai-console-page-helpers', () => {
           defaultModel: ' MiniMax-M2.7 ',
           defaultVariant: ' default ',
           tools: [' search '],
-          subagents: [' critic '],
-          skills: [' brainstorm '],
         },
       },
     )
@@ -155,8 +145,6 @@ describe('ai-console-page-helpers', () => {
         defaultModel: 'MiniMax-M2.7',
         defaultVariant: 'default',
         toolsJson: '["search"]',
-        subagentsJson: '["critic"]',
-        skillsJson: '["brainstorm"]',
       },
     })
   })
@@ -172,7 +160,6 @@ describe('ai-console-page-helpers', () => {
           baseUrl: '',
           apiKey: '',
           timeoutMillis: '60000',
-          streamIdleTimeoutMillis: '60000',
         },
         modelDraft: emptyModelDraft(),
         agentDraft: emptyAgentDraft(),
@@ -189,7 +176,6 @@ describe('ai-console-page-helpers', () => {
         baseUrl: null,
         apiKey: null,
         timeoutMillis: 60000,
-        streamIdleTimeoutMillis: 60000,
       },
     })
 
@@ -203,9 +189,6 @@ describe('ai-console-page-helpers', () => {
           description: ' updated ',
           defaultVariant: ' default ',
           variants: [{ id: 'variant-1', name: ' default ', temperature: '', maxOutputTokens: '', extras: [] }],
-          capabilities: [],
-          limits: [],
-          pricing: [],
         },
         agentDraft: emptyAgentDraft(),
       },
@@ -216,9 +199,6 @@ describe('ai-console-page-helpers', () => {
       id: 'model-1',
       data: {
         description: 'updated',
-        capabilitiesJson: null,
-        limitJson: null,
-        pricingJson: null,
         defaultVariant: 'default',
         variantsJson: '[{"name":"default"}]',
         name: 'MiniMax-M2.7',
@@ -238,8 +218,6 @@ describe('ai-console-page-helpers', () => {
           defaultModel: ' MiniMax-M2.7 ',
           defaultVariant: ' default ',
           tools: [' search '],
-          subagents: [' critic '],
-          skills: [' brainstorm '],
         },
       },
     )
@@ -252,8 +230,6 @@ describe('ai-console-page-helpers', () => {
         systemPrompt: 'prompt',
         defaultVariant: 'default',
         toolsJson: '["search"]',
-        subagentsJson: '["critic"]',
-        skillsJson: '["brainstorm"]',
         name: 'assistant',
         defaultProvider: 'minimax',
         defaultModel: 'MiniMax-M2.7',
@@ -270,7 +246,6 @@ function emptyProviderDraft() {
     baseUrl: '',
     apiKey: '',
     timeoutMillis: '60000',
-    streamIdleTimeoutMillis: '60000',
   }
 }
 
@@ -281,9 +256,6 @@ function emptyModelDraft() {
     description: '',
     defaultVariant: 'default',
     variants: [{ id: 'variant-1', name: 'default', temperature: '', maxOutputTokens: '', extras: [] }],
-    capabilities: [],
-    limits: [],
-    pricing: [],
   }
 }
 
@@ -296,8 +268,6 @@ function emptyAgentDraft() {
     defaultModel: '',
     defaultVariant: 'default',
     tools: [],
-    subagents: [],
-    skills: [],
   }
 }
 
@@ -310,7 +280,6 @@ function provider() {
     baseUrl: 'https://api.minimax.chat/v1',
     apiKey: 'test-key',
     timeoutMillis: 60000,
-    streamIdleTimeoutMillis: 60000,
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
   }
@@ -323,9 +292,6 @@ function model() {
     providerName: 'minimax',
     name: 'MiniMax-M2.7',
     description: 'Chat model',
-    capabilitiesJson: null,
-    limitJson: null,
-    pricingJson: null,
     defaultVariant: 'default',
     variantsJson: '[{"name":"default","temperature":0.2}]',
     createTime: '2026-06-20T02:00:00',
@@ -345,8 +311,6 @@ function agent() {
     defaultModelName: 'MiniMax-M2.7',
     defaultVariant: 'default',
     toolsJson: '[]',
-    subagentsJson: '[]',
-    skillsJson: '[]',
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
   }

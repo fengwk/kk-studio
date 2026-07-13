@@ -14,7 +14,6 @@ public final class AgentIdGenerator {
   public static final String AGENT_DEFINITION = "agent_definition";
   public static final String AGENT_SESSION = "agent_session";
   public static final String AGENT_SESSION_EVENT = "agent_session_event";
-  public static final String AGENT_SESSION_HEAD = "agent_session_head";
   public static final String AGENT_RUN = "agent_run";
 
   private AgentIdGenerator() {}
@@ -37,10 +36,6 @@ public final class AgentIdGenerator {
 
   public static long nextEventId() {
     return GlobalSnowflakeIdGenerator.next(AGENT_SESSION_EVENT);
-  }
-
-  public static long nextHeadId() {
-    return GlobalSnowflakeIdGenerator.next(AGENT_SESSION_HEAD);
   }
 
   public static long nextRunId() {

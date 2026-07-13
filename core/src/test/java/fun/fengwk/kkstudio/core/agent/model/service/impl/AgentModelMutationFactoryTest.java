@@ -50,9 +50,6 @@ public class AgentModelMutationFactoryTest {
     AgentModelUpdateDTO updateDTO = new AgentModelUpdateDTO();
     updateDTO.setName(" ");
     updateDTO.setDescription(" ");
-    updateDTO.setCapabilitiesJson("{\"vision\":true}");
-    updateDTO.setLimitJson("{\"maxTokens\":128000}");
-    updateDTO.setPricingJson("{\"input\":2}");
     updateDTO.setDefaultVariant("  stable  ");
     updateDTO.setVariantsJson("[{\"name\":\"stable\"}]");
 
@@ -61,9 +58,6 @@ public class AgentModelMutationFactoryTest {
 
     assertEquals("gpt-4.1", model.getName());
     assertNull(model.getDescription());
-    assertEquals("{\"vision\":true}", model.getCapabilitiesJson());
-    assertEquals("{\"maxTokens\":128000}", model.getLimitJson());
-    assertEquals("{\"input\":2}", model.getPricingJson());
     assertEquals("stable", model.getDefaultVariant());
     assertEquals("[{\"name\":\"stable\"}]", model.getVariantsJson());
   }
@@ -87,10 +81,6 @@ public class AgentModelMutationFactoryTest {
     assertThrows(IllegalArgumentException.class, () -> factory.newCreateMutation(createDTO));
 
     createDTO.setProvider("openai");
-    createDTO.setCapabilitiesJson("[]");
-    assertThrows(IllegalArgumentException.class, () -> factory.newCreateMutation(createDTO));
-
-    createDTO.setCapabilitiesJson(null);
     createDTO.setVariantsJson("{}");
     assertThrows(IllegalArgumentException.class, () -> factory.newCreateMutation(createDTO));
 

@@ -38,6 +38,11 @@ public class MysqlAgentSessionRepository implements AgentSessionRepository {
   }
 
   @Override
+  public AgentSession getBySessionIdForUpdate(String sessionId) {
+    return convert(agentSessionMapper.getBySessionIdForUpdate(sessionId));
+  }
+
+  @Override
   public boolean add(AgentSession session) {
     return agentSessionMapper.insertSelective(convert(session)) == 1;
   }
@@ -50,13 +55,6 @@ public class MysqlAgentSessionRepository implements AgentSessionRepository {
   @Override
   public boolean deleteBySessionId(String sessionId) {
     return agentSessionMapper.deleteBySessionId(sessionId) == 1;
-  }
-
-  @Override
-  public boolean updateCurrentHeadEventId(
-      String sessionId, String currentHeadEventId, LocalDateTime updateTime) {
-    return agentSessionMapper.updateCurrentHeadEventId(sessionId, currentHeadEventId, updateTime)
-        == 1;
   }
 
   @Override
@@ -80,7 +78,6 @@ public class MysqlAgentSessionRepository implements AgentSessionRepository {
     sessionDO.setAgentId(session.getAgentId());
     sessionDO.setAgentName(session.getAgentName());
     sessionDO.setTitle(session.getTitle());
-    sessionDO.setStatus(session.getStatus());
     sessionDO.setCurrentHeadEventId(session.getCurrentHeadEventId());
     sessionDO.setCreateTime(session.getCreateTime());
     sessionDO.setUpdateTime(session.getUpdateTime());
@@ -97,7 +94,6 @@ public class MysqlAgentSessionRepository implements AgentSessionRepository {
     session.setAgentId(sessionDO.getAgentId());
     session.setAgentName(sessionDO.getAgentName());
     session.setTitle(sessionDO.getTitle());
-    session.setStatus(sessionDO.getStatus());
     session.setCurrentHeadEventId(sessionDO.getCurrentHeadEventId());
     session.setCreateTime(sessionDO.getCreateTime());
     session.setUpdateTime(sessionDO.getUpdateTime());

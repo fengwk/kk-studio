@@ -41,7 +41,6 @@ final class CoreSessionEventRepositoryAdapter implements SessionEventRepository 
     coreEvent.setParentEventId(event.getParentEventId());
     coreEvent.setRunId(runId);
     coreEvent.setEventType(event.getEventType().name());
-    coreEvent.setPayloadType(event.getEventType().name());
     coreEvent.setPayloadJson(eventBridge.serialize(event.getPayload()));
     coreEvent.setCreateTime(event.getCreateTime());
     if (!agentSessionEventRepository.add(coreEvent)) {

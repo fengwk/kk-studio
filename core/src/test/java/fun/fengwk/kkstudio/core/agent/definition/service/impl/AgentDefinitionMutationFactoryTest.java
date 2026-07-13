@@ -41,8 +41,6 @@ public class AgentDefinitionMutationFactoryTest {
     assertEquals("gpt-4.1", mutation.defaultModel());
     assertEquals("default", mutation.defaultVariant());
     assertEquals("[]", mutation.toolsJson());
-    assertEquals("[]", mutation.subagentsJson());
-    assertEquals("[]", mutation.skillsJson());
     assertNotNull(agent.getId());
     assertEquals(3L, agent.getDefaultProviderId());
     assertEquals(5L, agent.getDefaultModelId());
@@ -61,8 +59,6 @@ public class AgentDefinitionMutationFactoryTest {
     updateDTO.setDefaultModel("gpt-4.1");
     updateDTO.setDefaultVariant("  stable  ");
     updateDTO.setToolsJson("[\"browser\"]");
-    updateDTO.setSubagentsJson("[\"planner\"]");
-    updateDTO.setSkillsJson("[\"writer\"]");
 
     AgentDefinition agent = new AgentDefinition();
     factory.apply(agent, 7L, 9L, factory.newUpdateMutation("assistant-a", updateDTO));
@@ -74,8 +70,6 @@ public class AgentDefinitionMutationFactoryTest {
     assertEquals(9L, agent.getDefaultModelId());
     assertEquals("stable", agent.getDefaultVariant());
     assertEquals("[\"browser\"]", agent.getToolsJson());
-    assertEquals("[\"planner\"]", agent.getSubagentsJson());
-    assertEquals("[\"writer\"]", agent.getSkillsJson());
   }
 
   /** 校验缺失关键引用名或非法数组 JSON 会被拒绝，避免 agent 定义进入坏状态。 */
@@ -108,7 +102,7 @@ public class AgentDefinitionMutationFactoryTest {
     AgentDefinitionUpdateDTO updateDTO = new AgentDefinitionUpdateDTO();
     updateDTO.setDefaultProvider("openai");
     updateDTO.setDefaultModel("gpt-4.1");
-    updateDTO.setSkillsJson("bad-json");
+    updateDTO.setToolsJson("bad-json");
     assertThrows(
         IllegalArgumentException.class, () -> factory.newUpdateMutation("assistant-a", updateDTO));
     assertThrows(

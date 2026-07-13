@@ -41,7 +41,8 @@ enum StartLoopSignal implements AgentSignal {
 record SetAgentNameSignal(String agentName) implements AgentSignal {}
 
 /** 更新当前模型选择的控制信号。 */
-record SetModelSelectionSignal(String provider, String model, String variant) implements AgentSignal {}
+record SetModelSelectionSignal(String provider, String model, String variant)
+    implements AgentSignal {}
 
 /** 触发 assistant 重试的延迟回流信号。 */
 record RetryAssistantSignal(AgentRunContext runContext) implements AgentSignal {}

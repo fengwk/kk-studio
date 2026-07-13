@@ -41,7 +41,6 @@ public class AgentProviderMutationFactoryTest {
     assertEquals("https://example.test", mutation.baseUrl());
     assertEquals("secret-key", mutation.apiKey());
     assertEquals(60_000L, mutation.timeout().toMillis());
-    assertEquals(60_000L, mutation.streamIdleTimeout().toMillis());
     assertNotNull(provider.getId());
     assertEquals("openai-compatible", provider.getName());
     assertEquals("Provider description", provider.getDescription());
@@ -59,7 +58,6 @@ public class AgentProviderMutationFactoryTest {
     updateDTO.setBaseUrl(" ");
     updateDTO.setApiKey(" ");
     updateDTO.setTimeoutMillis(30_000L);
-    updateDTO.setStreamIdleTimeoutMillis(45_000L);
 
     AgentProvider provider = new AgentProvider();
     factory.apply(provider, factory.newUpdateMutation("provider-a", updateDTO));
@@ -69,7 +67,6 @@ public class AgentProviderMutationFactoryTest {
     assertNull(provider.getBaseUrl());
     assertNull(provider.getApiKey());
     assertEquals(30_000L, provider.getTimeout().toMillis());
-    assertEquals(45_000L, provider.getStreamIdleTimeout().toMillis());
   }
 
   /** 校验非法入参会被立即拒绝，避免把坏数据推进到 provider 持久化层。 */

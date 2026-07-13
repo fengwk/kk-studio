@@ -25,6 +25,5 @@ public class AgentRuntimeProperties {
     private String baseUrl;
     private String apiKey;
     private Duration timeout = Duration.ofSeconds(60);
-    private Duration streamIdleTimeout = Duration.ofSeconds(60);
   }
 }

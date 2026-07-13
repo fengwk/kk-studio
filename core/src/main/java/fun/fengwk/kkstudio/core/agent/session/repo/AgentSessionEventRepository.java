@@ -14,4 +14,6 @@ public interface AgentSessionEventRepository {
   List<AgentSessionEvent> listBySessionId(String sessionId);
 
   List<AgentSessionEvent> listBySessionIdAfterEventId(String sessionId, String afterEventId);
+
+  int deleteBySessionId(String sessionId);
 }

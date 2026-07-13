@@ -232,7 +232,6 @@ function provider() {
     baseUrl: 'http://stub.local/v1',
     apiKey: 'stub-key',
     timeoutMillis: 60000,
-    streamIdleTimeoutMillis: 60000,
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
   }
@@ -245,9 +244,6 @@ function model() {
     providerName: 'stub',
     name: 'acceptance-stub',
     description: 'Acceptance model',
-    capabilitiesJson: null,
-    limitJson: null,
-    pricingJson: null,
     defaultVariant: 'default',
     variantsJson: '[{"name":"default"}]',
     createTime: '2026-06-20T02:00:00',
@@ -267,8 +263,6 @@ function agent() {
     defaultModelName: 'acceptance-stub',
     defaultVariant: 'default',
     toolsJson: '[]',
-    subagentsJson: '[]',
-    skillsJson: '[]',
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
   }

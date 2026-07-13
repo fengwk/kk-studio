@@ -15,9 +15,9 @@ describe('AiResourceForms', () => {
     await user.selectOptions(screen.getByLabelText('Provider Type'), 'anthropic')
     await user.type(screen.getByPlaceholderText('https://api.example.com/v1'), 'https://proxy.example/v1')
     await user.type(screen.getByPlaceholderText('sk-...'), 'secret')
-    const timeoutInputs = screen.getAllByPlaceholderText('60000')
-    await user.clear(timeoutInputs[0])
-    await user.type(timeoutInputs[0], '120000')
+    const timeoutInput = screen.getByPlaceholderText('60000')
+    await user.clear(timeoutInput)
+    await user.type(timeoutInput, '120000')
 
     expect(screen.getByDisplayValue('provider-a')).toBeInTheDocument()
     expect(screen.getByDisplayValue('provider desc')).toBeInTheDocument()
@@ -27,7 +27,7 @@ describe('AiResourceForms', () => {
     expect(screen.getByDisplayValue('120000')).toBeInTheDocument()
   })
 
-  it('edits model variants and structured metadata fields without raw json', async () => {
+  it('edits model variants without raw json', async () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)
 
@@ -40,19 +40,6 @@ describe('AiResourceForms', () => {
     await user.type(secondNameInput, 'creative')
     await user.type(screen.getByDisplayValue('creative'), '{tab}0.8{tab}512')
     expect(screen.getByRole('option', { name: 'creative' })).toBeInTheDocument()
-
-    await user.click(screen.getByRole('checkbox', { name: 'Tools' }))
-    await user.type(screen.getByLabelText('Input Modalities'), 'text, image')
-    await user.type(screen.getByLabelText('Output Modalities'), 'text')
-    await user.type(screen.getByLabelText('Context Window'), '128000')
-    await user.type(screen.getByLabelText(/^Input$/), '0.1')
-    await user.type(screen.getByLabelText(/^Cache Write$/), '0.2')
-
-    expect(screen.getByRole('checkbox', { name: 'Tools' })).toBeChecked()
-    expect(screen.getByDisplayValue('text, image')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('128000')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('0.1')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('0.2')).toBeInTheDocument()
 
     const extras = screen.getByRole('region', { name: 'Variant Extras 2' })
     await user.click(within(extras).getByRole('button', { name: '添加' }))
@@ -86,7 +73,7 @@ describe('AiResourceForms', () => {
     expect(screen.getByLabelText('Default Variant')).toHaveValue('default')
   })
 
-  it('edits agent model binding and string lists without json editing', async () => {
+  it('edits agent model binding and tools string list without json editing', async () => {
     const user = userEvent.setup()
     render(<AgentFormHarness />)
 
@@ -117,8 +104,6 @@ describe('AiResourceForms', () => {
           defaultModel: '',
           defaultVariant: 'default',
           tools: [],
-          subagents: [],
-          skills: [],
         }}
         models={[]}
         onChange={() => undefined}
@@ -137,7 +122,6 @@ function ProviderFormHarness() {
     baseUrl: '',
     apiKey: '',
     timeoutMillis: '60000',
-    streamIdleTimeoutMillis: '60000',
   })
   return <ProviderForm draft={draft} onChange={setDraft} />
 }
@@ -149,9 +133,6 @@ function ModelFormHarness() {
     description: '',
     defaultVariant: 'default',
     variants: [{ id: 'variant-1', name: 'default', temperature: '', maxOutputTokens: '', extras: [] }],
-    capabilities: [],
-    limits: [],
-    pricing: [],
   })
   return (
     <ModelForm
@@ -166,7 +147,6 @@ function ModelFormHarness() {
           baseUrl: null,
           apiKey: null,
           timeoutMillis: null,
-          streamIdleTimeoutMillis: null,
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:00:00',
         },
@@ -185,8 +165,6 @@ function AgentFormHarness() {
     defaultModel: '',
     defaultVariant: 'default',
     tools: [],
-    subagents: [],
-    skills: [],
   })
   return (
     <AgentForm
@@ -198,9 +176,6 @@ function AgentFormHarness() {
           providerName: 'minimax',
           name: 'MiniMax-M2.7',
           description: null,
-          capabilitiesJson: null,
-          limitJson: null,
-          pricingJson: null,
           defaultVariant: 'default',
           variantsJson: '[{"name":"default"}]',
           createTime: '2026-06-20T02:00:00',
@@ -212,9 +187,6 @@ function AgentFormHarness() {
           providerName: 'anthropic',
           name: 'Claude-Sonnet-4.5',
           description: null,
-          capabilitiesJson: null,
-          limitJson: null,
-          pricingJson: null,
           defaultVariant: 'creative',
           variantsJson: '[{"name":"creative"},{"name":"precise"}]',
           createTime: '2026-06-20T02:00:00',

@@ -79,7 +79,6 @@ public class MysqlAgentProviderRepository implements AgentProviderRepository {
     providerDO.setBaseUrl(provider.getBaseUrl());
     providerDO.setApiKey(provider.getApiKey());
     providerDO.setTimeoutMillis(toMillis(provider.getTimeout()));
-    providerDO.setStreamIdleTimeoutMillis(toMillis(provider.getStreamIdleTimeout()));
     return providerDO;
   }
 
@@ -95,7 +94,6 @@ public class MysqlAgentProviderRepository implements AgentProviderRepository {
     provider.setBaseUrl(providerDO.getBaseUrl());
     provider.setApiKey(providerDO.getApiKey());
     provider.setTimeout(toDuration(providerDO.getTimeoutMillis()));
-    provider.setStreamIdleTimeout(toDuration(providerDO.getStreamIdleTimeoutMillis()));
     provider.setCreateTime(providerDO.getCreateTime());
     provider.setUpdateTime(providerDO.getUpdateTime());
     return provider;

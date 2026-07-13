@@ -42,7 +42,6 @@ final class EmbeddedAgentRuntimeMetadataFactory {
         .baseUrl(agentProvider.getBaseUrl())
         .apiKey(agentProvider.getApiKey())
         .timeout(agentProvider.getTimeout())
-        .streamIdleTimeout(agentProvider.getStreamIdleTimeout())
         .build();
   }
 
@@ -55,8 +54,6 @@ final class EmbeddedAgentRuntimeMetadataFactory {
         .defaultModel(modelName)
         .defaultVariant(firstNonBlank(agentDefinition.getDefaultVariant(), DEFAULT_VARIANT))
         .tools(parseStringList(agentDefinition.getToolsJson()))
-        .subagents(parseStringList(agentDefinition.getSubagentsJson()))
-        .skills(parseStringList(agentDefinition.getSkillsJson()))
         .build();
   }
 
@@ -65,7 +62,6 @@ final class EmbeddedAgentRuntimeMetadataFactory {
     return ModelInfo.builder()
         .provider(providerName)
         .name(agentModel.getName())
-        .displayName(agentModel.getName())
         .defaultVariant(firstNonBlank(agentModel.getDefaultVariant(), DEFAULT_VARIANT))
         .variants(parseVariants(agentModel.getVariantsJson()))
         .build();

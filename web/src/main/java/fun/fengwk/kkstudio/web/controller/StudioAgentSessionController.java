@@ -20,7 +20,6 @@ import fun.fengwk.kkstudio.core.agent.session.service.AgentSessionService;
 import fun.fengwk.kkstudio.share.model.AgentSessionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionEventDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionHeadDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionUpdateDTO;
 
@@ -75,11 +74,6 @@ public class StudioAgentSessionController {
     // 这样 SSE 端的下一个轮询周期就能拉到新增的 assistant_delta，不再被外层事务吞住。
     agentRunRuntimeService.scheduleQueuedRun(created.getRunId(), sessionId, createDTO.getContent());
     return Results.created(created);
-  }
-
-  @GetMapping("/{sessionId}/heads")
-  public Result<List<AgentSessionHeadDTO>> listHeads(@PathVariable("sessionId") String sessionId) {
-    return Results.ok(agentSessionService.listHeads(sessionId));
   }
 
   @GetMapping("/{sessionId}/events")

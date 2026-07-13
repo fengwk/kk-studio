@@ -40,7 +40,9 @@ public class InMemoryUserRequestQueueTest {
                           () -> {
                             ready.countDown();
                             start.await();
-                            for (int index = workerIndex; index < requestCount; index += workerCount) {
+                            for (int index = workerIndex;
+                                index < requestCount;
+                                index += workerCount) {
                               queue.submit(UserRequest.userRequest("message-" + index));
                             }
                             return null;

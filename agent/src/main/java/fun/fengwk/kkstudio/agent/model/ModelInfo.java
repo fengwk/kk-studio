@@ -22,18 +22,6 @@ public class ModelInfo {
   /** 模型名称。 */
   private final String name;
 
-  /** 模型展示名。 */
-  private final String displayName;
-
-  /** 模型能力描述。 */
-  private final ModelCapabilities capabilities;
-
-  /** 模型限制信息。 */
-  private final ModelLimit limit;
-
-  /** 模型价格信息。 */
-  private final ModelPricing pricing;
-
   /** 默认 variant 名称。 */
   private final String defaultVariant;
 

@@ -43,9 +43,6 @@ public class AgentModelServiceTest {
     createDTO.setProvider(provider.getName());
     createDTO.setName("model_" + suffix);
     createDTO.setDescription("Primary model");
-    createDTO.setCapabilitiesJson("{\"vision\":true}");
-    createDTO.setLimitJson("{\"rpm\":60}");
-    createDTO.setPricingJson("{\"input\":0.1}");
     createDTO.setDefaultVariant("fast");
     createDTO.setVariantsJson("[{\"name\":\"fast\"},{\"name\":\"accurate\"}]");
 
@@ -60,9 +57,6 @@ public class AgentModelServiceTest {
     AgentModelUpdateDTO updateDTO = new AgentModelUpdateDTO();
     updateDTO.setName("model_updated_" + suffix);
     updateDTO.setDescription("Updated model");
-    updateDTO.setCapabilitiesJson("{\"reasoning\":true}");
-    updateDTO.setLimitJson("{\"rpm\":120}");
-    updateDTO.setPricingJson("{\"input\":0.2}");
     updateDTO.setDefaultVariant("accurate");
     updateDTO.setVariantsJson("[{\"name\":\"accurate\"}]");
 

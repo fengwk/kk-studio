@@ -1,20 +1,5 @@
-import type { KeyValueDraft, VariantDraft } from '@/features/ai/ai-console-types'
+import type { VariantDraft } from '@/features/ai/ai-console-types'
 import { newKeyValueDraft, newVariantDraft, parseScalar } from '@/features/ai/ai-resource-draft-primitives'
-
-export function parseObjectDrafts(json: string | null): KeyValueDraft[] {
-  if (!json) {
-    return []
-  }
-  try {
-    const parsed = JSON.parse(json)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return []
-    }
-    return Object.entries(parsed).map(([key, value]) => newKeyValueDraft(key, parseScalar(value)))
-  } catch {
-    return []
-  }
-}
 
 export function parseStringList(json: string | null): string[] {
   if (!json) {

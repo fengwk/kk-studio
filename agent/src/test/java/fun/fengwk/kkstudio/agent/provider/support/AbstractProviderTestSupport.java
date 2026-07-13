@@ -79,7 +79,6 @@ abstract class AbstractProviderTestSupport {
         .baseUrl(baseUrl)
         .apiKey(apiKey)
         .timeout(Duration.ofSeconds(90))
-        .streamIdleTimeout(Duration.ofSeconds(90))
         .build();
   }
 

@@ -117,8 +117,6 @@ public class StudioAgentSessionControllerTest {
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.data.agentName").value("default-assistant"))
             .andExpect(jsonPath("$.data.title").value("Bootstrap Session"))
-            .andExpect(jsonPath("$.data.status").value("active"))
-            .andExpect(jsonPath("$.data.currentHeadEventId").value("root"))
             .andReturn();
 
     JsonNode created =
@@ -132,19 +130,6 @@ public class StudioAgentSessionControllerTest {
         .andExpect(jsonPath("$.data.sessionId").value(sessionId))
         .andExpect(jsonPath("$.data.agentName").value("default-assistant"))
         .andExpect(jsonPath("$.data.title").value("Bootstrap Session"));
-
-    MvcResult headsResult =
-        mockMvc
-            .perform(get("/api/agent/sessions/{sessionId}/heads", sessionId))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data[0].sessionId").value(sessionId))
-            .andExpect(jsonPath("$.data[0].headName").value("default"))
-            .andExpect(jsonPath("$.data[0].headEventId").value("root"))
-            .andReturn();
-
-    JsonNode head =
-        objectMapper.readTree(headsResult.getResponse().getContentAsString()).path("data").get(0);
-    assertEquals("root", head.path("headEventId").asText());
 
     mockMvc
         .perform(get("/api/agent/sessions/{sessionId}/events", sessionId))
@@ -247,7 +232,6 @@ public class StudioAgentSessionControllerTest {
             .andExpect(jsonPath("$.data.sessionId").value(sessionId))
             .andExpect(jsonPath("$.data.parentEventId").value("root"))
             .andExpect(jsonPath("$.data.eventType").value("user_message"))
-            .andExpect(jsonPath("$.data.payloadType").value("text"))
             .andExpect(jsonPath("$.data.payloadJson").value("{\"content\":\"Hello kk-studio\"}"))
             .andExpect(jsonPath("$.data.runId").value(Matchers.startsWith("rn_")))
             .andReturn();
@@ -258,17 +242,6 @@ public class StudioAgentSessionControllerTest {
     String runId = createdEvent.path("runId").asText();
     assertTrue(eventId.startsWith("ev_"));
     assertTrue(runId.startsWith("rn_"));
-
-    mockMvc
-        .perform(get("/api/agent/sessions/{sessionId}", sessionId))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.currentHeadEventId", Matchers.not(eventId)));
-
-    mockMvc
-        .perform(get("/api/agent/sessions/{sessionId}/heads", sessionId))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[0].headName").value("default"))
-        .andExpect(jsonPath("$.data[0].headEventId", Matchers.not(eventId)));
 
     mockMvc
         .perform(get("/api/agent/sessions/{sessionId}/events", sessionId))

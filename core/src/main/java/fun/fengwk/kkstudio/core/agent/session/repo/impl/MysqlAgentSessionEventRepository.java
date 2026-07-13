@@ -49,6 +49,11 @@ public class MysqlAgentSessionEventRepository implements AgentSessionEventReposi
         .collect(Collectors.toList());
   }
 
+  @Override
+  public int deleteBySessionId(String sessionId) {
+    return agentSessionEventMapper.deleteBySessionId(sessionId);
+  }
+
   private AgentSessionEventDO convert(AgentSessionEvent sessionEvent) {
     if (sessionEvent == null) {
       return null;
@@ -61,7 +66,6 @@ public class MysqlAgentSessionEventRepository implements AgentSessionEventReposi
     sessionEventDO.setParentEventId(sessionEvent.getParentEventId());
     sessionEventDO.setRunId(sessionEvent.getRunId());
     sessionEventDO.setEventType(sessionEvent.getEventType());
-    sessionEventDO.setPayloadType(sessionEvent.getPayloadType());
     sessionEventDO.setPayloadJson(sessionEvent.getPayloadJson());
     sessionEventDO.setCreateTime(sessionEvent.getCreateTime());
     return sessionEventDO;
@@ -79,7 +83,6 @@ public class MysqlAgentSessionEventRepository implements AgentSessionEventReposi
     sessionEvent.setParentEventId(sessionEventDO.getParentEventId());
     sessionEvent.setRunId(sessionEventDO.getRunId());
     sessionEvent.setEventType(sessionEventDO.getEventType());
-    sessionEvent.setPayloadType(sessionEventDO.getPayloadType());
     sessionEvent.setPayloadJson(sessionEventDO.getPayloadJson());
     sessionEvent.setCreateTime(sessionEventDO.getCreateTime());
     return sessionEvent;

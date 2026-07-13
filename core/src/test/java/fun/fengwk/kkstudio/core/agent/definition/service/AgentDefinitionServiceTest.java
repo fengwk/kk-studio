@@ -51,8 +51,6 @@ public class AgentDefinitionServiceTest {
     createDTO.setDefaultModel(primaryModel.getName());
     createDTO.setDefaultVariant("creative");
     createDTO.setToolsJson("[\"browser\"]");
-    createDTO.setSubagentsJson("[]");
-    createDTO.setSkillsJson("[\"analysis\"]");
 
     // 创建链路必须解析 provider/model 名称，并把默认引用落成稳定的实体 id。
     AgentDefinitionDTO created = agentDefinitionService.createAgent(createDTO);
@@ -72,8 +70,6 @@ public class AgentDefinitionServiceTest {
     updateDTO.setDefaultModel(fallbackModel.getName());
     updateDTO.setDefaultVariant("stable");
     updateDTO.setToolsJson("[]");
-    updateDTO.setSubagentsJson("[\"sub-a\"]");
-    updateDTO.setSkillsJson("[]");
 
     // 更新链路必须在切换默认 provider/model 时同步更新引用和对外展示字段。
     AgentDefinitionDTO updated = agentDefinitionService.updateAgent(created.getId(), updateDTO);
@@ -85,7 +81,6 @@ public class AgentDefinitionServiceTest {
     assertEquals(fallbackModel.getId(), updated.getDefaultModelId());
     assertEquals(fallbackModel.getName(), updated.getDefaultModelName());
     assertEquals(updateDTO.getDefaultVariant(), updated.getDefaultVariant());
-    assertEquals(updateDTO.getSubagentsJson(), updated.getSubagentsJson());
 
     agentDefinitionService.deleteAgent(created.getId());
     Page<AgentDefinitionDTO> afterDelete = agentDefinitionService.pageAgents(new PageQuery(1, 200));

@@ -28,7 +28,6 @@ public class ConfiguredAgentProviderInfoResolver implements AgentProviderInfoRes
         .baseUrl(providerProperties.getBaseUrl())
         .apiKey(providerProperties.getApiKey())
         .timeout(providerProperties.getTimeout())
-        .streamIdleTimeout(providerProperties.getStreamIdleTimeout())
         .build();
   }
 }

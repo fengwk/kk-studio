@@ -19,7 +19,6 @@
         <module>core</module>
         <module>web</module>
         <module>agent</module>
-        <module>daemon</module>
     </modules>
 
     <properties>
@@ -28,7 +27,6 @@
         <project.build.sourceEncoding>utf-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>utf-8</project.reporting.outputEncoding>
         <kk-studio.version>1.0.0</kk-studio.version>
-        <gateway.version>1.0.8</gateway.version>
         <aws.sdk.version>2.29.52</aws.sdk.version>
         <langchain4j.version>1.16.2</langchain4j.version>
     </properties>
@@ -47,11 +45,6 @@
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-daemon</artifactId>
-                <version>${kk-studio.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>fun.fengwk.kk-studio</groupId>
                 <artifactId>kk-studio-core</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
@@ -59,11 +52,6 @@
                 <groupId>fun.fengwk.kk-studio</groupId>
                 <artifactId>kk-studio-web</artifactId>
                 <version>${kk-studio.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>fun.fengwk.gateway</groupId>
-                <artifactId>gateway-share</artifactId>
-                <version>${gateway.version}</version>
             </dependency>
             <dependency>
                 <groupId>software.amazon.awssdk</groupId>

@@ -58,7 +58,6 @@ final class AgentProviderMutationFactory {
     provider.setBaseUrl(mutation.baseUrl());
     provider.setApiKey(mutation.apiKey());
     provider.setTimeout(mutation.timeout());
-    provider.setStreamIdleTimeout(mutation.streamIdleTimeout());
   }
 
   private Mutation newMutation(
@@ -70,8 +69,7 @@ final class AgentProviderMutationFactory {
         toProviderType(properties.getProviderType()),
         editableSupport.trimToNull(properties.getBaseUrl()),
         editableSupport.trimToNull(properties.getApiKey()),
-        toDuration(properties.getTimeoutMillis()),
-        toDuration(properties.getStreamIdleTimeoutMillis()));
+        toDuration(properties.getTimeoutMillis()));
   }
 
   private void validateEditable(
@@ -87,7 +85,6 @@ final class AgentProviderMutationFactory {
     }
     toProviderType(properties.getProviderType());
     toDuration(properties.getTimeoutMillis());
-    toDuration(properties.getStreamIdleTimeoutMillis());
   }
 
   private Duration toDuration(Long millis) {
@@ -126,6 +123,5 @@ final class AgentProviderMutationFactory {
       ProviderType providerType,
       String baseUrl,
       String apiKey,
-      Duration timeout,
-      Duration streamIdleTimeout) {}
+      Duration timeout) {}
 }

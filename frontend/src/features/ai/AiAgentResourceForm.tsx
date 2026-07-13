@@ -53,8 +53,6 @@ export function AgentForm({
       </label>
 
       <StringListEditor label="Tools" items={draft.tools} onChange={(tools) => onChange({ ...draft, tools })} itemPlaceholder="tool name" />
-      <StringListEditor label="Subagents" items={draft.subagents} onChange={(subagents) => onChange({ ...draft, subagents })} itemPlaceholder="subagent name" />
-      <StringListEditor label="Skills" items={draft.skills} onChange={(skills) => onChange({ ...draft, skills })} itemPlaceholder="skill name" />
 
       {models.length === 0 && (
         <div className="inline-hint" role="status">

@@ -18,12 +18,11 @@ public interface AgentSessionRepository {
 
   AgentSession getBySessionId(String sessionId);
 
+  AgentSession getBySessionIdForUpdate(String sessionId);
+
   boolean updateTitleBySessionId(String sessionId, String title, LocalDateTime updateTime);
 
   boolean deleteBySessionId(String sessionId);
-
-  boolean updateCurrentHeadEventId(
-      String sessionId, String currentHeadEventId, LocalDateTime updateTime);
 
   boolean compareAndSetCurrentHeadEventId(
       String sessionId,

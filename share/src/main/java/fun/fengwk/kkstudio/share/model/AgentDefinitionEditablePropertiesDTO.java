@@ -15,7 +15,5 @@ public class AgentDefinitionEditablePropertiesDTO {
     private String defaultModel;
     private String defaultVariant;
     private String toolsJson;
-    private String subagentsJson;
-    private String skillsJson;
 
 }

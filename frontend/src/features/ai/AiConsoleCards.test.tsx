@@ -59,8 +59,6 @@ describe('AiConsoleCards', () => {
           agentId: 'agent-1',
           agentName: 'default-assistant',
           title: null,
-          status: 'active',
-          currentHeadEventId: 'root',
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:01:00',
         }}
@@ -90,8 +88,6 @@ describe('AiConsoleCards', () => {
           agentId: 'agent-1',
           agentName: 'fallback-agent',
           title: 'Named Session',
-          status: 'active',
-          currentHeadEventId: 'root',
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:01:00',
         }}
@@ -106,8 +102,6 @@ describe('AiConsoleCards', () => {
           defaultModelName: 'MiniMax-M2.7',
           defaultVariant: 'default',
           toolsJson: '[]',
-          subagentsJson: '[]',
-          skillsJson: '[]',
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:00:00',
         }}
@@ -140,8 +134,6 @@ describe('AiConsoleCards', () => {
             defaultModelName: 'MiniMax-M2.7',
             defaultVariant: 'default',
             toolsJson: '[]',
-            subagentsJson: '[]',
-            skillsJson: '[]',
             createTime: '2026-06-20T02:00:00',
             updateTime: '2026-06-20T02:00:00',
           }}
@@ -162,8 +154,6 @@ describe('AiConsoleCards', () => {
             defaultModelName: 'MiniMax-M2.7',
             defaultVariant: null,
             toolsJson: '[]',
-            subagentsJson: '[]',
-            skillsJson: '[]',
             createTime: '2026-06-20T02:00:00',
             updateTime: '2026-06-20T02:00:00',
           }}
@@ -198,9 +188,6 @@ describe('AiConsoleCards', () => {
           providerName: 'minimax',
           name: 'MiniMax-M2.7',
           description: null,
-          capabilitiesJson: null,
-          limitJson: null,
-          pricingJson: null,
           defaultVariant: null,
           variantsJson: '[{"name":"default"}]',
           createTime: '2026-06-20T02:00:00',
@@ -234,7 +221,6 @@ describe('AiConsoleCards', () => {
           baseUrl: null,
           apiKey: null,
           timeoutMillis: null,
-          streamIdleTimeoutMillis: null,
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:00:00',
         }}

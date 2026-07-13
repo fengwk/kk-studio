@@ -267,13 +267,13 @@ payload：
 - `agentName`
 - `systemPrompt`
 - `tools: List<String>`
-- `subagents: List<String>`
-- `skills: List<String>`
 
 语义：
 
-- 记录的是实际展开后的 agent 信息
-- replay 不依赖 registry 的外部变更
+- 记录的是实际展开后的 agent 声明
+- `tools` 保存 Agent 声明的工具名称，不表示工具已经注册
+- 每次 assistant attempt 从 ToolRegistry 解析声明且已注册的 ToolRegistration
+- 历史声明回放不依赖 registry；继续执行时按当前 registry 重新解析
 - 不投影成业务消息，但会在投影时生成 system message
 
 ### 5.2 set_model_info
@@ -415,7 +415,8 @@ payload：
 - tool not found：`tool not found: {toolName}. Available tools: {a, b, c}.`
 - timeout：`tool timeout after {timeoutSeconds} seconds: {toolName}`
 
-可用工具列表按字典序展示。
+可用工具列表是当前 assistant attempt 实际暴露给模型的工具，按字典序展示。已注册但未被当前
+agent 启用的工具也按 tool not found 处理，错误结果会回流给下一轮 assistant。
 
 ## 8. Abort 事件
 
@@ -586,7 +587,6 @@ agent.tool
   ToolCallRequest
   ToolExecutionHandler
   ToolExecutionHandle
-  NoopToolExecutionHandle
   ToolInfo
   ToolRegistration
   ToolRegistry
@@ -686,7 +686,7 @@ public interface ToolExecutionHandle {
 - `cancel()` 是 best-effort
 - `cancel()` 必须尽量幂等
 - `cancel()` 抛异常时 runtime warn 后继续
-- `NoopToolExecutionHandle` 作为独立类提供给测试与适配器使用，不在接口上放 `NOOP` 常量
+- 生产代码不提供全局 no-op 常量；测试可在测试源码中定义最小实现
 
 ### 12.6 ToolRegistration
 
@@ -699,6 +699,8 @@ public interface ToolExecutionHandle {
 
 - 注册层以 registration 为唯一事实
 - 避免 `getToolInfo(name)` 与 `getTool(name)` 分裂
+- 每次 assistant attempt 解析出不可变的 registration 映射
+- Provider 工具描述、参数校验与最终工具执行使用同一 registration
 
 ### 12.7 ToolRegistry
 
@@ -706,10 +708,6 @@ public interface ToolExecutionHandle {
 
 - `register(ToolRegistration registration)`
 - `get(String toolName)`
-- `getToolInfo(String toolName)`
-- `getTool(String toolName)`
-- `listToolNames()`
-- `listRegistrations()`
 
 `DefaultToolRegistry` 策略：
 
@@ -719,8 +717,9 @@ public interface ToolExecutionHandle {
 - `Tool` 非空
 - `tool.timeoutSeconds() < 0` 拒绝注册
 - 重复注册 fail-fast
-- list 返回不可变视图
-- `listToolNames()` 用字典序返回，确保错误提示和测试稳定
+
+`AgentRuntimeConfigResolver` 是运行时解析 ToolRegistry 的唯一入口。`AgentFactory` 和
+`AgentToolOrchestrator` 不再单独持有 ToolRegistry，避免工具描述、Schema 与执行实现来自不同注册表。
 
 ## 13. ToolCallExecutor
 
@@ -858,12 +857,15 @@ assistant 正常结束后，若 response 包含 tool calls：
 
 ### 14.2 tool not found
 
-tool not found 仍写：
+工具未注册，或已注册但未被当前 agent 启用，都按 tool not found 处理。运行时仍写：
 
 ```text
 tool_start
 tool_error
 ```
+
+`tool_error` 会作为自然语言工具结果进入下一轮 assistant 上下文，使模型可以根据当前支持的工具
+自行恢复。
 
 错误文本：
 
@@ -1006,8 +1008,6 @@ Agent 创建 listener 时通过闭包绑定自己的 `ToolExecutionState`，再�
 - `defaultModel`
 - `defaultVariant`
 - `tools`
-- `subagents`
-- `skills`
 
 ### 18.2 ProviderRegistry / ProviderManager
 
@@ -1041,9 +1041,15 @@ Agent 创建 listener 时通过闭包绑定自己的 `ToolExecutionState`，再�
 职责：
 
 - 注册工具描述与执行器
-- 查询工具描述
-- 查询工具执行器
-- 提供可用工具名称列表
+- 按 Agent 声明解析当前 attempt 的 ToolRegistration
+- 提供工具目录查询能力
+
+解析规则：
+
+- Agent 未声明的工具按 tool not found 处理
+- Agent 已声明但未注册的工具按 tool not found 处理
+- 解析结果同时提供给 Provider 和 AgentToolOrchestrator
+- tool batch 期间不再查询全局 ToolRegistry
 
 `ToolInfo` 中：
 
@@ -1086,12 +1092,14 @@ LangChain4j 在系统中的职责是 provider 边界适配。
   - 将 provider callback 转换为 `AgentSignal`
 - `AgentToolOrchestrator`
   - 负责一批 tool call 的 start、delta、complete、error 与 cancel
+  - 只使用当前 attempt 已解析的 ToolRegistration，不查询全局 ToolRegistry
   - 将 tool callback 转换为 `AgentSignal`
 - `AgentRunContext`
-  - 承载一个主链 run 的 retry、active assistant 和 tool execution 状态
+  - 承载一个主链 run 的 retry、active assistant、resolved tools 和 tool execution 状态
   - 仅由上述运行时协作者共享
 - `AgentRuntimeConfigResolver`
   - 负责 agent/model 选择解析与运行时 provider/request config 装配
+  - 根据 Agent 声明从 ToolRegistry 解析当前 attempt 的 ToolRegistration
 - `AgentFactory`
   - 从 session tree 读取 branch event 链并装配 `Agent` 运行时
 - `ToolCallExecutor`

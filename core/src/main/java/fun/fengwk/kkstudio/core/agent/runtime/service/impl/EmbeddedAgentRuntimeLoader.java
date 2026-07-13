@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.agent.Agent;
 import fun.fengwk.kkstudio.agent.AgentEventHandler;
@@ -29,9 +28,7 @@ import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionHeadRepository;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionRepository;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSession;
 
 import java.time.Duration;
 import java.util.concurrent.ExecutorService;
@@ -42,11 +39,9 @@ import java.util.concurrent.ScheduledExecutorService;
 @Component
 final class EmbeddedAgentRuntimeLoader {
   private final AgentSessionRepository agentSessionRepository;
-  private final AgentSessionHeadRepository agentSessionHeadRepository;
   private final AgentSessionEventRepository agentSessionEventRepository;
   private final ProviderManager providerManager;
   private final ObjectMapper objectMapper;
-  private final TransactionTemplate transactionTemplate;
   private final EmbeddedAgentRuntimeReferenceResolver runtimeReferenceResolver;
   private final EmbeddedAgentRuntimeMetadataFactory runtimeMetadataFactory;
 
@@ -59,7 +54,6 @@ final class EmbeddedAgentRuntimeLoader {
   Agent load(String runId, String sessionId, AgentEventHandler eventHandler) {
     EmbeddedAgentRuntimeReferenceResolver.RuntimeReferences references =
         runtimeReferenceResolver.resolve(sessionId);
-    AgentSession session = references.session();
     AgentDefinition agentDefinition = references.agentDefinition();
     AgentProvider agentProvider = references.provider();
     AgentModel agentModel = references.model();
@@ -76,8 +70,7 @@ final class EmbeddedAgentRuntimeLoader {
         new ToolCallExecutor(agentToolWorkerExecutorService, agentScheduler);
     SessionManager sessionManager =
         new SessionManagerImpl(
-            new CoreSessionRepositoryAdapter(
-                agentSessionRepository, agentSessionHeadRepository, transactionTemplate),
+            new CoreSessionRepositoryAdapter(agentSessionRepository),
             new CoreSessionEventRepositoryAdapter(
                 runId, agentSessionEventRepository, objectMapper));
     UserRequestQueue userRequestQueue = new InMemoryUserRequestQueue();
@@ -85,13 +78,19 @@ final class EmbeddedAgentRuntimeLoader {
 
     AgentRegistry agentRegistry = new SingleAgentRegistry(agentInfo);
     ModelRegistry modelRegistry = new SingleModelRegistry(modelInfo);
-    ProviderRegistry providerRegistry = new SingleProviderRegistry(agentProvider.getName(), providerInfo);
-    AgentRuntimeConfigResolver runtimeConfigResolver = new AgentRuntimeConfigResolver(
-        agentRegistry, modelRegistry, providerRegistry, providerManager, toolRegistry);
+    ProviderRegistry providerRegistry =
+        new SingleProviderRegistry(agentProvider.getName(), providerInfo);
+    AgentRuntimeConfigResolver runtimeConfigResolver =
+        new AgentRuntimeConfigResolver(
+            agentRegistry, modelRegistry, providerRegistry, providerManager, toolRegistry);
 
-    AgentFactory.Dependencies deps = new AgentFactory.Dependencies(
-        toolRegistry, toolCallExecutor, sessionManager,
-        new CoreSessionEventMessageProjector(), eventHandler, runtimeConfigResolver);
+    AgentFactory.Dependencies deps =
+        new AgentFactory.Dependencies(
+            toolCallExecutor,
+            sessionManager,
+            new CoreSessionEventMessageProjector(),
+            eventHandler,
+            runtimeConfigResolver);
 
     return agentFactory.load(
         sessionId,

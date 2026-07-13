@@ -35,8 +35,6 @@ public interface AgentDefinitionMapper extends BaseMapper {
             default_model_id,
             default_variant,
             tools_json,
-            subagents_json,
-            skills_json,
             gmt_create as create_time,
             gmt_modified as update_time
         from agent_definition
@@ -54,8 +52,6 @@ public interface AgentDefinitionMapper extends BaseMapper {
         @Result(column = "default_model_id", property = "defaultModelId"),
         @Result(column = "default_variant", property = "defaultVariant"),
         @Result(column = "tools_json", property = "toolsJson"),
-        @Result(column = "subagents_json", property = "subagentsJson"),
-        @Result(column = "skills_json", property = "skillsJson"),
         @Result(column = "create_time", property = "createTime"),
         @Result(column = "update_time", property = "updateTime")
       })
@@ -72,8 +68,6 @@ public interface AgentDefinitionMapper extends BaseMapper {
             default_model_id,
             default_variant,
             tools_json,
-            subagents_json,
-            skills_json,
             gmt_create as create_time,
             gmt_modified as update_time
         from agent_definition
@@ -93,8 +87,6 @@ public interface AgentDefinitionMapper extends BaseMapper {
             default_model_id,
             default_variant,
             tools_json,
-            subagents_json,
-            skills_json,
             gmt_create as create_time,
             gmt_modified as update_time
         from agent_definition
@@ -114,8 +106,6 @@ public interface AgentDefinitionMapper extends BaseMapper {
             default_model_id,
             default_variant,
             tools_json,
-            subagents_json,
-            skills_json,
             gmt_create,
             gmt_modified,
             version
@@ -128,8 +118,6 @@ public interface AgentDefinitionMapper extends BaseMapper {
             #{defaultModelId},
             #{defaultVariant},
             #{toolsJson},
-            #{subagentsJson},
-            #{skillsJson},
             current_timestamp(3),
             current_timestamp(3),
             0
@@ -148,8 +136,6 @@ public interface AgentDefinitionMapper extends BaseMapper {
             default_model_id = #{agent.defaultModelId},
             default_variant = #{agent.defaultVariant},
             tools_json = #{agent.toolsJson},
-            subagents_json = #{agent.subagentsJson},
-            skills_json = #{agent.skillsJson},
             gmt_modified = current_timestamp(3)
         where id = #{agent.id}
         """)

@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContentDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContentType;
 import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandle;
+import fun.fengwk.kkstudio.agent.tool.ToolRegistration;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -36,6 +37,9 @@ final class AgentRunContext {
 
   /** 当前活跃的 assistant 尝试状态（null 表示等待 retry delay 或无活动）。 */
   AssistantAttemptState activeAssistant;
+
+  /** 当前 assistant attempt 已解析的工具注册项。 */
+  Map<String, ToolRegistration> resolvedTools = Map.of();
 
   /** 当前 loop 中全部 toolCallId 对应的执行状态。 */
   final Map<String, ToolExecutionState> toolStates = new LinkedHashMap<>();

@@ -13,14 +13,6 @@ public class AgentIdentifierGenerator {
     return "se_" + rawUuid();
   }
 
-  public static String newProfileId() {
-    return "pf_" + rawUuid();
-  }
-
-  public static String newHeadId() {
-    return "hd_" + rawUuid();
-  }
-
   public static String newEventId() {
     return "ev_" + rawUuid();
   }

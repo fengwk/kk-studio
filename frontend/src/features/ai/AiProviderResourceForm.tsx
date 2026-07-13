@@ -46,15 +46,6 @@ export function ProviderForm({
         <span>Timeout Millis</span>
         <input value={draft.timeoutMillis} onChange={(event) => onChange({ ...draft, timeoutMillis: event.target.value })} placeholder="60000" inputMode="numeric" />
       </label>
-      <label className="form-group">
-        <span>Stream Idle Timeout Millis</span>
-        <input
-          value={draft.streamIdleTimeoutMillis}
-          onChange={(event) => onChange({ ...draft, streamIdleTimeoutMillis: event.target.value })}
-          placeholder="60000"
-          inputMode="numeric"
-        />
-      </label>
     </>
   )
 }

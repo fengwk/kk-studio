@@ -24,4 +24,6 @@ public interface AgentRunRepository {
       String runId, String expectedStatus, String status, LocalDateTime updateTime);
 
   boolean markFailedFromActive(String runId, String status, LocalDateTime updateTime);
+
+  int deleteBySessionId(String sessionId);
 }

@@ -67,6 +67,11 @@ public class MysqlAgentRunRepository implements AgentRunRepository {
     return agentRunMapper.markFailedFromActive(runId, status, updateTime) > 0;
   }
 
+  @Override
+  public int deleteBySessionId(String sessionId) {
+    return agentRunMapper.deleteBySessionId(sessionId);
+  }
+
   private AgentRunDO convert(AgentRun run) {
     if (run == null) {
       return null;

@@ -25,21 +25,23 @@ import java.util.function.Consumer;
  * AgentAssistantRunner 负责一次 assistant attempt 的完整生命周期。
  *
  * <p>职责范围：
+ *
  * <ul>
- *   <li>写 assistant_start 事件，合并 userMessages</li>
- *   <li>调用 provider.asyncChat 启动流</li>
- *   <li>处理流式 delta（text / thinking / toolCallDelta / toolCallComplete）</li>
- *   <li>处理 complete（含 gap 补齐）+ toolCalls 路由</li>
- *   <li>处理 error 事件（写 assistant_error event + 清状态）</li>
- *   <li>取消时释放 handle</li>
+ *   <li>写 assistant_start 事件，合并 userMessages
+ *   <li>调用 provider.asyncChat 启动流
+ *   <li>处理流式 delta（text / thinking / toolCallDelta / toolCallComplete）
+ *   <li>处理 complete（含 gap 补齐）+ toolCalls 路由
+ *   <li>处理 error 事件（写 assistant_error event + 清状态）
+ *   <li>取消时释放 handle
  * </ul>
  *
  * <p>不负责：
+ *
  * <ul>
- *   <li>解析运行时配置（由 Agent 调用 AgentRuntimeConfigResolver 完成）</li>
- *   <li>管理 retry task（由 Agent 持有）</li>
- *   <li>决定是否 abort / 调度 retry（由 Agent 状态机决定）</li>
- *   <li>维护 run 级状态（AgentRunContext 由 Agent 持有）</li>
+ *   <li>解析运行时配置（由 Agent 调用 AgentRuntimeConfigResolver 完成）
+ *   <li>管理 retry task（由 Agent 持有）
+ *   <li>决定是否 abort / 调度 retry（由 Agent 状态机决定）
+ *   <li>维护 run 级状态（AgentRunContext 由 Agent 持有）
  * </ul>
  *
  * @author fengwk
@@ -62,17 +64,16 @@ final class AgentAssistantRunner {
 
   /** 取消当前 attempt 的 provider handle（best-effort）。 */
   void cancelActive(AgentRunContext runContext) {
-    AssistantResponseHandle handle = runContext == null || runContext.activeAssistant == null
-        ? null
-        : runContext.activeAssistant.handle;
+    AssistantResponseHandle handle =
+        runContext == null || runContext.activeAssistant == null
+            ? null
+            : runContext.activeAssistant.handle;
     if (handle != null) {
       cancel(handle);
     }
   }
 
-  /**
-   * 启动一次 assistant attempt。需要 Agent 先调用 AgentRuntimeConfigResolver 解析并持久化 config。
-   */
+  /** 启动一次 assistant attempt。需要 Agent 先调用 AgentRuntimeConfigResolver 解析并持久化 config。 */
   void startAttempt(
       AgentRunContext runContext,
       AgentRuntimeConfigResolver.ResolvedRuntimeConfig runtimeConfig,
@@ -82,10 +83,12 @@ final class AgentAssistantRunner {
     }
     requireNonNull(runtimeConfig, "runtimeConfig");
 
+    runContext.resolvedTools = runtimeConfig.getResolvedTools();
     AssistantAttemptState attemptState = new AssistantAttemptState();
     runContext.activeAssistant = attemptState;
 
-    List<AgentMessage> messagesForModel = withUserMessages(writer.getProjectedMessages(), userMessages);
+    List<AgentMessage> messagesForModel =
+        withUserMessages(writer.getProjectedMessages(), userMessages);
     AssistantStartPayload assistantStartPayload = new AssistantStartPayload();
     assistantStartPayload.setUserMessages(userMessages);
     writer.appendEvent(SessionEventType.assistant_start, assistantStartPayload);
@@ -240,7 +243,8 @@ final class AgentAssistantRunner {
     List<IndexedToolCallDelta> toolCallGaps =
         attemptState.computeToolCallGaps(response.getToolCalls());
     String textGap = AgentTextDelta.gap(attemptState.text.toString(), response.getText());
-    String thinkingGap = AgentTextDelta.gap(attemptState.thinking.toString(), response.getThinking());
+    String thinkingGap =
+        AgentTextDelta.gap(attemptState.thinking.toString(), response.getThinking());
     if ((textGap == null || textGap.isEmpty())
         && (thinkingGap == null || thinkingGap.isEmpty())
         && toolCallGaps.isEmpty()) {
@@ -290,10 +294,9 @@ final class AgentAssistantRunner {
     }
   }
 
-  private static boolean isActiveAssistant(AgentRunContext runContext, AssistantAttemptState attemptState) {
-    return runContext != null
-        && runContext.activeAssistant == attemptState
-        && !runContext.aborted;
+  private static boolean isActiveAssistant(
+      AgentRunContext runContext, AssistantAttemptState attemptState) {
+    return runContext != null && runContext.activeAssistant == attemptState && !runContext.aborted;
   }
 
   private static boolean isUsableToolCallIndex(Integer index) {
@@ -321,10 +324,7 @@ final class AgentAssistantRunner {
     return value;
   }
 
-  /**
-   * AssistantResponseHandler 把 provider 回调包成 AgentSignal 入队。
-   * 不持有 Agent 引用，避免反向耦合。
-   */
+  /** AssistantResponseHandler 把 provider 回调包成 AgentSignal 入队。 不持有 Agent 引用，避免反向耦合。 */
   private final class RunnerResponseHandler implements AssistantResponseHandler {
 
     private final AssistantAttemptState attemptState;
@@ -344,12 +344,14 @@ final class AgentAssistantRunner {
     }
 
     @Override
-    public void onToolCallDelta(IndexedToolCallDelta toolCallDelta, AssistantResponseHandle handle) {
+    public void onToolCallDelta(
+        IndexedToolCallDelta toolCallDelta, AssistantResponseHandle handle) {
       enqueueSignal.accept(new AssistantToolCallDeltaSignal(attemptState, toolCallDelta));
     }
 
     @Override
-    public void onToolCallComplete(Integer index, ToolCall toolCall, AssistantResponseHandle handle) {
+    public void onToolCallComplete(
+        Integer index, ToolCall toolCall, AssistantResponseHandle handle) {
       enqueueSignal.accept(new AssistantToolCallCompleteSignal(attemptState, index, toolCall));
     }
 

@@ -33,11 +33,17 @@ public class EmbeddedAgentRunRuntimeService implements AgentRunRuntimeService {
 
   @Override
   public void scheduleQueuedRun(String runId, String sessionId, String content) {
-    agentRunTaskExecutor.execute(() -> executeQueuedRun(runId, sessionId, content));
+    try {
+      agentRunTaskExecutor.execute(() -> executeQueuedRun(runId, sessionId, content));
+    } catch (RuntimeException error) {
+      if (!agentRunService.markFailed(runId)) {
+        log.warn("Failed to close rejected queued run, runId: {}", runId);
+      }
+      throw error;
+    }
   }
 
-  @Override
-  public void executeQueuedRun(String runId, String sessionId, String content) {
+  private void executeQueuedRun(String runId, String sessionId, String content) {
     // 不再包外层事务：agent 主循环内的每条 event（assistant_delta 等）
     // 都是单条 INSERT，由 MyBatis/auto-commit 立即对外可见，
     // 这样 SSE 端在下个 250ms 轮询周期就能拿到新的 delta，而不是等 run 结束才一次性 commit。

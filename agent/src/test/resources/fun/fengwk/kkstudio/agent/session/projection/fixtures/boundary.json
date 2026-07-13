@@ -177,49 +177,49 @@
     "events": [
       {
         "eventType": "set_agent_info",
-        "payloadType": "unknown",
+        "payloadClass": "unknown",
         "payload": {
           "ignored": true
         }
       },
       {
         "eventType": "set_model_info",
-        "payloadType": "unknown",
+        "payloadClass": "unknown",
         "payload": {
           "ignored": true
         }
       },
       {
         "eventType": "assistant_delta",
-        "payloadType": "assistant_start",
+        "payloadClass": "assistant_start",
         "payload": {
           "userMessages": ["ghost"]
         }
       },
       {
         "eventType": "assistant_start",
-        "payloadType": "unknown",
+        "payloadClass": "unknown",
         "payload": {
           "ignored": true
         }
       },
       {
         "eventType": "tool_start",
-        "payloadType": "tool_error",
+        "payloadClass": "tool_error",
         "payload": {
           "message": "bad"
         }
       },
       {
         "eventType": "tool_delta",
-        "payloadType": "assistant_delta",
+        "payloadClass": "assistant_delta",
         "payload": {
           "textDelta": "bad"
         }
       },
       {
         "eventType": "tool_end",
-        "payloadType": "assistant_start",
+        "payloadClass": "assistant_start",
         "payload": {
           "userMessages": ["bad"]
         }
@@ -246,14 +246,14 @@
       },
       {
         "eventType": "assistant_error",
-        "payloadType": "unknown",
+        "payloadClass": "unknown",
         "payload": {
           "ignored": true
         }
       },
       {
         "eventType": "abort",
-        "payloadType": "unknown",
+        "payloadClass": "unknown",
         "payload": {
           "ignored": true
         }

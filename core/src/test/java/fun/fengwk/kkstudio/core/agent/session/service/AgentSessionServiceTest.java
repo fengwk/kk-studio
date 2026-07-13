@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.agent.run.service.AgentRunService;
 import fun.fengwk.kkstudio.core.agent.runtime.service.AgentRunRuntimeService;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
+import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionRepository;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
 import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
 import fun.fengwk.kkstudio.core.testing.StubProviderManager;
@@ -24,13 +25,18 @@ import fun.fengwk.kkstudio.share.model.AgentRunDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionEventDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionHeadDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionUpdateDTO;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author fengwk
@@ -45,6 +51,8 @@ public class AgentSessionServiceTest {
   @Autowired private AgentRunRuntimeService agentRunRuntimeService;
 
   @Autowired private AgentSessionEventRepository agentSessionEventRepository;
+
+  @Autowired private AgentSessionRepository agentSessionRepository;
 
   @Autowired private StubProviderManager stubProviderManager;
 
@@ -102,8 +110,6 @@ public class AgentSessionServiceTest {
     assertTrue(created.getSessionId().startsWith("se_"));
     assertEquals("default-assistant", created.getAgentName());
     assertEquals("Bootstrap Session", created.getTitle());
-    assertEquals("active", created.getStatus());
-    assertEquals("root", created.getCurrentHeadEventId());
     assertNotNull(created.getCreateTime());
     assertNotNull(created.getUpdateTime());
 
@@ -111,15 +117,9 @@ public class AgentSessionServiceTest {
     assertEquals(created.getSessionId(), loaded.getSessionId());
     assertEquals(created.getAgentName(), loaded.getAgentName());
     assertEquals(created.getTitle(), loaded.getTitle());
-    assertEquals(created.getStatus(), loaded.getStatus());
-    assertEquals(created.getCurrentHeadEventId(), loaded.getCurrentHeadEventId());
-
-    List<AgentSessionHeadDTO> heads = agentSessionService.listHeads(created.getSessionId());
-    assertEquals(1, heads.size());
-    assertTrue(heads.get(0).getHeadId().startsWith("hd_"));
-    assertEquals(created.getSessionId(), heads.get(0).getSessionId());
-    assertEquals("default", heads.get(0).getHeadName());
-    assertEquals("root", heads.get(0).getHeadEventId());
+    assertEquals(
+        "root",
+        agentSessionRepository.getBySessionId(created.getSessionId()).getCurrentHeadEventId());
 
     List<AgentSessionEventDTO> events =
         agentSessionService.listEvents(created.getSessionId(), null);
@@ -149,8 +149,55 @@ public class AgentSessionServiceTest {
     assertNull(agentSessionService.getSession(session.getSessionId()).getTitle());
   }
 
+  /** 删除会话必须清理整个持久化聚合，而不是遗留不可访问的 event 和 run。 */
   @Test
-  public void shouldAppendUserMessageAndAdvanceDefaultHead() throws InterruptedException {
+  public void shouldDeleteCompletedSessionAggregate() throws InterruptedException {
+    stubProviderManager.enqueueText("delete me");
+    AgentSessionCreateDTO createDTO = new AgentSessionCreateDTO();
+    createDTO.setAgentName("default-assistant");
+    createDTO.setTitle("Disposable Session");
+    AgentSessionDTO session = agentSessionService.createSession(createDTO);
+
+    AgentSessionMessageCreateDTO message = new AgentSessionMessageCreateDTO();
+    message.setContent("complete before delete");
+    AgentSessionEventDTO event = agentSessionService.createMessage(session.getSessionId(), message);
+    agentRunRuntimeService.scheduleQueuedRun(
+        event.getRunId(), session.getSessionId(), message.getContent());
+    waitForRunCompleted(event.getRunId());
+
+    agentSessionService.deleteSession(session.getSessionId());
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> agentSessionService.getSession(session.getSessionId()));
+    assertTrue(agentSessionEventRepository.listBySessionId(session.getSessionId()).isEmpty());
+    assertNull(agentRunService.getRun(event.getRunId()));
+  }
+
+  /** 活跃 run 仍可能写事件，此时删除 session 必须被拒绝。 */
+  @Test
+  public void shouldRejectDeletingSessionWithActiveRun() {
+    AgentSessionCreateDTO createDTO = new AgentSessionCreateDTO();
+    createDTO.setAgentName("default-assistant");
+    createDTO.setTitle("Active Session");
+    AgentSessionDTO session = agentSessionService.createSession(createDTO);
+
+    AgentSessionMessageCreateDTO message = new AgentSessionMessageCreateDTO();
+    message.setContent("still queued");
+    agentSessionService.createMessage(session.getSessionId(), message);
+
+    IllegalStateException error =
+        assertThrows(
+            IllegalStateException.class,
+            () -> agentSessionService.deleteSession(session.getSessionId()));
+
+    assertEquals("session has active run: " + session.getSessionId(), error.getMessage());
+    assertNotNull(agentSessionService.getSession(session.getSessionId()));
+    assertEquals(1, agentSessionEventRepository.listBySessionId(session.getSessionId()).size());
+  }
+
+  @Test
+  public void shouldAppendUserMessageAndAdvanceSessionHead() throws InterruptedException {
     stubProviderManager.enqueueText("Agent reply");
 
     AgentSessionCreateDTO createDTO = new AgentSessionCreateDTO();
@@ -173,18 +220,16 @@ public class AgentSessionServiceTest {
     assertEquals(createdSession.getSessionId(), createdEvent.getSessionId());
     assertEquals("root", createdEvent.getParentEventId());
     assertEquals("user_message", createdEvent.getEventType());
-    assertEquals("text", createdEvent.getPayloadType());
     assertEquals("{\"content\":\"Hello kk-studio\"}", createdEvent.getPayloadJson());
     assertNotNull(createdEvent.getCreateTime());
 
-    AgentSessionDTO loadedSession = agentSessionService.getSession(createdSession.getSessionId());
-    assertNotNull(loadedSession.getCurrentHeadEventId());
-    assertTrue(loadedSession.getCurrentHeadEventId().startsWith("ev_"));
-    assertTrue(!createdEvent.getEventId().equals(loadedSession.getCurrentHeadEventId()));
-
-    List<AgentSessionHeadDTO> heads = agentSessionService.listHeads(createdSession.getSessionId());
-    assertEquals(1, heads.size());
-    assertEquals(loadedSession.getCurrentHeadEventId(), heads.get(0).getHeadEventId());
+    String currentHeadEventId =
+        agentSessionRepository
+            .getBySessionId(createdSession.getSessionId())
+            .getCurrentHeadEventId();
+    assertNotNull(currentHeadEventId);
+    assertTrue(currentHeadEventId.startsWith("ev_"));
+    assertTrue(!createdEvent.getEventId().equals(currentHeadEventId));
 
     List<AgentRunDTO> runs = agentRunService.listRuns(createdSession.getSessionId());
     assertEquals(1, runs.size());
@@ -203,6 +248,84 @@ public class AgentSessionServiceTest {
     assertEquals("assistant_delta", events.get(4).getEventType());
     assertTrue(events.get(4).getPayloadJson().contains("Agent reply"));
     assertEquals("assistant_end", events.get(5).getEventType());
+  }
+
+  /** 同一 session 已存在 queued/running run 时必须拒绝第二条消息，避免产生分叉回答。 */
+  @Test
+  public void shouldRejectMessageWhileSessionHasActiveRun() {
+    AgentSessionCreateDTO createDTO = new AgentSessionCreateDTO();
+    createDTO.setAgentName("default-assistant");
+    createDTO.setTitle("Serialized Message Session");
+    AgentSessionDTO session = agentSessionService.createSession(createDTO);
+
+    AgentSessionMessageCreateDTO firstMessage = new AgentSessionMessageCreateDTO();
+    firstMessage.setContent("first");
+    AgentSessionEventDTO firstEvent =
+        agentSessionService.createMessage(session.getSessionId(), firstMessage);
+
+    AgentSessionMessageCreateDTO secondMessage = new AgentSessionMessageCreateDTO();
+    secondMessage.setContent("second");
+    IllegalStateException error =
+        assertThrows(
+            IllegalStateException.class,
+            () -> agentSessionService.createMessage(session.getSessionId(), secondMessage));
+
+    assertEquals("session has active run: " + session.getSessionId(), error.getMessage());
+    assertEquals(1, agentRunService.listRuns(session.getSessionId()).size());
+    List<AgentSessionEventDTO> events =
+        agentSessionService.listEvents(session.getSessionId(), null);
+    assertEquals(1, events.size());
+    assertEquals(firstEvent.getEventId(), events.get(0).getEventId());
+    assertEquals(
+        firstEvent.getEventId(),
+        agentSessionRepository.getBySessionId(session.getSessionId()).getCurrentHeadEventId());
+  }
+
+  /** 并发提交必须由 session 行锁串行化，最终只能创建一个 user event 和一个 active run。 */
+  @Test
+  public void shouldSerializeConcurrentMessageSubmissions() throws Exception {
+    AgentSessionCreateDTO createDTO = new AgentSessionCreateDTO();
+    createDTO.setAgentName("default-assistant");
+    createDTO.setTitle("Concurrent Message Session");
+    AgentSessionDTO session = agentSessionService.createSession(createDTO);
+
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    CountDownLatch ready = new CountDownLatch(2);
+    CountDownLatch start = new CountDownLatch(1);
+    List<Future<Object>> futures = new ArrayList<>();
+    try {
+      for (int index = 0; index < 2; index++) {
+        String content = "message-" + index;
+        futures.add(
+            executor.submit(
+                () -> {
+                  ready.countDown();
+                  start.await();
+                  AgentSessionMessageCreateDTO message = new AgentSessionMessageCreateDTO();
+                  message.setContent(content);
+                  try {
+                    return agentSessionService.createMessage(session.getSessionId(), message);
+                  } catch (RuntimeException error) {
+                    return error;
+                  }
+                }));
+      }
+      assertTrue(ready.await(5, TimeUnit.SECONDS));
+      start.countDown();
+
+      List<Object> results = new ArrayList<>();
+      for (Future<Object> future : futures) {
+        results.add(future.get(5, TimeUnit.SECONDS));
+      }
+
+      assertEquals(1, results.stream().filter(AgentSessionEventDTO.class::isInstance).count());
+      assertEquals(1, results.stream().filter(IllegalStateException.class::isInstance).count());
+      assertEquals(1, agentRunService.listRuns(session.getSessionId()).size());
+      assertEquals(1, agentSessionService.listEvents(session.getSessionId(), null).size());
+    } finally {
+      start.countDown();
+      executor.shutdownNow();
+    }
   }
 
   @Test
@@ -229,9 +352,12 @@ public class AgentSessionServiceTest {
     assertEquals(createdEvent.getRunId(), runs.get(0).getRunId());
     assertEquals("failed", runs.get(0).getStatus());
 
-    AgentSessionDTO loadedSession = agentSessionService.getSession(createdSession.getSessionId());
-    assertNotNull(loadedSession.getCurrentHeadEventId());
-    assertTrue(!createdEvent.getEventId().equals(loadedSession.getCurrentHeadEventId()));
+    String currentHeadEventId =
+        agentSessionRepository
+            .getBySessionId(createdSession.getSessionId())
+            .getCurrentHeadEventId();
+    assertNotNull(currentHeadEventId);
+    assertTrue(!createdEvent.getEventId().equals(currentHeadEventId));
 
     List<AgentSessionEventDTO> events =
         agentSessionService.listEvents(createdSession.getSessionId(), null);
@@ -259,7 +385,8 @@ public class AgentSessionServiceTest {
     waitForRunCompleted(createdEvent.getRunId());
 
     assertEquals("failed", agentRunService.getRun(createdEvent.getRunId()).getStatus());
-    List<AgentSessionEventDTO> events = agentSessionService.listEvents(session.getSessionId(), null);
+    List<AgentSessionEventDTO> events =
+        agentSessionService.listEvents(session.getSessionId(), null);
     assertEquals(1, events.size());
     assertEquals("user_message", events.get(0).getEventType());
   }
@@ -337,7 +464,6 @@ public class AgentSessionServiceTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> agentSessionService.updateSession(session.getSessionId(), null));
-    assertThrows(IllegalArgumentException.class, () -> agentSessionService.listHeads(" "));
     assertThrows(IllegalArgumentException.class, () -> agentSessionService.listEvents(" ", null));
     assertThrows(
         IllegalArgumentException.class,
@@ -383,7 +509,6 @@ public class AgentSessionServiceTest {
     sessionEvent.setParentEventId(parentEventId);
     sessionEvent.setRunId("rn_" + eventId);
     sessionEvent.setEventType("test_event");
-    sessionEvent.setPayloadType("text");
     sessionEvent.setPayloadJson("{}");
     sessionEvent.setCreateTime(LocalDateTime.now());
     agentSessionEventRepository.add(sessionEvent);

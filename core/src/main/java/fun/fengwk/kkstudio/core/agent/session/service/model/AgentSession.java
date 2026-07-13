@@ -15,7 +15,6 @@ public class AgentSession {
   private Long agentId;
   private String agentName;
   private String title;
-  private String status;
   private String currentHeadEventId;
   private LocalDateTime createTime;
   private LocalDateTime updateTime;

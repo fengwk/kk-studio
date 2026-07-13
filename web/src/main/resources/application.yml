@@ -24,50 +24,6 @@ spring:
     # 替换为mysql {password}
     password: {password}
 
-#  config:
-#    # NacosConfigDataMissingEnvironmentPostProcessor
-#    # 指定nacos使用配置文件的dataId
-#    import: 'nacos:${spring.application.name}.yml'
-#
-#  cloud:
-#    discovery:
-#      # 当这个选项被启用后nacos的loadbalancer将会被激活
-#      # @ConditionalOnDiscoveryEnabled
-#      enabled: true
-#    # nacos配置，注意另外需配置spring.cloud.config.import
-#    nacos:
-#      # NacosConfigProperties
-#      config:
-#        server-addr: vps-nacos:8848
-#        namespace: ${spring.profiles.active}
-#      # NacosDiscoveryProperties
-#      discovery:
-#        server-addr: ${spring.cloud.nacos.config.server-addr}
-#        namespace: ${spring.cloud.nacos.config.namespace}
-#
-#    loadbalancer:
-#      nacos:
-#        # 启用nacos的loadbalancer
-#        # @ConditionalOnLoadBalancerNacos
-#        enabled: true
-#
-#    # openfeign配置
-#    openfeign:
-#      # FeignHttpClientProperties
-#      httpclient:
-#        # 关闭ssl验证
-#        disable-ssl-validation: true
-#      # FeignClientProperties
-#      client:
-#        # FeignClientConfiguration
-#        config:
-#          # default表示默认，或者具体的服务名表示指定服务
-#          default:
-#            loggerLevel: NONE
-#            connect-timeout: 3000
-#            read-timeout: 3000
-#            follow-redirects: true
-
 server:
   port: 8080
   # Compression
@@ -105,13 +61,3 @@ convention:
     i18n:
       # 错误码i18n语言，与i18n.locale保持一致
       locale: ${convention.i18n.locale}
-
-# springdoc配置，如需使用同时要启用pom.xml文件中的springdoc-openapi-starter-webmvc-ui依赖
-#springdoc:
-#
-#  swagger-ui:
-#    path: /swagger-ui.html
-#
-#  api-docs:
-#    path: /api-docs
-#    enabled: true

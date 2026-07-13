@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.agent.tool;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -9,8 +8,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.agent.tool.schema.ToolParamsSchema;
 
-import java.util.List;
-
 /**
  * DefaultToolRegistry 的注册校验测试。
  *
@@ -18,22 +15,17 @@ import java.util.List;
  */
 public class DefaultToolRegistryTest {
 
-  /** 校验注册表按字典序返回工具名，并通过同一注册项提供描述与实现。 */
+  /** 校验注册后可按名称取得完整注册项。 */
   @Test
-  public void testRegisterAndListToolNamesInStableOrder() {
+  public void testRegisterAndGet() {
     DefaultToolRegistry registry = new DefaultToolRegistry();
     Tool alpha = noopTool();
-    Tool beta = noopTool();
+    ToolRegistration registration = new ToolRegistration("alpha", toolInfo("alpha"), alpha);
 
-    registry.register(new ToolRegistration("beta", toolInfo("beta"), beta));
-    registry.register(new ToolRegistration("alpha", toolInfo("alpha"), alpha));
+    registry.register(registration);
 
-    assertEquals(List.of("alpha", "beta"), registry.listToolNames());
-    assertSame(alpha, registry.getTool("alpha"));
-    assertEquals("beta", registry.getToolInfo("beta").getName());
-    assertEquals(
-        List.of("alpha", "beta"),
-        registry.listRegistrations().stream().map(ToolRegistration::getName).toList());
+    assertSame(registration, registry.get("alpha"));
+    assertSame(alpha, registry.get("alpha").getTool());
   }
 
   /** 校验重复注册、名称不一致与负超时都会 fail-fast。 */
@@ -87,8 +79,6 @@ public class DefaultToolRegistryTest {
 
     assertNull(registry.get(null));
     assertNull(registry.get("missing"));
-    assertNull(registry.getToolInfo("missing"));
-    assertNull(registry.getTool("missing"));
   }
 
   private ToolInfo toolInfo(String name) {

@@ -118,7 +118,6 @@ public class AnthropicAgentMultiTurnLiveTest {
         .baseUrl(baseUrl)
         .apiKey(apiKey)
         .timeout(Duration.ofSeconds(90))
-        .streamIdleTimeout(Duration.ofSeconds(90))
         .build();
   }
 
@@ -185,19 +184,20 @@ public class AnthropicAgentMultiTurnLiveTest {
             return () -> {};
           };
       DefaultToolRegistry toolRegistry = new DefaultToolRegistry();
-      AgentRuntimeConfigResolver resolver = new AgentRuntimeConfigResolver(
-          new LiveAgentRegistry(),
-          new LiveModelRegistry(),
-          new LiveProviderRegistry(providerManager.providerInfo),
-          providerManager,
-          toolRegistry);
-      AgentFactory.Dependencies deps = new AgentFactory.Dependencies(
-          toolRegistry,
-          new ToolCallExecutor(new DirectExecutorService(), scheduler),
-          sessionManager,
-          new DefaultSessionEventMessageProjector(),
-          new RecordingAgentEventHandler(events),
-          resolver);
+      AgentRuntimeConfigResolver resolver =
+          new AgentRuntimeConfigResolver(
+              new LiveAgentRegistry(),
+              new LiveModelRegistry(),
+              new LiveProviderRegistry(providerManager.providerInfo),
+              providerManager,
+              toolRegistry);
+      AgentFactory.Dependencies deps =
+          new AgentFactory.Dependencies(
+              new ToolCallExecutor(new DirectExecutorService(), scheduler),
+              sessionManager,
+              new DefaultSessionEventMessageProjector(),
+              new RecordingAgentEventHandler(events),
+              resolver);
       return new AgentFactory()
           .load(
               session.getSessionId(),

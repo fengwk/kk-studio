@@ -21,7 +21,7 @@ export function useAgentSessionController(sessionId: string) {
 
   function submitMessage() {
     const content = draft.trim()
-    if (!content || createMessageMutation.isPending) {
+    if (!content || activeRun || createMessageMutation.isPending) {
       return
     }
     createMessageMutation.mutate(content)
@@ -41,7 +41,7 @@ export function useAgentSessionController(sessionId: string) {
     bodyRef,
     draft,
     pending: createMessageMutation.isPending,
-    disabled: !session,
+    disabled: !session || activeRun,
     setDraft,
     submitMessage,
   }

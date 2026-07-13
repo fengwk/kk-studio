@@ -61,7 +61,8 @@ public class AgentRunServiceImpl implements AgentRunService {
 
   @Override
   public boolean markFailed(String runId) {
-    return updateStatus(runId, STATUS_RUNNING, STATUS_FAILED);
+    return agentRunRepository.markFailedFromActive(
+        runGuard.requireRunId(runId), STATUS_FAILED, LocalDateTime.now());
   }
 
   @Override
@@ -74,6 +75,15 @@ public class AgentRunServiceImpl implements AgentRunService {
   @Override
   public boolean hasActiveRun(String sessionId) {
     return agentRunRepository.existsActiveBySessionId(runGuard.requireSessionId(sessionId));
+  }
+
+  @Override
+  public void deleteRunsBySessionId(String sessionId) {
+    String normalizedSessionId = runGuard.requireSessionId(sessionId);
+    if (agentRunRepository.existsActiveBySessionId(normalizedSessionId)) {
+      throw new IllegalStateException("session has active run: " + normalizedSessionId);
+    }
+    agentRunRepository.deleteBySessionId(normalizedSessionId);
   }
 
   private boolean updateStatus(String runId, String expectedStatus, String status) {

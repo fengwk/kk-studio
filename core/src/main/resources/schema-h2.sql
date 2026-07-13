@@ -6,7 +6,6 @@ create table if not exists agent_provider (
     base_url                    varchar(512) null comment '服务地址',
     api_key                     varchar(512) null comment '访问凭据',
     timeout_millis              bigint null comment '请求超时毫秒',
-    stream_idle_timeout_millis  bigint null comment '流式空闲超时毫秒',
     gmt_create                  timestamp(3) not null default current_timestamp(3) comment '创建时间',
     gmt_modified                timestamp(3) not null default current_timestamp(3) comment '更新时间',
     version                     bigint not null default '0' comment '数据版本号',
@@ -19,9 +18,6 @@ create table if not exists agent_model (
     provider_id       bigint unsigned not null comment '所属 provider id',
     name              varchar(128) not null comment '模型名称',
     description       varchar(512) null comment '描述',
-    capabilities_json text null comment '模型能力 JSON',
-    limit_json        text null comment '模型限制 JSON',
-    pricing_json      text null comment '模型价格 JSON',
     default_variant   varchar(64) not null comment '默认 variant',
     variants_json     text not null comment 'variants JSON 数组',
     gmt_create        timestamp(3) not null default current_timestamp(3) comment '创建时间',
@@ -40,8 +36,6 @@ create table if not exists agent_definition (
     default_model_id      bigint unsigned not null comment '默认 model id',
     default_variant       varchar(64) not null comment '默认 variant',
     tools_json            text null comment '工具名称 JSON 数组',
-    subagents_json        text null comment '子 agent 名称 JSON 数组',
-    skills_json           text null comment '技能名称 JSON 数组',
     gmt_create            timestamp(3) not null default current_timestamp(3) comment '创建时间',
     gmt_modified          timestamp(3) not null default current_timestamp(3) comment '更新时间',
     version               bigint not null default '0' comment '数据版本号',
@@ -55,27 +49,12 @@ create table if not exists agent_session (
     agent_id               bigint unsigned null comment '绑定的 agent id',
     agent_name             varchar(64) null comment '绑定的 agent 名称快照',
     title                  varchar(256) null comment 'session 标题',
-    status                 varchar(32) not null comment 'session 状态',
     current_head_event_id  varchar(64) not null comment '当前默认 head event id',
     gmt_create             timestamp(3) not null default current_timestamp(3) comment '创建时间',
     gmt_modified           timestamp(3) not null default current_timestamp(3) comment '更新时间',
     version                bigint not null default '0' comment '数据版本号',
     primary key (id),
     unique (session_id)
-);
-
-create table if not exists agent_session_head (
-    id             bigint not null comment '主键',
-    head_id        varchar(64) not null comment 'head 业务 id',
-    session_id     varchar(64) not null comment 'session 业务 id',
-    head_name      varchar(64) not null comment 'head 名称',
-    head_event_id  varchar(64) not null comment 'head event id',
-    gmt_create     timestamp(3) not null default current_timestamp(3) comment '创建时间',
-    gmt_modified   timestamp(3) not null default current_timestamp(3) comment '更新时间',
-    version        bigint not null default '0' comment '数据版本号',
-    primary key (id),
-    unique (head_id),
-    unique (session_id, head_name)
 );
 
 create table if not exists agent_session_event (
@@ -85,7 +64,6 @@ create table if not exists agent_session_event (
     parent_event_id  varchar(64) not null comment '父 event id',
     run_id           varchar(64) null comment 'run 业务 id',
     event_type       varchar(64) not null comment '事件类型',
-    payload_type     varchar(64) not null comment 'payload 类型',
     payload_json     text not null comment 'payload JSON',
     gmt_create       timestamp(3) not null default current_timestamp(3) comment '创建时间',
     gmt_modified     timestamp(3) not null default current_timestamp(3) comment '更新时间',

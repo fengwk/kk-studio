@@ -6,30 +6,31 @@ import fun.fengwk.kkstudio.agent.session.SessionEventType;
 import fun.fengwk.kkstudio.agent.session.payload.IndexedToolContentDelta;
 import fun.fengwk.kkstudio.agent.session.payload.ToolCall;
 import fun.fengwk.kkstudio.agent.session.payload.ToolContent;
-import fun.fengwk.kkstudio.agent.tool.ToolCallRequest;
 import fun.fengwk.kkstudio.agent.session.payload.ToolDeltaPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolEndPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolErrorPayload;
 import fun.fengwk.kkstudio.agent.session.payload.ToolStartPayload;
+import fun.fengwk.kkstudio.agent.tool.ToolCallRequest;
 import fun.fengwk.kkstudio.agent.tool.ToolExecutionHandle;
 import fun.fengwk.kkstudio.agent.tool.ToolRegistration;
-import fun.fengwk.kkstudio.agent.tool.ToolRegistry;
 import fun.fengwk.kkstudio.agent.tool.execution.ToolCallExecutor;
 import fun.fengwk.kkstudio.agent.tool.execution.ToolExecutionListener;
 
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 /**
  * AgentToolOrchestrator 负责一次 tool batch 的完整生命周期。
  *
  * <p>职责范围：
+ *
  * <ul>
- *   <li>tool_start 事件写入与 ToolExecutionState 创建</li>
- *   <li>tool delta 流式回调</li>
- *   <li>tool complete / error 处理（含 gap 补齐）</li>
- *   <li>tool not found 处理与稳定错误文本</li>
- *   <li>全部 tool 终态聚合</li>
+ *   <li>tool_start 事件写入与 ToolExecutionState 创建
+ *   <li>tool delta 流式回调
+ *   <li>tool complete / error 处理（含 gap 补齐）
+ *   <li>tool not found 处理与稳定错误文本
+ *   <li>全部 tool 终态聚合
  * </ul>
  *
  * @author fengwk
@@ -38,19 +39,16 @@ import java.util.function.Consumer;
 final class AgentToolOrchestrator {
 
   private final AgentSessionWriter writer;
-  private final ToolRegistry toolRegistry;
   private final ToolCallExecutor toolCallExecutor;
   private final Consumer<AgentSignal> enqueueSignal;
   private final Runnable onAllToolsClosed;
 
   AgentToolOrchestrator(
       AgentSessionWriter writer,
-      ToolRegistry toolRegistry,
       ToolCallExecutor toolCallExecutor,
       Consumer<AgentSignal> enqueueSignal,
       Runnable onAllToolsClosed) {
     this.writer = requireNonNull(writer, "writer");
-    this.toolRegistry = requireNonNull(toolRegistry, "toolRegistry");
     this.toolCallExecutor = requireNonNull(toolCallExecutor, "toolCallExecutor");
     this.enqueueSignal = requireNonNull(enqueueSignal, "enqueueSignal");
     this.onAllToolsClosed = requireNonNull(onAllToolsClosed, "onAllToolsClosed");
@@ -156,12 +154,13 @@ final class AgentToolOrchestrator {
 
     ToolExecutionState toolState = new ToolExecutionState(toolCall);
     runContext.toolStates.put(toolCall.getToolCallId(), toolState);
-    ToolRegistration registration = toolRegistry.get(toolCall.getToolName());
+    ToolRegistration registration = runContext.resolvedTools.get(toolCall.getToolName());
     if (registration == null) {
       writer.appendEvent(
           SessionEventType.tool_error,
           newToolErrorPayload(
-              toolCall.getToolCallId(), newToolNotFoundMessage(toolCall.getToolName())));
+              toolCall.getToolCallId(),
+              newToolNotFoundMessage(toolCall.getToolName(), runContext.resolvedTools)));
       toolState.closed = true;
       return;
     }
@@ -230,13 +229,16 @@ final class AgentToolOrchestrator {
     return message == null || message.isBlank() ? error.getClass().getSimpleName() : message;
   }
 
-  private String newToolNotFoundMessage(String toolName) {
-    List<String> toolNames = toolRegistry.listToolNames();
+  private static String newToolNotFoundMessage(
+      String toolName, Map<String, ToolRegistration> resolvedTools) {
+    List<String> toolNames =
+        resolvedTools == null ? List.of() : resolvedTools.keySet().stream().sorted().toList();
     String availableTools = toolNames.isEmpty() ? "none" : String.join(", ", toolNames);
     return "tool not found: " + toolName + ". Available tools: " + availableTools + ".";
   }
 
-  private static ToolCallRequest toToolCallRequest(ToolCall toolCall, ToolRegistration registration) {
+  private static ToolCallRequest toToolCallRequest(
+      ToolCall toolCall, ToolRegistration registration) {
     if (toolCall == null) {
       return null;
     }

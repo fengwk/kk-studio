@@ -39,9 +39,7 @@ final class AgentDefinitionMutationFactory {
         editableSupport.trimToNull(createDTO.getDefaultProvider()),
         editableSupport.trimToNull(createDTO.getDefaultModel()),
         editableSupport.firstNonBlank(createDTO.getDefaultVariant(), DEFAULT_VARIANT),
-        editableSupport.firstNonBlank(createDTO.getToolsJson(), EMPTY_ARRAY_JSON),
-        editableSupport.firstNonBlank(createDTO.getSubagentsJson(), EMPTY_ARRAY_JSON),
-        editableSupport.firstNonBlank(createDTO.getSkillsJson(), EMPTY_ARRAY_JSON));
+        editableSupport.firstNonBlank(createDTO.getToolsJson(), EMPTY_ARRAY_JSON));
   }
 
   Mutation newUpdateMutation(String currentName, AgentDefinitionUpdateDTO updateDTO) {
@@ -54,9 +52,7 @@ final class AgentDefinitionMutationFactory {
         editableSupport.trimToNull(updateDTO.getDefaultProvider()),
         editableSupport.trimToNull(updateDTO.getDefaultModel()),
         editableSupport.firstNonBlank(updateDTO.getDefaultVariant(), DEFAULT_VARIANT),
-        editableSupport.firstNonBlank(updateDTO.getToolsJson(), EMPTY_ARRAY_JSON),
-        editableSupport.firstNonBlank(updateDTO.getSubagentsJson(), EMPTY_ARRAY_JSON),
-        editableSupport.firstNonBlank(updateDTO.getSkillsJson(), EMPTY_ARRAY_JSON));
+        editableSupport.firstNonBlank(updateDTO.getToolsJson(), EMPTY_ARRAY_JSON));
   }
 
   AgentDefinition newAgent(long providerId, long modelId, Mutation mutation) {
@@ -81,8 +77,6 @@ final class AgentDefinitionMutationFactory {
     agent.setDefaultModelId(modelId);
     agent.setDefaultVariant(mutation.defaultVariant());
     agent.setToolsJson(mutation.toolsJson());
-    agent.setSubagentsJson(mutation.subagentsJson());
-    agent.setSkillsJson(mutation.skillsJson());
   }
 
   private void validateEditable(
@@ -101,11 +95,6 @@ final class AgentDefinitionMutationFactory {
     }
     editableSupport.validateJsonArray(
         editableSupport.firstNonBlank(properties.getToolsJson(), EMPTY_ARRAY_JSON), "toolsJson");
-    editableSupport.validateJsonArray(
-        editableSupport.firstNonBlank(properties.getSubagentsJson(), EMPTY_ARRAY_JSON),
-        "subagentsJson");
-    editableSupport.validateJsonArray(
-        editableSupport.firstNonBlank(properties.getSkillsJson(), EMPTY_ARRAY_JSON), "skillsJson");
   }
 
   private static <T> T requireNonNull(T value, String name) {
@@ -135,7 +124,5 @@ final class AgentDefinitionMutationFactory {
       String defaultProvider,
       String defaultModel,
       String defaultVariant,
-      String toolsJson,
-      String subagentsJson,
-      String skillsJson) {}
+      String toolsJson) {}
 }

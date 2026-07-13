@@ -46,9 +46,6 @@ describe('ai-draft-normalizers', () => {
         { id: 'variant-1', name: 'default', temperature: '', maxOutputTokens: '', extras: [] },
         { id: 'variant-2', name: 'creative', temperature: '', maxOutputTokens: '', extras: [] },
       ],
-      capabilities: [],
-      limits: [],
-      pricing: [],
     })
     expect(normalizedModel.defaultVariant).toBe('default')
 
@@ -61,8 +58,6 @@ describe('ai-draft-normalizers', () => {
         defaultModel: 'Claude-Sonnet-4.5',
         defaultVariant: 'legacy',
         tools: [],
-        subagents: [],
-        skills: [],
       },
       [
         model({
@@ -85,8 +80,6 @@ describe('ai-draft-normalizers', () => {
           defaultModel: 'missing',
           defaultVariant: '   ',
           tools: [],
-          subagents: [],
-          skills: [],
         },
         [],
       ).defaultVariant,
@@ -102,8 +95,6 @@ describe('ai-draft-normalizers', () => {
       defaultModel: 'MiniMax-M2.7',
       defaultVariant: 'default',
       tools: [],
-      subagents: [],
-      skills: [],
     }
     const models = [
       model({
@@ -141,9 +132,6 @@ function model(overrides: Partial<AgentModelDTO>): AgentModelDTO {
     providerName: 'minimax',
     name: 'MiniMax-M2.7',
     description: null,
-    capabilitiesJson: null,
-    limitJson: null,
-    pricingJson: null,
     defaultVariant: 'default',
     variantsJson: '[{"name":"default"}]',
     createTime: '2026-06-20T02:00:00',

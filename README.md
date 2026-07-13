@@ -37,7 +37,7 @@ flowchart LR
 
 | 领域 | 已落地能力 |
 | --- | --- |
-| Provider | 创建、编辑、删除、分页查询；运行时映射为 `ProviderInfo` 的 `providerType/baseUrl/apiKey/timeout/streamIdleTimeout` |
+| Provider | 创建、编辑、删除、分页查询；运行时映射为 `ProviderInfo` 的 `providerType/baseUrl/apiKey/timeout` |
 | Model | 创建、编辑、删除、分页查询；运行时映射为 `ModelInfo` 和 `Variant` |
 | Agent | 创建、编辑、删除、分页查询；运行时映射为 `AgentInfo` |
 | Chat | 创建、编辑、删除 session，提交 message，基于 `agent_session_event` 投影聊天消息 |
@@ -104,7 +104,7 @@ mysql -h <host> -P <port> -u <user> -p <database> < core/src/main/resources/data
 | `agent_model` | `stub / acceptance-stub` |
 | `agent_definition` | `default-assistant` |
 
-真实模型需要在控制台或 SQL 中创建真实 provider/model/agent。Provider 存储只承载连接配置和展示信息，不承载模型参数；模型参数放在 model variants 中，agent 只绑定默认 provider/model/variant 与 system prompt/tools/subagents/skills。
+真实模型需要在控制台或 SQL 中创建真实 provider/model/agent。Provider 存储只承载连接配置和展示信息，不承载模型参数；模型参数放在 model variants 中，agent 只绑定默认 provider/model/variant 与 system prompt/tools。
 
 ## 启动前后端
 

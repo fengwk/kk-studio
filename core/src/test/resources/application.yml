@@ -29,12 +29,6 @@ spring:
     configuration:
       map-underscore-to-camel-case: true
 
-  # 测试时关闭nacos配置
-  cloud:
-    nacos:
-      config:
-        enabled: false
-
 convention:
   snowflake-id:
     # 雪花id开始时间，固定不可变

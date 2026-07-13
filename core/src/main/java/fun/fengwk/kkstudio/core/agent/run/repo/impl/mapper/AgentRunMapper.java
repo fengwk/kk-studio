@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.agent.run.repo.impl.mapper;
 
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -153,4 +154,7 @@ public interface AgentRunMapper extends BaseMapper {
       @Param("runId") String runId,
       @Param("status") String status,
       @Param("updateTime") LocalDateTime updateTime);
+
+  @Delete("delete from agent_run where session_id = #{sessionId}")
+  int deleteBySessionId(@Param("sessionId") String sessionId);
 }

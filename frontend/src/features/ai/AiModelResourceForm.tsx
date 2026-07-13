@@ -1,5 +1,4 @@
 import { VariantListEditor } from '@/features/ai/AiResourceFieldEditors'
-import { CapabilitiesSection, LimitsSection, PricingSection } from '@/features/ai/AiResourceMetadataSections'
 import type { ModelDraft, VariantDraft } from '@/features/ai/ai-console-types'
 import { variantOptionsFromDraft } from '@/features/ai/ai-draft-normalizers'
 import { blankVariant } from '@/features/ai/ai-resource-form-drafts'
@@ -67,9 +66,6 @@ export function ModelForm({
         onChange={commitVariants}
         onResetDefault={() => commitVariants([blankVariant(selectedDefaultVariant || 'default')], selectedDefaultVariant)}
       />
-      <CapabilitiesSection entries={draft.capabilities} onChange={(capabilities) => onChange({ ...draft, capabilities })} />
-      <LimitsSection entries={draft.limits} onChange={(limits) => onChange({ ...draft, limits })} />
-      <PricingSection entries={draft.pricing} onChange={(pricing) => onChange({ ...draft, pricing })} />
     </>
   )
 }

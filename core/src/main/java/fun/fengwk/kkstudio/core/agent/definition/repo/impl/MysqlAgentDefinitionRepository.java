@@ -69,8 +69,6 @@ public class MysqlAgentDefinitionRepository implements AgentDefinitionRepository
     agentDefinitionDO.setDefaultModelId(agentDefinition.getDefaultModelId());
     agentDefinitionDO.setDefaultVariant(agentDefinition.getDefaultVariant());
     agentDefinitionDO.setToolsJson(agentDefinition.getToolsJson());
-    agentDefinitionDO.setSubagentsJson(agentDefinition.getSubagentsJson());
-    agentDefinitionDO.setSkillsJson(agentDefinition.getSkillsJson());
     return agentDefinitionDO;
   }
 
@@ -87,8 +85,6 @@ public class MysqlAgentDefinitionRepository implements AgentDefinitionRepository
     agentDefinition.setDefaultModelId(agentDefinitionDO.getDefaultModelId());
     agentDefinition.setDefaultVariant(agentDefinitionDO.getDefaultVariant());
     agentDefinition.setToolsJson(agentDefinitionDO.getToolsJson());
-    agentDefinition.setSubagentsJson(agentDefinitionDO.getSubagentsJson());
-    agentDefinition.setSkillsJson(agentDefinitionDO.getSkillsJson());
     agentDefinition.setCreateTime(agentDefinitionDO.getCreateTime());
     agentDefinition.setUpdateTime(agentDefinitionDO.getUpdateTime());
     return agentDefinition;

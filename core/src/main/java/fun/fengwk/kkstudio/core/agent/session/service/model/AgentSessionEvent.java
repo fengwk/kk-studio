@@ -18,7 +18,6 @@ public class AgentSessionEvent {
   private String parentEventId;
   private String runId;
   private String eventType;
-  private String payloadType;
   private String payloadJson;
   private LocalDateTime createTime;
 }

@@ -40,9 +40,6 @@ final class AgentModelMutationFactory {
         providerName,
         editableSupport.trimToNull(createDTO.getName()),
         editableSupport.trimToNull(createDTO.getDescription()),
-        editableSupport.trimToNull(createDTO.getCapabilitiesJson()),
-        editableSupport.trimToNull(createDTO.getLimitJson()),
-        editableSupport.trimToNull(createDTO.getPricingJson()),
         editableSupport.firstNonBlank(createDTO.getDefaultVariant(), DEFAULT_VARIANT),
         editableSupport.firstNonBlank(createDTO.getVariantsJson(), DEFAULT_VARIANTS_JSON));
   }
@@ -54,9 +51,6 @@ final class AgentModelMutationFactory {
         null,
         editableSupport.firstNonBlank(updateDTO.getName(), currentName),
         editableSupport.trimToNull(updateDTO.getDescription()),
-        editableSupport.trimToNull(updateDTO.getCapabilitiesJson()),
-        editableSupport.trimToNull(updateDTO.getLimitJson()),
-        editableSupport.trimToNull(updateDTO.getPricingJson()),
         editableSupport.firstNonBlank(updateDTO.getDefaultVariant(), DEFAULT_VARIANT),
         editableSupport.firstNonBlank(updateDTO.getVariantsJson(), DEFAULT_VARIANTS_JSON));
   }
@@ -78,9 +72,6 @@ final class AgentModelMutationFactory {
     requireNonNull(mutation, "mutation");
     model.setName(mutation.name());
     model.setDescription(mutation.description());
-    model.setCapabilitiesJson(mutation.capabilitiesJson());
-    model.setLimitJson(mutation.limitJson());
-    model.setPricingJson(mutation.pricingJson());
     model.setDefaultVariant(mutation.defaultVariant());
     model.setVariantsJson(mutation.variantsJson());
   }
@@ -92,9 +83,6 @@ final class AgentModelMutationFactory {
     if (requireName && editableSupport.trimToNull(properties.getName()) == null) {
       throw new IllegalArgumentException("agent model name must not be blank");
     }
-    editableSupport.validateJsonObjectOrNull(properties.getCapabilitiesJson(), "capabilitiesJson");
-    editableSupport.validateJsonObjectOrNull(properties.getLimitJson(), "limitJson");
-    editableSupport.validateJsonObjectOrNull(properties.getPricingJson(), "pricingJson");
     editableSupport.validateJsonArray(
         editableSupport.firstNonBlank(properties.getVariantsJson(), DEFAULT_VARIANTS_JSON),
         "variantsJson");
@@ -118,9 +106,6 @@ final class AgentModelMutationFactory {
       String providerName,
       String name,
       String description,
-      String capabilitiesJson,
-      String limitJson,
-      String pricingJson,
       String defaultVariant,
       String variantsJson) {}
 }

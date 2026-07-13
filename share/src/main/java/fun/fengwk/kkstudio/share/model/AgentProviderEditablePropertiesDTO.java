@@ -14,6 +14,5 @@ public class AgentProviderEditablePropertiesDTO {
     private String baseUrl;
     private String apiKey;
     private Long timeoutMillis;
-    private Long streamIdleTimeoutMillis;
 
 }

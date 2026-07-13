@@ -45,7 +45,6 @@ public class LocalH2AcceptanceConfiguration {
             .baseUrl("http://stub-provider")
             .apiKey("stub-api-key")
             .timeout(Duration.ofSeconds(30))
-            .streamIdleTimeout(Duration.ofSeconds(30))
             .build();
   }
 

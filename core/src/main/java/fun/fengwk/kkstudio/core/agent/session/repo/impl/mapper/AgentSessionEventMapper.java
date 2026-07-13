@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.agent.session.repo.impl.mapper;
 
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -28,7 +29,6 @@ public interface AgentSessionEventMapper extends BaseMapper {
             parent_event_id,
             run_id,
             event_type,
-            payload_type,
             payload_json,
             gmt_create,
             version
@@ -39,7 +39,6 @@ public interface AgentSessionEventMapper extends BaseMapper {
             #{parentEventId},
             #{runId},
             #{eventType},
-            #{payloadType},
             #{payloadJson},
             #{createTime},
             0
@@ -56,7 +55,6 @@ public interface AgentSessionEventMapper extends BaseMapper {
             parent_event_id,
             run_id,
             event_type,
-            payload_type,
             payload_json,
             gmt_create as create_time
         from agent_session_event
@@ -72,7 +70,6 @@ public interface AgentSessionEventMapper extends BaseMapper {
         @Result(column = "parent_event_id", property = "parentEventId"),
         @Result(column = "run_id", property = "runId"),
         @Result(column = "event_type", property = "eventType"),
-        @Result(column = "payload_type", property = "payloadType"),
         @Result(column = "payload_json", property = "payloadJson"),
         @Result(column = "create_time", property = "createTime")
       })
@@ -87,7 +84,6 @@ public interface AgentSessionEventMapper extends BaseMapper {
             parent_event_id,
             run_id,
             event_type,
-            payload_type,
             payload_json,
             gmt_create as create_time
         from agent_session_event
@@ -103,4 +99,7 @@ public interface AgentSessionEventMapper extends BaseMapper {
   @ResultMap("agentSessionEventResultMap")
   List<AgentSessionEventDO> listBySessionIdAfterEventId(
       @Param("sessionId") String sessionId, @Param("afterEventId") String afterEventId);
+
+  @Delete("delete from agent_session_event where session_id = #{sessionId}")
+  int deleteBySessionId(@Param("sessionId") String sessionId);
 }

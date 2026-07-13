@@ -33,7 +33,6 @@ public interface AgentSessionMapper extends BaseMapper {
             agent_id,
             agent_name,
             title,
-            status,
             current_head_event_id,
             gmt_create,
             gmt_modified,
@@ -44,7 +43,6 @@ public interface AgentSessionMapper extends BaseMapper {
             #{agentId},
             #{agentName},
             #{title},
-            #{status},
             #{currentHeadEventId},
             #{createTime},
             #{updateTime},
@@ -61,7 +59,6 @@ public interface AgentSessionMapper extends BaseMapper {
             agent_id,
             agent_name,
             title,
-            status,
             current_head_event_id,
             gmt_create as create_time,
             gmt_modified as update_time
@@ -77,7 +74,6 @@ public interface AgentSessionMapper extends BaseMapper {
         @Result(column = "agent_id", property = "agentId"),
         @Result(column = "agent_name", property = "agentName"),
         @Result(column = "title", property = "title"),
-        @Result(column = "status", property = "status"),
         @Result(column = "current_head_event_id", property = "currentHeadEventId"),
         @Result(column = "create_time", property = "createTime"),
         @Result(column = "update_time", property = "updateTime")
@@ -92,7 +88,6 @@ public interface AgentSessionMapper extends BaseMapper {
             agent_id,
             agent_name,
             title,
-            status,
             current_head_event_id,
             gmt_create as create_time,
             gmt_modified as update_time
@@ -101,6 +96,24 @@ public interface AgentSessionMapper extends BaseMapper {
         """)
   @ResultMap("agentSessionResultMap")
   AgentSessionDO getBySessionId(@Param("sessionId") String sessionId);
+
+  @Select(
+      """
+        select
+            id,
+            session_id,
+            agent_id,
+            agent_name,
+            title,
+            current_head_event_id,
+            gmt_create as create_time,
+            gmt_modified as update_time
+        from agent_session
+        where session_id = #{sessionId}
+        for update
+        """)
+  @ResultMap("agentSessionResultMap")
+  AgentSessionDO getBySessionIdForUpdate(@Param("sessionId") String sessionId);
 
   @Update(
       """
@@ -117,19 +130,6 @@ public interface AgentSessionMapper extends BaseMapper {
 
   @Delete("delete from agent_session where session_id = #{sessionId}")
   int deleteBySessionId(@Param("sessionId") String sessionId);
-
-  @Update(
-      """
-        update agent_session
-        set
-            current_head_event_id = #{currentHeadEventId},
-            gmt_modified = #{updateTime}
-        where session_id = #{sessionId}
-        """)
-  int updateCurrentHeadEventId(
-      @Param("sessionId") String sessionId,
-      @Param("currentHeadEventId") String currentHeadEventId,
-      @Param("updateTime") LocalDateTime updateTime);
 
   @Update(
       """

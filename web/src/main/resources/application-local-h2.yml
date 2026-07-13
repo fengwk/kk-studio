@@ -27,18 +27,6 @@ spring:
     configuration:
       map-underscore-to-camel-case: true
 
-  cloud:
-    discovery:
-      enabled: false
-    service-registry:
-      auto-registration:
-        enabled: false
-    nacos:
-      config:
-        enabled: false
-      discovery:
-        enabled: false
-
 convention:
   snowflake-id:
     initial-timestamp: 1702214261706

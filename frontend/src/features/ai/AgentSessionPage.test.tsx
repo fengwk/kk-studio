@@ -62,16 +62,17 @@ describe('AgentSessionPage', () => {
       totalCount: 1,
       results: [
         {
+          id: 'agent-1',
           agentName: 'default-assistant',
           name: 'Default Assistant',
           description: null,
           systemPrompt: null,
-          defaultProvider: 'minimax',
-          defaultModel: 'MiniMax-M2.7',
+          defaultProviderId: 'provider-1',
+          defaultProviderName: 'minimax',
+          defaultModelId: 'model-1',
+          defaultModelName: 'MiniMax-M2.7',
           defaultVariant: 'default',
           toolsJson: '[]',
-          subagentsJson: '[]',
-          skillsJson: '[]',
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:00:00',
         },
@@ -84,10 +85,9 @@ describe('AgentSessionPage', () => {
       results: [
         {
           sessionId: 'session-1',
+          agentId: 'agent-1',
           agentName: 'default-assistant',
           title: 'Script Review',
-          status: 'active',
-          currentHeadEventId: 'event-3',
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:01:00',
         },
@@ -95,10 +95,9 @@ describe('AgentSessionPage', () => {
     })
     vi.mocked(agentService.getSession).mockResolvedValue({
       sessionId: 'session-1',
+      agentId: 'agent-1',
       agentName: 'default-assistant',
       title: 'Script Review',
-      status: 'active',
-      currentHeadEventId: 'event-3',
       createTime: '2026-06-20T02:00:00',
       updateTime: '2026-06-20T02:01:00',
     })
@@ -109,7 +108,6 @@ describe('AgentSessionPage', () => {
         parentEventId: 'root',
         runId: 'run-1',
         eventType: 'user_message',
-        payloadType: 'text',
         payloadJson: '{"content":"检查第一集大纲"}',
         createTime: '2026-06-20T02:00:00',
       },
@@ -119,7 +117,6 @@ describe('AgentSessionPage', () => {
         parentEventId: 'event-1',
         runId: 'run-1',
         eventType: 'assistant_delta',
-        payloadType: 'json',
         payloadJson: '{"textDelta":"结构完整"}',
         createTime: '2026-06-20T02:01:00',
       },
@@ -129,7 +126,6 @@ describe('AgentSessionPage', () => {
         parentEventId: 'event-2',
         runId: 'run-1',
         eventType: 'assistant_end',
-        payloadType: 'json',
         payloadJson: '{"metadata":{"finishReason":"stop"}}',
         createTime: '2026-06-20T02:01:01',
       },
@@ -141,7 +137,7 @@ describe('AgentSessionPage', () => {
         triggerEventId: 'event-1',
         status: 'succeeded',
         createTime: '2026-06-20T02:00:00',
-        updateTime: [2026, 6, 20, 2, 1, 2, 0],
+        updateTime: '2026-06-20T02:01:02',
       },
     ])
     vi.mocked(agentService.createMessage).mockResolvedValue({
@@ -150,7 +146,6 @@ describe('AgentSessionPage', () => {
       parentEventId: 'event-3',
       runId: 'run-2',
       eventType: 'user_message',
-      payloadType: 'text',
       payloadJson: '{"content":"继续"}',
       createTime: '2026-06-20T02:02:00',
     })
@@ -173,6 +168,27 @@ describe('AgentSessionPage', () => {
     })
   })
 
+  it('disables message submission while the session has an active run', async () => {
+    vi.mocked(agentService.listRuns).mockResolvedValueOnce([
+      {
+        runId: 'run-active',
+        sessionId: 'session-1',
+        triggerEventId: 'event-1',
+        status: 'running',
+        createTime: '2026-06-20T02:00:00',
+        updateTime: '2026-06-20T02:01:02',
+      },
+    ])
+
+    renderSession()
+
+    await waitFor(() => {
+      expect(screen.getAllByText('running').length).toBeGreaterThan(0)
+    })
+    expect(screen.getByPlaceholderText('给 AI 发送消息...')).toBeDisabled()
+    expect(agentService.createMessage).not.toHaveBeenCalled()
+  })
+
   it('merges streamed events into the dialogue cache', async () => {
     vi.mocked(agentService.listEvents).mockResolvedValue([])
     const { queryClient } = renderSession()
@@ -190,7 +206,6 @@ describe('AgentSessionPage', () => {
         parentEventId: 'root',
         runId: 'run-stream',
         eventType: 'assistant_delta',
-        payloadType: 'json',
         payloadJson: '{"textDelta":"streamed answer"}',
         createTime: '2026-06-20T02:02:00',
       })
@@ -203,7 +218,6 @@ describe('AgentSessionPage', () => {
         parentEventId: 'root',
         runId: 'run-stream',
         eventType: 'assistant_delta',
-        payloadType: 'json',
         payloadJson: '{"textDelta":"streamed answer"}',
         createTime: '2026-06-20T02:02:00',
       },
@@ -233,7 +247,6 @@ describe('AgentSessionPage', () => {
         parentEventId: 'root',
         runId: 'run-stream',
         eventType: 'assistant_delta',
-        payloadType: 'json',
         payloadJson: '{"textDelta":"streamed answer"}',
         createTime: '2026-06-20T02:02:00',
       })
@@ -266,10 +279,9 @@ describe('AgentSessionPage', () => {
   it('renders empty dialogue and active run status', async () => {
     vi.mocked(agentService.getSession).mockResolvedValueOnce({
       sessionId: 'session-1',
+      agentId: 'agent-1',
       agentName: 'default-assistant',
       title: null,
-      status: 'active',
-      currentHeadEventId: null,
       createTime: '2026-06-20T02:00:00',
       updateTime: '2026-06-20T02:01:00',
     })
@@ -281,7 +293,7 @@ describe('AgentSessionPage', () => {
         triggerEventId: 'event-4',
         status: 'queued',
         createTime: '2026-06-20T02:02:00',
-        updateTime: '',
+        updateTime: null,
       },
     ])
 
@@ -301,7 +313,6 @@ describe('AgentSessionPage', () => {
         parentEventId: 'root',
         runId: 'run-1',
         eventType: 'user_message',
-        payloadType: 'json',
         payloadJson: '{"content":"只看用户消息"}',
         createTime: '2026-06-20T02:00:00',
       },
@@ -311,7 +322,6 @@ describe('AgentSessionPage', () => {
         parentEventId: 'event-1',
         runId: 'run-1',
         eventType: 'assistant_start',
-        payloadType: 'json',
         payloadJson: '{}',
         createTime: '2026-06-20T02:01:00',
       },
@@ -321,7 +331,6 @@ describe('AgentSessionPage', () => {
         parentEventId: 'event-2',
         runId: 'run-1',
         eventType: 'assistant_end',
-        payloadType: 'json',
         payloadJson: '{}',
         createTime: '2026-06-20T02:01:01',
       },
@@ -342,7 +351,6 @@ describe('AgentSessionPage', () => {
         parentEventId: 'root',
         runId: 'run-1',
         eventType: 'assistant_start',
-        payloadType: 'json',
         payloadJson: '{}',
         createTime: '2026-06-20T02:00:00',
       },
@@ -352,7 +360,6 @@ describe('AgentSessionPage', () => {
         parentEventId: 'event-1',
         runId: 'run-1',
         eventType: 'assistant_delta',
-        payloadType: 'json',
         payloadJson: '{"textDelta":"我先查一下。"}',
         createTime: '2026-06-20T02:00:01',
       },
@@ -362,7 +369,6 @@ describe('AgentSessionPage', () => {
         parentEventId: 'event-2',
         runId: 'run-1',
         eventType: 'tool_start',
-        payloadType: 'json',
         payloadJson: '{"toolCallId":"tool-1","toolName":"web_search","arguments":"{\\"q\\":\\"上海天气\\"}"}',
         createTime: '2026-06-20T02:00:02',
       },
@@ -372,7 +378,6 @@ describe('AgentSessionPage', () => {
         parentEventId: 'event-3',
         runId: 'run-1',
         eventType: 'tool_delta',
-        payloadType: 'json',
         payloadJson: '{"toolCallId":"tool-1","contentDeltas":[{"index":0,"contentDelta":{"type":"text","text":"晴 32C"}}]}',
         createTime: '2026-06-20T02:00:03',
       },
@@ -382,7 +387,6 @@ describe('AgentSessionPage', () => {
         parentEventId: 'event-4',
         runId: 'run-1',
         eventType: 'tool_end',
-        payloadType: 'json',
         payloadJson: '{"toolCallId":"tool-1"}',
         createTime: '2026-06-20T02:00:04',
       },
@@ -406,7 +410,6 @@ describe('AgentSessionPage', () => {
         parentEventId: 'root',
         runId: 'run-1',
         eventType: 'tool_start',
-        payloadType: 'json',
         payloadJson: '{"toolCallId":"tool-media","toolName":"media_tool","arguments":"{}"}',
         createTime: '2026-06-20T02:00:00',
       },
@@ -416,7 +419,6 @@ describe('AgentSessionPage', () => {
         parentEventId: 'event-1',
         runId: 'run-1',
         eventType: 'tool_delta',
-        payloadType: 'json',
         payloadJson: JSON.stringify({
           toolCallId: 'tool-media',
           contentDeltas: [
@@ -441,7 +443,6 @@ describe('AgentSessionPage', () => {
         parentEventId: 'event-2',
         runId: 'run-1',
         eventType: 'tool_end',
-        payloadType: 'json',
         payloadJson: '{"toolCallId":"tool-media"}',
         createTime: '2026-06-20T02:00:02',
       },

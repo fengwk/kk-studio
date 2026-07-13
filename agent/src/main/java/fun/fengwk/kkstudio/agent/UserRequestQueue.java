@@ -6,11 +6,12 @@ import java.util.List;
  * UserRequestQueue 表示 Agent 的输入缓冲区。
  *
  * <p>语义说明：
+ *
  * <ul>
- *   <li>submit 动作先进入 queue。</li>
- *   <li>queue 中的请求在 drain 时会被整理进后续 assistant_start 事件的输入负载。</li>
- *   <li>实现必须线程安全：submit 可由外部调用线程执行，pollAll 和 isEmpty 由 Agent signal drain 调用。</li>
- *   <li>与 pollAll 并发提交的请求可归入本次或下一次收割。</li>
+ *   <li>submit 动作先进入 queue。
+ *   <li>queue 中的请求在 drain 时会被整理进后续 assistant_start 事件的输入负载。
+ *   <li>实现必须线程安全：submit 可由外部调用线程执行，pollAll 和 isEmpty 由 Agent signal drain 调用。
+ *   <li>与 pollAll 并发提交的请求可归入本次或下一次收割。
  * </ul>
  *
  * @author fengwk

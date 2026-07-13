@@ -22,9 +22,6 @@ public class AgentModelConverter {
     modelDTO.setProviderName(provider == null ? null : provider.getName());
     modelDTO.setName(model.getName());
     modelDTO.setDescription(model.getDescription());
-    modelDTO.setCapabilitiesJson(model.getCapabilitiesJson());
-    modelDTO.setLimitJson(model.getLimitJson());
-    modelDTO.setPricingJson(model.getPricingJson());
     modelDTO.setDefaultVariant(model.getDefaultVariant());
     modelDTO.setVariantsJson(model.getVariantsJson());
     modelDTO.setCreateTime(model.getCreateTime());

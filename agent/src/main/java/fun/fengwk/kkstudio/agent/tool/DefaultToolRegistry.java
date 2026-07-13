@@ -1,9 +1,6 @@
 package fun.fengwk.kkstudio.agent.tool;
 
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -43,20 +40,6 @@ public class DefaultToolRegistry implements ToolRegistry {
       return null;
     }
     return registrations.get(name);
-  }
-
-  @Override
-  public synchronized List<String> listToolNames() {
-    List<String> names = new ArrayList<>(registrations.keySet());
-    names.sort(Comparator.naturalOrder());
-    return List.copyOf(names);
-  }
-
-  @Override
-  public synchronized List<ToolRegistration> listRegistrations() {
-    List<ToolRegistration> result = new ArrayList<>(registrations.values());
-    result.sort(Comparator.comparing(ToolRegistration::getName));
-    return List.copyOf(result);
   }
 
   private <T> T requireNonNull(T value, String name) {

@@ -13,8 +13,6 @@ export function emptyAgentDraft(model?: AgentModelDTO): AgentDraft {
     defaultModel: model?.name || '',
     defaultVariant: model?.defaultVariant || 'default',
     tools: [],
-    subagents: [],
-    skills: [],
   }
 }
 
@@ -27,8 +25,6 @@ export function toAgentDraft(agent: AgentDefinitionDTO): AgentDraft {
     defaultModel: agent.defaultModelName,
     defaultVariant: agent.defaultVariant || 'default',
     tools: parseStringList(agent.toolsJson),
-    subagents: parseStringList(agent.subagentsJson),
-    skills: parseStringList(agent.skillsJson),
   }
 }
 
@@ -41,8 +37,6 @@ export function toEditableAgent(draft: AgentDraft): AgentDefinitionCreateDTO {
     defaultModel: draft.defaultModel.trim(),
     defaultVariant: trimToNull(draft.defaultVariant),
     toolsJson: serializeStringList(draft.tools),
-    subagentsJson: serializeStringList(draft.subagents),
-    skillsJson: serializeStringList(draft.skills),
   }
 }
 
@@ -53,8 +47,6 @@ export function toEditableAgentUpdate(draft: AgentDraft): AgentDefinitionUpdateD
     systemPrompt: data.systemPrompt,
     defaultVariant: data.defaultVariant,
     toolsJson: data.toolsJson,
-    subagentsJson: data.subagentsJson,
-    skillsJson: data.skillsJson,
     name: data.name,
     defaultProvider: data.defaultProvider,
     defaultModel: data.defaultModel,

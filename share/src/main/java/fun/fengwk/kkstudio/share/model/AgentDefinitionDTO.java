@@ -20,8 +20,6 @@ public class AgentDefinitionDTO {
     private String defaultModelName;
     private String defaultVariant;
     private String toolsJson;
-    private String subagentsJson;
-    private String skillsJson;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 

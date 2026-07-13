@@ -50,7 +50,6 @@ public class StudioAgentResourceControllerTest {
     providerCreate.setBaseUrl("http://localhost/" + suffix);
     providerCreate.setApiKey("test-key");
     providerCreate.setTimeoutMillis(60_000L);
-    providerCreate.setStreamIdleTimeoutMillis(60_000L);
 
     mockMvc
         .perform(
@@ -67,7 +66,6 @@ public class StudioAgentResourceControllerTest {
     providerUpdate.setBaseUrl("http://localhost/updated-" + suffix);
     providerUpdate.setApiKey("updated-key");
     providerUpdate.setTimeoutMillis(120_000L);
-    providerUpdate.setStreamIdleTimeoutMillis(120_000L);
 
     // PUT path uses {id} now
     String providersJson =
@@ -145,8 +143,6 @@ public class StudioAgentResourceControllerTest {
     agentCreate.setDefaultModel(model);
     agentCreate.setDefaultVariant("fast");
     agentCreate.setToolsJson("[]");
-    agentCreate.setSubagentsJson("[]");
-    agentCreate.setSkillsJson("[]");
 
     mockMvc
         .perform(
@@ -165,8 +161,6 @@ public class StudioAgentResourceControllerTest {
     agentUpdate.setDefaultModel(model);
     agentUpdate.setDefaultVariant("fast");
     agentUpdate.setToolsJson("[]");
-    agentUpdate.setSubagentsJson("[]");
-    agentUpdate.setSkillsJson("[]");
 
     String agentsJson =
         mockMvc

@@ -28,7 +28,4 @@ public class ProviderInfo {
 
   /** provider 总体请求超时。 */
   private final Duration timeout;
-
-  /** provider 流式间隔超时。 */
-  private final Duration streamIdleTimeout;
 }

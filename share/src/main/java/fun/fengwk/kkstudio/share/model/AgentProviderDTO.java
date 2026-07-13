@@ -17,7 +17,6 @@ public class AgentProviderDTO {
     private String baseUrl;
     private String apiKey;
     private Long timeoutMillis;
-    private Long streamIdleTimeoutMillis;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 

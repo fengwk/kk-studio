@@ -31,10 +31,4 @@ public class AgentInfo {
 
   /** agent 可用工具列表。 */
   private final List<String> tools;
-
-  /** agent 可用子代理列表。 */
-  private final List<String> subagents;
-
-  /** agent 可用技能列表。 */
-  private final List<String> skills;
 }

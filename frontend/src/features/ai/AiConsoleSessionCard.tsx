@@ -32,7 +32,6 @@ export function SessionCard({
         </div>
       </div>
       <div className="meta-block">
-        <MetaRow label="Status" value={session.status} />
         <MetaRow label="Agent" value={session.agentName} />
         <MetaRow label="Updated" value={formatBackendDate(session.updateTime)} />
       </div>

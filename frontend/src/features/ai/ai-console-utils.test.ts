@@ -27,7 +27,7 @@ import {
 
 describe('ai-console-utils', () => {
   it('builds editable drafts from DTOs and default factories', () => {
-    expect(emptyProviderDraft()).toMatchObject({ providerType: 'openai', timeoutMillis: '60000', streamIdleTimeoutMillis: '60000' })
+    expect(emptyProviderDraft()).toMatchObject({ providerType: 'openai', timeoutMillis: '60000' })
     expect(emptyModelDraft(undefined, { name: 'minimax' } as never)).toMatchObject({ provider: 'minimax', defaultVariant: 'default' })
     expect(emptyAgentDraft({ providerName: 'minimax', name: 'MiniMax-M2.7', defaultVariant: 'default' } as never)).toMatchObject({
       defaultProvider: 'minimax',
@@ -44,7 +44,6 @@ describe('ai-console-utils', () => {
         baseUrl: 'https://api.minimax.io/v1',
         apiKey: 'secret',
         timeoutMillis: 120000,
-        streamIdleTimeoutMillis: 180000,
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       }),
@@ -55,7 +54,6 @@ describe('ai-console-utils', () => {
       baseUrl: 'https://api.minimax.io/v1',
       apiKey: 'secret',
       timeoutMillis: '120000',
-      streamIdleTimeoutMillis: '180000',
     })
 
     expect(
@@ -65,9 +63,6 @@ describe('ai-console-utils', () => {
         providerName: 'minimax',
         name: 'MiniMax-M2.7',
         description: 'model desc',
-        capabilitiesJson: '{"tools":true,"input":["text","image"],"output":["text"],"vision":true}',
-        limitJson: '{"context":128000,"input":32000,"output":4096}',
-        pricingJson: '{"input":0.1,"output":0.3,"cacheRead":0.02}',
         defaultVariant: 'default',
         variantsJson: '[{"name":"default","temperature":0.2,"maxOutputTokens":256,"topK":32}]',
         createTime: '2026-06-20T02:00:00',
@@ -77,22 +72,6 @@ describe('ai-console-utils', () => {
       provider: 'minimax',
       name: 'MiniMax-M2.7',
       defaultVariant: 'default',
-      capabilities: [
-        { key: 'tools', value: 'true' },
-        { key: 'input', value: 'text,image' },
-        { key: 'output', value: 'text' },
-        { key: 'vision', value: 'true' },
-      ],
-      limits: [
-        { key: 'context', value: '128000' },
-        { key: 'input', value: '32000' },
-        { key: 'output', value: '4096' },
-      ],
-      pricing: [
-        { key: 'input', value: '0.1' },
-        { key: 'output', value: '0.3' },
-        { key: 'cacheRead', value: '0.02' },
-      ],
     })
 
     expect(
@@ -107,8 +86,6 @@ describe('ai-console-utils', () => {
         defaultModelName: 'MiniMax-M2.7',
         defaultVariant: 'default',
         toolsJson: '["search"]',
-        subagentsJson: '["critic"]',
-        skillsJson: '["brainstorm"]',
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       }),
@@ -117,8 +94,6 @@ describe('ai-console-utils', () => {
       defaultProvider: 'minimax',
       defaultModel: 'MiniMax-M2.7',
       tools: ['search'],
-      subagents: ['critic'],
-      skills: ['brainstorm'],
     })
   })
 
@@ -131,7 +106,6 @@ describe('ai-console-utils', () => {
         baseUrl: ' https://api.minimax.io/v1 ',
         apiKey: ' secret ',
         timeoutMillis: '120000',
-        streamIdleTimeoutMillis: 'oops',
       }),
     ).toEqual({
       name: 'minimax',
@@ -140,7 +114,6 @@ describe('ai-console-utils', () => {
       baseUrl: 'https://api.minimax.io/v1',
       apiKey: 'secret',
       timeoutMillis: 120000,
-      streamIdleTimeoutMillis: null,
     })
     expect(
       toEditableProviderUpdate({
@@ -150,7 +123,6 @@ describe('ai-console-utils', () => {
         baseUrl: ' https://api.minimax.io/v1 ',
         apiKey: ' secret ',
         timeoutMillis: '120000',
-        streamIdleTimeoutMillis: 'oops',
       }),
     ).toEqual({
       name: 'minimax',
@@ -159,7 +131,6 @@ describe('ai-console-utils', () => {
       baseUrl: 'https://api.minimax.io/v1',
       apiKey: 'secret',
       timeoutMillis: 120000,
-      streamIdleTimeoutMillis: null,
     })
 
     expect(
@@ -180,17 +151,11 @@ describe('ai-console-utils', () => {
             ],
           },
         ],
-        capabilities: [{ id: 'cap-1', key: 'vision', value: 'true' }],
-        limits: [{ id: 'limit-1', key: 'contextWindow', value: '128000' }],
-        pricing: [{ id: 'price-1', key: 'input', value: '0.1' }],
       }),
     ).toEqual({
       provider: 'minimax',
       name: 'MiniMax-M2.7',
       description: 'chat model',
-      capabilitiesJson: '{"vision":true}',
-      limitJson: '{"contextWindow":128000}',
-      pricingJson: '{"input":0.1}',
       defaultVariant: 'default',
       variantsJson: '[{"name":"default","temperature":0.1,"maxOutputTokens":256,"topK":32,"supportsVision":true}]',
     })
@@ -209,48 +174,12 @@ describe('ai-console-utils', () => {
             extras: [{ id: 'extra-1', key: 'topK', value: '32' }],
           },
         ],
-        capabilities: [{ id: 'cap-1', key: 'vision', value: 'true' }],
-        limits: [{ id: 'limit-1', key: 'contextWindow', value: '128000' }],
-        pricing: [{ id: 'price-1', key: 'input', value: '0.1' }],
       }),
     ).toEqual({
       description: 'chat model',
-      capabilitiesJson: '{"vision":true}',
-      limitJson: '{"contextWindow":128000}',
-      pricingJson: '{"input":0.1}',
       defaultVariant: 'default',
       variantsJson: '[{"name":"default","temperature":0.1,"maxOutputTokens":256,"topK":32}]',
       name: 'MiniMax-M2.7',
-    })
-
-    expect(
-      toEditableModel({
-        provider: ' minimax ',
-        name: ' MiniMax-M2.7 ',
-        description: '',
-        defaultVariant: ' default ',
-        variants: [{ id: 'variant-1', name: ' default ', temperature: '', maxOutputTokens: '', extras: [] }],
-        capabilities: [
-          { id: 'cap-1', key: 'tools', value: 'true' },
-          { id: 'cap-2', key: 'input', value: 'text, image' },
-          { id: 'cap-3', key: 'output', value: 'text' },
-        ],
-        limits: [
-          { id: 'limit-1', key: 'context', value: '128000' },
-          { id: 'limit-2', key: 'input', value: '32000' },
-          { id: 'limit-3', key: 'output', value: '4096' },
-        ],
-        pricing: [
-          { id: 'price-1', key: 'input', value: '0.1' },
-          { id: 'price-2', key: 'output', value: '0.3' },
-          { id: 'price-3', key: 'cacheRead', value: '0.02' },
-          { id: 'price-4', key: 'cacheWrite', value: '0.05' },
-        ],
-      }),
-    ).toMatchObject({
-      capabilitiesJson: '{"tools":true,"input":["text","image"],"output":["text"]}',
-      limitJson: '{"context":128000,"input":32000,"output":4096}',
-      pricingJson: '{"input":0.1,"output":0.3,"cacheRead":0.02,"cacheWrite":0.05}',
     })
 
     expect(
@@ -262,8 +191,6 @@ describe('ai-console-utils', () => {
         defaultModel: ' MiniMax-M2.7 ',
         defaultVariant: ' default ',
         tools: [' search ', ''],
-        subagents: [' critic '],
-        skills: [' brainstorm ', ''],
       }),
     ).toEqual({
       name: 'assistant',
@@ -273,8 +200,6 @@ describe('ai-console-utils', () => {
       defaultModel: 'MiniMax-M2.7',
       defaultVariant: 'default',
       toolsJson: '["search"]',
-      subagentsJson: '["critic"]',
-      skillsJson: '["brainstorm"]',
     })
     expect(
       toEditableAgentUpdate({
@@ -285,16 +210,12 @@ describe('ai-console-utils', () => {
         defaultModel: ' MiniMax-M2.7 ',
         defaultVariant: ' default ',
         tools: [' search ', ''],
-        subagents: [' critic '],
-        skills: [' brainstorm ', ''],
       }),
     ).toEqual({
       description: 'desc',
       systemPrompt: 'prompt',
       defaultVariant: 'default',
       toolsJson: '["search"]',
-      subagentsJson: '["critic"]',
-      skillsJson: '["brainstorm"]',
       name: 'assistant',
       defaultProvider: 'minimax',
       defaultModel: 'MiniMax-M2.7',
@@ -309,8 +230,6 @@ describe('ai-console-utils', () => {
         sessionId: 'session-1',
         agentName: 'assistant',
         title: 'Script Review',
-        status: 'active',
-        currentHeadEventId: 'event-1',
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:01:00',
       },
@@ -327,8 +246,6 @@ describe('ai-console-utils', () => {
         defaultModelName: 'MiniMax-M2.7',
         defaultVariant: 'default',
         toolsJson: '[]',
-        subagentsJson: '[]',
-        skillsJson: '[]',
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       },
@@ -340,9 +257,6 @@ describe('ai-console-utils', () => {
         providerName: 'minimax',
         name: 'MiniMax-M2.7',
         description: 'Chat model',
-        capabilitiesJson: null,
-        limitJson: null,
-        pricingJson: null,
         defaultVariant: 'default',
         variantsJson: '[{"name":"default"}]',
         createTime: '2026-06-20T02:00:00',
@@ -358,7 +272,6 @@ describe('ai-console-utils', () => {
         baseUrl: 'https://api.minimax.io/v1',
         apiKey: null,
         timeoutMillis: null,
-        streamIdleTimeoutMillis: null,
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       },
@@ -380,7 +293,7 @@ describe('ai-console-utils', () => {
     expect(formatJsonSummary('{broken')).toBe('invalid json')
     expect(formatBackendDate([2026, 6, 20, 2, 1, 0, 0])).toBe('2026-06-20 02:01')
     expect(formatBackendDate('2026-06-20T02:01:00')).toBe('2026-06-20 02:01')
-    expect(formatBackendDate([Number.NaN] as never)).toBe('-')
+    expect(formatBackendDate([Number.NaN])).toBe('-')
   })
 
   it('handles malformed backend drafts and serialization fallbacks', () => {
@@ -393,7 +306,6 @@ describe('ai-console-utils', () => {
         baseUrl: null,
         apiKey: null,
         timeoutMillis: null,
-        streamIdleTimeoutMillis: null,
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       }),
@@ -404,7 +316,6 @@ describe('ai-console-utils', () => {
       baseUrl: '',
       apiKey: '',
       timeoutMillis: '',
-      streamIdleTimeoutMillis: '',
     })
 
     expect(
@@ -414,9 +325,6 @@ describe('ai-console-utils', () => {
         providerName: 'stub',
         name: 'fallback-model',
         description: null,
-        capabilitiesJson: '[]',
-        limitJson: '{broken',
-        pricingJson: 'null',
         defaultVariant: null,
         variantsJson: '{broken',
         createTime: '2026-06-20T02:00:00',
@@ -426,9 +334,6 @@ describe('ai-console-utils', () => {
       provider: 'stub',
       description: '',
       defaultVariant: 'default',
-      capabilities: [],
-      limits: [],
-      pricing: [],
       variants: [{ name: 'default', temperature: '', maxOutputTokens: '', extras: [] }],
     })
 
@@ -439,20 +344,12 @@ describe('ai-console-utils', () => {
         providerName: 'stub',
         name: 'primitive-variant-model',
         description: null,
-        capabilitiesJson: '{"enabled":false,"limit":null}',
-        limitJson: '{"max":1.5}',
-        pricingJson: '{}',
         defaultVariant: null,
         variantsJson: '[1]',
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       }),
     ).toMatchObject({
-      capabilities: [
-        { key: 'enabled', value: 'false' },
-        { key: 'limit', value: '' },
-      ],
-      limits: [{ key: 'max', value: '1.5' }],
       variants: [{ name: '', temperature: '', maxOutputTokens: '', extras: [] }],
     })
 
@@ -468,8 +365,6 @@ describe('ai-console-utils', () => {
         defaultModelName: 'fallback-model',
         defaultVariant: null,
         toolsJson: '{"broken":true}',
-        subagentsJson: '[1," ",false,null]',
-        skillsJson: '{broken',
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       }),
@@ -478,8 +373,6 @@ describe('ai-console-utils', () => {
       systemPrompt: '',
       defaultVariant: 'default',
       tools: [],
-      subagents: ['1', 'false'],
-      skills: [],
     })
 
     expect(
@@ -490,7 +383,6 @@ describe('ai-console-utils', () => {
         baseUrl: '   ',
         apiKey: '   ',
         timeoutMillis: '   ',
-        streamIdleTimeoutMillis: '1.5',
       }),
     ).toEqual({
       name: 'stub',
@@ -499,7 +391,6 @@ describe('ai-console-utils', () => {
       baseUrl: null,
       apiKey: null,
       timeoutMillis: null,
-      streamIdleTimeoutMillis: 1.5,
     })
 
     expect(
@@ -523,17 +414,11 @@ describe('ai-console-utils', () => {
             ],
           },
         ],
-        capabilities: [{ id: 'cap-1', key: '  ', value: 'ignored' }],
-        limits: [],
-        pricing: [],
       }),
     ).toEqual({
       provider: 'stub',
       name: 'fallback-model',
       description: null,
-      capabilitiesJson: null,
-      limitJson: null,
-      pricingJson: null,
       defaultVariant: 'fallback',
       variantsJson: '[{"name":"fallback"}]',
     })
@@ -545,9 +430,6 @@ describe('ai-console-utils', () => {
         description: '',
         defaultVariant: '   ',
         variants: [{ id: 'variant-2', name: '   ', temperature: '', maxOutputTokens: '', extras: [] }],
-        capabilities: [],
-        limits: [],
-        pricing: [],
       }),
     ).toMatchObject({
       defaultVariant: null,
@@ -575,9 +457,6 @@ describe('ai-console-utils', () => {
             ],
           },
         ],
-        capabilities: [],
-        limits: [],
-        pricing: [],
       }).variantsJson,
     ).toBe('[{"name":"default","flag":false,"nil":null,"offset":-2,"ratio":1.25,"label":"text"}]')
 
@@ -590,8 +469,6 @@ describe('ai-console-utils', () => {
         defaultModel: ' fallback-model ',
         defaultVariant: '   ',
         tools: ['   '],
-        subagents: [],
-        skills: ['   '],
       }),
     ).toEqual({
       name: 'agent',
@@ -601,12 +478,10 @@ describe('ai-console-utils', () => {
       defaultModel: 'fallback-model',
       defaultVariant: null,
       toolsJson: null,
-      subagentsJson: null,
-      skillsJson: null,
     })
 
     expect(includesSearch('MiniMax', 'missing')).toBe(false)
     expect(formatJsonSummary('123')).toBe('default')
-    expect(formatBackendDate(null as never)).toBe('-')
+    expect(formatBackendDate(null)).toBe('-')
   })
 })

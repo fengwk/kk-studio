@@ -42,9 +42,9 @@ flowchart LR
 | 2 | 前端调用 `web` API | 获取 provider / model / agent / session / run 数据 |
 | 3 | `web` 转发到 `core` | 命中领域服务 |
 | 4 | `core` 从 MySQL / H2 读取数据 | 返回 DTO 给前端 |
-| 5 | 用户创建 session | 初始化 `default` head 与 `root` |
+| 5 | 用户创建 session | 将当前事件指针初始化为 `root` |
 | 6 | 用户提交 message | 追加 `user_message` 并创建 `queued` run |
-| 7 | `core` after-commit 调度 runtime | run 进入 `running` |
+| 7 | `web` 在消息事务返回后调度 runtime | run 进入 `running` |
 | 8 | embedded runtime 追加 `set_*` / `assistant_*` | run 最终进入 `succeeded` 或 `failed` |
 | 9 | 前端订阅 SSE | `session_event` 推送后更新聊天投影 |
 
@@ -65,7 +65,7 @@ flowchart LR
 | provider | `agent_provider` | `/api/agent/providers` |
 | model | `agent_model` | `/api/agent/models` |
 | agent | `agent_definition` | `/api/agent/agents` |
-| session metadata | `agent_session` | `/api/agent/sessions` |
-| session branch | `agent_session_head`、`agent_session_event` | `/api/agent/sessions/{sessionId}/heads`、`/api/agent/sessions/{sessionId}/events` |
+| session metadata 与当前 head | `agent_session` | `/api/agent/sessions` |
+| session event tree | `agent_session_event` | `/api/agent/sessions/{sessionId}/events` |
 | event stream | `agent_session_event` | `/api/agent/sessions/{sessionId}/events/stream` |
 | run | `agent_run` | `/api/agent/sessions/{sessionId}/runs` |

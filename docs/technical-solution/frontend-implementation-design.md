@@ -93,8 +93,8 @@ Provider / Model / Agent 的录入以可见字段为主，不要求用户直接�
 | 资源 | 当前录入方式 |
 | --- | --- |
 | Provider | 常规输入框、下拉选择、密码框、数值输入 |
-| Model | Provider / 名称 / 描述 / default variant 输入框与下拉框，variants 使用结构化列表编辑，capabilities / limits / pricing 使用 key/value 编辑 |
-| Agent | 名称 / 描述 / system prompt 输入框，默认 model / variant 下拉框，tools / subagents / skills 使用字符串列表编辑 |
+| Model | Provider / 名称 / 描述 / default variant 输入框与下拉框，variants 使用结构化列表编辑 |
+| Agent | 名称 / 描述 / system prompt 输入框，默认 model / variant 下拉框，tools 使用字符串列表编辑 |
 
 ## 后端契约
 
@@ -129,7 +129,6 @@ export interface PageResult<T> {
 | `listAgents` / `createAgent` / `updateAgent` / `deleteAgent` | `/api/agent/agents` | Agent CRUD |
 | `listSessions` / `createSession` / `getSession` / `updateSession` / `deleteSession` | `/api/agent/sessions` | Chat CRUD |
 | `createMessage` | `POST /api/agent/sessions/{sessionId}/messages` | 提交用户消息 |
-| `listHeads` | `GET /api/agent/sessions/{sessionId}/heads` | branch heads |
 | `listEvents` | `GET /api/agent/sessions/{sessionId}/events` | branch events 快照 |
 | `createEventStream` | `GET /api/agent/sessions/{sessionId}/events/stream` | branch events SSE |
 | `listRuns` | `GET /api/agent/sessions/{sessionId}/runs` | run 列表 |
@@ -175,6 +174,7 @@ export interface PageResult<T> {
 | events 快照 | 页面进入时调用 `listEvents` 重建当前 branch |
 | events 流 | `session_event` 合并进 events query cache，按 `eventId` 去重；timeline 直接消费合并后的 event cache |
 | runs 刷新 | 存在 `queued/running` 时轮询 |
+| message composer | session 存在 active run 时禁用发送，等待当前 run 进入终态 |
 
 ## 测试边界
 

@@ -83,19 +83,20 @@ public class AgentFactoryTest {
     AgentFactory agentFactory = new AgentFactory();
     AgentScheduler scheduler = (delay, task) -> () -> {};
     DefaultToolRegistry toolRegistry = new DefaultToolRegistry();
-    AgentRuntimeConfigResolver resolver = new AgentRuntimeConfigResolver(
-        new InMemoryAgentRegistry(),
-        new InMemoryModelRegistry(),
-        new InMemoryProviderRegistry(),
-        new ProviderManagerImpl(),
-        toolRegistry);
-    AgentFactory.Dependencies deps = new AgentFactory.Dependencies(
-        toolRegistry,
-        new ToolCallExecutor(new DirectExecutorService(), scheduler),
-        sessionManager,
-        new DefaultSessionEventMessageProjector(),
-        event -> {},
-        resolver);
+    AgentRuntimeConfigResolver resolver =
+        new AgentRuntimeConfigResolver(
+            new InMemoryAgentRegistry(),
+            new InMemoryModelRegistry(),
+            new InMemoryProviderRegistry(),
+            new ProviderManagerImpl(),
+            toolRegistry);
+    AgentFactory.Dependencies deps =
+        new AgentFactory.Dependencies(
+            new ToolCallExecutor(new DirectExecutorService(), scheduler),
+            sessionManager,
+            new DefaultSessionEventMessageProjector(),
+            event -> {},
+            resolver);
     Agent agent =
         agentFactory.load(
             session.getSessionId(),
@@ -275,7 +276,6 @@ public class AgentFactoryTest {
           .baseUrl("http://localhost")
           .apiKey("test")
           .timeout(Duration.ofSeconds(30))
-          .streamIdleTimeout(Duration.ofSeconds(30))
           .build();
     }
   }

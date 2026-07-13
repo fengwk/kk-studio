@@ -6,7 +6,6 @@ import fun.fengwk.convention4j.api.page.PageQuery;
 import fun.fengwk.kkstudio.share.model.AgentSessionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionEventDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionHeadDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionUpdateDTO;
 
@@ -28,8 +27,6 @@ public interface AgentSessionService {
   void deleteSession(String sessionId);
 
   AgentSessionEventDTO createMessage(String sessionId, AgentSessionMessageCreateDTO createDTO);
-
-  List<AgentSessionHeadDTO> listHeads(String sessionId);
 
   List<AgentSessionEventDTO> listEvents(String sessionId, String headEventId);
 

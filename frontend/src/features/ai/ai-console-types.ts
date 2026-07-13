@@ -9,7 +9,6 @@ export interface ProviderDraft {
   baseUrl: string
   apiKey: string
   timeoutMillis: string
-  streamIdleTimeoutMillis: string
 }
 
 export interface KeyValueDraft {
@@ -32,9 +31,6 @@ export interface ModelDraft {
   description: string
   defaultVariant: string
   variants: VariantDraft[]
-  capabilities: KeyValueDraft[]
-  limits: KeyValueDraft[]
-  pricing: KeyValueDraft[]
 }
 
 export interface AgentDraft {
@@ -45,8 +41,6 @@ export interface AgentDraft {
   defaultModel: string
   defaultVariant: string
   tools: string[]
-  subagents: string[]
-  skills: string[]
 }
 
 export interface ConfirmModalState {

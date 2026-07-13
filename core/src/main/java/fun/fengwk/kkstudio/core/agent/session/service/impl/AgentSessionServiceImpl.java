@@ -9,18 +9,15 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.run.service.AgentRunService;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionEventRepository;
-import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionHeadRepository;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionRepository;
 import fun.fengwk.kkstudio.core.agent.session.service.AgentSessionService;
 import fun.fengwk.kkstudio.core.agent.session.service.converter.AgentSessionConverter;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSession;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionHead;
 import fun.fengwk.kkstudio.core.agent.support.AgentIdentifierGenerator;
 import fun.fengwk.kkstudio.share.model.AgentSessionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionEventDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionHeadDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionUpdateDTO;
 
@@ -35,12 +32,10 @@ import java.util.List;
 public class AgentSessionServiceImpl implements AgentSessionService {
 
   private final AgentSessionRepository agentSessionRepository;
-  private final AgentSessionHeadRepository agentSessionHeadRepository;
   private final AgentSessionEventRepository agentSessionEventRepository;
   private final AgentRunService agentRunService;
   private final AgentSessionConverter agentSessionConverter;
   private final AgentSessionMutationFactory sessionMutationFactory;
-  private final AgentSessionDefaultHeadAdvancer sessionDefaultHeadAdvancer;
   private final AgentSessionEventBranchLoader sessionEventBranchLoader;
   private final AgentSessionRequestSupport sessionRequestSupport;
 
@@ -59,12 +54,6 @@ public class AgentSessionServiceImpl implements AgentSessionService {
     if (!agentSessionRepository.add(session)) {
       throw new IllegalStateException("create session failed");
     }
-
-    AgentSessionHead sessionHead = sessionMutationFactory.newDefaultHead(session.getSessionId());
-    if (!agentSessionHeadRepository.add(sessionHead)) {
-      throw new IllegalStateException("create session head failed");
-    }
-
     return agentSessionConverter.convert(session);
   }
 
@@ -86,9 +75,12 @@ public class AgentSessionServiceImpl implements AgentSessionService {
         agentSessionRepository.getBySessionId(session.getSessionId()));
   }
 
+  @Transactional
   @Override
   public void deleteSession(String sessionId) {
-    AgentSession session = sessionRequestSupport.requireSession(sessionId);
+    AgentSession session = sessionRequestSupport.requireSessionForUpdate(sessionId);
+    agentRunService.deleteRunsBySessionId(session.getSessionId());
+    agentSessionEventRepository.deleteBySessionId(session.getSessionId());
     if (!agentSessionRepository.deleteBySessionId(session.getSessionId())) {
       throw new IllegalStateException("delete session failed: " + session.getSessionId());
     }
@@ -99,7 +91,10 @@ public class AgentSessionServiceImpl implements AgentSessionService {
   public AgentSessionEventDTO createMessage(
       String sessionId, AgentSessionMessageCreateDTO createDTO) {
     String content = sessionRequestSupport.requireMessageContent(createDTO);
-    AgentSession session = sessionRequestSupport.requireSession(sessionId);
+    AgentSession session = sessionRequestSupport.requireSessionForUpdate(sessionId);
+    if (agentRunService.hasActiveRun(session.getSessionId())) {
+      throw new IllegalStateException("session has active run: " + session.getSessionId());
+    }
 
     String runId = AgentIdentifierGenerator.newRunId();
     AgentSessionEvent userEvent =
@@ -114,16 +109,14 @@ public class AgentSessionServiceImpl implements AgentSessionService {
     }
 
     agentRunService.createQueuedRun(runId, session.getSessionId(), userEvent.getEventId());
-    sessionDefaultHeadAdvancer.advanceToLatest(session.getSessionId());
+    if (!agentSessionRepository.compareAndSetCurrentHeadEventId(
+        session.getSessionId(),
+        session.getCurrentHeadEventId(),
+        userEvent.getEventId(),
+        LocalDateTime.now())) {
+      throw new IllegalStateException("advance session head failed: " + session.getSessionId());
+    }
     return agentSessionConverter.convert(userEvent);
-  }
-
-  @Override
-  public List<AgentSessionHeadDTO> listHeads(String sessionId) {
-    AgentSession session = sessionRequestSupport.requireSession(sessionId);
-    return agentSessionHeadRepository.listBySessionId(session.getSessionId()).stream()
-        .map(agentSessionConverter::convert)
-        .toList();
   }
 
   @Override

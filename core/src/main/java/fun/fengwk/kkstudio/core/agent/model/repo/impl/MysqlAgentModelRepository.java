@@ -70,9 +70,6 @@ public class MysqlAgentModelRepository implements AgentModelRepository {
     modelDO.setProviderId(model.getProviderId());
     modelDO.setName(model.getName());
     modelDO.setDescription(model.getDescription());
-    modelDO.setCapabilitiesJson(model.getCapabilitiesJson());
-    modelDO.setLimitJson(model.getLimitJson());
-    modelDO.setPricingJson(model.getPricingJson());
     modelDO.setDefaultVariant(model.getDefaultVariant());
     modelDO.setVariantsJson(model.getVariantsJson());
     return modelDO;
@@ -87,9 +84,6 @@ public class MysqlAgentModelRepository implements AgentModelRepository {
     model.setProviderId(modelDO.getProviderId());
     model.setName(modelDO.getName());
     model.setDescription(modelDO.getDescription());
-    model.setCapabilitiesJson(modelDO.getCapabilitiesJson());
-    model.setLimitJson(modelDO.getLimitJson());
-    model.setPricingJson(modelDO.getPricingJson());
     model.setDefaultVariant(modelDO.getDefaultVariant());
     model.setVariantsJson(modelDO.getVariantsJson());
     model.setCreateTime(modelDO.getCreateTime());

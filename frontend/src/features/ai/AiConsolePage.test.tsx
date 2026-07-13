@@ -198,7 +198,7 @@ describe('AiConsolePage', () => {
       pageNumber: 1,
       pageSize: 50,
       totalCount: 1,
-      results: [{ ...session(), title: null, updateTime: [Number.NaN] }],
+      results: [{ ...session(), title: null, updateTime: null }],
     })
     renderConsole('chat')
     expect(await screen.findByText('Untitled Chat')).toBeInTheDocument()
@@ -314,7 +314,6 @@ function provider() {
     baseUrl: 'https://api.minimax.chat/v1',
     apiKey: 'test-key',
     timeoutMillis: 60000,
-    streamIdleTimeoutMillis: 60000,
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
   }
@@ -327,9 +326,6 @@ function model() {
     providerName: 'minimax',
     name: 'MiniMax-M2.7',
     description: 'Chat model',
-    capabilitiesJson: null,
-    limitJson: null,
-    pricingJson: null,
     defaultVariant: 'default',
     variantsJson: '[{"name":"default","temperature":0.2}]',
     createTime: '2026-06-20T02:00:00',
@@ -349,8 +345,6 @@ function agent() {
     defaultModelName: 'MiniMax-M2.7',
     defaultVariant: 'default',
     toolsJson: '[]',
-    subagentsJson: '[]',
-    skillsJson: '[]',
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
   }
@@ -362,9 +356,7 @@ function session() {
     agentId: 'agent-1',
     agentName: 'default-assistant',
     title: 'Script Review',
-    status: 'active',
-    currentHeadEventId: 'event-1',
     createTime: '2026-06-20T02:00:00',
-    updateTime: [2026, 6, 20, 2, 1, 0, 0],
+    updateTime: '2026-06-20T02:01:00',
   }
 }

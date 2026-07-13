@@ -40,7 +40,6 @@ public class AgentProviderServiceTest {
     createDTO.setBaseUrl("https://example.invalid/v1");
     createDTO.setApiKey("test-key");
     createDTO.setTimeoutMillis(30_000L);
-    createDTO.setStreamIdleTimeoutMillis(45_000L);
 
     // 创建链路必须校验 provider 名称唯一，并把对外返回字段标准化。
     AgentProviderDTO created = agentProviderService.createProvider(createDTO);
@@ -58,7 +57,6 @@ public class AgentProviderServiceTest {
     updateDTO.setBaseUrl("https://example.invalid/v2");
     updateDTO.setApiKey("test-key-updated");
     updateDTO.setTimeoutMillis(40_000L);
-    updateDTO.setStreamIdleTimeoutMillis(50_000L);
 
     // 更新链路必须同步刷新配置字段，并维持唯一名称约束。
     AgentProviderDTO updated = agentProviderService.updateProvider(created.getId(), updateDTO);
@@ -67,7 +65,6 @@ public class AgentProviderServiceTest {
     assertEquals(updateDTO.getBaseUrl(), updated.getBaseUrl());
     assertEquals(updateDTO.getApiKey(), updated.getApiKey());
     assertEquals(updateDTO.getTimeoutMillis(), updated.getTimeoutMillis());
-    assertEquals(updateDTO.getStreamIdleTimeoutMillis(), updated.getStreamIdleTimeoutMillis());
 
     agentProviderService.deleteProvider(created.getId());
     Page<AgentProviderDTO> afterDelete = agentProviderService.pageProviders(new PageQuery(1, 200));

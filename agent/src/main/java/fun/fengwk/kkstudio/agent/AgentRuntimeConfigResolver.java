@@ -13,10 +13,13 @@ import fun.fengwk.kkstudio.agent.provider.ProviderRegistry;
 import fun.fengwk.kkstudio.agent.session.payload.SetAgentInfoPayload;
 import fun.fengwk.kkstudio.agent.session.payload.SetModelInfoPayload;
 import fun.fengwk.kkstudio.agent.tool.ToolInfo;
+import fun.fengwk.kkstudio.agent.tool.ToolRegistration;
 import fun.fengwk.kkstudio.agent.tool.ToolRegistry;
 
-import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -78,8 +81,7 @@ public class AgentRuntimeConfigResolver {
       throw new IllegalArgumentException("provider info not found: " + resolvedProvider);
     }
     Provider runtimeProvider = providerManager.getProvider(providerInfo);
-    List<ToolInfo> toolInfos =
-        resolveToolInfos(latestAgentInfo == null ? List.of() : latestAgentInfo.getTools());
+    Map<String, ToolRegistration> resolvedTools = resolveTools(latestAgentInfo.getTools());
     return ResolvedRuntimeConfig.builder()
         .agentInfo(latestAgentInfo)
         .agentPayload(agentPayload)
@@ -87,29 +89,29 @@ public class AgentRuntimeConfigResolver {
         .provider(runtimeProvider)
         .modelInfo(modelInfo)
         .variant(variantInfo)
-        .toolInfos(toolInfos)
+        .resolvedTools(resolvedTools)
         .resolvedProvider(resolvedProvider)
         .resolvedModel(resolvedModel)
         .resolvedVariant(variantInfo.getName())
         .build();
   }
 
-  private List<ToolInfo> resolveToolInfos(List<String> toolNames) {
+  /** 将 Agent 声明解析为当前 assistant attempt 使用的工具注册项。 */
+  private Map<String, ToolRegistration> resolveTools(List<String> toolNames) {
     if (toolNames == null || toolNames.isEmpty()) {
-      return List.of();
+      return Map.of();
     }
-    List<ToolInfo> result = new ArrayList<>();
+    Map<String, ToolRegistration> result = new LinkedHashMap<>();
     for (String toolName : toolNames) {
-      if (toolName == null || toolName.isBlank()) {
+      if (toolName == null || toolName.isBlank() || result.containsKey(toolName)) {
         continue;
       }
-      ToolInfo toolInfo = toolRegistry.getToolInfo(toolName);
-      if (toolInfo == null) {
-        continue;
+      ToolRegistration registration = toolRegistry.get(toolName);
+      if (registration != null) {
+        result.put(toolName, registration);
       }
-      result.add(toolInfo);
     }
-    return result;
+    return Collections.unmodifiableMap(result);
   }
 
   private SetAgentInfoPayload toSetAgentInfoPayload(AgentInfo latestAgentInfo) {
@@ -117,8 +119,6 @@ public class AgentRuntimeConfigResolver {
     payload.setAgentName(latestAgentInfo.getName());
     payload.setSystemPrompt(latestAgentInfo.getSystemPrompt());
     payload.setTools(copyList(latestAgentInfo.getTools()));
-    payload.setSubagents(copyList(latestAgentInfo.getSubagents()));
-    payload.setSkills(copyList(latestAgentInfo.getSkills()));
     return payload;
   }
 
@@ -165,9 +165,19 @@ public class AgentRuntimeConfigResolver {
     private final Provider provider;
     private final ModelInfo modelInfo;
     private final Variant variant;
-    private final List<ToolInfo> toolInfos;
+
+    /** 当前 attempt 已解析的工具注册项，key 为声明工具名。 */
+    private final Map<String, ToolRegistration> resolvedTools;
+
     private final String resolvedProvider;
     private final String resolvedModel;
     private final String resolvedVariant;
+
+    public List<ToolInfo> getToolInfos() {
+      if (resolvedTools == null || resolvedTools.isEmpty()) {
+        return List.of();
+      }
+      return resolvedTools.values().stream().map(ToolRegistration::getToolInfo).toList();
+    }
   }
 }

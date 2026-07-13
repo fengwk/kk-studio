@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.core.agent.runtime.service.impl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -26,7 +25,7 @@ import java.util.List;
  */
 public class EmbeddedAgentRuntimeMetadataFactoryTest {
 
-  /** 校验会从 agent 定义里补默认 variant，并解析字符串列表字段。 */
+  /** 校验会从 agent 定义里补默认 variant，并解析工具列表。 */
   @Test
   public void shouldBuildAgentInfoWithParsedListsAndDefaultVariant() {
     EmbeddedAgentRuntimeMetadataFactory factory = newFactory();
@@ -35,8 +34,6 @@ public class EmbeddedAgentRuntimeMetadataFactoryTest {
     agentDefinition.setSystemPrompt("you are helpful");
     agentDefinition.setDefaultVariant(" ");
     agentDefinition.setToolsJson("[\"browser\", \" \", \"shell\"]");
-    agentDefinition.setSubagentsJson("{}");
-    agentDefinition.setSkillsJson("[\"writer\"]");
 
     AgentInfo agentInfo = factory.toAgentInfo(agentDefinition, "openai", "gpt-4.1");
 
@@ -45,8 +42,6 @@ public class EmbeddedAgentRuntimeMetadataFactoryTest {
     assertEquals("gpt-4.1", agentInfo.getDefaultModel());
     assertEquals("default", agentInfo.getDefaultVariant());
     assertEquals(List.of("browser", "shell"), agentInfo.getTools());
-    assertTrue(agentInfo.getSubagents().isEmpty());
-    assertEquals(List.of("writer"), agentInfo.getSkills());
   }
 
   /** 校验会从 model variantsJson 里恢复受运行时支持的 variant 参数。 */

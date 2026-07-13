@@ -4,10 +4,8 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSession;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionEvent;
-import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSessionHead;
 import fun.fengwk.kkstudio.share.model.AgentSessionDTO;
 import fun.fengwk.kkstudio.share.model.AgentSessionEventDTO;
-import fun.fengwk.kkstudio.share.model.AgentSessionHeadDTO;
 
 /**
  * @author fengwk
@@ -24,8 +22,6 @@ public class AgentSessionConverter {
     sessionDTO.setAgentId(session.getAgentId());
     sessionDTO.setAgentName(session.getAgentName());
     sessionDTO.setTitle(session.getTitle());
-    sessionDTO.setStatus(session.getStatus());
-    sessionDTO.setCurrentHeadEventId(session.getCurrentHeadEventId());
     sessionDTO.setCreateTime(session.getCreateTime());
     sessionDTO.setUpdateTime(session.getUpdateTime());
     return sessionDTO;
@@ -41,21 +37,8 @@ public class AgentSessionConverter {
     eventDTO.setParentEventId(event.getParentEventId());
     eventDTO.setRunId(event.getRunId());
     eventDTO.setEventType(event.getEventType());
-    eventDTO.setPayloadType(event.getPayloadType());
     eventDTO.setPayloadJson(event.getPayloadJson());
     eventDTO.setCreateTime(event.getCreateTime());
     return eventDTO;
-  }
-
-  public AgentSessionHeadDTO convert(AgentSessionHead head) {
-    if (head == null) {
-      return null;
-    }
-    AgentSessionHeadDTO headDTO = new AgentSessionHeadDTO();
-    headDTO.setHeadId(head.getHeadId());
-    headDTO.setSessionId(head.getSessionId());
-    headDTO.setHeadName(head.getHeadName());
-    headDTO.setHeadEventId(head.getHeadEventId());
-    return headDTO;
   }
 }

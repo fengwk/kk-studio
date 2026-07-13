@@ -14,7 +14,6 @@ import type {
   AgentSessionCreateDTO,
   AgentSessionDTO,
   AgentSessionEventDTO,
-  AgentSessionHeadDTO,
   AgentSessionMessageCreateDTO,
   AgentSessionUpdateDTO,
   PageResult,
@@ -69,8 +68,6 @@ export function createAgentService(client: HttpClient = apiClient) {
 
     createMessage: (sessionId: string, data: AgentSessionMessageCreateDTO): Promise<AgentSessionEventDTO> =>
       client.post(`/agent/sessions/${sessionId}/messages`, data),
-
-    listHeads: (sessionId: string): Promise<AgentSessionHeadDTO[]> => client.get(`/agent/sessions/${sessionId}/heads`),
 
     listEvents: (sessionId: string, headEventId?: string): Promise<AgentSessionEventDTO[]> =>
       client.get(`/agent/sessions/${sessionId}/events`, { params: headEventId ? { headEventId } : undefined }),

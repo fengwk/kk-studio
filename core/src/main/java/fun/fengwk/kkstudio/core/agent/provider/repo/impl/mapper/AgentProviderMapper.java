@@ -34,7 +34,6 @@ public interface AgentProviderMapper extends BaseMapper {
             base_url,
             api_key,
             timeout_millis,
-            stream_idle_timeout_millis,
             gmt_create as create_time,
             gmt_modified as update_time
         from agent_provider
@@ -51,7 +50,6 @@ public interface AgentProviderMapper extends BaseMapper {
         @Result(column = "base_url", property = "baseUrl"),
         @Result(column = "api_key", property = "apiKey"),
         @Result(column = "timeout_millis", property = "timeoutMillis"),
-        @Result(column = "stream_idle_timeout_millis", property = "streamIdleTimeoutMillis"),
         @Result(column = "create_time", property = "createTime"),
         @Result(column = "update_time", property = "updateTime")
       })
@@ -67,7 +65,6 @@ public interface AgentProviderMapper extends BaseMapper {
             base_url,
             api_key,
             timeout_millis,
-            stream_idle_timeout_millis,
             gmt_create as create_time,
             gmt_modified as update_time
         from agent_provider
@@ -86,7 +83,6 @@ public interface AgentProviderMapper extends BaseMapper {
             base_url,
             api_key,
             timeout_millis,
-            stream_idle_timeout_millis,
             gmt_create as create_time,
             gmt_modified as update_time
         from agent_provider
@@ -105,7 +101,6 @@ public interface AgentProviderMapper extends BaseMapper {
             base_url,
             api_key,
             timeout_millis,
-            stream_idle_timeout_millis,
             gmt_create,
             gmt_modified,
             version
@@ -117,7 +112,6 @@ public interface AgentProviderMapper extends BaseMapper {
             #{baseUrl},
             #{apiKey},
             #{timeoutMillis},
-            #{streamIdleTimeoutMillis},
             current_timestamp(3),
             current_timestamp(3),
             0
@@ -135,7 +129,6 @@ public interface AgentProviderMapper extends BaseMapper {
             base_url = #{provider.baseUrl},
             api_key = #{provider.apiKey},
             timeout_millis = #{provider.timeoutMillis},
-            stream_idle_timeout_millis = #{provider.streamIdleTimeoutMillis},
             gmt_modified = current_timestamp(3)
         where id = #{provider.id}
         """)

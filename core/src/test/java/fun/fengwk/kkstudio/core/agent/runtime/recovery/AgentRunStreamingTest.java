@@ -162,7 +162,9 @@ public class AgentRunStreamingTest {
       assertTrue(stub.isCancelled());
       List<AgentSessionEventDTO> eventsBeforeLateComplete =
           agentSessionService.listEvents(session.getSessionId(), null);
-      assertEquals("abort", eventsBeforeLateComplete.get(eventsBeforeLateComplete.size() - 1).getEventType());
+      assertEquals(
+          "abort",
+          eventsBeforeLateComplete.get(eventsBeforeLateComplete.size() - 1).getEventType());
 
       stub.release();
       assertTrue(stub.awaitCompletion(5, TimeUnit.SECONDS));
@@ -170,7 +172,8 @@ public class AgentRunStreamingTest {
       List<AgentSessionEventDTO> eventsAfterLateComplete =
           agentSessionService.listEvents(session.getSessionId(), null);
       assertEquals(eventsBeforeLateComplete.size(), eventsAfterLateComplete.size());
-      assertEquals("abort", eventsAfterLateComplete.get(eventsAfterLateComplete.size() - 1).getEventType());
+      assertEquals(
+          "abort", eventsAfterLateComplete.get(eventsAfterLateComplete.size() - 1).getEventType());
     } finally {
       stub.release();
       runFuture.cancel(true);
@@ -182,7 +185,8 @@ public class AgentRunStreamingTest {
     long deadline = System.currentTimeMillis() + 5000L;
     while (System.currentTimeMillis() < deadline) {
       AgentRunDTO run = agentRunService.getRun(runId);
-      if (run != null && ("succeeded".equals(run.getStatus()) || "failed".equals(run.getStatus()))) {
+      if (run != null
+          && ("succeeded".equals(run.getStatus()) || "failed".equals(run.getStatus()))) {
         return;
       }
       Thread.sleep(10L);
@@ -195,7 +199,8 @@ public class AgentRunStreamingTest {
     while (System.currentTimeMillis() < deadline) {
       AgentRunDTO run = agentRunService.getRun(runId);
       List<AgentSessionEventDTO> events = agentSessionService.listEvents(sessionId, null);
-      boolean started = events.stream().anyMatch(event -> "assistant_start".equals(event.getEventType()));
+      boolean started =
+          events.stream().anyMatch(event -> "assistant_start".equals(event.getEventType()));
       if (started && run != null && "running".equals(run.getStatus())) {
         return;
       }

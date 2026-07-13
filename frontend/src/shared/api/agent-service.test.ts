@@ -36,7 +36,6 @@ describe('agentService', () => {
       baseUrl: 'https://api.minimax.chat/v1',
       apiKey: 'key',
       timeoutMillis: 60000,
-      streamIdleTimeoutMillis: 60000,
     }
     const modelBody = {
       provider: 'minimax',
@@ -50,8 +49,6 @@ describe('agentService', () => {
       defaultModel: 'MiniMax-M2.7',
       defaultVariant: 'default',
       toolsJson: '[]',
-      subagentsJson: '[]',
-      skillsJson: '[]',
     }
     const updateProviderBody = { description: 'updated' }
     const updateModelBody = { defaultVariant: 'fast' }
@@ -86,7 +83,6 @@ describe('agentService', () => {
     await service.getSession('session-1')
     await service.updateSession('session-1', { title: 'Renamed' })
     await service.deleteSession('session-1')
-    await service.listHeads('session-1')
     await service.listEvents('session-1', 'event-9')
     await service.listRuns('session-1')
     await service.createMessage('session-1', { content: 'hello' })
@@ -95,9 +91,8 @@ describe('agentService', () => {
     expect(client.get).toHaveBeenNthCalledWith(1, '/agent/sessions/session-1')
     expect(client.put).toHaveBeenNthCalledWith(1, '/agent/sessions/session-1', { title: 'Renamed' })
     expect(client.delete).toHaveBeenNthCalledWith(1, '/agent/sessions/session-1')
-    expect(client.get).toHaveBeenNthCalledWith(2, '/agent/sessions/session-1/heads')
-    expect(client.get).toHaveBeenNthCalledWith(3, '/agent/sessions/session-1/events', { params: { headEventId: 'event-9' } })
-    expect(client.get).toHaveBeenNthCalledWith(4, '/agent/sessions/session-1/runs')
+    expect(client.get).toHaveBeenNthCalledWith(2, '/agent/sessions/session-1/events', { params: { headEventId: 'event-9' } })
+    expect(client.get).toHaveBeenNthCalledWith(3, '/agent/sessions/session-1/runs')
     expect(client.post).toHaveBeenNthCalledWith(2, '/agent/sessions/session-1/messages', { content: 'hello' })
   })
 

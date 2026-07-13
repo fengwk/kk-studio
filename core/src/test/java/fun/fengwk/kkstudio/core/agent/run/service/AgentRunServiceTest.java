@@ -139,6 +139,21 @@ public class AgentRunServiceTest {
     assertNull(agentRunService.getRun("rn_missing"));
   }
 
+  /** queued run 也属于 active，调度失败时必须能够直接收敛为 failed。 */
+  @Test
+  public void shouldMarkQueuedRunFailed() {
+    AgentSessionCreateDTO createSessionDTO = new AgentSessionCreateDTO();
+    createSessionDTO.setAgentName("default-assistant");
+    createSessionDTO.setTitle("Rejected Run Session");
+    AgentSessionDTO session = agentSessionService.createSession(createSessionDTO);
+
+    agentRunService.createQueuedRun("rn_rejected", session.getSessionId(), "ev_rejected");
+
+    assertTrue(agentRunService.markFailed("rn_rejected"));
+    assertEquals("failed", agentRunService.getRun("rn_rejected").getStatus());
+    assertFalse(agentRunService.markFailed("rn_rejected"));
+  }
+
   @Test
   public void shouldDetectActiveRunsBySession() {
     AgentSessionCreateDTO createSessionDTO = new AgentSessionCreateDTO();

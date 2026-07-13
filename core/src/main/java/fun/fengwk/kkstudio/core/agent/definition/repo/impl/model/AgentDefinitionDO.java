@@ -18,8 +18,6 @@ public class AgentDefinitionDO {
   private Long defaultModelId;
   private String defaultVariant;
   private String toolsJson;
-  private String subagentsJson;
-  private String skillsJson;
   private LocalDateTime createTime;
   private LocalDateTime updateTime;
 }

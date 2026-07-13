@@ -29,12 +29,11 @@ final class AgentSessionRequestSupport {
   }
 
   AgentSession requireSession(String sessionId) {
-    String normalizedSessionId = requireNonBlank(sessionId, "sessionId must not be blank");
-    AgentSession session = agentSessionRepository.getBySessionId(normalizedSessionId);
-    if (session == null) {
-      throw new IllegalArgumentException("session not found: " + normalizedSessionId);
-    }
-    return session;
+    return requireSession(sessionId, false);
+  }
+
+  AgentSession requireSessionForUpdate(String sessionId) {
+    return requireSession(sessionId, true);
   }
 
   String normalizeTitle(AgentSessionUpdateDTO updateDTO) {
@@ -54,6 +53,18 @@ final class AgentSessionRequestSupport {
   String resolveHeadEventId(AgentSession session, String headEventId) {
     String normalizedHeadEventId = normalizeBlankToNull(headEventId);
     return normalizedHeadEventId != null ? normalizedHeadEventId : session.getCurrentHeadEventId();
+  }
+
+  private AgentSession requireSession(String sessionId, boolean forUpdate) {
+    String normalizedSessionId = requireNonBlank(sessionId, "sessionId must not be blank");
+    AgentSession session =
+        forUpdate
+            ? agentSessionRepository.getBySessionIdForUpdate(normalizedSessionId)
+            : agentSessionRepository.getBySessionId(normalizedSessionId);
+    if (session == null) {
+      throw new IllegalArgumentException("session not found: " + normalizedSessionId);
+    }
+    return session;
   }
 
   private String requireCreateAgentName(AgentSessionCreateDTO createDTO) {

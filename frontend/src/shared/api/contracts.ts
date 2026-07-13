@@ -24,7 +24,6 @@ export interface AgentProviderDTO {
   baseUrl: string | null
   apiKey: string | null
   timeoutMillis: number | null
-  streamIdleTimeoutMillis: number | null
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
@@ -36,7 +35,6 @@ export interface AgentProviderEditablePropertiesDTO {
   baseUrl?: string | null
   apiKey?: string | null
   timeoutMillis?: number | null
-  streamIdleTimeoutMillis?: number | null
 }
 
 export interface AgentProviderCreateDTO extends AgentProviderEditablePropertiesDTO {
@@ -51,9 +49,6 @@ export interface AgentModelDTO {
   providerName: string
   name: string
   description: string | null
-  capabilitiesJson: string | null
-  limitJson: string | null
-  pricingJson: string | null
   defaultVariant: string
   variantsJson: string | null
   createTime: BackendDateTime
@@ -62,9 +57,6 @@ export interface AgentModelDTO {
 
 export interface AgentModelEditablePropertiesDTO {
   description?: string | null
-  capabilitiesJson?: string | null
-  limitJson?: string | null
-  pricingJson?: string | null
   defaultVariant?: string | null
   variantsJson?: string | null
 }
@@ -89,8 +81,6 @@ export interface AgentDefinitionDTO {
   defaultModelName: string
   defaultVariant: string
   toolsJson: string | null
-  subagentsJson: string | null
-  skillsJson: string | null
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
@@ -100,8 +90,6 @@ export interface AgentDefinitionEditablePropertiesDTO {
   systemPrompt?: string | null
   defaultVariant?: string | null
   toolsJson?: string | null
-  subagentsJson?: string | null
-  skillsJson?: string | null
 }
 
 export interface AgentDefinitionCreateDTO extends AgentDefinitionEditablePropertiesDTO {
@@ -121,8 +109,6 @@ export interface AgentSessionDTO {
   agentId: AgentResourceId
   agentName: string
   title: string | null
-  status: string
-  currentHeadEventId: string | null
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
@@ -140,20 +126,12 @@ export interface AgentSessionMessageCreateDTO {
   content: string
 }
 
-export interface AgentSessionHeadDTO {
-  headId: string
-  sessionId: string
-  headName: string
-  headEventId: string | null
-}
-
 export interface AgentSessionEventDTO {
   eventId: string
   sessionId: string
   parentEventId: string
   runId: string | null
   eventType: string
-  payloadType: string
   payloadJson: string | null
   createTime: BackendDateTime
 }

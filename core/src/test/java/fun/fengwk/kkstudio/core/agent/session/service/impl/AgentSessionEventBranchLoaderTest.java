@@ -18,32 +18,30 @@ import java.util.List;
  */
 public class AgentSessionEventBranchLoaderTest {
 
-  /** 校验 root head 只返回按事件 id 排序的 user_message。 */
+  /** root 是事件树的虚拟起点，不包含任何实际事件。 */
   @Test
-  public void shouldLoadRootHeadAsOrderedUserMessagesOnly() {
+  public void shouldLoadRootHeadAsEmptyBranch() {
     InMemorySessionEventRepository sessionEventRepository = new InMemorySessionEventRepository();
     AgentSessionEventBranchLoader loader =
         new AgentSessionEventBranchLoader(sessionEventRepository);
-
-    sessionEventRepository.addEvent(event(2L, "ev_assistant", "root", "rn_1", "assistant_start"));
-    sessionEventRepository.addEvent(event(3L, "ev_user_2", "root", "rn_2", "user_message"));
-    sessionEventRepository.addEvent(event(1L, "ev_user_1", "root", "rn_1", "user_message"));
+    sessionEventRepository.addEvent(event(1L, "ev_user", "root", "rn_1", "user_message"));
 
     List<AgentSessionEvent> events = loader.load("se_1", "root");
 
-    assertEquals(List.of("ev_user_1", "ev_user_2"), eventIds(events));
+    assertEquals(List.of(), eventIds(events));
   }
 
-  /** 校验会把与分支并行、同一 run 的 user_message 合并回结果中。 */
+  /** 非 root head 只按 parentEventId 回放其严格祖先链。 */
   @Test
-  public void shouldMergeParallelUserMessageIntoBranch() {
+  public void shouldLoadStrictParentChain() {
     InMemorySessionEventRepository sessionEventRepository = new InMemorySessionEventRepository();
     AgentSessionEventBranchLoader loader =
         new AgentSessionEventBranchLoader(sessionEventRepository);
 
     sessionEventRepository.addEvent(event(1L, "ev_user", "root", "rn_1", "user_message"));
-    sessionEventRepository.addEvent(event(2L, "ev_start", "root", "rn_1", "assistant_start"));
+    sessionEventRepository.addEvent(event(2L, "ev_start", "ev_user", "rn_1", "assistant_start"));
     sessionEventRepository.addEvent(event(3L, "ev_delta", "ev_start", "rn_1", "assistant_delta"));
+    sessionEventRepository.addEvent(event(4L, "ev_other", "root", "rn_2", "user_message"));
 
     List<AgentSessionEvent> events = loader.load("se_1", "ev_delta");
 
@@ -75,7 +73,6 @@ public class AgentSessionEventBranchLoaderTest {
     event.setParentEventId(parentEventId);
     event.setRunId(runId);
     event.setEventType(eventType);
-    event.setPayloadType("text");
     event.setPayloadJson("{}");
     return event;
   }
@@ -112,6 +109,11 @@ public class AgentSessionEventBranchLoaderTest {
     @Override
     public List<AgentSessionEvent> listBySessionIdAfterEventId(
         String sessionId, String afterEventId) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public int deleteBySessionId(String sessionId) {
       throw new UnsupportedOperationException();
     }
 

@@ -25,7 +25,6 @@ public class ConfiguredAgentProviderInfoResolverTest {
     providerProperties.setBaseUrl("https://api.example.test");
     providerProperties.setApiKey("test-api-key");
     providerProperties.setTimeout(Duration.ofSeconds(10));
-    providerProperties.setStreamIdleTimeout(Duration.ofSeconds(20));
     properties.getProviders().put("openai-main", providerProperties);
 
     ConfiguredAgentProviderInfoResolver resolver =
@@ -36,7 +35,6 @@ public class ConfiguredAgentProviderInfoResolverTest {
     assertEquals("https://api.example.test", providerInfo.getBaseUrl());
     assertEquals("test-api-key", providerInfo.getApiKey());
     assertEquals(Duration.ofSeconds(10), providerInfo.getTimeout());
-    assertEquals(Duration.ofSeconds(20), providerInfo.getStreamIdleTimeout());
   }
 
   @Test

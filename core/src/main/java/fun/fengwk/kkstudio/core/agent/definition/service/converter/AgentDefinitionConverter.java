@@ -29,8 +29,6 @@ public class AgentDefinitionConverter {
     agentDefinitionDTO.setDefaultModelName(model == null ? null : model.getName());
     agentDefinitionDTO.setDefaultVariant(agentDefinition.getDefaultVariant());
     agentDefinitionDTO.setToolsJson(agentDefinition.getToolsJson());
-    agentDefinitionDTO.setSubagentsJson(agentDefinition.getSubagentsJson());
-    agentDefinitionDTO.setSkillsJson(agentDefinition.getSkillsJson());
     agentDefinitionDTO.setCreateTime(agentDefinition.getCreateTime());
     agentDefinitionDTO.setUpdateTime(agentDefinition.getUpdateTime());
     return agentDefinitionDTO;

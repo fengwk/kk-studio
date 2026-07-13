@@ -38,7 +38,6 @@ public class LocalH2AcceptanceConfigurationTest {
     assertEquals("http://stub-provider", providerInfo.getBaseUrl());
     assertEquals("stub-api-key", providerInfo.getApiKey());
     assertEquals(Duration.ofSeconds(30), providerInfo.getTimeout());
-    assertEquals(Duration.ofSeconds(30), providerInfo.getStreamIdleTimeout());
     assertTrue(executed.get());
   }
 }

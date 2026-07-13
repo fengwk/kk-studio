@@ -33,10 +33,10 @@ flowchart LR
 
 | 上层模型 | agent 包对齐 | 上层允许扩展 |
 | --- | --- | --- |
-| `AgentProviderDTO` / `agent_provider` | `ProviderInfo.providerType/baseUrl/apiKey/timeout/streamIdleTimeout` | `provider/name/description` 仅用于管理和展示 |
-| `AgentModelDTO` / `agent_model` | `ModelInfo.provider/name/displayName/defaultVariant/variants` 与 `Variant` | `description/capabilitiesJson/limitJson/pricingJson` 仅用于管理和展示 |
-| `AgentDefinitionDTO` / `agent_definition` | `AgentInfo.name/systemPrompt/defaultProvider/defaultModel/defaultVariant/tools/subagents/skills` | `name/description` 仅用于管理和展示 |
-| `AgentSessionDTO` / `agent_session` | `agent.session.Session` 的 session/head 语义 | `title/status` 用于控制面 |
+| `AgentProviderDTO` / `agent_provider` | `ProviderInfo.providerType/baseUrl/apiKey/timeout` | `name/description` 仅用于管理和展示 |
+| `AgentModelDTO` / `agent_model` | `ModelInfo.provider/name/defaultVariant/variants` 与 `Variant` | `description` 仅用于管理和展示 |
+| `AgentDefinitionDTO` / `agent_definition` | `AgentInfo.name/systemPrompt/defaultProvider/defaultModel/defaultVariant/tools` | `description` 仅用于管理和展示 |
+| `AgentSessionDTO` / `agent_session` | `agent.session.Session` 的 session/head 语义 | `title` 用于控制面 |
 
 `ProviderInfo` 不承载模型参数，也不承载 variant 请求参数。模型请求参数只能通过 `agent_model.variants_json` 映射到 `Variant`。
 
@@ -53,13 +53,24 @@ sequenceDiagram
 
     FE->>WEB: POST /api/agent/sessions/{sessionId}/messages
     WEB->>SESSION: createMessage(...)
-    SESSION->>RUN: createQueuedRun(...)
-    SESSION-->>RUNTIME: after-commit scheduleQueuedRun(...)
+    SESSION->>SESSION: 锁定 session 并确认无 active run
+    SESSION->>RUN: 写 user_message、推进 head、创建 queued run
+    SESSION-->>WEB: 返回已提交的 user_message
+    WEB->>RUNTIME: scheduleQueuedRun(...)
     RUNTIME->>AGENT: load session + AgentInfo + ModelInfo + ProviderInfo
     AGENT-->>RUNTIME: append set_* / assistant_*
     FE->>WEB: GET /api/agent/sessions/{sessionId}/events/stream
     WEB-->>FE: event: session_event
 ```
+
+Message 写入事务遵循以下约束：
+
+- 通过 `select ... for update` 锁定 session 行，同一 session 的消息提交串行化。
+- session 已存在 `queued` 或 `running` run 时拒绝新消息，避免并行 Agent 分叉并产生不可见回答。
+- `user_message`、queued run 和 session current head 在同一事务内写入。
+- `web` 在事务方法返回后调度 runtime；executor 拒绝任务时，queued run 立即转为 `failed`，不会长期停留在 active 状态。
+- 删除 session 时先锁定 session 并拒绝 active run，再在同一事务内删除 run、event 和 session 主记录。
+- branch 回放与 `agent` 模块保持一致：`root` 表示空链，非 root head 只沿 `parentEventId` 回放严格祖先链。
 
 ## `share` DTO 清单
 
@@ -70,7 +81,6 @@ sequenceDiagram
 | `AgentDefinitionDTO`、`AgentDefinitionCreateDTO`、`AgentDefinitionUpdateDTO` | Agent CRUD |
 | `AgentSessionDTO`、`AgentSessionCreateDTO`、`AgentSessionUpdateDTO` | Chat session CRUD |
 | `AgentSessionMessageCreateDTO` | 用户消息提交 |
-| `AgentSessionHeadDTO` | branch head |
 | `AgentSessionEventDTO` | session branch event |
 | `AgentRunDTO` | run 查询结果 |
 
@@ -101,7 +111,7 @@ fun.fengwk.kkstudio.core.agent
 | `provider` | provider 仓储、领域模型、CRUD 服务、DTO 转换 |
 | `model` | model 仓储、领域模型、CRUD 服务、variant JSON 校验 |
 | `definition` | agent definition 仓储、领域模型、CRUD 服务、provider/model 引用校验 |
-| `session` | session / head / event 仓储、branch 回放、message submit 入口 |
+| `session` | session / event 仓储、branch 回放、message submit 入口 |
 | `run` | run 仓储、领域模型、状态迁移服务 |
 | `runtime` | runtime 自动配置、embedded runtime 执行、agent 包模型组装 |
 | `support` | 业务 id 生成 |
@@ -112,23 +122,22 @@ fun.fengwk.kkstudio.core.agent
 | --- | --- | --- | --- | --- |
 | Provider | `GET` | `/api/agent/providers` | `pageNumber`, `pageSize` | `Result<Page<AgentProviderDTO>>` |
 | Provider | `POST` | `/api/agent/providers` | `AgentProviderCreateDTO` | `Result<AgentProviderDTO>` |
-| Provider | `PUT` | `/api/agent/providers/{provider}` | `AgentProviderUpdateDTO` | `Result<AgentProviderDTO>` |
-| Provider | `DELETE` | `/api/agent/providers/{provider}` | 无 | `204` |
+| Provider | `PUT` | `/api/agent/providers/{id}` | `AgentProviderUpdateDTO` | `Result<AgentProviderDTO>` |
+| Provider | `DELETE` | `/api/agent/providers/{id}` | 无 | `204` |
 | Model | `GET` | `/api/agent/models` | `pageNumber`, `pageSize` | `Result<Page<AgentModelDTO>>` |
 | Model | `POST` | `/api/agent/models` | `AgentModelCreateDTO` | `Result<AgentModelDTO>` |
-| Model | `PUT` | `/api/agent/models/{provider}/{name}` | `AgentModelUpdateDTO` | `Result<AgentModelDTO>` |
-| Model | `DELETE` | `/api/agent/models/{provider}/{name}` | 无 | `204` |
+| Model | `PUT` | `/api/agent/models/{id}` | `AgentModelUpdateDTO` | `Result<AgentModelDTO>` |
+| Model | `DELETE` | `/api/agent/models/{id}` | 无 | `204` |
 | Agent | `GET` | `/api/agent/agents` | `pageNumber`, `pageSize` | `Result<Page<AgentDefinitionDTO>>` |
 | Agent | `POST` | `/api/agent/agents` | `AgentDefinitionCreateDTO` | `Result<AgentDefinitionDTO>` |
-| Agent | `PUT` | `/api/agent/agents/{agentName}` | `AgentDefinitionUpdateDTO` | `Result<AgentDefinitionDTO>` |
-| Agent | `DELETE` | `/api/agent/agents/{agentName}` | 无 | `204` |
+| Agent | `PUT` | `/api/agent/agents/{id}` | `AgentDefinitionUpdateDTO` | `Result<AgentDefinitionDTO>` |
+| Agent | `DELETE` | `/api/agent/agents/{id}` | 无 | `204` |
 | Session | `GET` | `/api/agent/sessions` | `pageNumber`, `pageSize` | `Result<Page<AgentSessionDTO>>` |
 | Session | `POST` | `/api/agent/sessions` | `AgentSessionCreateDTO` | `Result<AgentSessionDTO>` |
 | Session | `GET` | `/api/agent/sessions/{sessionId}` | 无 | `Result<AgentSessionDTO>` |
 | Session | `PUT` | `/api/agent/sessions/{sessionId}` | `AgentSessionUpdateDTO` | `Result<AgentSessionDTO>` |
 | Session | `DELETE` | `/api/agent/sessions/{sessionId}` | 无 | `204` |
 | Message | `POST` | `/api/agent/sessions/{sessionId}/messages` | `AgentSessionMessageCreateDTO` | `Result<AgentSessionEventDTO>` |
-| Head | `GET` | `/api/agent/sessions/{sessionId}/heads` | 无 | `Result<List<AgentSessionHeadDTO>>` |
 | Event | `GET` | `/api/agent/sessions/{sessionId}/events` | `headEventId` 可选 | `Result<List<AgentSessionEventDTO>>` |
 | Event Stream | `GET` | `/api/agent/sessions/{sessionId}/events/stream` | `headEventId`、`idleTimeoutMillis` 可选 | `text/event-stream` |
 | Run | `GET` | `/api/agent/sessions/{sessionId}/runs` | 无 | `Result<List<AgentRunDTO>>` |
@@ -159,7 +168,6 @@ SSE 当前行为：
 | Provider | `LocalH2AcceptanceConfiguration` 注入 `AcceptanceStubProviderManager` |
 | Run 调度 | `agentRunTaskExecutor` 使用同步执行器，便于手工验收 |
 | SSE 调度 | `agentEventStreamTaskExecutor` 独立异步执行 |
-| Nacos | 关闭 config / discovery / auto-registration |
 | 雪花 ID | 固定 `convention.snowflake-id.worker-id = 0`，不依赖 Redis 申请 worker id |
 
 ## 测试边界

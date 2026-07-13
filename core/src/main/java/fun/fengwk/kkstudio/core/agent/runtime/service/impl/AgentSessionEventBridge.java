@@ -65,7 +65,7 @@ final class AgentSessionEventBridge {
     if (payloadJson == null || payloadJson.isBlank()) {
       return null;
     }
-    Class<? extends Payload> payloadType =
+    Class<? extends Payload> payloadClass =
         switch (eventType) {
           case set_agent_info -> SetAgentInfoPayload.class;
           case set_model_info -> SetModelInfoPayload.class;
@@ -80,7 +80,7 @@ final class AgentSessionEventBridge {
           case abort -> AbortPayload.class;
         };
     try {
-      return objectMapper.readValue(payloadJson, payloadType);
+      return objectMapper.readValue(payloadJson, payloadClass);
     } catch (JsonProcessingException e) {
       throw new IllegalStateException("deserialize runtime payload failed", e);
     }

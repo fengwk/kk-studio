@@ -26,8 +26,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class StaleRunReconciler {
 
-  private static final String STATUS_FAILED = "failed";
-
   private static final Duration STALE_RUN_THRESHOLD = Duration.ofMinutes(30);
 
   private static final List<String> ACTIVE_STATUSES = List.of("queued", "running");
@@ -46,8 +44,7 @@ public class StaleRunReconciler {
 
     int failed = 0;
     for (AgentRun run : staleRuns) {
-      if (agentRunRepository.markFailedFromActive(
-          run.getRunId(), STATUS_FAILED, LocalDateTime.now())) {
+      if (agentRunService.markFailed(run.getRunId())) {
         failed++;
       } else {
         log.warn(

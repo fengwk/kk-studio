@@ -31,7 +31,6 @@ function event(eventId: string): AgentSessionEventDTO {
     parentEventId: 'root',
     runId: 'run-1',
     eventType: 'assistant_delta',
-    payloadType: 'json',
     payloadJson: '{"textDelta":"hello"}',
     createTime: '2026-06-20T02:00:00',
   }

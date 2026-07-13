@@ -10,7 +10,6 @@ export function emptyProviderDraft(): ProviderDraft {
     baseUrl: '',
     apiKey: '',
     timeoutMillis: '60000',
-    streamIdleTimeoutMillis: '60000',
   }
 }
 
@@ -22,7 +21,6 @@ export function toProviderDraft(provider: AgentProviderDTO): ProviderDraft {
     baseUrl: provider.baseUrl || '',
     apiKey: provider.apiKey || '',
     timeoutMillis: provider.timeoutMillis ? String(provider.timeoutMillis) : '',
-    streamIdleTimeoutMillis: provider.streamIdleTimeoutMillis ? String(provider.streamIdleTimeoutMillis) : '',
   }
 }
 
@@ -34,7 +32,6 @@ export function toEditableProvider(draft: ProviderDraft): AgentProviderCreateDTO
     baseUrl: trimToNull(draft.baseUrl),
     apiKey: trimToNull(draft.apiKey),
     timeoutMillis: numberToNull(draft.timeoutMillis),
-    streamIdleTimeoutMillis: numberToNull(draft.streamIdleTimeoutMillis),
   }
 }
 
