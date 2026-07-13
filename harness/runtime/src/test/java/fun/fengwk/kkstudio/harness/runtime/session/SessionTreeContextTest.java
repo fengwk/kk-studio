@@ -119,6 +119,7 @@ class SessionTreeContextTest {
             List.of(
                 new ToolResultMessageContent(
                     "call-1",
+                    "read",
                     List.of(
                         new TextMessageContent("preview"),
                         new ArtifactMessageContent("artifact-1", "text/plain", "first line")),
@@ -142,6 +143,82 @@ class SessionTreeContextTest {
             codec.decode(
                 SessionEntryType.COMPACTION,
                 "{\"summary\":\"x\",\"firstKeptEntryId\":\"2\",\"tokensBefore\":1,\"detailsJson\":\"{}\"}"));
+  }
+
+  /** ToolResult 必须携带工具名，TOOL 消息必须恰好包含一个结果。 */
+  @Test
+  void shouldEnforceToolResultAndToolMessageContracts() {
+    ToolResultMessageContent result = toolResult("read");
+
+    assertEquals("read", result.toolName());
+    assertThrows(IllegalArgumentException.class, () -> toolResult(null));
+    assertThrows(IllegalArgumentException.class, () -> toolResult(" "));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AgentMessage(AgentMessageRole.TOOL, List.of(new TextMessageContent("mixed"))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new AgentMessage(
+                AgentMessageRole.TOOL, List.of(result, new TextMessageContent("mixed"))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AgentMessage(AgentMessageRole.TOOL, List.of(result, result)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AgentMessage(AgentMessageRole.USER, List.of(result)));
+  }
+
+  /** ToolCall 和 ToolResult 独立持久化往返后必须保留相同的调用 ID 与工具名。 */
+  @Test
+  void shouldPreserveToolIdentityAcrossMessageRoundTrips() {
+    SessionEntryJsonCodec codec = new SessionEntryJsonCodec();
+    AgentMessage callMessage =
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(new ToolCallMessageContent("call-1", "read", "{\"path\":\"README.md\"}")));
+    AgentMessage resultMessage =
+        new AgentMessage(AgentMessageRole.TOOL, List.of(toolResult("read")));
+
+    AgentMessage decodedCall =
+        ((MessageEntryPayload)
+                codec.decode(
+                    SessionEntryType.MESSAGE, codec.encode(new MessageEntryPayload(callMessage))))
+            .message();
+    AgentMessage decodedResult =
+        ((MessageEntryPayload)
+                codec.decode(
+                    SessionEntryType.MESSAGE, codec.encode(new MessageEntryPayload(resultMessage))))
+            .message();
+    ToolCallMessageContent call = (ToolCallMessageContent) decodedCall.contents().get(0);
+    ToolResultMessageContent result = (ToolResultMessageContent) decodedResult.contents().get(0);
+
+    assertEquals("call-1", result.toolCallId());
+    assertEquals(call.toolCallId(), result.toolCallId());
+    assertEquals(call.toolName(), result.toolName());
+  }
+
+  /** JSON 边界必须拒绝缺失 toolName 以及包含多个 ToolResult 的 TOOL 消息。 */
+  @Test
+  void shouldRejectMalformedToolResultPayloads() {
+    SessionEntryJsonCodec codec = new SessionEntryJsonCodec();
+    String missingToolName =
+        "{\"message\":{\"role\":\"TOOL\",\"contents\":[{\"type\":\"tool_result\","
+            + "\"toolCallId\":\"call-1\",\"contents\":[{\"type\":\"text\",\"text\":\"ok\"}],"
+            + "\"error\":false,\"detailsJson\":\"{}\"}]}}";
+    String result =
+        "{\"type\":\"tool_result\",\"toolCallId\":\"call-1\",\"toolName\":\"read\","
+            + "\"contents\":[{\"type\":\"text\",\"text\":\"ok\"}],\"error\":false,"
+            + "\"detailsJson\":\"{}\"}";
+    String multipleResults =
+        "{\"message\":{\"role\":\"TOOL\",\"contents\":[" + result + "," + result + "]}}";
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(SessionEntryType.MESSAGE, missingToolName));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(SessionEntryType.MESSAGE, multipleResults));
   }
 
   /** latest compaction = summary + 其祖先 firstKept..前一项 + compaction 后新 entries。 */
@@ -260,6 +337,11 @@ class SessionTreeContextTest {
   private static MessageEntryPayload user(String text) {
     return new MessageEntryPayload(
         new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text))));
+  }
+
+  private static ToolResultMessageContent toolResult(String toolName) {
+    return new ToolResultMessageContent(
+        "call-1", toolName, List.of(new TextMessageContent("ok")), false, "{}");
   }
 
   private static SessionEntry entry(

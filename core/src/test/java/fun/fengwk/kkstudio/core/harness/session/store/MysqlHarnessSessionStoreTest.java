@@ -7,12 +7,19 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.kkstudio.core.CoreTestApplication;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshotEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.InvalidSessionTreeException;
+import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
+import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionLeafConflictException;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -48,6 +55,52 @@ class MysqlHarnessSessionStoreTest {
         () -> store.append(stale, root.id(), afterRoot.version()));
     assertEquals(current.id(), store.find(sessionId).orElseThrow().leafEntryId());
     assertFalse(store.find(sessionId, stale.id()).isPresent());
+  }
+
+  /** ToolCall 与 ToolResult 经数据库 payload 往返后保留相同工具标识。 */
+  @Test
+  void shouldRoundTripToolNameThroughEntryStore() {
+    long sessionId = id();
+    store.create(root(sessionId, 1L));
+    SessionEntry snapshot = entry(id(), sessionId, null);
+    store.append(snapshot, null, 0L);
+    SessionEntry call =
+        entry(
+            id(),
+            sessionId,
+            snapshot.id(),
+            new MessageEntryPayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(new ToolCallMessageContent("call-1", "read", "{}")))));
+    store.append(call, snapshot.id(), 1L);
+    SessionEntry result =
+        entry(
+            id(),
+            sessionId,
+            call.id(),
+            new MessageEntryPayload(
+                new AgentMessage(
+                    AgentMessageRole.TOOL,
+                    List.of(
+                        new ToolResultMessageContent(
+                            "call-1",
+                            "read",
+                            List.of(new TextMessageContent("ok")),
+                            false,
+                            "{}")))));
+    store.append(result, call.id(), 2L);
+
+    List<SessionEntry> path = store.loadPath(sessionId, result.id());
+    ToolCallMessageContent storedCall =
+        (ToolCallMessageContent)
+            ((MessageEntryPayload) path.get(1).payload()).message().contents().get(0);
+    ToolResultMessageContent storedResult =
+        (ToolResultMessageContent)
+            ((MessageEntryPayload) path.get(2).payload()).message().contents().get(0);
+
+    assertEquals(storedCall.toolCallId(), storedResult.toolCallId());
+    assertEquals(storedCall.toolName(), storedResult.toolName());
   }
 
   /** 同 Session children query 返回 sibling，且跨 Session Entry 不可作为 checkout/path 目标。 */
@@ -206,7 +259,11 @@ class MysqlHarnessSessionStoreTest {
   private static SessionEntry entry(long entryId, long sessionId, Long parentEntryId) {
     AgentSnapshot snapshot =
         new AgentSnapshot("system", "model", "default", List.of(), List.of(), List.of(), "{}");
-    AgentSnapshotEntryPayload payload = new AgentSnapshotEntryPayload(snapshot);
+    return entry(entryId, sessionId, parentEntryId, new AgentSnapshotEntryPayload(snapshot));
+  }
+
+  private static SessionEntry entry(
+      long entryId, long sessionId, Long parentEntryId, SessionEntryPayload payload) {
     return new SessionEntry(
         entryId, sessionId, parentEntryId, null, payload.type(), payload, Instant.now());
   }

@@ -19,8 +19,9 @@ public record AgentMessage(AgentMessageRole role, List<AgentMessageContent> cont
     if (hasResult && role != AgentMessageRole.TOOL) {
       throw new IllegalArgumentException("tool results are only allowed for tool messages");
     }
-    if (role == AgentMessageRole.TOOL && !hasResult) {
-      throw new IllegalArgumentException("tool messages must contain tool results");
+    if (role == AgentMessageRole.TOOL
+        && (contents.size() != 1 || !(contents.get(0) instanceof ToolResultMessageContent))) {
+      throw new IllegalArgumentException("tool messages must contain exactly one tool result");
     }
   }
 

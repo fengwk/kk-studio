@@ -204,6 +204,7 @@ public final class SessionEntryJsonCodec {
     } else if (content instanceof ToolResultMessageContent value) {
       node.put("type", "tool_result");
       node.put("toolCallId", value.toolCallId());
+      node.put("toolName", value.toolName());
       ArrayNode contents = node.putArray("contents");
       value.contents().forEach(item -> contents.add(encodeContent(item)));
       node.put("error", value.error());
@@ -255,7 +256,7 @@ public final class SessionEntryJsonCodec {
             jsonObjectText(node, "argumentsJson"));
       }
       case "tool_result" -> {
-        fields(node, "type", "toolCallId", "contents", "error", "detailsJson");
+        fields(node, "type", "toolCallId", "toolName", "contents", "error", "detailsJson");
         ArrayNode contents = array(node.get("contents"), "contents");
         List<AgentMessageContent> result = new ArrayList<>(contents.size());
         for (JsonNode item : contents) {
@@ -269,6 +270,7 @@ public final class SessionEntryJsonCodec {
         }
         yield new ToolResultMessageContent(
             text(node, "toolCallId"),
+            text(node, "toolName"),
             result,
             bool(node, "error"),
             jsonObjectText(node, "detailsJson"));
