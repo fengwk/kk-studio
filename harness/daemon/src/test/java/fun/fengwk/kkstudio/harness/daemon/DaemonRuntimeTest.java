@@ -33,7 +33,14 @@ import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolArraySchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolBooleanSchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolNumberSchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolObjectSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -91,6 +98,32 @@ class DaemonRuntimeTest {
     assertEquals(DaemonRuntimeState.READY, runtime.state());
   }
 
+  /** CAPABILITIES 必须完整保留 object/array/enum/primitive schema，供 Cloud 做参数匹配。 */
+  @Test
+  void serializesCompleteToolSchemaInCapabilities() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new SchemaTool());
+
+    runtime.start();
+    transport.awaitConnections(1);
+    List<DaemonEnvelope> handshake = transport.takeMessages(3);
+
+    JsonNode schema = codec.readPayload(handshake.get(1)).path("tools").get(0).path("inputSchema");
+    assertEquals("string", schema.path("properties").path("text").path("type").asText());
+    assertEquals("integer", schema.path("properties").path("count").path("type").asText());
+    assertEquals("number", schema.path("properties").path("ratio").path("type").asText());
+    assertEquals("boolean", schema.path("properties").path("enabled").path("type").asText());
+    assertEquals(
+        List.of("fast", "safe"), jsonTexts(schema.path("properties").path("mode").path("enum")));
+    assertEquals(
+        "string", schema.path("properties").path("tags").path("items").path("type").asText());
+    JsonNode nested = schema.path("properties").path("options");
+    assertEquals("object", nested.path("type").asText());
+    assertEquals("boolean", nested.path("properties").path("force").path("type").asText());
+    assertEquals(List.of("force"), jsonTexts(nested.path("required")));
+    assertTrue(nested.path("additionalProperties").asBoolean());
+  }
+
   /** READY 后必须在配置周期内发送 HEARTBEAT。 */
   @Test
   void sendsHeartbeatWhileReady() throws InterruptedException {
@@ -115,6 +148,27 @@ class DaemonRuntimeTest {
     transport.awaitConnections(2);
 
     assertMessageTypes(transport.takeMessages(3), HELLO, CAPABILITIES, READY);
+  }
+
+  /** 任一出站 send failure 都使连接失效；重连后 journal 仍阻止 invocation 重启。 */
+  @Test
+  void reconnectsAfterSendFailureWithoutRestartingInvocation() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.failNextSend();
+    transport.receive(invoke("send-failure", 9));
+    transport.awaitConnections(1);
+    assertMessageTypes(transport.takeMessages(3), HELLO, CAPABILITIES, READY);
+    assertEquals(1, tool.executions.get());
+
+    transport.receive(invoke("send-failure", 0));
+    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    assertEquals(1, tool.executions.get());
   }
 
   /** 未注册工具必须以 FAILED 终态返回，而不是让协议处理线程失败。 */
@@ -192,7 +246,8 @@ class DaemonRuntimeTest {
 
   /** 当前连接只接受连续 sequence；最新 envelope 的重复会 ACK 并复用 invocation journal。 */
   @Test
-  void rejectsOutOfOrderSequenceAndHandlesLatestDuplicateIdempotently() throws InterruptedException {
+  void rejectsOutOfOrderSequenceAndHandlesLatestDuplicateIdempotently()
+      throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     TestTool tool = new TestTool();
     runtime = runtime(transport, tool);
@@ -213,6 +268,26 @@ class DaemonRuntimeTest {
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     transport.receive(cancel("sequence-invocation", 5));
     assertMessageTypes(transport.takeMessages(2), ACK, CANCELLED);
+  }
+
+  /** WELCOME/ACK/ERROR 只推进连接 sequence，不创建 invocation 或发送额外响应。 */
+  @Test
+  void acceptsInboundCloudControlMessagesWithinSequence() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.receive(control(DaemonMessageType.WELCOME, 20));
+    transport.receive(control(DaemonMessageType.ACK, 21));
+    transport.receive(control(DaemonMessageType.ERROR, 22));
+    assertFalse(transport.hasMessages());
+
+    transport.receive(invoke("after-control", 23));
+    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    assertEquals(1, tool.executions.get());
   }
 
   /** Cloud 声明的工具版本必须匹配本地 descriptor，避免以错误参数契约启动 Tool。 */
@@ -241,7 +316,7 @@ class DaemonRuntimeTest {
     runtime.start();
     transport.awaitConnections(1);
     transport.takeMessages(3);
-    DaemonEnvelope invoke = invoke("invocation-1", 1);
+    DaemonEnvelope invoke = invoke("invocation-1", 7);
     transport.receive(invoke);
     assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
     assertEquals(1, tool.executions.get());
@@ -250,7 +325,8 @@ class DaemonRuntimeTest {
     assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
     assertEquals(1, tool.executions.get());
 
-    tool.complete(new ToolResult("invocation-1", List.of(new TextToolContent("done")), false, "{}", false));
+    tool.complete(
+        new ToolResult("invocation-1", List.of(new TextToolContent("done")), false, "{}", false));
     List<DaemonEnvelope> terminal = transport.takeMessages(1);
     assertMessageTypes(terminal, COMPLETED);
     assertTrue(terminal.get(0).payloadJson().contains("done"));
@@ -260,7 +336,7 @@ class DaemonRuntimeTest {
     transport.disconnect();
     transport.awaitConnections(1);
     transport.takeMessages(3);
-    transport.receive(invoke);
+    transport.receive(invoke("invocation-1", 0));
     assertMessageTypes(transport.takeMessages(2), ACK, COMPLETED);
     assertEquals(1, tool.executions.get());
   }
@@ -288,7 +364,8 @@ class DaemonRuntimeTest {
 
   /** 0 timeout 使用 descriptor timeout，完成或取消时 deadline 必须被撤销。 */
   @Test
-  void resolvesZeroTimeoutAndCancelsDeadlineAfterCompletionOrCancellation() throws InterruptedException {
+  void resolvesZeroTimeoutAndCancelsDeadlineAfterCompletionOrCancellation()
+      throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     TestTool tool = new TestTool();
     runtime = runtime(transport, tool);
@@ -307,6 +384,43 @@ class DaemonRuntimeTest {
     transport.receive(cancel("cancel-before-timeout", 3));
     assertMessageTypes(transport.takeMessages(2), ACK, CANCELLED);
     assertFalse(transport.awaitMessage(Duration.ofMillis(80)));
+  }
+
+  /** descriptor 也为 0 时必须回退 daemon 默认 timeout，仍不能产生无限执行。 */
+  @Test
+  void fallsBackToDaemonTimeoutWhenRequestAndDescriptorAreZero() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    DefaultTimeoutTool tool = new DefaultTimeoutTool();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.receive(invoke("default-timeout", 1, "fallback", "1.0.0", 0));
+    transport.takeMessages(2);
+
+    assertEquals(Duration.ofSeconds(10), tool.request.effectiveTimeout());
+    tool.complete();
+    assertMessageTypes(transport.takeMessages(1), COMPLETED);
+  }
+
+  /** complete 抢先终态后 deadline 必须失效且不能 cancel handle。 */
+  @Test
+  void completionWinsAgainstPendingTimeout() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.receive(invoke("complete-before-timeout", 1, "test", "1.0.0", 50));
+    transport.takeMessages(2);
+    tool.complete(new ToolResult("complete-before-timeout", List.of(), false, "{}", false));
+
+    assertMessageTypes(transport.takeMessages(1), COMPLETED);
+    assertFalse(transport.awaitMessage(Duration.ofMillis(100)));
+    assertEquals(0, tool.handle.cancelCalls.get());
   }
 
   /** 流式结果必须保留 JSON 与 Artifact 等非文本内容的结构。 */
@@ -363,7 +477,8 @@ class DaemonRuntimeTest {
 
   /** PARTIAL 必须流式转发，CANCEL 后迟到 complete callback 不能覆盖 CANCELLED 终态。 */
   @Test
-  void forwardsPartialAndGuardsCancelledInvocationAgainstLateCallbacks() throws InterruptedException {
+  void forwardsPartialAndGuardsCancelledInvocationAgainstLateCallbacks()
+      throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     TestTool tool = new TestTool();
     runtime = runtime(transport, tool);
@@ -374,7 +489,8 @@ class DaemonRuntimeTest {
     transport.receive(invoke("invocation-2", 1));
     transport.takeMessages(2);
 
-    tool.partial(new ToolResult("invocation-2", List.of(new TextToolContent("chunk")), false, "{}", false));
+    tool.partial(
+        new ToolResult("invocation-2", List.of(new TextToolContent("chunk")), false, "{}", false));
     List<DaemonEnvelope> partial = transport.takeMessages(1);
     assertMessageTypes(partial, PARTIAL);
     assertTrue(partial.get(0).payloadJson().contains("chunk"));
@@ -383,15 +499,16 @@ class DaemonRuntimeTest {
     assertMessageTypes(transport.takeMessages(2), ACK, CANCELLED);
     assertEquals(1, tool.handle.cancelCalls.get());
 
-    tool.complete(new ToolResult("invocation-2", List.of(new TextToolContent("late")), false, "{}", false));
+    tool.complete(
+        new ToolResult("invocation-2", List.of(new TextToolContent("late")), false, "{}", false));
     assertFalse(transport.hasMessages());
   }
 
-  private DaemonRuntime runtime(FakeTransport transport, TestTool tool) {
+  private DaemonRuntime runtime(FakeTransport transport, Tool tool) {
     return runtime(transport, tool, Duration.ofMinutes(1));
   }
 
-  private DaemonRuntime runtime(FakeTransport transport, TestTool tool, Duration heartbeatInterval) {
+  private DaemonRuntime runtime(FakeTransport transport, Tool tool, Duration heartbeatInterval) {
     DaemonToolRegistry registry = new DaemonToolRegistry();
     registry.register(tool);
     return new DaemonRuntime(
@@ -436,6 +553,11 @@ class DaemonRuntimeTest {
             + "}");
   }
 
+  private DaemonEnvelope control(DaemonMessageType messageType, long sequence) {
+    return new DaemonEnvelope(
+        DaemonProtocol.VERSION_1, messageType, "workspace", "environment", null, sequence, "{}");
+  }
+
   private DaemonEnvelope cancel(String invocationId, long sequence) {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION_1,
@@ -447,9 +569,14 @@ class DaemonRuntimeTest {
         "{}");
   }
 
+  private List<String> jsonTexts(JsonNode array) {
+    List<String> values = new ArrayList<>();
+    array.forEach(value -> values.add(value.asText()));
+    return values;
+  }
+
   private void assertMessageTypes(List<DaemonEnvelope> envelopes, DaemonMessageType... expected) {
-    assertEquals(
-        List.of(expected), envelopes.stream().map(DaemonEnvelope::messageType).toList());
+    assertEquals(List.of(expected), envelopes.stream().map(DaemonEnvelope::messageType).toList());
   }
 
   private final class FakeTransport implements DaemonTransport {
@@ -457,6 +584,7 @@ class DaemonRuntimeTest {
     private final Semaphore connections = new Semaphore(0);
     private final LinkedBlockingQueue<String> sent = new LinkedBlockingQueue<>();
     private final AtomicBoolean failNextConnection = new AtomicBoolean();
+    private final AtomicBoolean failNextSend = new AtomicBoolean();
     private volatile DaemonTransportListener listener;
     private volatile FakeConnection connection;
 
@@ -473,6 +601,10 @@ class DaemonRuntimeTest {
 
     private void failNextConnection() {
       failNextConnection.set(true);
+    }
+
+    private void failNextSend() {
+      failNextSend.set(true);
     }
 
     private void receive(DaemonEnvelope envelope) {
@@ -522,6 +654,10 @@ class DaemonRuntimeTest {
 
       @Override
       public CompletionStage<Void> sendText(String message) {
+        if (failNextSend.compareAndSet(true, false)) {
+          open = false;
+          return CompletableFuture.failedFuture(new IllegalStateException("send failed"));
+        }
         sent.add(message);
         return CompletableFuture.completedFuture(null);
       }
@@ -535,6 +671,87 @@ class DaemonRuntimeTest {
       public boolean isOpen() {
         return open;
       }
+    }
+  }
+
+  private static final class SchemaTool implements Tool {
+
+    private final ToolDescriptor descriptor =
+        new ToolDescriptor(
+            "schema",
+            "2.1.0",
+            "schema tool",
+            "schema-renderer",
+            new ToolParamsSchema(
+                "schema arguments",
+                Map.of(
+                    "text",
+                    new ToolStringSchema("text value"),
+                    "count",
+                    new ToolIntegerSchema("count value"),
+                    "ratio",
+                    new ToolNumberSchema("ratio value"),
+                    "enabled",
+                    new ToolBooleanSchema("enabled value"),
+                    "mode",
+                    new ToolEnumSchema("execution mode", List.of("fast", "safe")),
+                    "tags",
+                    new ToolArraySchema("tag values", new ToolStringSchema("tag")),
+                    "options",
+                    new ToolObjectSchema(
+                        "nested options",
+                        Map.of("force", new ToolBooleanSchema("force execution")),
+                        Set.of("force"),
+                        true)),
+                Set.of("text"),
+                false),
+            ToolExecutionMode.ENVIRONMENT,
+            ToolSideEffect.IDEMPOTENT,
+            Duration.ofSeconds(3));
+
+    @Override
+    public ToolDescriptor descriptor() {
+      return descriptor;
+    }
+
+    @Override
+    public ToolExecutionHandle execute(
+        ToolExecutionRequest request, ToolExecutionListener listener) {
+      throw new AssertionError("schema tool must not execute");
+    }
+  }
+
+  private static final class DefaultTimeoutTool implements Tool {
+
+    private final ToolDescriptor descriptor =
+        new ToolDescriptor(
+            "fallback",
+            "1.0.0",
+            "default timeout tool",
+            null,
+            new ToolParamsSchema("fallback arguments", Map.of(), Set.of(), false),
+            ToolExecutionMode.ENVIRONMENT,
+            ToolSideEffect.READ_ONLY,
+            Duration.ZERO);
+    private final TestHandle handle = new TestHandle();
+    private volatile ToolExecutionListener listener;
+    private volatile ToolExecutionRequest request;
+
+    @Override
+    public ToolDescriptor descriptor() {
+      return descriptor;
+    }
+
+    @Override
+    public ToolExecutionHandle execute(
+        ToolExecutionRequest request, ToolExecutionListener listener) {
+      this.request = request;
+      this.listener = listener;
+      return handle;
+    }
+
+    private void complete() {
+      listener.onComplete(new ToolResult(request.call().id(), List.of(), false, "{}", false));
     }
   }
 
@@ -561,7 +778,8 @@ class DaemonRuntimeTest {
     }
 
     @Override
-    public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
+    public ToolExecutionHandle execute(
+        ToolExecutionRequest request, ToolExecutionListener listener) {
       executions.incrementAndGet();
       this.request = request;
       this.listener = listener;

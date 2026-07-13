@@ -55,8 +55,8 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Environment Daemon 的连接、协议和本地 Tool SPI 执行基座。
  *
- * <p>Invocation journal 是去重事实源；WebSocket 仅传递消息。因此连接断开后，Daemon 可以连接到
- * 任意 gateway 并通过 READY/PULL 重新获取未完成调用。
+ * <p>Invocation journal 是去重事实源；WebSocket 仅传递消息。因此连接断开后，Daemon 可以连接到 任意 gateway 并通过 READY/PULL
+ * 重新获取未完成调用。
  */
 public final class DaemonRuntime implements AutoCloseable {
 
@@ -156,12 +156,16 @@ public final class DaemonRuntime implements AutoCloseable {
                   connection.close();
                   return;
                 }
-                activeConnection.set(new ActiveConnection(generation, connection));
+                ActiveConnection active = new ActiveConnection(generation, connection);
+                activeConnection.set(active);
                 nextReconnectDelay = config.initialReconnectDelay();
-                state = DaemonRuntimeState.READY;
-                sendHello();
-                sendCapabilities();
-                sendReady();
+                sendHello(active);
+                sendCapabilities(active);
+                sendReady(active);
+                if (activeConnection.get() == active) {
+                  active.markReady();
+                  state = DaemonRuntimeState.READY;
+                }
               });
     } catch (RuntimeException error) {
       connecting.set(false);
@@ -172,7 +176,8 @@ public final class DaemonRuntime implements AutoCloseable {
   private void handleDisconnected(long generation) {
     ActiveConnection connection = activeConnection.get();
     if (connection != null) {
-      if (connection.generation() != generation || !activeConnection.compareAndSet(connection, null)) {
+      if (connection.generation() != generation
+          || !activeConnection.compareAndSet(connection, null)) {
         return;
       }
     } else if (state != DaemonRuntimeState.CONNECTING) {
@@ -199,20 +204,20 @@ public final class DaemonRuntime implements AutoCloseable {
     }
   }
 
-  private void sendHello() {
+  private void sendHello(ActiveConnection connection) {
     ObjectNode payload = envelopeCodec.createPayload();
     payload.put("daemonId", config.daemonId());
     payload.put("protocolVersion", DaemonProtocol.VERSION_1);
-    send(DaemonMessageType.HELLO, null, envelopeCodec.writeJson(payload));
+    sendOn(connection, DaemonMessageType.HELLO, null, envelopeCodec.writeJson(payload));
   }
 
-  private void sendCapabilities() {
+  private void sendCapabilities(ActiveConnection connection) {
     ObjectNode payload = envelopeCodec.createPayload();
     ArrayNode tools = payload.putArray("tools");
     for (ToolDescriptor descriptor : toolRegistry.descriptors()) {
       writeDescriptor(tools.addObject(), descriptor);
     }
-    send(DaemonMessageType.CAPABILITIES, null, envelopeCodec.writeJson(payload));
+    sendOn(connection, DaemonMessageType.CAPABILITIES, null, envelopeCodec.writeJson(payload));
   }
 
   private void writeDescriptor(ObjectNode target, ToolDescriptor descriptor) {
@@ -291,8 +296,8 @@ public final class DaemonRuntime implements AutoCloseable {
     target.put("additionalProperties", additionalProperties);
   }
 
-  private void sendReady() {
-    send(DaemonMessageType.READY, null, "{\"pull\":true}");
+  private void sendReady(ActiveConnection connection) {
+    sendOn(connection, DaemonMessageType.READY, null, "{\"pull\":true}");
   }
 
   private void sendHeartbeat() {
@@ -325,7 +330,8 @@ public final class DaemonRuntime implements AutoCloseable {
           connection.acceptInboundSequence(envelope.sequence());
           // Cloud control messages do not alter local invocation facts.
         }
-        default -> throw new DaemonProtocolException("unexpected inbound messageType: " + envelope.messageType());
+        default -> throw new DaemonProtocolException(
+            "unexpected inbound messageType: " + envelope.messageType());
       }
     } catch (IllegalArgumentException error) {
       send(DaemonMessageType.ERROR, null, errorPayload(error));
@@ -448,8 +454,8 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   /**
-   * 0 timeoutMillis 表示不覆盖 descriptor；descriptor 未设置 deadline 时回退 daemon 默认值，确保
-   * 每次 invocation 都有有效 deadline。
+   * 0 timeoutMillis 表示不覆盖 descriptor；descriptor 未设置 deadline 时回退 daemon 默认值，确保 每次 invocation 都有有效
+   * deadline。
    */
   private Duration resolveTimeout(Duration requestedTimeout, ToolDescriptor descriptor) {
     if (!requestedTimeout.isZero()) {
@@ -464,7 +470,8 @@ public final class DaemonRuntime implements AutoCloseable {
     if (arguments == null || !arguments.isObject()) {
       throw new DaemonProtocolException("INVOKE payload.arguments must be a JSON object");
     }
-    long timeoutMillis = optionalNonNegativeLong(payload, "timeoutMillis", config.defaultToolTimeout().toMillis());
+    long timeoutMillis =
+        optionalNonNegativeLong(payload, "timeoutMillis", config.defaultToolTimeout().toMillis());
     return new InvokePayload(
         requiredPayloadText(payload, "toolName"),
         requiredPayloadText(payload, "toolVersion"),
@@ -478,21 +485,24 @@ public final class DaemonRuntime implements AutoCloseable {
       return defaultValue;
     }
     if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0) {
-      throw new DaemonProtocolException("INVOKE payload." + fieldName + " must be a non-negative long");
+      throw new DaemonProtocolException(
+          "INVOKE payload." + fieldName + " must be a non-negative long");
     }
     return value.longValue();
   }
 
   private void requireInvocationId(DaemonEnvelope envelope) {
     if (envelope.invocationId() == null || envelope.invocationId().isBlank()) {
-      throw new DaemonProtocolException(envelope.messageType() + " requires a non-blank invocationId");
+      throw new DaemonProtocolException(
+          envelope.messageType() + " requires a non-blank invocationId");
     }
   }
 
   private String requiredPayloadText(ObjectNode payload, String fieldName) {
     JsonNode value = payload.get(fieldName);
     if (value == null || !value.isTextual() || value.textValue().isBlank()) {
-      throw new DaemonProtocolException("INVOKE payload." + fieldName + " must be a non-blank string");
+      throw new DaemonProtocolException(
+          "INVOKE payload." + fieldName + " must be a non-blank string");
     }
     return value.textValue();
   }
@@ -503,7 +513,18 @@ public final class DaemonRuntime implements AutoCloseable {
 
   private void send(DaemonMessageType messageType, String invocationId, String payloadJson) {
     ActiveConnection connection = activeConnection.get();
-    if (connection == null || !connection.connection().isOpen()) {
+    if (connection == null || !connection.isReady()) {
+      return;
+    }
+    sendOn(connection, messageType, invocationId, payloadJson);
+  }
+
+  private void sendOn(
+      ActiveConnection connection,
+      DaemonMessageType messageType,
+      String invocationId,
+      String payloadJson) {
+    if (!connection.connection().isOpen()) {
       return;
     }
     DaemonEnvelope envelope = envelope(messageType, invocationId, payloadJson);
@@ -570,7 +591,8 @@ public final class DaemonRuntime implements AutoCloseable {
 
     @Override
     public void onPartial(ToolResult partial) {
-      if (isRunning(invocation.invocationId()) && matchesInvocation(partial, invocation.invocationId())) {
+      if (isRunning(invocation.invocationId())
+          && matchesInvocation(partial, invocation.invocationId())) {
         send(DaemonMessageType.PARTIAL, invocation.invocationId(), resultPayload(partial));
       }
     }
@@ -724,6 +746,7 @@ public final class DaemonRuntime implements AutoCloseable {
 
     private final long generation;
     private final DaemonConnection connection;
+    private final AtomicBoolean ready = new AtomicBoolean();
     private long lastInboundSequence = -1;
 
     private ActiveConnection(long generation, DaemonConnection connection) {
@@ -737,6 +760,14 @@ public final class DaemonRuntime implements AutoCloseable {
 
     private DaemonConnection connection() {
       return connection;
+    }
+
+    private void markReady() {
+      ready.set(true);
+    }
+
+    private boolean isReady() {
+      return ready.get() && connection.isOpen();
     }
 
     private synchronized void acceptInboundSequence(long sequence) {
@@ -757,5 +788,4 @@ public final class DaemonRuntime implements AutoCloseable {
 
   private record InvokePayload(
       String toolName, String toolVersion, String argumentsJson, Duration timeout) {}
-
 }
