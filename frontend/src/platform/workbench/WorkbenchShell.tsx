@@ -1,6 +1,6 @@
-import { Navigate, Route, Routes, useParams } from 'react-router-dom'
+import { Link, Navigate, Route, Routes, useParams } from 'react-router-dom'
 import type { PageContribution, WorkspacePageProps } from '@/platform/extensions/types'
-import { useExtensionHost } from '@/platform/extensions/ExtensionHostContext'
+import { useExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
 import { AppShell } from '@/platform/shell/AppShell'
 import { OverlayHost, WorkbenchSlot } from '@/platform/workbench/WorkbenchSlots'
 
@@ -9,7 +9,7 @@ function UnknownContributionFallback() {
   return (
     <section className="screen active">
       <div className="screen-body"><h1>页面不可用</h1><p>该页面扩展不存在或已卸载。</p></div>
-      <a href={`/workspaces/${encodeURIComponent(workspaceId)}/sessions`}>返回 Chat</a>
+      <Link to={`/workspaces/${encodeURIComponent(workspaceId)}/sessions`}>返回 Chat</Link>
     </section>
   )
 }
@@ -24,7 +24,7 @@ function RegisteredPage({ page, workspaceId }: { page: PageContribution; workspa
 }
 
 function WorkspaceWorkbenchRoutes({ workspaceId }: WorkspacePageProps) {
-  const host = useExtensionHost()
+  const host = useExtensionHostSnapshot()
   const pages = host.pages.list()
   const defaultPage = pages[0]
 

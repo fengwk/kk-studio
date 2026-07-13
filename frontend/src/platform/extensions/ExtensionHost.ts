@@ -12,10 +12,15 @@ import type {
   WidgetContribution,
 } from '@/platform/extensions/types'
 
+type RegistryListener = () => void
+
 interface RegisteredContribution<T> {
-  extensionId: string
   contribution: T
   registrationOrder: number
+}
+
+interface ExtensionRegistration {
+  contributions: Array<{ registry: ContributionRegistry<never>; dispose: Disposable }>
 }
 
 /**
@@ -25,19 +30,42 @@ interface RegisteredContribution<T> {
  */
 export class ContributionRegistry<T extends { id: string; priority?: number }> {
   private readonly candidatesById = new Map<string, RegisteredContribution<T>[]>()
+  private readonly listeners = new Set<RegistryListener>()
+  private snapshot: readonly T[] = []
 
-  register(extensionId: string, contribution: T, registrationOrder: number): Disposable {
+  subscribe = (listener: RegistryListener): Disposable => {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  getSnapshot = (): readonly T[] => this.snapshot
+
+  register(contribution: T, registrationOrder: number, notify = true): Disposable {
+    validateId('Contribution', contribution.id)
     const candidates = this.candidatesById.get(contribution.id) ?? []
-    const registered = { extensionId, contribution, registrationOrder }
+    const registered = { contribution, registrationOrder }
     candidates.push(registered)
     this.candidatesById.set(contribution.id, candidates)
+    this.refreshSnapshot()
+    if (notify) {
+      this.publish()
+    }
 
+    let disposed = false
     return () => {
+      if (disposed) {
+        return
+      }
+      disposed = true
       const remaining = (this.candidatesById.get(contribution.id) ?? []).filter((candidate) => candidate !== registered)
       if (remaining.length === 0) {
         this.candidatesById.delete(contribution.id)
       } else {
         this.candidatesById.set(contribution.id, remaining)
+      }
+      this.refreshSnapshot()
+      if (notify) {
+        this.publish()
       }
     }
   }
@@ -46,16 +74,32 @@ export class ContributionRegistry<T extends { id: string; priority?: number }> {
     return this.select(this.candidatesById.get(id))?.contribution
   }
 
-  list(): T[] {
-    return [...this.candidatesById.values()]
+  list(): readonly T[] {
+    return this.snapshot
+  }
+
+  clear(notify = true): boolean {
+    if (this.candidatesById.size === 0) {
+      return false
+    }
+    this.candidatesById.clear()
+    this.refreshSnapshot()
+    if (notify) {
+      this.publish()
+    }
+    return true
+  }
+
+  publish() {
+    this.listeners.forEach((listener) => listener())
+  }
+
+  private refreshSnapshot() {
+    this.snapshot = [...this.candidatesById.values()]
       .map((candidates) => this.select(candidates))
       .filter((candidate): candidate is RegisteredContribution<T> => candidate !== undefined)
       .sort((left, right) => this.compare(left, right))
       .map((candidate) => candidate.contribution)
-  }
-
-  clear() {
-    this.candidatesById.clear()
   }
 
   private select(candidates: RegisteredContribution<T>[] | undefined): RegisteredContribution<T> | undefined {
@@ -79,21 +123,31 @@ export class ExtensionHost {
   readonly dialogs = new ContributionRegistry<DialogContribution>()
   readonly overlays = new ContributionRegistry<OverlayContribution>()
 
-  private readonly extensionDisposers = new Map<string, Disposable>()
+  private readonly listeners = new Set<RegistryListener>()
+  private readonly extensionRegistrations = new Map<string, ExtensionRegistration>()
   private registrationOrder = 0
+  private snapshot = { revision: 0 }
+
+  subscribe = (listener: RegistryListener): Disposable => {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  getSnapshot = (): Readonly<{ revision: number }> => this.snapshot
 
   register(extension: TrustedReactExtension): Disposable {
-    if (this.extensionDisposers.has(extension.id)) {
+    this.validateExtension(extension)
+    if (this.extensionRegistrations.has(extension.id)) {
       throw new Error(`Extension id already registered: ${extension.id}`)
     }
 
-    const disposers: Disposable[] = []
-    const registerAll = <T extends { id: string; priority?: number }>(
-      registry: ContributionRegistry<T>,
-      contributions: T[] | undefined,
-    ) => {
-      for (const contribution of contributions ?? []) {
-        disposers.push(registry.register(extension.id, contribution, this.registrationOrder++))
+    const contributions: ExtensionRegistration['contributions'] = []
+    const changedRegistries = new Set<ContributionRegistry<never>>()
+    const registerAll = <T extends { id: string; priority?: number }>(registry: ContributionRegistry<T>, items: T[] | undefined) => {
+      for (const contribution of items ?? []) {
+        const dispose = registry.register(contribution, this.registrationOrder++, false)
+        contributions.push({ registry: registry as ContributionRegistry<never>, dispose })
+        changedRegistries.add(registry as ContributionRegistry<never>)
       }
     }
 
@@ -107,20 +161,93 @@ export class ExtensionHost {
     registerAll(this.dialogs, extension.dialogs)
     registerAll(this.overlays, extension.overlays)
 
-    const dispose = () => {
-      if (this.extensionDisposers.delete(extension.id)) {
-        disposers.reverse().forEach((disposeContribution) => disposeContribution())
+    this.extensionRegistrations.set(extension.id, { contributions })
+    this.publish(changedRegistries)
+
+    let disposed = false
+    return () => {
+      if (disposed) {
+        return
       }
+      disposed = true
+      this.unregister(extension.id)
     }
-    this.extensionDisposers.set(extension.id, dispose)
-    return dispose
   }
 
   unregister(extensionId: string) {
-    this.extensionDisposers.get(extensionId)?.()
+    const registration = this.extensionRegistrations.get(extensionId)
+    if (!registration) {
+      return
+    }
+    this.extensionRegistrations.delete(extensionId)
+    const changedRegistries = new Set<ContributionRegistry<never>>()
+    for (const contribution of registration.contributions) {
+      contribution.dispose()
+      changedRegistries.add(contribution.registry)
+    }
+    this.publish(changedRegistries)
   }
 
   dispose() {
-    ;[...this.extensionDisposers.values()].forEach((dispose) => dispose())
+    if (this.extensionRegistrations.size === 0) {
+      return
+    }
+    const changedRegistries = new Set<ContributionRegistry<never>>()
+    for (const [extensionId, registration] of this.extensionRegistrations) {
+      this.extensionRegistrations.delete(extensionId)
+      for (const contribution of registration.contributions) {
+        contribution.dispose()
+        changedRegistries.add(contribution.registry)
+      }
+    }
+    this.publish(changedRegistries)
+  }
+
+  private publish(changedRegistries: Set<ContributionRegistry<never>>) {
+    changedRegistries.forEach((registry) => registry.publish())
+    this.snapshot = { revision: this.snapshot.revision + 1 }
+    this.listeners.forEach((listener) => listener())
+  }
+
+  private validateExtension(extension: TrustedReactExtension) {
+    validateId('Extension', extension.id)
+    validateContributionList('pages', extension.pages, (page) => validateNestedPath('Page', page.path))
+    validateContributionList('navigation', extension.navigation, (navigation) => validateNestedPath('Navigation', navigation.path))
+    validateContributionList('panels', extension.panels)
+    validateContributionList('widgets', extension.widgets)
+    validateContributionList('inspectors', extension.inspectors)
+    validateContributionList('commands', extension.commands)
+    validateContributionList('statuses', extension.statuses)
+    validateContributionList('dialogs', extension.dialogs)
+    validateContributionList('overlays', extension.overlays)
+  }
+}
+
+function validateContributionList<T extends { id: string }>(
+  registryName: string,
+  contributions: T[] | undefined,
+  validateContribution?: (contribution: T) => void,
+) {
+  const ids = new Set<string>()
+  for (const contribution of contributions ?? []) {
+    validateId(`Contribution in ${registryName}`, contribution.id)
+    if (ids.has(contribution.id)) {
+      throw new Error(`Duplicate contribution id in ${registryName}: ${contribution.id}`)
+    }
+    ids.add(contribution.id)
+    validateContribution?.(contribution)
+  }
+}
+
+function validateId(subject: string, id: string) {
+  if (!id || id.trim() !== id) {
+    throw new Error(`${subject} id must be non-empty`)
+  }
+}
+
+function validateNestedPath(subject: string, path: string) {
+  const segments = path.split('/')
+  if (!path || path.trim() !== path || path.startsWith('/') || path.includes('?') || path.includes('#') || segments.some((segment) => !segment || segment === '.' || segment === '..')) {
+    throw new Error(`${subject} path must be a non-empty nested relative path: ${path}`)
   }
 }

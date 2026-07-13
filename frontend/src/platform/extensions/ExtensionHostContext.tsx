@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, type PropsWithChildren } from 'react'
+import { createContext, useContext, useSyncExternalStore, type PropsWithChildren } from 'react'
 import { ExtensionHost } from '@/platform/extensions/ExtensionHost'
 
 const ExtensionHostContext = createContext<ExtensionHost | null>(null)
@@ -13,5 +13,11 @@ export function useExtensionHost(): ExtensionHost {
   if (!host) {
     throw new Error('ExtensionHostProvider is required')
   }
+  return host
+}
+
+export function useExtensionHostSnapshot(): ExtensionHost {
+  const host = useExtensionHost()
+  useSyncExternalStore(host.subscribe, host.getSnapshot, host.getSnapshot)
   return host
 }
