@@ -5,11 +5,17 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import java.util.List;
 import java.util.Objects;
 
-/** 一个完整 Assistant Turn 的 Provider 响应与已验证工具调用。 */
-public record AgentTurnResult(ProviderResponse response, List<ToolCall> toolCalls) {
+/** 一个完整 Assistant Turn 的最终语义消息及 Provider 用量快照。 */
+public record AgentTurnResult(
+    AgentAssistantMessage assistantMessage, ProviderResponse providerResponse) {
 
   public AgentTurnResult {
-    response = Objects.requireNonNull(response, "response");
-    toolCalls = List.copyOf(Objects.requireNonNull(toolCalls, "toolCalls"));
+    assistantMessage = Objects.requireNonNull(assistantMessage, "assistantMessage");
+    providerResponse = Objects.requireNonNull(providerResponse, "providerResponse");
+  }
+
+  /** 返回已通过名称、唯一性和输入 schema 校验的工具调用。 */
+  public List<ToolCall> toolCalls() {
+    return assistantMessage.toolCalls();
   }
 }

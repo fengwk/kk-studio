@@ -1,0 +1,40 @@
+package fun.fengwk.kkstudio.harness.model.provider.adapter;
+
+import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.googleai.GoogleAiGeminiStreamingChatModel;
+import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import java.util.Objects;
+
+/** Google Gemini Provider adapter。 */
+public final class GoogleProviderAdapter implements ProviderAdapter {
+
+  private final String apiKey;
+
+  public GoogleProviderAdapter(String apiKey) {
+    this.apiKey = Objects.requireNonNull(apiKey, "apiKey");
+  }
+
+  @Override
+  public ProviderType providerType() {
+    return ProviderType.GOOGLE;
+  }
+
+  @Override
+  public ModelProvider create(ProviderDescriptor descriptor) {
+    OpenAiProviderAdapter.requireType(descriptor, providerType());
+    return new LangChainModelProvider() {
+      @Override
+      protected StreamingChatModel chatModel(ProviderRequest request) {
+        return GoogleAiGeminiStreamingChatModel.builder()
+            .baseUrl(descriptor.endpoint())
+            .apiKey(apiKey)
+            .timeout(descriptor.timeout())
+            .returnThinking(true)
+            .build();
+      }
+    };
+  }
+}
