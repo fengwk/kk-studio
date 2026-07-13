@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderVideoBlock;
 import java.math.BigDecimal;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -43,11 +44,19 @@ class ProviderContractTest {
             ProviderMessageRole.TOOL,
             List.of(
                 new ProviderToolResultBlock(
-                    "call-1", List.of(new ProviderTextBlock("content")), false, "{\"bytes\":7}")));
+                    "call-1",
+                    "read",
+                    List.of(
+                        new ProviderTextBlock("content"),
+                        new ProviderVideoBlock("video/mp4", "artifact://video-1")),
+                    false,
+                    "{\"bytes\":7}")));
 
     assertEquals(3, user.contents().size());
     assertEquals(call, ((ProviderToolCallBlock) assistant.contents().get(1)).toolCall());
     assertEquals("call-1", ((ProviderToolResultBlock) tool.contents().get(0)).toolCallId());
+    assertEquals("read", ((ProviderToolResultBlock) tool.contents().get(0)).toolName());
+    assertEquals(2, ((ProviderToolResultBlock) tool.contents().get(0)).contents().size());
     assertThrows(
         IllegalArgumentException.class,
         () ->

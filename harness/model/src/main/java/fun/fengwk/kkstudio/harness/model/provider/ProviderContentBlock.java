@@ -5,6 +5,7 @@ public sealed interface ProviderContentBlock
     permits ProviderTextBlock,
         ProviderImageBlock,
         ProviderAudioBlock,
+        ProviderVideoBlock,
         ProviderThinkingBlock,
         ProviderJsonBlock,
         ProviderToolCallBlock,
