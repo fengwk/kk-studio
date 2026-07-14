@@ -6,7 +6,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 /** Applies the shared bounded-preview and complete-artifact policy to tool output. */
@@ -63,17 +62,29 @@ final class OutputLimiter {
                 config.previewMaxBytes()
                     - byteCount
                     - prefix.getBytes(StandardCharsets.UTF_8).length);
-        result
-            .append(prefix)
-            .append(
-                new String(
-                    Arrays.copyOf(line.getBytes(StandardCharsets.UTF_8), remaining),
-                    StandardCharsets.UTF_8));
+        result.append(prefix).append(prefixWithinUtf8Limit(line, remaining));
         break;
       }
       result.append(prefix).append(line);
       byteCount += lineBytes.length;
       lines++;
+    }
+    return result.toString();
+  }
+
+  private static String prefixWithinUtf8Limit(String value, int maximumBytes) {
+    StringBuilder result = new StringBuilder();
+    int used = 0;
+    for (int offset = 0; offset < value.length(); ) {
+      int codePoint = value.codePointAt(offset);
+      String character = new String(Character.toChars(codePoint));
+      int size = character.getBytes(StandardCharsets.UTF_8).length;
+      if (used + size > maximumBytes) {
+        break;
+      }
+      result.append(character);
+      used += size;
+      offset += Character.charCount(codePoint);
     }
     return result.toString();
   }

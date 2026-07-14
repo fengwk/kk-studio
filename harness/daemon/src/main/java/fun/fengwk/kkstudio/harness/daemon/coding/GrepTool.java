@@ -98,11 +98,18 @@ public final class GrepTool extends AbstractCodingTool {
     ByteArrayOutputStream bytes = new ByteArrayOutputStream();
     Thread reader = new Thread(() -> copy(process.getInputStream(), bytes), "daemon-grep-reader");
     reader.start();
-    if (!process.waitFor(timeout, TimeUnit.SECONDS)) {
+    try {
+      if (!process.waitFor(timeout, TimeUnit.SECONDS)) {
+        terminate(process);
+        reader.join();
+        throw new IllegalArgumentException("grep timed out after " + timeout + " seconds");
+      }
+      reader.join();
+    } catch (InterruptedException error) {
       terminate(process);
-      throw new IllegalArgumentException("grep timed out after " + timeout + " seconds");
+      reader.join();
+      throw error;
     }
-    reader.join();
     if (execution.isCancelled()) {
       throw new InterruptedException();
     }

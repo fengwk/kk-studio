@@ -81,11 +81,18 @@ public final class FindTool extends AbstractCodingTool {
     ByteArrayOutputStream bytes = new ByteArrayOutputStream();
     Thread reader = new Thread(() -> copy(process.getInputStream(), bytes), "daemon-find-reader");
     reader.start();
-    if (!process.waitFor(timeout, TimeUnit.SECONDS)) {
+    try {
+      if (!process.waitFor(timeout, TimeUnit.SECONDS)) {
+        terminate(process);
+        reader.join();
+        throw new IllegalArgumentException("find timed out after " + timeout + " seconds");
+      }
+      reader.join();
+    } catch (InterruptedException error) {
       terminate(process);
-      throw new IllegalArgumentException("find timed out after " + timeout + " seconds");
+      reader.join();
+      throw error;
     }
-    reader.join();
     if (execution.isCancelled()) {
       throw new InterruptedException();
     }
