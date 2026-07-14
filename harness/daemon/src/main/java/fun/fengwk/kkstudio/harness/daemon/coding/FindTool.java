@@ -1,6 +1,9 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
+import fun.fengwk.kkstudio.harness.tool.TextToolContent;
+import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -66,8 +69,6 @@ public final class FindTool extends AbstractCodingTool {
     command.add("--color=never");
     command.add("--hidden");
     command.add("--no-require-git");
-    command.add("--max-results");
-    command.add(Integer.toString(limit + 1));
     if (pattern.contains("/") || pattern.contains(File.separator)) {
       command.add("--full-path");
     }
@@ -84,6 +85,7 @@ public final class FindTool extends AbstractCodingTool {
     }
     ByteArrayOutputStream bytes = new ByteArrayOutputStream();
     Thread reader = new Thread(() -> copy(process.getInputStream(), bytes), "daemon-find-reader");
+    reader.setDaemon(true);
     reader.start();
     try {
       if (!process.waitFor(timeout, TimeUnit.SECONDS)) {
@@ -113,19 +115,42 @@ public final class FindTool extends AbstractCodingTool {
         lines.add(line.replace('\\', '/').replaceFirst("^\\./", ""));
       }
     }
-    boolean limited = lines.size() > limit;
+    List<String> completeLines = List.copyOf(lines);
+    boolean limited = completeLines.size() > limit;
+    List<String> previewLines =
+        new ArrayList<>(completeLines.subList(0, Math.min(limit, completeLines.size())));
     if (limited) {
-      lines = new ArrayList<>(lines.subList(0, limit));
-      lines.add("");
-      lines.add("[" + limit + " results limit reached. Refine the pattern or raise limit.]");
+      previewLines.add("");
+      previewLines.add("[" + limit + " results limit reached. Refine the pattern or raise limit.]");
     }
-    return new ToolResult(
-        request.call().id(),
-        OutputLimiter.limit(
-            String.join("\n", lines).getBytes(StandardCharsets.UTF_8), "text/plain", config),
-        false,
-        "{}",
-        false);
+    if (!limited) {
+      return new ToolResult(
+          request.call().id(),
+          OutputLimiter.limit(
+              String.join("\n", previewLines).getBytes(StandardCharsets.UTF_8),
+              "text/plain",
+              config),
+          false,
+          "{}",
+          false);
+    }
+    String preview = String.join("\n", previewLines);
+    byte[] previewBytes = preview.getBytes(StandardCharsets.UTF_8);
+    if (OutputLimiter.exceeds(preview, previewBytes.length, config)) {
+      preview =
+          OutputLimiter.preview(preview, config)
+              + "\n\n[Output truncated to the configured preview limits.]";
+    }
+    List<ToolContent> contents = new ArrayList<>();
+    contents.add(new TextToolContent(preview));
+    contents.add(
+        new ArtifactToolContent(
+            config
+                .artifactSink()
+                .store(
+                    String.join("\n", completeLines).getBytes(StandardCharsets.UTF_8),
+                    "text/plain")));
+    return new ToolResult(request.call().id(), contents, false, "{}", false);
   }
 
   private static void copy(InputStream input, ByteArrayOutputStream output) {

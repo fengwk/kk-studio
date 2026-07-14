@@ -41,11 +41,11 @@ final class OutputLimiter {
     return false;
   }
 
-  private static boolean exceeds(String text, int byteCount, CodingToolsConfig config) {
+  static boolean exceeds(String text, int byteCount, CodingToolsConfig config) {
     return byteCount > config.previewMaxBytes() || lineCount(text) > config.previewMaxLines();
   }
 
-  private static String preview(String text, CodingToolsConfig config) {
+  static String preview(String text, CodingToolsConfig config) {
     StringBuilder result = new StringBuilder();
     int byteCount = 0;
     int lines = 0;

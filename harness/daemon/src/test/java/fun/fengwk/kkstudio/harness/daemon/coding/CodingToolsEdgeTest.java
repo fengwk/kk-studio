@@ -22,6 +22,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -175,6 +176,20 @@ class CodingToolsEdgeTest {
   }
 
   @Test
+  void readToolDecodesUtf16BomAsNumberedText() throws Exception {
+    Files.write(
+        workspace.resolve("utf16.txt"),
+        TextFileCodec.encode("alpha\nbeta\n", StandardCharsets.UTF_16LE, 2));
+
+    ToolResult result = invoke(new ReadTool(config()), "{\"path\":\"utf16.txt\"}");
+
+    assertFalse(result.error());
+    assertTrue(text(result).contains("1|alpha"));
+    assertTrue(text(result).contains("2|beta"));
+    assertFalse(result.contents().stream().anyMatch(ArtifactToolContent.class::isInstance));
+  }
+
+  @Test
   void configSystemPropertiesAndValidationCoverStandaloneStartupInputs() throws Exception {
     String[] names = {
       "kkstudio.daemon.workspace-root",
@@ -275,24 +290,47 @@ class CodingToolsEdgeTest {
   @Test
   void scriptedSearchesCoverOptionsErrorsAndProcessCleanup() throws Exception {
     assumePosix();
-    Files.writeString(workspace.resolve("visible.txt"), "content");
+    Path visible = workspace.resolve("visible.txt");
+    Files.writeString(visible, "content");
+    String longLine = "x".repeat(600);
     Path rg =
-        script(
-            "rg",
-            "printf '%s\\n' 'file.txt:1: Alpha' 'file.txt:2: alpha' 'ignored.bin:1: Alpha'\n");
+        script("rg", "printf '%s\\n' '" + visible + ":1: " + longLine + "' 'file.txt:2: alpha'\n");
     Path fd = script("fd", "printf '%s\\n' './dir/a.txt' './dir/b.txt'\n");
-    GrepTool grep = new GrepTool(config(2000, 50 * 1024, new InMemoryArtifactSink(), rg, fd));
-    FindTool find = new FindTool(config(2000, 50 * 1024, new InMemoryArtifactSink(), rg, fd));
+    InMemoryArtifactSink sink = new InMemoryArtifactSink();
+    GrepTool grep = new GrepTool(config(2000, 50 * 1024, sink, rg, fd));
+    FindTool find = new FindTool(config(2000, 50 * 1024, sink, rg, fd));
 
     ToolResult literal =
         invoke(
             grep,
-            "{\"pattern\":\"Alpha\",\"path\":\".\",\"literal\":true,\"ignore_case\":true,\"multiline\":true,\"include\":\"*.txt\",\"limit\":1}");
+            "{\"pattern\":\"Alpha\",\"path\":\".\",\"literal\":true,\"ignore_case\":true,\"multiline\":true,\"include\":\"*.txt\",\"limit\":10}");
+    assertTrue(text(literal).contains("visible.txt:1:"));
+    assertFalse(text(literal).contains(workspace.toString()));
+    assertTrue(text(literal).contains("line truncated to 500 chars"));
+    ArtifactToolContent grepArtifact =
+        (ArtifactToolContent)
+            literal.contents().stream()
+                .filter(ArtifactToolContent.class::isInstance)
+                .findFirst()
+                .orElseThrow();
+    assertTrue(
+        new String(sink.get(grepArtifact.artifact().artifactId()), StandardCharsets.UTF_8)
+            .contains(longLine));
+
     ToolResult found = invoke(find, "{\"pattern\":\"dir/*.txt\",\"path\":\".\",\"limit\":1}");
-    assertTrue(text(literal).contains("results limit reached"));
-    assertTrue(literal.contents().stream().anyMatch(ArtifactToolContent.class::isInstance));
     assertTrue(text(found).contains("dir/a.txt"));
     assertTrue(text(found).contains("results limit reached"));
+    assertTrue(found.contents().stream().anyMatch(ArtifactToolContent.class::isInstance));
+
+    Path argumentFile = workspace.resolve("fd-arguments.txt");
+    Path exactFd =
+        script(
+            "fd-exact",
+            "printf '%s\\n' \"$@\" > '" + argumentFile + "'\nprintf '%s\\n' './dir/only.txt'\n");
+    FindTool exactFind = new FindTool(config(2000, 50 * 1024, sink, rg, exactFd));
+    ToolResult exact = invoke(exactFind, "{\"pattern\":\"dir/*.txt\",\"path\":\".\",\"limit\":1}");
+    assertFalse(text(exact).contains("results limit reached"));
+    assertTrue(Files.readString(argumentFile).contains("--full-path"));
 
     GrepTool missing =
         new GrepTool(
@@ -335,6 +373,35 @@ class CodingToolsEdgeTest {
     ToolResult nonZero = invoke(bash, "{\"command\":\"echo failure; exit 7\"}");
     assertTrue(nonZero.error());
     assertTrue(text(nonZero).contains("Command exited with code 7"));
+  }
+
+  @Test
+  void utf8StreamDecoderCarriesIncompleteSuffixAndFlushesMalformedTail() {
+    Utf8StreamDecoder decoder = new Utf8StreamDecoder();
+    byte[] emoji = "😀".getBytes(StandardCharsets.UTF_8);
+
+    assertEquals("", decoder.decode(emoji, 2));
+    assertEquals("😀", decoder.decode(new byte[] {emoji[2], emoji[3]}, 2));
+    assertEquals("", decoder.finish());
+    assertEquals("", decoder.decode(new byte[] {(byte) 0xf0}, 1));
+    assertEquals("�", decoder.finish());
+    assertThrows(IllegalArgumentException.class, () -> decoder.decode(new byte[1], 2));
+  }
+
+  @Test
+  void bashStreamsSplitUtf8CodePointWithoutReplacementCharacters() throws Exception {
+    RecordingListener listener =
+        invokeAsync(
+            new BashTool(config()),
+            "{\"command\":\"printf '\\\\360\\\\237'; sleep 0.05; printf '\\\\230\\\\200'\"}",
+            Duration.ofSeconds(2));
+
+    assertTrue(listener.await());
+    String partialText =
+        listener.partials.stream().map(CodingToolsEdgeTest::text).reduce("", String::concat);
+    assertEquals("😀", partialText);
+    assertFalse(partialText.contains("�"));
+    assertEquals(1, listener.completions);
   }
 
   @Test
@@ -416,12 +483,15 @@ class CodingToolsEdgeTest {
 
   private static final class RecordingListener implements ToolExecutionListener {
     private final CountDownLatch done = new CountDownLatch(1);
+    private final List<ToolResult> partials = new ArrayList<>();
     private volatile ToolResult result;
     private volatile ToolExecutionHandle handle;
     private volatile int completions;
 
     @Override
-    public void onPartial(ToolResult partial) {}
+    public synchronized void onPartial(ToolResult partial) {
+      partials.add(partial);
+    }
 
     @Override
     public void onComplete(ToolResult result) {

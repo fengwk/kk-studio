@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -25,8 +24,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -42,8 +41,7 @@ public final class BashTool implements Tool {
 
   private static final ExecutorService EXECUTOR =
       Executors.newCachedThreadPool(threadFactory("daemon-bash"));
-  private static final ScheduledExecutorService SCHEDULER =
-      Executors.newScheduledThreadPool(1, threadFactory("daemon-bash-timeout"));
+  private static final ScheduledThreadPoolExecutor SCHEDULER = createScheduler();
   private final CodingToolsConfig config;
   private final WorkspacePathBoundary boundary;
   private final ToolDescriptor descriptor;
@@ -113,22 +111,15 @@ public final class BashTool implements Tool {
         handle.timeoutFuture.cancel(false);
       }
       ByteArrayOutputStream output = new ByteArrayOutputStream();
+      Utf8StreamDecoder streamDecoder = new Utf8StreamDecoder();
       try (InputStream input = process.getInputStream()) {
         byte[] buffer = new byte[4096];
         int count;
         while ((count = input.read(buffer)) >= 0) {
           output.write(buffer, 0, count);
-          if (!handle.cancelled.get() && !handle.timedOut.get()) {
-            listener.onPartial(
-                new ToolResult(
-                    request.call().id(),
-                    List.of(
-                        new TextToolContent(new String(buffer, 0, count, StandardCharsets.UTF_8))),
-                    false,
-                    "{}",
-                    false));
-          }
+          emitPartial(request.call().id(), listener, handle, streamDecoder.decode(buffer, count));
         }
+        emitPartial(request.call().id(), listener, handle, streamDecoder.finish());
       }
       int exitCode = process.waitFor();
       if (handle.cancelled.get()) {
@@ -151,6 +142,21 @@ public final class BashTool implements Tool {
     } catch (Exception error) {
       handle.complete(listener, AbstractCodingTool.error(request.call().id(), error.getMessage()));
     }
+  }
+
+  private static void emitPartial(
+      String callId, ToolExecutionListener listener, BashHandle handle, String text) {
+    if (!text.isEmpty() && !handle.cancelled.get() && !handle.timedOut.get()) {
+      listener.onPartial(
+          new ToolResult(callId, List.of(new TextToolContent(text)), false, "{}", false));
+    }
+  }
+
+  private static ScheduledThreadPoolExecutor createScheduler() {
+    ScheduledThreadPoolExecutor scheduler =
+        new ScheduledThreadPoolExecutor(1, threadFactory("daemon-bash-timeout"));
+    scheduler.setRemoveOnCancelPolicy(true);
+    return scheduler;
   }
 
   private static ThreadFactory threadFactory(String name) {
