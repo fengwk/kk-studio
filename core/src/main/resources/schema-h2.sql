@@ -169,3 +169,41 @@ create table if not exists harness_run_event (
 );
 
 create index if not exists idx_harness_run_event_run on harness_run_event (run_id, id);
+
+create table if not exists tool_invocation (
+    id                    bigint not null,
+    run_id                bigint not null,
+    assistant_entry_id    bigint not null,
+    ordinal               integer not null,
+    tool_call_id          varchar(256) not null,
+    tool_name             varchar(128) not null,
+    tool_version          varchar(128) not null,
+    target_type           varchar(32) not null,
+    environment_id        bigint,
+    arguments_json        text not null,
+    status                varchar(32) not null,
+    permission_action     varchar(16) not null,
+    permission_decision   varchar(16),
+    deadline_at           timestamp(3) not null,
+    lease_owner           varchar(128),
+    lease_until           timestamp(3),
+    cancel_requested_at   timestamp(3),
+    result_json           text,
+    error_message         text,
+    gmt_create            timestamp(3) not null default current_timestamp(),
+    started_at            timestamp(3),
+    finished_at           timestamp(3),
+    gmt_modified          timestamp(3) not null default current_timestamp(),
+    primary key (id),
+    unique (run_id, tool_call_id),
+    unique (assistant_entry_id, ordinal)
+);
+
+create index if not exists idx_tool_invocation_run_status
+    on tool_invocation (run_id, status, ordinal);
+
+create index if not exists idx_tool_invocation_claim
+    on tool_invocation (target_type, status, deadline_at, id);
+
+create index if not exists idx_tool_invocation_environment_claim
+    on tool_invocation (environment_id, status, deadline_at, id);

@@ -12,25 +12,32 @@ public final class SessionTree {
   private final SessionStore sessionStore;
   private final SessionEntryStore entryStore;
   private final SessionIdGenerator idGenerator;
+  private final SessionYoloResolver yoloResolver;
   private final Clock clock;
 
   public SessionTree(
       SessionStore sessionStore,
       SessionEntryStore entryStore,
       SessionIdGenerator idGenerator,
+      SessionYoloResolver yoloResolver,
       Clock clock) {
     this.sessionStore = Objects.requireNonNull(sessionStore, "sessionStore");
     this.entryStore = Objects.requireNonNull(entryStore, "entryStore");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
+    this.yoloResolver = Objects.requireNonNull(yoloResolver, "yoloResolver");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
-  public Session create(
-      long workspaceId, Long agentDefinitionId, String title, boolean yoloEnabled) {
+  public Session create(long workspaceId, Long agentDefinitionId, String title) {
     long sessionId = idGenerator.newSessionId();
     Session session =
         Session.root(
-            sessionId, workspaceId, agentDefinitionId, title, yoloEnabled, clock.instant());
+            sessionId,
+            workspaceId,
+            agentDefinitionId,
+            title,
+            yoloResolver.defaultYolo(workspaceId),
+            clock.instant());
     sessionStore.create(session);
     return session;
   }

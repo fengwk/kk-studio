@@ -8,9 +8,14 @@ import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionEntry
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionEntryDO;
+import fun.fengwk.kkstudio.core.harness.tool.service.WorkspaceToolPolicyResolver;
+import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
+import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
 import fun.fengwk.kkstudio.harness.runtime.run.AgentRun;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEvent;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
+import fun.fengwk.kkstudio.harness.runtime.run.RunEventPayloads;
+import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
 import fun.fengwk.kkstudio.harness.runtime.run.RunIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
 import fun.fengwk.kkstudio.harness.runtime.run.RunTransactions;
@@ -20,9 +25,17 @@ import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.tool.PreparedToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolPreparationService;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.ConcurrentModificationException;
 import java.util.HashSet;
 import java.util.List;
@@ -38,7 +51,10 @@ public class HarnessRunTransactionService implements RunTransactions {
   private final HarnessRunEventMapper eventMapper;
   private final HarnessSessionMapper sessionMapper;
   private final HarnessSessionEntryMapper entryMapper;
+  private final ToolInvocationMapper invocationMapper;
   private final RunIdGenerator idGenerator;
+  private final ToolPreparationService toolPreparationService;
+  private final WorkspaceToolPolicyResolver policyResolver;
   private final SessionEntryJsonCodec payloadCodec = new SessionEntryJsonCodec();
 
   public HarnessRunTransactionService(
@@ -46,12 +62,19 @@ public class HarnessRunTransactionService implements RunTransactions {
       HarnessRunEventMapper eventMapper,
       HarnessSessionMapper sessionMapper,
       HarnessSessionEntryMapper entryMapper,
-      RunIdGenerator idGenerator) {
+      ToolInvocationMapper invocationMapper,
+      RunIdGenerator idGenerator,
+      ToolPreparationService toolPreparationService,
+      WorkspaceToolPolicyResolver policyResolver) {
     this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
     this.eventMapper = Objects.requireNonNull(eventMapper, "eventMapper");
     this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
     this.entryMapper = Objects.requireNonNull(entryMapper, "entryMapper");
+    this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
+    this.toolPreparationService =
+        Objects.requireNonNull(toolPreparationService, "toolPreparationService");
+    this.policyResolver = Objects.requireNonNull(policyResolver, "policyResolver");
   }
 
   @Override
@@ -97,6 +120,9 @@ public class HarnessRunTransactionService implements RunTransactions {
       List<RunEventDraft> terminalEvents,
       Instant now) {
     validateAssistant(assistant);
+    if (hasAssistantToolCalls(assistant)) {
+      throw new IllegalArgumentException("no-tool completion must not contain tool calls");
+    }
     LockedRun locked = lockOwned(claimedRun);
     if (locked == null) {
       return false;
@@ -112,17 +138,53 @@ public class HarnessRunTransactionService implements RunTransactions {
   public boolean prepareTools(
       AgentRun claimedRun,
       MessageEntryPayload assistant,
-      List<RunEventDraft> barrierEvents,
+      List<ToolCall> toolCalls,
+      List<ToolBinding> bindings,
+      Path workdir,
+      Path workspaceRoot,
+      List<RunEventDraft> assistantEvents,
       Instant now) {
     validateAssistant(assistant);
+    validateAssistantToolCalls(assistant, toolCalls);
+    if (assistantEvents == null
+        || assistantEvents.size() != 1
+        || assistantEvents.get(0) == null
+        || assistantEvents.get(0).type() != RunEventType.ASSISTANT_COMPLETED) {
+      throw new IllegalArgumentException(
+          "tool preparation requires exactly one assistant_completed event");
+    }
     LockedRun locked = lockOwned(claimedRun);
     if (locked == null) {
       return false;
     }
-    appendEntry(locked.session(), claimedRun.id(), assistant, now);
+    WorkspaceToolPolicyResolver.ResolvedPolicy policy = policyResolver.resolve(locked.session());
+    List<PreparedToolInvocation> prepared =
+        toolPreparationService.prepare(
+            toolCalls,
+            bindings,
+            policy.settings(),
+            policy.yoloEnabled(),
+            workdir,
+            workspaceRoot,
+            now);
+    long assistantEntryId = appendEntry(locked.session(), claimedRun.id(), assistant, now);
+    for (PreparedToolInvocation invocation : prepared) {
+      if (invocationMapper.insert(toDO(claimedRun.id(), assistantEntryId, invocation, now)) != 1) {
+        throw new ConcurrentModificationException("cannot create tool invocation");
+      }
+    }
     transitionCompleted(claimedRun, RunStatus.WAITING_TOOLS, now);
-    appendEvents(locked.run(), barrierEvents, now);
+    appendEvents(locked.run(), toolPreparationEvents(claimedRun, prepared, assistantEvents), now);
     return true;
+  }
+
+  @Transactional
+  public void appendExternalEvent(long runId, RunEventDraft event, Instant now) {
+    HarnessRunDO run = runMapper.findForUpdate(runId);
+    if (run == null) {
+      throw new IllegalArgumentException("unknown run: " + runId);
+    }
+    appendEvents(run, List.of(event), now);
   }
 
   @Override
@@ -257,7 +319,7 @@ public class HarnessRunTransactionService implements RunTransactions {
     run.setEventSequence(finalSequence);
   }
 
-  private void appendEntry(
+  private long appendEntry(
       HarnessSessionDO session, long runId, SessionEntryPayload payload, Instant now) {
     long entryId = idGenerator.newSessionEntryId();
     LocalDateTime timestamp = utc(now);
@@ -276,6 +338,7 @@ public class HarnessRunTransactionService implements RunTransactions {
       throw new ConcurrentModificationException("session leaf changed during run transition");
     }
     session.setLeafEntryId(entryId);
+    return entryId;
   }
 
   private void transitionCompleted(AgentRun claimedRun, RunStatus status, Instant now) {
@@ -322,6 +385,97 @@ public class HarnessRunTransactionService implements RunTransactions {
     if (assistant.message().role() != AgentMessageRole.ASSISTANT) {
       throw new IllegalArgumentException("completed turn entry must have ASSISTANT role");
     }
+  }
+
+  private boolean hasAssistantToolCalls(MessageEntryPayload assistant) {
+    return assistant.message().contents().stream()
+        .anyMatch(ToolCallMessageContent.class::isInstance);
+  }
+
+  private void validateAssistantToolCalls(MessageEntryPayload assistant, List<ToolCall> toolCalls) {
+    List<ToolCall> expected = List.copyOf(Objects.requireNonNull(toolCalls, "toolCalls"));
+    List<ToolCall> persisted =
+        assistant.message().contents().stream()
+            .filter(ToolCallMessageContent.class::isInstance)
+            .map(ToolCallMessageContent.class::cast)
+            .map(
+                content ->
+                    new ToolCall(content.toolCallId(), content.toolName(), content.argumentsJson()))
+            .toList();
+    if (!persisted.equals(expected)) {
+      throw new IllegalArgumentException(
+          "assistant tool calls must exactly match invocation source order");
+    }
+  }
+
+  private List<RunEventDraft> toolPreparationEvents(
+      AgentRun run, List<PreparedToolInvocation> prepared, List<RunEventDraft> assistantEvents) {
+    List<RunEventDraft> events =
+        new ArrayList<>(List.copyOf(Objects.requireNonNull(assistantEvents, "assistantEvents")));
+    for (PreparedToolInvocation invocation : prepared) {
+      events.add(
+          new RunEventDraft(
+              RunEventType.TOOL_PREPARED,
+              RunEventPayloads.forAttempt(
+                  run,
+                  "invocationId",
+                  invocation.id(),
+                  "ordinal",
+                  invocation.ordinal(),
+                  "toolCallId",
+                  invocation.call().id(),
+                  "toolName",
+                  invocation.call().toolName(),
+                  "status",
+                  invocation.initialStatus().name())));
+      if (invocation.initialStatus() == ToolInvocationStatus.WAITING_APPROVAL) {
+        events.add(
+            new RunEventDraft(
+                RunEventType.PERMISSION_REQUESTED,
+                RunEventPayloads.forAttempt(
+                    run,
+                    "invocationId",
+                    invocation.id(),
+                    "ordinal",
+                    invocation.ordinal(),
+                    "tool",
+                    invocation.promptPreview().tool(),
+                    "workdir",
+                    invocation.promptPreview().workdir(),
+                    "arguments",
+                    invocation.promptPreview().arguments())));
+      }
+    }
+    events.add(
+        new RunEventDraft(
+            RunEventType.RUN_WAITING,
+            RunEventPayloads.forAttempt(run, "status", RunStatus.WAITING_TOOLS.name())));
+    return List.copyOf(events);
+  }
+
+  private ToolInvocationDO toDO(
+      long runId, long assistantEntryId, PreparedToolInvocation source, Instant now) {
+    ToolInvocationDO target = new ToolInvocationDO();
+    target.setId(source.id());
+    target.setRunId(runId);
+    target.setAssistantEntryId(assistantEntryId);
+    target.setOrdinal(source.ordinal());
+    target.setToolCallId(source.call().id());
+    target.setToolName(source.call().toolName());
+    target.setToolVersion(source.binding().descriptor().version());
+    target.setTargetType(source.binding().targetType().name());
+    target.setEnvironmentId(source.binding().environmentId());
+    target.setArgumentsJson(source.call().argumentsJson());
+    target.setStatus(source.initialStatus().name());
+    target.setPermissionAction(source.permissionAction().name());
+    target.setDeadlineAt(utc(source.deadlineAt()));
+    target.setResultJson(source.resultJson());
+    target.setErrorMessage(source.errorMessage());
+    LocalDateTime timestamp = utc(now);
+    target.setCreateTime(timestamp);
+    target.setFinishedAt(source.initialStatus().isTerminal() ? timestamp : null);
+    target.setUpdateTime(timestamp);
+    return target;
   }
 
   private HarnessRunDO queuedRun(

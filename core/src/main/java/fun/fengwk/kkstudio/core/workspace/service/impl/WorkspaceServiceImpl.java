@@ -4,17 +4,17 @@ import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextWorksp
 
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
-import lombok.AllArgsConstructor;
-import org.springframework.stereotype.Service;
-
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.core.workspace.repo.WorkspaceRepository;
 import fun.fengwk.kkstudio.core.workspace.service.WorkspaceService;
 import fun.fengwk.kkstudio.core.workspace.service.converter.WorkspaceConverter;
 import fun.fengwk.kkstudio.core.workspace.service.model.Workspace;
+import fun.fengwk.kkstudio.harness.runtime.permission.WorkspaceToolSettingsCodec;
 import fun.fengwk.kkstudio.share.model.WorkspaceCreateDTO;
 import fun.fengwk.kkstudio.share.model.WorkspaceDTO;
 import fun.fengwk.kkstudio.share.model.WorkspaceUpdateDTO;
+import lombok.AllArgsConstructor;
+import org.springframework.stereotype.Service;
 
 /**
  * @author fengwk
@@ -28,6 +28,7 @@ public class WorkspaceServiceImpl implements WorkspaceService {
   private final WorkspaceRepository workspaceRepository;
   private final WorkspaceConverter workspaceConverter;
   private final AgentEditableSupport editableSupport;
+  private final WorkspaceToolSettingsCodec settingsCodec;
 
   @Override
   public Page<WorkspaceDTO> pageWorkspaces(PageQuery pageQuery) {
@@ -59,7 +60,9 @@ public class WorkspaceServiceImpl implements WorkspaceService {
     if (updateDTO == null) {
       throw new IllegalArgumentException("workspace body must not be null");
     }
-    String name = editableSupport.firstNonBlank(editableSupport.trimToNull(updateDTO.getName()), workspace.getName());
+    String name =
+        editableSupport.firstNonBlank(
+            editableSupport.trimToNull(updateDTO.getName()), workspace.getName());
     if (!workspace.getName().equals(name)) {
       ensureNameAvailable(name);
     }
@@ -111,7 +114,6 @@ public class WorkspaceServiceImpl implements WorkspaceService {
 
   private String normalizeSettings(String settingsJson) {
     String result = editableSupport.firstNonBlank(settingsJson, EMPTY_OBJECT_JSON);
-    editableSupport.validateJsonObject(result, "settingsJson");
-    return result;
+    return settingsCodec.canonicalize(result);
   }
 }

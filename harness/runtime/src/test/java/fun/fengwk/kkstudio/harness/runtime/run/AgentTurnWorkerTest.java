@@ -36,12 +36,14 @@ import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryStore;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionStore;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import java.math.BigDecimal;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -115,11 +117,20 @@ class AgentTurnWorkerTest {
     fixture.tools = List.of(tool());
     List<String> barrier = new ArrayList<>();
     fixture.toolPreparation =
-        (run, assistant, calls, barrierEvents, now) -> {
+        (run, assistant, calls, bindings, workdir, workspaceRoot, assistantEvents, now) -> {
           fixture.store.sessionMessages.add(assistant);
           barrier.add("assistant");
           barrier.add("prepare:" + calls.get(0).id());
-          fixture.store.appendDrafts(run.id(), barrierEvents, now);
+          List<RunEventDraft> events = new ArrayList<>(assistantEvents);
+          events.add(
+              new RunEventDraft(
+                  RunEventType.TOOL_PREPARED,
+                  RunEventPayloads.forAttempt(run, "toolCallCount", calls.size())));
+          events.add(
+              new RunEventDraft(
+                  RunEventType.RUN_WAITING,
+                  RunEventPayloads.forAttempt(run, "status", "WAITING_TOOLS")));
+          fixture.store.appendDrafts(run.id(), events, now);
           fixture.store.current = fixture.store.waiting(run, now);
           return true;
         };
@@ -144,6 +155,58 @@ class AgentTurnWorkerTest {
         fixture.store.events.stream()
             .filter(event -> event.type() == RunEventType.RUN_WAITING)
             .count());
+  }
+
+  /** beforeTool/schema/permission preparation 失败必须终结 Run，不能遗留到 lease reclaim。 */
+  @Test
+  void failsRunWhenToolPreparationThrows() {
+    Fixture fixture = new Fixture();
+    fixture.providers.add(
+        RecordingProvider.complete(
+            response(
+                "", List.of(new ProviderToolCall("call-1", "read", "{\"path\":\"README.md\"}")))));
+    fixture.tools = List.of(tool());
+    fixture.toolPreparation =
+        (run, assistant, calls, bindings, workdir, workspaceRoot, assistantEvents, now) -> {
+          throw new IllegalArgumentException("interceptor rejected call");
+        };
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.FAILED, fixture.store.current.status());
+    assertTrue(fixture.store.sessionMessages.isEmpty());
+    assertEquals(
+        List.of(RunEventType.ASSISTANT_FAILED, RunEventType.RUN_FAILED),
+        fixture.store.events.stream()
+            .map(RunEvent::type)
+            .filter(
+                type -> type == RunEventType.ASSISTANT_FAILED || type == RunEventType.RUN_FAILED)
+            .toList());
+    assertTrue(
+        fixture.store.events.stream()
+            .filter(event -> event.type() == RunEventType.RUN_FAILED)
+            .anyMatch(event -> event.payloadJson().contains("tool_preparation_failed")));
+  }
+
+  /** 非领域型 preparation 故障保留 RUNNING lease，由数据库 reclaim 重试最后完整 Entry。 */
+  @Test
+  void leavesInfrastructurePreparationFailureForLeaseReclaim() {
+    Fixture fixture = new Fixture();
+    fixture.providers.add(
+        RecordingProvider.complete(
+            response(
+                "", List.of(new ProviderToolCall("call-1", "read", "{\"path\":\"README.md\"}")))));
+    fixture.tools = List.of(tool());
+    fixture.toolPreparation =
+        (run, assistant, calls, bindings, workdir, workspaceRoot, assistantEvents, now) -> {
+          throw new IllegalStateException("database unavailable");
+        };
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.RUNNING, fixture.store.current.status());
+    assertFalse(
+        fixture.store.events.stream().anyMatch(event -> event.type() == RunEventType.RUN_FAILED));
   }
 
   /** transient 错误只写 RunEvent，持久 backoff 后重试，失败 partial 不进入下一次 Context。 */
@@ -490,7 +553,13 @@ class AgentTurnWorkerTest {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO));
-    return new TurnResources(provider, model, variant, tools);
+    return new TurnResources(
+        provider,
+        model,
+        variant,
+        tools.stream().map(ToolBinding::of).toList(),
+        Path.of("/workspace"),
+        Path.of("/workspace"));
   }
 
   private static final class Fixture {
@@ -736,6 +805,9 @@ class AgentTurnWorkerTest {
         AgentRun claimedRun,
         MessageEntryPayload assistant,
         List<ToolCall> calls,
+        List<ToolBinding> bindings,
+        Path workdir,
+        Path workspaceRoot,
         List<RunEventDraft> barrierEvents,
         Instant now) {
       if (!owned(claimedRun)) {

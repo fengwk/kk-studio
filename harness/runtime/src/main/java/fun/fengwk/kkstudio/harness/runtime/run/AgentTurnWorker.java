@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorException;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import java.time.Clock;
 import java.time.Instant;
@@ -122,7 +123,7 @@ public final class AgentTurnWorker {
             config.deltaFlushInterval(),
             config.deltaBatchBytes(),
             claimedAt);
-    TurnHandler handler = new TurnHandler(run, context, batcher);
+    TurnHandler handler = new TurnHandler(run, context, resources, batcher);
     AgentTurnEngine engine = new DefaultAgentTurnEngine(resources.provider());
     AgentTurnHandle handle;
     try {
@@ -132,7 +133,7 @@ public final class AgentTurnWorker {
                   resources.model(),
                   resources.variant(),
                   messageProjector.project(context.messages()),
-                  resources.tools()),
+                  resources.toolDescriptors()),
               handler);
     } catch (RuntimeException error) {
       handler.onFailed(
@@ -210,12 +211,15 @@ public final class AgentTurnWorker {
   private final class TurnHandler implements AgentTurnEventHandler {
     private final AgentRun run;
     private final SessionContext context;
+    private final TurnResources resources;
     private final DeltaBatcher batcher;
     private final AtomicBoolean terminal = new AtomicBoolean();
 
-    private TurnHandler(AgentRun run, SessionContext context, DeltaBatcher batcher) {
+    private TurnHandler(
+        AgentRun run, SessionContext context, TurnResources resources, DeltaBatcher batcher) {
       this.run = run;
       this.context = context;
+      this.resources = resources;
       this.batcher = batcher;
     }
 
@@ -263,14 +267,40 @@ public final class AgentTurnWorker {
             now);
         return;
       }
-      toolPreparationPort.prepare(
+      try {
+        toolPreparationPort.prepare(
+            run,
+            assistant,
+            toolCalls,
+            resources.toolBindings(),
+            resources.workdir(),
+            resources.workspaceRoot(),
+            List.of(assistantCompleted),
+            now);
+      } catch (IllegalArgumentException | ToolInterceptorException error) {
+        failToolPreparation(error, now);
+      }
+    }
+
+    private void failToolPreparation(RuntimeException error, Instant now) {
+      transactions.terminate(
           run,
-          assistant,
-          toolCalls,
+          RunStatus.FAILED,
           List.of(
-              assistantCompleted,
-              attemptDraft(run, RunEventType.TOOL_PREPARED, "toolCallCount", toolCalls.size()),
-              attemptDraft(run, RunEventType.RUN_WAITING, "status", "WAITING_TOOLS")),
+              attemptDraft(
+                  run,
+                  RunEventType.ASSISTANT_FAILED,
+                  "kind",
+                  ProviderErrorKind.INVALID_REQUEST.name(),
+                  "message",
+                  message(error)),
+              attemptDraft(
+                  run,
+                  RunEventType.RUN_FAILED,
+                  "reason",
+                  "tool_preparation_failed",
+                  "message",
+                  message(error))),
           now);
     }
 

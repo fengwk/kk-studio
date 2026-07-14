@@ -3,27 +3,30 @@ package fun.fengwk.kkstudio.core.workspace.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-
 import fun.fengwk.kkstudio.core.CoreTestApplication;
+import fun.fengwk.kkstudio.harness.runtime.session.SessionTree;
 import fun.fengwk.kkstudio.share.model.WorkspaceCreateDTO;
 import fun.fengwk.kkstudio.share.model.WorkspaceDTO;
 import fun.fengwk.kkstudio.share.model.WorkspaceUpdateDTO;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Workspace CRUD verifies lookup and JSON partial-update invariants. */
 @SpringBootTest(classes = CoreTestApplication.class)
 public class WorkspaceServiceTest {
 
   @Autowired private WorkspaceService workspaceService;
+  @Autowired private SessionTree sessionTree;
+  @Autowired private JdbcTemplate jdbcTemplate;
 
   @Test
   public void shouldCreateGetPartiallyUpdateAndDeleteWorkspace() {
     String name = "workspace-" + System.nanoTime();
     WorkspaceCreateDTO create = new WorkspaceCreateDTO();
     create.setName(name);
-    create.setSettingsJson("{\"defaultYolo\":false}");
+    create.setSettingsJson("{\"extensions\":{\"theme\":\"dark\"},\"defaultYolo\":false}");
     WorkspaceDTO workspace = workspaceService.createWorkspace(create);
     long workspaceId = Long.parseLong(workspace.getId());
     assertEquals(name, workspaceService.getWorkspace(workspaceId).getName());
@@ -33,12 +36,29 @@ public class WorkspaceServiceTest {
     WorkspaceUpdateDTO nameOnlyUpdate = new WorkspaceUpdateDTO();
     nameOnlyUpdate.setName(name + "-renamed");
     WorkspaceDTO renamed = workspaceService.updateWorkspace(workspaceId, nameOnlyUpdate);
-    assertEquals("{\"defaultYolo\":false}", renamed.getSettingsJson());
+    assertEquals(
+        "{\"extensions\":{\"theme\":\"dark\"},\"defaultYolo\":false,\"permission\":{}}",
+        renamed.getSettingsJson());
 
     WorkspaceUpdateDTO settingsUpdate = new WorkspaceUpdateDTO();
     settingsUpdate.setSettingsJson("{\"defaultYolo\":true}");
     WorkspaceDTO updated = workspaceService.updateWorkspace(workspaceId, settingsUpdate);
-    assertEquals("{\"defaultYolo\":true}", updated.getSettingsJson());
+    assertEquals("{\"defaultYolo\":true,\"permission\":{}}", updated.getSettingsJson());
+    workspaceService.deleteWorkspace(workspaceId);
+  }
+
+  /** Workspace 有 Harness Session 时禁止删除，避免留下跨聚合悬空引用。 */
+  @Test
+  public void shouldRejectDeletionWhileHarnessSessionExists() {
+    WorkspaceCreateDTO create = new WorkspaceCreateDTO();
+    create.setName("session-workspace-" + System.nanoTime());
+    WorkspaceDTO workspace = workspaceService.createWorkspace(create);
+    long workspaceId = Long.parseLong(workspace.getId());
+    sessionTree.create(workspaceId, null, "session");
+
+    assertThrows(IllegalStateException.class, () -> workspaceService.deleteWorkspace(workspaceId));
+
+    jdbcTemplate.update("delete from harness_session where workspace_id = ?", workspaceId);
     workspaceService.deleteWorkspace(workspaceId);
   }
 
@@ -47,7 +67,8 @@ public class WorkspaceServiceTest {
     WorkspaceCreateDTO invalidCreate = new WorkspaceCreateDTO();
     invalidCreate.setName("invalid-workspace-" + System.nanoTime());
     invalidCreate.setSettingsJson("[]");
-    assertThrows(IllegalArgumentException.class, () -> workspaceService.createWorkspace(invalidCreate));
+    assertThrows(
+        IllegalArgumentException.class, () -> workspaceService.createWorkspace(invalidCreate));
 
     WorkspaceCreateDTO validCreate = new WorkspaceCreateDTO();
     validCreate.setName("valid-workspace-" + System.nanoTime());
@@ -56,8 +77,11 @@ public class WorkspaceServiceTest {
     invalidUpdate.setSettingsJson("not-json");
     long workspaceId = Long.parseLong(workspace.getId());
     assertThrows(
-        IllegalArgumentException.class, () -> workspaceService.updateWorkspace(workspaceId, invalidUpdate));
-    assertEquals("{}", workspaceService.getWorkspace(workspaceId).getSettingsJson());
+        IllegalArgumentException.class,
+        () -> workspaceService.updateWorkspace(workspaceId, invalidUpdate));
+    assertEquals(
+        "{\"permission\":{},\"defaultYolo\":false}",
+        workspaceService.getWorkspace(workspaceId).getSettingsJson());
     workspaceService.deleteWorkspace(workspaceId);
   }
 }

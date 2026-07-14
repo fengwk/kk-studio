@@ -163,3 +163,35 @@ create table if not exists harness_run_event (
     unique key uk_harness_run_event_sequence (run_id, sequence),
     key idx_harness_run_event_run (run_id, id)
 ) engine=InnoDB default charset=utf8mb4 comment='harness run event journal';
+
+create table if not exists tool_invocation (
+    id                    bigint not null comment '唯一 Snowflake 主键与执行幂等键',
+    run_id                bigint not null comment '所属 run',
+    assistant_entry_id    bigint not null comment '产生调用的 Assistant Entry',
+    ordinal               int not null comment 'Assistant source order',
+    tool_call_id          varchar(256) not null comment 'Provider tool call id',
+    tool_name             varchar(128) not null comment '冻结工具名称',
+    tool_version          varchar(128) not null comment '冻结工具版本',
+    target_type           varchar(32) not null comment 'CONTROL/CLOUD/ENVIRONMENT',
+    environment_id        bigint null comment 'ENVIRONMENT 目标 id；其他类型为空',
+    arguments_json        longtext not null comment 'interceptor 后参数 JSON',
+    status                varchar(32) not null comment '持久状态',
+    permission_action     varchar(16) not null comment 'ALLOW/ASK/DENY',
+    permission_decision   varchar(16) null comment '用户 ALLOW/DENY 决定',
+    deadline_at           datetime(3) not null comment '冻结 deadline',
+    lease_owner           varchar(128) null comment '执行 lease owner',
+    lease_until           datetime(3) null comment '执行 lease 截止',
+    cancel_requested_at   datetime(3) null comment '取消请求时间',
+    result_json           longtext null comment '确定性或执行 ToolResult JSON',
+    error_message         longtext null comment '错误摘要',
+    gmt_create            datetime(3) not null default current_timestamp(3) comment '创建时间',
+    started_at            datetime(3) null comment '开始时间',
+    finished_at           datetime(3) null comment '终态时间',
+    gmt_modified          datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
+    primary key (id),
+    unique key uk_tool_invocation_run_call (run_id, tool_call_id),
+    unique key uk_tool_invocation_assistant_ordinal (assistant_entry_id, ordinal),
+    key idx_tool_invocation_run_status (run_id, status, ordinal),
+    key idx_tool_invocation_claim (target_type, status, deadline_at, id),
+    key idx_tool_invocation_environment_claim (environment_id, status, deadline_at, id)
+) engine=InnoDB default charset=utf8mb4 comment='durable tool invocation';

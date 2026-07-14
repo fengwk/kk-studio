@@ -36,7 +36,7 @@ class SessionTreeContextTest {
   void shouldCheckoutSiblingBranchesAndListChildren() {
     InMemoryStore store = new InMemoryStore();
     SessionTree tree = tree(store);
-    Session session = tree.create(1L, 10L, "root", true);
+    Session session = tree.create(1L, 10L, "root");
     SessionEntry snapshot = append(tree, session.id(), null, snapshotPayload());
     SessionEntry branchA = append(tree, session.id(), snapshot.id(), user("A"));
 
@@ -55,8 +55,8 @@ class SessionTreeContextTest {
   void shouldRejectInvalidCheckoutTargets() {
     InMemoryStore store = new InMemoryStore();
     SessionTree tree = tree(store);
-    Session first = tree.create(1L, null, null, false);
-    Session second = tree.create(1L, null, null, false);
+    Session first = tree.create(1L, null, null);
+    Session second = tree.create(1L, null, null);
     SessionEntry firstRoot = append(tree, first.id(), null, snapshotPayload());
     SessionEntry secondRoot = append(tree, second.id(), null, snapshotPayload());
 
@@ -85,7 +85,7 @@ class SessionTreeContextTest {
   void shouldForkWithIndependentEntriesAndHierarchy() {
     InMemoryStore store = new InMemoryStore();
     SessionTree tree = tree(store);
-    Session source = tree.create(7L, 11L, "source", true);
+    Session source = tree.create(7L, 11L, "source");
     SessionEntry snapshot = append(tree, source.id(), null, snapshotPayload());
     SessionEntry leaf = append(tree, source.id(), snapshot.id(), user("message"));
 
@@ -106,7 +106,7 @@ class SessionTreeContextTest {
   void shouldRejectStaleLeafCompareAndSet() {
     InMemoryStore store = new InMemoryStore();
     SessionTree tree = tree(store);
-    Session session = tree.create(1L, null, null, false);
+    Session session = tree.create(1L, null, null);
     SessionEntry first = append(tree, session.id(), null, snapshotPayload());
 
     assertFalse(tree.append(session.id(), null, new SessionEntryDraft(user("stale"))).appended());
@@ -309,7 +309,8 @@ class SessionTreeContextTest {
   }
 
   private static SessionTree tree(InMemoryStore store) {
-    return new SessionTree(store, store, new SequenceIds(), Clock.fixed(NOW, ZoneOffset.UTC));
+    return new SessionTree(
+        store, store, new SequenceIds(), workspaceId -> false, Clock.fixed(NOW, ZoneOffset.UTC));
   }
 
   private static SessionContextBuilder builder(InMemoryStore store) {

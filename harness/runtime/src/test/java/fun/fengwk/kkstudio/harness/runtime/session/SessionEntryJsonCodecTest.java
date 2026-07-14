@@ -225,6 +225,15 @@ class SessionEntryJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> new MessageEntryPayload(assistant));
     assertThrows(
         IllegalArgumentException.class, () -> new MessageEntryPayload(user, assistantMetadata()));
+    AgentMessage toolCalling =
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT, List.of(new ToolCallMessageContent("call", "read", "{}")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new MessageEntryPayload(toolCalling, assistantMetadata()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new MessageEntryPayload(assistant, assistantMetadata(ProviderStopReason.TOOL_CALLS)));
 
     assertMalformed(SessionEntryType.MESSAGE, messageWithMetadata("ASSISTANT", "null"));
     assertMalformed(SessionEntryType.MESSAGE, messageWithMetadata("USER", validMetadataJson()));
@@ -283,7 +292,12 @@ class SessionEntryJsonCodecTest {
   private AgentMessage roundTrip(AgentMessage message) {
     MessageEntryPayload payload =
         message.role() == AgentMessageRole.ASSISTANT
-            ? new MessageEntryPayload(message, assistantMetadata())
+            ? new MessageEntryPayload(
+                message,
+                assistantMetadata(
+                    message.contents().stream().anyMatch(ToolCallMessageContent.class::isInstance)
+                        ? ProviderStopReason.TOOL_CALLS
+                        : ProviderStopReason.COMPLETED))
             : new MessageEntryPayload(message);
     MessageEntryPayload decoded =
         assertInstanceOf(
@@ -299,8 +313,12 @@ class SessionEntryJsonCodecTest {
   }
 
   private static AssistantMessageMetadata assistantMetadata() {
+    return assistantMetadata(ProviderStopReason.COMPLETED);
+  }
+
+  private static AssistantMessageMetadata assistantMetadata(ProviderStopReason stopReason) {
     return new AssistantMessageMetadata(
-        ProviderStopReason.COMPLETED,
+        stopReason,
         new ModelUsage(321, 45, 6, 7, 8),
         new ModelCost("USD", new BigDecimal("0.000004200000")));
   }

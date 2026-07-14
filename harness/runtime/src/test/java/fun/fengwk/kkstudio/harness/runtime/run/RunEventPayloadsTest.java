@@ -55,7 +55,13 @@ class RunEventPayloadsTest {
                 "map",
                 Map.of("key", "value"),
                 "record",
-                new ModelUsage(1, 2, 3, 4, 5)));
+                new ModelUsage(1, 2, 3, 4, 5),
+                "attempt",
+                99,
+                "turnIndex",
+                99,
+                "schemaVersion",
+                99));
 
     assertEquals(1, payload.get("schemaVersion").intValue());
     assertEquals(5, payload.get("attempt").intValue());

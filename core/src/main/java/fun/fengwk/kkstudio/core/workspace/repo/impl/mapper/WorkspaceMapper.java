@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.core.workspace.repo.impl.mapper;
 
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
+import fun.fengwk.kkstudio.core.workspace.repo.impl.model.WorkspaceDO;
+import java.util.List;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
@@ -11,10 +13,6 @@ import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
-import fun.fengwk.kkstudio.core.workspace.repo.impl.model.WorkspaceDO;
-
-import java.util.List;
-
 /**
  * @author fengwk
  */
@@ -24,7 +22,9 @@ public interface WorkspaceMapper extends BaseMapper {
   @Select("select count(*) from workspace")
   long countAll();
 
-  @Select("select id, name, settings_json, version, gmt_create as create_time, gmt_modified as update_time from workspace order by id asc limit #{offset}, #{limit}")
+  @Select(
+      "select id, name, settings_json, version, gmt_create as create_time, gmt_modified as"
+          + " update_time from workspace order by id asc limit #{offset}, #{limit}")
   @Results(
       id = "workspaceResultMap",
       value = {
@@ -37,23 +37,38 @@ public interface WorkspaceMapper extends BaseMapper {
       })
   List<WorkspaceDO> pageAll(@Param("offset") long offset, @Param("limit") int limit);
 
-  @Select("select id, name, settings_json, version, gmt_create as create_time, gmt_modified as update_time from workspace where id = #{id}")
+  @Select(
+      "select id, name, settings_json, version, gmt_create as create_time, gmt_modified as"
+          + " update_time from workspace where id = #{id}")
   @ResultMap("workspaceResultMap")
   WorkspaceDO getById(@Param("id") long id);
 
-  @Select("select id, name, settings_json, version, gmt_create as create_time, gmt_modified as update_time from workspace where name = #{name}")
+  @Select(
+      "select id, name, settings_json, version, gmt_create as create_time, gmt_modified as"
+          + " update_time from workspace where name = #{name}")
   @ResultMap("workspaceResultMap")
   WorkspaceDO getByName(@Param("name") String name);
 
-  @Insert("insert into workspace (id, name, settings_json, gmt_create, gmt_modified, version) values (#{id}, #{name}, #{settingsJson}, current_timestamp(3), current_timestamp(3), 0)")
+  @Insert(
+      "insert into workspace (id, name, settings_json, gmt_create, gmt_modified, version) values"
+          + " (#{id}, #{name}, #{settingsJson}, current_timestamp(3), current_timestamp(3), 0)")
   int insert(WorkspaceDO workspace);
 
-  @Update("update workspace set name = #{workspace.name}, settings_json = #{workspace.settingsJson}, gmt_modified = current_timestamp(3), version = version + 1 where id = #{workspace.id}")
+  @Update(
+      "update workspace set name = #{workspace.name}, settings_json = #{workspace.settingsJson},"
+          + " gmt_modified = current_timestamp(3), version = version + 1 where id ="
+          + " #{workspace.id}")
   int updateById(@Param("workspace") WorkspaceDO workspace);
 
   @Delete("delete from workspace where id = #{id}")
   int deleteById(@Param("id") long id);
 
-  @Select("select (select count(*) from agent_provider where workspace_id = #{id}) + (select count(*) from agent_model where workspace_id = #{id}) + (select count(*) from agent_definition where workspace_id = #{id})")
+  @Select(
+      """
+      select (select count(*) from agent_provider where workspace_id = #{id})
+           + (select count(*) from agent_model where workspace_id = #{id})
+           + (select count(*) from agent_definition where workspace_id = #{id})
+           + (select count(*) from harness_session where workspace_id = #{id})
+      """)
   long countResources(@Param("id") long id);
 }

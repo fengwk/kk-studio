@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService
 import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
 import fun.fengwk.kkstudio.core.harness.run.store.SnowflakeRunIdGenerator;
 import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
+import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
@@ -22,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
 import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshotEntryPayload;
@@ -31,14 +33,24 @@ import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import java.math.BigDecimal;
+import java.nio.file.Path;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -59,11 +71,13 @@ class HarnessRunPersistenceTest {
   @Autowired private MysqlHarnessRunStore runStore;
   @Autowired private HarnessRunTransactionService transactions;
   @Autowired private DatabaseToolPreparationPort toolPreparation;
+  @Autowired private MysqlToolInvocationStore invocationStore;
   @Autowired private SnowflakeRunIdGenerator idGenerator;
   @Autowired private JdbcTemplate jdbcTemplate;
 
   @BeforeEach
   void cleanHarnessRunTables() {
+    jdbcTemplate.update("delete from tool_invocation");
     jdbcTemplate.update("delete from harness_run_event");
     jdbcTemplate.update("delete from harness_run");
     jdbcTemplate.update("delete from harness_session_entry");
@@ -294,23 +308,24 @@ class HarnessRunPersistenceTest {
     assertTrue(runStore.listAfter(queued.id(), 0, 10).isEmpty());
   }
 
-  /** Tool barrier 只追加 Assistant 并进入 WAITING_TOOLS；T05 schema 中不存在 tool invocation 表。 */
+  /** Assistant、source-order Invocation、WAITING_TOOLS 与事件必须在同一事务提交。 */
   @Test
-  void preparesToolBarrierWithoutForgingInvocation() {
+  void preparesAssistantAndInvocationAtomically() {
     Seed seed = seedSession();
     AgentRun queued =
         transactions.submitUserMessage(seed.sessionId(), seed.snapshotId(), user("hello"), NOW);
     AgentRun claimed = runStore.claimDue("worker", NOW, Duration.ofSeconds(30)).orElseThrow();
+    ToolCall call = new ToolCall("call-1", "read", "{}");
 
     assertTrue(
         toolPreparation.prepare(
             claimed,
-            assistant("calling"),
-            List.of(new ToolCall("call-1", "read", "{}")),
-            List.of(
-                terminalEvent(claimed, RunEventType.ASSISTANT_COMPLETED),
-                terminalEvent(claimed, RunEventType.TOOL_PREPARED),
-                terminalEvent(claimed, RunEventType.RUN_WAITING)),
+            assistant("calling", List.of(call)),
+            List.of(call),
+            List.of(readBinding()),
+            Path.of("."),
+            Path.of("."),
+            List.of(terminalEvent(claimed, RunEventType.ASSISTANT_COMPLETED)),
             NOW.plusSeconds(1)));
 
     AgentRun stored = runStore.find(queued.id()).orElseThrow();
@@ -323,9 +338,12 @@ class HarnessRunPersistenceTest {
             RunEventType.ASSISTANT_COMPLETED, RunEventType.TOOL_PREPARED, RunEventType.RUN_WAITING),
         runStore.listAfter(queued.id(), 0, 10).stream().map(RunEvent::type).toList());
     assertEquals(
-        assistant("calling"),
+        assistant("calling", List.of(call)),
         sessionStore.find(seed.sessionId(), session.leafEntryId()).orElseThrow().payload());
-    assertFalse(tableExists("tool_invocation"));
+    assertTrue(tableExists("tool_invocation"));
+    assertEquals(
+        ToolInvocationStatus.QUEUED, invocationStore.listByRun(stored.id()).get(0).status());
+    assertEquals(0, invocationStore.listByRun(stored.id()).get(0).ordinal());
   }
 
   /** Tool barrier event 失败时 Assistant、WAITING_TOOLS 与全部 barrier events 一起回滚。 */
@@ -335,15 +353,19 @@ class HarnessRunPersistenceTest {
     AgentRun queued =
         transactions.submitUserMessage(seed.sessionId(), seed.snapshotId(), user("hello"), NOW);
     AgentRun claimed = runStore.claimDue("worker", NOW, Duration.ofSeconds(30)).orElseThrow();
+    ToolCall call = new ToolCall("call-1", "read", "{}");
 
     assertThrows(
         IllegalArgumentException.class,
         () ->
             toolPreparation.prepare(
                 claimed,
-                assistant("calling"),
-                List.of(new ToolCall("call-1", "read", "{}")),
-                eventsEndingMalformed(claimed, RunEventType.ASSISTANT_COMPLETED),
+                assistant("calling", List.of(call)),
+                List.of(call),
+                List.of(readBinding()),
+                Path.of("."),
+                Path.of("."),
+                List.of(new RunEventDraft(RunEventType.ASSISTANT_COMPLETED, "{}")),
                 NOW.plusSeconds(1)));
 
     AgentRun afterRollback = runStore.find(queued.id()).orElseThrow();
@@ -353,6 +375,7 @@ class HarnessRunPersistenceTest {
     assertEquals(queued.id(), session.activeRunId());
     assertEquals(queued.triggerEntryId(), session.leafEntryId());
     assertTrue(runStore.listAfter(queued.id(), 0, 10).isEmpty());
+    assertTrue(invocationStore.listByRun(queued.id()).isEmpty());
   }
 
   /** retry、compaction、FAILED 的 event 批次失败时状态、leaf、activeRunId 与已插事件全部回滚。 */
@@ -561,10 +584,48 @@ class HarnessRunPersistenceTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
+            transactions.complete(
+                claimed,
+                assistant("bad", List.of(new ToolCall("unexpected", "read", "{}"))),
+                List.of(terminalEvent(claimed, RunEventType.RUN_COMPLETED)),
+                NOW));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            toolPreparation.prepare(
+                claimed,
+                assistant("bad"),
+                List.of(new ToolCall("missing-from-assistant", "read", "{}")),
+                List.of(readBinding()),
+                Path.of("."),
+                Path.of("."),
+                List.of(terminalEvent(claimed, RunEventType.RUN_WAITING)),
+                NOW));
+    ToolCall duplicateEventCall = new ToolCall("duplicate-event", "read", "{}");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            toolPreparation.prepare(
+                claimed,
+                assistant("bad", List.of(duplicateEventCall)),
+                List.of(duplicateEventCall),
+                List.of(readBinding()),
+                Path.of("."),
+                Path.of("."),
+                List.of(
+                    terminalEvent(claimed, RunEventType.ASSISTANT_COMPLETED),
+                    terminalEvent(claimed, RunEventType.ASSISTANT_COMPLETED)),
+                NOW));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
             toolPreparation.prepare(
                 claimed,
                 assistant("bad"),
                 List.of(),
+                List.of(readBinding()),
+                Path.of("."),
+                Path.of("."),
                 List.of(terminalEvent(claimed, RunEventType.RUN_WAITING)),
                 NOW));
     assertThrows(
@@ -591,6 +652,7 @@ class HarnessRunPersistenceTest {
   void usesFinalRunAndEventColumns() {
     Set<String> runColumns = columns("harness_run");
     Set<String> eventColumns = columns("harness_run_event");
+    Set<String> invocationColumns = columns("tool_invocation");
 
     assertEquals(
         Set.of(
@@ -613,6 +675,32 @@ class HarnessRunPersistenceTest {
     assertEquals(
         Set.of("id", "run_id", "sequence", "event_type", "payload_json", "gmt_create"),
         eventColumns);
+    assertEquals(
+        Set.of(
+            "id",
+            "run_id",
+            "assistant_entry_id",
+            "ordinal",
+            "tool_call_id",
+            "tool_name",
+            "tool_version",
+            "target_type",
+            "environment_id",
+            "arguments_json",
+            "status",
+            "permission_action",
+            "permission_decision",
+            "deadline_at",
+            "lease_owner",
+            "lease_until",
+            "cancel_requested_at",
+            "result_json",
+            "error_message",
+            "gmt_create",
+            "started_at",
+            "finished_at",
+            "gmt_modified"),
+        invocationColumns);
     assertFalse(runColumns.contains("run_id"));
   }
 
@@ -633,6 +721,15 @@ class HarnessRunPersistenceTest {
   }
 
   private Seed seedSession() {
+    jdbcTemplate.update(
+        "merge into workspace (id, name, settings_json, gmt_create, gmt_modified, version) key(id)"
+            + " values (?, ?, ?, ?, ?, ?)",
+        1L,
+        "harness-run-workspace",
+        "{\"permission\":{},\"defaultYolo\":false}",
+        Timestamp.from(NOW),
+        Timestamp.from(NOW),
+        0L);
     long sessionId = idGenerator.newSessionEntryId();
     Session session = Session.root(sessionId, 1L, 1L, "run-test", false, NOW);
     sessionStore.create(session);
@@ -680,12 +777,35 @@ class HarnessRunPersistenceTest {
   }
 
   private static MessageEntryPayload assistant(String text) {
+    return assistant(text, List.of());
+  }
+
+  private static MessageEntryPayload assistant(String text, List<ToolCall> calls) {
+    List<AgentMessageContent> contents = new ArrayList<>();
+    contents.add(new TextMessageContent(text));
+    calls.forEach(
+        call ->
+            contents.add(
+                new ToolCallMessageContent(call.id(), call.toolName(), call.argumentsJson())));
     return new MessageEntryPayload(
-        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))),
+        new AgentMessage(AgentMessageRole.ASSISTANT, contents),
         new AssistantMessageMetadata(
-            ProviderStopReason.COMPLETED,
+            calls.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS,
             new ModelUsage(10, 2, 1, 0, 0),
             new ModelCost("USD", new BigDecimal("0.000012"))));
+  }
+
+  private static ToolBinding readBinding() {
+    return ToolBinding.of(
+        new ToolDescriptor(
+            "read",
+            "1",
+            "read",
+            null,
+            new ToolParamsSchema("", Map.of(), Set.of(), true),
+            ToolExecutionMode.CLOUD,
+            ToolSideEffect.READ_ONLY,
+            Duration.ofSeconds(30)));
   }
 
   private static RunEventDraft terminalEvent(AgentRun run, RunEventType type) {

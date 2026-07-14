@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.run;
 
-/** T05 产生或消费的 Run Event 类型。 */
+/** Harness Runtime 持久 Run Event 类型。 */
 public enum RunEventType {
   RUN_STARTED("run_started"),
   TURN_STARTED("turn_started"),
@@ -12,6 +12,9 @@ public enum RunEventType {
   COMPACTION_STARTED("compaction_started"),
   COMPACTION_COMPLETED("compaction_completed"),
   TOOL_PREPARED("tool_prepared"),
+  PERMISSION_REQUESTED("permission_requested"),
+  PERMISSION_RESOLVED("permission_resolved"),
+  RUNTIME_STATE_CHANGED("runtime_state_changed"),
   RUN_WAITING("run_waiting"),
   RUN_COMPLETED("run_completed"),
   RUN_FAILED("run_failed"),
