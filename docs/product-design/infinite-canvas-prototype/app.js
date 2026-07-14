@@ -6,6 +6,7 @@
   const worldSize = { width: 2600, height: 1600 };
   const canvasGridSize = 18;
   let researchOpener = null;
+  let saveTimer = null;
 
   const stage = $('#canvasStage');
   const world = $('#canvasWorld');
@@ -148,9 +149,27 @@
   const defaultContextIds = ['web', 'image', 'file'];
 
   const generationProfiles = {
+    text: {
+      label: '文本生成',
+      icon: 'T',
+      prompt: '将画布中的竞品观察整理为一段清晰、有判断力的产品定位说明。',
+      cost: '≈ 3 积分',
+      size: { width: 300, height: 196 },
+      capabilities: ['自由写作', '参考改写', '结构提炼', '继续扩写'],
+      groups: [
+        { key: '模型', values: ['Claude · Sonnet', 'GPT · 4.1', 'Gemini · Pro'] },
+        { key: '长度', values: ['精炼', '标准', '详细'] },
+        { key: '语气', values: ['专业', '叙事', '直接'] },
+        { key: '格式', values: ['段落', '要点', '大纲'] }
+      ]
+    },
     image: {
-      prompt: '低饱和黑白产品视觉，留出清晰的编辑空间',
+      label: '图片生成',
+      icon: '◒',
+      prompt: '低饱和黑白产品视觉，留出清晰的编辑空间。',
       cost: '≈ 8 积分',
+      size: { width: 240, height: 224 },
+      capabilities: ['文生图', '多图参考', '风格迁移', '局部重绘'],
       groups: [
         { key: '模型', values: ['Flux · Pro', 'SDXL · Turbo', 'Ideogram · V3'] },
         { key: '比例', values: ['1:1', '4:3', '16:9'] },
@@ -159,8 +178,12 @@
       ]
     },
     video: {
-      prompt: '黑灰创作工作台缓慢推镜，抽象素材在画布中展开，克制的镜头运动',
+      label: '视频生成',
+      icon: '▻',
+      prompt: '黑灰创作工作台缓慢推镜，抽象素材在画布中展开，保持克制的镜头运动。',
       cost: '≈ 28 积分',
+      size: { width: 286, height: 214 },
+      capabilities: ['首尾帧', '多图参考', '动作模仿', '全能参考', '视频编辑'],
       groups: [
         { key: '模型', values: ['Kling · 1.6', 'Runway · Gen-3', 'Luma · Ray 2'] },
         { key: '规格', values: ['16:9 · 1080p', '9:16 · 1080p', '1:1 · 720p'] },
@@ -181,16 +204,8 @@
     runTimer: null,
     activeView: 'library',
     messages: [],
-    generationMode: 'image',
-    generationPrompts: {
-      image: generationProfiles.image.prompt,
-      video: generationProfiles.video.prompt
-    },
-    generationParameters: {
-      image: [0, 0, 0, 0],
-      video: [0, 0, 0, 0]
-    },
-    references: [true, true, false],
+    activeGeneratorId: null,
+    generationPanelExpanded: false,
     sequence: 0,
     forceThreadScroll: false
   };
@@ -215,6 +230,40 @@
   function nextId(prefix) {
     state.sequence += 1;
     return `${prefix}-${Date.now()}-${state.sequence}`;
+  }
+
+  function getActiveGenerator() {
+    const node = findNode(state.activeGeneratorId);
+    return node && node.type === 'generator' ? node : null;
+  }
+
+  function generatorStatusLabel(node) {
+    return node.status === 'generated' ? '已生成' : '草稿';
+  }
+
+  function generatorTitle(mode, status) {
+    const suffix = status === 'generated' ? '结果' : '草稿';
+    return `${generationProfiles[mode].label} · ${suffix}`;
+  }
+
+  function generatorSummary(prompt) {
+    const normalized = String(prompt || '').trim();
+    return normalized.length > 54 ? `${normalized.slice(0, 54)}…` : normalized;
+  }
+
+  function applyGenerationMode(node, mode) {
+    const profile = generationProfiles[mode];
+    node.generationMode = mode;
+    node.prompt = profile.prompt;
+    node.parameterIndexes = profile.groups.map(() => 0);
+    node.references = [true, true, false];
+    node.capability = profile.capabilities[0];
+    node.status = 'draft';
+    node.width = profile.size.width;
+    node.height = profile.size.height;
+    node.title = generatorTitle(mode, node.status);
+    node.copy = generatorSummary(node.prompt);
+    node.meta = `${node.capability} · ${generatorStatusLabel(node)}`;
   }
 
   function nodeMarkup(node) {
@@ -269,6 +318,34 @@
 
     if (node.type === 'text') {
       return `<div class="node-content">${label('T', node.meta || 'Text')}${details}</div>`;
+    }
+
+    if (node.type === 'generator') {
+      const mode = node.generationMode;
+      const profile = generationProfiles[mode];
+      const status = generatorStatusLabel(node);
+      const textPreview = node.status === 'generated'
+        ? `<p>${escapeHTML(node.copy)}</p><blockquote>“</blockquote>`
+        : '<i></i><i></i><i></i><blockquote>“</blockquote>';
+      const imagePreview = '<i></i><i></i><span>✦</span>';
+      const videoPreview = '<i></i><span class="generator-play">▶</span><small>00:06</small>';
+      const previews = { text: textPreview, image: imagePreview, video: videoPreview };
+      return `
+        <div class="node-content">
+          <div class="generator-preview generator-preview-${mode} ${node.status}">
+            ${previews[mode]}
+          </div>
+          <div class="generator-node-head">
+            ${label(profile.icon, profile.label)}
+            <span class="generator-state ${node.status}">${status}</span>
+          </div>
+          ${details}
+          <div class="node-footer">
+            <span>${escapeHTML(node.status === 'generated' ? node.meta : node.capability)}</span>
+            <span>${node.status === 'generated' ? '✓' : '↗'}</span>
+          </div>
+        </div>
+      `;
     }
 
     if (node.type === 'run') {
@@ -336,34 +413,33 @@
       `;
     }
 
-    if (node.type === 'media') {
-      const mediaLabel = node.mediaType === 'video' ? 'Generated video' : 'Generated image';
-      const mediaIcon = node.mediaType === 'video' ? '▻' : '◒';
-      const mediaMeta = node.meta || (node.mediaType === 'video' ? '16:9 · 6 秒' : '1:1 · 4 个变体');
-      return `
-        <div class="node-content">
-          <div class="media-preview"></div>
-          ${label(mediaIcon, mediaLabel)}
-          ${details}
-          <div class="node-footer"><span>${mediaMeta}</span><span>✦</span></div>
-        </div>
-      `;
-    }
-
     return '';
   }
 
   function renderNodes() {
-    nodesLayer.innerHTML = state.nodes.map((node) => `
-      <article
-        class="canvas-node node-${node.type} ${node.mediaType || ''} ${state.selected.has(node.id) ? 'selected' : ''}"
-        data-node-id="${node.id}"
-        style="transform:translate(${node.x}px,${node.y}px);width:${node.width}px;height:${node.height}px"
-      >${nodeMarkup(node)}</article>
-    `).join('');
+    nodesLayer.innerHTML = state.nodes.map((node) => {
+      const selectedClass = state.selected.has(node.id) ? 'selected' : '';
+      const modeClass = node.type === 'generator' ? node.generationMode : '';
+      const statusClass = node.status || '';
+      const generatorAttributes = node.type === 'generator'
+        ? `tabindex="0" role="button" data-generation-mode="${node.generationMode}" `
+          + `data-generation-status="${node.status}" aria-label="${escapeHTML(node.title)}，打开生成操作台"`
+        : '';
+      return `
+        <article
+          class="canvas-node node-${node.type} ${modeClass} ${statusClass} ${selectedClass}"
+          data-node-id="${node.id}"
+          ${generatorAttributes}
+          style="transform:translate(${node.x}px,${node.y}px);width:${node.width}px;height:${node.height}px"
+        >${nodeMarkup(node)}</article>
+      `;
+    }).join('');
 
     nodesLayer.querySelectorAll('.canvas-node').forEach((element) => {
       element.addEventListener('pointerdown', onNodePointerDown);
+    });
+    nodesLayer.querySelectorAll('.node-generator').forEach((element) => {
+      element.addEventListener('keydown', onGeneratorKeyDown);
     });
 
     nodesLayer.querySelectorAll('[data-run-action]').forEach((button) => {
@@ -453,6 +529,7 @@
     mini.style.width = `${Math.min(116, stage.clientWidth / scale * mapScale)}px`;
     mini.style.height = `${Math.min(74, stage.clientHeight / scale * mapScale)}px`;
     updateSelectionToolbar();
+    positionGenerationPanel();
   }
 
   function selectionBounds(nodes) {
@@ -521,6 +598,10 @@
   }
 
   function render() {
+    const activeGenerator = getActiveGenerator();
+    if (activeGenerator && !state.selected.has(activeGenerator.id)) {
+      setGenerationOpen(false, { clearActive: true });
+    }
     renderNodes();
     renderRelations();
     updateViewport();
@@ -540,15 +621,31 @@
         state.selected.add(id);
       }
     });
+
+    const selected = state.nodes.filter((node) => state.selected.has(node.id));
+    if (selected.length === 1 && selected[0].type === 'generator') {
+      activateGenerator(selected[0].id);
+    } else {
+      setGenerationOpen(false, { clearActive: true });
+    }
     render();
+  }
+
+  function focusGeneratorNode(id) {
+    const nodeElement = nodesLayer.querySelector(`[data-node-id="${id}"]`);
+    if (nodeElement) {
+      nodeElement.focus({ preventScroll: true });
+    }
   }
 
   function markSaved() {
     saveState.textContent = '保存中';
     saveState.style.color = '#c7c7c7';
-    window.setTimeout(() => {
+    window.clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(() => {
       saveState.textContent = '已保存';
       saveState.style.color = '';
+      saveTimer = null;
     }, 420);
   }
 
@@ -578,6 +675,14 @@
       }
     } else if (!state.selected.has(id)) {
       setSelection([id]);
+    }
+
+    const node = findNode(id);
+    if (node && node.type === 'generator' && state.selected.size === 1) {
+      activateGenerator(id);
+      focusGeneratorNode(id);
+    } else {
+      setGenerationOpen(false, { clearActive: true });
     }
 
     const origin = stagePoint(event);
@@ -611,11 +716,25 @@
       window.removeEventListener('pointerup', end);
       window.removeEventListener('pointercancel', end);
       markSaved();
+      if (node && node.type === 'generator' && state.selected.size === 1) {
+        focusGeneratorNode(id);
+      }
     };
 
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', end);
     window.addEventListener('pointercancel', end);
+  }
+
+  function onGeneratorKeyDown(event) {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const id = event.currentTarget.dataset.nodeId;
+    setSelection([id]);
+    generationPrompt.focus();
   }
 
   function zoomAt(clientX, clientY, nextScale) {
@@ -697,20 +816,25 @@
     if (ids.includes('run')) {
       stopRunTimer();
     }
+    if (ids.includes(state.activeGeneratorId)) {
+      setGenerationOpen(false, { clearActive: true });
+    }
     state.nodes = state.nodes.filter((node) => !state.selected.has(node.id));
     state.relations = state.relations.filter(([from, to]) => !state.selected.has(from) && !state.selected.has(to));
     state.selected.clear();
     render();
+    stage.focus({ preventScroll: true });
     markSaved();
     showToast(`已删除 ${ids.length} 个对象（可重置演示恢复）`);
   }
 
   function onStagePointerDown(event) {
-    const overlay = event.target.closest('.selection-toolbar, .canvas-controls, .agent-dock-wrap');
+    const overlay = event.target.closest('.selection-toolbar, .canvas-controls, .generation-panel, .agent-dock-wrap');
     if (event.button !== 0 || event.target.closest('.canvas-node') || overlay || state.spaceDown || state.tool !== 'select' || event.shiftKey) {
       return;
     }
 
+    setGenerationOpen(false, { clearActive: true });
     state.selected.clear();
     render();
     startMarqueeSelection(event);
@@ -759,6 +883,11 @@
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', end);
       window.removeEventListener('pointercancel', end);
+      const selected = state.nodes.filter((node) => state.selected.has(node.id));
+      if (selected.length === 1 && selected[0].type === 'generator') {
+        activateGenerator(selected[0].id);
+        render();
+      }
     };
 
     window.addEventListener('pointermove', move);
@@ -790,7 +919,7 @@
     });
 
     stage.addEventListener('pointerdown', (event) => {
-      const overlay = event.target.closest('.selection-toolbar, .canvas-controls, .agent-dock-wrap');
+      const overlay = event.target.closest('.selection-toolbar, .canvas-controls, .generation-panel, .agent-dock-wrap');
       if (!overlay) {
         stage.focus({ preventScroll: true });
       }
@@ -838,6 +967,10 @@
     });
 
     stage.addEventListener('wheel', (event) => {
+      const overlay = event.target.closest('.selection-toolbar, .canvas-controls, .generation-panel, .agent-dock-wrap');
+      if (overlay) {
+        return;
+      }
       event.preventDefault();
       if (event.ctrlKey || event.metaKey) {
         const factor = event.deltaY > 0 ? 0.9 : 1.11;
@@ -1029,19 +1162,20 @@
   }
 
   function generationMessageMarkup(message) {
-    const title = message.mode === 'video' ? '▻ 视频生成任务' : '◒ 图片生成任务';
+    const profile = generationProfiles[message.mode] || generationProfiles.text;
     return `
-      <div class="thread-message run">
-        <strong>${title}</strong>
+      <div class="thread-message run generation-message">
+        <strong>${profile.icon} ${profile.label}完成</strong>
         ${escapeHTML(message.text)}
-        <small>${escapeHTML(message.parameters)} · 已完成 · 结果已放入画布</small>
+        <small>${escapeHTML(message.parameters)} · 已完成 · 节点已原地更新</small>
       </div>
     `;
   }
 
   function renderThread() {
     const previousScrollTop = threadMessages.scrollTop;
-    const shouldScroll = state.forceThreadScroll || isThreadNearBottom();
+    const threadVisible = !thread.hidden;
+    const shouldScroll = threadVisible && (state.forceThreadScroll || isThreadNearBottom());
     updateContextUI();
     threadMessages.innerHTML = state.messages.map((message) => {
       if (message.kind === 'user') {
@@ -1060,12 +1194,12 @@
       button.addEventListener('click', () => handleRunAction(button.dataset.threadRunAction));
     });
 
-    if (shouldScroll) {
-      threadMessages.scrollTop = threadMessages.scrollHeight;
+    if (threadVisible) {
+      threadMessages.scrollTop = shouldScroll ? threadMessages.scrollHeight : previousScrollTop;
+      state.forceThreadScroll = false;
     } else {
       threadMessages.scrollTop = previousScrollTop;
     }
-    state.forceThreadScroll = false;
   }
 
   function setVisible(element, visible) {
@@ -1079,19 +1213,29 @@
     }
   }
 
+  function persistActiveGenerator() {
+    const node = getActiveGenerator();
+    if (node) {
+      node.prompt = generationPrompt.value;
+    }
+  }
+
   function setThreadOpen(open) {
     if (open) {
       setVisible(addMenu, false);
-      setVisible(generationPanel, false);
       $('#dockAdd').setAttribute('aria-expanded', 'false');
+      setGenerationOpen(false, { clearActive: true });
     }
     setVisible(thread, open);
+    if (open) {
+      renderThread();
+    }
   }
 
   function setAddMenuOpen(open) {
     if (open) {
       setVisible(thread, false);
-      setVisible(generationPanel, false);
+      setGenerationOpen(false, { clearActive: true });
     }
     setVisible(addMenu, open);
     $('#dockAdd').setAttribute('aria-expanded', String(open));
@@ -1100,13 +1244,37 @@
     }
   }
 
-  function setGenerationOpen(open) {
+  function setGenerationOpen(open, { clearActive = !open } = {}) {
+    if (open && !getActiveGenerator()) {
+      return;
+    }
     if (open) {
       setVisible(thread, false);
       setVisible(addMenu, false);
       $('#dockAdd').setAttribute('aria-expanded', 'false');
+      setVisible(generationPanel, true);
+      renderGenerationWorkbench();
+      positionGenerationPanel();
+      return;
     }
-    setVisible(generationPanel, open);
+
+    persistActiveGenerator();
+    setVisible(generationPanel, false);
+    if (clearActive) {
+      state.activeGeneratorId = null;
+    }
+  }
+
+  function activateGenerator(id) {
+    const node = findNode(id);
+    if (!node || node.type !== 'generator') {
+      return;
+    }
+    if (state.activeGeneratorId !== id) {
+      persistActiveGenerator();
+    }
+    state.activeGeneratorId = id;
+    setGenerationOpen(true, { clearActive: false });
   }
 
   function collapseThread() {
@@ -1119,9 +1287,12 @@
     $('#dockAdd').focus();
   }
 
-  function closeGenerationPanel() {
-    setGenerationOpen(false);
-    $('#dockAdd').focus();
+  function closeGenerationPanel({ restoreFocus = true } = {}) {
+    const id = state.activeGeneratorId;
+    setGenerationOpen(false, { clearActive: true });
+    if (restoreFocus && id) {
+      focusGeneratorNode(id);
+    }
   }
 
   function hasBlockingOverlay() {
@@ -1131,18 +1302,20 @@
       || !addMenu.hidden;
   }
 
-  function getParameterSummary(mode = state.generationMode) {
-    const profile = generationProfiles[mode];
+  function getParameterSummary(node = getActiveGenerator()) {
+    if (!node) {
+      return '';
+    }
+    const profile = generationProfiles[node.generationMode];
     return profile.groups.map((group, index) => {
-      return group.values[state.generationParameters[mode][index]];
+      return group.values[node.parameterIndexes[index]];
     }).join(' · ');
   }
 
-  function renderGenerationControls() {
-    const mode = state.generationMode;
-    const profile = generationProfiles[mode];
+  function renderGenerationControls(node) {
+    const profile = generationProfiles[node.generationMode];
     $('#parameterChips').innerHTML = profile.groups.map((group, index) => {
-      const value = group.values[state.generationParameters[mode][index]];
+      const value = group.values[node.parameterIndexes[index]];
       return `
         <button
           class="parameter-chip"
@@ -1158,74 +1331,212 @@
     });
   }
 
-  function renderReferenceSelection() {
+  function renderReferenceSelection(node) {
     $$('.reference-thumb').forEach((button, index) => {
-      const selected = state.references[index];
+      const selected = Boolean(node.references[index]);
       button.classList.toggle('selected', selected);
       button.setAttribute('aria-pressed', String(selected));
     });
   }
 
-  function setGenerationMode(mode, { persistCurrent = true } = {}) {
-    if (persistCurrent) {
-      state.generationPrompts[state.generationMode] = generationPrompt.value;
-    }
-    state.generationMode = mode;
-    $$('.generation-tabs [data-generation-mode]').forEach((button) => {
-      const selected = button.dataset.generationMode === mode;
-      button.setAttribute('aria-pressed', String(selected));
+  function renderGenerationCapabilities(node) {
+    const capabilities = generationProfiles[node.generationMode].capabilities;
+    $('#generationCapabilities').innerHTML = capabilities.map((capability) => {
+      const selected = capability === node.capability;
+      return `
+        <button type="button" data-generation-capability="${escapeHTML(capability)}"
+          aria-pressed="${selected}">${escapeHTML(capability)}</button>
+      `;
+    }).join('');
+    $('#generationCapabilities').querySelectorAll('[data-generation-capability]').forEach((button) => {
+      button.addEventListener('click', () => setGenerationCapability(button.dataset.generationCapability));
     });
-    generationPrompt.value = state.generationPrompts[mode];
-    $('#generationCost').textContent = generationProfiles[mode].cost;
-    $('#submitGeneration').setAttribute('aria-label', `提交${mode === 'video' ? '视频' : '图片'}生成`);
-    renderGenerationControls();
-    renderReferenceSelection();
+  }
+
+  function renderGenerationWorkbench() {
+    const node = getActiveGenerator();
+    if (!node) {
+      return;
+    }
+    const mode = node.generationMode;
+    const profile = generationProfiles[mode];
+    $('#generationPanelTitle').textContent = profile.label;
+    $('#generationNodeStatus').textContent = generatorStatusLabel(node);
+    $('#generationNodeStatus').className = `generation-node-status ${node.status}`;
+    $$('.generation-tabs [data-generation-mode]').forEach((button) => {
+      button.setAttribute('aria-pressed', String(button.dataset.generationMode === mode));
+    });
+    generationPrompt.value = node.prompt;
+    generationPrompt.placeholder = `描述要生成的${mode === 'text' ? '文本' : mode === 'image' ? '画面' : '镜头'}…`;
+    $('#generationCost').textContent = profile.cost;
+    $('#submitGeneration').setAttribute('aria-label', `提交${profile.label}`);
+    generationPanel.classList.toggle('expanded', state.generationPanelExpanded);
+    $('#toggleGenerationPanel').setAttribute('aria-expanded', String(state.generationPanelExpanded));
+    $('#toggleGenerationPanel').setAttribute(
+      'aria-label',
+      state.generationPanelExpanded ? '收起生成操作台宽度' : '展开生成操作台宽度'
+    );
+    renderGenerationCapabilities(node);
+    renderGenerationControls(node);
+    renderReferenceSelection(node);
+  }
+
+  function markGeneratorDraft(node) {
+    node.status = 'draft';
+    node.title = generatorTitle(node.generationMode, node.status);
+    node.copy = generatorSummary(node.prompt);
+    node.meta = `${node.capability} · ${generatorStatusLabel(node)}`;
+  }
+
+  function setGenerationMode(mode) {
+    const node = getActiveGenerator();
+    if (!node || node.generationMode === mode) {
+      return;
+    }
+    persistActiveGenerator();
+    const centerX = node.x + node.width / 2;
+    const centerY = node.y + node.height / 2;
+    applyGenerationMode(node, mode);
+    node.x = Math.round(centerX - node.width / 2);
+    node.y = Math.round(centerY - node.height / 2);
+    renderGenerationWorkbench();
+    render();
+    revealNodeAboveDock(node);
+    markSaved();
+    generationPrompt.focus();
+  }
+
+  function setGenerationCapability(capability) {
+    const node = getActiveGenerator();
+    if (!node) {
+      return;
+    }
+    node.capability = capability;
+    markGeneratorDraft(node);
+    renderGenerationWorkbench();
+    render();
+    markSaved();
+    const activeButton = [...$('#generationCapabilities').querySelectorAll('[data-generation-capability]')]
+      .find((button) => button.dataset.generationCapability === capability);
+    if (activeButton) {
+      activeButton.focus({ preventScroll: true });
+    }
   }
 
   function cycleParameter(index) {
-    const mode = state.generationMode;
-    const values = generationProfiles[mode].groups[index].values;
-    state.generationParameters[mode][index] = (state.generationParameters[mode][index] + 1) % values.length;
-    renderGenerationControls();
+    const node = getActiveGenerator();
+    if (!node) {
+      return;
+    }
+    const values = generationProfiles[node.generationMode].groups[index].values;
+    node.parameterIndexes[index] = (node.parameterIndexes[index] + 1) % values.length;
+    markGeneratorDraft(node);
+    renderGenerationWorkbench();
+    render();
+    markSaved();
+    const activeButton = $(`#parameterChips [data-parameter-index="${index}"]`);
+    if (activeButton) {
+      activeButton.focus({ preventScroll: true });
+    }
   }
 
   function toggleReference(index) {
-    state.references[index] = !state.references[index];
-    renderReferenceSelection();
+    const node = getActiveGenerator();
+    if (!node) {
+      return;
+    }
+    node.references[index] = !node.references[index];
+    markGeneratorDraft(node);
+    renderGenerationWorkbench();
+    render();
+    markSaved();
   }
 
-  function findOpenCanvasPosition(anchor, width, height) {
+  function toggleGenerationPanelWidth() {
+    state.generationPanelExpanded = !state.generationPanelExpanded;
+    renderGenerationWorkbench();
+    positionGenerationPanel();
+  }
+
+  function positionGenerationPanel() {
+    const node = getActiveGenerator();
+    if (!node || generationPanel.hidden) {
+      return;
+    }
+    const scale = Number.isFinite(state.viewport.scale) && state.viewport.scale > 0
+      ? state.viewport.scale
+      : 0.6;
+    const stageRect = stage.getBoundingClientRect();
+    const dockRect = $('#agentDockWrap').getBoundingClientRect();
+    const stageWidth = Math.max(0, stageRect.width || stage.clientWidth || 0);
+    const stageHeight = Math.max(0, stageRect.height || stage.clientHeight || 0);
+    const margin = 12;
+    const nodeGap = 12;
+    const toolbarClearance = 48;
+    const safeTop = margin;
+    const measuredDockTop = dockRect.top - stageRect.top;
+    const fallbackDockTop = Math.max(safeTop, stageHeight - 88);
+    const dockTop = dockRect.height > 0 && Number.isFinite(measuredDockTop)
+      ? measuredDockTop
+      : fallbackDockTop;
+    const safeBottom = Math.max(safeTop, Math.min(stageHeight - margin, dockTop - 12));
+    const desiredPanelWidth = state.generationPanelExpanded ? 720 : 560;
+    const availableWidth = Math.max(0, stageWidth - margin * 2);
+    const panelWidth = availableWidth ? Math.min(desiredPanelWidth, availableWidth) : desiredPanelWidth;
+    generationPanel.style.maxHeight = 'none';
+    const naturalPanelHeight = generationPanel.offsetHeight || 330;
+    const nodeLeft = state.viewport.x + node.x * scale;
+    const nodeTop = state.viewport.y + node.y * scale;
+    const nodeWidth = node.width * scale;
+    const nodeBottom = nodeTop + node.height * scale;
+    const belowTop = nodeBottom + nodeGap;
+    const aboveBottom = nodeTop - toolbarClearance;
+    const belowAvailable = Math.max(0, safeBottom - belowTop);
+    const aboveAvailable = Math.max(0, aboveBottom - safeTop);
+    const comfortableHeight = Math.min(naturalPanelHeight, 180);
+    const placeBelow = belowAvailable >= comfortableHeight || belowAvailable >= aboveAvailable;
+    const placementAvailable = placeBelow ? belowAvailable : aboveAvailable;
+    const visiblePanelHeight = Math.max(80, Math.min(naturalPanelHeight, placementAvailable));
+    const preferredTop = placeBelow ? belowTop : aboveBottom - visiblePanelHeight;
+    const maxLeft = Math.max(margin, stageWidth - panelWidth - margin);
+    const maxTop = Math.max(safeTop, safeBottom - visiblePanelHeight);
+    const left = Math.max(margin, Math.min(maxLeft, nodeLeft + nodeWidth / 2 - panelWidth / 2));
+    const top = Math.max(safeTop, Math.min(maxTop, preferredTop));
+    generationPanel.style.left = `${Number.isFinite(left) ? left : margin}px`;
+    generationPanel.style.top = `${Number.isFinite(top) ? top : safeTop}px`;
+    generationPanel.style.maxHeight = `${visiblePanelHeight}px`;
+    generationPanel.dataset.placement = placeBelow ? 'below' : 'above';
+  }
+
+  function findOpenCanvasPosition(anchor, width, height, preferredPosition = null) {
     const gap = 28;
-    const startX = anchor ? anchor.x + anchor.width + 100 : 1060;
-    const startY = anchor ? anchor.y + anchor.height + 100 : 380;
-    let x = startX;
-    let y = startY;
+    const startX = preferredPosition ? preferredPosition.x : anchor ? anchor.x + anchor.width + 100 : 1060;
+    const startY = preferredPosition ? preferredPosition.y : anchor ? anchor.y + anchor.height + 100 : 380;
+    const rowsPerColumn = 4;
+    let candidate = { x: startX, y: startY };
 
     for (let attempt = 0; attempt < 60; attempt += 1) {
+      const column = Math.floor(attempt / rowsPerColumn);
+      const row = attempt % rowsPerColumn;
+      candidate = {
+        x: startX + column * (width + 70),
+        y: startY + row * (height + gap)
+      };
       const blocked = state.nodes.some((node) => {
         if (node.type === 'frame') {
           return false;
         }
-        return x < node.x + node.width + gap
-          && x + width + gap > node.x
-          && y < node.y + node.height + gap
-          && y + height + gap > node.y;
+        return candidate.x < node.x + node.width + gap
+          && candidate.x + width + gap > node.x
+          && candidate.y < node.y + node.height + gap
+          && candidate.y + height + gap > node.y;
       });
       if (!blocked) {
-        return { x, y };
-      }
-
-      y += height + gap;
-      if (y + height > worldSize.height - 70) {
-        y = 110;
-        x += width + 70;
+        return candidate;
       }
     }
 
-    return {
-      x: Math.max(40, Math.min(worldSize.width - width - 40, x)),
-      y: Math.max(40, Math.min(worldSize.height - height - 40, y))
-    };
+    return candidate;
   }
 
   function revealNodeAboveDock(node) {
@@ -1273,60 +1584,68 @@
     }
   }
 
+  function createGenerationNode(mode) {
+    const profile = generationProfiles[mode];
+    const scale = Number.isFinite(state.viewport.scale) && state.viewport.scale > 0
+      ? state.viewport.scale
+      : 0.6;
+    const stageRect = stage.getBoundingClientRect();
+    const dockRect = $('#agentDockWrap').getBoundingClientRect();
+    const stageWidth = stageRect.width || stage.clientWidth || 960;
+    const stageHeight = stageRect.height || stage.clientHeight || 640;
+    const dockTop = dockRect.height > 0 && dockRect.top > stageRect.top
+      ? dockRect.top - stageRect.top
+      : stageHeight - 96;
+    const safeHeight = Math.max(120, dockTop - 24);
+    const preferredPosition = {
+      x: (stageWidth / 2 - state.viewport.x) / scale - profile.size.width / 2,
+      y: (safeHeight / 2 - state.viewport.y) / scale - profile.size.height / 2
+    };
+    const position = findOpenCanvasPosition(null, profile.size.width, profile.size.height, preferredPosition);
+    const node = {
+      id: nextId('generator'),
+      type: 'generator',
+      x: position.x,
+      y: position.y
+    };
+    applyGenerationMode(node, mode);
+    state.nodes.push(node);
+    state.selected.clear();
+    state.selected.add(node.id);
+    activateGenerator(node.id);
+    render();
+    revealNodeAboveDock(node);
+    generationPrompt.focus();
+    markSaved();
+    showToast(`已创建${profile.label}节点`);
+  }
+
   function submitGeneration() {
+    const node = getActiveGenerator();
     const prompt = generationPrompt.value.trim();
-    if (!prompt) {
+    if (!node || !prompt) {
       showToast('请先描述要生成的内容');
       generationPrompt.focus();
       return;
     }
 
-    const run = findNode('run');
-    const mode = state.generationMode;
-    const parameters = getParameterSummary(mode);
-    const width = mode === 'video' ? 254 : 220;
-    const height = 205;
-    const position = findOpenCanvasPosition(run, width, height);
-    const node = {
-      id: nextId(mode),
-      type: 'media',
-      mediaType: mode,
-      x: position.x,
-      y: position.y,
-      width,
-      height,
-      title: mode === 'video' ? '概念镜头 · 生成结果' : '视觉方向 · 生成结果',
-      copy: prompt,
-      meta: parameters,
-      generated: true
-    };
-
-    state.nodes.push(node);
-    if (run) {
-      state.relations.push([run.id, node.id]);
-    }
-    state.selected.clear();
-    state.selected.add(node.id);
+    node.prompt = prompt;
+    node.status = 'generated';
+    node.title = generatorTitle(node.generationMode, node.status);
+    node.copy = generatorSummary(prompt);
+    node.meta = getParameterSummary(node);
+    const profile = generationProfiles[node.generationMode];
     state.messages.push({
       kind: 'generation',
-      mode,
-      parameters,
-      text: `已提交${mode === 'video' ? '视频' : '图片'}生成任务。`
-    });
-    state.messages.push({
-      kind: 'agent',
-      text: run
-        ? `${mode === 'video' ? '视频' : '图片'}生成完成，结果已放入画布并关联 Agent Run。`
-        : `${mode === 'video' ? '视频' : '图片'}生成完成，结果已放入当前画布。`
+      mode: node.generationMode,
+      parameters: node.meta,
+      text: `${profile.label}完成，已原地更新生成节点。`
     });
     requestThreadScroll();
-    setGenerationOpen(false);
-    setThreadOpen(true);
+    renderGenerationWorkbench();
     render();
-    revealNodeAboveDock(node);
-    agentPrompt.focus();
     markSaved();
-    showToast(`${mode === 'video' ? '视频' : '图片'}生成完成，结果已放入画布`);
+    showToast(`${profile.label}完成，生成节点已原地更新`);
   }
 
   function focusAgentDock() {
@@ -1382,24 +1701,15 @@
     state.tool = 'select';
     state.spaceDown = false;
     state.messages = [];
-    state.generationMode = 'image';
-    state.generationPrompts = {
-      image: generationProfiles.image.prompt,
-      video: generationProfiles.video.prompt
-    };
-    state.generationParameters = {
-      image: [0, 0, 0, 0],
-      video: [0, 0, 0, 0]
-    };
-    state.references = [true, true, false];
+    state.activeGeneratorId = null;
+    state.generationPanelExpanded = false;
     state.forceThreadScroll = false;
     agentPrompt.value = '';
     resizeAgentInput();
     stage.classList.remove('hand-tool', 'panning', 'dragging-node');
     setThreadOpen(false);
     setAddMenuOpen(false);
-    setGenerationOpen(false);
-    setGenerationMode('image', { persistCurrent: false });
+    setGenerationOpen(false, { clearActive: true });
     render();
     fitView({ notify: false });
     agentPrompt.focus();
@@ -1449,7 +1759,7 @@
       <p class="panel-section-title">产品定位</p>
       <article class="insight-card"><h3>Agent 原生的多模态创作工作区</h3><p>资料、想法和产物存在同一空间。<strong>输入 → Agent Run → 可编辑结果</strong>，过程可见、来源可追溯。</p></article>
       <p class="panel-section-title">对象模型</p>
-      <div class="model-flow">Workspace <span>→</span> Project <span>→</span> CanvasDocument <span>→</span> CanvasItem / Relation / AgentRun</div>
+      <div class="model-flow">Workspace <span>→</span> Project <span>→</span> CanvasDocument <span>→</span> CanvasItem / Generator / Relation / AgentRun</div>
       <article class="insight-card">
         <h3>扩展协议</h3>
         <ul class="protocol-list">
@@ -1464,7 +1774,7 @@
     `,
     roadmap: `
       <p class="panel-section-title">从验证到生态</p>
-      <article class="insight-card phase"><span class="phase-index">A</span><div><h3>交互原型</h3><p>中性暗色 Stage、底部 Agent Dock、媒体生成和结果落位，验证产品表达。</p></div></article>
+      <article class="insight-card phase"><span class="phase-index">A</span><div><h3>交互原型</h3><p>中性暗色 Stage、底部 Agent Dock、生成节点和上下文操作台，验证产品表达。</p></div></article>
       <article class="insight-card phase"><span class="phase-index">B</span><div><h3>画布 MVP</h3><p>持久化、统一命令历史、素材引用、自动保存和节点/动作注册表。</p></div></article>
       <article class="insight-card phase"><span class="phase-index">C</span><div><h3>Agent 原生能力</h3><p>选区/整图上下文、SSE 状态、画布命令、暂停重试与来源追踪。</p></div></article>
       <article class="insight-card phase"><span class="phase-index">D</span><div><h3>协作与生态</h3><p>实时协作、只读分享、创作回放、Playbook / Skill 市场与用量策略。</p></div></article>
@@ -1580,20 +1890,13 @@
   }
 
   function handleAddAction(action) {
-    if (action === 'text') {
+    if (['text', 'image', 'video'].includes(action)) {
       setAddMenuOpen(false);
-      createTextNode();
+      createGenerationNode(action);
       return;
     }
 
-    if (action === 'image' || action === 'video') {
-      setGenerationMode(action);
-      setGenerationOpen(true);
-      generationPrompt.focus();
-      return;
-    }
-
-    setAddMenuOpen(false);
+    closeAddMenu();
     showToast(action === 'file'
       ? '文件导入将在完整产品中打开（原型模拟）'
       : 'Frame 创建将在完整产品中提供（原型模拟）');
@@ -1659,7 +1962,8 @@
     $$('.add-menu [data-add-action]').forEach((button) => {
       button.addEventListener('click', () => handleAddAction(button.dataset.addAction));
     });
-    $('#closeGenerationPanel').addEventListener('click', closeGenerationPanel);
+    $('#closeGenerationPanel').addEventListener('click', () => closeGenerationPanel());
+    $('#toggleGenerationPanel').addEventListener('click', toggleGenerationPanelWidth);
     $$('.generation-tabs [data-generation-mode]').forEach((button) => {
       button.addEventListener('click', () => setGenerationMode(button.dataset.generationMode));
     });
@@ -1669,7 +1973,18 @@
     $('#addReference').addEventListener('click', () => showToast('参考素材选择器将在完整产品中打开（原型模拟）'));
     $('#submitGeneration').addEventListener('click', submitGeneration);
     generationPrompt.addEventListener('input', () => {
-      state.generationPrompts[state.generationMode] = generationPrompt.value;
+      const node = getActiveGenerator();
+      if (!node) {
+        return;
+      }
+      node.prompt = generationPrompt.value;
+      markGeneratorDraft(node);
+      $('#generationNodeStatus').textContent = generatorStatusLabel(node);
+      $('#generationNodeStatus').className = `generation-node-status ${node.status}`;
+      renderNodes();
+      updateViewport();
+      updateLibraryCardState();
+      markSaved();
     });
 
     $('#sendAgent').addEventListener('click', sendAgentMessage);
@@ -1747,7 +2062,19 @@
       } else if (state.activeView === 'editor') {
         state.selected.clear();
         render();
+        stage.focus({ preventScroll: true });
       }
+      return;
+    }
+
+    const deleteKey = event.key === 'Delete' || event.key === 'Backspace';
+    const generatorDelete = deleteKey
+      && state.activeView === 'editor'
+      && !isInteractiveControl(event.target)
+      && !generationPanel.hidden;
+    if (generatorDelete) {
+      event.preventDefault();
+      deleteSelection();
       return;
     }
 
@@ -1757,7 +2084,7 @@
       return;
     }
 
-    if (event.key === 'Delete' || event.key === 'Backspace') {
+    if (deleteKey) {
       event.preventDefault();
       deleteSelection();
     } else if (event.key === '0') {
@@ -1788,9 +2115,7 @@
     setResearchOpen(false);
     setThreadOpen(false);
     setAddMenuOpen(false);
-    setGenerationOpen(false);
-    setGenerationMode('image');
-    renderReferenceSelection();
+    setGenerationOpen(false, { clearActive: true });
     render();
     resizeAgentInput();
   }
