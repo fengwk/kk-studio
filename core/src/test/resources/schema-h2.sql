@@ -207,3 +207,17 @@ create index if not exists idx_tool_invocation_claim
 
 create index if not exists idx_tool_invocation_environment_claim
     on tool_invocation (environment_id, status, deadline_at, id);
+
+create table if not exists tool_artifact (
+    id bigint not null,
+    workspace_id bigint not null,
+    media_type varchar(128) not null,
+    encoding varchar(64) not null,
+    content blob not null,
+    size_bytes bigint not null,
+    sha256 varchar(64) not null,
+    gmt_create timestamp(3) not null default current_timestamp(),
+    primary key (id)
+);
+
+create index if not exists idx_tool_artifact_workspace on tool_artifact (workspace_id, id);

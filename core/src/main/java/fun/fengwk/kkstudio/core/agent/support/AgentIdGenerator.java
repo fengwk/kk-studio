@@ -21,6 +21,7 @@ public final class AgentIdGenerator {
   public static final String HARNESS_RUN = "harness_run";
   public static final String HARNESS_RUN_EVENT = "harness_run_event";
   public static final String TOOL_INVOCATION = "tool_invocation";
+  public static final String TOOL_ARTIFACT = "tool_artifact";
 
   private AgentIdGenerator() {}
 
@@ -70,5 +71,9 @@ public final class AgentIdGenerator {
 
   public static long nextToolInvocationId() {
     return GlobalSnowflakeIdGenerator.next(TOOL_INVOCATION);
+  }
+
+  public static long nextToolArtifactId() {
+    return GlobalSnowflakeIdGenerator.next(TOOL_ARTIFACT);
   }
 }

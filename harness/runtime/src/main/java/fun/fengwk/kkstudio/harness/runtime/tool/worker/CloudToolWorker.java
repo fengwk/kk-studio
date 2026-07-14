@@ -1,0 +1,364 @@
+package fun.fengwk.kkstudio.harness.runtime.tool.worker;
+
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
+import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
+import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
+import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
+import fun.fengwk.kkstudio.harness.tool.TextToolContent;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.harness.tool.ToolContent;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.execution.Tool;
+import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
+import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * Asynchronously dispatches at most one durable Cloud/Control invocation per poll. No worker thread
+ * waits for callbacks: callback ownership is validated by the transaction port before every write.
+ */
+public final class CloudToolWorker {
+  private final ToolInvocationWorkerStore store;
+  private final ToolInvocationTransactions transactions;
+  private final ToolRegistry registry;
+  private final ArtifactStore artifactStore;
+  private final ToolWorkerConfig config;
+  private final Clock clock;
+  private final ScheduledExecutorService scheduler;
+  private final ConcurrentHashMap<Long, Execution> executions = new ConcurrentHashMap<>();
+
+  public CloudToolWorker(
+      ToolInvocationWorkerStore store,
+      ToolInvocationTransactions transactions,
+      ToolRegistry registry,
+      ArtifactStore artifactStore,
+      ToolWorkerConfig config,
+      Clock clock,
+      ScheduledExecutorService scheduler) {
+    this.store = Objects.requireNonNull(store, "store");
+    this.transactions = Objects.requireNonNull(transactions, "transactions");
+    this.registry = Objects.requireNonNull(registry, "registry");
+    this.artifactStore = Objects.requireNonNull(artifactStore, "artifactStore");
+    this.config = Objects.requireNonNull(config, "config");
+    this.clock = Objects.requireNonNull(clock, "clock");
+    this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+  }
+
+  /**
+   * Coordinates stranded terminal batches then dispatches one due invocation without awaiting it.
+   */
+  public Optional<ClaimedToolInvocation> executeNext(String workerId) {
+    requireNonBlank(workerId, "workerId");
+    Instant now = clock.instant();
+    transactions.coordinateReadyRuns(now);
+    Optional<ClaimedToolInvocation> claimed = store.claimDue(workerId, now, config.leaseDuration());
+    claimed.ifPresent(this::dispatch);
+    return claimed;
+  }
+
+  private void dispatch(ClaimedToolInvocation claimed) {
+    ToolInvocation invocation = claimed.invocation();
+    if (!supportedTarget(invocation)) {
+      fail(claimed, "Tool worker cannot execute target " + invocation.targetType() + ".");
+      return;
+    }
+    if (invocation.cancelRequestedAt() != null
+        || invocation.status() == ToolInvocationStatus.CANCEL_REQUESTED) {
+      terminate(
+          claimed,
+          ToolInvocationStatus.CANCELLED,
+          ToolResult.error(invocation.toolCallId(), "Tool execution cancelled."),
+          "Tool execution cancelled.");
+      return;
+    }
+    if (!clock.instant().isBefore(invocation.deadlineAt())) {
+      fail(claimed, "Tool execution deadline exceeded.");
+      return;
+    }
+    Optional<Tool> resolved = registry.find(invocation.toolName(), invocation.toolVersion());
+    if (resolved.isEmpty() || !descriptorMatches(invocation, resolved.get())) {
+      fail(
+          claimed,
+          "Frozen tool "
+              + invocation.toolName()
+              + "@"
+              + invocation.toolVersion()
+              + " is unavailable.");
+      return;
+    }
+    Tool tool = resolved.get();
+    if (claimed.recoveredLease()
+        && tool.descriptor().sideEffect() == ToolSideEffect.NON_IDEMPOTENT) {
+      terminate(
+          claimed,
+          ToolInvocationStatus.UNKNOWN,
+          ToolResult.error(
+              invocation.toolCallId(), "Tool ownership was lost; side effect result is unknown."),
+          "non-idempotent invocation lease expired");
+      return;
+    }
+    if (!transactions.start(claimed, clock.instant())) {
+      return;
+    }
+    Execution execution = new Execution(claimed);
+    if (executions.putIfAbsent(invocation.id(), execution) != null) {
+      return;
+    }
+    execution.schedule();
+    try {
+      ToolExecutionHandle handle =
+          tool.execute(
+              new ToolExecutionRequest(
+                  tool.descriptor(),
+                  new ToolCall(
+                      invocation.toolCallId(), invocation.toolName(), invocation.argumentsJson()),
+                  Duration.between(clock.instant(), invocation.deadlineAt())),
+              execution);
+      execution.setHandle(handle);
+    } catch (RuntimeException error) {
+      execution.error(error);
+    }
+  }
+
+  private boolean descriptorMatches(ToolInvocation invocation, Tool tool) {
+    return tool.descriptor().name().equals(invocation.toolName())
+        && tool.descriptor().version().equals(invocation.toolVersion())
+        && ToolTargetType.fromExecutionMode(tool.descriptor().executionMode())
+            == invocation.targetType();
+  }
+
+  private boolean supportedTarget(ToolInvocation invocation) {
+    return invocation.targetType() == ToolTargetType.CLOUD
+        || invocation.targetType() == ToolTargetType.CONTROL;
+  }
+
+  private void fail(ClaimedToolInvocation claimed, String message) {
+    terminate(
+        claimed,
+        ToolInvocationStatus.FAILED,
+        ToolResult.error(claimed.invocation().toolCallId(), message),
+        message);
+  }
+
+  private void terminate(
+      ClaimedToolInvocation claimed,
+      ToolInvocationStatus status,
+      ToolResult result,
+      String errorMessage) {
+    transactions.terminate(
+        claimed, status, externalize(claimed.workspaceId(), result), errorMessage, clock.instant());
+    transactions.coordinateReadyRuns(clock.instant());
+  }
+
+  private ToolResult externalize(long workspaceId, ToolResult result) {
+    List<ToolContent> contents = new ArrayList<>();
+    for (ToolContent content : result.contents()) {
+      byte[] bytes = bytes(content);
+      if (bytes.length <= config.inlineResultBytes() || content instanceof ArtifactToolContent) {
+        contents.add(content);
+        continue;
+      }
+      String mediaType = content instanceof JsonToolContent ? "application/json" : "text/plain";
+      ArtifactRef artifact = artifactStore.save(workspaceId, mediaType, "utf-8", bytes);
+      contents.add(new TextToolContent(preview(bytes)));
+      contents.add(new ArtifactToolContent(artifact));
+    }
+    return new ToolResult(
+        result.toolCallId(), contents, result.error(), result.detailsJson(), false);
+  }
+
+  private byte[] bytes(ToolContent content) {
+    if (content instanceof TextToolContent text) {
+      return text.text().getBytes(StandardCharsets.UTF_8);
+    }
+    if (content instanceof JsonToolContent json) {
+      return json.json().getBytes(StandardCharsets.UTF_8);
+    }
+    return new byte[0];
+  }
+
+  private String preview(byte[] bytes) {
+    int length = Math.min(bytes.length, config.previewBytes());
+    String value = new String(bytes, 0, length, StandardCharsets.UTF_8);
+    return length == bytes.length ? value : value + "\n[full output stored as artifact]";
+  }
+
+  private static String requireNonBlank(String value, String name) {
+    if (value == null || value.isBlank()) {
+      throw new IllegalArgumentException(name + " must not be blank");
+    }
+    return value;
+  }
+
+  private final class Execution implements ToolExecutionListener {
+    private final ClaimedToolInvocation claimed;
+    private final List<ToolResult> pending = new ArrayList<>();
+    private ToolExecutionHandle handle;
+    private boolean terminal;
+    private int pendingBytes;
+    private ScheduledFuture<?> heartbeat;
+    private ScheduledFuture<?> timeout;
+    private ScheduledFuture<?> partialFlush;
+
+    private Execution(ClaimedToolInvocation claimed) {
+      this.claimed = claimed;
+    }
+
+    private synchronized void schedule() {
+      heartbeat =
+          scheduler.scheduleAtFixedRate(
+              this::heartbeat,
+              config.heartbeatInterval().toMillis(),
+              config.heartbeatInterval().toMillis(),
+              TimeUnit.MILLISECONDS);
+      timeout =
+          scheduler.schedule(
+              this::timeout,
+              Math.max(
+                  0,
+                  Duration.between(clock.instant(), claimed.invocation().deadlineAt()).toMillis()),
+              TimeUnit.MILLISECONDS);
+      partialFlush =
+          scheduler.scheduleAtFixedRate(
+              this::flush,
+              config.partialFlushInterval().toMillis(),
+              config.partialFlushInterval().toMillis(),
+              TimeUnit.MILLISECONDS);
+    }
+
+    private synchronized void setHandle(ToolExecutionHandle value) {
+      handle = Objects.requireNonNull(value, "tool execution handle");
+      if (terminal) {
+        handle.cancel();
+      }
+    }
+
+    @Override
+    public void onPartial(ToolResult partial) {
+      synchronized (this) {
+        if (terminal) {
+          return;
+        }
+        pending.add(externalize(claimed.workspaceId(), partial));
+        pendingBytes += ToolResultJsonCodec.encode(partial).length();
+        if (pendingBytes >= config.partialBatchBytes()) {
+          flush();
+        }
+      }
+    }
+
+    @Override
+    public void onComplete(ToolResult result) {
+      complete(ToolInvocationStatus.SUCCEEDED, result, null);
+    }
+
+    @Override
+    public void onError(Throwable error) {
+      error(error);
+    }
+
+    private void error(Throwable error) {
+      String message =
+          error == null || error.getMessage() == null
+              ? "Tool execution failed."
+              : error.getMessage();
+      complete(
+          ToolInvocationStatus.FAILED,
+          ToolResult.error(claimed.invocation().toolCallId(), message),
+          message);
+    }
+
+    private void timeout() {
+      complete(
+          ToolInvocationStatus.FAILED,
+          ToolResult.error(claimed.invocation().toolCallId(), "Tool execution deadline exceeded."),
+          "Tool execution deadline exceeded.");
+    }
+
+    private void heartbeat() {
+      ToolInvocation current = store.find(claimed.invocation().id()).orElse(null);
+      if (current == null || current.status().isTerminal()) {
+        stop();
+        return;
+      }
+      if (current.cancelRequestedAt() != null
+          || current.status() == ToolInvocationStatus.CANCEL_REQUESTED) {
+        complete(
+            ToolInvocationStatus.CANCELLED,
+            ToolResult.error(claimed.invocation().toolCallId(), "Tool execution cancelled."),
+            "Tool execution cancelled.");
+        return;
+      }
+      if (!store.heartbeat(claimed, clock.instant(), config.leaseDuration())) {
+        stop();
+      }
+    }
+
+    private void flush() {
+      List<ToolResult> batch;
+      synchronized (this) {
+        if (pending.isEmpty()) {
+          return;
+        }
+        batch = List.copyOf(pending);
+        pending.clear();
+        pendingBytes = 0;
+      }
+      transactions.appendPartial(claimed, batch, clock.instant());
+    }
+
+    private void complete(ToolInvocationStatus status, ToolResult result, String errorMessage) {
+      synchronized (this) {
+        if (terminal) {
+          return;
+        }
+        terminal = true;
+      }
+      flush();
+      if (transactions.terminate(
+          claimed,
+          status,
+          externalize(claimed.workspaceId(), result),
+          errorMessage,
+          clock.instant())) {
+        transactions.coordinateReadyRuns(clock.instant());
+      }
+      cancelHandle();
+      stop();
+    }
+
+    private synchronized void cancelHandle() {
+      if (handle != null && !handle.isCancelled()) {
+        handle.cancel();
+      }
+    }
+
+    private synchronized void stop() {
+      if (heartbeat != null) {
+        heartbeat.cancel(false);
+      }
+      if (timeout != null) {
+        timeout.cancel(false);
+      }
+      if (partialFlush != null) {
+        partialFlush.cancel(false);
+      }
+      executions.remove(claimed.invocation().id(), this);
+    }
+  }
+}

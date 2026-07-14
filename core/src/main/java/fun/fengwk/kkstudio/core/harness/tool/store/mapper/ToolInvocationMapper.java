@@ -86,6 +86,9 @@ public interface ToolInvocationMapper extends BaseMapper {
   @ResultMap("toolInvocationResultMap")
   ToolInvocationDO findInWorkspace(@Param("workspaceId") long workspaceId, @Param("id") long id);
 
+  @Select("select session_id from harness_run where id = #{runId}")
+  Long findRunSessionId(@Param("runId") long runId);
+
   @Select("select " + COLUMNS + " from tool_invocation ti where ti.id = #{id} for update")
   @ResultMap("toolInvocationResultMap")
   ToolInvocationDO findForUpdate(@Param("id") long id);
@@ -102,6 +105,84 @@ public interface ToolInvocationMapper extends BaseMapper {
       """)
   @ResultMap("toolInvocationResultMap")
   List<ToolInvocationDO> listByRun(@Param("runId") long runId);
+
+  @Select(
+      """
+      select
+      """
+          + COLUMNS
+          + """
+      from tool_invocation ti
+      where ti.target_type in ('CLOUD', 'CONTROL')
+        and (ti.status in ('QUEUED', 'CANCEL_REQUESTED')
+          or (ti.status = 'RUNNING' and ti.lease_until <= #{now}))
+      order by ti.deadline_at asc, ti.id asc
+      limit 1
+      """)
+  @ResultMap("toolInvocationResultMap")
+  ToolInvocationDO findClaimCandidate(@Param("now") LocalDateTime now);
+
+  @Update(
+      """
+      update tool_invocation
+      set status = case when status = 'CANCEL_REQUESTED' then status else 'RUNNING' end,
+          lease_owner = #{owner}, lease_until = #{leaseUntil},
+          started_at = coalesce(started_at, #{now}), gmt_modified = #{now}
+      where id = #{id}
+        and (status in ('QUEUED', 'CANCEL_REQUESTED')
+          or (status = 'RUNNING' and lease_until <= #{now}))
+      """)
+  int claim(
+      @Param("id") long id,
+      @Param("owner") String owner,
+      @Param("now") LocalDateTime now,
+      @Param("leaseUntil") LocalDateTime leaseUntil);
+
+  @Update(
+      """
+      update tool_invocation
+      set lease_until = #{leaseUntil}, gmt_modified = #{now}
+      where id = #{id} and status = 'RUNNING' and lease_owner = #{owner} and lease_until > #{now}
+      """)
+  int heartbeat(
+      @Param("id") long id,
+      @Param("owner") String owner,
+      @Param("now") LocalDateTime now,
+      @Param("leaseUntil") LocalDateTime leaseUntil);
+
+  @Update(
+      """
+      update tool_invocation
+      set status = #{terminalStatus}, result_json = #{resultJson}, error_message = #{errorMessage},
+          lease_owner = null, lease_until = null, finished_at = #{now}, gmt_modified = #{now}
+      where id = #{id} and status in ('RUNNING', 'CANCEL_REQUESTED')
+        and lease_owner = #{owner} and lease_until > #{now}
+      """)
+  int terminateOwned(
+      @Param("id") long id,
+      @Param("owner") String owner,
+      @Param("terminalStatus") String terminalStatus,
+      @Param("resultJson") String resultJson,
+      @Param("errorMessage") String errorMessage,
+      @Param("now") LocalDateTime now);
+
+  @Select(
+      """
+      select count(*)
+      from tool_invocation
+      where run_id = #{runId} and status not in ('SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN')
+      """)
+  long countNonTerminalByRun(@Param("runId") long runId);
+
+  @Update(
+      """
+      update tool_invocation
+      set status = case when status in ('PREPARING', 'WAITING_APPROVAL', 'QUEUED', 'RUNNING')
+                   then 'CANCEL_REQUESTED' else status end,
+          cancel_requested_at = coalesce(cancel_requested_at, #{now}), gmt_modified = #{now}
+      where id = #{id} and status not in ('SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN')
+      """)
+  int requestCancel(@Param("id") long id, @Param("now") LocalDateTime now);
 
   @Update(
       """

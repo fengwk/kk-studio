@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.harness.run.store.mapper;
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
 import java.time.LocalDateTime;
+import java.util.List;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -169,6 +170,28 @@ public interface HarnessRunMapper extends BaseMapper {
       @Param("attempt") int attempt,
       @Param("status") String status,
       @Param("now") LocalDateTime now);
+
+  @Select(
+      """
+      select id, session_id, trigger_entry_id, status, turn_index, attempt, event_sequence,
+             lease_owner, lease_until, next_attempt_at, cancel_requested_at,
+             gmt_create as create_time, started_at, finished_at, gmt_modified as update_time
+      from harness_run
+      where status = 'WAITING_TOOLS'
+      order by id asc
+      limit #{limit}
+      """)
+  @ResultMap("harnessRunResultMap")
+  List<HarnessRunDO> listWaitingTools(@Param("limit") int limit);
+
+  @Update(
+      """
+      update harness_run
+      set status = 'QUEUED', lease_owner = null, lease_until = null, next_attempt_at = #{now},
+          gmt_modified = #{now}
+      where id = #{runId} and status = 'WAITING_TOOLS'
+      """)
+  int requeueWaitingTools(@Param("runId") long runId, @Param("now") LocalDateTime now);
 
   @Update(
       """

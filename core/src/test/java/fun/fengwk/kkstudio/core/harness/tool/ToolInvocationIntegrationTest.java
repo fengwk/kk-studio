@@ -18,6 +18,9 @@ import fun.fengwk.kkstudio.core.harness.tool.service.ToolDecisionConflictExcepti
 import fun.fengwk.kkstudio.core.harness.tool.service.ToolInvocationDecisionService;
 import fun.fengwk.kkstudio.core.harness.tool.service.WorkspaceToolPolicyResolver;
 import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
+import fun.fengwk.kkstudio.core.harness.tool.worker.DatabaseArtifactStore;
+import fun.fengwk.kkstudio.core.harness.tool.worker.DatabaseToolInvocationWorkerStore;
+import fun.fengwk.kkstudio.core.harness.tool.worker.ToolInvocationTransactionService;
 import fun.fengwk.kkstudio.core.workspace.service.WorkspaceService;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
@@ -33,26 +36,36 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshotEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.ArtifactMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionTree;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolPermissionDecision;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.ClaimedToolInvocation;
+import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
+import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
+import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
+import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 import fun.fengwk.kkstudio.share.model.WorkspaceCreateDTO;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -60,6 +73,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -77,6 +94,9 @@ class ToolInvocationIntegrationTest {
   @Autowired private HarnessRunTransactionService transactions;
   @Autowired private DatabaseToolPreparationPort preparationPort;
   @Autowired private MysqlToolInvocationStore invocationStore;
+  @Autowired private DatabaseToolInvocationWorkerStore workerStore;
+  @Autowired private ToolInvocationTransactionService toolTransactions;
+  @Autowired private DatabaseArtifactStore artifactStore;
   @Autowired private ToolInvocationDecisionService decisionService;
   @Autowired private HarnessSessionYoloService yoloService;
   @Autowired private WorkspaceToolPolicyResolver policyResolver;
@@ -85,6 +105,7 @@ class ToolInvocationIntegrationTest {
 
   @BeforeEach
   void clean() {
+    jdbcTemplate.update("delete from tool_artifact");
     jdbcTemplate.update("delete from tool_invocation");
     jdbcTemplate.update("delete from harness_run_event");
     jdbcTemplate.update("delete from harness_run");
@@ -407,6 +428,270 @@ class ToolInvocationIntegrationTest {
 
     jdbcTemplate.update("update harness_run set status = 'CANCELLED' where id = ?", childRun.id());
     assertThrows(IllegalStateException.class, () -> yoloService.set(workspaceId, child.id(), true));
+  }
+
+  /**
+   * Claims only Cloud work, preserves cancellation, and rejects a callback after lease ownership
+   * changes.
+   */
+  @Test
+  void claimsHeartbeatsCancelsAndReclaimsExpiredCloudInvocations() {
+    long workspaceId = workspace("{}");
+    Claimed run = claimedRun(workspaceId, false);
+    List<ToolCall> calls =
+        List.of(
+            new ToolCall("cancelled", "read", "{\"path\":\"a\"}"),
+            new ToolCall("reclaimed", "write", "{\"path\":\"b\"}"));
+    assertTrue(prepare(run.run(), calls, List.of(binding("read"), binding("write"))));
+
+    ClaimedToolInvocation first =
+        workerStore.claimDue("tool-a", NOW.plusSeconds(2), Duration.ofMinutes(1)).orElseThrow();
+    assertEquals(ToolInvocationStatus.RUNNING, first.invocation().status());
+    assertTrue(workerStore.heartbeat(first, NOW.plusSeconds(3), Duration.ofMinutes(1)));
+    assertTrue(toolTransactions.requestCancel(first.invocation().id(), NOW.plusSeconds(4)));
+    assertFalse(workerStore.heartbeat(first, NOW.plusSeconds(5), Duration.ofMinutes(1)));
+
+    ClaimedToolInvocation cancelled =
+        workerStore.claimDue("tool-b", NOW.plusSeconds(5), Duration.ofMinutes(1)).orElseThrow();
+    assertEquals(ToolInvocationStatus.CANCEL_REQUESTED, cancelled.invocation().status());
+    assertTrue(
+        toolTransactions.terminate(
+            cancelled,
+            ToolInvocationStatus.CANCELLED,
+            ToolResult.error("cancelled", "cancelled"),
+            "cancelled",
+            NOW.plusSeconds(5)));
+
+    ClaimedToolInvocation original =
+        workerStore.claimDue("tool-c", NOW.plusSeconds(6), Duration.ofMinutes(1)).orElseThrow();
+    ClaimedToolInvocation reclaimed =
+        workerStore.claimDue("tool-d", NOW.plusSeconds(67), Duration.ofMinutes(1)).orElseThrow();
+    assertTrue(reclaimed.recoveredLease());
+    assertTrue(reclaimed.invocation().deadlineAt().isBefore(NOW.plusSeconds(67)));
+    assertFalse(workerStore.heartbeat(original, NOW.plusSeconds(67), Duration.ofMinutes(1)));
+    assertFalse(
+        toolTransactions.terminate(
+            original,
+            ToolInvocationStatus.FAILED,
+            ToolResult.error("reclaimed", "late"),
+            "late callback",
+            NOW.plusSeconds(67)));
+    assertTrue(workerStore.find(reclaimed.invocation().id()).isPresent());
+    assertFalse(toolTransactions.start(original, NOW.plusSeconds(67)));
+    assertFalse(
+        toolTransactions.appendPartial(
+            original,
+            List.of(
+                new ToolResult(
+                    "reclaimed", List.of(new TextToolContent("late")), false, "{}", false)),
+            NOW.plusSeconds(67)));
+    assertFalse(toolTransactions.requestCancel(Long.MAX_VALUE, NOW));
+    assertFalse(toolTransactions.coordinate(Long.MAX_VALUE, NOW));
+    assertThrows(
+        IllegalArgumentException.class, () -> workerStore.claimDue("", NOW, Duration.ofSeconds(1)));
+    assertThrows(
+        IllegalArgumentException.class, () -> workerStore.heartbeat(reclaimed, NOW, Duration.ZERO));
+    assertThrows(
+        NullPointerException.class, () -> workerStore.heartbeat(null, NOW, Duration.ofSeconds(1)));
+  }
+
+  /**
+   * Artifact reads are workspace scoped and preserve complete bytes plus the immutable SHA-256
+   * digest.
+   */
+  @Test
+  void storesWorkspaceScopedArtifactsWithStableTransportId() {
+    long workspaceId = workspace("{}");
+    long otherWorkspaceId = workspace("{}");
+    byte[] content = "abc".getBytes(StandardCharsets.UTF_8);
+
+    ArtifactRef ref = artifactStore.save(workspaceId, "text/plain", "utf-8", content);
+    content[0] = 'x';
+
+    assertTrue(artifactStore.find(otherWorkspaceId, ref.artifactId()).isEmpty());
+    var artifact = artifactStore.find(workspaceId, ref.artifactId()).orElseThrow();
+    assertEquals("abc", new String(artifact.content(), StandardCharsets.UTF_8));
+    assertEquals(
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", artifact.sha256());
+    assertEquals("text/plain", ref.mediaType());
+    assertEquals(3, ref.sizeBytes());
+    assertTrue(artifactStore.find(workspaceId, "not-a-snowflake").isEmpty());
+    assertTrue(artifactStore.find(0, ref.artifactId()).isEmpty());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> artifactStore.save(0, "text/plain", "utf-8", new byte[0]));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> artifactStore.save(workspaceId, "", "utf-8", new byte[0]));
+    assertThrows(
+        NullPointerException.class,
+        () -> artifactStore.save(workspaceId, "text/plain", "utf-8", null));
+  }
+
+  /**
+   * Partial journal data is append-only, and malformed terminal state rolls its coordinator
+   * transaction back.
+   */
+  @Test
+  void journalsPartialAndRollsBackCoordinatorOnCorruptTerminalResult() {
+    long workspaceId = workspace("{}");
+    Claimed run = claimedRun(workspaceId, false);
+    List<ToolCall> calls = List.of(new ToolCall("partial", "read", "{\"path\":\"a\"}"));
+    assertTrue(prepare(run.run(), calls, List.of(binding("read"))));
+    ClaimedToolInvocation claimed =
+        workerStore.claimDue("tool-a", NOW.plusSeconds(2), Duration.ofMinutes(1)).orElseThrow();
+    assertTrue(toolTransactions.start(claimed, NOW.plusSeconds(2)));
+    assertTrue(toolTransactions.appendPartial(claimed, List.of(), NOW.plusSeconds(2)));
+    assertTrue(
+        toolTransactions.appendPartial(
+            claimed,
+            List.of(
+                new ToolResult(
+                    "partial", List.of(new TextToolContent("progress")), false, "{}", false)),
+            NOW.plusSeconds(2)));
+    assertEquals(
+        1,
+        runStore.listAfter(run.run().id(), 0, 20).stream()
+            .filter(event -> event.type() == RunEventType.TOOL_DELTA_BATCH)
+            .count());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            toolTransactions.appendPartial(
+                claimed,
+                List.of(
+                    new ToolResult(
+                        "wrong", List.of(new TextToolContent("wrong")), false, "{}", false)),
+                NOW.plusSeconds(2)));
+    assertTrue(
+        toolTransactions.terminate(
+            claimed,
+            ToolInvocationStatus.SUCCEEDED,
+            new ToolResult("partial", List.of(new TextToolContent("done")), false, "{}", false),
+            null,
+            NOW.plusSeconds(3)));
+    assertFalse(
+        toolTransactions.terminate(
+            claimed,
+            ToolInvocationStatus.SUCCEEDED,
+            new ToolResult("partial", List.of(new TextToolContent("late")), false, "{}", false),
+            null,
+            NOW.plusSeconds(3)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            toolTransactions.terminate(
+                claimed,
+                ToolInvocationStatus.RUNNING,
+                ToolResult.error("partial", "bad"),
+                null,
+                NOW));
+    assertThrows(IllegalArgumentException.class, () -> toolTransactions.requestCancel(0, NOW));
+    Long leafBefore = sessionStore.find(run.sessionId()).orElseThrow().leafEntryId();
+    jdbcTemplate.update(
+        "update tool_invocation set result_json = ? where id = ?",
+        "{bad",
+        claimed.invocation().id());
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> toolTransactions.coordinateReadyRuns(NOW.plusSeconds(4)));
+    assertEquals(leafBefore, sessionStore.find(run.sessionId()).orElseThrow().leafEntryId());
+    assertEquals(RunStatus.WAITING_TOOLS, runStore.find(run.run().id()).orElseThrow().status());
+  }
+
+  /**
+   * Terminal callbacks are materialized once in source ordinal order before the Run is requeued.
+   */
+  @Test
+  void coordinatesTerminalResultsInOrdinalOrderIdempotently() throws Exception {
+    long workspaceId = workspace("{}");
+    Claimed run = claimedRun(workspaceId, false);
+    List<ToolCall> calls =
+        List.of(
+            new ToolCall("second-completes-first", "read", "{\"path\":\"a\"}"),
+            new ToolCall("first-completes-second", "write", "{\"path\":\"b\"}"));
+    assertTrue(prepare(run.run(), calls, List.of(binding("read"), binding("write"))));
+
+    ClaimedToolInvocation first =
+        workerStore.claimDue("tool-a", NOW.plusSeconds(2), Duration.ofMinutes(1)).orElseThrow();
+    assertTrue(toolTransactions.start(first, NOW.plusSeconds(2)));
+    assertTrue(
+        toolTransactions.terminate(
+            first,
+            ToolInvocationStatus.SUCCEEDED,
+            new ToolResult(
+                "second-completes-first",
+                List.of(
+                    new JsonToolContent("{\"result\":1}"),
+                    new ArtifactToolContent(new ArtifactRef("99", "text/plain", 12))),
+                false,
+                "{}",
+                true),
+            null,
+            NOW.plusSeconds(2)));
+    ClaimedToolInvocation second =
+        workerStore.claimDue("tool-b", NOW.plusSeconds(3), Duration.ofMinutes(1)).orElseThrow();
+    assertTrue(toolTransactions.start(second, NOW.plusSeconds(3)));
+    assertTrue(
+        toolTransactions.terminate(
+            second,
+            ToolInvocationStatus.SUCCEEDED,
+            new ToolResult(
+                "first-completes-second",
+                List.of(new TextToolContent("second terminal")),
+                false,
+                "{}",
+                true),
+            null,
+            NOW.plusSeconds(3)));
+
+    ExecutorService coordinators = Executors.newFixedThreadPool(2);
+    CountDownLatch start = new CountDownLatch(1);
+    try {
+      Future<Integer> one =
+          coordinators.submit(
+              () -> {
+                start.await();
+                return toolTransactions.coordinateReadyRuns(NOW.plusSeconds(4));
+              });
+      Future<Integer> two =
+          coordinators.submit(
+              () -> {
+                start.await();
+                return toolTransactions.coordinateReadyRuns(NOW.plusSeconds(4));
+              });
+      start.countDown();
+      assertEquals(1, one.get() + two.get());
+    } finally {
+      coordinators.shutdownNow();
+    }
+    assertEquals(0, toolTransactions.coordinateReadyRuns(NOW.plusSeconds(5)));
+    assertEquals(RunStatus.QUEUED, runStore.find(run.run().id()).orElseThrow().status());
+    Session session = sessionStore.find(run.sessionId()).orElseThrow();
+    List<SessionEntry> path = sessionStore.loadPath(run.sessionId(), session.leafEntryId());
+    List<String> toolCallIds =
+        path.stream()
+            .map(SessionEntry::payload)
+            .filter(MessageEntryPayload.class::isInstance)
+            .map(MessageEntryPayload.class::cast)
+            .filter(payload -> payload.message().role() == AgentMessageRole.TOOL)
+            .map(
+                payload ->
+                    ((ToolResultMessageContent) payload.message().contents().get(0)).toolCallId())
+            .toList();
+    assertEquals(List.of("second-completes-first", "first-completes-second"), toolCallIds);
+    ToolResultMessageContent firstResult =
+        path.stream()
+            .map(SessionEntry::payload)
+            .filter(MessageEntryPayload.class::isInstance)
+            .map(MessageEntryPayload.class::cast)
+            .filter(payload -> payload.message().role() == AgentMessageRole.TOOL)
+            .map(payload -> (ToolResultMessageContent) payload.message().contents().get(0))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(firstResult.contents().get(0) instanceof JsonMessageContent);
+    assertTrue(firstResult.contents().get(1) instanceof ArtifactMessageContent);
   }
 
   private ToolInvocation askInvocation(long workspaceId, String toolCallId) {

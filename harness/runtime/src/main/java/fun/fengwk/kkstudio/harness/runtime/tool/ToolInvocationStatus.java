@@ -34,6 +34,7 @@ public enum ToolInvocationStatus {
       case RUNNING -> target == SUCCEEDED
           || target == FAILED
           || target == CANCEL_REQUESTED
+          || target == CANCELLED
           || target == UNKNOWN;
       case CANCEL_REQUESTED -> target == SUCCEEDED
           || target == FAILED

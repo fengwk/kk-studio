@@ -195,3 +195,16 @@ create table if not exists tool_invocation (
     key idx_tool_invocation_claim (target_type, status, deadline_at, id),
     key idx_tool_invocation_environment_claim (environment_id, status, deadline_at, id)
 ) engine=InnoDB default charset=utf8mb4 comment='durable tool invocation';
+
+create table if not exists tool_artifact (
+    id           bigint not null comment 'Snowflake primary key',
+    workspace_id bigint not null comment 'isolation boundary',
+    media_type   varchar(128) not null comment 'RFC media type',
+    encoding     varchar(64) not null comment 'content encoding',
+    content      longblob not null comment 'immutable complete output',
+    size_bytes   bigint not null comment 'content bytes',
+    sha256       varchar(64) not null comment 'content digest',
+    gmt_create   datetime(3) not null default current_timestamp(3) comment 'creation timestamp',
+    primary key (id),
+    key idx_tool_artifact_workspace (workspace_id, id)
+) engine=InnoDB default charset=utf8mb4 comment='workspace tool output artifact';
