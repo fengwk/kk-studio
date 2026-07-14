@@ -215,6 +215,7 @@ create table if not exists harness_subagent_task (
     child_run_id         bigint not null,
     target_agent         varchar(128) not null,
     workspace_policy     varchar(32) not null,
+    workspace_revision   varchar(512),
     max_turns            integer not null,
     idle_timeout_millis  bigint,
     status               varchar(32) not null,

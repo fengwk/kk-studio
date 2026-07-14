@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.task;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
@@ -12,7 +13,6 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 import java.io.IOException;
@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class TaskTool implements Tool {
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-  private static final Duration POLL_INTERVAL = Duration.ofMillis(100);
+  public static final Duration DEFAULT_POLL_INTERVAL = Duration.ofSeconds(1);
   private static final ToolDescriptor DESCRIPTOR =
       new ToolDescriptor(
           "task",
@@ -47,7 +47,7 @@ public final class TaskTool implements Tool {
               Map.of(
                   "subagent_type", new ToolStringSchema("Allowed target agent name."),
                   "prompt", new ToolStringSchema("Complete task instruction."),
-                  "session_id", new ToolIntegerSchema("Optional child session id to resume."),
+                  "session_id", new ToolStringSchema("Optional child session id to resume."),
                   "workspace_policy",
                       new ToolEnumSchema(
                           "Workspace isolation policy.",
@@ -61,11 +61,21 @@ public final class TaskTool implements Tool {
   private final TaskRuntime runtime;
   private final ScheduledExecutorService scheduler;
   private final Clock clock;
+  private final Duration pollInterval;
 
   public TaskTool(TaskRuntime runtime, ScheduledExecutorService scheduler, Clock clock) {
+    this(runtime, scheduler, clock, DEFAULT_POLL_INTERVAL);
+  }
+
+  public TaskTool(
+      TaskRuntime runtime, ScheduledExecutorService scheduler, Clock clock, Duration pollInterval) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.clock = Objects.requireNonNull(clock, "clock");
+    this.pollInterval = Objects.requireNonNull(pollInterval, "pollInterval");
+    if (pollInterval.isNegative() || pollInterval.isZero()) {
+      throw new IllegalArgumentException("pollInterval must be positive");
+    }
   }
 
   @Override
@@ -91,13 +101,14 @@ public final class TaskTool implements Tool {
         handle.future =
             scheduler.scheduleWithFixedDelay(
                 () -> inspect(handle),
-                POLL_INTERVAL.toMillis(),
-                POLL_INTERVAL.toMillis(),
+                pollInterval.toMillis(),
+                pollInterval.toMillis(),
                 TimeUnit.MILLISECONDS);
       }
     } catch (RuntimeException error) {
-      listener.onComplete(ToolResult.error(request.call().id(), error.getMessage()));
-      handle.completed.set(true);
+      if (handle.completed.compareAndSet(false, true)) {
+        listener.onComplete(ToolResult.error(request.call().id(), message(error)));
+      }
     }
     return handle;
   }
@@ -115,8 +126,7 @@ public final class TaskTool implements Tool {
     } catch (RuntimeException error) {
       if (handle.completed.compareAndSet(false, true)) {
         cancelFuture(handle);
-        handle.listener.onComplete(
-            ToolResult.error(handle.request.call().id(), error.getMessage()));
+        handle.listener.onComplete(ToolResult.error(handle.request.call().id(), message(error)));
       }
     }
   }
@@ -126,12 +136,14 @@ public final class TaskTool implements Tool {
       return;
     }
     cancelFuture(handle);
+    String json = TaskResultFormatter.json(report);
     ToolResult result =
         new ToolResult(
             handle.request.call().id(),
-            List.of(new TextToolContent(report.render())),
+            List.of(
+                new TextToolContent(TaskResultFormatter.text(report)), new JsonToolContent(json)),
             !report.success(),
-            "{}",
+            json,
             false);
     handle.listener.onComplete(result);
   }
@@ -160,17 +172,30 @@ public final class TaskTool implements Tool {
       String prompt = text(root, "prompt", true);
       Long sessionId = null;
       if (root.has("session_id") && !root.get("session_id").isNull()) {
-        JsonNode value = root.get("session_id");
-        if (!value.canConvertToLong()) {
-          throw new IllegalArgumentException("session_id must be an integer");
-        }
-        sessionId = value.longValue();
+        sessionId = parseSnowflakeId(text(root, "session_id", true), "session_id");
       }
       String policy = text(root, "workspace_policy", false);
       return new TaskCommand(
           type, prompt, sessionId, policy == null ? null : WorkspacePolicy.parse(policy));
     } catch (IOException error) {
       throw new IllegalArgumentException("task arguments must be valid JSON", error);
+    }
+  }
+
+  private static String message(RuntimeException error) {
+    return error.getMessage() == null || error.getMessage().isBlank()
+        ? "Task execution failed."
+        : error.getMessage();
+  }
+
+  private static long parseSnowflakeId(String value, String field) {
+    if (!value.matches("[1-9][0-9]*")) {
+      throw new IllegalArgumentException(field + " must be a positive decimal string");
+    }
+    try {
+      return Long.parseLong(value);
+    } catch (NumberFormatException error) {
+      throw new IllegalArgumentException(field + " is outside the signed 64-bit range", error);
     }
   }
 

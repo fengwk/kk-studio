@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.harness.run.store.mapper;
 
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunEventDO;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
@@ -56,4 +57,7 @@ public interface HarnessRunEventMapper extends BaseMapper {
       @Param("rootSessionId") long rootSessionId,
       @Param("afterEventId") long afterEventId,
       @Param("limit") int limit);
+
+  @Select("select max(gmt_create) from harness_run_event where run_id = #{runId}")
+  LocalDateTime latestActivityAt(@Param("runId") long runId);
 }

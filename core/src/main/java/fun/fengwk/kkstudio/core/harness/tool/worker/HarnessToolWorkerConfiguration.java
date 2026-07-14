@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.harness.tool.worker;
 
 import fun.fengwk.kkstudio.harness.runtime.task.TaskRuntime;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskTool;
+import fun.fengwk.kkstudio.harness.runtime.task.WorkspaceRevisionPort;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.CloudToolWorker;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
@@ -11,6 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorkerConfig;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import java.time.Clock;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -31,6 +33,12 @@ public class HarnessToolWorkerConfiguration {
   @ConditionalOnMissingBean(name = "toolWorkerScheduler")
   public ScheduledExecutorService toolWorkerScheduler() {
     return Executors.newScheduledThreadPool(2);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  public WorkspaceRevisionPort workspaceRevisionPort() {
+    return (workspaceId, policy, childSessionId) -> Optional.empty();
   }
 
   @Bean

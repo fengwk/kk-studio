@@ -15,6 +15,7 @@ public record SubagentTask(
     long childRunId,
     String targetAgent,
     WorkspacePolicy workspacePolicy,
+    String workspaceRevision,
     int maxTurns,
     Duration idleTimeout,
     TaskState state,

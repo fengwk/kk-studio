@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -35,7 +36,9 @@ class TaskToolTest {
   @Test
   void startsWithoutWaitingThenCompletesFromDurableInspection() throws Exception {
     RecordingRuntime runtime = new RecordingRuntime();
-    TaskTool tool = new TaskTool(runtime, scheduler, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC));
+    TaskTool tool =
+        new TaskTool(
+            runtime, scheduler, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), Duration.ofMillis(5));
     RecordingListener listener = new RecordingListener();
 
     ToolExecutionHandle handle =
@@ -64,7 +67,9 @@ class TaskToolTest {
   @Test
   void cancelRequestsTreeOnce() {
     RecordingRuntime runtime = new RecordingRuntime();
-    TaskTool tool = new TaskTool(runtime, scheduler, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC));
+    TaskTool tool =
+        new TaskTool(
+            runtime, scheduler, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), Duration.ofMillis(5));
 
     ToolExecutionHandle handle =
         tool.execute(
@@ -88,7 +93,9 @@ class TaskToolTest {
   @Test
   void rejectsUnknownArguments() throws Exception {
     RecordingRuntime runtime = new RecordingRuntime();
-    TaskTool tool = new TaskTool(runtime, scheduler, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC));
+    TaskTool tool =
+        new TaskTool(
+            runtime, scheduler, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), Duration.ofMillis(5));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -160,6 +167,7 @@ class TaskToolTest {
               4,
               "Coder",
               WorkspacePolicy.FORK,
+              null,
               50,
               null,
               state,
@@ -167,7 +175,9 @@ class TaskToolTest {
               now,
               now);
       TaskReport report =
-          completed ? new TaskReport(3, 4, state, "done", List.of(), 1, 2, null) : null;
+          completed
+              ? new TaskReport(3, 4, state, "done", List.of(), 1, 2, WorkspacePolicy.FORK, null)
+              : null;
       return new TaskInspection(task, report);
     }
   }

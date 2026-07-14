@@ -16,17 +16,17 @@ import org.apache.ibatis.annotations.Update;
 @Mapper
 public interface HarnessSubagentTaskMapper extends BaseMapper {
   String COLUMNS =
-      "parent_invocation_id, parent_session_id, child_session_id, child_run_id, target_agent, "
-          + "workspace_policy, max_turns, idle_timeout_millis, status, report_json, "
-          + "gmt_create as create_time, gmt_modified as update_time";
+      "parent_invocation_id, parent_session_id, child_session_id, child_run_id, target_agent,"
+          + " workspace_policy, workspace_revision, max_turns, idle_timeout_millis, status,"
+          + " report_json, gmt_create as create_time, gmt_modified as update_time";
 
   @Insert(
       "insert into harness_subagent_task (parent_invocation_id, parent_session_id,"
-          + " child_session_id, child_run_id, target_agent, workspace_policy, max_turns,"
-          + " idle_timeout_millis, status, report_json, gmt_create, gmt_modified) values"
+          + " child_session_id, child_run_id, target_agent, workspace_policy, workspace_revision,"
+          + " max_turns, idle_timeout_millis, status, report_json, gmt_create, gmt_modified) values"
           + " (#{parentInvocationId}, #{parentSessionId}, #{childSessionId}, #{childRunId},"
-          + " #{targetAgent}, #{workspacePolicy}, #{maxTurns}, #{idleTimeoutMillis}, #{status},"
-          + " #{reportJson}, #{createTime}, #{updateTime})")
+          + " #{targetAgent}, #{workspacePolicy}, #{workspaceRevision}, #{maxTurns},"
+          + " #{idleTimeoutMillis}, #{status}, #{reportJson}, #{createTime}, #{updateTime})")
   int insert(HarnessSubagentTaskDO task);
 
   @Select("select " + COLUMNS + " from harness_subagent_task where parent_invocation_id = #{id}")
@@ -39,6 +39,7 @@ public interface HarnessSubagentTaskMapper extends BaseMapper {
         @Result(column = "child_run_id", property = "childRunId"),
         @Result(column = "target_agent", property = "targetAgent"),
         @Result(column = "workspace_policy", property = "workspacePolicy"),
+        @Result(column = "workspace_revision", property = "workspaceRevision"),
         @Result(column = "max_turns", property = "maxTurns"),
         @Result(column = "idle_timeout_millis", property = "idleTimeoutMillis"),
         @Result(column = "status", property = "status"),

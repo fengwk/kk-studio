@@ -12,6 +12,7 @@ public class HarnessSubagentTaskDO {
   private Long childRunId;
   private String targetAgent;
   private String workspacePolicy;
+  private String workspaceRevision;
   private Integer maxTurns;
   private Long idleTimeoutMillis;
   private String status;

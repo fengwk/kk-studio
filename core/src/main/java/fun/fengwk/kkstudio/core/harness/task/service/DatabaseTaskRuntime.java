@@ -35,10 +35,16 @@ import fun.fengwk.kkstudio.harness.runtime.task.SubagentTask;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskCommand;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskInspection;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskPolicy;
+import fun.fengwk.kkstudio.harness.runtime.task.TaskPolicyCodec;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskReport;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskRuntime;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskState;
 import fun.fengwk.kkstudio.harness.runtime.task.WorkspacePolicy;
+import fun.fengwk.kkstudio.harness.runtime.task.WorkspaceRevisionPort;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolResultJsonCodec;
+import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
+import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
 import java.time.Duration;
 import java.time.Instant;
@@ -47,8 +53,13 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -69,6 +80,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
   private final AgentDefinitionMapper agentMapper;
   private final RunIdGenerator runIds;
   private final SessionIdGenerator sessionIds;
+  private final WorkspaceRevisionPort workspaceRevisionPort;
   private final SessionEntryJsonCodec entryCodec = new SessionEntryJsonCodec();
 
   public DatabaseTaskRuntime(
@@ -80,7 +92,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       HarnessSubagentTaskMapper taskMapper,
       AgentDefinitionMapper agentMapper,
       RunIdGenerator runIds,
-      SessionIdGenerator sessionIds) {
+      SessionIdGenerator sessionIds,
+      WorkspaceRevisionPort workspaceRevisionPort) {
     this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
     this.eventMapper = Objects.requireNonNull(eventMapper, "eventMapper");
     this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
@@ -90,6 +103,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     this.agentMapper = Objects.requireNonNull(agentMapper, "agentMapper");
     this.runIds = Objects.requireNonNull(runIds, "runIds");
     this.sessionIds = Objects.requireNonNull(sessionIds, "sessionIds");
+    this.workspaceRevisionPort =
+        Objects.requireNonNull(workspaceRevisionPort, "workspaceRevisionPort");
   }
 
   @Override
@@ -117,7 +132,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     if (!parentSnapshot.allowedSubagents().contains(command.subagentType())) {
       throw new IllegalArgumentException("subagent is not allowed: " + command.subagentType());
     }
-    TaskPolicy parentPolicy = parsePolicy(parentSnapshot.executionPolicyJson());
+    TaskPolicy parentPolicy = TaskPolicyCodec.decode(parentSnapshot.executionPolicyJson());
     if (parent.getDepth() >= parentPolicy.maxDepth()) {
       throw new IllegalStateException("subagent maximum depth exceeded");
     }
@@ -145,10 +160,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
   @Override
   @Transactional
   public TaskInspection inspect(long parentInvocationId, Instant now) {
-    HarnessSubagentTaskDO task = taskMapper.findForUpdate(parentInvocationId);
-    if (task == null) {
-      throw new IllegalArgumentException("unknown task invocation: " + parentInvocationId);
-    }
+    LockedTaskParent locked = lockTaskParent(parentInvocationId);
+    HarnessSubagentTaskDO task = locked.task();
     if (!TaskState.RUNNING.name().equals(task.getStatus())) {
       return inspection(task);
     }
@@ -158,13 +171,18 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     }
     LocalDateTime timestamp = utc(now);
     if (!isTerminal(childRun)) {
-      if (childRun.getTurnIndex() >= task.getMaxTurns()
-          || (task.getIdleTimeoutMillis() != null
-              && childRun
-                  .getUpdateTime()
-                  .plus(task.getIdleTimeoutMillis(), ChronoUnit.MILLIS)
-                  .isBefore(timestamp))) {
-        requestChildCancellation(task.getChildRunId(), timestamp);
+      String cancellationReason = cancellationReason(task, childRun, timestamp);
+      if (cancellationReason != null && requestChildCancellation(task.getChildRunId(), timestamp)) {
+        appendEvent(
+            locked.parentRun(),
+            RunEventType.SUBAGENT_CANCEL_REQUESTED,
+            RunEventPayloads.of(
+                "childSessionId", task.getChildSessionId(),
+                "childRunId", task.getChildRunId(),
+                "reason", cancellationReason,
+                "attempt", locked.parentRun().getAttempt(),
+                "turnIndex", locked.parentRun().getTurnIndex()),
+            timestamp);
       }
       return inspection(task);
     }
@@ -174,23 +192,16 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     if (taskMapper.complete(
             task.getParentInvocationId(), terminal.name(), encode(report), timestamp)
         == 1) {
-      ToolInvocationDO parentInvocation =
-          invocationMapper.findForUpdate(task.getParentInvocationId());
-      if (parentInvocation != null) {
-        HarnessRunDO parentRun = runMapper.findForUpdate(parentInvocation.getRunId());
-        if (parentRun != null) {
-          appendEvent(
-              parentRun,
-              RunEventType.SUBAGENT_COMPLETED,
-              RunEventPayloads.of(
-                  "childSessionId", task.getChildSessionId(),
-                  "childRunId", task.getChildRunId(),
-                  "status", terminal.name(),
-                  "attempt", parentRun.getAttempt(),
-                  "turnIndex", parentRun.getTurnIndex()),
-              timestamp);
-        }
-      }
+      appendEvent(
+          locked.parentRun(),
+          RunEventType.SUBAGENT_COMPLETED,
+          RunEventPayloads.of(
+              "childSessionId", task.getChildSessionId(),
+              "childRunId", task.getChildRunId(),
+              "status", terminal.name(),
+              "attempt", locked.parentRun().getAttempt(),
+              "turnIndex", locked.parentRun().getTurnIndex()),
+          timestamp);
     }
     return inspection(requireTask(parentInvocationId));
   }
@@ -198,32 +209,33 @@ public class DatabaseTaskRuntime implements TaskRuntime {
   @Override
   @Transactional
   public void cancelTree(long parentInvocationId, Instant now) {
-    HarnessSubagentTaskDO rootTask = taskMapper.findForUpdate(parentInvocationId);
-    if (rootTask == null) {
-      return;
-    }
+    LockedTaskParent locked = lockTaskParent(parentInvocationId);
     LocalDateTime timestamp = utc(now);
     ArrayDeque<HarnessSubagentTaskDO> pending = new ArrayDeque<>();
-    pending.add(rootTask);
+    HashSet<Long> visitedSessions = new HashSet<>();
+    pending.add(locked.task());
+    boolean requested = false;
     while (!pending.isEmpty()) {
       HarnessSubagentTaskDO task = pending.removeFirst();
-      requestChildCancellation(task.getChildRunId(), timestamp);
-      pending.addAll(taskMapper.listByParentSession(task.getChildSessionId()));
-    }
-    ToolInvocationDO invocation = invocationMapper.findForUpdate(parentInvocationId);
-    if (invocation != null) {
-      HarnessRunDO parentRun = runMapper.findForUpdate(invocation.getRunId());
-      if (parentRun != null) {
-        appendEvent(
-            parentRun,
-            RunEventType.SUBAGENT_CANCEL_REQUESTED,
-            RunEventPayloads.of(
-                "childSessionId", rootTask.getChildSessionId(),
-                "childRunId", rootTask.getChildRunId(),
-                "attempt", parentRun.getAttempt(),
-                "turnIndex", parentRun.getTurnIndex()),
-            timestamp);
+      if (!visitedSessions.add(task.getChildSessionId())) {
+        continue;
       }
+      requested |= requestChildCancellation(task.getChildRunId(), timestamp);
+      taskMapper.listByParentSession(task.getChildSessionId()).stream()
+          .sorted(Comparator.comparing(HarnessSubagentTaskDO::getChildSessionId))
+          .forEach(pending::addLast);
+    }
+    if (requested) {
+      appendEvent(
+          locked.parentRun(),
+          RunEventType.SUBAGENT_CANCEL_REQUESTED,
+          RunEventPayloads.of(
+              "childSessionId", locked.task().getChildSessionId(),
+              "childRunId", locked.task().getChildRunId(),
+              "reason", "parent_cancelled",
+              "attempt", locked.parentRun().getAttempt(),
+              "turnIndex", locked.parentRun().getTurnIndex()),
+          timestamp);
     }
   }
 
@@ -271,7 +283,11 @@ public class DatabaseTaskRuntime implements TaskRuntime {
                 AgentMessageRole.USER, List.of(new TextMessageContent(command.prompt())))),
         timestamp);
     insertQueuedRun(childRunId, childSessionId, promptEntryId, timestamp);
-    TaskPolicy targetPolicy = parsePolicy(targetSnapshot.executionPolicyJson());
+    TaskPolicy targetPolicy = TaskPolicyCodec.decode(targetSnapshot.executionPolicyJson());
+    String workspaceRevision =
+        workspaceRevisionPort
+            .prepare(parent.getWorkspaceId(), command.workspacePolicy(), childSessionId)
+            .orElse(null);
     insertTask(
         context.invocationId(),
         parent.getId(),
@@ -279,6 +295,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
         childRunId,
         target.getName(),
         command.workspacePolicy(),
+        workspaceRevision,
         targetPolicy,
         timestamp);
     appendEvent(
@@ -334,7 +351,11 @@ public class DatabaseTaskRuntime implements TaskRuntime {
         != 1) {
       throw new IllegalStateException("subagent child changed before resume");
     }
-    TaskPolicy targetPolicy = parsePolicy(snapshot(target).executionPolicyJson());
+    TaskPolicy targetPolicy = TaskPolicyCodec.decode(childSnapshot(child).executionPolicyJson());
+    String workspaceRevision =
+        child.getParentInvocationId() == null
+            ? null
+            : requireTask(child.getParentInvocationId()).getWorkspaceRevision();
     insertTask(
         context.invocationId(),
         parent.getId(),
@@ -342,6 +363,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
         childRunId,
         target.getName(),
         command.workspacePolicy(),
+        workspaceRevision,
         targetPolicy,
         timestamp);
     appendEvent(
@@ -392,10 +414,22 @@ public class DatabaseTaskRuntime implements TaskRuntime {
   }
 
   private AgentSnapshot parentSnapshot(long sessionId) {
+    return snapshotOnCurrentPath(requireSession(sessionId));
+  }
+
+  private AgentSnapshot childSnapshot(HarnessSessionDO session) {
+    return snapshotOnCurrentPath(session);
+  }
+
+  private AgentSnapshot snapshotOnCurrentPath(HarnessSessionDO session) {
+    if (session.getLeafEntryId() == null) {
+      throw new IllegalStateException("session has no current leaf for agent snapshot lookup");
+    }
     HarnessSessionEntryDO entry =
-        entryMapper.findLatestByType(sessionId, SessionEntryType.AGENT_SNAPSHOT.value());
+        entryMapper.findLatestOnPathByType(
+            session.getId(), session.getLeafEntryId(), SessionEntryType.AGENT_SNAPSHOT.value());
     if (entry == null) {
-      throw new IllegalStateException("parent session has no frozen agent snapshot");
+      throw new IllegalStateException("session has no frozen agent snapshot on its current path");
     }
     SessionEntryPayload payload =
         entryCodec.decode(SessionEntryType.AGENT_SNAPSHOT, entry.getPayloadJson());
@@ -440,53 +474,6 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       result.add(value.textValue());
     }
     return List.copyOf(result);
-  }
-
-  private TaskPolicy parsePolicy(String json) {
-    try {
-      JsonNode policy = OBJECT_MAPPER.readTree(json);
-      return new TaskPolicy(
-          positive(policy, "maxDepth", TaskPolicy.DEFAULT_MAX_DEPTH),
-          positive(policy, "maxDirectSubagents", TaskPolicy.DEFAULT_MAX_DIRECT),
-          optionalPositive(policy, "maxTotalSubagents"),
-          positive(policy, "maxTurns", TaskPolicy.DEFAULT_MAX_TURNS),
-          optionalDuration(policy, "idleTimeoutMillis"));
-    } catch (JsonProcessingException error) {
-      throw new IllegalArgumentException("execution policy must be valid JSON", error);
-    }
-  }
-
-  private int positive(JsonNode policy, String field, int fallback) {
-    JsonNode value = policy.path(field);
-    if (value.isMissingNode() || value.isNull()) {
-      return fallback;
-    }
-    if (!value.canConvertToInt() || value.intValue() <= 0) {
-      throw new IllegalArgumentException("execution policy " + field + " must be positive");
-    }
-    return value.intValue();
-  }
-
-  private Integer optionalPositive(JsonNode policy, String field) {
-    JsonNode value = policy.path(field);
-    if (value.isMissingNode() || value.isNull()) {
-      return null;
-    }
-    if (!value.canConvertToInt() || value.intValue() <= 0) {
-      throw new IllegalArgumentException("execution policy " + field + " must be positive");
-    }
-    return value.intValue();
-  }
-
-  private Duration optionalDuration(JsonNode policy, String field) {
-    JsonNode value = policy.path(field);
-    if (value.isMissingNode() || value.isNull()) {
-      return null;
-    }
-    if (!value.canConvertToLong() || value.longValue() <= 0) {
-      throw new IllegalArgumentException("execution policy " + field + " must be positive");
-    }
-    return Duration.ofMillis(value.longValue());
   }
 
   private void insertSession(
@@ -566,6 +553,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       long childRunId,
       String targetAgent,
       WorkspacePolicy workspacePolicy,
+      String workspaceRevision,
       TaskPolicy policy,
       LocalDateTime timestamp) {
     HarnessSubagentTaskDO task = new HarnessSubagentTaskDO();
@@ -575,6 +563,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     task.setChildRunId(childRunId);
     task.setTargetAgent(targetAgent);
     task.setWorkspacePolicy(workspacePolicy.name());
+    task.setWorkspaceRevision(workspaceRevision);
     task.setMaxTurns(policy.maxTurns());
     task.setIdleTimeoutMillis(
         policy.idleTimeout() == null ? null : policy.idleTimeout().toMillis());
@@ -586,48 +575,115 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     }
   }
 
-  private void requestChildCancellation(long runId, LocalDateTime timestamp) {
-    runMapper.requestCancel(runId, timestamp);
-    invocationMapper.requestCancelByRun(runId, timestamp);
+  private boolean requestChildCancellation(long runId, LocalDateTime timestamp) {
+    boolean requested = runMapper.requestCancel(runId, timestamp) == 1;
+    if (requested) {
+      invocationMapper.requestCancelByRun(runId, timestamp);
+    }
+    return requested;
   }
 
+  private String cancellationReason(
+      HarnessSubagentTaskDO task, HarnessRunDO childRun, LocalDateTime now) {
+    if (childRun.getTurnIndex() >= task.getMaxTurns()) {
+      return "max_turns";
+    }
+    if (task.getIdleTimeoutMillis() == null) {
+      return null;
+    }
+    LocalDateTime activity = eventMapper.latestActivityAt(childRun.getId());
+    if (activity == null) {
+      activity = childRun.getCreateTime();
+    }
+    return activity.plus(task.getIdleTimeoutMillis(), ChronoUnit.MILLIS).isBefore(now)
+        ? "idle_timeout"
+        : null;
+  }
+
+  /** Locks the parent aggregate first, then its task relation, before any child row. */
+  private LockedTaskParent lockTaskParent(long parentInvocationId) {
+    ToolInvocationDO hint = invocationMapper.find(parentInvocationId);
+    if (hint == null) {
+      throw new IllegalArgumentException("unknown task invocation: " + parentInvocationId);
+    }
+    HarnessRunDO parentRun = runMapper.findForUpdate(hint.getRunId());
+    if (parentRun == null) {
+      throw new IllegalStateException("task parent run is missing");
+    }
+    HarnessSessionDO parent = requireSessionForUpdate(parentRun.getSessionId());
+    HarnessSessionDO root = lockRoot(parent);
+    ToolInvocationDO invocation = invocationMapper.findForUpdate(parentInvocationId);
+    if (invocation == null || !Objects.equals(invocation.getRunId(), parentRun.getId())) {
+      throw new IllegalStateException("task invocation changed while locking parent");
+    }
+    HarnessSubagentTaskDO task = taskMapper.findForUpdate(parentInvocationId);
+    if (task == null) {
+      throw new IllegalArgumentException("unknown task invocation: " + parentInvocationId);
+    }
+    return new LockedTaskParent(parentRun, parent, root, invocation, task);
+  }
+
+  private record LockedTaskParent(
+      HarnessRunDO parentRun,
+      HarnessSessionDO parent,
+      HarnessSessionDO root,
+      ToolInvocationDO invocation,
+      HarnessSubagentTaskDO task) {}
+
   private TaskReport report(HarnessSubagentTaskDO task, HarnessRunDO childRun, TaskState terminal) {
-    String finalReport = finalAssistantReport(task.getChildSessionId());
     return new TaskReport(
         task.getChildSessionId(),
         task.getChildRunId(),
         terminal,
-        finalReport,
-        List.of(),
+        finalAssistantReport(task.getChildSessionId()),
+        artifacts(childRun.getId()),
         childRun.getTurnIndex(),
         runMapper.countToolInvocations(childRun.getId()),
-        null);
+        WorkspacePolicy.valueOf(task.getWorkspacePolicy()),
+        task.getWorkspaceRevision());
+  }
+
+  private List<ArtifactRef> artifacts(long runId) {
+    LinkedHashMap<String, ArtifactRef> result = new LinkedHashMap<>();
+    for (ToolInvocationDO invocation : invocationMapper.listByRun(runId)) {
+      if (invocation.getResultJson() == null) {
+        continue;
+      }
+      ToolResult toolResult = ToolResultJsonCodec.decode(invocation.getResultJson());
+      toolResult.contents().stream()
+          .filter(ArtifactToolContent.class::isInstance)
+          .map(ArtifactToolContent.class::cast)
+          .map(ArtifactToolContent::artifact)
+          .forEach(artifact -> result.putIfAbsent(artifact.artifactId(), artifact));
+    }
+    return List.copyOf(result.values());
   }
 
   private String finalAssistantReport(long sessionId) {
     HarnessSessionDO session = requireSession(sessionId);
+    List<HarnessSessionEntryDO> path = new ArrayList<>();
     Long entryId = session.getLeafEntryId();
     while (entryId != null) {
       HarnessSessionEntryDO entry = entryMapper.find(sessionId, entryId);
       if (entry == null) {
         throw new IllegalStateException("child session entry path is broken");
       }
-      if (SessionEntryType.MESSAGE.value().equals(entry.getEntryType())) {
-        MessageEntryPayload payload =
-            (MessageEntryPayload)
-                entryCodec.decode(SessionEntryType.MESSAGE, entry.getPayloadJson());
-        if (payload.message().role() == AgentMessageRole.ASSISTANT) {
-          return payload.message().contents().stream()
-              .filter(TextMessageContent.class::isInstance)
-              .map(TextMessageContent.class::cast)
-              .map(TextMessageContent::text)
-              .findFirst()
-              .orElse("");
-        }
-      }
+      path.add(entry);
       entryId = entry.getParentEntryId();
     }
-    return "";
+    Collections.reverse(path);
+    return path.stream()
+        .filter(entry -> SessionEntryType.MESSAGE.value().equals(entry.getEntryType()))
+        .map(
+            entry ->
+                (MessageEntryPayload)
+                    entryCodec.decode(SessionEntryType.MESSAGE, entry.getPayloadJson()))
+        .filter(payload -> payload.message().role() == AgentMessageRole.ASSISTANT)
+        .flatMap(payload -> payload.message().contents().stream())
+        .filter(TextMessageContent.class::isInstance)
+        .map(TextMessageContent.class::cast)
+        .map(TextMessageContent::text)
+        .collect(Collectors.joining("\n"));
   }
 
   private TaskInspection inspection(HarnessSubagentTaskDO task) {
@@ -644,6 +700,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
         task.getChildRunId(),
         task.getTargetAgent(),
         WorkspacePolicy.valueOf(task.getWorkspacePolicy()),
+        task.getWorkspaceRevision(),
         task.getMaxTurns(),
         task.getIdleTimeoutMillis() == null ? null : Duration.ofMillis(task.getIdleTimeoutMillis()),
         TaskState.valueOf(task.getStatus()),

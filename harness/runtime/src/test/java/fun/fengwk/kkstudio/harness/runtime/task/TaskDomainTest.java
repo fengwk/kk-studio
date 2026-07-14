@@ -71,10 +71,12 @@ class TaskDomainTest {
    */
   @Test
   void rendersTerminalReport() {
-    TaskReport report = new TaskReport(9, 10, TaskState.FAILED, "broken", List.of(), 2, 3, "rev-1");
+    TaskReport report =
+        new TaskReport(
+            9, 10, TaskState.FAILED, "broken", List.of(), 2, 3, WorkspacePolicy.FORK, "rev-1");
 
     assertFalse(report.success());
-    assertTrue(report.render().contains("<task_error>broken</task_error>"));
-    assertTrue(report.render().contains("<workspace_revision>rev-1</workspace_revision>"));
+    assertTrue(TaskResultFormatter.text(report).contains("<task_error>broken</task_error>"));
+    assertTrue(TaskResultFormatter.json(report).contains("\"workspaceRevision\":\"rev-1\""));
   }
 }
