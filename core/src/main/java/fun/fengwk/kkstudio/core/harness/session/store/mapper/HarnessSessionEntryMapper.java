@@ -54,4 +54,12 @@ public interface HarnessSessionEntryMapper extends BaseMapper {
   @ResultMap("harnessSessionEntryResultMap")
   List<HarnessSessionEntryDO> listChildren(
       @Param("sessionId") long sessionId, @Param("parentEntryId") Long parentEntryId);
+
+  @Select(
+      "select id, session_id, parent_entry_id, run_id, entry_type, payload_json, "
+          + "gmt_create as create_time from harness_session_entry where session_id = #{sessionId} "
+          + "and entry_type = #{entryType} order by id desc limit 1")
+  @ResultMap("harnessSessionEntryResultMap")
+  HarnessSessionEntryDO findLatestByType(
+      @Param("sessionId") long sessionId, @Param("entryType") String entryType);
 }

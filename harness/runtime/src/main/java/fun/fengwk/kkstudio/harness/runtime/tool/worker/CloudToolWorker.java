@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
+import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
@@ -127,7 +128,9 @@ public final class CloudToolWorker {
                   tool.descriptor(),
                   new ToolCall(
                       invocation.toolCallId(), invocation.toolName(), invocation.argumentsJson()),
-                  Duration.between(clock.instant(), invocation.deadlineAt())),
+                  Duration.between(clock.instant(), invocation.deadlineAt()),
+                  new ToolExecutionContext(
+                      invocation.id(), invocation.runId(), claimed.workspaceId())),
               execution);
       execution.setHandle(handle);
     } catch (RuntimeException error) {

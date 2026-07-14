@@ -6,7 +6,13 @@ import java.time.Duration;
 import java.util.Objects;
 
 /** 提交给 Tool SPI 的单次执行请求。 */
-public record ToolExecutionRequest(ToolDescriptor descriptor, ToolCall call, Duration timeout) {
+public record ToolExecutionRequest(
+    ToolDescriptor descriptor, ToolCall call, Duration timeout, ToolExecutionContext context) {
+
+  /** Keeps daemon and existing Tool implementations source-compatible. */
+  public ToolExecutionRequest(ToolDescriptor descriptor, ToolCall call, Duration timeout) {
+    this(descriptor, call, timeout, null);
+  }
 
   public ToolExecutionRequest {
     descriptor = Objects.requireNonNull(descriptor, "descriptor");

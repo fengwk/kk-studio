@@ -7,6 +7,7 @@ import lombok.Data;
 public class HarnessRunEventDO {
   private Long id;
   private Long runId;
+  private Long sessionId;
   private Long sequence;
   private String eventType;
   private String payloadJson;

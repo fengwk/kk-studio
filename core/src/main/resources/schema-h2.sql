@@ -207,3 +207,24 @@ create index if not exists idx_tool_invocation_claim
 
 create index if not exists idx_tool_invocation_environment_claim
     on tool_invocation (environment_id, status, deadline_at, id);
+
+create table if not exists harness_subagent_task (
+    parent_invocation_id bigint not null,
+    parent_session_id    bigint not null,
+    child_session_id     bigint not null,
+    child_run_id         bigint not null,
+    target_agent         varchar(128) not null,
+    workspace_policy     varchar(32) not null,
+    max_turns            integer not null,
+    idle_timeout_millis  bigint,
+    status               varchar(32) not null,
+    report_json          text,
+    gmt_create           timestamp(3) not null default current_timestamp(),
+    gmt_modified         timestamp(3) not null default current_timestamp(),
+    primary key (parent_invocation_id)
+);
+
+create index if not exists idx_harness_subagent_task_child
+    on harness_subagent_task (child_session_id, child_run_id);
+create index if not exists idx_harness_subagent_task_parent
+    on harness_subagent_task (parent_session_id, status);

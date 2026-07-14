@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.core.harness.tool.worker;
 
+import fun.fengwk.kkstudio.harness.runtime.task.TaskRuntime;
+import fun.fengwk.kkstudio.harness.runtime.task.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.CloudToolWorker;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
@@ -29,6 +31,14 @@ public class HarnessToolWorkerConfiguration {
   @ConditionalOnMissingBean(name = "toolWorkerScheduler")
   public ScheduledExecutorService toolWorkerScheduler() {
     return Executors.newScheduledThreadPool(2);
+  }
+
+  @Bean
+  @ConditionalOnBean(TaskRuntime.class)
+  @ConditionalOnMissingBean
+  public TaskTool taskTool(
+      TaskRuntime runtime, ScheduledExecutorService toolWorkerScheduler, Clock clock) {
+    return new TaskTool(runtime, toolWorkerScheduler, clock);
   }
 
   @Bean

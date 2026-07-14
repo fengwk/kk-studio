@@ -208,3 +208,21 @@ create table if not exists tool_artifact (
     primary key (id),
     key idx_tool_artifact_workspace (workspace_id, id)
 ) engine=InnoDB default charset=utf8mb4 comment='workspace tool output artifact';
+
+create table harness_subagent_task (
+    parent_invocation_id bigint not null comment 'task ToolInvocation idempotency key',
+    parent_session_id    bigint not null,
+    child_session_id     bigint not null,
+    child_run_id         bigint not null,
+    target_agent         varchar(128) not null,
+    workspace_policy     varchar(32) not null,
+    max_turns            int not null,
+    idle_timeout_millis  bigint,
+    status               varchar(32) not null,
+    report_json          text,
+    gmt_create           datetime(3) not null default current_timestamp(3),
+    gmt_modified         datetime(3) not null default current_timestamp(3),
+    primary key (parent_invocation_id),
+    key idx_harness_subagent_task_child (child_session_id, child_run_id),
+    key idx_harness_subagent_task_parent (parent_session_id, status)
+) engine=InnoDB default charset=utf8mb4 comment='durable task invocation to child run relation';

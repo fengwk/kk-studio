@@ -204,4 +204,7 @@ public interface HarnessRunMapper extends BaseMapper {
       @Param("expectedSequence") long expectedSequence,
       @Param("nextSequence") long nextSequence,
       @Param("now") LocalDateTime now);
+
+  @Select("select count(*) from tool_invocation where run_id = #{runId}")
+  int countToolInvocations(@Param("runId") long runId);
 }

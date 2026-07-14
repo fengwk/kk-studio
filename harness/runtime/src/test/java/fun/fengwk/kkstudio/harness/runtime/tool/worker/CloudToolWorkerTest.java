@@ -55,6 +55,9 @@ class CloudToolWorkerTest {
 
     assertTrue(fixture.worker.executeNext("worker-a").isPresent());
     assertNotNull(fixture.tool.listener);
+    assertEquals(1L, fixture.tool.request.context().invocationId());
+    assertEquals(2L, fixture.tool.request.context().runId());
+    assertEquals(9L, fixture.tool.request.context().workspaceId());
     fixture.tool.listener.onPartial(result("partial"));
     fixture.tool.listener.onComplete(result("complete"));
 
@@ -540,6 +543,7 @@ class CloudToolWorkerTest {
     private final ToolDescriptor descriptor;
     private final Handle handle = new Handle();
     private ToolExecutionListener listener;
+    private ToolExecutionRequest request;
     private boolean completeSynchronously;
     private int executions;
 
@@ -556,6 +560,7 @@ class CloudToolWorkerTest {
     public ToolExecutionHandle execute(
         ToolExecutionRequest request, ToolExecutionListener listener) {
       executions++;
+      this.request = request;
       this.listener = listener;
       if (completeSynchronously) {
         listener.onComplete(

@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Result;
+import org.apache.ibatis.annotations.ResultMap;
 import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 
@@ -32,6 +33,7 @@ public interface HarnessRunEventMapper extends BaseMapper {
       value = {
         @Result(column = "id", property = "id"),
         @Result(column = "run_id", property = "runId"),
+        @Result(column = "session_id", property = "sessionId"),
         @Result(column = "sequence", property = "sequence"),
         @Result(column = "event_type", property = "eventType"),
         @Result(column = "payload_json", property = "payloadJson"),
@@ -40,5 +42,18 @@ public interface HarnessRunEventMapper extends BaseMapper {
   List<HarnessRunEventDO> listAfter(
       @Param("runId") long runId,
       @Param("afterSequence") long afterSequence,
+      @Param("limit") int limit);
+
+  @Select(
+      "select e.id, e.run_id, r.session_id, e.sequence, e.event_type, e.payload_json, e.gmt_create"
+          + " as create_time from harness_run_event e join harness_run r on r.id = e.run_id join"
+          + " harness_session s on s.id = r.session_id where s.workspace_id = #{workspaceId} and"
+          + " s.root_session_id = #{rootSessionId} and e.id > #{afterEventId} order by e.id asc"
+          + " limit #{limit}")
+  @ResultMap("harnessRunEventResultMap")
+  List<HarnessRunEventDO> listRootActivity(
+      @Param("workspaceId") long workspaceId,
+      @Param("rootSessionId") long rootSessionId,
+      @Param("afterEventId") long afterEventId,
       @Param("limit") int limit);
 }

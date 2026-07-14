@@ -212,4 +212,11 @@ public interface ToolInvocationMapper extends BaseMapper {
       @Param("errorMessage") String errorMessage,
       @Param("finishedAt") LocalDateTime finishedAt,
       @Param("updateTime") LocalDateTime updateTime);
+
+  @Update(
+      "update tool_invocation set status = case when status in ('PREPARING', 'WAITING_APPROVAL',"
+          + " 'QUEUED', 'RUNNING') then 'CANCEL_REQUESTED' else status end, cancel_requested_at ="
+          + " coalesce(cancel_requested_at, #{now}), gmt_modified = #{now} where run_id = #{runId}"
+          + " and status not in ('SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN')")
+  int requestCancelByRun(@Param("runId") long runId, @Param("now") LocalDateTime now);
 }
