@@ -21,13 +21,19 @@ class TaskDomainTest {
   @Test
   void defaultsWorkspacePolicyAndValidatesArguments() {
     assertEquals(
-        WorkspacePolicy.SHARE_READ_ONLY, new TaskCommand("RepositoryExplorer", "inspect", null, null).workspacePolicy());
-    assertEquals(WorkspacePolicy.EXCLUSIVE, new TaskCommand("Coder", "write", null, WorkspacePolicy.EXCLUSIVE).workspacePolicy());
+        WorkspacePolicy.SHARE_READ_ONLY,
+        new TaskCommand("RepositoryExplorer", "inspect", null, null).workspacePolicy());
+    assertEquals(
+        WorkspacePolicy.EXCLUSIVE,
+        new TaskCommand("Coder", "write", null, WorkspacePolicy.EXCLUSIVE).workspacePolicy());
     assertThrows(IllegalArgumentException.class, () -> new TaskCommand(" ", "prompt", null, null));
     assertThrows(IllegalArgumentException.class, () -> new TaskCommand("Coder", " ", null, null));
   }
 
-  /** Frozen maxDepth and allowlist decide both descriptor injection and deterministic instruction text. */
+  /**
+   * Frozen maxDepth and allowlist decide both descriptor injection and deterministic instruction
+   * text.
+   */
   @Test
   void exposesTaskOnlyBelowFrozenDepth() {
     AgentSnapshot snapshot =
@@ -53,11 +59,16 @@ class TaskDomainTest {
     assertTrue(TaskExposure.descriptor(snapshot, 1, descriptor).isPresent());
     assertFalse(TaskExposure.descriptor(snapshot, 2, descriptor).isPresent());
     assertEquals(
-        "<available_subagents>\n  <subagent name=\"Coder\"/>\n  <subagent name=\"Explorer\"/>\n</available_subagents>",
+        "<available_subagents>\n"
+            + "  <subagent name=\"Coder\"/>\n"
+            + "  <subagent name=\"Explorer\"/>\n"
+            + "</available_subagents>",
         TaskExposure.availableSubagentsInstruction(snapshot, 1));
   }
 
-  /** Structured reports preserve terminal state and produce standard error text for child failure. */
+  /**
+   * Structured reports preserve terminal state and produce standard error text for child failure.
+   */
   @Test
   void rendersTerminalReport() {
     TaskReport report = new TaskReport(9, 10, TaskState.FAILED, "broken", List.of(), 2, 3, "rev-1");

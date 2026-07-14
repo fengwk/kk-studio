@@ -9,7 +9,8 @@ public record TaskCommand(
     if (sessionId != null && sessionId <= 0) {
       throw new IllegalArgumentException("session_id must be positive when present");
     }
-    workspacePolicy = workspacePolicy == null ? WorkspacePolicy.defaultFor(subagentType) : workspacePolicy;
+    workspacePolicy =
+        workspacePolicy == null ? WorkspacePolicy.defaultFor(subagentType) : workspacePolicy;
   }
 
   private static String requireNonBlank(String value, String field) {

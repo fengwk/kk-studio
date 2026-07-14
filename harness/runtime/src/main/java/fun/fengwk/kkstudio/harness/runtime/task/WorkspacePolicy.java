@@ -24,8 +24,6 @@ public enum WorkspacePolicy {
     if (agentName == null || agentName.isBlank()) {
       throw new IllegalArgumentException("subagent_type must not be blank");
     }
-    return agentName.toLowerCase(Locale.ROOT).contains("explorer")
-        ? SHARE_READ_ONLY
-        : FORK;
+    return agentName.toLowerCase(Locale.ROOT).contains("explorer") ? SHARE_READ_ONLY : FORK;
   }
 }

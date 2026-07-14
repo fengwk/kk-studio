@@ -15,8 +15,8 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
-import java.time.Clock;
 import java.io.IOException;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Iterator;
@@ -83,7 +83,8 @@ public final class TaskTool implements Tool {
         throw new IllegalArgumentException("task requires a durable execution context");
       }
       TaskInspection inspection =
-          runtime.startOrResume(request.context(), parse(request.call().argumentsJson()), clock.instant());
+          runtime.startOrResume(
+              request.context(), parse(request.call().argumentsJson()), clock.instant());
       if (inspection.terminal()) {
         complete(handle, inspection.report());
       } else {
@@ -106,14 +107,16 @@ public final class TaskTool implements Tool {
       return;
     }
     try {
-      TaskInspection inspection = runtime.inspect(handle.request.context().invocationId(), clock.instant());
+      TaskInspection inspection =
+          runtime.inspect(handle.request.context().invocationId(), clock.instant());
       if (inspection.terminal()) {
         complete(handle, inspection.report());
       }
     } catch (RuntimeException error) {
       if (handle.completed.compareAndSet(false, true)) {
         cancelFuture(handle);
-        handle.listener.onComplete(ToolResult.error(handle.request.call().id(), error.getMessage()));
+        handle.listener.onComplete(
+            ToolResult.error(handle.request.call().id(), error.getMessage()));
       }
     }
   }
@@ -164,7 +167,8 @@ public final class TaskTool implements Tool {
         sessionId = value.longValue();
       }
       String policy = text(root, "workspace_policy", false);
-      return new TaskCommand(type, prompt, sessionId, policy == null ? null : WorkspacePolicy.parse(policy));
+      return new TaskCommand(
+          type, prompt, sessionId, policy == null ? null : WorkspacePolicy.parse(policy));
     } catch (IOException error) {
       throw new IllegalArgumentException("task arguments must be valid JSON", error);
     }

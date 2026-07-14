@@ -36,10 +36,19 @@ public record TaskReport(
 
   public String render() {
     StringBuilder output = new StringBuilder();
-    output.append("<task id=\"").append(childSessionId).append("\" state=\"")
-        .append(terminalState.name().toLowerCase(Locale.ROOT)).append("\">\n")
-        .append("<child_run id=\"").append(childRunId).append("\" turns=\"")
-        .append(turnCount).append("\" tool_calls=\"").append(toolCount).append("\"/>\n");
+    output
+        .append("<task id=\"")
+        .append(childSessionId)
+        .append("\" state=\"")
+        .append(terminalState.name().toLowerCase(Locale.ROOT))
+        .append("\">\n")
+        .append("<child_run id=\"")
+        .append(childRunId)
+        .append("\" turns=\"")
+        .append(turnCount)
+        .append("\" tool_calls=\"")
+        .append(toolCount)
+        .append("\"/>\n");
     if (success()) {
       output.append("<task_result>").append(finalAssistantReport).append("</task_result>\n");
     } else {
@@ -48,14 +57,21 @@ public record TaskReport(
     if (!artifacts.isEmpty()) {
       output.append("<artifacts>");
       for (ArtifactRef artifact : artifacts) {
-        output.append("<artifact id=\"").append(artifact.artifactId()).append("\" media_type=\"")
-            .append(artifact.mediaType()).append("\" size=\"").append(artifact.sizeBytes())
+        output
+            .append("<artifact id=\"")
+            .append(artifact.artifactId())
+            .append("\" media_type=\"")
+            .append(artifact.mediaType())
+            .append("\" size=\"")
+            .append(artifact.sizeBytes())
             .append("\"/>");
       }
       output.append("</artifacts>\n");
     }
     if (workspaceRevision != null) {
-      output.append("<workspace_revision>").append(workspaceRevision)
+      output
+          .append("<workspace_revision>")
+          .append(workspaceRevision)
           .append("</workspace_revision>\n");
     }
     return output.append("</task>").toString();

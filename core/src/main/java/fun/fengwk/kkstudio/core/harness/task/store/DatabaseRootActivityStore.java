@@ -19,7 +19,8 @@ public class DatabaseRootActivityStore implements RootActivityStore {
   }
 
   @Override
-  public List<RootActivity> list(long workspaceId, long rootSessionId, long afterEventId, int limit) {
+  public List<RootActivity> list(
+      long workspaceId, long rootSessionId, long afterEventId, int limit) {
     if (workspaceId <= 0 || rootSessionId <= 0 || afterEventId < 0 || limit <= 0) {
       throw new IllegalArgumentException("invalid root activity query");
     }

@@ -29,8 +29,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionIdGenerator;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.task.SubagentTask;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskCommand;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskInspection;
@@ -103,7 +103,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     HarnessRunDO parentRun = requireParentRun(context);
     HarnessSessionDO parent = requireSessionForUpdate(parentRun.getSessionId());
     if (parent.getWorkspaceId() != context.workspaceId()) {
-      throw new IllegalArgumentException("task execution context workspace does not match parent session");
+      throw new IllegalArgumentException(
+          "task execution context workspace does not match parent session");
     }
     HarnessSessionDO root = lockRoot(parent);
     ToolInvocationDO invocation = requireTaskInvocation(context, parentRun);
@@ -124,13 +125,16 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       throw new IllegalStateException("subagent direct concurrency limit exceeded");
     }
     if (parentPolicy.maxTotal() != null
-        && taskMapper.countActiveRoot(parent.getWorkspaceId(), root.getId()) >= parentPolicy.maxTotal()) {
+        && taskMapper.countActiveRoot(parent.getWorkspaceId(), root.getId())
+            >= parentPolicy.maxTotal()) {
       throw new IllegalStateException("subagent root concurrency limit exceeded");
     }
 
-    AgentDefinitionDO target = agentMapper.getByWorkspaceIdAndName(parent.getWorkspaceId(), command.subagentType());
+    AgentDefinitionDO target =
+        agentMapper.getByWorkspaceIdAndName(parent.getWorkspaceId(), command.subagentType());
     if (target == null) {
-      throw new IllegalArgumentException("unknown subagent in workspace: " + command.subagentType());
+      throw new IllegalArgumentException(
+          "unknown subagent in workspace: " + command.subagentType());
     }
     if (command.sessionId() == null) {
       return createChild(context, command, parentRun, parent, root, target, timestamp, now);
@@ -156,7 +160,9 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     if (!isTerminal(childRun)) {
       if (childRun.getTurnIndex() >= task.getMaxTurns()
           || (task.getIdleTimeoutMillis() != null
-              && childRun.getUpdateTime().plus(task.getIdleTimeoutMillis(), ChronoUnit.MILLIS)
+              && childRun
+                  .getUpdateTime()
+                  .plus(task.getIdleTimeoutMillis(), ChronoUnit.MILLIS)
                   .isBefore(timestamp))) {
         requestChildCancellation(task.getChildRunId(), timestamp);
       }
@@ -165,8 +171,11 @@ public class DatabaseTaskRuntime implements TaskRuntime {
 
     TaskState terminal = taskState(childRun.getStatus());
     TaskReport report = report(task, childRun, terminal);
-    if (taskMapper.complete(task.getParentInvocationId(), terminal.name(), encode(report), timestamp) == 1) {
-      ToolInvocationDO parentInvocation = invocationMapper.findForUpdate(task.getParentInvocationId());
+    if (taskMapper.complete(
+            task.getParentInvocationId(), terminal.name(), encode(report), timestamp)
+        == 1) {
+      ToolInvocationDO parentInvocation =
+          invocationMapper.findForUpdate(task.getParentInvocationId());
       if (parentInvocation != null) {
         HarnessRunDO parentRun = runMapper.findForUpdate(parentInvocation.getRunId());
         if (parentRun != null) {
@@ -257,7 +266,9 @@ public class DatabaseTaskRuntime implements TaskRuntime {
         snapshotEntryId,
         childRunId,
         SessionEntryType.MESSAGE,
-        new MessageEntryPayload(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(command.prompt())))),
+        new MessageEntryPayload(
+            new AgentMessage(
+                AgentMessageRole.USER, List.of(new TextMessageContent(command.prompt())))),
         timestamp);
     insertQueuedRun(childRunId, childSessionId, promptEntryId, timestamp);
     TaskPolicy targetPolicy = parsePolicy(targetSnapshot.executionPolicyJson());
@@ -273,12 +284,14 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     appendEvent(
         parentRun,
         RunEventType.SUBAGENT_STARTED,
-        taskPayload(childSessionId, childRunId, target.getName(), command.workspacePolicy(), parentRun),
+        taskPayload(
+            childSessionId, childRunId, target.getName(), command.workspacePolicy(), parentRun),
         timestamp);
     appendEvent(
         requireRun(childRunId),
         RunEventType.SUBAGENT_STARTED,
-        RunEventPayloads.of("parentInvocationId", context.invocationId(), "attempt", 0, "turnIndex", 0),
+        RunEventPayloads.of(
+            "parentInvocationId", context.invocationId(), "attempt", 0, "turnIndex", 0),
         timestamp);
     return inspection(requireTask(context.invocationId()));
   }
@@ -297,7 +310,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
         || child.getRootSessionId() != root.getId()
         || !Objects.equals(child.getParentSessionId(), parent.getId())
         || !Objects.equals(child.getAgentDefinitionId(), target.getId())) {
-      throw new IllegalArgumentException("resume child does not match parent hierarchy or target agent");
+      throw new IllegalArgumentException(
+          "resume child does not match parent hierarchy or target agent");
     }
     if (child.getActiveRunId() != null) {
       throw new IllegalStateException("subagent child already has an active run");
@@ -310,10 +324,13 @@ public class DatabaseTaskRuntime implements TaskRuntime {
         child.getLeafEntryId(),
         childRunId,
         SessionEntryType.MESSAGE,
-        new MessageEntryPayload(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(command.prompt())))),
+        new MessageEntryPayload(
+            new AgentMessage(
+                AgentMessageRole.USER, List.of(new TextMessageContent(command.prompt())))),
         timestamp);
     insertQueuedRun(childRunId, child.getId(), promptEntryId, timestamp);
-    if (sessionMapper.attachRun(child.getId(), child.getLeafEntryId(), promptEntryId, childRunId, timestamp)
+    if (sessionMapper.attachRun(
+            child.getId(), child.getLeafEntryId(), promptEntryId, childRunId, timestamp)
         != 1) {
       throw new IllegalStateException("subagent child changed before resume");
     }
@@ -330,12 +347,14 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     appendEvent(
         parentRun,
         RunEventType.SUBAGENT_RESUMED,
-        taskPayload(child.getId(), childRunId, target.getName(), command.workspacePolicy(), parentRun),
+        taskPayload(
+            child.getId(), childRunId, target.getName(), command.workspacePolicy(), parentRun),
         timestamp);
     appendEvent(
         requireRun(childRunId),
         RunEventType.SUBAGENT_RESUMED,
-        RunEventPayloads.of("parentInvocationId", context.invocationId(), "attempt", 0, "turnIndex", 0),
+        RunEventPayloads.of(
+            "parentInvocationId", context.invocationId(), "attempt", 0, "turnIndex", 0),
         timestamp);
     return inspection(requireTask(context.invocationId()));
   }
@@ -348,7 +367,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     return run;
   }
 
-  private ToolInvocationDO requireTaskInvocation(ToolExecutionContext context, HarnessRunDO parentRun) {
+  private ToolInvocationDO requireTaskInvocation(
+      ToolExecutionContext context, HarnessRunDO parentRun) {
     ToolInvocationDO invocation = invocationMapper.findForUpdate(context.invocationId());
     if (invocation == null
         || !Objects.equals(invocation.getRunId(), parentRun.getId())
@@ -396,7 +416,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
           tools,
           skills,
           allowed,
-          OBJECT_MAPPER.writeValueAsString(policy.isMissingNode() ? OBJECT_MAPPER.createObjectNode() : policy));
+          OBJECT_MAPPER.writeValueAsString(
+              policy.isMissingNode() ? OBJECT_MAPPER.createObjectNode() : policy));
     } catch (JsonProcessingException error) {
       throw new IllegalArgumentException("target agent config is invalid", error);
     }
@@ -413,7 +434,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     List<String> result = new ArrayList<>();
     for (JsonNode value : values) {
       if (!value.isTextual() || value.textValue().isBlank()) {
-        throw new IllegalArgumentException("agent config " + name + " must contain non-blank strings");
+        throw new IllegalArgumentException(
+            "agent config " + name + " must contain non-blank strings");
       }
       result.add(value.textValue());
     }
@@ -519,7 +541,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     }
   }
 
-  private void insertQueuedRun(long id, long sessionId, long triggerEntryId, LocalDateTime timestamp) {
+  private void insertQueuedRun(
+      long id, long sessionId, long triggerEntryId, LocalDateTime timestamp) {
     HarnessRunDO run = new HarnessRunDO();
     run.setId(id);
     run.setSessionId(sessionId);
@@ -553,7 +576,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     task.setTargetAgent(targetAgent);
     task.setWorkspacePolicy(workspacePolicy.name());
     task.setMaxTurns(policy.maxTurns());
-    task.setIdleTimeoutMillis(policy.idleTimeout() == null ? null : policy.idleTimeout().toMillis());
+    task.setIdleTimeoutMillis(
+        policy.idleTimeout() == null ? null : policy.idleTimeout().toMillis());
     task.setStatus(TaskState.RUNNING.name());
     task.setCreateTime(timestamp);
     task.setUpdateTime(timestamp);
@@ -590,7 +614,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       }
       if (SessionEntryType.MESSAGE.value().equals(entry.getEntryType())) {
         MessageEntryPayload payload =
-            (MessageEntryPayload) entryCodec.decode(SessionEntryType.MESSAGE, entry.getPayloadJson());
+            (MessageEntryPayload)
+                entryCodec.decode(SessionEntryType.MESSAGE, entry.getPayloadJson());
         if (payload.message().role() == AgentMessageRole.ASSISTANT) {
           return payload.message().contents().stream()
               .filter(TextMessageContent.class::isInstance)
@@ -650,12 +675,18 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       WorkspacePolicy workspacePolicy,
       HarnessRunDO parentRun) {
     return new Object[] {
-      "childSessionId", childSessionId,
-      "childRunId", childRunId,
-      "targetAgent", targetAgent,
-      "workspacePolicy", workspacePolicy.name(),
-      "attempt", parentRun.getAttempt(),
-      "turnIndex", parentRun.getTurnIndex()
+      "childSessionId",
+      childSessionId,
+      "childRunId",
+      childRunId,
+      "targetAgent",
+      targetAgent,
+      "workspacePolicy",
+      workspacePolicy.name(),
+      "attempt",
+      parentRun.getAttempt(),
+      "turnIndex",
+      parentRun.getTurnIndex()
     };
   }
 
@@ -664,7 +695,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     appendEvent(run, type, RunEventPayloads.of(fields), timestamp);
   }
 
-  private void appendEvent(HarnessRunDO run, RunEventType type, String payload, LocalDateTime timestamp) {
+  private void appendEvent(
+      HarnessRunDO run, RunEventType type, String payload, LocalDateTime timestamp) {
     long next = run.getEventSequence() + 1;
     if (runMapper.updateEventSequence(run.getId(), run.getEventSequence(), next, timestamp) != 1) {
       throw new IllegalStateException("cannot allocate task event sequence");

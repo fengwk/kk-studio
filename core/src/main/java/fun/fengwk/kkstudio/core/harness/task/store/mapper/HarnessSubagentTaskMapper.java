@@ -21,11 +21,12 @@ public interface HarnessSubagentTaskMapper extends BaseMapper {
           + "gmt_create as create_time, gmt_modified as update_time";
 
   @Insert(
-      "insert into harness_subagent_task (parent_invocation_id, parent_session_id, child_session_id, "
-          + "child_run_id, target_agent, workspace_policy, max_turns, idle_timeout_millis, status, "
-          + "report_json, gmt_create, gmt_modified) values (#{parentInvocationId}, #{parentSessionId}, "
-          + "#{childSessionId}, #{childRunId}, #{targetAgent}, #{workspacePolicy}, #{maxTurns}, "
-          + "#{idleTimeoutMillis}, #{status}, #{reportJson}, #{createTime}, #{updateTime})")
+      "insert into harness_subagent_task (parent_invocation_id, parent_session_id,"
+          + " child_session_id, child_run_id, target_agent, workspace_policy, max_turns,"
+          + " idle_timeout_millis, status, report_json, gmt_create, gmt_modified) values"
+          + " (#{parentInvocationId}, #{parentSessionId}, #{childSessionId}, #{childRunId},"
+          + " #{targetAgent}, #{workspacePolicy}, #{maxTurns}, #{idleTimeoutMillis}, #{status},"
+          + " #{reportJson}, #{createTime}, #{updateTime})")
   int insert(HarnessSubagentTaskDO task);
 
   @Select("select " + COLUMNS + " from harness_subagent_task where parent_invocation_id = #{id}")
@@ -47,7 +48,10 @@ public interface HarnessSubagentTaskMapper extends BaseMapper {
       })
   HarnessSubagentTaskDO find(@Param("id") long parentInvocationId);
 
-  @Select("select " + COLUMNS + " from harness_subagent_task where parent_invocation_id = #{id} for update")
+  @Select(
+      "select "
+          + COLUMNS
+          + " from harness_subagent_task where parent_invocation_id = #{id} for update")
   @ResultMap("harnessSubagentTaskResultMap")
   HarnessSubagentTaskDO findForUpdate(@Param("id") long parentInvocationId);
 
@@ -60,14 +64,16 @@ public interface HarnessSubagentTaskMapper extends BaseMapper {
   List<HarnessSubagentTaskDO> listByParentSession(@Param("parentSessionId") long parentSessionId);
 
   @Select(
-      "select count(*) from harness_subagent_task t join harness_run r on r.id = t.child_run_id "
-          + "where t.parent_session_id = #{parentSessionId} and r.status not in ('SUCCEEDED','FAILED','CANCELLED')")
+      "select count(*) from harness_subagent_task t join harness_run r on r.id = t.child_run_id"
+          + " where t.parent_session_id = #{parentSessionId} and r.status not in"
+          + " ('SUCCEEDED','FAILED','CANCELLED')")
   int countActiveDirect(@Param("parentSessionId") long parentSessionId);
 
   @Select(
-      "select count(*) from harness_subagent_task t join harness_session s on s.id = t.child_session_id "
-          + "join harness_run r on r.id = t.child_run_id where s.workspace_id = #{workspaceId} "
-          + "and s.root_session_id = #{rootSessionId} and r.status not in ('SUCCEEDED','FAILED','CANCELLED')")
+      "select count(*) from harness_subagent_task t join harness_session s on s.id ="
+          + " t.child_session_id join harness_run r on r.id = t.child_run_id where s.workspace_id ="
+          + " #{workspaceId} and s.root_session_id = #{rootSessionId} and r.status not in"
+          + " ('SUCCEEDED','FAILED','CANCELLED')")
   int countActiveRoot(
       @Param("workspaceId") long workspaceId, @Param("rootSessionId") long rootSessionId);
 

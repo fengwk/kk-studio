@@ -42,7 +42,8 @@ class TaskToolTest {
         tool.execute(
             new ToolExecutionRequest(
                 tool.descriptor(),
-                new ToolCall("call", "task", "{\"subagent_type\":\"Coder\",\"prompt\":\"Implement it\"}"),
+                new ToolCall(
+                    "call", "task", "{\"subagent_type\":\"Coder\",\"prompt\":\"Implement it\"}"),
                 tool.descriptor().timeout(),
                 new ToolExecutionContext(11, 12, 13)),
             listener);
@@ -56,7 +57,10 @@ class TaskToolTest {
     assertTrue(text(listener.result).contains("<task_result>done</task_result>"));
   }
 
-  /** Cancel propagation is a durable, idempotent tree request and does not synthesize a terminal result. */
+  /**
+   * Cancel propagation is a durable, idempotent tree request and does not synthesize a terminal
+   * result.
+   */
   @Test
   void cancelRequestsTreeOnce() {
     RecordingRuntime runtime = new RecordingRuntime();
@@ -66,7 +70,8 @@ class TaskToolTest {
         tool.execute(
             new ToolExecutionRequest(
                 tool.descriptor(),
-                new ToolCall("call", "task", "{\"subagent_type\":\"Explorer\",\"prompt\":\"Inspect\"}"),
+                new ToolCall(
+                    "call", "task", "{\"subagent_type\":\"Explorer\",\"prompt\":\"Inspect\"}"),
                 tool.descriptor().timeout(),
                 new ToolExecutionContext(21, 22, 23)),
             new RecordingListener());
@@ -89,7 +94,8 @@ class TaskToolTest {
         () ->
             new ToolExecutionRequest(
                 tool.descriptor(),
-                new ToolCall("call", "task", "{\"subagent_type\":\"Coder\",\"prompt\":\"x\",\"bad\":1}"),
+                new ToolCall(
+                    "call", "task", "{\"subagent_type\":\"Coder\",\"prompt\":\"x\",\"bad\":1}"),
                 tool.descriptor().timeout(),
                 new ToolExecutionContext(31, 32, 33)));
 

@@ -4,11 +4,7 @@ import java.time.Duration;
 
 /** Frozen subagent limits resolved from the parent or target AgentSnapshot. */
 public record TaskPolicy(
-    int maxDepth,
-    int maxDirect,
-    Integer maxTotal,
-    int maxTurns,
-    Duration idleTimeout) {
+    int maxDepth, int maxDirect, Integer maxTotal, int maxTurns, Duration idleTimeout) {
   public static final int DEFAULT_MAX_DEPTH = 2;
   public static final int DEFAULT_MAX_DIRECT = 10;
   public static final int DEFAULT_MAX_TURNS = 50;
