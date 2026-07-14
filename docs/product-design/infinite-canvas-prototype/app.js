@@ -4,6 +4,8 @@
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => [...document.querySelectorAll(selector)];
   const worldSize = { width: 2600, height: 1600 };
+  const canvasGridSize = 18;
+  let researchOpener = null;
 
   const stage = $('#canvasStage');
   const world = $('#canvasWorld');
@@ -295,7 +297,14 @@
           </div>
           <div class="node-title">${escapeHTML(node.title)}</div>
           <div class="run-steps">${stepMarkup}</div>
-          <div class="run-progress"><i style="width:${(node.progress / node.total) * 100}%"></i></div>
+          <div
+            class="run-progress"
+            role="progressbar"
+            aria-label="Agent 运行进度"
+            aria-valuemin="0"
+            aria-valuemax="${node.total}"
+            aria-valuenow="${node.progress}"
+          ><i style="width:${(node.progress / node.total) * 100}%"></i></div>
           <div class="run-node-controls">
             <button class="run-node-control" data-run-action="${action}" type="button">${control}</button>
           </div>
@@ -432,8 +441,9 @@
     state.viewport = { x, y, scale };
 
     world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
-    stage.style.backgroundSize = `${22 * scale}px ${22 * scale}px`;
-    stage.style.backgroundPosition = `${x % (22 * scale)}px ${y % (22 * scale)}px`;
+    const scaledGridSize = canvasGridSize * scale;
+    stage.style.backgroundSize = `${scaledGridSize}px ${scaledGridSize}px`;
+    stage.style.backgroundPosition = `${x % scaledGridSize}px ${y % scaledGridSize}px`;
     $('#resetZoom').textContent = `${Math.round(scale * 100)}%`;
 
     const mapScale = 120 / worldSize.width;
@@ -473,10 +483,41 @@
     const bounds = selectionBounds(selected);
     const x = state.viewport.x + (bounds.x + bounds.width / 2) * state.viewport.scale;
     const y = state.viewport.y + bounds.y * state.viewport.scale - 38;
-    selectionToolbar.style.left = `${Math.max(100, Math.min(stage.clientWidth - 145, x))}px`;
-    selectionToolbar.style.top = `${Math.max(8, y)}px`;
     selectionToolbar.classList.remove('hidden');
+    const stageWidth = Math.max(0, stage.clientWidth || 0);
+    const toolbarWidth = selectionToolbar.offsetWidth || 240;
+    const toolbarHalfWidth = toolbarWidth / 2;
+    const horizontalGap = 8;
+    const minimumLeft = toolbarHalfWidth + horizontalGap;
+    const maximumLeft = stageWidth - toolbarHalfWidth - horizontalGap;
+    const toolbarLeft = minimumLeft > maximumLeft
+      ? stageWidth / 2
+      : Math.max(minimumLeft, Math.min(maximumLeft, x));
+    selectionToolbar.style.left = `${toolbarLeft}px`;
+    selectionToolbar.style.top = `${Math.max(8, y)}px`;
     updateContextUI();
+  }
+
+  function updateLibraryCardState() {
+    const status = $('[data-project-run-state]');
+    const objectCount = $('[data-project-object-count]');
+    const run = findNode('run');
+
+    if (status) {
+      const runState = run ? run.status : 'removed';
+      const presentation = {
+        running: ['running', '● 1 个任务进行中'],
+        paused: ['paused', 'Ⅱ 1 个任务已暂停'],
+        succeeded: ['completed', '✓ 最近任务已完成'],
+        removed: ['removed', 'Agent Run 已移除']
+      }[runState];
+      status.className = `project-state ${presentation[0]}`;
+      status.textContent = presentation[1];
+    }
+
+    if (objectCount) {
+      objectCount.textContent = `${state.nodes.length + state.relations.length} 个对象`;
+    }
   }
 
   function render() {
@@ -484,6 +525,7 @@
     renderRelations();
     updateViewport();
     renderThread();
+    updateLibraryCardState();
   }
 
   function setSelection(ids, append = false) {
@@ -525,6 +567,7 @@
 
     event.preventDefault();
     event.stopPropagation();
+    stage.focus({ preventScroll: true });
     const id = event.currentTarget.dataset.nodeId;
 
     if (event.shiftKey) {
@@ -591,7 +634,8 @@
     updateViewport();
   }
 
-  function fitView() {
+  function fitView(options = {}) {
+    const notify = options.notify !== false;
     const content = state.nodes.filter((node) => node.type !== 'frame');
     const bounds = selectionBounds(content.length ? content : state.nodes);
     if (!bounds) {
@@ -601,7 +645,9 @@
         scale: 0.6
       };
       updateViewport();
-      showToast('画布暂无内容，已保持稳定视图');
+      if (notify) {
+        showToast('画布暂无内容，已保持稳定视图');
+      }
       return;
     }
 
@@ -616,7 +662,9 @@
       y: (stage.clientHeight - bounds.height * scale) / 2 - bounds.y * scale
     };
     updateViewport();
-    showToast('已适应全部内容');
+    if (notify) {
+      showToast('已适应全部内容');
+    }
   }
 
   function focusSelection() {
@@ -743,6 +791,9 @@
 
     stage.addEventListener('pointerdown', (event) => {
       const overlay = event.target.closest('.selection-toolbar, .canvas-controls, .agent-dock-wrap');
+      if (!overlay) {
+        stage.focus({ preventScroll: true });
+      }
       const blank = !event.target.closest('.canvas-node') && !overlay;
       const shouldPan = !overlay && (
         event.button === 1
@@ -821,9 +872,8 @@
   }
 
   function ensureRunMessage() {
-    if (!state.messages.some((message) => message.kind === 'run')) {
-      state.messages.push({ kind: 'run' });
-    }
+    state.messages = state.messages.filter((message) => message.kind !== 'run');
+    state.messages.push({ kind: 'run' });
   }
 
   function requestThreadScroll() {
@@ -837,15 +887,18 @@
     }
 
     run.status = 'succeeded';
+    const width = 196;
+    const height = 178;
+    const position = findOpenCanvasPosition(run, width, height);
     const result = {
       id: nextId('generated'),
       type: 'result',
-      x: run.x + run.width + 95,
-      y: run.y + 250,
-      width: 196,
-      height: 178,
+      x: position.x,
+      y: position.y,
+      width,
+      height,
       title: 'MVP 页面方向 C',
-      copy: 'Agent 生成的新结果，固定落在来源右侧。',
+      copy: 'Agent 生成的新结果，避让已有内容并保留来源关系。',
       variant: '新',
       generated: true
     };
@@ -856,8 +909,9 @@
     state.messages.push({ kind: 'agent', text: '任务完成：已生成可编辑的 MVP 页面方向，并保留来源关系。' });
     requestThreadScroll();
     render();
+    revealNodeAboveDock(result);
     markSaved();
-    showToast('任务完成：新结果已落在 Agent Run 右侧');
+    showToast('任务完成：新结果已避让已有内容并保留来源关系');
   }
 
   function scheduleRun(run) {
@@ -1041,6 +1095,9 @@
     }
     setVisible(addMenu, open);
     $('#dockAdd').setAttribute('aria-expanded', String(open));
+    if (open) {
+      addMenu.querySelector('button').focus();
+    }
   }
 
   function setGenerationOpen(open) {
@@ -1050,6 +1107,28 @@
       $('#dockAdd').setAttribute('aria-expanded', 'false');
     }
     setVisible(generationPanel, open);
+  }
+
+  function collapseThread() {
+    setThreadOpen(false);
+    $('#dockAdd').focus();
+  }
+
+  function closeAddMenu() {
+    setAddMenuOpen(false);
+    $('#dockAdd').focus();
+  }
+
+  function closeGenerationPanel() {
+    setGenerationOpen(false);
+    $('#dockAdd').focus();
+  }
+
+  function hasBlockingOverlay() {
+    return $('#helpDialog').open
+      || !$('#researchPanel').classList.contains('hidden')
+      || !generationPanel.hidden
+      || !addMenu.hidden;
   }
 
   function getParameterSummary(mode = state.generationMode) {
@@ -1094,7 +1173,7 @@
     state.generationMode = mode;
     $$('.generation-tabs [data-generation-mode]').forEach((button) => {
       const selected = button.dataset.generationMode === mode;
-      button.setAttribute('aria-selected', String(selected));
+      button.setAttribute('aria-pressed', String(selected));
     });
     generationPrompt.value = state.generationPrompts[mode];
     $('#generationCost').textContent = generationProfiles[mode].cost;
@@ -1115,12 +1194,14 @@
     renderReferenceSelection();
   }
 
-  function findOpenMediaPosition(run, width, height) {
-    let x = run ? run.x + run.width + 92 : 1060;
-    let y = run ? run.y + run.height + 70 : 380;
+  function findOpenCanvasPosition(anchor, width, height) {
     const gap = 28;
+    const startX = anchor ? anchor.x + anchor.width + 100 : 1060;
+    const startY = anchor ? anchor.y + anchor.height + 100 : 380;
+    let x = startX;
+    let y = startY;
 
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    for (let attempt = 0; attempt < 60; attempt += 1) {
       const blocked = state.nodes.some((node) => {
         if (node.type === 'frame') {
           return false;
@@ -1141,7 +1222,55 @@
       }
     }
 
-    return { x, y };
+    return {
+      x: Math.max(40, Math.min(worldSize.width - width - 40, x)),
+      y: Math.max(40, Math.min(worldSize.height - height - 40, y))
+    };
+  }
+
+  function revealNodeAboveDock(node) {
+    const scale = Number.isFinite(state.viewport.scale) && state.viewport.scale > 0
+      ? state.viewport.scale
+      : 0.6;
+    const stageRect = stage.getBoundingClientRect();
+    const dockRect = $('#agentDockWrap').getBoundingClientRect();
+    const stageWidth = stageRect.width || stage.clientWidth || 960;
+    const stageHeight = stageRect.height || stage.clientHeight || 640;
+    const dockTop = dockRect.height > 0 && dockRect.top > stageRect.top
+      ? dockRect.top - stageRect.top
+      : stageHeight - 96;
+    const margin = 18;
+    const safeLeft = margin;
+    const safeTop = margin;
+    const safeRight = Math.max(safeLeft + 1, stageWidth - margin);
+    const safeBottom = Math.max(safeTop + 1, Math.min(stageHeight - margin, dockTop - 12));
+    const nodeLeft = state.viewport.x + node.x * scale;
+    const nodeTop = state.viewport.y + node.y * scale;
+    const nodeRight = nodeLeft + node.width * scale;
+    const nodeBottom = nodeTop + node.height * scale;
+    let shiftX = 0;
+    let shiftY = 0;
+
+    if (nodeRight > safeRight) {
+      shiftX = safeRight - nodeRight;
+    }
+    if (nodeLeft + shiftX < safeLeft) {
+      shiftX += safeLeft - (nodeLeft + shiftX);
+    }
+    if (nodeBottom > safeBottom) {
+      shiftY = safeBottom - nodeBottom;
+    }
+    if (nodeTop + shiftY < safeTop) {
+      shiftY += safeTop - (nodeTop + shiftY);
+    }
+
+    const nextX = state.viewport.x + shiftX;
+    const nextY = state.viewport.y + shiftY;
+    if (Number.isFinite(nextX) && Number.isFinite(nextY)) {
+      state.viewport.x = nextX;
+      state.viewport.y = nextY;
+      updateViewport();
+    }
   }
 
   function submitGeneration() {
@@ -1157,7 +1286,7 @@
     const parameters = getParameterSummary(mode);
     const width = mode === 'video' ? 254 : 220;
     const height = 205;
-    const position = findOpenMediaPosition(run, width, height);
+    const position = findOpenCanvasPosition(run, width, height);
     const node = {
       id: nextId(mode),
       type: 'media',
@@ -1194,6 +1323,8 @@
     setGenerationOpen(false);
     setThreadOpen(true);
     render();
+    revealNodeAboveDock(node);
+    agentPrompt.focus();
     markSaved();
     showToast(`${mode === 'video' ? '视频' : '图片'}生成完成，结果已放入画布`);
   }
@@ -1270,7 +1401,8 @@
     setGenerationOpen(false);
     setGenerationMode('image', { persistCurrent: false });
     render();
-    fitView();
+    fitView({ notify: false });
+    agentPrompt.focus();
     showToast('演示和 Agent 消息已重置');
   }
 
@@ -1281,12 +1413,20 @@
 
   function showView(view) {
     const editorActive = view === 'editor';
+    const libraryView = $('#libraryView');
+    const editorView = $('#editorView');
     state.activeView = view;
     document.body.classList.toggle('editor-active', editorActive);
-    $('#libraryView').classList.toggle('active', !editorActive);
-    $('#editorView').classList.toggle('active', editorActive);
+    libraryView.classList.toggle('active', !editorActive);
+    editorView.classList.toggle('active', editorActive);
+    if (!editorActive) {
+      setThreadOpen(false);
+      setAddMenuOpen(false);
+      setGenerationOpen(false);
+    }
+    (editorActive ? editorView : libraryView).focus({ preventScroll: true });
     if (editorActive) {
-      (window.requestAnimationFrame || ((callback) => callback()))(fitView);
+      (window.requestAnimationFrame || ((callback) => callback()))(() => fitView({ notify: false }));
     }
   }
 
@@ -1331,15 +1471,37 @@
     `
   };
 
-  function setResearchOpen(open) {
+  function isElementInActiveView(element) {
+    if (!element || !element.isConnected) {
+      return false;
+    }
+    const view = element.closest('.view');
+    return !view || view.classList.contains('active');
+  }
+
+  function setResearchOpen(open, { opener = null, restoreFocus = true } = {}) {
     const panel = $('#researchPanel');
+    const wasOpen = !panel.classList.contains('hidden');
+    if (open) {
+      researchOpener = opener && opener.isConnected ? opener : document.activeElement;
+    }
     panel.classList.toggle('hidden', !open);
     panel.setAttribute('aria-hidden', String(!open));
     panel.inert = !open;
     if (open) {
       panel.removeAttribute('inert');
+      $('#closeResearch').focus();
     } else {
       panel.setAttribute('inert', '');
+      if (restoreFocus && wasOpen) {
+        const focusTarget = isElementInActiveView(researchOpener)
+          ? researchOpener
+          : $('#researchButton');
+        if (isElementInActiveView(focusTarget)) {
+          focusTarget.focus();
+        }
+      }
+      researchOpener = null;
     }
   }
 
@@ -1347,13 +1509,13 @@
     $$('.panel-tabs button').forEach((button) => {
       const selected = button.dataset.panelTab === tab;
       button.classList.toggle('active', selected);
-      button.setAttribute('aria-selected', String(selected));
+      button.setAttribute('aria-pressed', String(selected));
     });
     $('#panelContent').innerHTML = panelData[tab];
   }
 
-  function openResearch(tab = 'research') {
-    setResearchOpen(true);
+  function openResearch(tab = 'research', opener = document.activeElement) {
+    setResearchOpen(true, { opener });
     setPanelTab(tab);
   }
 
@@ -1361,7 +1523,7 @@
     $$('[data-library-filter]').forEach((button) => {
       const selected = button.dataset.libraryFilter === filter;
       button.classList.toggle('active', selected);
-      button.setAttribute('aria-selected', String(selected));
+      button.setAttribute('aria-pressed', String(selected));
     });
     $$('[data-library-owner]').forEach((card) => {
       card.hidden = filter !== 'all' && card.dataset.libraryOwner !== filter;
@@ -1427,6 +1589,7 @@
     if (action === 'image' || action === 'video') {
       setGenerationMode(action);
       setGenerationOpen(true);
+      generationPrompt.focus();
       return;
     }
 
@@ -1445,18 +1608,28 @@
     });
 
     $('#createFromIdea').addEventListener('click', () => {
+      const idea = $('#ideaInput').value.trim();
+      if (!idea) {
+        showToast('请先描述想完成的工作');
+        $('#ideaInput').focus();
+        return;
+      }
       showView('editor');
       showToast('已根据目标创建「研究与归纳」画布');
     });
     $('#ideaInput').addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
+      if (event.key === 'Enter' && !event.isComposing) {
         $('#createFromIdea').click();
       }
     });
     $$('.template-card').forEach((card) => {
       card.addEventListener('click', () => {
-        $$('.template-card').forEach((item) => item.classList.remove('selected'));
+        $$('.template-card').forEach((item) => {
+          item.classList.remove('selected');
+          item.setAttribute('aria-pressed', 'false');
+        });
         card.classList.add('selected');
+        card.setAttribute('aria-pressed', 'true');
         showToast(`已选择「${card.dataset.template}」模板`);
       });
     });
@@ -1470,8 +1643,8 @@
     $('#assetsNavButton').addEventListener('click', () => showToast('资产库入口将在完整产品中打开（原型模拟）'));
     $('#workspaceAvatar').addEventListener('click', () => showToast('工作区菜单将在完整产品中打开（原型模拟）'));
 
-    $('#researchButton').addEventListener('click', () => openResearch());
-    $('#libraryResearchButton').addEventListener('click', () => openResearch());
+    $('#researchButton').addEventListener('click', (event) => openResearch('research', event.currentTarget));
+    $('#libraryResearchButton').addEventListener('click', (event) => openResearch('research', event.currentTarget));
     $('#closeResearch').addEventListener('click', () => setResearchOpen(false));
     $$('.panel-tabs button').forEach((button) => {
       button.addEventListener('click', () => setPanelTab(button.dataset.panelTab));
@@ -1480,12 +1653,13 @@
     $('#selectionContext').addEventListener('click', () => setContext('selection'));
     $('#wholeContext').addEventListener('click', () => setContext('whole'));
     $('#resetDemo').addEventListener('click', resetDemo);
+    $('#collapseThread').addEventListener('click', collapseThread);
 
     $('#dockAdd').addEventListener('click', () => setAddMenuOpen(addMenu.hidden));
     $$('.add-menu [data-add-action]').forEach((button) => {
       button.addEventListener('click', () => handleAddAction(button.dataset.addAction));
     });
-    $('#closeGenerationPanel').addEventListener('click', () => setGenerationOpen(false));
+    $('#closeGenerationPanel').addEventListener('click', closeGenerationPanel);
     $$('.generation-tabs [data-generation-mode]').forEach((button) => {
       button.addEventListener('click', () => setGenerationMode(button.dataset.generationMode));
     });
@@ -1503,7 +1677,7 @@
     agentPrompt.addEventListener('click', focusAgentDock);
     agentPrompt.addEventListener('input', resizeAgentInput);
     agentPrompt.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' && !event.shiftKey) {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
         event.preventDefault();
         sendAgentMessage();
       }
@@ -1527,7 +1701,10 @@
       button.addEventListener('click', () => handleToolbarAction(button.dataset.action));
     });
     $('#helpButton').addEventListener('click', () => $('#helpDialog').showModal());
-    $('#closeHelp').addEventListener('click', () => $('#helpDialog').close());
+    $('#closeHelp').addEventListener('click', () => {
+      $('#helpDialog').close();
+      $('#helpButton').focus();
+    });
     $('#shareButton').addEventListener('click', () => showToast('分享链接已复制（原型模拟）'));
     $('#exportButton').addEventListener('click', () => showToast('导出 PNG / PDF / JSON 将在完整产品中提供（原型模拟）'));
     $('#editorMoreButton').addEventListener('click', () => showToast('更多编辑器操作将在完整产品中提供（原型模拟）'));
@@ -1540,7 +1717,16 @@
   function onKeyboardShortcut(event) {
     const modifier = event.metaKey || event.ctrlKey;
     if (modifier && event.key.toLowerCase() === 'k') {
+      if (state.activeView !== 'editor') {
+        return;
+      }
       event.preventDefault();
+      if ($('#helpDialog').open) {
+        $('#helpDialog').close();
+      }
+      if (!$('#researchPanel').classList.contains('hidden')) {
+        setResearchOpen(false, { restoreFocus: false });
+      }
       setThreadOpen(true);
       agentPrompt.focus();
       return;
@@ -1549,22 +1735,25 @@
     if (event.key === 'Escape') {
       if ($('#helpDialog').open) {
         $('#helpDialog').close();
+        $('#helpButton').focus();
       } else if (!$('#researchPanel').classList.contains('hidden')) {
         setResearchOpen(false);
       } else if (!generationPanel.hidden) {
-        setGenerationOpen(false);
+        closeGenerationPanel();
       } else if (!addMenu.hidden) {
-        setAddMenuOpen(false);
+        closeAddMenu();
       } else if (!thread.hidden) {
-        setThreadOpen(false);
-      } else {
+        collapseThread();
+      } else if (state.activeView === 'editor') {
         state.selected.clear();
         render();
       }
       return;
     }
 
-    if (isTyping(event.target) || state.activeView !== 'editor') {
+    if (state.activeView !== 'editor'
+      || isInteractiveControl(event.target)
+      || hasBlockingOverlay()) {
       return;
     }
 
