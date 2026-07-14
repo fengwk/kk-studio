@@ -26,6 +26,8 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -38,8 +40,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class BashTool implements Tool {
 
-  private static final ExecutorService EXECUTOR = Executors.newCachedThreadPool();
-  private static final ScheduledExecutorService SCHEDULER = Executors.newScheduledThreadPool(1);
+  private static final ExecutorService EXECUTOR =
+      Executors.newCachedThreadPool(threadFactory("daemon-bash"));
+  private static final ScheduledExecutorService SCHEDULER =
+      Executors.newScheduledThreadPool(1, threadFactory("daemon-bash-timeout"));
   private final CodingToolsConfig config;
   private final WorkspacePathBoundary boundary;
   private final ToolDescriptor descriptor;
@@ -96,14 +100,18 @@ public final class BashTool implements Tool {
       if (handle.cancelled.get()) {
         handle.stopProcessTree();
       }
-      SCHEDULER.schedule(
-          () -> {
-            if (handle.timedOut.compareAndSet(false, true)) {
-              handle.stopProcessTree();
-            }
-          },
-          request.effectiveTimeout().toMillis(),
-          TimeUnit.MILLISECONDS);
+      handle.timeoutFuture =
+          SCHEDULER.schedule(
+              () -> {
+                if (handle.timedOut.compareAndSet(false, true)) {
+                  handle.stopProcessTree();
+                }
+              },
+              request.effectiveTimeout().toMillis(),
+              TimeUnit.MILLISECONDS);
+      if (handle.terminal.get()) {
+        handle.timeoutFuture.cancel(false);
+      }
       ByteArrayOutputStream output = new ByteArrayOutputStream();
       try (InputStream input = process.getInputStream()) {
         byte[] buffer = new byte[4096];
@@ -145,6 +153,14 @@ public final class BashTool implements Tool {
     }
   }
 
+  private static ThreadFactory threadFactory(String name) {
+    return runnable -> {
+      Thread thread = new Thread(runnable, name);
+      thread.setDaemon(true);
+      return thread;
+    };
+  }
+
   private static final class BashHandle implements ToolExecutionHandle {
     private final String callId;
     private final ToolExecutionListener listener;
@@ -152,6 +168,7 @@ public final class BashTool implements Tool {
     private final AtomicBoolean timedOut = new AtomicBoolean();
     private final AtomicBoolean terminal = new AtomicBoolean();
     private volatile Process process;
+    private volatile ScheduledFuture<?> timeoutFuture;
 
     private BashHandle(String callId, ToolExecutionListener listener) {
       this.callId = callId;
@@ -190,6 +207,10 @@ public final class BashTool implements Tool {
 
     private void complete(ToolExecutionListener listener, ToolResult result) {
       if (terminal.compareAndSet(false, true)) {
+        ScheduledFuture<?> timeout = timeoutFuture;
+        if (timeout != null) {
+          timeout.cancel(false);
+        }
         listener.onComplete(result);
       }
     }

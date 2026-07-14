@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -58,7 +59,9 @@ public final class ReadTool extends AbstractCodingTool {
         names =
             entries
                 .map(
-                    entry -> entry.getFileName().toString() + (Files.isDirectory(entry) ? "/" : ""))
+                    entry ->
+                        entry.getFileName().toString()
+                            + (Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS) ? "/" : ""))
                 .sorted(Comparator.naturalOrder())
                 .toList();
       }
@@ -74,17 +77,23 @@ public final class ReadTool extends AbstractCodingTool {
           false);
     }
     byte[] bytes = Files.readAllBytes(path);
-    if (OutputLimiter.isBinary(bytes)) {
-      return new ToolResult(
-          request.call().id(),
-          OutputLimiter.limit(bytes, "application/octet-stream", config),
-          false,
-          "{}",
-          false);
+    TextFileCodec.Decoded decoded;
+    try {
+      decoded = TextFileCodec.decode(bytes);
+    } catch (IllegalArgumentException error) {
+      if ("file appears to be binary".equals(error.getMessage())) {
+        return new ToolResult(
+            request.call().id(),
+            OutputLimiter.limit(bytes, "application/octet-stream", config),
+            false,
+            "{}",
+            false);
+      }
+      throw error;
     }
     int offset = optionalPositiveInt(args, "offset", 1, Integer.MAX_VALUE);
     int limit = optionalPositiveInt(args, "limit", DEFAULT_LIMIT, MAX_LIMIT);
-    String original = new String(bytes, StandardCharsets.UTF_8);
+    String original = decoded.text();
     boolean endsWithNewline = original.endsWith("\n") || original.endsWith("\r");
     String normalized = original.replace("\r\n", "\n").replace('\r', '\n');
     List<String> lines = new ArrayList<>(List.of(normalized.split("\n", -1)));

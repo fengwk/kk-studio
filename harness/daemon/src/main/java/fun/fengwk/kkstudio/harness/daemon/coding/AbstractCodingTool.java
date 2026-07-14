@@ -110,7 +110,8 @@ abstract class AbstractCodingTool implements Tool {
   }
 
   static ToolResult error(String id, String message) {
-    return new ToolResult(id, List.of(new TextToolContent("Error: " + message)), true, "{}", false);
+    String detail = message == null || message.isBlank() ? "tool execution failed" : message;
+    return new ToolResult(id, List.of(new TextToolContent("Error: " + detail)), true, "{}", false);
   }
 
   /** Mutable execution state whose terminal callback is guaranteed to run exactly once. */

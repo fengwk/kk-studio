@@ -36,7 +36,7 @@ public final class WriteTool extends AbstractCodingTool {
                 Set.of("path", "content"),
                 false),
             ToolExecutionMode.ENVIRONMENT,
-            ToolSideEffect.NON_IDEMPOTENT,
+            ToolSideEffect.IDEMPOTENT,
             Duration.ofMinutes(1)));
   }
 

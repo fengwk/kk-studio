@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -58,18 +59,21 @@ public final class FindTool extends AbstractCodingTool {
     }
     int limit = optionalPositiveInt(args, "limit", 1000, 100_000);
     int timeout = optionalPositiveInt(args, "timeout_seconds", 15, 3600);
-    List<String> command =
-        List.of(
-            config.fdExecutable(),
-            "--glob",
-            "--color=never",
-            "--hidden",
-            "--no-require-git",
-            "--max-results",
-            Integer.toString(limit),
-            "--",
-            string(args, "pattern"),
-            ".");
+    String pattern = string(args, "pattern");
+    List<String> command = new ArrayList<>();
+    command.add(config.fdExecutable());
+    command.add("--glob");
+    command.add("--color=never");
+    command.add("--hidden");
+    command.add("--no-require-git");
+    command.add("--max-results");
+    command.add(Integer.toString(limit + 1));
+    if (pattern.contains("/") || pattern.contains(File.separator)) {
+      command.add("--full-path");
+    }
+    command.add("--");
+    command.add(pattern);
+    command.add(".");
     Process process;
     try {
       process =
@@ -109,7 +113,9 @@ public final class FindTool extends AbstractCodingTool {
         lines.add(line.replace('\\', '/').replaceFirst("^\\./", ""));
       }
     }
-    if (lines.size() >= limit) {
+    boolean limited = lines.size() > limit;
+    if (limited) {
+      lines = new ArrayList<>(lines.subList(0, limit));
       lines.add("");
       lines.add("[" + limit + " results limit reached. Refine the pattern or raise limit.]");
     }
