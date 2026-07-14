@@ -92,12 +92,16 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
   @Override
   @Transactional
   public boolean start(ClaimedToolInvocation claimed, Instant now) {
-    ToolInvocation invocation = lockOwned(claimed, now);
+    HarnessRunDO run = lockWaitingRun(claimed.invocation().runId());
+    if (run == null) {
+      return false;
+    }
+    ToolInvocation invocation = lockOwned(claimed, now, run.getId());
     if (invocation == null) {
       return false;
     }
     appendEvents(
-        invocation.runId(),
+        run,
         List.of(
             new RunEventDraft(
                 RunEventType.TOOL_STARTED,
@@ -107,7 +111,11 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
                     "ordinal",
                     invocation.ordinal(),
                     "toolCallId",
-                    invocation.toolCallId()))),
+                    invocation.toolCallId(),
+                    "attempt",
+                    run.getAttempt(),
+                    "turnIndex",
+                    run.getTurnIndex()))),
         now);
     return true;
   }
@@ -120,7 +128,11 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
     if (batch.isEmpty()) {
       return true;
     }
-    ToolInvocation invocation = lockOwned(claimed, now);
+    HarnessRunDO run = lockWaitingRun(claimed.invocation().runId());
+    if (run == null) {
+      return false;
+    }
+    ToolInvocation invocation = lockOwned(claimed, now, run.getId());
     if (invocation == null) {
       return false;
     }
@@ -128,7 +140,7 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
       requireResultFor(invocation, partial);
     }
     appendEvents(
-        invocation.runId(),
+        run,
         List.of(
             new RunEventDraft(
                 RunEventType.TOOL_DELTA_BATCH,
@@ -138,7 +150,11 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
                     "ordinal",
                     invocation.ordinal(),
                     "partialResults",
-                    batch.stream().map(ToolResultJsonCodec::encode).toList()))),
+                    batch.stream().map(ToolResultJsonCodec::encode).toList(),
+                    "attempt",
+                    run.getAttempt(),
+                    "turnIndex",
+                    run.getTurnIndex()))),
         now);
     return true;
   }
@@ -154,7 +170,11 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
     if (terminalStatus == null || !terminalStatus.isTerminal()) {
       throw new IllegalArgumentException("terminalStatus must be terminal");
     }
-    ToolInvocation invocation = lockOwned(claimed, now);
+    HarnessRunDO run = lockWaitingRun(claimed.invocation().runId());
+    if (run == null) {
+      return false;
+    }
+    ToolInvocation invocation = lockOwned(claimed, now, run.getId());
     if (invocation == null) {
       return false;
     }
@@ -171,7 +191,7 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
       return false;
     }
     appendEvents(
-        invocation.runId(),
+        run,
         List.of(
             new RunEventDraft(
                 RunEventType.TOOL_COMPLETED,
@@ -183,7 +203,11 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
                     "status",
                     terminalStatus.name(),
                     "error",
-                    result.error()))),
+                    result.error(),
+                    "attempt",
+                    run.getAttempt(),
+                    "turnIndex",
+                    run.getTurnIndex()))),
         now);
     return true;
   }
@@ -228,23 +252,39 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
       throw new ConcurrentModificationException("waiting run changed during tool coordination");
     }
     appendEvents(
-        runId,
+        run,
         List.of(
             new RunEventDraft(
                 RunEventType.TOOL_REQUEUED,
                 RunEventPayloads.of(
-                    "status", RunStatus.QUEUED.name(), "count", invocations.size()))),
+                    "status",
+                    RunStatus.QUEUED.name(),
+                    "count",
+                    invocations.size(),
+                    "attempt",
+                    run.getAttempt(),
+                    "turnIndex",
+                    run.getTurnIndex()))),
         now);
     return true;
   }
 
-  private ToolInvocation lockOwned(ClaimedToolInvocation claimed, Instant now) {
+  private HarnessRunDO lockWaitingRun(long runId) {
+    HarnessRunDO run = runMapper.findForUpdate(runId);
+    if (run == null || !RunStatus.WAITING_TOOLS.name().equals(run.getStatus())) {
+      return null;
+    }
+    return run;
+  }
+
+  private ToolInvocation lockOwned(ClaimedToolInvocation claimed, Instant now, long runId) {
     ToolInvocationDO source = invocationMapper.findForUpdate(claimed.invocation().id());
     if (source == null) {
       return null;
     }
     ToolInvocation invocation = invocationStore.toInvocation(source);
-    if ((invocation.status() != ToolInvocationStatus.RUNNING
+    if (invocation.runId() != runId
+        || (invocation.status() != ToolInvocationStatus.RUNNING
             && invocation.status() != ToolInvocationStatus.CANCEL_REQUESTED)
         || !Objects.equals(invocation.leaseOwner(), claimed.invocation().leaseOwner())
         || invocation.leaseUntil() == null
@@ -309,21 +349,17 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
     }
   }
 
-  private void appendEvents(long runId, List<RunEventDraft> drafts, Instant now) {
-    HarnessRunDO run = runMapper.findForUpdate(runId);
-    if (run == null) {
-      throw new IllegalArgumentException("unknown run: " + runId);
-    }
+  private void appendEvents(HarnessRunDO run, List<RunEventDraft> drafts, Instant now) {
     long sequence = run.getEventSequence();
     long finalSequence = Math.addExact(sequence, drafts.size());
-    if (runMapper.updateEventSequence(runId, sequence, finalSequence, utc(now)) != 1) {
+    if (runMapper.updateEventSequence(run.getId(), sequence, finalSequence, utc(now)) != 1) {
       throw new ConcurrentModificationException("cannot allocate Tool run event sequence");
     }
     for (RunEventDraft draft : drafts) {
       RunEvent event =
           new RunEvent(
               idGenerator.newRunEventId(),
-              runId,
+              run.getId(),
               ++sequence,
               draft.type(),
               draft.payloadJson(),

@@ -174,9 +174,14 @@ public final class CloudToolWorker {
         continue;
       }
       String mediaType = content instanceof JsonToolContent ? "application/json" : "text/plain";
+      // Artifact persistence intentionally precedes the terminal ownership CAS. A lost CAS can
+      // leave an unreachable artifact, but no Invocation or Session entry can reference it.
       ArtifactRef artifact = artifactStore.save(workspaceId, mediaType, "utf-8", bytes);
       contents.add(new TextToolContent(preview(bytes)));
       contents.add(new ArtifactToolContent(artifact));
+    }
+    if (contents.isEmpty()) {
+      contents.add(new TextToolContent(""));
     }
     return new ToolResult(
         result.toolCallId(), contents, result.error(), result.detailsJson(), false);
@@ -193,9 +198,24 @@ public final class CloudToolWorker {
   }
 
   private String preview(byte[] bytes) {
-    int length = Math.min(bytes.length, config.previewBytes());
-    String value = new String(bytes, 0, length, StandardCharsets.UTF_8);
-    return length == bytes.length ? value : value + "\n[full output stored as artifact]";
+    if (bytes.length <= config.previewBytes()) {
+      return new String(bytes, StandardCharsets.UTF_8);
+    }
+    String value = new String(bytes, StandardCharsets.UTF_8);
+    StringBuilder prefix = new StringBuilder();
+    int previewBytes = 0;
+    for (int offset = 0; offset < value.length(); ) {
+      int codePoint = value.codePointAt(offset);
+      int codePointBytes =
+          new String(Character.toChars(codePoint)).getBytes(StandardCharsets.UTF_8).length;
+      if (previewBytes + codePointBytes > config.previewBytes()) {
+        break;
+      }
+      prefix.appendCodePoint(codePoint);
+      previewBytes += codePointBytes;
+      offset += Character.charCount(codePoint);
+    }
+    return prefix + "\n[full output stored as artifact]";
   }
 
   private static String requireNonBlank(String value, String name) {
@@ -293,6 +313,7 @@ public final class CloudToolWorker {
     private void heartbeat() {
       ToolInvocation current = store.find(claimed.invocation().id()).orElse(null);
       if (current == null || current.status().isTerminal()) {
+        cancelHandle();
         stop();
         return;
       }
@@ -305,6 +326,7 @@ public final class CloudToolWorker {
         return;
       }
       if (!store.heartbeat(claimed, clock.instant(), config.leaseDuration())) {
+        cancelHandle();
         stop();
       }
     }
@@ -329,17 +351,25 @@ public final class CloudToolWorker {
         }
         terminal = true;
       }
-      flush();
-      if (transactions.terminate(
-          claimed,
-          status,
-          externalize(claimed.workspaceId(), result),
-          errorMessage,
-          clock.instant())) {
-        transactions.coordinateReadyRuns(clock.instant());
+      boolean terminalPersisted = false;
+      try {
+        flush();
+        terminalPersisted =
+            transactions.terminate(
+                claimed,
+                status,
+                externalize(claimed.workspaceId(), result),
+                errorMessage,
+                clock.instant());
+        if (terminalPersisted) {
+          transactions.coordinateReadyRuns(clock.instant());
+        }
+      } finally {
+        if (status != ToolInvocationStatus.SUCCEEDED || !terminalPersisted) {
+          cancelHandle();
+        }
+        stop();
       }
-      cancelHandle();
-      stop();
     }
 
     private synchronized void cancelHandle() {

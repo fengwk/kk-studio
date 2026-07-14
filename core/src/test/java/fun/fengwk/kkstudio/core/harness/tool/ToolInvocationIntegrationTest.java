@@ -77,6 +77,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -451,8 +452,16 @@ class ToolInvocationIntegrationTest {
     assertTrue(toolTransactions.requestCancel(first.invocation().id(), NOW.plusSeconds(4)));
     assertFalse(workerStore.heartbeat(first, NOW.plusSeconds(5), Duration.ofMinutes(1)));
 
-    ClaimedToolInvocation cancelled =
+    // An active cancellation remains owned by tool-a; the other queued invocation is selected.
+    ClaimedToolInvocation original =
         workerStore.claimDue("tool-b", NOW.plusSeconds(5), Duration.ofMinutes(1)).orElseThrow();
+    assertEquals("reclaimed", original.invocation().toolCallId());
+    ToolInvocation activeCancel = workerStore.find(first.invocation().id()).orElseThrow();
+    assertEquals(ToolInvocationStatus.CANCEL_REQUESTED, activeCancel.status());
+    assertEquals("tool-a", activeCancel.leaseOwner());
+
+    ClaimedToolInvocation cancelled =
+        workerStore.claimDue("tool-b", NOW.plusSeconds(64), Duration.ofMinutes(1)).orElseThrow();
     assertEquals(ToolInvocationStatus.CANCEL_REQUESTED, cancelled.invocation().status());
     assertTrue(
         toolTransactions.terminate(
@@ -460,31 +469,29 @@ class ToolInvocationIntegrationTest {
             ToolInvocationStatus.CANCELLED,
             ToolResult.error("cancelled", "cancelled"),
             "cancelled",
-            NOW.plusSeconds(5)));
+            NOW.plusSeconds(64)));
 
-    ClaimedToolInvocation original =
-        workerStore.claimDue("tool-c", NOW.plusSeconds(6), Duration.ofMinutes(1)).orElseThrow();
     ClaimedToolInvocation reclaimed =
-        workerStore.claimDue("tool-d", NOW.plusSeconds(67), Duration.ofMinutes(1)).orElseThrow();
+        workerStore.claimDue("tool-d", NOW.plusSeconds(66), Duration.ofMinutes(1)).orElseThrow();
     assertTrue(reclaimed.recoveredLease());
-    assertTrue(reclaimed.invocation().deadlineAt().isBefore(NOW.plusSeconds(67)));
-    assertFalse(workerStore.heartbeat(original, NOW.plusSeconds(67), Duration.ofMinutes(1)));
+    assertTrue(reclaimed.invocation().deadlineAt().isBefore(NOW.plusSeconds(66)));
+    assertFalse(workerStore.heartbeat(original, NOW.plusSeconds(66), Duration.ofMinutes(1)));
     assertFalse(
         toolTransactions.terminate(
             original,
             ToolInvocationStatus.FAILED,
             ToolResult.error("reclaimed", "late"),
             "late callback",
-            NOW.plusSeconds(67)));
+            NOW.plusSeconds(66)));
     assertTrue(workerStore.find(reclaimed.invocation().id()).isPresent());
-    assertFalse(toolTransactions.start(original, NOW.plusSeconds(67)));
+    assertFalse(toolTransactions.start(original, NOW.plusSeconds(126)));
     assertFalse(
         toolTransactions.appendPartial(
             original,
             List.of(
                 new ToolResult(
                     "reclaimed", List.of(new TextToolContent("late")), false, "{}", false)),
-            NOW.plusSeconds(67)));
+            NOW.plusSeconds(126)));
     assertFalse(toolTransactions.requestCancel(Long.MAX_VALUE, NOW));
     assertFalse(toolTransactions.coordinate(Long.MAX_VALUE, NOW));
     assertThrows(
@@ -493,6 +500,102 @@ class ToolInvocationIntegrationTest {
         IllegalArgumentException.class, () -> workerStore.heartbeat(reclaimed, NOW, Duration.ZERO));
     assertThrows(
         NullPointerException.class, () -> workerStore.heartbeat(null, NOW, Duration.ofSeconds(1)));
+  }
+
+  /** Queue scans only dispatch invocations while their parent Run remains WAITING_TOOLS. */
+  @Test
+  void doesNotClaimInvocationWhoseRunIsNotWaitingTools() {
+    long workspaceId = workspace("{}");
+    Claimed run = claimedRun(workspaceId, false);
+    assertTrue(
+        prepare(
+            run.run(),
+            List.of(new ToolCall("not-waiting", "read", "{\"path\":\"a\"}")),
+            List.of(binding("read"))));
+    jdbcTemplate.update("update harness_run set status = 'QUEUED' where id = ?", run.run().id());
+
+    assertTrue(workerStore.claimDue("tool-a", NOW.plusSeconds(2), Duration.ofMinutes(1)).isEmpty());
+  }
+
+  /**
+   * Callback transactions lock and validate the Run before the invocation, so a moved Run cannot
+   * receive a stale event or terminal result.
+   */
+  @Test
+  void rejectsCallbackWhenRunIsNoLongerWaitingTools() {
+    long workspaceId = workspace("{}");
+    Claimed run = claimedRun(workspaceId, false);
+    assertTrue(
+        prepare(
+            run.run(),
+            List.of(new ToolCall("moved-run", "read", "{\"path\":\"a\"}")),
+            List.of(binding("read"))));
+    ClaimedToolInvocation claimed =
+        workerStore.claimDue("tool-a", NOW.plusSeconds(2), Duration.ofMinutes(1)).orElseThrow();
+    jdbcTemplate.update("update harness_run set status = 'QUEUED' where id = ?", run.run().id());
+
+    assertFalse(toolTransactions.start(claimed, NOW.plusSeconds(2)));
+    assertFalse(
+        toolTransactions.appendPartial(
+            claimed,
+            List.of(
+                new ToolResult(
+                    "moved-run", List.of(new TextToolContent("partial")), false, "{}", false)),
+            NOW.plusSeconds(2)));
+    assertFalse(
+        toolTransactions.terminate(
+            claimed,
+            ToolInvocationStatus.SUCCEEDED,
+            new ToolResult("moved-run", List.of(new TextToolContent("done")), false, "{}", false),
+            null,
+            NOW.plusSeconds(2)));
+    assertTrue(
+        runStore.listAfter(run.run().id(), 0, 20).stream()
+            .noneMatch(
+                event ->
+                    event.type() == RunEventType.TOOL_STARTED
+                        || event.type() == RunEventType.TOOL_DELTA_BATCH
+                        || event.type() == RunEventType.TOOL_COMPLETED));
+    assertEquals(
+        ToolInvocationStatus.RUNNING, invocationStore.listByRun(run.run().id()).get(0).status());
+  }
+
+  /**
+   * Callback journaling and coordination both acquire the Run lock first, so concurrent work on one
+   * Run completes without lock inversion.
+   */
+  @Test
+  void callbackAndCoordinatorUseConsistentRunFirstLockOrder() throws Exception {
+    long workspaceId = workspace("{}");
+    Claimed run = claimedRun(workspaceId, false);
+    assertTrue(
+        prepare(
+            run.run(),
+            List.of(new ToolCall("lock-order", "read", "{\"path\":\"a\"}")),
+            List.of(binding("read"))));
+    ClaimedToolInvocation claimed =
+        workerStore.claimDue("tool-a", NOW.plusSeconds(2), Duration.ofMinutes(1)).orElseThrow();
+    ExecutorService workers = Executors.newFixedThreadPool(2);
+    CountDownLatch start = new CountDownLatch(1);
+    try {
+      Future<Boolean> callback =
+          workers.submit(
+              () -> {
+                start.await();
+                return toolTransactions.start(claimed, NOW.plusSeconds(2));
+              });
+      Future<Integer> coordinator =
+          workers.submit(
+              () -> {
+                start.await();
+                return toolTransactions.coordinateReadyRuns(NOW.plusSeconds(2));
+              });
+      start.countDown();
+      assertTrue(callback.get(1, TimeUnit.SECONDS));
+      assertEquals(0, coordinator.get(1, TimeUnit.SECONDS));
+    } finally {
+      workers.shutdownNow();
+    }
   }
 
   /**
@@ -549,11 +652,12 @@ class ToolInvocationIntegrationTest {
                 new ToolResult(
                     "partial", List.of(new TextToolContent("progress")), false, "{}", false)),
             NOW.plusSeconds(2)));
-    assertEquals(
-        1,
+    RunEvent delta =
         runStore.listAfter(run.run().id(), 0, 20).stream()
             .filter(event -> event.type() == RunEventType.TOOL_DELTA_BATCH)
-            .count());
+            .findFirst()
+            .orElseThrow();
+    assertToolEventAttempt(delta, run.run());
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -668,6 +772,13 @@ class ToolInvocationIntegrationTest {
     }
     assertEquals(0, toolTransactions.coordinateReadyRuns(NOW.plusSeconds(5)));
     assertEquals(RunStatus.QUEUED, runStore.find(run.run().id()).orElseThrow().status());
+    runStore.listAfter(run.run().id(), 0, 20).stream()
+        .filter(
+            event ->
+                event.type() == RunEventType.TOOL_STARTED
+                    || event.type() == RunEventType.TOOL_COMPLETED
+                    || event.type() == RunEventType.TOOL_REQUEUED)
+        .forEach(event -> assertToolEventAttempt(event, run.run()));
     Session session = sessionStore.find(run.sessionId()).orElseThrow();
     List<SessionEntry> path = sessionStore.loadPath(run.sessionId(), session.leafEntryId());
     List<String> toolCallIds =
@@ -692,6 +803,16 @@ class ToolInvocationIntegrationTest {
             .orElseThrow();
     assertTrue(firstResult.contents().get(0) instanceof JsonMessageContent);
     assertTrue(firstResult.contents().get(1) instanceof ArtifactMessageContent);
+  }
+
+  private void assertToolEventAttempt(RunEvent event, AgentRun expectedRun) {
+    AgentRun lockedRun = runStore.find(event.runId()).orElseThrow();
+    assertEquals(expectedRun.id(), lockedRun.id());
+    assertTrue(
+        event.payloadJson().contains("\"attempt\":" + lockedRun.attempt()), event.payloadJson());
+    assertTrue(
+        event.payloadJson().contains("\"turnIndex\":" + lockedRun.turnIndex()),
+        event.payloadJson());
   }
 
   private ToolInvocation askInvocation(long workspaceId, String toolCallId) {

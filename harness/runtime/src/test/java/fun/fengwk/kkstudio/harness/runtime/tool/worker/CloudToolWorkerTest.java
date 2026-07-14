@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
@@ -62,6 +64,7 @@ class CloudToolWorkerTest {
     assertEquals(ToolInvocationStatus.SUCCEEDED, fixture.transactions.status);
     assertEquals("complete", text(fixture.transactions.result));
     assertTrue(fixture.transactions.coordinations >= 1);
+    assertFalse(fixture.tool.handle.cancelled);
   }
 
   /**
@@ -106,6 +109,56 @@ class CloudToolWorkerTest {
     assertEquals(ToolInvocationStatus.FAILED, fixture.transactions.status);
     assertTrue(fixture.tool.handle.cancelled);
     assertTrue(text(fixture.transactions.result).contains("deadline"));
+  }
+
+  /** Heartbeat ownership loss cancels the local handle before relinquishing its durable lease. */
+  @Test
+  void cancelsHandleWhenHeartbeatLosesOwnership() throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+    fixture.rebuildWorker(
+        new ToolWorkerConfig(
+            Duration.ofSeconds(1), Duration.ofMillis(5), Duration.ofSeconds(1), 8192, 8192, 1024));
+    fixture.store.heartbeatResult = false;
+
+    fixture.worker.executeNext("worker-a");
+
+    assertTrue(fixture.store.heartbeatFailure.await(1, TimeUnit.SECONDS));
+    assertTrue(fixture.tool.handle.cancelled);
+  }
+
+  /**
+   * A terminal durable state observed during heartbeat also cancels an untrusted local execution.
+   */
+  @Test
+  void cancelsHandleWhenDurableInvocationBecomesTerminal() throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+    fixture.rebuildWorker(
+        new ToolWorkerConfig(
+            Duration.ofSeconds(1), Duration.ofMillis(5), Duration.ofSeconds(1), 8192, 8192, 1024));
+    fixture.store.current = copyWithStatus(fixture.store.current, ToolInvocationStatus.SUCCEEDED);
+
+    fixture.worker.executeNext("worker-a");
+
+    assertTrue(fixture.store.terminalRead.await(1, TimeUnit.SECONDS));
+    assertTrue(fixture.tool.handle.cancelled);
+  }
+
+  /**
+   * Failed partial journaling after terminal ownership was claimed always stops and cancels
+   * locally.
+   */
+  @Test
+  void cancelsHandleAndStopsWhenPartialFlushFailsDuringCompletion() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+    fixture.transactions.partialFailure = true;
+
+    fixture.worker.executeNext("worker-a");
+    fixture.tool.listener.onPartial(result("partial"));
+    assertThrows(
+        IllegalStateException.class, () -> fixture.tool.listener.onComplete(result("complete")));
+
+    assertTrue(fixture.tool.handle.cancelled);
+    assertEquals(1, fixture.transactions.coordinations);
   }
 
   /**
@@ -182,6 +235,36 @@ class CloudToolWorkerTest {
     assertEquals("0123456789", new String(fixture.artifacts.content, StandardCharsets.UTF_8));
   }
 
+  /** Empty Tool results get a durable text representation so ordinal coordination can advance. */
+  @Test
+  void normalizesEmptyTerminalResultWithoutCancellingSuccessfulHandle() throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+
+    fixture.worker.executeNext("worker-a");
+    fixture.tool.listener.onComplete(new ToolResult("call-1", List.of(), false, "{}", false));
+
+    assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
+    assertEquals("", text(fixture.transactions.result));
+    assertFalse(fixture.tool.handle.cancelled);
+  }
+
+  /**
+   * Byte-limited previews preserve complete UTF-8 code points rather than replacement characters.
+   */
+  @Test
+  void storesCodePointSafeUtf8Preview() throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+    fixture.rebuildWorker(
+        new ToolWorkerConfig(
+            Duration.ofSeconds(1), Duration.ofSeconds(1), Duration.ofMillis(5), 10, 1, 5));
+
+    fixture.worker.executeNext("worker-a");
+    fixture.tool.listener.onComplete(result("😀😀"));
+
+    assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
+    assertEquals("😀\n[full output stored as artifact]", text(fixture.transactions.result));
+  }
+
   private Fixture fixture(ToolSideEffect sideEffect, Instant deadline) {
     Fixture fixture = new Fixture(sideEffect, deadline);
     fixture.rebuildWorker();
@@ -198,6 +281,33 @@ class CloudToolWorkerTest {
 
   private static List<String> texts(List<ToolResult> results) {
     return results.stream().map(CloudToolWorkerTest::text).toList();
+  }
+
+  private ToolInvocation copyWithStatus(ToolInvocation source, ToolInvocationStatus status) {
+    return new ToolInvocation(
+        source.id(),
+        source.runId(),
+        source.assistantEntryId(),
+        source.ordinal(),
+        source.toolCallId(),
+        source.toolName(),
+        source.toolVersion(),
+        source.targetType(),
+        source.environmentId(),
+        source.argumentsJson(),
+        status,
+        source.permissionAction(),
+        source.permissionDecision(),
+        source.deadlineAt(),
+        source.leaseOwner(),
+        source.leaseUntil(),
+        source.cancelRequestedAt(),
+        source.resultJson(),
+        source.errorMessage(),
+        source.createdAt(),
+        source.startedAt(),
+        source.finishedAt(),
+        source.updatedAt());
   }
 
   private ToolInvocation copyWithEnvironmentTarget(ToolInvocation source) {
@@ -327,9 +437,12 @@ class CloudToolWorkerTest {
   }
 
   private static final class RecordingStore implements ToolInvocationWorkerStore {
-    private ToolInvocation current;
+    private volatile ToolInvocation current;
     private boolean claimed;
     private boolean recovered;
+    private volatile boolean heartbeatResult = true;
+    private final CountDownLatch heartbeatFailure = new CountDownLatch(1);
+    private final CountDownLatch terminalRead = new CountDownLatch(1);
 
     private RecordingStore(ToolInvocation current) {
       this.current = current;
@@ -347,11 +460,17 @@ class CloudToolWorkerTest {
 
     @Override
     public boolean heartbeat(ClaimedToolInvocation claimed, Instant now, Duration leaseDuration) {
-      return true;
+      if (!heartbeatResult) {
+        heartbeatFailure.countDown();
+      }
+      return heartbeatResult;
     }
 
     @Override
     public Optional<ToolInvocation> find(long invocationId) {
+      if (current.status().isTerminal()) {
+        terminalRead.countDown();
+      }
       return Optional.of(current);
     }
   }
@@ -360,6 +479,7 @@ class CloudToolWorkerTest {
     private final CountDownLatch terminal = new CountDownLatch(1);
     private final List<List<ToolResult>> partials = new ArrayList<>();
     private boolean terminalResult = true;
+    private boolean partialFailure;
     private int started;
     private int coordinations;
     private ToolInvocationStatus status;
@@ -374,6 +494,9 @@ class CloudToolWorkerTest {
     @Override
     public boolean appendPartial(
         ClaimedToolInvocation claimed, List<ToolResult> partials, Instant now) {
+      if (partialFailure) {
+        throw new IllegalStateException("partial journal unavailable");
+      }
       this.partials.add(partials);
       return true;
     }

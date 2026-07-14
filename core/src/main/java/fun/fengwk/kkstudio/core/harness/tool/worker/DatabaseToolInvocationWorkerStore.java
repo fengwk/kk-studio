@@ -16,12 +16,16 @@ import java.time.ZoneOffset;
 import java.util.Objects;
 import java.util.Optional;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Database claim port for Cloud/Control leases; all compare-and-set predicates live in the mapper.
  */
 @Repository
 public class DatabaseToolInvocationWorkerStore implements ToolInvocationWorkerStore {
+  private static final int MAX_CLAIM_CONTENTION_RETRIES = 64;
+
   private final ToolInvocationMapper invocationMapper;
   private final MysqlToolInvocationStore invocationStore;
   private final HarnessSessionMapper sessionMapper;
@@ -36,6 +40,7 @@ public class DatabaseToolInvocationWorkerStore implements ToolInvocationWorkerSt
   }
 
   @Override
+  @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public Optional<ClaimedToolInvocation> claimDue(
       String leaseOwner, Instant now, Duration leaseDuration) {
     Objects.requireNonNull(now, "now");
@@ -47,22 +52,27 @@ public class DatabaseToolInvocationWorkerStore implements ToolInvocationWorkerSt
       throw new IllegalArgumentException("lease owner and duration must be valid");
     }
     LocalDateTime timestamp = utc(now);
-    ToolInvocationDO candidate = invocationMapper.findClaimCandidate(timestamp);
-    if (candidate == null) {
-      return Optional.empty();
+    LocalDateTime leaseUntil = utc(now.plus(leaseDuration));
+    // Each failed CAS rereads a current candidate in a separate autocommit statement. This avoids
+    // retrying a stale REPEATABLE READ snapshot while another worker is claiming due work.
+    for (int retry = 0; retry < MAX_CLAIM_CONTENTION_RETRIES; retry++) {
+      ToolInvocationDO candidate = invocationMapper.findClaimCandidate(timestamp);
+      if (candidate == null) {
+        return Optional.empty();
+      }
+      boolean recovered = ToolInvocationStatus.RUNNING.name().equals(candidate.getStatus());
+      if (invocationMapper.claim(candidate.getId(), leaseOwner, timestamp, leaseUntil) != 1) {
+        continue;
+      }
+      ToolInvocation invocation = invocationStore.find(candidate.getId()).orElseThrow();
+      HarnessSessionDO session = sessionMapper.find(runSessionId(invocation));
+      if (session == null) {
+        throw new IllegalStateException("tool invocation run session is missing");
+      }
+      return Optional.of(
+          new ClaimedToolInvocation(invocation, session.getWorkspaceId(), recovered));
     }
-    boolean recovered = ToolInvocationStatus.RUNNING.name().equals(candidate.getStatus());
-    if (invocationMapper.claim(
-            candidate.getId(), leaseOwner, timestamp, utc(now.plus(leaseDuration)))
-        != 1) {
-      return Optional.empty();
-    }
-    ToolInvocation invocation = invocationStore.find(candidate.getId()).orElseThrow();
-    HarnessSessionDO session = sessionMapper.find(runSessionId(invocation));
-    if (session == null) {
-      throw new IllegalStateException("tool invocation run session is missing");
-    }
-    return Optional.of(new ClaimedToolInvocation(invocation, session.getWorkspaceId(), recovered));
+    return Optional.empty();
   }
 
   @Override

@@ -113,8 +113,12 @@ public interface ToolInvocationMapper extends BaseMapper {
           + COLUMNS
           + """
       from tool_invocation ti
-      where ti.target_type in ('CLOUD', 'CONTROL')
-        and (ti.status in ('QUEUED', 'CANCEL_REQUESTED')
+      join harness_run r on r.id = ti.run_id
+      where r.status = 'WAITING_TOOLS'
+        and ti.target_type in ('CLOUD', 'CONTROL')
+        and (ti.status = 'QUEUED'
+          or (ti.status = 'CANCEL_REQUESTED'
+            and (ti.lease_owner is null or ti.lease_until is null or ti.lease_until <= #{now}))
           or (ti.status = 'RUNNING' and ti.lease_until <= #{now}))
       order by ti.deadline_at asc, ti.id asc
       limit 1
@@ -129,7 +133,13 @@ public interface ToolInvocationMapper extends BaseMapper {
           lease_owner = #{owner}, lease_until = #{leaseUntil},
           started_at = coalesce(started_at, #{now}), gmt_modified = #{now}
       where id = #{id}
-        and (status in ('QUEUED', 'CANCEL_REQUESTED')
+        and exists (
+          select 1 from harness_run r where r.id = tool_invocation.run_id
+            and r.status = 'WAITING_TOOLS'
+        )
+        and (status = 'QUEUED'
+          or (status = 'CANCEL_REQUESTED'
+            and (lease_owner is null or lease_until is null or lease_until <= #{now}))
           or (status = 'RUNNING' and lease_until <= #{now}))
       """)
   int claim(
