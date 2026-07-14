@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
+import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -66,6 +67,45 @@ class TaskDomainTest {
         TaskExposure.availableSubagentsInstruction(snapshot, 1));
   }
 
+  /** Strict policy JSON accepts optional limits and rejects each malformed numeric field. */
+  @Test
+  void decodesFrozenPoliciesStrictly() {
+    assertEquals(
+        new TaskPolicy(4, 3, 9, 2, Duration.ofMillis(7)),
+        TaskPolicyCodec.decode(
+            "{\"maxDepth\":4,\"maxDirectSubagents\":3,\"maxTotalSubagents\":9,\"maxTurns\":2,\"idleTimeoutMillis\":7}"));
+    assertEquals(TaskPolicy.defaults(), TaskPolicyCodec.decode("{}"));
+    assertThrows(IllegalArgumentException.class, () -> TaskPolicyCodec.decode("[]"));
+    assertThrows(IllegalArgumentException.class, () -> TaskPolicyCodec.decode("not-json"));
+    for (String field :
+        List.of(
+            "maxDepth",
+            "maxDirectSubagents",
+            "maxTotalSubagents",
+            "maxTurns",
+            "idleTimeoutMillis")) {
+      assertThrows(
+          IllegalArgumentException.class, () -> TaskPolicyCodec.decode("{\"" + field + "\":0}"));
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> TaskPolicyCodec.decode("{\"" + field + "\":\"1\"}"));
+    }
+  }
+
+  /** XML instruction escaping and no-eligible cases remain deterministic for frozen snapshots. */
+  @Test
+  void escapesAvailableSubagentsAndRejectsInvalidDepth() {
+    AgentSnapshot snapshot =
+        new AgentSnapshot(
+            null, "model", "variant", List.of(), List.of(), List.of("A<&\"'"), "{\"maxDepth\":1}");
+    assertTrue(
+        TaskExposure.availableSubagentsInstruction(snapshot, 0).contains("A&lt;&amp;&quot;&apos;"));
+    assertEquals("", TaskExposure.availableSubagentsInstruction(snapshot, 1));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> TaskExposure.availableSubagentsInstruction(snapshot, -1));
+  }
+
   /**
    * Structured reports preserve terminal state and produce standard error text for child failure.
    */
@@ -78,5 +118,19 @@ class TaskDomainTest {
     assertFalse(report.success());
     assertTrue(TaskResultFormatter.text(report).contains("<task_error>broken</task_error>"));
     assertTrue(TaskResultFormatter.json(report).contains("\"workspaceRevision\":\"rev-1\""));
+    TaskReport succeeded =
+        new TaskReport(
+            11,
+            12,
+            TaskState.SUCCEEDED,
+            "<&\"'",
+            List.of(new ArtifactRef("artifact-1", "text/plain", 3)),
+            0,
+            0,
+            WorkspacePolicy.NONE,
+            null);
+    assertTrue(TaskResultFormatter.text(succeeded).contains("&lt;&amp;&quot;&apos;"));
+    assertFalse(TaskResultFormatter.json(succeeded).contains("workspaceRevision"));
+    assertTrue(TaskResultFormatter.json(succeeded).contains("\"artifactId\":\"artifact-1\""));
   }
 }

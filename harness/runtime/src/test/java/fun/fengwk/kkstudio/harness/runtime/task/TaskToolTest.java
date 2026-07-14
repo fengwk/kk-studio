@@ -89,6 +89,107 @@ class TaskToolTest {
     assertEquals(21L, runtime.cancelledInvocationId);
   }
 
+  /** Terminal starts format both report channels immediately without scheduling a poll. */
+  @Test
+  void completesImmediatelyForTerminalInspection() {
+    RecordingRuntime runtime = new RecordingRuntime();
+    runtime.terminal = true;
+    TaskTool tool =
+        new TaskTool(
+            runtime, scheduler, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), Duration.ofMillis(5));
+    RecordingListener listener = new RecordingListener();
+
+    tool.execute(request("{\"subagent_type\":\"Coder\",\"prompt\":\"done\"}"), listener);
+
+    assertEquals(1, runtime.starts);
+    assertEquals(0L, listener.completed.getCount());
+    assertTrue(text(listener.result).contains("<task_result>done</task_result>"));
+    assertFalse(listener.result.error());
+  }
+
+  /** Parser, missing durable context, and runtime errors are converted to one normal Tool error. */
+  @Test
+  void convertsArgumentAndStartFailuresToToolErrors() {
+    RecordingRuntime runtime = new RecordingRuntime();
+    TaskTool tool =
+        new TaskTool(
+            runtime, scheduler, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), Duration.ofMillis(5));
+    for (String arguments :
+        List.of(
+            "{\"subagent_type\":\"\",\"prompt\":\"x\"}",
+            "{\"subagent_type\":\"Coder\",\"prompt\":\"\"}",
+            "{\"subagent_type\":\"Coder\",\"prompt\":\"x\",\"session_id\":\"0\"}",
+            "{\"subagent_type\":\"Coder\",\"prompt\":\"x\",\"session_id\":\"999999999999999999999\"}")) {
+      RecordingListener listener = new RecordingListener();
+      tool.execute(request(arguments), listener);
+      assertTrue(listener.result.error());
+    }
+    RecordingListener missingContext = new RecordingListener();
+    tool.execute(requestWithoutContext(), missingContext);
+    assertTrue(missingContext.result.error());
+    runtime.startError = new IllegalStateException();
+    RecordingListener runtimeFailure = new RecordingListener();
+    tool.execute(request("{\"subagent_type\":\"Coder\",\"prompt\":\"x\"}"), runtimeFailure);
+    assertEquals("Task execution failed.", text(runtimeFailure.result));
+  }
+
+  /**
+   * Optional task arguments parse into a pending durable command and terminal handles ignore
+   * cancel.
+   */
+  @Test
+  void parsesOptionalSessionAndWorkspacePolicy() {
+    RecordingRuntime runtime = new RecordingRuntime();
+    TaskTool tool =
+        new TaskTool(
+            runtime, scheduler, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), Duration.ofMillis(5));
+    ToolExecutionHandle pending =
+        tool.execute(
+            request(
+                "{\"subagent_type\":\"Coder\",\"prompt\":\"x\",\"session_id\":\"123\",\"workspace_policy\":\"NONE\"}"),
+            new RecordingListener());
+    pending.cancel();
+    assertEquals(1, runtime.cancels);
+
+    runtime.terminal = true;
+    ToolExecutionHandle terminal =
+        tool.execute(
+            request("{\"subagent_type\":\"Coder\",\"prompt\":\"x\"}"), new RecordingListener());
+    terminal.cancel();
+    assertEquals(1, runtime.cancels);
+  }
+
+  /**
+   * Poll errors finish once and cancellation without a context remains a harmless local operation.
+   */
+  @Test
+  void completesPollingErrorsAndHandlesContextlessCancellation() throws Exception {
+    RecordingRuntime runtime = new RecordingRuntime();
+    runtime.inspectError = new IllegalArgumentException("inspect failed");
+    TaskTool tool =
+        new TaskTool(
+            runtime, scheduler, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), Duration.ofMillis(5));
+    RecordingListener listener = new RecordingListener();
+    ToolExecutionHandle handle =
+        tool.execute(request("{\"subagent_type\":\"Coder\",\"prompt\":\"x\"}"), listener);
+    assertTrue(listener.completed.await(1, TimeUnit.SECONDS));
+    assertTrue(listener.result.error());
+    assertTrue(text(listener.result).contains("inspect failed"));
+
+    ToolExecutionHandle contextless =
+        tool.execute(requestWithoutContext(), new RecordingListener());
+    contextless.cancel();
+    assertTrue(contextless.isCancelled());
+  }
+
+  /** Constructors reject invalid polling intervals before a scheduler can be used. */
+  @Test
+  void rejectsInvalidPollInterval() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new TaskTool(new RecordingRuntime(), scheduler, Clock.systemUTC(), Duration.ZERO));
+  }
+
   /** Strict parsing rejects unknown keys before the runtime can create a durable child. */
   @Test
   void rejectsUnknownArguments() throws Exception {
@@ -107,6 +208,34 @@ class TaskToolTest {
                 new ToolExecutionContext(31, 32, 33)));
 
     assertEquals(0, runtime.starts);
+  }
+
+  private ToolExecutionRequest request(String arguments) {
+    TaskTool descriptorSource =
+        new TaskTool(
+            new RecordingRuntime(),
+            scheduler,
+            Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
+            Duration.ofMillis(5));
+    return new ToolExecutionRequest(
+        descriptorSource.descriptor(),
+        new ToolCall("call", "task", arguments),
+        descriptorSource.descriptor().timeout(),
+        new ToolExecutionContext(41, 42, 43));
+  }
+
+  private ToolExecutionRequest requestWithoutContext() {
+    TaskTool descriptorSource =
+        new TaskTool(
+            new RecordingRuntime(),
+            scheduler,
+            Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
+            Duration.ofMillis(5));
+    return new ToolExecutionRequest(
+        descriptorSource.descriptor(),
+        new ToolCall("call", "task", "{\"subagent_type\":\"Coder\",\"prompt\":\"x\"}"),
+        descriptorSource.descriptor().timeout(),
+        null);
   }
 
   private static String text(ToolResult result) {
@@ -135,6 +264,8 @@ class TaskToolTest {
   private static final class RecordingRuntime implements TaskRuntime {
     private final Instant now = Instant.EPOCH;
     private boolean terminal;
+    private RuntimeException startError;
+    private RuntimeException inspectError;
     private int starts;
     private int cancels;
     private long cancelledInvocationId;
@@ -143,11 +274,17 @@ class TaskToolTest {
     public TaskInspection startOrResume(
         ToolExecutionContext context, TaskCommand command, Instant ignored) {
       starts++;
-      return inspection(context.invocationId(), false);
+      if (startError != null) {
+        throw startError;
+      }
+      return inspection(context.invocationId(), terminal);
     }
 
     @Override
     public TaskInspection inspect(long parentInvocationId, Instant ignored) {
+      if (inspectError != null) {
+        throw inspectError;
+      }
       return inspection(parentInvocationId, terminal);
     }
 

@@ -64,14 +64,15 @@ public interface HarnessSessionEntryMapper extends BaseMapper {
       @Param("sessionId") long sessionId, @Param("entryType") String entryType);
 
   @Select(
-      "with recursive path (id, parent_entry_id) as (select id, parent_entry_id from"
-          + " harness_session_entry where session_id = #{sessionId} and id = #{leafEntryId} union"
-          + " all select entry.id, entry.parent_entry_id from harness_session_entry entry join path"
-          + " on entry.id = path.parent_entry_id where entry.session_id = #{sessionId}) select"
-          + " entry.id, entry.session_id, entry.parent_entry_id, entry.run_id, entry.entry_type,"
-          + " entry.payload_json, entry.gmt_create as create_time from harness_session_entry entry"
-          + " join path on path.id = entry.id where entry.entry_type = #{entryType} order by"
-          + " entry.id desc limit 1")
+      "with recursive path (id, parent_entry_id, path_depth) as (select id, parent_entry_id, 0"
+          + " from harness_session_entry where session_id = #{sessionId} and id = #{leafEntryId}"
+          + " union all select entry.id, entry.parent_entry_id, path.path_depth + 1 from"
+          + " harness_session_entry entry join path on entry.id = path.parent_entry_id where"
+          + " entry.session_id = #{sessionId}) select entry.id, entry.session_id,"
+          + " entry.parent_entry_id, entry.run_id, entry.entry_type, entry.payload_json,"
+          + " entry.gmt_create as create_time from harness_session_entry entry join path on"
+          + " path.id = entry.id where entry.entry_type = #{entryType} order by path.path_depth"
+          + " asc limit 1")
   @ResultMap("harnessSessionEntryResultMap")
   HarnessSessionEntryDO findLatestOnPathByType(
       @Param("sessionId") long sessionId,

@@ -121,6 +121,7 @@ public interface HarnessRunMapper extends BaseMapper {
       set cancel_requested_at = coalesce(cancel_requested_at, #{requestedAt}),
           gmt_modified = #{requestedAt}
       where id = #{runId} and status not in ('SUCCEEDED', 'FAILED', 'CANCELLED')
+        and cancel_requested_at is null
       """)
   int requestCancel(@Param("runId") long runId, @Param("requestedAt") LocalDateTime requestedAt);
 

@@ -40,7 +40,7 @@ import fun.fengwk.kkstudio.harness.runtime.task.TaskReport;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskRuntime;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskState;
 import fun.fengwk.kkstudio.harness.runtime.task.WorkspacePolicy;
-import fun.fengwk.kkstudio.harness.runtime.task.WorkspaceRevisionPort;
+import fun.fengwk.kkstudio.harness.runtime.task.WorkspaceRevisionResolver;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
@@ -54,7 +54,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -80,7 +79,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
   private final AgentDefinitionMapper agentMapper;
   private final RunIdGenerator runIds;
   private final SessionIdGenerator sessionIds;
-  private final WorkspaceRevisionPort workspaceRevisionPort;
+  private final WorkspaceRevisionResolver workspaceRevisionResolver;
   private final SessionEntryJsonCodec entryCodec = new SessionEntryJsonCodec();
 
   public DatabaseTaskRuntime(
@@ -93,7 +92,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       AgentDefinitionMapper agentMapper,
       RunIdGenerator runIds,
       SessionIdGenerator sessionIds,
-      WorkspaceRevisionPort workspaceRevisionPort) {
+      WorkspaceRevisionResolver workspaceRevisionResolver) {
     this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
     this.eventMapper = Objects.requireNonNull(eventMapper, "eventMapper");
     this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
@@ -103,8 +102,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     this.agentMapper = Objects.requireNonNull(agentMapper, "agentMapper");
     this.runIds = Objects.requireNonNull(runIds, "runIds");
     this.sessionIds = Objects.requireNonNull(sessionIds, "sessionIds");
-    this.workspaceRevisionPort =
-        Objects.requireNonNull(workspaceRevisionPort, "workspaceRevisionPort");
+    this.workspaceRevisionResolver =
+        Objects.requireNonNull(workspaceRevisionResolver, "workspaceRevisionResolver");
   }
 
   @Override
@@ -145,16 +144,16 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       throw new IllegalStateException("subagent root concurrency limit exceeded");
     }
 
+    if (command.sessionId() != null) {
+      return resumeChild(context, command, parentRun, parent, root, timestamp);
+    }
     AgentDefinitionDO target =
         agentMapper.getByWorkspaceIdAndName(parent.getWorkspaceId(), command.subagentType());
     if (target == null) {
       throw new IllegalArgumentException(
           "unknown subagent in workspace: " + command.subagentType());
     }
-    if (command.sessionId() == null) {
-      return createChild(context, command, parentRun, parent, root, target, timestamp, now);
-    }
-    return resumeChild(context, command, parentRun, parent, root, target, timestamp, now);
+    return createChild(context, command, parentRun, parent, root, target, timestamp);
   }
 
   @Override
@@ -211,18 +210,23 @@ public class DatabaseTaskRuntime implements TaskRuntime {
   public void cancelTree(long parentInvocationId, Instant now) {
     LockedTaskParent locked = lockTaskParent(parentInvocationId);
     LocalDateTime timestamp = utc(now);
-    ArrayDeque<HarnessSubagentTaskDO> pending = new ArrayDeque<>();
+    ArrayDeque<Long> pending = new ArrayDeque<>();
     HashSet<Long> visitedSessions = new HashSet<>();
-    pending.add(locked.task());
+    pending.add(locked.task().getChildSessionId());
     boolean requested = false;
     while (!pending.isEmpty()) {
-      HarnessSubagentTaskDO task = pending.removeFirst();
-      if (!visitedSessions.add(task.getChildSessionId())) {
+      long childSessionId = pending.removeFirst();
+      if (!visitedSessions.add(childSessionId)) {
         continue;
       }
-      requested |= requestChildCancellation(task.getChildRunId(), timestamp);
-      taskMapper.listByParentSession(task.getChildSessionId()).stream()
-          .sorted(Comparator.comparing(HarnessSubagentTaskDO::getChildSessionId))
+      HarnessSessionDO child = requireSessionForUpdate(childSessionId);
+      if (child.getActiveRunId() != null) {
+        requested |= requestChildCancellation(child.getActiveRunId(), timestamp);
+      }
+      taskMapper.listByParentSession(childSessionId).stream()
+          .map(HarnessSubagentTaskDO::getChildSessionId)
+          .distinct()
+          .sorted()
           .forEach(pending::addLast);
     }
     if (requested) {
@@ -246,8 +250,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       HarnessSessionDO parent,
       HarnessSessionDO root,
       AgentDefinitionDO target,
-      LocalDateTime timestamp,
-      Instant now) {
+      LocalDateTime timestamp) {
     long childSessionId = sessionIds.newSessionId();
     long snapshotEntryId = sessionIds.newEntryId();
     long promptEntryId = sessionIds.newEntryId();
@@ -285,8 +288,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     insertQueuedRun(childRunId, childSessionId, promptEntryId, timestamp);
     TaskPolicy targetPolicy = TaskPolicyCodec.decode(targetSnapshot.executionPolicyJson());
     String workspaceRevision =
-        workspaceRevisionPort
-            .prepare(parent.getWorkspaceId(), command.workspacePolicy(), childSessionId)
+        workspaceRevisionResolver
+            .resolve(parent.getWorkspaceId(), command.workspacePolicy(), childSessionId)
             .orElse(null);
     insertTask(
         context.invocationId(),
@@ -319,17 +322,26 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       HarnessRunDO parentRun,
       HarnessSessionDO parent,
       HarnessSessionDO root,
-      AgentDefinitionDO target,
-      LocalDateTime timestamp,
-      Instant now) {
+      LocalDateTime timestamp) {
     HarnessSessionDO child = requireSessionForUpdate(command.sessionId());
-    if (child.getWorkspaceId() != parent.getWorkspaceId()
-        || child.getRootSessionId() != root.getId()
+    if (!Objects.equals(child.getWorkspaceId(), parent.getWorkspaceId())
+        || !Objects.equals(child.getRootSessionId(), root.getId())
         || !Objects.equals(child.getParentSessionId(), parent.getId())
-        || !Objects.equals(child.getAgentDefinitionId(), target.getId())) {
-      throw new IllegalArgumentException(
-          "resume child does not match parent hierarchy or target agent");
+        || child.getParentInvocationId() == null) {
+      throw new IllegalArgumentException("resume child does not match parent hierarchy");
     }
+    HarnessSubagentTaskDO creation = requireTask(child.getParentInvocationId());
+    if (!Objects.equals(creation.getChildSessionId(), child.getId())
+        || !Objects.equals(creation.getParentSessionId(), parent.getId())
+        || !command.subagentType().equals(creation.getTargetAgent())) {
+      throw new IllegalArgumentException(
+          "resume child does not match its frozen creation task relation");
+    }
+    WorkspacePolicy workspacePolicy = WorkspacePolicy.valueOf(creation.getWorkspacePolicy());
+    if (command.workspacePolicy() != workspacePolicy) {
+      throw new IllegalArgumentException("resume workspace policy differs from child creation");
+    }
+    AgentSnapshot targetSnapshot = childSnapshot(child);
     if (child.getActiveRunId() != null) {
       throw new IllegalStateException("subagent child already has an active run");
     }
@@ -351,26 +363,22 @@ public class DatabaseTaskRuntime implements TaskRuntime {
         != 1) {
       throw new IllegalStateException("subagent child changed before resume");
     }
-    TaskPolicy targetPolicy = TaskPolicyCodec.decode(childSnapshot(child).executionPolicyJson());
-    String workspaceRevision =
-        child.getParentInvocationId() == null
-            ? null
-            : requireTask(child.getParentInvocationId()).getWorkspaceRevision();
+    TaskPolicy targetPolicy = TaskPolicyCodec.decode(targetSnapshot.executionPolicyJson());
     insertTask(
         context.invocationId(),
         parent.getId(),
         child.getId(),
         childRunId,
-        target.getName(),
-        command.workspacePolicy(),
-        workspaceRevision,
+        creation.getTargetAgent(),
+        workspacePolicy,
+        creation.getWorkspaceRevision(),
         targetPolicy,
         timestamp);
     appendEvent(
         parentRun,
         RunEventType.SUBAGENT_RESUMED,
         taskPayload(
-            child.getId(), childRunId, target.getName(), command.workspacePolicy(), parentRun),
+            child.getId(), childRunId, creation.getTargetAgent(), workspacePolicy, parentRun),
         timestamp);
     appendEvent(
         requireRun(childRunId),
@@ -595,7 +603,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     if (activity == null) {
       activity = childRun.getCreateTime();
     }
-    return activity.plus(task.getIdleTimeoutMillis(), ChronoUnit.MILLIS).isBefore(now)
+    return !activity.plus(task.getIdleTimeoutMillis(), ChronoUnit.MILLIS).isAfter(now)
         ? "idle_timeout"
         : null;
   }
@@ -635,7 +643,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
         task.getChildSessionId(),
         task.getChildRunId(),
         terminal,
-        finalAssistantReport(task.getChildSessionId()),
+        finalAssistantReport(task.getChildSessionId(), childRun.getId()),
         artifacts(childRun.getId()),
         childRun.getTurnIndex(),
         runMapper.countToolInvocations(childRun.getId()),
@@ -659,7 +667,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     return List.copyOf(result.values());
   }
 
-  private String finalAssistantReport(long sessionId) {
+  private String finalAssistantReport(long sessionId, long childRunId) {
     HarnessSessionDO session = requireSession(sessionId);
     List<HarnessSessionEntryDO> path = new ArrayList<>();
     Long entryId = session.getLeafEntryId();
@@ -673,6 +681,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     }
     Collections.reverse(path);
     return path.stream()
+        .filter(entry -> Objects.equals(entry.getRunId(), childRunId))
         .filter(entry -> SessionEntryType.MESSAGE.value().equals(entry.getEntryType()))
         .map(
             entry ->
