@@ -16,6 +16,8 @@ final class DeltaBatcher {
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
   private final long runId;
+  private final int attempt;
+  private final int turnIndex;
   private final RunEventStore eventStore;
   private final Clock clock;
   private final DeltaFlushScheduler flushScheduler;
@@ -28,6 +30,8 @@ final class DeltaBatcher {
 
   DeltaBatcher(
       long runId,
+      int attempt,
+      int turnIndex,
       RunEventStore eventStore,
       Clock clock,
       DeltaFlushScheduler flushScheduler,
@@ -35,6 +39,11 @@ final class DeltaBatcher {
       int maxBytes,
       Instant startedAt) {
     this.runId = runId;
+    if (attempt <= 0 || turnIndex < 0) {
+      throw new IllegalArgumentException("attempt must be positive and turnIndex non-negative");
+    }
+    this.attempt = attempt;
+    this.turnIndex = turnIndex;
     this.eventStore = Objects.requireNonNull(eventStore, "eventStore");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.flushScheduler = Objects.requireNonNull(flushScheduler, "flushScheduler");
@@ -75,6 +84,8 @@ final class DeltaBatcher {
     }
     ObjectNode payload = OBJECT_MAPPER.createObjectNode();
     payload.put("schemaVersion", 1);
+    payload.put("attempt", attempt);
+    payload.put("turnIndex", turnIndex);
     payload.set("deltas", deltas);
     try {
       eventStore.append(

@@ -6,6 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import fun.fengwk.kkstudio.harness.model.ModelCost;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -39,6 +43,11 @@ public final class SessionEntryJsonCodec {
     ObjectNode node = NODES.objectNode();
     if (payload instanceof MessageEntryPayload value) {
       node.set("message", encodeMessage(value.message()));
+      if (value.assistantMetadata() == null) {
+        node.putNull("assistantMetadata");
+      } else {
+        node.set("assistantMetadata", encodeAssistantMetadata(value.assistantMetadata()));
+      }
     } else if (payload instanceof AgentSnapshotEntryPayload value) {
       node.set("snapshot", encodeSnapshot(value.snapshot()));
     } else if (payload instanceof ModelChangeEntryPayload value) {
@@ -69,8 +78,14 @@ public final class SessionEntryJsonCodec {
   private SessionEntryPayload decodePayload(SessionEntryType type, ObjectNode node) {
     return switch (type) {
       case MESSAGE -> {
-        fields(node, "message");
-        yield new MessageEntryPayload(decodeMessage(node.get("message")));
+        fields(node, "message", "assistantMetadata");
+        JsonNode metadata = node.get("assistantMetadata");
+        if (metadata == null) {
+          throw new IllegalArgumentException("assistantMetadata must be present");
+        }
+        yield new MessageEntryPayload(
+            decodeMessage(node.get("message")),
+            metadata.isNull() ? null : decodeAssistantMetadata(metadata));
       }
       case AGENT_SNAPSHOT -> {
         fields(node, "snapshot");
@@ -150,6 +165,59 @@ public final class SessionEntryJsonCodec {
         strings(node.get("skills"), "skills"),
         strings(node.get("allowedSubagents"), "allowedSubagents"),
         jsonObjectText(node, "executionPolicyJson"));
+  }
+
+  private ObjectNode encodeAssistantMetadata(AssistantMessageMetadata metadata) {
+    ObjectNode node = NODES.objectNode();
+    node.put("stopReason", metadata.stopReason().name());
+    ModelUsage usage = metadata.usage();
+    ObjectNode usageNode = node.putObject("usage");
+    usageNode.put("inputTokens", usage.inputTokens());
+    usageNode.put("outputTokens", usage.outputTokens());
+    usageNode.put("cacheReadTokens", usage.cacheReadTokens());
+    usageNode.put("cacheWriteTokens", usage.cacheWriteTokens());
+    usageNode.put("reasoningTokens", usage.reasoningTokens());
+    ModelCost cost = metadata.cost();
+    ObjectNode costNode = node.putObject("cost");
+    costNode.put("currency", cost.currency());
+    costNode.put("amount", cost.amount().toPlainString());
+    return node;
+  }
+
+  private AssistantMessageMetadata decodeAssistantMetadata(JsonNode value) {
+    ObjectNode node = object(value, "assistantMetadata");
+    fields(node, "stopReason", "usage", "cost");
+    ProviderStopReason stopReason;
+    try {
+      stopReason = ProviderStopReason.valueOf(text(node, "stopReason"));
+    } catch (IllegalArgumentException exception) {
+      throw new IllegalArgumentException("unknown provider stop reason", exception);
+    }
+    ObjectNode usage = object(node.get("usage"), "usage");
+    fields(
+        usage,
+        "inputTokens",
+        "outputTokens",
+        "cacheReadTokens",
+        "cacheWriteTokens",
+        "reasoningTokens");
+    ModelUsage modelUsage =
+        new ModelUsage(
+            nonNegativeLong(usage, "inputTokens"),
+            nonNegativeLong(usage, "outputTokens"),
+            nonNegativeLong(usage, "cacheReadTokens"),
+            nonNegativeLong(usage, "cacheWriteTokens"),
+            nonNegativeLong(usage, "reasoningTokens"));
+    ObjectNode cost = object(node.get("cost"), "cost");
+    fields(cost, "currency", "amount");
+    BigDecimal amount;
+    try {
+      amount = new BigDecimal(text(cost, "amount"));
+    } catch (NumberFormatException exception) {
+      throw new IllegalArgumentException("cost amount must be a decimal", exception);
+    }
+    return new AssistantMessageMetadata(
+        stopReason, modelUsage, new ModelCost(text(cost, "currency"), amount));
   }
 
   private ObjectNode encodeMessage(AgentMessage message) {
@@ -369,6 +437,17 @@ public final class SessionEntryJsonCodec {
       throw new IllegalArgumentException(field + " must be a non-negative integer");
     }
     return value.intValue();
+  }
+
+  private static long nonNegativeLong(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value == null
+        || !value.canConvertToLong()
+        || !value.isIntegralNumber()
+        || value.longValue() < 0) {
+      throw new IllegalArgumentException(field + " must be a non-negative integer");
+    }
+    return value.longValue();
   }
 
   private static long positiveLong(ObjectNode node, String field) {

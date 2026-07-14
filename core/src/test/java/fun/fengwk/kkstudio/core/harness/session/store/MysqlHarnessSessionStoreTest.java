@@ -7,10 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.kkstudio.core.CoreTestApplication;
+import fun.fengwk.kkstudio.harness.model.ModelCost;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshotEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.InvalidSessionTreeException;
 import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
@@ -20,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.SessionLeafConflictException;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -72,7 +77,11 @@ class MysqlHarnessSessionStoreTest {
             new MessageEntryPayload(
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
-                    List.of(new ToolCallMessageContent("call-1", "read", "{}")))));
+                    List.of(new ToolCallMessageContent("call-1", "read", "{}"))),
+                new AssistantMessageMetadata(
+                    ProviderStopReason.TOOL_CALLS,
+                    new ModelUsage(1, 1, 0, 0, 0),
+                    new ModelCost("USD", BigDecimal.ZERO))));
     store.append(call, snapshot.id(), 1L);
     SessionEntry result =
         entry(

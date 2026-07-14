@@ -11,6 +11,16 @@ final class RunEventPayloads {
 
   private RunEventPayloads() {}
 
+  static String forAttempt(AgentRun run, Object... fields) {
+    Object[] scoped = new Object[fields.length + 4];
+    scoped[0] = "attempt";
+    scoped[1] = run.attempt();
+    scoped[2] = "turnIndex";
+    scoped[3] = run.turnIndex();
+    System.arraycopy(fields, 0, scoped, 4, fields.length);
+    return of(scoped);
+  }
+
   static String of(Object... fields) {
     if (fields.length % 2 != 0) {
       throw new IllegalArgumentException("event fields must be key/value pairs");

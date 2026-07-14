@@ -13,24 +13,31 @@ import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService
 import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
 import fun.fengwk.kkstudio.core.harness.run.store.SnowflakeRunIdGenerator;
 import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
+import fun.fengwk.kkstudio.harness.model.ModelCost;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.run.AgentRun;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEvent;
+import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
 import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshotEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -164,6 +171,39 @@ class HarnessRunPersistenceTest {
             Duration.ofSeconds(30)));
   }
 
+  /** 高竞争下每次 CAS 失败都会重读新候选，一个已失败候选不会饿死其后的 due Run。 */
+  @Test
+  void claimsAllDueRunsWithoutCandidateStarvationUnderContention() throws Exception {
+    int runCount = 24;
+    Set<Long> queuedRunIds = new HashSet<>();
+    for (int i = 0; i < runCount; i++) {
+      Seed seed = seedSession();
+      queuedRunIds.add(
+          transactions
+              .submitUserMessage(seed.sessionId(), seed.snapshotId(), user("run-" + i), NOW)
+              .id());
+    }
+    ExecutorService executor = Executors.newFixedThreadPool(runCount);
+    CountDownLatch start = new CountDownLatch(1);
+    List<Future<AgentRun>> futures = new ArrayList<>();
+    for (int i = 0; i < runCount; i++) {
+      String owner = "contender-" + i;
+      futures.add(executor.submit(() -> claim(start, owner, NOW)));
+    }
+
+    start.countDown();
+    Set<Long> claimedRunIds = new HashSet<>();
+    for (Future<AgentRun> future : futures) {
+      AgentRun claimed = future.get();
+      assertTrue(claimed != null);
+      claimedRunIds.add(claimed.id());
+    }
+    executor.shutdownNow();
+
+    assertEquals(queuedRunIds, claimedRunIds);
+    assertEquals(runCount, claimedRunIds.size());
+  }
+
   /** RunEvent 并发 append 原子分配连续 sequence，cursor 只返回指定位置之后的事件。 */
   @Test
   void allocatesRunEventSequenceAtomicallyAndReadsByCursor() throws Exception {
@@ -207,15 +247,51 @@ class HarnessRunPersistenceTest {
     AgentRun claimed = runStore.claimDue("worker", NOW, Duration.ofSeconds(30)).orElseThrow();
     MessageEntryPayload assistant = assistant("answer");
 
-    assertTrue(transactions.complete(claimed, assistant, NOW.plusSeconds(1)));
-    assertFalse(transactions.complete(claimed, assistant, NOW.plusSeconds(2)));
+    List<RunEventDraft> terminalEvents =
+        List.of(
+            terminalEvent(claimed, RunEventType.ASSISTANT_COMPLETED),
+            terminalEvent(claimed, RunEventType.RUN_COMPLETED));
+    assertTrue(transactions.complete(claimed, assistant, terminalEvents, NOW.plusSeconds(1)));
+    assertFalse(transactions.complete(claimed, assistant, terminalEvents, NOW.plusSeconds(2)));
 
     AgentRun stored = runStore.find(queued.id()).orElseThrow();
     Session session = sessionStore.find(seed.sessionId()).orElseThrow();
     assertEquals(RunStatus.SUCCEEDED, stored.status());
     assertEquals(1, stored.turnIndex());
     assertNull(session.activeRunId());
-    assertEquals(1, sessionStore.listChildren(seed.sessionId(), queued.triggerEntryId()).size());
+    List<SessionEntry> children =
+        sessionStore.listChildren(seed.sessionId(), queued.triggerEntryId());
+    assertEquals(1, children.size());
+    assertEquals(assistant, children.get(0).payload());
+    assertEquals(
+        List.of(RunEventType.ASSISTANT_COMPLETED, RunEventType.RUN_COMPLETED),
+        runStore.listAfter(queued.id(), 0, 10).stream().map(RunEvent::type).toList());
+  }
+
+  /** terminal event 写入失败时 Entry、状态和 activeRunId 全部回滚，不存在 terminal crash gap。 */
+  @Test
+  void rollsBackTerminalTransitionWhenTerminalEventCannotBePersisted() {
+    Seed seed = seedSession();
+    AgentRun queued =
+        transactions.submitUserMessage(seed.sessionId(), seed.snapshotId(), user("hello"), NOW);
+    AgentRun claimed = runStore.claimDue("worker", NOW, Duration.ofSeconds(30)).orElseThrow();
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            transactions.complete(
+                claimed,
+                assistant("answer"),
+                eventsEndingMalformed(claimed, RunEventType.ASSISTANT_COMPLETED),
+                NOW.plusSeconds(1)));
+
+    AgentRun afterRollback = runStore.find(queued.id()).orElseThrow();
+    Session session = sessionStore.find(seed.sessionId()).orElseThrow();
+    assertEquals(RunStatus.RUNNING, afterRollback.status());
+    assertEquals(claimed.leaseOwner(), afterRollback.leaseOwner());
+    assertEquals(queued.id(), session.activeRunId());
+    assertEquals(queued.triggerEntryId(), session.leafEntryId());
+    assertTrue(runStore.listAfter(queued.id(), 0, 10).isEmpty());
   }
 
   /** Tool barrier 只追加 Assistant 并进入 WAITING_TOOLS；T05 schema 中不存在 tool invocation 表。 */
@@ -231,6 +307,10 @@ class HarnessRunPersistenceTest {
             claimed,
             assistant("calling"),
             List.of(new ToolCall("call-1", "read", "{}")),
+            List.of(
+                terminalEvent(claimed, RunEventType.ASSISTANT_COMPLETED),
+                terminalEvent(claimed, RunEventType.TOOL_PREPARED),
+                terminalEvent(claimed, RunEventType.RUN_WAITING)),
             NOW.plusSeconds(1)));
 
     AgentRun stored = runStore.find(queued.id()).orElseThrow();
@@ -238,7 +318,106 @@ class HarnessRunPersistenceTest {
     assertEquals(RunStatus.WAITING_TOOLS, stored.status());
     assertEquals(stored.id(), session.activeRunId());
     assertEquals(1, stored.turnIndex());
+    assertEquals(
+        List.of(
+            RunEventType.ASSISTANT_COMPLETED, RunEventType.TOOL_PREPARED, RunEventType.RUN_WAITING),
+        runStore.listAfter(queued.id(), 0, 10).stream().map(RunEvent::type).toList());
+    assertEquals(
+        assistant("calling"),
+        sessionStore.find(seed.sessionId(), session.leafEntryId()).orElseThrow().payload());
     assertFalse(tableExists("tool_invocation"));
+  }
+
+  /** Tool barrier event 失败时 Assistant、WAITING_TOOLS 与全部 barrier events 一起回滚。 */
+  @Test
+  void rollsBackToolBarrierWhenBarrierEventCannotBePersisted() {
+    Seed seed = seedSession();
+    AgentRun queued =
+        transactions.submitUserMessage(seed.sessionId(), seed.snapshotId(), user("hello"), NOW);
+    AgentRun claimed = runStore.claimDue("worker", NOW, Duration.ofSeconds(30)).orElseThrow();
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            toolPreparation.prepare(
+                claimed,
+                assistant("calling"),
+                List.of(new ToolCall("call-1", "read", "{}")),
+                eventsEndingMalformed(claimed, RunEventType.ASSISTANT_COMPLETED),
+                NOW.plusSeconds(1)));
+
+    AgentRun afterRollback = runStore.find(queued.id()).orElseThrow();
+    Session session = sessionStore.find(seed.sessionId()).orElseThrow();
+    assertEquals(RunStatus.RUNNING, afterRollback.status());
+    assertEquals(claimed.leaseOwner(), afterRollback.leaseOwner());
+    assertEquals(queued.id(), session.activeRunId());
+    assertEquals(queued.triggerEntryId(), session.leafEntryId());
+    assertTrue(runStore.listAfter(queued.id(), 0, 10).isEmpty());
+  }
+
+  /** retry、compaction、FAILED 的 event 批次失败时状态、leaf、activeRunId 与已插事件全部回滚。 */
+  @Test
+  void rollsBackRetryCompactionAndTerminationWhenEventsCannotBePersisted() {
+    Seed retrySeed = seedSession();
+    AgentRun retryQueued =
+        transactions.submitUserMessage(
+            retrySeed.sessionId(), retrySeed.snapshotId(), user("retry"), NOW);
+    AgentRun retryClaimed =
+        runStore.claimDue("retry-worker", NOW, Duration.ofSeconds(30)).orElseThrow();
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            transactions.requeue(
+                retryClaimed,
+                NOW.plusSeconds(5),
+                eventsEndingMalformed(retryClaimed, RunEventType.ASSISTANT_FAILED),
+                NOW.plusSeconds(1)));
+
+    assertOwnedRunningWithoutEvents(retrySeed, retryQueued, retryClaimed);
+
+    Seed compactionSeed = seedSession();
+    AgentRun compactionQueued =
+        transactions.submitUserMessage(
+            compactionSeed.sessionId(), compactionSeed.snapshotId(), user("compaction"), NOW);
+    AgentRun compactionClaimed =
+        runStore.claimDue("compaction-worker", NOW, Duration.ofSeconds(30)).orElseThrow();
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            transactions.compactAndRequeue(
+                compactionClaimed,
+                new CompactionEntryPayload("summary", compactionSeed.snapshotId(), 100, "{}"),
+                NOW.plusSeconds(1),
+                eventsEndingMalformed(compactionClaimed, RunEventType.COMPACTION_STARTED),
+                NOW.plusSeconds(1)));
+
+    assertOwnedRunningWithoutEvents(compactionSeed, compactionQueued, compactionClaimed);
+    assertEquals(
+        1,
+        jdbcTemplate.queryForObject(
+            "select count(*) from harness_session_entry where run_id = ?",
+            Integer.class,
+            compactionQueued.id()));
+
+    Seed failedSeed = seedSession();
+    AgentRun failedQueued =
+        transactions.submitUserMessage(
+            failedSeed.sessionId(), failedSeed.snapshotId(), user("failed"), NOW);
+    AgentRun failedClaimed =
+        runStore.claimDue("failed-worker", NOW, Duration.ofSeconds(30)).orElseThrow();
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            transactions.terminate(
+                failedClaimed,
+                RunStatus.FAILED,
+                eventsEndingMalformed(failedClaimed, RunEventType.ASSISTANT_FAILED),
+                NOW.plusSeconds(1)));
+
+    assertOwnedRunningWithoutEvents(failedSeed, failedQueued, failedClaimed);
   }
 
   /** Compaction Entry 追加后 requeue，且保留的 firstKeptEntry 必须位于活动路径。 */
@@ -253,7 +432,15 @@ class HarnessRunPersistenceTest {
 
     assertTrue(
         transactions.compactAndRequeue(
-            claimed, compaction, NOW.plusSeconds(1), NOW.plusSeconds(1)));
+            claimed,
+            compaction,
+            NOW.plusSeconds(1),
+            List.of(
+                terminalEvent(claimed, RunEventType.ASSISTANT_FAILED),
+                terminalEvent(claimed, RunEventType.COMPACTION_STARTED),
+                terminalEvent(claimed, RunEventType.COMPACTION_COMPLETED),
+                terminalEvent(claimed, RunEventType.RETRY_SCHEDULED)),
+            NOW.plusSeconds(1)));
 
     AgentRun stored = runStore.find(queued.id()).orElseThrow();
     List<SessionEntry> path =
@@ -262,6 +449,13 @@ class HarnessRunPersistenceTest {
     assertEquals(RunStatus.QUEUED, stored.status());
     assertEquals(3, path.size());
     assertEquals(compaction, path.get(2).payload());
+    assertEquals(
+        List.of(
+            RunEventType.ASSISTANT_FAILED,
+            RunEventType.COMPACTION_STARTED,
+            RunEventType.COMPACTION_COMPLETED,
+            RunEventType.RETRY_SCHEDULED),
+        runStore.listAfter(queued.id(), 0, 10).stream().map(RunEvent::type).toList());
     assertEquals(
         1,
         jdbcTemplate.queryForObject(
@@ -279,6 +473,7 @@ class HarnessRunPersistenceTest {
               reclaimed,
               new CompactionEntryPayload("bad", idGenerator.newSessionEntryId(), 100, "{}"),
               NOW.plusSeconds(2),
+              List.of(terminalEvent(reclaimed, RunEventType.RETRY_SCHEDULED)),
               NOW.plusSeconds(2));
         });
   }
@@ -291,15 +486,33 @@ class HarnessRunPersistenceTest {
         transactions.submitUserMessage(seed.sessionId(), seed.snapshotId(), user("hello"), NOW);
     AgentRun first = runStore.claimDue("worker-1", NOW, Duration.ofSeconds(30)).orElseThrow();
 
-    assertTrue(transactions.requeue(first, NOW.plusSeconds(5), NOW.plusSeconds(1)));
+    assertTrue(
+        transactions.requeue(
+            first,
+            NOW.plusSeconds(5),
+            List.of(
+                terminalEvent(first, RunEventType.ASSISTANT_FAILED),
+                terminalEvent(first, RunEventType.RETRY_SCHEDULED)),
+            NOW.plusSeconds(1)));
     assertTrue(runStore.claimDue("early", NOW.plusSeconds(4), Duration.ofSeconds(30)).isEmpty());
     AgentRun second =
         runStore.claimDue("worker-2", NOW.plusSeconds(5), Duration.ofSeconds(30)).orElseThrow();
     assertEquals(2, second.attempt());
-    assertTrue(transactions.terminate(second, RunStatus.FAILED, NOW.plusSeconds(6)));
-    assertFalse(transactions.terminate(second, RunStatus.FAILED, NOW.plusSeconds(7)));
+    List<RunEventDraft> failedEvents =
+        List.of(
+            terminalEvent(second, RunEventType.ASSISTANT_FAILED),
+            terminalEvent(second, RunEventType.RUN_FAILED));
+    assertTrue(transactions.terminate(second, RunStatus.FAILED, failedEvents, NOW.plusSeconds(6)));
+    assertFalse(transactions.terminate(second, RunStatus.FAILED, failedEvents, NOW.plusSeconds(7)));
     assertEquals(RunStatus.FAILED, runStore.find(queued.id()).orElseThrow().status());
     assertNull(sessionStore.find(seed.sessionId()).orElseThrow().activeRunId());
+    assertEquals(
+        List.of(
+            RunEventType.ASSISTANT_FAILED,
+            RunEventType.RETRY_SCHEDULED,
+            RunEventType.ASSISTANT_FAILED,
+            RunEventType.RUN_FAILED),
+        runStore.listAfter(queued.id(), 0, 10).stream().map(RunEvent::type).toList());
 
     Seed cancelledSeed = seedSession();
     AgentRun cancelledQueued =
@@ -309,8 +522,16 @@ class HarnessRunPersistenceTest {
     AgentRun cancelled =
         runStore.claimDue("worker-3", NOW.plusSeconds(1), Duration.ofSeconds(30)).orElseThrow();
     assertEquals(NOW.plusSeconds(1), cancelled.cancelRequestedAt());
-    assertTrue(transactions.terminate(cancelled, RunStatus.CANCELLED, NOW.plusSeconds(2)));
+    assertTrue(
+        transactions.terminate(
+            cancelled,
+            RunStatus.CANCELLED,
+            List.of(terminalEvent(cancelled, RunEventType.RUN_CANCELLED)),
+            NOW.plusSeconds(2)));
     assertEquals(RunStatus.CANCELLED, runStore.find(cancelled.id()).orElseThrow().status());
+    assertEquals(
+        List.of(RunEventType.RUN_CANCELLED),
+        runStore.listAfter(cancelled.id(), 0, 10).stream().map(RunEvent::type).toList());
   }
 
   /** Store 与事务边界拒绝坏 owner/cursor/payload role、未知聚合和空 Tool barrier。 */
@@ -331,13 +552,29 @@ class HarnessRunPersistenceTest {
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> transactions.complete(claimed, new MessageEntryPayload(user("bad")), NOW));
+        () ->
+            transactions.complete(
+                claimed,
+                new MessageEntryPayload(user("bad")),
+                List.of(terminalEvent(claimed, RunEventType.RUN_COMPLETED)),
+                NOW));
     assertThrows(
         IllegalArgumentException.class,
-        () -> toolPreparation.prepare(claimed, assistant("bad"), List.of(), NOW));
+        () ->
+            toolPreparation.prepare(
+                claimed,
+                assistant("bad"),
+                List.of(),
+                List.of(terminalEvent(claimed, RunEventType.RUN_WAITING)),
+                NOW));
     assertThrows(
         IllegalArgumentException.class,
-        () -> transactions.terminate(claimed, RunStatus.SUCCEEDED, NOW));
+        () ->
+            transactions.terminate(
+                claimed,
+                RunStatus.SUCCEEDED,
+                List.of(terminalEvent(claimed, RunEventType.RUN_COMPLETED)),
+                NOW));
     assertThrows(
         IllegalArgumentException.class, () -> runStore.claimDue(" ", NOW, Duration.ofSeconds(1)));
     assertThrows(IllegalArgumentException.class, () -> runStore.listAfter(queued.id(), -1, 1));
@@ -410,6 +647,17 @@ class HarnessRunPersistenceTest {
     return new Seed(sessionId, snapshotId);
   }
 
+  private void assertOwnedRunningWithoutEvents(Seed seed, AgentRun queued, AgentRun claimed) {
+    AgentRun stored = runStore.find(queued.id()).orElseThrow();
+    Session session = sessionStore.find(seed.sessionId()).orElseThrow();
+    assertEquals(RunStatus.RUNNING, stored.status());
+    assertEquals(claimed.leaseOwner(), stored.leaseOwner());
+    assertEquals(0, stored.eventSequence());
+    assertEquals(queued.id(), session.activeRunId());
+    assertEquals(queued.triggerEntryId(), session.leafEntryId());
+    assertTrue(runStore.listAfter(queued.id(), 0, 10).isEmpty());
+  }
+
   private Set<String> columns(String table) {
     return Set.copyOf(
         jdbcTemplate.queryForList(
@@ -433,7 +681,25 @@ class HarnessRunPersistenceTest {
 
   private static MessageEntryPayload assistant(String text) {
     return new MessageEntryPayload(
-        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))));
+        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))),
+        new AssistantMessageMetadata(
+            ProviderStopReason.COMPLETED,
+            new ModelUsage(10, 2, 1, 0, 0),
+            new ModelCost("USD", new BigDecimal("0.000012"))));
+  }
+
+  private static RunEventDraft terminalEvent(AgentRun run, RunEventType type) {
+    return new RunEventDraft(
+        type,
+        "{\"schemaVersion\":1,\"attempt\":"
+            + run.attempt()
+            + ",\"turnIndex\":"
+            + run.turnIndex()
+            + "}");
+  }
+
+  private static List<RunEventDraft> eventsEndingMalformed(AgentRun run, RunEventType type) {
+    return List.of(terminalEvent(run, type), new RunEventDraft(type, "{}"));
   }
 
   private static String text(MessageEntryPayload payload) {

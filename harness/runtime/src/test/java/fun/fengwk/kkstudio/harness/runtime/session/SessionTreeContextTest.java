@@ -6,10 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import fun.fengwk.kkstudio.harness.model.ModelCost;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.context.ContextState;
 import fun.fengwk.kkstudio.harness.runtime.context.DefaultContextTransform;
 import fun.fengwk.kkstudio.harness.runtime.context.SessionContext;
 import fun.fengwk.kkstudio.harness.runtime.context.SessionContextBuilder;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -183,7 +187,8 @@ class SessionTreeContextTest {
     AgentMessage decodedCall =
         ((MessageEntryPayload)
                 codec.decode(
-                    SessionEntryType.MESSAGE, codec.encode(new MessageEntryPayload(callMessage))))
+                    SessionEntryType.MESSAGE,
+                    codec.encode(new MessageEntryPayload(callMessage, assistantMetadata()))))
             .message();
     AgentMessage decodedResult =
         ((MessageEntryPayload)
@@ -205,13 +210,17 @@ class SessionTreeContextTest {
     String missingToolName =
         "{\"message\":{\"role\":\"TOOL\",\"contents\":[{\"type\":\"tool_result\","
             + "\"toolCallId\":\"call-1\",\"contents\":[{\"type\":\"text\",\"text\":\"ok\"}],"
-            + "\"error\":false,\"detailsJson\":\"{}\"}]}}";
+            + "\"error\":false,\"detailsJson\":\"{}\"}]},\"assistantMetadata\":null}";
     String result =
         "{\"type\":\"tool_result\",\"toolCallId\":\"call-1\",\"toolName\":\"read\","
             + "\"contents\":[{\"type\":\"text\",\"text\":\"ok\"}],\"error\":false,"
             + "\"detailsJson\":\"{}\"}";
     String multipleResults =
-        "{\"message\":{\"role\":\"TOOL\",\"contents\":[" + result + "," + result + "]}}";
+        "{\"message\":{\"role\":\"TOOL\",\"contents\":["
+            + result
+            + ","
+            + result
+            + "]},\"assistantMetadata\":null}";
 
     assertThrows(
         IllegalArgumentException.class,
@@ -332,6 +341,13 @@ class SessionTreeContextTest {
 
   private static AgentSnapshotEntryPayload snapshotPayload() {
     return new AgentSnapshotEntryPayload(snapshot());
+  }
+
+  private static AssistantMessageMetadata assistantMetadata() {
+    return new AssistantMessageMetadata(
+        ProviderStopReason.TOOL_CALLS,
+        new ModelUsage(1, 1, 0, 0, 0),
+        new ModelCost("USD", BigDecimal.ZERO));
   }
 
   private static MessageEntryPayload user(String text) {

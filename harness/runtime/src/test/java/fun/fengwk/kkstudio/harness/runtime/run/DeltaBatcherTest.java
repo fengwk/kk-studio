@@ -25,7 +25,7 @@ class DeltaBatcherTest {
     RecordingEventStore events = new RecordingEventStore();
     ManualScheduler scheduler = new ManualScheduler();
     DeltaBatcher batcher =
-        new DeltaBatcher(1L, events, clock, scheduler, Duration.ofMillis(150), 8 * 1024, NOW);
+        new DeltaBatcher(1L, 1, 0, events, clock, scheduler, Duration.ofMillis(150), 8 * 1024, NOW);
 
     batcher.add(new ProviderStreamEvent.TextDelta("a"));
     assertTrue(events.events.isEmpty());
@@ -49,11 +49,34 @@ class DeltaBatcherTest {
     RecordingEventStore events = new RecordingEventStore();
     DeltaBatcher batcher =
         new DeltaBatcher(
-            1L, events, clock, (delay, task) -> {}, Duration.ofMillis(250), 8 * 1024, NOW);
+            1L, 1, 0, events, clock, (delay, task) -> {}, Duration.ofMillis(250), 8 * 1024, NOW);
 
     batcher.add(new ProviderStreamEvent.TextDelta("x".repeat(9 * 1024)));
 
     assertEquals(1, events.events.size());
+  }
+
+  /** reclaim 后旧 stream 的晚到 Delta 保留 attempt=1，新 stream 明确标记 attempt=2。 */
+  @Test
+  void keepsLateAttemptDeltaScopedAfterReclaim() {
+    MutableClock clock = new MutableClock();
+    RecordingEventStore events = new RecordingEventStore();
+    DeltaBatcher attemptOne =
+        new DeltaBatcher(
+            1L, 1, 0, events, clock, (delay, task) -> {}, Duration.ofMillis(150), 8 * 1024, NOW);
+    DeltaBatcher attemptTwo =
+        new DeltaBatcher(
+            1L, 2, 0, events, clock, (delay, task) -> {}, Duration.ofMillis(150), 8 * 1024, NOW);
+
+    attemptTwo.add(new ProviderStreamEvent.TextDelta("current"));
+    attemptTwo.flush();
+    attemptOne.add(new ProviderStreamEvent.TextDelta("late"));
+    attemptOne.flush();
+
+    assertTrue(events.events.get(0).payloadJson().contains("\"attempt\":2"));
+    assertTrue(events.events.get(0).payloadJson().contains("\"turnIndex\":0"));
+    assertTrue(events.events.get(1).payloadJson().contains("\"attempt\":1"));
+    assertTrue(events.events.get(1).payloadJson().contains("late"));
   }
 
   private static final class ManualScheduler implements DeltaFlushScheduler {

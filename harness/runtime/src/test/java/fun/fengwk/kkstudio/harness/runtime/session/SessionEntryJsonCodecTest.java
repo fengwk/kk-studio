@@ -5,6 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import fun.fengwk.kkstudio.harness.model.ModelCost;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
@@ -100,6 +104,24 @@ class SessionEntryJsonCodecTest {
         assertInstanceOf(ArtifactMessageContent.class, decodedUser.contents().get(5)).preview());
   }
 
+  /** Assistant stop reason、usage 与 cost 必须完整持久化，不能在 Session 历史中丢失。 */
+  @Test
+  void shouldRoundTripAssistantMetadata() {
+    MessageEntryPayload payload =
+        new MessageEntryPayload(
+            new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("answer"))),
+            assistantMetadata());
+
+    MessageEntryPayload decoded =
+        assertInstanceOf(
+            MessageEntryPayload.class,
+            codec.decode(SessionEntryType.MESSAGE, codec.encode(payload)));
+
+    assertEquals(payload, decoded);
+    assertEquals(321L, decoded.assistantMetadata().usage().inputTokens());
+    assertEquals(new BigDecimal("0.000004200000"), decoded.assistantMetadata().cost().amount());
+  }
+
   /** Payload 根节点必须是完整且字段精确的 JSON object。 */
   @Test
   void shouldRejectMalformedPayloadEnvelopes() {
@@ -108,7 +130,7 @@ class SessionEntryJsonCodecTest {
     assertMalformed(SessionEntryType.LABEL, "{}");
     assertMalformed(SessionEntryType.LABEL, "{\"label\":\"x\",\"extra\":1}");
     assertMalformed(SessionEntryType.MODEL_CHANGE, "{\"modelId\":\"m\"}");
-    assertMalformed(SessionEntryType.MESSAGE, "{\"message\":[]}");
+    assertMalformed(SessionEntryType.MESSAGE, "{\"message\":[],\"assistantMetadata\":null}");
   }
 
   /** Message 边界拒绝未知 role/type、错误 object/array 形状和空白语义值。 */
@@ -116,25 +138,30 @@ class SessionEntryJsonCodecTest {
   void shouldRejectMalformedMessagesAndContents() {
     assertMalformed(
         SessionEntryType.MESSAGE,
-        "{\"message\":{\"role\":\"UNKNOWN\",\"contents\":[{\"type\":\"text\",\"text\":\"x\"}]}}");
+        nonAssistantMessage(
+            "{\"role\":\"UNKNOWN\",\"contents\":[{\"type\":\"text\",\"text\":\"x\"}]}"));
     assertMalformed(
         SessionEntryType.MESSAGE,
-        "{\"message\":{\"role\":1,\"contents\":[{\"type\":\"text\",\"text\":\"x\"}]}}");
-    assertMalformed(SessionEntryType.MESSAGE, "{\"message\":{\"role\":\"USER\",\"contents\":{}}}");
-    assertMalformed(SessionEntryType.MESSAGE, "{\"message\":{\"role\":\"USER\",\"contents\":[1]}}");
+        nonAssistantMessage("{\"role\":1,\"contents\":[{\"type\":\"text\",\"text\":\"x\"}]}"));
+    assertMalformed(
+        SessionEntryType.MESSAGE, nonAssistantMessage("{\"role\":\"USER\",\"contents\":{}}"));
+    assertMalformed(
+        SessionEntryType.MESSAGE, nonAssistantMessage("{\"role\":\"USER\",\"contents\":[1]}"));
     assertMalformed(
         SessionEntryType.MESSAGE,
-        "{\"message\":{\"role\":\"USER\",\"contents\":[{\"text\":\"x\"}]}}");
+        nonAssistantMessage("{\"role\":\"USER\",\"contents\":[{\"text\":\"x\"}]}"));
     assertMalformed(
         SessionEntryType.MESSAGE,
-        "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"unknown\"}]}}");
+        nonAssistantMessage("{\"role\":\"USER\",\"contents\":[{\"type\":\"unknown\"}]}"));
     assertMalformed(
         SessionEntryType.MESSAGE,
-        "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"image\",\"mediaType\":\""
-            + " \",\"source\":\"uri\"}]}}");
+        nonAssistantMessage(
+            "{\"role\":\"USER\",\"contents\":[{\"type\":\"image\",\"mediaType\":\""
+                + " \",\"source\":\"uri\"}]}"));
     assertMalformed(
         SessionEntryType.MESSAGE,
-        "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"json\",\"json\":\"not-json\"}]}}");
+        nonAssistantMessage(
+            "{\"role\":\"USER\",\"contents\":[{\"type\":\"json\",\"json\":\"not-json\"}]}"));
   }
 
   /** Snapshot/list/JSON object 字段必须保持声明的 JSON 类型。 */
@@ -183,8 +210,55 @@ class SessionEntryJsonCodecTest {
                 + "\"detailsJson\":\"{}\"}"));
     assertMalformed(
         SessionEntryType.MESSAGE,
-        "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"artifact\","
-            + "\"artifactId\":\"a\",\"mediaType\":\"text/plain\",\"preview\":1}]}}");
+        nonAssistantMessage(
+            "{\"role\":\"USER\",\"contents\":[{\"type\":\"artifact\","
+                + "\"artifactId\":\"a\",\"mediaType\":\"text/plain\",\"preview\":1}]}"));
+  }
+
+  /** Assistant metadata 与角色必须严格一致，坏 stop reason、usage、cost 均不得进入历史。 */
+  @Test
+  void shouldRejectInconsistentOrMalformedAssistantMetadata() {
+    AgentMessage assistant =
+        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("answer")));
+    AgentMessage user =
+        new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("question")));
+    assertThrows(IllegalArgumentException.class, () -> new MessageEntryPayload(assistant));
+    assertThrows(
+        IllegalArgumentException.class, () -> new MessageEntryPayload(user, assistantMetadata()));
+
+    assertMalformed(SessionEntryType.MESSAGE, messageWithMetadata("ASSISTANT", "null"));
+    assertMalformed(SessionEntryType.MESSAGE, messageWithMetadata("USER", validMetadataJson()));
+    assertMalformed(
+        SessionEntryType.MESSAGE,
+        messageWithMetadata("ASSISTANT", validMetadataJson().replace("COMPLETED", "UNKNOWN")));
+    assertMalformed(
+        SessionEntryType.MESSAGE,
+        messageWithMetadata(
+            "ASSISTANT", validMetadataJson().replace("\"inputTokens\":321", "\"inputTokens\":-1")));
+    assertMalformed(
+        SessionEntryType.MESSAGE,
+        messageWithMetadata(
+            "ASSISTANT",
+            validMetadataJson().replace("\"amount\":\"0.000004200000\"", "\"amount\":\"bad\"")));
+    assertMalformed(
+        SessionEntryType.MESSAGE,
+        messageWithMetadata(
+            "ASSISTANT",
+            validMetadataJson().replace("\"amount\":\"0.000004200000\"", "\"amount\":\"-1\"")));
+    assertMalformed(
+        SessionEntryType.MESSAGE,
+        messageWithMetadata(
+            "ASSISTANT",
+            validMetadataJson().replace("\"currency\":\"USD\"", "\"currency\":\" \"")));
+    assertMalformed(
+        SessionEntryType.MESSAGE,
+        messageWithMetadata(
+            "ASSISTANT",
+            validMetadataJson().replace("\"inputTokens\":321", "\"inputTokens\":1.5")));
+    assertMalformed(
+        SessionEntryType.MESSAGE,
+        messageWithMetadata(
+            "ASSISTANT", validMetadataJson().replace("\"cost\":", "\"extra\":true,\"cost\":")));
   }
 
   /** ToolResult 内容不能递归嵌套 ToolCall 或 ToolResult。 */
@@ -207,10 +281,14 @@ class SessionEntryJsonCodecTest {
   }
 
   private AgentMessage roundTrip(AgentMessage message) {
+    MessageEntryPayload payload =
+        message.role() == AgentMessageRole.ASSISTANT
+            ? new MessageEntryPayload(message, assistantMetadata())
+            : new MessageEntryPayload(message);
     MessageEntryPayload decoded =
         assertInstanceOf(
             MessageEntryPayload.class,
-            codec.decode(SessionEntryType.MESSAGE, codec.encode(new MessageEntryPayload(message))));
+            codec.decode(SessionEntryType.MESSAGE, codec.encode(payload)));
     return decoded.message();
   }
 
@@ -220,8 +298,35 @@ class SessionEntryJsonCodecTest {
     assertEquals("malformed " + type.value() + " payload", exception.getMessage());
   }
 
+  private static AssistantMessageMetadata assistantMetadata() {
+    return new AssistantMessageMetadata(
+        ProviderStopReason.COMPLETED,
+        new ModelUsage(321, 45, 6, 7, 8),
+        new ModelCost("USD", new BigDecimal("0.000004200000")));
+  }
+
+  private static String validMetadataJson() {
+    return "{\"stopReason\":\"COMPLETED\",\"usage\":{\"inputTokens\":321,"
+        + "\"outputTokens\":45,\"cacheReadTokens\":6,\"cacheWriteTokens\":7,"
+        + "\"reasoningTokens\":8},\"cost\":{\"currency\":\"USD\","
+        + "\"amount\":\"0.000004200000\"}}";
+  }
+
+  private static String messageWithMetadata(String role, String metadataJson) {
+    return "{\"message\":{\"role\":\""
+        + role
+        + "\",\"contents\":[{\"type\":\"text\",\"text\":\"x\"}]},"
+        + "\"assistantMetadata\":"
+        + metadataJson
+        + "}";
+  }
+
+  private static String nonAssistantMessage(String messageJson) {
+    return "{\"message\":" + messageJson + ",\"assistantMetadata\":null}";
+  }
+
   private static String toolMessage(String content) {
-    return "{\"message\":{\"role\":\"TOOL\",\"contents\":[" + content + "]}}";
+    return nonAssistantMessage("{\"role\":\"TOOL\",\"contents\":[" + content + "]}");
   }
 
   private static String toolResultWithContents(String content) {

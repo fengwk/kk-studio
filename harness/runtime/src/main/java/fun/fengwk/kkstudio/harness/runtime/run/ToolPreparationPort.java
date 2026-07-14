@@ -12,5 +12,9 @@ import java.util.List;
 @FunctionalInterface
 public interface ToolPreparationPort {
   boolean prepare(
-      AgentRun claimedRun, MessageEntryPayload assistant, List<ToolCall> toolCalls, Instant now);
+      AgentRun claimedRun,
+      MessageEntryPayload assistant,
+      List<ToolCall> toolCalls,
+      List<RunEventDraft> barrierEvents,
+      Instant now);
 }

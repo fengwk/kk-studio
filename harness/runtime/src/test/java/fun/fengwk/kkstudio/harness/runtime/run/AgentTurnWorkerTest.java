@@ -73,7 +73,11 @@ class AgentTurnWorkerTest {
     assertEquals(RunStatus.SUCCEEDED, fixture.store.current.status());
     assertEquals(List.of("assistant", "terminal:SUCCEEDED"), fixture.store.operations);
     assertEquals(1, fixture.store.sessionMessages.size());
-    assertEquals("answer", text(fixture.store.sessionMessages.get(0)));
+    MessageEntryPayload assistant = fixture.store.sessionMessages.get(0);
+    assertEquals("answer", text(assistant));
+    assertEquals(ProviderStopReason.COMPLETED, assistant.assistantMetadata().stopReason());
+    assertEquals(new ModelUsage(1, 1, 0, 0, 0), assistant.assistantMetadata().usage());
+    assertEquals(new ModelCost("USD", BigDecimal.ZERO), assistant.assistantMetadata().cost());
     assertEquals(2, provider.request.messages().size());
     assertEquals(
         List.of(
@@ -84,6 +88,20 @@ class AgentTurnWorkerTest {
             RunEventType.ASSISTANT_COMPLETED,
             RunEventType.RUN_COMPLETED),
         fixture.store.events.stream().map(RunEvent::type).toList());
+    assertTrue(
+        fixture.store.events.stream()
+            .allMatch(
+                event ->
+                    event.payloadJson().contains("\"attempt\":1")
+                        && event.payloadJson().contains("\"turnIndex\":0")));
+    RunEvent completed =
+        fixture.store.events.stream()
+            .filter(event -> event.type() == RunEventType.ASSISTANT_COMPLETED)
+            .findFirst()
+            .orElseThrow();
+    assertTrue(completed.payloadJson().contains("\"stopReason\":\"COMPLETED\""));
+    assertTrue(completed.payloadJson().contains("\"inputTokens\":1"));
+    assertTrue(completed.payloadJson().contains("\"currency\":\"USD\""));
   }
 
   /** Tool barrier 观察到 Assistant 已持久化后才准备，并只进入 WAITING_TOOLS，不伪造 Invocation。 */
@@ -97,10 +115,11 @@ class AgentTurnWorkerTest {
     fixture.tools = List.of(tool());
     List<String> barrier = new ArrayList<>();
     fixture.toolPreparation =
-        (run, assistant, calls, now) -> {
+        (run, assistant, calls, barrierEvents, now) -> {
           fixture.store.sessionMessages.add(assistant);
           barrier.add("assistant");
           barrier.add("prepare:" + calls.get(0).id());
+          fixture.store.appendDrafts(run.id(), barrierEvents, now);
           fixture.store.current = fixture.store.waiting(run, now);
           return true;
         };
@@ -110,11 +129,21 @@ class AgentTurnWorkerTest {
     assertEquals(List.of("assistant", "prepare:call-1"), barrier);
     assertEquals(RunStatus.WAITING_TOOLS, fixture.store.current.status());
     assertEquals(1, fixture.store.current.turnIndex());
-    assertTrue(
+    assertEquals(
+        1,
         fixture.store.events.stream()
-            .map(RunEvent::type)
-            .toList()
-            .contains(RunEventType.TOOL_PREPARED));
+            .filter(event -> event.type() == RunEventType.ASSISTANT_COMPLETED)
+            .count());
+    assertEquals(
+        1,
+        fixture.store.events.stream()
+            .filter(event -> event.type() == RunEventType.TOOL_PREPARED)
+            .count());
+    assertEquals(
+        1,
+        fixture.store.events.stream()
+            .filter(event -> event.type() == RunEventType.RUN_WAITING)
+            .count());
   }
 
   /** transient 错误只写 RunEvent，持久 backoff 后重试，失败 partial 不进入下一次 Context。 */
@@ -185,6 +214,35 @@ class AgentTurnWorkerTest {
                         && event.payloadJson().contains("no_compactable_context")));
   }
 
+  /** CompactionService 持续返回结果时也受持久 attempt 上限约束，达到上限直接 FAILED。 */
+  @Test
+  void stopsRepeatedOverflowCompactionAtAttemptLimit() {
+    Fixture fixture = new Fixture();
+    fixture.workerConfig =
+        new RunWorkerConfig(
+            Duration.ofSeconds(30), Duration.ofMillis(150), 8 * 1024, 3, Duration.ofSeconds(1));
+    for (int i = 0; i < 3; i++) {
+      fixture.providers.add(
+          RecordingProvider.fail(new ProviderException(ProviderErrorKind.OVERFLOW, "too long")));
+    }
+    fixture.compaction =
+        (sessionId, context) -> Optional.of(new CompactionEntryPayload("summary", 10L, 100, "{}"));
+
+    fixture.worker().executeNext("worker-1").orElseThrow();
+    fixture.worker().executeNext("worker-2").orElseThrow();
+    fixture.worker().executeNext("worker-3").orElseThrow();
+
+    assertEquals(RunStatus.FAILED, fixture.store.current.status());
+    assertEquals(3, fixture.store.current.attempt());
+    assertEquals(2, fixture.store.compactions.size());
+    assertTrue(
+        fixture.store.events.stream()
+            .anyMatch(
+                event ->
+                    event.type() == RunEventType.RUN_FAILED
+                        && event.payloadJson().contains("compaction_attempts_exhausted")));
+  }
+
   /** Worker 未 finalize 时 lease 到期可由另一 worker reclaim，并从同一完整 Context 重新 Turn。 */
   @Test
   void reclaimsCrashedTurnFromLastCompleteEntry() {
@@ -204,6 +262,57 @@ class AgentTurnWorkerTest {
     assertEquals(RunStatus.SUCCEEDED, fixture.store.current.status());
     assertEquals(2, fixture.store.current.attempt());
     assertEquals(2, recovered.request.messages().size());
+  }
+
+  /** reclaim 后旧 stream 晚到 Delta 仍标记旧 attempt，且不能追加 stale terminal event 或覆盖新终态。 */
+  @Test
+  void scopesLateAttemptDeltaWithoutOverwritingCurrentRun() {
+    Fixture fixture = new Fixture();
+    RecordingProvider stale = RecordingProvider.manual();
+    fixture.providers.add(stale);
+    fixture.providers.add(RecordingProvider.complete(response("current", List.of())));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+    fixture.clock.advance(Duration.ofSeconds(31));
+    fixture.worker().executeNext("worker-b").orElseThrow();
+    stale.deliverEvent(new ProviderStreamEvent.TextDelta("late"));
+    stale.deliverFail(new ProviderException(ProviderErrorKind.TRANSIENT, "late failure"));
+
+    assertEquals(RunStatus.SUCCEEDED, fixture.store.current.status());
+    assertEquals(1, fixture.store.sessionMessages.size());
+    RunEvent lateDelta = fixture.store.events.get(fixture.store.events.size() - 1);
+    assertEquals(RunEventType.ASSISTANT_DELTA_BATCH, lateDelta.type());
+    assertTrue(lateDelta.payloadJson().contains("\"attempt\":1"));
+    assertTrue(lateDelta.payloadJson().contains("\"turnIndex\":0"));
+    assertTrue(lateDelta.payloadJson().contains("late"));
+    assertFalse(
+        fixture.store.events.stream()
+            .anyMatch(event -> event.type() == RunEventType.ASSISTANT_FAILED));
+  }
+
+  /** 后续 Turn 即使 attempt 重置为 1 也只发 TURN_STARTED，不重复整个 Run 的 RUN_STARTED。 */
+  @Test
+  void doesNotRepeatRunStartedWhenLaterTurnAttemptResets() {
+    Fixture fixture = new Fixture();
+    fixture.store.current =
+        fixture.store.copy(RunStatus.QUEUED, 1, 0, 0, null, null, START, null, START, null, START);
+    fixture.providers.add(RecordingProvider.complete(response("next turn", List.of())));
+
+    fixture.worker().executeNext("worker-next-turn").orElseThrow();
+
+    assertEquals(1, fixture.store.current.attempt());
+    assertEquals(2, fixture.store.current.turnIndex());
+    assertFalse(
+        fixture.store.events.stream()
+            .map(RunEvent::type)
+            .toList()
+            .contains(RunEventType.RUN_STARTED));
+    assertTrue(
+        fixture.store.events.stream()
+            .anyMatch(
+                event ->
+                    event.type() == RunEventType.TURN_STARTED
+                        && event.payloadJson().contains("\"turnIndex\":1")));
   }
 
   /** error/cancel 终态都先 flush Delta；auth 不重试，cancel 进入 CANCELLED。 */
@@ -608,23 +717,32 @@ class AgentTurnWorkerTest {
 
     @Override
     public synchronized boolean complete(
-        AgentRun claimedRun, MessageEntryPayload assistant, Instant now) {
+        AgentRun claimedRun,
+        MessageEntryPayload assistant,
+        List<RunEventDraft> terminalEvents,
+        Instant now) {
       if (!owned(claimedRun)) {
         return false;
       }
       sessionMessages.add(assistant);
       operations.add("assistant");
+      appendDrafts(claimedRun.id(), terminalEvents, now);
       current = terminal(claimedRun, RunStatus.SUCCEEDED, now, true);
       operations.add("terminal:SUCCEEDED");
       return true;
     }
 
     private synchronized boolean prepare(
-        AgentRun claimedRun, MessageEntryPayload assistant, List<ToolCall> calls, Instant now) {
+        AgentRun claimedRun,
+        MessageEntryPayload assistant,
+        List<ToolCall> calls,
+        List<RunEventDraft> barrierEvents,
+        Instant now) {
       if (!owned(claimedRun)) {
         return false;
       }
       sessionMessages.add(assistant);
+      appendDrafts(claimedRun.id(), barrierEvents, now);
       current = waiting(claimedRun, now);
       return true;
     }
@@ -645,10 +763,12 @@ class AgentTurnWorkerTest {
     }
 
     @Override
-    public synchronized boolean requeue(AgentRun claimedRun, Instant nextAttemptAt, Instant now) {
+    public synchronized boolean requeue(
+        AgentRun claimedRun, Instant nextAttemptAt, List<RunEventDraft> retryEvents, Instant now) {
       if (!owned(claimedRun)) {
         return false;
       }
+      appendDrafts(claimedRun.id(), retryEvents, now);
       current =
           copy(
               RunStatus.QUEUED,
@@ -670,23 +790,34 @@ class AgentTurnWorkerTest {
         AgentRun claimedRun,
         CompactionEntryPayload compaction,
         Instant nextAttemptAt,
+        List<RunEventDraft> compactionEvents,
         Instant now) {
       if (!owned(claimedRun)) {
         return false;
       }
       compactions.add(compaction);
-      return requeue(claimedRun, nextAttemptAt, now);
+      return requeue(claimedRun, nextAttemptAt, compactionEvents, now);
     }
 
     @Override
     public synchronized boolean terminate(
-        AgentRun claimedRun, RunStatus terminalStatus, Instant now) {
+        AgentRun claimedRun,
+        RunStatus terminalStatus,
+        List<RunEventDraft> terminalEvents,
+        Instant now) {
       if (!owned(claimedRun)) {
         return false;
       }
+      appendDrafts(claimedRun.id(), terminalEvents, now);
       current = terminal(claimedRun, terminalStatus, now, false);
       operations.add("terminal:" + terminalStatus.name());
       return true;
+    }
+
+    private void appendDrafts(long runId, List<RunEventDraft> drafts, Instant now) {
+      for (RunEventDraft draft : drafts) {
+        append(runId, draft.type(), draft.payloadJson(), now);
+      }
     }
 
     private boolean owned(AgentRun claimedRun) {
@@ -799,6 +930,10 @@ class AgentTurnWorkerTest {
 
     void deliverComplete(ProviderResponse response) {
       handler.onComplete(response, stream);
+    }
+
+    void deliverEvent(ProviderStreamEvent event) {
+      handler.onEvent(event, stream);
     }
 
     void deliverFail(ProviderException error) {

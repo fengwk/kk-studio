@@ -1,12 +1,16 @@
 package fun.fengwk.kkstudio.core.harness.run.service;
 
+import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunEventMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
+import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunEventDO;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionEntryMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionEntryDO;
 import fun.fengwk.kkstudio.harness.runtime.run.AgentRun;
+import fun.fengwk.kkstudio.harness.runtime.run.RunEvent;
+import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
 import fun.fengwk.kkstudio.harness.runtime.run.RunIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
 import fun.fengwk.kkstudio.harness.runtime.run.RunTransactions;
@@ -21,6 +25,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ConcurrentModificationException;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import org.springframework.stereotype.Service;
@@ -30,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class HarnessRunTransactionService implements RunTransactions {
   private final HarnessRunMapper runMapper;
+  private final HarnessRunEventMapper eventMapper;
   private final HarnessSessionMapper sessionMapper;
   private final HarnessSessionEntryMapper entryMapper;
   private final RunIdGenerator idGenerator;
@@ -37,10 +43,12 @@ public class HarnessRunTransactionService implements RunTransactions {
 
   public HarnessRunTransactionService(
       HarnessRunMapper runMapper,
+      HarnessRunEventMapper eventMapper,
       HarnessSessionMapper sessionMapper,
       HarnessSessionEntryMapper entryMapper,
       RunIdGenerator idGenerator) {
     this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
+    this.eventMapper = Objects.requireNonNull(eventMapper, "eventMapper");
     this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
     this.entryMapper = Objects.requireNonNull(entryMapper, "entryMapper");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
@@ -83,7 +91,11 @@ public class HarnessRunTransactionService implements RunTransactions {
 
   @Override
   @Transactional
-  public boolean complete(AgentRun claimedRun, MessageEntryPayload assistant, Instant now) {
+  public boolean complete(
+      AgentRun claimedRun,
+      MessageEntryPayload assistant,
+      List<RunEventDraft> terminalEvents,
+      Instant now) {
     validateAssistant(assistant);
     LockedRun locked = lockOwned(claimedRun);
     if (locked == null) {
@@ -92,11 +104,16 @@ public class HarnessRunTransactionService implements RunTransactions {
     appendEntry(locked.session(), claimedRun.id(), assistant, now);
     transitionCompleted(claimedRun, RunStatus.SUCCEEDED, now);
     clearActiveRun(claimedRun, now);
+    appendEvents(locked.run(), terminalEvents, now);
     return true;
   }
 
   @Transactional
-  public boolean prepareTools(AgentRun claimedRun, MessageEntryPayload assistant, Instant now) {
+  public boolean prepareTools(
+      AgentRun claimedRun,
+      MessageEntryPayload assistant,
+      List<RunEventDraft> barrierEvents,
+      Instant now) {
     validateAssistant(assistant);
     LockedRun locked = lockOwned(claimedRun);
     if (locked == null) {
@@ -104,29 +121,40 @@ public class HarnessRunTransactionService implements RunTransactions {
     }
     appendEntry(locked.session(), claimedRun.id(), assistant, now);
     transitionCompleted(claimedRun, RunStatus.WAITING_TOOLS, now);
+    appendEvents(locked.run(), barrierEvents, now);
     return true;
   }
 
   @Override
   @Transactional
-  public boolean requeue(AgentRun claimedRun, Instant nextAttemptAt, Instant now) {
-    if (lockOwned(claimedRun) == null) {
+  public boolean requeue(
+      AgentRun claimedRun, Instant nextAttemptAt, List<RunEventDraft> retryEvents, Instant now) {
+    LockedRun locked = lockOwned(claimedRun);
+    if (locked == null) {
       return false;
     }
     claimedRun.status().requireTransitionTo(RunStatus.QUEUED);
-    return runMapper.requeueOwned(
+    if (runMapper.requeueOwned(
             claimedRun.id(),
             claimedRun.leaseOwner(),
             claimedRun.attempt(),
             utc(nextAttemptAt),
             utc(now))
-        == 1;
+        != 1) {
+      throw new ConcurrentModificationException("run ownership lost during retry scheduling");
+    }
+    appendEvents(locked.run(), retryEvents, now);
+    return true;
   }
 
   @Override
   @Transactional
   public boolean compactAndRequeue(
-      AgentRun claimedRun, CompactionEntryPayload compaction, Instant nextAttemptAt, Instant now) {
+      AgentRun claimedRun,
+      CompactionEntryPayload compaction,
+      Instant nextAttemptAt,
+      List<RunEventDraft> compactionEvents,
+      Instant now) {
     LockedRun locked = lockOwned(claimedRun);
     if (locked == null) {
       return false;
@@ -146,12 +174,17 @@ public class HarnessRunTransactionService implements RunTransactions {
         != 1) {
       throw new ConcurrentModificationException("run ownership lost during compaction");
     }
+    appendEvents(locked.run(), compactionEvents, now);
     return true;
   }
 
   @Override
   @Transactional
-  public boolean terminate(AgentRun claimedRun, RunStatus terminalStatus, Instant now) {
+  public boolean terminate(
+      AgentRun claimedRun,
+      RunStatus terminalStatus,
+      List<RunEventDraft> terminalEvents,
+      Instant now) {
     if (terminalStatus != RunStatus.FAILED && terminalStatus != RunStatus.CANCELLED) {
       throw new IllegalArgumentException("terminate only accepts FAILED or CANCELLED");
     }
@@ -170,6 +203,7 @@ public class HarnessRunTransactionService implements RunTransactions {
       throw new ConcurrentModificationException("run ownership lost during terminal transition");
     }
     clearActiveRun(claimedRun, now);
+    appendEvents(locked.run(), terminalEvents, now);
     return true;
   }
 
@@ -186,6 +220,41 @@ public class HarnessRunTransactionService implements RunTransactions {
       throw new IllegalStateException("session active run does not match claimed run");
     }
     return new LockedRun(run, session);
+  }
+
+  private void appendEvents(HarnessRunDO run, List<RunEventDraft> drafts, Instant now) {
+    List<RunEventDraft> events = List.copyOf(Objects.requireNonNull(drafts, "eventDrafts"));
+    if (events.isEmpty()) {
+      throw new IllegalArgumentException("eventDrafts must not be empty");
+    }
+    long expectedSequence = run.getEventSequence();
+    long finalSequence = Math.addExact(expectedSequence, events.size());
+    if (runMapper.updateEventSequence(run.getId(), expectedSequence, finalSequence, utc(now))
+        != 1) {
+      throw new ConcurrentModificationException("cannot allocate run event sequences");
+    }
+    long sequence = expectedSequence;
+    for (RunEventDraft draft : events) {
+      RunEvent event =
+          new RunEvent(
+              idGenerator.newRunEventId(),
+              run.getId(),
+              ++sequence,
+              draft.type(),
+              draft.payloadJson(),
+              now);
+      HarnessRunEventDO target = new HarnessRunEventDO();
+      target.setId(event.id());
+      target.setRunId(event.runId());
+      target.setSequence(event.sequence());
+      target.setEventType(event.type().value());
+      target.setPayloadJson(event.payloadJson());
+      target.setCreateTime(utc(event.createdAt()));
+      if (eventMapper.insert(target) != 1) {
+        throw new ConcurrentModificationException("cannot append run event");
+      }
+    }
+    run.setEventSequence(finalSequence);
   }
 
   private void appendEntry(

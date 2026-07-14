@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.harness.run.service;
 
 import fun.fengwk.kkstudio.harness.runtime.run.AgentRun;
+import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
 import fun.fengwk.kkstudio.harness.runtime.run.ToolPreparationPort;
 import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -20,10 +21,14 @@ public class DatabaseToolPreparationPort implements ToolPreparationPort {
 
   @Override
   public boolean prepare(
-      AgentRun claimedRun, MessageEntryPayload assistant, List<ToolCall> toolCalls, Instant now) {
+      AgentRun claimedRun,
+      MessageEntryPayload assistant,
+      List<ToolCall> toolCalls,
+      List<RunEventDraft> barrierEvents,
+      Instant now) {
     if (toolCalls == null || toolCalls.isEmpty()) {
       throw new IllegalArgumentException("tool preparation requires at least one call");
     }
-    return transactions.prepareTools(claimedRun, assistant, now);
+    return transactions.prepareTools(claimedRun, assistant, barrierEvents, now);
   }
 }

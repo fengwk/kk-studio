@@ -19,12 +19,13 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /** MySQL/H2 Durable Run queue 与线性 Run Event Journal。 */
 @Repository
 public class MysqlHarnessRunStore implements RunStore, RunEventStore {
-  private static final int MAX_CLAIM_CONTENTION_RETRIES = 8;
+  private static final int MAX_CLAIM_CONTENTION_RETRIES = 64;
 
   private final HarnessRunMapper runMapper;
   private final HarnessRunEventMapper eventMapper;
@@ -43,14 +44,17 @@ public class MysqlHarnessRunStore implements RunStore, RunEventStore {
   }
 
   @Override
-  @Transactional
+  @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public Optional<AgentRun> claimDue(String leaseOwner, Instant now, Duration leaseDuration) {
     if (leaseOwner == null || leaseOwner.isBlank()) {
       throw new IllegalArgumentException("leaseOwner must not be blank");
     }
     LocalDateTime claimedAt = utc(now);
     LocalDateTime leaseUntil = utc(now.plus(leaseDuration));
-    for (int i = 0; i < MAX_CLAIM_CONTENTION_RETRIES; i++) {
+    // 每次 mapper 调用均在独立 autocommit 语句中执行，CAS 失败后会重新读取最新候选；禁止用
+    // MySQL REPEATABLE READ 的长事务快照反复选择已经被其他 worker claim 的旧行。竞争重试有界，
+    // 数据库异常则立即向上抛出，避免故障期间 busy loop。
+    for (int retry = 0; retry < MAX_CLAIM_CONTENTION_RETRIES; retry++) {
       HarnessRunDO candidate = runMapper.findClaimCandidate(claimedAt);
       if (candidate == null) {
         return Optional.empty();
@@ -88,7 +92,9 @@ public class MysqlHarnessRunStore implements RunStore, RunEventStore {
     }
     RunEvent event =
         new RunEvent(idGenerator.newRunEventId(), runId, sequence, type, payloadJson, createdAt);
-    eventMapper.insert(toDO(event));
+    if (eventMapper.insert(toDO(event)) != 1) {
+      throw new IllegalStateException("cannot append run event: " + runId);
+    }
     return event;
   }
 

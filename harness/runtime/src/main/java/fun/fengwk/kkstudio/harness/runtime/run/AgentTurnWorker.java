@@ -9,12 +9,14 @@ import fun.fengwk.kkstudio.harness.agent.AgentTurnResult;
 import fun.fengwk.kkstudio.harness.agent.DefaultAgentTurnEngine;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.context.SessionContext;
 import fun.fengwk.kkstudio.harness.runtime.context.SessionContextBuilder;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
@@ -90,13 +92,10 @@ public final class AgentTurnWorker {
       return Optional.empty();
     }
     AgentRun run = claimed.orElseThrow();
-    if (run.attempt() == 1) {
-      event(run, RunEventType.RUN_STARTED, RunEventPayloads.of("attempt", run.attempt()));
+    if (run.turnIndex() == 0 && run.attempt() == 1) {
+      attemptEvent(run, RunEventType.RUN_STARTED);
     }
-    event(
-        run,
-        RunEventType.TURN_STARTED,
-        RunEventPayloads.of("attempt", run.attempt(), "turnIndex", run.turnIndex()));
+    attemptEvent(run, RunEventType.TURN_STARTED);
     if (run.cancelRequestedAt() != null) {
       cancelBeforeStart(run);
       return Optional.of(new ClaimedTurn(run, TERMINAL_HANDLE));
@@ -115,6 +114,8 @@ public final class AgentTurnWorker {
     DeltaBatcher batcher =
         new DeltaBatcher(
             run.id(),
+            run.attempt(),
+            run.turnIndex(),
             eventStore,
             clock,
             deltaFlushScheduler,
@@ -151,31 +152,48 @@ public final class AgentTurnWorker {
 
   private void cancelBeforeStart(AgentRun run) {
     Instant now = clock.instant();
-    if (transactions.terminate(run, RunStatus.CANCELLED, now)) {
-      event(
-          run,
-          RunEventType.RUN_CANCELLED,
-          RunEventPayloads.of("cancelRequestedAt", run.cancelRequestedAt()));
-    }
+    transactions.terminate(
+        run,
+        RunStatus.CANCELLED,
+        List.of(
+            attemptDraft(
+                run, RunEventType.RUN_CANCELLED, "cancelRequestedAt", run.cancelRequestedAt())),
+        now);
   }
 
   private void failBeforeStream(AgentRun run, RuntimeException error) {
     Instant now = clock.instant();
-    event(
+    transactions.terminate(
         run,
-        RunEventType.ASSISTANT_FAILED,
-        RunEventPayloads.of(
-            "kind", ProviderErrorKind.INVALID_REQUEST.name(), "message", message(error)));
-    if (transactions.terminate(run, RunStatus.FAILED, now)) {
-      event(
-          run,
-          RunEventType.RUN_FAILED,
-          RunEventPayloads.of("reason", "turn_setup_failed", "message", message(error)));
-    }
+        RunStatus.FAILED,
+        List.of(
+            attemptDraft(
+                run,
+                RunEventType.ASSISTANT_FAILED,
+                "kind",
+                ProviderErrorKind.INVALID_REQUEST.name(),
+                "message",
+                message(error)),
+            attemptDraft(
+                run,
+                RunEventType.RUN_FAILED,
+                "reason",
+                "turn_setup_failed",
+                "message",
+                message(error))),
+        now);
   }
 
   private void event(AgentRun run, RunEventType type, String payload) {
     eventStore.append(run.id(), type, payload, clock.instant());
+  }
+
+  private void attemptEvent(AgentRun run, RunEventType type, Object... fields) {
+    event(run, type, RunEventPayloads.forAttempt(run, fields));
+  }
+
+  private RunEventDraft attemptDraft(AgentRun run, RunEventType type, Object... fields) {
+    return new RunEventDraft(type, RunEventPayloads.forAttempt(run, fields));
   }
 
   private static String message(Throwable error) {
@@ -203,7 +221,7 @@ public final class AgentTurnWorker {
 
     @Override
     public void onStarted() {
-      event(run, RunEventType.ASSISTANT_STARTED, RunEventPayloads.of("attempt", run.attempt()));
+      attemptEvent(run, RunEventType.ASSISTANT_STARTED);
     }
 
     @Override
@@ -219,29 +237,41 @@ public final class AgentTurnWorker {
         return;
       }
       batcher.flush();
-      MessageEntryPayload assistant = assistantPayload(result.assistantMessage());
+      ProviderResponse response = result.providerResponse();
+      MessageEntryPayload assistant = assistantPayload(result.assistantMessage(), response);
       List<ToolCall> toolCalls = result.toolCalls();
       Instant now = clock.instant();
-      boolean committed =
-          toolCalls.isEmpty()
-              ? transactions.complete(run, assistant, now)
-              : toolPreparationPort.prepare(run, assistant, toolCalls, now);
-      if (!committed) {
+      RunEventDraft assistantCompleted =
+          attemptDraft(
+              run,
+              RunEventType.ASSISTANT_COMPLETED,
+              "toolCallCount",
+              toolCalls.size(),
+              "stopReason",
+              response.stopReason().name(),
+              "usage",
+              response.usage(),
+              "cost",
+              response.cost());
+      if (toolCalls.isEmpty()) {
+        transactions.complete(
+            run,
+            assistant,
+            List.of(
+                assistantCompleted,
+                attemptDraft(run, RunEventType.RUN_COMPLETED, "status", "SUCCEEDED")),
+            now);
         return;
       }
-      event(
+      toolPreparationPort.prepare(
           run,
-          RunEventType.ASSISTANT_COMPLETED,
-          RunEventPayloads.of("toolCallCount", toolCalls.size()));
-      if (toolCalls.isEmpty()) {
-        event(run, RunEventType.RUN_COMPLETED, RunEventPayloads.of("status", "SUCCEEDED"));
-      } else {
-        event(
-            run,
-            RunEventType.TOOL_PREPARED,
-            RunEventPayloads.of("toolCallCount", toolCalls.size()));
-        event(run, RunEventType.RUN_WAITING, RunEventPayloads.of("status", "WAITING_TOOLS"));
-      }
+          assistant,
+          toolCalls,
+          List.of(
+              assistantCompleted,
+              attemptDraft(run, RunEventType.TOOL_PREPARED, "toolCallCount", toolCalls.size()),
+              attemptDraft(run, RunEventType.RUN_WAITING, "status", "WAITING_TOOLS")),
+          now);
     }
 
     @Override
@@ -250,78 +280,112 @@ public final class AgentTurnWorker {
         return;
       }
       batcher.flush();
-      event(
-          run,
-          RunEventType.ASSISTANT_FAILED,
-          RunEventPayloads.of("kind", error.kind().name(), "message", message(error)));
+      RunEventDraft assistantFailed =
+          attemptDraft(
+              run,
+              RunEventType.ASSISTANT_FAILED,
+              "kind",
+              error.kind().name(),
+              "message",
+              message(error));
       switch (error.kind()) {
-        case TRANSIENT -> transientFailure(error);
-        case OVERFLOW -> overflowFailure();
-        case CANCELLED -> cancelledFailure();
-        case AUTHENTICATION, BILLING, INVALID_REQUEST -> permanentFailure(error);
+        case TRANSIENT -> transientFailure(error, assistantFailed);
+        case OVERFLOW -> overflowFailure(assistantFailed);
+        case CANCELLED -> cancelledFailure(assistantFailed);
+        case AUTHENTICATION, BILLING, INVALID_REQUEST -> permanentFailure(error, assistantFailed);
       }
     }
 
-    private void transientFailure(ProviderException error) {
+    private void transientFailure(ProviderException error, RunEventDraft assistantFailed) {
       Instant now = clock.instant();
       if (run.attempt() >= config.maxAttempts()) {
-        permanentFailure(error);
+        permanentFailure(error, assistantFailed);
         return;
       }
       Instant nextAttemptAt = now.plus(config.backoffForAttempt(run.attempt()));
-      if (transactions.requeue(run, nextAttemptAt, now)) {
-        event(
-            run,
-            RunEventType.RETRY_SCHEDULED,
-            RunEventPayloads.of("attempt", run.attempt(), "nextAttemptAt", nextAttemptAt));
-      }
+      transactions.requeue(
+          run,
+          nextAttemptAt,
+          List.of(
+              assistantFailed,
+              attemptDraft(run, RunEventType.RETRY_SCHEDULED, "nextAttemptAt", nextAttemptAt)),
+          now);
     }
 
-    private void overflowFailure() {
-      event(run, RunEventType.COMPACTION_STARTED, RunEventPayloads.of("attempt", run.attempt()));
-      Optional<CompactionEntryPayload> compaction =
-          compactionService.compact(run.sessionId(), context);
+    private void overflowFailure(RunEventDraft assistantFailed) {
       Instant now = clock.instant();
-      if (compaction.isEmpty()) {
-        if (transactions.terminate(run, RunStatus.FAILED, now)) {
-          event(
-              run,
-              RunEventType.RUN_FAILED,
-              RunEventPayloads.of("reason", "no_compactable_context"));
-        }
+      if (run.attempt() >= config.maxAttempts()) {
+        transactions.terminate(
+            run,
+            RunStatus.FAILED,
+            List.of(
+                assistantFailed,
+                attemptDraft(
+                    run, RunEventType.RUN_FAILED, "reason", "compaction_attempts_exhausted")),
+            now);
         return;
       }
-      if (transactions.compactAndRequeue(run, compaction.orElseThrow(), now, now)) {
-        event(
+      RunEventDraft compactionStarted = attemptDraft(run, RunEventType.COMPACTION_STARTED);
+      Optional<CompactionEntryPayload> compaction =
+          compactionService.compact(run.sessionId(), context);
+      if (compaction.isEmpty()) {
+        transactions.terminate(
             run,
-            RunEventType.COMPACTION_COMPLETED,
-            RunEventPayloads.of("firstKeptEntryId", compaction.orElseThrow().firstKeptEntryId()));
-        event(
-            run,
-            RunEventType.RETRY_SCHEDULED,
-            RunEventPayloads.of("attempt", run.attempt(), "nextAttemptAt", now));
+            RunStatus.FAILED,
+            List.of(
+                assistantFailed,
+                compactionStarted,
+                attemptDraft(run, RunEventType.RUN_FAILED, "reason", "no_compactable_context")),
+            now);
+        return;
       }
+      transactions.compactAndRequeue(
+          run,
+          compaction.orElseThrow(),
+          now,
+          List.of(
+              assistantFailed,
+              compactionStarted,
+              attemptDraft(
+                  run,
+                  RunEventType.COMPACTION_COMPLETED,
+                  "firstKeptEntryId",
+                  compaction.orElseThrow().firstKeptEntryId()),
+              attemptDraft(run, RunEventType.RETRY_SCHEDULED, "nextAttemptAt", now)),
+          now);
     }
 
-    private void cancelledFailure() {
+    private void cancelledFailure(RunEventDraft assistantFailed) {
       Instant now = clock.instant();
-      if (transactions.terminate(run, RunStatus.CANCELLED, now)) {
-        event(run, RunEventType.RUN_CANCELLED, RunEventPayloads.of("reason", "cancelled"));
-      }
+      transactions.terminate(
+          run,
+          RunStatus.CANCELLED,
+          List.of(
+              assistantFailed,
+              attemptDraft(run, RunEventType.RUN_CANCELLED, "reason", "cancelled")),
+          now);
     }
 
-    private void permanentFailure(ProviderException error) {
+    private void permanentFailure(ProviderException error, RunEventDraft assistantFailed) {
       Instant now = clock.instant();
-      if (transactions.terminate(run, RunStatus.FAILED, now)) {
-        event(
-            run,
-            RunEventType.RUN_FAILED,
-            RunEventPayloads.of("kind", error.kind().name(), "message", message(error)));
-      }
+      transactions.terminate(
+          run,
+          RunStatus.FAILED,
+          List.of(
+              assistantFailed,
+              attemptDraft(
+                  run,
+                  RunEventType.RUN_FAILED,
+                  "kind",
+                  error.kind().name(),
+                  "message",
+                  message(error))),
+          now);
     }
   }
 
-  private static MessageEntryPayload assistantPayload(AgentAssistantMessage message) {
+  private static MessageEntryPayload assistantPayload(
+      AgentAssistantMessage message, ProviderResponse response) {
     List<AgentMessageContent> contents = new ArrayList<>();
     if (!message.text().isEmpty()) {
       contents.add(new TextMessageContent(message.text()));
@@ -336,6 +400,8 @@ public final class AgentTurnWorker {
     if (contents.isEmpty()) {
       contents.add(new TextMessageContent(""));
     }
-    return new MessageEntryPayload(new AgentMessage(AgentMessageRole.ASSISTANT, contents));
+    return new MessageEntryPayload(
+        new AgentMessage(AgentMessageRole.ASSISTANT, contents),
+        new AssistantMessageMetadata(response.stopReason(), response.usage(), response.cost()));
   }
 }
