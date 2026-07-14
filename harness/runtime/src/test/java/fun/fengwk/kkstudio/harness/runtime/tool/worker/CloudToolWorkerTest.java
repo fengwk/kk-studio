@@ -68,6 +68,21 @@ class CloudToolWorkerTest {
   }
 
   /**
+   * A synchronous success before execute returns its handle must not be mistaken for cancellation.
+   */
+  @Test
+  void doesNotCancelHandleWhenToolCompletesSynchronously() throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+    fixture.tool.completeSynchronously = true;
+
+    fixture.worker.executeNext("worker-a");
+
+    assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
+    assertEquals(ToolInvocationStatus.SUCCEEDED, fixture.transactions.status);
+    assertFalse(fixture.tool.handle.cancelled);
+  }
+
+  /**
    * A frozen name/version absent from the current registry fails without invoking any Tool side
    * effect.
    */
@@ -525,6 +540,7 @@ class CloudToolWorkerTest {
     private final ToolDescriptor descriptor;
     private final Handle handle = new Handle();
     private ToolExecutionListener listener;
+    private boolean completeSynchronously;
     private int executions;
 
     private RecordingTool(ToolDescriptor descriptor) {
@@ -541,6 +557,11 @@ class CloudToolWorkerTest {
         ToolExecutionRequest request, ToolExecutionListener listener) {
       executions++;
       this.listener = listener;
+      if (completeSynchronously) {
+        listener.onComplete(
+            new ToolResult(
+                request.call().id(), List.of(new TextToolContent("done")), false, "{}", false));
+      }
       return handle;
     }
   }

@@ -230,6 +230,7 @@ public final class CloudToolWorker {
     private final List<ToolResult> pending = new ArrayList<>();
     private ToolExecutionHandle handle;
     private boolean terminal;
+    private boolean cancelHandleOnAttach;
     private int pendingBytes;
     private ScheduledFuture<?> heartbeat;
     private ScheduledFuture<?> timeout;
@@ -263,7 +264,7 @@ public final class CloudToolWorker {
 
     private synchronized void setHandle(ToolExecutionHandle value) {
       handle = Objects.requireNonNull(value, "tool execution handle");
-      if (terminal) {
+      if (cancelHandleOnAttach) {
         handle.cancel();
       }
     }
@@ -373,6 +374,7 @@ public final class CloudToolWorker {
     }
 
     private synchronized void cancelHandle() {
+      cancelHandleOnAttach = true;
       if (handle != null && !handle.isCancelled()) {
         handle.cancel();
       }
