@@ -1,0 +1,92 @@
+package fun.fengwk.kkstudio.harness.daemon.coding;
+
+import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
+import fun.fengwk.kkstudio.harness.tool.TextToolContent;
+import fun.fengwk.kkstudio.harness.tool.ToolContent;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+/** Applies the shared bounded-preview and complete-artifact policy to tool output. */
+final class OutputLimiter {
+
+  private OutputLimiter() {}
+
+  static List<ToolContent> limit(byte[] bytes, String mediaType, CodingToolsConfig config)
+      throws IOException {
+    boolean binary = isBinary(bytes);
+    String text =
+        binary
+            ? "[Binary output; complete bytes are attached as an artifact.]"
+            : new String(bytes, StandardCharsets.UTF_8);
+    if (binary || exceeds(text, bytes.length, config)) {
+      List<ToolContent> contents = new ArrayList<>();
+      contents.add(
+          new TextToolContent(binary ? text : preview(text, config) + truncationHint(bytes, text)));
+      contents.add(new ArtifactToolContent(config.artifactSink().store(bytes, mediaType)));
+      return contents;
+    }
+    return List.of(new TextToolContent(text));
+  }
+
+  static boolean isBinary(byte[] bytes) {
+    int scan = Math.min(bytes.length, 8192);
+    for (int index = 0; index < scan; index++) {
+      int value = bytes[index] & 0xff;
+      if (value == 0 || (value < 0x09) || (value > 0x0d && value < 0x20)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean exceeds(String text, int byteCount, CodingToolsConfig config) {
+    return byteCount > config.previewMaxBytes() || lineCount(text) > config.previewMaxLines();
+  }
+
+  private static String preview(String text, CodingToolsConfig config) {
+    StringBuilder result = new StringBuilder();
+    int byteCount = 0;
+    int lines = 0;
+    for (String line : text.split("\\n", -1)) {
+      if (lines >= config.previewMaxLines()) {
+        break;
+      }
+      String prefix = lines == 0 ? "" : "\n";
+      byte[] lineBytes = (prefix + line).getBytes(StandardCharsets.UTF_8);
+      if (byteCount + lineBytes.length > config.previewMaxBytes()) {
+        int remaining =
+            Math.max(
+                0,
+                config.previewMaxBytes()
+                    - byteCount
+                    - prefix.getBytes(StandardCharsets.UTF_8).length);
+        result
+            .append(prefix)
+            .append(
+                new String(
+                    Arrays.copyOf(line.getBytes(StandardCharsets.UTF_8), remaining),
+                    StandardCharsets.UTF_8));
+        break;
+      }
+      result.append(prefix).append(line);
+      byteCount += lineBytes.length;
+      lines++;
+    }
+    return result.toString();
+  }
+
+  private static String truncationHint(byte[] bytes, String text) {
+    return "\n\n[Output truncated; complete output ("
+        + bytes.length
+        + " bytes, "
+        + lineCount(text)
+        + ") is attached as an artifact.]";
+  }
+
+  private static int lineCount(String text) {
+    return text.isEmpty() ? 0 : text.split("\\n", -1).length;
+  }
+}

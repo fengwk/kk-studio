@@ -1,16 +1,17 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
-/** Environment Daemon 独立进程入口。工具由部署代码在启动前注册。 */
+import fun.fengwk.kkstudio.harness.daemon.coding.CodingTools;
+import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
+
+/** Environment Daemon 独立进程入口。 */
 public final class DaemonMain {
 
   private DaemonMain() {}
 
-  /**
-   * 使用 {@code -Dkkstudio.daemon.gateway-uri}、{@code -Dkkstudio.daemon.workspace-id} 和
-   * {@code -Dkkstudio.daemon.environment-id} 启动空工具 Daemon。
-   */
+  /** 使用连接属性及可选的 {@code kkstudio.daemon.workspace-root} 启动带本地 coding tools 的 Daemon。 */
   public static void main(String[] args) throws InterruptedException {
     DaemonToolRegistry toolRegistry = new DaemonToolRegistry();
+    CodingTools.registerAll(toolRegistry, CodingToolsConfig.fromSystemProperties());
     DaemonRuntime runtime = new DaemonRuntime(DaemonConfig.fromSystemProperties(), toolRegistry);
     Runtime.getRuntime().addShutdownHook(new Thread(runtime::close, "daemon-shutdown"));
     runtime.start();
