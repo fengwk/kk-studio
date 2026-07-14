@@ -251,7 +251,7 @@
     return normalized.length > 54 ? `${normalized.slice(0, 54)}…` : normalized;
   }
 
-  function applyGenerationMode(node, mode) {
+  function initializeGeneratorNode(node, mode) {
     const profile = generationProfiles[mode];
     node.generationMode = mode;
     node.prompt = profile.prompt;
@@ -1287,6 +1287,21 @@
     $('#dockAdd').focus();
   }
 
+  function navigateAddMenu(event) {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      return;
+    }
+    const items = $$('.add-menu [role="menuitem"]');
+    const currentIndex = Math.max(0, items.indexOf(document.activeElement));
+    const nextIndex = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? items.length - 1
+        : (currentIndex + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    event.preventDefault();
+    items[nextIndex].focus();
+  }
+
   function closeGenerationPanel({ restoreFocus = true } = {}) {
     const id = state.activeGeneratorId;
     setGenerationOpen(false, { clearActive: true });
@@ -1363,9 +1378,6 @@
     $('#generationPanelTitle').textContent = profile.label;
     $('#generationNodeStatus').textContent = generatorStatusLabel(node);
     $('#generationNodeStatus').className = `generation-node-status ${node.status}`;
-    $$('.generation-tabs [data-generation-mode]').forEach((button) => {
-      button.setAttribute('aria-pressed', String(button.dataset.generationMode === mode));
-    });
     generationPrompt.value = node.prompt;
     generationPrompt.placeholder = `描述要生成的${mode === 'text' ? '文本' : mode === 'image' ? '画面' : '镜头'}…`;
     $('#generationCost').textContent = profile.cost;
@@ -1386,24 +1398,6 @@
     node.title = generatorTitle(node.generationMode, node.status);
     node.copy = generatorSummary(node.prompt);
     node.meta = `${node.capability} · ${generatorStatusLabel(node)}`;
-  }
-
-  function setGenerationMode(mode) {
-    const node = getActiveGenerator();
-    if (!node || node.generationMode === mode) {
-      return;
-    }
-    persistActiveGenerator();
-    const centerX = node.x + node.width / 2;
-    const centerY = node.y + node.height / 2;
-    applyGenerationMode(node, mode);
-    node.x = Math.round(centerX - node.width / 2);
-    node.y = Math.round(centerY - node.height / 2);
-    renderGenerationWorkbench();
-    render();
-    revealNodeAboveDock(node);
-    markSaved();
-    generationPrompt.focus();
   }
 
   function setGenerationCapability(capability) {
@@ -1608,7 +1602,7 @@
       x: position.x,
       y: position.y
     };
-    applyGenerationMode(node, mode);
+    initializeGeneratorNode(node, mode);
     state.nodes.push(node);
     state.selected.clear();
     state.selected.add(node.id);
@@ -1959,14 +1953,12 @@
     $('#collapseThread').addEventListener('click', collapseThread);
 
     $('#dockAdd').addEventListener('click', () => setAddMenuOpen(addMenu.hidden));
+    addMenu.addEventListener('keydown', navigateAddMenu);
     $$('.add-menu [data-add-action]').forEach((button) => {
       button.addEventListener('click', () => handleAddAction(button.dataset.addAction));
     });
     $('#closeGenerationPanel').addEventListener('click', () => closeGenerationPanel());
     $('#toggleGenerationPanel').addEventListener('click', toggleGenerationPanelWidth);
-    $$('.generation-tabs [data-generation-mode]').forEach((button) => {
-      button.addEventListener('click', () => setGenerationMode(button.dataset.generationMode));
-    });
     $$('.reference-thumb').forEach((button, index) => {
       button.addEventListener('click', () => toggleReference(index));
     });
