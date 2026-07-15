@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshotEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -65,7 +66,7 @@ public class HarnessRunControlCommandService {
       long sessionId, RunControlKind kind, AgentMessage userMessage, Instant now) {
     requireNonNull(kind, "kind");
     requireNonNull(userMessage, "userMessage");
-    requireNonNull(now, "now");
+    Instant timestamp = requireNonNull(now, "now").truncatedTo(ChronoUnit.MILLIS);
     if (userMessage.role() != AgentMessageRole.USER) {
       throw new IllegalArgumentException("control message must have USER role");
     }
@@ -77,7 +78,7 @@ public class HarnessRunControlCommandService {
     Long activeHint = hint.getActiveRunId();
 
     if (activeHint == null) {
-      return submitNoActive(sessionId, kind, userMessage, now);
+      return submitNoActive(sessionId, kind, userMessage, timestamp);
     }
 
     HarnessRunDO lockedRun = runMapper.findForUpdate(activeHint);
@@ -85,7 +86,7 @@ public class HarnessRunControlCommandService {
         requireNonNull(sessionMapper.findForUpdate(sessionId), "session disappeared while locking");
     if (lockedRun == null || isTerminal(lockedRun)) {
       return submitAfterActiveRunEnded(
-          lockedSession, activeHint, kind, userMessage, now, "active run is unavailable");
+          lockedSession, activeHint, kind, userMessage, timestamp, "active run is unavailable");
     }
     if (lockedRun.getCancelRequestedAt() != null) {
       throw new RunControlConflictException(
@@ -99,7 +100,7 @@ public class HarnessRunControlCommandService {
     }
     if (!activeHint.equals(lockedSession.getActiveRunId())) {
       return submitAfterActiveRunEnded(
-          lockedSession, activeHint, kind, userMessage, now, "session active run changed");
+          lockedSession, activeHint, kind, userMessage, timestamp, "session active run changed");
     }
 
     ControlPolicy policy = freezePolicy(lockedSession);
@@ -116,7 +117,7 @@ public class HarnessRunControlCommandService {
             RunControlStatus.PENDING,
             null,
             null,
-            now,
+            timestamp,
             null);
     if (controlStore.insert(pending) != 1) {
       throw new IllegalStateException("cannot insert control message: " + controlId);
@@ -127,7 +128,7 @@ public class HarnessRunControlCommandService {
             requestedEventType(kind),
             RunEventPayloads.of(
                 "controlId", controlId, "kind", kind.name(), "consumptionMode", mode.name()));
-    runTransactions.appendExternalEvents(activeHint, List.of(requested), now);
+    runTransactions.appendExternalEvents(activeHint, List.of(requested), timestamp);
 
     return pending;
   }

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.kkstudio.core.CoreTestApplication;
+import fun.fengwk.kkstudio.core.harness.control.service.HarnessRunAbortService;
 import fun.fengwk.kkstudio.core.harness.run.store.SnowflakeRunIdGenerator;
 import fun.fengwk.kkstudio.core.harness.task.service.DatabaseTaskRuntime;
 import fun.fengwk.kkstudio.core.harness.task.store.DatabaseRootActivityStore;
@@ -67,6 +68,7 @@ class DatabaseTaskRuntimeIntegrationTest {
   private static final SessionEntryJsonCodec ENTRY_CODEC = new SessionEntryJsonCodec();
 
   @Autowired private DatabaseTaskRuntime runtime;
+  @Autowired private HarnessRunAbortService abortService;
   @Autowired private DatabaseRootActivityStore rootActivityStore;
   @Autowired private SnowflakeRunIdGenerator ids;
   @Autowired private JdbcTemplate jdbc;
@@ -75,6 +77,7 @@ class DatabaseTaskRuntimeIntegrationTest {
   void clean() {
     jdbc.execute("alter table harness_run_event drop constraint if exists unique_event_type");
     jdbc.update("delete from tool_artifact");
+    jdbc.update("delete from harness_run_control_message");
     jdbc.update("delete from harness_subagent_task");
     jdbc.update("delete from tool_invocation");
     jdbc.update("delete from harness_run_event");
@@ -475,6 +478,69 @@ class DatabaseTaskRuntimeIntegrationTest {
             "harness_run_event",
             "run_id = ? and event_type = 'subagent_cancel_requested'",
             fixture.parentRunId));
+  }
+
+  /** Session abort recursively marks a real two-level task tree once without deleting relations. */
+  @Test
+  void abortsNestedSubagentTreeIdempotentlyAndPreservesDurableRows() {
+    Fixture fixture = fixture(policy(4, 3, 5, 4, null), policy(4, 3, 5, 7, null));
+    TaskInspection child = runtime.startOrResume(fixture.context(), command(null), NOW);
+    jdbc.update(
+        "update harness_run set status = 'WAITING_TOOLS' where id = ?", child.task().childRunId());
+    long nestedInvocation = fixture.newInvocation(child.task().childRunId());
+    TaskInspection grandchild =
+        runtime.startOrResume(
+            fixture.context(nestedInvocation, child.task().childRunId()),
+            command(null),
+            NOW.plusSeconds(1));
+    assertEquals(
+        "WAITING_TOOLS", value("select status from harness_run where id = ?", fixture.parentRunId));
+
+    abortService.abort(fixture.parentSessionId, NOW.plusSeconds(2));
+    abortService.abort(fixture.parentSessionId, NOW.plusSeconds(3));
+
+    assertNotNull(
+        jdbc.queryForObject(
+            "select cancel_requested_at from harness_run where id = ?",
+            Timestamp.class,
+            fixture.parentRunId));
+    assertNotNull(
+        jdbc.queryForObject(
+            "select cancel_requested_at from harness_run where id = ?",
+            Timestamp.class,
+            child.task().childRunId()));
+    assertNotNull(
+        jdbc.queryForObject(
+            "select cancel_requested_at from harness_run where id = ?",
+            Timestamp.class,
+            grandchild.task().childRunId()));
+    assertEquals(
+        "CANCEL_REQUESTED",
+        value("select status from tool_invocation where id = ?", fixture.invocationId));
+    assertEquals(
+        "CANCEL_REQUESTED",
+        value("select status from tool_invocation where id = ?", nestedInvocation));
+    assertEquals(3, count("harness_session"));
+    assertEquals(2, count("harness_subagent_task"));
+    assertEquals(1, countWhere("harness_session", "id = ?", child.task().childSessionId()));
+    assertEquals(1, countWhere("harness_session", "id = ?", grandchild.task().childSessionId()));
+    assertEquals(
+        1, countWhere("harness_subagent_task", "parent_invocation_id = ?", fixture.invocationId));
+    assertEquals(
+        1, countWhere("harness_subagent_task", "parent_invocation_id = ?", nestedInvocation));
+    assertEquals(
+        1,
+        countWhere(
+            "harness_run_event",
+            "run_id = ? and event_type = 'abort_requested'",
+            fixture.parentRunId));
+    assertEquals(
+        1,
+        countWhere(
+            "harness_run_event",
+            "run_id = ? and event_type = 'subagent_cancel_requested'",
+            fixture.parentRunId));
+    assertEquals(1, countWhere("harness_run_event", "event_type = 'subagent_cancel_requested'"));
   }
 
   /** A tree cancellation follows each descendant session's current active run after resumes. */

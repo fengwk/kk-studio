@@ -2,13 +2,17 @@ package fun.fengwk.kkstudio.web.controller;
 
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
+import fun.fengwk.kkstudio.core.harness.control.service.HarnessRunAbortService;
 import fun.fengwk.kkstudio.core.harness.control.service.HarnessRunControlCommandService;
+import fun.fengwk.kkstudio.core.harness.control.service.RunAbortConflictException;
 import fun.fengwk.kkstudio.core.harness.control.service.RunControlConflictException;
 import fun.fengwk.kkstudio.harness.runtime.control.RunControlKind;
 import fun.fengwk.kkstudio.harness.runtime.control.RunControlMessage;
+import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.share.model.RunAbortDTO;
 import fun.fengwk.kkstudio.share.model.RunControlCreateDTO;
 import fun.fengwk.kkstudio.share.model.RunControlDTO;
 import java.time.Clock;
@@ -25,13 +29,14 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-/** 全局 Session 的 steer/follow-up 控制命令 API。 */
+/** 全局 Session 的 steer、follow-up 与 abort 控制命令 API。 */
 @AllArgsConstructor
 @RestController
 @RequestMapping("/api/sessions")
 public class StudioRunControlController {
 
   private final HarnessRunControlCommandService commandService;
+  private final HarnessRunAbortService abortService;
   private final Clock harnessRunClock;
 
   @PostMapping("/{sessionId}/steer")
@@ -46,6 +51,23 @@ public class StudioRunControlController {
       @PathVariable("sessionId") String sessionId,
       @RequestBody(required = false) RunControlCreateDTO request) {
     return submit(sessionId, request, RunControlKind.FOLLOW_UP);
+  }
+
+  @PostMapping("/{sessionId}/abort")
+  public Result<RunAbortDTO> abort(@PathVariable("sessionId") String sessionId) {
+    long parsed = parseSessionId(sessionId);
+    HarnessRunAbortService.AbortResult result;
+    try {
+      result = abortService.abort(parsed, harnessRunClock.instant());
+    } catch (RunAbortConflictException error) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, error.getMessage(), error);
+    } catch (IllegalArgumentException error) {
+      if (error.getMessage() != null && error.getMessage().startsWith("unknown session")) {
+        throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
+      }
+      throw error;
+    }
+    return Results.ok(toAbortDTO(result));
   }
 
   private Result<RunControlDTO> submit(
@@ -104,6 +126,17 @@ public class StudioRunControlController {
     target.setContent(extractText(source));
     target.setCreatedAt(toLocal(source.createdAt()));
     target.setConsumedAt(toLocal(source.consumedAt()));
+    return target;
+  }
+
+  static RunAbortDTO toAbortDTO(HarnessRunAbortService.AbortResult source) {
+    RunAbortDTO target = new RunAbortDTO();
+    target.setSessionId(Long.toString(source.sessionId()));
+    target.setRunId(source.runId() == null ? null : Long.toString(source.runId()));
+    target.setNewlyRequested(source.newlyRequested());
+    RunStatus status = source.status();
+    target.setStatus(status == null ? null : status.name());
+    target.setRequestedAt(toLocal(source.requestedAt()));
     return target;
   }
 

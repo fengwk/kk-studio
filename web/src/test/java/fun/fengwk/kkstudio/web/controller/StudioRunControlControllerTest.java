@@ -1,9 +1,13 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
 import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
 import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
@@ -30,6 +34,7 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,13 +44,15 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
-/** steer/follow-up 全局 API 的真实持久化契约测试。 */
+/** steer/follow-up/abort 全局 API 的真实持久化契约测试。 */
 @AutoConfigureMockMvc
 @SpringBootTest(classes = WebTestApplication.class)
 public class StudioRunControlControllerTest {
 
   @Autowired private MockMvc mockMvc;
+  @Autowired private ObjectMapper objectMapper;
   @Autowired private StubProviderManager stubProviderManager;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private MysqlHarnessSessionStore sessionStore;
@@ -195,7 +202,133 @@ public class StudioRunControlControllerTest {
         .andExpect(status().isNotFound());
   }
 
+  /** 活跃 RUNNING Run 首次 abort 返回完整字符串标识，并持久化取消时间。 */
+  @Test
+  public void shouldAbortActiveRunningRun() throws Exception {
+    long sessionId = seedSessionAndUserRun();
+    long runId = activeRunId(sessionId);
+
+    mockMvc
+        .perform(post("/api/sessions/{sessionId}/abort", Long.toString(sessionId)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.sessionId").value(Long.toString(sessionId)))
+        .andExpect(jsonPath("$.data.runId").value(Long.toString(runId)))
+        .andExpect(jsonPath("$.data.newlyRequested").value(true))
+        .andExpect(jsonPath("$.data.status").value("RUNNING"))
+        .andExpect(jsonPath("$.data.requestedAt").exists());
+
+    assertNotNull(cancelRequestedAt(runId));
+  }
+
+  /** 重复 abort 保持首次请求时间，并且只追加一个 ABORT_REQUESTED 事件。 */
+  @Test
+  public void shouldKeepRepeatedAbortIdempotent() throws Exception {
+    long sessionId = seedSessionAndUserRun();
+    long runId = activeRunId(sessionId);
+
+    MvcResult firstResult =
+        mockMvc
+            .perform(post("/api/sessions/{sessionId}/abort", Long.toString(sessionId)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.newlyRequested").value(true))
+            .andExpect(jsonPath("$.data.requestedAt").exists())
+            .andReturn();
+    JsonNode firstData =
+        objectMapper.readTree(firstResult.getResponse().getContentAsString()).path("data");
+    LocalDateTime firstRequestedAt =
+        objectMapper.treeToValue(firstData.path("requestedAt"), LocalDateTime.class);
+    LocalDateTime storedRequestedAt = cancelRequestedAt(runId);
+    assertNotNull(storedRequestedAt);
+    assertEquals(storedRequestedAt, firstRequestedAt);
+
+    MvcResult repeatedResult =
+        mockMvc
+            .perform(post("/api/sessions/{sessionId}/abort", Long.toString(sessionId)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.sessionId").value(Long.toString(sessionId)))
+            .andExpect(jsonPath("$.data.runId").value(Long.toString(runId)))
+            .andExpect(jsonPath("$.data.newlyRequested").value(false))
+            .andExpect(jsonPath("$.data.status").value("RUNNING"))
+            .andExpect(jsonPath("$.data.requestedAt").exists())
+            .andReturn();
+    JsonNode repeatedData =
+        objectMapper.readTree(repeatedResult.getResponse().getContentAsString()).path("data");
+    LocalDateTime repeatedRequestedAt =
+        objectMapper.treeToValue(repeatedData.path("requestedAt"), LocalDateTime.class);
+
+    assertEquals(storedRequestedAt, repeatedRequestedAt);
+    assertEquals(storedRequestedAt, cancelRequestedAt(runId));
+    assertEquals(1L, abortRequestedEventCount(runId));
+  }
+
+  /** 无活跃 Run 时 abort 成功返回空 Run 投影，且不创建新请求。 */
+  @Test
+  public void shouldReturnEmptyAbortResultWhenNoActiveRun() throws Exception {
+    long sessionId = seedSessionAndUserRun();
+    completeActiveRun(sessionId);
+
+    mockMvc
+        .perform(post("/api/sessions/{sessionId}/abort", Long.toString(sessionId)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.sessionId").value(Long.toString(sessionId)))
+        .andExpect(jsonPath("$.data.runId").doesNotExist())
+        .andExpect(jsonPath("$.data.newlyRequested").value(false))
+        .andExpect(jsonPath("$.data.status").doesNotExist())
+        .andExpect(jsonPath("$.data.requestedAt").doesNotExist());
+  }
+
+  /** abort 拒绝非数字 sessionId。 */
+  @Test
+  public void shouldRejectNonNumericAbortSessionId() throws Exception {
+    mockMvc
+        .perform(post("/api/sessions/{sessionId}/abort", "abc"))
+        .andExpect(status().isBadRequest());
+  }
+
+  /** abort 拒绝非正 sessionId。 */
+  @Test
+  public void shouldRejectNonPositiveAbortSessionId() throws Exception {
+    mockMvc
+        .perform(post("/api/sessions/{sessionId}/abort", "0"))
+        .andExpect(status().isBadRequest());
+  }
+
+  /** abort 未知 session 时返回 404。 */
+  @Test
+  public void shouldReturnNotFoundWhenAbortingUnknownSession() throws Exception {
+    mockMvc
+        .perform(post("/api/sessions/{sessionId}/abort", "9999999999"))
+        .andExpect(status().isNotFound());
+  }
+
+  /** 旧 workspaces abort 路由不得暴露。 */
+  @Test
+  public void shouldNotExposeWorkspaceAbortRoute() throws Exception {
+    mockMvc
+        .perform(post("/api/workspaces/{sessionId}/abort", "1"))
+        .andExpect(status().isNotFound());
+  }
+
   // ---- helpers ----
+
+  private long activeRunId(long sessionId) {
+    return sessionStore.find(sessionId).orElseThrow().activeRunId();
+  }
+
+  private LocalDateTime cancelRequestedAt(long runId) {
+    return jdbc.queryForObject(
+        "select cancel_requested_at from harness_run where id=?", LocalDateTime.class, runId);
+  }
+
+  private long abortRequestedEventCount(long runId) {
+    Long count =
+        jdbc.queryForObject(
+            "select count(*) from harness_run_event where run_id=? and event_type=?",
+            Long.class,
+            runId,
+            RunEventType.ABORT_REQUESTED.value());
+    return count == null ? 0L : count;
+  }
 
   private long seedSessionAndUserRun() {
     Instant now = harnessRunClock.instant();

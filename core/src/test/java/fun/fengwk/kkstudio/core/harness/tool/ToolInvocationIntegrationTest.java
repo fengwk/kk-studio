@@ -3,10 +3,12 @@ package fun.fengwk.kkstudio.core.harness.tool;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.kkstudio.core.CoreTestApplication;
+import fun.fengwk.kkstudio.core.harness.control.service.HarnessRunAbortService;
 import fun.fengwk.kkstudio.core.harness.run.service.DatabaseToolPreparationPort;
 import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
 import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
@@ -101,11 +103,13 @@ class ToolInvocationIntegrationTest {
   @Autowired private HarnessSessionYoloService yoloService;
   @Autowired private ToolPolicyResolver policyResolver;
   @Autowired private SessionTree sessionTree;
+  @Autowired private HarnessRunAbortService abortService;
   @Autowired private JdbcTemplate jdbcTemplate;
 
   @BeforeEach
   void clean() {
     jdbcTemplate.update("delete from tool_artifact");
+    jdbcTemplate.update("delete from harness_run_control_message");
     jdbcTemplate.update("delete from tool_invocation");
     jdbcTemplate.update("delete from harness_run_event");
     jdbcTemplate.update("delete from harness_run");
@@ -138,6 +142,82 @@ class ToolInvocationIntegrationTest {
     assertTrue(requested.payloadJson().contains("\"tool\":\"write\""));
     assertTrue(requested.payloadJson().contains("\"workdir\""));
     assertTrue(requested.payloadJson().contains("\"arguments\""));
+  }
+
+  /**
+   * Abort makes a pending permission non-decidable and survives worker reconstruction to terminal.
+   */
+  @Test
+  void abortCancelsWaitingApprovalAndConvergesThroughDurableWorkerBoundaries() {
+    configureToolSettings("{\"permission\":{\"write\":\"ask\"}}");
+    Claimed claimed = claimedRun(false);
+    prepare(
+        claimed.run(),
+        List.of(new ToolCall("abort-approval", "write", "{\"path\":\"a.txt\"}")),
+        List.of(binding("write")));
+    ToolInvocation pending = invocationStore.listByRun(claimed.run().id()).get(0);
+
+    abortService.abort(claimed.sessionId(), NOW.plusSeconds(2));
+
+    ToolInvocation cancelRequested = invocationStore.find(pending.id()).orElseThrow();
+    assertEquals(ToolInvocationStatus.CANCEL_REQUESTED, cancelRequested.status());
+    assertNotNull(cancelRequested.cancelRequestedAt());
+    assertThrows(
+        ToolDecisionConflictException.class,
+        () -> decisionService.decide(pending.id(), ToolPermissionDecision.ALLOW));
+
+    ClaimedToolInvocation reclaimed =
+        workerStore
+            .claimDue("restart-tool-worker", NOW.plusSeconds(3), Duration.ofSeconds(30))
+            .orElseThrow();
+    ToolResult cancelled = ToolResult.error(pending.toolCallId(), "Tool execution cancelled.");
+    assertTrue(
+        toolTransactions.terminate(
+            reclaimed, ToolInvocationStatus.CANCELLED, cancelled, "cancelled", NOW.plusSeconds(4)));
+    assertTrue(toolTransactions.coordinate(claimed.run().id(), NOW.plusSeconds(5)));
+
+    AgentRun queued = runStore.find(claimed.run().id()).orElseThrow();
+    assertEquals(RunStatus.QUEUED, queued.status());
+    assertNotNull(queued.cancelRequestedAt());
+    AgentRun reclaimedRun =
+        runStore
+            .claimDue("restart-agent-worker", NOW.plusSeconds(6), Duration.ofSeconds(30))
+            .orElseThrow();
+    assertTrue(
+        transactions.terminate(
+            reclaimedRun,
+            RunStatus.CANCELLED,
+            List.of(
+                new RunEventDraft(
+                    RunEventType.RUN_CANCELLED,
+                    RunEventPayloads.forAttempt(reclaimedRun, "reason", "cancel_requested"))),
+            NOW.plusSeconds(7)));
+    assertEquals(RunStatus.CANCELLED, runStore.find(claimed.run().id()).orElseThrow().status());
+    assertEquals(
+        ToolInvocationStatus.CANCELLED, invocationStore.find(pending.id()).orElseThrow().status());
+    assertNull(sessionStore.find(claimed.sessionId()).orElseThrow().activeRunId());
+  }
+
+  /** Environment cancellation is durably frozen for the T15 remote transport owner. */
+  @Test
+  void abortMarksEnvironmentInvocationCancelRequested() {
+    configureToolSettings("{}");
+    Claimed claimed = claimedRun(false);
+    prepare(
+        claimed.run(),
+        List.of(new ToolCall("abort-environment", "read", "{\"path\":\"remote.txt\"}")),
+        List.of(environmentBinding("read", 42L)));
+    ToolInvocation remote = invocationStore.listByRun(claimed.run().id()).get(0);
+
+    abortService.abort(claimed.sessionId(), NOW.plusSeconds(2));
+
+    ToolInvocation stored = invocationStore.find(remote.id()).orElseThrow();
+    assertEquals(ToolTargetType.ENVIRONMENT, stored.targetType());
+    assertEquals(42L, stored.environmentId());
+    assertEquals(ToolInvocationStatus.CANCEL_REQUESTED, stored.status());
+    assertNotNull(stored.cancelRequestedAt());
+    assertTrue(
+        workerStore.claimDue("cloud-worker", NOW.plusSeconds(3), Duration.ofSeconds(30)).isEmpty());
   }
 
   /** allow/deny/yolo 映射到 QUEUED/FAILED/QUEUED；deny 不取消或终止整个 Run。 */

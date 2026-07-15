@@ -86,4 +86,12 @@ public interface HarnessSubagentTaskMapper extends BaseMapper {
       @Param("status") String status,
       @Param("reportJson") String reportJson,
       @Param("now") LocalDateTime now);
+
+  /** 按 parent Run 返回持久化 subagent relation 的 invocation id，结果按 id 升序。 */
+  @Select(
+      "select ti.id from tool_invocation ti"
+          + " join harness_subagent_task t on t.parent_invocation_id = ti.id"
+          + " where ti.run_id = #{parentRunId}"
+          + " order by ti.id asc")
+  List<Long> listTaskInvocationIdsByParentRun(@Param("parentRunId") long parentRunId);
 }
