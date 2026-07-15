@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.harness.agent;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import fun.fengwk.kkstudio.harness.agent.extension.BeforeProviderRequestInterceptor;
+import fun.fengwk.kkstudio.harness.agent.extension.ProviderRequestInterceptorChain;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
@@ -42,9 +44,22 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
   private final ModelProvider provider;
+  private final ProviderRequestInterceptorChain providerRequestInterceptors;
 
   public DefaultAgentTurnEngine(ModelProvider provider) {
+    this(provider, List.of());
+  }
+
+  public DefaultAgentTurnEngine(
+      ModelProvider provider, List<BeforeProviderRequestInterceptor> providerRequestInterceptors) {
+    this(provider, new ProviderRequestInterceptorChain(providerRequestInterceptors));
+  }
+
+  public DefaultAgentTurnEngine(
+      ModelProvider provider, ProviderRequestInterceptorChain providerRequestInterceptors) {
     this.provider = Objects.requireNonNull(provider, "provider");
+    this.providerRequestInterceptors =
+        Objects.requireNonNull(providerRequestInterceptors, "providerRequestInterceptors");
   }
 
   @Override
@@ -54,14 +69,14 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
     TurnState state = new TurnState(handler, descriptorsByName(request.tools()));
     handler.onStarted();
     try {
+      ProviderRequest providerRequest =
+          new ProviderRequest(
+              request.model(),
+              request.variant(),
+              request.messages(),
+              toProviderTools(request.tools()));
       ProviderStream stream =
-          provider.stream(
-              new ProviderRequest(
-                  request.model(),
-                  request.variant(),
-                  request.messages(),
-                  toProviderTools(request.tools())),
-              state);
+          provider.stream(providerRequestInterceptors.intercept(providerRequest), state);
       state.bind(stream);
     } catch (ProviderException error) {
       state.fail(error);

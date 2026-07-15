@@ -2,8 +2,12 @@ package fun.fengwk.kkstudio.harness.agent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import fun.fengwk.kkstudio.harness.agent.extension.BeforeProviderRequestInterceptor;
+import fun.fengwk.kkstudio.harness.agent.extension.ProviderRequestInterceptorChain;
 import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
@@ -77,6 +81,94 @@ class DefaultAgentTurnEngineTest {
     assertEquals("{\"path\":\"README.md\"}", handler.result.toolCalls().get(0).argumentsJson());
     assertEquals("read", provider.request().tools().get(0).name());
     assertFalse(handler.failed);
+  }
+
+  /** interceptor 严格按传入顺序串行执行，前项结果对后项可见，最终结果实际交给 Provider。 */
+  @Test
+  void interceptsProviderRequestInInputOrder() {
+    FakeModelProvider provider =
+        FakeModelProvider.sequence()
+            .complete(response("ok", "", List.of(), ProviderStopReason.COMPLETED))
+            .build();
+    List<String> calls = new ArrayList<>();
+    BeforeProviderRequestInterceptor first =
+        providerRequest -> {
+          calls.add("first");
+          assertEquals("read", providerRequest.tools().get(0).name());
+          return withAppendedMessage(providerRequest, "first");
+        };
+    BeforeProviderRequestInterceptor second =
+        providerRequest -> {
+          calls.add("second");
+          assertEquals("first", messageText(providerRequest.messages().get(1)));
+          return withAppendedMessage(providerRequest, "second");
+        };
+    RecordingHandler handler = new RecordingHandler();
+
+    new DefaultAgentTurnEngine(provider, List.of(first, second)).execute(request(), handler);
+
+    assertEquals(List.of("first", "second"), calls);
+    assertEquals("first", messageText(provider.request().messages().get(1)));
+    assertEquals("second", messageText(provider.request().messages().get(2)));
+    assertEquals(List.of("started", "delta", "completed"), handler.events);
+  }
+
+  /** 显式空链与原有只传 Provider 的构造方式保持相同行为。 */
+  @Test
+  void supportsExplicitEmptyInterceptorChain() {
+    FakeModelProvider provider =
+        FakeModelProvider.sequence()
+            .complete(response("ok", "", List.of(), ProviderStopReason.COMPLETED))
+            .build();
+    RecordingHandler handler = new RecordingHandler();
+
+    new DefaultAgentTurnEngine(provider, new ProviderRequestInterceptorChain(List.of()))
+        .execute(request(), handler);
+
+    assertNotNull(provider.request());
+    assertEquals(List.of("started", "delta", "completed"), handler.events);
+    assertFalse(handler.failed);
+  }
+
+  /** hook 抛错时 Turn 在 started 后确定性失败一次，且 Provider 完全不会被调用。 */
+  @Test
+  void failsExactlyOnceWithoutCallingProviderWhenInterceptorThrows() {
+    FakeModelProvider provider = FakeModelProvider.sequence().build();
+    RecordingHandler handler = new RecordingHandler();
+
+    AgentTurnHandle handle =
+        new DefaultAgentTurnEngine(
+                provider,
+                List.of(
+                    providerRequest -> {
+                      throw new IllegalArgumentException("broken hook");
+                    }))
+            .execute(request(), handler);
+
+    handle.cancel();
+
+    assertNull(provider.request());
+    assertEquals(List.of("started", "failed"), handler.events);
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, handler.failure.kind());
+    assertTrue(handle.isCancelled());
+  }
+
+  /** hook 返回 null 与抛错遵循同一失败路径，不调用 Provider，也不留下悬挂 Turn。 */
+  @Test
+  void failsExactlyOnceWithoutCallingProviderWhenInterceptorReturnsNull() {
+    FakeModelProvider provider = FakeModelProvider.sequence().build();
+    RecordingHandler handler = new RecordingHandler();
+
+    AgentTurnHandle handle =
+        new DefaultAgentTurnEngine(provider, List.of(providerRequest -> null))
+            .execute(request(), handler);
+
+    handle.cancel();
+
+    assertNull(provider.request());
+    assertEquals(List.of("started", "failed"), handler.events);
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, handler.failure.kind());
+    assertTrue(handle.isCancelled());
   }
 
   /** 只有 TOOL_CALLS 结束原因可以携带调用，其他结束原因必须在投递 final gap 前失败。 */
@@ -404,6 +496,17 @@ class DefaultAgentTurnEngineTest {
     ModelUsage usage = new ModelUsage(1, 1, 0, 0, 0);
     return new ProviderResponse(
         text, thinking, calls, stopReason, usage, new ModelCost("USD", BigDecimal.ONE));
+  }
+
+  private static ProviderRequest withAppendedMessage(ProviderRequest request, String text) {
+    List<ProviderMessage> messages = new ArrayList<>(request.messages());
+    messages.add(
+        new ProviderMessage(ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock(text))));
+    return new ProviderRequest(request.model(), request.variant(), messages, request.tools());
+  }
+
+  private static String messageText(ProviderMessage message) {
+    return ((ProviderTextBlock) message.contents().get(0)).text();
   }
 
   private static void await(CountDownLatch latch) {
