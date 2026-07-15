@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService
 import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
 import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
 import fun.fengwk.kkstudio.core.harness.session.store.SnowflakeSessionIdGenerator;
+import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProperties;
 import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
 import fun.fengwk.kkstudio.core.workspace.service.WorkspaceService;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
@@ -66,6 +67,7 @@ class StudioToolInvocationControllerTest {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private WorkspaceService workspaceService;
+  @Autowired private ToolSettingsProperties toolSettingsProperties;
   @Autowired private MysqlHarnessSessionStore sessionStore;
   @Autowired private SnowflakeSessionIdGenerator sessionIds;
   @Autowired private MysqlHarnessRunStore runStore;
@@ -85,14 +87,12 @@ class StudioToolInvocationControllerTest {
     jdbcTemplate.update("delete from workspace");
   }
 
-  /** Decision API 同决定幂等，冲突返回 409，且 workspace path 约束生效。 */
+  /** Global Decision API 同决定幂等，冲突返回 409。 */
   @Test
-  void decidesPermissionIdempotentlyAndRejectsConflictAndCrossWorkspace() throws Exception {
+  void decidesPermissionIdempotentlyAndRejectsConflictGlobally() throws Exception {
     long workspaceId = workspace("{\"permission\":{\"write\":\"ask\"}}");
-    long otherWorkspaceId = workspace("{}");
     ToolInvocation invocation = askInvocation(workspaceId);
-    String endpoint =
-        "/api/workspaces/" + workspaceId + "/tool-invocations/" + invocation.id() + "/decision";
+    String endpoint = "/api/tool-invocations/" + invocation.id() + "/decision";
 
     mockMvc
         .perform(
@@ -115,23 +115,11 @@ class StudioToolInvocationControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"decision\":\"deny\"}"))
         .andExpect(status().isConflict());
-    mockMvc
-        .perform(
-            post(
-                    "/api/workspaces/{workspaceId}/tool-invocations/{invocationId}/decision",
-                    otherWorkspaceId,
-                    invocation.id())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"decision\":\"allow\"}"))
-        .andExpect(status().is4xxClientError());
 
     ToolInvocation denied = askInvocation(workspaceId);
     mockMvc
         .perform(
-            post(
-                    "/api/workspaces/{workspaceId}/tool-invocations/{invocationId}/decision",
-                    workspaceId,
-                    denied.id())
+            post("/api/tool-invocations/{invocationId}/decision", denied.id())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"decision\":\"deny\"}"))
         .andExpect(status().isOk())
@@ -140,48 +128,36 @@ class StudioToolInvocationControllerTest {
         .andExpect(jsonPath("$.data.errorMessage").value("Permission denied by user for write."));
   }
 
-  /** Workspace-scoped explicit YOLO set 支持 Child 动态 Root 读取，无 active Run 也可由 GET 观察。 */
+  /** Global YOLO set 支持 Child 动态 Root 读取，无 active Run 也可由 GET 观察。 */
   @Test
   void setsAndReadsChildRootYoloWithoutActiveRun() throws Exception {
     long workspaceId = workspace("{\"defaultYolo\":true}");
-    long otherWorkspaceId = workspace("{}");
     Session root = sessionTree.create(workspaceId, null, "root");
     Session child = sessionTree.fork(root.id(), null);
 
     mockMvc
-        .perform(
-            get("/api/workspaces/{workspaceId}/sessions/{sessionId}/yolo", workspaceId, child.id()))
+        .perform(get("/api/sessions/{sessionId}/yolo", child.id()))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.rootSessionId").value(Long.toString(root.id())))
         .andExpect(jsonPath("$.data.enabled").value(true));
     mockMvc
         .perform(
-            put("/api/workspaces/{workspaceId}/sessions/{sessionId}/yolo", workspaceId, child.id())
+            put("/api/sessions/{sessionId}/yolo", child.id())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"enabled\":false}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.rootSessionId").value(Long.toString(root.id())))
         .andExpect(jsonPath("$.data.enabled").value(false));
     mockMvc
-        .perform(
-            get("/api/workspaces/{workspaceId}/sessions/{sessionId}/yolo", workspaceId, root.id()))
+        .perform(get("/api/sessions/{sessionId}/yolo", root.id()))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.enabled").value(false));
     mockMvc
         .perform(
-            put("/api/workspaces/{workspaceId}/sessions/{sessionId}/yolo", workspaceId, child.id())
+            put("/api/sessions/{sessionId}/yolo", child.id())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}"))
         .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(
-            put(
-                    "/api/workspaces/{workspaceId}/sessions/{sessionId}/yolo",
-                    otherWorkspaceId,
-                    child.id())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"enabled\":true}"))
-        .andExpect(status().is4xxClientError());
   }
 
   private ToolInvocation askInvocation(long workspaceId) {
@@ -215,9 +191,10 @@ class StudioToolInvocationControllerTest {
   }
 
   private long workspace(String settingsJson) {
+    toolSettingsProperties.setSettingsJson(settingsJson);
     WorkspaceCreateDTO request = new WorkspaceCreateDTO();
     request.setName("web-tool-workspace-" + System.nanoTime());
-    request.setSettingsJson(settingsJson);
+    request.setSettingsJson("{}");
     return Long.parseLong(workspaceService.createWorkspace(request).getId());
   }
 

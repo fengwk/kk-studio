@@ -72,7 +72,7 @@ class BashSurfaceAnalyzerTest {
   /** unsupported 只在完整命令规则明确 deny 时拒绝，否则必须 ASK，不能猜内部命令。 */
   @Test
   void unsupportedIsDeniedOnlyByCompleteCommandMatch() {
-    WorkspaceToolSettings ask =
+    ToolSettings ask =
         settings(
             List.of(
                 new PermissionRule("*", PermissionAction.ASK),
@@ -89,7 +89,7 @@ class BashSurfaceAnalyzerTest {
   /** 任一静态 segment deny 立即 deny，否则 ask 优先于 allow。 */
   @Test
   void combinesCompositeSegmentActions() {
-    WorkspaceToolSettings settings =
+    ToolSettings settings =
         settings(
             List.of(
                 new PermissionRule("*", PermissionAction.ASK),
@@ -120,7 +120,7 @@ class BashSurfaceAnalyzerTest {
             settings(List.of(new PermissionRule("*", PermissionAction.DENY)))));
   }
 
-  private PermissionAction evaluate(String command, WorkspaceToolSettings settings) {
+  private PermissionAction evaluate(String command, ToolSettings settings) {
     String arguments = "{\"command\":" + quote(command) + ",\"workdir\":\".\"}";
     return evaluator
         .evaluate(
@@ -137,7 +137,7 @@ class BashSurfaceAnalyzerTest {
     }
   }
 
-  private static WorkspaceToolSettings settings(List<PermissionRule> bashRules) {
-    return new WorkspaceToolSettings(Map.of("bash", bashRules), false);
+  private static ToolSettings settings(List<PermissionRule> bashRules) {
+    return new ToolSettings(Map.of("bash", bashRules), false);
   }
 }

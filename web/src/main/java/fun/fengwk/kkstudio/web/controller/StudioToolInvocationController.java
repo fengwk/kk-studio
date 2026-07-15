@@ -23,9 +23,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-/** Workspace-scoped Tool permission decision 与 Session YOLO API。 */
+/** Global Tool permission decision 与 Session YOLO API。 */
 @AllArgsConstructor
-@RequestMapping("/api/workspaces/{workspaceId}")
+@RequestMapping("/api")
 @RestController
 public class StudioToolInvocationController {
   private final ToolInvocationDecisionService decisionService;
@@ -33,13 +33,11 @@ public class StudioToolInvocationController {
 
   @PostMapping("/tool-invocations/{invocationId}/decision")
   public Result<ToolInvocationDTO> decide(
-      @PathVariable long workspaceId,
-      @PathVariable long invocationId,
-      @RequestBody ToolInvocationDecisionDTO request) {
+      @PathVariable long invocationId, @RequestBody ToolInvocationDecisionDTO request) {
     try {
       ToolPermissionDecision decision =
           ToolPermissionDecision.fromApiValue(request == null ? null : request.getDecision());
-      return Results.ok(toDTO(decisionService.decide(workspaceId, invocationId, decision)));
+      return Results.ok(toDTO(decisionService.decide(invocationId, decision)));
     } catch (ToolDecisionConflictException error) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, error.getMessage(), error);
     }
@@ -47,23 +45,20 @@ public class StudioToolInvocationController {
 
   @PutMapping("/sessions/{sessionId}/yolo")
   public Result<SessionYoloDTO> setYolo(
-      @PathVariable long workspaceId,
-      @PathVariable long sessionId,
-      @RequestBody SessionYoloSetDTO request) {
+      @PathVariable long sessionId, @RequestBody SessionYoloSetDTO request) {
     if (request == null || request.getEnabled() == null) {
       throw new IllegalArgumentException("enabled must not be null");
     }
     try {
-      return Results.ok(toDTO(yoloService.set(workspaceId, sessionId, request.getEnabled())));
+      return Results.ok(toDTO(yoloService.set(sessionId, request.getEnabled())));
     } catch (ConcurrentModificationException error) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, error.getMessage(), error);
     }
   }
 
   @GetMapping("/sessions/{sessionId}/yolo")
-  public Result<SessionYoloDTO> getYolo(
-      @PathVariable long workspaceId, @PathVariable long sessionId) {
-    return Results.ok(toDTO(yoloService.get(workspaceId, sessionId)));
+  public Result<SessionYoloDTO> getYolo(@PathVariable long sessionId) {
+    return Results.ok(toDTO(yoloService.get(sessionId)));
   }
 
   private ToolInvocationDTO toDTO(ToolInvocation source) {

@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
-import fun.fengwk.kkstudio.harness.runtime.permission.WorkspaceToolSettings;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
@@ -37,8 +37,8 @@ class ToolPreparationServiceTest {
   void preparesAllowAskAndDenyInSourceOrder() {
     ToolPreparationService service = service(new ToolInterceptorChain(List.of(), List.of()));
     List<ToolBinding> bindings = List.of(binding("read"), binding("write"), binding("delete"));
-    WorkspaceToolSettings settings =
-        new WorkspaceToolSettings(
+    ToolSettings settings =
+        new ToolSettings(
             Map.of(
                 "read", List.of(new PermissionRule("*", PermissionAction.ALLOW)),
                 "write", List.of(new PermissionRule("*", PermissionAction.ASK)),
@@ -77,8 +77,8 @@ class ToolPreparationServiceTest {
   @Test
   void yoloBypassesPermissionButNotSchemaOrBinding() throws Exception {
     ToolPreparationService service = service(new ToolInterceptorChain(List.of(), List.of()));
-    WorkspaceToolSettings deny =
-        new WorkspaceToolSettings(
+    ToolSettings deny =
+        new ToolSettings(
             Map.of("write", List.of(new PermissionRule("*", PermissionAction.DENY))), false);
 
     PreparedToolInvocation yolo =
@@ -149,7 +149,7 @@ class ToolPreparationServiceTest {
             .prepare(
                 List.of(new ToolCall("call", "read", "{\"path\":\"README.md\"}")),
                 List.of(binding("read", Duration.ZERO)),
-                WorkspaceToolSettings.DEFAULT,
+                ToolSettings.DEFAULT,
                 false,
                 Path.of("/tmp/workspace"),
                 Path.of("/tmp/workspace"),
@@ -172,7 +172,7 @@ class ToolPreparationServiceTest {
             service.prepare(
                 List.of(new ToolCall("overflow", "read", "{\"path\":\"README.md\"}")),
                 List.of(binding("read", Duration.ofSeconds(Long.MAX_VALUE))),
-                WorkspaceToolSettings.DEFAULT,
+                ToolSettings.DEFAULT,
                 false,
                 Path.of("/tmp/workspace"),
                 Path.of("/tmp/workspace"),
@@ -191,7 +191,7 @@ class ToolPreparationServiceTest {
             service.prepare(
                 List.of(call, call),
                 List.of(binding("read")),
-                WorkspaceToolSettings.DEFAULT,
+                ToolSettings.DEFAULT,
                 false,
                 Path.of("."),
                 Path.of("."),
@@ -202,7 +202,7 @@ class ToolPreparationServiceTest {
             service.prepare(
                 List.of(call),
                 List.of(binding("read"), binding("read")),
-                WorkspaceToolSettings.DEFAULT,
+                ToolSettings.DEFAULT,
                 false,
                 Path.of("."),
                 Path.of("."),
@@ -213,7 +213,7 @@ class ToolPreparationServiceTest {
             service.prepare(
                 List.of(),
                 List.of(binding("read")),
-                WorkspaceToolSettings.DEFAULT,
+                ToolSettings.DEFAULT,
                 false,
                 Path.of("."),
                 Path.of("."),

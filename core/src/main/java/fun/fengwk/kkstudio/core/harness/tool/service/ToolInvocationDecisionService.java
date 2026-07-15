@@ -52,12 +52,11 @@ public class ToolInvocationDecisionService {
   }
 
   @Transactional
-  public ToolInvocation decide(
-      long workspaceId, long invocationId, ToolPermissionDecision decision) {
+  public ToolInvocation decide(long invocationId, ToolPermissionDecision decision) {
     Objects.requireNonNull(decision, "decision");
-    ToolInvocationDO observed = invocationMapper.findInWorkspace(workspaceId, invocationId);
+    ToolInvocationDO observed = invocationMapper.find(invocationId);
     if (observed == null) {
-      throw new IllegalArgumentException("tool invocation not found in workspace");
+      throw new IllegalArgumentException("tool invocation not found");
     }
     HarnessRunDO run = runMapper.findForUpdate(observed.getRunId());
     if (run == null) {

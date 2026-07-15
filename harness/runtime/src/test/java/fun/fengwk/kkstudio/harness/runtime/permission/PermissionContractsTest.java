@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 
 class PermissionContractsTest {
   private final ObjectMapper objectMapper = new ObjectMapper();
-  private final WorkspaceToolSettingsCodec codec = new WorkspaceToolSettingsCodec(objectMapper);
+  private final ToolSettingsCodec codec = new ToolSettingsCodec(objectMapper);
   private final PermissionEvaluator evaluator =
       new PermissionEvaluator(objectMapper, new BashSurfaceAnalyzer());
 
@@ -54,7 +54,7 @@ class PermissionContractsTest {
             new PermissionRule("*", PermissionAction.ASK),
             new PermissionRule("file?.txt", PermissionAction.ALLOW),
             new PermissionRule("/outside/*", PermissionAction.DENY)));
-    WorkspaceToolSettings settings = new WorkspaceToolSettings(rules, false);
+    ToolSettings settings = new ToolSettings(rules, false);
 
     assertEquals(
         PermissionAction.ALLOW, evaluate("write", "{\"path\":\"file1.txt\"}", settings).action());
@@ -66,7 +66,7 @@ class PermissionContractsTest {
         evaluate(
                 "bash",
                 "{\"command\":\"\"}",
-                new WorkspaceToolSettings(
+                new ToolSettings(
                     Map.of("bash", List.of(new PermissionRule("*", PermissionAction.ASK))), false))
             .action());
   }
@@ -79,19 +79,19 @@ class PermissionContractsTest {
         () ->
             evaluator.evaluate(
                 new PermissionEvaluationContext(
-                    "write", "[]", Path.of("."), Path.of("."), WorkspaceToolSettings.DEFAULT)));
+                    "write", "[]", Path.of("."), Path.of("."), ToolSettings.DEFAULT)));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new PermissionEvaluationContext(
-                " ", "{}", Path.of("."), Path.of("."), WorkspaceToolSettings.DEFAULT));
+                " ", "{}", Path.of("."), Path.of("."), ToolSettings.DEFAULT));
     PermissionEvaluationContext invalidWorkdir =
         new PermissionEvaluationContext(
             "write",
             "{\"path\":\"x\",\"workdir\":\"@\"}",
             Path.of("."),
             Path.of("."),
-            WorkspaceToolSettings.DEFAULT);
+            ToolSettings.DEFAULT);
     assertThrows(IllegalArgumentException.class, () -> evaluator.evaluate(invalidWorkdir));
     assertEquals("<invalid-workdir>", evaluator.preview(invalidWorkdir).workdir());
     assertThrows(IllegalArgumentException.class, () -> PermissionAction.fromValue("invalid"));
@@ -107,7 +107,7 @@ class PermissionContractsTest {
   }
 
   private PermissionEvaluator.Evaluation evaluate(
-      String tool, String arguments, WorkspaceToolSettings settings) {
+      String tool, String arguments, ToolSettings settings) {
     return evaluator.evaluate(
         new PermissionEvaluationContext(
             tool, arguments, Path.of("/workspace"), Path.of("/workspace"), settings));

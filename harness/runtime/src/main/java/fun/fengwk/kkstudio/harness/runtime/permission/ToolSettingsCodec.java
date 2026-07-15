@@ -11,32 +11,32 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** Workspace settings canonical codec，兼容 PiBase string/object 简写。 */
-public final class WorkspaceToolSettingsCodec {
+/** Tool settings canonical codec，兼容 PiBase string/object 简写。 */
+public final class ToolSettingsCodec {
   private final ObjectMapper objectMapper;
 
-  public WorkspaceToolSettingsCodec(ObjectMapper objectMapper) {
+  public ToolSettingsCodec(ObjectMapper objectMapper) {
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
   }
 
-  public WorkspaceToolSettings decode(String settingsJson) {
+  public ToolSettings decode(String settingsJson) {
     ObjectNode root = readRoot(settingsJson);
-    return new WorkspaceToolSettings(
+    return new ToolSettings(
         decodePermission(root.get("permission")), root.path("defaultYolo").asBoolean(false));
   }
 
-  /** 保留未知 Workspace 设置，但将 permission/defaultYolo 统一编码为规范 JSON。 */
+  /** 保留未知 Tool 设置，但将 permission/defaultYolo 统一编码为规范 JSON。 */
   public String canonicalize(String settingsJson) {
     ObjectNode root = readRoot(settingsJson);
-    WorkspaceToolSettings settings =
-        new WorkspaceToolSettings(
+    ToolSettings settings =
+        new ToolSettings(
             decodePermission(root.get("permission")), root.path("defaultYolo").asBoolean(false));
     root.set("permission", encodePermission(settings.permission()));
     root.put("defaultYolo", settings.defaultYolo());
     try {
       return objectMapper.writeValueAsString(root);
     } catch (JsonProcessingException error) {
-      throw new IllegalArgumentException("cannot encode workspace settings", error);
+      throw new IllegalArgumentException("cannot encode tool settings", error);
     }
   }
 

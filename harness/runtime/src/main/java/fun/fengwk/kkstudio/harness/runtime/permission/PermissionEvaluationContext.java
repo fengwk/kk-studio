@@ -3,13 +3,13 @@ package fun.fengwk.kkstudio.harness.runtime.permission;
 import java.nio.file.Path;
 import java.util.Objects;
 
-/** 单次 Tool permission 评估所需的冻结路径与 Workspace 规则。 */
+/** 单次 Tool permission 评估所需的冻结路径与全局规则。 */
 public record PermissionEvaluationContext(
     String toolName,
     String argumentsJson,
     Path workdir,
     Path workspaceRoot,
-    WorkspaceToolSettings settings) {
+    ToolSettings settings) {
   public PermissionEvaluationContext {
     if (toolName == null || toolName.isBlank()) {
       throw new IllegalArgumentException("toolName must not be blank");

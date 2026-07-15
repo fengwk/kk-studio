@@ -13,10 +13,11 @@ import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
 import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
 import fun.fengwk.kkstudio.core.harness.session.store.SnowflakeSessionIdGenerator;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
+import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProperties;
 import fun.fengwk.kkstudio.core.harness.tool.service.HarnessSessionYoloService;
 import fun.fengwk.kkstudio.core.harness.tool.service.ToolDecisionConflictException;
 import fun.fengwk.kkstudio.core.harness.tool.service.ToolInvocationDecisionService;
-import fun.fengwk.kkstudio.core.harness.tool.service.WorkspaceToolPolicyResolver;
+import fun.fengwk.kkstudio.core.harness.tool.service.ToolPolicyResolver;
 import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
 import fun.fengwk.kkstudio.core.harness.tool.worker.DatabaseArtifactStore;
 import fun.fengwk.kkstudio.core.harness.tool.worker.DatabaseToolInvocationWorkerStore;
@@ -89,6 +90,7 @@ class ToolInvocationIntegrationTest {
   private static final Instant NOW = Instant.parse("2026-05-01T00:00:00Z");
 
   @Autowired private WorkspaceService workspaceService;
+  @Autowired private ToolSettingsProperties toolSettingsProperties;
   @Autowired private MysqlHarnessSessionStore sessionStore;
   @Autowired private SnowflakeSessionIdGenerator sessionIds;
   @Autowired private MysqlHarnessRunStore runStore;
@@ -100,7 +102,7 @@ class ToolInvocationIntegrationTest {
   @Autowired private DatabaseArtifactStore artifactStore;
   @Autowired private ToolInvocationDecisionService decisionService;
   @Autowired private HarnessSessionYoloService yoloService;
-  @Autowired private WorkspaceToolPolicyResolver policyResolver;
+  @Autowired private ToolPolicyResolver policyResolver;
   @Autowired private SessionTree sessionTree;
   @Autowired private JdbcTemplate jdbcTemplate;
 
@@ -234,11 +236,19 @@ class ToolInvocationIntegrationTest {
         sessionStore.find(rollback.sessionId()).orElseThrow().leafEntryId());
   }
 
+  /** Decision 拒绝未知 Invocation。 */
+  @Test
+  void rejectsUnknownInvocation() {
+    long workspaceId = workspace("{}");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> decisionService.decide(Long.MAX_VALUE, ToolPermissionDecision.ALLOW));
+  }
+
   /** decision 相同请求幂等；冲突决定 409 领域冲突，跨 Workspace 拒绝。 */
   @Test
-  void resolvesPermissionIdempotentlyAndRejectsConflictsAndCrossWorkspace() {
+  void resolvesPermissionIdempotentlyAndRejectsConflictsGlobally() {
     long workspaceId = workspace("{\"permission\":{\"write\":\"ask\"}}");
-    long otherWorkspaceId = workspace("{}");
     Claimed allowClaimed = claimedRun(workspaceId, false);
     prepare(
         allowClaimed.run(),
@@ -246,20 +256,15 @@ class ToolInvocationIntegrationTest {
         List.of(binding("write")));
     ToolInvocation pending = invocationStore.listByRun(allowClaimed.run().id()).get(0);
 
-    ToolInvocation allowed =
-        decisionService.decide(workspaceId, pending.id(), ToolPermissionDecision.ALLOW);
-    ToolInvocation repeated =
-        decisionService.decide(workspaceId, pending.id(), ToolPermissionDecision.ALLOW);
+    ToolInvocation allowed = decisionService.decide(pending.id(), ToolPermissionDecision.ALLOW);
+    ToolInvocation repeated = decisionService.decide(pending.id(), ToolPermissionDecision.ALLOW);
     assertEquals(ToolInvocationStatus.QUEUED, allowed.status());
     assertEquals(
         Duration.ofSeconds(30), Duration.between(allowed.updatedAt(), allowed.deadlineAt()));
     assertEquals(ToolPermissionDecision.ALLOW, repeated.permissionDecision());
     assertThrows(
         ToolDecisionConflictException.class,
-        () -> decisionService.decide(workspaceId, pending.id(), ToolPermissionDecision.DENY));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> decisionService.decide(otherWorkspaceId, pending.id(), ToolPermissionDecision.ALLOW));
+        () -> decisionService.decide(pending.id(), ToolPermissionDecision.DENY));
     assertEquals(
         1,
         runStore.listAfter(allowClaimed.run().id(), 0, 30).stream()
@@ -273,7 +278,6 @@ class ToolInvocationIntegrationTest {
         List.of(binding("write")));
     ToolInvocation denied =
         decisionService.decide(
-            workspaceId,
             invocationStore.listByRun(denyClaimed.run().id()).get(0).id(),
             ToolPermissionDecision.DENY);
     assertEquals(ToolInvocationStatus.FAILED, denied.status());
@@ -292,7 +296,7 @@ class ToolInvocationIntegrationTest {
         "update harness_run set status = 'CANCELLED' where id = ?", settledClaimed.run().id());
     assertThrows(
         ToolDecisionConflictException.class,
-        () -> decisionService.decide(workspaceId, settled.id(), ToolPermissionDecision.ALLOW));
+        () -> decisionService.decide(settled.id(), ToolPermissionDecision.ALLOW));
 
     long automaticWorkspaceId = workspace("{\"permission\":{\"write\":\"allow\"}}");
     Claimed automatic = claimedRun(automaticWorkspaceId, false);
@@ -303,9 +307,7 @@ class ToolInvocationIntegrationTest {
     ToolInvocation alreadyQueued = invocationStore.listByRun(automatic.run().id()).get(0);
     assertThrows(
         ToolDecisionConflictException.class,
-        () ->
-            decisionService.decide(
-                automaticWorkspaceId, alreadyQueued.id(), ToolPermissionDecision.ALLOW));
+        () -> decisionService.decide(alreadyQueued.id(), ToolPermissionDecision.ALLOW));
   }
 
   /** 决策事务拒绝损坏的 ASK action 与非正 timeout budget，避免把坏快照继续推进。 */
@@ -318,95 +320,136 @@ class ToolInvocationIntegrationTest {
         "update tool_invocation set permission_action = 'ALLOW' where id = ?", invalidPending.id());
     assertThrows(
         IllegalStateException.class,
-        () ->
-            decisionService.decide(workspaceId, invalidPending.id(), ToolPermissionDecision.ALLOW));
+        () -> decisionService.decide(invalidPending.id(), ToolPermissionDecision.ALLOW));
 
     ToolInvocation invalidTimeout = askInvocation(workspaceId, "invalid-timeout");
     jdbcTemplate.update(
         "update tool_invocation set deadline_at = gmt_create where id = ?", invalidTimeout.id());
     assertThrows(
         IllegalStateException.class,
-        () ->
-            decisionService.decide(workspaceId, invalidTimeout.id(), ToolPermissionDecision.ALLOW));
+        () -> decisionService.decide(invalidTimeout.id(), ToolPermissionDecision.ALLOW));
 
     ToolInvocation decided = askInvocation(workspaceId, "decided-corruption");
-    decisionService.decide(workspaceId, decided.id(), ToolPermissionDecision.ALLOW);
+    decisionService.decide(decided.id(), ToolPermissionDecision.ALLOW);
     jdbcTemplate.update(
         "update tool_invocation set permission_action = 'ALLOW' where id = ?", decided.id());
     assertThrows(
         IllegalStateException.class,
-        () -> decisionService.decide(workspaceId, decided.id(), ToolPermissionDecision.ALLOW));
+        () -> decisionService.decide(decided.id(), ToolPermissionDecision.ALLOW));
   }
 
-  /** Policy resolver 明确拒绝缺失 Workspace 与缺失 Root，不能静默降级权限。 */
+  /** Policy resolver 拒绝没有 Root 标识的孤儿 Session。 */
+  @Test
+  void rejectsOrphanSessionForPolicyResolution() {
+    HarnessSessionDO orphan = new HarnessSessionDO();
+    orphan.setId(99L);
+    assertThrows(IllegalStateException.class, () -> policyResolver.resolve(orphan));
+  }
+
+  /** Policy resolver 只接受合法 Root 拓扑，不能因缺少 Workspace 记录而静默降级权限。 */
   @Test
   void rejectsInvalidPermissionPolicyReferences() {
-    HarnessSessionDO missingWorkspace = new HarnessSessionDO();
-    missingWorkspace.setId(1L);
-    missingWorkspace.setWorkspaceId(Long.MAX_VALUE);
-    missingWorkspace.setRootSessionId(1L);
-    assertThrows(IllegalStateException.class, () -> policyResolver.resolve(missingWorkspace));
-
-    long workspaceId = workspace("{}");
     HarnessSessionDO missingRoot = new HarnessSessionDO();
-    missingRoot.setId(2L);
-    missingRoot.setWorkspaceId(workspaceId);
-    missingRoot.setParentSessionId(1L);
-    missingRoot.setRootSessionId(Long.MAX_VALUE - 1);
+    missingRoot.setId(1L);
+    missingRoot.setRootSessionId(Long.MAX_VALUE);
     assertThrows(IllegalStateException.class, () -> policyResolver.resolve(missingRoot));
+
+    HarnessSessionDO invalidRoot = new HarnessSessionDO();
+    invalidRoot.setId(2L);
+    invalidRoot.setRootSessionId(2L);
+    invalidRoot.setParentSessionId(1L);
+    assertThrows(IllegalStateException.class, () -> policyResolver.resolve(invalidRoot));
   }
 
   /** YOLO 服务拒绝损坏的 Root 拓扑与悬空 activeRunId，不发布错误运行事件。 */
   @Test
   void rejectsCorruptedYoloState() {
+    assertThrows(IllegalArgumentException.class, () -> yoloService.get(Long.MAX_VALUE));
+
     long workspaceId = workspace("{}");
     Session invalidRoot = sessionTree.create(workspaceId, null, "invalid-root");
     jdbcTemplate.update(
         "update harness_session set parent_session_id = ? where id = ?",
         invalidRoot.id() + 1,
         invalidRoot.id());
-    assertThrows(IllegalStateException.class, () -> yoloService.get(workspaceId, invalidRoot.id()));
+    assertThrows(IllegalStateException.class, () -> yoloService.get(invalidRoot.id()));
 
     Session missingRun = sessionTree.create(workspaceId, null, "missing-run");
     jdbcTemplate.update(
         "update harness_session set active_run_id = ? where id = ?",
         Long.MAX_VALUE,
         missingRun.id());
-    assertThrows(
-        IllegalStateException.class, () -> yoloService.set(workspaceId, missingRun.id(), true));
+    assertThrows(IllegalStateException.class, () -> yoloService.set(missingRun.id(), true));
+  }
+
+  /** YOLO set 在 active run 不属于当前 Session 时拒绝写。 */
+  @Test
+  void rejectsYoloSetWhenActiveRunBelongsToAnotherSession() {
+    long workspaceId = workspace("{}");
+    Session root = sessionTree.create(workspaceId, null, "root");
+    assertEquals(root.id(), yoloService.set(root.id(), true).rootSessionId());
+
+    Session otherRoot = sessionTree.create(workspaceId, null, "other");
+    AgentRun foreignRun =
+        transactions.submitUserMessage(otherRoot.id(), null, user(), NOW.plusSeconds(2));
+    AgentRun foreignClaimed =
+        runStore.claimDue("yolo-worker", NOW.plusSeconds(2), Duration.ofMinutes(1)).orElseThrow();
+    assertEquals(foreignRun.id(), foreignClaimed.id());
+    jdbcTemplate.update(
+        "update harness_session set active_run_id = ? where id = ?",
+        foreignClaimed.id(),
+        root.id());
+    assertThrows(IllegalStateException.class, () -> yoloService.set(root.id(), false));
+  }
+
+  /** YOLO set 在 active run 状态异常时拒绝写。 */
+  @Test
+  void rejectsYoloSetOnTerminalOrForeignActiveRun() {
+    long workspaceId = workspace("{}");
+    Session root = sessionTree.create(workspaceId, null, "root");
+    Session child = sessionTree.fork(root.id(), null);
+    AgentRun queued = transactions.submitUserMessage(child.id(), null, user(), NOW.plusSeconds(2));
+    AgentRun claimed =
+        runStore.claimDue("yolo-worker", NOW.plusSeconds(2), Duration.ofMinutes(1)).orElseThrow();
+    assertEquals(queued.id(), claimed.id());
+
+    jdbcTemplate.update("update harness_run set status = 'CANCELLED' where id = ?", claimed.id());
+    assertThrows(IllegalStateException.class, () -> yoloService.set(child.id(), true));
+
+    Session stray = sessionTree.create(workspaceId, null, "stray");
+    jdbcTemplate.update(
+        "update harness_session set active_run_id = ? where id = ?", Long.MAX_VALUE, stray.id());
+    assertThrows(IllegalStateException.class, () -> yoloService.set(stray.id(), true));
   }
 
   /** Root 创建继承 defaultYolo；Child 动态读取 Root，且无 active Run 时 set/get 仍持久可观察。 */
   @Test
   void inheritsAndDynamicallyUpdatesRootYoloForChildren() {
     long workspaceId = workspace("{\"defaultYolo\":true,\"permission\":{\"write\":\"deny\"}}");
-    long otherWorkspaceId = workspace("{}");
     Session root = sessionTree.create(workspaceId, null, "root");
     Session child = sessionTree.fork(root.id(), null);
 
     assertTrue(root.yoloEnabled());
-    assertTrue(yoloService.get(workspaceId, child.id()).enabled());
-    HarnessSessionYoloService.YoloState disabled = yoloService.set(workspaceId, child.id(), false);
+    assertTrue(yoloService.get(child.id()).enabled());
+    HarnessSessionYoloService.YoloState disabled = yoloService.set(child.id(), false);
     assertEquals(root.id(), disabled.rootSessionId());
-    assertFalse(yoloService.get(workspaceId, root.id()).enabled());
-    assertFalse(yoloService.get(workspaceId, child.id()).enabled());
+    assertFalse(yoloService.get(root.id()).enabled());
+    assertFalse(yoloService.get(child.id()).enabled());
     assertFalse(sessionStore.find(root.id()).orElseThrow().yoloEnabled());
-    assertThrows(
-        IllegalArgumentException.class, () -> yoloService.set(otherWorkspaceId, child.id(), true));
 
     AgentRun childQueued =
         transactions.submitUserMessage(child.id(), null, user(), NOW.plusSeconds(2));
     AgentRun childRun =
         runStore.claimDue("child-worker", NOW.plusSeconds(2), Duration.ofMinutes(1)).orElseThrow();
     assertEquals(childQueued.id(), childRun.id());
-    yoloService.set(workspaceId, root.id(), true);
+    yoloService.set(root.id(), true);
     prepare(
         childRun,
         List.of(new ToolCall("child-yolo", "write", "{\"path\":\"child.txt\"}")),
         List.of(binding("write")));
     assertEquals(
         ToolInvocationStatus.QUEUED, invocationStore.listByRun(childRun.id()).get(0).status());
-    yoloService.set(workspaceId, child.id(), false);
+    yoloService.set(child.id(), false);
     assertEquals(
         2,
         runStore.listAfter(childRun.id(), 0, 10).stream()
@@ -420,7 +463,7 @@ class ToolInvocationIntegrationTest {
     AgentRun rootRun =
         runStore.claimDue("root-worker", NOW.plusSeconds(3), Duration.ofMinutes(1)).orElseThrow();
     assertEquals(rootQueued.id(), rootRun.id());
-    yoloService.set(workspaceId, idleChild.id(), false);
+    yoloService.set(idleChild.id(), false);
     assertEquals(
         1,
         runStore.listAfter(rootRun.id(), 0, 10).stream()
@@ -428,7 +471,7 @@ class ToolInvocationIntegrationTest {
             .count());
 
     jdbcTemplate.update("update harness_run set status = 'CANCELLED' where id = ?", childRun.id());
-    assertThrows(IllegalStateException.class, () -> yoloService.set(workspaceId, child.id(), true));
+    assertThrows(IllegalStateException.class, () -> yoloService.set(child.id(), true));
   }
 
   /**
@@ -855,9 +898,10 @@ class ToolInvocationIntegrationTest {
   }
 
   private long workspace(String settingsJson) {
+    toolSettingsProperties.setSettingsJson(settingsJson);
     WorkspaceCreateDTO request = new WorkspaceCreateDTO();
     request.setName("tool-workspace-" + System.nanoTime());
-    request.setSettingsJson(settingsJson);
+    request.setSettingsJson("{}");
     return Long.parseLong(workspaceService.createWorkspace(request).getId());
   }
 

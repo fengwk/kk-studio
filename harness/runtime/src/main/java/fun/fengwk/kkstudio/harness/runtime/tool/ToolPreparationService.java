@@ -8,7 +8,7 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluationContext;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
-import fun.fengwk.kkstudio.harness.runtime.permission.WorkspaceToolSettings;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import java.nio.file.Path;
 import java.time.DateTimeException;
@@ -56,7 +56,7 @@ public final class ToolPreparationService {
   public List<PreparedToolInvocation> prepare(
       List<ToolCall> toolCalls,
       List<ToolBinding> bindings,
-      WorkspaceToolSettings settings,
+      ToolSettings settings,
       boolean yoloEnabled,
       Path workdir,
       Path workspaceRoot,

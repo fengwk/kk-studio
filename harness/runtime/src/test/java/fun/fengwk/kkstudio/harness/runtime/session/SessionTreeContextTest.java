@@ -310,7 +310,7 @@ class SessionTreeContextTest {
 
   private static SessionTree tree(InMemoryStore store) {
     return new SessionTree(
-        store, store, new SequenceIds(), workspaceId -> false, Clock.fixed(NOW, ZoneOffset.UTC));
+        store, store, new SequenceIds(), () -> false, Clock.fixed(NOW, ZoneOffset.UTC));
   }
 
   private static SessionContextBuilder builder(InMemoryStore store) {

@@ -64,8 +64,7 @@ public final class PermissionEvaluator {
     return List.copyOf(candidates);
   }
 
-  private PermissionAction evaluateBash(
-      String command, WorkspaceToolSettings settings, String toolName) {
+  private PermissionAction evaluateBash(String command, ToolSettings settings, String toolName) {
     BashSurfaceAnalyzer.Analysis analysis = bashAnalyzer.analyze(command);
     if (!analysis.supported()) {
       PermissionAction staticAction = evaluateRules(List.of(command), settings, toolName);
@@ -89,7 +88,7 @@ public final class PermissionEvaluator {
   }
 
   private PermissionAction evaluateRules(
-      List<String> candidates, WorkspaceToolSettings settings, String toolName) {
+      List<String> candidates, ToolSettings settings, String toolName) {
     PermissionAction action = PermissionAction.ALLOW;
     List<List<PermissionRule>> rulesets =
         List.of(settings.rulesFor("*"), settings.rulesFor(toolName));

@@ -18,7 +18,7 @@ class PermissionEvaluatorTest {
   /** 最后命中规则生效，且 tool-specific 必须在全局规则之后应用。 */
   @Test
   void appliesGlobalThenToolSpecificRulesWithLastMatchWinning() {
-    WorkspaceToolSettings settings =
+    ToolSettings settings =
         settings(
             Map.of(
                 "*",
@@ -41,8 +41,7 @@ class PermissionEvaluatorTest {
     Path workspace = Path.of("/tmp/permission-workspace");
     Path workdir = workspace.resolve("repo");
     PermissionEvaluationContext context =
-        new PermissionEvaluationContext(
-            "write", "{}", workdir, workspace, WorkspaceToolSettings.DEFAULT);
+        new PermissionEvaluationContext("write", "{}", workdir, workspace, ToolSettings.DEFAULT);
     JsonNode input = objectMapper.readTree("{\"path\":\"src/Main.java\"}");
 
     assertEquals(
@@ -58,7 +57,7 @@ class PermissionEvaluatorTest {
   /** 显式 workdir 决定 path 解析，generic Tool 使用单一 `*` 候选。 */
   @Test
   void matchesExplicitWorkdirAndGenericCandidate() {
-    WorkspaceToolSettings settings =
+    ToolSettings settings =
         settings(
             Map.of(
                 "write",
@@ -81,7 +80,7 @@ class PermissionEvaluatorTest {
   /** `~`、`$HOME` 与 `${HOME}` 规则和路径都按同一 home 目录匹配。 */
   @Test
   void expandsSupportedHomeShortcuts() {
-    WorkspaceToolSettings settings =
+    ToolSettings settings =
         settings(
             Map.of(
                 "write",
@@ -123,7 +122,7 @@ class PermissionEvaluatorTest {
   /** 管理输入兼容 PiBase 简写，持久输出统一为 ordered rule list。 */
   @Test
   void canonicalizesWorkspaceSettingsShorthand() throws Exception {
-    WorkspaceToolSettingsCodec codec = new WorkspaceToolSettingsCodec(objectMapper);
+    ToolSettingsCodec codec = new ToolSettingsCodec(objectMapper);
     String canonical =
         codec.canonicalize(
             "{\"permission\":{\"write\":\"ask\",\"bash\":{\"*\":\"ask\",\"git"
@@ -142,7 +141,7 @@ class PermissionEvaluatorTest {
   }
 
   private PermissionEvaluator.Evaluation evaluate(
-      String toolName, String arguments, WorkspaceToolSettings settings) {
+      String toolName, String arguments, ToolSettings settings) {
     return evaluator.evaluate(
         new PermissionEvaluationContext(
             toolName,
@@ -152,7 +151,7 @@ class PermissionEvaluatorTest {
             settings));
   }
 
-  private static WorkspaceToolSettings settings(Map<String, List<PermissionRule>> rules) {
-    return new WorkspaceToolSettings(rules, false);
+  private static ToolSettings settings(Map<String, List<PermissionRule>> rules) {
+    return new ToolSettings(rules, false);
   }
 }

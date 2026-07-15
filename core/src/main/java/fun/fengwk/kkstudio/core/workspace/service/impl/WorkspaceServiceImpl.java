@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.core.workspace.repo.WorkspaceRepository;
 import fun.fengwk.kkstudio.core.workspace.service.WorkspaceService;
 import fun.fengwk.kkstudio.core.workspace.service.converter.WorkspaceConverter;
 import fun.fengwk.kkstudio.core.workspace.service.model.Workspace;
-import fun.fengwk.kkstudio.harness.runtime.permission.WorkspaceToolSettingsCodec;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsCodec;
 import fun.fengwk.kkstudio.share.model.WorkspaceCreateDTO;
 import fun.fengwk.kkstudio.share.model.WorkspaceDTO;
 import fun.fengwk.kkstudio.share.model.WorkspaceUpdateDTO;
@@ -28,7 +28,7 @@ public class WorkspaceServiceImpl implements WorkspaceService {
   private final WorkspaceRepository workspaceRepository;
   private final WorkspaceConverter workspaceConverter;
   private final AgentEditableSupport editableSupport;
-  private final WorkspaceToolSettingsCodec settingsCodec;
+  private final ToolSettingsCodec settingsCodec;
 
   @Override
   public Page<WorkspaceDTO> pageWorkspaces(PageQuery pageQuery) {

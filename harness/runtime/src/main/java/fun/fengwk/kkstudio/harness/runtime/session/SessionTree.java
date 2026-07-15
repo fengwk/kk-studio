@@ -36,7 +36,7 @@ public final class SessionTree {
             workspaceId,
             agentDefinitionId,
             title,
-            yoloResolver.defaultYolo(workspaceId),
+            yoloResolver.defaultYolo(),
             clock.instant());
     sessionStore.create(session);
     return session;

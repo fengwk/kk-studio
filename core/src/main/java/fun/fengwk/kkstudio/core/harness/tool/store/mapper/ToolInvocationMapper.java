@@ -72,20 +72,6 @@ public interface ToolInvocationMapper extends BaseMapper {
       })
   ToolInvocationDO find(@Param("id") long id);
 
-  @Select(
-      """
-      select
-      """
-          + COLUMNS
-          + """
-      from tool_invocation ti
-      join harness_run r on r.id = ti.run_id
-      join harness_session s on s.id = r.session_id
-      where ti.id = #{id} and s.workspace_id = #{workspaceId}
-      """)
-  @ResultMap("toolInvocationResultMap")
-  ToolInvocationDO findInWorkspace(@Param("workspaceId") long workspaceId, @Param("id") long id);
-
   @Select("select " + COLUMNS + " from tool_invocation ti where ti.id = #{id} for update")
   @ResultMap("toolInvocationResultMap")
   ToolInvocationDO findForUpdate(@Param("id") long id);

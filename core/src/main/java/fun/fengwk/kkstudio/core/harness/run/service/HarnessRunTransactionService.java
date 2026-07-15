@@ -8,7 +8,7 @@ import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionEntry
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionEntryDO;
-import fun.fengwk.kkstudio.core.harness.tool.service.WorkspaceToolPolicyResolver;
+import fun.fengwk.kkstudio.core.harness.tool.service.ToolPolicyResolver;
 import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
 import fun.fengwk.kkstudio.harness.runtime.run.AgentRun;
@@ -54,7 +54,7 @@ public class HarnessRunTransactionService implements RunTransactions {
   private final ToolInvocationMapper invocationMapper;
   private final RunIdGenerator idGenerator;
   private final ToolPreparationService toolPreparationService;
-  private final WorkspaceToolPolicyResolver policyResolver;
+  private final ToolPolicyResolver policyResolver;
   private final SessionEntryJsonCodec payloadCodec = new SessionEntryJsonCodec();
 
   public HarnessRunTransactionService(
@@ -65,7 +65,7 @@ public class HarnessRunTransactionService implements RunTransactions {
       ToolInvocationMapper invocationMapper,
       RunIdGenerator idGenerator,
       ToolPreparationService toolPreparationService,
-      WorkspaceToolPolicyResolver policyResolver) {
+      ToolPolicyResolver policyResolver) {
     this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
     this.eventMapper = Objects.requireNonNull(eventMapper, "eventMapper");
     this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
@@ -157,7 +157,7 @@ public class HarnessRunTransactionService implements RunTransactions {
     if (locked == null) {
       return false;
     }
-    WorkspaceToolPolicyResolver.ResolvedPolicy policy = policyResolver.resolve(locked.session());
+    ToolPolicyResolver.ResolvedPolicy policy = policyResolver.resolve(locked.session());
     List<PreparedToolInvocation> prepared =
         toolPreparationService.prepare(
             toolCalls,

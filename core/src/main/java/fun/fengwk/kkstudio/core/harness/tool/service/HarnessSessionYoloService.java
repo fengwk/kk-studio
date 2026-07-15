@@ -18,7 +18,7 @@ import java.util.Objects;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** Workspace-scoped Root Session YOLO 显式 set；Child 始终动态读取 Root。 */
+/** Root Session YOLO 显式 set；Child 始终动态读取所属 Root。 */
 @Service
 public class HarnessSessionYoloService {
   private final HarnessSessionMapper sessionMapper;
@@ -38,18 +38,18 @@ public class HarnessSessionYoloService {
   }
 
   @Transactional
-  public YoloState set(long workspaceId, long sessionId, boolean enabled) {
-    HarnessSessionDO initialRequested = requireInWorkspace(workspaceId, sessionId, false);
+  public YoloState set(long sessionId, boolean enabled) {
+    HarnessSessionDO initialRequested = requireSession(sessionId, false);
     HarnessSessionDO initialRoot =
         initialRequested.getRootSessionId().equals(initialRequested.getId())
             ? initialRequested
-            : requireInWorkspace(workspaceId, initialRequested.getRootSessionId(), false);
+            : requireSession(initialRequested.getRootSessionId(), false);
     validateRoot(initialRoot);
     Long directRunId = activeRunId(initialRequested, initialRoot);
     Long candidateRunId =
         directRunId != null
             ? directRunId
-            : sessionMapper.findAnyActiveRunIdByRoot(workspaceId, initialRoot.getId());
+            : sessionMapper.findAnyActiveRunIdByRoot(initialRoot.getId());
     if (candidateRunId != null) {
       HarnessRunDO candidateRun = runMapper.findForUpdate(candidateRunId);
       if (candidateRun == null) {
@@ -68,8 +68,7 @@ public class HarnessSessionYoloService {
               "active run does not belong to session: " + candidateRunId);
         }
       } else {
-        HarnessSessionDO candidateSession =
-            requireInWorkspace(workspaceId, candidateRun.getSessionId());
+        HarnessSessionDO candidateSession = requireSession(candidateRun.getSessionId());
         if (!Objects.equals(candidateSession.getActiveRunId(), candidateRunId)) {
           throw new ConcurrentModificationException(
               "root session activity changed while setting yolo");
@@ -81,19 +80,22 @@ public class HarnessSessionYoloService {
       }
     }
 
-    HarnessSessionDO requested = requireInWorkspace(workspaceId, sessionId);
+    HarnessSessionDO requested = requireSession(sessionId);
     HarnessSessionDO root =
         requested.getRootSessionId().equals(requested.getId())
             ? requested
-            : requireInWorkspace(workspaceId, requested.getRootSessionId());
+            : requireSession(requested.getRootSessionId());
     validateRoot(root);
+    if (!Objects.equals(root.getId(), initialRoot.getId())) {
+      throw new ConcurrentModificationException("session root changed while setting yolo");
+    }
     if (!Objects.equals(directRunId, activeRunId(requested, root))) {
       throw new ConcurrentModificationException("session activity changed while setting yolo");
     }
     boolean current = Boolean.TRUE.equals(root.getYoloEnabled());
     Instant now = clock.instant();
     if (current != enabled) {
-      if (sessionMapper.setRootYolo(workspaceId, root.getId(), enabled, utc(now)) != 1) {
+      if (sessionMapper.setRootYolo(root.getId(), enabled, utc(now)) != 1) {
         throw new IllegalStateException("cannot update root session yolo");
       }
       if (candidateRunId != null) {
@@ -109,25 +111,25 @@ public class HarnessSessionYoloService {
   }
 
   @Transactional(readOnly = true)
-  public YoloState get(long workspaceId, long sessionId) {
-    HarnessSessionDO requested = requireInWorkspace(workspaceId, sessionId, false);
+  public YoloState get(long sessionId) {
+    HarnessSessionDO requested = requireSession(sessionId, false);
     HarnessSessionDO root =
         requested.getRootSessionId().equals(requested.getId())
             ? requested
-            : requireInWorkspace(workspaceId, requested.getRootSessionId(), false);
+            : requireSession(requested.getRootSessionId(), false);
     validateRoot(root);
     return new YoloState(sessionId, root.getId(), Boolean.TRUE.equals(root.getYoloEnabled()));
   }
 
-  private HarnessSessionDO requireInWorkspace(long workspaceId, long sessionId) {
-    return requireInWorkspace(workspaceId, sessionId, true);
+  private HarnessSessionDO requireSession(long sessionId) {
+    return requireSession(sessionId, true);
   }
 
-  private HarnessSessionDO requireInWorkspace(long workspaceId, long sessionId, boolean forUpdate) {
+  private HarnessSessionDO requireSession(long sessionId, boolean forUpdate) {
     HarnessSessionDO session =
         forUpdate ? sessionMapper.findForUpdate(sessionId) : sessionMapper.find(sessionId);
-    if (session == null || !session.getWorkspaceId().equals(workspaceId)) {
-      throw new IllegalArgumentException("session not found in workspace");
+    if (session == null) {
+      throw new IllegalArgumentException("session not found: " + sessionId);
     }
     return session;
   }

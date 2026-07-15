@@ -114,23 +114,21 @@ public interface HarnessSessionMapper extends BaseMapper {
       """
       select active_run_id
       from harness_session
-      where workspace_id = #{workspaceId} and root_session_id = #{rootSessionId}
+      where root_session_id = #{rootSessionId}
         and active_run_id is not null
       order by id
       limit 1
       """)
-  Long findAnyActiveRunIdByRoot(
-      @Param("workspaceId") long workspaceId, @Param("rootSessionId") long rootSessionId);
+  Long findAnyActiveRunIdByRoot(@Param("rootSessionId") long rootSessionId);
 
   @Update(
       """
       update harness_session
       set yolo_enabled = #{enabled}, gmt_modified = #{updateTime}, version = version + 1
-      where id = #{rootSessionId} and workspace_id = #{workspaceId}
+      where id = #{rootSessionId}
         and parent_session_id is null and root_session_id = id
       """)
   int setRootYolo(
-      @Param("workspaceId") long workspaceId,
       @Param("rootSessionId") long rootSessionId,
       @Param("enabled") boolean enabled,
       @Param("updateTime") LocalDateTime updateTime);

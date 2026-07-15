@@ -6,13 +6,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** Workspace 中规范化的 ordered permission rules 与默认 YOLO。 */
-public record WorkspaceToolSettings(
-    Map<String, List<PermissionRule>> permission, boolean defaultYolo) {
+/** 全局规范化的 ordered permission rules 与默认 YOLO。 */
+public record ToolSettings(Map<String, List<PermissionRule>> permission, boolean defaultYolo) {
 
-  public static final WorkspaceToolSettings DEFAULT = new WorkspaceToolSettings(Map.of(), false);
+  public static final ToolSettings DEFAULT = new ToolSettings(Map.of(), false);
 
-  public WorkspaceToolSettings {
+  public ToolSettings {
     Objects.requireNonNull(permission, "permission");
     Map<String, List<PermissionRule>> copy = new LinkedHashMap<>();
     permission.forEach(
