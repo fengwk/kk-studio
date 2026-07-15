@@ -109,6 +109,25 @@ class CoreHarnessExtensionTest {
     }
   }
 
+  /** Provider factory 在离开 typed registry 前拒绝 null 或与注册 key 不一致的 adapter。 */
+  @Test
+  void rejectsInvalidProviderFactoryResults() {
+    ProviderFactory mismatched =
+        CoreHarnessExtension.providerFactory(
+            ProviderType.OPENAI, credential -> new GoogleProviderAdapter(credential));
+    ProviderFactory missing =
+        CoreHarnessExtension.providerFactory(ProviderType.OPENAI, credential -> null);
+
+    assertThrows(IllegalStateException.class, () -> mismatched.create("credential", null));
+    assertThrows(NullPointerException.class, () -> missing.create("credential", null));
+    assertThrows(
+        NullPointerException.class,
+        () -> CoreHarnessExtension.providerFactory(null, OpenAiProviderAdapter::new));
+    assertThrows(
+        NullPointerException.class,
+        () -> CoreHarnessExtension.providerFactory(ProviderType.OPENAI, null));
+  }
+
   @Test
   void snapshotsAndSortsToolsWhileHostOwnsLookupAndDuplicateValidation() {
     Tool zeta = tool("zeta", "1");
