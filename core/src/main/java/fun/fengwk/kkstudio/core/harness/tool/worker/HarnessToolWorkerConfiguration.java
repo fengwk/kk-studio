@@ -1,17 +1,18 @@
 package fun.fengwk.kkstudio.core.harness.tool.worker;
 
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskRuntime;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.task.WorkingCopyRevisionResolver;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.CloudToolWorker;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationWorkerStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolRegistry;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorkerConfig;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import java.time.Clock;
-import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -50,14 +51,10 @@ public class HarnessToolWorkerConfiguration {
   }
 
   @Bean
-  @ConditionalOnBean(Tool.class)
+  @ConditionalOnBean(HarnessExtensionHost.class)
   @ConditionalOnMissingBean
-  public ToolRegistry toolRegistry(List<Tool> tools) {
-    return (name, version) ->
-        tools.stream()
-            .filter(tool -> tool.descriptor().name().equals(name))
-            .filter(tool -> tool.descriptor().version().equals(version))
-            .findFirst();
+  public ToolRegistry toolRegistry(HarnessExtensionHost host) {
+    return host::createTool;
   }
 
   @Bean
@@ -67,11 +64,21 @@ public class HarnessToolWorkerConfiguration {
       ToolInvocationWorkerStore store,
       ToolInvocationTransactions transactions,
       ToolRegistry registry,
+      ToolInterceptorChain interceptorChain,
       ArtifactStore artifactStore,
       ToolWorkerConfig config,
       Clock clock,
-      ScheduledExecutorService toolWorkerScheduler) {
+      ScheduledExecutorService toolWorkerScheduler,
+      HarnessLifecycleObservers lifecycleObservers) {
     return new CloudToolWorker(
-        store, transactions, registry, artifactStore, config, clock, toolWorkerScheduler);
+        store,
+        transactions,
+        registry,
+        interceptorChain,
+        artifactStore,
+        config,
+        clock,
+        toolWorkerScheduler,
+        lifecycleObservers);
   }
 }

@@ -3,18 +3,20 @@ package fun.fengwk.kkstudio.core.harness.run.worker;
 import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
 import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
 import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
-import fun.fengwk.kkstudio.harness.runtime.context.ContextTransform;
+import fun.fengwk.kkstudio.harness.agent.extension.ProviderRequestInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.context.DefaultContextTransform;
 import fun.fengwk.kkstudio.harness.runtime.context.SessionContextBuilder;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
 import fun.fengwk.kkstudio.harness.runtime.run.AgentTurnWorker;
 import fun.fengwk.kkstudio.harness.runtime.run.CompactionService;
 import fun.fengwk.kkstudio.harness.runtime.run.DeltaFlushScheduler;
+import fun.fengwk.kkstudio.harness.runtime.run.InterceptingCompactionService;
 import fun.fengwk.kkstudio.harness.runtime.run.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.runtime.run.RunWorkerConfig;
 import fun.fengwk.kkstudio.harness.runtime.run.ToolPreparationPort;
 import fun.fengwk.kkstudio.harness.runtime.run.TurnResourceResolver;
 import java.time.Clock;
-import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -53,7 +55,8 @@ public class HarnessRunWorkerConfiguration {
       HarnessRunTransactionService transactions,
       ToolPreparationPort toolPreparationPort,
       MysqlHarnessSessionStore sessionStore,
-      List<ContextTransform> contextTransforms,
+      HarnessExtensionHost host,
+      HarnessLifecycleObservers lifecycleObservers,
       TurnResourceResolver resourceResolver,
       CompactionService compactionService,
       RunWorkerConfig config,
@@ -61,7 +64,9 @@ public class HarnessRunWorkerConfiguration {
       DeltaFlushScheduler deltaFlushScheduler) {
     SessionContextBuilder contextBuilder =
         new SessionContextBuilder(
-            sessionStore, sessionStore, new DefaultContextTransform(), contextTransforms);
+            sessionStore, sessionStore, new DefaultContextTransform(), host.contextTransforms());
+    CompactionService interceptingCompactionService =
+        new InterceptingCompactionService(compactionService, host.beforeCompactionInterceptors());
     return new AgentTurnWorker(
         runStore,
         runStore,
@@ -70,9 +75,11 @@ public class HarnessRunWorkerConfiguration {
         contextBuilder,
         new ProviderMessageProjector(),
         resourceResolver,
-        compactionService,
+        interceptingCompactionService,
         config,
         clock,
-        deltaFlushScheduler);
+        deltaFlushScheduler,
+        new ProviderRequestInterceptorChain(host.beforeProviderRequestInterceptors()),
+        lifecycleObservers);
   }
 }
