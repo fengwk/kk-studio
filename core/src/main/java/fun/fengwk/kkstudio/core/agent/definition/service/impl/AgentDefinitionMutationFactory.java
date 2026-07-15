@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
+import fun.fengwk.kkstudio.harness.runtime.control.ControlConsumptionMode;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
@@ -96,7 +97,27 @@ final class AgentDefinitionMutationFactory {
     validatePositive(result.getMaxTotalSubagents(), "executionPolicy.maxTotalSubagents");
     validatePositive(result.getIdleTimeoutMillis(), "executionPolicy.idleTimeoutMillis");
     validatePositive(result.getRunTimeoutMillis(), "executionPolicy.runTimeoutMillis");
+    // Steering/follow-up 控制消费模式只对非 null 值严格解析；null/absent 表示由
+    // frozen snapshot decode 阶段决定默认值，不在此机械写入 DTO，避免污染历史数据。
+    result.setSteeringMode(parseControlMode(result.getSteeringMode(), "executionPolicy.steeringMode"));
+    result.setFollowUpMode(parseControlMode(result.getFollowUpMode(), "executionPolicy.followUpMode"));
     return result;
+  }
+
+  private String parseControlMode(String value, String fieldName) {
+    if (value == null) {
+      return null;
+    }
+    String trimmed = value.trim();
+    if (trimmed.isEmpty()) {
+      throw new IllegalArgumentException(fieldName + " must not be blank when present");
+    }
+    try {
+      return ControlConsumptionMode.valueOf(trimmed).name();
+    } catch (IllegalArgumentException exception) {
+      throw new IllegalArgumentException(
+          fieldName + " must be one of ONE_AT_A_TIME/ALL but was: " + value, exception);
+    }
   }
 
   private void validatePositive(Number value, String fieldName) {

@@ -224,3 +224,24 @@ create index if not exists idx_harness_subagent_task_child
     on harness_subagent_task (child_session_id, child_run_id);
 create index if not exists idx_harness_subagent_task_parent
     on harness_subagent_task (parent_session_id, status);
+
+create table if not exists harness_run_control_message (
+    id                 bigint not null,
+    session_id         bigint not null,
+    run_id             bigint,
+    control_kind       varchar(16) not null,
+    consumption_mode   varchar(32) not null,
+    message_json       text not null,
+    status             varchar(16) not null,
+    consumed_run_id    bigint,
+    consumed_entry_id  bigint,
+    gmt_create         timestamp(3) not null default current_timestamp(),
+    consumed_at        timestamp(3),
+    gmt_modified       timestamp(3) not null default current_timestamp(),
+    primary key (id)
+);
+
+create index if not exists idx_harness_control_pending
+    on harness_run_control_message (run_id, control_kind, status, id);
+create index if not exists idx_harness_control_session
+    on harness_run_control_message (session_id, status, id);

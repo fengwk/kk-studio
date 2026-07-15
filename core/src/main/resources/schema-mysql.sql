@@ -209,3 +209,21 @@ create table harness_subagent_task (
     key idx_harness_subagent_task_child (child_session_id, child_run_id),
     key idx_harness_subagent_task_parent (parent_session_id, status)
 ) engine=InnoDB default charset=utf8mb4 comment='durable task invocation to child run relation';
+
+create table if not exists harness_run_control_message (
+    id                 bigint not null comment 'Snowflake control id (独立 namespace)',
+    session_id         bigint not null comment 'target session',
+    run_id             bigint null comment 'active run when accepted; null when FOLLOW_UP 直接 promotion',
+    control_kind       varchar(16) not null comment 'STEER/FOLLOW_UP',
+    consumption_mode   varchar(32) not null comment 'frozen ONE_AT_A_TIME/ALL snapshot',
+    message_json       longtext not null comment 'encoded USER AgentMessage via SessionEntryJsonCodec',
+    status             varchar(16) not null comment 'PENDING/CONSUMED/CLEARED/PROMOTED',
+    consumed_run_id    bigint null comment 'consumed run id (CONSUMED only)',
+    consumed_entry_id  bigint null comment 'consumed session entry id (CONSUMED/PROMOTED only)',
+    gmt_create         datetime(3) not null default current_timestamp(3) comment '入库时间',
+    consumed_at        datetime(3) null comment 'PENDING->CLEARED/CONSUMED/PROMOTED 时间',
+    gmt_modified       datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
+    primary key (id),
+    key idx_harness_control_pending (run_id, control_kind, status, id),
+    key idx_harness_control_session (session_id, status, id)
+) engine=InnoDB default charset=utf8mb4 comment='durable run control queue: steer/follow-up + frozen policy';

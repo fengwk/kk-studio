@@ -89,6 +89,93 @@ public class AgentDefinitionMutationFactoryTest {
     assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
   }
 
+  /** steering/followUp 缺失时持久化为 null，由 frozen snapshot decode 决定默认值，不机械写入 DTO。 */
+  @Test
+  public void shouldLeaveControlModesUnsetWhenAbsent() throws Exception {
+    ObjectMapper objectMapper = new ObjectMapper();
+    AgentDefinitionMutationFactory factory = factory(objectMapper);
+    AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
+    create.setName("agent");
+    AgentDefinition definition = factory.newAgent(2L, create);
+
+    AgentDefinitionConfigDTO stored =
+        objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
+    assertEquals(null, stored.getExecutionPolicy().getSteeringMode());
+    assertEquals(null, stored.getExecutionPolicy().getFollowUpMode());
+  }
+
+  /** 合法控制模式值必须原样持久化。 */
+  @Test
+  public void shouldPersistValidControlModes() throws Exception {
+    ObjectMapper objectMapper = new ObjectMapper();
+    AgentDefinitionMutationFactory factory = factory(objectMapper);
+    AgentExecutionPolicyDTO policy = new AgentExecutionPolicyDTO();
+    policy.setSteeringMode("ALL");
+    policy.setFollowUpMode("ONE_AT_A_TIME");
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setExecutionPolicy(policy);
+    AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
+    create.setName("agent");
+    create.setConfig(config);
+    AgentDefinition definition = factory.newAgent(2L, create);
+
+    AgentDefinitionConfigDTO stored =
+        objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
+    assertEquals("ALL", stored.getExecutionPolicy().getSteeringMode());
+    assertEquals("ONE_AT_A_TIME", stored.getExecutionPolicy().getFollowUpMode());
+  }
+
+  /** 控制模式值非法时必须报错且字段名清楚。 */
+  @Test
+  public void shouldRejectInvalidControlModes() {
+    AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
+
+    AgentExecutionPolicyDTO badSteering = new AgentExecutionPolicyDTO();
+    badSteering.setSteeringMode("WHENEVER");
+    AgentDefinitionConfigDTO badSteeringConfig = new AgentDefinitionConfigDTO();
+    badSteeringConfig.setExecutionPolicy(badSteering);
+    AgentDefinitionCreateDTO badSteeringCreate = new AgentDefinitionCreateDTO();
+    badSteeringCreate.setName("agent");
+    badSteeringCreate.setConfig(badSteeringConfig);
+    IllegalArgumentException steeringException =
+        assertThrows(
+            IllegalArgumentException.class, () -> factory.newAgent(2L, badSteeringCreate));
+    assertEquals(
+        "executionPolicy.steeringMode must be one of ONE_AT_A_TIME/ALL but was: WHENEVER",
+        steeringException.getMessage());
+
+    AgentExecutionPolicyDTO badFollowUp = new AgentExecutionPolicyDTO();
+    badFollowUp.setFollowUpMode("WHENEVER");
+    AgentDefinitionConfigDTO badFollowUpConfig = new AgentDefinitionConfigDTO();
+    badFollowUpConfig.setExecutionPolicy(badFollowUp);
+    AgentDefinitionCreateDTO badFollowUpCreate = new AgentDefinitionCreateDTO();
+    badFollowUpCreate.setName("agent");
+    badFollowUpCreate.setConfig(badFollowUpConfig);
+    IllegalArgumentException followUpException =
+        assertThrows(
+            IllegalArgumentException.class, () -> factory.newAgent(2L, badFollowUpCreate));
+    assertEquals(
+        "executionPolicy.followUpMode must be one of ONE_AT_A_TIME/ALL but was: WHENEVER",
+        followUpException.getMessage());
+  }
+
+  /** 控制模式非字符串空白时也明确报错。 */
+  @Test
+  public void shouldRejectBlankControlModes() {
+    AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
+    AgentExecutionPolicyDTO policy = new AgentExecutionPolicyDTO();
+    policy.setSteeringMode("   ");
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setExecutionPolicy(policy);
+    AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
+    create.setName("agent");
+    create.setConfig(config);
+    IllegalArgumentException exception =
+        assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
+    assertEquals(
+        "executionPolicy.steeringMode must not be blank when present", exception.getMessage());
+  }
+
   private AgentDefinitionMutationFactory factory(ObjectMapper objectMapper) {
     return new AgentDefinitionMutationFactory(new AgentEditableSupport(objectMapper), objectMapper);
   }
