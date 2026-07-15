@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.core.harness.control.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -12,7 +11,6 @@ import fun.fengwk.kkstudio.harness.runtime.control.ControlConsumptionMode;
 import fun.fengwk.kkstudio.harness.runtime.control.RunControlIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.control.RunControlKind;
 import fun.fengwk.kkstudio.harness.runtime.control.RunControlMessage;
-import fun.fengwk.kkstudio.harness.runtime.control.RunControlMessageStore;
 import fun.fengwk.kkstudio.harness.runtime.control.RunControlStatus;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -24,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
@@ -290,7 +289,7 @@ class MysqlRunControlMessageStoreIntegrationTest {
     assertEquals(m2, store.find(b.id()).orElseThrow().message());
   }
 
-  /** 复用同一 id 二次 insert 必须失败（PRIMARY KEY）。 */
+  /** 复用同一 id 二次 insert 必须因 PRIMARY KEY 冲突而失败。 */
   @Test
   void duplicateInsertIsRejected() {
     long id = idGenerator.newControlMessageId();
@@ -307,9 +306,31 @@ class MysqlRunControlMessageStoreIntegrationTest {
             null,
             NOW,
             null));
-    Exception error =
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            store.insert(
+                new RunControlMessage(
+                    id,
+                    11L,
+                    21L,
+                    RunControlKind.STEER,
+                    ControlConsumptionMode.ONE_AT_A_TIME,
+                    userMessage("hi"),
+                    RunControlStatus.PENDING,
+                    null,
+                    null,
+                    NOW,
+                    null)));
+  }
+
+  /** insert 只接受新建 PENDING；终态必须通过 CAS 推进。 */
+  @Test
+  void insertRejectsNonPendingStatus() {
+    long id = idGenerator.newControlMessageId();
+    IllegalArgumentException exception =
         assertThrows(
-            Exception.class,
+            IllegalArgumentException.class,
             () ->
                 store.insert(
                     new RunControlMessage(
@@ -319,12 +340,13 @@ class MysqlRunControlMessageStoreIntegrationTest {
                         RunControlKind.STEER,
                         ControlConsumptionMode.ONE_AT_A_TIME,
                         userMessage("hi"),
-                        RunControlStatus.PENDING,
-                        null,
-                        null,
+                        RunControlStatus.CONSUMED,
+                        21L,
+                        99L,
                         NOW,
-                        null)));
-    assertNotNull(error);
+                        NOW.plusSeconds(1))));
+    assertEquals(
+        "control insert only accepts PENDING but was CONSUMED", exception.getMessage());
   }
 
   private long insertPending(long sessionId, Long originalRunId, RunControlKind kind) {

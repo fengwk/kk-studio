@@ -14,7 +14,8 @@ public interface RunControlMessageStore {
   Optional<RunControlMessage> find(long controlId);
 
   /**
-   * 拉取指定 original run + kind 的 PENDING 行；按 id asc；实现可提供 for-update 语义。
+   * 拉取指定 original run + kind 的 PENDING 行；按 id asc。
+   * 调用方负责持有 Run/Session 锁，避免与 CAS 推进竞争；
    * 若 originalRunId 为 null（如 FOLLOW_UP 尚未挂到 run），查询结果为空。
    */
   List<RunControlMessage> listPendingByRun(long originalRunId, RunControlKind kind);

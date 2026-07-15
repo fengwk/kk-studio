@@ -16,16 +16,10 @@ public class AgentExecutionPolicyDTO {
   private Integer maxTotalSubagents;
   private Long idleTimeoutMillis;
   private Long runTimeoutMillis;
-  /**
-   * freeze-time control consumption mode for steering inputs. Null/absent at
-   * persist-time means the frozen snapshot defaults to {@code ONE_AT_A_TIME};
-   * any non-null value must parse strictly to the enum in
-   * {@code ControlConsumptionMode}.
-   */
+
+  /** {@code ONE_AT_A_TIME} 或 {@code ALL}；null 表示由 frozen snapshot decode 决定默认值。 */
   private String steeringMode;
-  /**
-   * freeze-time control consumption mode for follow-up inputs. Same
-   * null/default/parse rules as {@link #steeringMode}.
-   */
+
+  /** {@code ONE_AT_A_TIME} 或 {@code ALL}；null 表示由 frozen snapshot decode 决定默认值。 */
   private String followUpMode;
 }

@@ -31,6 +31,11 @@ public class MysqlRunControlMessageStore implements RunControlMessageStore {
   @Override
   public int insert(RunControlMessage message) {
     Objects.requireNonNull(message, "message");
+    // 仅接受新建 PENDING 的 control 入库；终态行属于 CAS 推进的范畴，不能借 insert 复用。
+    if (message.status() != RunControlStatus.PENDING) {
+      throw new IllegalArgumentException(
+          "control insert only accepts PENDING but was " + message.status());
+    }
     return mapper.insert(toDO(message, messageCodec));
   }
 

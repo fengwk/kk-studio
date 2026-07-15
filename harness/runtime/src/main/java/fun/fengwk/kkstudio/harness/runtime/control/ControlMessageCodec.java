@@ -24,12 +24,8 @@ public final class ControlMessageCodec {
     if (json == null) {
       throw new IllegalArgumentException("control message json must not be null");
     }
-    MessageEntryPayload payload;
-    try {
-      payload = (MessageEntryPayload) entryCodec.decode(SessionEntryType.MESSAGE, json);
-    } catch (ClassCastException exception) {
-      throw new IllegalArgumentException("control message payload type mismatch", exception);
-    }
+    MessageEntryPayload payload =
+        (MessageEntryPayload) entryCodec.decode(SessionEntryType.MESSAGE, json);
     requireUser(payload.message());
     return payload.message();
   }

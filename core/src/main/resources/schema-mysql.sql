@@ -218,7 +218,7 @@ create table if not exists harness_run_control_message (
     consumption_mode   varchar(32) not null comment 'frozen ONE_AT_A_TIME/ALL snapshot',
     message_json       longtext not null comment 'encoded USER AgentMessage via SessionEntryJsonCodec',
     status             varchar(16) not null comment 'PENDING/CONSUMED/CLEARED/PROMOTED',
-    consumed_run_id    bigint null comment 'consumed run id (CONSUMED only)',
+    consumed_run_id    bigint null comment 'CONSUMED/PROMOTED 写入的目标 run id',
     consumed_entry_id  bigint null comment 'consumed session entry id (CONSUMED/PROMOTED only)',
     gmt_create         datetime(3) not null default current_timestamp(3) comment '入库时间',
     consumed_at        datetime(3) null comment 'PENDING->CLEARED/CONSUMED/PROMOTED 时间',

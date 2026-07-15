@@ -97,8 +97,7 @@ final class AgentDefinitionMutationFactory {
     validatePositive(result.getMaxTotalSubagents(), "executionPolicy.maxTotalSubagents");
     validatePositive(result.getIdleTimeoutMillis(), "executionPolicy.idleTimeoutMillis");
     validatePositive(result.getRunTimeoutMillis(), "executionPolicy.runTimeoutMillis");
-    // Steering/follow-up 控制消费模式只对非 null 值严格解析；null/absent 表示由
-    // frozen snapshot decode 阶段决定默认值，不在此机械写入 DTO，避免污染历史数据。
+    // 控制消费模式只对非 null 值严格解析；null 表示由 frozen snapshot decode 决定默认值。
     result.setSteeringMode(parseControlMode(result.getSteeringMode(), "executionPolicy.steeringMode"));
     result.setFollowUpMode(parseControlMode(result.getFollowUpMode(), "executionPolicy.followUpMode"));
     return result;
