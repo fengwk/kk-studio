@@ -4,15 +4,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.core.harness.tool.configuration.DeploymentToolSettingsProvider;
 import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProperties;
 import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProvider;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
 import fun.fengwk.kkstudio.harness.runtime.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsCodec;
-import fun.fengwk.kkstudio.harness.runtime.tool.AfterToolCallInterceptor;
-import fun.fengwk.kkstudio.harness.runtime.tool.BeforeToolCallInterceptor;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolPreparationService;
-import java.util.List;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -50,10 +48,9 @@ public class HarnessToolConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public ToolInterceptorChain toolInterceptorChain(
-      List<BeforeToolCallInterceptor> beforeInterceptors,
-      List<AfterToolCallInterceptor> afterInterceptors) {
-    return new ToolInterceptorChain(beforeInterceptors, afterInterceptors);
+  public ToolInterceptorChain toolInterceptorChain(HarnessExtensionHost host) {
+    return new ToolInterceptorChain(
+        host.beforeToolCallInterceptors(), host.afterToolCallInterceptors());
   }
 
   @Bean
@@ -61,9 +58,7 @@ public class HarnessToolConfiguration {
   public ToolPreparationService toolPreparationService(
       ToolInvocationIdGenerator idGenerator,
       ToolInterceptorChain interceptorChain,
-      PermissionEvaluator permissionEvaluator,
       ObjectMapper objectMapper) {
-    return new ToolPreparationService(
-        idGenerator, interceptorChain, permissionEvaluator, objectMapper);
+    return new ToolPreparationService(idGenerator, interceptorChain, objectMapper);
   }
 }
