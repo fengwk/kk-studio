@@ -6,7 +6,6 @@ import java.util.Objects;
 
 /** Cursorable root-tree activity projection. Event id is the global Snowflake cursor. */
 public record RootActivity(
-    long workspaceId,
     long rootSessionId,
     long sessionId,
     long runId,
@@ -16,7 +15,7 @@ public record RootActivity(
     String payloadJson,
     Instant createdAt) {
   public RootActivity {
-    if (workspaceId <= 0 || rootSessionId <= 0 || sessionId <= 0 || runId <= 0 || eventId <= 0) {
+    if (rootSessionId <= 0 || sessionId <= 0 || runId <= 0 || eventId <= 0) {
       throw new IllegalArgumentException("root activity ids must be positive");
     }
     if (sequence <= 0) {

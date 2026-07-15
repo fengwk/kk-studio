@@ -28,16 +28,11 @@ public final class SessionTree {
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
-  public Session create(long workspaceId, Long agentDefinitionId, String title) {
+  public Session create(Long agentDefinitionId, String title) {
     long sessionId = idGenerator.newSessionId();
     Session session =
         Session.root(
-            sessionId,
-            workspaceId,
-            agentDefinitionId,
-            title,
-            yoloResolver.defaultYolo(),
-            clock.instant());
+            sessionId, agentDefinitionId, title, yoloResolver.defaultYolo(), clock.instant());
     sessionStore.create(session);
     return session;
   }
@@ -94,7 +89,6 @@ public final class SessionTree {
     Session fork =
         new Session(
             targetSessionId,
-            source.workspaceId(),
             source.agentDefinitionId(),
             source.title(),
             targetLeaf,

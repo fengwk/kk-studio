@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
 import fun.fengwk.kkstudio.core.harness.tool.worker.DatabaseArtifactStore;
 import fun.fengwk.kkstudio.core.harness.tool.worker.DatabaseToolInvocationWorkerStore;
 import fun.fengwk.kkstudio.core.harness.tool.worker.ToolInvocationTransactionService;
-import fun.fengwk.kkstudio.core.workspace.service.WorkspaceService;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
@@ -64,7 +63,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
-import fun.fengwk.kkstudio.share.model.WorkspaceCreateDTO;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -89,7 +87,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 class ToolInvocationIntegrationTest {
   private static final Instant NOW = Instant.parse("2026-05-01T00:00:00Z");
 
-  @Autowired private WorkspaceService workspaceService;
   @Autowired private ToolSettingsProperties toolSettingsProperties;
   @Autowired private MysqlHarnessSessionStore sessionStore;
   @Autowired private SnowflakeSessionIdGenerator sessionIds;
@@ -114,14 +111,13 @@ class ToolInvocationIntegrationTest {
     jdbcTemplate.update("delete from harness_run");
     jdbcTemplate.update("delete from harness_session_entry");
     jdbcTemplate.update("delete from harness_session");
-    jdbcTemplate.update("delete from workspace");
   }
 
   /** 无 UI 参与时 ASK 仍持久 WAITING_APPROVAL、prompt preview 和 WAITING_TOOLS。 */
   @Test
   void persistsAskWithoutUi() {
-    long workspaceId = workspace("{\"permission\":{\"write\":\"ask\"}}");
-    Claimed claimed = claimedRun(workspaceId, false);
+    configureToolSettings("{\"permission\":{\"write\":\"ask\"}}");
+    Claimed claimed = claimedRun(false);
 
     assertTrue(
         prepare(
@@ -147,8 +143,8 @@ class ToolInvocationIntegrationTest {
   /** allow/deny/yolo 映射到 QUEUED/FAILED/QUEUED；deny 不取消或终止整个 Run。 */
   @Test
   void evaluatesAllowDenyAndYoloWithoutCancellingRun() {
-    long allowWorkspace = workspace("{\"permission\":{\"write\":\"allow\"}}");
-    Claimed allow = claimedRun(allowWorkspace, false);
+    configureToolSettings("{\"permission\":{\"write\":\"allow\"}}");
+    Claimed allow = claimedRun(false);
     prepare(
         allow.run(),
         List.of(new ToolCall("allow", "write", "{\"path\":\"a.txt\"}")),
@@ -156,8 +152,8 @@ class ToolInvocationIntegrationTest {
     assertEquals(
         ToolInvocationStatus.QUEUED, invocationStore.listByRun(allow.run().id()).get(0).status());
 
-    long denyWorkspace = workspace("{\"permission\":{\"write\":\"deny\"}}");
-    Claimed deny = claimedRun(denyWorkspace, false);
+    configureToolSettings("{\"permission\":{\"write\":\"deny\"}}");
+    Claimed deny = claimedRun(false);
     prepare(
         deny.run(),
         List.of(new ToolCall("deny", "write", "{\"path\":\"d.txt\"}")),
@@ -173,8 +169,8 @@ class ToolInvocationIntegrationTest {
             .anyMatch(
                 type -> type == RunEventType.RUN_CANCELLED || type == RunEventType.RUN_FAILED));
 
-    long yoloWorkspace = workspace("{\"permission\":{\"write\":\"deny\"}}");
-    Claimed yolo = claimedRun(yoloWorkspace, true);
+    configureToolSettings("{\"permission\":{\"write\":\"deny\"}}");
+    Claimed yolo = claimedRun(true);
     prepare(
         yolo.run(),
         List.of(new ToolCall("yolo", "write", "{\"path\":\"y.txt\"}")),
@@ -182,8 +178,8 @@ class ToolInvocationIntegrationTest {
     assertEquals(
         ToolInvocationStatus.QUEUED, invocationStore.listByRun(yolo.run().id()).get(0).status());
 
-    long environmentWorkspace = workspace("{}");
-    Claimed environment = claimedRun(environmentWorkspace, false);
+    configureToolSettings("{}");
+    Claimed environment = claimedRun(false);
     prepare(
         environment.run(),
         List.of(new ToolCall("environment", "read", "{\"path\":\"remote.txt\"}")),
@@ -196,8 +192,8 @@ class ToolInvocationIntegrationTest {
   /** 多调用严格按 Assistant source order 持久；事件失败回滚 Entry、Invocation 与 Run 状态。 */
   @Test
   void preservesSourceOrdinalAndRollsBackWholeBarrier() {
-    long workspaceId = workspace("{}");
-    Claimed claimed = claimedRun(workspaceId, false);
+    configureToolSettings("{}");
+    Claimed claimed = claimedRun(false);
     assertTrue(
         prepare(
             claimed.run(),
@@ -216,7 +212,7 @@ class ToolInvocationIntegrationTest {
             .map(ToolInvocation::ordinal)
             .toList());
 
-    Claimed rollback = claimedRun(workspaceId, false);
+    Claimed rollback = claimedRun(false);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -239,17 +235,17 @@ class ToolInvocationIntegrationTest {
   /** Decision 拒绝未知 Invocation。 */
   @Test
   void rejectsUnknownInvocation() {
-    long workspaceId = workspace("{}");
+    configureToolSettings("{}");
     assertThrows(
         IllegalArgumentException.class,
         () -> decisionService.decide(Long.MAX_VALUE, ToolPermissionDecision.ALLOW));
   }
 
-  /** decision 相同请求幂等；冲突决定 409 领域冲突，跨 Workspace 拒绝。 */
+  /** decision 相同请求幂等；冲突决定、终态 Run 与非 ASK Invocation 均拒绝。 */
   @Test
   void resolvesPermissionIdempotentlyAndRejectsConflictsGlobally() {
-    long workspaceId = workspace("{\"permission\":{\"write\":\"ask\"}}");
-    Claimed allowClaimed = claimedRun(workspaceId, false);
+    configureToolSettings("{\"permission\":{\"write\":\"ask\"}}");
+    Claimed allowClaimed = claimedRun(false);
     prepare(
         allowClaimed.run(),
         List.of(new ToolCall("allow-decision", "write", "{\"path\":\"a\"}")),
@@ -271,7 +267,7 @@ class ToolInvocationIntegrationTest {
             .filter(event -> event.type() == RunEventType.PERMISSION_RESOLVED)
             .count());
 
-    Claimed denyClaimed = claimedRun(workspaceId, false);
+    Claimed denyClaimed = claimedRun(false);
     prepare(
         denyClaimed.run(),
         List.of(new ToolCall("deny-decision", "write", "{\"path\":\"d\"}")),
@@ -286,7 +282,7 @@ class ToolInvocationIntegrationTest {
     assertEquals(
         RunStatus.WAITING_TOOLS, runStore.find(denyClaimed.run().id()).orElseThrow().status());
 
-    Claimed settledClaimed = claimedRun(workspaceId, false);
+    Claimed settledClaimed = claimedRun(false);
     prepare(
         settledClaimed.run(),
         List.of(new ToolCall("settled", "write", "{\"path\":\"s\"}")),
@@ -298,8 +294,8 @@ class ToolInvocationIntegrationTest {
         ToolDecisionConflictException.class,
         () -> decisionService.decide(settled.id(), ToolPermissionDecision.ALLOW));
 
-    long automaticWorkspaceId = workspace("{\"permission\":{\"write\":\"allow\"}}");
-    Claimed automatic = claimedRun(automaticWorkspaceId, false);
+    configureToolSettings("{\"permission\":{\"write\":\"allow\"}}");
+    Claimed automatic = claimedRun(false);
     prepare(
         automatic.run(),
         List.of(new ToolCall("automatic", "write", "{\"path\":\"a\"}")),
@@ -313,23 +309,23 @@ class ToolInvocationIntegrationTest {
   /** 决策事务拒绝损坏的 ASK action 与非正 timeout budget，避免把坏快照继续推进。 */
   @Test
   void rejectsCorruptedApprovalState() {
-    long workspaceId = workspace("{\"permission\":{\"write\":\"ask\"}}");
+    configureToolSettings("{\"permission\":{\"write\":\"ask\"}}");
 
-    ToolInvocation invalidPending = askInvocation(workspaceId, "invalid-pending");
+    ToolInvocation invalidPending = askInvocation("invalid-pending");
     jdbcTemplate.update(
         "update tool_invocation set permission_action = 'ALLOW' where id = ?", invalidPending.id());
     assertThrows(
         IllegalStateException.class,
         () -> decisionService.decide(invalidPending.id(), ToolPermissionDecision.ALLOW));
 
-    ToolInvocation invalidTimeout = askInvocation(workspaceId, "invalid-timeout");
+    ToolInvocation invalidTimeout = askInvocation("invalid-timeout");
     jdbcTemplate.update(
         "update tool_invocation set deadline_at = gmt_create where id = ?", invalidTimeout.id());
     assertThrows(
         IllegalStateException.class,
         () -> decisionService.decide(invalidTimeout.id(), ToolPermissionDecision.ALLOW));
 
-    ToolInvocation decided = askInvocation(workspaceId, "decided-corruption");
+    ToolInvocation decided = askInvocation("decided-corruption");
     decisionService.decide(decided.id(), ToolPermissionDecision.ALLOW);
     jdbcTemplate.update(
         "update tool_invocation set permission_action = 'ALLOW' where id = ?", decided.id());
@@ -346,7 +342,7 @@ class ToolInvocationIntegrationTest {
     assertThrows(IllegalStateException.class, () -> policyResolver.resolve(orphan));
   }
 
-  /** Policy resolver 只接受合法 Root 拓扑，不能因缺少 Workspace 记录而静默降级权限。 */
+  /** Policy resolver 只接受合法 Root 拓扑，不能因悬空或伪 Root 引用而静默降级权限。 */
   @Test
   void rejectsInvalidPermissionPolicyReferences() {
     HarnessSessionDO missingRoot = new HarnessSessionDO();
@@ -366,15 +362,15 @@ class ToolInvocationIntegrationTest {
   void rejectsCorruptedYoloState() {
     assertThrows(IllegalArgumentException.class, () -> yoloService.get(Long.MAX_VALUE));
 
-    long workspaceId = workspace("{}");
-    Session invalidRoot = sessionTree.create(workspaceId, null, "invalid-root");
+    configureToolSettings("{}");
+    Session invalidRoot = sessionTree.create(null, "invalid-root");
     jdbcTemplate.update(
         "update harness_session set parent_session_id = ? where id = ?",
         invalidRoot.id() + 1,
         invalidRoot.id());
     assertThrows(IllegalStateException.class, () -> yoloService.get(invalidRoot.id()));
 
-    Session missingRun = sessionTree.create(workspaceId, null, "missing-run");
+    Session missingRun = sessionTree.create(null, "missing-run");
     jdbcTemplate.update(
         "update harness_session set active_run_id = ? where id = ?",
         Long.MAX_VALUE,
@@ -385,11 +381,11 @@ class ToolInvocationIntegrationTest {
   /** YOLO set 在 active run 不属于当前 Session 时拒绝写。 */
   @Test
   void rejectsYoloSetWhenActiveRunBelongsToAnotherSession() {
-    long workspaceId = workspace("{}");
-    Session root = sessionTree.create(workspaceId, null, "root");
+    configureToolSettings("{}");
+    Session root = sessionTree.create(null, "root");
     assertEquals(root.id(), yoloService.set(root.id(), true).rootSessionId());
 
-    Session otherRoot = sessionTree.create(workspaceId, null, "other");
+    Session otherRoot = sessionTree.create(null, "other");
     AgentRun foreignRun =
         transactions.submitUserMessage(otherRoot.id(), null, user(), NOW.plusSeconds(2));
     AgentRun foreignClaimed =
@@ -405,8 +401,8 @@ class ToolInvocationIntegrationTest {
   /** YOLO set 在 active run 状态异常时拒绝写。 */
   @Test
   void rejectsYoloSetOnTerminalOrForeignActiveRun() {
-    long workspaceId = workspace("{}");
-    Session root = sessionTree.create(workspaceId, null, "root");
+    configureToolSettings("{}");
+    Session root = sessionTree.create(null, "root");
     Session child = sessionTree.fork(root.id(), null);
     AgentRun queued = transactions.submitUserMessage(child.id(), null, user(), NOW.plusSeconds(2));
     AgentRun claimed =
@@ -416,7 +412,7 @@ class ToolInvocationIntegrationTest {
     jdbcTemplate.update("update harness_run set status = 'CANCELLED' where id = ?", claimed.id());
     assertThrows(IllegalStateException.class, () -> yoloService.set(child.id(), true));
 
-    Session stray = sessionTree.create(workspaceId, null, "stray");
+    Session stray = sessionTree.create(null, "stray");
     jdbcTemplate.update(
         "update harness_session set active_run_id = ? where id = ?", Long.MAX_VALUE, stray.id());
     assertThrows(IllegalStateException.class, () -> yoloService.set(stray.id(), true));
@@ -425,8 +421,8 @@ class ToolInvocationIntegrationTest {
   /** Root 创建继承 defaultYolo；Child 动态读取 Root，且无 active Run 时 set/get 仍持久可观察。 */
   @Test
   void inheritsAndDynamicallyUpdatesRootYoloForChildren() {
-    long workspaceId = workspace("{\"defaultYolo\":true,\"permission\":{\"write\":\"deny\"}}");
-    Session root = sessionTree.create(workspaceId, null, "root");
+    configureToolSettings("{\"defaultYolo\":true,\"permission\":{\"write\":\"deny\"}}");
+    Session root = sessionTree.create(null, "root");
     Session child = sessionTree.fork(root.id(), null);
 
     assertTrue(root.yoloEnabled());
@@ -456,7 +452,7 @@ class ToolInvocationIntegrationTest {
             .filter(event -> event.type() == RunEventType.RUNTIME_STATE_CHANGED)
             .count());
 
-    Session activeRoot = sessionTree.create(workspaceId, null, "active-root");
+    Session activeRoot = sessionTree.create(null, "active-root");
     Session idleChild = sessionTree.fork(activeRoot.id(), null);
     AgentRun rootQueued =
         transactions.submitUserMessage(activeRoot.id(), null, user(), NOW.plusSeconds(3));
@@ -480,8 +476,8 @@ class ToolInvocationIntegrationTest {
    */
   @Test
   void claimsHeartbeatsCancelsAndReclaimsExpiredCloudInvocations() {
-    long workspaceId = workspace("{}");
-    Claimed run = claimedRun(workspaceId, false);
+    configureToolSettings("{}");
+    Claimed run = claimedRun(false);
     List<ToolCall> calls =
         List.of(
             new ToolCall("cancelled", "read", "{\"path\":\"a\"}"),
@@ -548,8 +544,8 @@ class ToolInvocationIntegrationTest {
   /** Queue scans only dispatch invocations while their parent Run remains WAITING_TOOLS. */
   @Test
   void doesNotClaimInvocationWhoseRunIsNotWaitingTools() {
-    long workspaceId = workspace("{}");
-    Claimed run = claimedRun(workspaceId, false);
+    configureToolSettings("{}");
+    Claimed run = claimedRun(false);
     assertTrue(
         prepare(
             run.run(),
@@ -566,8 +562,8 @@ class ToolInvocationIntegrationTest {
    */
   @Test
   void rejectsCallbackWhenRunIsNoLongerWaitingTools() {
-    long workspaceId = workspace("{}");
-    Claimed run = claimedRun(workspaceId, false);
+    configureToolSettings("{}");
+    Claimed run = claimedRun(false);
     assertTrue(
         prepare(
             run.run(),
@@ -609,8 +605,8 @@ class ToolInvocationIntegrationTest {
    */
   @Test
   void callbackAndCoordinatorUseConsistentRunFirstLockOrder() throws Exception {
-    long workspaceId = workspace("{}");
-    Claimed run = claimedRun(workspaceId, false);
+    configureToolSettings("{}");
+    Claimed run = claimedRun(false);
     assertTrue(
         prepare(
             run.run(),
@@ -675,8 +671,8 @@ class ToolInvocationIntegrationTest {
    */
   @Test
   void journalsPartialAndRollsBackCoordinatorOnCorruptTerminalResult() {
-    long workspaceId = workspace("{}");
-    Claimed run = claimedRun(workspaceId, false);
+    configureToolSettings("{}");
+    Claimed run = claimedRun(false);
     List<ToolCall> calls = List.of(new ToolCall("partial", "read", "{\"path\":\"a\"}"));
     assertTrue(prepare(run.run(), calls, List.of(binding("read"))));
     ClaimedToolInvocation claimed =
@@ -747,8 +743,8 @@ class ToolInvocationIntegrationTest {
    */
   @Test
   void coordinatesTerminalResultsInOrdinalOrderIdempotently() throws Exception {
-    long workspaceId = workspace("{}");
-    Claimed run = claimedRun(workspaceId, false);
+    configureToolSettings("{}");
+    Claimed run = claimedRun(false);
     List<ToolCall> calls =
         List.of(
             new ToolCall("second-completes-first", "read", "{\"path\":\"a\"}"),
@@ -853,8 +849,8 @@ class ToolInvocationIntegrationTest {
         event.payloadJson());
   }
 
-  private ToolInvocation askInvocation(long workspaceId, String toolCallId) {
-    Claimed claimed = claimedRun(workspaceId, false);
+  private ToolInvocation askInvocation(String toolCallId) {
+    Claimed claimed = claimedRun(false);
     prepare(
         claimed.run(),
         List.of(new ToolCall(toolCallId, "write", "{\"path\":\"notes.txt\"}")),
@@ -875,9 +871,9 @@ class ToolInvocationIntegrationTest {
         NOW.plusSeconds(1));
   }
 
-  private Claimed claimedRun(long workspaceId, boolean yoloEnabled) {
+  private Claimed claimedRun(boolean yoloEnabled) {
     long sessionId = sessionIds.newSessionId();
-    Session root = Session.root(sessionId, workspaceId, null, "session", yoloEnabled, NOW);
+    Session root = Session.root(sessionId, null, "session", yoloEnabled, NOW);
     sessionStore.create(root);
     long snapshotId = sessionIds.newEntryId();
     AgentSnapshotEntryPayload snapshot =
@@ -897,12 +893,8 @@ class ToolInvocationIntegrationTest {
     return new Claimed(sessionId, claimed);
   }
 
-  private long workspace(String settingsJson) {
+  private void configureToolSettings(String settingsJson) {
     toolSettingsProperties.setSettingsJson(settingsJson);
-    WorkspaceCreateDTO request = new WorkspaceCreateDTO();
-    request.setName("tool-workspace-" + System.nanoTime());
-    request.setSettingsJson("{}");
-    return Long.parseLong(workspaceService.createWorkspace(request).getId());
   }
 
   private static AgentMessage user() {

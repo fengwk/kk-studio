@@ -48,10 +48,10 @@ public final class TaskTool implements Tool {
                   "subagent_type", new ToolStringSchema("Allowed target agent name."),
                   "prompt", new ToolStringSchema("Complete task instruction."),
                   "session_id", new ToolStringSchema("Optional child session id to resume."),
-                  "workspace_policy",
+                  "working_copy_policy",
                       new ToolEnumSchema(
-                          "Workspace isolation policy.",
-                          Arrays.stream(WorkspacePolicy.values()).map(Enum::name).toList())),
+                          "Working copy isolation policy.",
+                          Arrays.stream(WorkingCopyPolicy.values()).map(Enum::name).toList())),
               Set.of("subagent_type", "prompt"),
               false),
           ToolExecutionMode.CONTROL,
@@ -164,7 +164,8 @@ public final class TaskTool implements Tool {
       Iterator<String> names = root.fieldNames();
       while (names.hasNext()) {
         String name = names.next();
-        if (!Set.of("subagent_type", "prompt", "session_id", "workspace_policy").contains(name)) {
+        if (!Set.of("subagent_type", "prompt", "session_id", "working_copy_policy")
+            .contains(name)) {
           throw new IllegalArgumentException("task arguments contain unknown field: " + name);
         }
       }
@@ -174,9 +175,9 @@ public final class TaskTool implements Tool {
       if (root.has("session_id") && !root.get("session_id").isNull()) {
         sessionId = parseSnowflakeId(text(root, "session_id", true), "session_id");
       }
-      String policy = text(root, "workspace_policy", false);
+      String policy = text(root, "working_copy_policy", false);
       return new TaskCommand(
-          type, prompt, sessionId, policy == null ? null : WorkspacePolicy.parse(policy));
+          type, prompt, sessionId, policy == null ? null : WorkingCopyPolicy.parse(policy));
     } catch (IOException error) {
       throw new IllegalArgumentException("task arguments must be valid JSON", error);
     }

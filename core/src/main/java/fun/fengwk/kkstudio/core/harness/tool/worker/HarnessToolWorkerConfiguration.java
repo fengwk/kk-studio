@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.core.harness.tool.worker;
 
 import fun.fengwk.kkstudio.harness.runtime.task.TaskRuntime;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskTool;
-import fun.fengwk.kkstudio.harness.runtime.task.WorkspaceRevisionResolver;
+import fun.fengwk.kkstudio.harness.runtime.task.WorkingCopyRevisionResolver;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.CloudToolWorker;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
@@ -37,8 +37,8 @@ public class HarnessToolWorkerConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public WorkspaceRevisionResolver workspaceRevisionResolver() {
-    return (workspaceId, policy, childSessionId) -> Optional.empty();
+  public WorkingCopyRevisionResolver workingCopyRevisionResolver() {
+    return (policy, childSessionId) -> Optional.empty();
   }
 
   @Bean

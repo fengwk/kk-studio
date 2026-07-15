@@ -97,7 +97,6 @@ create table if not exists agent_run (
 
 create table if not exists harness_session (
     id                    bigint not null,
-    workspace_id          bigint not null,
     agent_definition_id   bigint,
     title                 varchar(256),
     leaf_entry_id         bigint,
@@ -113,7 +112,6 @@ create table if not exists harness_session (
     primary key (id)
 );
 
-create index if not exists idx_harness_session_workspace on harness_session (workspace_id);
 create index if not exists idx_harness_session_root on harness_session (root_session_id);
 
 create table if not exists harness_session_entry (
@@ -217,19 +215,19 @@ create table if not exists tool_artifact (
 );
 
 create table if not exists harness_subagent_task (
-    parent_invocation_id bigint not null,
-    parent_session_id    bigint not null,
-    child_session_id     bigint not null,
-    child_run_id         bigint not null,
-    target_agent         varchar(128) not null,
-    workspace_policy     varchar(32) not null,
-    workspace_revision   varchar(512),
-    max_turns            integer not null,
-    idle_timeout_millis  bigint,
-    status               varchar(32) not null,
-    report_json          text,
-    gmt_create           timestamp(3) not null default current_timestamp(),
-    gmt_modified         timestamp(3) not null default current_timestamp(),
+    parent_invocation_id  bigint not null,
+    parent_session_id     bigint not null,
+    child_session_id      bigint not null,
+    child_run_id          bigint not null,
+    target_agent          varchar(128) not null,
+    working_copy_policy   varchar(32) not null,
+    working_copy_revision varchar(512),
+    max_turns             integer not null,
+    idle_timeout_millis   bigint,
+    status                varchar(32) not null,
+    report_json           text,
+    gmt_create            timestamp(3) not null default current_timestamp(),
+    gmt_modified          timestamp(3) not null default current_timestamp(),
     primary key (parent_invocation_id)
 );
 

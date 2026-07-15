@@ -47,19 +47,17 @@ public class WorkspaceServiceTest {
     workspaceService.deleteWorkspace(workspaceId);
   }
 
-  /** Workspace 有 Harness Session 时禁止删除，避免留下跨聚合悬空引用。 */
+  /** Harness Session 已全局化，不再阻止 Workspace 删除。 */
   @Test
-  public void shouldRejectDeletionWhileHarnessSessionExists() {
+  public void shouldDeleteWorkspaceEvenWhenGlobalHarnessSessionExists() {
     WorkspaceCreateDTO create = new WorkspaceCreateDTO();
     create.setName("session-workspace-" + System.nanoTime());
     WorkspaceDTO workspace = workspaceService.createWorkspace(create);
     long workspaceId = Long.parseLong(workspace.getId());
-    sessionTree.create(workspaceId, null, "session");
+    sessionTree.create(null, "session");
 
-    assertThrows(IllegalStateException.class, () -> workspaceService.deleteWorkspace(workspaceId));
-
-    jdbcTemplate.update("delete from harness_session where workspace_id = ?", workspaceId);
     workspaceService.deleteWorkspace(workspaceId);
+    jdbcTemplate.update("delete from harness_session");
   }
 
   @Test

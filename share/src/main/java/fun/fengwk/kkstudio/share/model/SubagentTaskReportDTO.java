@@ -13,6 +13,6 @@ public class SubagentTaskReportDTO {
   private List<ToolArtifactRefDTO> artifacts;
   private Integer turnCount;
   private Integer toolCount;
-  private String workspacePolicy;
-  private String workspaceRevision;
+  private String workingCopyPolicy;
+  private String workingCopyRevision;
 }

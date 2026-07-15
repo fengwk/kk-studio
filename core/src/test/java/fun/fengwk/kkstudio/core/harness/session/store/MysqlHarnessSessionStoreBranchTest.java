@@ -41,19 +41,18 @@ class MysqlHarnessSessionStoreBranchTest {
   @Test
   void shouldCreateAndFindOnlyFreshRootSessions() {
     long rootId = id();
-    Session root = Session.root(rootId, 7L, 9L, "root", true, NOW);
+    Session root = Session.root(rootId, 9L, "root", true, NOW);
 
     store.create(root);
 
     assertEquals(root, store.find(rootId).orElseThrow());
     assertTrue(store.find(id()).isEmpty());
-    Session child = child(id(), 7L, rootId, rootId, null, 1);
+    Session child = child(id(), rootId, rootId, null, 1);
     assertThrows(IllegalArgumentException.class, () -> store.create(child));
     long invalidRootId = id();
     Session rootWithLeaf =
         new Session(
             invalidRootId,
-            7L,
             9L,
             "invalid",
             id(),
@@ -73,11 +72,11 @@ class MysqlHarnessSessionStoreBranchTest {
   @Test
   void shouldCreateOnlyConsistentForkChains() {
     long rootId = id();
-    store.create(Session.root(rootId, 7L, 9L, "root", true, NOW));
+    store.create(Session.root(rootId, 9L, "root", true, NOW));
     long childId = id();
     SessionEntry first = entry(id(), childId, null, 101L);
     SessionEntry second = entry(id(), childId, first.id(), null);
-    Session child = child(childId, 7L, rootId, rootId, second.id(), 1);
+    Session child = child(childId, rootId, rootId, second.id(), 1);
 
     store.createFork(child, List.of(first, second));
 
@@ -86,20 +85,20 @@ class MysqlHarnessSessionStoreBranchTest {
     assertEquals(first, store.find(childId, first.id()).orElseThrow());
 
     long emptyChildId = id();
-    Session emptyChild = child(emptyChildId, 7L, rootId, rootId, null, 1);
+    Session emptyChild = child(emptyChildId, rootId, rootId, null, 1);
     store.createFork(emptyChild, List.of());
     assertEquals(emptyChild, store.find(emptyChildId).orElseThrow());
 
-    Session missingParent = child(id(), 7L, id(), rootId, null, 1);
+    Session missingParent = child(id(), id(), rootId, null, 1);
     assertThrows(IllegalArgumentException.class, () -> store.createFork(missingParent, List.of()));
     assertThrows(
         IllegalArgumentException.class,
-        () -> store.createFork(Session.root(id(), 7L, null, null, false, NOW), List.of()));
+        () -> store.createFork(Session.root(id(), null, null, false, NOW), List.of()));
 
     long wrongSessionChildId = id();
     SessionEntry wrongSessionEntry = entry(id(), id(), null, null);
     Session wrongSessionChild =
-        child(wrongSessionChildId, 7L, rootId, rootId, wrongSessionEntry.id(), 1);
+        child(wrongSessionChildId, rootId, rootId, wrongSessionEntry.id(), 1);
     assertThrows(
         InvalidSessionTreeException.class,
         () -> store.createFork(wrongSessionChild, List.of(wrongSessionEntry)));
@@ -107,14 +106,14 @@ class MysqlHarnessSessionStoreBranchTest {
     long brokenChainChildId = id();
     SessionEntry brokenFirst = entry(id(), brokenChainChildId, null, null);
     SessionEntry brokenSecond = entry(id(), brokenChainChildId, id(), null);
-    Session brokenChain = child(brokenChainChildId, 7L, rootId, rootId, brokenSecond.id(), 1);
+    Session brokenChain = child(brokenChainChildId, rootId, rootId, brokenSecond.id(), 1);
     assertThrows(
         InvalidSessionTreeException.class,
         () -> store.createFork(brokenChain, List.of(brokenFirst, brokenSecond)));
 
     long wrongLeafChildId = id();
     SessionEntry onlyEntry = entry(id(), wrongLeafChildId, null, null);
-    Session wrongLeaf = child(wrongLeafChildId, 7L, rootId, rootId, id(), 1);
+    Session wrongLeaf = child(wrongLeafChildId, rootId, rootId, id(), 1);
     assertThrows(
         InvalidSessionTreeException.class, () -> store.createFork(wrongLeaf, List.of(onlyEntry)));
   }
@@ -126,7 +125,7 @@ class MysqlHarnessSessionStoreBranchTest {
     assertThrows(IllegalArgumentException.class, () -> store.append(unknownSessionEntry, null, 0L));
 
     long sessionId = id();
-    store.create(Session.root(sessionId, 1L, null, null, false, NOW));
+    store.create(Session.root(sessionId, null, null, false, NOW));
     SessionEntry root = entry(id(), sessionId, null, null);
     store.append(root, null, 0L);
     assertEquals(root, store.find(sessionId, root.id()).orElseThrow());
@@ -141,7 +140,7 @@ class MysqlHarnessSessionStoreBranchTest {
         InvalidSessionTreeException.class, () -> store.append(mismatchedParent, root.id(), 1L));
 
     long otherSessionId = id();
-    store.create(Session.root(otherSessionId, 1L, null, null, false, NOW));
+    store.create(Session.root(otherSessionId, null, null, false, NOW));
     SessionEntry otherRoot = entry(id(), otherSessionId, null, null);
     store.append(otherRoot, null, 0L);
     SessionEntry crossSessionParent = entry(id(), sessionId, otherRoot.id(), null);
@@ -155,7 +154,7 @@ class MysqlHarnessSessionStoreBranchTest {
   @Test
   void shouldRollbackInsertedEntryWhenLeafCasLosesRace() {
     long sessionId = id();
-    Session original = Session.root(sessionId, 1L, null, null, false, NOW);
+    Session original = Session.root(sessionId, null, null, false, NOW);
     store.create(original);
     SessionEntry entry = entry(id(), sessionId, null, null);
     String triggerName = "bump_harness_session_version";
@@ -181,7 +180,7 @@ class MysqlHarnessSessionStoreBranchTest {
   @Test
   void shouldCompareAndSetOnlyExistingSameSessionLeaves() {
     long sessionId = id();
-    store.create(Session.root(sessionId, 1L, null, null, false, NOW));
+    store.create(Session.root(sessionId, null, null, false, NOW));
     SessionEntry root = entry(id(), sessionId, null, null);
     store.append(root, null, 0L);
 
@@ -203,7 +202,7 @@ class MysqlHarnessSessionStoreBranchTest {
   @Test
   void shouldLoadDeepPathsAndListOnlyDirectSameSessionChildren() {
     long sessionId = id();
-    store.create(Session.root(sessionId, 1L, null, null, false, NOW));
+    store.create(Session.root(sessionId, null, null, false, NOW));
     SessionEntry root = entry(id(), sessionId, null, null);
     store.append(root, null, 0L);
     SessionEntry first = entry(id(), sessionId, root.id(), null);
@@ -222,7 +221,7 @@ class MysqlHarnessSessionStoreBranchTest {
     assertTrue(store.find(sessionId, id()).isEmpty());
 
     long otherSessionId = id();
-    store.create(Session.root(otherSessionId, 1L, null, null, false, NOW));
+    store.create(Session.root(otherSessionId, null, null, false, NOW));
     SessionEntry otherRoot = entry(id(), otherSessionId, null, null);
     store.append(otherRoot, null, 0L);
     assertTrue(store.find(sessionId, otherRoot.id()).isEmpty());
@@ -235,7 +234,7 @@ class MysqlHarnessSessionStoreBranchTest {
   @Test
   void shouldRejectBrokenAndCyclicPersistedPaths() {
     long sessionId = id();
-    store.create(Session.root(sessionId, 1L, null, null, false, NOW));
+    store.create(Session.root(sessionId, null, null, false, NOW));
     long missingParent = id();
     long brokenLeaf = id();
     insertRawEntry(brokenLeaf, sessionId, missingParent);
@@ -263,15 +262,9 @@ class MysqlHarnessSessionStoreBranchTest {
   }
 
   private static Session child(
-      long id,
-      long workspaceId,
-      long parentSessionId,
-      long rootSessionId,
-      Long leafEntryId,
-      int depth) {
+      long id, long parentSessionId, long rootSessionId, Long leafEntryId, int depth) {
     return new Session(
         id,
-        workspaceId,
         9L,
         "child",
         leafEntryId,

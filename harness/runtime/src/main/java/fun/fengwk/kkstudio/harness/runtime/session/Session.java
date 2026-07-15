@@ -3,10 +3,9 @@ package fun.fengwk.kkstudio.harness.runtime.session;
 import java.time.Instant;
 import java.util.Objects;
 
-/** Workspace 作用域的 Session 聚合快照；id 是唯一业务与持久化标识。 */
+/** Global Session 聚合快照；id 是唯一业务与持久化标识，父子关系只由 session/root/parent 决定。 */
 public record Session(
     long id,
-    long workspaceId,
     Long agentDefinitionId,
     String title,
     Long leafEntryId,
@@ -20,8 +19,8 @@ public record Session(
     Instant createdAt,
     Instant updatedAt) {
   public Session {
-    if (id <= 0 || workspaceId <= 0 || rootSessionId <= 0) {
-      throw new IllegalArgumentException("session, workspace, and root ids must be positive");
+    if (id <= 0 || rootSessionId <= 0) {
+      throw new IllegalArgumentException("session and root ids must be positive");
     }
     if (agentDefinitionId != null && agentDefinitionId <= 0) {
       throw new IllegalArgumentException("agentDefinitionId must be positive when present");
@@ -54,26 +53,8 @@ public record Session(
   }
 
   public static Session root(
-      long id,
-      long workspaceId,
-      Long agentDefinitionId,
-      String title,
-      boolean yoloEnabled,
-      Instant now) {
+      long id, Long agentDefinitionId, String title, boolean yoloEnabled, Instant now) {
     return new Session(
-        id,
-        workspaceId,
-        agentDefinitionId,
-        title,
-        null,
-        null,
-        null,
-        id,
-        null,
-        0,
-        yoloEnabled,
-        0,
-        now,
-        now);
+        id, agentDefinitionId, title, null, null, null, id, null, 0, yoloEnabled, 0, now, now);
   }
 }

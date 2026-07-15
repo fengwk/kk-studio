@@ -20,13 +20,20 @@ import org.junit.jupiter.api.Test;
 class TaskDomainTest {
   /** Explorer-like names get read-only sharing while explicit policy remains authoritative. */
   @Test
-  void defaultsWorkspacePolicyAndValidatesArguments() {
+  void defaultsWorkingCopyPolicyAndValidatesArguments() {
     assertEquals(
-        WorkspacePolicy.SHARE_READ_ONLY,
-        new TaskCommand("RepositoryExplorer", "inspect", null, null).workspacePolicy());
+        WorkingCopyPolicy.SHARE_READ_ONLY,
+        new TaskCommand("RepositoryExplorer", "inspect", null, null).workingCopyPolicy());
     assertEquals(
-        WorkspacePolicy.EXCLUSIVE,
-        new TaskCommand("Coder", "write", null, WorkspacePolicy.EXCLUSIVE).workspacePolicy());
+        WorkingCopyPolicy.EXCLUSIVE,
+        new TaskCommand("Coder", "write", null, WorkingCopyPolicy.EXCLUSIVE).workingCopyPolicy());
+    assertEquals(WorkingCopyPolicy.FORK, WorkingCopyPolicy.defaultFor("Coder"));
+    assertEquals(WorkingCopyPolicy.FORK, WorkingCopyPolicy.parse("FORK"));
+    assertThrows(IllegalArgumentException.class, () -> WorkingCopyPolicy.parse(null));
+    assertThrows(IllegalArgumentException.class, () -> WorkingCopyPolicy.parse(" "));
+    assertThrows(IllegalArgumentException.class, () -> WorkingCopyPolicy.parse("fork"));
+    assertThrows(IllegalArgumentException.class, () -> WorkingCopyPolicy.defaultFor(null));
+    assertThrows(IllegalArgumentException.class, () -> WorkingCopyPolicy.defaultFor(" "));
     assertThrows(IllegalArgumentException.class, () -> new TaskCommand(" ", "prompt", null, null));
     assertThrows(IllegalArgumentException.class, () -> new TaskCommand("Coder", " ", null, null));
   }
@@ -113,11 +120,11 @@ class TaskDomainTest {
   void rendersTerminalReport() {
     TaskReport report =
         new TaskReport(
-            9, 10, TaskState.FAILED, "broken", List.of(), 2, 3, WorkspacePolicy.FORK, "rev-1");
+            9, 10, TaskState.FAILED, "broken", List.of(), 2, 3, WorkingCopyPolicy.FORK, "rev-1");
 
     assertFalse(report.success());
     assertTrue(TaskResultFormatter.text(report).contains("<task_error>broken</task_error>"));
-    assertTrue(TaskResultFormatter.json(report).contains("\"workspaceRevision\":\"rev-1\""));
+    assertTrue(TaskResultFormatter.json(report).contains("\"workingCopyRevision\":\"rev-1\""));
     TaskReport succeeded =
         new TaskReport(
             11,
@@ -127,10 +134,10 @@ class TaskDomainTest {
             List.of(new ArtifactRef("artifact-1", "text/plain", 3)),
             0,
             0,
-            WorkspacePolicy.NONE,
+            WorkingCopyPolicy.NONE,
             null);
     assertTrue(TaskResultFormatter.text(succeeded).contains("&lt;&amp;&quot;&apos;"));
-    assertFalse(TaskResultFormatter.json(succeeded).contains("workspaceRevision"));
+    assertFalse(TaskResultFormatter.json(succeeded).contains("workingCopyRevision"));
     assertTrue(TaskResultFormatter.json(succeeded).contains("\"artifactId\":\"artifact-1\""));
   }
 }

@@ -43,7 +43,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import java.math.BigDecimal;
 import java.nio.file.Path;
-import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -721,17 +720,8 @@ class HarnessRunPersistenceTest {
   }
 
   private Seed seedSession() {
-    jdbcTemplate.update(
-        "merge into workspace (id, name, settings_json, gmt_create, gmt_modified, version) key(id)"
-            + " values (?, ?, ?, ?, ?, ?)",
-        1L,
-        "harness-run-workspace",
-        "{\"permission\":{},\"defaultYolo\":false}",
-        Timestamp.from(NOW),
-        Timestamp.from(NOW),
-        0L);
     long sessionId = idGenerator.newSessionEntryId();
-    Session session = Session.root(sessionId, 1L, 1L, "run-test", false, NOW);
+    Session session = Session.root(sessionId, 1L, "run-test", false, NOW);
     sessionStore.create(session);
     long snapshotId = idGenerator.newSessionEntryId();
     AgentSnapshot snapshot =

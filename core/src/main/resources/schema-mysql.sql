@@ -97,7 +97,6 @@ create table if not exists agent_run (
 
 create table if not exists harness_session (
     id                    bigint not null comment '唯一业务与主键',
-    workspace_id          bigint not null comment '所属 workspace',
     agent_definition_id   bigint null comment '创建时 agent definition',
     title                 varchar(256) null comment '标题',
     leaf_entry_id         bigint null comment '唯一活动 leaf',
@@ -111,7 +110,6 @@ create table if not exists harness_session (
     gmt_modified          datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
     version               bigint not null default '0' comment '数据版本号',
     primary key (id),
-    key idx_harness_session_workspace (workspace_id),
     key idx_harness_session_root (root_session_id)
 ) engine=InnoDB default charset=utf8mb4 comment='harness session';
 
@@ -205,18 +203,18 @@ create table if not exists tool_artifact (
 ) engine=InnoDB default charset=utf8mb4 comment='globally addressable tool output artifact';
 
 create table harness_subagent_task (
-    parent_invocation_id bigint not null comment 'task ToolInvocation idempotency key',
-    parent_session_id    bigint not null,
-    child_session_id     bigint not null,
-    child_run_id         bigint not null,
-    target_agent         varchar(128) not null,
-    workspace_policy     varchar(32) not null,
-    workspace_revision   varchar(512),
-    max_turns            int not null,
-    idle_timeout_millis  bigint,
-    status               varchar(32) not null,
-    report_json          text,
-    gmt_create           datetime(3) not null default current_timestamp(3),
+    parent_invocation_id  bigint not null comment 'task ToolInvocation idempotency key',
+    parent_session_id     bigint not null,
+    child_session_id      bigint not null,
+    child_run_id          bigint not null,
+    target_agent          varchar(128) not null,
+    working_copy_policy   varchar(32) not null,
+    working_copy_revision varchar(512),
+    max_turns             int not null,
+    idle_timeout_millis   bigint,
+    status                varchar(32) not null,
+    report_json           text,
+    gmt_create            datetime(3) not null default current_timestamp(3),
     gmt_modified         datetime(3) not null default current_timestamp(3),
     primary key (parent_invocation_id),
     key idx_harness_subagent_task_child (child_session_id, child_run_id),

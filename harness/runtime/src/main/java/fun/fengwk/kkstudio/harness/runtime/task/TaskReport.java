@@ -13,8 +13,8 @@ public record TaskReport(
     List<ArtifactRef> artifacts,
     int turnCount,
     int toolCount,
-    WorkspacePolicy workspacePolicy,
-    String workspaceRevision) {
+    WorkingCopyPolicy workingCopyPolicy,
+    String workingCopyRevision) {
   public TaskReport {
     if (childSessionId <= 0 || childRunId <= 0) {
       throw new IllegalArgumentException("child ids must be positive");
@@ -28,7 +28,7 @@ public record TaskReport(
     if (turnCount < 0 || toolCount < 0) {
       throw new IllegalArgumentException("report counts must not be negative");
     }
-    workspacePolicy = Objects.requireNonNull(workspacePolicy, "workspacePolicy");
+    workingCopyPolicy = Objects.requireNonNull(workingCopyPolicy, "workingCopyPolicy");
   }
 
   public boolean success() {

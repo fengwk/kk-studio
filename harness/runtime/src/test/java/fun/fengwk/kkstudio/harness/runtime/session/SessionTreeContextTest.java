@@ -36,7 +36,7 @@ class SessionTreeContextTest {
   void shouldCheckoutSiblingBranchesAndListChildren() {
     InMemoryStore store = new InMemoryStore();
     SessionTree tree = tree(store);
-    Session session = tree.create(1L, 10L, "root");
+    Session session = tree.create(10L, "root");
     SessionEntry snapshot = append(tree, session.id(), null, snapshotPayload());
     SessionEntry branchA = append(tree, session.id(), snapshot.id(), user("A"));
 
@@ -55,8 +55,8 @@ class SessionTreeContextTest {
   void shouldRejectInvalidCheckoutTargets() {
     InMemoryStore store = new InMemoryStore();
     SessionTree tree = tree(store);
-    Session first = tree.create(1L, null, null);
-    Session second = tree.create(1L, null, null);
+    Session first = tree.create(null, null);
+    Session second = tree.create(null, null);
     SessionEntry firstRoot = append(tree, first.id(), null, snapshotPayload());
     SessionEntry secondRoot = append(tree, second.id(), null, snapshotPayload());
 
@@ -85,7 +85,7 @@ class SessionTreeContextTest {
   void shouldForkWithIndependentEntriesAndHierarchy() {
     InMemoryStore store = new InMemoryStore();
     SessionTree tree = tree(store);
-    Session source = tree.create(7L, 11L, "source");
+    Session source = tree.create(11L, "source");
     SessionEntry snapshot = append(tree, source.id(), null, snapshotPayload());
     SessionEntry leaf = append(tree, source.id(), snapshot.id(), user("message"));
 
@@ -95,7 +95,6 @@ class SessionTreeContextTest {
     assertEquals(source.id(), fork.parentSessionId());
     assertEquals(source.id(), fork.rootSessionId());
     assertEquals(1, fork.depth());
-    assertEquals(source.workspaceId(), fork.workspaceId());
     assertFalse(fork.yoloEnabled());
     assertEquals(2, clone.size());
     assertNotEquals(snapshot.id(), clone.get(0).id());
@@ -106,7 +105,7 @@ class SessionTreeContextTest {
   void shouldRejectStaleLeafCompareAndSet() {
     InMemoryStore store = new InMemoryStore();
     SessionTree tree = tree(store);
-    Session session = tree.create(1L, null, null);
+    Session session = tree.create(null, null);
     SessionEntry first = append(tree, session.id(), null, snapshotPayload());
 
     assertFalse(tree.append(session.id(), null, new SessionEntryDraft(user("stale"))).appended());
@@ -367,8 +366,7 @@ class SessionTreeContextTest {
   }
 
   private static Session session(long id, Long leafEntryId) {
-    return new Session(
-        id, 1L, 10L, "test", leafEntryId, null, null, id, null, 0, false, 0, NOW, NOW);
+    return new Session(id, 10L, "test", leafEntryId, null, null, id, null, 0, false, 0, NOW, NOW);
   }
 
   private static final class SequenceIds implements SessionIdGenerator {
@@ -485,7 +483,6 @@ class SessionTreeContextTest {
     private Session withLeaf(Session session, Long leafEntryId) {
       return new Session(
           session.id(),
-          session.workspaceId(),
           session.agentDefinitionId(),
           session.title(),
           leafEntryId,

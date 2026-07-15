@@ -11,8 +11,8 @@ public class SubagentTaskDTO {
   private String childSessionId;
   private String childRunId;
   private String targetAgent;
-  private String workspacePolicy;
-  private String workspaceRevision;
+  private String workingCopyPolicy;
+  private String workingCopyRevision;
   private Integer maxTurns;
   private Long idleTimeoutMillis;
   private String status;

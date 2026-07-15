@@ -61,8 +61,7 @@ public class MysqlHarnessSessionStore implements SessionStore, SessionEntryStore
       throw new IllegalArgumentException("a child session must reference its parent session");
     }
     Session parent = requireSession(session.parentSessionId());
-    if (parent.workspaceId() != session.workspaceId()
-        || parent.rootSessionId() != session.rootSessionId()
+    if (parent.rootSessionId() != session.rootSessionId()
         || parent.depth() + 1 != session.depth()) {
       throw new InvalidSessionTreeException("child session hierarchy is inconsistent");
     }
@@ -171,7 +170,6 @@ public class MysqlHarnessSessionStore implements SessionStore, SessionEntryStore
   private HarnessSessionDO toDO(Session session) {
     HarnessSessionDO target = new HarnessSessionDO();
     target.setId(session.id());
-    target.setWorkspaceId(session.workspaceId());
     target.setAgentDefinitionId(session.agentDefinitionId());
     target.setTitle(session.title());
     target.setLeafEntryId(session.leafEntryId());
@@ -202,7 +200,6 @@ public class MysqlHarnessSessionStore implements SessionStore, SessionEntryStore
   private Session toSession(HarnessSessionDO source) {
     return new Session(
         source.getId(),
-        source.getWorkspaceId(),
         source.getAgentDefinitionId(),
         source.getTitle(),
         source.getLeafEntryId(),

@@ -46,7 +46,7 @@ class MysqlHarnessSessionStoreTest {
   @Test
   void shouldAppendWithLeafAndVersionCasAndRollbackConflict() {
     long sessionId = id();
-    store.create(root(sessionId, 1L));
+    store.create(root(sessionId));
     SessionEntry root = entry(id(), sessionId, null);
     store.append(root, null, 0L);
 
@@ -66,7 +66,7 @@ class MysqlHarnessSessionStoreTest {
   @Test
   void shouldRoundTripToolNameThroughEntryStore() {
     long sessionId = id();
-    store.create(root(sessionId, 1L));
+    store.create(root(sessionId));
     SessionEntry snapshot = entry(id(), sessionId, null);
     store.append(snapshot, null, 0L);
     SessionEntry call =
@@ -117,8 +117,8 @@ class MysqlHarnessSessionStoreTest {
   void shouldListChildrenAndRejectCrossSessionPath() {
     long sourceId = id();
     long otherId = id();
-    store.create(root(sourceId, 1L));
-    store.create(root(otherId, 1L));
+    store.create(root(sourceId));
+    store.create(root(otherId));
     SessionEntry sourceRoot = entry(id(), sourceId, null);
     store.append(sourceRoot, null, 0L);
     SessionEntry first = entry(id(), sourceId, sourceRoot.id());
@@ -136,21 +136,18 @@ class MysqlHarnessSessionStoreTest {
         () -> store.compareAndSetLeaf(sourceId, second.id(), 4L, id()));
   }
 
-  /** Child 必须继承 root/workspace 并使用 parent.depth + 1，跨 Workspace 或错误 root 均拒绝。 */
+  /** Child 必须继承 root 并使用 parent.depth + 1，错误 root 或 depth 均拒绝。 */
   @Test
   void shouldValidateChildSessionHierarchy() {
     long sourceId = id();
-    store.create(root(sourceId, 9L));
+    store.create(root(sourceId));
 
-    Session crossWorkspace = child(id(), 10L, sourceId, sourceId, 1);
-    assertThrows(
-        InvalidSessionTreeException.class, () -> store.createFork(crossWorkspace, List.of()));
-    Session wrongRoot = child(id(), 9L, sourceId, id(), 1);
+    Session wrongRoot = child(id(), sourceId, id(), 1);
     assertThrows(InvalidSessionTreeException.class, () -> store.createFork(wrongRoot, List.of()));
-    Session wrongDepth = child(id(), 9L, sourceId, sourceId, 2);
+    Session wrongDepth = child(id(), sourceId, sourceId, 2);
     assertThrows(InvalidSessionTreeException.class, () -> store.createFork(wrongDepth, List.of()));
 
-    Session valid = child(id(), 9L, sourceId, sourceId, 1);
+    Session valid = child(id(), sourceId, sourceId, 1);
     store.createFork(valid, List.of());
     Session loaded = store.find(valid.id()).orElseThrow();
     assertEquals(sourceId, loaded.parentSessionId());
@@ -168,7 +165,6 @@ class MysqlHarnessSessionStoreTest {
         sessionColumns.containsAll(
             Set.of(
                 "id",
-                "workspace_id",
                 "agent_definition_id",
                 "title",
                 "leaf_entry_id",
@@ -192,6 +188,7 @@ class MysqlHarnessSessionStoreTest {
             "gmt_create"),
         entryColumns);
     assertFalse(sessionColumns.contains("session_id"));
+    assertFalse(sessionColumns.contains("workspace_id"));
     assertFalse(entryColumns.contains("entry_id"));
   }
 
@@ -209,7 +206,7 @@ class MysqlHarnessSessionStoreTest {
         from system_range(1, 10000) as noise(n)
         """);
     long sessionId = id();
-    store.create(root(sessionId, 1L));
+    store.create(root(sessionId));
     SessionEntry root = entry(id(), sessionId, null);
     store.append(root, null, 0L);
 
@@ -240,17 +237,15 @@ class MysqlHarnessSessionStoreTest {
             table));
   }
 
-  private static Session root(long id, long workspaceId) {
+  private static Session root(long id) {
     Instant now = Instant.now();
-    return Session.root(id, workspaceId, 1L, "root", true, now);
+    return Session.root(id, 1L, "root", true, now);
   }
 
-  private static Session child(
-      long id, long workspaceId, long parentSessionId, long rootSessionId, int depth) {
+  private static Session child(long id, long parentSessionId, long rootSessionId, int depth) {
     Instant now = Instant.now();
     return new Session(
         id,
-        workspaceId,
         1L,
         "child",
         null,

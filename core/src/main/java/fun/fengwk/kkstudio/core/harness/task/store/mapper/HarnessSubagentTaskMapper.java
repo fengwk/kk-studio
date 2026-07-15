@@ -17,15 +17,16 @@ import org.apache.ibatis.annotations.Update;
 public interface HarnessSubagentTaskMapper extends BaseMapper {
   String COLUMNS =
       "parent_invocation_id, parent_session_id, child_session_id, child_run_id, target_agent,"
-          + " workspace_policy, workspace_revision, max_turns, idle_timeout_millis, status,"
+          + " working_copy_policy, working_copy_revision, max_turns, idle_timeout_millis, status,"
           + " report_json, gmt_create as create_time, gmt_modified as update_time";
 
   @Insert(
       "insert into harness_subagent_task (parent_invocation_id, parent_session_id,"
-          + " child_session_id, child_run_id, target_agent, workspace_policy, workspace_revision,"
-          + " max_turns, idle_timeout_millis, status, report_json, gmt_create, gmt_modified) values"
+          + " child_session_id, child_run_id, target_agent, working_copy_policy,"
+          + " working_copy_revision, max_turns, idle_timeout_millis, status, report_json,"
+          + " gmt_create, gmt_modified) values"
           + " (#{parentInvocationId}, #{parentSessionId}, #{childSessionId}, #{childRunId},"
-          + " #{targetAgent}, #{workspacePolicy}, #{workspaceRevision}, #{maxTurns},"
+          + " #{targetAgent}, #{workingCopyPolicy}, #{workingCopyRevision}, #{maxTurns},"
           + " #{idleTimeoutMillis}, #{status}, #{reportJson}, #{createTime}, #{updateTime})")
   int insert(HarnessSubagentTaskDO task);
 
@@ -38,8 +39,8 @@ public interface HarnessSubagentTaskMapper extends BaseMapper {
         @Result(column = "child_session_id", property = "childSessionId"),
         @Result(column = "child_run_id", property = "childRunId"),
         @Result(column = "target_agent", property = "targetAgent"),
-        @Result(column = "workspace_policy", property = "workspacePolicy"),
-        @Result(column = "workspace_revision", property = "workspaceRevision"),
+        @Result(column = "working_copy_policy", property = "workingCopyPolicy"),
+        @Result(column = "working_copy_revision", property = "workingCopyRevision"),
         @Result(column = "max_turns", property = "maxTurns"),
         @Result(column = "idle_timeout_millis", property = "idleTimeoutMillis"),
         @Result(column = "status", property = "status"),
@@ -72,11 +73,10 @@ public interface HarnessSubagentTaskMapper extends BaseMapper {
 
   @Select(
       "select count(*) from harness_subagent_task t join harness_session s on s.id ="
-          + " t.child_session_id join harness_run r on r.id = t.child_run_id where s.workspace_id ="
-          + " #{workspaceId} and s.root_session_id = #{rootSessionId} and r.status not in"
+          + " t.child_session_id join harness_run r on r.id = t.child_run_id where"
+          + " s.root_session_id = #{rootSessionId} and r.status not in"
           + " ('SUCCEEDED','FAILED','CANCELLED')")
-  int countActiveRoot(
-      @Param("workspaceId") long workspaceId, @Param("rootSessionId") long rootSessionId);
+  int countActiveRoot(@Param("rootSessionId") long rootSessionId);
 
   @Update(
       "update harness_subagent_task set status = #{status}, report_json = #{reportJson}, "

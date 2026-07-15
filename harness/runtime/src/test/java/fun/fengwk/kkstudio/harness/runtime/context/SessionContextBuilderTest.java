@@ -145,7 +145,6 @@ class SessionContextBuilderTest {
   private static Session session(Long leafEntryId) {
     return new Session(
         SESSION_ID,
-        1L,
         2L,
         "session",
         leafEntryId,

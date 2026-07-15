@@ -138,7 +138,7 @@ class TaskToolTest {
    * cancel.
    */
   @Test
-  void parsesOptionalSessionAndWorkspacePolicy() {
+  void parsesOptionalSessionAndWorkingCopyPolicy() {
     RecordingRuntime runtime = new RecordingRuntime();
     TaskTool tool =
         new TaskTool(
@@ -146,7 +146,7 @@ class TaskToolTest {
     ToolExecutionHandle pending =
         tool.execute(
             request(
-                "{\"subagent_type\":\"Coder\",\"prompt\":\"x\",\"session_id\":\"123\",\"workspace_policy\":\"NONE\"}"),
+                "{\"subagent_type\":\"Coder\",\"prompt\":\"x\",\"session_id\":\"123\",\"working_copy_policy\":\"NONE\"}"),
             new RecordingListener());
     pending.cancel();
     assertEquals(1, runtime.cancels);
@@ -303,7 +303,7 @@ class TaskToolTest {
               3,
               4,
               "Coder",
-              WorkspacePolicy.FORK,
+              WorkingCopyPolicy.FORK,
               null,
               50,
               null,
@@ -313,7 +313,7 @@ class TaskToolTest {
               now);
       TaskReport report =
           completed
-              ? new TaskReport(3, 4, state, "done", List.of(), 1, 2, WorkspacePolicy.FORK, null)
+              ? new TaskReport(3, 4, state, "done", List.of(), 1, 2, WorkingCopyPolicy.FORK, null)
               : null;
       return new TaskInspection(task, report);
     }

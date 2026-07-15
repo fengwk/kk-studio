@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
 import fun.fengwk.kkstudio.core.harness.session.store.SnowflakeSessionIdGenerator;
 import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProperties;
 import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
-import fun.fengwk.kkstudio.core.workspace.service.WorkspaceService;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
@@ -41,7 +40,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
-import fun.fengwk.kkstudio.share.model.WorkspaceCreateDTO;
 import fun.fengwk.kkstudio.web.WebTestApplication;
 import java.math.BigDecimal;
 import java.nio.file.Path;
@@ -66,7 +64,6 @@ class StudioToolInvocationControllerTest {
   private static final Instant NOW = Instant.parse("2026-06-01T00:00:00Z");
 
   @Autowired private MockMvc mockMvc;
-  @Autowired private WorkspaceService workspaceService;
   @Autowired private ToolSettingsProperties toolSettingsProperties;
   @Autowired private MysqlHarnessSessionStore sessionStore;
   @Autowired private SnowflakeSessionIdGenerator sessionIds;
@@ -84,14 +81,13 @@ class StudioToolInvocationControllerTest {
     jdbcTemplate.update("delete from harness_run");
     jdbcTemplate.update("delete from harness_session_entry");
     jdbcTemplate.update("delete from harness_session");
-    jdbcTemplate.update("delete from workspace");
   }
 
   /** Global Decision API 同决定幂等，冲突返回 409。 */
   @Test
   void decidesPermissionIdempotentlyAndRejectsConflictGlobally() throws Exception {
-    long workspaceId = workspace("{\"permission\":{\"write\":\"ask\"}}");
-    ToolInvocation invocation = askInvocation(workspaceId);
+    configureToolSettings("{\"permission\":{\"write\":\"ask\"}}");
+    ToolInvocation invocation = askInvocation();
     String endpoint = "/api/tool-invocations/" + invocation.id() + "/decision";
 
     mockMvc
@@ -116,7 +112,7 @@ class StudioToolInvocationControllerTest {
                 .content("{\"decision\":\"deny\"}"))
         .andExpect(status().isConflict());
 
-    ToolInvocation denied = askInvocation(workspaceId);
+    ToolInvocation denied = askInvocation();
     mockMvc
         .perform(
             post("/api/tool-invocations/{invocationId}/decision", denied.id())
@@ -131,8 +127,8 @@ class StudioToolInvocationControllerTest {
   /** Global YOLO set 支持 Child 动态 Root 读取，无 active Run 也可由 GET 观察。 */
   @Test
   void setsAndReadsChildRootYoloWithoutActiveRun() throws Exception {
-    long workspaceId = workspace("{\"defaultYolo\":true}");
-    Session root = sessionTree.create(workspaceId, null, "root");
+    configureToolSettings("{\"defaultYolo\":true}");
+    Session root = sessionTree.create(null, "root");
     Session child = sessionTree.fork(root.id(), null);
 
     mockMvc
@@ -160,9 +156,9 @@ class StudioToolInvocationControllerTest {
         .andExpect(status().isBadRequest());
   }
 
-  private ToolInvocation askInvocation(long workspaceId) {
+  private ToolInvocation askInvocation() {
     long sessionId = sessionIds.newSessionId();
-    sessionStore.create(Session.root(sessionId, workspaceId, null, "session", false, NOW));
+    sessionStore.create(Session.root(sessionId, null, "session", false, NOW));
     long snapshotId = sessionIds.newEntryId();
     AgentSnapshotEntryPayload snapshot =
         new AgentSnapshotEntryPayload(
@@ -190,12 +186,8 @@ class StudioToolInvocationControllerTest {
     return invocationStore.listByRun(queued.id()).get(0);
   }
 
-  private long workspace(String settingsJson) {
+  private void configureToolSettings(String settingsJson) {
     toolSettingsProperties.setSettingsJson(settingsJson);
-    WorkspaceCreateDTO request = new WorkspaceCreateDTO();
-    request.setName("web-tool-workspace-" + System.nanoTime());
-    request.setSettingsJson("{}");
-    return Long.parseLong(workspaceService.createWorkspace(request).getId());
   }
 
   private static AgentMessage user() {

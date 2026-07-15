@@ -17,11 +17,11 @@ public interface HarnessSessionMapper extends BaseMapper {
   @Insert(
       """
       insert into harness_session (
-          id, workspace_id, agent_definition_id, title, leaf_entry_id, active_run_id,
+          id, agent_definition_id, title, leaf_entry_id, active_run_id,
           parent_session_id, root_session_id, parent_invocation_id, depth, yolo_enabled,
           gmt_create, gmt_modified, version
       ) values (
-          #{id}, #{workspaceId}, #{agentDefinitionId}, #{title}, #{leafEntryId}, #{activeRunId},
+          #{id}, #{agentDefinitionId}, #{title}, #{leafEntryId}, #{activeRunId},
           #{parentSessionId}, #{rootSessionId}, #{parentInvocationId}, #{depth}, #{yoloEnabled},
           #{createTime}, #{updateTime}, #{version}
       )
@@ -30,7 +30,7 @@ public interface HarnessSessionMapper extends BaseMapper {
 
   @Select(
       """
-      select id, workspace_id, agent_definition_id, title, leaf_entry_id, active_run_id,
+      select id, agent_definition_id, title, leaf_entry_id, active_run_id,
              parent_session_id, root_session_id, parent_invocation_id, depth, yolo_enabled,
              version, gmt_create as create_time, gmt_modified as update_time
       from harness_session
@@ -40,7 +40,6 @@ public interface HarnessSessionMapper extends BaseMapper {
       id = "harnessSessionResultMap",
       value = {
         @Result(column = "id", property = "id"),
-        @Result(column = "workspace_id", property = "workspaceId"),
         @Result(column = "agent_definition_id", property = "agentDefinitionId"),
         @Result(column = "title", property = "title"),
         @Result(column = "leaf_entry_id", property = "leafEntryId"),
@@ -58,7 +57,7 @@ public interface HarnessSessionMapper extends BaseMapper {
 
   @Select(
       """
-      select id, workspace_id, agent_definition_id, title, leaf_entry_id, active_run_id,
+      select id, agent_definition_id, title, leaf_entry_id, active_run_id,
              parent_session_id, root_session_id, parent_invocation_id, depth, yolo_enabled,
              version, gmt_create as create_time, gmt_modified as update_time
       from harness_session

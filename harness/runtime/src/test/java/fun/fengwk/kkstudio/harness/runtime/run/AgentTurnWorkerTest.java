@@ -617,7 +617,7 @@ class AgentTurnWorkerTest {
           new SessionEntry(11L, 1L, 10L, 20L, user.type(), user, START.plusMillis(1));
       path = List.of(root, message);
       session =
-          new Session(1L, 1L, 1L, "session", 11L, 20L, null, 1L, null, 0, false, 2L, START, START);
+          new Session(1L, 1L, "session", 11L, 20L, null, 1L, null, 0, false, 2L, START, START);
     }
 
     @Override

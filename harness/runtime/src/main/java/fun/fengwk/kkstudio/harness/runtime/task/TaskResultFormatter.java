@@ -23,9 +23,9 @@ public final class TaskResultFormatter {
     fields.put("artifacts", artifacts(report.artifacts()));
     fields.put("turnCount", report.turnCount());
     fields.put("toolCount", report.toolCount());
-    fields.put("workspacePolicy", report.workspacePolicy().name());
-    if (report.workspaceRevision() != null) {
-      fields.put("workspaceRevision", report.workspaceRevision());
+    fields.put("workingCopyPolicy", report.workingCopyPolicy().name());
+    if (report.workingCopyRevision() != null) {
+      fields.put("workingCopyRevision", report.workingCopyRevision());
     }
     try {
       return OBJECT_MAPPER.writeValueAsString(fields);
@@ -46,8 +46,8 @@ public final class TaskResultFormatter {
         + report.turnCount()
         + "\" tool_calls=\""
         + report.toolCount()
-        + "\" workspace_policy=\""
-        + report.workspacePolicy().name()
+        + "\" working_copy_policy=\""
+        + report.workingCopyPolicy().name()
         + "\"/>\n<"
         + resultTag
         + ">"

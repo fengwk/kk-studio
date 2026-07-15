@@ -48,12 +48,11 @@ public interface HarnessRunEventMapper extends BaseMapper {
   @Select(
       "select e.id, e.run_id, r.session_id, e.sequence, e.event_type, e.payload_json, e.gmt_create"
           + " as create_time from harness_run_event e join harness_run r on r.id = e.run_id join"
-          + " harness_session s on s.id = r.session_id where s.workspace_id = #{workspaceId} and"
-          + " s.root_session_id = #{rootSessionId} and e.id > #{afterEventId} order by e.id asc"
+          + " harness_session s on s.id = r.session_id where s.root_session_id = #{rootSessionId}"
+          + " and e.id > #{afterEventId} order by e.id asc"
           + " limit #{limit}")
   @ResultMap("harnessRunEventResultMap")
   List<HarnessRunEventDO> listRootActivity(
-      @Param("workspaceId") long workspaceId,
       @Param("rootSessionId") long rootSessionId,
       @Param("afterEventId") long afterEventId,
       @Param("limit") int limit);

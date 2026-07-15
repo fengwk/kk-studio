@@ -39,8 +39,8 @@ import fun.fengwk.kkstudio.harness.runtime.task.TaskPolicyCodec;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskReport;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskRuntime;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskState;
-import fun.fengwk.kkstudio.harness.runtime.task.WorkspacePolicy;
-import fun.fengwk.kkstudio.harness.runtime.task.WorkspaceRevisionResolver;
+import fun.fengwk.kkstudio.harness.runtime.task.WorkingCopyPolicy;
+import fun.fengwk.kkstudio.harness.runtime.task.WorkingCopyRevisionResolver;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
@@ -79,7 +79,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
   private final AgentDefinitionMapper agentMapper;
   private final RunIdGenerator runIds;
   private final SessionIdGenerator sessionIds;
-  private final WorkspaceRevisionResolver workspaceRevisionResolver;
+  private final WorkingCopyRevisionResolver workingCopyRevisionResolver;
   private final SessionEntryJsonCodec entryCodec = new SessionEntryJsonCodec();
 
   public DatabaseTaskRuntime(
@@ -92,7 +92,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       AgentDefinitionMapper agentMapper,
       RunIdGenerator runIds,
       SessionIdGenerator sessionIds,
-      WorkspaceRevisionResolver workspaceRevisionResolver) {
+      WorkingCopyRevisionResolver workingCopyRevisionResolver) {
     this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
     this.eventMapper = Objects.requireNonNull(eventMapper, "eventMapper");
     this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
@@ -102,8 +102,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     this.agentMapper = Objects.requireNonNull(agentMapper, "agentMapper");
     this.runIds = Objects.requireNonNull(runIds, "runIds");
     this.sessionIds = Objects.requireNonNull(sessionIds, "sessionIds");
-    this.workspaceRevisionResolver =
-        Objects.requireNonNull(workspaceRevisionResolver, "workspaceRevisionResolver");
+    this.workingCopyRevisionResolver =
+        Objects.requireNonNull(workingCopyRevisionResolver, "workingCopyRevisionResolver");
   }
 
   @Override
@@ -135,8 +135,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       throw new IllegalStateException("subagent direct concurrency limit exceeded");
     }
     if (parentPolicy.maxTotal() != null
-        && taskMapper.countActiveRoot(parent.getWorkspaceId(), root.getId())
-            >= parentPolicy.maxTotal()) {
+        && taskMapper.countActiveRoot(root.getId()) >= parentPolicy.maxTotal()) {
       throw new IllegalStateException("subagent root concurrency limit exceeded");
     }
 
@@ -252,7 +251,6 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     AgentSnapshot targetSnapshot = snapshot(target);
     insertSession(
         childSessionId,
-        parent.getWorkspaceId(),
         target.getId(),
         parent.getId(),
         root.getId(),
@@ -281,9 +279,9 @@ public class DatabaseTaskRuntime implements TaskRuntime {
         timestamp);
     insertQueuedRun(childRunId, childSessionId, promptEntryId, timestamp);
     TaskPolicy targetPolicy = TaskPolicyCodec.decode(targetSnapshot.executionPolicyJson());
-    String workspaceRevision =
-        workspaceRevisionResolver
-            .resolve(parent.getWorkspaceId(), command.workspacePolicy(), childSessionId)
+    String workingCopyRevision =
+        workingCopyRevisionResolver
+            .resolve(command.workingCopyPolicy(), childSessionId)
             .orElse(null);
     insertTask(
         context.invocationId(),
@@ -291,15 +289,15 @@ public class DatabaseTaskRuntime implements TaskRuntime {
         childSessionId,
         childRunId,
         target.getName(),
-        command.workspacePolicy(),
-        workspaceRevision,
+        command.workingCopyPolicy(),
+        workingCopyRevision,
         targetPolicy,
         timestamp);
     appendEvent(
         parentRun,
         RunEventType.SUBAGENT_STARTED,
         taskPayload(
-            childSessionId, childRunId, target.getName(), command.workspacePolicy(), parentRun),
+            childSessionId, childRunId, target.getName(), command.workingCopyPolicy(), parentRun),
         timestamp);
     appendEvent(
         requireRun(childRunId),
@@ -318,8 +316,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       HarnessSessionDO root,
       LocalDateTime timestamp) {
     HarnessSessionDO child = requireSessionForUpdate(command.sessionId());
-    if (!Objects.equals(child.getWorkspaceId(), parent.getWorkspaceId())
-        || !Objects.equals(child.getRootSessionId(), root.getId())
+    if (!Objects.equals(child.getRootSessionId(), root.getId())
         || !Objects.equals(child.getParentSessionId(), parent.getId())
         || child.getParentInvocationId() == null) {
       throw new IllegalArgumentException("resume child does not match parent hierarchy");
@@ -331,9 +328,10 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       throw new IllegalArgumentException(
           "resume child does not match its frozen creation task relation");
     }
-    WorkspacePolicy workspacePolicy = WorkspacePolicy.valueOf(creation.getWorkspacePolicy());
-    if (command.workspacePolicy() != workspacePolicy) {
-      throw new IllegalArgumentException("resume workspace policy differs from child creation");
+    WorkingCopyPolicy workingCopyPolicy =
+        WorkingCopyPolicy.valueOf(creation.getWorkingCopyPolicy());
+    if (command.workingCopyPolicy() != workingCopyPolicy) {
+      throw new IllegalArgumentException("resume working copy policy differs from child creation");
     }
     AgentSnapshot targetSnapshot = childSnapshot(child);
     if (child.getActiveRunId() != null) {
@@ -364,15 +362,15 @@ public class DatabaseTaskRuntime implements TaskRuntime {
         child.getId(),
         childRunId,
         creation.getTargetAgent(),
-        workspacePolicy,
-        creation.getWorkspaceRevision(),
+        workingCopyPolicy,
+        creation.getWorkingCopyRevision(),
         targetPolicy,
         timestamp);
     appendEvent(
         parentRun,
         RunEventType.SUBAGENT_RESUMED,
         taskPayload(
-            child.getId(), childRunId, creation.getTargetAgent(), workspacePolicy, parentRun),
+            child.getId(), childRunId, creation.getTargetAgent(), workingCopyPolicy, parentRun),
         timestamp);
     appendEvent(
         requireRun(childRunId),
@@ -480,7 +478,6 @@ public class DatabaseTaskRuntime implements TaskRuntime {
 
   private void insertSession(
       long id,
-      long workspaceId,
       long agentDefinitionId,
       long parentSessionId,
       long rootSessionId,
@@ -491,7 +488,6 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       LocalDateTime timestamp) {
     HarnessSessionDO session = new HarnessSessionDO();
     session.setId(id);
-    session.setWorkspaceId(workspaceId);
     session.setAgentDefinitionId(agentDefinitionId);
     session.setTitle(null);
     session.setLeafEntryId(leafEntryId);
@@ -554,8 +550,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       long childSessionId,
       long childRunId,
       String targetAgent,
-      WorkspacePolicy workspacePolicy,
-      String workspaceRevision,
+      WorkingCopyPolicy workingCopyPolicy,
+      String workingCopyRevision,
       TaskPolicy policy,
       LocalDateTime timestamp) {
     HarnessSubagentTaskDO task = new HarnessSubagentTaskDO();
@@ -564,8 +560,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     task.setChildSessionId(childSessionId);
     task.setChildRunId(childRunId);
     task.setTargetAgent(targetAgent);
-    task.setWorkspacePolicy(workspacePolicy.name());
-    task.setWorkspaceRevision(workspaceRevision);
+    task.setWorkingCopyPolicy(workingCopyPolicy.name());
+    task.setWorkingCopyRevision(workingCopyRevision);
     task.setMaxTurns(policy.maxTurns());
     task.setIdleTimeoutMillis(
         policy.idleTimeout() == null ? null : policy.idleTimeout().toMillis());
@@ -641,8 +637,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
         artifacts(childRun.getId()),
         childRun.getTurnIndex(),
         runMapper.countToolInvocations(childRun.getId()),
-        WorkspacePolicy.valueOf(task.getWorkspacePolicy()),
-        task.getWorkspaceRevision());
+        WorkingCopyPolicy.valueOf(task.getWorkingCopyPolicy()),
+        task.getWorkingCopyRevision());
   }
 
   private List<ArtifactRef> artifacts(long runId) {
@@ -702,8 +698,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
         task.getChildSessionId(),
         task.getChildRunId(),
         task.getTargetAgent(),
-        WorkspacePolicy.valueOf(task.getWorkspacePolicy()),
-        task.getWorkspaceRevision(),
+        WorkingCopyPolicy.valueOf(task.getWorkingCopyPolicy()),
+        task.getWorkingCopyRevision(),
         task.getMaxTurns(),
         task.getIdleTimeoutMillis() == null ? null : Duration.ofMillis(task.getIdleTimeoutMillis()),
         TaskState.valueOf(task.getStatus()),
@@ -732,7 +728,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       long childSessionId,
       long childRunId,
       String targetAgent,
-      WorkspacePolicy workspacePolicy,
+      WorkingCopyPolicy workingCopyPolicy,
       HarnessRunDO parentRun) {
     return new Object[] {
       "childSessionId",
@@ -741,8 +737,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       childRunId,
       "targetAgent",
       targetAgent,
-      "workspacePolicy",
-      workspacePolicy.name(),
+      "workingCopyPolicy",
+      workingCopyPolicy.name(),
       "attempt",
       parentRun.getAttempt(),
       "turnIndex",

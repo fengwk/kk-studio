@@ -25,8 +25,8 @@ import fun.fengwk.kkstudio.harness.runtime.task.RootActivity;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskCommand;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskInspection;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskState;
-import fun.fengwk.kkstudio.harness.runtime.task.WorkspacePolicy;
-import fun.fengwk.kkstudio.harness.runtime.task.WorkspaceRevisionResolver;
+import fun.fengwk.kkstudio.harness.runtime.task.WorkingCopyPolicy;
+import fun.fengwk.kkstudio.harness.runtime.task.WorkingCopyRevisionResolver;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
@@ -82,7 +82,6 @@ class DatabaseTaskRuntimeIntegrationTest {
     jdbc.update("delete from harness_session_entry");
     jdbc.update("delete from harness_session");
     jdbc.update("delete from agent_definition");
-    jdbc.update("delete from workspace");
   }
 
   /**
@@ -119,7 +118,7 @@ class DatabaseTaskRuntimeIntegrationTest {
                 + " limit 1",
             inspection.task().childSessionId()));
     assertEquals(
-        "rev-" + inspection.task().childSessionId(), inspection.task().workspaceRevision());
+        "rev-" + inspection.task().childSessionId(), inspection.task().workingCopyRevision());
     assertEquals(2, count("harness_run_event"));
     assertEquals(
         List.of("subagent_started"),
@@ -157,7 +156,7 @@ class DatabaseTaskRuntimeIntegrationTest {
         () ->
             runtime.startOrResume(
                 denied.context(),
-                new TaskCommand("Other", "work", null, WorkspacePolicy.FORK),
+                new TaskCommand("Other", "work", null, WorkingCopyPolicy.FORK),
                 NOW));
     assertChildStateAbsent();
 
@@ -277,13 +276,15 @@ class DatabaseTaskRuntimeIntegrationTest {
             NOW.plusSeconds(2));
 
     assertEquals(created.task().targetAgent(), resumed.task().targetAgent());
-    assertEquals(created.task().workspacePolicy(), resumed.task().workspacePolicy());
-    assertEquals(created.task().workspaceRevision(), resumed.task().workspaceRevision());
+    assertEquals(created.task().workingCopyPolicy(), resumed.task().workingCopyPolicy());
+    assertEquals(created.task().workingCopyRevision(), resumed.task().workingCopyRevision());
   }
 
-  /** A resume cannot combine the creation revision with a different effective workspace policy. */
+  /**
+   * A resume cannot combine the creation revision with a different effective working copy policy.
+   */
   @Test
-  void rejectsResumeWithWorkspacePolicyDifferentFromCreation() {
+  void rejectsResumeWithWorkingCopyPolicyDifferentFromCreation() {
     Fixture fixture = fixture(policy(3, 3, 5, 4, null), policy(3, 3, 5, 7, null));
     TaskInspection created = runtime.startOrResume(fixture.context(), command(null), NOW);
     terminateChild(created, "SUCCEEDED", "first");
@@ -295,7 +296,10 @@ class DatabaseTaskRuntimeIntegrationTest {
             runtime.startOrResume(
                 fixture.context(fixture.newInvocation()),
                 new TaskCommand(
-                    "Child", "complete it", created.task().childSessionId(), WorkspacePolicy.NONE),
+                    "Child",
+                    "complete it",
+                    created.task().childSessionId(),
+                    WorkingCopyPolicy.NONE),
                 NOW.plusSeconds(2)));
     assertEquals(1, countWhere("harness_run", "session_id = ?", created.task().childSessionId()));
     assertEquals(
@@ -362,7 +366,7 @@ class DatabaseTaskRuntimeIntegrationTest {
       assertEquals(
           List.of("a", "b", "c"),
           completed.report().artifacts().stream().map(ArtifactRef::artifactId).toList());
-      assertEquals("rev-" + task.task().childSessionId(), completed.report().workspaceRevision());
+      assertEquals("rev-" + task.task().childSessionId(), completed.report().workingCopyRevision());
       assertEquals(
           terminal,
           value(
@@ -523,8 +527,8 @@ class DatabaseTaskRuntimeIntegrationTest {
   }
 
   /**
-   * Root projection includes descendant permission events and enforces event cursor, workspace and
-   * root boundaries.
+   * Root projection includes descendant permission events and enforces event cursor and root
+   * boundaries.
    */
   @Test
   void projectsRootActivityByEventIdAcrossDescendantsOnly() {
@@ -537,9 +541,9 @@ class DatabaseTaskRuntimeIntegrationTest {
         "{\"permission\":true}",
         NOW.plusSeconds(1));
     jdbc.update("delete from agent_definition");
-    Fixture other = fixtureInWorkspace(2L, 2L);
+    Fixture other = fixtureInRoot(2L);
     TaskInspection otherChild = runtime.startOrResume(other.context(), command(null), NOW);
-    List<RootActivity> activity = rootActivityStore.list(1, fixture.rootSessionId, 0, 20);
+    List<RootActivity> activity = rootActivityStore.list(fixture.rootSessionId, 0, 20);
     assertTrue(
         activity.stream()
             .anyMatch(
@@ -548,14 +552,14 @@ class DatabaseTaskRuntimeIntegrationTest {
                         && event.type() == RunEventType.PERMISSION_REQUESTED));
     long cursor = activity.get(0).eventId();
     assertTrue(
-        rootActivityStore.list(1, fixture.rootSessionId, cursor, 20).stream()
+        rootActivityStore.list(fixture.rootSessionId, cursor, 20).stream()
             .allMatch(event -> event.eventId() > cursor));
     assertTrue(
-        rootActivityStore.list(1, fixture.rootSessionId, 0, 20).stream()
+        rootActivityStore.list(fixture.rootSessionId, 0, 20).stream()
             .noneMatch(event -> event.runId() == otherChild.task().childRunId()));
     assertTrue(
-        rootActivityStore.list(2, other.rootSessionId, 0, 20).stream()
-            .allMatch(event -> event.workspaceId() == 2));
+        rootActivityStore.list(other.rootSessionId, 0, 20).stream()
+            .allMatch(event -> event.rootSessionId() == other.rootSessionId));
   }
 
   /**
@@ -646,38 +650,22 @@ class DatabaseTaskRuntimeIntegrationTest {
   }
 
   private Fixture fixture(String parentPolicy, String childPolicy) {
-    return fixture(1L, 1L, parentPolicy, childPolicy);
+    return fixture(1L, parentPolicy, childPolicy);
   }
 
-  private Fixture fixtureInWorkspace(long workspaceId, long rootId) {
-    return fixture(workspaceId, rootId, policy(3, 3, 5, 4, null), policy(3, 3, 5, 7, null));
+  private Fixture fixtureInRoot(long rootId) {
+    return fixture(rootId, policy(3, 3, 5, 4, null), policy(3, 3, 5, 7, null));
   }
 
-  private Fixture fixture(long workspaceId, long rootId, String parentPolicy, String childPolicy) {
+  private Fixture fixture(long rootId, String parentPolicy, String childPolicy) {
     long parentAgentId = ids.newRunId();
     long childAgentId = ids.newRunId();
-    jdbc.update(
-        "insert into workspace (id, name, settings_json, gmt_create, gmt_modified, version) values"
-            + " (?, ?, '{}', ?, ?, 0)",
-        workspaceId,
-        "workspace-" + workspaceId,
-        timestamp(NOW),
-        timestamp(NOW));
     insertAgent(parentAgentId, "Parent", config(parentPolicy, List.of("Child")));
     insertAgent(childAgentId, "Child", config(childPolicy, List.of("Child")));
     long parentSessionId = rootId;
     long snapshotId = ids.newSessionEntryId();
     long parentRunId = ids.newRunId();
-    insertSession(
-        parentSessionId,
-        workspaceId,
-        parentAgentId,
-        null,
-        rootId,
-        null,
-        0,
-        snapshotId,
-        parentRunId);
+    insertSession(parentSessionId, parentAgentId, null, rootId, null, 0, snapshotId, parentRunId);
     insertEntry(
         snapshotId,
         parentSessionId,
@@ -737,8 +725,7 @@ class DatabaseTaskRuntimeIntegrationTest {
     long runId = ids.newRunId();
     long agentId =
         longValue("select agent_definition_id from harness_session where id = ?", rootSessionId);
-    insertSession(
-        sessionId, 1L, agentId, rootSessionId, rootSessionId, null, depth, snapshotId, runId);
+    insertSession(sessionId, agentId, rootSessionId, rootSessionId, null, depth, snapshotId, runId);
     insertEntry(
         snapshotId,
         sessionId,
@@ -752,7 +739,6 @@ class DatabaseTaskRuntimeIntegrationTest {
 
   private void insertSession(
       long id,
-      long workspaceId,
       long agentId,
       Long parentId,
       long rootId,
@@ -761,12 +747,11 @@ class DatabaseTaskRuntimeIntegrationTest {
       long leafId,
       long activeRunId) {
     jdbc.update(
-        "insert into harness_session (id, workspace_id, agent_definition_id, title, leaf_entry_id,"
+        "insert into harness_session (id, agent_definition_id, title, leaf_entry_id,"
             + " active_run_id, parent_session_id, root_session_id, parent_invocation_id, depth,"
-            + " yolo_enabled, gmt_create, gmt_modified, version) values (?, ?, ?, null, ?, ?, ?, ?,"
+            + " yolo_enabled, gmt_create, gmt_modified, version) values (?, ?, null, ?, ?, ?, ?,"
             + " ?, ?, false, ?, ?, 0)",
         id,
-        workspaceId,
         agentId,
         leafId,
         activeRunId,
@@ -893,7 +878,7 @@ class DatabaseTaskRuntimeIntegrationTest {
   }
 
   private TaskCommand command(Long sessionId) {
-    return new TaskCommand("Child", "complete it", sessionId, WorkspacePolicy.FORK);
+    return new TaskCommand("Child", "complete it", sessionId, WorkingCopyPolicy.FORK);
   }
 
   private static String policy(int depth, int direct, Integer total, int turns, Long idleMillis) {
@@ -1000,8 +985,8 @@ class DatabaseTaskRuntimeIntegrationTest {
   static class TaskTestConfiguration {
     @Bean
     @Primary
-    WorkspaceRevisionResolver testWorkspaceRevisionResolver() {
-      return (workspaceId, policy, childSessionId) -> Optional.of("rev-" + childSessionId);
+    WorkingCopyRevisionResolver testWorkingCopyRevisionResolver() {
+      return (policy, childSessionId) -> Optional.of("rev-" + childSessionId);
     }
   }
 }

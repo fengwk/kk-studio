@@ -14,8 +14,8 @@ public record SubagentTask(
     long childSessionId,
     long childRunId,
     String targetAgent,
-    WorkspacePolicy workspacePolicy,
-    String workspaceRevision,
+    WorkingCopyPolicy workingCopyPolicy,
+    String workingCopyRevision,
     int maxTurns,
     Duration idleTimeout,
     TaskState state,
@@ -29,7 +29,7 @@ public record SubagentTask(
     if (targetAgent == null || targetAgent.isBlank()) {
       throw new IllegalArgumentException("targetAgent must not be blank");
     }
-    workspacePolicy = Objects.requireNonNull(workspacePolicy, "workspacePolicy");
+    workingCopyPolicy = Objects.requireNonNull(workingCopyPolicy, "workingCopyPolicy");
     if (maxTurns <= 0) {
       throw new IllegalArgumentException("maxTurns must be positive");
     }

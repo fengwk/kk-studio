@@ -6,7 +6,6 @@ import lombok.Data;
 /** Cursorable root-session tree activity event. All Snowflake IDs are serialized as strings. */
 @Data
 public class RootActivityDTO {
-  private String workspaceId;
   private String rootSessionId;
   private String sessionId;
   private String runId;

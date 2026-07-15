@@ -6,7 +6,6 @@ import lombok.Data;
 @Data
 public class HarnessSessionDO {
   private Long id;
-  private Long workspaceId;
   private Long agentDefinitionId;
   private String title;
   private Long leafEntryId;
