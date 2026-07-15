@@ -40,7 +40,6 @@ create table if not exists agent_model (
 
 create table if not exists agent_definition (
     id              bigint not null comment '主键',
-    workspace_id    bigint not null comment '所属 workspace',
     name            varchar(64) not null comment 'agent 名称',
     description     varchar(512) null comment '描述',
     system_prompt   longtext null comment '系统提示词',
@@ -51,7 +50,7 @@ create table if not exists agent_definition (
     gmt_modified    datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
     version         bigint not null default '0' comment '数据版本号',
     primary key (id),
-    unique key uk_agent_definition_workspace_name (workspace_id, name)
+    unique key uk_agent_definition_name (name)
 ) engine=InnoDB default charset=utf8mb4 comment='agent definition';
 
 create table if not exists agent_session (

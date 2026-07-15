@@ -3,19 +3,15 @@ package fun.fengwk.kkstudio.core.agent.definition.repo.impl;
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import fun.fengwk.convention4j.common.page.Pages;
-import lombok.AllArgsConstructor;
-import org.springframework.stereotype.Repository;
-
 import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.mapper.AgentDefinitionMapper;
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.model.AgentDefinitionDO;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
-
 import java.util.List;
+import lombok.AllArgsConstructor;
+import org.springframework.stereotype.Repository;
 
-/**
- * @author fengwk
- */
+/** MySQL-backed global Agent definition repository. */
 @AllArgsConstructor
 @Repository
 public class MysqlAgentDefinitionRepository implements AgentDefinitionRepository {
@@ -23,27 +19,16 @@ public class MysqlAgentDefinitionRepository implements AgentDefinitionRepository
   private final AgentDefinitionMapper agentDefinitionMapper;
 
   @Override
-  public Page<AgentDefinition> page(long workspaceId, PageQuery pageQuery) {
+  public Page<AgentDefinition> page(PageQuery pageQuery) {
     long offset = Pages.queryOffset(pageQuery);
     int limit = Pages.queryLimit(pageQuery);
-    List<AgentDefinitionDO> results = agentDefinitionMapper.pageByWorkspaceId(workspaceId, offset, limit);
-    return Pages.page(pageQuery, results, agentDefinitionMapper.countByWorkspaceId(workspaceId))
-        .map(this::convert);
+    List<AgentDefinitionDO> results = agentDefinitionMapper.page(offset, limit);
+    return Pages.page(pageQuery, results, agentDefinitionMapper.count()).map(this::convert);
   }
 
   @Override
   public AgentDefinition getById(long id) {
     return convert(agentDefinitionMapper.getById(id));
-  }
-
-  @Override
-  public AgentDefinition getByWorkspaceIdAndId(long workspaceId, long id) {
-    return convert(agentDefinitionMapper.getByWorkspaceIdAndId(workspaceId, id));
-  }
-
-  @Override
-  public AgentDefinition getByWorkspaceIdAndName(long workspaceId, String name) {
-    return convert(agentDefinitionMapper.getByWorkspaceIdAndName(workspaceId, name));
   }
 
   @Override
@@ -62,8 +47,8 @@ public class MysqlAgentDefinitionRepository implements AgentDefinitionRepository
   }
 
   @Override
-  public boolean deleteByWorkspaceIdAndId(long workspaceId, long id) {
-    return agentDefinitionMapper.deleteByWorkspaceIdAndId(workspaceId, id) == 1;
+  public boolean deleteById(long id) {
+    return agentDefinitionMapper.deleteById(id) == 1;
   }
 
   private AgentDefinitionDO convert(AgentDefinition definition) {
@@ -72,7 +57,6 @@ public class MysqlAgentDefinitionRepository implements AgentDefinitionRepository
     }
     AgentDefinitionDO result = new AgentDefinitionDO();
     result.setId(definition.getId());
-    result.setWorkspaceId(definition.getWorkspaceId());
     result.setName(definition.getName());
     result.setDescription(definition.getDescription());
     result.setSystemPrompt(definition.getSystemPrompt());
@@ -88,7 +72,6 @@ public class MysqlAgentDefinitionRepository implements AgentDefinitionRepository
     }
     AgentDefinition result = new AgentDefinition();
     result.setId(definition.getId());
-    result.setWorkspaceId(definition.getWorkspaceId());
     result.setName(definition.getName());
     result.setDescription(definition.getDescription());
     result.setSystemPrompt(definition.getSystemPrompt());

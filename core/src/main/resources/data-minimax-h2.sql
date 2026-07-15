@@ -20,10 +20,10 @@ merge into agent_model (
 );
 
 merge into agent_definition (
-    id, workspace_id, name, description, system_prompt, model_id, variant, config_json,
+    id, name, description, system_prompt, model_id, variant, config_json,
     gmt_create, gmt_modified, version
 ) key (id) values (
-    1, 1, 'default-assistant', 'Default MiniMax assistant.',
+    1, 'default-assistant', 'Default MiniMax assistant.',
     '你是 kk-studio 的本地开发助手。', 1, 'default',
     '{"tools":[],"skills":[],"allowedSubagents":[],"executionPolicy":{"maxTurns":null,"maxDepth":null,"maxDirectSubagents":null,"maxTotalSubagents":null,"idleTimeoutMillis":null,"runTimeoutMillis":null}}',
     current_timestamp(), current_timestamp(), 0

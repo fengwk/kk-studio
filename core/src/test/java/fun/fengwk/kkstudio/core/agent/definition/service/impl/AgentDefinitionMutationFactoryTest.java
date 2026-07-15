@@ -4,16 +4,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.Test;
-
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
+import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
-
 import java.util.Arrays;
 import java.util.List;
+import org.junit.jupiter.api.Test;
 
 /** Structured definition config is normalized before it is stored. */
 public class AgentDefinitionMutationFactoryTest {
@@ -35,7 +34,7 @@ public class AgentDefinitionMutationFactoryTest {
     create.setName("agent");
     create.setConfig(config);
 
-    AgentDefinition definition = factory.newAgent(1L, 2L, create);
+    AgentDefinition definition = factory.newAgent(2L, create);
     AgentDefinitionConfigDTO stored =
         objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
 
@@ -48,7 +47,38 @@ public class AgentDefinitionMutationFactoryTest {
   }
 
   @Test
-  public void shouldRejectNonPositiveTypedPolicyValues() {
+  public void shouldDefaultAndPatchDefinitionConfiguration() throws Exception {
+    ObjectMapper objectMapper = new ObjectMapper();
+    AgentDefinitionMutationFactory factory = factory(objectMapper);
+    AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
+    create.setName("agent");
+    AgentDefinition definition = factory.newAgent(2L, create);
+    assertEquals("default", definition.getVariant());
+
+    String originalConfig = definition.getConfigJson();
+    AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
+    update.setDescription("updated");
+    factory.update(definition, update);
+    assertEquals("agent", definition.getName());
+    assertEquals(originalConfig, definition.getConfigJson());
+    assertEquals(
+        List.of(),
+        objectMapper
+            .readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class)
+            .getAllowedSubagents());
+  }
+
+  @Test
+  public void shouldRejectInvalidDefinitionConfiguration() {
+    AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
+    assertThrows(
+        IllegalArgumentException.class, () -> factory.newAgent(0L, new AgentDefinitionCreateDTO()));
+    assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, null));
+
+    AgentDefinitionCreateDTO blank = new AgentDefinitionCreateDTO();
+    blank.setName(" ");
+    assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, blank));
+
     AgentExecutionPolicyDTO policy = new AgentExecutionPolicyDTO();
     policy.setMaxTurns(0);
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
@@ -56,8 +86,7 @@ public class AgentDefinitionMutationFactoryTest {
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setName("agent");
     create.setConfig(config);
-
-    assertThrows(IllegalArgumentException.class, () -> factory(new ObjectMapper()).newAgent(1L, 2L, create));
+    assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
   }
 
   private AgentDefinitionMutationFactory factory(ObjectMapper objectMapper) {

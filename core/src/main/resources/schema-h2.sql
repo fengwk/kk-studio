@@ -40,7 +40,6 @@ create table if not exists agent_model (
 
 create table if not exists agent_definition (
     id              bigint not null,
-    workspace_id    bigint not null,
     name            varchar(64) not null,
     description     varchar(512),
     system_prompt   text,
@@ -51,7 +50,7 @@ create table if not exists agent_definition (
     gmt_modified    timestamp(3) not null default current_timestamp(),
     version         bigint not null default 0,
     primary key (id),
-    unique (workspace_id, name)
+    unique (name)
 );
 
 create table if not exists agent_session (

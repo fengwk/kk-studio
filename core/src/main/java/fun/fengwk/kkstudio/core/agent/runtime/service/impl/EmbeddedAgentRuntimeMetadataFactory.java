@@ -3,8 +3,6 @@ package fun.fengwk.kkstudio.core.agent.runtime.service.impl;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.stereotype.Component;
-
 import fun.fengwk.kkstudio.agent.AgentInfo;
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
 import fun.fengwk.kkstudio.agent.model.Variant;
@@ -12,12 +10,12 @@ import fun.fengwk.kkstudio.agent.provider.ProviderInfo;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
-
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import org.springframework.stereotype.Component;
 
-/** Builds legacy runtime metadata from the workspace-scoped configuration model. */
+/** Builds legacy runtime metadata from the global configuration model. */
 @Component
 final class EmbeddedAgentRuntimeMetadataFactory {
 

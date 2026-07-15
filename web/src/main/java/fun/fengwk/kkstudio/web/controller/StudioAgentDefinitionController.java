@@ -4,6 +4,10 @@ import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
+import fun.fengwk.kkstudio.core.agent.definition.service.AgentDefinitionService;
+import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
+import fun.fengwk.kkstudio.share.model.AgentDefinitionDTO;
+import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
 import lombok.AllArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,14 +19,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.core.agent.definition.service.AgentDefinitionService;
-import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentDefinitionDTO;
-import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
-
-/** Workspace-scoped agent definition CRUD API. */
+/** Global Agent definition CRUD API. */
 @AllArgsConstructor
-@RequestMapping("/api/workspaces/{workspaceId}/agents")
+@RequestMapping("/api/agents")
 @RestController
 public class StudioAgentDefinitionController {
 
@@ -30,29 +29,25 @@ public class StudioAgentDefinitionController {
 
   @GetMapping
   public Result<Page<AgentDefinitionDTO>> pageAgents(
-      @PathVariable long workspaceId,
       @RequestParam(value = "pageNumber", defaultValue = "1") int pageNumber,
       @RequestParam(value = "pageSize", defaultValue = "50") int pageSize) {
-    return Results.ok(agentDefinitionService.pageAgents(workspaceId, new PageQuery(pageNumber, pageSize)));
+    return Results.ok(agentDefinitionService.pageAgents(new PageQuery(pageNumber, pageSize)));
   }
 
   @PostMapping
-  public Result<AgentDefinitionDTO> createAgent(
-      @PathVariable long workspaceId, @RequestBody AgentDefinitionCreateDTO createDTO) {
-    return Results.created(agentDefinitionService.createAgent(workspaceId, createDTO));
+  public Result<AgentDefinitionDTO> createAgent(@RequestBody AgentDefinitionCreateDTO createDTO) {
+    return Results.created(agentDefinitionService.createAgent(createDTO));
   }
 
   @PutMapping("/{id}")
   public Result<AgentDefinitionDTO> updateAgent(
-      @PathVariable long workspaceId,
-      @PathVariable long id,
-      @RequestBody AgentDefinitionUpdateDTO updateDTO) {
-    return Results.ok(agentDefinitionService.updateAgent(workspaceId, id, updateDTO));
+      @PathVariable long id, @RequestBody AgentDefinitionUpdateDTO updateDTO) {
+    return Results.ok(agentDefinitionService.updateAgent(id, updateDTO));
   }
 
   @DeleteMapping("/{id}")
-  public Result<Void> deleteAgent(@PathVariable long workspaceId, @PathVariable long id) {
-    agentDefinitionService.deleteAgent(workspaceId, id);
+  public Result<Void> deleteAgent(@PathVariable long id) {
+    agentDefinitionService.deleteAgent(id);
     return Results.noContent();
   }
 }

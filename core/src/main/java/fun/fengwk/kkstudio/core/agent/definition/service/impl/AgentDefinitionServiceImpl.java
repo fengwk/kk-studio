@@ -6,54 +6,42 @@ import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.agent.definition.service.AgentDefinitionService;
 import fun.fengwk.kkstudio.core.agent.definition.service.converter.AgentDefinitionConverter;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.core.workspace.repo.WorkspaceRepository;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
-/**
- * @author fengwk
- */
+/** Global Agent definition CRUD. */
 @AllArgsConstructor
 @Service
 public class AgentDefinitionServiceImpl implements AgentDefinitionService {
 
   private final AgentDefinitionRepository agentDefinitionRepository;
-  private final WorkspaceRepository workspaceRepository;
   private final AgentDefinitionConverter agentDefinitionConverter;
   private final AgentDefinitionMutationFactory definitionMutationFactory;
   private final AgentDefinitionReferenceResolver referenceResolver;
 
   @Override
-  public Page<AgentDefinitionDTO> pageAgents(long workspaceId, PageQuery pageQuery) {
-    requireWorkspace(workspaceId);
-    return agentDefinitionRepository
-        .page(workspaceId, pageQuery)
-        .map(agentDefinitionConverter::convert);
+  public Page<AgentDefinitionDTO> pageAgents(PageQuery pageQuery) {
+    return agentDefinitionRepository.page(pageQuery).map(agentDefinitionConverter::convert);
   }
 
   @Override
-  public AgentDefinitionDTO createAgent(long workspaceId, AgentDefinitionCreateDTO createDTO) {
-    requireWorkspace(workspaceId);
+  public AgentDefinitionDTO createAgent(AgentDefinitionCreateDTO createDTO) {
     long modelId = parseModelId(createDTO == null ? null : createDTO.getModelId());
     referenceResolver.requireModel(modelId);
-    AgentDefinition definition =
-        definitionMutationFactory.newAgent(workspaceId, modelId, createDTO);
-    referenceResolver.ensureNameAvailable(workspaceId, definition.getName());
+    AgentDefinition definition = definitionMutationFactory.newAgent(modelId, createDTO);
+    referenceResolver.ensureNameAvailable(definition.getName());
     if (!agentDefinitionRepository.create(definition)) {
       throw new IllegalStateException("create agent definition failed");
     }
-    return agentDefinitionConverter.convert(
-        agentDefinitionRepository.getByWorkspaceIdAndId(workspaceId, definition.getId()));
+    return agentDefinitionConverter.convert(agentDefinitionRepository.getById(definition.getId()));
   }
 
   @Override
-  public AgentDefinitionDTO updateAgent(
-      long workspaceId, long id, AgentDefinitionUpdateDTO updateDTO) {
-    requireWorkspace(workspaceId);
-    AgentDefinition definition = referenceResolver.requireAgent(workspaceId, id);
+  public AgentDefinitionDTO updateAgent(long id, AgentDefinitionUpdateDTO updateDTO) {
+    AgentDefinition definition = referenceResolver.requireAgent(id);
     long modelId =
         updateDTO == null || updateDTO.getModelId() == null || updateDTO.getModelId().isBlank()
             ? definition.getModelId()
@@ -62,26 +50,18 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     String currentName = definition.getName();
     definitionMutationFactory.update(definition, updateDTO);
     definition.setModelId(modelId);
-    referenceResolver.ensureNameAvailable(workspaceId, currentName, definition.getName());
+    referenceResolver.ensureNameAvailable(currentName, definition.getName());
     if (!agentDefinitionRepository.updateById(definition)) {
       throw new IllegalStateException("update agent definition failed: " + id);
     }
-    return agentDefinitionConverter.convert(
-        agentDefinitionRepository.getByWorkspaceIdAndId(workspaceId, id));
+    return agentDefinitionConverter.convert(agentDefinitionRepository.getById(id));
   }
 
   @Override
-  public void deleteAgent(long workspaceId, long id) {
-    requireWorkspace(workspaceId);
-    referenceResolver.requireAgent(workspaceId, id);
-    if (!agentDefinitionRepository.deleteByWorkspaceIdAndId(workspaceId, id)) {
+  public void deleteAgent(long id) {
+    referenceResolver.requireAgent(id);
+    if (!agentDefinitionRepository.deleteById(id)) {
       throw new IllegalStateException("delete agent definition failed: " + id);
-    }
-  }
-
-  private void requireWorkspace(long workspaceId) {
-    if (workspaceId <= 0 || workspaceRepository.getById(workspaceId) == null) {
-      throw new IllegalArgumentException("workspace not found: " + workspaceId);
     }
   }
 
@@ -92,8 +72,8 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
         throw new NumberFormatException();
       }
       return id;
-    } catch (NumberFormatException e) {
-      throw new IllegalArgumentException("modelId must be a positive Snowflake ID", e);
+    } catch (NumberFormatException error) {
+      throw new IllegalArgumentException("modelId must be a positive Snowflake ID", error);
     }
   }
 }

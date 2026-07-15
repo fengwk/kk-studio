@@ -2,16 +2,13 @@ package fun.fengwk.kkstudio.core.agent.definition.service.converter;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.AllArgsConstructor;
-import org.springframework.stereotype.Component;
-
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionDTO;
+import lombok.AllArgsConstructor;
+import org.springframework.stereotype.Component;
 
-/**
- * @author fengwk
- */
+/** Converts global Agent definitions to public DTOs. */
 @AllArgsConstructor
 @Component
 public class AgentDefinitionConverter {
@@ -24,7 +21,6 @@ public class AgentDefinitionConverter {
     }
     AgentDefinitionDTO dto = new AgentDefinitionDTO();
     dto.setId(Long.toString(definition.getId()));
-    dto.setWorkspaceId(Long.toString(definition.getWorkspaceId()));
     dto.setName(definition.getName());
     dto.setDescription(definition.getDescription());
     dto.setSystemPrompt(definition.getSystemPrompt());
@@ -40,8 +36,8 @@ public class AgentDefinitionConverter {
   private AgentDefinitionConfigDTO readConfig(String configJson) {
     try {
       return objectMapper.readValue(configJson, AgentDefinitionConfigDTO.class);
-    } catch (JsonProcessingException e) {
-      throw new IllegalStateException("stored agent definition config is invalid", e);
+    } catch (JsonProcessingException error) {
+      throw new IllegalStateException("stored agent definition config is invalid", error);
     }
   }
 }

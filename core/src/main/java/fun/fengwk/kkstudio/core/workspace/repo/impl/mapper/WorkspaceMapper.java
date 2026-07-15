@@ -63,10 +63,8 @@ public interface WorkspaceMapper extends BaseMapper {
   @Delete("delete from workspace where id = #{id}")
   int deleteById(@Param("id") long id);
 
-  @Select(
-      """
-      select (select count(*) from agent_definition where workspace_id = #{id})
-           + (select count(*) from harness_session where workspace_id = #{id})
+  @Select("""
+      select count(*) from harness_session where workspace_id = #{id}
       """)
   long countResources(@Param("id") long id);
 }

@@ -11,12 +11,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
+import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
-import fun.fengwk.kkstudio.share.model.WorkspaceCreateDTO;
 import fun.fengwk.kkstudio.web.WebTestApplication;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -26,7 +26,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
-/** HTTP contract for global Provider/Model APIs, string IDs and credential redaction. */
+/** HTTP contract for global Agent resources, string IDs and credential redaction. */
 @AutoConfigureMockMvc
 @SpringBootTest(classes = WebTestApplication.class)
 public class StudioAgentResourceControllerTest {
@@ -35,9 +35,8 @@ public class StudioAgentResourceControllerTest {
   @Autowired private ObjectMapper objectMapper;
 
   @Test
-  public void shouldUseGlobalProviderAndModelRoutes() throws Exception {
+  public void shouldUseGlobalAgentResourceRoutes() throws Exception {
     String suffix = Long.toString(System.nanoTime());
-    String workspaceId = createWorkspace("web-workspace-" + suffix);
 
     AgentProviderCreateDTO provider = new AgentProviderCreateDTO();
     provider.setName("provider-" + suffix);
@@ -108,16 +107,31 @@ public class StudioAgentResourceControllerTest {
     agent.setName("agent-" + suffix);
     agent.setModelId(modelId);
     agent.setConfig(config);
+    String agentId =
+        id(
+            mockMvc
+                .perform(
+                    post("/api/agents")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(agent)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.id").isString())
+                .andExpect(jsonPath("$.data.workspaceId").doesNotExist())
+                .andExpect(jsonPath("$.data.modelId").value(modelId))
+                .andExpect(jsonPath("$.data.config.allowedSubagents[0]").value("reviewer"))
+                .andExpect(jsonPath("$.data.config.executionPolicy.maxTurns").value(8))
+                .andReturn()
+                .getResponse()
+                .getContentAsString());
+    AgentDefinitionUpdateDTO agentUpdate = new AgentDefinitionUpdateDTO();
+    agentUpdate.setDescription("updated agent");
     mockMvc
         .perform(
-            post("/api/workspaces/{workspaceId}/agents", workspaceId)
+            put("/api/agents/{id}", agentId)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(agent)))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.id").isString())
-        .andExpect(jsonPath("$.data.modelId").value(modelId))
-        .andExpect(jsonPath("$.data.config.allowedSubagents[0]").value("reviewer"))
-        .andExpect(jsonPath("$.data.config.executionPolicy.maxTurns").value(8));
+                .content(objectMapper.writeValueAsString(agentUpdate)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.description").value("updated agent"));
 
     AgentProviderCreateDTO disposableProvider = new AgentProviderCreateDTO();
     disposableProvider.setName("disposable-provider-" + suffix);
@@ -163,25 +177,11 @@ public class StudioAgentResourceControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.results[0].credential").doesNotExist());
     mockMvc
-        .perform(get("/api/workspaces/{workspaceId}/providers", workspaceId))
-        .andExpect(status().isNotFound());
-  }
-
-  private String createWorkspace(String name) throws Exception {
-    WorkspaceCreateDTO workspace = new WorkspaceCreateDTO();
-    workspace.setName(name);
-    String response =
-        mockMvc
-            .perform(
-                post("/api/workspaces")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(workspace)))
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.id").isString())
-            .andReturn()
-            .getResponse()
-            .getContentAsString();
-    return id(response);
+        .perform(get("/api/agents"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.results[0].modelId").isString());
+    mockMvc.perform(delete("/api/agents/{id}", agentId)).andExpect(status().isNoContent());
+    mockMvc.perform(get("/api/workspaces/1/agents")).andExpect(status().isNotFound());
   }
 
   private String id(String response) throws Exception {

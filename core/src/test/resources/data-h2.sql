@@ -22,10 +22,10 @@ merge into agent_model (
 );
 
 merge into agent_definition (
-    id, workspace_id, name, description, system_prompt, model_id, variant, config_json,
+    id, name, description, system_prompt, model_id, variant, config_json,
     gmt_create, gmt_modified, version
 ) key (id) values (
-    1, 1, 'default-assistant', 'Acceptance stub agent for local studio pages.',
+    1, 'default-assistant', 'Acceptance stub agent for local studio pages.',
     'You are the local acceptance stub assistant for kk-studio.', 1, 'default',
     '{"tools":[],"skills":[],"allowedSubagents":[],"executionPolicy":{"maxTurns":null,"maxDepth":null,"maxDirectSubagents":null,"maxTotalSubagents":null,"idleTimeoutMillis":null,"runTimeoutMillis":null}}',
     current_timestamp(), current_timestamp(), 0

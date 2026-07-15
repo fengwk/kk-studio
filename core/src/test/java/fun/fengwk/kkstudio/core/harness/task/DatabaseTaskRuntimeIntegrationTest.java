@@ -161,7 +161,7 @@ class DatabaseTaskRuntimeIntegrationTest {
                 NOW));
     assertChildStateAbsent();
 
-    jdbc.update("delete from agent_definition where workspace_id = ? and name = ?", 1L, "Child");
+    jdbc.update("delete from agent_definition where name = ?", "Child");
     long unknownInvocation = denied.newInvocation();
     assertThrows(
         IllegalArgumentException.class,
@@ -536,6 +536,7 @@ class DatabaseTaskRuntimeIntegrationTest {
         RunEventType.PERMISSION_REQUESTED.value(),
         "{\"permission\":true}",
         NOW.plusSeconds(1));
+    jdbc.update("delete from agent_definition");
     Fixture other = fixtureInWorkspace(2L, 2L);
     TaskInspection otherChild = runtime.startOrResume(other.context(), command(null), NOW);
     List<RootActivity> activity = rootActivityStore.list(1, fixture.rootSessionId, 0, 20);
@@ -662,8 +663,8 @@ class DatabaseTaskRuntimeIntegrationTest {
         "workspace-" + workspaceId,
         timestamp(NOW),
         timestamp(NOW));
-    insertAgent(parentAgentId, workspaceId, "Parent", config(parentPolicy, List.of("Child")));
-    insertAgent(childAgentId, workspaceId, "Child", config(childPolicy, List.of("Child")));
+    insertAgent(parentAgentId, "Parent", config(parentPolicy, List.of("Child")));
+    insertAgent(childAgentId, "Child", config(childPolicy, List.of("Child")));
     long parentSessionId = rootId;
     long snapshotId = ids.newSessionEntryId();
     long parentRunId = ids.newRunId();
@@ -690,13 +691,12 @@ class DatabaseTaskRuntimeIntegrationTest {
         rootId, childAgentId, parentSessionId, snapshotId, parentRunId, invocationId);
   }
 
-  private void insertAgent(long id, long workspaceId, String name, String config) {
+  private void insertAgent(long id, String name, String config) {
     jdbc.update(
-        "insert into agent_definition (id, workspace_id, name, description, system_prompt,"
-            + " model_id, variant, config_json, gmt_create, gmt_modified, version) values (?, ?, ?,"
-            + " null, 'system', 1, 'default', ?, ?, ?, 0)",
+        "insert into agent_definition (id, name, description, system_prompt, model_id, variant,"
+            + " config_json, gmt_create, gmt_modified, version) values (?, ?, null, 'system', 1,"
+            + " 'default', ?, ?, ?, 0)",
         id,
-        workspaceId,
         name,
         config,
         timestamp(NOW),

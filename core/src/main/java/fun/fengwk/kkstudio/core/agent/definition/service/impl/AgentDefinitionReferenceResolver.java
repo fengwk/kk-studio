@@ -7,7 +7,7 @@ import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
-/** Resolves workspace-scoped definition and model references. */
+/** Resolves global Agent definition and model references. */
 @AllArgsConstructor
 @Component
 final class AgentDefinitionReferenceResolver {
@@ -15,10 +15,10 @@ final class AgentDefinitionReferenceResolver {
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentModelRepository agentModelRepository;
 
-  AgentDefinition requireAgent(long workspaceId, long id) {
-    AgentDefinition definition = agentDefinitionRepository.getByWorkspaceIdAndId(workspaceId, id);
+  AgentDefinition requireAgent(long id) {
+    AgentDefinition definition = agentDefinitionRepository.getById(id);
     if (definition == null) {
-      throw new IllegalArgumentException("agent definition not found in workspace: " + id);
+      throw new IllegalArgumentException("agent definition not found: " + id);
     }
     return definition;
   }
@@ -31,16 +31,15 @@ final class AgentDefinitionReferenceResolver {
     return model;
   }
 
-  void ensureNameAvailable(long workspaceId, String name) {
-    if (agentDefinitionRepository.getByWorkspaceIdAndName(workspaceId, name) != null) {
-      throw new IllegalArgumentException(
-          "agent definition name already exists in workspace: " + name);
+  void ensureNameAvailable(String name) {
+    if (agentDefinitionRepository.getByName(name) != null) {
+      throw new IllegalArgumentException("agent definition name already exists: " + name);
     }
   }
 
-  void ensureNameAvailable(long workspaceId, String currentName, String nextName) {
+  void ensureNameAvailable(String currentName, String nextName) {
     if (!currentName.equals(nextName)) {
-      ensureNameAvailable(workspaceId, nextName);
+      ensureNameAvailable(nextName);
     }
   }
 }

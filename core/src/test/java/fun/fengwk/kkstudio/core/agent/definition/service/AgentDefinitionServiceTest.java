@@ -2,63 +2,66 @@ package fun.fengwk.kkstudio.core.agent.definition.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import fun.fengwk.convention4j.api.page.PageQuery;
 import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.agent.model.service.AgentModelService;
 import fun.fengwk.kkstudio.core.agent.provider.service.AgentProviderService;
-import fun.fengwk.kkstudio.core.workspace.service.WorkspaceService;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionDTO;
+import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
-import fun.fengwk.kkstudio.share.model.WorkspaceCreateDTO;
-import fun.fengwk.kkstudio.share.model.WorkspaceDTO;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
-/** Agent definitions remain scoped temporarily while their model references are global. */
+/** Agent definitions and their model references are global. */
 @SpringBootTest(classes = CoreTestApplication.class)
 public class AgentDefinitionServiceTest {
 
-  @Autowired private WorkspaceService workspaceService;
   @Autowired private AgentProviderService agentProviderService;
   @Autowired private AgentModelService agentModelService;
   @Autowired private AgentDefinitionService agentDefinitionService;
 
   @Test
-  public void shouldPersistStructuredConfigWithGlobalModelReference() {
+  public void shouldPersistGlobalStructuredDefinition() {
     String suffix = Long.toString(System.nanoTime());
-    WorkspaceDTO workspace = workspace("agent-workspace-" + suffix);
-    long workspaceId = id(workspace.getId());
     AgentProviderDTO provider = provider("agent-provider-" + suffix);
     AgentModelDTO model = model(provider.getId(), "agent-model-" + suffix);
+    String name = "agent-definition-" + suffix;
 
-    AgentDefinitionDTO definition =
-        agentDefinitionService.createAgent(
-            workspaceId, agent(model.getId(), "agent-definition-" + suffix));
+    AgentDefinitionDTO definition = agentDefinitionService.createAgent(agent(model.getId(), name));
     assertEquals(List.of("browser"), definition.getConfig().getTools());
     assertEquals(List.of("java"), definition.getConfig().getSkills());
     assertEquals(List.of("reviewer"), definition.getConfig().getAllowedSubagents());
     assertEquals(8, definition.getConfig().getExecutionPolicy().getMaxTurns());
     assertThrows(
+        IllegalArgumentException.class,
+        () -> agentDefinitionService.createAgent(agent(model.getId(), name)));
+    assertThrows(
         IllegalStateException.class, () -> agentModelService.deleteModel(id(model.getId())));
 
-    agentDefinitionService.deleteAgent(workspaceId, id(definition.getId()));
+    AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
+    update.setDescription("updated");
+    AgentDefinitionDTO updated = agentDefinitionService.updateAgent(id(definition.getId()), update);
+    assertEquals("updated", updated.getDescription());
+    assertTrue(
+        agentDefinitionService.pageAgents(new PageQuery(1, 100)).getResults().stream()
+            .anyMatch(candidate -> candidate.getId().equals(definition.getId())));
+
+    agentDefinitionService.deleteAgent(id(definition.getId()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> agentDefinitionService.deleteAgent(id(definition.getId())));
     agentModelService.deleteModel(id(model.getId()));
     agentProviderService.deleteProvider(id(provider.getId()));
-    workspaceService.deleteWorkspace(workspaceId);
-  }
-
-  private WorkspaceDTO workspace(String name) {
-    WorkspaceCreateDTO dto = new WorkspaceCreateDTO();
-    dto.setName(name);
-    return workspaceService.createWorkspace(dto);
   }
 
   private AgentProviderDTO provider(String name) {

@@ -4,15 +4,13 @@ import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextAgentI
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.stereotype.Component;
-
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
-
 import java.util.List;
+import org.springframework.stereotype.Component;
 
 /**
  * Normalizes the persisted agent definition and serializes its structured execution configuration.
@@ -32,21 +30,22 @@ final class AgentDefinitionMutationFactory {
     this.objectMapper = objectMapper;
   }
 
-  AgentDefinition newAgent(long workspaceId, long modelId, AgentDefinitionEditablePropertiesDTO properties) {
-    if (workspaceId <= 0 || modelId <= 0) {
-      throw new IllegalArgumentException("workspaceId and modelId must be positive");
+  AgentDefinition newAgent(long modelId, AgentDefinitionEditablePropertiesDTO properties) {
+    if (modelId <= 0) {
+      throw new IllegalArgumentException("modelId must be positive");
     }
     Mutation mutation = newMutation(properties, null, null, true);
     AgentDefinition definition = new AgentDefinition();
     definition.setId(nextAgentId());
-    definition.setWorkspaceId(workspaceId);
     definition.setModelId(modelId);
     apply(definition, mutation);
     return definition;
   }
 
   void update(AgentDefinition definition, AgentDefinitionEditablePropertiesDTO properties) {
-    apply(definition, newMutation(properties, definition.getName(), definition.getConfigJson(), false));
+    apply(
+        definition,
+        newMutation(properties, definition.getName(), definition.getConfigJson(), false));
   }
 
   private void apply(AgentDefinition definition, Mutation mutation) {
@@ -70,7 +69,8 @@ final class AgentDefinitionMutationFactory {
       throw new IllegalArgumentException("agent name must not be blank");
     }
     AgentDefinitionConfigDTO config = properties.getConfig();
-    String configJson = config == null && !creating ? existingConfigJson : writeConfig(normalizeConfig(config));
+    String configJson =
+        config == null && !creating ? existingConfigJson : writeConfig(normalizeConfig(config));
     return new Mutation(
         name,
         editableSupport.trimToNull(properties.getDescription()),

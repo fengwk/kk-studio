@@ -143,11 +143,9 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     if (command.sessionId() != null) {
       return resumeChild(context, command, parentRun, parent, root, timestamp);
     }
-    AgentDefinitionDO target =
-        agentMapper.getByWorkspaceIdAndName(parent.getWorkspaceId(), command.subagentType());
+    AgentDefinitionDO target = agentMapper.getByName(command.subagentType());
     if (target == null) {
-      throw new IllegalArgumentException(
-          "unknown subagent in workspace: " + command.subagentType());
+      throw new IllegalArgumentException("unknown subagent: " + command.subagentType());
     }
     return createChild(context, command, parentRun, parent, root, target, timestamp);
   }
