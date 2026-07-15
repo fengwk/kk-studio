@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.ToolCompleted;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
 import fun.fengwk.kkstudio.harness.runtime.tool.AfterToolCallContext;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
@@ -45,6 +47,7 @@ public final class CloudToolWorker {
   private final ToolWorkerConfig config;
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
+  private final HarnessLifecycleObservers lifecycleObservers;
   private final ConcurrentHashMap<Long, Execution> executions = new ConcurrentHashMap<>();
 
   public CloudToolWorker(
@@ -56,6 +59,28 @@ public final class CloudToolWorker {
       ToolWorkerConfig config,
       Clock clock,
       ScheduledExecutorService scheduler) {
+    this(
+        store,
+        transactions,
+        registry,
+        interceptorChain,
+        artifactStore,
+        config,
+        clock,
+        scheduler,
+        new HarnessLifecycleObservers(List.of()));
+  }
+
+  public CloudToolWorker(
+      ToolInvocationWorkerStore store,
+      ToolInvocationTransactions transactions,
+      ToolRegistry registry,
+      ToolInterceptorChain interceptorChain,
+      ArtifactStore artifactStore,
+      ToolWorkerConfig config,
+      Clock clock,
+      ScheduledExecutorService scheduler,
+      HarnessLifecycleObservers lifecycleObservers) {
     this.store = Objects.requireNonNull(store, "store");
     this.transactions = Objects.requireNonNull(transactions, "transactions");
     this.registry = Objects.requireNonNull(registry, "registry");
@@ -64,6 +89,7 @@ public final class CloudToolWorker {
     this.config = Objects.requireNonNull(config, "config");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+    this.lifecycleObservers = Objects.requireNonNull(lifecycleObservers, "lifecycleObservers");
   }
 
   /**
@@ -166,13 +192,21 @@ public final class CloudToolWorker {
         message);
   }
 
-  private void terminate(
+  private boolean terminate(
       ClaimedToolInvocation claimed,
       ToolInvocationStatus status,
       ToolResult result,
       String errorMessage) {
-    transactions.terminate(claimed, status, externalize(result), errorMessage, clock.instant());
-    transactions.coordinateReadyRuns(clock.instant());
+    Instant now = clock.instant();
+    if (!transactions.terminate(claimed, status, externalize(result), errorMessage, now)) {
+      return false;
+    }
+    // terminal CAS 已落库，先发 lifecycle observation，再尝试 coordinate；coordinate 抛错也不影响已持久观察。
+    lifecycleObservers.publish(
+        new ToolCompleted(
+            claimed.invocation().id(), claimed.invocation().runId(), status, errorMessage, now));
+    transactions.coordinateReadyRuns(now);
+    return true;
   }
 
   private ToolResult externalize(ToolResult result) {
@@ -384,15 +418,7 @@ public final class CloudToolWorker {
               ToolResult.error(claimed.invocation().toolCallId(), terminalErrorMessage);
         }
         terminalPersisted =
-            transactions.terminate(
-                claimed,
-                terminalStatus,
-                externalize(terminalResult),
-                terminalErrorMessage,
-                clock.instant());
-        if (terminalPersisted) {
-          transactions.coordinateReadyRuns(clock.instant());
-        }
+            terminate(claimed, terminalStatus, terminalResult, terminalErrorMessage);
       } finally {
         if (terminalStatus != ToolInvocationStatus.SUCCEEDED || !terminalPersisted) {
           cancelHandle();

@@ -7,6 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.ToolCompleted;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.tool.AfterToolCallInterceptor;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
@@ -81,6 +84,7 @@ class CloudToolWorkerTest {
     assertEquals("complete", text(fixture.transactions.result));
     assertTrue(fixture.transactions.coordinations >= 1);
     assertFalse(fixture.tool.handle.cancelled);
+    assertToolCompletion(fixture, ToolInvocationStatus.SUCCEEDED, null);
   }
 
   /** 最终结果在 durable terminate 前经过 after hook，且 hook 收到冻结 Tool 的准确 binding/call。 */
@@ -113,6 +117,7 @@ class CloudToolWorkerTest {
     assertEquals(ToolInvocationStatus.SUCCEEDED, fixture.transactions.status);
     assertEquals("hooked", text(fixture.transactions.result));
     assertEquals(1, fixture.transactions.terminateCalls);
+    assertToolCompletion(fixture, ToolInvocationStatus.SUCCEEDED, null);
   }
 
   /** after hook 的抛错、null 与 toolCallId 篡改都必须吞并为一次 durable FAILED，而非逃出 callback。 */
@@ -170,6 +175,7 @@ class CloudToolWorkerTest {
     assertEquals(1, fixture.transactions.terminateCalls);
     assertEquals(ToolInvocationStatus.SUCCEEDED, fixture.transactions.status);
     assertTrue(fixture.tool.handle.cancelled);
+    assertTrue(toolCompletions(fixture).isEmpty());
   }
 
   /**
@@ -203,6 +209,66 @@ class CloudToolWorkerTest {
     assertEquals(0, fixture.tool.executions);
     assertEquals(ToolInvocationStatus.FAILED, fixture.transactions.status);
     assertTrue(text(fixture.transactions.result).contains("unavailable"));
+    assertToolCompletion(
+        fixture, ToolInvocationStatus.FAILED, "Frozen tool tool@1 is unavailable.");
+  }
+
+  /** pre-execution terminal CAS 丢失时既不发布 observation，也不触发 terminal coordination。 */
+  @Test
+  void doesNotObserveLostPreExecutionTerminalCas() throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+    fixture.registry = (name, version) -> Optional.empty();
+    fixture.transactions.terminalResult = false;
+    fixture.rebuildWorker();
+
+    fixture.worker.executeNext("worker-a");
+
+    assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
+    assertEquals(1, fixture.transactions.coordinations);
+    assertTrue(toolCompletions(fixture).isEmpty());
+  }
+
+  /** observer RuntimeException 由真实 Worker dispatcher 隔离，不改变 terminal CAS 与 coordination。 */
+  @Test
+  void isolatesObserverFailureFromToolTermination() throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+    fixture.lifecycleObservers =
+        new HarnessLifecycleObservers(
+            List.of(
+                observation -> {
+                  throw new IllegalStateException("observer failed");
+                },
+                fixture.observations::add));
+    fixture.rebuildWorker();
+
+    fixture.worker.executeNext("worker-a");
+    fixture.tool.listener.onComplete(result("complete"));
+
+    assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
+    assertEquals(ToolInvocationStatus.SUCCEEDED, fixture.transactions.status);
+    assertEquals(2, fixture.transactions.coordinations);
+    assertToolCompletion(fixture, ToolInvocationStatus.SUCCEEDED, null);
+  }
+
+  /** CAS=true 后 coordinate 抛错：Tool observation 已经发布，不能因 coordination 失败而漏发。 */
+  @Test
+  void publishesToolCompletionBeforeCoordinateThrows() throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+    fixture.transactions.coordinateFailure = true;
+    fixture.rebuildWorker();
+
+    fixture.worker.executeNext("worker-a");
+
+    try {
+      fixture.tool.listener.onComplete(result("complete"));
+    } catch (IllegalStateException expected) {
+      // coordinate 抛错会让 listener 回调传出；生产侧由 Spring 事务或 wrapper 隔离。
+    }
+
+    assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
+    assertEquals(ToolInvocationStatus.SUCCEEDED, fixture.transactions.status);
+    assertTrue(fixture.transactions.coordinations >= 2);
+    assertToolCompletion(fixture, ToolInvocationStatus.SUCCEEDED, null);
   }
 
   /** Reclaimed non-idempotent work becomes UNKNOWN instead of executing a second side effect. */
@@ -216,6 +282,8 @@ class CloudToolWorkerTest {
     assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
     assertEquals(0, fixture.tool.executions);
     assertEquals(ToolInvocationStatus.UNKNOWN, fixture.transactions.status);
+    assertToolCompletion(
+        fixture, ToolInvocationStatus.UNKNOWN, "non-idempotent invocation lease expired");
   }
 
   /** Deadline owns the terminal race and asks the best-effort in-memory handle to cancel. */
@@ -294,6 +362,7 @@ class CloudToolWorkerTest {
     assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
     assertEquals(0, fixture.tool.executions);
     assertEquals(ToolInvocationStatus.CANCELLED, fixture.transactions.status);
+    assertToolCompletion(fixture, ToolInvocationStatus.CANCELLED, "Tool execution cancelled.");
   }
 
   /**
@@ -310,6 +379,7 @@ class CloudToolWorkerTest {
     assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
     assertEquals(1, fixture.transactions.coordinations);
     assertTrue(fixture.tool.handle.cancelled);
+    assertTrue(toolCompletions(fixture).isEmpty());
   }
 
   /** Environment invocations are never dispatched by the Cloud/Control worker. */
@@ -323,6 +393,8 @@ class CloudToolWorkerTest {
     assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
     assertEquals(0, fixture.tool.executions);
     assertEquals(ToolInvocationStatus.FAILED, fixture.transactions.status);
+    assertToolCompletion(
+        fixture, ToolInvocationStatus.FAILED, "Tool worker cannot execute target ENVIRONMENT.");
   }
 
   /** A Tool error callback is terminalized asynchronously with its diagnostic message. */
@@ -336,6 +408,7 @@ class CloudToolWorkerTest {
     assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
     assertEquals(ToolInvocationStatus.FAILED, fixture.transactions.status);
     assertEquals("boom", text(fixture.transactions.result));
+    assertToolCompletion(fixture, ToolInvocationStatus.FAILED, "boom");
   }
 
   /** Large output retains a bounded semantic preview and a complete global artifact. */
@@ -403,6 +476,25 @@ class CloudToolWorkerTest {
     return results.stream().map(CloudToolWorkerTest::text).toList();
   }
 
+  private static void assertToolCompletion(
+      Fixture fixture, ToolInvocationStatus status, String errorMessage) {
+    List<ToolCompleted> completions = toolCompletions(fixture);
+    assertEquals(1, completions.size());
+    ToolCompleted completed = completions.get(0);
+    assertEquals(1L, completed.invocationId());
+    assertEquals(2L, completed.runId());
+    assertEquals(status, completed.status());
+    assertEquals(errorMessage, completed.error());
+    assertEquals(fixture.transactions.terminalAt, completed.occurredAt());
+  }
+
+  private static List<ToolCompleted> toolCompletions(Fixture fixture) {
+    return fixture.observations.stream()
+        .filter(ToolCompleted.class::isInstance)
+        .map(ToolCompleted.class::cast)
+        .toList();
+  }
+
   private void assertAfterFailure(AfterToolCallInterceptor interceptor) throws Exception {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
     fixture.interceptorChain = new ToolInterceptorChain(List.of(), List.of(interceptor));
@@ -418,6 +510,7 @@ class CloudToolWorkerTest {
     assertTrue(text(fixture.transactions.result).contains("afterToolCall"));
     assertTrue(fixture.transactions.errorMessage.contains("afterToolCall"));
     assertTrue(fixture.tool.handle.cancelled);
+    assertToolCompletion(fixture, ToolInvocationStatus.FAILED, fixture.transactions.errorMessage);
   }
 
   private static void await(CountDownLatch latch) {
@@ -517,7 +610,10 @@ class CloudToolWorkerTest {
     private final RecordingTransactions transactions = new RecordingTransactions();
     private final RecordingTool tool;
     private final MemoryArtifacts artifacts = new MemoryArtifacts();
+    private final List<HarnessLifecycleObservation> observations = new ArrayList<>();
     private ToolInterceptorChain interceptorChain = new ToolInterceptorChain(List.of(), List.of());
+    private HarnessLifecycleObservers lifecycleObservers =
+        new HarnessLifecycleObservers(List.of(observations::add));
     private ToolRegistry registry;
     private CloudToolWorker worker;
 
@@ -543,7 +639,8 @@ class CloudToolWorkerTest {
               artifacts,
               config,
               Clock.fixed(NOW, ZoneOffset.UTC),
-              scheduler);
+              scheduler,
+              lifecycleObservers);
     }
   }
 
@@ -634,12 +731,14 @@ class CloudToolWorkerTest {
     private final List<List<ToolResult>> partials = new ArrayList<>();
     private boolean terminalResult = true;
     private boolean partialFailure;
+    private boolean coordinateFailure;
     private int started;
     private int coordinations;
     private int terminateCalls;
     private ToolInvocationStatus status;
     private ToolResult result;
     private String errorMessage;
+    private Instant terminalAt;
 
     @Override
     public boolean start(ClaimedToolInvocation claimed, Instant now) {
@@ -668,6 +767,7 @@ class CloudToolWorkerTest {
       this.status = status;
       this.result = result;
       this.errorMessage = errorMessage;
+      terminalAt = now;
       terminal.countDown();
       return terminalResult;
     }
@@ -675,6 +775,9 @@ class CloudToolWorkerTest {
     @Override
     public int coordinateReadyRuns(Instant now) {
       coordinations++;
+      if (coordinateFailure && coordinations >= 2) {
+        throw new IllegalStateException("coordinate queue unavailable");
+      }
       return 0;
     }
   }

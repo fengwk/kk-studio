@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import fun.fengwk.kkstudio.harness.agent.extension.ProviderRequestInterceptorChain;
 import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
@@ -26,7 +27,14 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.context.DefaultContextTransform;
 import fun.fengwk.kkstudio.harness.runtime.context.SessionContextBuilder;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.AssistantCompleted;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.CompactionCompleted;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.RunTerminated;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.TurnStarted;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshotEntryPayload;
@@ -37,6 +45,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryStore;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionStore;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -62,6 +71,297 @@ import org.junit.jupiter.api.Test;
 
 class AgentTurnWorkerTest {
   private static final Instant START = Instant.parse("2026-01-01T00:00:00Z");
+
+  /** 真实 Worker 必须把 Host Provider chain 交给 Turn Engine，并在 TURN_STARTED 落库后观察同一时间。 */
+  @Test
+  void invokesProviderHookAndPublishesDurableTurnStart() {
+    Fixture fixture = new Fixture();
+    RecordingProvider provider = RecordingProvider.complete(response("answer", List.of()));
+    fixture.providers.add(provider);
+    boolean[] intercepted = {false};
+    fixture.providerRequestInterceptors =
+        new ProviderRequestInterceptorChain(
+            List.of(
+                request -> {
+                  intercepted[0] = true;
+                  return new ProviderRequest(
+                      request.model(),
+                      new ModelVariant("hooked", null, null, null, null, List.of()),
+                      request.messages(),
+                      request.tools());
+                }));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertTrue(intercepted[0]);
+    assertEquals("hooked", provider.request.variant().name());
+    TurnStarted observation = onlyObservation(fixture, TurnStarted.class);
+    RunEvent event =
+        fixture.store.events.stream()
+            .filter(candidate -> candidate.type() == RunEventType.TURN_STARTED)
+            .findFirst()
+            .orElseThrow();
+    assertEquals(event.createdAt(), observation.occurredAt());
+    assertEquals(20L, observation.runId());
+    assertEquals(1L, observation.sessionId());
+    assertEquals(1, observation.attempt());
+    assertEquals(0, observation.turnIndex());
+  }
+
+  /** 自然 SUCCEEDED 路径：Assistant + Run 按序成对发布，复用 complete CAS now 与真实 stopReason。 */
+  @Test
+  void publishesAssistantCompletionOnlyAfterCompleteSucceeds() {
+    Fixture succeeded = new Fixture();
+    succeeded.providers.add(RecordingProvider.complete(response("answer", List.of())));
+
+    succeeded.worker().executeNext("worker-a").orElseThrow();
+
+    AssistantCompleted completed = onlyObservation(succeeded, AssistantCompleted.class);
+    assertEquals(0, completed.toolCallCount());
+    assertEquals(ProviderStopReason.COMPLETED, completed.stopReason());
+    assertAssistantThenTerminal(succeeded, succeeded.store.completeAt);
+
+    Fixture lostOwnership = new Fixture();
+    lostOwnership.store.completeResult = false;
+    lostOwnership.providers.add(RecordingProvider.complete(response("ignored", List.of())));
+
+    lostOwnership.worker().executeNext("worker-b").orElseThrow();
+
+    assertTrue(observations(lostOwnership, AssistantCompleted.class).isEmpty());
+    assertTrue(observations(lostOwnership, RunTerminated.class).isEmpty());
+    assertEquals(RunStatus.RUNNING, lostOwnership.store.current.status());
+  }
+
+  /** complete cancel-wins：DB 返回 true 但不持久 Assistant，真实 status 是 CANCELLED；只发 RunTerminated。 */
+  @Test
+  void publishesRunTerminalOnlyWhenCompleteLosesToCancelWins() {
+    Fixture fixture = new Fixture();
+    fixture.store.cancelOnCompleteAt = START.plusSeconds(1);
+    fixture.providers.add(RecordingProvider.complete(response("ignored", List.of())));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.CANCELLED, fixture.store.current.status());
+    assertTrue(fixture.store.sessionMessages.isEmpty());
+    assertCancelWinsRunTermination(fixture, fixture.store.completeAt);
+  }
+
+  /** control requeue QUEUED：Assistant 持久化但 Run 仍 active；只发 Assistant，不发 RunTerminated。 */
+  @Test
+  void publishesAssistantOnlyWhenCompleteRequeuesForControl() {
+    Fixture fixture = new Fixture();
+    fixture.store.pendingSteer = true;
+    fixture.providers.add(RecordingProvider.complete(response("answer", List.of())));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.QUEUED, fixture.store.current.status());
+    assertEquals(1, fixture.store.sessionMessages.size());
+    assertAssistantOnlyAfterControlRequeue(fixture, fixture.store.completeAt);
+  }
+
+  /** Tool barrier observation 同样只在 prepare CAS 成功后发布，并携带真实 Tool stopReason/count。 */
+  @Test
+  void publishesAssistantCompletionOnlyAfterToolPreparationSucceeds() {
+    Fixture succeeded = toolFixture();
+
+    succeeded.worker().executeNext("worker-a").orElseThrow();
+
+    AssistantCompleted completed = onlyObservation(succeeded, AssistantCompleted.class);
+    assertEquals(1, completed.toolCallCount());
+    assertEquals(ProviderStopReason.TOOL_CALLS, completed.stopReason());
+    assertAssistantOnlyAfterPreparation(succeeded, succeeded.store.prepareAt);
+
+    Fixture lostOwnership = toolFixture();
+    lostOwnership.toolPreparation =
+        (run, assistant, calls, bindings, workdir, environmentRoot, events, now) -> false;
+
+    lostOwnership.worker().executeNext("worker-b").orElseThrow();
+
+    assertTrue(observations(lostOwnership, AssistantCompleted.class).isEmpty());
+    assertEquals(RunStatus.RUNNING, lostOwnership.store.current.status());
+  }
+
+  /** prepare cancel-wins：DB 返回 true 但不持久 Assistant、不进入 WAITING_TOOLS；只发 RunTerminated。 */
+  @Test
+  void publishesRunTerminalOnlyWhenPrepareLosesToCancelWins() {
+    Fixture fixture = toolFixture();
+    fixture.store.cancelOnPrepareAt = START.plusSeconds(1);
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.CANCELLED, fixture.store.current.status());
+    assertTrue(fixture.store.sessionMessages.isEmpty());
+    assertCancelWinsRunTermination(fixture, fixture.store.prepareAt);
+  }
+
+  /** Compaction observation 只在 compactAndRequeue 成功后发布并复用事务时间。 */
+  @Test
+  void publishesCompactionOnlyAfterDurableRequeue() {
+    Fixture succeeded = overflowFixture();
+
+    succeeded.worker().executeNext("worker-a").orElseThrow();
+
+    CompactionCompleted completed = onlyObservation(succeeded, CompactionCompleted.class);
+    assertEquals(10L, completed.firstKeptEntryId());
+    assertEquals(succeeded.store.compactAt, completed.occurredAt());
+
+    Fixture lostOwnership = overflowFixture();
+    lostOwnership.store.compactResult = false;
+
+    lostOwnership.worker().executeNext("worker-b").orElseThrow();
+
+    assertTrue(observations(lostOwnership, CompactionCompleted.class).isEmpty());
+    assertEquals(RunStatus.RUNNING, lostOwnership.store.current.status());
+  }
+
+  /** terminate=false 不能伪造 Run terminal observation。 */
+  @Test
+  void doesNotPublishRunTerminationWhenTerminalCasIsLost() {
+    Fixture fixture = new Fixture();
+    fixture.store.terminateResult = false;
+    fixture.providers.add(
+        RecordingProvider.fail(
+            new ProviderException(ProviderErrorKind.AUTHENTICATION, "invalid credential")));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertTrue(observations(fixture, RunTerminated.class).isEmpty());
+    assertEquals(RunStatus.RUNNING, fixture.store.current.status());
+  }
+
+  /** terminal 已落库后 reload 缺失或异常只跳过 observation，不能破坏 durable FAILED。 */
+  @Test
+  void keepsDurableTerminationWhenReloadCannotObserveIt() {
+    Fixture missing = terminalFailureFixture();
+    missing.store.findMissing = true;
+
+    missing.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.FAILED, missing.store.current.status());
+    assertTrue(observations(missing, RunTerminated.class).isEmpty());
+
+    Fixture failedReload = terminalFailureFixture();
+    failedReload.store.findFailure = new IllegalStateException("database read unavailable");
+
+    failedReload.worker().executeNext("worker-b").orElseThrow();
+
+    assertEquals(RunStatus.FAILED, failedReload.store.current.status());
+    assertTrue(observations(failedReload, RunTerminated.class).isEmpty());
+  }
+
+  /** complete CAS 成功后 reload 缺失只跳过 observation，已持久 SUCCEEDED 不能回滚。 */
+  @Test
+  void keepsDurableCompletionWhenReloadReturnsMissing() {
+    Fixture fixture = new Fixture();
+    fixture.store.findMissing = true;
+    fixture.providers.add(RecordingProvider.complete(response("answer", List.of())));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.SUCCEEDED, fixture.store.current.status());
+    assertTrue(observations(fixture, AssistantCompleted.class).isEmpty());
+    assertTrue(observations(fixture, RunTerminated.class).isEmpty());
+  }
+
+  /** complete CAS 成功后 reload 抛错只跳过 observation，已持久 SUCCEEDED 不能回滚。 */
+  @Test
+  void keepsDurableCompletionWhenReloadThrows() {
+    Fixture fixture = new Fixture();
+    fixture.store.findFailure = new IllegalStateException("database read unavailable");
+    fixture.providers.add(RecordingProvider.complete(response("answer", List.of())));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.SUCCEEDED, fixture.store.current.status());
+    assertTrue(observations(fixture, AssistantCompleted.class).isEmpty());
+    assertTrue(observations(fixture, RunTerminated.class).isEmpty());
+  }
+
+  /** prepare CAS 成功后 reload 抛错只跳过 observation，已持久 WAITING_TOOLS 不能回滚。 */
+  @Test
+  void keepsDurablePreparationWhenReloadThrows() {
+    Fixture fixture = toolFixture();
+    fixture.store.findFailure = new IllegalStateException("database read unavailable");
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.WAITING_TOOLS, fixture.store.current.status());
+    assertTrue(observations(fixture, AssistantCompleted.class).isEmpty());
+    assertTrue(observations(fixture, RunTerminated.class).isEmpty());
+  }
+
+  /** compactAndRequeue cancel-wins：真实 status 变 CANCELLED，observation 只发 RunTerminated。 */
+  @Test
+  void publishesRunTerminalOnlyWhenCompactionLosesToCancelWins() {
+    Fixture fixture = overflowFixture();
+    fixture.store.cancelOnCompactAt = START.plusSeconds(1);
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.CANCELLED, fixture.store.current.status());
+    assertTrue(fixture.store.compactions.isEmpty());
+    assertTrue(observations(fixture, CompactionCompleted.class).isEmpty());
+    RunTerminated terminated = onlyObservation(fixture, RunTerminated.class);
+    assertEquals(RunStatus.CANCELLED, terminated.status());
+    assertEquals(fixture.store.compactAt, terminated.occurredAt());
+  }
+
+  /** Assistant 文本为空且没有 tool call 时 Assistant entry 仍持久化一个空 TextMessageContent。 */
+  @Test
+  void persistsEmptyAssistantTextWithoutToolCalls() {
+    Fixture fixture = new Fixture();
+    fixture.providers.add(RecordingProvider.complete(response("", List.of())));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.SUCCEEDED, fixture.store.current.status());
+    assertEquals(1, fixture.store.sessionMessages.size());
+    MessageEntryPayload assistant = fixture.store.sessionMessages.get(0);
+    List<AgentMessageContent> contents = assistant.message().contents();
+    assertEquals(1, contents.size());
+    assertTrue(contents.get(0) instanceof TextMessageContent);
+    assertEquals("", ((TextMessageContent) contents.get(0)).text());
+    assertAssistantThenTerminal(fixture, fixture.store.completeAt);
+  }
+
+  /** Assistant thinking 文本持久化为 ThinkingMessageContent，与 Text/ToolCall 并存。 */
+  @Test
+  void persistsAssistantThinkingAlongsideText() {
+    Fixture fixture = new Fixture();
+    fixture.providers.add(RecordingProvider.complete(thinkingResponse("answer", "reasoning")));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.SUCCEEDED, fixture.store.current.status());
+    MessageEntryPayload assistant = fixture.store.sessionMessages.get(0);
+    List<AgentMessageContent> contents = assistant.message().contents();
+    assertEquals(2, contents.size());
+    assertTrue(contents.get(0) instanceof TextMessageContent);
+    assertEquals("answer", ((TextMessageContent) contents.get(0)).text());
+    assertTrue(contents.get(1) instanceof ThinkingMessageContent);
+    assertEquals("reasoning", ((ThinkingMessageContent) contents.get(1)).text());
+    assertAssistantThenTerminal(fixture, fixture.store.completeAt);
+  }
+
+  /** observer RuntimeException 由生产 dispatcher 隔离，不能改变已经成功的 transaction。 */
+  @Test
+  void isolatesObserverFailureFromSuccessfulTransaction() {
+    Fixture fixture = new Fixture();
+    fixture.providers.add(RecordingProvider.complete(response("answer", List.of())));
+    fixture.lifecycleObservers =
+        new HarnessLifecycleObservers(
+            List.of(
+                observation -> {
+                  throw new IllegalStateException("observer failed");
+                },
+                fixture.observations::add));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.SUCCEEDED, fixture.store.current.status());
+    assertEquals(1, observations(fixture, AssistantCompleted.class).size());
+  }
 
   /** 无工具 Turn 先落完整 Assistant，再 terminal 并清理 active run；Context 已投影给 Provider。 */
   @Test
@@ -187,6 +487,7 @@ class AgentTurnWorkerTest {
         fixture.store.events.stream()
             .filter(event -> event.type() == RunEventType.RUN_FAILED)
             .anyMatch(event -> event.payloadJson().contains("tool_preparation_failed")));
+    assertRunTermination(fixture, RunStatus.FAILED);
   }
 
   /** 非领域型 preparation 故障保留 RUNNING lease，由数据库 reclaim 重试最后完整 Entry。 */
@@ -276,6 +577,7 @@ class AgentTurnWorkerTest {
                 event ->
                     event.type() == RunEventType.RUN_FAILED
                         && event.payloadJson().contains("no_compactable_context")));
+    assertRunTermination(fixture, RunStatus.FAILED);
   }
 
   /** BeforeCompaction hook 异常必须通过持久 terminate 路径确定性终结 Run。 */
@@ -306,6 +608,7 @@ class AgentTurnWorkerTest {
                     event.type() == RunEventType.RUN_FAILED
                         && event.payloadJson().contains("compaction_failed")
                         && event.payloadJson().contains("hook failed")));
+    assertRunTermination(fixture, RunStatus.FAILED);
   }
 
   /** Compaction delegate 异常与 hook 异常使用同一 FAILED 收敛路径，不能遗留 RUNNING lease。 */
@@ -333,6 +636,7 @@ class AgentTurnWorkerTest {
                     event.type() == RunEventType.RUN_FAILED
                         && event.payloadJson().contains("compaction_failed")
                         && event.payloadJson().contains("delegate failed")));
+    assertRunTermination(fixture, RunStatus.FAILED);
   }
 
   /** Compaction 失败与持久 cancel 竞争时由事务保持 cancel-wins，且只能写一个 terminal。 */
@@ -362,6 +666,7 @@ class AgentTurnWorkerTest {
             .count());
     assertFalse(
         fixture.store.events.stream().anyMatch(event -> event.type() == RunEventType.RUN_FAILED));
+    assertRunTermination(fixture, RunStatus.CANCELLED);
   }
 
   /** CompactionService 持续返回结果时也受持久 attempt 上限约束，达到上限直接 FAILED。 */
@@ -391,6 +696,7 @@ class AgentTurnWorkerTest {
                 event ->
                     event.type() == RunEventType.RUN_FAILED
                         && event.payloadJson().contains("compaction_attempts_exhausted")));
+    assertRunTermination(fixture, RunStatus.FAILED);
   }
 
   /** Worker 未 finalize 时 lease 到期可由另一 worker reclaim，并从同一完整 Context 重新 Turn。 */
@@ -487,6 +793,8 @@ class AgentTurnWorkerTest {
           kind == ProviderErrorKind.CANCELLED ? RunStatus.CANCELLED : RunStatus.FAILED,
           fixture.store.current.status());
       assertTrue(fixture.store.sessionMessages.isEmpty());
+      assertRunTermination(
+          fixture, kind == ProviderErrorKind.CANCELLED ? RunStatus.CANCELLED : RunStatus.FAILED);
     }
   }
 
@@ -537,6 +845,7 @@ class AgentTurnWorkerTest {
             .map(RunEvent::type)
             .toList()
             .contains(RunEventType.RUN_CANCELLED));
+    assertRunTermination(fixture, RunStatus.CANCELLED);
   }
 
   /** Context/资源解析失败属于不可重试 setup failure，且无 Provider stream 或 Session partial。 */
@@ -552,6 +861,7 @@ class AgentTurnWorkerTest {
     assertTrue(
         fixture.store.events.stream()
             .anyMatch(event -> event.payloadJson().contains("turn_setup_failed")));
+    assertRunTermination(fixture, RunStatus.FAILED);
   }
 
   /** transient 达到 attempt 上限后直接 FAILED，不再生成 retry_scheduled。 */
@@ -572,6 +882,7 @@ class AgentTurnWorkerTest {
             .map(RunEvent::type)
             .toList()
             .contains(RunEventType.RETRY_SCHEDULED));
+    assertRunTermination(fixture, RunStatus.FAILED);
   }
 
   /** consumeSteering=false 时不启动 Provider。 */
@@ -636,6 +947,90 @@ class AgentTurnWorkerTest {
     assertThrows(IllegalArgumentException.class, () -> fixture.worker().executeNext(" "));
   }
 
+  private static Fixture toolFixture() {
+    Fixture fixture = new Fixture();
+    fixture.providers.add(
+        RecordingProvider.complete(
+            response(
+                "", List.of(new ProviderToolCall("call-1", "read", "{\"path\":\"README.md\"}")))));
+    fixture.tools = List.of(tool());
+    return fixture;
+  }
+
+  private static Fixture overflowFixture() {
+    Fixture fixture = new Fixture();
+    fixture.providers.add(
+        RecordingProvider.fail(new ProviderException(ProviderErrorKind.OVERFLOW, "too long")));
+    fixture.compaction =
+        (sessionId, context) -> Optional.of(new CompactionEntryPayload("summary", 10L, 100, "{}"));
+    return fixture;
+  }
+
+  private static Fixture terminalFailureFixture() {
+    Fixture fixture = new Fixture();
+    fixture.providers.add(
+        RecordingProvider.fail(
+            new ProviderException(ProviderErrorKind.AUTHENTICATION, "invalid credential")));
+    return fixture;
+  }
+
+  private static void assertRunTermination(Fixture fixture, RunStatus status) {
+    RunTerminated terminated = onlyObservation(fixture, RunTerminated.class);
+    assertEquals(status, terminated.status());
+    assertEquals(fixture.store.terminateAt, terminated.occurredAt());
+  }
+
+  /** RunTerminated 由 complete/prepare CAS cancel-wins 触发时使用与事务相同的 now。 */
+  private static void assertCancelWinsRunTermination(Fixture fixture, Instant observedAt) {
+    RunTerminated terminated = onlyObservation(fixture, RunTerminated.class);
+    assertEquals(RunStatus.CANCELLED, terminated.status());
+    assertEquals(observedAt, terminated.occurredAt());
+    assertTrue(observations(fixture, AssistantCompleted.class).isEmpty());
+  }
+
+  /** natural SUCCEEDED 路径必须按 Assistant -> Run 顺序成对发布，observation 使用 complete CAS now。 */
+  private static void assertAssistantThenTerminal(Fixture fixture, Instant observedAt) {
+    AssistantCompleted assistant = onlyObservation(fixture, AssistantCompleted.class);
+    List<RunTerminated> terminals = observations(fixture, RunTerminated.class);
+    assertEquals(1, terminals.size());
+    RunTerminated terminated = terminals.get(0);
+    assertEquals(RunStatus.SUCCEEDED, terminated.status());
+    assertEquals(observedAt, assistant.occurredAt());
+    assertEquals(observedAt, terminated.occurredAt());
+    int assistantIndex = fixture.observations.indexOf(assistant);
+    int terminalIndex = fixture.observations.indexOf(terminated);
+    assertTrue(
+        assistantIndex >= 0 && terminalIndex > assistantIndex,
+        "Assistant must be observed before terminal, but order was "
+            + fixture.observations.stream().map(o -> o.getClass().getSimpleName()).toList());
+  }
+
+  /** control requeue QUEUED 路径只发 Assistant，observation 使用 complete CAS now。 */
+  private static void assertAssistantOnlyAfterControlRequeue(Fixture fixture, Instant observedAt) {
+    AssistantCompleted assistant = onlyObservation(fixture, AssistantCompleted.class);
+    assertEquals(observedAt, assistant.occurredAt());
+    assertTrue(observations(fixture, RunTerminated.class).isEmpty());
+  }
+
+  /** prepare 实际 WAITING_TOOLS 只发 Assistant，observation 使用 prepare CAS now。 */
+  private static void assertAssistantOnlyAfterPreparation(Fixture fixture, Instant observedAt) {
+    AssistantCompleted assistant = onlyObservation(fixture, AssistantCompleted.class);
+    assertEquals(observedAt, assistant.occurredAt());
+    assertTrue(observations(fixture, RunTerminated.class).isEmpty());
+  }
+
+  private static <T extends HarnessLifecycleObservation> T onlyObservation(
+      Fixture fixture, Class<T> type) {
+    List<T> observations = observations(fixture, type);
+    assertEquals(1, observations.size());
+    return observations.get(0);
+  }
+
+  private static <T extends HarnessLifecycleObservation> List<T> observations(
+      Fixture fixture, Class<T> type) {
+    return fixture.observations.stream().filter(type::isInstance).map(type::cast).toList();
+  }
+
   private static String text(MessageEntryPayload payload) {
     return ((TextMessageContent) payload.message().contents().get(0)).text();
   }
@@ -671,6 +1066,16 @@ class AgentTurnWorkerTest {
         "",
         calls,
         calls.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS,
+        new ModelUsage(1, 1, 0, 0, 0),
+        new ModelCost("USD", BigDecimal.ZERO));
+  }
+
+  private static ProviderResponse thinkingResponse(String text, String thinking) {
+    return new ProviderResponse(
+        text,
+        thinking,
+        List.of(),
+        ProviderStopReason.COMPLETED,
         new ModelUsage(1, 1, 0, 0, 0),
         new ModelCost("USD", BigDecimal.ZERO));
   }
@@ -714,6 +1119,11 @@ class AgentTurnWorkerTest {
     private CompactionService compaction = (sessionId, context) -> Optional.empty();
     private RunWorkerConfig workerConfig = RunWorkerConfig.DEFAULT;
     private RuntimeException resourceFailure;
+    private ProviderRequestInterceptorChain providerRequestInterceptors =
+        new ProviderRequestInterceptorChain(List.of());
+    private final List<HarnessLifecycleObservation> observations = new ArrayList<>();
+    private HarnessLifecycleObservers lifecycleObservers =
+        new HarnessLifecycleObservers(List.of(observations::add));
 
     private AgentTurnWorker worker() {
       return new AgentTurnWorker(
@@ -733,7 +1143,9 @@ class AgentTurnWorkerTest {
           compaction,
           workerConfig,
           clock,
-          (delay, task) -> {});
+          (delay, task) -> {},
+          providerRequestInterceptors,
+          lifecycleObservers);
     }
   }
 
@@ -824,6 +1236,20 @@ class AgentTurnWorkerTest {
     private boolean steeringBlocked;
     private String leaseOverride;
     private int terminateCalls;
+    private boolean completeResult = true;
+    private boolean compactResult = true;
+    private boolean terminateResult = true;
+    private boolean findMissing;
+    private RuntimeException findFailure;
+    private boolean pendingSteer;
+    private boolean pendingFollowUp;
+    private Instant cancelOnCompleteAt;
+    private Instant cancelOnPrepareAt;
+    private Instant cancelOnCompactAt;
+    private Instant completeAt;
+    private Instant prepareAt;
+    private Instant compactAt;
+    private Instant terminateAt;
 
     private InMemoryRunState(Instant now, List<String> boundaryOperations) {
       this.boundaryOperations = boundaryOperations;
@@ -834,6 +1260,12 @@ class AgentTurnWorkerTest {
 
     @Override
     public synchronized Optional<AgentRun> find(long runId) {
+      if (findFailure != null) {
+        throw findFailure;
+      }
+      if (findMissing) {
+        return Optional.empty();
+      }
       return runId == current.id() ? Optional.of(current) : Optional.empty();
     }
 
@@ -957,8 +1389,56 @@ class AgentTurnWorkerTest {
         MessageEntryPayload assistant,
         RunEventDraft assistantCompleted,
         Instant now) {
-      if (!owned(claimedRun)) {
+      completeAt = now;
+      if (!owned(claimedRun) || !completeResult) {
         return false;
+      }
+      if (cancelOnCompleteAt != null && current.cancelRequestedAt() == null) {
+        // 模拟 Provider 完成 -> cancel 请求在 complete CAS 边界提交，DB 仍返回 true。
+        current =
+            copy(
+                current.status(),
+                current.turnIndex(),
+                current.attempt(),
+                current.eventSequence(),
+                current.leaseOwner(),
+                current.leaseUntil(),
+                current.nextAttemptAt(),
+                cancelOnCompleteAt,
+                current.startedAt(),
+                current.finishedAt(),
+                now);
+      }
+      if (current.cancelRequestedAt() != null) {
+        // 模拟 DB cancel-wins：返回 true 但不会持久 Assistant；真实 status 变成 CANCELLED。
+        List<RunEventDraft> cancelEvents = new ArrayList<>();
+        cancelEvents.add(
+            new RunEventDraft(
+                RunEventType.RUN_CANCELLED,
+                RunEventPayloads.forAttempt(claimedRun, "reason", "cancel_requested")));
+        appendDrafts(claimedRun.id(), cancelEvents, now);
+        current = terminal(claimedRun, RunStatus.CANCELLED, now, false);
+        operations.add("terminal:CANCELLED");
+        return true;
+      }
+      if (pendingSteer || pendingFollowUp) {
+        // 模拟 control requeue：Assistant 持久化、status 变 QUEUED、不发 terminal。
+        sessionMessages.add(assistant);
+        operations.add("assistant");
+        appendDrafts(claimedRun.id(), List.of(assistantCompleted), now);
+        appendDrafts(
+            claimedRun.id(),
+            List.of(
+                new RunEventDraft(
+                    RunEventType.RUN_REQUEUED,
+                    RunEventPayloads.forAttempt(
+                        claimedRun,
+                        "reason",
+                        pendingSteer ? "steering_pending" : "follow_up_consumed"))),
+            now);
+        current = requeued(claimedRun, now);
+        operations.add("requeue:QUEUED");
+        return true;
       }
       sessionMessages.add(assistant);
       operations.add("assistant");
@@ -983,8 +1463,36 @@ class AgentTurnWorkerTest {
         Path environmentRoot,
         List<RunEventDraft> barrierEvents,
         Instant now) {
+      prepareAt = now;
       if (!owned(claimedRun)) {
         return false;
+      }
+      if (cancelOnPrepareAt != null && current.cancelRequestedAt() == null) {
+        current =
+            copy(
+                current.status(),
+                current.turnIndex(),
+                current.attempt(),
+                current.eventSequence(),
+                current.leaseOwner(),
+                current.leaseUntil(),
+                current.nextAttemptAt(),
+                cancelOnPrepareAt,
+                current.startedAt(),
+                current.finishedAt(),
+                now);
+      }
+      if (current.cancelRequestedAt() != null) {
+        // 模拟 DB cancel-wins：返回 true 但不持久 Assistant、不进入 WAITING_TOOLS。
+        List<RunEventDraft> cancelEvents = new ArrayList<>();
+        cancelEvents.add(
+            new RunEventDraft(
+                RunEventType.RUN_CANCELLED,
+                RunEventPayloads.forAttempt(claimedRun, "reason", "cancel_requested")));
+        appendDrafts(claimedRun.id(), cancelEvents, now);
+        current = terminal(claimedRun, RunStatus.CANCELLED, now, false);
+        operations.add("terminal:CANCELLED");
+        return true;
       }
       sessionMessages.add(assistant);
       appendDrafts(claimedRun.id(), barrierEvents, now);
@@ -1001,6 +1509,21 @@ class AgentTurnWorkerTest {
           null,
           null,
           claimedRun.nextAttemptAt(),
+          claimedRun.cancelRequestedAt(),
+          claimedRun.startedAt(),
+          null,
+          now);
+    }
+
+    private AgentRun requeued(AgentRun claimedRun, Instant now) {
+      return copy(
+          RunStatus.QUEUED,
+          claimedRun.turnIndex() + 1,
+          claimedRun.attempt(),
+          current.eventSequence(),
+          null,
+          null,
+          now,
           claimedRun.cancelRequestedAt(),
           claimedRun.startedAt(),
           null,
@@ -1037,8 +1560,36 @@ class AgentTurnWorkerTest {
         Instant nextAttemptAt,
         List<RunEventDraft> compactionEvents,
         Instant now) {
-      if (!owned(claimedRun)) {
+      compactAt = now;
+      if (!owned(claimedRun) || !compactResult) {
         return false;
+      }
+      if (cancelOnCompactAt != null && current.cancelRequestedAt() == null) {
+        current =
+            copy(
+                current.status(),
+                current.turnIndex(),
+                current.attempt(),
+                current.eventSequence(),
+                current.leaseOwner(),
+                current.leaseUntil(),
+                current.nextAttemptAt(),
+                cancelOnCompactAt,
+                current.startedAt(),
+                current.finishedAt(),
+                now);
+      }
+      if (current.cancelRequestedAt() != null) {
+        // 模拟 DB cancel-wins：返回 true 但不持久 Compaction，真实 status 变 CANCELLED。
+        List<RunEventDraft> cancelEvents = new ArrayList<>();
+        cancelEvents.add(
+            new RunEventDraft(
+                RunEventType.RUN_CANCELLED,
+                RunEventPayloads.forAttempt(claimedRun, "reason", "cancel_requested")));
+        appendDrafts(claimedRun.id(), cancelEvents, now);
+        current = terminal(claimedRun, RunStatus.CANCELLED, now, false);
+        operations.add("terminal:CANCELLED");
+        return true;
       }
       compactions.add(compaction);
       return requeue(claimedRun, nextAttemptAt, compactionEvents, now);
@@ -1054,6 +1605,10 @@ class AgentTurnWorkerTest {
         return false;
       }
       terminateCalls++;
+      terminateAt = now;
+      if (!terminateResult) {
+        return false;
+      }
       RunStatus resolvedStatus = terminalStatus;
       List<RunEventDraft> resolvedEvents = terminalEvents;
       if (current.cancelRequestedAt() != null) {
