@@ -322,6 +322,23 @@ class HarnessRunControlConsumptionIntegrationTest {
     long eid1 = controlStore.find(c1).orElseThrow().consumedEntryId();
     long eid2 = controlStore.find(c2).orElseThrow().consumedEntryId();
     assertTrue(eid1 < eid2);
+    assertEquals(
+        claimed.triggerEntryId(),
+        jdbc.queryForObject(
+            "select parent_entry_id from harness_session_entry where id = ?", Long.class, eid1));
+    assertEquals(
+        eid1,
+        jdbc.queryForObject(
+            "select parent_entry_id from harness_session_entry where id = ?", Long.class, eid2));
+    assertEquals(
+        newRun.id(),
+        jdbc.queryForObject(
+            "select run_id from harness_session_entry where id = ?", Long.class, eid1));
+    assertEquals(
+        newRun.id(),
+        jdbc.queryForObject(
+            "select run_id from harness_session_entry where id = ?", Long.class, eid2));
+    assertEquals(eid2, session.leafEntryId());
 
     // Events: terminal events then CONTROL_PROMOTED events
     List<RunEvent> events = runStore.listAfter(claimed.id(), 0, 100);
@@ -330,6 +347,10 @@ class HarnessRunControlConsumptionIntegrationTest {
     assertEquals(RunEventType.RUN_FAILED, events.get(1).type());
     assertEquals(RunEventType.CONTROL_PROMOTED, events.get(2).type());
     assertEquals(RunEventType.CONTROL_PROMOTED, events.get(3).type());
+    assertTrue(events.get(2).payloadJson().contains("\"targetRunId\":" + newRun.id()));
+    assertTrue(events.get(2).payloadJson().contains("\"entryId\":" + eid1));
+    assertTrue(events.get(3).payloadJson().contains("\"targetRunId\":" + newRun.id()));
+    assertTrue(events.get(3).payloadJson().contains("\"entryId\":" + eid2));
 
     // Two runs: old (FAILED) + new (QUEUED)
     assertEquals(
