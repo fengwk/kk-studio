@@ -10,7 +10,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryStore;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionStore;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 
@@ -29,8 +28,7 @@ public final class SessionContextBuilder {
     this.sessionStore = Objects.requireNonNull(sessionStore, "sessionStore");
     this.entryStore = Objects.requireNonNull(entryStore, "entryStore");
     this.defaultTransform = Objects.requireNonNull(defaultTransform, "defaultTransform");
-    this.extensions =
-        extensions.stream().sorted(Comparator.comparingInt(ContextTransform::priority)).toList();
+    this.extensions = List.copyOf(Objects.requireNonNull(extensions, "extensions"));
   }
 
   public SessionContext build(long sessionId) {

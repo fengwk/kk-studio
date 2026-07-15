@@ -359,8 +359,26 @@ public final class AgentTurnWorker {
         return;
       }
       RunEventDraft compactionStarted = attemptDraft(run, RunEventType.COMPACTION_STARTED);
-      Optional<CompactionEntryPayload> compaction =
-          compactionService.compact(run.sessionId(), context);
+      Optional<CompactionEntryPayload> compaction;
+      try {
+        compaction = compactionService.compact(run.sessionId(), context);
+      } catch (RuntimeException error) {
+        transactions.terminate(
+            run,
+            RunStatus.FAILED,
+            List.of(
+                assistantFailed,
+                compactionStarted,
+                attemptDraft(
+                    run,
+                    RunEventType.RUN_FAILED,
+                    "reason",
+                    "compaction_failed",
+                    "message",
+                    message(error))),
+            now);
+        return;
+      }
       if (compaction.isEmpty()) {
         transactions.terminate(
             run,
