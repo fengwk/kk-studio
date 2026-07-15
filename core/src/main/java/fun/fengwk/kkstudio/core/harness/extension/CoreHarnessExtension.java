@@ -82,6 +82,29 @@ public final class CoreHarnessExtension implements HarnessExtension {
         new ProviderFactoryDefinition(ProviderType.GOOGLE, GoogleProviderAdapter::new));
   }
 
+  static ProviderFactory providerFactory(
+      ProviderType providerType, Function<String, ProviderAdapter> constructor) {
+    Objects.requireNonNull(providerType, "providerType");
+    Objects.requireNonNull(constructor, "constructor");
+    return new ProviderFactory() {
+      @Override
+      public ProviderType providerType() {
+        return providerType;
+      }
+
+      @Override
+      public ProviderAdapter create(String credential, String configJson) {
+        ProviderAdapter adapter =
+            Objects.requireNonNull(constructor.apply(credential), "provider adapter");
+        if (adapter.providerType() != providerType) {
+          throw new IllegalStateException(
+              "ProviderFactory result does not match registered provider type " + providerType);
+        }
+        return adapter;
+      }
+    };
+  }
+
   private record ProviderFactoryDefinition(
       ProviderType providerType, Function<String, ProviderAdapter> constructor) {
 
@@ -91,23 +114,7 @@ public final class CoreHarnessExtension implements HarnessExtension {
     }
 
     private ProviderFactory factory() {
-      return new ProviderFactory() {
-        @Override
-        public ProviderType providerType() {
-          return providerType;
-        }
-
-        @Override
-        public ProviderAdapter create(String credential, String configJson) {
-          ProviderAdapter adapter =
-              Objects.requireNonNull(constructor.apply(credential), "provider adapter");
-          if (adapter.providerType() != providerType) {
-            throw new IllegalStateException(
-                "ProviderFactory result does not match registered provider type " + providerType);
-          }
-          return adapter;
-        }
-      };
+      return providerFactory(providerType, constructor);
     }
   }
 }
