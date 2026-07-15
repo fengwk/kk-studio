@@ -1,27 +1,46 @@
 package fun.fengwk.kkstudio.harness.runtime.tool;
 
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 
-/** 稳定 priority 顺序的可信 Tool interceptor chain。 */
+/** 按 Extension Host 输入顺序执行，并把唯一 permission boundary 固定在末端。 */
 public final class ToolInterceptorChain {
   private final List<BeforeToolCallInterceptor> beforeInterceptors;
   private final List<AfterToolCallInterceptor> afterInterceptors;
+  private final boolean permissionBoundaryPresent;
 
   public ToolInterceptorChain(
       List<BeforeToolCallInterceptor> beforeInterceptors,
       List<AfterToolCallInterceptor> afterInterceptors) {
-    this.beforeInterceptors = stableBefore(beforeInterceptors);
-    this.afterInterceptors = stableAfter(afterInterceptors);
+    this.beforeInterceptors = freezeBefore(beforeInterceptors);
+    this.afterInterceptors =
+        List.copyOf(Objects.requireNonNull(afterInterceptors, "afterInterceptors"));
+    permissionBoundaryPresent =
+        this.beforeInterceptors.stream().anyMatch(PermissionBoundaryInterceptor.class::isInstance);
   }
 
-  public BeforeToolCallContext before(ToolBinding originalBinding, ToolCall originalCall) {
+  public boolean hasPermissionBoundary() {
+    return permissionBoundaryPresent;
+  }
+
+  public BeforeToolCallResult before(
+      ToolBinding originalBinding,
+      ToolCall originalCall,
+      ToolSettings settings,
+      boolean yoloEnabled,
+      Path workdir,
+      Path environmentRoot) {
     originalCall.validateFor(originalBinding.descriptor());
-    BeforeToolCallContext current = new BeforeToolCallContext(originalBinding, originalCall);
+    BeforeToolCallContext current =
+        new BeforeToolCallContext(
+            originalBinding, originalCall, settings, yoloEnabled, workdir, environmentRoot);
+    BeforeToolCallResult currentResult =
+        new BeforeToolCallResult(originalBinding, originalCall.argumentsJson());
     for (BeforeToolCallInterceptor interceptor : beforeInterceptors) {
       BeforeToolCallResult result;
       try {
@@ -29,11 +48,33 @@ public final class ToolInterceptorChain {
       } catch (RuntimeException error) {
         throw new ToolInterceptorException("beforeToolCall", interceptor, error);
       }
+      boolean permissionBoundary = interceptor instanceof PermissionBoundaryInterceptor;
+      if (!permissionBoundary && result.permissionAction() != null) {
+        throw new ToolInterceptorException(
+            "beforeToolCall",
+            interceptor,
+            new IllegalArgumentException("ordinary interceptor must not produce permission"));
+      }
+      if (permissionBoundary && result.permissionAction() == null) {
+        throw new ToolInterceptorException(
+            "beforeToolCall",
+            interceptor,
+            new IllegalArgumentException("permission boundary must produce permission"));
+      }
       if (!result.binding().descriptor().name().equals(originalBinding.descriptor().name())) {
         throw new ToolInterceptorException(
             "beforeToolCall",
             interceptor,
             new IllegalArgumentException("interceptor must not rename a tool"));
+      }
+      if (permissionBoundary
+          && (!result.binding().equals(current.binding())
+              || !result.argumentsJson().equals(current.call().argumentsJson()))) {
+        throw new ToolInterceptorException(
+            "beforeToolCall",
+            interceptor,
+            new IllegalArgumentException(
+                "permission boundary must not change the final binding or arguments"));
       }
       ToolCall transformed;
       try {
@@ -44,9 +85,17 @@ public final class ToolInterceptorChain {
       } catch (RuntimeException error) {
         throw new ToolInterceptorException("beforeToolCall schema validation", interceptor, error);
       }
-      current = new BeforeToolCallContext(result.binding(), transformed);
+      currentResult = result;
+      current =
+          new BeforeToolCallContext(
+              result.binding(),
+              transformed,
+              current.settings(),
+              current.yoloEnabled(),
+              current.workdir(),
+              current.environmentRoot());
     }
-    return current;
+    return currentResult;
   }
 
   public ToolResult after(AfterToolCallContext original) {
@@ -71,19 +120,26 @@ public final class ToolInterceptorChain {
     return current.result();
   }
 
-  private static List<BeforeToolCallInterceptor> stableBefore(
+  private static List<BeforeToolCallInterceptor> freezeBefore(
       List<BeforeToolCallInterceptor> interceptors) {
-    List<BeforeToolCallInterceptor> copy =
-        new ArrayList<>(Objects.requireNonNull(interceptors, "beforeInterceptors"));
-    copy.sort(Comparator.comparingInt(BeforeToolCallInterceptor::priority));
-    return List.copyOf(copy);
-  }
-
-  private static List<AfterToolCallInterceptor> stableAfter(
-      List<AfterToolCallInterceptor> interceptors) {
-    List<AfterToolCallInterceptor> copy =
-        new ArrayList<>(Objects.requireNonNull(interceptors, "afterInterceptors"));
-    copy.sort(Comparator.comparingInt(AfterToolCallInterceptor::priority));
-    return List.copyOf(copy);
+    Objects.requireNonNull(interceptors, "beforeInterceptors");
+    List<BeforeToolCallInterceptor> ordinary = new ArrayList<>(interceptors.size());
+    PermissionBoundaryInterceptor boundary = null;
+    for (BeforeToolCallInterceptor interceptor : interceptors) {
+      Objects.requireNonNull(interceptor, "beforeInterceptor");
+      if (interceptor instanceof PermissionBoundaryInterceptor nextBoundary) {
+        if (boundary != null) {
+          throw new IllegalArgumentException(
+              "at most one PermissionBoundaryInterceptor may be registered");
+        }
+        boundary = nextBoundary;
+      } else {
+        ordinary.add(interceptor);
+      }
+    }
+    if (boundary != null) {
+      ordinary.add(boundary);
+    }
+    return List.copyOf(ordinary);
   }
 }

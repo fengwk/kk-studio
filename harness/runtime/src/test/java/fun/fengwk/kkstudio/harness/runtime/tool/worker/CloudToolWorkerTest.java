@@ -3,10 +3,13 @@ package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
+import fun.fengwk.kkstudio.harness.runtime.tool.AfterToolCallInterceptor;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
@@ -36,6 +39,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -77,6 +81,95 @@ class CloudToolWorkerTest {
     assertEquals("complete", text(fixture.transactions.result));
     assertTrue(fixture.transactions.coordinations >= 1);
     assertFalse(fixture.tool.handle.cancelled);
+  }
+
+  /** 最终结果在 durable terminate 前经过 after hook，且 hook 收到冻结 Tool 的准确 binding/call。 */
+  @Test
+  void transformsSuccessfulFinalResultBeforePersistence() throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+    AtomicReference<String> observed = new AtomicReference<>();
+    fixture.interceptorChain =
+        new ToolInterceptorChain(
+            List.of(),
+            List.of(
+                context -> {
+                  observed.set(
+                      context.binding().descriptor().name()
+                          + "@"
+                          + context.binding().descriptor().version()
+                          + ":"
+                          + context.call().argumentsJson());
+                  return result("hooked");
+                }));
+    fixture.rebuildWorker();
+
+    fixture.worker.executeNext("worker-a");
+    fixture.tool.listener.onPartial(result("partial"));
+    fixture.tool.listener.onComplete(result("complete"));
+
+    assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
+    assertEquals("tool@1:{}", observed.get());
+    assertEquals(List.of("partial"), texts(fixture.transactions.partials.get(0)));
+    assertEquals(ToolInvocationStatus.SUCCEEDED, fixture.transactions.status);
+    assertEquals("hooked", text(fixture.transactions.result));
+    assertEquals(1, fixture.transactions.terminateCalls);
+  }
+
+  /** after hook 的抛错、null 与 toolCallId 篡改都必须吞并为一次 durable FAILED，而非逃出 callback。 */
+  @Test
+  void persistsAfterInterceptorContractFailures() throws Exception {
+    assertAfterFailure(
+        context -> {
+          throw new IllegalStateException("boom");
+        });
+    assertAfterFailure(context -> null);
+    assertAfterFailure(context -> ToolResult.error("different", "changed"));
+  }
+
+  /** 完成 callback 与并发 cancel 只尝试一次终态 CAS，cancel 已持久化时成功结果不能覆盖它。 */
+  @Test
+  void preservesSingleTerminalCasAcrossCompletionCancelRace() throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+    CountDownLatch hookEntered = new CountDownLatch(1);
+    CountDownLatch releaseHook = new CountDownLatch(1);
+    AtomicReference<Throwable> callbackFailure = new AtomicReference<>();
+    fixture.interceptorChain =
+        new ToolInterceptorChain(
+            List.of(),
+            List.of(
+                context -> {
+                  hookEntered.countDown();
+                  await(releaseHook);
+                  return context.result();
+                }));
+    fixture.rebuildWorker(
+        new ToolWorkerConfig(
+            Duration.ofSeconds(1), Duration.ofMillis(5), Duration.ofSeconds(1), 8192, 8192, 1024));
+    fixture.worker.executeNext("worker-a");
+    Thread callback =
+        new Thread(
+            () -> {
+              try {
+                fixture.tool.listener.onComplete(result("complete"));
+              } catch (Throwable error) {
+                callbackFailure.set(error);
+              }
+            });
+
+    callback.start();
+    assertTrue(hookEntered.await(1, TimeUnit.SECONDS));
+    fixture.store.current = copyWithCancel(fixture.store.current, NOW);
+    assertTrue(fixture.store.cancelRead.await(1, TimeUnit.SECONDS));
+    fixture.transactions.terminalResult = false;
+    releaseHook.countDown();
+    callback.join(1000);
+
+    assertFalse(callback.isAlive());
+    assertNull(callbackFailure.get());
+    assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
+    assertEquals(1, fixture.transactions.terminateCalls);
+    assertEquals(ToolInvocationStatus.SUCCEEDED, fixture.transactions.status);
+    assertTrue(fixture.tool.handle.cancelled);
   }
 
   /**
@@ -310,6 +403,34 @@ class CloudToolWorkerTest {
     return results.stream().map(CloudToolWorkerTest::text).toList();
   }
 
+  private void assertAfterFailure(AfterToolCallInterceptor interceptor) throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+    fixture.interceptorChain = new ToolInterceptorChain(List.of(), List.of(interceptor));
+    fixture.rebuildWorker();
+
+    fixture.worker.executeNext("worker-a");
+    fixture.tool.listener.onComplete(result("complete"));
+
+    assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
+    assertEquals(1, fixture.transactions.terminateCalls);
+    assertEquals(ToolInvocationStatus.FAILED, fixture.transactions.status);
+    assertTrue(fixture.transactions.result.error());
+    assertTrue(text(fixture.transactions.result).contains("afterToolCall"));
+    assertTrue(fixture.transactions.errorMessage.contains("afterToolCall"));
+    assertTrue(fixture.tool.handle.cancelled);
+  }
+
+  private static void await(CountDownLatch latch) {
+    try {
+      if (!latch.await(1, TimeUnit.SECONDS)) {
+        throw new IllegalStateException("timed out waiting for test synchronization");
+      }
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("test synchronization interrupted", error);
+    }
+  }
+
   private ToolInvocation copyWithStatus(ToolInvocation source, ToolInvocationStatus status) {
     return new ToolInvocation(
         source.id(),
@@ -396,6 +517,7 @@ class CloudToolWorkerTest {
     private final RecordingTransactions transactions = new RecordingTransactions();
     private final RecordingTool tool;
     private final MemoryArtifacts artifacts = new MemoryArtifacts();
+    private ToolInterceptorChain interceptorChain = new ToolInterceptorChain(List.of(), List.of());
     private ToolRegistry registry;
     private CloudToolWorker worker;
 
@@ -417,6 +539,7 @@ class CloudToolWorkerTest {
               store,
               transactions,
               registry,
+              interceptorChain,
               artifacts,
               config,
               Clock.fixed(NOW, ZoneOffset.UTC),
@@ -470,6 +593,7 @@ class CloudToolWorkerTest {
     private volatile boolean heartbeatResult = true;
     private final CountDownLatch heartbeatFailure = new CountDownLatch(1);
     private final CountDownLatch terminalRead = new CountDownLatch(1);
+    private final CountDownLatch cancelRead = new CountDownLatch(1);
 
     private RecordingStore(ToolInvocation current) {
       this.current = current;
@@ -495,6 +619,9 @@ class CloudToolWorkerTest {
 
     @Override
     public Optional<ToolInvocation> find(long invocationId) {
+      if (current.cancelRequestedAt() != null) {
+        cancelRead.countDown();
+      }
       if (current.status().isTerminal()) {
         terminalRead.countDown();
       }
@@ -509,8 +636,10 @@ class CloudToolWorkerTest {
     private boolean partialFailure;
     private int started;
     private int coordinations;
+    private int terminateCalls;
     private ToolInvocationStatus status;
     private ToolResult result;
+    private String errorMessage;
 
     @Override
     public boolean start(ClaimedToolInvocation claimed, Instant now) {
@@ -535,8 +664,10 @@ class CloudToolWorkerTest {
         ToolResult result,
         String errorMessage,
         Instant now) {
+      terminateCalls++;
       this.status = status;
       this.result = result;
+      this.errorMessage = errorMessage;
       terminal.countDown();
       return terminalResult;
     }
