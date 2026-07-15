@@ -919,6 +919,102 @@ class AgentTurnWorkerTest {
     assertEquals(List.of("consumeSteering", "context", "provider"), fixture.boundaryOperations);
   }
 
+  /** consumeSteering cancel-wins：事务内 cancelOwned → 真实 CANCELLED，发 RunTerminated，Provider 不调用。 */
+  @Test
+  void observesCancelWinsWhenConsumeSteeringLosesToCancel() {
+    Fixture fixture = new Fixture();
+    fixture.store.current =
+        fixture.store.copy(RunStatus.QUEUED, 0, 0, 0, null, null, START, null, null, null, START);
+    fixture.store.leaseOverride = "worker-a";
+    fixture.store.cancelOnConsumeSteeringAt = START.plusSeconds(1);
+    RecordingProvider provider = RecordingProvider.complete(response("ignored", List.of()));
+    fixture.providers.add(provider);
+
+    AgentTurnWorker.ClaimedTurn turn = fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertTrue(turn.handle().isCancelled());
+    assertEquals(RunStatus.CANCELLED, fixture.store.current.status());
+    assertNull(provider.request);
+    assertEquals(List.of("consumeSteering"), fixture.boundaryOperations);
+    assertTrue(
+        fixture.store.events.stream().noneMatch(e -> e.type() == RunEventType.ASSISTANT_STARTED));
+    RunTerminated terminated = onlyObservation(fixture, RunTerminated.class);
+    assertEquals(RunStatus.CANCELLED, terminated.status());
+    assertEquals(fixture.store.consumeSteeringAt, terminated.occurredAt());
+    assertTrue(observations(fixture, AssistantCompleted.class).isEmpty());
+  }
+
+  /** consumeSteering 返 false 但只是 ownership 丢失（lease/attempt 不匹配）：不发布，不打 WARNING。 */
+  @Test
+  void doesNotObserveWhenConsumeSteeringLosesOwnershipSilently() {
+    Fixture fixture = new Fixture();
+    fixture.store.current =
+        fixture.store.copy(RunStatus.QUEUED, 0, 0, 0, null, null, START, null, null, null, START);
+    fixture.store.steeringBlocked = true;
+    RecordingProvider provider = RecordingProvider.complete(response("ignored", List.of()));
+    fixture.providers.add(provider);
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.RUNNING, fixture.store.current.status());
+    assertNull(provider.request);
+    assertTrue(observations(fixture, RunTerminated.class).isEmpty());
+    assertTrue(observations(fixture, AssistantCompleted.class).isEmpty());
+  }
+
+  /**
+   * transient requeue cancel-wins：事务内 cancelOwned → 真实 CANCELLED，发 RunTerminated，不发
+   * FAILED/Assistant。
+   */
+  @Test
+  void observesCancelWinsWhenTransientRequeueLosesToCancel() {
+    Fixture fixture = new Fixture();
+    fixture.store.cancelOnRequeueAt = START.plusSeconds(1);
+    fixture.providers.add(
+        RecordingProvider.failAfterDelta(
+            new ProviderStreamEvent.TextDelta("partial"),
+            new ProviderException(ProviderErrorKind.TRANSIENT, "network")));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.CANCELLED, fixture.store.current.status());
+    assertTrue(fixture.store.sessionMessages.isEmpty());
+    assertFalse(
+        fixture.store.events.stream().anyMatch(event -> event.type() == RunEventType.RUN_FAILED));
+    assertFalse(
+        fixture.store.events.stream()
+            .anyMatch(event -> event.type() == RunEventType.ASSISTANT_COMPLETED));
+    assertTrue(
+        fixture.store.events.stream()
+            .anyMatch(event -> event.type() == RunEventType.RUN_CANCELLED));
+    RunTerminated terminated = onlyObservation(fixture, RunTerminated.class);
+    assertEquals(RunStatus.CANCELLED, terminated.status());
+    assertEquals(fixture.store.requeueAt, terminated.occurredAt());
+    assertTrue(observations(fixture, AssistantCompleted.class).isEmpty());
+  }
+
+  /** transient requeue 正常 QUEUED：不发任何 terminal 或 assistant observation。 */
+  @Test
+  void doesNotObserveWhenTransientRequeueReturnsQueued() {
+    Fixture fixture = new Fixture();
+    fixture.providers.add(
+        RecordingProvider.failAfterDelta(
+            new ProviderStreamEvent.TextDelta("partial"),
+            new ProviderException(ProviderErrorKind.TRANSIENT, "network")));
+    fixture.providers.add(RecordingProvider.complete(response("recovered", List.of())));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+    assertEquals(RunStatus.QUEUED, fixture.store.current.status());
+    assertEquals(START.plusSeconds(1), fixture.store.current.nextAttemptAt());
+    assertTrue(observations(fixture, RunTerminated.class).isEmpty());
+    assertTrue(observations(fixture, AssistantCompleted.class).isEmpty());
+
+    fixture.clock.advance(Duration.ofSeconds(1));
+    fixture.worker().executeNext("worker-b").orElseThrow();
+    assertEquals(RunStatus.SUCCEEDED, fixture.store.current.status());
+    assertEquals(2, fixture.store.current.attempt());
+  }
+
   /** heartbeat 因 cancel_requested 返回 false 时触发 handle.cancel()。 */
   @Test
   void heartbeatCancelsHandleWhenCancelRequested() {
@@ -1243,9 +1339,13 @@ class AgentTurnWorkerTest {
     private RuntimeException findFailure;
     private boolean pendingSteer;
     private boolean pendingFollowUp;
+    private Instant cancelOnConsumeSteeringAt;
+    private Instant cancelOnRequeueAt;
     private Instant cancelOnCompleteAt;
     private Instant cancelOnPrepareAt;
     private Instant cancelOnCompactAt;
+    private Instant consumeSteeringAt;
+    private Instant requeueAt;
     private Instant completeAt;
     private Instant prepareAt;
     private Instant compactAt;
@@ -1374,7 +1474,35 @@ class AgentTurnWorkerTest {
     @Override
     public synchronized boolean consumeSteering(AgentRun claimedRun, Instant now) {
       boundaryOperations.add("consumeSteering");
+      consumeSteeringAt = now;
       if (!owned(claimedRun)) {
+        return false;
+      }
+      if (cancelOnConsumeSteeringAt != null && current.cancelRequestedAt() == null) {
+        current =
+            copy(
+                current.status(),
+                current.turnIndex(),
+                current.attempt(),
+                current.eventSequence(),
+                current.leaseOwner(),
+                current.leaseUntil(),
+                current.nextAttemptAt(),
+                cancelOnConsumeSteeringAt,
+                current.startedAt(),
+                current.finishedAt(),
+                now);
+      }
+      if (current.cancelRequestedAt() != null) {
+        // 模拟 DB cancel-wins：返 false 但 run 已 CANCELLED。
+        List<RunEventDraft> cancelEvents = new ArrayList<>();
+        cancelEvents.add(
+            new RunEventDraft(
+                RunEventType.RUN_CANCELLED,
+                RunEventPayloads.forAttempt(claimedRun, "reason", "cancel_requested")));
+        appendDrafts(claimedRun.id(), cancelEvents, now);
+        current = terminal(claimedRun, RunStatus.CANCELLED, now, false);
+        operations.add("terminal:CANCELLED");
         return false;
       }
       if (steeringBlocked) {
@@ -1533,8 +1661,36 @@ class AgentTurnWorkerTest {
     @Override
     public synchronized boolean requeue(
         AgentRun claimedRun, Instant nextAttemptAt, List<RunEventDraft> retryEvents, Instant now) {
+      requeueAt = now;
       if (!owned(claimedRun)) {
         return false;
+      }
+      if (cancelOnRequeueAt != null && current.cancelRequestedAt() == null) {
+        current =
+            copy(
+                current.status(),
+                current.turnIndex(),
+                current.attempt(),
+                current.eventSequence(),
+                current.leaseOwner(),
+                current.leaseUntil(),
+                current.nextAttemptAt(),
+                cancelOnRequeueAt,
+                current.startedAt(),
+                current.finishedAt(),
+                now);
+      }
+      if (current.cancelRequestedAt() != null) {
+        // 模拟 DB cancel-wins：返 true 但不持久 retry events，run 变 CANCELLED。
+        List<RunEventDraft> cancelEvents = new ArrayList<>();
+        cancelEvents.add(
+            new RunEventDraft(
+                RunEventType.RUN_CANCELLED,
+                RunEventPayloads.forAttempt(claimedRun, "reason", "cancel_requested")));
+        appendDrafts(claimedRun.id(), cancelEvents, now);
+        current = terminal(claimedRun, RunStatus.CANCELLED, now, false);
+        operations.add("terminal:CANCELLED");
+        return true;
       }
       appendDrafts(claimedRun.id(), retryEvents, now);
       current =

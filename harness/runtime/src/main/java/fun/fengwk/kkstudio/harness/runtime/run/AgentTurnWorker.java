@@ -150,6 +150,9 @@ public final class AgentTurnWorker {
 
     // consumeSteering in the same turn boundary, before context build / provider
     if (!transactions.consumeSteering(run, claimedAt)) {
+      // consumeSteering 可能因 cancelRequestedAt 在事务内 cancelOwned（返 false），也可能因
+      // ownership 已丢失（lease/attempt 不匹配）。reload 真实 status，仅实际 terminal 时发布。
+      observeCancelWinsTerminal(run, claimedAt);
       return Optional.of(new ClaimedTurn(run, TERMINAL_HANDLE));
     }
 
@@ -259,6 +262,23 @@ public final class AgentTurnWorker {
       return;
     }
     publishTerminalIfDurable(run, now);
+  }
+
+  /**
+   * 用于 consumeSteering 返 false / requeue 返 true 这类 Turn 边界：reload 真实 status，仅当 actual
+   * terminal（CANCELLED 即 cancel-wins）才发布 RunTerminated；非terminal（QUEUED 是正常 requeue， RUNNING 是
+   * ownership 丢失）静默跳过，不打误导 WARNING。 reload 缺失/异常已由 reloadRun 内部 WARNING。
+   */
+  private void observeCancelWinsTerminal(AgentRun run, Instant now) {
+    Optional<AgentRun> reloaded = reloadRun(run.id());
+    if (reloaded.isEmpty()) {
+      return;
+    }
+    AgentRun current = reloaded.orElseThrow();
+    RunStatus status = current.status();
+    if (status.terminal()) {
+      publishRunTerminated(current, status, now);
+    }
   }
 
   /** 重载 Run 以 DB 为唯一事实源决定是否发布 terminal observation。 reload 缺失/异常/非终态仅 WARNING 跳过， 不能抛错影响已持久状态。 */
@@ -507,13 +527,17 @@ public final class AgentTurnWorker {
         return;
       }
       Instant nextAttemptAt = now.plus(config.backoffForAttempt(run.attempt()));
-      transactions.requeue(
+      if (transactions.requeue(
           run,
           nextAttemptAt,
           List.of(
               assistantFailed,
               attemptDraft(run, RunEventType.RETRY_SCHEDULED, "nextAttemptAt", nextAttemptAt)),
-          now);
+          now)) {
+        // requeue 返 true 可能 cancel-wins（事务内 cancelOwned 变 CANCELLED），正常则 QUEUED。
+        // reload 真实 status 仅当 terminal 才发布，不发 Assistant 或 FAILED。
+        observeCancelWinsTerminal(run, now);
+      }
     }
 
     private void overflowFailure(RunEventDraft assistantFailed) {
