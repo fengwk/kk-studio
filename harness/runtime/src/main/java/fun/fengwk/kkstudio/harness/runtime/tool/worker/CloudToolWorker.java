@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 
+import fun.fengwk.kkstudio.harness.runtime.tool.AfterToolCallContext;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
@@ -37,6 +40,7 @@ public final class CloudToolWorker {
   private final ToolInvocationWorkerStore store;
   private final ToolInvocationTransactions transactions;
   private final ToolRegistry registry;
+  private final ToolInterceptorChain interceptorChain;
   private final ArtifactStore artifactStore;
   private final ToolWorkerConfig config;
   private final Clock clock;
@@ -47,6 +51,7 @@ public final class CloudToolWorker {
       ToolInvocationWorkerStore store,
       ToolInvocationTransactions transactions,
       ToolRegistry registry,
+      ToolInterceptorChain interceptorChain,
       ArtifactStore artifactStore,
       ToolWorkerConfig config,
       Clock clock,
@@ -54,6 +59,7 @@ public final class CloudToolWorker {
     this.store = Objects.requireNonNull(store, "store");
     this.transactions = Objects.requireNonNull(transactions, "transactions");
     this.registry = Objects.requireNonNull(registry, "registry");
+    this.interceptorChain = Objects.requireNonNull(interceptorChain, "interceptorChain");
     this.artifactStore = Objects.requireNonNull(artifactStore, "artifactStore");
     this.config = Objects.requireNonNull(config, "config");
     this.clock = Objects.requireNonNull(clock, "clock");
@@ -116,7 +122,11 @@ public final class CloudToolWorker {
     if (!transactions.start(claimed, clock.instant())) {
       return;
     }
-    Execution execution = new Execution(claimed);
+    ToolBinding binding =
+        new ToolBinding(tool.descriptor(), invocation.targetType(), invocation.environmentId());
+    ToolCall call =
+        new ToolCall(invocation.toolCallId(), invocation.toolName(), invocation.argumentsJson());
+    Execution execution = new Execution(claimed, binding, call);
     if (executions.putIfAbsent(invocation.id(), execution) != null) {
       return;
     }
@@ -126,8 +136,7 @@ public final class CloudToolWorker {
           tool.execute(
               new ToolExecutionRequest(
                   tool.descriptor(),
-                  new ToolCall(
-                      invocation.toolCallId(), invocation.toolName(), invocation.argumentsJson()),
+                  call,
                   Duration.between(clock.instant(), invocation.deadlineAt()),
                   new ToolExecutionContext(invocation.id(), invocation.runId())),
               execution);
@@ -228,6 +237,8 @@ public final class CloudToolWorker {
 
   private final class Execution implements ToolExecutionListener {
     private final ClaimedToolInvocation claimed;
+    private final ToolBinding binding;
+    private final ToolCall call;
     private final List<ToolResult> pending = new ArrayList<>();
     private ToolExecutionHandle handle;
     private boolean terminal;
@@ -237,8 +248,10 @@ public final class CloudToolWorker {
     private ScheduledFuture<?> timeout;
     private ScheduledFuture<?> partialFlush;
 
-    private Execution(ClaimedToolInvocation claimed) {
+    private Execution(ClaimedToolInvocation claimed, ToolBinding binding, ToolCall call) {
       this.claimed = claimed;
+      this.binding = binding;
+      this.call = call;
     }
 
     private synchronized void schedule() {
@@ -354,20 +367,43 @@ public final class CloudToolWorker {
         terminal = true;
       }
       boolean terminalPersisted = false;
+      ToolInvocationStatus terminalStatus = status;
+      ToolResult terminalResult = result;
+      String terminalErrorMessage = errorMessage;
       try {
         flush();
+        try {
+          terminalResult =
+              interceptorChain.after(
+                  new AfterToolCallContext(
+                      claimed.invocation().id(), binding, call, terminalResult));
+        } catch (RuntimeException error) {
+          terminalStatus = ToolInvocationStatus.FAILED;
+          terminalErrorMessage = afterInterceptorFailure(error);
+          terminalResult =
+              ToolResult.error(claimed.invocation().toolCallId(), terminalErrorMessage);
+        }
         terminalPersisted =
             transactions.terminate(
-                claimed, status, externalize(result), errorMessage, clock.instant());
+                claimed,
+                terminalStatus,
+                externalize(terminalResult),
+                terminalErrorMessage,
+                clock.instant());
         if (terminalPersisted) {
           transactions.coordinateReadyRuns(clock.instant());
         }
       } finally {
-        if (status != ToolInvocationStatus.SUCCEEDED || !terminalPersisted) {
+        if (terminalStatus != ToolInvocationStatus.SUCCEEDED || !terminalPersisted) {
           cancelHandle();
         }
         stop();
       }
+    }
+
+    private String afterInterceptorFailure(RuntimeException error) {
+      String message = error.getMessage();
+      return message == null || message.isBlank() ? "afterToolCall interceptor failed." : message;
     }
 
     private synchronized void cancelHandle() {

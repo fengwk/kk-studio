@@ -5,8 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluationContext;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -28,27 +26,23 @@ public final class ToolPreparationService {
 
   private final ToolInvocationIdGenerator idGenerator;
   private final ToolInterceptorChain interceptorChain;
-  private final PermissionEvaluator permissionEvaluator;
   private final ObjectMapper objectMapper;
   private final Duration defaultTimeout;
 
   public ToolPreparationService(
       ToolInvocationIdGenerator idGenerator,
       ToolInterceptorChain interceptorChain,
-      PermissionEvaluator permissionEvaluator,
       ObjectMapper objectMapper) {
-    this(idGenerator, interceptorChain, permissionEvaluator, objectMapper, DEFAULT_TIMEOUT);
+    this(idGenerator, interceptorChain, objectMapper, DEFAULT_TIMEOUT);
   }
 
   public ToolPreparationService(
       ToolInvocationIdGenerator idGenerator,
       ToolInterceptorChain interceptorChain,
-      PermissionEvaluator permissionEvaluator,
       ObjectMapper objectMapper,
       Duration defaultTimeout) {
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
     this.interceptorChain = Objects.requireNonNull(interceptorChain, "interceptorChain");
-    this.permissionEvaluator = Objects.requireNonNull(permissionEvaluator, "permissionEvaluator");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
     this.defaultTimeout = requirePositive(defaultTimeout, "defaultTimeout");
   }
@@ -66,6 +60,10 @@ public final class ToolPreparationService {
     if (toolCalls.isEmpty()) {
       throw new IllegalArgumentException("tool preparation requires at least one call");
     }
+    if (!interceptorChain.hasPermissionBoundary()) {
+      throw new IllegalStateException(
+          "tool preparation requires exactly one PermissionBoundaryInterceptor");
+    }
     Map<String, ToolBinding> byName = indexBindings(bindings);
     Set<String> toolCallIds = new HashSet<>();
     List<PreparedToolInvocation> prepared = new ArrayList<>(toolCalls.size());
@@ -79,30 +77,30 @@ public final class ToolPreparationService {
         throw new IllegalArgumentException(
             "tool call has no frozen binding: " + original.toolName());
       }
-      BeforeToolCallContext intercepted = interceptorChain.before(binding, original);
-      PermissionEvaluationContext permissionContext =
-          new PermissionEvaluationContext(
+      BeforeToolCallResult intercepted =
+          interceptorChain.before(
+              binding, original, settings, yoloEnabled, workdir, environmentRoot);
+      PermissionAction action = Objects.requireNonNull(intercepted.permissionAction());
+      PermissionPromptPreview promptPreview =
+          Objects.requireNonNull(intercepted.permissionPromptPreview());
+      ToolCall interceptedCall =
+          new ToolCall(
+              original.id(),
               intercepted.binding().descriptor().name(),
-              intercepted.call().argumentsJson(),
-              workdir,
-              environmentRoot,
-              settings);
-      PermissionEvaluator.Evaluation evaluation = permissionEvaluator.evaluate(permissionContext);
-      PermissionAction action = yoloEnabled ? PermissionAction.ALLOW : evaluation.action();
-      PermissionPromptPreview promptPreview = evaluation.promptPreview();
+              intercepted.argumentsJson());
       ToolInvocationStatus status = initialStatus(action);
       String errorMessage = null;
       String resultJson = null;
       if (action == PermissionAction.DENY) {
-        errorMessage = "Permission denied for " + intercepted.call().toolName() + ".";
-        resultJson = deniedResult(intercepted.call().id(), errorMessage);
+        errorMessage = "Permission denied for " + interceptedCall.toolName() + ".";
+        resultJson = deniedResult(interceptedCall.id(), errorMessage);
       }
       prepared.add(
           new PreparedToolInvocation(
               idGenerator.newInvocationId(),
               ordinal,
               intercepted.binding(),
-              intercepted.call(),
+              interceptedCall,
               action,
               status,
               deadlineAt(now, intercepted.binding()),

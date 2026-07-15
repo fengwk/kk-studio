@@ -35,7 +35,7 @@ class ToolPreparationServiceTest {
   /** allow/ask/deny 一次性评估并保留 source ordinal；deny 只终止该 Invocation。 */
   @Test
   void preparesAllowAskAndDenyInSourceOrder() {
-    ToolPreparationService service = service(new ToolInterceptorChain(List.of(), List.of()));
+    ToolPreparationService service = service(chain());
     List<ToolBinding> bindings = List.of(binding("read"), binding("write"), binding("delete"));
     ToolSettings settings =
         new ToolSettings(
@@ -76,7 +76,7 @@ class ToolPreparationServiceTest {
   /** YOLO 仅绕过 permission，不能绕过 schema、path surface 或 binding 校验。 */
   @Test
   void yoloBypassesPermissionButNotSchemaOrBinding() throws Exception {
-    ToolPreparationService service = service(new ToolInterceptorChain(List.of(), List.of()));
+    ToolPreparationService service = service(chain());
     ToolSettings deny =
         new ToolSettings(
             Map.of("write", List.of(new PermissionRule("*", PermissionAction.DENY))), false);
@@ -94,6 +94,8 @@ class ToolPreparationServiceTest {
             .get(0);
     assertEquals(PermissionAction.ALLOW, yolo.permissionAction());
     assertEquals(ToolInvocationStatus.QUEUED, yolo.initialStatus());
+    assertEquals("write", yolo.promptPreview().tool());
+    assertEquals("{\"path\":\"notes.txt\"}", yolo.promptPreview().arguments());
 
     assertThrows(
         IllegalArgumentException.class,
@@ -109,7 +111,7 @@ class ToolPreparationServiceTest {
     String invalidPathArguments =
         objectMapper.writeValueAsString(Map.of("path", "bad" + (char) 0 + "path"));
     assertThrows(
-        IllegalArgumentException.class,
+        ToolInterceptorException.class,
         () ->
             service.prepare(
                 List.of(new ToolCall("bad-path", "write", invalidPathArguments)),
@@ -132,17 +134,47 @@ class ToolPreparationServiceTest {
                 NOW));
   }
 
+  /** PermissionEvaluator 即使先注册也必须在 modifier 后运行，并依据最终参数决定 durable 初态。 */
+  @Test
+  void evaluatesPermissionLastAgainstFinalArguments() {
+    PermissionEvaluator evaluator =
+        new PermissionEvaluator(objectMapper, new BashSurfaceAnalyzer());
+    BeforeToolCallInterceptor modifier =
+        context -> new BeforeToolCallResult(context.binding(), "{\"path\":\"safe.txt\"}");
+    ToolPreparationService service =
+        service(new ToolInterceptorChain(List.of(evaluator, modifier), List.of()));
+    ToolSettings settings =
+        new ToolSettings(
+            Map.of(
+                "write",
+                List.of(
+                    new PermissionRule("*", PermissionAction.DENY),
+                    new PermissionRule("safe.txt", PermissionAction.ALLOW))),
+            false);
+
+    PreparedToolInvocation prepared =
+        service
+            .prepare(
+                List.of(new ToolCall("call", "write", "{\"path\":\"secret.txt\"}")),
+                List.of(binding("write")),
+                settings,
+                false,
+                Path.of("/tmp/environment"),
+                Path.of("/tmp/environment"),
+                NOW)
+            .get(0);
+
+    assertEquals(PermissionAction.ALLOW, prepared.permissionAction());
+    assertEquals("{\"path\":\"safe.txt\"}", prepared.call().argumentsJson());
+    assertEquals("{\"path\":\"safe.txt\"}", prepared.promptPreview().arguments());
+  }
+
   /** descriptor 未指定 timeout 时使用正的 Runtime 默认值，不能生成立即过期 Invocation。 */
   @Test
   void appliesConfiguredDefaultTimeout() {
     Duration defaultTimeout = Duration.ofSeconds(45);
     ToolPreparationService service =
-        new ToolPreparationService(
-            ids::incrementAndGet,
-            new ToolInterceptorChain(List.of(), List.of()),
-            new PermissionEvaluator(objectMapper, new BashSurfaceAnalyzer()),
-            objectMapper,
-            defaultTimeout);
+        new ToolPreparationService(ids::incrementAndGet, chain(), objectMapper, defaultTimeout);
 
     PreparedToolInvocation prepared =
         service
@@ -160,12 +192,7 @@ class ToolPreparationServiceTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new ToolPreparationService(
-                ids::incrementAndGet,
-                new ToolInterceptorChain(List.of(), List.of()),
-                new PermissionEvaluator(objectMapper, new BashSurfaceAnalyzer()),
-                objectMapper,
-                Duration.ZERO));
+            new ToolPreparationService(ids::incrementAndGet, chain(), objectMapper, Duration.ZERO));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -182,7 +209,7 @@ class ToolPreparationServiceTest {
   /** 重复 call id、重复 binding name 和空调用在事务写入前明确失败。 */
   @Test
   void rejectsAmbiguousPreparationInput() {
-    ToolPreparationService service = service(new ToolInterceptorChain(List.of(), List.of()));
+    ToolPreparationService service = service(chain());
     ToolCall call = new ToolCall("same", "read", "{\"path\":\"x\"}");
 
     assertThrows(
@@ -220,12 +247,35 @@ class ToolPreparationServiceTest {
                 NOW));
   }
 
+  /** after-only 链可以合法存在，但缺失不可绕过的 permission boundary 时 preparation 必须显式拒绝。 */
+  @Test
+  void rejectsPreparationWithoutPermissionBoundary() {
+    ToolPreparationService service =
+        service(new ToolInterceptorChain(List.of(), List.of(context -> context.result())));
+
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                service.prepare(
+                    List.of(new ToolCall("call", "read", "{\"path\":\"README.md\"}")),
+                    List.of(binding("read")),
+                    ToolSettings.DEFAULT,
+                    false,
+                    Path.of("."),
+                    Path.of("."),
+                    NOW));
+
+    assertTrue(failure.getMessage().contains("PermissionBoundaryInterceptor"));
+  }
+
   private ToolPreparationService service(ToolInterceptorChain chain) {
-    return new ToolPreparationService(
-        ids::incrementAndGet,
-        chain,
-        new PermissionEvaluator(objectMapper, new BashSurfaceAnalyzer()),
-        objectMapper);
+    return new ToolPreparationService(ids::incrementAndGet, chain, objectMapper);
+  }
+
+  private ToolInterceptorChain chain() {
+    return new ToolInterceptorChain(
+        List.of(new PermissionEvaluator(objectMapper, new BashSurfaceAnalyzer())), List.of());
   }
 
   private static ToolBinding binding(String name) {
