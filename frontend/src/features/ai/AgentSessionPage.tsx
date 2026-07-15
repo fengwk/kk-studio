@@ -3,18 +3,17 @@ import { ChatPanel } from '@/features/ai/ChatPanel'
 import { useAgentSessionController } from '@/features/ai/useAgentSessionController'
 
 export function AgentSessionPage() {
-  const { workspaceId = '', sessionId = '' } = useParams()
+  const { sessionId = '' } = useParams()
   const navigate = useNavigate()
-  const controller = useAgentSessionController(workspaceId, sessionId)
+  const controller = useAgentSessionController(sessionId)
 
   return (
     <ChatPanel
-      workspaceId={workspaceId}
       sessions={controller.sessions}
       agentsByName={controller.agentsByName}
       activeSessionId={sessionId}
       title={controller.title}
-      onBack={() => navigate(`/workspaces/${encodeURIComponent(workspaceId)}/sessions`)}
+      onBack={() => navigate('/sessions')}
       session={controller.session}
       agent={controller.agent}
       timeline={controller.timeline}

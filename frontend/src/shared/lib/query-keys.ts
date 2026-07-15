@@ -1,24 +1,21 @@
 export const queryKeys = {
-  workspaces: {
-    all: ['workspaces'] as const,
-    list: ['workspaces', 'list'] as const,
-    detail: (workspaceId: string) => ['workspaces', 'detail', workspaceId] as const,
-  },
   providers: {
-    list: (workspaceId: string) => ['workspaces', workspaceId, 'providers'] as const,
+    all: ['providers'] as const,
+    list: ['providers', 'list'] as const,
   },
   models: {
-    list: (workspaceId: string) => ['workspaces', workspaceId, 'models'] as const,
+    all: ['models'] as const,
+    list: ['models', 'list'] as const,
   },
   agents: {
-    list: (workspaceId: string) => ['workspaces', workspaceId, 'agents'] as const,
+    all: ['agents'] as const,
+    list: ['agents', 'list'] as const,
   },
-  // Session data is currently loaded through the legacy Session API, but must
-  // still be partitioned by the active workspace in React Query.
   sessions: {
-    list: (workspaceId: string) => ['workspaces', workspaceId, 'sessions'] as const,
-    detail: (workspaceId: string, sessionId: string) => ['workspaces', workspaceId, 'sessions', sessionId] as const,
-    events: (workspaceId: string, sessionId: string) => ['workspaces', workspaceId, 'sessions', sessionId, 'events'] as const,
-    runs: (workspaceId: string, sessionId: string) => ['workspaces', workspaceId, 'sessions', sessionId, 'runs'] as const,
+    all: ['sessions'] as const,
+    list: ['sessions', 'list'] as const,
+    detail: (sessionId: string) => ['sessions', 'detail', sessionId] as const,
+    events: (sessionId: string) => ['sessions', 'detail', sessionId, 'events'] as const,
+    runs: (sessionId: string) => ['sessions', 'detail', sessionId, 'runs'] as const,
   },
 }

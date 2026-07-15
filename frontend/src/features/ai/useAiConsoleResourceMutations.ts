@@ -12,57 +12,55 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { useInvalidateMutation } from '@/features/ai/useInvalidateMutation'
 
 export function useAiConsoleResourceMutations({
-  workspaceId,
   onResourceSaved,
   onDeleteCompleted,
 }: {
-  workspaceId: string
   onResourceSaved: () => void
   onDeleteCompleted: () => void
 }) {
   const createProviderMutation = useInvalidateMutation({
-    mutationFn: (provider: AgentProviderCreateDTO) => agentService.createProvider(workspaceId, provider),
-    invalidateQueryKeys: [queryKeys.providers.list(workspaceId)],
+    mutationFn: (provider: AgentProviderCreateDTO) => agentService.createProvider(provider),
+    invalidateQueryKeys: [queryKeys.providers.list],
     onSuccess: onResourceSaved,
   })
   const updateProviderMutation = useInvalidateMutation({
-    mutationFn: ({ id, data }: { id: AgentResourceId; data: AgentProviderUpdateDTO }) => agentService.updateProvider(workspaceId, id, data),
-    invalidateQueryKeys: [queryKeys.providers.list(workspaceId), queryKeys.models.list(workspaceId), queryKeys.agents.list(workspaceId)],
+    mutationFn: ({ id, data }: { id: AgentResourceId; data: AgentProviderUpdateDTO }) => agentService.updateProvider(id, data),
+    invalidateQueryKeys: [queryKeys.providers.list, queryKeys.models.list, queryKeys.agents.list],
     onSuccess: onResourceSaved,
   })
   const deleteProviderMutation = useInvalidateMutation({
-    mutationFn: (id: AgentResourceId) => agentService.deleteProvider(workspaceId, id),
-    invalidateQueryKeys: [queryKeys.providers.list(workspaceId), queryKeys.models.list(workspaceId), queryKeys.agents.list(workspaceId)],
+    mutationFn: (id: AgentResourceId) => agentService.deleteProvider(id),
+    invalidateQueryKeys: [queryKeys.providers.list, queryKeys.models.list, queryKeys.agents.list],
     onSuccess: onDeleteCompleted,
   })
   const createModelMutation = useInvalidateMutation({
-    mutationFn: (model: AgentModelCreateDTO) => agentService.createModel(workspaceId, model),
-    invalidateQueryKeys: [queryKeys.models.list(workspaceId)],
+    mutationFn: (model: AgentModelCreateDTO) => agentService.createModel(model),
+    invalidateQueryKeys: [queryKeys.models.list],
     onSuccess: onResourceSaved,
   })
   const updateModelMutation = useInvalidateMutation({
-    mutationFn: ({ id, data }: { id: AgentResourceId; data: AgentModelUpdateDTO }) => agentService.updateModel(workspaceId, id, data),
-    invalidateQueryKeys: [queryKeys.models.list(workspaceId), queryKeys.agents.list(workspaceId)],
+    mutationFn: ({ id, data }: { id: AgentResourceId; data: AgentModelUpdateDTO }) => agentService.updateModel(id, data),
+    invalidateQueryKeys: [queryKeys.models.list, queryKeys.agents.list],
     onSuccess: onResourceSaved,
   })
   const deleteModelMutation = useInvalidateMutation({
-    mutationFn: (id: AgentResourceId) => agentService.deleteModel(workspaceId, id),
-    invalidateQueryKeys: [queryKeys.models.list(workspaceId), queryKeys.agents.list(workspaceId)],
+    mutationFn: (id: AgentResourceId) => agentService.deleteModel(id),
+    invalidateQueryKeys: [queryKeys.models.list, queryKeys.agents.list],
     onSuccess: onDeleteCompleted,
   })
   const createAgentMutation = useInvalidateMutation({
-    mutationFn: (agent: AgentDefinitionCreateDTO) => agentService.createAgent(workspaceId, agent),
-    invalidateQueryKeys: [queryKeys.agents.list(workspaceId)],
+    mutationFn: (agent: AgentDefinitionCreateDTO) => agentService.createAgent(agent),
+    invalidateQueryKeys: [queryKeys.agents.list],
     onSuccess: onResourceSaved,
   })
   const updateAgentMutation = useInvalidateMutation({
-    mutationFn: ({ id, data }: { id: AgentResourceId; data: AgentDefinitionUpdateDTO }) => agentService.updateAgent(workspaceId, id, data),
-    invalidateQueryKeys: [queryKeys.agents.list(workspaceId), queryKeys.sessions.list(workspaceId)],
+    mutationFn: ({ id, data }: { id: AgentResourceId; data: AgentDefinitionUpdateDTO }) => agentService.updateAgent(id, data),
+    invalidateQueryKeys: [queryKeys.agents.list, queryKeys.sessions.list],
     onSuccess: onResourceSaved,
   })
   const deleteAgentMutation = useInvalidateMutation({
-    mutationFn: (id: AgentResourceId) => agentService.deleteAgent(workspaceId, id),
-    invalidateQueryKeys: [queryKeys.agents.list(workspaceId), queryKeys.sessions.list(workspaceId)],
+    mutationFn: (id: AgentResourceId) => agentService.deleteAgent(id),
+    invalidateQueryKeys: [queryKeys.agents.list, queryKeys.sessions.list],
     onSuccess: onDeleteCompleted,
   })
 

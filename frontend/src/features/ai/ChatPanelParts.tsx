@@ -6,14 +6,12 @@ import type { SessionTimeline } from '@/features/ai/session-events'
 import type { AgentDefinitionDTO, AgentRunDTO, AgentSessionDTO } from '@/shared/api/contracts'
 
 export function ChatSidebar({
-  workspaceId,
   sessions,
   agentsByName,
   activeSessionId,
   title,
   onBack,
 }: {
-  workspaceId: string
   sessions: AgentSessionDTO[]
   agentsByName: Map<string, AgentDefinitionDTO>
   activeSessionId: string
@@ -27,7 +25,7 @@ export function ChatSidebar({
           <ArrowLeft aria-hidden="true" />
         </button>
         <h1>{title}</h1>
-        <Link className="sidebar-icon-btn" to={`/workspaces/${encodeURIComponent(workspaceId)}/sessions`} title="新建会话">
+        <Link className="sidebar-icon-btn" to="/sessions" title="新建会话">
           <Plus aria-hidden="true" />
         </Link>
       </div>
@@ -38,7 +36,7 @@ export function ChatSidebar({
             <Link
               key={item.sessionId}
               className={`chat-item ${item.sessionId === activeSessionId ? 'active' : ''}`}
-              to={`/workspaces/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(item.sessionId)}`}
+              to={`/sessions/${encodeURIComponent(item.sessionId)}`}
             >
               <MessageSquare aria-hidden="true" />
               <span>{item.title || agent?.name || item.agentName || item.sessionId}</span>

@@ -17,49 +17,45 @@ import type {
   AgentSessionMessageCreateDTO,
   AgentSessionUpdateDTO,
   PageResult,
-  WorkspaceDTO,
 } from '@/shared/api/contracts'
 
 export function createAgentService(client: HttpClient = apiClient) {
   return {
-    listWorkspaces: (pageNumber = 1, pageSize = 50): Promise<PageResult<WorkspaceDTO>> =>
-      client.get('/workspaces', { params: { pageNumber, pageSize } }),
+    listProviders: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentProviderDTO>> =>
+      client.get('/providers', { params: { pageNumber, pageSize } }),
 
-    listProviders: (workspaceId: string, pageNumber = 1, pageSize = 50): Promise<PageResult<AgentProviderDTO>> =>
-      client.get(`/workspaces/${encodeURIComponent(workspaceId)}/providers`, { params: { pageNumber, pageSize } }),
+    createProvider: (data: AgentProviderCreateDTO): Promise<AgentProviderDTO> =>
+      client.post('/providers', data),
 
-    createProvider: (workspaceId: string, data: AgentProviderCreateDTO): Promise<AgentProviderDTO> =>
-      client.post(`/workspaces/${encodeURIComponent(workspaceId)}/providers`, data),
+    updateProvider: (id: AgentResourceId, data: AgentProviderUpdateDTO): Promise<AgentProviderDTO> =>
+      client.put(`/providers/${encodeURIComponent(String(id))}`, data),
 
-    updateProvider: (workspaceId: string, id: AgentResourceId, data: AgentProviderUpdateDTO): Promise<AgentProviderDTO> =>
-      client.put(`/workspaces/${encodeURIComponent(workspaceId)}/providers/${encodeURIComponent(String(id))}`, data),
+    deleteProvider: (id: AgentResourceId): Promise<void> =>
+      client.delete(`/providers/${encodeURIComponent(String(id))}`),
 
-    deleteProvider: (workspaceId: string, id: AgentResourceId): Promise<void> =>
-      client.delete(`/workspaces/${encodeURIComponent(workspaceId)}/providers/${encodeURIComponent(String(id))}`),
+    listModels: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentModelDTO>> =>
+      client.get('/models', { params: { pageNumber, pageSize } }),
 
-    listModels: (workspaceId: string, pageNumber = 1, pageSize = 50): Promise<PageResult<AgentModelDTO>> =>
-      client.get(`/workspaces/${encodeURIComponent(workspaceId)}/models`, { params: { pageNumber, pageSize } }),
+    createModel: (data: AgentModelCreateDTO): Promise<AgentModelDTO> =>
+      client.post('/models', data),
 
-    createModel: (workspaceId: string, data: AgentModelCreateDTO): Promise<AgentModelDTO> =>
-      client.post(`/workspaces/${encodeURIComponent(workspaceId)}/models`, data),
+    updateModel: (id: AgentResourceId, data: AgentModelUpdateDTO): Promise<AgentModelDTO> =>
+      client.put(`/models/${encodeURIComponent(String(id))}`, data),
 
-    updateModel: (workspaceId: string, id: AgentResourceId, data: AgentModelUpdateDTO): Promise<AgentModelDTO> =>
-      client.put(`/workspaces/${encodeURIComponent(workspaceId)}/models/${encodeURIComponent(String(id))}`, data),
+    deleteModel: (id: AgentResourceId): Promise<void> =>
+      client.delete(`/models/${encodeURIComponent(String(id))}`),
 
-    deleteModel: (workspaceId: string, id: AgentResourceId): Promise<void> =>
-      client.delete(`/workspaces/${encodeURIComponent(workspaceId)}/models/${encodeURIComponent(String(id))}`),
+    listAgents: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentDefinitionDTO>> =>
+      client.get('/agents', { params: { pageNumber, pageSize } }),
 
-    listAgents: (workspaceId: string, pageNumber = 1, pageSize = 50): Promise<PageResult<AgentDefinitionDTO>> =>
-      client.get(`/workspaces/${encodeURIComponent(workspaceId)}/agents`, { params: { pageNumber, pageSize } }),
+    createAgent: (data: AgentDefinitionCreateDTO): Promise<AgentDefinitionDTO> =>
+      client.post('/agents', data),
 
-    createAgent: (workspaceId: string, data: AgentDefinitionCreateDTO): Promise<AgentDefinitionDTO> =>
-      client.post(`/workspaces/${encodeURIComponent(workspaceId)}/agents`, data),
+    updateAgent: (id: AgentResourceId, data: AgentDefinitionUpdateDTO): Promise<AgentDefinitionDTO> =>
+      client.put(`/agents/${encodeURIComponent(String(id))}`, data),
 
-    updateAgent: (workspaceId: string, id: AgentResourceId, data: AgentDefinitionUpdateDTO): Promise<AgentDefinitionDTO> =>
-      client.put(`/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(String(id))}`, data),
-
-    deleteAgent: (workspaceId: string, id: AgentResourceId): Promise<void> =>
-      client.delete(`/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(String(id))}`),
+    deleteAgent: (id: AgentResourceId): Promise<void> =>
+      client.delete(`/agents/${encodeURIComponent(String(id))}`),
 
     // Session endpoints remain on the legacy API until T15 moves them.
     listSessions: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentSessionDTO>> =>
@@ -89,11 +85,10 @@ export const agentService = createAgentService()
 
 /**
  * Temporary boundary for the legacy Session API. T15 can replace this adapter
- * with workspace-scoped endpoints without changing feature controllers.
+ * with global endpoints without changing feature controllers.
  */
-export function createWorkspaceSessionApi(workspaceId: string, service = agentService) {
+export function createSessionApi(service = agentService) {
   return {
-    workspaceId,
     list: () => service.listSessions(),
     create: (data: AgentSessionCreateDTO) => service.createSession(data),
     get: (sessionId: string) => service.getSession(sessionId),

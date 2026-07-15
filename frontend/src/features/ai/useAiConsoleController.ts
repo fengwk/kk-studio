@@ -4,12 +4,12 @@ import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO } from '@/shar
 import { useAiConsoleResourceController } from '@/features/ai/useAiConsoleResourceController'
 import { useAiConsoleSessionController } from '@/features/ai/useAiConsoleSessionController'
 
-export function useAiConsoleController(workspaceId: string) {
+export function useAiConsoleController() {
   const [search, setSearch] = useState('')
   const deferredSearch = useDeferredValue(search.trim().toLowerCase())
 
-  const resourceController = useAiConsoleResourceController(workspaceId)
-  const sessionController = useAiConsoleSessionController(workspaceId, resourceController.agents)
+  const resourceController = useAiConsoleResourceController()
+  const sessionController = useAiConsoleSessionController(resourceController.agents)
 
   const agentsByName = useMemo(() => new Map(resourceController.agents.map((agent) => [agent.name, agent])), [resourceController.agents])
   const filteredSessions = useMemo(
@@ -39,7 +39,6 @@ export function useAiConsoleController(workspaceId: string) {
     error,
     mutationError,
     chatPanelProps: {
-      workspaceId,
       sessions: filteredSessions,
       agentsByName,
       deletePending: sessionController.sessionDeletePending,

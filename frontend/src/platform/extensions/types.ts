@@ -12,8 +12,7 @@ export type WorkbenchSlotName =
   | 'inspector'
   | 'status'
 
-export interface WorkspacePageProps {
-  workspaceId: string
+export interface ExtensionComponentProps {
   children?: ReactNode
 }
 
@@ -24,7 +23,7 @@ export interface Contribution {
 
 export interface PageContribution extends Contribution {
   path: string
-  component: ComponentType<WorkspacePageProps>
+  component: ComponentType<ExtensionComponentProps>
 }
 
 export interface NavigationContribution extends Contribution {
@@ -34,33 +33,33 @@ export interface NavigationContribution extends Contribution {
 
 export interface PanelContribution extends Contribution {
   slot: WorkbenchSlotName
-  component: ComponentType<WorkspacePageProps>
+  component: ComponentType<ExtensionComponentProps>
 }
 
 export interface WidgetContribution extends Contribution {
   slot: WorkbenchSlotName
-  component: ComponentType<WorkspacePageProps>
+  component: ComponentType<ExtensionComponentProps>
 }
 
 export interface InspectorContribution extends Contribution {
-  component: ComponentType<WorkspacePageProps>
+  component: ComponentType<ExtensionComponentProps>
 }
 
 export interface CommandContribution extends Contribution {
   title: string
-  run: (workspaceId: string) => void | Promise<void>
+  run: () => void | Promise<void>
 }
 
 export interface StatusContribution extends Contribution {
-  component: ComponentType<WorkspacePageProps>
+  component: ComponentType<ExtensionComponentProps>
 }
 
 export interface DialogContribution extends Contribution {
-  component: ComponentType<WorkspacePageProps>
+  component: ComponentType<ExtensionComponentProps>
 }
 
 export interface OverlayContribution extends Contribution {
-  component: ComponentType<WorkspacePageProps>
+  component: ComponentType<ExtensionComponentProps>
 }
 
 /**

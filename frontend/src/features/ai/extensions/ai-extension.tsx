@@ -5,14 +5,14 @@ import { ConfirmActionModal, CreateSessionModal, EditSessionModal, ResourceEdito
 import { AgentsPanel, ChatSessionsPanel, ModelsPanel, ProvidersPanel } from '@/features/ai/AiConsolePanels'
 import { AgentSessionPage } from '@/features/ai/AgentSessionPage'
 import { useAiConsoleController } from '@/features/ai/useAiConsoleController'
-import type { TrustedReactExtension, WorkspacePageProps } from '@/platform/extensions/types'
+import type { ExtensionComponentProps, TrustedReactExtension } from '@/platform/extensions/types'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 
 type AiConsoleController = ReturnType<typeof useAiConsoleController>
 const AiConsoleContext = createContext<AiConsoleController | null>(null)
 
-function AiConsoleRuntime({ workspaceId, children }: PropsWithChildren<{ workspaceId: string }>) {
-  const controller = useAiConsoleController(workspaceId)
+function AiConsoleRuntime({ children }: PropsWithChildren) {
+  const controller = useAiConsoleController()
   return <AiConsoleContext.Provider value={controller}>{children}</AiConsoleContext.Provider>
 }
 
@@ -28,13 +28,13 @@ function useOptionalAiConsole() {
   return useContext(AiConsoleContext)
 }
 
-function AiConsoleFrame({ workspaceId, content, children }: WorkspacePageProps & { content: ReactNode }) {
+function AiConsoleFrame({ content, children }: ExtensionComponentProps & { content: ReactNode }) {
   const controller = useAiConsole()
   return (
     <section className="screen active">
       <nav className="subbar">
         <div className="ai-mark">AI</div>
-        <NavigationSlot workspaceId={workspaceId} />
+        <NavigationSlot />
         <SearchField value={controller.search} onChange={controller.setSearch} />
       </nav>
       <div className="screen-body">
@@ -50,13 +50,10 @@ function AiConsoleFrame({ workspaceId, content, children }: WorkspacePageProps &
   )
 }
 
-function SessionsPage({ workspaceId, children }: WorkspacePageProps) {
+function SessionsPage({ children }: ExtensionComponentProps) {
   return (
-    <AiConsoleRuntime workspaceId={workspaceId}>
-      <AiConsoleFrame
-        workspaceId={workspaceId}
-        content={<SessionsPanel />}
-      >
+    <AiConsoleRuntime>
+      <AiConsoleFrame content={<SessionsPanel />}>
         {children}
       </AiConsoleFrame>
     </AiConsoleRuntime>
@@ -68,10 +65,10 @@ function SessionsPanel() {
   return <ChatSessionsPanel {...controller.chatPanelProps} />
 }
 
-function AgentsPage({ workspaceId, children }: WorkspacePageProps) {
+function AgentsPage({ children }: ExtensionComponentProps) {
   return (
-    <AiConsoleRuntime workspaceId={workspaceId}>
-      <AiConsoleFrame workspaceId={workspaceId} content={<AgentsResourcePanel />}>
+    <AiConsoleRuntime>
+      <AiConsoleFrame content={<AgentsResourcePanel />}>
         {children}
       </AiConsoleFrame>
     </AiConsoleRuntime>
@@ -83,10 +80,10 @@ function AgentsResourcePanel() {
   return <AgentsPanel {...controller.agentPanelProps} />
 }
 
-function ModelsPage({ workspaceId, children }: WorkspacePageProps) {
+function ModelsPage({ children }: ExtensionComponentProps) {
   return (
-    <AiConsoleRuntime workspaceId={workspaceId}>
-      <AiConsoleFrame workspaceId={workspaceId} content={<ModelsResourcePanel />}>
+    <AiConsoleRuntime>
+      <AiConsoleFrame content={<ModelsResourcePanel />}>
         {children}
       </AiConsoleFrame>
     </AiConsoleRuntime>
@@ -98,10 +95,10 @@ function ModelsResourcePanel() {
   return <ModelsPanel {...controller.modelPanelProps} />
 }
 
-function ProvidersPage({ workspaceId, children }: WorkspacePageProps) {
+function ProvidersPage({ children }: ExtensionComponentProps) {
   return (
-    <AiConsoleRuntime workspaceId={workspaceId}>
-      <AiConsoleFrame workspaceId={workspaceId} content={<ProvidersResourcePanel />}>
+    <AiConsoleRuntime>
+      <AiConsoleFrame content={<ProvidersResourcePanel />}>
         {children}
       </AiConsoleFrame>
     </AiConsoleRuntime>

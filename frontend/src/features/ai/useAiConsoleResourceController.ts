@@ -6,13 +6,12 @@ import { useAiConsoleResourceEditorState } from '@/features/ai/useAiConsoleResou
 import { useAiConsoleResourceMutations } from '@/features/ai/useAiConsoleResourceMutations'
 import { useAiConsoleResourceQueries } from '@/features/ai/useAiConsoleResourceQueries'
 
-export function useAiConsoleResourceController(workspaceId: string) {
+export function useAiConsoleResourceController() {
   const [deleteConfirm, setDeleteConfirm] = useState<ConfirmModalState | null>(null)
-  const { providersQuery, modelsQuery, agentsQuery, providers, models, agents } = useAiConsoleResourceQueries(workspaceId)
+  const { providersQuery, modelsQuery, agentsQuery, providers, models, agents } = useAiConsoleResourceQueries()
   const editorState = useAiConsoleResourceEditorState({ providers, models, agents })
   const closeDeleteConfirm = () => setDeleteConfirm(null)
   const mutations = useAiConsoleResourceMutations({
-    workspaceId,
     onResourceSaved: editorState.closeResourceModal,
     onDeleteCompleted: closeDeleteConfirm,
   })

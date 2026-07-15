@@ -19,7 +19,7 @@ vi.mock('@/shared/api/agent-service', () => {
   }
   return {
     agentService,
-    createWorkspaceSessionApi: () => ({
+    createSessionApi: () => ({
       list: () => agentService.listSessions(),
       get: (sessionId: string) => agentService.getSession(sessionId),
       createMessage: (sessionId: string, data: unknown) => agentService.createMessage(sessionId, data),
@@ -200,9 +200,20 @@ describe('AgentSessionPage', () => {
     expect(agentService.createMessage).not.toHaveBeenCalled()
   })
 
-  it('merges streamed events into the dialogue cache', async () => {
+  it('merges streamed events into only the active session cache', async () => {
+    // A seeded second-session cache detects accidental cross-session event writes.
     vi.mocked(agentService.listEvents).mockResolvedValue([])
     const { queryClient } = renderSession()
+    const otherSessionEvents = [{
+      eventId: 'event-other',
+      sessionId: 'session-2',
+      parentEventId: 'root',
+      runId: null,
+      eventType: 'user_message',
+      payloadJson: '{"content":"other session"}',
+      createTime: '2026-06-20T02:00:00',
+    }]
+    queryClient.setQueryData(queryKeys.sessions.events('session-2'), otherSessionEvents)
 
     await waitFor(() => {
       expect(agentService.createEventStream).toHaveBeenCalledWith('session-1')
@@ -211,6 +222,7 @@ describe('AgentSessionPage', () => {
     expect(streams.at(-1)?.listenerCount('session_event')).toBe(1)
 
     await act(async () => {
+      streams.at(-1)?.emit('session_event', null)
       streams.at(-1)?.emit('session_event', {
         eventId: 'event-stream-1',
         sessionId: 'session-1',
@@ -222,7 +234,7 @@ describe('AgentSessionPage', () => {
       })
     })
 
-    expect(queryClient.getQueryData(queryKeys.sessions.events('workspace-1', 'session-1'))).toEqual([
+    expect(queryClient.getQueryData(queryKeys.sessions.events('session-1'))).toEqual([
       {
         eventId: 'event-stream-1',
         sessionId: 'session-1',
@@ -233,6 +245,7 @@ describe('AgentSessionPage', () => {
         createTime: '2026-06-20T02:02:00',
       },
     ])
+    expect(queryClient.getQueryData(queryKeys.sessions.events('session-2'))).toEqual(otherSessionEvents)
 
     expect(await screen.findByText('streamed answer')).toBeInTheDocument()
   })
@@ -503,7 +516,7 @@ describe('AgentSessionPage', () => {
   })
 
   it('skips session-specific queries when session id is missing', async () => {
-    renderSession({ initialEntries: ['/workspaces/workspace-1/sessions'], routePath: '/workspaces/:workspaceId/sessions' })
+    renderSession({ initialEntries: ['/sessions'], routePath: '/sessions' })
 
     await waitFor(() => {
       expect(agentService.listAgents).toHaveBeenCalled()
@@ -519,8 +532,8 @@ describe('AgentSessionPage', () => {
 })
 
 function renderSession({
-  initialEntries = ['/workspaces/workspace-1/sessions/session-1'],
-  routePath = '/workspaces/:workspaceId/sessions/:sessionId',
+  initialEntries = ['/sessions/session-1'],
+  routePath = '/sessions/:sessionId',
 }: {
   initialEntries?: string[]
   routePath?: string

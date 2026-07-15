@@ -2,7 +2,6 @@ import { AgentResourceCard, CreateCard, ModelResourceCard, ProviderResourceCard,
 import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, AgentSessionDTO } from '@/shared/api/contracts'
 
 export function ChatSessionsPanel({
-  workspaceId,
   sessions,
   agentsByName,
   deletePending,
@@ -10,7 +9,6 @@ export function ChatSessionsPanel({
   onEdit,
   onDelete,
 }: {
-  workspaceId: string
   sessions: AgentSessionDTO[]
   agentsByName: Map<string, AgentDefinitionDTO>
   deletePending: boolean
@@ -24,7 +22,6 @@ export function ChatSessionsPanel({
       {sessions.map((session) => (
         <SessionCard
           key={session.sessionId}
-          workspaceId={workspaceId}
           session={session}
           agent={agentsByName.get(session.agentName)}
           onEdit={() => onEdit(session)}
