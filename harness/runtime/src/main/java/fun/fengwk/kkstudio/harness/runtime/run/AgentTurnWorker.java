@@ -7,12 +7,18 @@ import fun.fengwk.kkstudio.harness.agent.AgentTurnHandle;
 import fun.fengwk.kkstudio.harness.agent.AgentTurnRequest;
 import fun.fengwk.kkstudio.harness.agent.AgentTurnResult;
 import fun.fengwk.kkstudio.harness.agent.DefaultAgentTurnEngine;
+import fun.fengwk.kkstudio.harness.agent.extension.ProviderRequestInterceptorChain;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.context.SessionContext;
 import fun.fengwk.kkstudio.harness.runtime.context.SessionContextBuilder;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.AssistantCompleted;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.CompactionCompleted;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.RunTerminated;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.TurnStarted;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -24,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorException;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import java.lang.System.Logger.Level;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -34,6 +41,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /** 数据库 claim 驱动的单 Turn Worker。实例内不保存调度器或可恢复事实，只让当前 Provider stream 及其 Delta buffer 存活到本次回调终态。 */
 public final class AgentTurnWorker {
+  private static final System.Logger LOGGER = System.getLogger(AgentTurnWorker.class.getName());
   private static final AgentTurnHandle TERMINAL_HANDLE =
       new AgentTurnHandle() {
         @Override
@@ -56,6 +64,8 @@ public final class AgentTurnWorker {
   private final RunWorkerConfig config;
   private final Clock clock;
   private final DeltaFlushScheduler deltaFlushScheduler;
+  private final ProviderRequestInterceptorChain providerRequestInterceptors;
+  private final HarnessLifecycleObservers lifecycleObservers;
 
   public AgentTurnWorker(
       RunStore runStore,
@@ -69,6 +79,36 @@ public final class AgentTurnWorker {
       RunWorkerConfig config,
       Clock clock,
       DeltaFlushScheduler deltaFlushScheduler) {
+    this(
+        runStore,
+        eventStore,
+        transactions,
+        toolPreparationPort,
+        contextBuilder,
+        messageProjector,
+        resourceResolver,
+        compactionService,
+        config,
+        clock,
+        deltaFlushScheduler,
+        new ProviderRequestInterceptorChain(List.of()),
+        new HarnessLifecycleObservers(List.of()));
+  }
+
+  public AgentTurnWorker(
+      RunStore runStore,
+      RunEventStore eventStore,
+      RunTransactions transactions,
+      ToolPreparationPort toolPreparationPort,
+      SessionContextBuilder contextBuilder,
+      ProviderMessageProjector messageProjector,
+      TurnResourceResolver resourceResolver,
+      CompactionService compactionService,
+      RunWorkerConfig config,
+      Clock clock,
+      DeltaFlushScheduler deltaFlushScheduler,
+      ProviderRequestInterceptorChain providerRequestInterceptors,
+      HarnessLifecycleObservers lifecycleObservers) {
     this.runStore = Objects.requireNonNull(runStore, "runStore");
     this.eventStore = Objects.requireNonNull(eventStore, "eventStore");
     this.transactions = Objects.requireNonNull(transactions, "transactions");
@@ -80,6 +120,9 @@ public final class AgentTurnWorker {
     this.config = Objects.requireNonNull(config, "config");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.deltaFlushScheduler = Objects.requireNonNull(deltaFlushScheduler, "deltaFlushScheduler");
+    this.providerRequestInterceptors =
+        Objects.requireNonNull(providerRequestInterceptors, "providerRequestInterceptors");
+    this.lifecycleObservers = Objects.requireNonNull(lifecycleObservers, "lifecycleObservers");
   }
 
   /** claim 至多一个 due Run，并为它启动恰好一个 Turn。 */
@@ -96,7 +139,10 @@ public final class AgentTurnWorker {
     if (run.turnIndex() == 0 && run.attempt() == 1) {
       attemptEvent(run, RunEventType.RUN_STARTED);
     }
-    attemptEvent(run, RunEventType.TURN_STARTED);
+    Instant turnStartedAt = clock.instant();
+    attemptEventAt(run, RunEventType.TURN_STARTED, turnStartedAt);
+    lifecycleObservers.publish(
+        new TurnStarted(run.id(), run.sessionId(), run.attempt(), run.turnIndex(), turnStartedAt));
     if (run.cancelRequestedAt() != null) {
       cancelBeforeStart(run);
       return Optional.of(new ClaimedTurn(run, TERMINAL_HANDLE));
@@ -129,7 +175,8 @@ public final class AgentTurnWorker {
             config.deltaBatchBytes(),
             claimedAt);
     TurnHandler handler = new TurnHandler(run, context, resources, batcher);
-    AgentTurnEngine engine = new DefaultAgentTurnEngine(resources.provider());
+    AgentTurnEngine engine =
+        new DefaultAgentTurnEngine(resources.provider(), providerRequestInterceptors);
     AgentTurnHandle handle;
     try {
       handle =
@@ -162,7 +209,7 @@ public final class AgentTurnWorker {
 
   private void cancelBeforeStart(AgentRun run) {
     Instant now = clock.instant();
-    transactions.terminate(
+    terminate(
         run,
         RunStatus.CANCELLED,
         List.of(
@@ -173,7 +220,7 @@ public final class AgentTurnWorker {
 
   private void failBeforeStream(AgentRun run, RuntimeException error) {
     Instant now = clock.instant();
-    transactions.terminate(
+    terminate(
         run,
         RunStatus.FAILED,
         List.of(
@@ -200,6 +247,126 @@ public final class AgentTurnWorker {
 
   private void attemptEvent(AgentRun run, RunEventType type, Object... fields) {
     event(run, type, RunEventPayloads.forAttempt(run, fields));
+  }
+
+  private void attemptEventAt(AgentRun run, RunEventType type, Instant now, Object... fields) {
+    eventStore.append(run.id(), type, RunEventPayloads.forAttempt(run, fields), now);
+  }
+
+  private void terminate(
+      AgentRun run, RunStatus terminalStatus, List<RunEventDraft> terminalEvents, Instant now) {
+    if (!transactions.terminate(run, terminalStatus, terminalEvents, now)) {
+      return;
+    }
+    publishTerminalIfDurable(run, now);
+  }
+
+  /** 重载 Run 以 DB 为唯一事实源决定是否发布 terminal observation。 reload 缺失/异常/非终态仅 WARNING 跳过， 不能抛错影响已持久状态。 */
+  private void publishTerminalIfDurable(AgentRun run, Instant now) {
+    Optional<AgentRun> reloaded = reloadRun(run.id());
+    if (reloaded.isEmpty()) {
+      return;
+    }
+    AgentRun terminalRun = reloaded.orElseThrow();
+    RunStatus status = terminalRun.status();
+    if (!status.terminal()) {
+      LOGGER.log(
+          Level.WARNING,
+          "Run terminal observation skipped because reload returned nonterminal status: " + status);
+      return;
+    }
+    publishRunTerminated(terminalRun, status, now);
+  }
+
+  /**
+   * complete CAS 成功后根据 reload 实际 status 决定 Assistant/Run 组合。 cancel-wins 实际 CANCELLED 时只发
+   * RunTerminated；control requeue QUEUED 只发 Assistant；自然 SUCCEEDED 按 Assistant -> Run 顺序发。
+   */
+  private void publishAssistantObservation(
+      AgentRun run, ProviderResponse response, int toolCallCount, Instant now) {
+    Optional<AgentRun> reloaded = reloadRun(run.id());
+    if (reloaded.isEmpty()) {
+      return;
+    }
+    AgentRun current = reloaded.orElseThrow();
+    switch (current.status()) {
+      case SUCCEEDED -> {
+        publishAssistantCompleted(run, response, toolCallCount, now);
+        publishRunTerminated(current, RunStatus.SUCCEEDED, now);
+      }
+      case QUEUED -> publishAssistantCompleted(run, response, toolCallCount, now);
+      case CANCELLED -> publishRunTerminated(current, RunStatus.CANCELLED, now);
+      default -> LOGGER.log(
+          Level.WARNING,
+          "Assistant completion observation skipped because reload returned unexpected"
+              + " status: "
+              + current.status());
+    }
+  }
+
+  /** prepare CAS 成功后 reload 实际 status：WAITING_TOOLS 仅 Assistant；CANCELLED 仅 Run；其他仅 WARNING 跳过。 */
+  private void publishPreparationObservation(
+      AgentRun run, ProviderResponse response, int toolCallCount, Instant now) {
+    Optional<AgentRun> reloaded = reloadRun(run.id());
+    if (reloaded.isEmpty()) {
+      return;
+    }
+    AgentRun current = reloaded.orElseThrow();
+    switch (current.status()) {
+      case WAITING_TOOLS -> publishAssistantCompleted(run, response, toolCallCount, now);
+      case CANCELLED -> publishRunTerminated(current, RunStatus.CANCELLED, now);
+      default -> LOGGER.log(
+          Level.WARNING,
+          "Preparation observation skipped because reload returned unexpected status: "
+              + current.status());
+    }
+  }
+
+  /**
+   * compactAndRequeue CAS 成功后 reload 实际 status：QUEUED 仅 Compaction；CANCELLED 仅 Run；其他 WARNING 跳过。
+   */
+  private void publishCompactionObservation(
+      AgentRun run, CompactionEntryPayload completedCompaction, Instant now) {
+    Optional<AgentRun> reloaded = reloadRun(run.id());
+    if (reloaded.isEmpty()) {
+      return;
+    }
+    AgentRun current = reloaded.orElseThrow();
+    switch (current.status()) {
+      case QUEUED -> lifecycleObservers.publish(
+          new CompactionCompleted(
+              run.id(), run.sessionId(), completedCompaction.firstKeptEntryId(), now));
+      case CANCELLED -> publishRunTerminated(current, RunStatus.CANCELLED, now);
+      default -> LOGGER.log(
+          Level.WARNING,
+          "Compaction observation skipped because reload returned unexpected status: "
+              + current.status());
+    }
+  }
+
+  /** DB 是 Run 唯一事实源；reload 失败或缺失仅 WARNING，跳过本次 observation 不能影响已持久状态。 */
+  private Optional<AgentRun> reloadRun(long runId) {
+    try {
+      Optional<AgentRun> reloaded = runStore.find(runId);
+      if (reloaded.isEmpty()) {
+        LOGGER.log(Level.WARNING, "Run reload skipped because find returned empty for " + runId);
+      }
+      return reloaded;
+    } catch (RuntimeException error) {
+      LOGGER.log(Level.WARNING, "Run reload skipped because find failed for " + runId, error);
+      return Optional.empty();
+    }
+  }
+
+  private void publishAssistantCompleted(
+      AgentRun run, ProviderResponse response, int toolCallCount, Instant now) {
+    lifecycleObservers.publish(
+        new AssistantCompleted(
+            run.id(), run.sessionId(), toolCallCount, response.stopReason(), now));
+  }
+
+  private void publishRunTerminated(AgentRun run, RunStatus status, Instant now) {
+    lifecycleObservers.publish(new RunTerminated(run.id(), run.sessionId(), status, now));
   }
 
   private RunEventDraft attemptDraft(AgentRun run, RunEventType type, Object... fields) {
@@ -267,11 +434,13 @@ public final class AgentTurnWorker {
               "cost",
               response.cost());
       if (toolCalls.isEmpty()) {
-        transactions.complete(run, assistant, assistantCompleted, now);
+        if (transactions.complete(run, assistant, assistantCompleted, now)) {
+          publishAssistantObservation(run, response, toolCalls.size(), now);
+        }
         return;
       }
       try {
-        toolPreparationPort.prepare(
+        if (toolPreparationPort.prepare(
             run,
             assistant,
             toolCalls,
@@ -279,14 +448,16 @@ public final class AgentTurnWorker {
             resources.workdir(),
             resources.environmentRoot(),
             List.of(assistantCompleted),
-            now);
+            now)) {
+          publishPreparationObservation(run, response, toolCalls.size(), now);
+        }
       } catch (IllegalArgumentException | ToolInterceptorException error) {
         failToolPreparation(error, now);
       }
     }
 
     private void failToolPreparation(RuntimeException error, Instant now) {
-      transactions.terminate(
+      terminate(
           run,
           RunStatus.FAILED,
           List.of(
@@ -348,7 +519,7 @@ public final class AgentTurnWorker {
     private void overflowFailure(RunEventDraft assistantFailed) {
       Instant now = clock.instant();
       if (run.attempt() >= config.maxAttempts()) {
-        transactions.terminate(
+        terminate(
             run,
             RunStatus.FAILED,
             List.of(
@@ -363,7 +534,7 @@ public final class AgentTurnWorker {
       try {
         compaction = compactionService.compact(run.sessionId(), context);
       } catch (RuntimeException error) {
-        transactions.terminate(
+        terminate(
             run,
             RunStatus.FAILED,
             List.of(
@@ -380,7 +551,7 @@ public final class AgentTurnWorker {
         return;
       }
       if (compaction.isEmpty()) {
-        transactions.terminate(
+        terminate(
             run,
             RunStatus.FAILED,
             List.of(
@@ -390,9 +561,10 @@ public final class AgentTurnWorker {
             now);
         return;
       }
-      transactions.compactAndRequeue(
+      CompactionEntryPayload completedCompaction = compaction.orElseThrow();
+      if (transactions.compactAndRequeue(
           run,
-          compaction.orElseThrow(),
+          completedCompaction,
           now,
           List.of(
               assistantFailed,
@@ -401,14 +573,16 @@ public final class AgentTurnWorker {
                   run,
                   RunEventType.COMPACTION_COMPLETED,
                   "firstKeptEntryId",
-                  compaction.orElseThrow().firstKeptEntryId()),
+                  completedCompaction.firstKeptEntryId()),
               attemptDraft(run, RunEventType.RETRY_SCHEDULED, "nextAttemptAt", now)),
-          now);
+          now)) {
+        publishCompactionObservation(run, completedCompaction, now);
+      }
     }
 
     private void cancelledFailure(RunEventDraft assistantFailed) {
       Instant now = clock.instant();
-      transactions.terminate(
+      terminate(
           run,
           RunStatus.CANCELLED,
           List.of(
@@ -419,7 +593,7 @@ public final class AgentTurnWorker {
 
     private void permanentFailure(ProviderException error, RunEventDraft assistantFailed) {
       Instant now = clock.instant();
-      transactions.terminate(
+      terminate(
           run,
           RunStatus.FAILED,
           List.of(
