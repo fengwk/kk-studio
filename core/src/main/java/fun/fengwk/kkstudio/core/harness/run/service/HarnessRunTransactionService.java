@@ -287,11 +287,17 @@ public class HarnessRunTransactionService implements RunTransactions {
 
   @Transactional
   public void appendExternalEvent(long runId, RunEventDraft event, Instant now) {
+    appendExternalEvents(runId, List.of(event), now);
+  }
+
+  /** 在同一事务内按序追加外部事件。 */
+  @Transactional
+  public void appendExternalEvents(long runId, List<RunEventDraft> events, Instant now) {
     HarnessRunDO run = runMapper.findForUpdate(runId);
     if (run == null) {
       throw new IllegalArgumentException("unknown run: " + runId);
     }
-    appendEventsInternal(run, List.of(event), now);
+    appendEventsInternal(run, events, now);
   }
 
   @Override
