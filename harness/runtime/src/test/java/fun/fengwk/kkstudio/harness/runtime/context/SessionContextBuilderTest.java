@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.context;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -82,21 +83,38 @@ class SessionContextBuilderTest {
     assertEquals(List.of("hello"), messageTexts(context));
   }
 
-  /** Extension 必须按 priority 升序执行，并把前一扩展的结果传给后一扩展。 */
+  /** Extension 必须严格按输入顺序执行，并把前一扩展的结果传给后一扩展。 */
   @Test
-  void shouldApplyExtensionsByPriority() {
+  void shouldApplyExtensionsInInputOrder() {
     List<String> order = new ArrayList<>();
-    ContextTransform later = transform(20, "later", order, "final-model");
-    ContextTransform earlier = transform(-10, "earlier", order, "intermediate-model");
+    ContextTransform first = transform("first", order, "base-model", "intermediate-model");
+    ContextTransform second = transform("second", order, "intermediate-model", "final-model");
     List<SessionEntry> path =
         List.of(entry(1L, null, snapshot("system")), entry(2L, 1L, message("hello")));
     FixedStores stores = new FixedStores(session(2L), path);
 
-    SessionContext context = builder(stores, List.of(later, earlier)).build(SESSION_ID);
+    SessionContext context = builder(stores, List.of(first, second)).build(SESSION_ID);
 
-    assertEquals(List.of("earlier", "later"), order);
+    assertEquals(List.of("first", "second"), order);
     assertEquals("final-model", context.config().modelId());
     assertEquals(List.of("system", "hello"), messageTexts(context));
+  }
+
+  /** 构造时冻结 Extension 列表，调用方后续修改不能改变流水线。 */
+  @Test
+  void shouldSnapshotExtensionListAtConstruction() {
+    List<String> order = new ArrayList<>();
+    List<ContextTransform> transforms = new ArrayList<>();
+    transforms.add(transform("retained", order, "base-model", "retained-model"));
+    FixedStores stores = new FixedStores(session(1L), List.of(entry(1L, null, snapshot("system"))));
+    SessionContextBuilder builder = builder(stores, transforms);
+    transforms.clear();
+    transforms.add(transform("late", order, "base-model", "late-model"));
+
+    SessionContext context = builder.build(SESSION_ID);
+
+    assertEquals(List.of("retained"), order);
+    assertEquals("retained-model", context.config().modelId());
   }
 
   /** Extension 返回 null 会破坏流水线，必须在该扩展处立即失败。 */
@@ -114,20 +132,34 @@ class SessionContextBuilderTest {
     assertEquals("context transform result", exception.getMessage());
   }
 
-  private static ContextTransform transform(
-      int priority, String name, List<String> order, String modelId) {
-    return new ContextTransform() {
-      @Override
-      public ContextState transform(ContextState state) {
-        order.add(name);
-        return new ContextState(
-            state.config().withModel(modelId, state.config().variant()), state.entries());
-      }
+  /** Extension 实现异常保持原样传播，调用方可识别真实失败。 */
+  @Test
+  void shouldPropagateExtensionFailure() {
+    FixedStores stores = new FixedStores(session(1L), List.of(entry(1L, null, snapshot("system"))));
+    IllegalStateException failure = new IllegalStateException("transform failed");
 
-      @Override
-      public int priority() {
-        return priority;
-      }
+    IllegalStateException thrown =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                builder(
+                        stores,
+                        List.of(
+                            state -> {
+                              throw failure;
+                            }))
+                    .build(SESSION_ID));
+
+    assertSame(failure, thrown);
+  }
+
+  private static ContextTransform transform(
+      String name, List<String> order, String expectedModelId, String modelId) {
+    return state -> {
+      assertEquals(expectedModelId, state.config().modelId());
+      order.add(name);
+      return new ContextState(
+          state.config().withModel(modelId, state.config().variant()), state.entries());
     };
   }
 

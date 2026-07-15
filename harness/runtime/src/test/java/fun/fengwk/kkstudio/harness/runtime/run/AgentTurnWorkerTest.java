@@ -278,6 +278,92 @@ class AgentTurnWorkerTest {
                         && event.payloadJson().contains("no_compactable_context")));
   }
 
+  /** BeforeCompaction hook 异常必须通过持久 terminate 路径确定性终结 Run。 */
+  @Test
+  void failsRunWhenCompactionHookThrows() {
+    Fixture fixture = new Fixture();
+    fixture.providers.add(
+        RecordingProvider.fail(new ProviderException(ProviderErrorKind.OVERFLOW, "too long")));
+    fixture.compaction =
+        new InterceptingCompactionService(
+            (sessionId, context) ->
+                Optional.of(new CompactionEntryPayload("unused", 10L, 100, "{}")),
+            List.of(
+                context -> {
+                  throw new IllegalStateException("hook failed");
+                }));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.FAILED, fixture.store.current.status());
+    assertEquals(1, fixture.store.terminateCalls);
+    assertEquals(1, terminalOperationCount(fixture));
+    assertTrue(fixture.store.compactions.isEmpty());
+    assertTrue(
+        fixture.store.events.stream()
+            .anyMatch(
+                event ->
+                    event.type() == RunEventType.RUN_FAILED
+                        && event.payloadJson().contains("compaction_failed")
+                        && event.payloadJson().contains("hook failed")));
+  }
+
+  /** Compaction delegate 异常与 hook 异常使用同一 FAILED 收敛路径，不能遗留 RUNNING lease。 */
+  @Test
+  void failsRunWhenCompactionDelegateThrows() {
+    Fixture fixture = new Fixture();
+    fixture.providers.add(
+        RecordingProvider.fail(new ProviderException(ProviderErrorKind.OVERFLOW, "too long")));
+    fixture.compaction =
+        new InterceptingCompactionService(
+            (sessionId, context) -> {
+              throw new IllegalArgumentException("delegate failed");
+            },
+            List.of(context -> context.context()));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.FAILED, fixture.store.current.status());
+    assertEquals(1, fixture.store.terminateCalls);
+    assertEquals(1, terminalOperationCount(fixture));
+    assertTrue(
+        fixture.store.events.stream()
+            .anyMatch(
+                event ->
+                    event.type() == RunEventType.RUN_FAILED
+                        && event.payloadJson().contains("compaction_failed")
+                        && event.payloadJson().contains("delegate failed")));
+  }
+
+  /** Compaction 失败与持久 cancel 竞争时由事务保持 cancel-wins，且只能写一个 terminal。 */
+  @Test
+  void keepsCancelWinsWhenCompactionFailureRacesWithCancel() {
+    Fixture fixture = new Fixture();
+    fixture.providers.add(
+        RecordingProvider.fail(new ProviderException(ProviderErrorKind.OVERFLOW, "too long")));
+    fixture.compaction =
+        new InterceptingCompactionService(
+            (sessionId, context) -> Optional.empty(),
+            List.of(
+                context -> {
+                  fixture.store.requestCancel(20L, START.plusSeconds(1));
+                  throw new IllegalStateException("hook failed after cancel");
+                }));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.CANCELLED, fixture.store.current.status());
+    assertEquals(1, fixture.store.terminateCalls);
+    assertEquals(1, terminalOperationCount(fixture));
+    assertEquals(
+        1,
+        fixture.store.events.stream()
+            .filter(event -> event.type() == RunEventType.RUN_CANCELLED)
+            .count());
+    assertFalse(
+        fixture.store.events.stream().anyMatch(event -> event.type() == RunEventType.RUN_FAILED));
+  }
+
   /** CompactionService 持续返回结果时也受持久 attempt 上限约束，达到上限直接 FAILED。 */
   @Test
   void stopsRepeatedOverflowCompactionAtAttemptLimit() {
@@ -554,6 +640,10 @@ class AgentTurnWorkerTest {
     return ((TextMessageContent) payload.message().contents().get(0)).text();
   }
 
+  private static long terminalOperationCount(Fixture fixture) {
+    return fixture.store.operations.stream().filter(value -> value.startsWith("terminal:")).count();
+  }
+
   private static void await(CountDownLatch latch) {
     try {
       latch.await();
@@ -733,6 +823,7 @@ class AgentTurnWorkerTest {
     private final List<String> boundaryOperations;
     private boolean steeringBlocked;
     private String leaseOverride;
+    private int terminateCalls;
 
     private InMemoryRunState(Instant now, List<String> boundaryOperations) {
       this.boundaryOperations = boundaryOperations;
@@ -962,9 +1053,31 @@ class AgentTurnWorkerTest {
       if (!owned(claimedRun)) {
         return false;
       }
-      appendDrafts(claimedRun.id(), terminalEvents, now);
-      current = terminal(claimedRun, terminalStatus, now, false);
-      operations.add("terminal:" + terminalStatus.name());
+      terminateCalls++;
+      RunStatus resolvedStatus = terminalStatus;
+      List<RunEventDraft> resolvedEvents = terminalEvents;
+      if (current.cancelRequestedAt() != null) {
+        resolvedStatus = RunStatus.CANCELLED;
+        resolvedEvents = new ArrayList<>();
+        boolean hasRunCancelled = false;
+        for (RunEventDraft event : terminalEvents) {
+          if (event.type() != RunEventType.RUN_FAILED) {
+            resolvedEvents.add(event);
+          }
+          if (event.type() == RunEventType.RUN_CANCELLED) {
+            hasRunCancelled = true;
+          }
+        }
+        if (!hasRunCancelled) {
+          resolvedEvents.add(
+              new RunEventDraft(
+                  RunEventType.RUN_CANCELLED,
+                  RunEventPayloads.forAttempt(claimedRun, "reason", "cancel_requested")));
+        }
+      }
+      appendDrafts(claimedRun.id(), resolvedEvents, now);
+      current = terminal(claimedRun, resolvedStatus, now, false);
+      operations.add("terminal:" + resolvedStatus.name());
       return true;
     }
 
