@@ -200,7 +200,6 @@ class DaemonRuntimeTest {
         new DaemonEnvelope(
             DaemonProtocol.VERSION_1,
             DaemonMessageType.INVOKE,
-            "workspace",
             "other-environment",
             "wrong-scope",
             1,
@@ -211,7 +210,6 @@ class DaemonRuntimeTest {
         new DaemonEnvelope(
             DaemonProtocol.VERSION_1,
             DaemonMessageType.INVOKE,
-            "workspace",
             "environment",
             "bad-payload",
             2,
@@ -230,13 +228,13 @@ class DaemonRuntimeTest {
     transport.awaitConnections(1);
     transport.takeMessages(3);
     transport.receiveRaw(
-        "{\"protocolVersion\":1,\"messageType\":\"INVOKE\",\"workspaceId\":\"workspace\","
+        "{\"protocolVersion\":1,\"messageType\":\"INVOKE\","
             + "\"environmentId\":\"environment\",\"sequence\":1,\"payload\":{\"toolName\":\"test\","
             + "\"toolVersion\":\"1.0.0\",\"arguments\":{}}}");
 
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     transport.receiveRaw(
-        "{\"protocolVersion\":1,\"messageType\":\"CANCEL\",\"workspaceId\":\"workspace\","
+        "{\"protocolVersion\":1,\"messageType\":\"CANCEL\","
             + "\"environmentId\":\"environment\",\"sequence\":1,\"payload\":{}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
@@ -578,7 +576,6 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            "workspace",
             "environment",
             "daemon",
             heartbeatInterval,
@@ -604,7 +601,6 @@ class DaemonRuntimeTest {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION_1,
         DaemonMessageType.INVOKE,
-        "workspace",
         "environment",
         invocationId,
         sequence,
@@ -622,7 +618,6 @@ class DaemonRuntimeTest {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION_1,
         DaemonMessageType.INVOKE,
-        "workspace",
         "environment",
         invocationId,
         sequence,
@@ -635,14 +630,13 @@ class DaemonRuntimeTest {
 
   private DaemonEnvelope control(DaemonMessageType messageType, long sequence) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_1, messageType, "workspace", "environment", null, sequence, "{}");
+        DaemonProtocol.VERSION_1, messageType, "environment", null, sequence, "{}");
   }
 
   private DaemonEnvelope cancel(String invocationId, long sequence) {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION_1,
         DaemonMessageType.CANCEL,
-        "workspace",
         "environment",
         invocationId,
         sequence,

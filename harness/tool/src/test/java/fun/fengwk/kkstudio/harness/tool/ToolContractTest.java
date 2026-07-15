@@ -102,17 +102,13 @@ class ToolContractTest {
   void enforcesDaemonEnvelopeCorrelationAndJsonPayload() {
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new DaemonEnvelope(
-                1, DaemonMessageType.INVOKE, "workspace", "environment", null, 1, "{}"));
+        () -> new DaemonEnvelope(1, DaemonMessageType.INVOKE, "environment", null, 1, "{}"));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new DaemonEnvelope(
-                1, DaemonMessageType.HELLO, "workspace", "environment", null, 0, "not-json"));
+        () -> new DaemonEnvelope(1, DaemonMessageType.HELLO, "environment", null, 0, "not-json"));
 
     DaemonEnvelope hello =
-        new DaemonEnvelope(1, DaemonMessageType.HELLO, "workspace", "environment", null, 0, "{}");
+        new DaemonEnvelope(1, DaemonMessageType.HELLO, "environment", null, 0, "{}");
     assertEquals(DaemonMessageType.HELLO, hello.messageType());
   }
 

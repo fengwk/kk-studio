@@ -36,8 +36,7 @@ public final class InMemoryDaemonInvocationJournal implements DaemonInvocationJo
         (id, entry) -> {
           if (!entry.state().isTerminal()) {
             completed.set(true);
-            return new DaemonInvocationJournalEntry(
-                id, toState(terminalMessage), terminalMessage);
+            return new DaemonInvocationJournalEntry(id, toState(terminalMessage), terminalMessage);
           }
           return entry;
         });

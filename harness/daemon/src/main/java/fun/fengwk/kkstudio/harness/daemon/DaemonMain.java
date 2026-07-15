@@ -8,7 +8,7 @@ public final class DaemonMain {
 
   private DaemonMain() {}
 
-  /** 使用连接属性及可选的 {@code kkstudio.daemon.workspace-root} 启动带本地 coding tools 的 Daemon。 */
+  /** 使用连接属性及可选的 {@code kkstudio.daemon.environment-root} 启动带本地 coding tools 的 Daemon。 */
   public static void main(String[] args) throws InterruptedException {
     DaemonToolRegistry toolRegistry = new DaemonToolRegistry();
     CodingTools.registerAll(toolRegistry, CodingToolsConfig.fromSystemProperties());

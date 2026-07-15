@@ -8,8 +8,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 /**
  * Daemon v1 envelope 的 JSON codec。
  *
- * <p>codec 在边界拒绝未知版本、未知消息类型、缺失字段和非对象 payload，避免将不完整 wire
- * 消息传给运行时。
+ * <p>codec 在边界拒绝未知版本、未知消息类型、缺失字段和非对象 payload，避免将不完整 wire 消息传给运行时。
  */
 public final class DaemonEnvelopeCodec {
 
@@ -20,7 +19,6 @@ public final class DaemonEnvelopeCodec {
     ObjectNode root = OBJECT_MAPPER.createObjectNode();
     root.put("protocolVersion", envelope.protocolVersion());
     root.put("messageType", envelope.messageType().name());
-    root.put("workspaceId", envelope.workspaceId());
     root.put("environmentId", envelope.environmentId());
     if (envelope.invocationId() != null) {
       root.put("invocationId", envelope.invocationId());
@@ -60,7 +58,6 @@ public final class DaemonEnvelopeCodec {
     return new DaemonEnvelope(
         protocolVersion,
         messageType,
-        requiredText(root, "workspaceId"),
         requiredText(root, "environmentId"),
         invocationId,
         sequence,

@@ -32,13 +32,13 @@ public final class ReadTool extends AbstractCodingTool {
         new ToolDescriptor(
             "read",
             "1",
-            "Read a file or directory inside the environment workspace.",
+            "Read a file or directory inside the environment root.",
             null,
             new ToolParamsSchema(
                 "Read parameters",
                 Map.of(
                     "path", new ToolStringSchema("File or directory path"),
-                    "workdir", new ToolStringSchema("Optional workspace-relative directory"),
+                    "workdir", new ToolStringSchema("Optional environment-root-relative directory"),
                     "offset", new ToolIntegerSchema("One-based line offset"),
                     "limit", new ToolIntegerSchema("Maximum number of lines")),
                 Set.of("path"),

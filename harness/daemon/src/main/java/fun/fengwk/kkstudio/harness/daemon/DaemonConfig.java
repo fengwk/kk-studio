@@ -8,7 +8,6 @@ import java.util.UUID;
 /** Daemon 独立进程的连接与执行配置。 */
 public record DaemonConfig(
     URI gatewayUri,
-    String workspaceId,
     String environmentId,
     String daemonId,
     Duration heartbeatInterval,
@@ -21,7 +20,6 @@ public record DaemonConfig(
     if (!"ws".equals(gatewayUri.getScheme()) && !"wss".equals(gatewayUri.getScheme())) {
       throw new IllegalArgumentException("gatewayUri must use ws or wss");
     }
-    workspaceId = requireNonBlank(workspaceId, "workspaceId");
     environmentId = requireNonBlank(environmentId, "environmentId");
     daemonId = requireNonBlank(daemonId, "daemonId");
     heartbeatInterval = requirePositive(heartbeatInterval, "heartbeatInterval");
@@ -37,7 +35,6 @@ public record DaemonConfig(
   public static DaemonConfig fromSystemProperties() {
     return new DaemonConfig(
         URI.create(requiredProperty("kkstudio.daemon.gateway-uri")),
-        requiredProperty("kkstudio.daemon.workspace-id"),
         requiredProperty("kkstudio.daemon.environment-id"),
         System.getProperty("kkstudio.daemon.id", UUID.randomUUID().toString()),
         durationProperty("kkstudio.daemon.heartbeat", Duration.ofSeconds(15)),

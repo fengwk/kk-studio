@@ -341,9 +341,8 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   private void verifyScope(DaemonEnvelope envelope) {
-    if (!config.workspaceId().equals(envelope.workspaceId())
-        || !config.environmentId().equals(envelope.environmentId())) {
-      throw new DaemonProtocolException("envelope workspaceId/environmentId does not match daemon");
+    if (!config.environmentId().equals(envelope.environmentId())) {
+      throw new DaemonProtocolException("envelope environmentId does not match daemon");
     }
   }
 
@@ -545,7 +544,6 @@ public final class DaemonRuntime implements AutoCloseable {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION_1,
         messageType,
-        config.workspaceId(),
         config.environmentId(),
         invocationId,
         outboundSequence.getAndIncrement(),
@@ -799,7 +797,6 @@ public final class DaemonRuntime implements AutoCloseable {
   private record InboundEnvelopeIdentity(
       int protocolVersion,
       DaemonMessageType messageType,
-      String workspaceId,
       String environmentId,
       String invocationId,
       long sequence,
@@ -809,7 +806,6 @@ public final class DaemonRuntime implements AutoCloseable {
       return new InboundEnvelopeIdentity(
           envelope.protocolVersion(),
           envelope.messageType(),
-          envelope.workspaceId(),
           envelope.environmentId(),
           envelope.invocationId(),
           envelope.sequence(),

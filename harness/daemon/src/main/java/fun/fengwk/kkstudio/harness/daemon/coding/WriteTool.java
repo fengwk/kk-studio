@@ -16,7 +16,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 
-/** Intentionally creates or replaces one text file under the workspace root. */
+/** Intentionally creates or replaces one text file under the environment root. */
 public final class WriteTool extends AbstractCodingTool {
 
   public WriteTool(CodingToolsConfig config) {
@@ -25,14 +25,15 @@ public final class WriteTool extends AbstractCodingTool {
         new ToolDescriptor(
             "write",
             "1",
-            "Create or intentionally overwrite a file inside the environment workspace.",
+            "Create or intentionally overwrite a file inside the environment root.",
             null,
             new ToolParamsSchema(
                 "Write parameters",
                 Map.of(
                     "path", new ToolStringSchema("File path"),
                     "content", new ToolStringSchema("Complete replacement content"),
-                    "workdir", new ToolStringSchema("Optional workspace-relative directory")),
+                    "workdir",
+                        new ToolStringSchema("Optional environment-root-relative directory")),
                 Set.of("path", "content"),
                 false),
             ToolExecutionMode.ENVIRONMENT,

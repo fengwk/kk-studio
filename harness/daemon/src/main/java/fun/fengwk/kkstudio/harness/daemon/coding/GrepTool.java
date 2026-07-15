@@ -28,7 +28,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Searches workspace files through configurable ripgrep while retaining its gitignore semantics.
+ * Searches environment files through configurable ripgrep while retaining its gitignore semantics.
  */
 public final class GrepTool extends AbstractCodingTool {
 
@@ -41,14 +41,14 @@ public final class GrepTool extends AbstractCodingTool {
         new ToolDescriptor(
             "grep",
             "1",
-            "Search text files under a workspace path using ripgrep.",
+            "Search text files under an environment root path using ripgrep.",
             null,
             new ToolParamsSchema(
                 "Grep parameters",
                 Map.of(
                     "pattern", new ToolStringSchema("Regular expression or literal"),
                     "path", new ToolStringSchema("Search file or directory"),
-                    "workdir", new ToolStringSchema("Optional workspace-relative directory"),
+                    "workdir", new ToolStringSchema("Optional environment-root-relative directory"),
                     "include", new ToolStringSchema("Optional glob"),
                     "ignore_case", new ToolBooleanSchema("Ignore case"),
                     "literal", new ToolBooleanSchema("Treat pattern literally"),
@@ -180,7 +180,7 @@ public final class GrepTool extends AbstractCodingTool {
       Path resultPath = Path.of(displayPath);
       if (resultPath.isAbsolute()) {
         Path normalized = resultPath.normalize();
-        if (normalized.startsWith(config.workspaceRoot())) {
+        if (normalized.startsWith(config.environmentRoot())) {
           displayPath = workdir.relativize(normalized).toString();
         }
       }

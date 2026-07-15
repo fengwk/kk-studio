@@ -9,8 +9,7 @@ import java.util.Set;
 public record DaemonTerminalMessage(DaemonMessageType messageType, String payloadJson) {
 
   private static final Set<DaemonMessageType> TERMINAL_TYPES =
-      Set.of(
-          DaemonMessageType.COMPLETED, DaemonMessageType.FAILED, DaemonMessageType.CANCELLED);
+      Set.of(DaemonMessageType.COMPLETED, DaemonMessageType.FAILED, DaemonMessageType.CANCELLED);
 
   public DaemonTerminalMessage {
     messageType = Objects.requireNonNull(messageType, "messageType");

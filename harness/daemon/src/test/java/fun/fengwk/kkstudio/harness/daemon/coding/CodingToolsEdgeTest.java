@@ -98,7 +98,7 @@ class CodingToolsEdgeTest {
   void pathBoundaryAcceptsCanonicalChildrenAndRejectsInvalidWorkdirs() throws Exception {
     Path nested = Files.createDirectories(workspace.resolve("nested"));
     Files.writeString(nested.resolve("file.txt"), "x");
-    WorkspacePathBoundary boundary = new WorkspacePathBoundary(config());
+    EnvironmentPathBoundary boundary = new EnvironmentPathBoundary(config());
 
     assertEquals(nested.toRealPath(), boundary.workdir("@nested"));
     assertEquals(nested.resolve("file.txt").toRealPath(), boundary.existing("@file.txt", nested));
@@ -192,7 +192,7 @@ class CodingToolsEdgeTest {
   @Test
   void configSystemPropertiesAndValidationCoverStandaloneStartupInputs() throws Exception {
     String[] names = {
-      "kkstudio.daemon.workspace-root",
+      "kkstudio.daemon.environment-root",
       "kkstudio.daemon.default-workdir",
       "kkstudio.daemon.artifact-directory",
       "kkstudio.daemon.bash",
@@ -211,7 +211,7 @@ class CodingToolsEdgeTest {
       System.setProperty(names[4], "custom-rg");
       System.setProperty(names[5], "custom-fd");
       CodingToolsConfig properties = CodingToolsConfig.fromSystemProperties();
-      assertEquals(workspace.toRealPath(), properties.workspaceRoot());
+      assertEquals(workspace.toRealPath(), properties.environmentRoot());
       assertEquals("custom-bash", properties.bashExecutable());
       assertTrue(properties.artifactSink() instanceof LocalFileArtifactSink);
     } finally {

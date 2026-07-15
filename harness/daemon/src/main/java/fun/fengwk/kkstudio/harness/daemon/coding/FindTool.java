@@ -26,7 +26,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-/** Finds gitignore-respecting workspace-relative paths through configurable fd or fdfind. */
+/** Finds gitignore-respecting environment-root-relative paths through configurable fd or fdfind. */
 public final class FindTool extends AbstractCodingTool {
 
   public FindTool(CodingToolsConfig config) {
@@ -35,14 +35,14 @@ public final class FindTool extends AbstractCodingTool {
         new ToolDescriptor(
             "find",
             "1",
-            "Find files under a workspace path using fd while respecting .gitignore.",
+            "Find files under an environment root path using fd while respecting .gitignore.",
             null,
             new ToolParamsSchema(
                 "Find parameters",
                 Map.of(
                     "pattern", new ToolStringSchema("Glob pattern"),
                     "path", new ToolStringSchema("Search directory"),
-                    "workdir", new ToolStringSchema("Optional workspace-relative directory"),
+                    "workdir", new ToolStringSchema("Optional environment-root-relative directory"),
                     "limit", new ToolIntegerSchema("Maximum results"),
                     "timeout_seconds", new ToolIntegerSchema("Search timeout in seconds")),
                 Set.of("pattern", "path"),

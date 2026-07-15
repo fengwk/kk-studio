@@ -17,7 +17,6 @@ class DaemonEnvelopeCodecTest {
         new DaemonEnvelope(
             DaemonProtocol.VERSION_1,
             DaemonMessageType.INVOKE,
-            "workspace",
             "environment",
             "invocation",
             7,
@@ -32,17 +31,17 @@ class DaemonEnvelopeCodecTest {
   @Test
   void rejectsUnsupportedOrMalformedWireEnvelope() {
     assertProtocolError(
-        "{\"protocolVersion\":2,\"messageType\":\"READY\",\"workspaceId\":\"w\","
-            + "\"environmentId\":\"e\",\"sequence\":0,\"payload\":{}}");
+        "{\"protocolVersion\":2,\"messageType\":\"READY\",\"environmentId\":\"e\","
+            + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        "{\"protocolVersion\":1,\"messageType\":\"FUTURE\",\"workspaceId\":\"w\","
-            + "\"environmentId\":\"e\",\"sequence\":0,\"payload\":{}}");
+        "{\"protocolVersion\":1,\"messageType\":\"FUTURE\",\"environmentId\":\"e\","
+            + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        "{\"protocolVersion\":1,\"messageType\":\"READY\",\"workspaceId\":\"w\","
-            + "\"environmentId\":\"e\",\"sequence\":-1,\"payload\":{}}");
+        "{\"protocolVersion\":1,\"messageType\":\"READY\",\"environmentId\":\"e\","
+            + "\"sequence\":-1,\"payload\":{}}");
     assertProtocolError(
-        "{\"protocolVersion\":1,\"messageType\":\"READY\",\"workspaceId\":\"w\","
-            + "\"environmentId\":\"e\",\"sequence\":0,\"payload\":[]}");
+        "{\"protocolVersion\":1,\"messageType\":\"READY\",\"environmentId\":\"e\","
+            + "\"sequence\":0,\"payload\":[]}");
   }
 
   private void assertProtocolError(String json) {

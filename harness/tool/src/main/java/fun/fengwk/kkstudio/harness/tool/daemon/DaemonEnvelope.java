@@ -8,7 +8,6 @@ import java.util.Set;
 public record DaemonEnvelope(
     int protocolVersion,
     DaemonMessageType messageType,
-    String workspaceId,
     String environmentId,
     String invocationId,
     long sequence,
@@ -29,7 +28,6 @@ public record DaemonEnvelope(
       throw new IllegalArgumentException("protocolVersion must be positive");
     }
     messageType = Objects.requireNonNull(messageType, "messageType");
-    workspaceId = requireNonBlank(workspaceId, "workspaceId");
     environmentId = requireNonBlank(environmentId, "environmentId");
     if (sequence < 0) {
       throw new IllegalArgumentException("sequence must not be negative");

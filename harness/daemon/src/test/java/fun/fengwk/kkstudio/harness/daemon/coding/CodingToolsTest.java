@@ -58,9 +58,9 @@ class CodingToolsTest {
     ToolResult symlink = invoke(read, "{\"path\":\"escape/secret.txt\"}");
     ToolResult unsafeWrite = invoke(write, "{\"path\":\"escape/new.txt\",\"content\":\"x\"}");
 
-    assertTrue(text(traversal).contains("escapes workspace root"));
-    assertTrue(text(symlink).contains("outside workspace root"));
-    assertTrue(text(unsafeWrite).contains("outside workspace root"));
+    assertTrue(text(traversal).contains("escapes environment root"));
+    assertTrue(text(symlink).contains("outside environment root"));
+    assertTrue(text(unsafeWrite).contains("outside environment root"));
     assertFalse(Files.exists(outside.resolve("new.txt")));
   }
 

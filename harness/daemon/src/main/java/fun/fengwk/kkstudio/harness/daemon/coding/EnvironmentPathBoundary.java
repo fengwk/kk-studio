@@ -6,21 +6,21 @@ import java.nio.file.Path;
 import java.util.Objects;
 
 /**
- * Enforces the Daemon workspace boundary for every filesystem-facing tool.
+ * Enforces the Daemon environment root boundary for every filesystem-facing tool.
  *
  * <p>Cloud permission authorizes a command; it never relaxes this local path and symlink boundary.
  */
-public final class WorkspacePathBoundary {
+public final class EnvironmentPathBoundary {
 
-  private final Path workspaceRoot;
+  private final Path environmentRoot;
   private final Path defaultWorkdir;
 
-  public WorkspacePathBoundary(CodingToolsConfig config) {
-    this.workspaceRoot = config.workspaceRoot();
+  public EnvironmentPathBoundary(CodingToolsConfig config) {
+    this.environmentRoot = config.environmentRoot();
     this.defaultWorkdir = config.defaultWorkdir();
   }
 
-  /** Resolves and canonicalizes an existing work directory inside the workspace. */
+  /** Resolves and canonicalizes an existing work directory inside the environment root. */
   public Path workdir(String rawWorkdir) {
     if (rawWorkdir == null || rawWorkdir.isBlank()) {
       return defaultWorkdir;
@@ -42,7 +42,9 @@ public final class WorkspacePathBoundary {
     return canonicalExisting(candidate, "path");
   }
 
-  /** Resolves a write target whose existing ancestors cannot traverse outside the workspace. */
+  /**
+   * Resolves a write target whose existing ancestors cannot traverse outside the environment root.
+   */
   public Path writable(String rawPath, Path workdir) {
     Path candidate = resolve(rawPath, requireWorkdir(workdir), "path");
     Path existing = candidate;
@@ -54,8 +56,8 @@ public final class WorkspacePathBoundary {
     }
     Path canonicalAncestor = canonicalExisting(existing, "path ancestor");
     Path resolved = canonicalAncestor.resolve(existing.relativize(candidate)).normalize();
-    if (!resolved.startsWith(workspaceRoot)) {
-      throw new IllegalArgumentException("path escapes workspace root: " + display(rawPath));
+    if (!resolved.startsWith(environmentRoot)) {
+      throw new IllegalArgumentException("path escapes environment root: " + display(rawPath));
     }
     if (Files.exists(candidate)) {
       return canonicalExisting(candidate, "path");
@@ -77,8 +79,8 @@ public final class WorkspacePathBoundary {
       throw new IllegalArgumentException(name + " is not a valid path: " + value, error);
     }
     Path candidate = (requested.isAbsolute() ? requested : base.resolve(requested)).normalize();
-    if (!candidate.startsWith(workspaceRoot)) {
-      throw new IllegalArgumentException(name + " escapes workspace root: " + value);
+    if (!candidate.startsWith(environmentRoot)) {
+      throw new IllegalArgumentException(name + " escapes environment root: " + value);
     }
     return candidate;
   }
@@ -86,13 +88,14 @@ public final class WorkspacePathBoundary {
   private Path canonicalExisting(Path candidate, String name) {
     try {
       Path canonical = candidate.toRealPath();
-      if (!canonical.startsWith(workspaceRoot)) {
-        throw new IllegalArgumentException(name + " resolves outside workspace root: " + candidate);
+      if (!canonical.startsWith(environmentRoot)) {
+        throw new IllegalArgumentException(
+            name + " resolves outside environment root: " + candidate);
       }
       return canonical;
     } catch (IOException error) {
       throw new IllegalArgumentException(
-          name + " must exist inside workspace root: " + candidate, error);
+          name + " must exist inside environment root: " + candidate, error);
     }
   }
 

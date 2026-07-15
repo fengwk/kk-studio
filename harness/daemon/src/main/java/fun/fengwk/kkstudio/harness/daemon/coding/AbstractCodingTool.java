@@ -33,12 +33,12 @@ abstract class AbstractCodingTool implements Tool {
           });
 
   final CodingToolsConfig config;
-  final WorkspacePathBoundary boundary;
+  final EnvironmentPathBoundary boundary;
   private final ToolDescriptor descriptor;
 
   AbstractCodingTool(CodingToolsConfig config, ToolDescriptor descriptor) {
     this.config = Objects.requireNonNull(config, "config");
-    this.boundary = new WorkspacePathBoundary(config);
+    this.boundary = new EnvironmentPathBoundary(config);
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
   }
 

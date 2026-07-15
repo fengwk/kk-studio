@@ -7,7 +7,7 @@ import java.util.Objects;
 
 /** Immutable local execution configuration shared by Daemon coding tools. */
 public record CodingToolsConfig(
-    Path workspaceRoot,
+    Path environmentRoot,
     Path defaultWorkdir,
     int previewMaxLines,
     int previewMaxBytes,
@@ -20,15 +20,15 @@ public record CodingToolsConfig(
   public static final int DEFAULT_PREVIEW_MAX_BYTES = 50 * 1024;
 
   public CodingToolsConfig {
-    workspaceRoot = canonicalDirectory(workspaceRoot, "workspaceRoot");
+    environmentRoot = canonicalDirectory(environmentRoot, "environmentRoot");
     defaultWorkdir =
         Objects.requireNonNull(defaultWorkdir, "defaultWorkdir").toAbsolutePath().normalize();
-    if (!defaultWorkdir.startsWith(workspaceRoot)) {
-      throw new IllegalArgumentException("defaultWorkdir must be inside workspaceRoot");
+    if (!defaultWorkdir.startsWith(environmentRoot)) {
+      throw new IllegalArgumentException("defaultWorkdir must be inside environmentRoot");
     }
     defaultWorkdir = canonicalDirectory(defaultWorkdir, "defaultWorkdir");
-    if (!defaultWorkdir.startsWith(workspaceRoot)) {
-      throw new IllegalArgumentException("defaultWorkdir resolves outside workspaceRoot");
+    if (!defaultWorkdir.startsWith(environmentRoot)) {
+      throw new IllegalArgumentException("defaultWorkdir resolves outside environmentRoot");
     }
     if (previewMaxLines < 1 || previewMaxBytes < 1) {
       throw new IllegalArgumentException("preview output limits must be positive");
@@ -43,7 +43,7 @@ public record CodingToolsConfig(
   public static CodingToolsConfig fromSystemProperties() {
     Path root =
         Path.of(
-            System.getProperty("kkstudio.daemon.workspace-root", System.getProperty("user.dir")));
+            System.getProperty("kkstudio.daemon.environment-root", System.getProperty("user.dir")));
     Path defaultWorkdir =
         Path.of(System.getProperty("kkstudio.daemon.default-workdir", root.toString()));
     Path artifactDirectory =

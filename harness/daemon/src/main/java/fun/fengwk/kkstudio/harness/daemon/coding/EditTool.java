@@ -27,7 +27,7 @@ public final class EditTool extends AbstractCodingTool {
         new ToolDescriptor(
             "edit",
             "1",
-            "Replace exact text in an existing file inside the environment workspace.",
+            "Replace exact text in an existing file inside the environment root.",
             null,
             new ToolParamsSchema(
                 "Edit parameters",
@@ -36,7 +36,8 @@ public final class EditTool extends AbstractCodingTool {
                     "old_string", new ToolStringSchema("Exact text to replace"),
                     "new_string", new ToolStringSchema("Replacement text"),
                     "replace_all", new ToolBooleanSchema("Replace every exact match"),
-                    "workdir", new ToolStringSchema("Optional workspace-relative directory")),
+                    "workdir",
+                        new ToolStringSchema("Optional environment-root-relative directory")),
                 Set.of("path", "old_string", "new_string"),
                 false),
             ToolExecutionMode.ENVIRONMENT,

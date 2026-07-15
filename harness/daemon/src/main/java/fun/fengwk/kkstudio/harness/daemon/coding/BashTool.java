@@ -31,7 +31,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Executes a Cloud-authorized shell command after enforcing only the explicit workspace workdir.
+ * Executes a Cloud-authorized shell command after enforcing only the explicit environment workdir.
  *
  * <p>Static parsing cannot sandbox shell internals; command authorization belongs to Cloud
  * permission. The Daemon nevertheless validates workdir and terminates the complete process tree on
@@ -43,23 +43,24 @@ public final class BashTool implements Tool {
       Executors.newCachedThreadPool(threadFactory("daemon-bash"));
   private static final ScheduledThreadPoolExecutor SCHEDULER = createScheduler();
   private final CodingToolsConfig config;
-  private final WorkspacePathBoundary boundary;
+  private final EnvironmentPathBoundary boundary;
   private final ToolDescriptor descriptor;
 
   public BashTool(CodingToolsConfig config) {
     this.config = Objects.requireNonNull(config, "config");
-    boundary = new WorkspacePathBoundary(config);
+    boundary = new EnvironmentPathBoundary(config);
     descriptor =
         new ToolDescriptor(
             "bash",
             "1",
-            "Execute an already Cloud-authorized bash command in a validated workspace workdir.",
+            "Execute an already Cloud-authorized bash command in a validated environment workdir.",
             null,
             new ToolParamsSchema(
                 "Bash parameters",
                 Map.of(
                     "command", new ToolStringSchema("Cloud-authorized shell command"),
-                    "workdir", new ToolStringSchema("Optional workspace-relative directory")),
+                    "workdir",
+                        new ToolStringSchema("Optional environment-root-relative directory")),
                 Set.of("command"),
                 false),
             ToolExecutionMode.ENVIRONMENT,
