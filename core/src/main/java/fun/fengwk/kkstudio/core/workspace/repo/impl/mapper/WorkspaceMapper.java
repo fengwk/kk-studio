@@ -65,9 +65,7 @@ public interface WorkspaceMapper extends BaseMapper {
 
   @Select(
       """
-      select (select count(*) from agent_provider where workspace_id = #{id})
-           + (select count(*) from agent_model where workspace_id = #{id})
-           + (select count(*) from agent_definition where workspace_id = #{id})
+      select (select count(*) from agent_definition where workspace_id = #{id})
            + (select count(*) from harness_session where workspace_id = #{id})
       """)
   long countResources(@Param("id") long id);

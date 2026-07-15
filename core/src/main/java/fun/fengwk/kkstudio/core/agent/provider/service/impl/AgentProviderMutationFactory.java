@@ -2,18 +2,13 @@ package fun.fengwk.kkstudio.core.agent.provider.service.impl;
 
 import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextProviderId;
 
-import org.springframework.stereotype.Component;
-
 import fun.fengwk.kkstudio.agent.provider.ProviderType;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.share.model.AgentProviderEditablePropertiesDTO;
+import org.springframework.stereotype.Component;
 
-/**
- * Normalizes mutable provider configuration while retaining credentials only in the persistence model.
- *
- * @author fengwk
- */
+/** Normalizes mutable provider configuration while keeping credentials out of public DTOs. */
 @Component
 final class AgentProviderMutationFactory {
 
@@ -25,20 +20,17 @@ final class AgentProviderMutationFactory {
     this.editableSupport = editableSupport;
   }
 
-  AgentProvider newProvider(long workspaceId, AgentProviderEditablePropertiesDTO properties) {
-    if (workspaceId <= 0) {
-      throw new IllegalArgumentException("workspaceId must be positive");
-    }
+  AgentProvider newProvider(AgentProviderEditablePropertiesDTO properties) {
     Mutation mutation = newMutation(properties, null, null, true);
     AgentProvider provider = new AgentProvider();
     provider.setId(nextProviderId());
-    provider.setWorkspaceId(workspaceId);
     apply(provider, mutation);
     return provider;
   }
 
   void update(AgentProvider provider, AgentProviderEditablePropertiesDTO properties) {
-    Mutation mutation = newMutation(properties, provider.getName(), provider.getCredential(), false);
+    Mutation mutation =
+        newMutation(properties, provider.getName(), provider.getCredential(), false);
     apply(provider, mutation);
   }
 
@@ -71,7 +63,8 @@ final class AgentProviderMutationFactory {
     if (!creating && credential == null) {
       credential = existingCredential;
     }
-    String configJson = editableSupport.firstNonBlank(properties.getConfigJson(), EMPTY_OBJECT_JSON);
+    String configJson =
+        editableSupport.firstNonBlank(properties.getConfigJson(), EMPTY_OBJECT_JSON);
     editableSupport.validateJsonObject(configJson, "configJson");
     try {
       return new Mutation(
@@ -81,8 +74,8 @@ final class AgentProviderMutationFactory {
           editableSupport.trimToNull(properties.getBaseUrl()),
           credential,
           configJson);
-    } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException("unsupported providerType: " + providerType, e);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException("unsupported providerType: " + providerType, error);
     }
   }
 

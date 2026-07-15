@@ -1,8 +1,5 @@
 package fun.fengwk.kkstudio.core.agent.runtime.service.impl;
 
-import lombok.AllArgsConstructor;
-import org.springframework.stereotype.Component;
-
 import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.model.repo.AgentModelRepository;
@@ -11,8 +8,10 @@ import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.agent.session.repo.AgentSessionRepository;
 import fun.fengwk.kkstudio.core.agent.session.service.model.AgentSession;
+import lombok.AllArgsConstructor;
+import org.springframework.stereotype.Component;
 
-/** Resolves legacy sessions through their workspace-scoped configuration graph. */
+/** Resolves legacy sessions through the configured Agent, model and provider graph. */
 @AllArgsConstructor
 @Component
 final class EmbeddedAgentRuntimeReferenceResolver {
@@ -27,7 +26,6 @@ final class EmbeddedAgentRuntimeReferenceResolver {
     AgentDefinition definition = requireAgentDefinition(session.getAgentId());
     AgentModel model = requireModel(definition.getModelId());
     AgentProvider provider = requireProvider(model.getProviderId());
-    ensureSameWorkspace(definition, model, provider);
     return new RuntimeReferences(session, definition, provider, model);
   }
 
@@ -61,14 +59,6 @@ final class EmbeddedAgentRuntimeReferenceResolver {
       throw new IllegalArgumentException("provider config not found: " + providerId);
     }
     return provider;
-  }
-
-  private void ensureSameWorkspace(
-      AgentDefinition definition, AgentModel model, AgentProvider provider) {
-    if (!definition.getWorkspaceId().equals(model.getWorkspaceId())
-        || !model.getWorkspaceId().equals(provider.getWorkspaceId())) {
-      throw new IllegalStateException("runtime configuration crosses workspaces");
-    }
   }
 
   record RuntimeReferences(

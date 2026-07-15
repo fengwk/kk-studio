@@ -11,7 +11,6 @@ create table if not exists workspace (
 
 create table if not exists agent_provider (
     id              bigint not null,
-    workspace_id    bigint not null,
     name            varchar(64) not null,
     description     varchar(512),
     provider_type   varchar(64) not null,
@@ -22,12 +21,11 @@ create table if not exists agent_provider (
     gmt_modified    timestamp(3) not null default current_timestamp(),
     version         bigint not null default 0,
     primary key (id),
-    unique (workspace_id, name)
+    unique (name)
 );
 
 create table if not exists agent_model (
     id                  bigint not null,
-    workspace_id        bigint not null,
     provider_id         bigint not null,
     name                varchar(128) not null,
     description         varchar(512),
@@ -37,7 +35,7 @@ create table if not exists agent_model (
     gmt_modified        timestamp(3) not null default current_timestamp(),
     version             bigint not null default 0,
     primary key (id),
-    unique (workspace_id, name)
+    unique (name)
 );
 
 create table if not exists agent_definition (

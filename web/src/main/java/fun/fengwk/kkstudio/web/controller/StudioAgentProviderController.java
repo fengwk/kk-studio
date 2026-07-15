@@ -4,6 +4,10 @@ import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
+import fun.fengwk.kkstudio.core.agent.provider.service.AgentProviderService;
+import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
+import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
+import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
 import lombok.AllArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,14 +19,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.core.agent.provider.service.AgentProviderService;
-import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
-import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
-
-/** Workspace-scoped provider CRUD API. */
+/** Global provider CRUD API. */
 @AllArgsConstructor
-@RequestMapping("/api/workspaces/{workspaceId}/providers")
+@RequestMapping("/api/providers")
 @RestController
 public class StudioAgentProviderController {
 
@@ -30,30 +29,25 @@ public class StudioAgentProviderController {
 
   @GetMapping
   public Result<Page<AgentProviderDTO>> pageProviders(
-      @PathVariable long workspaceId,
       @RequestParam(value = "pageNumber", defaultValue = "1") int pageNumber,
       @RequestParam(value = "pageSize", defaultValue = "50") int pageSize) {
-    return Results.ok(
-        agentProviderService.pageProviders(workspaceId, new PageQuery(pageNumber, pageSize)));
+    return Results.ok(agentProviderService.pageProviders(new PageQuery(pageNumber, pageSize)));
   }
 
   @PostMapping
-  public Result<AgentProviderDTO> createProvider(
-      @PathVariable long workspaceId, @RequestBody AgentProviderCreateDTO createDTO) {
-    return Results.created(agentProviderService.createProvider(workspaceId, createDTO));
+  public Result<AgentProviderDTO> createProvider(@RequestBody AgentProviderCreateDTO createDTO) {
+    return Results.created(agentProviderService.createProvider(createDTO));
   }
 
   @PutMapping("/{id}")
   public Result<AgentProviderDTO> updateProvider(
-      @PathVariable long workspaceId,
-      @PathVariable long id,
-      @RequestBody AgentProviderUpdateDTO updateDTO) {
-    return Results.ok(agentProviderService.updateProvider(workspaceId, id, updateDTO));
+      @PathVariable long id, @RequestBody AgentProviderUpdateDTO updateDTO) {
+    return Results.ok(agentProviderService.updateProvider(id, updateDTO));
   }
 
   @DeleteMapping("/{id}")
-  public Result<Void> deleteProvider(@PathVariable long workspaceId, @PathVariable long id) {
-    agentProviderService.deleteProvider(workspaceId, id);
+  public Result<Void> deleteProvider(@PathVariable long id) {
+    agentProviderService.deleteProvider(id);
     return Results.noContent();
   }
 }

@@ -1,17 +1,13 @@
 package fun.fengwk.kkstudio.core.agent.model.repo.impl.model;
 
+import java.time.LocalDateTime;
 import lombok.Data;
 
-import java.time.LocalDateTime;
-
-/**
- * @author fengwk
- */
+/** Model persistence row. */
 @Data
 public class AgentModelDO {
 
   private Long id;
-  private Long workspaceId;
   private Long providerId;
   private String name;
   private String description;

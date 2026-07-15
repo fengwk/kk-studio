@@ -1,13 +1,10 @@
 package fun.fengwk.kkstudio.core.agent.model.service.converter;
 
-import org.springframework.stereotype.Component;
-
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.share.model.AgentModelDTO;
+import org.springframework.stereotype.Component;
 
-/**
- * @author fengwk
- */
+/** Converts global model resources to public DTOs. */
 @Component
 public class AgentModelConverter {
 
@@ -17,7 +14,6 @@ public class AgentModelConverter {
     }
     AgentModelDTO dto = new AgentModelDTO();
     dto.setId(Long.toString(model.getId()));
-    dto.setWorkspaceId(Long.toString(model.getWorkspaceId()));
     dto.setProviderId(Long.toString(model.getProviderId()));
     dto.setName(model.getName());
     dto.setDescription(model.getDescription());

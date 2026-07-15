@@ -3,19 +3,15 @@ package fun.fengwk.kkstudio.core.agent.provider.repo.impl;
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import fun.fengwk.convention4j.common.page.Pages;
-import lombok.AllArgsConstructor;
-import org.springframework.stereotype.Repository;
-
 import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.repo.impl.mapper.AgentProviderMapper;
 import fun.fengwk.kkstudio.core.agent.provider.repo.impl.model.AgentProviderDO;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
-
 import java.util.List;
+import lombok.AllArgsConstructor;
+import org.springframework.stereotype.Repository;
 
-/**
- * @author fengwk
- */
+/** MySQL-backed global provider repository. */
 @AllArgsConstructor
 @Repository
 public class MysqlAgentProviderRepository implements AgentProviderRepository {
@@ -23,12 +19,11 @@ public class MysqlAgentProviderRepository implements AgentProviderRepository {
   private final AgentProviderMapper agentProviderMapper;
 
   @Override
-  public Page<AgentProvider> page(long workspaceId, PageQuery pageQuery) {
+  public Page<AgentProvider> page(PageQuery pageQuery) {
     long offset = Pages.queryOffset(pageQuery);
     int limit = Pages.queryLimit(pageQuery);
-    List<AgentProviderDO> results = agentProviderMapper.pageByWorkspaceId(workspaceId, offset, limit);
-    return Pages.page(pageQuery, results, agentProviderMapper.countByWorkspaceId(workspaceId))
-        .map(this::convert);
+    List<AgentProviderDO> results = agentProviderMapper.page(offset, limit);
+    return Pages.page(pageQuery, results, agentProviderMapper.count()).map(this::convert);
   }
 
   @Override
@@ -37,13 +32,8 @@ public class MysqlAgentProviderRepository implements AgentProviderRepository {
   }
 
   @Override
-  public AgentProvider getByWorkspaceIdAndId(long workspaceId, long id) {
-    return convert(agentProviderMapper.getByWorkspaceIdAndId(workspaceId, id));
-  }
-
-  @Override
-  public AgentProvider getByWorkspaceIdAndName(long workspaceId, String name) {
-    return convert(agentProviderMapper.getByWorkspaceIdAndName(workspaceId, name));
+  public AgentProvider getByName(String name) {
+    return convert(agentProviderMapper.getByName(name));
   }
 
   @Override
@@ -57,13 +47,13 @@ public class MysqlAgentProviderRepository implements AgentProviderRepository {
   }
 
   @Override
-  public boolean deleteByWorkspaceIdAndId(long workspaceId, long id) {
-    return agentProviderMapper.deleteByWorkspaceIdAndId(workspaceId, id) == 1;
+  public boolean deleteById(long id) {
+    return agentProviderMapper.deleteById(id) == 1;
   }
 
   @Override
-  public boolean hasModels(long workspaceId, long providerId) {
-    return agentProviderMapper.countModelsByProviderId(workspaceId, providerId) > 0;
+  public boolean hasModels(long providerId) {
+    return agentProviderMapper.countModelsByProviderId(providerId) > 0;
   }
 
   private AgentProviderDO convert(AgentProvider provider) {
@@ -72,7 +62,6 @@ public class MysqlAgentProviderRepository implements AgentProviderRepository {
     }
     AgentProviderDO result = new AgentProviderDO();
     result.setId(provider.getId());
-    result.setWorkspaceId(provider.getWorkspaceId());
     result.setName(provider.getName());
     result.setDescription(provider.getDescription());
     result.setProviderType(provider.getProviderType());
@@ -88,7 +77,6 @@ public class MysqlAgentProviderRepository implements AgentProviderRepository {
     }
     AgentProvider result = new AgentProvider();
     result.setId(provider.getId());
-    result.setWorkspaceId(provider.getWorkspaceId());
     result.setName(provider.getName());
     result.setDescription(provider.getDescription());
     result.setProviderType(provider.getProviderType());

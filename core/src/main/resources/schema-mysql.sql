@@ -11,7 +11,6 @@ create table if not exists workspace (
 
 create table if not exists agent_provider (
     id              bigint not null comment '主键',
-    workspace_id    bigint not null comment '所属 workspace',
     name            varchar(64) not null comment 'provider 名称',
     description     varchar(512) null comment '描述',
     provider_type   varchar(64) not null comment 'provider 类型',
@@ -22,12 +21,11 @@ create table if not exists agent_provider (
     gmt_modified    datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
     version         bigint not null default '0' comment '数据版本号',
     primary key (id),
-    unique key uk_agent_provider_workspace_name (workspace_id, name)
+    unique key uk_agent_provider_name (name)
 ) engine=InnoDB default charset=utf8mb4 comment='agent provider';
 
 create table if not exists agent_model (
     id                  bigint not null comment '主键',
-    workspace_id        bigint not null comment '所属 workspace',
     provider_id         bigint not null comment '所属 provider',
     name                varchar(128) not null comment '模型名称',
     description         varchar(512) null comment '描述',
@@ -37,7 +35,7 @@ create table if not exists agent_model (
     gmt_modified        datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
     version             bigint not null default '0' comment '数据版本号',
     primary key (id),
-    unique key uk_agent_model_workspace_name (workspace_id, name)
+    unique key uk_agent_model_name (name)
 ) engine=InnoDB default charset=utf8mb4 comment='agent model';
 
 create table if not exists agent_definition (

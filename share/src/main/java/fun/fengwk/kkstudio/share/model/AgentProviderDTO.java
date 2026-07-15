@@ -1,17 +1,13 @@
 package fun.fengwk.kkstudio.share.model;
 
+import java.time.LocalDateTime;
 import lombok.Data;
 
-import java.time.LocalDateTime;
-
-/**
- * @author fengwk
- */
+/** Public provider representation without credentials. */
 @Data
 public class AgentProviderDTO {
 
   private String id;
-  private String workspaceId;
   private String name;
   private String description;
   private String providerType;

@@ -3,10 +3,6 @@ package fun.fengwk.kkstudio.core.agent.definition.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-
 import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.agent.model.service.AgentModelService;
 import fun.fengwk.kkstudio.core.agent.provider.service.AgentProviderService;
@@ -21,10 +17,12 @@ import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.model.WorkspaceCreateDTO;
 import fun.fengwk.kkstudio.share.model.WorkspaceDTO;
-
 import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 
-/** Agent definition configuration is structured and model references are workspace-scoped. */
+/** Agent definitions remain scoped temporarily while their model references are global. */
 @SpringBootTest(classes = CoreTestApplication.class)
 public class AgentDefinitionServiceTest {
 
@@ -34,33 +32,27 @@ public class AgentDefinitionServiceTest {
   @Autowired private AgentDefinitionService agentDefinitionService;
 
   @Test
-  public void shouldPersistStructuredConfigAndRejectCrossWorkspaceModel() {
+  public void shouldPersistStructuredConfigWithGlobalModelReference() {
     String suffix = Long.toString(System.nanoTime());
-    WorkspaceDTO first = workspace("agent-first-" + suffix);
-    WorkspaceDTO second = workspace("agent-second-" + suffix);
-    long firstId = id(first.getId());
-    long secondId = id(second.getId());
-    AgentProviderDTO firstProvider = provider(firstId, "provider");
-    AgentProviderDTO secondProvider = provider(secondId, "provider");
-    AgentModelDTO firstModel = model(firstId, firstProvider.getId(), "model");
-    AgentModelDTO secondModel = model(secondId, secondProvider.getId(), "model");
+    WorkspaceDTO workspace = workspace("agent-workspace-" + suffix);
+    long workspaceId = id(workspace.getId());
+    AgentProviderDTO provider = provider("agent-provider-" + suffix);
+    AgentModelDTO model = model(provider.getId(), "agent-model-" + suffix);
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> agentDefinitionService.createAgent(secondId, agent(firstModel.getId(), "cross")));
-    AgentDefinitionDTO definition = agentDefinitionService.createAgent(firstId, agent(firstModel.getId(), "agent"));
+    AgentDefinitionDTO definition =
+        agentDefinitionService.createAgent(
+            workspaceId, agent(model.getId(), "agent-definition-" + suffix));
     assertEquals(List.of("browser"), definition.getConfig().getTools());
     assertEquals(List.of("java"), definition.getConfig().getSkills());
     assertEquals(List.of("reviewer"), definition.getConfig().getAllowedSubagents());
     assertEquals(8, definition.getConfig().getExecutionPolicy().getMaxTurns());
+    assertThrows(
+        IllegalStateException.class, () -> agentModelService.deleteModel(id(model.getId())));
 
-    agentDefinitionService.deleteAgent(firstId, id(definition.getId()));
-    agentModelService.deleteModel(firstId, id(firstModel.getId()));
-    agentModelService.deleteModel(secondId, id(secondModel.getId()));
-    agentProviderService.deleteProvider(firstId, id(firstProvider.getId()));
-    agentProviderService.deleteProvider(secondId, id(secondProvider.getId()));
-    workspaceService.deleteWorkspace(firstId);
-    workspaceService.deleteWorkspace(secondId);
+    agentDefinitionService.deleteAgent(workspaceId, id(definition.getId()));
+    agentModelService.deleteModel(id(model.getId()));
+    agentProviderService.deleteProvider(id(provider.getId()));
+    workspaceService.deleteWorkspace(workspaceId);
   }
 
   private WorkspaceDTO workspace(String name) {
@@ -69,18 +61,18 @@ public class AgentDefinitionServiceTest {
     return workspaceService.createWorkspace(dto);
   }
 
-  private AgentProviderDTO provider(long workspaceId, String name) {
+  private AgentProviderDTO provider(String name) {
     AgentProviderCreateDTO dto = new AgentProviderCreateDTO();
     dto.setName(name);
     dto.setProviderType("openai");
-    return agentProviderService.createProvider(workspaceId, dto);
+    return agentProviderService.createProvider(dto);
   }
 
-  private AgentModelDTO model(long workspaceId, String providerId, String name) {
+  private AgentModelDTO model(String providerId, String name) {
     AgentModelCreateDTO dto = new AgentModelCreateDTO();
     dto.setProviderId(providerId);
     dto.setName(name);
-    return agentModelService.createModel(workspaceId, dto);
+    return agentModelService.createModel(dto);
   }
 
   private AgentDefinitionCreateDTO agent(String modelId, String name) {

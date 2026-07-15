@@ -3,19 +3,19 @@ merge into workspace (id, name, settings_json, gmt_create, gmt_modified, version
 );
 
 merge into agent_provider (
-    id, workspace_id, name, description, provider_type, base_url, credential, config_json,
+    id, name, description, provider_type, base_url, credential, config_json,
     gmt_create, gmt_modified, version
 ) key (id) values (
-    1, 1, 'minimax', 'MiniMax provider for local development.',
+    1, 'minimax', 'MiniMax provider for local development.',
     'openai', 'https://api.minimaxi.com/v1', null, '{"timeoutMillis":60000}',
     current_timestamp(), current_timestamp(), 0
 );
 
 merge into agent_model (
-    id, workspace_id, provider_id, name, description, capabilities_json, config_json,
+    id, provider_id, name, description, capabilities_json, config_json,
     gmt_create, gmt_modified, version
 ) key (id) values (
-    1, 1, 1, 'MiniMax-M2.7', 'MiniMax M2.7 model.', '[]',
+    1, 1, 'MiniMax-M2.7', 'MiniMax M2.7 model.', '[]',
     '{"variants":[{"name":"default"}]}', current_timestamp(), current_timestamp(), 0
 );
 

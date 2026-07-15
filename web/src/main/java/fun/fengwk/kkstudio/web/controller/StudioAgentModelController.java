@@ -4,6 +4,10 @@ import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
+import fun.fengwk.kkstudio.core.agent.model.service.AgentModelService;
+import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
+import fun.fengwk.kkstudio.share.model.AgentModelDTO;
+import fun.fengwk.kkstudio.share.model.AgentModelUpdateDTO;
 import lombok.AllArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,14 +19,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.core.agent.model.service.AgentModelService;
-import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentModelDTO;
-import fun.fengwk.kkstudio.share.model.AgentModelUpdateDTO;
-
-/** Workspace-scoped model CRUD API. */
+/** Global model CRUD API. */
 @AllArgsConstructor
-@RequestMapping("/api/workspaces/{workspaceId}/models")
+@RequestMapping("/api/models")
 @RestController
 public class StudioAgentModelController {
 
@@ -30,29 +29,25 @@ public class StudioAgentModelController {
 
   @GetMapping
   public Result<Page<AgentModelDTO>> pageModels(
-      @PathVariable long workspaceId,
       @RequestParam(value = "pageNumber", defaultValue = "1") int pageNumber,
       @RequestParam(value = "pageSize", defaultValue = "50") int pageSize) {
-    return Results.ok(agentModelService.pageModels(workspaceId, new PageQuery(pageNumber, pageSize)));
+    return Results.ok(agentModelService.pageModels(new PageQuery(pageNumber, pageSize)));
   }
 
   @PostMapping
-  public Result<AgentModelDTO> createModel(
-      @PathVariable long workspaceId, @RequestBody AgentModelCreateDTO createDTO) {
-    return Results.created(agentModelService.createModel(workspaceId, createDTO));
+  public Result<AgentModelDTO> createModel(@RequestBody AgentModelCreateDTO createDTO) {
+    return Results.created(agentModelService.createModel(createDTO));
   }
 
   @PutMapping("/{id}")
   public Result<AgentModelDTO> updateModel(
-      @PathVariable long workspaceId,
-      @PathVariable long id,
-      @RequestBody AgentModelUpdateDTO updateDTO) {
-    return Results.ok(agentModelService.updateModel(workspaceId, id, updateDTO));
+      @PathVariable long id, @RequestBody AgentModelUpdateDTO updateDTO) {
+    return Results.ok(agentModelService.updateModel(id, updateDTO));
   }
 
   @DeleteMapping("/{id}")
-  public Result<Void> deleteModel(@PathVariable long workspaceId, @PathVariable long id) {
-    agentModelService.deleteModel(workspaceId, id);
+  public Result<Void> deleteModel(@PathVariable long id) {
+    agentModelService.deleteModel(id);
     return Results.noContent();
   }
 }

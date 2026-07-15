@@ -1,17 +1,13 @@
 package fun.fengwk.kkstudio.share.model;
 
+import java.time.LocalDateTime;
 import lombok.Data;
 
-import java.time.LocalDateTime;
-
-/**
- * @author fengwk
- */
+/** Public global model representation. */
 @Data
 public class AgentModelDTO {
 
   private String id;
-  private String workspaceId;
   private String providerId;
   private String name;
   private String description;
