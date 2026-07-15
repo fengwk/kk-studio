@@ -116,10 +116,6 @@ public class DatabaseTaskRuntime implements TaskRuntime {
 
     HarnessRunDO parentRun = requireParentRun(context);
     HarnessSessionDO parent = requireSessionForUpdate(parentRun.getSessionId());
-    if (parent.getWorkspaceId() != context.workspaceId()) {
-      throw new IllegalArgumentException(
-          "task execution context workspace does not match parent session");
-    }
     HarnessSessionDO root = lockRoot(parent);
     ToolInvocationDO invocation = requireTaskInvocation(context, parentRun);
     HarnessSubagentTaskDO replay = taskMapper.findForUpdate(context.invocationId());

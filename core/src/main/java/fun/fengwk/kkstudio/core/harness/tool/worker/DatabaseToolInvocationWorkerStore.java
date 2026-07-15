@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.core.harness.tool.worker;
 
-import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
-import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
 import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
 import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
@@ -28,15 +26,11 @@ public class DatabaseToolInvocationWorkerStore implements ToolInvocationWorkerSt
 
   private final ToolInvocationMapper invocationMapper;
   private final MysqlToolInvocationStore invocationStore;
-  private final HarnessSessionMapper sessionMapper;
 
   public DatabaseToolInvocationWorkerStore(
-      ToolInvocationMapper invocationMapper,
-      MysqlToolInvocationStore invocationStore,
-      HarnessSessionMapper sessionMapper) {
+      ToolInvocationMapper invocationMapper, MysqlToolInvocationStore invocationStore) {
     this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
     this.invocationStore = Objects.requireNonNull(invocationStore, "invocationStore");
-    this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
   }
 
   @Override
@@ -65,12 +59,7 @@ public class DatabaseToolInvocationWorkerStore implements ToolInvocationWorkerSt
         continue;
       }
       ToolInvocation invocation = invocationStore.find(candidate.getId()).orElseThrow();
-      HarnessSessionDO session = sessionMapper.find(runSessionId(invocation));
-      if (session == null) {
-        throw new IllegalStateException("tool invocation run session is missing");
-      }
-      return Optional.of(
-          new ClaimedToolInvocation(invocation, session.getWorkspaceId(), recovered));
+      return Optional.of(new ClaimedToolInvocation(invocation, recovered));
     }
     return Optional.empty();
   }
@@ -92,13 +81,6 @@ public class DatabaseToolInvocationWorkerStore implements ToolInvocationWorkerSt
   @Override
   public Optional<ToolInvocation> find(long invocationId) {
     return invocationStore.find(invocationId);
-  }
-
-  private long runSessionId(ToolInvocation invocation) {
-    // assistant entries are session-local; this query is intentionally delegated through the run
-    // table.
-    // The mapper's findInWorkspace contract cannot infer the workspace before this lookup.
-    return invocationMapper.findRunSessionId(invocation.runId());
   }
 
   private static LocalDateTime utc(Instant instant) {

@@ -598,37 +598,32 @@ class ToolInvocationIntegrationTest {
     }
   }
 
-  /**
-   * Artifact reads are workspace scoped and preserve complete bytes plus the immutable SHA-256
-   * digest.
-   */
+  /** Artifact reads are global and preserve complete bytes plus the immutable SHA-256 digest. */
   @Test
-  void storesWorkspaceScopedArtifactsWithStableTransportId() {
-    long workspaceId = workspace("{}");
-    long otherWorkspaceId = workspace("{}");
+  void storesGloballyAddressableArtifactsWithStableTransportId() {
     byte[] content = "abc".getBytes(StandardCharsets.UTF_8);
 
-    ArtifactRef ref = artifactStore.save(workspaceId, "text/plain", "utf-8", content);
+    ArtifactRef ref = artifactStore.save("text/plain", "utf-8", content);
     content[0] = 'x';
 
-    assertTrue(artifactStore.find(otherWorkspaceId, ref.artifactId()).isEmpty());
-    var artifact = artifactStore.find(workspaceId, ref.artifactId()).orElseThrow();
+    var artifact = artifactStore.find(ref.artifactId()).orElseThrow();
+    assertEquals("abc", new String(artifact.content(), StandardCharsets.UTF_8));
+    artifact.content()[0] = 'z';
     assertEquals("abc", new String(artifact.content(), StandardCharsets.UTF_8));
     assertEquals(
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", artifact.sha256());
     assertEquals("text/plain", ref.mediaType());
     assertEquals(3, ref.sizeBytes());
-    assertTrue(artifactStore.find(workspaceId, "not-a-snowflake").isEmpty());
-    assertTrue(artifactStore.find(0, ref.artifactId()).isEmpty());
+    assertTrue(artifactStore.find(null).isEmpty());
+    assertTrue(artifactStore.find(" ").isEmpty());
+    assertTrue(artifactStore.find("not-a-snowflake").isEmpty());
+    assertTrue(artifactStore.find("0").isEmpty());
+    assertTrue(artifactStore.find("9223372036854775808").isEmpty());
+    String wrongId = Long.toString(Math.addExact(Long.parseLong(ref.artifactId()), 1));
+    assertTrue(artifactStore.find(wrongId).isEmpty());
     assertThrows(
-        IllegalArgumentException.class,
-        () -> artifactStore.save(0, "text/plain", "utf-8", new byte[0]));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> artifactStore.save(workspaceId, "", "utf-8", new byte[0]));
-    assertThrows(
-        NullPointerException.class,
-        () -> artifactStore.save(workspaceId, "text/plain", "utf-8", null));
+        IllegalArgumentException.class, () -> artifactStore.save("", "utf-8", new byte[0]));
+    assertThrows(NullPointerException.class, () -> artifactStore.save("text/plain", "utf-8", null));
   }
 
   /**

@@ -6,7 +6,6 @@ import lombok.Data;
 @Data
 public class ToolArtifactDO {
   private Long id;
-  private Long workspaceId;
   private String mediaType;
   private String encoding;
   private byte[] content;

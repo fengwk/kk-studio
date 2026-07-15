@@ -86,9 +86,6 @@ public interface ToolInvocationMapper extends BaseMapper {
   @ResultMap("toolInvocationResultMap")
   ToolInvocationDO findInWorkspace(@Param("workspaceId") long workspaceId, @Param("id") long id);
 
-  @Select("select session_id from harness_run where id = #{runId}")
-  Long findRunSessionId(@Param("runId") long runId);
-
   @Select("select " + COLUMNS + " from tool_invocation ti where ti.id = #{id} for update")
   @ResultMap("toolInvocationResultMap")
   ToolInvocationDO findForUpdate(@Param("id") long id);

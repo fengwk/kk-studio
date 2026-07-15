@@ -3,18 +3,12 @@ package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 import java.util.Arrays;
 import java.util.Objects;
 
-/** Workspace-scoped immutable full tool output. */
+/** Durable globally addressable immutable full tool output. */
 public record Artifact(
-    long id,
-    long workspaceId,
-    String mediaType,
-    String encoding,
-    byte[] content,
-    long sizeBytes,
-    String sha256) {
+    long id, String mediaType, String encoding, byte[] content, long sizeBytes, String sha256) {
   public Artifact {
-    if (id <= 0 || workspaceId <= 0 || sizeBytes < 0) {
-      throw new IllegalArgumentException("artifact identifiers and size must be valid");
+    if (id <= 0 || sizeBytes < 0) {
+      throw new IllegalArgumentException("artifact identifier and size must be valid");
     }
     mediaType = requireNonBlank(mediaType, "mediaType");
     encoding = requireNonBlank(encoding, "encoding");

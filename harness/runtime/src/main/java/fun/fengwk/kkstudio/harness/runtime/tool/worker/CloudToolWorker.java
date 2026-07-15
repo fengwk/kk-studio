@@ -129,8 +129,7 @@ public final class CloudToolWorker {
                   new ToolCall(
                       invocation.toolCallId(), invocation.toolName(), invocation.argumentsJson()),
                   Duration.between(clock.instant(), invocation.deadlineAt()),
-                  new ToolExecutionContext(
-                      invocation.id(), invocation.runId(), claimed.workspaceId())),
+                  new ToolExecutionContext(invocation.id(), invocation.runId())),
               execution);
       execution.setHandle(handle);
     } catch (RuntimeException error) {
@@ -163,12 +162,11 @@ public final class CloudToolWorker {
       ToolInvocationStatus status,
       ToolResult result,
       String errorMessage) {
-    transactions.terminate(
-        claimed, status, externalize(claimed.workspaceId(), result), errorMessage, clock.instant());
+    transactions.terminate(claimed, status, externalize(result), errorMessage, clock.instant());
     transactions.coordinateReadyRuns(clock.instant());
   }
 
-  private ToolResult externalize(long workspaceId, ToolResult result) {
+  private ToolResult externalize(ToolResult result) {
     List<ToolContent> contents = new ArrayList<>();
     for (ToolContent content : result.contents()) {
       byte[] bytes = bytes(content);
@@ -179,7 +177,7 @@ public final class CloudToolWorker {
       String mediaType = content instanceof JsonToolContent ? "application/json" : "text/plain";
       // Artifact persistence intentionally precedes the terminal ownership CAS. A lost CAS can
       // leave an unreachable artifact, but no Invocation or Session entry can reference it.
-      ArtifactRef artifact = artifactStore.save(workspaceId, mediaType, "utf-8", bytes);
+      ArtifactRef artifact = artifactStore.save(mediaType, "utf-8", bytes);
       contents.add(new TextToolContent(preview(bytes)));
       contents.add(new ArtifactToolContent(artifact));
     }
@@ -278,7 +276,7 @@ public final class CloudToolWorker {
         if (terminal) {
           return;
         }
-        pending.add(externalize(claimed.workspaceId(), partial));
+        pending.add(externalize(partial));
         pendingBytes += ToolResultJsonCodec.encode(partial).length();
         if (pendingBytes >= config.partialBatchBytes()) {
           flush();
@@ -360,11 +358,7 @@ public final class CloudToolWorker {
         flush();
         terminalPersisted =
             transactions.terminate(
-                claimed,
-                status,
-                externalize(claimed.workspaceId(), result),
-                errorMessage,
-                clock.instant());
+                claimed, status, externalize(result), errorMessage, clock.instant());
         if (terminalPersisted) {
           transactions.coordinateReadyRuns(clock.instant());
         }

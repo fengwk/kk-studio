@@ -687,7 +687,7 @@ class DatabaseTaskRuntimeIntegrationTest {
     insertRun(parentRunId, parentSessionId, snapshotId, "WAITING_TOOLS", 0);
     long invocationId = newInvocation(parentRunId);
     return new Fixture(
-        workspaceId, rootId, childAgentId, parentSessionId, snapshotId, parentRunId, invocationId);
+        rootId, childAgentId, parentSessionId, snapshotId, parentRunId, invocationId);
   }
 
   private void insertAgent(long id, long workspaceId, String name, String config) {
@@ -949,7 +949,6 @@ class DatabaseTaskRuntimeIntegrationTest {
   }
 
   private final class Fixture {
-    private final long workspaceId;
     private final long rootSessionId;
     private final long childAgentId;
     private final long parentSessionId;
@@ -958,14 +957,12 @@ class DatabaseTaskRuntimeIntegrationTest {
     private final long invocationId;
 
     private Fixture(
-        long workspaceId,
         long rootSessionId,
         long childAgentId,
         long parentSessionId,
         long parentSnapshotId,
         long parentRunId,
         long invocationId) {
-      this.workspaceId = workspaceId;
       this.rootSessionId = rootSessionId;
       this.childAgentId = childAgentId;
       this.parentSessionId = parentSessionId;
@@ -983,7 +980,7 @@ class DatabaseTaskRuntimeIntegrationTest {
     }
 
     private ToolExecutionContext context(long invocation, long runId) {
-      return new ToolExecutionContext(invocation, runId, workspaceId);
+      return new ToolExecutionContext(invocation, runId);
     }
 
     private long newInvocation() {

@@ -48,7 +48,7 @@ class TaskToolTest {
                 new ToolCall(
                     "call", "task", "{\"subagent_type\":\"Coder\",\"prompt\":\"Implement it\"}"),
                 tool.descriptor().timeout(),
-                new ToolExecutionContext(11, 12, 13)),
+                new ToolExecutionContext(11, 12)),
             listener);
 
     assertEquals(1, runtime.starts);
@@ -78,7 +78,7 @@ class TaskToolTest {
                 new ToolCall(
                     "call", "task", "{\"subagent_type\":\"Explorer\",\"prompt\":\"Inspect\"}"),
                 tool.descriptor().timeout(),
-                new ToolExecutionContext(21, 22, 23)),
+                new ToolExecutionContext(21, 22)),
             new RecordingListener());
 
     handle.cancel();
@@ -205,7 +205,7 @@ class TaskToolTest {
                 new ToolCall(
                     "call", "task", "{\"subagent_type\":\"Coder\",\"prompt\":\"x\",\"bad\":1}"),
                 tool.descriptor().timeout(),
-                new ToolExecutionContext(31, 32, 33)));
+                new ToolExecutionContext(31, 32)));
 
     assertEquals(0, runtime.starts);
   }
@@ -221,7 +221,7 @@ class TaskToolTest {
         descriptorSource.descriptor(),
         new ToolCall("call", "task", arguments),
         descriptorSource.descriptor().timeout(),
-        new ToolExecutionContext(41, 42, 43));
+        new ToolExecutionContext(41, 42));
   }
 
   private ToolExecutionRequest requestWithoutContext() {

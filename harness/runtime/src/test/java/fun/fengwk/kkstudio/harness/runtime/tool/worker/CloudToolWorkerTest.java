@@ -48,6 +48,16 @@ class CloudToolWorkerTest {
     schedulers.forEach(ScheduledExecutorService::shutdownNow);
   }
 
+  /** Worker identifiers are validated before any durable claim can be attempted. */
+  @Test
+  void rejectsBlankWorkerId() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+
+    assertThrows(IllegalArgumentException.class, () -> fixture.worker.executeNext(" "));
+
+    assertEquals(0, fixture.tool.executions);
+  }
+
   /** Dispatch returns before callbacks and batches partials outside the Session result path. */
   @Test
   void dispatchesAsynchronouslyAndFlushesPartialsBeforeTerminal() throws Exception {
@@ -57,7 +67,6 @@ class CloudToolWorkerTest {
     assertNotNull(fixture.tool.listener);
     assertEquals(1L, fixture.tool.request.context().invocationId());
     assertEquals(2L, fixture.tool.request.context().runId());
-    assertEquals(9L, fixture.tool.request.context().workspaceId());
     fixture.tool.listener.onPartial(result("partial"));
     fixture.tool.listener.onComplete(result("complete"));
 
@@ -236,7 +245,7 @@ class CloudToolWorkerTest {
     assertEquals("boom", text(fixture.transactions.result));
   }
 
-  /** Large output retains a bounded semantic preview and a complete workspace artifact. */
+  /** Large output retains a bounded semantic preview and a complete global artifact. */
   @Test
   void storesLargeOutputAsArtifactWithPreview() throws Exception {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
@@ -473,7 +482,7 @@ class CloudToolWorkerTest {
         return Optional.empty();
       }
       claimed = true;
-      return Optional.of(new ClaimedToolInvocation(current, 9, recovered));
+      return Optional.of(new ClaimedToolInvocation(current, recovered));
     }
 
     @Override
@@ -589,13 +598,13 @@ class CloudToolWorkerTest {
     private byte[] content;
 
     @Override
-    public ArtifactRef save(long workspaceId, String mediaType, String encoding, byte[] content) {
+    public ArtifactRef save(String mediaType, String encoding, byte[] content) {
       this.content = content.clone();
       return new ArtifactRef("8", mediaType, content.length);
     }
 
     @Override
-    public Optional<Artifact> find(long workspaceId, String artifactId) {
+    public Optional<Artifact> find(String artifactId) {
       return Optional.empty();
     }
   }

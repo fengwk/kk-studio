@@ -16,7 +16,7 @@ import java.util.Objects;
 import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
-/** MyBatis artifact store with mandatory Workspace predicate on reads. */
+/** Database-backed globally addressable immutable tool output store. */
 @Repository
 public class DatabaseArtifactStore implements ArtifactStore {
   private final ToolArtifactMapper mapper;
@@ -26,19 +26,14 @@ public class DatabaseArtifactStore implements ArtifactStore {
   }
 
   @Override
-  public ArtifactRef save(long workspaceId, String mediaType, String encoding, byte[] content) {
-    if (workspaceId <= 0
-        || mediaType == null
-        || mediaType.isBlank()
-        || encoding == null
-        || encoding.isBlank()) {
-      throw new IllegalArgumentException("artifact workspace and metadata must be valid");
+  public ArtifactRef save(String mediaType, String encoding, byte[] content) {
+    if (mediaType == null || mediaType.isBlank() || encoding == null || encoding.isBlank()) {
+      throw new IllegalArgumentException("artifact metadata must be valid");
     }
     byte[] immutable = Arrays.copyOf(Objects.requireNonNull(content, "content"), content.length);
     long id = AgentIdGenerator.nextToolArtifactId();
     ToolArtifactDO target = new ToolArtifactDO();
     target.setId(id);
-    target.setWorkspaceId(workspaceId);
     target.setMediaType(mediaType);
     target.setEncoding(encoding);
     target.setContent(immutable);
@@ -52,8 +47,8 @@ public class DatabaseArtifactStore implements ArtifactStore {
   }
 
   @Override
-  public Optional<Artifact> find(long workspaceId, String artifactId) {
-    if (workspaceId <= 0 || artifactId == null || artifactId.isBlank()) {
+  public Optional<Artifact> find(String artifactId) {
+    if (artifactId == null || artifactId.isBlank()) {
       return Optional.empty();
     }
     try {
@@ -61,7 +56,7 @@ public class DatabaseArtifactStore implements ArtifactStore {
       if (id <= 0) {
         return Optional.empty();
       }
-      return Optional.ofNullable(mapper.find(workspaceId, id)).map(this::toArtifact);
+      return Optional.ofNullable(mapper.find(id)).map(this::toArtifact);
     } catch (NumberFormatException ignored) {
       return Optional.empty();
     }
@@ -70,7 +65,6 @@ public class DatabaseArtifactStore implements ArtifactStore {
   private Artifact toArtifact(ToolArtifactDO source) {
     return new Artifact(
         source.getId(),
-        source.getWorkspaceId(),
         source.getMediaType(),
         source.getEncoding(),
         source.getContent(),

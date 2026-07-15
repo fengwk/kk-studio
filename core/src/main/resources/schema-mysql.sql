@@ -197,17 +197,15 @@ create table if not exists tool_invocation (
 ) engine=InnoDB default charset=utf8mb4 comment='durable tool invocation';
 
 create table if not exists tool_artifact (
-    id           bigint not null comment 'Snowflake primary key',
-    workspace_id bigint not null comment 'isolation boundary',
+    id           bigint not null comment 'Snowflake globally unique primary key',
     media_type   varchar(128) not null comment 'RFC media type',
     encoding     varchar(64) not null comment 'content encoding',
     content      longblob not null comment 'immutable complete output',
     size_bytes   bigint not null comment 'content bytes',
     sha256       varchar(64) not null comment 'content digest',
     gmt_create   datetime(3) not null default current_timestamp(3) comment 'creation timestamp',
-    primary key (id),
-    key idx_tool_artifact_workspace (workspace_id, id)
-) engine=InnoDB default charset=utf8mb4 comment='workspace tool output artifact';
+    primary key (id)
+) engine=InnoDB default charset=utf8mb4 comment='globally addressable tool output artifact';
 
 create table harness_subagent_task (
     parent_invocation_id bigint not null comment 'task ToolInvocation idempotency key',

@@ -210,7 +210,6 @@ create index if not exists idx_tool_invocation_environment_claim
 
 create table if not exists tool_artifact (
     id bigint not null,
-    workspace_id bigint not null,
     media_type varchar(128) not null,
     encoding varchar(64) not null,
     content blob not null,
@@ -219,8 +218,6 @@ create table if not exists tool_artifact (
     gmt_create timestamp(3) not null default current_timestamp(),
     primary key (id)
 );
-
-create index if not exists idx_tool_artifact_workspace on tool_artifact (workspace_id, id);
 
 create table if not exists harness_subagent_task (
     parent_invocation_id bigint not null,
