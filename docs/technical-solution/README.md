@@ -13,6 +13,7 @@ flowchart TD
     A --> E[storage-models.md<br/>存储模型]
     A --> F[frontend-implementation-design.md<br/>前端实现]
     A --> G[agent-engine.md<br/>agent 内核]
+    A --> H[harness-extensions.md<br/>Harness 扩展]
 ```
 
 ## 阅读顺序
@@ -25,6 +26,7 @@ flowchart TD
 | 4 | [storage-models.md](storage-models.md) | 表结构、资源文件、seed 语义 | 调整存储或初始化脚本 |
 | 5 | [frontend-implementation-design.md](frontend-implementation-design.md) | 路由、状态管理、测试边界 | 修改前端页面或 API 适配 |
 | 6 | [agent-engine.md](agent-engine.md) | `agent` 模块执行内核 | 深入运行时与事件语义 |
+| 7 | [harness-extensions.md](harness-extensions.md) | typed registry、hook 顺序、factory 与 lifecycle | 扩展 Harness 执行链 |
 
 ## 按主题索引
 
@@ -36,6 +38,7 @@ flowchart TD
 | 存储模型 | [storage-models.md](storage-models.md) |
 | 前端实现 | [frontend-implementation-design.md](frontend-implementation-design.md) |
 | agent 内核 | [agent-engine.md](agent-engine.md) |
+| Harness 扩展 | [harness-extensions.md](harness-extensions.md) |
 
 ## 维护规则
 
