@@ -11,11 +11,20 @@ public interface RunTransactions {
   AgentRun submitUserMessage(
       long sessionId, Long expectedLeafEntryId, AgentMessage userMessage, Instant now);
 
-  /** Assistant Entry、terminal events、Run terminal 与 activeRunId 清理一次提交。 */
+  /**
+   * 在 Turn 边界消费当前 Run 的 PENDING STEER。true 才允许继续构建 Context/发 Provider request； false 表示 ownership
+   * 已丢失或该 Run 已在事务内因 cancel 终止。
+   */
+  boolean consumeSteering(AgentRun claimedRun, Instant now);
+
+  /**
+   * Assistant Entry、终态选择与 activeRunId 清理一次提交。 {@code assistantCompleted} 必须严格为一个
+   * ASSISTANT_COMPLETED event。 实现自行决定 RUN_COMPLETED / RUN_REQUEUED 并追加对应 event。
+   */
   boolean complete(
       AgentRun claimedRun,
       MessageEntryPayload assistant,
-      List<RunEventDraft> terminalEvents,
+      RunEventDraft assistantCompleted,
       Instant now);
 
   /** transient attempt 与 retry events 一次提交，失败 partial 不写 Session。 */

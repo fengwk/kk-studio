@@ -260,12 +260,10 @@ class HarnessRunPersistenceTest {
     AgentRun claimed = runStore.claimDue("worker", NOW, Duration.ofSeconds(30)).orElseThrow();
     MessageEntryPayload assistant = assistant("answer");
 
-    List<RunEventDraft> terminalEvents =
-        List.of(
-            terminalEvent(claimed, RunEventType.ASSISTANT_COMPLETED),
-            terminalEvent(claimed, RunEventType.RUN_COMPLETED));
-    assertTrue(transactions.complete(claimed, assistant, terminalEvents, NOW.plusSeconds(1)));
-    assertFalse(transactions.complete(claimed, assistant, terminalEvents, NOW.plusSeconds(2)));
+    assertTrue(
+        transactions.complete(claimed, assistant, assistantCompleted(claimed), NOW.plusSeconds(1)));
+    assertFalse(
+        transactions.complete(claimed, assistant, assistantCompleted(claimed), NOW.plusSeconds(2)));
 
     AgentRun stored = runStore.find(queued.id()).orElseThrow();
     Session session = sessionStore.find(seed.sessionId()).orElseThrow();
@@ -295,7 +293,7 @@ class HarnessRunPersistenceTest {
             transactions.complete(
                 claimed,
                 assistant("answer"),
-                eventsEndingMalformed(claimed, RunEventType.ASSISTANT_COMPLETED),
+                new RunEventDraft(RunEventType.ASSISTANT_COMPLETED, "{}"),
                 NOW.plusSeconds(1)));
 
     AgentRun afterRollback = runStore.find(queued.id()).orElseThrow();
@@ -578,7 +576,7 @@ class HarnessRunPersistenceTest {
             transactions.complete(
                 claimed,
                 new MessageEntryPayload(user("bad")),
-                List.of(terminalEvent(claimed, RunEventType.RUN_COMPLETED)),
+                new RunEventDraft(RunEventType.ASSISTANT_COMPLETED, "{}"),
                 NOW));
     assertThrows(
         IllegalArgumentException.class,
@@ -586,7 +584,7 @@ class HarnessRunPersistenceTest {
             transactions.complete(
                 claimed,
                 assistant("bad", List.of(new ToolCall("unexpected", "read", "{}"))),
-                List.of(terminalEvent(claimed, RunEventType.RUN_COMPLETED)),
+                assistantCompleted(claimed),
                 NOW));
     assertThrows(
         IllegalArgumentException.class,
@@ -796,6 +794,16 @@ class HarnessRunPersistenceTest {
             ToolExecutionMode.CLOUD,
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(30)));
+  }
+
+  private static RunEventDraft assistantCompleted(AgentRun run) {
+    return new RunEventDraft(
+        RunEventType.ASSISTANT_COMPLETED,
+        "{\"schemaVersion\":1,\"attempt\":"
+            + run.attempt()
+            + ",\"turnIndex\":"
+            + run.turnIndex()
+            + "}");
   }
 
   private static RunEventDraft terminalEvent(AgentRun run, RunEventType type) {

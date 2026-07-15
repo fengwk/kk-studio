@@ -26,7 +26,14 @@ public enum RunEventType {
   RUN_WAITING("run_waiting"),
   RUN_COMPLETED("run_completed"),
   RUN_FAILED("run_failed"),
-  RUN_CANCELLED("run_cancelled");
+  RUN_CANCELLED("run_cancelled"),
+  STEER_REQUESTED("steer_requested"),
+  FOLLOW_UP_REQUESTED("follow_up_requested"),
+  STEER_CONSUMED("steer_consumed"),
+  FOLLOW_UP_CONSUMED("follow_up_consumed"),
+  CONTROL_PROMOTED("control_promoted"),
+  ABORT_REQUESTED("abort_requested"),
+  RUN_REQUEUED("run_requeued");
 
   private final String value;
 
