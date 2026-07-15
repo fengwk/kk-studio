@@ -9,7 +9,6 @@ import fun.fengwk.convention4j.springboot.starter.snowflake.GlobalSnowflakeIdGen
  */
 public final class AgentIdGenerator {
 
-  public static final String WORKSPACE = "workspace";
   public static final String AGENT_PROVIDER = "agent_provider";
   public static final String AGENT_MODEL = "agent_model";
   public static final String AGENT_DEFINITION = "agent_definition";
@@ -24,10 +23,6 @@ public final class AgentIdGenerator {
   public static final String TOOL_ARTIFACT = "tool_artifact";
 
   private AgentIdGenerator() {}
-
-  public static long nextWorkspaceId() {
-    return GlobalSnowflakeIdGenerator.next(WORKSPACE);
-  }
 
   public static long nextProviderId() {
     return GlobalSnowflakeIdGenerator.next(AGENT_PROVIDER);

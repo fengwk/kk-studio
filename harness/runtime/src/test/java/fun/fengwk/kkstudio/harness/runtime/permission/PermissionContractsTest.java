@@ -20,7 +20,7 @@ class PermissionContractsTest {
 
   /** codec 接受 canonical list、null permission 和未知字段，并拒绝所有非规范类型。 */
   @Test
-  void validatesCanonicalWorkspaceSettingsShapes() {
+  void validatesCanonicalToolSettingsShapes() {
     String canonical =
         codec.canonicalize(
             "{\"other\":1,\"permission\":{\"bash\":[{\"pattern\":\"git"
@@ -44,7 +44,7 @@ class PermissionContractsTest {
     }
   }
 
-  /** wildcard `?`、绝对 workdir、Workspace 外路径和空 command 使用确定候选。 */
+  /** wildcard `?`、绝对 workdir、Environment root 外路径和空 command 使用确定候选。 */
   @Test
   void evaluatesWildcardAbsoluteAndEmptyTargets() {
     Map<String, List<PermissionRule>> rules = new LinkedHashMap<>();
@@ -110,6 +110,6 @@ class PermissionContractsTest {
       String tool, String arguments, ToolSettings settings) {
     return evaluator.evaluate(
         new PermissionEvaluationContext(
-            tool, arguments, Path.of("/workspace"), Path.of("/workspace"), settings));
+            tool, arguments, Path.of("/environment"), Path.of("/environment"), settings));
   }
 }

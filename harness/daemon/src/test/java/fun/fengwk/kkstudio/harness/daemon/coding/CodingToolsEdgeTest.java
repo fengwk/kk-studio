@@ -33,7 +33,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 class CodingToolsEdgeTest {
 
-  @TempDir Path workspace;
+  @TempDir Path environmentRoot;
 
   @Test
   void everyDescriptorRejectsWrongTypedAndUnknownArguments() {
@@ -96,29 +96,31 @@ class CodingToolsEdgeTest {
 
   @Test
   void pathBoundaryAcceptsCanonicalChildrenAndRejectsInvalidWorkdirs() throws Exception {
-    Path nested = Files.createDirectories(workspace.resolve("nested"));
+    Path nested = Files.createDirectories(environmentRoot.resolve("nested"));
     Files.writeString(nested.resolve("file.txt"), "x");
     EnvironmentPathBoundary boundary = new EnvironmentPathBoundary(config());
 
     assertEquals(nested.toRealPath(), boundary.workdir("@nested"));
     assertEquals(nested.resolve("file.txt").toRealPath(), boundary.existing("@file.txt", nested));
     assertEquals(nested.resolve("future/file.txt"), boundary.writable("future/file.txt", nested));
-    assertEquals(workspace.toRealPath(), boundary.workdir(null));
+    assertEquals(environmentRoot.toRealPath(), boundary.workdir(null));
     assertThrows(IllegalArgumentException.class, () -> boundary.workdir("missing"));
     assertThrows(IllegalArgumentException.class, () -> boundary.workdir("file.txt"));
     assertThrows(
-        IllegalArgumentException.class, () -> boundary.workdir(workspace.getParent().toString()));
+        IllegalArgumentException.class,
+        () -> boundary.workdir(environmentRoot.getParent().toString()));
     assertThrows(IllegalArgumentException.class, () -> boundary.existing("", nested));
     assertThrows(IllegalArgumentException.class, () -> boundary.existing("missing", nested));
     assertEquals(
         nested.resolve("file.txt").toRealPath(),
-        boundary.existing(nested.resolve("file.txt").toString(), workspace));
+        boundary.existing(nested.resolve("file.txt").toString(), environmentRoot));
     assertEquals(nested.resolve("file.txt").toRealPath(), boundary.writable("file.txt", nested));
     assertThrows(NullPointerException.class, () -> boundary.existing("file.txt", null));
     assertThrows(IllegalArgumentException.class, () -> boundary.existing("\u0000", nested));
-    Path dangling = workspace.resolve("dangling");
-    Files.createSymbolicLink(dangling, workspace.resolve("not-created"));
-    assertThrows(IllegalArgumentException.class, () -> boundary.existing("dangling", workspace));
+    Path dangling = environmentRoot.resolve("dangling");
+    Files.createSymbolicLink(dangling, environmentRoot.resolve("not-created"));
+    assertThrows(
+        IllegalArgumentException.class, () -> boundary.existing("dangling", environmentRoot));
   }
 
   @Test
@@ -164,7 +166,7 @@ class CodingToolsEdgeTest {
     assertArrayEquals(utf16be, TextFileCodec.encode(big.text(), big.charset(), big.bomLength()));
     assertThrows(IllegalArgumentException.class, () -> TextFileCodec.decode(new byte[] {0, 1}));
 
-    LocalFileArtifactSink local = new LocalFileArtifactSink(workspace.resolve("artifacts"));
+    LocalFileArtifactSink local = new LocalFileArtifactSink(environmentRoot.resolve("artifacts"));
     var reference = local.store(new byte[] {7, 8}, "application/octet-stream");
     assertArrayEquals(
         new byte[] {7, 8}, Files.readAllBytes(local.directory().resolve(reference.artifactId())));
@@ -178,7 +180,7 @@ class CodingToolsEdgeTest {
   @Test
   void readToolDecodesUtf16BomAsNumberedText() throws Exception {
     Files.write(
-        workspace.resolve("utf16.txt"),
+        environmentRoot.resolve("utf16.txt"),
         TextFileCodec.encode("alpha\nbeta\n", StandardCharsets.UTF_16LE, 2));
 
     ToolResult result = invoke(new ReadTool(config()), "{\"path\":\"utf16.txt\"}");
@@ -204,14 +206,14 @@ class CodingToolsEdgeTest {
       old[index] = System.getProperty(names[index]);
     }
     try {
-      System.setProperty(names[0], workspace.toString());
-      System.setProperty(names[1], workspace.toString());
-      System.setProperty(names[2], workspace.resolve("local-artifacts").toString());
+      System.setProperty(names[0], environmentRoot.toString());
+      System.setProperty(names[1], environmentRoot.toString());
+      System.setProperty(names[2], environmentRoot.resolve("local-artifacts").toString());
       System.setProperty(names[3], "custom-bash");
       System.setProperty(names[4], "custom-rg");
       System.setProperty(names[5], "custom-fd");
       CodingToolsConfig properties = CodingToolsConfig.fromSystemProperties();
-      assertEquals(workspace.toRealPath(), properties.environmentRoot());
+      assertEquals(environmentRoot.toRealPath(), properties.environmentRoot());
       assertEquals("custom-bash", properties.bashExecutable());
       assertTrue(properties.artifactSink() instanceof LocalFileArtifactSink);
     } finally {
@@ -227,13 +229,20 @@ class CodingToolsEdgeTest {
         IllegalArgumentException.class,
         () ->
             new CodingToolsConfig(
-                workspace, workspace, 0, 1, "bash", "rg", "fd", new InMemoryArtifactSink()));
+                environmentRoot,
+                environmentRoot,
+                0,
+                1,
+                "bash",
+                "rg",
+                "fd",
+                new InMemoryArtifactSink()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new CodingToolsConfig(
-                workspace,
-                workspace.resolve("missing"),
+                environmentRoot,
+                environmentRoot.resolve("missing"),
                 1,
                 1,
                 "bash",
@@ -244,13 +253,20 @@ class CodingToolsEdgeTest {
         IllegalArgumentException.class,
         () ->
             new CodingToolsConfig(
-                workspace, workspace, 1, 1, "", "rg", "fd", new InMemoryArtifactSink()));
+                environmentRoot,
+                environmentRoot,
+                1,
+                1,
+                "",
+                "rg",
+                "fd",
+                new InMemoryArtifactSink()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new CodingToolsConfig(
-                workspace.resolve("missing"),
-                workspace,
+                environmentRoot.resolve("missing"),
+                environmentRoot,
                 1,
                 1,
                 "bash",
@@ -270,7 +286,7 @@ class CodingToolsEdgeTest {
     ToolResult absent =
         invoke(
             edit, "{\"path\":\"new/created.txt\",\"old_string\":\"zero\",\"new_string\":\"two\"}");
-    Files.write(workspace.resolve("binary.txt"), new byte[] {0, 1});
+    Files.write(environmentRoot.resolve("binary.txt"), new byte[] {0, 1});
     ToolResult binary =
         invoke(edit, "{\"path\":\"binary.txt\",\"old_string\":\"a\",\"new_string\":\"b\"}");
     ToolResult empty =
@@ -279,7 +295,7 @@ class CodingToolsEdgeTest {
         invoke(edit, "{\"path\":\"new\",\"old_string\":\"a\",\"new_string\":\"b\"}");
 
     assertFalse(created.error());
-    assertEquals("one", Files.readString(workspace.resolve("new/created.txt")));
+    assertEquals("one", Files.readString(environmentRoot.resolve("new/created.txt")));
     assertTrue(text(unchanged).contains("must differ"));
     assertTrue(text(absent).contains("was not found"));
     assertTrue(text(binary).contains("appears to be binary"));
@@ -290,7 +306,7 @@ class CodingToolsEdgeTest {
   @Test
   void scriptedSearchesCoverOptionsErrorsAndProcessCleanup() throws Exception {
     assumePosix();
-    Path visible = workspace.resolve("visible.txt");
+    Path visible = environmentRoot.resolve("visible.txt");
     Files.writeString(visible, "content");
     String longLine = "x".repeat(600);
     Path rg =
@@ -305,7 +321,7 @@ class CodingToolsEdgeTest {
             grep,
             "{\"pattern\":\"Alpha\",\"path\":\".\",\"literal\":true,\"ignore_case\":true,\"multiline\":true,\"include\":\"*.txt\",\"limit\":10}");
     assertTrue(text(literal).contains("visible.txt:1:"));
-    assertFalse(text(literal).contains(workspace.toString()));
+    assertFalse(text(literal).contains(environmentRoot.toString()));
     assertTrue(text(literal).contains("line truncated to 500 chars"));
     ArtifactToolContent grepArtifact =
         (ArtifactToolContent)
@@ -322,7 +338,7 @@ class CodingToolsEdgeTest {
     assertTrue(text(found).contains("results limit reached"));
     assertTrue(found.contents().stream().anyMatch(ArtifactToolContent.class::isInstance));
 
-    Path argumentFile = workspace.resolve("fd-arguments.txt");
+    Path argumentFile = environmentRoot.resolve("fd-arguments.txt");
     Path exactFd =
         script(
             "fd-exact",
@@ -335,7 +351,11 @@ class CodingToolsEdgeTest {
     GrepTool missing =
         new GrepTool(
             config(
-                2000, 50 * 1024, new InMemoryArtifactSink(), workspace.resolve("missing-rg"), fd));
+                2000,
+                50 * 1024,
+                new InMemoryArtifactSink(),
+                environmentRoot.resolve("missing-rg"),
+                fd));
     assertTrue(text(invoke(missing, "{\"pattern\":\"x\",\"path\":\".\"}")).contains("unavailable"));
     Path failing = script("failing", "echo bad >&2\nexit 2\n");
     GrepTool nonZero =
@@ -344,7 +364,11 @@ class CodingToolsEdgeTest {
     FindTool missingFind =
         new FindTool(
             config(
-                2000, 50 * 1024, new InMemoryArtifactSink(), rg, workspace.resolve("missing-fd")));
+                2000,
+                50 * 1024,
+                new InMemoryArtifactSink(),
+                rg,
+                environmentRoot.resolve("missing-fd")));
     assertTrue(
         text(invoke(missingFind, "{\"pattern\":\"*\",\"path\":\".\"}")).contains("unavailable"));
     FindTool failingFind =
@@ -360,8 +384,8 @@ class CodingToolsEdgeTest {
     BashTool missing =
         new BashTool(
             new CodingToolsConfig(
-                workspace,
-                workspace,
+                environmentRoot,
+                environmentRoot,
                 10,
                 100,
                 "missing-bash",
@@ -432,11 +456,11 @@ class CodingToolsEdgeTest {
 
   private CodingToolsConfig config(int lines, int bytes, ArtifactSink sink, Path rg, Path fd) {
     return new CodingToolsConfig(
-        workspace, workspace, lines, bytes, "bash", rg.toString(), fd.toString(), sink);
+        environmentRoot, environmentRoot, lines, bytes, "bash", rg.toString(), fd.toString(), sink);
   }
 
   private Path script(String name, String body) throws IOException {
-    Path script = workspace.resolve(name + "-script");
+    Path script = environmentRoot.resolve(name + "-script");
     Files.writeString(script, "#!/bin/sh\n" + body);
     Files.setPosixFilePermissions(
         script,

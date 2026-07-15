@@ -181,6 +181,8 @@ public class StudioAgentResourceControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.results[0].modelId").isString());
     mockMvc.perform(delete("/api/agents/{id}", agentId)).andExpect(status().isNoContent());
+    mockMvc.perform(get("/api/workspaces")).andExpect(status().isNotFound());
+    mockMvc.perform(get("/api/workspaces/1")).andExpect(status().isNotFound());
     mockMvc.perform(get("/api/workspaces/1/agents")).andExpect(status().isNotFound());
   }
 

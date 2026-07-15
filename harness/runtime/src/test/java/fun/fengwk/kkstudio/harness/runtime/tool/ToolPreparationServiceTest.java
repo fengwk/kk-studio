@@ -54,8 +54,8 @@ class ToolPreparationServiceTest {
             bindings,
             settings,
             false,
-            Path.of("/tmp/workspace"),
-            Path.of("/tmp/workspace"),
+            Path.of("/tmp/environment"),
+            Path.of("/tmp/environment"),
             NOW);
 
     assertEquals(List.of(0, 1, 2), prepared.stream().map(PreparedToolInvocation::ordinal).toList());
@@ -88,8 +88,8 @@ class ToolPreparationServiceTest {
                 List.of(binding("write")),
                 deny,
                 true,
-                Path.of("/tmp/workspace"),
-                Path.of("/tmp/workspace"),
+                Path.of("/tmp/environment"),
+                Path.of("/tmp/environment"),
                 NOW)
             .get(0);
     assertEquals(PermissionAction.ALLOW, yolo.permissionAction());
@@ -103,8 +103,8 @@ class ToolPreparationServiceTest {
                 List.of(binding("write")),
                 deny,
                 true,
-                Path.of("/tmp/workspace"),
-                Path.of("/tmp/workspace"),
+                Path.of("/tmp/environment"),
+                Path.of("/tmp/environment"),
                 NOW));
     String invalidPathArguments =
         objectMapper.writeValueAsString(Map.of("path", "bad" + (char) 0 + "path"));
@@ -116,8 +116,8 @@ class ToolPreparationServiceTest {
                 List.of(binding("write")),
                 deny,
                 true,
-                Path.of("/tmp/workspace"),
-                Path.of("/tmp/workspace"),
+                Path.of("/tmp/environment"),
+                Path.of("/tmp/environment"),
                 NOW));
     assertThrows(
         IllegalArgumentException.class,
@@ -127,8 +127,8 @@ class ToolPreparationServiceTest {
                 List.of(),
                 deny,
                 true,
-                Path.of("/tmp/workspace"),
-                Path.of("/tmp/workspace"),
+                Path.of("/tmp/environment"),
+                Path.of("/tmp/environment"),
                 NOW));
   }
 
@@ -151,8 +151,8 @@ class ToolPreparationServiceTest {
                 List.of(binding("read", Duration.ZERO)),
                 ToolSettings.DEFAULT,
                 false,
-                Path.of("/tmp/workspace"),
-                Path.of("/tmp/workspace"),
+                Path.of("/tmp/environment"),
+                Path.of("/tmp/environment"),
                 NOW)
             .get(0);
 
@@ -174,8 +174,8 @@ class ToolPreparationServiceTest {
                 List.of(binding("read", Duration.ofSeconds(Long.MAX_VALUE))),
                 ToolSettings.DEFAULT,
                 false,
-                Path.of("/tmp/workspace"),
-                Path.of("/tmp/workspace"),
+                Path.of("/tmp/environment"),
+                Path.of("/tmp/environment"),
                 NOW));
   }
 

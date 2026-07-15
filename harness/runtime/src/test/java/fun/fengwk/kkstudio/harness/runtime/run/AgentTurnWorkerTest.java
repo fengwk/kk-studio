@@ -117,7 +117,7 @@ class AgentTurnWorkerTest {
     fixture.tools = List.of(tool());
     List<String> barrier = new ArrayList<>();
     fixture.toolPreparation =
-        (run, assistant, calls, bindings, workdir, workspaceRoot, assistantEvents, now) -> {
+        (run, assistant, calls, bindings, workdir, environmentRoot, assistantEvents, now) -> {
           fixture.store.sessionMessages.add(assistant);
           barrier.add("assistant");
           barrier.add("prepare:" + calls.get(0).id());
@@ -167,7 +167,7 @@ class AgentTurnWorkerTest {
                 "", List.of(new ProviderToolCall("call-1", "read", "{\"path\":\"README.md\"}")))));
     fixture.tools = List.of(tool());
     fixture.toolPreparation =
-        (run, assistant, calls, bindings, workdir, workspaceRoot, assistantEvents, now) -> {
+        (run, assistant, calls, bindings, workdir, environmentRoot, assistantEvents, now) -> {
           throw new IllegalArgumentException("interceptor rejected call");
         };
 
@@ -198,7 +198,7 @@ class AgentTurnWorkerTest {
                 "", List.of(new ProviderToolCall("call-1", "read", "{\"path\":\"README.md\"}")))));
     fixture.tools = List.of(tool());
     fixture.toolPreparation =
-        (run, assistant, calls, bindings, workdir, workspaceRoot, assistantEvents, now) -> {
+        (run, assistant, calls, bindings, workdir, environmentRoot, assistantEvents, now) -> {
           throw new IllegalStateException("database unavailable");
         };
 
@@ -558,8 +558,8 @@ class AgentTurnWorkerTest {
         model,
         variant,
         tools.stream().map(ToolBinding::of).toList(),
-        Path.of("/workspace"),
-        Path.of("/workspace"));
+        Path.of("/environment"),
+        Path.of("/environment"));
   }
 
   private static final class Fixture {
@@ -807,7 +807,7 @@ class AgentTurnWorkerTest {
         List<ToolCall> calls,
         List<ToolBinding> bindings,
         Path workdir,
-        Path workspaceRoot,
+        Path environmentRoot,
         List<RunEventDraft> barrierEvents,
         Instant now) {
       if (!owned(claimedRun)) {

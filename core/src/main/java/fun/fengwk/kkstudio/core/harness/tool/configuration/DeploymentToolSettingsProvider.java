@@ -4,7 +4,7 @@ import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsCodec;
 import java.util.Objects;
 
-/** Normalizes deployment Tool settings and exposes them without workspace lookup. */
+/** Normalizes and exposes deployment Tool settings directly. */
 public final class DeploymentToolSettingsProvider implements ToolSettingsProvider {
   private final ToolSettingsProperties properties;
   private final ToolSettingsCodec codec;

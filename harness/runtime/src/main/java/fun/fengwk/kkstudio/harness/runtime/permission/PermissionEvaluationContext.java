@@ -8,7 +8,7 @@ public record PermissionEvaluationContext(
     String toolName,
     String argumentsJson,
     Path workdir,
-    Path workspaceRoot,
+    Path environmentRoot,
     ToolSettings settings) {
   public PermissionEvaluationContext {
     if (toolName == null || toolName.isBlank()) {
@@ -18,8 +18,8 @@ public record PermissionEvaluationContext(
       throw new IllegalArgumentException("argumentsJson must not be blank");
     }
     workdir = Objects.requireNonNull(workdir, "workdir").toAbsolutePath().normalize();
-    workspaceRoot =
-        Objects.requireNonNull(workspaceRoot, "workspaceRoot").toAbsolutePath().normalize();
+    environmentRoot =
+        Objects.requireNonNull(environmentRoot, "environmentRoot").toAbsolutePath().normalize();
     settings = Objects.requireNonNull(settings, "settings");
   }
 }

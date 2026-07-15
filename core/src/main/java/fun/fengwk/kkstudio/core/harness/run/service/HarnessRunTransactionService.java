@@ -141,7 +141,7 @@ public class HarnessRunTransactionService implements RunTransactions {
       List<ToolCall> toolCalls,
       List<ToolBinding> bindings,
       Path workdir,
-      Path workspaceRoot,
+      Path environmentRoot,
       List<RunEventDraft> assistantEvents,
       Instant now) {
     validateAssistant(assistant);
@@ -165,7 +165,7 @@ public class HarnessRunTransactionService implements RunTransactions {
             policy.settings(),
             policy.yoloEnabled(),
             workdir,
-            workspaceRoot,
+            environmentRoot,
             now);
     long assistantEntryId = appendEntry(locked.session(), claimedRun.id(), assistant, now);
     for (PreparedToolInvocation invocation : prepared) {

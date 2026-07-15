@@ -16,7 +16,7 @@ public interface ToolPreparationPort {
       List<ToolCall> toolCalls,
       List<ToolBinding> bindings,
       Path workdir,
-      Path workspaceRoot,
+      Path environmentRoot,
       List<RunEventDraft> assistantEvents,
       Instant now);
 }

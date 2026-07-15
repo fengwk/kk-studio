@@ -46,11 +46,11 @@ class ToolContractTest {
   @Test
   void definesStableVersionAndRendererIdentity() {
     ToolDescriptor defaultRenderer = descriptor();
-    ToolDescriptor customRenderer = descriptor("workspace-search");
+    ToolDescriptor customRenderer = descriptor("repository-search");
 
     assertEquals("1.0.0", defaultRenderer.version());
     assertEquals("search", defaultRenderer.rendererKey());
-    assertEquals("workspace-search", customRenderer.rendererKey());
+    assertEquals("repository-search", customRenderer.rendererKey());
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -120,7 +120,7 @@ class ToolContractTest {
     return new ToolDescriptor(
         "search",
         "1.0.0",
-        "Search the workspace",
+        "Search the repository",
         rendererKey,
         schema(),
         ToolExecutionMode.CLOUD,

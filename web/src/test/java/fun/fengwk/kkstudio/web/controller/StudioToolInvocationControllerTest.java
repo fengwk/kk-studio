@@ -177,8 +177,8 @@ class StudioToolInvocationControllerTest {
         assistant(List.of(call)),
         List.of(call),
         List.of(binding()),
-        Path.of("/tmp/workspace"),
-        Path.of("/tmp/workspace"),
+        Path.of("/tmp/environment"),
+        Path.of("/tmp/environment"),
         List.of(
             new RunEventDraft(
                 RunEventType.ASSISTANT_COMPLETED, RunEventPayloads.forAttempt(claimed))),

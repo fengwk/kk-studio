@@ -3,21 +3,19 @@ package fun.fengwk.kkstudio.core.agent.runtime.service.impl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.Test;
-
 import fun.fengwk.kkstudio.agent.AgentInfo;
 import fun.fengwk.kkstudio.agent.model.ModelInfo;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
-
 import java.util.List;
+import org.junit.jupiter.api.Test;
 
 /** Runtime metadata consumes the new JSON configuration fields. */
 public class EmbeddedAgentRuntimeMetadataFactoryTest {
 
   @Test
-  public void shouldBuildRuntimeMetadataFromWorkspaceConfiguration() {
+  public void shouldBuildRuntimeMetadataFromGlobalConfiguration() {
     EmbeddedAgentRuntimeMetadataFactory factory =
         new EmbeddedAgentRuntimeMetadataFactory(new ObjectMapper());
     AgentDefinition definition = new AgentDefinition();

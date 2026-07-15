@@ -41,7 +41,7 @@ public final class PermissionEvaluator {
     if (input.path("path").isTextual() && !input.path("path").asText().trim().isEmpty()) {
       Path targetWorkdir = resolveWorkdir(input, context.workdir());
       return buildPathCandidates(
-          input.path("path").asText(), targetWorkdir, context.workspaceRoot());
+          input.path("path").asText(), targetWorkdir, context.environmentRoot());
     }
     if (input.path("command").isTextual()) {
       String command = input.path("command").asText().trim();
@@ -50,15 +50,15 @@ public final class PermissionEvaluator {
     return List.of("*");
   }
 
-  List<String> buildPathCandidates(String rawPath, Path workdir, Path workspaceRoot) {
+  List<String> buildPathCandidates(String rawPath, Path workdir, Path environmentRoot) {
     String stripped = rawPath.startsWith("@") ? rawPath.substring(1) : rawPath;
     Path raw = Path.of(expandHome(stripped));
     Path absolute = raw.isAbsolute() ? raw.normalize() : workdir.resolve(raw).normalize();
     LinkedHashSet<String> candidates = new LinkedHashSet<>();
     addCandidate(candidates, stripped);
     addCandidate(candidates, relativeDisplay(workdir, absolute));
-    if (absolute.startsWith(workspaceRoot)) {
-      addCandidate(candidates, relativeDisplay(workspaceRoot, absolute));
+    if (absolute.startsWith(environmentRoot)) {
+      addCandidate(candidates, relativeDisplay(environmentRoot, absolute));
     }
     addCandidate(candidates, display(absolute));
     return List.copyOf(candidates);

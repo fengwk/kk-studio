@@ -1,7 +1,3 @@
-merge into workspace (id, name, settings_json, gmt_create, gmt_modified, version) key (id) values (
-    1, 'default', '{}', current_timestamp(), current_timestamp(), 0
-);
-
 merge into agent_provider (
     id, name, description, provider_type, base_url, credential, config_json,
     gmt_create, gmt_modified, version

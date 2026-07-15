@@ -18,7 +18,7 @@ public record TurnResources(
     ModelVariant variant,
     List<ToolBinding> toolBindings,
     Path workdir,
-    Path workspaceRoot) {
+    Path environmentRoot) {
   public TurnResources {
     provider = Objects.requireNonNull(provider, "provider");
     model = Objects.requireNonNull(model, "model");
@@ -29,8 +29,8 @@ public record TurnResources(
       throw new IllegalArgumentException("tool binding names must be unique");
     }
     workdir = Objects.requireNonNull(workdir, "workdir").toAbsolutePath().normalize();
-    workspaceRoot =
-        Objects.requireNonNull(workspaceRoot, "workspaceRoot").toAbsolutePath().normalize();
+    environmentRoot =
+        Objects.requireNonNull(environmentRoot, "environmentRoot").toAbsolutePath().normalize();
   }
 
   public List<ToolDescriptor> toolDescriptors() {

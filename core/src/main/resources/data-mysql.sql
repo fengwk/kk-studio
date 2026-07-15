@@ -1,7 +1,3 @@
-insert into workspace (id, name, settings_json, gmt_create, gmt_modified, version) values (
-    1, 'default', '{}', current_timestamp(3), current_timestamp(3), 0
-) on duplicate key update name = 'default', settings_json = '{}', gmt_modified = current_timestamp(3);
-
 insert into agent_provider (
     id, name, description, provider_type, base_url, credential, config_json,
     gmt_create, gmt_modified, version

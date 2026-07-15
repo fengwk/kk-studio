@@ -1,14 +1,3 @@
-create table if not exists workspace (
-    id              bigint not null comment '主键',
-    name            varchar(64) not null comment 'workspace 名称',
-    settings_json   longtext not null comment 'workspace 设置 JSON',
-    gmt_create      datetime(3) not null default current_timestamp(3) comment '创建时间',
-    gmt_modified    datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
-    version         bigint not null default '0' comment '数据版本号',
-    primary key (id),
-    unique key uk_workspace_name (name)
-) engine=InnoDB default charset=utf8mb4 comment='workspace';
-
 create table if not exists agent_provider (
     id              bigint not null comment '主键',
     name            varchar(64) not null comment 'provider 名称',

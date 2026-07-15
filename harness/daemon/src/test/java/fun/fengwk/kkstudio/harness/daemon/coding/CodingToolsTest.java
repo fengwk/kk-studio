@@ -29,7 +29,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 class CodingToolsTest {
 
-  @TempDir Path workspace;
+  @TempDir Path environmentRoot;
 
   @Test
   void registersEnvironmentDescriptorsAndRejectsMalformedArguments() {
@@ -50,7 +50,7 @@ class CodingToolsTest {
   void rejectsTraversalSymlinksAndUnsafeWriteAncestors() throws Exception {
     Path outside = Files.createTempDirectory("coding-outside");
     Files.writeString(outside.resolve("secret.txt"), "secret");
-    Files.createSymbolicLink(workspace.resolve("escape"), outside);
+    Files.createSymbolicLink(environmentRoot.resolve("escape"), outside);
     ReadTool read = new ReadTool(config());
     WriteTool write = new WriteTool(config());
 
@@ -66,7 +66,7 @@ class CodingToolsTest {
 
   @Test
   void writeAndEditPreserveBomNewlinesAndSerializeExactReplacement() throws Exception {
-    Path file = workspace.resolve("sample.txt");
+    Path file = environmentRoot.resolve("sample.txt");
     Files.write(
         file, new byte[] {(byte) 0xef, (byte) 0xbb, (byte) 0xbf, 'a', '\r', '\n', 'a', '\r', '\n'});
     EditTool edit = new EditTool(config());
@@ -89,10 +89,10 @@ class CodingToolsTest {
 
   @Test
   void readReturnsDirectoryWindowAndBinaryArtifact() throws Exception {
-    Files.writeString(workspace.resolve("many.txt"), "one\ntwo\nthree\n");
-    Files.write(workspace.resolve("binary.bin"), new byte[] {1, 0, 2});
-    Files.createDirectory(workspace.resolve("directory"));
-    Files.writeString(workspace.resolve("directory/a.txt"), "a");
+    Files.writeString(environmentRoot.resolve("many.txt"), "one\ntwo\nthree\n");
+    Files.write(environmentRoot.resolve("binary.bin"), new byte[] {1, 0, 2});
+    Files.createDirectory(environmentRoot.resolve("directory"));
+    Files.writeString(environmentRoot.resolve("directory/a.txt"), "a");
     ReadTool read = new ReadTool(config());
     ReadTool constrainedRead = new ReadTool(config(1, 16));
 
@@ -116,7 +116,7 @@ class CodingToolsTest {
 
     assertTrue(first.await());
     assertTrue(second.await());
-    String content = Files.readString(workspace.resolve("shared.txt"));
+    String content = Files.readString(environmentRoot.resolve("shared.txt"));
     assertTrue(content.equals("first") || content.equals("second"));
     assertFalse(first.result.error());
     assertFalse(second.result.error());
@@ -124,9 +124,9 @@ class CodingToolsTest {
 
   @Test
   void grepAndFindRespectLimitsAndGitignore() throws Exception {
-    Files.writeString(workspace.resolve("visible.txt"), "needle\nneedle\n");
-    Files.writeString(workspace.resolve(".gitignore"), "ignored.txt\n");
-    Files.writeString(workspace.resolve("ignored.txt"), "needle\n");
+    Files.writeString(environmentRoot.resolve("visible.txt"), "needle\nneedle\n");
+    Files.writeString(environmentRoot.resolve(".gitignore"), "ignored.txt\n");
+    Files.writeString(environmentRoot.resolve("ignored.txt"), "needle\n");
     GrepTool grep = new GrepTool(config());
     FindTool find = new FindTool(config());
 
@@ -169,7 +169,14 @@ class CodingToolsTest {
 
   private CodingToolsConfig config(int lines, int bytes) {
     return new CodingToolsConfig(
-        workspace, workspace, lines, bytes, "bash", "rg", "fd", new InMemoryArtifactSink());
+        environmentRoot,
+        environmentRoot,
+        lines,
+        bytes,
+        "bash",
+        "rg",
+        "fd",
+        new InMemoryArtifactSink());
   }
 
   private ToolExecutionRequest request(Tool tool, String arguments) {

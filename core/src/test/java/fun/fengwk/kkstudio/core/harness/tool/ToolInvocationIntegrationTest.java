@@ -221,8 +221,8 @@ class ToolInvocationIntegrationTest {
                 assistant(List.of(new ToolCall("rollback", "read", "{\"path\":\"x\"}"))),
                 List.of(new ToolCall("rollback", "read", "{\"path\":\"x\"}")),
                 List.of(binding("read")),
-                Path.of("/tmp/workspace"),
-                Path.of("/tmp/workspace"),
+                Path.of("/tmp/environment"),
+                Path.of("/tmp/environment"),
                 List.of(new RunEventDraft(RunEventType.ASSISTANT_COMPLETED, "{}")),
                 NOW.plusSeconds(1)));
     assertTrue(invocationStore.listByRun(rollback.run().id()).isEmpty());
@@ -864,8 +864,8 @@ class ToolInvocationIntegrationTest {
         assistant(calls),
         calls,
         bindings,
-        Path.of("/tmp/workspace"),
-        Path.of("/tmp/workspace"),
+        Path.of("/tmp/environment"),
+        Path.of("/tmp/environment"),
         List.of(
             new RunEventDraft(RunEventType.ASSISTANT_COMPLETED, RunEventPayloads.forAttempt(run))),
         NOW.plusSeconds(1));

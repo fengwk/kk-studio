@@ -1,14 +1,3 @@
-create table if not exists workspace (
-    id              bigint not null,
-    name            varchar(64) not null,
-    settings_json   text not null,
-    gmt_create      timestamp(3) not null default current_timestamp(),
-    gmt_modified    timestamp(3) not null default current_timestamp(),
-    version         bigint not null default 0,
-    primary key (id),
-    unique (name)
-);
-
 create table if not exists agent_provider (
     id              bigint not null,
     name            varchar(64) not null,

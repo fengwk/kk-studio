@@ -28,10 +28,10 @@ public class DatabaseToolPreparationPort implements ToolPreparationPort {
       List<ToolCall> toolCalls,
       List<ToolBinding> bindings,
       Path workdir,
-      Path workspaceRoot,
+      Path environmentRoot,
       List<RunEventDraft> assistantEvents,
       Instant now) {
     return transactions.prepareTools(
-        claimedRun, assistant, toolCalls, bindings, workdir, workspaceRoot, assistantEvents, now);
+        claimedRun, assistant, toolCalls, bindings, workdir, environmentRoot, assistantEvents, now);
   }
 }

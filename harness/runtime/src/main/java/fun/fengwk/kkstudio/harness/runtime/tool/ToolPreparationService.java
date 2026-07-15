@@ -59,7 +59,7 @@ public final class ToolPreparationService {
       ToolSettings settings,
       boolean yoloEnabled,
       Path workdir,
-      Path workspaceRoot,
+      Path environmentRoot,
       Instant now) {
     toolCalls = List.copyOf(Objects.requireNonNull(toolCalls, "toolCalls"));
     now = Objects.requireNonNull(now, "now");
@@ -85,7 +85,7 @@ public final class ToolPreparationService {
               intercepted.binding().descriptor().name(),
               intercepted.call().argumentsJson(),
               workdir,
-              workspaceRoot,
+              environmentRoot,
               settings);
       PermissionEvaluator.Evaluation evaluation = permissionEvaluator.evaluate(permissionContext);
       PermissionAction action = yoloEnabled ? PermissionAction.ALLOW : evaluation.action();

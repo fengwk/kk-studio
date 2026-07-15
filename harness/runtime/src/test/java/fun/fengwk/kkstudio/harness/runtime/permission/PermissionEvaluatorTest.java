@@ -35,22 +35,27 @@ class PermissionEvaluatorTest {
         PermissionAction.ASK, evaluate("write", "{\"path\":\"README.md\"}", settings).action());
   }
 
-  /** path 候选同时保留 raw、workdir-relative、workspace-relative 与规范绝对展示路径。 */
+  /** path 候选同时保留 raw、workdir-relative、environment-relative 与规范绝对展示路径。 */
   @Test
-  void buildsPathCandidatesRelativeToExplicitWorkdirAndWorkspace() throws Exception {
-    Path workspace = Path.of("/tmp/permission-workspace");
-    Path workdir = workspace.resolve("repo");
+  void buildsPathCandidatesRelativeToExplicitWorkdirAndEnvironment() throws Exception {
+    Path environmentRoot = Path.of("/tmp/permission-environment");
+    Path workdir = environmentRoot.resolve("repo");
     PermissionEvaluationContext context =
-        new PermissionEvaluationContext("write", "{}", workdir, workspace, ToolSettings.DEFAULT);
+        new PermissionEvaluationContext(
+            "write", "{}", workdir, environmentRoot, ToolSettings.DEFAULT);
     JsonNode input = objectMapper.readTree("{\"path\":\"src/Main.java\"}");
 
     assertEquals(
         List.of(
-            "src/Main.java", "repo/src/Main.java", "/tmp/permission-workspace/repo/src/Main.java"),
-        evaluator.buildPathCandidates("src/Main.java", workdir, workspace));
+            "src/Main.java",
+            "repo/src/Main.java",
+            "/tmp/permission-environment/repo/src/Main.java"),
+        evaluator.buildPathCandidates("src/Main.java", workdir, environmentRoot));
     assertEquals(
         List.of(
-            "src/Main.java", "repo/src/Main.java", "/tmp/permission-workspace/repo/src/Main.java"),
+            "src/Main.java",
+            "repo/src/Main.java",
+            "/tmp/permission-environment/repo/src/Main.java"),
         evaluator.describeCandidates(input, context));
   }
 
@@ -121,7 +126,7 @@ class PermissionEvaluatorTest {
 
   /** 管理输入兼容 PiBase 简写，持久输出统一为 ordered rule list。 */
   @Test
-  void canonicalizesWorkspaceSettingsShorthand() throws Exception {
+  void canonicalizesToolSettingsShorthand() throws Exception {
     ToolSettingsCodec codec = new ToolSettingsCodec(objectMapper);
     String canonical =
         codec.canonicalize(
@@ -146,8 +151,8 @@ class PermissionEvaluatorTest {
         new PermissionEvaluationContext(
             toolName,
             arguments,
-            Path.of("/tmp/permission-workspace"),
-            Path.of("/tmp/permission-workspace"),
+            Path.of("/tmp/permission-environment"),
+            Path.of("/tmp/permission-environment"),
             settings));
   }
 

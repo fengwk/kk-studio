@@ -274,7 +274,7 @@ public final class AgentTurnWorker {
             toolCalls,
             resources.toolBindings(),
             resources.workdir(),
-            resources.workspaceRoot(),
+            resources.environmentRoot(),
             List.of(assistantCompleted),
             now);
       } catch (IllegalArgumentException | ToolInterceptorException error) {
