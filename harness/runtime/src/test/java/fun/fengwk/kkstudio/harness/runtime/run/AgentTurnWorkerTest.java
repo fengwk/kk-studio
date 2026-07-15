@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.run;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -494,11 +495,15 @@ class AgentTurnWorkerTest {
     fixture.store.current =
         fixture.store.copy(RunStatus.QUEUED, 0, 0, 0, null, null, START, null, null, null, START);
     fixture.store.steeringBlocked = true;
-    fixture.providers.add(RecordingProvider.complete(response("should-not-run", List.of())));
+    RecordingProvider provider = RecordingProvider.complete(response("should-not-run", List.of()));
+    fixture.providers.add(provider);
 
     AgentTurnWorker.ClaimedTurn turn = fixture.worker().executeNext("worker-a").orElseThrow();
     assertTrue(turn.handle().isCancelled());
     assertEquals(RunStatus.RUNNING, fixture.store.current.status());
+    assertEquals(0, fixture.sessions.loadPathCalls);
+    assertNull(provider.request);
+    assertEquals(List.of("consumeSteering"), fixture.boundaryOperations);
     assertTrue(
         fixture.store.events.stream().noneMatch(e -> e.type() == RunEventType.ASSISTANT_STARTED));
   }
@@ -514,8 +519,7 @@ class AgentTurnWorkerTest {
 
     fixture.worker().executeNext("worker-a").orElseThrow();
 
-    // consumeSteering was called (events exist after it)
-    assertFalse(fixture.store.events.isEmpty());
+    assertEquals(List.of("consumeSteering", "context", "provider"), fixture.boundaryOperations);
   }
 
   /** heartbeat 因 cancel_requested 返回 false 时触发 handle.cancel()。 */
@@ -531,6 +535,7 @@ class AgentTurnWorkerTest {
 
     assertFalse(fixture.worker().heartbeat(turn));
     assertTrue(turn.handle().isCancelled());
+    assertTrue(manual.stream.isCancelled());
   }
 
   /** 无 due Run 返回 empty，空 worker id 在访问 Store 前被拒绝。 */
@@ -610,9 +615,10 @@ class AgentTurnWorkerTest {
 
   private static final class Fixture {
     private final MutableClock clock = new MutableClock(START);
-    private final InMemoryRunState store = new InMemoryRunState(START);
+    private final List<String> boundaryOperations = new ArrayList<>();
+    private final InMemoryRunState store = new InMemoryRunState(START, boundaryOperations);
     private final Queue<RecordingProvider> providers = new ArrayDeque<>();
-    private final FixedSessionStore sessions = new FixedSessionStore();
+    private final FixedSessionStore sessions = new FixedSessionStore(boundaryOperations);
     private List<ToolDescriptor> tools = List.of();
     private ToolPreparationPort toolPreparation = store::prepare;
     private CompactionService compaction = (sessionId, context) -> Optional.empty();
@@ -631,6 +637,7 @@ class AgentTurnWorkerTest {
             if (resourceFailure != null) {
               throw resourceFailure;
             }
+            boundaryOperations.add("provider");
             return resources(providers.remove(), tools);
           },
           compaction,
@@ -643,8 +650,11 @@ class AgentTurnWorkerTest {
   private static final class FixedSessionStore implements SessionStore, SessionEntryStore {
     private final Session session;
     private final List<SessionEntry> path;
+    private final List<String> boundaryOperations;
+    private int loadPathCalls;
 
-    private FixedSessionStore() {
+    private FixedSessionStore(List<String> boundaryOperations) {
+      this.boundaryOperations = boundaryOperations;
       AgentSnapshot snapshot =
           new AgentSnapshot("system", "model", "default", List.of(), List.of(), List.of(), "{}");
       SessionEntry root =
@@ -678,6 +688,8 @@ class AgentTurnWorkerTest {
 
     @Override
     public List<SessionEntry> loadPath(long sessionId, long leafEntryId) {
+      loadPathCalls++;
+      boundaryOperations.add("context");
       return path;
     }
 
@@ -718,10 +730,12 @@ class AgentTurnWorkerTest {
     private final List<MessageEntryPayload> sessionMessages = new ArrayList<>();
     private final List<CompactionEntryPayload> compactions = new ArrayList<>();
     private final List<String> operations = new ArrayList<>();
+    private final List<String> boundaryOperations;
     private boolean steeringBlocked;
     private String leaseOverride;
 
-    private InMemoryRunState(Instant now) {
+    private InMemoryRunState(Instant now, List<String> boundaryOperations) {
+      this.boundaryOperations = boundaryOperations;
       current =
           new AgentRun(
               20L, 1L, 11L, RunStatus.QUEUED, 0, 0, 0, null, null, now, null, now, null, null, now);
@@ -836,6 +850,7 @@ class AgentTurnWorkerTest {
 
     @Override
     public synchronized boolean consumeSteering(AgentRun claimedRun, Instant now) {
+      boundaryOperations.add("consumeSteering");
       if (!owned(claimedRun)) {
         return false;
       }

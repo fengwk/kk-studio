@@ -396,14 +396,22 @@ public class HarnessRunTransactionService implements RunTransactions {
     List<RunControlMessage> pending = controlStore.listPendingBySession(claimedRun.sessionId());
     if (!pending.isEmpty()) {
       clearActiveRun(claimedRun, now);
-      promoteToNewRun(claimedRun, locked.session(), pending, now);
+      Promotion promotion = promoteToNewRun(locked.session(), pending, now);
       List<RunEventDraft> allEvents = new ArrayList<>(terminalEvents);
-      for (RunControlMessage control : pending) {
+      for (ControlConsumption consumed : promotion.controls()) {
         allEvents.add(
             new RunEventDraft(
                 RunEventType.CONTROL_PROMOTED,
                 RunEventPayloads.forAttempt(
-                    claimedRun, "controlId", control.id(), "kind", control.kind().name())));
+                    claimedRun,
+                    "controlId",
+                    consumed.control().id(),
+                    "kind",
+                    consumed.control().kind().name(),
+                    "targetRunId",
+                    promotion.runId(),
+                    "entryId",
+                    consumed.entryId())));
       }
       appendEventsInternal(locked.run(), allEvents, now);
     } else {
@@ -445,16 +453,19 @@ public class HarnessRunTransactionService implements RunTransactions {
           new RunEventDraft(
               RunEventType.RUN_CANCELLED,
               RunEventPayloads.forAttempt(
-                  runSnapshot, "reason", extraEvents != null ? "cancel_requested" : "cancelled")));
+                  runSnapshot,
+                  "reason",
+                  run.getCancelRequestedAt() != null ? "cancel_requested" : "cancelled")));
     }
     appendEventsInternal(run, events, now);
   }
 
-  private void promoteToNewRun(
-      AgentRun oldRun, HarnessSessionDO session, List<RunControlMessage> pending, Instant now) {
+  private Promotion promoteToNewRun(
+      HarnessSessionDO session, List<RunControlMessage> pending, Instant now) {
     long newRunId = idGenerator.newRunId();
     LocalDateTime timestamp = utc(now);
     long[] entryIds = new long[pending.size()];
+    List<ControlConsumption> promoted = new ArrayList<>();
     for (int i = 0; i < pending.size(); i++) {
       entryIds[i] = idGenerator.newSessionEntryId();
     }
@@ -496,7 +507,9 @@ public class HarnessRunTransactionService implements RunTransactions {
         throw new ConcurrentModificationException(
             "control already consumed during promotion: " + control.id());
       }
+      promoted.add(new ControlConsumption(control, entryIds[i]));
     }
+    return new Promotion(newRunId, List.copyOf(promoted));
   }
 
   private List<ControlConsumption> applyControlEntries(
@@ -818,4 +831,6 @@ public class HarnessRunTransactionService implements RunTransactions {
   private record LockedRun(HarnessRunDO run, HarnessSessionDO session) {}
 
   private record ControlConsumption(RunControlMessage control, long entryId) {}
+
+  private record Promotion(long runId, List<ControlConsumption> controls) {}
 }
