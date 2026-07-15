@@ -107,6 +107,7 @@ public interface HarnessRunMapper extends BaseMapper {
       where id = #{runId} and status = 'RUNNING'
         and lease_owner = #{owner} and attempt = #{attempt}
         and lease_until > #{now}
+        and cancel_requested_at is null
       """)
   int heartbeat(
       @Param("runId") long runId,
@@ -138,6 +139,21 @@ public interface HarnessRunMapper extends BaseMapper {
       @Param("owner") String owner,
       @Param("attempt") int attempt,
       @Param("nextAttemptAt") LocalDateTime nextAttemptAt,
+      @Param("now") LocalDateTime now);
+
+  @Update(
+      """
+      update harness_run
+      set status = 'QUEUED', turn_index = turn_index + 1,
+          lease_owner = null, lease_until = null,
+          next_attempt_at = #{now}, gmt_modified = #{now}
+      where id = #{runId} and status = 'RUNNING'
+        and lease_owner = #{owner} and attempt = #{attempt}
+      """)
+  int requeueAdvanceTurn(
+      @Param("runId") long runId,
+      @Param("owner") String owner,
+      @Param("attempt") int attempt,
       @Param("now") LocalDateTime now);
 
   @Update(

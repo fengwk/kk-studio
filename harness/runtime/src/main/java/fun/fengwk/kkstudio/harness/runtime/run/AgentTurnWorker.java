@@ -102,6 +102,11 @@ public final class AgentTurnWorker {
       return Optional.of(new ClaimedTurn(run, TERMINAL_HANDLE));
     }
 
+    // consumeSteering in the same turn boundary, before context build / provider
+    if (!transactions.consumeSteering(run, claimedAt)) {
+      return Optional.of(new ClaimedTurn(run, TERMINAL_HANDLE));
+    }
+
     SessionContext context;
     TurnResources resources;
     try {
@@ -147,8 +152,12 @@ public final class AgentTurnWorker {
   /** 由进程级 worker cadence 调用；本类不持有 timer。 */
   public boolean heartbeat(ClaimedTurn turn) {
     AgentRun run = turn.run();
-    return runStore.heartbeat(
-        run.id(), run.leaseOwner(), run.attempt(), clock.instant(), config.leaseDuration());
+    if (!runStore.heartbeat(
+        run.id(), run.leaseOwner(), run.attempt(), clock.instant(), config.leaseDuration())) {
+      turn.handle().cancel();
+      return false;
+    }
+    return true;
   }
 
   private void cancelBeforeStart(AgentRun run) {
@@ -258,13 +267,7 @@ public final class AgentTurnWorker {
               "cost",
               response.cost());
       if (toolCalls.isEmpty()) {
-        transactions.complete(
-            run,
-            assistant,
-            List.of(
-                assistantCompleted,
-                attemptDraft(run, RunEventType.RUN_COMPLETED, "status", "SUCCEEDED")),
-            now);
+        transactions.complete(run, assistant, assistantCompleted, now);
         return;
       }
       try {

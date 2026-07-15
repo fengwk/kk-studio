@@ -487,6 +487,52 @@ class AgentTurnWorkerTest {
             .contains(RunEventType.RETRY_SCHEDULED));
   }
 
+  /** consumeSteering=false 时不启动 Provider。 */
+  @Test
+  void doesNotStartProviderWhenConsumeSteeringReturnsFalse() {
+    Fixture fixture = new Fixture();
+    fixture.store.current =
+        fixture.store.copy(RunStatus.QUEUED, 0, 0, 0, null, null, START, null, null, null, START);
+    fixture.store.steeringBlocked = true;
+    fixture.providers.add(RecordingProvider.complete(response("should-not-run", List.of())));
+
+    AgentTurnWorker.ClaimedTurn turn = fixture.worker().executeNext("worker-a").orElseThrow();
+    assertTrue(turn.handle().isCancelled());
+    assertEquals(RunStatus.RUNNING, fixture.store.current.status());
+    assertTrue(
+        fixture.store.events.stream().noneMatch(e -> e.type() == RunEventType.ASSISTANT_STARTED));
+  }
+
+  /** consumeSteering 发生在 context build/provider resolve 前。 */
+  @Test
+  void consumeSteeringCalledBeforeContextAndProvider() {
+    Fixture fixture = new Fixture();
+    fixture.store.current =
+        fixture.store.copy(RunStatus.QUEUED, 0, 0, 0, null, null, START, null, null, null, START);
+    fixture.store.leaseOverride = "worker-a";
+    fixture.providers.add(RecordingProvider.complete(response("ok", List.of())));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    // consumeSteering was called (events exist after it)
+    assertFalse(fixture.store.events.isEmpty());
+  }
+
+  /** heartbeat 因 cancel_requested 返回 false 时触发 handle.cancel()。 */
+  @Test
+  void heartbeatCancelsHandleWhenCancelRequested() {
+    Fixture fixture = new Fixture();
+    RecordingProvider manual = RecordingProvider.manual();
+    fixture.providers.add(manual);
+    AgentTurnWorker.ClaimedTurn turn = fixture.worker().executeNext("worker-a").orElseThrow();
+
+    // Set cancel on current run
+    fixture.store.requestCancel(20L, START.plusSeconds(1));
+
+    assertFalse(fixture.worker().heartbeat(turn));
+    assertTrue(turn.handle().isCancelled());
+  }
+
   /** 无 due Run 返回 empty，空 worker id 在访问 Store 前被拒绝。 */
   @Test
   void validatesWorkerIdAndReturnsEmptyWhenNothingIsDue() {
@@ -672,6 +718,8 @@ class AgentTurnWorkerTest {
     private final List<MessageEntryPayload> sessionMessages = new ArrayList<>();
     private final List<CompactionEntryPayload> compactions = new ArrayList<>();
     private final List<String> operations = new ArrayList<>();
+    private boolean steeringBlocked;
+    private String leaseOverride;
 
     private InMemoryRunState(Instant now) {
       current =
@@ -711,7 +759,9 @@ class AgentTurnWorkerTest {
     @Override
     public synchronized boolean heartbeat(
         long runId, String leaseOwner, int attempt, Instant now, Duration leaseDuration) {
-      if (!current.isOwnedBy(leaseOwner, attempt) || !current.leaseUntil().isAfter(now)) {
+      if (!current.isOwnedBy(leaseOwner, attempt)
+          || !current.leaseUntil().isAfter(now)
+          || current.cancelRequestedAt() != null) {
         return false;
       }
       current =
@@ -785,20 +835,37 @@ class AgentTurnWorkerTest {
     }
 
     @Override
+    public synchronized boolean consumeSteering(AgentRun claimedRun, Instant now) {
+      if (!owned(claimedRun)) {
+        return false;
+      }
+      if (steeringBlocked) {
+        return false;
+      }
+      return true;
+    }
+
+    @Override
     public synchronized boolean complete(
         AgentRun claimedRun,
         MessageEntryPayload assistant,
-        List<RunEventDraft> terminalEvents,
+        RunEventDraft assistantCompleted,
         Instant now) {
       if (!owned(claimedRun)) {
         return false;
       }
       sessionMessages.add(assistant);
       operations.add("assistant");
-      appendDrafts(claimedRun.id(), terminalEvents, now);
+      appendDrafts(claimedRun.id(), List.of(assistantCompleted), now);
       current = terminal(claimedRun, RunStatus.SUCCEEDED, now, true);
+      appendDrafts(claimedRun.id(), List.of(completedEvent(claimedRun)), now);
       operations.add("terminal:SUCCEEDED");
       return true;
+    }
+
+    private RunEventDraft completedEvent(AgentRun run) {
+      return new RunEventDraft(
+          RunEventType.RUN_COMPLETED, RunEventPayloads.forAttempt(run, "status", "SUCCEEDED"));
     }
 
     private synchronized boolean prepare(

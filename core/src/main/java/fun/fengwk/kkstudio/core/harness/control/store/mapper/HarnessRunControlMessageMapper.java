@@ -56,11 +56,13 @@ public interface HarnessRunControlMessageMapper extends BaseMapper {
   HarnessRunControlMessageDO find(@Param("controlId") long controlId);
 
   /**
-   * 按 run+kind 拉 PENDING；按 id asc。可由调用方包裹 {@code for update} 语义。
-   * run_id 为 null 时（如 FOLLOW_UP 尚未挂到 run）此查询不会命中。
+   * 按 run+kind 拉 PENDING；按 id asc。可由调用方包裹 {@code for update} 语义。 run_id 为 null 时（如 FOLLOW_UP 尚未挂到
+   * run）此查询不会命中。
    */
   @Select(
-      "select " + COLUMNS + " from harness_run_control_message"
+      "select "
+          + COLUMNS
+          + " from harness_run_control_message"
           + " where run_id = #{runId} and control_kind = #{kind} and status = 'PENDING'"
           + " order by id asc")
   @ResultMap("harnessRunControlMessageResultMap")
@@ -69,7 +71,9 @@ public interface HarnessRunControlMessageMapper extends BaseMapper {
 
   /** 按 session 拉所有 PENDING；按 id asc。 */
   @Select(
-      "select " + COLUMNS + " from harness_run_control_message"
+      "select "
+          + COLUMNS
+          + " from harness_run_control_message"
           + " where session_id = #{sessionId} and status = 'PENDING'"
           + " order by id asc")
   @ResultMap("harnessRunControlMessageResultMap")
@@ -90,9 +94,7 @@ public interface HarnessRunControlMessageMapper extends BaseMapper {
       @Param("consumedEntryId") long consumedEntryId,
       @Param("now") LocalDateTime now);
 
-  /**
-   * CAS：PENDING -> PROMOTED；consumed_run_id 写入目标 run（直接 promotion 时即新 run 的 id）。
-   */
+  /** CAS：PENDING -> PROMOTED；consumed_run_id 写入目标 run（直接 promotion 时即新 run 的 id）。 */
   @Update(
       """
       update harness_run_control_message
@@ -124,4 +126,13 @@ public interface HarnessRunControlMessageMapper extends BaseMapper {
       where run_id = #{runId} and status = 'PENDING'
       """)
   int clearPendingByRun(@Param("runId") long runId, @Param("now") LocalDateTime now);
+
+  /** 批量清空指定 session 的所有 PENDING（含 run_id is null）；返回受影响行数。 */
+  @Update(
+      """
+      update harness_run_control_message
+      set status = 'CLEARED', consumed_at = #{now}, gmt_modified = #{now}
+      where session_id = #{sessionId} and status = 'PENDING'
+      """)
+  int clearPendingBySession(@Param("sessionId") long sessionId, @Param("now") LocalDateTime now);
 }

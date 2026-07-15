@@ -11,6 +11,10 @@ import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionEntryD
 import fun.fengwk.kkstudio.core.harness.tool.service.ToolPolicyResolver;
 import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
+import fun.fengwk.kkstudio.harness.runtime.control.ControlConsumptionMode;
+import fun.fengwk.kkstudio.harness.runtime.control.RunControlKind;
+import fun.fengwk.kkstudio.harness.runtime.control.RunControlMessage;
+import fun.fengwk.kkstudio.harness.runtime.control.RunControlMessageStore;
 import fun.fengwk.kkstudio.harness.runtime.run.AgentRun;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEvent;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
@@ -44,7 +48,6 @@ import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** Session leaf、activeRunId、完整 Entry 与 Run transition 的事务服务。 */
 @Service
 public class HarnessRunTransactionService implements RunTransactions {
   private final HarnessRunMapper runMapper;
@@ -55,6 +58,7 @@ public class HarnessRunTransactionService implements RunTransactions {
   private final RunIdGenerator idGenerator;
   private final ToolPreparationService toolPreparationService;
   private final ToolPolicyResolver policyResolver;
+  private final RunControlMessageStore controlStore;
   private final SessionEntryJsonCodec payloadCodec = new SessionEntryJsonCodec();
 
   public HarnessRunTransactionService(
@@ -65,7 +69,8 @@ public class HarnessRunTransactionService implements RunTransactions {
       ToolInvocationMapper invocationMapper,
       RunIdGenerator idGenerator,
       ToolPreparationService toolPreparationService,
-      ToolPolicyResolver policyResolver) {
+      ToolPolicyResolver policyResolver,
+      RunControlMessageStore controlStore) {
     this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
     this.eventMapper = Objects.requireNonNull(eventMapper, "eventMapper");
     this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
@@ -75,6 +80,7 @@ public class HarnessRunTransactionService implements RunTransactions {
     this.toolPreparationService =
         Objects.requireNonNull(toolPreparationService, "toolPreparationService");
     this.policyResolver = Objects.requireNonNull(policyResolver, "policyResolver");
+    this.controlStore = Objects.requireNonNull(controlStore, "controlStore");
   }
 
   @Override
@@ -114,23 +120,119 @@ public class HarnessRunTransactionService implements RunTransactions {
 
   @Override
   @Transactional
+  public boolean consumeSteering(AgentRun claimedRun, Instant now) {
+    LockedRun locked = lockOwned(claimedRun);
+    if (locked == null) {
+      return false;
+    }
+    if (locked.run().getCancelRequestedAt() != null) {
+      cancelOwned(locked, now, null);
+      return false;
+    }
+    List<RunControlMessage> pending =
+        controlStore.listPendingByRun(claimedRun.id(), RunControlKind.STEER);
+    if (pending.isEmpty()) {
+      return true;
+    }
+    ControlConsumptionMode mode = pending.get(0).consumptionMode();
+    List<RunControlMessage> batch =
+        mode == ControlConsumptionMode.ONE_AT_A_TIME
+            ? List.of(pending.get(0))
+            : List.copyOf(pending);
+    List<ControlConsumption> consumed =
+        applyControlEntries(locked.session(), claimedRun.id(), batch, now);
+    List<RunEventDraft> events = new ArrayList<>();
+    for (ControlConsumption c : consumed) {
+      events.add(
+          new RunEventDraft(
+              RunEventType.STEER_CONSUMED,
+              RunEventPayloads.forAttempt(
+                  claimedRun, "controlId", c.control().id(), "entryId", c.entryId())));
+    }
+    appendEventsInternal(locked.run(), events, now);
+    return true;
+  }
+
+  @Override
+  @Transactional
   public boolean complete(
       AgentRun claimedRun,
       MessageEntryPayload assistant,
-      List<RunEventDraft> terminalEvents,
+      RunEventDraft assistantCompleted,
       Instant now) {
     validateAssistant(assistant);
     if (hasAssistantToolCalls(assistant)) {
       throw new IllegalArgumentException("no-tool completion must not contain tool calls");
     }
+    if (assistantCompleted == null
+        || assistantCompleted.type() != RunEventType.ASSISTANT_COMPLETED) {
+      throw new IllegalArgumentException("complete requires exactly one ASSISTANT_COMPLETED event");
+    }
     LockedRun locked = lockOwned(claimedRun);
     if (locked == null) {
       return false;
     }
+    if (locked.run().getCancelRequestedAt() != null) {
+      cancelOwned(locked, now, null);
+      return true;
+    }
     appendEntry(locked.session(), claimedRun.id(), assistant, now);
+
+    List<RunControlMessage> pendingSteer =
+        controlStore.listPendingByRun(claimedRun.id(), RunControlKind.STEER);
+    if (!pendingSteer.isEmpty()) {
+      doRequeueAdvanceTurn(claimedRun, now);
+      appendEventsInternal(
+          locked.run(),
+          List.of(
+              assistantCompleted,
+              new RunEventDraft(
+                  RunEventType.RUN_REQUEUED,
+                  RunEventPayloads.forAttempt(
+                      claimedRun, "reason", "steering_pending", "count", pendingSteer.size()))),
+          now);
+      return true;
+    }
+
+    List<RunControlMessage> pendingFollowUp =
+        controlStore.listPendingByRun(claimedRun.id(), RunControlKind.FOLLOW_UP);
+    if (!pendingFollowUp.isEmpty()) {
+      ControlConsumptionMode mode = pendingFollowUp.get(0).consumptionMode();
+      List<RunControlMessage> batch =
+          mode == ControlConsumptionMode.ONE_AT_A_TIME
+              ? List.of(pendingFollowUp.get(0))
+              : List.copyOf(pendingFollowUp);
+      List<ControlConsumption> consumed =
+          applyControlEntries(locked.session(), claimedRun.id(), batch, now);
+      doRequeueAdvanceTurn(claimedRun, now);
+      List<RunEventDraft> events = new ArrayList<>();
+      events.add(assistantCompleted);
+      for (ControlConsumption c : consumed) {
+        events.add(
+            new RunEventDraft(
+                RunEventType.FOLLOW_UP_CONSUMED,
+                RunEventPayloads.forAttempt(
+                    claimedRun, "controlId", c.control().id(), "entryId", c.entryId())));
+      }
+      events.add(
+          new RunEventDraft(
+              RunEventType.RUN_REQUEUED,
+              RunEventPayloads.forAttempt(
+                  claimedRun, "reason", "follow_up_consumed", "count", batch.size())));
+      appendEventsInternal(locked.run(), events, now);
+      return true;
+    }
+
     transitionCompleted(claimedRun, RunStatus.SUCCEEDED, now);
     clearActiveRun(claimedRun, now);
-    appendEvents(locked.run(), terminalEvents, now);
+    appendEventsInternal(
+        locked.run(),
+        List.of(
+            assistantCompleted,
+            new RunEventDraft(
+                RunEventType.RUN_COMPLETED,
+                RunEventPayloads.forAttempt(claimedRun, "status", "SUCCEEDED"))),
+        now);
     return true;
   }
 
@@ -157,6 +259,10 @@ public class HarnessRunTransactionService implements RunTransactions {
     if (locked == null) {
       return false;
     }
+    if (locked.run().getCancelRequestedAt() != null) {
+      cancelOwned(locked, now, null);
+      return true;
+    }
     ToolPolicyResolver.ResolvedPolicy policy = policyResolver.resolve(locked.session());
     List<PreparedToolInvocation> prepared =
         toolPreparationService.prepare(
@@ -174,7 +280,8 @@ public class HarnessRunTransactionService implements RunTransactions {
       }
     }
     transitionCompleted(claimedRun, RunStatus.WAITING_TOOLS, now);
-    appendEvents(locked.run(), toolPreparationEvents(claimedRun, prepared, assistantEvents), now);
+    appendEventsInternal(
+        locked.run(), toolPreparationEvents(claimedRun, prepared, assistantEvents), now);
     return true;
   }
 
@@ -184,7 +291,7 @@ public class HarnessRunTransactionService implements RunTransactions {
     if (run == null) {
       throw new IllegalArgumentException("unknown run: " + runId);
     }
-    appendEvents(run, List.of(event), now);
+    appendEventsInternal(run, List.of(event), now);
   }
 
   @Override
@@ -194,6 +301,10 @@ public class HarnessRunTransactionService implements RunTransactions {
     LockedRun locked = lockOwned(claimedRun);
     if (locked == null) {
       return false;
+    }
+    if (locked.run().getCancelRequestedAt() != null) {
+      cancelOwned(locked, now, null);
+      return true;
     }
     claimedRun.status().requireTransitionTo(RunStatus.QUEUED);
     if (runMapper.requeueOwned(
@@ -205,7 +316,7 @@ public class HarnessRunTransactionService implements RunTransactions {
         != 1) {
       throw new ConcurrentModificationException("run ownership lost during retry scheduling");
     }
-    appendEvents(locked.run(), retryEvents, now);
+    appendEventsInternal(locked.run(), retryEvents, now);
     return true;
   }
 
@@ -220,6 +331,10 @@ public class HarnessRunTransactionService implements RunTransactions {
     LockedRun locked = lockOwned(claimedRun);
     if (locked == null) {
       return false;
+    }
+    if (locked.run().getCancelRequestedAt() != null) {
+      cancelOwned(locked, now, null);
+      return true;
     }
     if (!isAncestor(
         claimedRun.sessionId(), locked.session().getLeafEntryId(), compaction.firstKeptEntryId())) {
@@ -236,7 +351,7 @@ public class HarnessRunTransactionService implements RunTransactions {
         != 1) {
       throw new ConcurrentModificationException("run ownership lost during compaction");
     }
-    appendEvents(locked.run(), compactionEvents, now);
+    appendEventsInternal(locked.run(), compactionEvents, now);
     return true;
   }
 
@@ -254,19 +369,179 @@ public class HarnessRunTransactionService implements RunTransactions {
     if (locked == null) {
       return false;
     }
-    claimedRun.status().requireTransitionTo(terminalStatus);
+    if (locked.run().getCancelRequestedAt() != null) {
+      List<RunEventDraft> filtered = new ArrayList<>();
+      for (RunEventDraft evt : terminalEvents) {
+        if (evt.type() != RunEventType.RUN_FAILED) {
+          filtered.add(evt);
+        }
+      }
+      cancelOwned(locked, now, filtered);
+      return true;
+    }
+    if (terminalStatus == RunStatus.CANCELLED) {
+      cancelOwned(locked, now, terminalEvents);
+      return true;
+    }
+    claimedRun.status().requireTransitionTo(RunStatus.FAILED);
     if (runMapper.terminateOwned(
             claimedRun.id(),
             claimedRun.leaseOwner(),
             claimedRun.attempt(),
-            terminalStatus.name(),
+            RunStatus.FAILED.name(),
             utc(now))
         != 1) {
       throw new ConcurrentModificationException("run ownership lost during terminal transition");
     }
-    clearActiveRun(claimedRun, now);
-    appendEvents(locked.run(), terminalEvents, now);
+    List<RunControlMessage> pending = controlStore.listPendingBySession(claimedRun.sessionId());
+    if (!pending.isEmpty()) {
+      clearActiveRun(claimedRun, now);
+      promoteToNewRun(claimedRun, locked.session(), pending, now);
+      List<RunEventDraft> allEvents = new ArrayList<>(terminalEvents);
+      for (RunControlMessage control : pending) {
+        allEvents.add(
+            new RunEventDraft(
+                RunEventType.CONTROL_PROMOTED,
+                RunEventPayloads.forAttempt(
+                    claimedRun, "controlId", control.id(), "kind", control.kind().name())));
+      }
+      appendEventsInternal(locked.run(), allEvents, now);
+    } else {
+      clearActiveRun(claimedRun, now);
+      appendEventsInternal(locked.run(), terminalEvents, now);
+    }
     return true;
+  }
+
+  private void cancelOwned(LockedRun locked, Instant now, List<RunEventDraft> extraEvents) {
+    HarnessRunDO run = locked.run();
+    AgentRun runSnapshot = toRun(run);
+    runSnapshot.status().requireTransitionTo(RunStatus.CANCELLED);
+    if (runMapper.terminateOwned(
+            run.getId(),
+            run.getLeaseOwner(),
+            run.getAttempt(),
+            RunStatus.CANCELLED.name(),
+            utc(now))
+        != 1) {
+      throw new ConcurrentModificationException("run ownership lost during cancel");
+    }
+    clearActiveRun(runSnapshot, now);
+    controlStore.clearPendingBySession(run.getSessionId(), now);
+    List<RunEventDraft> events = new ArrayList<>();
+    boolean hasRunCancelled = false;
+    if (extraEvents != null) {
+      for (RunEventDraft evt : extraEvents) {
+        if (evt.type() != RunEventType.RUN_FAILED) {
+          events.add(evt);
+        }
+        if (evt.type() == RunEventType.RUN_CANCELLED) {
+          hasRunCancelled = true;
+        }
+      }
+    }
+    if (!hasRunCancelled) {
+      events.add(
+          new RunEventDraft(
+              RunEventType.RUN_CANCELLED,
+              RunEventPayloads.forAttempt(
+                  runSnapshot, "reason", extraEvents != null ? "cancel_requested" : "cancelled")));
+    }
+    appendEventsInternal(run, events, now);
+  }
+
+  private void promoteToNewRun(
+      AgentRun oldRun, HarnessSessionDO session, List<RunControlMessage> pending, Instant now) {
+    long newRunId = idGenerator.newRunId();
+    LocalDateTime timestamp = utc(now);
+    long[] entryIds = new long[pending.size()];
+    for (int i = 0; i < pending.size(); i++) {
+      entryIds[i] = idGenerator.newSessionEntryId();
+    }
+    Long prevEntryId = session.getLeafEntryId();
+    for (int i = 0; i < pending.size(); i++) {
+      RunControlMessage control = pending.get(i);
+      MessageEntryPayload payload = new MessageEntryPayload(control.message());
+      if (entryMapper.insert(
+              entry(
+                  entryIds[i],
+                  session.getId(),
+                  prevEntryId,
+                  newRunId,
+                  payload.type().value(),
+                  payloadCodec.encode(payload),
+                  timestamp))
+          != 1) {
+        throw new ConcurrentModificationException("cannot insert promoted entry");
+      }
+      prevEntryId = entryIds[i];
+    }
+    if (runMapper.insert(queuedRun(newRunId, session.getId(), entryIds[0], timestamp)) != 1) {
+      throw new ConcurrentModificationException("cannot insert promoted run");
+    }
+    if (sessionMapper.attachRun(
+            session.getId(),
+            session.getLeafEntryId(),
+            entryIds[pending.size() - 1],
+            newRunId,
+            timestamp)
+        != 1) {
+      throw new ConcurrentModificationException("cannot attach promoted run");
+    }
+    session.setLeafEntryId(entryIds[pending.size() - 1]);
+    session.setActiveRunId(newRunId);
+    for (int i = 0; i < pending.size(); i++) {
+      RunControlMessage control = pending.get(i);
+      if (!controlStore.markPromoted(control.id(), newRunId, entryIds[i], now)) {
+        throw new ConcurrentModificationException(
+            "control already consumed during promotion: " + control.id());
+      }
+    }
+  }
+
+  private List<ControlConsumption> applyControlEntries(
+      HarnessSessionDO session, long currentRunId, List<RunControlMessage> batch, Instant now) {
+    long currentLeaf = session.getLeafEntryId();
+    LocalDateTime timestamp = utc(now);
+    List<ControlConsumption> result = new ArrayList<>();
+    for (RunControlMessage control : batch) {
+      long entryId = idGenerator.newSessionEntryId();
+      MessageEntryPayload payload = new MessageEntryPayload(control.message());
+      if (entryMapper.insert(
+              entry(
+                  entryId,
+                  session.getId(),
+                  currentLeaf,
+                  currentRunId,
+                  payload.type().value(),
+                  payloadCodec.encode(payload),
+                  timestamp))
+          != 1) {
+        throw new ConcurrentModificationException("cannot insert control entry");
+      }
+      if (sessionMapper.advanceActiveRunLeaf(
+              session.getId(), currentRunId, currentLeaf, entryId, timestamp)
+          != 1) {
+        throw new ConcurrentModificationException(
+            "session leaf changed during control consumption");
+      }
+      currentLeaf = entryId;
+      if (!controlStore.markConsumed(control.id(), currentRunId, entryId, now)) {
+        throw new ConcurrentModificationException("control already consumed: " + control.id());
+      }
+      result.add(new ControlConsumption(control, entryId));
+    }
+    session.setLeafEntryId(currentLeaf);
+    return result;
+  }
+
+  private void doRequeueAdvanceTurn(AgentRun claimedRun, Instant now) {
+    claimedRun.status().requireTransitionTo(RunStatus.QUEUED);
+    if (runMapper.requeueAdvanceTurn(
+            claimedRun.id(), claimedRun.leaseOwner(), claimedRun.attempt(), utc(now))
+        != 1) {
+      throw new ConcurrentModificationException("run ownership lost during requeue advance turn");
+    }
   }
 
   private LockedRun lockOwned(AgentRun claimedRun) {
@@ -284,7 +559,7 @@ public class HarnessRunTransactionService implements RunTransactions {
     return new LockedRun(run, session);
   }
 
-  private void appendEvents(HarnessRunDO run, List<RunEventDraft> drafts, Instant now) {
+  private void appendEventsInternal(HarnessRunDO run, List<RunEventDraft> drafts, Instant now) {
     List<RunEventDraft> events = List.copyOf(Objects.requireNonNull(drafts, "eventDrafts"));
     if (events.isEmpty()) {
       throw new IllegalArgumentException("eventDrafts must not be empty");
@@ -541,4 +816,6 @@ public class HarnessRunTransactionService implements RunTransactions {
   }
 
   private record LockedRun(HarnessRunDO run, HarnessSessionDO session) {}
+
+  private record ControlConsumption(RunControlMessage control, long entryId) {}
 }

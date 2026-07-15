@@ -47,7 +47,9 @@ public class MysqlRunControlMessageStore implements RunControlMessageStore {
   @Override
   public List<RunControlMessage> listPendingByRun(long originalRunId, RunControlKind kind) {
     Objects.requireNonNull(kind, "kind");
-    return mapper.listPendingByRun(originalRunId, kind.name()).stream().map(this::toMessage).toList();
+    return mapper.listPendingByRun(originalRunId, kind.name()).stream()
+        .map(this::toMessage)
+        .toList();
   }
 
   @Override
@@ -56,13 +58,15 @@ public class MysqlRunControlMessageStore implements RunControlMessageStore {
   }
 
   @Override
-  public boolean markConsumed(long controlId, long consumedRunId, long consumedEntryId, Instant now) {
+  public boolean markConsumed(
+      long controlId, long consumedRunId, long consumedEntryId, Instant now) {
     Objects.requireNonNull(now, "now");
     return mapper.markConsumed(controlId, consumedRunId, consumedEntryId, utc(now)) == 1;
   }
 
   @Override
-  public boolean markPromoted(long controlId, long consumedRunId, long consumedEntryId, Instant now) {
+  public boolean markPromoted(
+      long controlId, long consumedRunId, long consumedEntryId, Instant now) {
     Objects.requireNonNull(now, "now");
     return mapper.markPromoted(controlId, consumedRunId, consumedEntryId, utc(now)) == 1;
   }
@@ -79,6 +83,12 @@ public class MysqlRunControlMessageStore implements RunControlMessageStore {
     return mapper.clearPendingByRun(originalRunId, utc(now));
   }
 
+  @Override
+  public int clearPendingBySession(long sessionId, Instant now) {
+    Objects.requireNonNull(now, "now");
+    return mapper.clearPendingBySession(sessionId, utc(now));
+  }
+
   static HarnessRunControlMessageDO toDO(RunControlMessage message, ControlMessageCodec codec) {
     HarnessRunControlMessageDO target = new HarnessRunControlMessageDO();
     target.setId(message.id());
@@ -92,7 +102,8 @@ public class MysqlRunControlMessageStore implements RunControlMessageStore {
     target.setConsumedEntryId(message.consumedEntryId());
     target.setCreateTime(utc(message.createdAt()));
     target.setConsumedAt(message.consumedAt() == null ? null : utc(message.consumedAt()));
-    target.setUpdateTime(utc(message.consumedAt() == null ? message.createdAt() : message.consumedAt()));
+    target.setUpdateTime(
+        utc(message.consumedAt() == null ? message.createdAt() : message.consumedAt()));
     return target;
   }
 
