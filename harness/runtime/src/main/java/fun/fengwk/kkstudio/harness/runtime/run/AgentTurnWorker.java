@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorException;
+import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageDraft;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import java.lang.System.Logger.Level;
 import java.time.Clock;
@@ -442,6 +443,22 @@ public final class AgentTurnWorker {
       }
       batcher.flush();
       ProviderResponse response = result.providerResponse();
+      ModelUsageDraft usageDraft;
+      try {
+        usageDraft = ModelUsageDraft.from(result.providerRequest(), response);
+      } catch (RuntimeException error) {
+        permanentFailure(
+            new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST, "invalid model usage draft", error),
+            attemptDraft(
+                run,
+                RunEventType.ASSISTANT_FAILED,
+                "kind",
+                ProviderErrorKind.INVALID_REQUEST.name(),
+                "message",
+                message(error)));
+        return;
+      }
       MessageEntryPayload assistant = assistantPayload(result.assistantMessage(), response);
       List<ToolCall> toolCalls = result.toolCalls();
       Instant now = clock.instant();
@@ -458,7 +475,7 @@ public final class AgentTurnWorker {
               "cost",
               response.cost());
       if (toolCalls.isEmpty()) {
-        if (transactions.complete(run, assistant, assistantCompleted, now)) {
+        if (transactions.complete(run, assistant, usageDraft, assistantCompleted, now)) {
           publishAssistantObservation(run, response, toolCalls.size(), now);
         }
         return;
@@ -467,6 +484,7 @@ public final class AgentTurnWorker {
         if (toolPreparationPort.prepare(
             run,
             assistant,
+            usageDraft,
             toolCalls,
             resources.toolBindings(),
             resources.workdir(),
