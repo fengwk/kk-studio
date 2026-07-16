@@ -6,6 +6,6 @@ import lombok.Data;
 @Data
 public class HarnessSessionMessageCreateDTO {
 
-    private String content;
-    private String expectedLeafEntryId;
+  private String content;
+  private String expectedLeafEntryId;
 }

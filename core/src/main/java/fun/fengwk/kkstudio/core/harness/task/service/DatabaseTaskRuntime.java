@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.core.harness.task.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.mapper.AgentDefinitionMapper;
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.model.AgentDefinitionDO;
@@ -9,6 +8,7 @@ import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunEventMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunEventDO;
+import fun.fengwk.kkstudio.core.harness.session.HarnessAgentSnapshotResolver;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionEntryMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
@@ -29,7 +29,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
-import fun.fengwk.kkstudio.core.harness.session.HarnessAgentSnapshotResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.task.SubagentTask;
@@ -431,25 +430,6 @@ public class DatabaseTaskRuntime implements TaskRuntime {
 
   private AgentSnapshot snapshot(AgentDefinitionDO definition) {
     return snapshotResolver.snapshotForDefinition(definition);
-  }
-
-  private List<String> strings(JsonNode config, String name) {
-    JsonNode values = config.path(name);
-    if (values.isMissingNode() || values.isNull()) {
-      return List.of();
-    }
-    if (!values.isArray()) {
-      throw new IllegalArgumentException("agent config " + name + " must be an array");
-    }
-    List<String> result = new ArrayList<>();
-    for (JsonNode value : values) {
-      if (!value.isTextual() || value.textValue().isBlank()) {
-        throw new IllegalArgumentException(
-            "agent config " + name + " must contain non-blank strings");
-      }
-      result.add(value.textValue());
-    }
-    return List.copyOf(result);
   }
 
   private void insertSession(

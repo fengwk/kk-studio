@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.core.harness.session;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.kkstudio.core.agent.definition.repo.impl.mapper.AgentDefinitionMapper;
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.model.AgentDefinitionDO;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionEntryMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
@@ -25,81 +24,78 @@ import org.springframework.stereotype.Component;
 @Component
 public class HarnessAgentSnapshotResolver {
 
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private final HarnessSessionEntryMapper sessionEntryMapper;
+  private final ObjectMapper objectMapper;
+  private final SessionEntryJsonCodec entryCodec = new SessionEntryJsonCodec();
 
-    private final AgentDefinitionMapper agentDefinitionMapper;
-    private final HarnessSessionEntryMapper sessionEntryMapper;
-    private final SessionEntryJsonCodec entryCodec = new SessionEntryJsonCodec();
+  public HarnessAgentSnapshotResolver(
+      HarnessSessionEntryMapper sessionEntryMapper, ObjectMapper objectMapper) {
+    this.sessionEntryMapper = sessionEntryMapper;
+    this.objectMapper = objectMapper;
+  }
 
-    public HarnessAgentSnapshotResolver(
-        AgentDefinitionMapper agentDefinitionMapper,
-        HarnessSessionEntryMapper sessionEntryMapper) {
-        this.agentDefinitionMapper = agentDefinitionMapper;
-        this.sessionEntryMapper = sessionEntryMapper;
+  /** Resolve the latest AGENT_SNAPSHOT on the active path of the given session. */
+  public AgentSnapshot snapshotOnCurrentPath(HarnessSessionDO session) {
+    if (session == null) {
+      throw new IllegalArgumentException("session must not be null");
     }
-
-    /** Resolve the latest AGENT_SNAPSHOT on the active path of the given session. */
-    public AgentSnapshot snapshotOnCurrentPath(HarnessSessionDO session) {
-        if (session == null) {
-            throw new IllegalArgumentException("session must not be null");
-        }
-        if (session.getLeafEntryId() == null) {
-            throw new IllegalStateException(
-                "session has no current leaf for agent snapshot lookup: " + session.getId());
-        }
-        HarnessSessionEntryDO entry =
-            sessionEntryMapper.findLatestOnPathByType(
-                session.getId(), session.getLeafEntryId(), SessionEntryType.AGENT_SNAPSHOT.value());
-        if (entry == null) {
-            throw new IllegalStateException(
-                "session has no frozen agent snapshot on its current path: " + session.getId());
-        }
-        SessionEntryPayload payload =
-            entryCodec.decode(SessionEntryType.AGENT_SNAPSHOT, entry.getPayloadJson());
-        return ((AgentSnapshotEntryPayload) payload).snapshot();
+    if (session.getLeafEntryId() == null) {
+      throw new IllegalStateException(
+          "session has no current leaf for agent snapshot lookup: " + session.getId());
     }
-
-    /** Build the AgentSnapshot for a brand-new session created from this AgentDefinition. */
-    public AgentSnapshot snapshotForDefinition(AgentDefinitionDO definition) {
-        if (definition == null) {
-            throw new IllegalArgumentException("agent definition must not be null");
-        }
-        try {
-            JsonNode config = OBJECT_MAPPER.readTree(definition.getConfigJson());
-            List<String> tools = strings(config, "tools");
-            List<String> skills = strings(config, "skills");
-            List<String> allowed = strings(config, "allowedSubagents");
-            JsonNode policy = config.path("executionPolicy");
-            return new AgentSnapshot(
-                definition.getSystemPrompt(),
-                String.valueOf(definition.getModelId()),
-                definition.getVariant(),
-                tools,
-                skills,
-                allowed,
-                OBJECT_MAPPER.writeValueAsString(
-                    policy.isMissingNode() ? OBJECT_MAPPER.createObjectNode() : policy));
-        } catch (JsonProcessingException error) {
-            throw new IllegalArgumentException("agent config is invalid", error);
-        }
+    HarnessSessionEntryDO entry =
+        sessionEntryMapper.findLatestOnPathByType(
+            session.getId(), session.getLeafEntryId(), SessionEntryType.AGENT_SNAPSHOT.value());
+    if (entry == null) {
+      throw new IllegalStateException(
+          "session has no frozen agent snapshot on its current path: " + session.getId());
     }
+    SessionEntryPayload payload =
+        entryCodec.decode(SessionEntryType.AGENT_SNAPSHOT, entry.getPayloadJson());
+    return ((AgentSnapshotEntryPayload) payload).snapshot();
+  }
 
-    private static List<String> strings(JsonNode config, String name) {
-        JsonNode values = config.path(name);
-        if (values.isMissingNode() || values.isNull()) {
-            return List.of();
-        }
-        if (!values.isArray()) {
-            throw new IllegalArgumentException("agent config " + name + " must be an array");
-        }
-        List<String> result = new ArrayList<>();
-        for (JsonNode value : values) {
-            if (!value.isTextual() || value.textValue().isBlank()) {
-                throw new IllegalArgumentException(
-                    "agent config " + name + " must contain non-blank strings");
-            }
-            result.add(value.textValue());
-        }
-        return List.copyOf(result);
+  /** Build the AgentSnapshot for a brand-new session created from this AgentDefinition. */
+  public AgentSnapshot snapshotForDefinition(AgentDefinitionDO definition) {
+    if (definition == null) {
+      throw new IllegalArgumentException("agent definition must not be null");
     }
+    try {
+      JsonNode config = objectMapper.readTree(definition.getConfigJson());
+      List<String> tools = strings(config, "tools");
+      List<String> skills = strings(config, "skills");
+      List<String> allowed = strings(config, "allowedSubagents");
+      JsonNode policy = config.path("executionPolicy");
+      return new AgentSnapshot(
+          definition.getSystemPrompt(),
+          String.valueOf(definition.getModelId()),
+          definition.getVariant(),
+          tools,
+          skills,
+          allowed,
+          objectMapper.writeValueAsString(
+              policy.isMissingNode() ? objectMapper.createObjectNode() : policy));
+    } catch (JsonProcessingException error) {
+      throw new IllegalArgumentException("agent config is invalid", error);
+    }
+  }
+
+  private static List<String> strings(JsonNode config, String name) {
+    JsonNode values = config.path(name);
+    if (values.isMissingNode() || values.isNull()) {
+      return List.of();
+    }
+    if (!values.isArray()) {
+      throw new IllegalArgumentException("agent config " + name + " must be an array");
+    }
+    List<String> result = new ArrayList<>();
+    for (JsonNode value : values) {
+      if (!value.isTextual() || value.textValue().isBlank()) {
+        throw new IllegalArgumentException(
+            "agent config " + name + " must contain non-blank strings");
+      }
+      result.add(value.textValue());
+    }
+    return List.copyOf(result);
+  }
 }

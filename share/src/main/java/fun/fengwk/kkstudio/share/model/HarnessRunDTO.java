@@ -7,17 +7,17 @@ import lombok.Data;
 @Data
 public class HarnessRunDTO {
 
-    private String runId;
-    private String sessionId;
-    private String triggerEntryId;
-    private String status;
-    private Integer turnIndex;
-    private Integer attempt;
-    private Long eventSequence;
-    private LocalDateTime nextAttemptAt;
-    private LocalDateTime cancelRequestedAt;
-    private LocalDateTime startedAt;
-    private LocalDateTime finishedAt;
-    private LocalDateTime createTime;
-    private LocalDateTime updateTime;
+  private String runId;
+  private String sessionId;
+  private String triggerEntryId;
+  private String status;
+  private Integer turnIndex;
+  private Integer attempt;
+  private Long eventSequence;
+  private LocalDateTime nextAttemptAt;
+  private LocalDateTime cancelRequestedAt;
+  private LocalDateTime startedAt;
+  private LocalDateTime finishedAt;
+  private LocalDateTime createTime;
+  private LocalDateTime updateTime;
 }

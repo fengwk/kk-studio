@@ -7,7 +7,7 @@ import java.util.List;
 /** T15 harness session query service. */
 public interface HarnessSessionQueryService {
 
-    HarnessSessionDTO getSession(String sessionId);
+  HarnessSessionDTO getSession(String sessionId);
 
-    List<HarnessSessionEntryDTO> listEntries(String sessionId);
+  List<HarnessSessionEntryDTO> listEntries(String sessionId);
 }
