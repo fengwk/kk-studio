@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
 import fun.fengwk.kkstudio.harness.runtime.context.SessionContext;
 import fun.fengwk.kkstudio.harness.runtime.context.SessionContextBuilder;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.AssistantCompleted;
@@ -178,8 +179,11 @@ public final class AgentTurnWorker {
             config.deltaBatchBytes(),
             claimedAt);
     TurnHandler handler = new TurnHandler(run, context, resources, batcher);
-    AgentTurnEngine engine =
-        new DefaultAgentTurnEngine(resources.provider(), providerRequestInterceptors);
+    // 唯一可信 cache control 派生点固定在所有 Extension Host hooks 之后；sessionId 仅用于
+    // affinity 派生，不会被写入 ProviderRequest，也不作为 Spring 单例存在。
+    ProviderRequestInterceptorChain perRunChain =
+        providerRequestInterceptors.andThen(new PromptCacheRequestFinalizer(run.sessionId()));
+    AgentTurnEngine engine = new DefaultAgentTurnEngine(resources.provider(), perRunChain);
     AgentTurnHandle handle;
     try {
       handle =
