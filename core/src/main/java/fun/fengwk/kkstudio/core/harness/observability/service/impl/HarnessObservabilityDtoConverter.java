@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.core.harness.observability.service.impl;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.harness.task.store.model.HarnessSubagentTaskDO;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEvent;
@@ -16,18 +18,25 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import org.springframework.stereotype.Component;
 
 /** Maps the persistent observability projections to share DTOs. */
 @Component
 public class HarnessObservabilityDtoConverter {
 
+  private final ObjectMapper objectMapper;
+
+  public HarnessObservabilityDtoConverter(ObjectMapper objectMapper) {
+    this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
+  }
+
   public RunEventDTO convert(RunEvent source) {
     if (source == null) {
       return null;
     }
     RunEventDTO target = new RunEventDTO();
-    target.setEventId(Long.toString(source.sequence()));
+    target.setEventId(HarnessIds.format(source.id()));
     target.setRunId(HarnessIds.format(source.runId()));
     target.setSequence(source.sequence());
     target.setType(source.type().value());
@@ -106,15 +115,14 @@ public class HarnessObservabilityDtoConverter {
     return target;
   }
 
-  private static SubagentTaskReportDTO parseReport(String reportJson) {
+  private SubagentTaskReportDTO parseReport(String reportJson) {
     if (reportJson == null || reportJson.isBlank()) {
       return null;
     }
     try {
-      com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-      com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(reportJson);
+      JsonNode root = objectMapper.readTree(reportJson);
       if (root == null || !root.isObject()) {
-        return null;
+        throw new IllegalStateException("report_json root is not a JSON object: " + reportJson);
       }
       SubagentTaskReportDTO target = new SubagentTaskReportDTO();
       target.setChildSessionId(textOrNull(root, "childSessionId"));
@@ -127,18 +135,20 @@ public class HarnessObservabilityDtoConverter {
       target.setWorkingCopyRevision(textOrNull(root, "workingCopyRevision"));
       target.setArtifacts(parseArtifacts(root));
       return target;
+    } catch (RuntimeException error) {
+      throw error;
     } catch (Exception error) {
-      return null;
+      throw new IllegalStateException("malformed report_json: " + reportJson, error);
     }
   }
 
-  private static List<ToolArtifactRefDTO> parseArtifacts(com.fasterxml.jackson.databind.JsonNode root) {
-    com.fasterxml.jackson.databind.JsonNode node = root.get("artifacts");
+  private List<ToolArtifactRefDTO> parseArtifacts(JsonNode root) {
+    JsonNode node = root.get("artifacts");
     if (node == null || !node.isArray()) {
       return null;
     }
     List<ToolArtifactRefDTO> refs = new ArrayList<>(node.size());
-    for (com.fasterxml.jackson.databind.JsonNode item : node) {
+    for (JsonNode item : node) {
       ToolArtifactRefDTO ref = new ToolArtifactRefDTO();
       ref.setArtifactId(textOrNull(item, "artifactId"));
       ref.setMediaType(textOrNull(item, "mediaType"));
@@ -148,18 +158,18 @@ public class HarnessObservabilityDtoConverter {
     return refs;
   }
 
-  private static String textOrNull(com.fasterxml.jackson.databind.JsonNode node, String field) {
-    com.fasterxml.jackson.databind.JsonNode value = node.get(field);
+  private static String textOrNull(JsonNode node, String field) {
+    JsonNode value = node.get(field);
     return value == null || value.isNull() ? null : value.asText();
   }
 
-  private static Integer intOrNull(com.fasterxml.jackson.databind.JsonNode node, String field) {
-    com.fasterxml.jackson.databind.JsonNode value = node.get(field);
+  private static Integer intOrNull(JsonNode node, String field) {
+    JsonNode value = node.get(field);
     return value == null || value.isNull() ? null : value.asInt();
   }
 
-  private static Long longOrNull(com.fasterxml.jackson.databind.JsonNode node, String field) {
-    com.fasterxml.jackson.databind.JsonNode value = node.get(field);
+  private static Long longOrNull(JsonNode node, String field) {
+    JsonNode value = node.get(field);
     return value == null || value.isNull() ? null : value.asLong();
   }
 

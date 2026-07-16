@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.harness.observability.service;
 
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.Artifact;
 import fun.fengwk.kkstudio.share.model.RootActivityDTO;
 import fun.fengwk.kkstudio.share.model.RunEventDTO;
 import fun.fengwk.kkstudio.share.model.SubagentTaskDTO;
@@ -7,13 +8,9 @@ import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
 import java.util.List;
 
 /**
- * T15 harness observability query service. All persistence I/O goes through the existing
- * {@link fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore} (run event cursor),
- * {@link fun.fengwk.kkstudio.core.harness.task.store.DatabaseRootActivityStore} (root-tree event-id
- * cursor), {@link fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore},
- * {@link fun.fengwk.kkstudio.core.harness.task.store.mapper.HarnessSubagentTaskMapper} and
- * {@link fun.fengwk.kkstudio.core.harness.tool.worker.DatabaseArtifactStore}. There is no in-memory
- * event bus — call sites observe only what has already been committed to the database.
+ * T15 harness observability query service. All persistence I/O goes through the existing stores and
+ * mappers. There is no in-memory event bus — call sites observe only what has already been
+ * committed to the database.
  */
 public interface HarnessObservabilityQueryService {
 
@@ -36,9 +33,9 @@ public interface HarnessObservabilityQueryService {
   List<SubagentTaskDTO> listSessionTasks(String sessionId);
 
   /**
-   * Strict artifact lookup that mirrors HTTP 400/404 semantics: blank or non-positive ids become
-   * 400, unknown ids become 404, otherwise the artifact is returned via {@link
-   * HarnessArtifactResolution.Result#artifact()}.
+   * Resolve an artifact by its decimal-pattern id. Throws {@link IllegalArgumentException} for
+   * blank, non-decimal or non-positive identifiers (400) and for unknown ids ("unknown artifact:"
+   * prefix → 404). Returns the {@link Artifact} on success.
    */
-  HarnessArtifactResolution.Result resolveArtifact(String artifactId);
+  Artifact getArtifact(String artifactId);
 }

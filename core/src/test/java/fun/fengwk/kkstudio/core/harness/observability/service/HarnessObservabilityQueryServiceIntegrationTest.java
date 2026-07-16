@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.core.harness.observability.service;
 import static fun.fengwk.kkstudio.core.harness.HarnessUsageFixtures.toolCallsUsageDraft;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -39,6 +38,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.Artifact;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
@@ -102,7 +102,10 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     jdbc.update("delete from agent_definition");
   }
 
-  /** Run events page in sequence order; cursor must be exclusive of the previous sequence. */
+  /**
+   * Run events page in sequence order; cursor must be exclusive of the previous sequence. Run event
+   * DTO eventId is the Snowflake id, which differs from the SSE event id (sequence decimal).
+   */
   @Test
   void pagesRunEventsBySequenceCursor() {
     SessionFixture fixture = seedRoot("run-events", false);
@@ -118,9 +121,13 @@ class HarnessObservabilityQueryServiceIntegrationTest {
 
     List<RunEventDTO> page1 = service.listRunEvents(Long.toString(run.id()), 0, 2);
     assertEquals(List.of(1L, 2L), page1.stream().map(RunEventDTO::getSequence).toList());
-    assertEquals(Long.toString(1L), page1.get(0).getEventId());
+    // RunEventDTO.eventId is the global Snowflake id (source.id()), never the sequence.
+    assertEquals(Long.toString(run.id()), page1.get(0).getRunId());
+    // The Snowflake id must be a positive number distinct from the Run-event sequence (1, 2, ...).
+    long snowflakeId = Long.parseLong(page1.get(0).getEventId());
+    assertTrue(snowflakeId > 1000, "eventId should be a Snowflake value: " + snowflakeId);
+    assertTrue(snowflakeId != page1.get(0).getSequence(), "eventId != sequence");
     assertEquals("turn_started", page1.get(0).getType());
-    assertEquals(Long.toString(2L), page1.get(1).getEventId());
 
     List<RunEventDTO> page2 = service.listRunEvents(Long.toString(run.id()), 2, 10);
     assertEquals(List.of(3L, 4L, 5L), page2.stream().map(RunEventDTO::getSequence).toList());
@@ -154,18 +161,15 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     List<RootActivityDTO> activity =
         service.listRootActivities(Long.toString(child.sessionId), 0, 10);
     assertEquals(2, activity.size());
-    assertEquals(
-        Long.toString(root.sessionId), activity.get(0).getRootSessionId());
-    assertEquals(
-        Long.toString(root.sessionId), activity.get(1).getRootSessionId());
+    assertEquals(Long.toString(root.sessionId), activity.get(0).getRootSessionId());
+    assertEquals(Long.toString(root.sessionId), activity.get(1).getRootSessionId());
 
     long cursor = Long.parseLong(activity.get(0).getEventId());
     List<RootActivityDTO> tail =
         service.listRootActivities(Long.toString(child.sessionId), cursor, 10);
     assertEquals(1, tail.size());
     assertTrue(Long.parseLong(tail.get(0).getEventId()) > cursor);
-    assertEquals(
-        Long.toString(child.sessionId), tail.get(0).getSessionId());
+    assertEquals(Long.toString(child.sessionId), tail.get(0).getSessionId());
 
     // Sibling root trees must not leak activity into the current root.
     SessionFixture otherRoot = seedRoot("other", false);
@@ -189,9 +193,7 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     AgentRun queued =
         transactions.submitUserMessage(fixture.sessionId, fixture.snapshotId, user("go"), NOW);
     AgentRun claimed =
-        runStore
-            .claimDue("worker-tool", NOW.plusMillis(1), Duration.ofMinutes(1))
-            .orElseThrow();
+        runStore.claimDue("worker-tool", NOW.plusMillis(1), Duration.ofMinutes(1)).orElseThrow();
     assertEquals(queued.id(), claimed.id());
 
     preparationPort.prepare(
@@ -208,8 +210,7 @@ class HarnessObservabilityQueryServiceIntegrationTest {
         NOW.plusSeconds(1));
     ToolInvocation stored = invocationStore.listByRun(queued.id()).get(0);
 
-    List<ToolInvocationDTO> projected =
-        service.listToolInvocations(Long.toString(queued.id()));
+    List<ToolInvocationDTO> projected = service.listToolInvocations(Long.toString(queued.id()));
     assertEquals(1, projected.size());
     ToolInvocationDTO dto = projected.get(0);
     assertEquals(Long.toString(stored.id()), dto.getId());
@@ -238,8 +239,12 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     long childRun = runIds.newRunId();
     String reportJson =
         "{"
-            + "\"childSessionId\":\"" + childSession + "\","
-            + "\"childRunId\":\"" + childRun + "\","
+            + "\"childSessionId\":\""
+            + childSession
+            + "\","
+            + "\"childRunId\":\""
+            + childRun
+            + "\","
             + "\"status\":\"SUCCEEDED\","
             + "\"finalReport\":\"done\","
             + "\"turnCount\":3,"
@@ -297,27 +302,23 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     assertEquals(4L, artifact.getSizeBytes());
   }
 
-  /** Artifact GET returns the persisted raw bytes; missing ids map to 404, malformed to 400. */
+  /** Artifact resolution returns raw bytes; illegal ids throw IllegalArgumentException (400). */
   @Test
   void resolvesArtifactBytesAndDistinguishesMissingFromInvalid() {
     var ref = artifactStore.save("application/json", "raw", "{\"ok\":true}".getBytes());
-    HarnessArtifactResolution.Result ok = service.resolveArtifact(ref.artifactId());
-    assertTrue(ok.found());
-    assertArrayEquals("{\"ok\":true}".getBytes(), ok.artifact().content());
-    assertEquals("application/json", ok.artifact().mediaType());
-    assertEquals(ref.artifactId(), Long.toString(ok.artifact().id()));
+    Artifact ok = service.getArtifact(ref.artifactId());
+    assertArrayEquals("{\"ok\":true}".getBytes(), ok.content());
+    assertEquals("application/json", ok.mediaType());
+    assertEquals(ref.artifactId(), Long.toString(ok.id()));
 
-    HarnessArtifactResolution.Result missing = service.resolveArtifact("9999999999");
-    assertFalse(missing.found());
+    IllegalArgumentException missing =
+        assertThrows(IllegalArgumentException.class, () -> service.getArtifact("9999999999"));
+    assertTrue(missing.getMessage().startsWith("unknown artifact:"));
 
-    HarnessArtifactResolution.Result invalid = service.resolveArtifact("abc");
-    assertFalse(invalid.found());
-
-    // Blank / non-positive / non-decimal ids are treated as 400 by the controller; the resolver
-    // surfaces them as Result.FOUR_HUNDRED so the caller can decide the status.
-    assertFalse(service.resolveArtifact("").found());
-    assertFalse(service.resolveArtifact("0").found());
-    assertFalse(service.resolveArtifact("-1").found());
+    assertThrows(IllegalArgumentException.class, () -> service.getArtifact(""));
+    assertThrows(IllegalArgumentException.class, () -> service.getArtifact("abc"));
+    assertThrows(IllegalArgumentException.class, () -> service.getArtifact("0"));
+    assertThrows(IllegalArgumentException.class, () -> service.getArtifact("-1"));
   }
 
   /** Unknown session/run must surface as IllegalArgumentException with the documented prefix. */
@@ -327,20 +328,16 @@ class HarnessObservabilityQueryServiceIntegrationTest {
 
     IllegalArgumentException sessionMissing =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> service.listRootActivities("9999999999", 0, 10));
+            IllegalArgumentException.class, () -> service.listRootActivities("9999999999", 0, 10));
     assertTrue(sessionMissing.getMessage().startsWith("unknown session:"));
 
     IllegalArgumentException runMissing =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> service.listRunEvents("9999999999", 0, 10));
+            IllegalArgumentException.class, () -> service.listRunEvents("9999999999", 0, 10));
     assertTrue(runMissing.getMessage().startsWith("unknown run:"));
 
     IllegalArgumentException sessionForTasks =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> service.listSessionTasks("9999999999"));
+        assertThrows(IllegalArgumentException.class, () -> service.listSessionTasks("9999999999"));
     assertTrue(sessionForTasks.getMessage().startsWith("unknown session:"));
 
     // Existing session + valid cursor must not throw.
@@ -349,14 +346,11 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     // Sanity: tool invocation query against an unknown run yields an explicit missing prefix.
     IllegalArgumentException invocationRunMissing =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> service.listToolInvocations("9999999999"));
+            IllegalArgumentException.class, () -> service.listToolInvocations("9999999999"));
     assertTrue(invocationRunMissing.getMessage().startsWith("unknown run:"));
 
     IllegalArgumentException invocationMissing =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> service.getToolInvocation("9999999999"));
+        assertThrows(IllegalArgumentException.class, () -> service.getToolInvocation("9999999999"));
     assertTrue(invocationMissing.getMessage().startsWith("unknown tool invocation:"));
   }
 

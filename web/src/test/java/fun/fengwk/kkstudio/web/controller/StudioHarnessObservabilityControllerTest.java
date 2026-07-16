@@ -13,7 +13,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.core.harness.run.service.DatabaseToolPreparationPort;
 import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
@@ -65,8 +64,9 @@ import org.springframework.test.web.servlet.MvcResult;
 
 /**
  * T15 observability HTTP contract coverage: strict 400/404 semantics, JSON contract for bigint IDs,
- * SSE event names + IDs, query cursor taking precedence over {@code Last-Event-ID}, and raw artifact
- * bytes. SSE tests rely only on events persisted in the H2 store; no in-memory event bus is used.
+ * SSE event names + IDs, query cursor taking precedence over {@code Last-Event-ID}, and raw
+ * artifact bytes. SSE tests rely only on events persisted in the H2 store; no in-memory event bus
+ * is used.
  */
 @AutoConfigureMockMvc
 @SpringBootTest(classes = WebTestApplication.class)
@@ -108,7 +108,7 @@ class StudioHarnessObservabilityControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[0].runId").value(Long.toString(seed.run.id())))
         .andExpect(jsonPath("$.data[0].sequence").value(1))
-        .andExpect(jsonPath("$.data[0].eventId").value("1"))
+        .andExpect(jsonPath("$.data[0].eventId").exists())
         .andExpect(jsonPath("$.data[0].type").value("turn_started"));
 
     mockMvc
@@ -121,24 +121,16 @@ class StudioHarnessObservabilityControllerTest {
         .andExpect(jsonPath("$.data[0].sequence").value(2));
 
     mockMvc
-        .perform(
-            get("/api/runs/{id}/events", seed.run.id())
-                .param("afterSequence", "-1"))
+        .perform(get("/api/runs/{id}/events", seed.run.id()).param("afterSequence", "-1"))
         .andExpect(status().isBadRequest());
 
     mockMvc
-        .perform(
-            get("/api/runs/{id}/events", seed.run.id())
-                .param("limit", "9999"))
+        .perform(get("/api/runs/{id}/events", seed.run.id()).param("limit", "9999"))
         .andExpect(status().isBadRequest());
 
-    mockMvc
-        .perform(get("/api/runs/{id}/events", "abc"))
-        .andExpect(status().isBadRequest());
+    mockMvc.perform(get("/api/runs/{id}/events", "abc")).andExpect(status().isBadRequest());
 
-    mockMvc
-        .perform(get("/api/runs/{id}/events", "9999999999"))
-        .andExpect(status().isNotFound());
+    mockMvc.perform(get("/api/runs/{id}/events", "9999999999")).andExpect(status().isNotFound());
 
     // Root activity list resolves the rootSessionId and paginates by eventId.
     mockMvc
@@ -149,15 +141,11 @@ class StudioHarnessObservabilityControllerTest {
         .andExpect(jsonPath("$.data[0].type").value("turn_started"));
 
     mockMvc
-        .perform(
-            get("/api/sessions/{id}/activities", seed.rootSessionId)
-                .param("limit", "1"))
+        .perform(get("/api/sessions/{id}/activities", seed.rootSessionId).param("limit", "1"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.length()").value(1));
 
-    mockMvc
-        .perform(get("/api/sessions/{id}/activities", "abc"))
-        .andExpect(status().isBadRequest());
+    mockMvc.perform(get("/api/sessions/{id}/activities", "abc")).andExpect(status().isBadRequest());
 
     mockMvc
         .perform(get("/api/sessions/{id}/activities", "9999999999"))
@@ -238,9 +226,7 @@ class StudioHarnessObservabilityControllerTest {
         .andExpect(jsonPath("$.data[0].report.finalReport").value("done"))
         .andExpect(jsonPath("$.data[0].report.turnCount").value(2));
 
-    mockMvc
-        .perform(get("/api/sessions/{id}/tasks", "9999999999"))
-        .andExpect(status().isNotFound());
+    mockMvc.perform(get("/api/sessions/{id}/tasks", "9999999999")).andExpect(status().isNotFound());
     mockMvc.perform(get("/api/sessions/{id}/tasks", "abc")).andExpect(status().isBadRequest());
   }
 
@@ -261,9 +247,7 @@ class StudioHarnessObservabilityControllerTest {
     mockMvc.perform(get("/api/artifacts/{id}", "-1")).andExpect(status().isBadRequest());
     mockMvc.perform(get("/api/artifacts/{id}", "abc")).andExpect(status().isBadRequest());
 
-    mockMvc
-        .perform(get("/api/artifacts/{id}", "9999999999"))
-        .andExpect(status().isNotFound());
+    mockMvc.perform(get("/api/artifacts/{id}", "9999999999")).andExpect(status().isNotFound());
   }
 
   /** SSE delivers persisted run events with name=run_event and id=sequence decimal. */
@@ -291,16 +275,18 @@ class StudioHarnessObservabilityControllerTest {
             .andReturn();
 
     String body = dispatched.getResponse().getContentAsString();
-    // Two persisted events are emitted with name=run_event and id equal to sequence decimal.
+    // Two persisted events are emitted with name=run_event and id=sequence decimal.
     assertTrue(body.contains("event:run_event"), body);
     assertTrue(body.contains("id:1"), body);
     assertTrue(body.contains("id:2"), body);
-    // The SseEmitter may serialise the Long field either as JSON number or string;
-    // assert by decimal token match only.
+    // The SSE event id is the sequence decimal, while the DTO eventId (inside data) is the
+    // Snowflake id — they are different. Assert both exist in the SSE body.
+    assertTrue(body.contains("\"eventId\":"), body);
     assertTrue(body.matches("(?s).*\"sequence\":\"?1\"?.*"), body);
     assertTrue(body.matches("(?s).*\"sequence\":\"?2\"?.*"), body);
     // Run is terminal and idle — heartbeat still permitted but close should follow.
-    // The exact body does not need to assert heartbeat because the close happens before the second tick.
+    // The exact body does not need to assert heartbeat because the close happens before the second
+    // tick.
     assertNotNull(body);
   }
 
@@ -372,10 +358,7 @@ class StudioHarnessObservabilityControllerTest {
             .andExpect(request().asyncStarted())
             .andReturn();
     MvcResult dispatched =
-        mockMvc
-            .perform(asyncDispatch(streamResult))
-            .andExpect(status().isOk())
-            .andReturn();
+        mockMvc.perform(asyncDispatch(streamResult)).andExpect(status().isOk()).andReturn();
     String afterFirst = dispatched.getResponse().getContentAsString();
     assertTrue(afterFirst.contains("event:root_activity"), afterFirst);
     // The first event id must NOT be re-emitted because the query cursor advanced past it.
@@ -398,10 +381,7 @@ class StudioHarnessObservabilityControllerTest {
             .andExpect(request().asyncStarted())
             .andReturn();
     MvcResult dispatched2 =
-        mockMvc
-            .perform(asyncDispatch(streamResult2))
-            .andExpect(status().isOk())
-            .andReturn();
+        mockMvc.perform(asyncDispatch(streamResult2)).andExpect(status().isOk()).andReturn();
     String fromZero = dispatched2.getResponse().getContentAsString();
     assertTrue(fromZero.contains("id:" + firstEventId), fromZero);
     assertTrue(fromZero.contains("id:" + secondEventId), fromZero);
@@ -495,8 +475,7 @@ class StudioHarnessObservabilityControllerTest {
 
   private void forceRootInactive(long rootSessionId) {
     jdbc.update(
-        "update harness_session set active_run_id = null where root_session_id = ?",
-        rootSessionId);
+        "update harness_session set active_run_id = null where root_session_id = ?", rootSessionId);
   }
 
   private static AgentMessage user(String text) {
