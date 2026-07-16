@@ -8,11 +8,14 @@ import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.HELLO;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.PARTIAL;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.READY;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.STARTED;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import fun.fengwk.kkstudio.harness.daemon.coding.ArtifactSource;
+import fun.fengwk.kkstudio.harness.daemon.coding.InMemoryArtifactSink;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
@@ -30,6 +33,7 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
@@ -42,9 +46,13 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolNumberSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolObjectSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
+import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -504,12 +512,14 @@ class DaemonRuntimeTest {
     assertEquals(0, tool.handle.cancelCalls.get());
   }
 
-  /** 流式结果必须保留 JSON 与 Artifact 等非文本内容的结构。 */
+  /** 流式结果必须保留 JSON 与 Artifact 等非文本内容的结构，并随 payload 自包含 artifact 字节。 */
   @Test
   void serializesJsonAndArtifactToolContents() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     TestTool tool = new TestTool();
-    runtime = runtime(transport, tool);
+    InMemoryArtifactSink sink = new InMemoryArtifactSink();
+    ArtifactRef stored = sink.store(new byte[] {1, 2}, "application/json");
+    runtime = runtime(transport, tool, sink);
 
     runtime.start();
     transport.awaitConnections(1);
@@ -519,9 +529,7 @@ class DaemonRuntimeTest {
     tool.partial(
         new ToolResult(
             "structured-content",
-            List.of(
-                new JsonToolContent("[1,2]"),
-                new ArtifactToolContent(new ArtifactRef("artifact", "application/json", 2))),
+            List.of(new JsonToolContent("[1,2]"), new ArtifactToolContent(stored)),
             false,
             "{}",
             false));
@@ -532,7 +540,146 @@ class DaemonRuntimeTest {
     assertTrue(payload.contains("\"type\":\"json\""));
     assertTrue(payload.contains("\"json\":[1,2]"));
     assertTrue(payload.contains("\"type\":\"artifact\""));
-    assertTrue(payload.contains("\"artifactId\":\"artifact\""));
+    assertTrue(payload.contains("\"artifactId\":\"" + stored.artifactId() + "\""));
+    assertTrue(payload.contains("\"mediaType\":\"application/json\""));
+    assertTrue(payload.contains("\"sizeBytes\":2"));
+    assertTrue(payload.contains("\"contentBase64\":\"AQI=\""));
+  }
+
+  /** wire artifact 必须包含 Base64 字节，使接收端可独立持久化并替换为 global ref；终端 payload 自包含，不依赖连接内映射。 */
+  @Test
+  void artifactPayloadIsSelfContainedAndRefIsRewrittenOnReceiver() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    InMemoryArtifactSink sink = new InMemoryArtifactSink();
+    byte[] data = new byte[] {(byte) 0xCA, (byte) 0xFE, (byte) 0xBA, (byte) 0xBE};
+    ArtifactRef stored = sink.store(data, "application/octet-stream");
+    runtime = runtime(transport, tool, sink);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.receive(invoke("artifact-rewrite", 1));
+    transport.takeMessages(2);
+    tool.complete(
+        new ToolResult(
+            "artifact-rewrite", List.of(new ArtifactToolContent(stored)), false, "{}", false));
+
+    List<DaemonEnvelope> terminal = transport.takeMessages(1);
+    assertMessageTypes(terminal, COMPLETED);
+    String payload = terminal.get(0).payloadJson();
+    JsonNode resultNode = codec.readPayload(terminal.get(0)).get("result");
+    JsonNode content = resultNode.get("contents").get(0);
+    assertEquals("artifact", content.get("type").asText());
+    assertEquals(stored.artifactId(), content.get("artifactId").asText());
+    assertEquals(stored.mediaType(), content.get("mediaType").asText());
+    assertEquals(stored.sizeBytes(), content.get("sizeBytes").asLong());
+    String base64 = content.get("contentBase64").asText();
+    assertEquals(Base64.getEncoder().encodeToString(data), base64);
+
+    // Receivers can persist independently and obtain a global ref distinct from the local id.
+    DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
+    Map<String, byte[]> receivedStore = new HashMap<>();
+    AtomicInteger counter = new AtomicInteger();
+    ToolResult decoded =
+        resultCodec.decodeResult(
+            payload,
+            (mediaType, size, bytes) -> {
+              String id = "global-" + counter.incrementAndGet();
+              receivedStore.put(id, Arrays.copyOf(bytes, bytes.length));
+              return new ArtifactRef(id, mediaType, size);
+            });
+    assertEquals(1, decoded.contents().size());
+    ArtifactToolContent decodedArtifact = (ArtifactToolContent) decoded.contents().get(0);
+    assertFalse(stored.artifactId().equals(decodedArtifact.artifact().artifactId()));
+    assertEquals("global-1", decodedArtifact.artifact().artifactId());
+    assertArrayEquals(data, receivedStore.get("global-1"));
+    assertTrue(
+        payload.contains("\"contentBase64\":\"yv66vg==\"")
+            || payload.contains("\"contentBase64\":\"" + base64 + "\""));
+  }
+
+  /** artifact reader / 编码失败必须让 PARTIAL/COMPLETED 收敛为 FAILED，callback 不会泄漏 local-only ref。 */
+  @Test
+  void convergesArtifactFailuresToFailedTerminal() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    ArtifactSource failingSource =
+        ref -> {
+          throw new IOException("missing artifact: " + ref.artifactId());
+        };
+    runtime = runtime(transport, tool, failingSource);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.receive(invoke("artifact-fail", 1));
+    transport.takeMessages(2);
+
+    // PARTIAL failure must converge to FAILED and not emit any PARTIAL or COMPLETED.
+    tool.partial(
+        new ToolResult(
+            "artifact-fail",
+            List.of(new ArtifactToolContent(new ArtifactRef("local-1", "application/json", 3))),
+            false,
+            "{}",
+            false));
+    List<DaemonEnvelope> partialFailure = transport.takeMessages(1);
+    assertMessageTypes(partialFailure, DaemonMessageType.FAILED);
+    assertTrue(partialFailure.get(0).payloadJson().contains("cannot partial"));
+
+    // A late COMPLETED after FAILED must be ignored (journal guards).
+    tool.complete(
+        new ToolResult(
+            "artifact-fail",
+            List.of(new ArtifactToolContent(new ArtifactRef("local-1", "application/json", 3))),
+            false,
+            "{}",
+            false));
+    assertFalse(transport.hasMessages());
+
+    // Now a separate invocation with COMPLETED failure must also converge to FAILED.
+    transport.receive(invoke("artifact-fail-2", 2));
+    transport.takeMessages(2);
+    tool.complete(
+        new ToolResult(
+            "artifact-fail-2",
+            List.of(new ArtifactToolContent(new ArtifactRef("local-2", "text/plain", 1))),
+            false,
+            "{}",
+            false));
+    List<DaemonEnvelope> completeFailure = transport.takeMessages(1);
+    assertMessageTypes(completeFailure, DaemonMessageType.FAILED);
+    assertTrue(completeFailure.get(0).payloadJson().contains("cannot complete"));
+  }
+
+  /** 无 artifact source 的 generic runtime 遇 artifact 必须确定性 FAILED，不能发送 local-only ref。 */
+  @Test
+  void failsClosedWhenArtifactSourceIsAbsent() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool); // no artifact source
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.receive(invoke("no-source", 1));
+    transport.takeMessages(2);
+
+    tool.complete(
+        new ToolResult(
+            "no-source",
+            List.of(new ArtifactToolContent(new ArtifactRef("local-only", "application/json", 0))),
+            false,
+            "{}",
+            false));
+
+    List<DaemonEnvelope> terminal = transport.takeMessages(1);
+    assertMessageTypes(terminal, DaemonMessageType.FAILED);
+    String payload = terminal.get(0).payloadJson();
+    assertTrue(payload.contains("cannot complete"));
+    assertFalse(payload.contains("\"artifactId\":\"local-only\""));
+    assertFalse(payload.contains("\"contentBase64\""));
   }
 
   /** Tool error 和错误关联 ID 的完成回调都必须收敛为 FAILED。 */
@@ -593,8 +740,21 @@ class DaemonRuntimeTest {
     return runtime(transport, tool, heartbeatInterval, Duration.ofSeconds(10));
   }
 
+  private DaemonRuntime runtime(FakeTransport transport, Tool tool, ArtifactSource artifactSource) {
+    return runtime(transport, tool, Duration.ofMinutes(1), Duration.ofSeconds(10), artifactSource);
+  }
+
   private DaemonRuntime runtime(
       FakeTransport transport, Tool tool, Duration heartbeatInterval, Duration defaultToolTimeout) {
+    return runtime(transport, tool, heartbeatInterval, defaultToolTimeout, null);
+  }
+
+  private DaemonRuntime runtime(
+      FakeTransport transport,
+      Tool tool,
+      Duration heartbeatInterval,
+      Duration defaultToolTimeout,
+      ArtifactSource artifactSource) {
     DaemonToolRegistry registry = new DaemonToolRegistry();
     registry.register(tool);
     return new DaemonRuntime(
@@ -609,7 +769,8 @@ class DaemonRuntimeTest {
         transport,
         registry,
         new InMemoryDaemonInvocationJournal(),
-        Executors.newSingleThreadScheduledExecutor());
+        Executors.newSingleThreadScheduledExecutor(),
+        artifactSource);
   }
 
   private DaemonEnvelope invoke(String invocationId, long sequence) {

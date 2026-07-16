@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import fun.fengwk.kkstudio.harness.daemon.coding.ArtifactSource;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournal;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournalEntry;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournalStart;
@@ -13,20 +13,18 @@ import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
 import fun.fengwk.kkstudio.harness.daemon.transport.JdkWebSocketTransport;
-import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
-import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonArtifactContentWriter;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
@@ -58,7 +56,9 @@ public final class DaemonRuntime implements AutoCloseable {
   private final DaemonToolRegistry toolRegistry;
   private final DaemonInvocationJournal journal;
   private final ScheduledExecutorService scheduler;
+  private final ArtifactSource artifactSource;
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
+  private final DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
   private final AtomicLong outboundSequence = new AtomicLong();
   private final AtomicReference<ActiveConnection> activeConnection = new AtomicReference<>();
   private final AtomicLong connectionGeneration = new AtomicLong();
@@ -71,14 +71,33 @@ public final class DaemonRuntime implements AutoCloseable {
   private volatile DaemonRuntimeState state = DaemonRuntimeState.STOPPED;
   private Duration nextReconnectDelay;
 
-  /** 使用 JDK WebSocket transport 和内存 journal 创建生产运行时。 */
+  /** 使用 JDK WebSocket transport 和内存 journal 创建生产运行时，无 artifact 源；遇到 artifact 工具结果将确定性收敛为 FAILED。 */
   public DaemonRuntime(DaemonConfig config, DaemonToolRegistry toolRegistry) {
     this(
         config,
         new JdkWebSocketTransport(config.gatewayUri()),
         toolRegistry,
         new InMemoryDaemonInvocationJournal(),
-        Executors.newSingleThreadScheduledExecutor());
+        Executors.newSingleThreadScheduledExecutor(),
+        null);
+  }
+
+  /**
+   * 使用 JDK WebSocket transport、内存 journal 和指定 artifact 源创建生产运行时。
+   *
+   * <p>artifact 源用于在发端读取本地 artifact 字节写入 wire；通常与 coding 工具的 {@link
+   * fun.fengwk.kkstudio.harness.daemon.coding.ArtifactSink} 共享同一实例。当 {@code artifactSource} 为
+   * {@code null} 时，遇到 artifact 工具结果会确定性收敛为 FAILED 而不会发送无法被接收端解析的本地 ref。
+   */
+  public DaemonRuntime(
+      DaemonConfig config, DaemonToolRegistry toolRegistry, ArtifactSource artifactSource) {
+    this(
+        config,
+        new JdkWebSocketTransport(config.gatewayUri()),
+        toolRegistry,
+        new InMemoryDaemonInvocationJournal(),
+        Executors.newSingleThreadScheduledExecutor(),
+        artifactSource);
   }
 
   /** 使用可替换 transport 和 journal 创建运行时，便于协议集成测试或持久化替换。 */
@@ -88,11 +107,23 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonToolRegistry toolRegistry,
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler) {
+    this(config, transport, toolRegistry, journal, scheduler, null);
+  }
+
+  /** 全参数运行时；{@code artifactSource} 可为 {@code null} 以强制对所有 artifact 工具结果返回 FAILED。 */
+  public DaemonRuntime(
+      DaemonConfig config,
+      DaemonTransport transport,
+      DaemonToolRegistry toolRegistry,
+      DaemonInvocationJournal journal,
+      ScheduledExecutorService scheduler,
+      ArtifactSource artifactSource) {
     this.config = Objects.requireNonNull(config, "config");
     this.transport = Objects.requireNonNull(transport, "transport");
     this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry");
     this.journal = Objects.requireNonNull(journal, "journal");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+    this.artifactSource = artifactSource;
     this.nextReconnectDelay = config.initialReconnectDelay();
   }
 
@@ -513,9 +544,17 @@ public final class DaemonRuntime implements AutoCloseable {
 
     @Override
     public void onPartial(ToolResult partial) {
-      if (isRunning(invocation.invocationId())
-          && matchesInvocation(partial, invocation.invocationId())) {
-        send(DaemonMessageType.PARTIAL, invocation.invocationId(), resultPayload(partial));
+      if (!isRunning(invocation.invocationId())
+          || !matchesInvocation(partial, invocation.invocationId())) {
+        return;
+      }
+      try {
+        send(
+            DaemonMessageType.PARTIAL,
+            invocation.invocationId(),
+            resultCodec.encodeResult(partial, artifactWriter()));
+      } catch (RuntimeException error) {
+        failArtifactEncoding(invocation.invocationId(), error, "partial");
       }
     }
 
@@ -530,9 +569,16 @@ public final class DaemonRuntime implements AutoCloseable {
             false);
         return;
       }
+      String payload;
+      try {
+        payload = resultCodec.encodeResult(result, artifactWriter());
+      } catch (RuntimeException error) {
+        failArtifactEncoding(invocation.invocationId(), error, "complete");
+        return;
+      }
       terminal(
           invocation.invocationId(),
-          new DaemonTerminalMessage(DaemonMessageType.COMPLETED, resultPayload(result)),
+          new DaemonTerminalMessage(DaemonMessageType.COMPLETED, payload),
           false);
     }
 
@@ -545,6 +591,41 @@ public final class DaemonRuntime implements AutoCloseable {
     }
   }
 
+  /** artifact 读取或编码失败时，确定性收敛为 FAILED，避免让 callback 漏掉终态。允许已有 journal 记录为 RUNNING 时覆盖。 */
+  private void failArtifactEncoding(String invocationId, RuntimeException error, String phase) {
+    String message = "cannot " + phase + " tool result: " + error.getMessage();
+    terminal(
+        invocationId,
+        new DaemonTerminalMessage(
+            DaemonMessageType.FAILED, errorPayload(new IllegalStateException(message, error))),
+        false);
+  }
+
+  private DaemonArtifactContentWriter artifactWriter() {
+    ArtifactSource source = this.artifactSource;
+    if (source == null) {
+      return ref -> {
+        throw new IllegalStateException("artifact source is not configured: " + ref.artifactId());
+      };
+    }
+    return ref -> {
+      byte[] bytes = source.read(ref);
+      if (bytes == null) {
+        throw new IllegalStateException("artifact source returned null bytes: " + ref.artifactId());
+      }
+      if (bytes.length != ref.sizeBytes()) {
+        throw new IllegalStateException(
+            "artifact source size mismatch for "
+                + ref.artifactId()
+                + ": declared="
+                + ref.sizeBytes()
+                + " actual="
+                + bytes.length);
+      }
+      return bytes;
+    };
+  }
+
   private boolean isRunning(String invocationId) {
     return journal
         .find(invocationId)
@@ -554,37 +635,6 @@ public final class DaemonRuntime implements AutoCloseable {
 
   private boolean matchesInvocation(ToolResult result, String invocationId) {
     return result != null && invocationId.equals(result.toolCallId());
-  }
-
-  private String resultPayload(ToolResult result) {
-    ObjectNode payload = envelopeCodec.createPayload();
-    ObjectNode wireResult = payload.putObject("result");
-    wireResult.put("toolCallId", result.toolCallId());
-    wireResult.put("error", result.error());
-    wireResult.set("details", envelopeCodec.readJson(result.detailsJson()));
-    ArrayNode contents = wireResult.putArray("contents");
-    for (ToolContent content : result.contents()) {
-      writeContent(contents, content);
-    }
-    return envelopeCodec.writeJson(payload);
-  }
-
-  private void writeContent(ArrayNode contents, ToolContent content) {
-    ObjectNode wireContent = contents.addObject();
-    if (content instanceof TextToolContent text) {
-      wireContent.put("type", "text");
-      wireContent.put("text", text.text());
-    } else if (content instanceof JsonToolContent json) {
-      wireContent.put("type", "json");
-      wireContent.set("json", envelopeCodec.readJson(json.json()));
-    } else if (content instanceof ArtifactToolContent artifact) {
-      wireContent.put("type", "artifact");
-      wireContent.put("artifactId", artifact.artifact().artifactId());
-      wireContent.put("mediaType", artifact.artifact().mediaType());
-      wireContent.put("sizeBytes", artifact.artifact().sizeBytes());
-    } else {
-      throw new IllegalArgumentException("unsupported tool content: " + content.getClass());
-    }
   }
 
   private final class RuntimeTransportListener implements DaemonTransportListener {
