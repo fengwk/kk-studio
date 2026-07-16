@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static fun.fengwk.kkstudio.web.HarnessUsageFixtures.completedUsageDraft;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -63,6 +64,7 @@ public class StudioRunControlControllerTest {
 
   @BeforeEach
   public void resetState() {
+    jdbc.update("delete from model_usage_record");
     stubProviderManager.reset();
     jdbc.update("delete from harness_run_control_message");
     jdbc.update("delete from harness_run_event");
@@ -377,6 +379,6 @@ public class StudioRunControlControllerTest {
         new RunEventDraft(
             RunEventType.ASSISTANT_COMPLETED,
             RunEventPayloads.forAttempt(run, "stopReason", ProviderStopReason.COMPLETED.name()));
-    runTransactions.complete(run, assistant, completed, now);
+    runTransactions.complete(run, assistant, completedUsageDraft(), completed, now);
   }
 }

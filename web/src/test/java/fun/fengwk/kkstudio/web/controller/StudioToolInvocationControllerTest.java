@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static fun.fengwk.kkstudio.web.HarnessUsageFixtures.toolCallsUsageDraft;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -76,6 +77,7 @@ class StudioToolInvocationControllerTest {
 
   @BeforeEach
   void clean() {
+    jdbcTemplate.update("delete from model_usage_record");
     jdbcTemplate.update("delete from tool_invocation");
     jdbcTemplate.update("delete from harness_run_event");
     jdbcTemplate.update("delete from harness_run");
@@ -175,6 +177,7 @@ class StudioToolInvocationControllerTest {
     preparationPort.prepare(
         claimed,
         assistant(List.of(call)),
+        toolCallsUsageDraft(),
         List.of(call),
         List.of(binding()),
         Path.of("/tmp/environment"),

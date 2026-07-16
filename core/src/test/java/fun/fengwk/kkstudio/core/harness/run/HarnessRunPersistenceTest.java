@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.core.harness.run;
 
+import static fun.fengwk.kkstudio.core.harness.HarnessUsageFixtures.completedUsageDraft;
+import static fun.fengwk.kkstudio.core.harness.HarnessUsageFixtures.toolCallsUsageDraft;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -76,6 +78,7 @@ class HarnessRunPersistenceTest {
 
   @BeforeEach
   void cleanHarnessRunTables() {
+    jdbcTemplate.update("delete from model_usage_record");
     jdbcTemplate.update("delete from tool_invocation");
     jdbcTemplate.update("delete from harness_run_event");
     jdbcTemplate.update("delete from harness_run");
@@ -261,9 +264,19 @@ class HarnessRunPersistenceTest {
     MessageEntryPayload assistant = assistant("answer");
 
     assertTrue(
-        transactions.complete(claimed, assistant, assistantCompleted(claimed), NOW.plusSeconds(1)));
+        transactions.complete(
+            claimed,
+            assistant,
+            completedUsageDraft(),
+            assistantCompleted(claimed),
+            NOW.plusSeconds(1)));
     assertFalse(
-        transactions.complete(claimed, assistant, assistantCompleted(claimed), NOW.plusSeconds(2)));
+        transactions.complete(
+            claimed,
+            assistant,
+            completedUsageDraft(),
+            assistantCompleted(claimed),
+            NOW.plusSeconds(2)));
 
     AgentRun stored = runStore.find(queued.id()).orElseThrow();
     Session session = sessionStore.find(seed.sessionId()).orElseThrow();
@@ -293,6 +306,7 @@ class HarnessRunPersistenceTest {
             transactions.complete(
                 claimed,
                 assistant("answer"),
+                completedUsageDraft(),
                 new RunEventDraft(RunEventType.ASSISTANT_COMPLETED, "{}"),
                 NOW.plusSeconds(1)));
 
@@ -318,6 +332,7 @@ class HarnessRunPersistenceTest {
         toolPreparation.prepare(
             claimed,
             assistant("calling", List.of(call)),
+            toolCallsUsageDraft(),
             List.of(call),
             List.of(readBinding()),
             Path.of("."),
@@ -358,6 +373,7 @@ class HarnessRunPersistenceTest {
             toolPreparation.prepare(
                 claimed,
                 assistant("calling", List.of(call)),
+                toolCallsUsageDraft(),
                 List.of(call),
                 List.of(readBinding()),
                 Path.of("."),
@@ -576,6 +592,7 @@ class HarnessRunPersistenceTest {
             transactions.complete(
                 claimed,
                 new MessageEntryPayload(user("bad")),
+                completedUsageDraft(),
                 new RunEventDraft(RunEventType.ASSISTANT_COMPLETED, "{}"),
                 NOW));
     assertThrows(
@@ -584,6 +601,7 @@ class HarnessRunPersistenceTest {
             transactions.complete(
                 claimed,
                 assistant("bad", List.of(new ToolCall("unexpected", "read", "{}"))),
+                completedUsageDraft(),
                 assistantCompleted(claimed),
                 NOW));
     assertThrows(
@@ -592,6 +610,7 @@ class HarnessRunPersistenceTest {
             toolPreparation.prepare(
                 claimed,
                 assistant("bad"),
+                toolCallsUsageDraft(),
                 List.of(new ToolCall("missing-from-assistant", "read", "{}")),
                 List.of(readBinding()),
                 Path.of("."),
@@ -605,6 +624,7 @@ class HarnessRunPersistenceTest {
             toolPreparation.prepare(
                 claimed,
                 assistant("bad", List.of(duplicateEventCall)),
+                toolCallsUsageDraft(),
                 List.of(duplicateEventCall),
                 List.of(readBinding()),
                 Path.of("."),
@@ -619,6 +639,7 @@ class HarnessRunPersistenceTest {
             toolPreparation.prepare(
                 claimed,
                 assistant("bad"),
+                toolCallsUsageDraft(),
                 List.of(),
                 List.of(readBinding()),
                 Path.of("."),

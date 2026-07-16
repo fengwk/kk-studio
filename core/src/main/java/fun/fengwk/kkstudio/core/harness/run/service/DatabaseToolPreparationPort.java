@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
 import fun.fengwk.kkstudio.harness.runtime.run.ToolPreparationPort;
 import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageDraft;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -25,6 +26,7 @@ public class DatabaseToolPreparationPort implements ToolPreparationPort {
   public boolean prepare(
       AgentRun claimedRun,
       MessageEntryPayload assistant,
+      ModelUsageDraft usageDraft,
       List<ToolCall> toolCalls,
       List<ToolBinding> bindings,
       Path workdir,
@@ -32,6 +34,14 @@ public class DatabaseToolPreparationPort implements ToolPreparationPort {
       List<RunEventDraft> assistantEvents,
       Instant now) {
     return transactions.prepareTools(
-        claimedRun, assistant, toolCalls, bindings, workdir, environmentRoot, assistantEvents, now);
+        claimedRun,
+        assistant,
+        usageDraft,
+        toolCalls,
+        bindings,
+        workdir,
+        environmentRoot,
+        assistantEvents,
+        now);
   }
 }

@@ -34,6 +34,10 @@ import fun.fengwk.kkstudio.harness.runtime.tool.PreparedToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolPreparationService;
+import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageDraft;
+import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecord;
+import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecordIdGenerator;
+import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecordStore;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -56,6 +60,8 @@ public class HarnessRunTransactionService implements RunTransactions {
   private final HarnessSessionEntryMapper entryMapper;
   private final ToolInvocationMapper invocationMapper;
   private final RunIdGenerator idGenerator;
+  private final ModelUsageRecordStore usageRecordStore;
+  private final ModelUsageRecordIdGenerator usageRecordIdGenerator;
   private final ToolPreparationService toolPreparationService;
   private final ToolPolicyResolver policyResolver;
   private final RunControlMessageStore controlStore;
@@ -68,6 +74,8 @@ public class HarnessRunTransactionService implements RunTransactions {
       HarnessSessionEntryMapper entryMapper,
       ToolInvocationMapper invocationMapper,
       RunIdGenerator idGenerator,
+      ModelUsageRecordStore usageRecordStore,
+      ModelUsageRecordIdGenerator usageRecordIdGenerator,
       ToolPreparationService toolPreparationService,
       ToolPolicyResolver policyResolver,
       RunControlMessageStore controlStore) {
@@ -77,6 +85,9 @@ public class HarnessRunTransactionService implements RunTransactions {
     this.entryMapper = Objects.requireNonNull(entryMapper, "entryMapper");
     this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
+    this.usageRecordStore = Objects.requireNonNull(usageRecordStore, "usageRecordStore");
+    this.usageRecordIdGenerator =
+        Objects.requireNonNull(usageRecordIdGenerator, "usageRecordIdGenerator");
     this.toolPreparationService =
         Objects.requireNonNull(toolPreparationService, "toolPreparationService");
     this.policyResolver = Objects.requireNonNull(policyResolver, "policyResolver");
@@ -158,8 +169,10 @@ public class HarnessRunTransactionService implements RunTransactions {
   public boolean complete(
       AgentRun claimedRun,
       MessageEntryPayload assistant,
+      ModelUsageDraft usageDraft,
       RunEventDraft assistantCompleted,
       Instant now) {
+    Objects.requireNonNull(usageDraft, "usageDraft");
     validateAssistant(assistant);
     if (hasAssistantToolCalls(assistant)) {
       throw new IllegalArgumentException("no-tool completion must not contain tool calls");
@@ -176,10 +189,20 @@ public class HarnessRunTransactionService implements RunTransactions {
       cancelOwned(locked, now, null);
       return true;
     }
-    appendEntry(locked.session(), claimedRun.id(), assistant, now);
+    long assistantEntryId = appendEntry(locked.session(), locked.run().getId(), assistant, now);
+    usageRecordStore.insert(
+        new ModelUsageRecord(
+            usageRecordIdGenerator.newModelUsageRecordId(),
+            locked.session().getId(),
+            locked.run().getId(),
+            assistantEntryId,
+            locked.run().getAttempt(),
+            locked.run().getTurnIndex(),
+            usageDraft,
+            now));
 
     List<RunControlMessage> pendingSteer =
-        controlStore.listPendingByRun(claimedRun.id(), RunControlKind.STEER);
+        controlStore.listPendingByRun(locked.run().getId(), RunControlKind.STEER);
     if (!pendingSteer.isEmpty()) {
       doRequeueAdvanceTurn(claimedRun, now);
       appendEventsInternal(
@@ -195,7 +218,7 @@ public class HarnessRunTransactionService implements RunTransactions {
     }
 
     List<RunControlMessage> pendingFollowUp =
-        controlStore.listPendingByRun(claimedRun.id(), RunControlKind.FOLLOW_UP);
+        controlStore.listPendingByRun(locked.run().getId(), RunControlKind.FOLLOW_UP);
     if (!pendingFollowUp.isEmpty()) {
       ControlConsumptionMode mode = pendingFollowUp.get(0).consumptionMode();
       List<RunControlMessage> batch =
@@ -203,7 +226,7 @@ public class HarnessRunTransactionService implements RunTransactions {
               ? List.of(pendingFollowUp.get(0))
               : List.copyOf(pendingFollowUp);
       List<ControlConsumption> consumed =
-          applyControlEntries(locked.session(), claimedRun.id(), batch, now);
+          applyControlEntries(locked.session(), locked.run().getId(), batch, now);
       doRequeueAdvanceTurn(claimedRun, now);
       List<RunEventDraft> events = new ArrayList<>();
       events.add(assistantCompleted);
@@ -240,12 +263,14 @@ public class HarnessRunTransactionService implements RunTransactions {
   public boolean prepareTools(
       AgentRun claimedRun,
       MessageEntryPayload assistant,
+      ModelUsageDraft usageDraft,
       List<ToolCall> toolCalls,
       List<ToolBinding> bindings,
       Path workdir,
       Path environmentRoot,
       List<RunEventDraft> assistantEvents,
       Instant now) {
+    Objects.requireNonNull(usageDraft, "usageDraft");
     validateAssistant(assistant);
     validateAssistantToolCalls(assistant, toolCalls);
     if (assistantEvents == null
@@ -273,9 +298,20 @@ public class HarnessRunTransactionService implements RunTransactions {
             workdir,
             environmentRoot,
             now);
-    long assistantEntryId = appendEntry(locked.session(), claimedRun.id(), assistant, now);
+    long assistantEntryId = appendEntry(locked.session(), locked.run().getId(), assistant, now);
+    usageRecordStore.insert(
+        new ModelUsageRecord(
+            usageRecordIdGenerator.newModelUsageRecordId(),
+            locked.session().getId(),
+            locked.run().getId(),
+            assistantEntryId,
+            locked.run().getAttempt(),
+            locked.run().getTurnIndex(),
+            usageDraft,
+            now));
     for (PreparedToolInvocation invocation : prepared) {
-      if (invocationMapper.insert(toDO(claimedRun.id(), assistantEntryId, invocation, now)) != 1) {
+      if (invocationMapper.insert(toDO(locked.run().getId(), assistantEntryId, invocation, now))
+          != 1) {
         throw new ConcurrentModificationException("cannot create tool invocation");
       }
     }
