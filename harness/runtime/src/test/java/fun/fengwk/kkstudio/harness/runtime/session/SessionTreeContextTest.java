@@ -346,8 +346,16 @@ class SessionTreeContextTest {
   private static AssistantMessageMetadata assistantMetadata() {
     return new AssistantMessageMetadata(
         ProviderStopReason.TOOL_CALLS,
-        new ModelUsage(1, 1, 0, 0, 0),
-        new ModelCost("USD", BigDecimal.ZERO));
+        new ModelUsage(1, 1, 0, 0, 0, 0, 2),
+        new ModelCost(
+            "USD",
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO));
   }
 
   private static MessageEntryPayload user(String text) {

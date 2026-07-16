@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
@@ -25,6 +26,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.context.DefaultContextTransform;
 import fun.fengwk.kkstudio.harness.runtime.context.SessionContextBuilder;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation;
@@ -88,7 +90,8 @@ class AgentTurnWorkerTest {
                       request.model(),
                       new ModelVariant("hooked", null, null, null, null, List.of()),
                       request.messages(),
-                      request.tools());
+                      request.tools(),
+                      request.cacheControl());
                 }));
 
     fixture.worker().executeNext("worker-a").orElseThrow();
@@ -379,8 +382,8 @@ class AgentTurnWorkerTest {
     MessageEntryPayload assistant = fixture.store.sessionMessages.get(0);
     assertEquals("answer", text(assistant));
     assertEquals(ProviderStopReason.COMPLETED, assistant.assistantMetadata().stopReason());
-    assertEquals(new ModelUsage(1, 1, 0, 0, 0), assistant.assistantMetadata().usage());
-    assertEquals(new ModelCost("USD", BigDecimal.ZERO), assistant.assistantMetadata().cost());
+    assertEquals(new ModelUsage(1, 1, 0, 0, 0, 0, 2), assistant.assistantMetadata().usage());
+    assertEquals(zeroCost("USD"), assistant.assistantMetadata().cost());
     assertEquals(2, provider.request.messages().size());
     assertEquals(
         List.of(
@@ -1162,8 +1165,11 @@ class AgentTurnWorkerTest {
         "",
         calls,
         calls.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS,
-        new ModelUsage(1, 1, 0, 0, 0),
-        new ModelCost("USD", BigDecimal.ZERO));
+        new ModelUsage(1, 1, 0, 0, 0, 0, 2),
+        zeroCost("USD"),
+        null,
+        null,
+        "{}");
   }
 
   private static ProviderResponse thinkingResponse(String text, String thinking) {
@@ -1172,15 +1178,32 @@ class AgentTurnWorkerTest {
         thinking,
         List.of(),
         ProviderStopReason.COMPLETED,
-        new ModelUsage(1, 1, 0, 0, 0),
-        new ModelCost("USD", BigDecimal.ZERO));
+        new ModelUsage(1, 1, 0, 0, 0, 0, 2),
+        zeroCost("USD"),
+        null,
+        null,
+        "{}");
+  }
+
+  private static ModelCost zeroCost(String currency) {
+    return new ModelCost(
+        currency,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO);
   }
 
   private static TurnResources resources(ModelProvider provider, List<ToolDescriptor> tools) {
     ModelVariant variant = new ModelVariant("default", null, null, null, null, List.of());
     ModelDescriptor model =
         new ModelDescriptor(
-            "provider",
+            1L,
+            2L,
+            ProviderType.OPENAI,
             "model",
             "Model",
             1024,
@@ -1190,11 +1213,17 @@ class AgentTurnWorkerTest {
             List.of(variant),
             new ModelPricing(
                 "USD",
+                "tier-1",
+                "default",
+                BigDecimal.ONE,
+                "v1",
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
-                BigDecimal.ZERO));
+                BigDecimal.ZERO,
+                BigDecimal.ZERO),
+            PromptCachePolicy.disabled());
     return new TurnResources(
         provider,
         model,

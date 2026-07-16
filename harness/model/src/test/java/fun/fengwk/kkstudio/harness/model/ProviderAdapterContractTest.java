@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCachePolicy;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
@@ -142,7 +144,9 @@ class ProviderAdapterContractTest {
     ModelVariant variant = new ModelVariant("default", 256, 0.0, null, null, List.of());
     ModelDescriptor model =
         new ModelDescriptor(
-            "provider",
+            1L,
+            2L,
+            ProviderType.OPENAI,
             "MiniMax-M2.7",
             "MiniMax",
             4096,
@@ -152,11 +156,17 @@ class ProviderAdapterContractTest {
             List.of(variant),
             new ModelPricing(
                 "USD",
+                "tier-1",
+                "default",
+                BigDecimal.ONE,
+                "v1",
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
-                BigDecimal.ZERO));
+                BigDecimal.ZERO,
+                BigDecimal.ZERO),
+            PromptCachePolicy.disabled());
     return new ProviderRequest(
         model,
         variant,
@@ -167,7 +177,8 @@ class ProviderAdapterContractTest {
             new ProviderToolDefinition(
                 "echo",
                 "Echo text",
-                "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"],\"additionalProperties\":false}")));
+                "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"],\"additionalProperties\":false}")),
+        ProviderCacheControl.none());
   }
 
   private static final class ProbeServer implements AutoCloseable {

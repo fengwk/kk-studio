@@ -95,14 +95,101 @@ class ProviderContractTest {
   /** 完整响应必须携带非空 usage/cost，并原样保留由 Turn Engine 校验的结束原因。 */
   @Test
   void requiresCompleteResponseAccountingAndPreservesStopReason() {
-    ModelUsage usage = new ModelUsage(1, 2, 0, 0, 0);
-    ModelCost cost = new ModelCost("USD", BigDecimal.ZERO);
-
+    ModelUsage usage = new ModelUsage(1, 2, 0, 0, 0, 0, 3);
+    ModelCost cost = zeroCost();
     assertThrows(
         NullPointerException.class,
-        () -> new ProviderResponse("", "", List.of(), ProviderStopReason.COMPLETED, null, cost));
+        () ->
+            new ProviderResponse(
+                "", "", List.of(), ProviderStopReason.COMPLETED, null, cost, null, null, "{}"));
     ProviderResponse response =
-        new ProviderResponse("", "", List.of(), ProviderStopReason.TOOL_CALLS, usage, cost);
+        new ProviderResponse(
+            "",
+            "",
+            List.of(),
+            ProviderStopReason.TOOL_CALLS,
+            usage,
+            cost,
+            "req-1",
+            "default",
+            "{\"prompt_tokens\":1}");
     assertEquals(ProviderStopReason.TOOL_CALLS, response.stopReason());
+    assertEquals("req-1", response.requestId());
+    assertEquals("default", response.serviceTier());
+    assertEquals("{\"prompt_tokens\":1}", response.rawUsageJson());
+  }
+
+  /** rawUsageJson 必须为合法 JSON object 或 array，仅 null 规范化为 "{}"。 */
+  @Test
+  void rawUsageJsonMustBeValidJsonObjectOrArray() {
+    ModelUsage usage = new ModelUsage(1, 1, 0, 0, 0, 0, 2);
+    ModelCost cost = zeroCost();
+
+    assertEquals(
+        "{}",
+        new ProviderResponse(
+                "", "", List.of(), ProviderStopReason.COMPLETED, usage, cost, null, null, null)
+            .rawUsageJson());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ProviderResponse(
+                "", "", List.of(), ProviderStopReason.COMPLETED, usage, cost, null, null, "   "));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ProviderResponse(
+                "",
+                "",
+                List.of(),
+                ProviderStopReason.COMPLETED,
+                usage,
+                cost,
+                null,
+                null,
+                "not-json"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ProviderResponse(
+                "",
+                "",
+                List.of(),
+                ProviderStopReason.COMPLETED,
+                usage,
+                cost,
+                null,
+                null,
+                "\"scalar\""));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ProviderResponse(
+                "", "", List.of(), ProviderStopReason.COMPLETED, usage, cost, " ", null, "{}"));
+    assertEquals(
+        "[{\"cached_tokens\":1}]",
+        new ProviderResponse(
+                "",
+                "",
+                List.of(),
+                ProviderStopReason.COMPLETED,
+                usage,
+                cost,
+                null,
+                null,
+                "[{\"cached_tokens\":1}]")
+            .rawUsageJson());
+  }
+
+  private static ModelCost zeroCost() {
+    return new ModelCost(
+        "USD",
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO);
   }
 }

@@ -363,8 +363,16 @@ public class StudioRunControlControllerTest {
             new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("done"))),
             new AssistantMessageMetadata(
                 ProviderStopReason.COMPLETED,
-                new ModelUsage(1, 1, 0, 0, 0),
-                new ModelCost("USD", BigDecimal.ZERO)));
+                new ModelUsage(1, 1, 0, 0, 0, 0, 2),
+                new ModelCost(
+                    "USD",
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO)));
     RunEventDraft completed =
         new RunEventDraft(
             RunEventType.ASSISTANT_COMPLETED,

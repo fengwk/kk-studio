@@ -15,6 +15,9 @@ import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCachePolicy;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
@@ -28,6 +31,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -111,6 +115,48 @@ class DefaultAgentTurnEngineTest {
     assertEquals("first", messageText(provider.request().messages().get(1)));
     assertEquals("second", messageText(provider.request().messages().get(2)));
     assertEquals(List.of("started", "delta", "completed"), handler.events);
+  }
+
+  /** 最终实际发送的 ProviderRequest 必须在 AgentTurnResult 与 Provider 收到的一致，且同步回调时仍可见。 */
+  @Test
+  void exposesFinalRequestIdentityToTurnResultOnSynchronousComplete() {
+    FakeModelProvider provider =
+        FakeModelProvider.sequence()
+            .complete(response("ok", "", List.of(), ProviderStopReason.COMPLETED))
+            .build();
+    RecordingHandler handler = new RecordingHandler();
+
+    new DefaultAgentTurnEngine(provider).execute(request(), handler);
+
+    assertEquals(provider.request(), handler.result.providerRequest());
+    assertEquals(ProviderCacheControl.none(), handler.result.providerRequest().cacheControl());
+  }
+
+  /** interceptor 改写 cacheControl 时，TurnResult 与 Provider 收到的是同一改写后的实例。 */
+  @Test
+  void exposesInterceptorMutatedRequestAsFinal() {
+    FakeModelProvider provider =
+        FakeModelProvider.sequence()
+            .complete(response("ok", "", List.of(), ProviderStopReason.COMPLETED))
+            .build();
+    ProviderCacheControl overridden =
+        ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "model-2");
+    RecordingHandler handler = new RecordingHandler();
+
+    new DefaultAgentTurnEngine(
+            provider,
+            List.of(
+                providerRequest ->
+                    new ProviderRequest(
+                        providerRequest.model(),
+                        providerRequest.variant(),
+                        providerRequest.messages(),
+                        providerRequest.tools(),
+                        overridden)))
+        .execute(request(), handler);
+
+    assertEquals(provider.request(), handler.result.providerRequest());
+    assertEquals(overridden, provider.request().cacheControl());
   }
 
   /** 显式空链与原有只传 Provider 的构造方式保持相同行为。 */
@@ -400,7 +446,10 @@ class DefaultAgentTurnEngineTest {
     completed.join();
     failed.join();
 
-    long terminals = handler.events.stream().filter(event -> !"started".equals(event)).count();
+    long terminals =
+        handler.events.stream()
+            .filter(event -> "completed".equals(event) || "failed".equals(event))
+            .count();
     assertEquals(1, terminals);
     assertTrue(handler.events.contains("completed") || handler.events.contains("failed"));
   }
@@ -460,7 +509,9 @@ class DefaultAgentTurnEngineTest {
   private static AgentTurnRequest request() {
     return new AgentTurnRequest(
         new ModelDescriptor(
-            "provider",
+            1L,
+            2L,
+            ProviderType.OPENAI,
             "model",
             "Model",
             1024,
@@ -470,11 +521,17 @@ class DefaultAgentTurnEngineTest {
             List.of(new ModelVariant("default", null, null, null, null, List.of())),
             new ModelPricing(
                 "USD",
+                "tier-1",
+                "default",
+                BigDecimal.ONE,
+                "v1",
                 BigDecimal.ONE,
                 BigDecimal.ONE,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
-                BigDecimal.ZERO)),
+                BigDecimal.ZERO,
+                BigDecimal.ZERO),
+            PromptCachePolicy.disabled()),
         new ModelVariant("default", null, null, null, null, List.of()),
         List.of(
             new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("hello")))),
@@ -493,16 +550,33 @@ class DefaultAgentTurnEngineTest {
 
   private static ProviderResponse response(
       String text, String thinking, List<ProviderToolCall> calls, ProviderStopReason stopReason) {
-    ModelUsage usage = new ModelUsage(1, 1, 0, 0, 0);
+    ModelUsage usage = new ModelUsage(1, 1, 0, 0, 0, 0, 2);
     return new ProviderResponse(
-        text, thinking, calls, stopReason, usage, new ModelCost("USD", BigDecimal.ONE));
+        text,
+        thinking,
+        calls,
+        stopReason,
+        usage,
+        new ModelCost(
+            "USD",
+            BigDecimal.ONE,
+            BigDecimal.ONE,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            new BigDecimal("2")),
+        null,
+        null,
+        "{}");
   }
 
   private static ProviderRequest withAppendedMessage(ProviderRequest request, String text) {
     List<ProviderMessage> messages = new ArrayList<>(request.messages());
     messages.add(
         new ProviderMessage(ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock(text))));
-    return new ProviderRequest(request.model(), request.variant(), messages, request.tools());
+    return new ProviderRequest(
+        request.model(), request.variant(), messages, request.tools(), request.cacheControl());
   }
 
   private static String messageText(ProviderMessage message) {

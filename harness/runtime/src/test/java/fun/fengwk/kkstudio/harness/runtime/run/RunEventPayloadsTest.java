@@ -55,7 +55,7 @@ class RunEventPayloadsTest {
                 "map",
                 Map.of("key", "value"),
                 "record",
-                new ModelUsage(1, 2, 3, 4, 5),
+                new ModelUsage(1, 2, 3, 4, 5, 6, 21),
                 "attempt",
                 99,
                 "turnIndex",
@@ -73,7 +73,8 @@ class RunEventPayloadsTest {
     assertTrue(payload.get("boolean").booleanValue());
     assertEquals(NOW.toString(), payload.get("instant").textValue());
     assertEquals("value", payload.get("map").get("key").textValue());
-    assertEquals(5L, payload.get("record").get("reasoningTokens").longValue());
+    assertEquals(6L, payload.get("record").get("reasoningTokens").longValue());
+    assertEquals(21L, payload.get("record").get("providerTotalTokens").longValue());
   }
 
   /** key/value 不成对时必须在写 journal 前失败。 */
