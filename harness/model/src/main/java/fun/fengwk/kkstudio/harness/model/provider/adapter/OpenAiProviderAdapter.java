@@ -36,7 +36,7 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
   public ModelProvider create(ProviderDescriptor descriptor) {
     requireType(descriptor, providerType());
     boolean minimax = isMiniMaxEndpoint(descriptor.endpoint());
-    return new LangChainModelProvider() {
+    return new LangChainModelProvider(providerType()) {
       @Override
       protected StreamingChatModel chatModel(ProviderRequest request) {
         ProviderCacheControl control = prepareCacheControl(request);

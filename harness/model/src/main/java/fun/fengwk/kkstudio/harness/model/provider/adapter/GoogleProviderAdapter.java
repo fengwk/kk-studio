@@ -25,7 +25,7 @@ public final class GoogleProviderAdapter implements ProviderAdapter {
   @Override
   public ModelProvider create(ProviderDescriptor descriptor) {
     OpenAiProviderAdapter.requireType(descriptor, providerType());
-    return new LangChainModelProvider() {
+    return new LangChainModelProvider(providerType()) {
       @Override
       protected StreamingChatModel chatModel(ProviderRequest request) {
         // AUTOMATIC：忽略 cacheControl；harness 不发送任何 cached-content resource。
