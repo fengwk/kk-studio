@@ -14,6 +14,7 @@ flowchart TD
     A --> F[frontend-implementation-design.md<br/>前端实现]
     A --> G[agent-engine.md<br/>agent 内核]
     A --> H[harness-extensions.md<br/>Harness 扩展]
+    A --> I[prompt-cache-usage-cost.md<br/>Prompt Cache、Usage 与成本账本]
 ```
 
 ## 阅读顺序
@@ -27,6 +28,7 @@ flowchart TD
 | 5 | [frontend-implementation-design.md](frontend-implementation-design.md) | 路由、状态管理、测试边界 | 修改前端页面或 API 适配 |
 | 6 | [agent-engine.md](agent-engine.md) | `agent` 模块执行内核 | 深入运行时与事件语义 |
 | 7 | [harness-extensions.md](harness-extensions.md) | typed registry、hook 顺序、factory 与 lifecycle | 扩展 Harness 执行链 |
+| 8 | [prompt-cache-usage-cost.md](prompt-cache-usage-cost.md) | cache control、usage、pricing、ledger 与聚合 API | 修改模型调用计量与缓存链路 |
 
 ## 按主题索引
 
@@ -39,6 +41,7 @@ flowchart TD
 | 前端实现 | [frontend-implementation-design.md](frontend-implementation-design.md) |
 | agent 内核 | [agent-engine.md](agent-engine.md) |
 | Harness 扩展 | [harness-extensions.md](harness-extensions.md) |
+| Prompt Cache、Usage 与成本账本 | [prompt-cache-usage-cost.md](prompt-cache-usage-cost.md) |
 
 ## 维护规则
 
