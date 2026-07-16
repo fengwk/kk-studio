@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -7,6 +9,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiCreateDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiUpdateDTO;
@@ -17,6 +20,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 /**
  * {@link StudioComfyuiWorkflowApiController} 的端到端测试。
@@ -26,8 +30,9 @@ import org.springframework.test.web.servlet.MockMvc;
  * <ul>
  *   <li>CRUD 路由；
  *   <li>响应 DTO 中的 {@code id} 为十进制字符串形式；
- *   <li>路径参数非法（{@code not-a-number}）通过 global exception handler 转化为 4xx；
- *   <li>写入路径非法入参（空白 workflowJson / 非小写 apiName）通过 global exception handler 转化为 4xx。
+ *   <li>路径参数非法（{@code not-a-number}）通过 global exception handler 转化为 400；
+ *   <li>解析合法但数据库中找不到的 id → 404；
+ *   <li>写入路径非法入参（空白 workflowJson / 非小写 apiName）通过 global exception handler 转化为 400。
  * </ul>
  *
  * @author fengwk
@@ -62,64 +67,65 @@ public class StudioComfyuiWorkflowApiControllerTest {
     create.setDefaultSelector("$['3'].inputs.seed");
     create.setEnabled(true);
 
-    // 创建链路返回 Created + 全字段映射 + id 为十进制字符串。
-    mockMvc
-        .perform(
-            post("/api/comfyui/workflows")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(create)))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.id").exists())
-        .andExpect(jsonPath("$.data.id").isString())
-        .andExpect(jsonPath("$.data.apiName").value(apiName))
-        .andExpect(jsonPath("$.data.name").value("Demo"))
-        .andExpect(jsonPath("$.data.enabled").value(true))
-        .andExpect(jsonPath("$.data.createTime").exists())
-        .andExpect(jsonPath("$.data.updateTime").exists());
+    // 1) 创建：严格通过 ObjectMapper 解析响应并提取十进制字符串 id。
+    MvcResult createResult =
+        mockMvc
+            .perform(
+                post("/api/comfyui/workflows")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(create)))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.data.id").exists())
+            .andExpect(jsonPath("$.data.id").isString())
+            .andExpect(jsonPath("$.data.apiName").value(apiName))
+            .andExpect(jsonPath("$.data.name").value("Demo"))
+            .andExpect(jsonPath("$.data.enabled").value(true))
+            .andExpect(jsonPath("$.data.createTime").exists())
+            .andExpect(jsonPath("$.data.updateTime").exists())
+            .andReturn();
 
-    mockMvc
-        .perform(get("/api/comfyui/workflows").param("pageNumber", "1").param("pageSize", "100"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.results[?(@.apiName=='" + apiName + "')]").exists());
+    JsonNode dataNode =
+        objectMapper.readTree(createResult.getResponse().getContentAsString()).get("data");
+    assertNotNull(dataNode, "response must carry a data envelope");
+    JsonNode idNode = dataNode.get("id");
+    assertNotNull(idNode, "data.id must be present");
+    assertTrue(idNode.isTextual(), "data.id must be a string, was: " + idNode.getNodeType());
+    String idString = idNode.asText();
+    assertTrue(
+        idString.matches("\\d+"), "data.id must be a non-blank decimal string, was: " + idString);
+    assertTrue(Long.parseLong(idString) > 0, "data.id must be positive, was: " + idString);
 
-    ComfyuiWorkflowApiUpdateDTO update = new ComfyuiWorkflowApiUpdateDTO();
-    update.setName("Demo-renamed");
-    update.setWorkflowJson(WORKFLOW_JSON);
-    update.setInputBindingsJson("[]");
-    update.setDefaultSelector(null);
-    update.setEnabled(false);
+    try {
+      // 2) 列表：刚创建的资源必须出现在分页结果中。
+      mockMvc
+          .perform(get("/api/comfyui/workflows").param("pageNumber", "1").param("pageSize", "100"))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.data.results[?(@.id=='" + idString + "')]").exists());
 
-    // 通过 id 路径定位记录进行更新。
-    mockMvc
-        .perform(get("/api/comfyui/workflows"))
-        .andExpect(status().isOk())
-        .andDo(
-            result -> {
-              String body = result.getResponse().getContentAsString();
-              int idx = body.indexOf("\"apiName\":\"" + apiName + "\"");
-              if (idx < 0) {
-                return;
-              }
-              int idIdx = body.lastIndexOf("\"id\":", idx);
-              int idEnd = body.indexOf(',', idIdx);
-              if (idEnd < 0) {
-                return;
-              }
-              String idFragment = body.substring(idIdx, idEnd);
-              String idString = idFragment.replaceAll("[^0-9]", "");
-              mockMvc
-                  .perform(
-                      put("/api/comfyui/workflows/" + idString)
-                          .contentType(MediaType.APPLICATION_JSON)
-                          .content(objectMapper.writeValueAsString(update)))
-                  .andExpect(status().isOk())
-                  .andExpect(jsonPath("$.data.name").value("Demo-renamed"))
-                  .andExpect(jsonPath("$.data.enabled").value(false));
+      // 3) 更新：必须使用从创建响应里提取到的精确 id。
+      ComfyuiWorkflowApiUpdateDTO update = new ComfyuiWorkflowApiUpdateDTO();
+      update.setName("Demo-renamed");
+      update.setWorkflowJson(WORKFLOW_JSON);
+      update.setInputBindingsJson("[]");
+      update.setDefaultSelector(null);
+      update.setEnabled(false);
 
-              mockMvc
-                  .perform(delete("/api/comfyui/workflows/" + idString))
-                  .andExpect(status().isNoContent());
-            });
+      mockMvc
+          .perform(
+              put("/api/comfyui/workflows/" + idString)
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(objectMapper.writeValueAsString(update)))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.data.id").value(idString))
+          .andExpect(jsonPath("$.data.apiName").value(apiName))
+          .andExpect(jsonPath("$.data.name").value("Demo-renamed"))
+          .andExpect(jsonPath("$.data.enabled").value(false));
+    } finally {
+      // 4) 删除：精确 id，必须 204。
+      mockMvc
+          .perform(delete("/api/comfyui/workflows/" + idString))
+          .andExpect(status().isNoContent());
+    }
   }
 
   @Test
