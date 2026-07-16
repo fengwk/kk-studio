@@ -53,6 +53,16 @@ public class MysqlModelUsageRecordStore implements ModelUsageRecordStore {
     return mapper.listByRunId(runId).stream().map(this::toRecord).toList();
   }
 
+  @Override
+  public List<ModelUsageRecord> listBySessionId(long sessionId) {
+    return mapper.listBySessionId(sessionId).stream().map(this::toRecord).toList();
+  }
+
+  @Override
+  public List<ModelUsageRecord> listByModelResourceId(long modelResourceId) {
+    return mapper.listByModelResourceId(modelResourceId).stream().map(this::toRecord).toList();
+  }
+
   static ModelUsageRecordDO toDO(ModelUsageRecord record) {
     ModelUsageDraft draft = record.draft();
     ModelUsage usage = draft.usage();

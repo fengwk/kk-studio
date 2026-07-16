@@ -148,4 +148,18 @@ public interface ModelUsageRecordMapper extends BaseMapper {
   @Select("select " + COLUMNS + " from model_usage_record where run_id = #{runId} order by id asc")
   @ResultMap("modelUsageRecordResultMap")
   List<ModelUsageRecordDO> listByRunId(@Param("runId") long runId);
+
+  @Select(
+      "select "
+          + COLUMNS
+          + " from model_usage_record where session_id = #{sessionId} order by id asc")
+  @ResultMap("modelUsageRecordResultMap")
+  List<ModelUsageRecordDO> listBySessionId(@Param("sessionId") long sessionId);
+
+  @Select(
+      "select "
+          + COLUMNS
+          + " from model_usage_record where model_resource_id = #{modelResourceId} order by id asc")
+  @ResultMap("modelUsageRecordResultMap")
+  List<ModelUsageRecordDO> listByModelResourceId(@Param("modelResourceId") long modelResourceId);
 }
