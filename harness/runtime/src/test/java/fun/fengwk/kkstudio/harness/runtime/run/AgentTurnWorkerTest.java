@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapability;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheMode;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
@@ -53,6 +54,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.SessionStore;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageDraft;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
@@ -70,6 +72,7 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Queue;
 import java.util.Set;
@@ -128,16 +131,61 @@ class AgentTurnWorkerTest {
     assertEquals(0, completed.toolCallCount());
     assertEquals(ProviderStopReason.COMPLETED, completed.stopReason());
     assertAssistantThenTerminal(succeeded, succeeded.store.completeAt);
+    assertEquals(1, succeeded.store.completeCalls);
+    assertEquals(1, succeeded.store.usageDrafts.size());
 
     Fixture lostOwnership = new Fixture();
     lostOwnership.store.completeResult = false;
-    lostOwnership.providers.add(RecordingProvider.complete(response("ignored", List.of())));
+    RecordingProvider lostOwnershipProvider =
+        RecordingProvider.complete(response("ignored", List.of()));
+    lostOwnership.providers.add(lostOwnershipProvider);
 
     lostOwnership.worker().executeNext("worker-b").orElseThrow();
 
     assertTrue(observations(lostOwnership, AssistantCompleted.class).isEmpty());
     assertTrue(observations(lostOwnership, RunTerminated.class).isEmpty());
     assertEquals(RunStatus.RUNNING, lostOwnership.store.current.status());
+    assertEquals(1, lostOwnership.store.completeCalls);
+    assertEquals(1, lostOwnership.store.usageDrafts.size());
+    assertNotNull(lostOwnershipProvider.request);
+  }
+
+  /** Draft 成本不匹配时必须在事务边界之前失败，不能把未经核验的 usage 送入 ledger。 */
+  @Test
+  void rejectsCostMismatchBeforeTransaction() {
+    Fixture fixture = new Fixture();
+    fixture.overrideModel = pricedModel();
+    ModelUsage usage = new ModelUsage(1, 0, 0, 0, 0, 0, 1);
+    ModelCost mismatch =
+        new ModelCost(
+            "USD",
+            new BigDecimal("0.000002"),
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            new BigDecimal("0.000002"));
+    fixture.providers.add(
+        RecordingProvider.complete(
+            new ProviderResponse(
+                "answer",
+                "",
+                List.of(),
+                ProviderStopReason.COMPLETED,
+                usage,
+                mismatch,
+                null,
+                null,
+                "{}")));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.FAILED, fixture.store.current.status());
+    assertTrue(fixture.store.sessionMessages.isEmpty());
+    assertTrue(fixture.store.usageDrafts.isEmpty());
+    assertEquals(0, fixture.store.completeCalls);
+    assertEquals(0, fixture.store.prepareCalls);
   }
 
   /** complete cancel-wins：DB 返回 true 但不持久 Assistant，真实 status 是 CANCELLED；只发 RunTerminated。 */
@@ -179,15 +227,21 @@ class AgentTurnWorkerTest {
     assertEquals(1, completed.toolCallCount());
     assertEquals(ProviderStopReason.TOOL_CALLS, completed.stopReason());
     assertAssistantOnlyAfterPreparation(succeeded, succeeded.store.prepareAt);
+    assertEquals(1, succeeded.store.prepareCalls);
+    assertEquals(1, succeeded.store.usageDrafts.size());
 
     Fixture lostOwnership = toolFixture();
     lostOwnership.toolPreparation =
-        (run, assistant, calls, bindings, workdir, environmentRoot, events, now) -> false;
+        (run, assistant, usageDraft, calls, bindings, workdir, environmentRoot, events, now) -> {
+          lostOwnership.store.usageDrafts.add(usageDraft);
+          return false;
+        };
 
     lostOwnership.worker().executeNext("worker-b").orElseThrow();
 
     assertTrue(observations(lostOwnership, AssistantCompleted.class).isEmpty());
     assertEquals(RunStatus.RUNNING, lostOwnership.store.current.status());
+    assertEquals(1, lostOwnership.store.usageDrafts.size());
   }
 
   /** prepare cancel-wins：DB 返回 true 但不持久 Assistant、不进入 WAITING_TOOLS；只发 RunTerminated。 */
@@ -426,7 +480,15 @@ class AgentTurnWorkerTest {
     fixture.tools = List.of(tool());
     List<String> barrier = new ArrayList<>();
     fixture.toolPreparation =
-        (run, assistant, calls, bindings, workdir, environmentRoot, assistantEvents, now) -> {
+        (run,
+            assistant,
+            usageDraft,
+            calls,
+            bindings,
+            workdir,
+            environmentRoot,
+            assistantEvents,
+            now) -> {
           fixture.store.sessionMessages.add(assistant);
           barrier.add("assistant");
           barrier.add("prepare:" + calls.get(0).id());
@@ -476,7 +538,15 @@ class AgentTurnWorkerTest {
                 "", List.of(new ProviderToolCall("call-1", "read", "{\"path\":\"README.md\"}")))));
     fixture.tools = List.of(tool());
     fixture.toolPreparation =
-        (run, assistant, calls, bindings, workdir, environmentRoot, assistantEvents, now) -> {
+        (run,
+            assistant,
+            usageDraft,
+            calls,
+            bindings,
+            workdir,
+            environmentRoot,
+            assistantEvents,
+            now) -> {
           throw new IllegalArgumentException("interceptor rejected call");
         };
 
@@ -508,7 +578,15 @@ class AgentTurnWorkerTest {
                 "", List.of(new ProviderToolCall("call-1", "read", "{\"path\":\"README.md\"}")))));
     fixture.tools = List.of(tool());
     fixture.toolPreparation =
-        (run, assistant, calls, bindings, workdir, environmentRoot, assistantEvents, now) -> {
+        (run,
+            assistant,
+            usageDraft,
+            calls,
+            bindings,
+            workdir,
+            environmentRoot,
+            assistantEvents,
+            now) -> {
           throw new IllegalStateException("database unavailable");
         };
 
@@ -801,6 +879,7 @@ class AgentTurnWorkerTest {
           kind == ProviderErrorKind.CANCELLED ? RunStatus.CANCELLED : RunStatus.FAILED,
           fixture.store.current.status());
       assertTrue(fixture.store.sessionMessages.isEmpty());
+      assertTrue(fixture.store.usageDrafts.isEmpty());
       assertRunTermination(
           fixture, kind == ProviderErrorKind.CANCELLED ? RunStatus.CANCELLED : RunStatus.FAILED);
     }
@@ -1051,6 +1130,37 @@ class AgentTurnWorkerTest {
     assertThrows(IllegalArgumentException.class, () -> fixture.worker().executeNext(" "));
   }
 
+  /** usage draft 必须携带 extension 修改后的最终 model identity 与 finalizer 生成的 cache control。 */
+  @Test
+  void carriesFinalExtensionRequestFactsIntoUsageDraft() {
+    Fixture fixture = new Fixture();
+    fixture.providers.add(RecordingProvider.complete(response("answer", List.of())));
+    fixture.providerRequestInterceptors =
+        new ProviderRequestInterceptorChain(
+            List.of(
+                request ->
+                    new ProviderRequest(
+                        modifiedAffinityModel(),
+                        request.variant(),
+                        request.messages(),
+                        request.tools(),
+                        ProviderCacheControl.affinity(
+                            PromptCacheRetention.LONG, "extension-forged-key"))));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    ModelUsageDraft draft = fixture.store.usageDrafts.get(0);
+    assertEquals(301L, draft.providerResourceId());
+    assertEquals(302L, draft.modelResourceId());
+    assertEquals(ProviderType.GOOGLE, draft.providerType());
+    assertEquals("gemini-final", draft.providerModelId());
+    assertEquals(PromptCacheMode.AFFINITY, draft.promptCacheMode());
+    assertEquals(PromptCacheRetention.SHORT, draft.promptCacheRetention());
+    assertTrue(draft.cacheEligible());
+    assertTrue(draft.cacheAffinityKey().startsWith("pc1-"));
+    assertTrue(!draft.cacheAffinityKey().equals("extension-forged-key"));
+  }
+
   /**
    * Host hook 伪造 breakpoints control 必须被 finalizer 覆盖；Worker 不把 sessionId 写到
    * ProviderRequest，Provider 看到的 control 完全来自 finalizer。
@@ -1221,6 +1331,35 @@ class AgentTurnWorkerTest {
             PromptCacheRetention.SHORT));
   }
 
+  /** 非零 input 单价模型，用于验证 Worker 在事务前拒绝错误 cost。 */
+  private static ModelDescriptor pricedModel() {
+    ModelVariant variant = new ModelVariant("default", null, null, null, null, List.of());
+    return new ModelDescriptor(
+        1L,
+        2L,
+        ProviderType.OPENAI,
+        "model",
+        "Model",
+        1024,
+        256,
+        Set.of(ModelInputModality.TEXT),
+        Set.of(ModelCapability.TEXT),
+        List.of(variant),
+        new ModelPricing(
+            "USD",
+            "tier-1",
+            "default",
+            BigDecimal.ONE,
+            "v1",
+            BigDecimal.ONE,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO),
+        PromptCachePolicy.disabled());
+  }
+
   /** AFFINITY capability：所有调用都必须覆盖 extension 伪造的 control 并派生 affinity key。 */
   private static ModelDescriptor affinityModel() {
     ModelVariant variant = new ModelVariant("default", null, null, null, null, List.of());
@@ -1250,6 +1389,23 @@ class AgentTurnWorkerTest {
         new PromptCachePolicy(
             PromptCacheCapability.affinity(EnumSet.of(PromptCacheRetention.SHORT)),
             PromptCacheRetention.SHORT));
+  }
+
+  private static ModelDescriptor modifiedAffinityModel() {
+    ModelDescriptor base = affinityModel();
+    return new ModelDescriptor(
+        301L,
+        302L,
+        ProviderType.GOOGLE,
+        "gemini-final",
+        "Final Model",
+        base.contextWindow(),
+        base.maxOutputTokens(),
+        base.inputModalities(),
+        base.capabilities(),
+        base.variants(),
+        base.pricing(),
+        base.promptCachePolicy());
   }
 
   private static Fixture toolFixture() {
@@ -1577,12 +1733,15 @@ class AgentTurnWorkerTest {
     private long eventId = 100;
     private final List<RunEvent> events = new ArrayList<>();
     private final List<MessageEntryPayload> sessionMessages = new ArrayList<>();
+    private final List<ModelUsageDraft> usageDrafts = new ArrayList<>();
     private final List<CompactionEntryPayload> compactions = new ArrayList<>();
     private final List<String> operations = new ArrayList<>();
     private final List<String> boundaryOperations;
     private boolean steeringBlocked;
     private String leaseOverride;
     private int terminateCalls;
+    private int completeCalls;
+    private int prepareCalls;
     private boolean completeResult = true;
     private boolean compactResult = true;
     private boolean terminateResult = true;
@@ -1766,8 +1925,11 @@ class AgentTurnWorkerTest {
     public synchronized boolean complete(
         AgentRun claimedRun,
         MessageEntryPayload assistant,
+        ModelUsageDraft usageDraft,
         RunEventDraft assistantCompleted,
         Instant now) {
+      usageDrafts.add(Objects.requireNonNull(usageDraft, "usageDraft"));
+      completeCalls++;
       completeAt = now;
       if (!owned(claimedRun) || !completeResult) {
         return false;
@@ -1836,12 +1998,15 @@ class AgentTurnWorkerTest {
     private synchronized boolean prepare(
         AgentRun claimedRun,
         MessageEntryPayload assistant,
+        ModelUsageDraft usageDraft,
         List<ToolCall> calls,
         List<ToolBinding> bindings,
         Path workdir,
         Path environmentRoot,
         List<RunEventDraft> barrierEvents,
         Instant now) {
+      usageDrafts.add(Objects.requireNonNull(usageDraft, "usageDraft"));
+      prepareCalls++;
       prepareAt = now;
       if (!owned(claimedRun)) {
         return false;

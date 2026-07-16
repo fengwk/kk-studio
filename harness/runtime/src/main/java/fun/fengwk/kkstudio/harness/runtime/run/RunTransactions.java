@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.run;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageDraft;
 import java.time.Instant;
 import java.util.List;
 
@@ -19,11 +20,13 @@ public interface RunTransactions {
 
   /**
    * Assistant Entry、终态选择与 activeRunId 清理一次提交。 {@code assistantCompleted} 必须严格为一个
-   * ASSISTANT_COMPLETED event。 实现自行决定 RUN_COMPLETED / RUN_REQUEUED 并追加对应 event。
+   * ASSISTANT_COMPLETED event；{@code usageDraft} 必须是已通过校验的非空 usage ledger 快照。 实现自行决定 RUN_COMPLETED
+   * / RUN_REQUEUED 并追加对应 event。
    */
   boolean complete(
       AgentRun claimedRun,
       MessageEntryPayload assistant,
+      ModelUsageDraft usageDraft,
       RunEventDraft assistantCompleted,
       Instant now);
 
