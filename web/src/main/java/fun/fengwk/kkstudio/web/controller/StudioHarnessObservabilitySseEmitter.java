@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits.requireNonNegativeCursor;
+
 import fun.fengwk.kkstudio.core.harness.observability.service.HarnessObservabilityQueryService;
 import fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits;
 import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
@@ -57,6 +59,7 @@ public class StudioHarnessObservabilitySseEmitter {
 
   public SseEmitter openRunStream(String runId, long afterSequence, Long idleTimeoutMillis) {
     long parsedRunId = HarnessIds.parsePositive(runId, "runId");
+    requireNonNegativeCursor(afterSequence, "afterSequence");
     if (runStore.find(parsedRunId).isEmpty()) {
       throw new IllegalArgumentException("unknown run: " + runId);
     }
@@ -71,6 +74,7 @@ public class StudioHarnessObservabilitySseEmitter {
   public SseEmitter openRootActivityStream(
       String sessionId, long afterEventId, Long idleTimeoutMillis) {
     long parsedSessionId = HarnessIds.parsePositive(sessionId, "sessionId");
+    requireNonNegativeCursor(afterEventId, "afterEventId");
     var sessionRow = sessionMapper.find(parsedSessionId);
     if (sessionRow == null) {
       throw new IllegalArgumentException("unknown session: " + sessionId);

@@ -53,6 +53,7 @@ import fun.fengwk.kkstudio.share.model.ToolArtifactRefDTO;
 import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
 import java.math.BigDecimal;
 import java.nio.file.Path;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -99,7 +100,6 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     jdbc.update("delete from harness_run");
     jdbc.update("delete from harness_session_entry");
     jdbc.update("delete from harness_session");
-    jdbc.update("delete from agent_definition");
   }
 
   /**
@@ -271,8 +271,8 @@ class HarnessObservabilityQueryServiceIntegrationTest {
         30000L,
         "SUCCEEDED",
         reportJson,
-        java.sql.Timestamp.from(NOW),
-        java.sql.Timestamp.from(NOW.plusSeconds(1)));
+        Timestamp.from(NOW),
+        Timestamp.from(NOW.plusSeconds(1)));
 
     List<SubagentTaskDTO> tasks = service.listSessionTasks(Long.toString(root.sessionId));
     assertEquals(1, tasks.size());
@@ -300,6 +300,34 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     assertEquals("11", artifact.getArtifactId());
     assertEquals("text/plain", artifact.getMediaType());
     assertEquals(4L, artifact.getSizeBytes());
+  }
+
+  /** Non-empty malformed report_json must throw IllegalStateException, not silently return null. */
+  @Test
+  void malformedReportJsonThrowsIllegalStateException() {
+    long sessionId = sessionIds.newSessionId();
+    sessionStore.create(Session.root(sessionId, null, "corrupted-report", false, NOW));
+    jdbc.update(
+        "insert into harness_subagent_task"
+            + " (parent_invocation_id, parent_session_id, child_session_id, child_run_id,"
+            + " target_agent, working_copy_policy, working_copy_revision, max_turns,"
+            + " idle_timeout_millis, status, report_json, gmt_create, gmt_modified) values"
+            + " (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        runIds.newRunEventId(),
+        sessionId,
+        sessionIds.newSessionId(),
+        runIds.newRunId(),
+        "Child",
+        "FORK",
+        "rev-1",
+        5,
+        30000L,
+        "PENDING",
+        "{not-json}",
+        Timestamp.from(NOW),
+        Timestamp.from(NOW));
+    assertThrows(
+        IllegalStateException.class, () -> service.listSessionTasks(Long.toString(sessionId)));
   }
 
   /** Artifact resolution returns raw bytes; illegal ids throw IllegalArgumentException (400). */

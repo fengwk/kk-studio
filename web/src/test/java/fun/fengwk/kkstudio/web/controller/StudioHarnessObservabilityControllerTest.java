@@ -21,6 +21,9 @@ import fun.fengwk.kkstudio.core.harness.run.store.SnowflakeRunIdGenerator;
 import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
 import fun.fengwk.kkstudio.core.harness.session.store.SnowflakeSessionIdGenerator;
 import fun.fengwk.kkstudio.core.harness.tool.worker.DatabaseArtifactStore;
+import fun.fengwk.kkstudio.harness.model.ModelCost;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.run.AgentRun;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventPayloads;
@@ -46,6 +49,7 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 import fun.fengwk.kkstudio.web.WebTestApplication;
 import java.math.BigDecimal;
 import java.nio.file.Path;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -69,7 +73,9 @@ import org.springframework.test.web.servlet.MvcResult;
  * is used.
  */
 @AutoConfigureMockMvc
-@SpringBootTest(classes = WebTestApplication.class)
+@SpringBootTest(
+    classes = WebTestApplication.class,
+    properties = "kk-studio.harness.runtime.workers-enabled=false")
 class StudioHarnessObservabilityControllerTest {
 
   private static final Instant NOW = Instant.parse("2026-07-16T00:00:00Z");
@@ -213,8 +219,8 @@ class StudioHarnessObservabilityControllerTest {
         15000L,
         "SUCCEEDED",
         "{\"finalReport\":\"done\",\"turnCount\":2}",
-        java.sql.Timestamp.from(NOW),
-        java.sql.Timestamp.from(NOW.plusSeconds(1)));
+        Timestamp.from(NOW),
+        Timestamp.from(NOW.plusSeconds(1)));
 
     mockMvc
         .perform(get("/api/sessions/{id}/tasks", seed.rootSessionId))
@@ -387,6 +393,33 @@ class StudioHarnessObservabilityControllerTest {
     assertTrue(fromZero.contains("id:" + secondEventId), fromZero);
   }
 
+  /**
+   * {@code Last-Event-ID} alone (no query param) must resume the Run SSE cursor: header=1 emits
+   * only sequence 2.
+   */
+  @Test
+  void lastEventIdAloneResumesRunStreamFromCursor() throws Exception {
+    Seed seed = seedRun("sse-last-event");
+    forceRunTerminal(seed.run.id());
+
+    MvcResult streamResult =
+        mockMvc
+            .perform(
+                get("/api/runs/{id}/events/stream", seed.run.id())
+                    .accept(MediaType.TEXT_EVENT_STREAM)
+                    .header("Last-Event-ID", "1")
+                    .param("idleTimeoutMillis", "60"))
+            .andExpect(request().asyncStarted())
+            .andReturn();
+    MvcResult dispatched =
+        mockMvc.perform(asyncDispatch(streamResult)).andExpect(status().isOk()).andReturn();
+    String body = dispatched.getResponse().getContentAsString();
+    // Sequence 1 must NOT be re-emitted because Last-Event-ID = 1 advances past it.
+    assertEquals(0, countSubstring(body, "id:1"));
+    // Sequence 2 must be emitted.
+    assertTrue(body.contains("id:2"), body);
+  }
+
   // ---------------- helpers ----------------
 
   private static int countSubstring(String haystack, String needle) {
@@ -469,7 +502,7 @@ class StudioHarnessObservabilityControllerTest {
     jdbc.update(
         "update harness_run set status = 'SUCCEEDED', finished_at = ?, lease_owner = null,"
             + " lease_until = null where id = ?",
-        java.sql.Timestamp.from(NOW.plusSeconds(10)),
+        Timestamp.from(NOW.plusSeconds(10)),
         runId);
   }
 
@@ -492,9 +525,9 @@ class StudioHarnessObservabilityControllerTest {
     return new MessageEntryPayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, contents),
         new AssistantMessageMetadata(
-            fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason.TOOL_CALLS,
-            new fun.fengwk.kkstudio.harness.model.ModelUsage(1, 1, 0, 0, 0, 0, 2),
-            new fun.fengwk.kkstudio.harness.model.ModelCost(
+            ProviderStopReason.TOOL_CALLS,
+            new ModelUsage(1, 1, 0, 0, 0, 0, 2),
+            new ModelCost(
                 "USD",
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,

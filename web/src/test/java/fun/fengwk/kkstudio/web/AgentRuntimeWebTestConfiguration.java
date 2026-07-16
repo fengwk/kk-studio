@@ -1,17 +1,15 @@
 package fun.fengwk.kkstudio.web;
 
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
-
 import fun.fengwk.kkstudio.agent.provider.ProviderInfo;
 import fun.fengwk.kkstudio.agent.provider.ProviderManager;
 import fun.fengwk.kkstudio.agent.provider.ProviderType;
 import fun.fengwk.kkstudio.core.agent.runtime.provider.AgentProviderInfoResolver;
 import fun.fengwk.kkstudio.web.testing.StubProviderManager;
-
 import java.time.Duration;
 import java.util.concurrent.Executor;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 /**
  * @author fengwk

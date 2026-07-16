@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.core.harness.observability.service.impl;
 
-import static fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits.DEFAULT_LIMIT;
 import static fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits.normalizeLimit;
 import static fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits.requireNonNegativeCursor;
 
@@ -59,7 +58,7 @@ public class HarnessObservabilityQueryServiceImpl implements HarnessObservabilit
   public List<RunEventDTO> listRunEvents(String runId, long afterSequence, int limit) {
     long parsedRunId = HarnessIds.parsePositive(runId, "runId");
     requireNonNegativeCursor(afterSequence, "afterSequence");
-    int boundedLimit = normalizeLimit(limit, DEFAULT_LIMIT);
+    int boundedLimit = normalizeLimit(limit);
     if (runStore.find(parsedRunId).isEmpty()) {
       throw new IllegalArgumentException("unknown run: " + runId);
     }
@@ -72,7 +71,7 @@ public class HarnessObservabilityQueryServiceImpl implements HarnessObservabilit
   public List<RootActivityDTO> listRootActivities(String sessionId, long afterEventId, int limit) {
     long parsedSessionId = HarnessIds.parsePositive(sessionId, "sessionId");
     requireNonNegativeCursor(afterEventId, "afterEventId");
-    int boundedLimit = normalizeLimit(limit, DEFAULT_LIMIT);
+    int boundedLimit = normalizeLimit(limit);
     Long rootSessionId = resolveRootSessionId(parsedSessionId);
     if (rootSessionId == null) {
       throw new IllegalArgumentException("unknown session: " + sessionId);
