@@ -15,7 +15,11 @@ import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheBreakpoint;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCachePolicy;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
@@ -63,6 +67,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -1046,6 +1051,232 @@ class AgentTurnWorkerTest {
     assertThrows(IllegalArgumentException.class, () -> fixture.worker().executeNext(" "));
   }
 
+  /**
+   * Host hook 伪造 breakpoints control 必须被 finalizer 覆盖；Worker 不把 sessionId 写到
+   * ProviderRequest，Provider 看到的 control 完全来自 finalizer。
+   */
+  @Test
+  void finalizerOverridesHostHookForgedControlForAffinityPolicy() {
+    Fixture fixture = new Fixture();
+    fixture.overrideModel = affinityModel();
+    RecordingProvider provider = RecordingProvider.complete(response("answer", List.of()));
+    fixture.providers.add(provider);
+    fixture.providerRequestInterceptors =
+        new ProviderRequestInterceptorChain(
+            List.of(
+                request ->
+                    new ProviderRequest(
+                        request.model(),
+                        request.variant(),
+                        request.messages(),
+                        request.tools(),
+                        // 伪造的 BREAKPOINTS 期望被 finalizer 完全覆盖；AFFINITY 模式
+                        // breakpoints 必须为 empty。
+                        ProviderCacheControl.breakpoints(
+                            PromptCacheRetention.LONG,
+                            "pc1-forged",
+                            EnumSet.of(PromptCacheBreakpoint.TOOLS)))));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    ProviderCacheControl resolved = provider.request.cacheControl();
+    assertEquals(PromptCacheRetention.SHORT, resolved.retention());
+    assertTrue(resolved.breakpoints().isEmpty());
+    assertTrue(resolved.affinityKey().startsWith("pc1-"));
+    assertTrue(!resolved.affinityKey().equals("pc1-forged"));
+  }
+
+  /**
+   * BREAKPOINTS 模式 + leading system 存在：finalizer 派生 SYSTEM breakpoint，且 affinity key
+   * 仍然必须基于修改后的前缀派生。FixedSessionStore 内置 systemPrompt="system"，不需要额外注入。
+   */
+  @Test
+  void breakpointsFinalizerIntersectsSystemWhenLeadingSystemPresent() {
+    Fixture fixture = new Fixture();
+    fixture.overrideModel = breakpointsModel();
+    RecordingProvider provider = RecordingProvider.complete(response("answer", List.of()));
+    fixture.providers.add(provider);
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    ProviderCacheControl resolved = provider.request.cacheControl();
+    assertEquals(PromptCacheRetention.SHORT, resolved.retention());
+    assertEquals(EnumSet.of(PromptCacheBreakpoint.SYSTEM), resolved.breakpoints());
+    assertTrue(resolved.affinityKey().startsWith("pc1-"));
+  }
+
+  /**
+   * BREAKPOINTS 模式 + capability 仅声明 TOOLS：leading system 即使存在也不进入 breakpoints。 同时验证 extension 伪造的
+   * cacheControl 被丢弃，finalizer 派生的是 key。
+   */
+  @Test
+  void breakpointsFinalizerDropsUnsupportedCapabilityBreakpoint() {
+    Fixture fixture = new Fixture();
+    fixture.overrideModel = breakpointsOnlyToolsModel();
+    fixture.tools = List.of(tool());
+    RecordingProvider provider = RecordingProvider.complete(response("answer", List.of()));
+    fixture.providers.add(provider);
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    ProviderCacheControl resolved = provider.request.cacheControl();
+    assertEquals(PromptCacheRetention.SHORT, resolved.retention());
+    // capability 不声明 SYSTEM；leading SYSTEM 即使存在也不能进入 breakpoints。
+    assertFalse(resolved.breakpoints().contains(PromptCacheBreakpoint.SYSTEM));
+    assertEquals(EnumSet.of(PromptCacheBreakpoint.TOOLS), resolved.breakpoints());
+    assertTrue(resolved.affinityKey().startsWith("pc1-"));
+  }
+
+  /**
+   * BREAKPOINTS 模式 + capability 同时允许 SYSTEM/TOOLS 但请求既无 leading system 也无 tools： 编辑过的 session 把
+   * SYSTEM 删除后 finalizer 必须降级 none()；extension 伪造的 control 必须被丢弃。
+   */
+  @Test
+  void breakpointsFinalizerReturnsNoneWhenNoValidBreakpoint() {
+    Fixture fixture = new Fixture();
+    fixture.overrideModel = breakpointsModel();
+    RecordingProvider provider = RecordingProvider.complete(response("answer", List.of()));
+    fixture.providers.add(provider);
+    fixture.providerRequestInterceptors =
+        new ProviderRequestInterceptorChain(
+            List.of(
+                request ->
+                    new ProviderRequest(
+                        request.model(),
+                        request.variant(),
+                        // 移除 SYSTEM message 并清空 tools。
+                        List.of(),
+                        List.of(),
+                        ProviderCacheControl.affinity(
+                            PromptCacheRetention.LONG, "pc1-extension-forged"))));
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    ProviderCacheControl resolved = provider.request.cacheControl();
+    assertEquals(PromptCacheRetention.NONE, resolved.retention());
+  }
+
+  /** finalizer 抛错必须经 Provider 流失败路径进入 Worker durable FAILED；该测试覆盖 "失败仍走现有 durable failure" 的验收点。 */
+  @Test
+  void finalizerFailurePropagatesAsDurableRunFailure() {
+    Fixture fixture = new Fixture();
+    fixture.overrideModel = affinityModel();
+    fixture.providers.add(
+        RecordingProvider.fail(
+            new ProviderException(ProviderErrorKind.INVALID_REQUEST, "finalizer failure")));
+    // 在 Host chain 之后放 finalizer，让 finalizer 抛错以模拟真实 finalizer 失败场景。
+    fixture.providerRequestInterceptors =
+        new ProviderRequestInterceptorChain(List.of(request -> request))
+            .andThen(
+                request -> {
+                  throw new IllegalStateException("finalizer boom");
+                });
+
+    fixture.worker().executeNext("worker-a").orElseThrow();
+
+    assertEquals(RunStatus.FAILED, fixture.store.current.status());
+    assertTrue(
+        observations(fixture, HarnessLifecycleObservation.RunTerminated.class).isEmpty()
+            || observations(fixture, HarnessLifecycleObservation.RunTerminated.class).stream()
+                .noneMatch(t -> t.status() == RunStatus.SUCCEEDED));
+  }
+
+  /** BREAKPOINTS capability：SYSTEM + TOOLS 全支持，用于验证 intersection & 派生 key。 */
+  private static ModelDescriptor breakpointsModel() {
+    ModelVariant variant = new ModelVariant("default", null, null, null, null, List.of());
+    return new ModelDescriptor(
+        1L,
+        2L,
+        ProviderType.OPENAI,
+        "model",
+        "Model",
+        1024,
+        256,
+        Set.of(ModelInputModality.TEXT),
+        Set.of(ModelCapability.TEXT),
+        List.of(variant),
+        new ModelPricing(
+            "USD",
+            "tier-1",
+            "default",
+            BigDecimal.ONE,
+            "v1",
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO),
+        new PromptCachePolicy(
+            PromptCacheCapability.breakpoints(
+                EnumSet.of(PromptCacheRetention.SHORT),
+                EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
+            PromptCacheRetention.SHORT));
+  }
+
+  /** BREAKPOINTS capability：仅支持 TOOLS，验证 unsupported breakpoint 被 finalizer 剔除。 */
+  private static ModelDescriptor breakpointsOnlyToolsModel() {
+    ModelVariant variant = new ModelVariant("default", null, null, null, null, List.of());
+    return new ModelDescriptor(
+        1L,
+        2L,
+        ProviderType.OPENAI,
+        "model",
+        "Model",
+        1024,
+        256,
+        Set.of(ModelInputModality.TEXT),
+        Set.of(ModelCapability.TEXT),
+        List.of(variant),
+        new ModelPricing(
+            "USD",
+            "tier-1",
+            "default",
+            BigDecimal.ONE,
+            "v1",
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO),
+        new PromptCachePolicy(
+            PromptCacheCapability.breakpoints(
+                EnumSet.of(PromptCacheRetention.SHORT), EnumSet.of(PromptCacheBreakpoint.TOOLS)),
+            PromptCacheRetention.SHORT));
+  }
+
+  /** AFFINITY capability：所有调用都必须覆盖 extension 伪造的 control 并派生 affinity key。 */
+  private static ModelDescriptor affinityModel() {
+    ModelVariant variant = new ModelVariant("default", null, null, null, null, List.of());
+    return new ModelDescriptor(
+        1L,
+        2L,
+        ProviderType.OPENAI,
+        "model",
+        "Model",
+        1024,
+        256,
+        Set.of(ModelInputModality.TEXT),
+        Set.of(ModelCapability.TEXT),
+        List.of(variant),
+        new ModelPricing(
+            "USD",
+            "tier-1",
+            "default",
+            BigDecimal.ONE,
+            "v1",
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO),
+        new PromptCachePolicy(
+            PromptCacheCapability.affinity(EnumSet.of(PromptCacheRetention.SHORT)),
+            PromptCacheRetention.SHORT));
+  }
+
   private static Fixture toolFixture() {
     Fixture fixture = new Fixture();
     fixture.providers.add(
@@ -1244,6 +1475,10 @@ class AgentTurnWorkerTest {
     private CompactionService compaction = (sessionId, context) -> Optional.empty();
     private RunWorkerConfig workerConfig = RunWorkerConfig.DEFAULT;
     private RuntimeException resourceFailure;
+
+    /** 允许特定测试覆写当前 Run 解析出的 Model 描述（policy 等），不依赖默认 resources(...)。 */
+    private ModelDescriptor overrideModel;
+
     private ProviderRequestInterceptorChain providerRequestInterceptors =
         new ProviderRequestInterceptorChain(List.of());
     private final List<HarnessLifecycleObservation> observations = new ArrayList<>();
@@ -1263,6 +1498,18 @@ class AgentTurnWorkerTest {
               throw resourceFailure;
             }
             boundaryOperations.add("provider");
+            if (overrideModel != null) {
+              ModelDescriptor model = overrideModel;
+              overrideModel = null; // consume once
+              ModelVariant variant = new ModelVariant("default", null, null, null, null, List.of());
+              return new TurnResources(
+                  providers.remove(),
+                  model,
+                  variant,
+                  tools.stream().map(ToolBinding::of).toList(),
+                  Path.of("/environment"),
+                  Path.of("/environment"));
+            }
             return resources(providers.remove(), tools);
           },
           compaction,
