@@ -36,6 +36,11 @@ convention:
     # 测试固定 worker id，避免依赖外部 worker id 分配服务
     worker-id: 0
 
+kk-studio:
+  harness:
+    runtime:
+      workers-enabled: false
+
 kk-circle:
   ai:
     image:

@@ -6,6 +6,7 @@ import java.util.Objects;
 /** Turn worker 的持久恢复与批处理参数。 */
 public record RunWorkerConfig(
     Duration leaseDuration,
+    Duration heartbeatInterval,
     Duration deltaFlushInterval,
     int deltaBatchBytes,
     int maxAttempts,
@@ -13,12 +14,36 @@ public record RunWorkerConfig(
 
   public static final RunWorkerConfig DEFAULT =
       new RunWorkerConfig(
-          Duration.ofSeconds(30), Duration.ofMillis(150), 8 * 1024, 3, Duration.ofSeconds(1));
+          Duration.ofSeconds(30),
+          Duration.ofSeconds(10),
+          Duration.ofMillis(150),
+          8 * 1024,
+          3,
+          Duration.ofSeconds(1));
+
+  public RunWorkerConfig(
+      Duration leaseDuration,
+      Duration deltaFlushInterval,
+      int deltaBatchBytes,
+      int maxAttempts,
+      Duration retryBaseDelay) {
+    this(
+        leaseDuration,
+        Objects.requireNonNull(leaseDuration, "leaseDuration").dividedBy(3),
+        deltaFlushInterval,
+        deltaBatchBytes,
+        maxAttempts,
+        retryBaseDelay);
+  }
 
   public RunWorkerConfig {
     leaseDuration = positive(leaseDuration, "leaseDuration");
+    heartbeatInterval = positive(heartbeatInterval, "heartbeatInterval");
     deltaFlushInterval = positive(deltaFlushInterval, "deltaFlushInterval");
     retryBaseDelay = positive(retryBaseDelay, "retryBaseDelay");
+    if (heartbeatInterval.compareTo(leaseDuration) >= 0) {
+      throw new IllegalArgumentException("heartbeatInterval must be shorter than leaseDuration");
+    }
     if (deltaFlushInterval.compareTo(Duration.ofMillis(100)) < 0
         || deltaFlushInterval.compareTo(Duration.ofMillis(250)) > 0) {
       throw new IllegalArgumentException("deltaFlushInterval must be between 100ms and 250ms");

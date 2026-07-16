@@ -104,6 +104,21 @@ public final class CloudToolWorker {
     return claimed;
   }
 
+  /**
+   * Process lifecycle gate: durable polling does not claim another tool while one handle is active.
+   */
+  public boolean hasActiveExecution() {
+    return !executions.isEmpty();
+  }
+
+  /**
+   * Stops process-local handles without changing durable invocation state; lease recovery stays in
+   * DB.
+   */
+  public void stop() {
+    executions.values().forEach(Execution::abandon);
+  }
+
   private void dispatch(ClaimedToolInvocation claimed) {
     ToolInvocation invocation = claimed.invocation();
     if (!supportedTarget(invocation)) {
@@ -430,6 +445,17 @@ public final class CloudToolWorker {
     private String afterInterceptorFailure(RuntimeException error) {
       String message = error.getMessage();
       return message == null || message.isBlank() ? "afterToolCall interceptor failed." : message;
+    }
+
+    private void abandon() {
+      synchronized (this) {
+        if (terminal) {
+          return;
+        }
+        terminal = true;
+      }
+      cancelHandle();
+      stop();
     }
 
     private synchronized void cancelHandle() {

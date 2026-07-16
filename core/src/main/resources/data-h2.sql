@@ -12,8 +12,8 @@ merge into agent_model (
     gmt_create, gmt_modified, version
 ) key (id) values (
     1, 1, 'acceptance-stub',
-    'Local deterministic model for development and acceptance tests.', '[]',
-    '{"variants":[{"name":"default","temperature":0.2,"maxOutputTokens":4096}]}',
+    'Local deterministic model for development and acceptance tests.', '["TEXT","TOOLS"]',
+    '{"contextWindow":32768,"maxOutputTokens":4096,"inputModalities":["TEXT"],"variants":[{"name":"default","temperature":0.2,"maxOutputTokens":4096}],"pricing":{"currency":"USD","pricingTier":"acceptance","serviceTier":"default","serviceTierMultiplier":1,"version":"acceptance-v1","inputPerMillionTokens":0,"outputPerMillionTokens":0,"cacheReadPerMillionTokens":0,"cacheWritePerMillionTokens":0,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0}}',
     current_timestamp(), current_timestamp(), 0
 );
 

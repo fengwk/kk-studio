@@ -87,6 +87,21 @@ class CloudToolWorkerTest {
     assertToolCompletion(fixture, ToolInvocationStatus.SUCCEEDED, null);
   }
 
+  /** Process stop cancels only the local handle and leaves durable recovery to the lease. */
+  @Test
+  void stopsActiveExecutionWithoutForgingTerminalState() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+
+    fixture.worker.executeNext("worker-a");
+    assertTrue(fixture.worker.hasActiveExecution());
+
+    fixture.worker.stop();
+
+    assertTrue(fixture.tool.handle.cancelled);
+    assertFalse(fixture.worker.hasActiveExecution());
+    assertEquals(0, fixture.transactions.terminateCalls);
+  }
+
   /** 最终结果在 durable terminate 前经过 after hook，且 hook 收到冻结 Tool 的准确 binding/call。 */
   @Test
   void transformsSuccessfulFinalResultBeforePersistence() throws Exception {

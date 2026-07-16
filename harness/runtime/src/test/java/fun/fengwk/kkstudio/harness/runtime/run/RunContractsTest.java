@@ -82,6 +82,17 @@ class RunContractsTest {
     RunWorkerConfig config = RunWorkerConfig.DEFAULT;
     assertEquals(Duration.ofSeconds(1), config.backoffForAttempt(1));
     assertEquals(Duration.ofSeconds(4), config.backoffForAttempt(3));
+    assertEquals(Duration.ofSeconds(10), config.heartbeatInterval());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new RunWorkerConfig(
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(1),
+                Duration.ofMillis(150),
+                8 * 1024,
+                1,
+                Duration.ofSeconds(1)));
     assertThrows(
         IllegalArgumentException.class,
         () ->
