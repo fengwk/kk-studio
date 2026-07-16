@@ -369,12 +369,12 @@ class PromptCacheAffinityKeyFactoryTest {
   /** tool definition 各字段必须独立成帧：name / description / inputSchemaJson 的 NUL 重排或追加都必须切 key。 */
   @Test
   void toolDefinitionFieldCollision() {
-    ProviderRequest a = baseRequest(tool("alpha", "desc", "{}"));
-    ProviderRequest b = baseRequest(tool("a\0desc", "alpha", "{}"));
+    ProviderRequest a = baseRequest(tool("a\0b", "c", "{}"));
+    ProviderRequest b = baseRequest(tool("a", "b\0c", "{}"));
     assertNotEquals(factory.create(SESSION_ID, a), factory.create(SESSION_ID, b));
 
-    ProviderRequest c = baseRequest(tool("alpha", "desc", "{\"a\":1}"));
-    ProviderRequest d = baseRequest(tool("alpha", "desc", "{\"a\":1,\"\":}"));
+    ProviderRequest c = baseRequest(tool("alpha", "desc\0{\"a\":1}", "{}"));
+    ProviderRequest d = baseRequest(tool("alpha", "desc", "{\"a\":1}\0{}"));
     assertNotEquals(factory.create(SESSION_ID, c), factory.create(SESSION_ID, d));
   }
 
