@@ -82,6 +82,17 @@ kk-studio:
 
 **远程发布前置条件**：`convention4j:1.2.2` 发布批次在 22 个模块上的本地 `~/.m2` 安装仅用于开发期验证。远程环境必须把 `fun.fengwk.convention4j` 全套 `1.2.2` 构件（不止 `convention4j-comfyui`，还需 `convention4j-parent` 及所有 starter / tracer / oauth2 等 1.2.2 发布批次构件）发布到内网 Maven 仓库，依赖解析才可复现。
 
+## 目标环境验收
+
+部署验收使用实际的浏览器 origin、对象存储和 ComfyUI 实例完成以下闭环：
+
+1. 目标构建环境只能从远程 Maven 仓库解析完整的 `fun.fengwk.convention4j:1.2.2` 发布批次，不依赖开发机的 `~/.m2`。
+2. `kk-studio.storage.s3.endpoint` 可由服务端访问，`public-endpoint` 可由浏览器访问，且两者指向同一个固定 bucket；对象存储 CORS 允许应用 origin 使用 `PUT`、`GET`、`HEAD` 及预签名响应中的请求头。
+3. 浏览器通过原生 `fetch` 对预签名响应的 `url` 执行 `PUT`，只设置响应 `headers` 中的头；不得设置 `Host`，也不得将对象字节发送给 kk-studio。
+4. 使用上传后的 key 提交带 file binding 的工作流。kk-studio 必须从固定 bucket 完成 HEAD、大小校验、下载和转交，ComfyUI 返回的 prompt/job id 必须原样作为 `runId`。
+5. 对该 `runId` 完成运行状态轮询、取消和 job-scoped 输出下载；输出下载只能解析该 job 返回的 filename、subfolder 和 type，不能接受调用方指定的 ComfyUI 路径。
+6. 分别验证关闭 `kk-studio.storage.s3.enabled` 或 `kk-studio.comfyui.enabled` 时，依赖相应运行期能力的 API 显式返回不可用，而不会降级为本地文件代理或持久化 ComfyUI job。
+
 ## 实现位置
 
 | 关注点 | 文件 |
