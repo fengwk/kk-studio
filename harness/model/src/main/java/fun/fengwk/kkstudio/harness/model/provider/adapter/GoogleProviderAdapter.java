@@ -28,12 +28,19 @@ public final class GoogleProviderAdapter implements ProviderAdapter {
     return new LangChainModelProvider() {
       @Override
       protected StreamingChatModel chatModel(ProviderRequest request) {
+        // AUTOMATIC：忽略 cacheControl；harness 不发送任何 cached-content resource。
         return GoogleAiGeminiStreamingChatModel.builder()
             .baseUrl(descriptor.endpoint())
             .apiKey(apiKey)
             .timeout(descriptor.timeout())
             .returnThinking(true)
             .build();
+      }
+
+      @Override
+      protected void validateRequest(ProviderRequest request) {
+        OpenAiProviderAdapter.requireProviderType(request, providerType());
+        // AUTOMATIC 模式下 Provider 自行决定缓存命中，control 被忽略。
       }
     };
   }

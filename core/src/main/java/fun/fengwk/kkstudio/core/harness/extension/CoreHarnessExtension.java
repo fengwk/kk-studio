@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.core.harness.extension;
 
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheBreakpoint;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapability;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.adapter.AnthropicProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.adapter.GoogleProviderAdapter;
@@ -15,8 +18,10 @@ import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 
 /** Core 内置的可信 Harness 扩展，汇总权限边界、Provider adapter 与 Spring 工具。 */
@@ -75,21 +80,40 @@ public final class CoreHarnessExtension implements HarnessExtension {
 
   private static List<ProviderFactoryDefinition> providerFactoryDefinitions() {
     return List.of(
-        new ProviderFactoryDefinition(ProviderType.OPENAI, OpenAiProviderAdapter::new),
         new ProviderFactoryDefinition(
-            ProviderType.OPENAI_RESPONSES, OpenAiResponsesProviderAdapter::new),
-        new ProviderFactoryDefinition(ProviderType.ANTHROPIC, AnthropicProviderAdapter::new),
-        new ProviderFactoryDefinition(ProviderType.GOOGLE, GoogleProviderAdapter::new));
+            ProviderType.OPENAI,
+            OpenAiProviderAdapter::new,
+            PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT))),
+        new ProviderFactoryDefinition(
+            ProviderType.OPENAI_RESPONSES,
+            OpenAiResponsesProviderAdapter::new,
+            PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT))),
+        new ProviderFactoryDefinition(
+            ProviderType.ANTHROPIC,
+            AnthropicProviderAdapter::new,
+            PromptCacheCapability.breakpoints(
+                Set.of(PromptCacheRetention.SHORT),
+                EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS))),
+        new ProviderFactoryDefinition(
+            ProviderType.GOOGLE, GoogleProviderAdapter::new, PromptCacheCapability.automatic()));
   }
 
   static ProviderFactory providerFactory(
-      ProviderType providerType, Function<String, ProviderAdapter> constructor) {
+      ProviderType providerType,
+      Function<String, ProviderAdapter> constructor,
+      PromptCacheCapability promptCacheCapability) {
     Objects.requireNonNull(providerType, "providerType");
     Objects.requireNonNull(constructor, "constructor");
+    Objects.requireNonNull(promptCacheCapability, "promptCacheCapability");
     return new ProviderFactory() {
       @Override
       public ProviderType providerType() {
         return providerType;
+      }
+
+      @Override
+      public PromptCacheCapability promptCacheCapability() {
+        return promptCacheCapability;
       }
 
       @Override
@@ -106,15 +130,18 @@ public final class CoreHarnessExtension implements HarnessExtension {
   }
 
   private record ProviderFactoryDefinition(
-      ProviderType providerType, Function<String, ProviderAdapter> constructor) {
+      ProviderType providerType,
+      Function<String, ProviderAdapter> constructor,
+      PromptCacheCapability promptCacheCapability) {
 
     private ProviderFactoryDefinition {
       Objects.requireNonNull(providerType, "providerType");
       Objects.requireNonNull(constructor, "constructor");
+      Objects.requireNonNull(promptCacheCapability, "promptCacheCapability");
     }
 
     private ProviderFactory factory() {
-      return providerFactory(providerType, constructor);
+      return providerFactory(providerType, constructor, promptCacheCapability);
     }
   }
 }

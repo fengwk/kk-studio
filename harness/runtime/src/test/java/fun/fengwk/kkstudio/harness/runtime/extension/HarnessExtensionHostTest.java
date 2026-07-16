@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapability;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.adapter.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.context.ContextTransform;
@@ -346,10 +348,17 @@ class HarnessExtensionHostTest {
   }
 
   private static ProviderFactory providerFactory(ProviderType providerType) {
+    PromptCacheCapability capability =
+        PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT));
     return new ProviderFactory() {
       @Override
       public ProviderType providerType() {
         return providerType;
+      }
+
+      @Override
+      public PromptCacheCapability promptCacheCapability() {
+        return capability;
       }
 
       @Override

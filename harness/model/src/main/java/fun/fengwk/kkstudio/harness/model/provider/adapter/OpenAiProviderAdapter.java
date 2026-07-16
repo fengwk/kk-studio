@@ -2,17 +2,24 @@ package fun.fengwk.kkstudio.harness.model.provider.adapter;
 
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import java.net.URI;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
 /** OpenAI 兼容 Chat Completions Provider adapter。 */
 public final class OpenAiProviderAdapter implements ProviderAdapter {
+
+  private static final String PROMPT_CACHE_KEY = "prompt_cache_key";
+  private static final String REASONING_SPLIT = "reasoning_split";
 
   private final String apiKey;
 
@@ -28,27 +35,51 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
   @Override
   public ModelProvider create(ProviderDescriptor descriptor) {
     requireType(descriptor, providerType());
+    boolean minimax = isMiniMaxEndpoint(descriptor.endpoint());
     return new LangChainModelProvider() {
       @Override
       protected StreamingChatModel chatModel(ProviderRequest request) {
-        OpenAiStreamingChatModel.OpenAiStreamingChatModelBuilder builder =
-            OpenAiStreamingChatModel.builder()
-                .baseUrl(descriptor.endpoint())
-                .apiKey(apiKey)
-                .modelName(request.model().modelId())
-                .timeout(descriptor.timeout())
-                .returnThinking(true);
-        if (isMiniMaxEndpoint(descriptor.endpoint())) {
-          builder.customParameters(Map.of("reasoning_split", true));
-        }
-        return builder.build();
+        ProviderCacheControl control = prepareCacheControl(request);
+        return OpenAiStreamingChatModel.builder()
+            .baseUrl(descriptor.endpoint())
+            .apiKey(apiKey)
+            .modelName(request.model().modelId())
+            .timeout(descriptor.timeout())
+            .returnThinking(true)
+            .customParameters(customParameters(control, minimax))
+            .build();
+      }
+
+      @Override
+      protected void validateRequest(ProviderRequest request) {
+        requireProviderType(request, providerType());
+        prepareCacheControl(request);
       }
 
       @Override
       protected boolean extractsThinkTags() {
-        return isMiniMaxEndpoint(descriptor.endpoint());
+        return minimax;
+      }
+
+      private ProviderCacheControl prepareCacheControl(ProviderRequest request) {
+        // requireOpenAiAffinity 同时被 validateRequest 与 chatModel 调用，作为幂等校验与键解析；LONG 或携带
+        // breakpoints 时抛 IllegalArgumentException，被 LangChainModelProvider.stream 转换为
+        // ProviderException。
+        CacheRequestValidator.requireOpenAiAffinity(request.cacheControl());
+        return request.cacheControl();
       }
     };
+  }
+
+  static Map<String, Object> customParameters(ProviderCacheControl control, boolean minimax) {
+    Map<String, Object> merged = new LinkedHashMap<>();
+    if (control.affinityKey() != null) {
+      merged.put(PROMPT_CACHE_KEY, control.affinityKey());
+    }
+    if (minimax) {
+      merged.put(REASONING_SPLIT, true);
+    }
+    return merged;
   }
 
   private static boolean isMiniMaxEndpoint(String endpoint) {
@@ -64,6 +95,16 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
     Objects.requireNonNull(descriptor, "descriptor");
     if (descriptor.type() != expected) {
       throw new IllegalArgumentException("provider descriptor type does not match adapter");
+    }
+  }
+
+  /** 模型描述符上的 providerType 与 adapter 类型不一致时拒绝启动。 */
+  static void requireProviderType(ProviderRequest request, ProviderType expected) {
+    Objects.requireNonNull(request, "request");
+    if (request.model().providerType() != expected) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "model providerType does not match adapter type " + expected);
     }
   }
 }

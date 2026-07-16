@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.extension;
 
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.adapter.ProviderAdapter;
 
@@ -7,6 +8,9 @@ import fun.fengwk.kkstudio.harness.model.provider.adapter.ProviderAdapter;
 public interface ProviderFactory {
 
   ProviderType providerType();
+
+  /** Provider 暴露给资源解析器的可信提示缓存能力快照，用于构造模型请求策略。 */
+  PromptCacheCapability promptCacheCapability();
 
   ProviderAdapter create(String credential, String configJson);
 }
