@@ -7,6 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheBreakpoint;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapability;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.adapter.AnthropicProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.adapter.GoogleProviderAdapter;
@@ -37,6 +40,7 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -112,20 +116,56 @@ class CoreHarnessExtensionTest {
   /** Provider factory 在离开 typed registry 前拒绝 null 或与注册 key 不一致的 adapter。 */
   @Test
   void rejectsInvalidProviderFactoryResults() {
+    PromptCacheCapability capability =
+        PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT));
     ProviderFactory mismatched =
         CoreHarnessExtension.providerFactory(
-            ProviderType.OPENAI, credential -> new GoogleProviderAdapter(credential));
+            ProviderType.OPENAI, credential -> new GoogleProviderAdapter(credential), capability);
     ProviderFactory missing =
-        CoreHarnessExtension.providerFactory(ProviderType.OPENAI, credential -> null);
+        CoreHarnessExtension.providerFactory(ProviderType.OPENAI, credential -> null, capability);
 
     assertThrows(IllegalStateException.class, () -> mismatched.create("credential", null));
     assertThrows(NullPointerException.class, () -> missing.create("credential", null));
     assertThrows(
         NullPointerException.class,
-        () -> CoreHarnessExtension.providerFactory(null, OpenAiProviderAdapter::new));
+        () -> CoreHarnessExtension.providerFactory(null, OpenAiProviderAdapter::new, capability));
     assertThrows(
         NullPointerException.class,
-        () -> CoreHarnessExtension.providerFactory(ProviderType.OPENAI, null));
+        () -> CoreHarnessExtension.providerFactory(ProviderType.OPENAI, null, capability));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            CoreHarnessExtension.providerFactory(
+                ProviderType.OPENAI, OpenAiProviderAdapter::new, null));
+  }
+
+  /** Core 内置四个 factory 各自暴露与 NOTES 决策一致的 prompt cache capability。 */
+  @Test
+  void exposesProviderCacheCapabilitySnapshot() {
+    HarnessExtensionHost host =
+        new HarnessExtensionHost(
+            List.of(new CoreHarnessExtension(permissionEvaluator(), List.of())));
+
+    try {
+      assertEquals(
+          PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
+          host.providerFactory(ProviderType.OPENAI).orElseThrow().promptCacheCapability());
+      assertEquals(
+          PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
+          host.providerFactory(ProviderType.OPENAI_RESPONSES)
+              .orElseThrow()
+              .promptCacheCapability());
+      assertEquals(
+          PromptCacheCapability.breakpoints(
+              Set.of(PromptCacheRetention.SHORT),
+              EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
+          host.providerFactory(ProviderType.ANTHROPIC).orElseThrow().promptCacheCapability());
+      assertEquals(
+          PromptCacheCapability.automatic(),
+          host.providerFactory(ProviderType.GOOGLE).orElseThrow().promptCacheCapability());
+    } finally {
+      host.close();
+    }
   }
 
   @Test

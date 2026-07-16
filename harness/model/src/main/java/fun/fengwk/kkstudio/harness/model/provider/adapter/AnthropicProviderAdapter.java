@@ -28,12 +28,23 @@ public final class AnthropicProviderAdapter implements ProviderAdapter {
     return new LangChainModelProvider() {
       @Override
       protected StreamingChatModel chatModel(ProviderRequest request) {
+        CacheRequestValidator.AnthropicCacheFlags flags =
+            CacheRequestValidator.requireAnthropicBreakpoints(request.cacheControl());
         return AnthropicStreamingChatModel.builder()
             .baseUrl(descriptor.endpoint())
             .apiKey(apiKey)
             .timeout(descriptor.timeout())
             .returnThinking(true)
+            .cacheSystemMessages(flags.cacheSystemMessages())
+            .cacheTools(flags.cacheTools())
             .build();
+      }
+
+      @Override
+      protected void validateRequest(ProviderRequest request) {
+        OpenAiProviderAdapter.requireProviderType(request, providerType());
+        // 提前执行 BREAKPOINTS 校验，确保非法 control 在 chatModel 之前 fail。
+        CacheRequestValidator.requireAnthropicBreakpoints(request.cacheControl());
       }
     };
   }

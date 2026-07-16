@@ -83,6 +83,24 @@ abstract class LangChainModelProvider implements ModelProvider {
     ToolCallNormalizer toolCallNormalizer = new ToolCallNormalizer();
     ThinkTagSplitter thinkTagSplitter = extractsThinkTags() ? new ThinkTagSplitter() : null;
     try {
+      try {
+        validateRequest(request);
+      } catch (ProviderException validationFailure) {
+        if (stream.terminal.compareAndSet(false, true)) {
+          handler.onError(validationFailure, stream);
+        }
+        return stream;
+      } catch (IllegalArgumentException validationFailure) {
+        if (stream.terminal.compareAndSet(false, true)) {
+          handler.onError(
+              new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST,
+                  validationFailure.getMessage(),
+                  validationFailure),
+              stream);
+        }
+        return stream;
+      }
       chatModel(request)
           .chat(
               ChatRequest.builder()
@@ -162,6 +180,13 @@ abstract class LangChainModelProvider implements ModelProvider {
   }
 
   protected abstract StreamingChatModel chatModel(ProviderRequest request);
+
+  /**
+   * Provider 类型与模型描述符的运行时绑定检查；不匹配时抛 {@link ProviderException} ({@link
+   * ProviderErrorKind#INVALID_REQUEST})，由 {@link #stream(ProviderRequest, ProviderStreamHandler)}
+   * 转换为调用方可见的错误事件。
+   */
+  protected abstract void validateRequest(ProviderRequest request);
 
   /** OpenAI 兼容端点仅在 MiniMax 等已知端点启用正文 think-tag 回退。 */
   protected boolean extractsThinkTags() {
