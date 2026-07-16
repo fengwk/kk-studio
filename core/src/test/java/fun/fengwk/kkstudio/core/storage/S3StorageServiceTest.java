@@ -105,6 +105,50 @@ public class S3StorageServiceTest {
   }
 
   @Test
+  public void testBoundedDownloadRejectsMissingHeadContentLength() {
+    TestContext context =
+        newTestContext(
+            null,
+            methodName ->
+                "headObject".equals(methodName)
+                    ? HeadObjectResponse.builder().contentLength(null).build()
+                    : null);
+    try {
+      IllegalArgumentException error =
+          assertThrows(
+              IllegalArgumentException.class,
+              () -> context.storageService.download("dir/demo.png", 1024L));
+      assertTrue(
+          error.getMessage().contains("non-negative content length"),
+          "actual message: " + error.getMessage());
+    } finally {
+      context.close();
+    }
+  }
+
+  @Test
+  public void testBoundedDownloadRejectsNegativeHeadContentLength() {
+    TestContext context =
+        newTestContext(
+            null,
+            methodName ->
+                "headObject".equals(methodName)
+                    ? HeadObjectResponse.builder().contentLength(-1L).build()
+                    : null);
+    try {
+      IllegalArgumentException error =
+          assertThrows(
+              IllegalArgumentException.class,
+              () -> context.storageService.download("dir/demo.png", 1024L));
+      assertTrue(
+          error.getMessage().contains("non-negative content length"),
+          "actual message: " + error.getMessage());
+    } finally {
+      context.close();
+    }
+  }
+
+  @Test
   public void testExistsReturnsFalseForMissingKey() {
     TestContext context =
         newTestContext(

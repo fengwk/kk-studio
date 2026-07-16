@@ -88,8 +88,12 @@ public class S3StorageServiceImpl implements S3StorageService {
     String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
     HeadObjectRequest headRequest =
         HeadObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build();
-    long contentLength = s3Client.headObject(headRequest).contentLength();
-    Assert.isTrue(contentLength <= maxSizeBytes, "S3 object exceeds max input file size");
+    Long declaredContentLength = s3Client.headObject(headRequest).contentLength();
+    // 防御性校验：S3 响应必须报告非负的对象长度；缺失或非法声明不允许继续读取，避免把"无长度"对象加载到下游。
+    Assert.isTrue(
+        declaredContentLength != null && declaredContentLength >= 0L,
+        "S3 HEAD response must report a non-negative content length for key: " + normalizedKey);
+    Assert.isTrue(declaredContentLength <= maxSizeBytes, "S3 object exceeds max input file size");
     ResponseBytes<GetObjectResponse> response = getObject(normalizedKey);
     byte[] bytes = response.asByteArray();
     Assert.isTrue(bytes.length <= maxSizeBytes, "S3 object exceeds max input file size");

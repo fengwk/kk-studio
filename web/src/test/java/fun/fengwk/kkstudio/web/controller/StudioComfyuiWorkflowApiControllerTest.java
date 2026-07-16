@@ -166,20 +166,29 @@ public class StudioComfyuiWorkflowApiControllerTest {
             put("/api/comfyui/workflows/not-a-number")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(update)))
-        .andExpect(status().is4xxClientError());
+        .andExpect(status().isBadRequest());
   }
 
   @Test
-  public void shouldRejectUnknownIdWith4xx() throws Exception {
+  public void shouldRejectUnknownParseableIdWith404() throws Exception {
     ComfyuiWorkflowApiUpdateDTO update = new ComfyuiWorkflowApiUpdateDTO();
     update.setWorkflowJson(WORKFLOW_JSON);
     update.setInputBindingsJson("[]");
 
+    // 解析合法但数据库中找不到的 id 必须返回 404，与 malformed id 的 400 明确区分。
     mockMvc
         .perform(
             put("/api/comfyui/workflows/999999999999999")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(update)))
-        .andExpect(status().is4xxClientError());
+        .andExpect(status().isNotFound());
+  }
+
+  @Test
+  public void shouldDeleteUnknownParseableIdWith404() throws Exception {
+    // DELETE 也要走相同的 404 路径。
+    mockMvc
+        .perform(delete("/api/comfyui/workflows/999999999999999"))
+        .andExpect(status().isNotFound());
   }
 }
