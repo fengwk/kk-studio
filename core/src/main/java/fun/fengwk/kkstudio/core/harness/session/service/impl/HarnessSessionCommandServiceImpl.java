@@ -27,6 +27,8 @@ import fun.fengwk.kkstudio.share.model.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionMessageCreateDTO;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -167,7 +169,7 @@ public class HarnessSessionCommandServiceImpl implements HarnessSessionCommandSe
             .collect(Collectors.toList());
     }
 
-    private static java.time.LocalDateTime toLocalDateTime(Instant value) {
-        return java.time.LocalDateTime.ofInstant(value, java.time.ZoneOffset.UTC);
+    private static LocalDateTime toLocalDateTime(Instant value) {
+        return LocalDateTime.ofInstant(value, ZoneOffset.UTC);
     }
 }
