@@ -75,6 +75,7 @@ class DatabaseTaskRuntimeIntegrationTest {
 
   @BeforeEach
   void clean() {
+    jdbc.update("delete from model_usage_record");
     jdbc.execute("alter table harness_run_event drop constraint if exists unique_event_type");
     jdbc.update("delete from tool_artifact");
     jdbc.update("delete from harness_run_control_message");

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.harness.tool;
 
+import static fun.fengwk.kkstudio.core.harness.HarnessUsageFixtures.toolCallsUsageDraft;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -108,6 +109,7 @@ class ToolInvocationIntegrationTest {
 
   @BeforeEach
   void clean() {
+    jdbcTemplate.update("delete from model_usage_record");
     jdbcTemplate.update("delete from tool_artifact");
     jdbcTemplate.update("delete from harness_run_control_message");
     jdbcTemplate.update("delete from tool_invocation");
@@ -299,6 +301,7 @@ class ToolInvocationIntegrationTest {
             preparationPort.prepare(
                 rollback.run(),
                 assistant(List.of(new ToolCall("rollback", "read", "{\"path\":\"x\"}"))),
+                toolCallsUsageDraft(),
                 List.of(new ToolCall("rollback", "read", "{\"path\":\"x\"}")),
                 List.of(binding("read")),
                 Path.of("/tmp/environment"),
@@ -942,6 +945,7 @@ class ToolInvocationIntegrationTest {
     return preparationPort.prepare(
         run,
         assistant(calls),
+        toolCallsUsageDraft(),
         calls,
         bindings,
         Path.of("/tmp/environment"),

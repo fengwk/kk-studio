@@ -251,14 +251,14 @@ class MysqlModelUsageRecordStoreIntegrationTest {
             "USD",
             "tier-1",
             "default",
-            BigDecimal.ONE,
+            BigDecimal.ONE.setScale(12),
             "v1",
             new BigDecimal("0.000001000000"),
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO);
+            BigDecimal.ZERO.setScale(12),
+            BigDecimal.ZERO.setScale(12),
+            BigDecimal.ZERO.setScale(12),
+            BigDecimal.ZERO.setScale(12),
+            BigDecimal.ZERO.setScale(12));
     ModelCost cost = ModelCost.calculate(pricing, usage);
     return new ModelUsageDraft(
         101L,
@@ -285,14 +285,14 @@ class MysqlModelUsageRecordStoreIntegrationTest {
             "USD",
             "tier-1",
             "default",
-            BigDecimal.ONE,
+            BigDecimal.ONE.setScale(12),
             "v1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO);
+            BigDecimal.ZERO.setScale(12),
+            BigDecimal.ZERO.setScale(12),
+            BigDecimal.ZERO.setScale(12),
+            BigDecimal.ZERO.setScale(12),
+            BigDecimal.ZERO.setScale(12),
+            BigDecimal.ZERO.setScale(12));
     ModelCost cost = ModelCost.calculate(pricing, usage);
     return new ModelUsageDraft(
         1L,

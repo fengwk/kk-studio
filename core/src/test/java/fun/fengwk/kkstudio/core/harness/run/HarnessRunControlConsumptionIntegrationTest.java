@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.core.harness.run;
 
+import static fun.fengwk.kkstudio.core.harness.HarnessUsageFixtures.completedUsageDraft;
+import static fun.fengwk.kkstudio.core.harness.HarnessUsageFixtures.toolCallsUsageDraft;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -78,6 +80,7 @@ class HarnessRunControlConsumptionIntegrationTest {
 
   @BeforeEach
   void clean() {
+    jdbc.update("delete from model_usage_record");
     jdbc.update("delete from harness_run_control_message");
     jdbc.update("delete from harness_run_event");
     jdbc.update("delete from harness_run");
@@ -217,7 +220,11 @@ class HarnessRunControlConsumptionIntegrationTest {
 
     assertTrue(
         transactions.complete(
-            claimed, assistant("ok"), assistantCompleted(claimed), NOW.plusSeconds(1)));
+            claimed,
+            assistant("ok"),
+            completedUsageDraft(),
+            assistantCompleted(claimed),
+            NOW.plusSeconds(1)));
 
     AgentRun stored = runStore.find(claimed.id()).orElseThrow();
     assertEquals(RunStatus.QUEUED, stored.status());
@@ -248,7 +255,11 @@ class HarnessRunControlConsumptionIntegrationTest {
 
     assertTrue(
         transactions.complete(
-            claimed, assistant("ok"), assistantCompleted(claimed), NOW.plusSeconds(1)));
+            claimed,
+            assistant("ok"),
+            completedUsageDraft(),
+            assistantCompleted(claimed),
+            NOW.plusSeconds(1)));
 
     AgentRun stored = runStore.find(claimed.id()).orElseThrow();
     assertEquals(RunStatus.QUEUED, stored.status());
@@ -272,7 +283,11 @@ class HarnessRunControlConsumptionIntegrationTest {
 
     assertTrue(
         transactions.complete(
-            claimed, assistant("ok"), assistantCompleted(claimed), NOW.plusSeconds(1)));
+            claimed,
+            assistant("ok"),
+            completedUsageDraft(),
+            assistantCompleted(claimed),
+            NOW.plusSeconds(1)));
 
     assertEquals(RunControlStatus.CONSUMED, controlStore.find(c1).orElseThrow().status());
     assertEquals(RunControlStatus.CONSUMED, controlStore.find(c2).orElseThrow().status());
@@ -398,6 +413,7 @@ class HarnessRunControlConsumptionIntegrationTest {
         transactions.complete(
             claimedWithCancel,
             assistant("ok"),
+            completedUsageDraft(),
             assistantCompleted(claimedWithCancel),
             NOW.plusSeconds(32)));
 
@@ -508,6 +524,7 @@ class HarnessRunControlConsumptionIntegrationTest {
             transactions.complete(
                 claimed,
                 assistant("ok"),
+                completedUsageDraft(),
                 new RunEventDraft(RunEventType.ASSISTANT_COMPLETED, "{}"),
                 NOW.plusSeconds(1)));
 
@@ -594,6 +611,7 @@ class HarnessRunControlConsumptionIntegrationTest {
         toolPreparation.prepare(
             claimedWithCancel,
             assistant("calling", List.of(call)),
+            toolCallsUsageDraft(),
             List.of(call),
             List.of(toolBinding()),
             Path.of("."),
@@ -651,6 +669,7 @@ class HarnessRunControlConsumptionIntegrationTest {
             transactions.complete(
                 claimed,
                 assistant("ok"),
+                completedUsageDraft(),
                 new RunEventDraft(RunEventType.RUN_FAILED, "{}"),
                 NOW.plusSeconds(1)));
   }
@@ -664,7 +683,11 @@ class HarnessRunControlConsumptionIntegrationTest {
     runStore.claimDue("worker-2", NOW.plusSeconds(31), Duration.ofSeconds(30)).orElseThrow();
     assertFalse(
         transactions.complete(
-            claimed, assistant("ok"), assistantCompleted(claimed), NOW.plusSeconds(31)));
+            claimed,
+            assistant("ok"),
+            completedUsageDraft(),
+            assistantCompleted(claimed),
+            NOW.plusSeconds(31)));
   }
 
   // ---- appendExternalEvent unknown run ----

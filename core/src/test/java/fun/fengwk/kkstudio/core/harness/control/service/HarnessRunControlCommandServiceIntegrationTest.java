@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.harness.control.service;
 
+import static fun.fengwk.kkstudio.core.harness.HarnessUsageFixtures.completedUsageDraft;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -73,6 +74,7 @@ class HarnessRunControlCommandServiceIntegrationTest {
 
   @BeforeEach
   void clean() {
+    jdbc.update("delete from model_usage_record");
     jdbc.update("delete from harness_run_control_message");
     jdbc.update("delete from harness_run_event");
     jdbc.update("delete from harness_run");
@@ -230,7 +232,11 @@ class HarnessRunControlCommandServiceIntegrationTest {
 
     assertTrue(
         transactions.complete(
-            claimed, assistant("done"), assistantCompleted(claimed), NOW.plusSeconds(2)));
+            claimed,
+            assistant("done"),
+            completedUsageDraft(),
+            assistantCompleted(claimed),
+            NOW.plusSeconds(2)));
     assertEquals(RunStatus.SUCCEEDED, runStore.find(claimed.id()).orElseThrow().status());
     assertNull(sessionStore.find(seed.sessionId()).orElseThrow().activeRunId());
 
@@ -381,6 +387,7 @@ class HarnessRunControlCommandServiceIntegrationTest {
               return transactions.complete(
                   claimed,
                   assistant("race answer"),
+                  completedUsageDraft(),
                   assistantCompleted(claimed),
                   NOW.plusSeconds(10));
             });
