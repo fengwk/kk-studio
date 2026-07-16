@@ -20,6 +20,7 @@ public final class AgentIdGenerator {
   public static final String HARNESS_RUN = "harness_run";
   public static final String HARNESS_RUN_EVENT = "harness_run_event";
   public static final String HARNESS_RUN_CONTROL_MESSAGE = "harness_run_control_message";
+  public static final String MODEL_USAGE_RECORD = "model_usage_record";
   public static final String TOOL_INVOCATION = "tool_invocation";
   public static final String TOOL_ARTIFACT = "tool_artifact";
 
@@ -67,6 +68,10 @@ public final class AgentIdGenerator {
 
   public static long nextHarnessRunControlMessageId() {
     return GlobalSnowflakeIdGenerator.next(HARNESS_RUN_CONTROL_MESSAGE);
+  }
+
+  public static long nextModelUsageRecordId() {
+    return GlobalSnowflakeIdGenerator.next(MODEL_USAGE_RECORD);
   }
 
   public static long nextToolInvocationId() {

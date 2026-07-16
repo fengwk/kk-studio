@@ -245,3 +245,58 @@ create index if not exists idx_harness_control_pending
     on harness_run_control_message (run_id, control_kind, status, id);
 create index if not exists idx_harness_control_session
     on harness_run_control_message (session_id, status, id);
+
+create table if not exists model_usage_record (
+    id                                 bigint not null,
+    session_id                         bigint not null,
+    run_id                             bigint not null,
+    assistant_entry_id                 bigint not null,
+    attempt                            integer not null,
+    turn_index                         integer not null,
+    provider_resource_id               bigint not null,
+    model_resource_id                  bigint not null,
+    provider_type                      varchar(64) not null,
+    provider_model_id                  varchar(256) not null,
+    prompt_cache_mode                  varchar(32) not null,
+    prompt_cache_retention             varchar(16) not null,
+    cache_eligible                     boolean not null,
+    cache_affinity_key                 varchar(512),
+    stop_reason                        varchar(32) not null,
+    usage_input_tokens                 bigint not null,
+    usage_output_tokens                bigint not null,
+    usage_cache_read_tokens            bigint not null,
+    usage_cache_write_tokens           bigint not null,
+    usage_cache_write_long_tokens      bigint not null,
+    usage_reasoning_tokens             bigint not null,
+    usage_provider_total_tokens        bigint not null,
+    cost_currency                      varchar(16) not null,
+    cost_input                         numeric(32,12) not null,
+    cost_output                        numeric(32,12) not null,
+    cost_cache_read                    numeric(32,12) not null,
+    cost_cache_write                   numeric(32,12) not null,
+    cost_cache_write_long              numeric(32,12) not null,
+    cost_reasoning                     numeric(32,12) not null,
+    cost_total                         numeric(32,12) not null,
+    pricing_currency                   varchar(16) not null,
+    pricing_tier                       varchar(64) not null,
+    pricing_service_tier               varchar(64) not null,
+    pricing_service_tier_multiplier    numeric(32,12) not null,
+    pricing_version                    varchar(64) not null,
+    pricing_input_per_million_tokens   numeric(32,12) not null,
+    pricing_output_per_million_tokens  numeric(32,12) not null,
+    pricing_cache_read_per_million_tokens  numeric(32,12) not null,
+    pricing_cache_write_per_million_tokens numeric(32,12) not null,
+    pricing_cache_write_long_per_million_tokens numeric(32,12) not null,
+    pricing_reasoning_per_million_tokens numeric(32,12) not null,
+    request_id                         varchar(256),
+    reported_service_tier              varchar(64),
+    raw_usage_json                     clob not null,
+    gmt_create                         timestamp(3) not null default current_timestamp(),
+    primary key (id),
+    unique (assistant_entry_id),
+    unique (run_id, attempt, turn_index)
+);
+
+create index if not exists idx_model_usage_record_run on model_usage_record (run_id, id);
+create index if not exists idx_model_usage_record_session on model_usage_record (session_id, id);
+create index if not exists idx_model_usage_record_model on model_usage_record (model_resource_id, id);
