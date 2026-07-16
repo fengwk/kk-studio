@@ -1,5 +1,15 @@
 import type { AgentResourceId } from '@/shared/api/contracts'
 
+export interface ComfyuiWorkflowDraft {
+  apiName: string
+  name: string
+  description: string
+  workflowJson: string
+  inputBindingsJson: string
+  defaultSelector: string
+  enabled: boolean
+}
+
 export interface ProviderDraft {
   name: string
   description: string

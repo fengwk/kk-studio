@@ -26,4 +26,7 @@ export const queryKeys = {
     session: (sessionId: string) => ['usage', 'sessions', sessionId] as const,
     model: (modelId: AgentResourceId) => ['usage', 'models', String(modelId)] as const,
   },
+  comfyui: {
+    workflows: ['comfyui', 'workflows'] as const,
+  },
 }

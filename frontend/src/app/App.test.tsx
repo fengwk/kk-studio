@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '@/app/App'
 import { AppProviders } from '@/app/providers'
 import { agentService } from '@/shared/api/agent-service'
+import { comfyuiService } from '@/shared/api/comfyui-service'
 
 vi.mock('@/shared/api/agent-service', () => {
   const agentService = {
@@ -16,6 +17,12 @@ vi.mock('@/shared/api/agent-service', () => {
     createSessionApi: () => ({ list: () => agentService.listSessions() }),
   }
 })
+
+vi.mock('@/shared/api/comfyui-service', () => ({
+  comfyuiService: {
+    listWorkflows: vi.fn(),
+  },
+}))
 
 const provider = {
   id: 'provider-1',
@@ -73,6 +80,7 @@ describe('App', () => {
     vi.mocked(agentService.listModels).mockResolvedValue(page([model]))
     vi.mocked(agentService.listAgents).mockResolvedValue(page([agent]))
     vi.mocked(agentService.listSessions).mockResolvedValue(page([session]))
+    vi.mocked(comfyuiService.listWorkflows).mockResolvedValue(page([]))
   })
 
   it('redirects the root route directly to the global session list', async () => {

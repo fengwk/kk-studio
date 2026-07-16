@@ -1380,6 +1380,205 @@ textarea::placeholder {
   height: 16px;
 }
 
+.comfyui-workflow-card {
+  min-height: 260px;
+}
+
+.comfyui-workflow-card.disabled {
+  border-color: rgba(113, 113, 122, 0.35);
+}
+
+.status-badge {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.status-badge.enabled {
+  background: var(--green-soft);
+  color: var(--green-primary);
+}
+
+.status-badge.disabled {
+  background: rgba(113, 113, 122, 0.15);
+  color: var(--fg-dim);
+}
+
+.comfyui-card-error {
+  padding: 9px 10px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: #fecaca;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.comfyui-editor-modal {
+  width: min(780px, 100%);
+}
+
+.comfyui-run-modal {
+  width: min(900px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+.comfyui-modal-scroll {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.code-textarea {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace !important;
+  font-size: 12px !important;
+  line-height: 1.55;
+  tab-size: 2;
+}
+
+.comfyui-workflow-json {
+  min-height: 220px !important;
+}
+
+.comfyui-bindings-json {
+  min-height: 180px !important;
+}
+
+.comfyui-run-endpoint {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #09090b;
+  color: var(--fg-muted);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.comfyui-file-field input[type="file"] {
+  height: auto;
+  padding: 8px 10px;
+}
+
+.comfyui-selected-file {
+  color: var(--green-primary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.comfyui-selector-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.comfyui-run-state {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.comfyui-run-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.comfyui-run-meta span {
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
+.comfyui-run-meta strong {
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.comfyui-json-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.comfyui-json-block > strong,
+.comfyui-downloads > strong {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.comfyui-json-block.danger > strong {
+  color: #fca5a5;
+}
+
+.comfyui-json-block pre {
+  max-height: 320px;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: #09090b;
+  color: #d4d4d8;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.comfyui-downloads {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.comfyui-downloads a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  color: var(--green-primary);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.comfyui-downloads a:hover {
+  text-decoration: underline;
+}
+
+.comfyui-downloads svg,
+.comfyui-run-actions svg {
+  width: 14px;
+  height: 14px;
+}
+
+.comfyui-run-actions {
+  gap: 8px;
+}
+
+.ghost-btn.danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
 @media (max-width: 860px) {
   .topbar {
     padding: 0 14px;
@@ -1439,6 +1638,19 @@ textarea::placeholder {
 
   .resource-modal-card {
     width: min(100%, 760px);
+  }
+
+  .comfyui-run-modal,
+  .comfyui-editor-modal {
+    max-height: calc(100vh - 24px);
+  }
+
+  .comfyui-selector-row {
+    grid-template-columns: 1fr;
+  }
+
+  .comfyui-selector-row .ghost-inline-btn {
+    width: 100%;
   }
 
   .editor-grid,
