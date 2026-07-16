@@ -15,7 +15,6 @@ import dev.langchain4j.data.message.TextContent;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.data.message.VideoContent;
-import dev.langchain4j.model.anthropic.AnthropicTokenUsage;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.ChatRequestParameters;
@@ -29,6 +28,7 @@ import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.model.chat.request.json.JsonSchemaElement;
 import dev.langchain4j.model.chat.request.json.JsonStringSchema;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
 import dev.langchain4j.model.chat.response.PartialResponse;
 import dev.langchain4j.model.chat.response.PartialResponseContext;
 import dev.langchain4j.model.chat.response.PartialThinking;
@@ -37,9 +37,7 @@ import dev.langchain4j.model.chat.response.PartialToolCall;
 import dev.langchain4j.model.chat.response.PartialToolCallContext;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.chat.response.StreamingHandle;
-import dev.langchain4j.model.openai.OpenAiTokenUsage;
 import dev.langchain4j.model.output.FinishReason;
-import dev.langchain4j.model.output.TokenUsage;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
@@ -63,11 +61,13 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderVideoBlock;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -75,7 +75,15 @@ import java.util.concurrent.atomic.AtomicReference;
 /** LangChain4j SDK 留在 model adapter 内的标准 Provider 流桥接。 */
 abstract class LangChainModelProvider implements ModelProvider {
 
-  private static final ObjectMapper USAGE_OBJECT_MAPPER = new ObjectMapper();
+  private final ProviderType providerType;
+
+  /**
+   * 绑定 Adapter 自身对应的 {@link ProviderType}，由 {@link ProviderUsageNormalizer} 决定七类语义与 raw usage JSON
+   * 提取策略；不允许在 metadata 上重新猜类型。
+   */
+  protected LangChainModelProvider(ProviderType providerType) {
+    this.providerType = Objects.requireNonNull(providerType, "providerType");
+  }
 
   @Override
   public final ProviderStream stream(ProviderRequest request, ProviderStreamHandler handler) {
@@ -412,11 +420,11 @@ abstract class LangChainModelProvider implements ModelProvider {
         }
       }
     }
-    TokenUsage usage =
-        response == null || response.metadata() == null ? null : response.metadata().tokenUsage();
-    ModelUsage modelUsage = toUsage(usage);
-    FinishReason finishReason =
-        response == null || response.metadata() == null ? null : response.metadata().finishReason();
+    ChatResponseMetadata metadata = response == null ? null : response.metadata();
+    ProviderUsageNormalizer.NormalizedUsage normalized =
+        ProviderUsageNormalizer.normalize(providerType, metadata);
+    ModelUsage modelUsage = normalized.modelUsage();
+    FinishReason finishReason = metadata == null ? null : metadata.finishReason();
     ProviderStopReason stopReason = toStopReason(finishReason, !calls.isEmpty());
     String text =
         response == null || response.aiMessage() == null ? "" : response.aiMessage().text();
@@ -436,60 +444,9 @@ abstract class LangChainModelProvider implements ModelProvider {
         stopReason,
         modelUsage,
         ModelCost.calculate(request.model().pricing(), modelUsage),
-        null,
-        null,
-        rawUsageJson(usage));
-  }
-
-  private static String rawUsageJson(TokenUsage usage) {
-    if (usage == null) {
-      return "{}";
-    }
-    return USAGE_OBJECT_MAPPER.valueToTree(usage).toString();
-  }
-
-  private static ModelUsage toUsage(TokenUsage usage) {
-    long input = usage == null ? 0 : valueOrZero(usage.inputTokenCount());
-    long output = usage == null ? 0 : valueOrZero(usage.outputTokenCount());
-    long providerTotal =
-        usage == null || usage.totalTokenCount() == null
-            ? Math.addExact(input, output)
-            : usage.totalTokenCount();
-    if (usage instanceof AnthropicTokenUsage anthropicUsage) {
-      long cacheRead = valueOrZero(anthropicUsage.cacheReadInputTokens());
-      long cacheWrite = valueOrZero(anthropicUsage.cacheCreationInputTokens());
-      return new ModelUsage(input, output, cacheRead, cacheWrite, 0, 0, providerTotal);
-    }
-    if (usage instanceof OpenAiTokenUsage openAiUsage) {
-      long cacheRead =
-          openAiUsage.inputTokensDetails() == null
-              ? 0
-              : valueOrZero(openAiUsage.inputTokensDetails().cachedTokens());
-      long reasoning =
-          openAiUsage.outputTokensDetails() == null
-              ? 0
-              : valueOrZero(openAiUsage.outputTokensDetails().reasoningTokens());
-      return new ModelUsage(
-          subtractCategory(input, cacheRead, "cached input tokens"),
-          subtractCategory(output, reasoning, "reasoning output tokens"),
-          cacheRead,
-          0,
-          0,
-          reasoning,
-          providerTotal);
-    }
-    return new ModelUsage(input, output, 0, 0, 0, 0, providerTotal);
-  }
-
-  private static long valueOrZero(Integer value) {
-    return value == null ? 0 : value.longValue();
-  }
-
-  private static long subtractCategory(long total, long category, String categoryName) {
-    if (category > total) {
-      throw new IllegalArgumentException(categoryName + " must not exceed its reported total");
-    }
-    return total - category;
+        normalized.requestId(),
+        normalized.serviceTier(),
+        normalized.rawUsageJson());
   }
 
   static ProviderStopReason toStopReason(FinishReason finishReason, boolean hasToolCalls) {
