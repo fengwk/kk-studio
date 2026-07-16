@@ -6,9 +6,9 @@ import static fun.fengwk.kkstudio.core.harness.observability.service.Observabili
 
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
-import fun.fengwk.kkstudio.core.harness.observability.service.HarnessArtifactResolution;
 import fun.fengwk.kkstudio.core.harness.observability.service.HarnessObservabilityQueryService;
 import fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.Artifact;
 import fun.fengwk.kkstudio.share.model.RootActivityDTO;
 import fun.fengwk.kkstudio.share.model.RunEventDTO;
 import fun.fengwk.kkstudio.share.model.SubagentTaskDTO;
@@ -69,7 +69,8 @@ public class StudioHarnessObservabilityController {
       @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId,
       @RequestParam(value = "idleTimeoutMillis", required = false) Long idleTimeoutMillis) {
     try {
-      long cursor = parseOptionalCursor(resumeOrLastEventId(afterSequence, lastEventId), "afterSequence");
+      long cursor =
+          parseOptionalCursor(resumeOrLastEventId(afterSequence, lastEventId), "afterSequence");
       return sseEmitter.openRunStream(id, cursor, idleTimeoutMillis);
     } catch (IllegalArgumentException error) {
       throw translate(error);
@@ -91,14 +92,17 @@ public class StudioHarnessObservabilityController {
     }
   }
 
-  @GetMapping(value = "/sessions/{id}/activities/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+  @GetMapping(
+      value = "/sessions/{id}/activities/stream",
+      produces = MediaType.TEXT_EVENT_STREAM_VALUE)
   public SseEmitter streamRootActivities(
       @PathVariable("id") String id,
       @RequestParam(value = "afterEventId", required = false) String afterEventId,
       @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId,
       @RequestParam(value = "idleTimeoutMillis", required = false) Long idleTimeoutMillis) {
     try {
-      long cursor = parseOptionalCursor(resumeOrLastEventId(afterEventId, lastEventId), "afterEventId");
+      long cursor =
+          parseOptionalCursor(resumeOrLastEventId(afterEventId, lastEventId), "afterEventId");
       return sseEmitter.openRootActivityStream(id, cursor, idleTimeoutMillis);
     } catch (IllegalArgumentException error) {
       throw translate(error);
@@ -133,42 +137,26 @@ public class StudioHarnessObservabilityController {
   }
 
   /**
-   * Artifact GET returns the persisted bytes with the original {@code mediaType}. Blank or non-positive
-   * identifiers translate to 400; unknown ids translate to 404. There is intentionally no JSON /
-   * base64 fallback so consumers can pipe the response directly to file outputs.
+   * Artifact GET returns the persisted bytes with the original {@code mediaType}. Blank or
+   * non-positive identifiers translate to 400; unknown ids translate to 404. There is intentionally
+   * no JSON / base64 fallback so consumers can pipe the response directly to file outputs.
    */
   @GetMapping("/artifacts/{id}")
   public ResponseEntity<ByteArrayResource> getArtifact(@PathVariable("id") String id) {
-    HarnessArtifactResolution.Result resolved;
+    Artifact artifact;
     try {
-      resolved = observabilityService.resolveArtifact(id);
+      artifact = observabilityService.getArtifact(id);
     } catch (IllegalArgumentException error) {
       throw translate(error);
     }
-    if (!resolved.found()) {
-      if (id == null || id.isBlank() || !isPositiveDecimal(id.trim())) {
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "artifactId must be positive");
-      }
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown artifact: " + id);
-    }
-    var artifact = resolved.artifact();
     HttpHeaders headers = new HttpHeaders();
     headers.setContentType(MediaType.parseMediaType(artifact.mediaType()));
     headers.setContentLength(artifact.sizeBytes());
-    return new ResponseEntity<>(
-        new ByteArrayResource(artifact.content()), headers, HttpStatus.OK);
+    return new ResponseEntity<>(new ByteArrayResource(artifact.content()), headers, HttpStatus.OK);
   }
 
   private static String resumeOrLastEventId(String queryValue, String lastEventId) {
     return queryValue != null && !queryValue.isBlank() ? queryValue : lastEventId;
-  }
-
-  private static boolean isPositiveDecimal(String trimmed) {
-    try {
-      return Long.parseLong(trimmed) > 0;
-    } catch (NumberFormatException error) {
-      return false;
-    }
   }
 
   private static RuntimeException translate(IllegalArgumentException error) {
@@ -176,9 +164,12 @@ public class StudioHarnessObservabilityController {
     if (message != null
         && (message.startsWith("unknown run:")
             || message.startsWith("unknown session:")
-            || message.startsWith("unknown tool invocation:"))) {
+            || message.startsWith("unknown tool invocation:")
+            || message.startsWith("unknown artifact:"))) {
       return new ResponseStatusException(HttpStatus.NOT_FOUND, message, error);
     }
-    return error;
+    // All other validation failures (malformed ids, negative cursors, out-of-range limits) are
+    // request errors → 400.
+    return new ResponseStatusException(HttpStatus.BAD_REQUEST, error.getMessage(), error);
   }
 }

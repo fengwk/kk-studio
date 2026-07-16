@@ -4,7 +4,6 @@ import static fun.fengwk.kkstudio.core.harness.observability.service.Observabili
 import static fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits.normalizeLimit;
 import static fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits.requireNonNegativeCursor;
 
-import fun.fengwk.kkstudio.core.harness.observability.service.HarnessArtifactResolution;
 import fun.fengwk.kkstudio.core.harness.observability.service.HarnessObservabilityQueryService;
 import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
@@ -12,9 +11,10 @@ import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.harness.task.store.DatabaseRootActivityStore;
 import fun.fengwk.kkstudio.core.harness.task.store.mapper.HarnessSubagentTaskMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
-import fun.fengwk.kkstudio.core.harness.tool.worker.DatabaseArtifactStore;
 import fun.fengwk.kkstudio.harness.runtime.task.RootActivity;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.Artifact;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.share.model.RootActivityDTO;
 import fun.fengwk.kkstudio.share.model.RunEventDTO;
 import fun.fengwk.kkstudio.share.model.SubagentTaskDTO;
@@ -35,7 +35,7 @@ public class HarnessObservabilityQueryServiceImpl implements HarnessObservabilit
   private final MysqlToolInvocationStore toolInvocationStore;
   private final HarnessSubagentTaskMapper subagentTaskMapper;
   private final HarnessSessionMapper sessionMapper;
-  private final DatabaseArtifactStore artifactStore;
+  private final ArtifactStore artifactStore;
   private final HarnessObservabilityDtoConverter converter;
 
   public HarnessObservabilityQueryServiceImpl(
@@ -44,7 +44,7 @@ public class HarnessObservabilityQueryServiceImpl implements HarnessObservabilit
       MysqlToolInvocationStore toolInvocationStore,
       HarnessSubagentTaskMapper subagentTaskMapper,
       HarnessSessionMapper sessionMapper,
-      DatabaseArtifactStore artifactStore,
+      ArtifactStore artifactStore,
       HarnessObservabilityDtoConverter converter) {
     this.runStore = runStore;
     this.rootActivityStore = rootActivityStore;
@@ -112,8 +112,11 @@ public class HarnessObservabilityQueryServiceImpl implements HarnessObservabilit
   }
 
   @Override
-  public HarnessArtifactResolution.Result resolveArtifact(String artifactId) {
-    return new HarnessArtifactResolution(artifactStore).resolve(artifactId);
+  public Artifact getArtifact(String artifactId) {
+    long parsed = HarnessIds.parsePositive(artifactId, "artifactId");
+    return artifactStore
+        .find(Long.toString(parsed))
+        .orElseThrow(() -> new IllegalArgumentException("unknown artifact: " + artifactId));
   }
 
   private Long resolveRootSessionId(long sessionId) {

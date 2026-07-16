@@ -5,10 +5,11 @@ import fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimit
 import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
-import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
 import fun.fengwk.kkstudio.share.model.RootActivityDTO;
 import fun.fengwk.kkstudio.share.model.RunEventDTO;
 import java.io.IOException;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
@@ -56,7 +57,6 @@ public class StudioHarnessObservabilitySseEmitter {
 
   public SseEmitter openRunStream(String runId, long afterSequence, Long idleTimeoutMillis) {
     long parsedRunId = HarnessIds.parsePositive(runId, "runId");
-    // Validate the Run up front so a 404 surfaces synchronously rather than after the first poll.
     if (runStore.find(parsedRunId).isEmpty()) {
       throw new IllegalArgumentException("unknown run: " + runId);
     }
@@ -102,14 +102,19 @@ public class StudioHarnessObservabilitySseEmitter {
   }
 
   private void emitRunEvents(
-      long runId, long afterSequence, long idleTimeoutMillis, SseEmitter emitter, AtomicBoolean active) {
+      long runId,
+      long afterSequence,
+      long idleTimeoutMillis,
+      SseEmitter emitter,
+      AtomicBoolean active) {
     long localCursor = afterSequence;
     long lastActivityMillis = System.currentTimeMillis();
     long lastHeartbeatMillis = 0L;
     try {
       while (active.get()) {
-        java.util.List<RunEventDTO> batch = observabilityService.listRunEvents(
-            Long.toString(runId), localCursor, ObservabilityLimits.MAX_LIMIT);
+        List<RunEventDTO> batch =
+            observabilityService.listRunEvents(
+                Long.toString(runId), localCursor, ObservabilityLimits.MAX_LIMIT);
         long[] advanced = advanceRunCursor(batch, emitter);
         if (advanced[1] == 1L) {
           localCursor = advanced[0];
@@ -117,10 +122,7 @@ public class StudioHarnessObservabilitySseEmitter {
         }
         long now = System.currentTimeMillis();
         if (now - lastHeartbeatMillis >= HEARTBEAT_INTERVAL_MILLIS) {
-          emitter.send(
-              SseEmitter.event()
-                  .name("heartbeat")
-                  .data(java.util.Map.of("timestampMillis", now)));
+          emitter.send(SseEmitter.event().name("heartbeat").data(Map.of("timestampMillis", now)));
           lastHeartbeatMillis = now;
         }
         if (shouldCloseForRun(runId, idleTimeoutMillis, now, lastActivityMillis)) {
@@ -152,8 +154,9 @@ public class StudioHarnessObservabilitySseEmitter {
     long lastHeartbeatMillis = 0L;
     try {
       while (active.get()) {
-        java.util.List<RootActivityDTO> batch = observabilityService.listRootActivities(
-            Long.toString(sessionId), localCursor, ObservabilityLimits.MAX_LIMIT);
+        List<RootActivityDTO> batch =
+            observabilityService.listRootActivities(
+                Long.toString(sessionId), localCursor, ObservabilityLimits.MAX_LIMIT);
         long[] advanced = advanceActivityCursor(batch, emitter);
         if (advanced[1] == 1L) {
           localCursor = advanced[0];
@@ -161,10 +164,7 @@ public class StudioHarnessObservabilitySseEmitter {
         }
         long now = System.currentTimeMillis();
         if (now - lastHeartbeatMillis >= HEARTBEAT_INTERVAL_MILLIS) {
-          emitter.send(
-              SseEmitter.event()
-                  .name("heartbeat")
-                  .data(java.util.Map.of("timestampMillis", now)));
+          emitter.send(SseEmitter.event().name("heartbeat").data(Map.of("timestampMillis", now)));
           lastHeartbeatMillis = now;
         }
         if (shouldCloseForRoot(rootSessionId, idleTimeoutMillis, now, lastActivityMillis)) {
@@ -184,19 +184,22 @@ public class StudioHarnessObservabilitySseEmitter {
     }
   }
 
-  private static long[] advanceRunCursor(java.util.List<RunEventDTO> batch, SseEmitter emitter)
+  private static long[] advanceRunCursor(List<RunEventDTO> batch, SseEmitter emitter)
       throws IOException {
     long newCursor = 0L;
     boolean advanced = false;
     for (RunEventDTO event : batch) {
-      emitter.send(SseEmitter.event().name("run_event").id(event.getEventId()).data(event));
+      // SSE event id must be the decimal sequence, never the DTO eventId (which is the Snowflake
+      // id). The DTO eventId field is used for typed access while the wire id is set explicitly.
+      emitter.send(
+          SseEmitter.event().name("run_event").id(Long.toString(event.getSequence())).data(event));
       newCursor = event.getSequence();
       advanced = true;
     }
     return new long[] {newCursor, advanced ? 1L : 0L};
   }
 
-  private static long[] advanceActivityCursor(java.util.List<RootActivityDTO> batch, SseEmitter emitter)
+  private static long[] advanceActivityCursor(List<RootActivityDTO> batch, SseEmitter emitter)
       throws IOException {
     long newCursor = 0L;
     boolean advanced = false;
@@ -210,18 +213,16 @@ public class StudioHarnessObservabilitySseEmitter {
 
   private boolean shouldCloseForRun(
       long runId, long idleTimeoutMillis, long nowMillis, long lastActivityMillis) {
-    boolean terminal = isRunTerminal(runId);
-    return terminal && nowMillis - lastActivityMillis >= idleTimeoutMillis;
+    return isRunTerminal(runId) && nowMillis - lastActivityMillis >= idleTimeoutMillis;
   }
 
   private boolean shouldCloseForRoot(
       long rootSessionId, long idleTimeoutMillis, long nowMillis, long lastActivityMillis) {
-    boolean active = isRootActive(rootSessionId);
-    return !active && nowMillis - lastActivityMillis >= idleTimeoutMillis;
+    return !isRootActive(rootSessionId) && nowMillis - lastActivityMillis >= idleTimeoutMillis;
   }
 
   private boolean isRunTerminal(long runId) {
-    return runStore.find(runId).map(run -> RunStatus.valueOf(run.status().name()).terminal()).orElse(true);
+    return runStore.find(runId).map(run -> run.status().terminal()).orElse(true);
   }
 
   private boolean isRootActive(long rootSessionId) {
