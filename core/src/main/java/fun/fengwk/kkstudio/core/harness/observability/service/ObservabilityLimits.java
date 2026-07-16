@@ -1,0 +1,56 @@
+package fun.fengwk.kkstudio.core.harness.observability.service;
+
+/** Page-size and cursor validators shared by the JSON and SSE endpoints. */
+public final class ObservabilityLimits {
+
+  public static final int DEFAULT_LIMIT = 100;
+  public static final int MIN_LIMIT = 1;
+  public static final int MAX_LIMIT = 200;
+
+  private ObservabilityLimits() {}
+
+  public static int normalizeLimit(Integer value, int defaultLimit) {
+    if (value == null) {
+      return defaultLimit;
+    }
+    int parsed = value;
+    if (parsed < MIN_LIMIT || parsed > MAX_LIMIT) {
+      throw new IllegalArgumentException(
+          "limit must be between " + MIN_LIMIT + " and " + MAX_LIMIT + ": " + value);
+    }
+    return parsed;
+  }
+
+  public static int normalizeLimit(int value, int defaultLimit) {
+    if (value < MIN_LIMIT || value > MAX_LIMIT) {
+      throw new IllegalArgumentException(
+          "limit must be between " + MIN_LIMIT + " and " + MAX_LIMIT + ": " + value);
+    }
+    return value;
+  }
+
+  public static void requireNonNegativeCursor(long cursor, String field) {
+    if (cursor < 0) {
+      throw new IllegalArgumentException(field + " must be non-negative: " + cursor);
+    }
+  }
+
+  /** Strict parser for SSE resume cursors that come from a query or {@code Last-Event-ID}. */
+  public static long parseOptionalCursor(String value, String field) {
+    if (value == null || value.isBlank()) {
+      return 0L;
+    }
+    String trimmed = value.trim();
+    long parsed;
+    try {
+      parsed = Long.parseLong(trimmed);
+    } catch (NumberFormatException error) {
+      throw new IllegalArgumentException(
+          field + " must be a non-negative long decimal: " + value, error);
+    }
+    if (parsed < 0) {
+      throw new IllegalArgumentException(field + " must be non-negative: " + value);
+    }
+    return parsed;
+  }
+}
