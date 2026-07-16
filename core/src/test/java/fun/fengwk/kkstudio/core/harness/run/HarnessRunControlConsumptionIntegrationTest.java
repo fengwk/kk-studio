@@ -704,9 +704,7 @@ class HarnessRunControlConsumptionIntegrationTest {
     return new MessageEntryPayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))),
         new AssistantMessageMetadata(
-            ProviderStopReason.COMPLETED,
-            new ModelUsage(1, 1, 0, 0, 0),
-            new ModelCost("USD", BigDecimal.ZERO)));
+            ProviderStopReason.COMPLETED, new ModelUsage(1, 1, 0, 0, 0, 0, 2), zeroCost()));
   }
 
   private static MessageEntryPayload assistant(String text, List<ToolCall> calls) {
@@ -726,8 +724,19 @@ class HarnessRunControlConsumptionIntegrationTest {
     }
     return new MessageEntryPayload(
         msg,
-        new AssistantMessageMetadata(
-            stopReason, new ModelUsage(1, 1, 0, 0, 0), new ModelCost("USD", BigDecimal.ZERO)));
+        new AssistantMessageMetadata(stopReason, new ModelUsage(1, 1, 0, 0, 0, 0, 2), zeroCost()));
+  }
+
+  private static ModelCost zeroCost() {
+    return new ModelCost(
+        "USD",
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO);
   }
 
   private static RunEventDraft assistantCompleted(AgentRun run) {

@@ -75,6 +75,8 @@ import java.util.concurrent.atomic.AtomicReference;
 /** LangChain4j SDK 留在 model adapter 内的标准 Provider 流桥接。 */
 abstract class LangChainModelProvider implements ModelProvider {
 
+  private static final ObjectMapper USAGE_OBJECT_MAPPER = new ObjectMapper();
+
   @Override
   public final ProviderStream stream(ProviderRequest request, ProviderStreamHandler handler) {
     BridgeStream stream = new BridgeStream();
@@ -408,28 +410,61 @@ abstract class LangChainModelProvider implements ModelProvider {
         calls,
         stopReason,
         modelUsage,
-        ModelCost.calculate(request.model().pricing(), modelUsage));
+        ModelCost.calculate(request.model().pricing(), modelUsage),
+        null,
+        null,
+        rawUsageJson(usage));
+  }
+
+  private static String rawUsageJson(TokenUsage usage) {
+    if (usage == null) {
+      return "{}";
+    }
+    return USAGE_OBJECT_MAPPER.valueToTree(usage).toString();
   }
 
   private static ModelUsage toUsage(TokenUsage usage) {
-    long input = usage == null ? 0 : usage.inputTokenCount();
-    long output = usage == null ? 0 : usage.outputTokenCount();
+    long input = usage == null ? 0 : valueOrZero(usage.inputTokenCount());
+    long output = usage == null ? 0 : valueOrZero(usage.outputTokenCount());
+    long providerTotal =
+        usage == null || usage.totalTokenCount() == null
+            ? Math.addExact(input, output)
+            : usage.totalTokenCount();
     if (usage instanceof AnthropicTokenUsage anthropicUsage) {
-      return new ModelUsage(
-          input,
-          output,
-          anthropicUsage.cacheReadInputTokens(),
-          anthropicUsage.cacheCreationInputTokens(),
-          0);
+      long cacheRead = valueOrZero(anthropicUsage.cacheReadInputTokens());
+      long cacheWrite = valueOrZero(anthropicUsage.cacheCreationInputTokens());
+      return new ModelUsage(input, output, cacheRead, cacheWrite, 0, 0, providerTotal);
     }
     if (usage instanceof OpenAiTokenUsage openAiUsage) {
       long cacheRead =
           openAiUsage.inputTokensDetails() == null
               ? 0
-              : openAiUsage.inputTokensDetails().cachedTokens();
-      return new ModelUsage(input, output, cacheRead, 0, 0);
+              : valueOrZero(openAiUsage.inputTokensDetails().cachedTokens());
+      long reasoning =
+          openAiUsage.outputTokensDetails() == null
+              ? 0
+              : valueOrZero(openAiUsage.outputTokensDetails().reasoningTokens());
+      return new ModelUsage(
+          subtractCategory(input, cacheRead, "cached input tokens"),
+          subtractCategory(output, reasoning, "reasoning output tokens"),
+          cacheRead,
+          0,
+          0,
+          reasoning,
+          providerTotal);
     }
-    return new ModelUsage(input, output, 0, 0, 0);
+    return new ModelUsage(input, output, 0, 0, 0, 0, providerTotal);
+  }
+
+  private static long valueOrZero(Integer value) {
+    return value == null ? 0 : value.longValue();
+  }
+
+  private static long subtractCategory(long total, long category, String categoryName) {
+    if (category > total) {
+      throw new IllegalArgumentException(categoryName + " must not exceed its reported total");
+    }
+    return total - category;
   }
 
   static ProviderStopReason toStopReason(FinishReason finishReason, boolean hasToolCalls) {

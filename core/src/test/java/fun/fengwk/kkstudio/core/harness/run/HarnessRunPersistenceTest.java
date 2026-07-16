@@ -779,8 +779,16 @@ class HarnessRunPersistenceTest {
         new AgentMessage(AgentMessageRole.ASSISTANT, contents),
         new AssistantMessageMetadata(
             calls.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS,
-            new ModelUsage(10, 2, 1, 0, 0),
-            new ModelCost("USD", new BigDecimal("0.000012"))));
+            new ModelUsage(10, 2, 1, 0, 0, 0, 13),
+            new ModelCost(
+                "USD",
+                new BigDecimal("0.000012"),
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                new BigDecimal("0.000012"))));
   }
 
   private static ToolBinding readBinding() {

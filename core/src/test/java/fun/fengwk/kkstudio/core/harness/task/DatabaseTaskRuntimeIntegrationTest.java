@@ -881,8 +881,16 @@ class DatabaseTaskRuntimeIntegrationTest {
                   AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(message))),
               new AssistantMessageMetadata(
                   ProviderStopReason.COMPLETED,
-                  new ModelUsage(1, 1, 1, 0, 0),
-                  new ModelCost("USD", BigDecimal.ZERO)));
+                  new ModelUsage(1, 1, 1, 0, 0, 0, 3),
+                  new ModelCost(
+                      "USD",
+                      BigDecimal.ZERO,
+                      BigDecimal.ZERO,
+                      BigDecimal.ZERO,
+                      BigDecimal.ZERO,
+                      BigDecimal.ZERO,
+                      BigDecimal.ZERO,
+                      BigDecimal.ZERO)));
       insertEntry(
           leaf, task.task().childSessionId(), parent, task.task().childRunId(), "message", payload);
       parent = leaf;

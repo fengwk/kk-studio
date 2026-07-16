@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.harness.agent.extension.BeforeProviderRequestInterceptor;
 import fun.fengwk.kkstudio.harness.agent.extension.ProviderRequestInterceptorChain;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
@@ -69,14 +70,16 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
     TurnState state = new TurnState(handler, descriptorsByName(request.tools()));
     handler.onStarted();
     try {
-      ProviderRequest providerRequest =
+      ProviderRequest baseRequest =
           new ProviderRequest(
               request.model(),
               request.variant(),
               request.messages(),
-              toProviderTools(request.tools()));
-      ProviderStream stream =
-          provider.stream(providerRequestInterceptors.intercept(providerRequest), state);
+              toProviderTools(request.tools()),
+              ProviderCacheControl.none());
+      ProviderRequest finalRequest = providerRequestInterceptors.intercept(baseRequest);
+      state.bindFinalRequest(finalRequest);
+      ProviderStream stream = provider.stream(finalRequest, state);
       state.bind(stream);
     } catch (ProviderException error) {
       state.fail(error);
@@ -188,6 +191,7 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
     private final AgentTurnEventHandler handler;
     private final Map<String, ToolDescriptor> descriptors;
     private final AtomicReference<ProviderStream> stream = new AtomicReference<>();
+    private final AtomicReference<ProviderRequest> finalRequest = new AtomicReference<>();
     private final AtomicBoolean cancelled = new AtomicBoolean();
     private final AtomicBoolean terminal = new AtomicBoolean();
     private final StringBuilder text = new StringBuilder();
@@ -197,6 +201,13 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
     private TurnState(AgentTurnEventHandler handler, Map<String, ToolDescriptor> descriptors) {
       this.handler = handler;
       this.descriptors = descriptors;
+    }
+
+    void bindFinalRequest(ProviderRequest request) {
+      Objects.requireNonNull(request, "request");
+      if (!finalRequest.compareAndSet(null, request)) {
+        throw new IllegalStateException("final request is already bound");
+      }
     }
 
     @Override
@@ -233,6 +244,13 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
             new ProviderException(ProviderErrorKind.CANCELLED, "assistant turn cancelled"));
         return;
       }
+      ProviderRequest boundRequest = finalRequest.get();
+      if (boundRequest == null) {
+        handler.onFailed(
+            new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST, "final provider request was never bound"));
+        return;
+      }
       try {
         AgentTurnResult result;
         synchronized (this) {
@@ -245,7 +263,8 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
             result =
                 new AgentTurnResult(
                     new AgentAssistantMessage(response.text(), response.thinking(), calls),
-                    response);
+                    response,
+                    boundRequest);
           }
         }
         if (result == null) {

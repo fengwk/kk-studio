@@ -8,9 +8,11 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -43,7 +45,9 @@ class AgentTurnRequestTest {
 
   private ModelDescriptor model() {
     return new ModelDescriptor(
-        "provider",
+        1L,
+        2L,
+        ProviderType.OPENAI,
         "model",
         "Model",
         8_192,
@@ -53,11 +57,17 @@ class AgentTurnRequestTest {
         List.of(),
         new ModelPricing(
             "USD",
+            "tier-1",
+            "default",
+            BigDecimal.ONE,
+            "v1",
             BigDecimal.ZERO,
             BigDecimal.ZERO,
             BigDecimal.ZERO,
             BigDecimal.ZERO,
-            BigDecimal.ZERO));
+            BigDecimal.ZERO,
+            BigDecimal.ZERO),
+        PromptCachePolicy.disabled());
   }
 
   private ToolDescriptor tool() {

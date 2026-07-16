@@ -8,7 +8,10 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCachePolicy;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
@@ -68,7 +71,9 @@ class ProviderRequestInterceptorChainTest {
     ModelVariant variant = new ModelVariant("default", null, null, null, null, List.of());
     ModelDescriptor model =
         new ModelDescriptor(
-            "provider",
+            1L,
+            2L,
+            ProviderType.OPENAI,
             "model",
             "Model",
             1024,
@@ -78,11 +83,17 @@ class ProviderRequestInterceptorChainTest {
             List.of(variant),
             new ModelPricing(
                 "USD",
+                "tier-1",
+                "default",
+                BigDecimal.ONE,
+                "v1",
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
-                BigDecimal.ZERO));
-    return new ProviderRequest(model, variant, List.of(), List.of());
+                BigDecimal.ZERO,
+                BigDecimal.ZERO),
+            PromptCachePolicy.disabled());
+    return new ProviderRequest(model, variant, List.of(), List.of(), ProviderCacheControl.none());
   }
 }

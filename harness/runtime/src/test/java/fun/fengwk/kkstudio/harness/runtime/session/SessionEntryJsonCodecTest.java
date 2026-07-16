@@ -119,6 +119,7 @@ class SessionEntryJsonCodecTest {
 
     assertEquals(payload, decoded);
     assertEquals(321L, decoded.assistantMetadata().usage().inputTokens());
+    assertEquals(new BigDecimal("0.000004200000"), decoded.assistantMetadata().cost().total());
     assertEquals(new BigDecimal("0.000004200000"), decoded.assistantMetadata().cost().amount());
   }
 
@@ -248,12 +249,12 @@ class SessionEntryJsonCodecTest {
         SessionEntryType.MESSAGE,
         messageWithMetadata(
             "ASSISTANT",
-            validMetadataJson().replace("\"amount\":\"0.000004200000\"", "\"amount\":\"bad\"")));
+            validMetadataJson().replace("\"total\":\"0.000004200000\"", "\"total\":\"bad\"")));
     assertMalformed(
         SessionEntryType.MESSAGE,
         messageWithMetadata(
             "ASSISTANT",
-            validMetadataJson().replace("\"amount\":\"0.000004200000\"", "\"amount\":\"-1\"")));
+            validMetadataJson().replace("\"total\":\"0.000004200000\"", "\"total\":\"-1\"")));
     assertMalformed(
         SessionEntryType.MESSAGE,
         messageWithMetadata(
@@ -268,6 +269,24 @@ class SessionEntryJsonCodecTest {
         SessionEntryType.MESSAGE,
         messageWithMetadata(
             "ASSISTANT", validMetadataJson().replace("\"cost\":", "\"extra\":true,\"cost\":")));
+    assertMalformed(
+        SessionEntryType.MESSAGE,
+        messageWithMetadata(
+            "ASSISTANT",
+            validMetadataJson()
+                .replace("\"cacheWriteLongTokens\":0", "\"cacheWriteLongTokens\":-1")));
+    assertMalformed(
+        SessionEntryType.MESSAGE,
+        messageWithMetadata(
+            "ASSISTANT",
+            validMetadataJson()
+                .replace(
+                    "\"cacheWrite\":\"0.000001200000\"", "\"cacheWrite\":\"-0.000001200000\"")));
+    assertMalformed(
+        SessionEntryType.MESSAGE,
+        messageWithMetadata(
+            "ASSISTANT",
+            validMetadataJson().replace("\"total\":\"0.000004200000\"", "\"total\":\"1\"")));
   }
 
   /** ToolResult 内容不能递归嵌套 ToolCall 或 ToolResult。 */
@@ -319,15 +338,26 @@ class SessionEntryJsonCodecTest {
   private static AssistantMessageMetadata assistantMetadata(ProviderStopReason stopReason) {
     return new AssistantMessageMetadata(
         stopReason,
-        new ModelUsage(321, 45, 6, 7, 8),
-        new ModelCost("USD", new BigDecimal("0.000004200000")));
+        new ModelUsage(321, 45, 6, 7, 0, 8, 387),
+        new ModelCost(
+            "USD",
+            new BigDecimal("0.000001000000"),
+            new BigDecimal("0.000001000000"),
+            new BigDecimal("0.000001000000"),
+            new BigDecimal("0.000001200000"),
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            new BigDecimal("0.000004200000")));
   }
 
   private static String validMetadataJson() {
     return "{\"stopReason\":\"COMPLETED\",\"usage\":{\"inputTokens\":321,"
         + "\"outputTokens\":45,\"cacheReadTokens\":6,\"cacheWriteTokens\":7,"
-        + "\"reasoningTokens\":8},\"cost\":{\"currency\":\"USD\","
-        + "\"amount\":\"0.000004200000\"}}";
+        + "\"cacheWriteLongTokens\":0,\"reasoningTokens\":8,\"providerTotalTokens\":387},"
+        + "\"cost\":{\"currency\":\"USD\",\"input\":\"0.000001000000\","
+        + "\"output\":\"0.000001000000\",\"cacheRead\":\"0.000001000000\","
+        + "\"cacheWrite\":\"0.000001200000\",\"cacheWriteLong\":\"0\","
+        + "\"reasoning\":\"0\",\"total\":\"0.000004200000\"}}";
   }
 
   private static String messageWithMetadata(String role, String metadataJson) {

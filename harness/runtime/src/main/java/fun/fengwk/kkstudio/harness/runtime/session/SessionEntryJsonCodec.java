@@ -176,11 +176,19 @@ public final class SessionEntryJsonCodec {
     usageNode.put("outputTokens", usage.outputTokens());
     usageNode.put("cacheReadTokens", usage.cacheReadTokens());
     usageNode.put("cacheWriteTokens", usage.cacheWriteTokens());
+    usageNode.put("cacheWriteLongTokens", usage.cacheWriteLongTokens());
     usageNode.put("reasoningTokens", usage.reasoningTokens());
+    usageNode.put("providerTotalTokens", usage.providerTotalTokens());
     ModelCost cost = metadata.cost();
     ObjectNode costNode = node.putObject("cost");
     costNode.put("currency", cost.currency());
-    costNode.put("amount", cost.amount().toPlainString());
+    costNode.put("input", cost.input().toPlainString());
+    costNode.put("output", cost.output().toPlainString());
+    costNode.put("cacheRead", cost.cacheRead().toPlainString());
+    costNode.put("cacheWrite", cost.cacheWrite().toPlainString());
+    costNode.put("cacheWriteLong", cost.cacheWriteLong().toPlainString());
+    costNode.put("reasoning", cost.reasoning().toPlainString());
+    costNode.put("total", cost.total().toPlainString());
     return node;
   }
 
@@ -200,24 +208,40 @@ public final class SessionEntryJsonCodec {
         "outputTokens",
         "cacheReadTokens",
         "cacheWriteTokens",
-        "reasoningTokens");
+        "cacheWriteLongTokens",
+        "reasoningTokens",
+        "providerTotalTokens");
     ModelUsage modelUsage =
         new ModelUsage(
             nonNegativeLong(usage, "inputTokens"),
             nonNegativeLong(usage, "outputTokens"),
             nonNegativeLong(usage, "cacheReadTokens"),
             nonNegativeLong(usage, "cacheWriteTokens"),
-            nonNegativeLong(usage, "reasoningTokens"));
+            nonNegativeLong(usage, "cacheWriteLongTokens"),
+            nonNegativeLong(usage, "reasoningTokens"),
+            nonNegativeLong(usage, "providerTotalTokens"));
     ObjectNode cost = object(node.get("cost"), "cost");
-    fields(cost, "currency", "amount");
-    BigDecimal amount;
-    try {
-      amount = new BigDecimal(text(cost, "amount"));
-    } catch (NumberFormatException exception) {
-      throw new IllegalArgumentException("cost amount must be a decimal", exception);
-    }
-    return new AssistantMessageMetadata(
-        stopReason, modelUsage, new ModelCost(text(cost, "currency"), amount));
+    fields(
+        cost,
+        "currency",
+        "input",
+        "output",
+        "cacheRead",
+        "cacheWrite",
+        "cacheWriteLong",
+        "reasoning",
+        "total");
+    ModelCost modelCost =
+        new ModelCost(
+            text(cost, "currency"),
+            decimal(cost, "input"),
+            decimal(cost, "output"),
+            decimal(cost, "cacheRead"),
+            decimal(cost, "cacheWrite"),
+            decimal(cost, "cacheWriteLong"),
+            decimal(cost, "reasoning"),
+            decimal(cost, "total"));
+    return new AssistantMessageMetadata(stopReason, modelUsage, modelCost);
   }
 
   private ObjectNode encodeMessage(AgentMessage message) {
@@ -459,6 +483,18 @@ public final class SessionEntryJsonCodec {
       throw new IllegalArgumentException(field + " must be a positive integer");
     }
     return value.longValue();
+  }
+
+  private static BigDecimal decimal(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value == null || !value.isTextual()) {
+      throw new IllegalArgumentException(field + " must be text");
+    }
+    try {
+      return new BigDecimal(value.textValue());
+    } catch (NumberFormatException exception) {
+      throw new IllegalArgumentException(field + " must be a decimal", exception);
+    }
   }
 
   private static void fields(ObjectNode node, String... expected) {

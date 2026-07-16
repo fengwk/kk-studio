@@ -80,8 +80,16 @@ class MysqlHarnessSessionStoreTest {
                     List.of(new ToolCallMessageContent("call-1", "read", "{}"))),
                 new AssistantMessageMetadata(
                     ProviderStopReason.TOOL_CALLS,
-                    new ModelUsage(1, 1, 0, 0, 0),
-                    new ModelCost("USD", BigDecimal.ZERO))));
+                    new ModelUsage(1, 1, 0, 0, 0, 0, 2),
+                    new ModelCost(
+                        "USD",
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO))));
     store.append(call, snapshot.id(), 1L);
     SessionEntry result =
         entry(
