@@ -16,6 +16,7 @@ flowchart TD
     A --> H[harness-extensions.md<br/>Harness 扩展]
     A --> I[prompt-cache-usage-cost.md<br/>Prompt Cache、Usage 与成本账本]
     A --> J[s3-presign.md<br/>S3 预签名直传]
+    A --> K[comfyui-workflow-api.md<br/>ComfyUI 工作流与 S3 直传后端]
 ```
 
 ## 阅读顺序
@@ -31,6 +32,7 @@ flowchart TD
 | 7 | [harness-extensions.md](harness-extensions.md) | typed registry、hook 顺序、factory 与 lifecycle | 扩展 Harness 执行链 |
 | 8 | [prompt-cache-usage-cost.md](prompt-cache-usage-cost.md) | cache control、usage、pricing、ledger 与聚合 API | 修改模型调用计量与缓存链路 |
 | 9 | [s3-presign.md](s3-presign.md) | 固定 bucket、path-style 的 S3 预签名直传 / 直下载 | 接入浏览器到对象存储的直传链路 |
+| 10 | [comfyui-workflow-api.md](comfyui-workflow-api.md) | ComfyUI 工作流卡片 CRUD + 无状态提交 / 查询 / 取消 + S3 输入桥 + job-scoped 输出下载 | 接入 ComfyUI 控制台与 S3 直传后端 |
 
 ## 按主题索引
 
@@ -45,6 +47,7 @@ flowchart TD
 | Harness 扩展 | [harness-extensions.md](harness-extensions.md) |
 | Prompt Cache、Usage 与成本账本 | [prompt-cache-usage-cost.md](prompt-cache-usage-cost.md) |
 | S3 预签名直传 | [s3-presign.md](s3-presign.md) |
+| ComfyUI 工作流与 S3 直传后端 | [comfyui-workflow-api.md](comfyui-workflow-api.md) |
 
 ## 维护规则
 

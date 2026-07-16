@@ -300,3 +300,19 @@ create table if not exists model_usage_record (
 create index if not exists idx_model_usage_record_run on model_usage_record (run_id, id);
 create index if not exists idx_model_usage_record_session on model_usage_record (session_id, id);
 create index if not exists idx_model_usage_record_model on model_usage_record (model_resource_id, id);
+
+create table if not exists comfyui_workflow_api (
+    id                    bigint not null,
+    api_name              varchar(64) not null,
+    name                  varchar(128) not null,
+    description           varchar(512),
+    workflow_json         text not null,
+    input_bindings_json   text not null,
+    default_selector      varchar(1024),
+    enabled               boolean not null,
+    gmt_create            timestamp(3) not null default current_timestamp(),
+    gmt_modified          timestamp(3) not null default current_timestamp(),
+    version               bigint not null default 0,
+    primary key (id),
+    unique (api_name)
+);

@@ -62,6 +62,49 @@ public class S3StorageServiceTest {
   }
 
   @Test
+  public void testBoundedDownloadReturnsMetadata() {
+    TestContext context = newTestContext(null);
+    try {
+      // 先 HEAD 再读取并复核字节长度，覆盖 ComfyUI 输入文件的大小边界。
+      S3ObjectContent content = context.storageService.download("dir/demo.png", 3L);
+      assertArrayEquals(new byte[] {1, 2, 3}, content.getBytes());
+      assertEquals("image/png", content.getContentType());
+    } finally {
+      context.close();
+    }
+  }
+
+  @Test
+  public void testBoundedDownloadRejectsOversizedObjectBeforeRead() {
+    TestContext context =
+        newTestContext(
+            null,
+            methodName ->
+                "headObject".equals(methodName)
+                    ? HeadObjectResponse.builder().contentLength(4L).build()
+                    : null);
+    try {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> context.storageService.download("dir/demo.png", 3L));
+    } finally {
+      context.close();
+    }
+  }
+
+  @Test
+  public void testBoundedDownloadRejectsNegativeLimit() {
+    TestContext context = newTestContext(null);
+    try {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> context.storageService.download("dir/demo.png", -1L));
+    } finally {
+      context.close();
+    }
+  }
+
+  @Test
   public void testExistsReturnsFalseForMissingKey() {
     TestContext context =
         newTestContext(
@@ -130,9 +173,10 @@ public class S3StorageServiceTest {
               return switch (method.getName()) {
                 case "close" -> null;
                 case "putObject" -> PutObjectResponse.builder().eTag("etag-demo").build();
-                case "headObject" -> HeadObjectResponse.builder().build();
+                case "headObject" -> HeadObjectResponse.builder().contentLength(3L).build();
                 case "getObjectAsBytes" -> ResponseBytes.fromByteArray(
-                    GetObjectResponse.builder().build(), new byte[] {1, 2, 3});
+                    GetObjectResponse.builder().contentType("image/png").build(),
+                    new byte[] {1, 2, 3});
                 case "serviceName" -> "s3";
                 case "toString" -> "noopS3Client";
                 case "hashCode" -> System.identityHashCode(proxy);
