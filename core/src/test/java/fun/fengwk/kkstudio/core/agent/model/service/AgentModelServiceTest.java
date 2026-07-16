@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.agent.model.service;
 
+import static fun.fengwk.kkstudio.core.agent.model.AgentModelTestData.executable;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -71,6 +72,7 @@ public class AgentModelServiceTest {
     AgentModelCreateDTO dto = new AgentModelCreateDTO();
     dto.setProviderId(providerId);
     dto.setName(name);
+    executable(dto);
     return dto;
   }
 

@@ -399,6 +399,69 @@ tokenReadRatio =
 
 所有 token 聚合使用 `Math.addExact`，溢出时失败；空 scope 返回正确的 `scopeType`、字符串 `scopeId`、零 token、`0.000000` ratios 和空 `costs`。
 
+## Executable Model 配置解析
+
+持久 `agent_model.capabilities_json` 与 `config_json` 必须在 mutation 阶段和 Turn 启动时同时验证，确保模型 ID、变体、缓存策略、价格快照和工具绑定都能被 runtime 实际执行。
+
+### 必需字段
+
+`configJson` 必须是合法 JSON object，固定包含：
+
+- `contextWindow` / `maxOutputTokens`：正整数，`maxOutputTokens <= contextWindow`。
+- `inputModalities`：非空 `ModelInputModality` 列表，限定为 `TEXT/IMAGE/AUDIO/VIDEO/DOCUMENT`。
+- `variants`：非空列表，每项至少包含非空 `name`，可选 `maxOutputTokens/temperature/topP/topK/frequencyPenalty/presencePenalty/stopSequences`，且 `variant.maxOutputTokens <= model.maxOutputTokens`，名称在 list 内唯一。
+- `pricing`：`currency/pricingTier/serviceTier/serviceTierMultiplier/version` 全部非空且 `serviceTierMultiplier > 0`；六类每百万 token 单价 `inputPerMillionTokens/outputPerMillionTokens/cacheReadPerMillionTokens/cacheWritePerMillionTokens/cacheWriteLongPerMillionTokens/reasoningPerMillionTokens` 均为非负有限数。
+
+`capabilitiesJson` 是 `ModelCapability` 列表，类型限定为 `TEXT/VISION/AUDIO/TOOLS/THINKING` 并去重。
+
+### 解析失败语义
+
+缺失或类型错误的必要字段、`contextWindow` 小于 `maxOutputTokens`、未知 enum 值、重复变体名、未注册工具等任何不合规输入都会在 `AgentModelMutationFactory`（写入阶段）或 `DatabaseTurnResourceResolver`（Turn 启动阶段）抛出 `IllegalArgumentException`，并阻止模型进入 Turn 队列。任何可以写库但不能执行的 `agent_model` 记录都被视为非法，立即失败。
+
+### 模型 CRUD 契约
+
+`AgentModelMutationFactory` 在 create 与 update 路径上先 `runtimeConfigParser.parse(...)` 再 `apply(...)`，使任何 `newModel(...)` 或 `update(...)` 都不可能产生一个不可执行的 `agent_model` 记录；`AgentModelServiceImpl` 在 create/update/delete 失败时把状态机异常转换为 `IllegalStateException`，并保留原 `name/version` 唯一性。
+
+## Resource 解析与进程生命周期
+
+`DatabaseTurnResourceResolver` 从当前 Session 路径的 `AGENT_SNAPSHOT` Entry 出发，把冻结的 modelId/variant/tools 解析为 `TurnResources`，并强制 Provider credential/config 来自持久库。
+
+### Provider Factory 调用
+
+解析器只通过 `HarnessExtensionHost.providerFactory(ProviderType)` 拉取可信工厂，并只使用：
+
+- `ProviderFactory.create(credential, configJson)` 构造 `ProviderAdapter`；
+- 工厂暴露的 `PromptCacheCapability` 决定 `PromptCachePolicy`，按 ProviderType 固定映射为 OpenAI/Responses 的 `affinityShort`、Anthropic 的 `breakpointsShort`、Google 的 `automatic`。本仓库不向 Google 提交任何 cached-content resource，cache 事实完全由 `ProviderResponse` usage 归一化读取。
+
+注册的 `ProviderFactory` 返回的 `ProviderAdapter` 必须与请求的 `ProviderType` 匹配，否则立即失败；持久 `configJson` 必须包含正整数 `timeoutMillis`、持久 `baseUrl` 必须非空。
+
+### Tool Binding 解析
+
+`tools` 字段可以是 `name@version` 或单独 `name`。单独 `name` 仅在 registered tool factory 中恰好匹配一个版本时成功；多版本同名 tool 抛错；任何 `ENVIRONMENT` tool 必须在调用端额外提供 `environmentId`，单独出现的 `ENVIRONMENT` 引用同样抛错。
+
+### 进程生命周期
+
+`AgentTurnWorkerLifecycle` 与 `CloudToolWorkerLifecycle` 都实现 `SmartLifecycle`：
+
+- 每次 tick 至多派发一个 active turn/tool，未在数据库 `claimDue` 成功时不创建新 handle。
+- `AgentTurnWorkerLifecycle` 按 `RunWorkerConfig.heartbeatInterval` 调用 `worker.heartbeat(turn)`；数据库 `claim`/`heartbeat` 失败或异常时立即 `handle.cancel()` 并清空 active 句柄，依赖数据库的 lease/attempt 复用保证不会重复执行。
+- 任何 scheduler `start` 异常会回滚 `running` 标志并取消已注册的 future。
+- `stop` 始终取消 future 并调用 `worker.stop()` 释放本地 Cloud tool 句柄；持久状态由 lease 自然回收，不伪造 terminal CAS。
+
+## Validation
+
+| 验证目标 | 测试文件 |
+| --- | --- |
+| 配置解析、缺字段、类型错误、enum 未知、变体重复 | [`AgentModelRuntimeConfigParserTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/agent/model/runtime/AgentModelRuntimeConfigParserTest.java) |
+| Mutation 拒绝不可执行 JSON、保留/重新校验部分更新 | [`AgentModelMutationFactoryTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/agent/model/service/impl/AgentModelMutationFactoryTest.java) |
+| 真实资源解析、provider 映射、cache policy 强约束、tool binding 边界、environmentRoot 强制 | [`DatabaseTurnResourceResolverTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/run/resource/DatabaseTurnResourceResolverTest.java) |
+| workdir 不能逃逸 environmentRoot、properties 边界 | [`HarnessRuntimePropertiesTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/configuration/HarnessRuntimePropertiesTest.java) |
+| Turn worker lifecycle: claim gate / heartbeat loss / stop cancel / scheduler 启动回滚 | [`AgentTurnWorkerLifecycleTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/run/worker/AgentTurnWorkerLifecycleTest.java) |
+| Cloud tool worker lifecycle: active gate / start 拒绝 / stop 释放本地句柄 | [`CloudToolWorkerLifecycleTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/tool/worker/CloudToolWorkerLifecycleTest.java) |
+| Spring 装配后 `AgentTurnWorker` / `CloudToolWorker` / 真实 `TurnResourceResolver` / `CompactionService` (empty) | [`HarnessRuntimeWiringIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/run/HarnessRuntimeWiringIntegrationTest.java) |
+| `RunWorkerConfig` heartbeat 必须 < lease，非法配置拒绝 | [`RunContractsTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/run/RunContractsTest.java) |
+| Cloud tool 进程停止仅取消本地 handle，不伪造 durable terminal | [`CloudToolWorkerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/tool/worker/CloudToolWorkerTest.java) |
+
 ## 组件与文件地图
 
 | 层次 | 组件 | 文件 |
