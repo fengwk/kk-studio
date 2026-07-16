@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
+import fun.fengwk.kkstudio.core.harness.session.HarnessAgentSnapshotResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.task.SubagentTask;
@@ -81,6 +82,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
   private final SessionIdGenerator sessionIds;
   private final WorkingCopyRevisionResolver workingCopyRevisionResolver;
   private final SessionEntryJsonCodec entryCodec = new SessionEntryJsonCodec();
+  private final HarnessAgentSnapshotResolver snapshotResolver;
 
   public DatabaseTaskRuntime(
       HarnessRunMapper runMapper,
@@ -92,7 +94,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       AgentDefinitionMapper agentMapper,
       RunIdGenerator runIds,
       SessionIdGenerator sessionIds,
-      WorkingCopyRevisionResolver workingCopyRevisionResolver) {
+      WorkingCopyRevisionResolver workingCopyRevisionResolver,
+      HarnessAgentSnapshotResolver snapshotResolver) {
     this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
     this.eventMapper = Objects.requireNonNull(eventMapper, "eventMapper");
     this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
@@ -104,6 +107,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     this.sessionIds = Objects.requireNonNull(sessionIds, "sessionIds");
     this.workingCopyRevisionResolver =
         Objects.requireNonNull(workingCopyRevisionResolver, "workingCopyRevisionResolver");
+    this.snapshotResolver = Objects.requireNonNull(snapshotResolver, "snapshotResolver");
   }
 
   @Override
@@ -422,39 +426,11 @@ public class DatabaseTaskRuntime implements TaskRuntime {
   }
 
   private AgentSnapshot snapshotOnCurrentPath(HarnessSessionDO session) {
-    if (session.getLeafEntryId() == null) {
-      throw new IllegalStateException("session has no current leaf for agent snapshot lookup");
-    }
-    HarnessSessionEntryDO entry =
-        entryMapper.findLatestOnPathByType(
-            session.getId(), session.getLeafEntryId(), SessionEntryType.AGENT_SNAPSHOT.value());
-    if (entry == null) {
-      throw new IllegalStateException("session has no frozen agent snapshot on its current path");
-    }
-    SessionEntryPayload payload =
-        entryCodec.decode(SessionEntryType.AGENT_SNAPSHOT, entry.getPayloadJson());
-    return ((AgentSnapshotEntryPayload) payload).snapshot();
+    return snapshotResolver.snapshotOnCurrentPath(session);
   }
 
   private AgentSnapshot snapshot(AgentDefinitionDO definition) {
-    try {
-      JsonNode config = OBJECT_MAPPER.readTree(definition.getConfigJson());
-      List<String> tools = strings(config, "tools");
-      List<String> skills = strings(config, "skills");
-      List<String> allowed = strings(config, "allowedSubagents");
-      JsonNode policy = config.path("executionPolicy");
-      return new AgentSnapshot(
-          definition.getSystemPrompt(),
-          String.valueOf(definition.getModelId()),
-          definition.getVariant(),
-          tools,
-          skills,
-          allowed,
-          OBJECT_MAPPER.writeValueAsString(
-              policy.isMissingNode() ? OBJECT_MAPPER.createObjectNode() : policy));
-    } catch (JsonProcessingException error) {
-      throw new IllegalArgumentException("target agent config is invalid", error);
-    }
+    return snapshotResolver.snapshotForDefinition(definition);
   }
 
   private List<String> strings(JsonNode config, String name) {
