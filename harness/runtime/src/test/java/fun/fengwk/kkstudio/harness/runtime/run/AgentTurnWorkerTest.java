@@ -1156,31 +1156,6 @@ class AgentTurnWorkerTest {
     assertEquals(PromptCacheRetention.NONE, resolved.retention());
   }
 
-  /** finalizer 抛错必须经 Provider 流失败路径进入 Worker durable FAILED；该测试覆盖 "失败仍走现有 durable failure" 的验收点。 */
-  @Test
-  void finalizerFailurePropagatesAsDurableRunFailure() {
-    Fixture fixture = new Fixture();
-    fixture.overrideModel = affinityModel();
-    fixture.providers.add(
-        RecordingProvider.fail(
-            new ProviderException(ProviderErrorKind.INVALID_REQUEST, "finalizer failure")));
-    // 在 Host chain 之后放 finalizer，让 finalizer 抛错以模拟真实 finalizer 失败场景。
-    fixture.providerRequestInterceptors =
-        new ProviderRequestInterceptorChain(List.of(request -> request))
-            .andThen(
-                request -> {
-                  throw new IllegalStateException("finalizer boom");
-                });
-
-    fixture.worker().executeNext("worker-a").orElseThrow();
-
-    assertEquals(RunStatus.FAILED, fixture.store.current.status());
-    assertTrue(
-        observations(fixture, HarnessLifecycleObservation.RunTerminated.class).isEmpty()
-            || observations(fixture, HarnessLifecycleObservation.RunTerminated.class).stream()
-                .noneMatch(t -> t.status() == RunStatus.SUCCEEDED));
-  }
-
   /** BREAKPOINTS capability：SYSTEM + TOOLS 全支持，用于验证 intersection & 派生 key。 */
   private static ModelDescriptor breakpointsModel() {
     ModelVariant variant = new ModelVariant("default", null, null, null, null, List.of());

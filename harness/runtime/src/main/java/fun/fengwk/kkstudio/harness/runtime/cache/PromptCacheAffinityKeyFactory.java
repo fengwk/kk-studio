@@ -10,15 +10,12 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderVideoBlock;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 
@@ -32,22 +29,17 @@ import java.util.Objects;
  *
  * <ul>
  *   <li>格式固定为 {@code pc1-} 前缀 + SHA-256 Base64URL 无 padding（43 字符）。
- *   <li>digest 输入采用长度前缀编码（type + ":" + 字段名长度 + ":" + 字段名 + ":" + 值长度 + ":" + 值 + "\n"），
- *       字段边界不可碰撞，绝不可能以简单字符串拼接伪造同 key。
+ *   <li>digest 输入采用 {@code (type, nameLen:4B, name, valueLen:4B, value)} 的长度前缀帧； 每个复合对象的每个
+ *       字段必须单独成帧，绝不依赖分隔字符或 NUL 拼接，因此字段值包含 NUL 也不会与跨字段拼接碰撞。
  *   <li>版本字段独立标记，用于将来在不破坏旧 key 的前提下增量调整算法。
  *   <li>输入：版本、sessionId、provider/model resource ID、providerType、Provider modelId、连续 leading SYSTEM
- *       messages 的完整 typed contents、按请求顺序的 tool name/description/inputSchemaJson。
+ *       messages 的完整 typed contents（每个 content 独立帧；嵌套 ToolResult 的 contents 也递归逐块成帧）、按请求顺序的 tool
+ *       name/description/inputSchemaJson。
  * </ul>
  */
 public final class PromptCacheAffinityKeyFactory {
 
   private static final String VERSION = "pc1";
-
-  /** 可被测试直接调用的工具函数：把单个 ProviderContentBlock 的稳定字节写入 digest。 */
-  static void writeContentForTest(
-      MessageDigest md, int messageIndex, int blockIndex, ProviderContentBlock block) {
-    writeContent(md, messageIndex, blockIndex, block);
-  }
 
   /**
    * 为单次请求派生 affinity key。sessionId 必须为正整数。
@@ -103,7 +95,6 @@ public final class PromptCacheAffinityKeyFactory {
     writeField(md, 'C', "leadingSystemCount", Integer.toString(leadingSystem));
     for (int messageIndex = 0; messageIndex < leadingSystem; messageIndex++) {
       ProviderMessage message = messages.get(messageIndex);
-      // 每条 system message 单独写入 role 与 contents，避免共享边界造成拼接碰撞。
       writeField(md, 'R', "role@" + messageIndex, message.role().name());
       List<ProviderContentBlock> contents = message.contents();
       writeField(md, 'N', "contentCount@" + messageIndex, Integer.toString(contents.size()));
@@ -126,75 +117,47 @@ public final class PromptCacheAffinityKeyFactory {
 
   private static void writeContent(
       MessageDigest md, int messageIndex, int blockIndex, ProviderContentBlock block) {
+    String tag = blockFieldTag(messageIndex, blockIndex);
+    // 只展开 leading SYSTEM 合法 6 类内容块。ToolCall/ToolResult 由 ProviderMessage 验证约束在
+    // ASSISTANT/TOOL message 中出现，因此这里遇到它们属于协议违规，交给 default 显式失败。
     if (block instanceof ProviderTextBlock text) {
-      writeField(md, 'B', blockFieldTag(messageIndex, blockIndex, "TEXT"), text.text());
+      writeField(md, 'B', tag + "/TEXT/text", text.text());
     } else if (block instanceof ProviderImageBlock image) {
-      writeField(
-          md,
-          'B',
-          blockFieldTag(messageIndex, blockIndex, "IMAGE"),
-          image.mediaType() + "\u0000" + image.source());
+      writeField(md, 'B', tag + "/IMAGE/mediaType", image.mediaType());
+      writeField(md, 'B', tag + "/IMAGE/source", image.source());
     } else if (block instanceof ProviderAudioBlock audio) {
-      writeField(
-          md,
-          'B',
-          blockFieldTag(messageIndex, blockIndex, "AUDIO"),
-          audio.mediaType() + "\u0000" + audio.source());
+      writeField(md, 'B', tag + "/AUDIO/mediaType", audio.mediaType());
+      writeField(md, 'B', tag + "/AUDIO/source", audio.source());
     } else if (block instanceof ProviderVideoBlock video) {
-      writeField(
-          md,
-          'B',
-          blockFieldTag(messageIndex, blockIndex, "VIDEO"),
-          video.mediaType() + "\u0000" + video.source());
+      writeField(md, 'B', tag + "/VIDEO/mediaType", video.mediaType());
+      writeField(md, 'B', tag + "/VIDEO/source", video.source());
     } else if (block instanceof ProviderThinkingBlock thinking) {
-      writeField(md, 'B', blockFieldTag(messageIndex, blockIndex, "THINKING"), thinking.thinking());
+      writeField(md, 'B', tag + "/THINKING/thinking", thinking.thinking());
     } else if (block instanceof ProviderJsonBlock json) {
-      writeField(md, 'B', blockFieldTag(messageIndex, blockIndex, "JSON"), json.json());
-    } else if (block instanceof ProviderToolCallBlock toolCall) {
-      writeField(
-          md,
-          'B',
-          blockFieldTag(messageIndex, blockIndex, "TOOL_CALL"),
-          toolCall.toolCall().id()
-              + "\u0000"
-              + toolCall.toolCall().name()
-              + "\u0000"
-              + toolCall.toolCall().argumentsJson());
-    } else if (block instanceof ProviderToolResultBlock toolResult) {
-      writeField(
-          md,
-          'B',
-          blockFieldTag(messageIndex, blockIndex, "TOOL_RESULT"),
-          toolResult.toolCallId()
-              + "\u0000"
-              + toolResult.toolName()
-              + "\u0000"
-              + Boolean.toString(toolResult.error())
-              + "\u0000"
-              + toolResult.detailsJson()
-              + "\u0000"
-              + Integer.toString(toolResult.contents().size()));
+      writeField(md, 'B', tag + "/JSON/json", json.json());
     } else {
-      throw new IllegalStateException("unhandled provider content block: " + block.getClass());
+      throw new IllegalStateException(
+          "leading SYSTEM contents must be one of TEXT/IMAGE/AUDIO/VIDEO/THINKING/JSON, got: "
+              + block.getClass().getSimpleName());
     }
   }
 
-  private static String blockFieldTag(int messageIndex, int blockIndex, String kind) {
-    return "msg#" + messageIndex + "/block#" + blockIndex + "/" + kind;
+  private static String blockFieldTag(int messageIndex, int blockIndex) {
+    return "msg#" + messageIndex + "/block#" + blockIndex;
   }
 
   private static void writeTools(MessageDigest md, List<ProviderToolDefinition> tools) {
     writeField(md, 'L', "toolCount", Integer.toString(tools.size()));
     for (int index = 0; index < tools.size(); index++) {
-      ProviderToolDefinition tool = tools.get(index);
-      writeField(md, 'O', "tool#" + index + "/name", tool.name());
-      writeField(md, 'D', "tool#" + index + "/description", tool.description());
-      writeField(md, 'J', "tool#" + index + "/inputSchemaJson", tool.inputSchemaJson());
+      writeField(md, 'O', "tool#" + index + "/name", tools.get(index).name());
+      writeField(md, 'D', "tool#" + index + "/description", tools.get(index).description());
+      writeField(md, 'J', "tool#" + index + "/inputSchemaJson", tools.get(index).inputSchemaJson());
     }
   }
 
   /**
-   * 写入一条带有类型标记、字段名长度与内容长度的字段。type | 字段名长度 | 字段名 | 值长度 | 值，每段以 ":" 定界并以 "\\n" 收尾，足以对抗任何简单字符串拼接碰撞。
+   * 写入一条独立长度帧：{@code type (1B) | nameLen (4B big-endian) | name | valueLen (4B big-endian) |
+   * value}。 每个复合对象的每个字段都独立走此帧，因此字段值可以包含任意字节（含 NUL）而不会与跨字段拼接产生碰撞。
    */
   private static void writeField(MessageDigest md, char type, String name, String value) {
     Objects.requireNonNull(name, "name");
@@ -202,35 +165,21 @@ public final class PromptCacheAffinityKeyFactory {
     byte[] nameBytes = name.getBytes(StandardCharsets.UTF_8);
     byte[] valueBytes = value.getBytes(StandardCharsets.UTF_8);
     md.update((byte) type);
-    md.update(colon());
-    md.update(lengthPrefix(nameBytes.length));
-    md.update(colon());
+    md.update(intBE(nameBytes.length));
     md.update(nameBytes);
-    md.update(colon());
-    md.update(lengthPrefix(valueBytes.length));
-    md.update(colon());
+    md.update(intBE(valueBytes.length));
     md.update(valueBytes);
-    md.update(newline());
   }
 
-  private static byte[] colon() {
-    return new byte[] {0x3A};
-  }
-
-  private static byte[] newline() {
-    return new byte[] {0x0A};
-  }
-
-  private static byte[] lengthPrefix(int length) {
-    if (length < 0) {
+  private static byte[] intBE(int value) {
+    if (value < 0) {
       throw new IllegalArgumentException("length must be non-negative");
     }
-    String hex = HexFormat.of().toHexDigits(length);
-    // Pad to fixed 8 hex characters (32-bit) so that consecutive fields have unambiguous
-    // boundaries.
-    if (hex.length() < 8) {
-      hex = "0".repeat(8 - hex.length()) + hex;
-    }
-    return hex.getBytes(StandardCharsets.UTF_8);
+    return new byte[] {
+      (byte) ((value >>> 24) & 0xFF),
+      (byte) ((value >>> 16) & 0xFF),
+      (byte) ((value >>> 8) & 0xFF),
+      (byte) (value & 0xFF)
+    };
   }
 }
