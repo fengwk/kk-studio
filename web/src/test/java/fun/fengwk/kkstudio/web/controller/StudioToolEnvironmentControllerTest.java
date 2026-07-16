@@ -119,7 +119,7 @@ public class StudioToolEnvironmentControllerTest {
             post("/api/environments")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(create)))
-        .andExpect(status().is4xxClientError());
+        .andExpect(status().isBadRequest());
   }
 
   @Test
@@ -149,7 +149,7 @@ public class StudioToolEnvironmentControllerTest {
               post("/api/environments")
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(objectMapper.writeValueAsString(conflict)))
-          .andExpect(status().is4xxClientError());
+          .andExpect(status().isBadRequest());
     } finally {
       mockMvc.perform(delete("/api/environments/" + id)).andExpect(status().isNoContent());
     }

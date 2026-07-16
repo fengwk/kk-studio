@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.environment.service.impl;
 
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
+import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
 import fun.fengwk.kkstudio.core.environment.service.model.ToolEnvironment;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEmptyCapabilities;
 import fun.fengwk.kkstudio.share.model.ToolEnvironmentEditablePropertiesDTO;
@@ -14,9 +15,9 @@ import org.springframework.stereotype.Component;
  * <p>Update semantics: when the request omits the name (null or blank), the existing name is
  * preserved; description may be updated or cleared per the existing resource conventions.
  *
- * <p>ID generation is delegated to a {@link LongSupplier} so unit tests can avoid depending on the
- * global snowflake generator; production wiring defaults to {@code
- * AgentIdGenerator::nextToolEnvironmentId}.
+ * <p>Production wiring uses {@link AgentIdGenerator#nextToolEnvironmentId()} as the default ID
+ * supplier; the {@link LongSupplier} constructor allows unit tests to substitute a deterministic
+ * source.
  */
 @Component
 public class ToolEnvironmentMutationFactory {
@@ -26,7 +27,7 @@ public class ToolEnvironmentMutationFactory {
 
   @Autowired
   public ToolEnvironmentMutationFactory(AgentEditableSupport editableSupport) {
-    this(editableSupport, AgentIdGeneratorShim::nextToolEnvironmentId);
+    this(editableSupport, AgentIdGenerator::nextToolEnvironmentId);
   }
 
   public ToolEnvironmentMutationFactory(

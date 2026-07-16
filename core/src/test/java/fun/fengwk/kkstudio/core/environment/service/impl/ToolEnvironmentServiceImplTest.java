@@ -49,8 +49,6 @@ class ToolEnvironmentServiceImplTest {
 
   @Test
   void createPersistsCanonicalEmptyCapabilitiesAndReturnsDTO() {
-    // mutationFactory uses the global snowflake generator which is unavailable in unit
-    // tests, so seed an id directly on the captured environment before persistence.
     ToolEnvironmentCreateDTO createDTO = new ToolEnvironmentCreateDTO();
     createDTO.setName("env-a");
     createDTO.setDescription("desc");

@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.tool.daemon;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -15,11 +14,18 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolNumberSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolObjectSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolSchemaElement;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import org.junit.jupiter.api.Test;
 
 /** Daemon v1 CAPABILITIES payload codec 的双向与拒绝契约测试。 */
@@ -53,6 +59,94 @@ class DaemonToolCapabilitiesCodecTest {
     assertEquals("{\"tools\":[]}", json);
     DaemonToolCapabilitiesCodec.DaemonToolCapabilities decoded = codec.decode(json);
     assertTrue(decoded.tools().isEmpty());
+  }
+
+  @Test
+  void encodeIsDeterministicAcrossInsertionOrders() {
+    // Build the same descriptor in three different insertion orders for properties and required.
+    Map<String, ToolSchemaElement> hashProps = new HashMap<>();
+    hashProps.put("zeta", new ToolStringSchema("z"));
+    hashProps.put("alpha", new ToolStringSchema("a"));
+    hashProps.put("mu", new ToolStringSchema("m"));
+    Set<String> hashRequired = new HashSet<>();
+    hashRequired.add("zeta");
+    hashRequired.add("alpha");
+    hashRequired.add("mu");
+    ToolDescriptor hashDescriptor =
+        new ToolDescriptor(
+            "shell",
+            "1",
+            "shell",
+            "r",
+            new ToolParamsSchema("", hashProps, hashRequired, false),
+            ToolExecutionMode.ENVIRONMENT,
+            ToolSideEffect.READ_ONLY,
+            Duration.ZERO);
+
+    Map<String, ToolSchemaElement> treeProps = new TreeMap<>();
+    treeProps.putAll(hashProps);
+    Set<String> treeRequired = new TreeSet<>(hashRequired);
+    ToolDescriptor treeDescriptor =
+        new ToolDescriptor(
+            "shell",
+            "1",
+            "shell",
+            "r",
+            new ToolParamsSchema("", treeProps, treeRequired, false),
+            ToolExecutionMode.ENVIRONMENT,
+            ToolSideEffect.READ_ONLY,
+            Duration.ZERO);
+
+    Map<String, ToolSchemaElement> linkedProps = new LinkedHashMap<>();
+    linkedProps.put("mu", new ToolStringSchema("m"));
+    linkedProps.put("alpha", new ToolStringSchema("a"));
+    linkedProps.put("zeta", new ToolStringSchema("z"));
+    Set<String> linkedRequired = new LinkedHashSet<>();
+    linkedRequired.add("mu");
+    linkedRequired.add("alpha");
+    linkedRequired.add("zeta");
+    ToolDescriptor linkedDescriptor =
+        new ToolDescriptor(
+            "shell",
+            "1",
+            "shell",
+            "r",
+            new ToolParamsSchema("", linkedProps, linkedRequired, false),
+            ToolExecutionMode.ENVIRONMENT,
+            ToolSideEffect.READ_ONLY,
+            Duration.ZERO);
+
+    String hashJson =
+        codec.encode(
+            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(hashDescriptor)));
+    String treeJson =
+        codec.encode(
+            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(treeDescriptor)));
+    String linkedJson =
+        codec.encode(
+            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(linkedDescriptor)));
+
+    assertEquals(treeJson, hashJson);
+    assertEquals(treeJson, linkedJson);
+    // Properties should appear sorted alphabetically in the wire output.
+    int alphaIdx = hashJson.indexOf("\"alpha\"");
+    int muIdx = hashJson.indexOf("\"mu\"");
+    int zetaIdx = hashJson.indexOf("\"zeta\"");
+    assertTrue(alphaIdx > 0 && muIdx > alphaIdx && zetaIdx > muIdx);
+  }
+
+  @Test
+  void encodePreservesToolListOrderAsAdvertised() {
+    ToolDescriptor first = tool("alpha", "1");
+    ToolDescriptor second = tool("bravo", "1");
+    ToolDescriptor third = tool("charlie", "1");
+    String json =
+        codec.encode(
+            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(first, second, third)));
+    int aIdx = json.indexOf("\"name\":\"alpha\"");
+    int bIdx = json.indexOf("\"name\":\"bravo\"");
+    int cIdx = json.indexOf("\"name\":\"charlie\"");
+    assertTrue(aIdx > 0 && bIdx > aIdx && cIdx > bIdx);
   }
 
   @Test
@@ -108,8 +202,6 @@ class DaemonToolCapabilitiesCodecTest {
 
   @Test
   void decodeRejectsDuplicateNameAtVersionAcrossMultipleDescriptors() {
-    // Build a payload directly with two descriptors sharing name@version, bypassing the
-    // constructor-level duplicate check so we can exercise the decode-side validation.
     String descriptorJson =
         "{\"name\":\"shell\",\"version\":\"1.0.0\",\"description\":\"shell tool\","
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\","
@@ -276,6 +368,36 @@ class DaemonToolCapabilitiesCodecTest {
   }
 
   @Test
+  void decodeRejectsNonObjectTopLevelProperties() {
+    // Cast to non-object at top-level must surface as DaemonProtocolException, never
+    // ClassCastException.
+    String json =
+        "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
+            + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
+            + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":"
+            + "[\"x\",\"y\"],\"required\":[],\"additionalProperties\":false}}]}";
+    DaemonProtocolException error =
+        assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
+    assertTrue(
+        error.getMessage().contains("inputSchema.properties")
+            || error.getMessage().contains("'properties'"));
+    assertTrue(error.getMessage().contains("JSON object"));
+  }
+
+  @Test
+  void decodeRejectsNonObjectNestedObjectProperties() {
+    String json =
+        "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
+            + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
+            + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{\"x\":"
+            + "{\"type\":\"object\",\"properties\":42,\"required\":[],"
+            + "\"additionalProperties\":false}},\"required\":[],\"additionalProperties\":false}}]}";
+    DaemonProtocolException error =
+        assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
+    assertTrue(error.getMessage().contains("JSON object"));
+  }
+
+  @Test
   void decodeRejectsNonObjectArrayItems() {
     String json =
         "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
@@ -285,7 +407,36 @@ class DaemonToolCapabilitiesCodecTest {
             + "\"additionalProperties\":false}}]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
-    assertTrue(error.getMessage().contains("'items'"));
+    assertTrue(error.getMessage().contains("items"));
+    assertTrue(error.getMessage().contains("JSON object"));
+  }
+
+  @Test
+  void decodeRejectsUndeclaredRequiredProperty() {
+    String json =
+        "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
+            + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
+            + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{\"x\":"
+            + "{\"type\":\"string\"}},\"required\":[\"y\"],\"additionalProperties\":false}}]}";
+    DaemonProtocolException error =
+        assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
+    assertTrue(error.getMessage().contains("not declared in 'properties'"));
+    assertTrue(error.getMessage().contains("'y'"));
+  }
+
+  @Test
+  void decodeRejectsDescriptorConstructorValidationFailure() {
+    // ToolDescriptor rejects names that contain invalid characters; this surfaces here as
+    // DaemonProtocolException with a contextual message.
+    String json =
+        "{\"tools\":[{\"name\":\"1bad\",\"version\":\"1\",\"description\":\"d\","
+            + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
+            + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{},"
+            + "\"required\":[],\"additionalProperties\":false}}]}";
+    DaemonProtocolException error =
+        assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
+    assertTrue(error.getMessage().contains("descriptor validation failed"));
+    assertTrue(error.getMessage().contains("1bad@1"));
   }
 
   @Test
@@ -334,11 +485,11 @@ class DaemonToolCapabilitiesCodecTest {
   }
 
   @Test
-  void roundTripPreservesSemanticEqualityForEmptyCapabilities() {
-    String json = codec.encode(new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of()));
-    assertSame(json, json, "encode is deterministic");
-    DaemonToolCapabilitiesCodec.DaemonToolCapabilities decoded = codec.decode(json);
-    assertEquals("{\"tools\":[]}", codec.encode(decoded));
+  void roundTripPreservesEmptyCapabilitiesAsCanonicalText() {
+    String first = codec.encode(new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of()));
+    DaemonToolCapabilitiesCodec.DaemonToolCapabilities decoded = codec.decode(first);
+    String second = codec.encode(decoded);
+    assertEquals(first, second);
   }
 
   private static ToolDescriptor sampleDescriptor() {
@@ -369,5 +520,17 @@ class DaemonToolCapabilitiesCodecTest {
         ToolExecutionMode.ENVIRONMENT,
         ToolSideEffect.IDEMPOTENT,
         Duration.ofSeconds(3));
+  }
+
+  private static ToolDescriptor tool(String name, String version) {
+    return new ToolDescriptor(
+        name,
+        version,
+        name + " tool",
+        name,
+        new ToolParamsSchema("", Map.of(), Set.of(), false),
+        ToolExecutionMode.ENVIRONMENT,
+        ToolSideEffect.READ_ONLY,
+        Duration.ZERO);
   }
 }
