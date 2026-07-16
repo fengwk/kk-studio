@@ -1,8 +1,10 @@
 package fun.fengwk.kkstudio.core.storage;
 
 import fun.fengwk.kkstudio.core.storage.configuration.S3StorageProperties;
+
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
+
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.sync.RequestBody;
@@ -37,27 +39,29 @@ public class S3StorageServiceImpl implements S3StorageService {
     }
 
     @Override
-    public PutObjectResponse putObject(String key, InputStream content, long contentLength, String contentType) {
+    public PutObjectResponse putObject(
+            String key, InputStream content, long contentLength, String contentType) {
         Objects.requireNonNull(content, "content must not be null");
         Assert.isTrue(contentLength >= 0L, "contentLength must be greater than or equal to 0");
-        String normalizedKey = normalizeKey(key);
-        PutObjectRequest.Builder builder = PutObjectRequest.builder()
-                .bucket(properties.getBucket())
-                .key(normalizedKey);
+        String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+        PutObjectRequest.Builder builder =
+                PutObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey);
         if (StringUtils.hasText(contentType)) {
             builder.contentType(contentType);
         }
-        return s3Client.putObject(builder.build(), RequestBody.fromInputStream(content, contentLength));
+        return s3Client.putObject(
+                builder.build(), RequestBody.fromInputStream(content, contentLength));
     }
 
     @Override
     public boolean exists(String key) {
-        String normalizedKey = normalizeKey(key);
+        String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
         try {
-            s3Client.headObject(HeadObjectRequest.builder()
-                    .bucket(properties.getBucket())
-                    .key(normalizedKey)
-                    .build());
+            s3Client.headObject(
+                    HeadObjectRequest.builder()
+                            .bucket(properties.getBucket())
+                            .key(normalizedKey)
+                            .build());
             return true;
         } catch (NoSuchKeyException e) {
             return false;
@@ -71,31 +75,25 @@ public class S3StorageServiceImpl implements S3StorageService {
 
     @Override
     public String getPublicUrl(String key) {
-        Assert.hasText(properties.getPublicBaseUrl(),
-                "kk-circle.storage.s3.public-base-url must not be blank when resolving public url");
-        String normalizedKey = normalizeKey(key);
-        return normalizePublicBaseUrl(properties.getPublicBaseUrl()) + "/" + encodeKey(normalizedKey);
+        Assert.hasText(
+                properties.getPublicBaseUrl(),
+                "kk-studio.storage.s3.public-base-url must not be blank when resolving public url");
+        String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+        return normalizePublicBaseUrl(properties.getPublicBaseUrl())
+                + "/"
+                + encodeKey(normalizedKey);
     }
 
     @Override
     public byte[] download(String key) {
-        String normalizedKey = normalizeKey(key);
-        ResponseBytes<GetObjectResponse> response = s3Client.getObjectAsBytes(GetObjectRequest.builder()
-                .bucket(properties.getBucket())
-                .key(normalizedKey)
-                .build());
+        String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+        ResponseBytes<GetObjectResponse> response =
+                s3Client.getObjectAsBytes(
+                        GetObjectRequest.builder()
+                                .bucket(properties.getBucket())
+                                .key(normalizedKey)
+                                .build());
         return response.asByteArray();
-    }
-
-    private String normalizeKey(String key) {
-        Assert.hasText(key, "key must not be blank");
-        int beginIndex = 0;
-        while (beginIndex < key.length() && key.charAt(beginIndex) == '/') {
-            beginIndex++;
-        }
-        String normalizedKey = key.substring(beginIndex);
-        Assert.hasText(normalizedKey, "key must not be blank");
-        return normalizedKey;
     }
 
     private String normalizePublicBaseUrl(String publicBaseUrl) {
@@ -108,8 +106,10 @@ public class S3StorageServiceImpl implements S3StorageService {
 
     private String encodeKey(String key) {
         return Arrays.stream(key.split("/", -1))
-                .map(segment -> URLEncoder.encode(segment, StandardCharsets.UTF_8).replace("+", "%20"))
+                .map(
+                        segment ->
+                                URLEncoder.encode(segment, StandardCharsets.UTF_8)
+                                        .replace("+", "%20"))
                 .collect(Collectors.joining("/"));
     }
-
 }
