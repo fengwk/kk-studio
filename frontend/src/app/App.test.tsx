@@ -75,6 +75,7 @@ function page<T>(results: T[]) {
 
 describe('App', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     window.history.replaceState({}, '', '/')
     vi.mocked(agentService.listProviders).mockResolvedValue(page([provider]))
     vi.mocked(agentService.listModels).mockResolvedValue(page([model]))
@@ -103,5 +104,22 @@ describe('App', () => {
 
     expect(await screen.findByRole('button', { name: createAction })).toBeInTheDocument()
     expect(window.location.pathname).toBe(path)
+  })
+
+  it('renders the ComfyUI workflow page through its own isolated runtime and never queries legacy agent endpoints', async () => {
+    vi.mocked(comfyuiService.listWorkflows).mockResolvedValue(page([]))
+
+    window.history.replaceState({}, '', '/comfyui')
+    render(<AppProviders><App /></AppProviders>)
+
+    // The ComfyUI page must consume only its own workflow query once mounted.
+    expect(await screen.findByRole('button', { name: '新建 ComfyUI Workflow' })).toBeInTheDocument()
+    await waitFor(() => expect(comfyuiService.listWorkflows).toHaveBeenCalled())
+
+    // No legacy provider/model/agent/session API may be queried while ComfyUI is the active route.
+    expect(agentService.listProviders).not.toHaveBeenCalled()
+    expect(agentService.listModels).not.toHaveBeenCalled()
+    expect(agentService.listAgents).not.toHaveBeenCalled()
+    expect(agentService.listSessions).not.toHaveBeenCalled()
   })
 })

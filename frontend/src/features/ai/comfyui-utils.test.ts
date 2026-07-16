@@ -192,7 +192,7 @@ function draft(overrides: Partial<Parameters<typeof validateComfyuiWorkflowDraft
 
 function workflow(): ComfyuiWorkflowApiDTO {
   return {
-    id: 1,
+    id: 'workflow-1',
     apiName: 'image-api',
     name: 'Image API',
     description: null,
