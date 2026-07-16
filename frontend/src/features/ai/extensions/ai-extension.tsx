@@ -3,6 +3,9 @@ import { createContext, useContext, type PropsWithChildren, type ReactNode } fro
 import { SearchField, StateBlock } from '@/features/ai/AiConsoleCards'
 import { ConfirmActionModal, CreateSessionModal, EditSessionModal, ResourceEditorModal } from '@/features/ai/AiConsoleModals'
 import { AgentsPanel, ChatSessionsPanel, ModelsPanel, ProvidersPanel } from '@/features/ai/AiConsolePanels'
+import { ComfyuiWorkflowEditorModal } from '@/features/ai/ComfyuiWorkflowEditorModal'
+import { ComfyuiWorkflowsPanel } from '@/features/ai/ComfyuiWorkflowsPanel'
+import { ComfyuiRunModal } from '@/features/ai/ComfyuiRunModal'
 import { AgentSessionPage } from '@/features/ai/AgentSessionPage'
 import { useAiConsoleController } from '@/features/ai/useAiConsoleController'
 import type { ExtensionComponentProps, TrustedReactExtension } from '@/platform/extensions/types'
@@ -110,6 +113,37 @@ function ProvidersResourcePanel() {
   return <ProvidersPanel {...controller.providerPanelProps} />
 }
 
+function ComfyuiPage({ children }: ExtensionComponentProps) {
+  return (
+    <AiConsoleRuntime>
+      <AiConsoleFrame content={<ComfyuiPanel />}>
+        {children}
+      </AiConsoleFrame>
+      <ComfyuiRunModalHost />
+    </AiConsoleRuntime>
+  )
+}
+
+function ComfyuiPanel() {
+  const controller = useAiConsole()
+  return <ComfyuiWorkflowsPanel {...controller.comfyuiPanelProps} />
+}
+
+function ComfyuiRunModalHost() {
+  const controller = useAiConsole()
+  const runModal = controller.comfyuiRunModal
+  if (!runModal.workflow) {
+    return null
+  }
+  return (
+    <ComfyuiRunModal
+      key={String(runModal.workflow.id)}
+      workflow={runModal.workflow}
+      onClose={runModal.onClose}
+    />
+  )
+}
+
 function CreateSessionDialog() {
   const controller = useOptionalAiConsole()
   return controller ? <CreateSessionModal {...controller.createSessionModal} /> : null
@@ -135,6 +169,16 @@ function ResourceDeleteDialog() {
   return controller ? <ConfirmActionModal {...controller.resourceDeleteConfirmModal} /> : null
 }
 
+function ComfyuiWorkflowEditorDialog() {
+  const controller = useOptionalAiConsole()
+  return controller ? <ComfyuiWorkflowEditorModal {...controller.comfyuiEditorModal} /> : null
+}
+
+function ComfyuiDeleteDialog() {
+  const controller = useOptionalAiConsole()
+  return controller ? <ConfirmActionModal {...controller.comfyuiDeleteConfirmModal} /> : null
+}
+
 export const aiExtension: TrustedReactExtension = {
   id: 'builtin.ai',
   pages: [
@@ -142,6 +186,7 @@ export const aiExtension: TrustedReactExtension = {
     { id: 'ai.agents', path: 'agents', component: AgentsPage, priority: 100 },
     { id: 'ai.models', path: 'models', component: ModelsPage, priority: 100 },
     { id: 'ai.providers', path: 'providers', component: ProvidersPage, priority: 100 },
+    { id: 'ai.comfyui', path: 'comfyui', component: ComfyuiPage, priority: 100 },
     { id: 'ai.session', path: 'sessions/:sessionId', component: AgentSessionPage, priority: 100 },
   ],
   navigation: [
@@ -149,6 +194,7 @@ export const aiExtension: TrustedReactExtension = {
     { id: 'ai.nav.agents', label: 'Agent', path: 'agents', priority: 100 },
     { id: 'ai.nav.models', label: 'Model', path: 'models', priority: 100 },
     { id: 'ai.nav.providers', label: 'Provider', path: 'providers', priority: 100 },
+    { id: 'ai.nav.comfyui', label: 'Workflow', path: 'comfyui', priority: 100 },
   ],
   dialogs: [
     { id: 'ai.create-session', component: CreateSessionDialog },
@@ -156,5 +202,7 @@ export const aiExtension: TrustedReactExtension = {
     { id: 'ai.resource-editor', component: ResourceEditorDialog },
     { id: 'ai.delete-session', component: SessionDeleteDialog },
     { id: 'ai.delete-resource', component: ResourceDeleteDialog },
+    { id: 'ai.comfyui-editor', component: ComfyuiWorkflowEditorDialog },
+    { id: 'ai.comfyui-delete', component: ComfyuiDeleteDialog },
   ],
 }
