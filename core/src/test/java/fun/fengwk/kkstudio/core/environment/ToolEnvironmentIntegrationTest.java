@@ -28,68 +28,72 @@ class ToolEnvironmentIntegrationTest {
 
   @Test
   void crudCapabilitiesAndHeartbeatReferenceCount() {
-    ToolEnvironment environment = new ToolEnvironment();
     long id = nextEnvironmentId();
-    environment.setId(id);
-    environment.setName("env-" + id);
-    environment.setDescription("desc");
-    environment.setCapabilitiesJson("{\"tools\":[]}");
+    ToolEnvironment environment = newEnvironmentRow(id, "env-" + id);
     assertTrue(repository.create(environment));
 
-    ToolEnvironment loaded = repository.getById(id);
-    assertNotNull(loaded);
-    assertEquals(environment.getName(), loaded.getName());
-    assertEquals("{\"tools\":[]}", loaded.getCapabilitiesJson());
+    long invocationId = 900_000_000_000_000_000L + id;
+    boolean environmentDeleted = false;
+    try {
+      ToolEnvironment loaded = repository.getById(id);
+      assertNotNull(loaded);
+      assertEquals(environment.getName(), loaded.getName());
+      assertEquals("{\"tools\":[]}", loaded.getCapabilitiesJson());
 
-    assertEquals(loaded, repository.getByName(environment.getName()));
+      assertEquals(loaded, repository.getByName(environment.getName()));
 
-    Page<ToolEnvironment> page = repository.page(new PageQuery(1, 50));
-    assertTrue(page.getTotalCount() >= 1);
-    assertTrue(page.getResults().stream().anyMatch(row -> row.getId() == id));
+      Page<ToolEnvironment> page = repository.page(new PageQuery(1, 50));
+      assertTrue(page.getTotalCount() >= 1);
+      assertTrue(page.getResults().stream().anyMatch(row -> row.getId() == id));
 
-    LocalDateTime capabilitySeen = LocalDateTime.now(ZoneOffset.UTC).withNano(0);
-    assertTrue(repository.updateCapabilities(id, "{\"tools\":[]}", capabilitySeen));
-    ToolEnvironment afterCapability = repository.getById(id);
-    assertNotNull(afterCapability.getLastSeenAt());
+      LocalDateTime capabilitySeen = LocalDateTime.now(ZoneOffset.UTC).withNano(0);
+      assertTrue(repository.updateCapabilities(id, "{\"tools\":[]}", capabilitySeen));
+      ToolEnvironment afterCapability = repository.getById(id);
+      assertNotNull(afterCapability.getLastSeenAt());
 
-    LocalDateTime heartbeatSeen = LocalDateTime.now(ZoneOffset.UTC).withNano(0);
-    assertTrue(repository.heartbeat(id, heartbeatSeen));
+      LocalDateTime heartbeatSeen = LocalDateTime.now(ZoneOffset.UTC).withNano(0);
+      assertTrue(repository.heartbeat(id, heartbeatSeen));
 
-    assertEquals(0L, repository.countToolInvocations(id));
-    // Insert a fake invocation row referencing this environment to verify the count.
-    long invocationId = 900000000000000000L + id;
-    jdbcTemplate.update(
-        "insert into tool_invocation (id, run_id, assistant_entry_id, ordinal, tool_call_id, "
-            + "tool_name, tool_version, target_type, environment_id, arguments_json, status, "
-            + "permission_action, deadline_at) "
-            + "values (?, 1, 1, 1, ?, ?, ?, 'ENVIRONMENT', ?, '{}', 'QUEUED', 'ALLOW', "
-            + "current_timestamp(3))",
-        invocationId,
-        "call-" + id,
-        "shell",
-        "1",
-        id);
-    assertEquals(1L, repository.countToolInvocations(id));
+      assertEquals(0L, repository.countToolInvocations(id));
 
-    loaded.setDescription("updated");
-    loaded.setName("env-" + id + "-renamed");
-    assertTrue(repository.updateById(loaded));
+      // Insert a fake invocation row referencing this environment and verify the count.
+      insertFakeInvocation(invocationId, id);
+      assertEquals(1L, repository.countToolInvocations(id));
 
-    assertTrue(repository.deleteById(id));
-    assertNull(repository.getById(id));
-    // Cleanup the dangling fake invocation so it does not pollute later tests.
-    jdbcTemplate.update("delete from tool_invocation where id = ?", invocationId);
+      // The repository layer itself does not enforce durable-reference checks — that lives
+      // on the service layer (covered by ToolEnvironmentServiceImplTest). At the repository
+      // level we still observe the Environment row while the invocation exists.
+
+      // Update succeeds while referenced.
+      ToolEnvironment toUpdate = repository.getById(id);
+      toUpdate.setDescription("updated");
+      toUpdate.setName("env-" + id + "-renamed");
+      assertTrue(repository.updateById(toUpdate));
+
+      // Clean up the fake invocation first; only then may deletion succeed.
+      jdbcTemplate.update("delete from tool_invocation where id = ?", invocationId);
+      assertEquals(0L, repository.countToolInvocations(id));
+      assertTrue(repository.deleteById(id));
+      environmentDeleted = true;
+      assertNull(repository.getById(id));
+    } finally {
+      // Defensive cleanup so a failed assertion does not pollute later tests.
+      if (!environmentDeleted) {
+        jdbcTemplate.update("delete from tool_invocation where id = ?", invocationId);
+        repository.deleteById(id);
+      }
+    }
   }
 
   @Test
   void nameUniquenessRejectsDuplicateName() {
     String name = "env-unique-" + System.nanoTime();
-    ToolEnvironment a = newEnvironment(name);
-    ToolEnvironment b = newEnvironment(name + "-other");
+    ToolEnvironment a = newEnvironmentRow(nextEnvironmentId(), name);
+    ToolEnvironment b = newEnvironmentRow(nextEnvironmentId(), name + "-other");
     assertTrue(repository.create(a));
     assertTrue(repository.create(b));
     try {
-      ToolEnvironment conflict = newEnvironment(name);
+      ToolEnvironment conflict = newEnvironmentRow(nextEnvironmentId(), name);
       // name uniqueness is enforced by the DB unique index; the insert must raise.
       assertThrows(DuplicateKeyException.class, () -> repository.create(conflict));
     } finally {
@@ -98,12 +102,27 @@ class ToolEnvironmentIntegrationTest {
     }
   }
 
-  private ToolEnvironment newEnvironment(String name) {
+  private ToolEnvironment newEnvironmentRow(long id, String name) {
     ToolEnvironment row = new ToolEnvironment();
-    row.setId(nextEnvironmentId());
+    row.setId(id);
     row.setName(name);
+    row.setDescription("desc");
     row.setCapabilitiesJson("{\"tools\":[]}");
     return row;
+  }
+
+  private void insertFakeInvocation(long invocationId, long environmentId) {
+    jdbcTemplate.update(
+        "insert into tool_invocation (id, run_id, assistant_entry_id, ordinal, tool_call_id, "
+            + "tool_name, tool_version, target_type, environment_id, arguments_json, status, "
+            + "permission_action, deadline_at) "
+            + "values (?, 1, 1, 1, ?, ?, ?, 'ENVIRONMENT', ?, '{}', 'QUEUED', 'ALLOW', "
+            + "current_timestamp(3))",
+        invocationId,
+        "call-" + environmentId,
+        "shell",
+        "1",
+        environmentId);
   }
 
   private long nextEnvironmentId() {

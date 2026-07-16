@@ -20,11 +20,14 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 
 /**
  * Daemon v1 {@code CAPABILITIES} payload 的共享严格 codec。
@@ -42,10 +45,16 @@ import java.util.Set;
  *       / items）；
  *   <li>object schema 缺失 {@code type=object} / {@code properties} / {@code required} / {@code
  *       additionalProperties}；
- *   <li>duplicate required property names。
+ *   <li>duplicate required property names；
+ *   <li>required 属性不在 {@code properties} 中声明；
+ *   <li>{@link ToolDescriptor} / {@link ToolParamsSchema} / {@link ToolObjectSchema} / {@link
+ *       ToolEnumSchema} 的构造器校验失败（如 blank tool name）会被包装为 {@link DaemonProtocolException}。
  * </ul>
  *
  * <p>空 capabilities ({@code {"tools":[]}}) 是合法 payload：新注册的 Environment 与尚未暴露工具的 daemon 都可以 表示这种状态。
+ *
+ * <p>{@link #encode(DaemonToolCapabilities)} 是 deterministic 的：object 属性按字典序排序，{@code required}
+ * 数组按字典序排序；descriptor 列表保留输入顺序（即 daemon 声明的 capability 顺序）。
  */
 public final class DaemonToolCapabilitiesCodec {
 
@@ -55,6 +64,9 @@ public final class DaemonToolCapabilitiesCodec {
       tools = List.copyOf(Objects.requireNonNull(tools, "tools"));
       Map<String, ToolDescriptor> seen = new LinkedHashMap<>();
       for (ToolDescriptor descriptor : tools) {
+        if (descriptor == null) {
+          throw new DaemonProtocolException("CAPABILITIES descriptor must not be null");
+        }
         if (descriptor.executionMode() != ToolExecutionMode.ENVIRONMENT) {
           throw new DaemonProtocolException(
               "CAPABILITIES descriptor executionMode must be ENVIRONMENT: "
@@ -72,7 +84,7 @@ public final class DaemonToolCapabilitiesCodec {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-  /** 将 {@link DaemonToolCapabilities} 编码为 canonical CAPABILITIES JSON 文本。 */
+  /** 将 {@link DaemonToolCapabilities} 编码为 deterministic canonical CAPABILITIES JSON 文本。 */
   public String encode(DaemonToolCapabilities capabilities) {
     Objects.requireNonNull(capabilities, "capabilities");
     ObjectNode root = OBJECT_MAPPER.createObjectNode();
@@ -89,7 +101,7 @@ public final class DaemonToolCapabilitiesCodec {
 
   /** 解码单个 canonical CAPABILITIES JSON 文本。 */
   public DaemonToolCapabilities decode(String json) {
-    ObjectNode root = (ObjectNode) readObject(json, "CAPABILITIES");
+    ObjectNode root = requiredObject(readRoot(json), "CAPABILITIES");
     Set<String> allowedTop = Set.of("tools");
     rejectUnknownFields(root, allowedTop, "CAPABILITIES");
     JsonNode toolsNode = root.get("tools");
@@ -121,10 +133,10 @@ public final class DaemonToolCapabilitiesCodec {
     target.put("executionMode", descriptor.executionMode().name());
     target.put("sideEffect", descriptor.sideEffect().name());
     target.put("timeoutMillis", descriptor.timeout().toMillis());
-    target.set("inputSchema", writeSchema(descriptor.inputSchema()));
+    target.set("inputSchema", writeParamsSchema(descriptor.inputSchema()));
   }
 
-  private static ObjectNode writeSchema(ToolParamsSchema schema) {
+  private static ObjectNode writeParamsSchema(ToolParamsSchema schema) {
     return writeObjectSchema(
         schema.description(),
         schema.properties(),
@@ -164,6 +176,9 @@ public final class DaemonToolCapabilitiesCodec {
     return target;
   }
 
+  /**
+   * 写出 deterministic object schema：properties 按 key 字典序排序；required 数组按字典序排序；description 缺省时省略字段。
+   */
   private static ObjectNode writeObjectSchema(
       String description,
       Map<String, ToolSchemaElement> properties,
@@ -175,19 +190,20 @@ public final class DaemonToolCapabilitiesCodec {
       target.put("description", description);
     }
     ObjectNode wireProperties = target.putObject("properties");
-    properties.forEach((name, schema) -> wireProperties.set(name, writeSchema(schema)));
+    TreeMap<String, ToolSchemaElement> sortedProps = new TreeMap<>(properties);
+    for (Map.Entry<String, ToolSchemaElement> entry : sortedProps.entrySet()) {
+      wireProperties.set(entry.getKey(), writeSchema(entry.getValue()));
+    }
     ArrayNode wireRequired = target.putArray("required");
-    required.forEach(wireRequired::add);
+    Set<String> sortedRequired = new TreeSet<>(required);
+    sortedRequired.forEach(wireRequired::add);
     target.put("additionalProperties", additionalProperties);
     return target;
   }
 
   private static ToolDescriptor readDescriptor(JsonNode node, int index) {
     String context = "CAPABILITIES descriptor[" + index + "]";
-    if (node == null || !node.isObject()) {
-      throw new DaemonProtocolException(context + " must be an object");
-    }
-    ObjectNode obj = (ObjectNode) node;
+    ObjectNode obj = requiredObject(node, context);
     Set<String> allowed =
         Set.of(
             "name",
@@ -211,13 +227,41 @@ public final class DaemonToolCapabilitiesCodec {
     ToolSideEffect sideEffect = readSideEffect(obj, context);
     Duration timeout = Duration.ofMillis(requiredNonNegativeLong(obj, "timeoutMillis", context));
     JsonNode inputSchemaNode = obj.get("inputSchema");
-    if (inputSchemaNode == null || !inputSchemaNode.isObject()) {
+    if (inputSchemaNode == null) {
       throw new DaemonProtocolException(
-          context + " 'inputSchema' must be an object: " + name + "@" + version);
+          context + " must declare 'inputSchema': " + name + "@" + version);
     }
-    ToolParamsSchema inputSchema = readParamsSchema((ObjectNode) inputSchemaNode, context);
-    return new ToolDescriptor(
+    ToolParamsSchema inputSchema = readParamsSchema((JsonNode) inputSchemaNode, context);
+    return constructDescriptor(
         name, version, description, rendererKey, inputSchema, executionMode, sideEffect, timeout);
+  }
+
+  /**
+   * 通过校验器构造 {@link ToolDescriptor}，把任何 {@link IllegalArgumentException} 包装为带上下文的 {@link
+   * DaemonProtocolException}，避免暴露 raw 校验消息。
+   */
+  private static ToolDescriptor constructDescriptor(
+      String name,
+      String version,
+      String description,
+      String rendererKey,
+      ToolParamsSchema inputSchema,
+      ToolExecutionMode executionMode,
+      ToolSideEffect sideEffect,
+      Duration timeout) {
+    try {
+      return new ToolDescriptor(
+          name, version, description, rendererKey, inputSchema, executionMode, sideEffect, timeout);
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException(
+          "CAPABILITIES descriptor validation failed for "
+              + name
+              + "@"
+              + version
+              + ": "
+              + error.getMessage(),
+          error);
+    }
   }
 
   private static ToolExecutionMode readExecutionMode(ObjectNode obj, String context) {
@@ -250,34 +294,65 @@ public final class DaemonToolCapabilitiesCodec {
     return value.longValue();
   }
 
-  private static ToolParamsSchema readParamsSchema(ObjectNode node, String context) {
-    readObjectSchemaShape(node, context);
+  private static ToolParamsSchema readParamsSchema(JsonNode node, String context) {
+    ObjectNode obj = requiredObject(node, context + " inputSchema");
     Set<String> allowed =
         Set.of("type", "description", "properties", "required", "additionalProperties");
-    rejectUnknownFields(node, allowed, context);
-    String description = optionalText(node, "description", context);
-    ObjectNode propertiesNode = (ObjectNode) requiredField(node, "properties", context);
-    Set<String> requiredNames = readRequiredArray(node, context);
-    boolean additionalProperties = readAdditionalProperties(node, context);
+    rejectUnknownFields(obj, allowed, context + " inputSchema");
+    readObjectSchemaShape(obj, context + " inputSchema");
+    String description = optionalText(obj, "description", context + " inputSchema");
+    JsonNode propertiesNode = obj.get("properties");
+    ObjectNode propertiesObject =
+        requiredObject(propertiesNode, context + " inputSchema.properties");
+    Set<String> requiredNames = readRequiredArray(obj, context + " inputSchema");
+    boolean additionalProperties = readAdditionalProperties(obj, context + " inputSchema");
     Map<String, ToolSchemaElement> properties = new LinkedHashMap<>();
-    propertiesNode
-        .fieldNames()
-        .forEachRemaining(
-            name -> {
-              JsonNode child = propertiesNode.get(name);
-              if (child == null || !child.isObject()) {
-                throw new DaemonProtocolException(
-                    context + " property '" + name + "' must be an object");
-              }
-              properties.put(
-                  name,
-                  readSchemaElement((ObjectNode) child, context + " property '" + name + "'"));
-            });
-    return new ToolParamsSchema(description, properties, requiredNames, additionalProperties);
+    Iterator<String> declaredNames = propertiesObject.fieldNames();
+    if (declaredNames != null) {
+      while (declaredNames.hasNext()) {
+        String name = declaredNames.next();
+        JsonNode child = propertiesObject.get(name);
+        if (child == null) {
+          throw new DaemonProtocolException(
+              context + " inputSchema property '" + name + "' must be an object");
+        }
+        if (!child.isObject()) {
+          throw new DaemonProtocolException(
+              context + " inputSchema property '" + name + "' must be an object");
+        }
+        properties.put(
+            name,
+            readSchemaElement(
+                (ObjectNode) child, context + " inputSchema property '" + name + "'"));
+      }
+    }
+    for (String requiredName : requiredNames) {
+      if (!properties.containsKey(requiredName)) {
+        throw new DaemonProtocolException(
+            context
+                + " inputSchema 'required' entry '"
+                + requiredName
+                + "' is not declared in 'properties'");
+      }
+    }
+    return constructParamsSchema(description, properties, requiredNames, additionalProperties);
+  }
+
+  private static ToolParamsSchema constructParamsSchema(
+      String description,
+      Map<String, ToolSchemaElement> properties,
+      Set<String> required,
+      boolean additionalProperties) {
+    try {
+      return new ToolParamsSchema(description, properties, required, additionalProperties);
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException(
+          "inputSchema validation failed: " + error.getMessage(), error);
+    }
   }
 
   private static ToolSchemaElement readSchemaElement(ObjectNode node, String context) {
-    if (node == null || !node.isObject()) {
+    if (node == null) {
       throw new DaemonProtocolException(context + " must be an object");
     }
     String type = requiredText(node, "type", context);
@@ -288,7 +363,7 @@ public final class DaemonToolCapabilitiesCodec {
         rejectUnknownFields(node, allowed, context);
         JsonNode enumNode = node.get("enum");
         if (enumNode == null) {
-          return new ToolStringSchema(description);
+          return constructStringSchema(description);
         }
         if (!enumNode.isArray()) {
           throw new DaemonProtocolException(context + " 'enum' must be an array");
@@ -308,58 +383,126 @@ public final class DaemonToolCapabilitiesCodec {
           values.add(text);
           enumIndex++;
         }
-        return new ToolEnumSchema(description, List.copyOf(values));
+        return constructEnumSchema(description, values);
       }
       case "integer" -> {
         Set<String> allowed = Set.of("type", "description");
         rejectUnknownFields(node, allowed, context);
-        return new ToolIntegerSchema(description);
+        return constructIntegerSchema(description);
       }
       case "number" -> {
         Set<String> allowed = Set.of("type", "description");
         rejectUnknownFields(node, allowed, context);
-        return new ToolNumberSchema(description);
+        return constructNumberSchema(description);
       }
       case "boolean" -> {
         Set<String> allowed = Set.of("type", "description");
         rejectUnknownFields(node, allowed, context);
-        return new ToolBooleanSchema(description);
+        return constructBooleanSchema(description);
       }
       case "array" -> {
         Set<String> allowed = Set.of("type", "description", "items");
         rejectUnknownFields(node, allowed, context);
-        JsonNode items = requiredField(node, "items", context);
-        if (!items.isObject()) {
-          throw new DaemonProtocolException(context + " 'items' must be an object");
-        }
-        return new ToolArraySchema(
-            description, readSchemaElement((ObjectNode) items, context + " items"));
+        JsonNode items = node.get("items");
+        ObjectNode itemsObject = requiredObject(items, context + " items");
+        ToolSchemaElement itemsSchema = readSchemaElement(itemsObject, context + " items");
+        return constructArraySchema(description, itemsSchema);
       }
       case "object" -> {
         Set<String> allowed =
             Set.of("type", "description", "properties", "required", "additionalProperties");
         rejectUnknownFields(node, allowed, context);
         readObjectSchemaShape(node, context);
-        ObjectNode propertiesNode = (ObjectNode) requiredField(node, "properties", context);
+        JsonNode propsNode = node.get("properties");
+        ObjectNode propertiesObject = requiredObject(propsNode, context + " properties");
         Set<String> requiredNames = readRequiredArray(node, context);
         boolean additionalProperties = readAdditionalProperties(node, context);
         Map<String, ToolSchemaElement> properties = new LinkedHashMap<>();
-        propertiesNode
-            .fieldNames()
-            .forEachRemaining(
-                name -> {
-                  JsonNode child = propertiesNode.get(name);
-                  if (child == null || !child.isObject()) {
-                    throw new DaemonProtocolException(
-                        context + " property '" + name + "' must be an object");
-                  }
-                  properties.put(
-                      name,
-                      readSchemaElement((ObjectNode) child, context + " property '" + name + "'"));
-                });
-        return new ToolObjectSchema(description, properties, requiredNames, additionalProperties);
+        Iterator<String> declaredNames = propertiesObject.fieldNames();
+        if (declaredNames != null) {
+          while (declaredNames.hasNext()) {
+            String name = declaredNames.next();
+            JsonNode child = propertiesObject.get(name);
+            if (child == null || !child.isObject()) {
+              throw new DaemonProtocolException(
+                  context + " property '" + name + "' must be an object");
+            }
+            properties.put(
+                name, readSchemaElement((ObjectNode) child, context + " property '" + name + "'"));
+          }
+        }
+        for (String requiredName : requiredNames) {
+          if (!properties.containsKey(requiredName)) {
+            throw new DaemonProtocolException(
+                context
+                    + " 'required' entry '"
+                    + requiredName
+                    + "' is not declared in 'properties'");
+          }
+        }
+        return constructObjectSchema(description, properties, requiredNames, additionalProperties);
       }
       default -> throw new DaemonProtocolException(context + " unknown schema type: " + type);
+    }
+  }
+
+  private static ToolStringSchema constructStringSchema(String description) {
+    try {
+      return new ToolStringSchema(description);
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException("string schema invalid: " + error.getMessage(), error);
+    }
+  }
+
+  private static ToolEnumSchema constructEnumSchema(String description, List<String> values) {
+    try {
+      return new ToolEnumSchema(description, List.copyOf(values));
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException("enum schema invalid: " + error.getMessage(), error);
+    }
+  }
+
+  private static ToolIntegerSchema constructIntegerSchema(String description) {
+    try {
+      return new ToolIntegerSchema(description);
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException("integer schema invalid: " + error.getMessage(), error);
+    }
+  }
+
+  private static ToolNumberSchema constructNumberSchema(String description) {
+    try {
+      return new ToolNumberSchema(description);
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException("number schema invalid: " + error.getMessage(), error);
+    }
+  }
+
+  private static ToolBooleanSchema constructBooleanSchema(String description) {
+    try {
+      return new ToolBooleanSchema(description);
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException("boolean schema invalid: " + error.getMessage(), error);
+    }
+  }
+
+  private static ToolArraySchema constructArraySchema(String description, ToolSchemaElement items) {
+    try {
+      return new ToolArraySchema(description, items);
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException("array schema invalid: " + error.getMessage(), error);
+    }
+  }
+
+  private static ToolObjectSchema constructObjectSchema(
+      String description,
+      Map<String, ToolSchemaElement> properties,
+      Set<String> required,
+      boolean additionalProperties) {
+    try {
+      return new ToolObjectSchema(description, properties, required, additionalProperties);
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException("object schema invalid: " + error.getMessage(), error);
     }
   }
 
@@ -418,13 +561,16 @@ public final class DaemonToolCapabilitiesCodec {
   }
 
   private static void rejectUnknownFields(ObjectNode node, Set<String> allowed, String context) {
-    node.fieldNames()
-        .forEachRemaining(
-            name -> {
-              if (!allowed.contains(name)) {
-                throw new DaemonProtocolException(context + " unknown field: '" + name + "'");
-              }
-            });
+    Iterator<String> fields = node.fieldNames();
+    if (fields == null) {
+      return;
+    }
+    while (fields.hasNext()) {
+      String name = fields.next();
+      if (!allowed.contains(name)) {
+        throw new DaemonProtocolException(context + " unknown field: '" + name + "'");
+      }
+    }
   }
 
   private static JsonNode requiredField(JsonNode node, String field, String context) {
@@ -458,15 +604,36 @@ public final class DaemonToolCapabilitiesCodec {
     return text;
   }
 
-  private static JsonNode readObject(String json, String context) {
+  /**
+   * 读取并验证 envelope payload 是合法 JSON object；任何 malformed payload 抛 {@link DaemonProtocolException}。
+   */
+  private static JsonNode readRoot(String json) {
+    if (json == null) {
+      throw new DaemonProtocolException("CAPABILITIES payload must not be null");
+    }
     try {
       JsonNode value = OBJECT_MAPPER.readTree(json);
       if (value == null || !value.isObject()) {
-        throw new DaemonProtocolException(context + " payload must be a JSON object");
+        throw new DaemonProtocolException("CAPABILITIES payload must be a JSON object");
       }
       return value;
     } catch (JsonProcessingException error) {
-      throw new DaemonProtocolException(context + " payload must be valid JSON", error);
+      throw new DaemonProtocolException("CAPABILITIES payload must be valid JSON", error);
     }
+  }
+
+  /**
+   * 严格的对象类型守卫：禁止把任意 JsonNode 强转为 ObjectNode 触发 {@link ClassCastException}。任何 null / 数组 /
+   * 标量都直接转换为带上下文的 {@link DaemonProtocolException}。
+   */
+  private static ObjectNode requiredObject(JsonNode node, String context) {
+    if (node == null || node.isNull()) {
+      throw new DaemonProtocolException(context + " must be a JSON object");
+    }
+    if (!node.isObject()) {
+      throw new DaemonProtocolException(
+          context + " must be a JSON object but was " + node.getNodeType().name().toLowerCase());
+    }
+    return (ObjectNode) node;
   }
 }
