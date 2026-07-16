@@ -23,7 +23,8 @@ public record ProviderCacheControl(
     Objects.requireNonNull(breakpoints, "breakpoints");
     if (retention == PromptCacheRetention.NONE) {
       if (affinityKey != null && !affinityKey.isEmpty()) {
-        throw new IllegalArgumentException("affinityKey must be null or empty when retention is NONE");
+        throw new IllegalArgumentException(
+            "affinityKey must be null or empty when retention is NONE");
       }
       affinityKey = null;
       if (!breakpoints.isEmpty()) {
@@ -32,7 +33,8 @@ public record ProviderCacheControl(
       breakpoints = Set.of();
     } else {
       if (affinityKey == null || affinityKey.isBlank()) {
-        throw new IllegalArgumentException("affinityKey must be non-blank when retention is " + retention);
+        throw new IllegalArgumentException(
+            "affinityKey must be non-blank when retention is " + retention);
       }
       breakpoints = immutable(breakpoints);
     }

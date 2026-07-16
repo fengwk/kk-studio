@@ -34,8 +34,7 @@ public class ModelUsageAggregationServiceImpl implements ModelUsageAggregationSe
 
   private ModelUsageSummaryDTO summarize(
       String scopeType, long scopeId, List<ModelUsageRecord> records) {
-    ModelUsageSummaryAccumulator accumulator =
-        new ModelUsageSummaryAccumulator(scopeType, scopeId);
+    ModelUsageSummaryAccumulator accumulator = new ModelUsageSummaryAccumulator(scopeType, scopeId);
     records.forEach(accumulator::add);
     return accumulator.toSummary();
   }

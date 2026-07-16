@@ -38,15 +38,12 @@ class ModelUsageAggregationServiceImplTest {
     service = new ModelUsageAggregationServiceImpl(recordStore);
   }
 
-  /**
-   * 多币种必须独立且稳定排序；cache 指标只看 eligible，waste 必须按 key 截断，不能全局抵消。
-   */
+  /** 多币种必须独立且稳定排序；cache 指标只看 eligible，waste 必须按 key 截断，不能全局抵消。 */
   @Test
   void aggregatesTokensCostsEligibleRatiosAndAffinityWaste() {
     ModelUsageRecord usdWrite =
         record(1L, eligible("USD", "alpha", usage(10, 2, 0, 100, 0, 3, 115)));
-    ModelUsageRecord usdRead =
-        record(2L, eligible("USD", "alpha", usage(5, 4, 60, 0, 0, 1, 70)));
+    ModelUsageRecord usdRead = record(2L, eligible("USD", "alpha", usage(5, 4, 60, 0, 0, 1, 70)));
     ModelUsageRecord eurOtherKey =
         record(3L, eligible("EUR", "beta", usage(5, 6, 70, 0, 0, 2, 83)));
     ModelUsageRecord nonEligible =
@@ -71,7 +68,9 @@ class ModelUsageAggregationServiceImplTest {
     assertDecimal("0.666667", summary.getCacheHitRatio());
     assertDecimal("0.866667", summary.getTokenReadRatio());
     assertEquals(40L, summary.getUnamortizedCacheWriteTokens());
-    assertEquals(List.of("EUR", "USD"), summary.getCosts().stream().map(ModelUsageCostSummaryDTO::getCurrency).toList());
+    assertEquals(
+        List.of("EUR", "USD"),
+        summary.getCosts().stream().map(ModelUsageCostSummaryDTO::getCurrency).toList());
     assertCost(eurOtherKey.draft().cost(), summary.getCosts().get(0));
     assertCost(
         add(usdWrite.draft().cost(), usdRead.draft().cost(), nonEligible.draft().cost()),
@@ -81,10 +80,8 @@ class ModelUsageAggregationServiceImplTest {
   /** null affinity key 必须以 record id 分桶，否则一条 read 会错误摊销另一条 write。 */
   @Test
   void treatsNullAffinityKeysAsIndependentRecords() {
-    ModelUsageRecord write =
-        record(11L, eligible("USD", null, usage(0, 0, 0, 50, 0, 0, 50)));
-    ModelUsageRecord read =
-        record(12L, eligible("USD", null, usage(0, 0, 50, 0, 0, 0, 50)));
+    ModelUsageRecord write = record(11L, eligible("USD", null, usage(0, 0, 0, 50, 0, 0, 50)));
+    ModelUsageRecord read = record(12L, eligible("USD", null, usage(0, 0, 50, 0, 0, 0, 50)));
     when(recordStore.listBySessionId(31L)).thenReturn(List.of(write, read));
 
     ModelUsageSummaryDTO summary = service.summarizeSession(31L);
@@ -152,12 +149,7 @@ class ModelUsageAggregationServiceImplTest {
 
   private static ModelUsageDraft nonEligible(String currency, ModelUsage usage) {
     return draft(
-        currency,
-        PromptCacheMode.UNSUPPORTED,
-        PromptCacheRetention.NONE,
-        false,
-        null,
-        usage);
+        currency, PromptCacheMode.UNSUPPORTED, PromptCacheRetention.NONE, false, null, usage);
   }
 
   private static ModelUsageDraft draft(
