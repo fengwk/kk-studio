@@ -9,7 +9,7 @@ public final class ObservabilityLimits {
 
   private ObservabilityLimits() {}
 
-  public static int normalizeLimit(int value, int defaultLimit) {
+  public static int normalizeLimit(int value) {
     if (value < MIN_LIMIT || value > MAX_LIMIT) {
       throw new IllegalArgumentException(
           "limit must be between " + MIN_LIMIT + " and " + MAX_LIMIT + ": " + value);
@@ -21,7 +21,7 @@ public final class ObservabilityLimits {
     if (value == null) {
       return defaultLimit;
     }
-    return normalizeLimit(value.intValue(), defaultLimit);
+    return normalizeLimit(value.intValue());
   }
 
   public static void requireNonNegativeCursor(long cursor, String field) {
