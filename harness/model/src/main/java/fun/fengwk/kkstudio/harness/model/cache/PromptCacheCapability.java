@@ -13,8 +13,8 @@ import java.util.Set;
  *
  * <ul>
  *   <li>{@link PromptCacheRetention#NONE} 永远有效，harness 调用方无需在集合中显式声明。
- *   <li>{@link PromptCacheMode#UNKNOWN} / {@link PromptCacheMode#UNSUPPORTED} / {@link PromptCacheMode#AUTOMATIC} 的 retentions
- *       和 breakpoints 必须同时为空。
+ *   <li>{@link PromptCacheMode#UNKNOWN} / {@link PromptCacheMode#UNSUPPORTED} / {@link
+ *       PromptCacheMode#AUTOMATIC} 的 retentions 和 breakpoints 必须同时为空。
  *   <li>{@link PromptCacheMode#AFFINITY} 至少支持一个非 NONE 的 retention，且 breakpoints 必须为空。
  *   <li>{@link PromptCacheMode#BREAKPOINTS} 至少支持一个非 NONE 的 retention 和至少一个 breakpoint。
  * </ul>
@@ -27,11 +27,9 @@ public record PromptCacheCapability(
   public PromptCacheCapability {
     Objects.requireNonNull(mode, "mode");
     supportedRetentions =
-        immutable(
-            supportedRetentions, PromptCacheRetention.class, "supportedRetentions");
+        immutable(supportedRetentions, PromptCacheRetention.class, "supportedRetentions");
     supportedBreakpoints =
-        immutable(
-            supportedBreakpoints, PromptCacheBreakpoint.class, "supportedBreakpoints");
+        immutable(supportedBreakpoints, PromptCacheBreakpoint.class, "supportedBreakpoints");
     validate(mode, supportedRetentions, supportedBreakpoints);
   }
 
@@ -54,9 +52,7 @@ public record PromptCacheCapability(
     return new PromptCacheCapability(PromptCacheMode.UNSUPPORTED, Set.of(), Set.of());
   }
 
-  /**
-   * 工厂：Provider 自行决定缓存命中，harness 不发送任何 cache hint；只有 {@link PromptCacheRetention#NONE} 合法。
-   */
+  /** 工厂：Provider 自行决定缓存命中，harness 不发送任何 cache hint；只有 {@link PromptCacheRetention#NONE} 合法。 */
   public static PromptCacheCapability automatic() {
     return new PromptCacheCapability(PromptCacheMode.AUTOMATIC, Set.of(), Set.of());
   }
@@ -123,7 +119,8 @@ public record PromptCacheCapability(
       }
     }
     if (!hasNonNone) {
-      throw new IllegalArgumentException(mode + " capability requires at least one non-NONE retention");
+      throw new IllegalArgumentException(
+          mode + " capability requires at least one non-NONE retention");
     }
     if (mode == PromptCacheMode.AFFINITY) {
       if (!breakpoints.isEmpty()) {
@@ -131,7 +128,8 @@ public record PromptCacheCapability(
       }
     } else if (mode == PromptCacheMode.BREAKPOINTS) {
       if (breakpoints.isEmpty()) {
-        throw new IllegalArgumentException("BREAKPOINTS capability requires at least one breakpoint");
+        throw new IllegalArgumentException(
+            "BREAKPOINTS capability requires at least one breakpoint");
       }
     }
   }

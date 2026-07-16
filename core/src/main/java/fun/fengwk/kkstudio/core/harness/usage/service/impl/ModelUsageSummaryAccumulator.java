@@ -50,11 +50,11 @@ final class ModelUsageSummaryAccumulator {
     outputTokens = Math.addExact(outputTokens, usage.outputTokens());
     cacheReadTokens = Math.addExact(cacheReadTokens, usage.cacheReadTokens());
     cacheWriteTokens = Math.addExact(cacheWriteTokens, usage.cacheWriteTokens());
-    cacheWriteLongTokens =
-        Math.addExact(cacheWriteLongTokens, usage.cacheWriteLongTokens());
+    cacheWriteLongTokens = Math.addExact(cacheWriteLongTokens, usage.cacheWriteLongTokens());
     reasoningTokens = Math.addExact(reasoningTokens, usage.reasoningTokens());
     providerTotalTokens = Math.addExact(providerTotalTokens, usage.providerTotalTokens());
-    costs.computeIfAbsent(draft.cost().currency(), ignored -> new CostAccumulator())
+    costs
+        .computeIfAbsent(draft.cost().currency(), ignored -> new CostAccumulator())
         .add(draft.cost());
     if (draft.cacheEligible()) {
       addEligible(record, usage);
@@ -90,11 +90,9 @@ final class ModelUsageSummaryAccumulator {
     if (usage.cacheReadTokens() > 0) {
       cacheHitRecordCount = Math.addExact(cacheHitRecordCount, 1L);
     }
-    eligibleCacheReadTokens =
-        Math.addExact(eligibleCacheReadTokens, usage.cacheReadTokens());
+    eligibleCacheReadTokens = Math.addExact(eligibleCacheReadTokens, usage.cacheReadTokens());
     long readDenominator = Math.addExact(usage.inputTokens(), usage.cacheReadTokens());
-    eligibleReadDenominatorTokens =
-        Math.addExact(eligibleReadDenominatorTokens, readDenominator);
+    eligibleReadDenominatorTokens = Math.addExact(eligibleReadDenominatorTokens, readDenominator);
     CacheBucketKey bucketKey =
         record.draft().cacheAffinityKey() == null
             ? CacheBucketKey.forRecord(record.id())

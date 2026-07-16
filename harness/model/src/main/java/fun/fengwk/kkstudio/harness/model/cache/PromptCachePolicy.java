@@ -6,8 +6,7 @@ import java.util.Objects;
  * harness 视角下某次请求要应用的缓存策略。
  *
  * <p>{@link PromptCachePolicy} 由 {@link PromptCacheCapability} 与具体 {@link PromptCacheRetention} 组成；
- * capability 必须在构造时支持目标 retention。该类只承担策略形态的固化，不直接映射到 Provider SDK；Provider cache 映射留待
- * Adapter 完成。
+ * capability 必须在构造时支持目标 retention。该类只承担策略形态的固化，不直接映射到 Provider SDK；Provider cache 映射留待 Adapter 完成。
  */
 public record PromptCachePolicy(PromptCacheCapability capability, PromptCacheRetention retention) {
 
@@ -22,8 +21,7 @@ public record PromptCachePolicy(PromptCacheCapability capability, PromptCacheRet
 
   /** 工厂：禁用任何缓存策略；缺省值。 */
   public static PromptCachePolicy disabled() {
-    return new PromptCachePolicy(
-        PromptCacheCapability.unsupported(), PromptCacheRetention.NONE);
+    return new PromptCachePolicy(PromptCacheCapability.unsupported(), PromptCacheRetention.NONE);
   }
 
   /**
@@ -35,17 +33,13 @@ public record PromptCachePolicy(PromptCacheCapability capability, PromptCacheRet
     return new PromptCachePolicy(capability, PromptCacheRetention.NONE);
   }
 
-  /**
-   * 工厂：AFFINITY + SHORT 留存；capability 必须支持 AFFINITY + SHORT。
-   */
+  /** 工厂：AFFINITY + SHORT 留存；capability 必须支持 AFFINITY + SHORT。 */
   public static PromptCachePolicy affinityShort(PromptCacheCapability capability) {
     requireMode(capability, PromptCacheMode.AFFINITY, "affinityShort");
     return new PromptCachePolicy(capability, PromptCacheRetention.SHORT);
   }
 
-  /**
-   * 工厂：BREAKPOINTS + SHORT 留存；capability 必须支持 BREAKPOINTS + SHORT。
-   */
+  /** 工厂：BREAKPOINTS + SHORT 留存；capability 必须支持 BREAKPOINTS + SHORT。 */
   public static PromptCachePolicy breakpointsShort(PromptCacheCapability capability) {
     requireMode(capability, PromptCacheMode.BREAKPOINTS, "breakpointsShort");
     return new PromptCachePolicy(capability, PromptCacheRetention.SHORT);
