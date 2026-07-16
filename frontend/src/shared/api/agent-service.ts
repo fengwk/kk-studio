@@ -16,6 +16,7 @@ import type {
   AgentSessionEventDTO,
   AgentSessionMessageCreateDTO,
   AgentSessionUpdateDTO,
+  ModelUsageSummaryDTO,
   PageResult,
 } from '@/shared/api/contracts'
 
@@ -56,6 +57,15 @@ export function createAgentService(client: HttpClient = apiClient) {
 
     deleteAgent: (id: AgentResourceId): Promise<void> =>
       client.delete(`/agents/${encodeURIComponent(String(id))}`),
+
+    getRunUsage: (runId: string): Promise<ModelUsageSummaryDTO> =>
+      client.get(`/usage/runs/${encodeURIComponent(runId)}`),
+
+    getSessionUsage: (sessionId: string): Promise<ModelUsageSummaryDTO> =>
+      client.get(`/usage/sessions/${encodeURIComponent(sessionId)}`),
+
+    getModelUsage: (modelId: AgentResourceId): Promise<ModelUsageSummaryDTO> =>
+      client.get(`/usage/models/${encodeURIComponent(String(modelId))}`),
 
     // Session endpoints remain on the legacy API until T15 moves them.
     listSessions: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentSessionDTO>> =>

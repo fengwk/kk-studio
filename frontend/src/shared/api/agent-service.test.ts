@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createAgentService, createSessionApi } from '@/shared/api/agent-service'
 import type { HttpClient } from '@/shared/api/client'
+import type { ModelUsageSummaryDTO } from '@/shared/api/contracts'
 
 function createClient(): HttpClient {
   return {
@@ -86,6 +87,21 @@ describe('agentService', () => {
     expect(client.post).toHaveBeenNthCalledWith(3, '/agents', agentBody)
     expect(client.put).toHaveBeenNthCalledWith(3, '/agents/303', updateAgentBody)
     expect(client.delete).toHaveBeenNthCalledWith(3, '/agents/303')
+  })
+
+  it('maps usage summaries to encoded run, session and model endpoints', async () => {
+    // Explicit promise annotations keep all three service return contracts tied to the backend summary DTO.
+    const client = createClient()
+    const service = createAgentService(client)
+
+    const runUsage: Promise<ModelUsageSummaryDTO> = service.getRunUsage('run /1')
+    const sessionUsage: Promise<ModelUsageSummaryDTO> = service.getSessionUsage('session /2')
+    const modelUsage: Promise<ModelUsageSummaryDTO> = service.getModelUsage('model /3')
+    await Promise.all([runUsage, sessionUsage, modelUsage])
+
+    expect(client.get).toHaveBeenNthCalledWith(1, '/usage/runs/run%20%2F1')
+    expect(client.get).toHaveBeenNthCalledWith(2, '/usage/sessions/session%20%2F2')
+    expect(client.get).toHaveBeenNthCalledWith(3, '/usage/models/model%20%2F3')
   })
 
   it('maps session detail, edit, delete, events, runs and message requests', async () => {
