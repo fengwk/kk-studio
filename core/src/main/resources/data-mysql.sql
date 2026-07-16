@@ -15,13 +15,13 @@ insert into agent_model (
     gmt_create, gmt_modified, version
 ) values (
     1, 1, 'acceptance-stub',
-    'Local deterministic model for development and acceptance tests.', '[]',
-    '{"variants":[{"name":"default","temperature":0.2,"maxOutputTokens":4096}]}',
+    'Local deterministic model for development and acceptance tests.', '["TEXT","TOOLS"]',
+    '{"contextWindow":32768,"maxOutputTokens":4096,"inputModalities":["TEXT"],"variants":[{"name":"default","temperature":0.2,"maxOutputTokens":4096}],"pricing":{"currency":"USD","pricingTier":"acceptance","serviceTier":"default","serviceTierMultiplier":1,"version":"acceptance-v1","inputPerMillionTokens":0,"outputPerMillionTokens":0,"cacheReadPerMillionTokens":0,"cacheWritePerMillionTokens":0,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0}}',
     current_timestamp(3), current_timestamp(3), 0
 ) on duplicate key update
     provider_id = 1, name = 'acceptance-stub',
-    description = 'Local deterministic model for development and acceptance tests.', capabilities_json = '[]',
-    config_json = '{"variants":[{"name":"default","temperature":0.2,"maxOutputTokens":4096}]}',
+    description = 'Local deterministic model for development and acceptance tests.', capabilities_json = '["TEXT","TOOLS"]',
+    config_json = '{"contextWindow":32768,"maxOutputTokens":4096,"inputModalities":["TEXT"],"variants":[{"name":"default","temperature":0.2,"maxOutputTokens":4096}],"pricing":{"currency":"USD","pricingTier":"acceptance","serviceTier":"default","serviceTierMultiplier":1,"version":"acceptance-v1","inputPerMillionTokens":0,"outputPerMillionTokens":0,"cacheReadPerMillionTokens":0,"cacheWritePerMillionTokens":0,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0}}',
     gmt_modified = current_timestamp(3);
 
 insert into agent_definition (

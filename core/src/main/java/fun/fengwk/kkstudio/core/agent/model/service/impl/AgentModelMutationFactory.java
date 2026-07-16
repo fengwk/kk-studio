@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.agent.model.service.impl;
 
 import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextModelId;
 
+import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.share.model.AgentModelEditablePropertiesDTO;
@@ -11,20 +12,20 @@ import org.springframework.stereotype.Component;
 @Component
 final class AgentModelMutationFactory {
 
-  private static final String EMPTY_ARRAY_JSON = "[]";
-  private static final String EMPTY_OBJECT_JSON = "{}";
-
   private final AgentEditableSupport editableSupport;
+  private final AgentModelRuntimeConfigParser runtimeConfigParser;
 
-  AgentModelMutationFactory(AgentEditableSupport editableSupport) {
+  AgentModelMutationFactory(
+      AgentEditableSupport editableSupport, AgentModelRuntimeConfigParser runtimeConfigParser) {
     this.editableSupport = editableSupport;
+    this.runtimeConfigParser = runtimeConfigParser;
   }
 
   AgentModel newModel(long providerId, AgentModelEditablePropertiesDTO properties) {
     if (providerId <= 0) {
       throw new IllegalArgumentException("providerId must be positive");
     }
-    Mutation mutation = newMutation(properties, null);
+    Mutation mutation = newMutation(properties, null, null, null);
     AgentModel model = new AgentModel();
     model.setId(nextModelId());
     model.setProviderId(providerId);
@@ -33,7 +34,10 @@ final class AgentModelMutationFactory {
   }
 
   void update(AgentModel model, AgentModelEditablePropertiesDTO properties) {
-    apply(model, newMutation(properties, model.getName()));
+    apply(
+        model,
+        newMutation(
+            properties, model.getName(), model.getCapabilitiesJson(), model.getConfigJson()));
   }
 
   private void apply(AgentModel model, Mutation mutation) {
@@ -43,7 +47,11 @@ final class AgentModelMutationFactory {
     model.setConfigJson(mutation.configJson());
   }
 
-  private Mutation newMutation(AgentModelEditablePropertiesDTO properties, String fallbackName) {
+  private Mutation newMutation(
+      AgentModelEditablePropertiesDTO properties,
+      String fallbackName,
+      String fallbackCapabilitiesJson,
+      String fallbackConfigJson) {
     if (properties == null) {
       throw new IllegalArgumentException("agent model body must not be null");
     }
@@ -52,11 +60,16 @@ final class AgentModelMutationFactory {
       throw new IllegalArgumentException("agent model name must not be blank");
     }
     String capabilitiesJson =
-        editableSupport.firstNonBlank(properties.getCapabilitiesJson(), EMPTY_ARRAY_JSON);
+        editableSupport.firstNonBlank(properties.getCapabilitiesJson(), fallbackCapabilitiesJson);
+    if (capabilitiesJson == null) {
+      throw new IllegalArgumentException("agent model capabilitiesJson must not be blank");
+    }
     String configJson =
-        editableSupport.firstNonBlank(properties.getConfigJson(), EMPTY_OBJECT_JSON);
-    editableSupport.validateJsonArray(capabilitiesJson, "capabilitiesJson");
-    editableSupport.validateJsonObject(configJson, "configJson");
+        editableSupport.firstNonBlank(properties.getConfigJson(), fallbackConfigJson);
+    if (configJson == null) {
+      throw new IllegalArgumentException("agent model configJson must not be blank");
+    }
+    runtimeConfigParser.parse(capabilitiesJson, configJson);
     return new Mutation(
         name,
         editableSupport.trimToNull(properties.getDescription()),
