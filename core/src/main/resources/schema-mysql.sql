@@ -297,3 +297,16 @@ create table if not exists comfyui_workflow_api (
     primary key (id),
     unique key uk_comfyui_workflow_api_api_name (api_name)
 ) engine=InnoDB default charset=utf8mb4 comment='comfyui workflow api card';
+
+create table if not exists tool_environment (
+    id                    bigint not null comment 'Snowflake 主键；Environment 全局资源，不属于 Workspace/Tenant',
+    name                  varchar(128) not null comment 'Environment 唯一名',
+    description           varchar(512) null comment '描述',
+    capabilities_json     longtext not null comment 'canonical Daemon CAPABILITIES payload',
+    last_seen_at          datetime(3) null comment '最近一次 daemon 主动上报时间',
+    gmt_create            datetime(3) not null default current_timestamp(3) comment '创建时间',
+    gmt_modified          datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
+    version               bigint not null default '0' comment '数据版本号',
+    primary key (id),
+    unique key uk_tool_environment_name (name)
+) engine=InnoDB default charset=utf8mb4 comment='global environment daemon registry';

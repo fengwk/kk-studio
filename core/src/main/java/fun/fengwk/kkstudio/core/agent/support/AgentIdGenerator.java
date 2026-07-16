@@ -24,6 +24,7 @@ public final class AgentIdGenerator {
   public static final String MODEL_USAGE_RECORD = "model_usage_record";
   public static final String TOOL_INVOCATION = "tool_invocation";
   public static final String TOOL_ARTIFACT = "tool_artifact";
+  public static final String TOOL_ENVIRONMENT = "tool_environment";
 
   private AgentIdGenerator() {}
 
@@ -85,5 +86,9 @@ public final class AgentIdGenerator {
 
   public static long nextToolArtifactId() {
     return GlobalSnowflakeIdGenerator.next(TOOL_ARTIFACT);
+  }
+
+  public static long nextToolEnvironmentId() {
+    return GlobalSnowflakeIdGenerator.next(TOOL_ENVIRONMENT);
   }
 }

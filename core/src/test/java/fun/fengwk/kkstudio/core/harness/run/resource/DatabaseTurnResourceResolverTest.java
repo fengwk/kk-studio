@@ -14,6 +14,8 @@ import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelRuntimeConfigParse
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
+import fun.fengwk.kkstudio.core.environment.service.model.ToolEnvironment;
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapability;
@@ -37,9 +39,11 @@ import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryStore;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionStore;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
@@ -262,6 +266,211 @@ class DatabaseTurnResourceResolverTest {
     }
   }
 
+  /**
+   * {@code environment:<id>/<tool>@<version>} 引用必须在调度 turn 之前完成存在性、capability 严格解码、
+   * exact-name-at-version 与 ENVIRONMENT 模式的校验；返回的 {@link
+   * fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding} 必须携带 Environment id。
+   */
+  @Test
+  void resolvesFrozenEnvironmentReferenceToEnvironmentBinding() {
+    CapturingProviderFactory factory =
+        new CapturingProviderFactory(
+            ProviderType.OPENAI,
+            PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
+    AgentSnapshot snapshot = snapshot("11", "quality", List.of());
+    DaemonToolCapabilitiesCodec codec = new DaemonToolCapabilitiesCodec();
+    String capabilitiesJson =
+        codec.encode(
+            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(
+                List.of(
+                    new ToolDescriptor(
+                        "shell",
+                        "1",
+                        "shell tool",
+                        "renderer",
+                        new ToolParamsSchema("", Map.of(), Set.of(), false),
+                        ToolExecutionMode.ENVIRONMENT,
+                        ToolSideEffect.READ_ONLY,
+                        Duration.ofSeconds(5)))));
+    ToolEnvironment environment = new ToolEnvironment();
+    environment.setId(123L);
+    environment.setName("env-123");
+    environment.setCapabilitiesJson(capabilitiesJson);
+
+    try (Fixture fixture = new Fixture(factory, List.of())) {
+      fixture.path(snapshot);
+      fixture.model(model(11L, 22L, MODEL_CONFIG));
+      fixture.provider(provider(22L, "openai"));
+      fixture.environment(environment);
+
+      TurnResources resources =
+          fixture.resolver.resolve(
+              7L, AgentRuntimeConfig.from(snapshot).withTools(List.of("environment:123/shell@1")));
+
+      assertEquals(1, resources.toolBindings().size());
+      assertEquals(ToolTargetType.ENVIRONMENT, resources.toolBindings().get(0).targetType());
+      assertEquals(123L, resources.toolBindings().get(0).environmentId());
+      assertEquals("shell", resources.toolBindings().get(0).descriptor().name());
+      assertEquals("1", resources.toolBindings().get(0).descriptor().version());
+      assertEquals(
+          ToolExecutionMode.ENVIRONMENT, resources.toolDescriptors().get(0).executionMode());
+    }
+  }
+
+  /**
+   * Environment 引用失败路径：malformed grammar、unknown id、unknown capability、non-ENVIRONMENT、collision。
+   */
+  @Test
+  void rejectsMalformedUnknownOrCollidingEnvironmentReferences() {
+    CapturingProviderFactory factory =
+        new CapturingProviderFactory(
+            ProviderType.OPENAI,
+            PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
+    AgentSnapshot snapshot = snapshot("11", "quality", List.of());
+    DaemonToolCapabilitiesCodec codec = new DaemonToolCapabilitiesCodec();
+    // Encode a CLOUD descriptor manually to test that the resolver rejects it without
+    // triggering the codec's own non-ENVIRONMENT guard.
+    String cloudDescriptorJson =
+        "{\"name\":\"cloud-tool\",\"version\":\"1\",\"description\":\"cloud tool\","
+            + "\"rendererKey\":\"renderer\",\"executionMode\":\"CLOUD\","
+            + "\"sideEffect\":\"READ_ONLY\",\"timeoutMillis\":0,"
+            + "\"inputSchema\":{\"type\":\"object\",\"properties\":{},"
+            + "\"required\":[],\"additionalProperties\":false}}";
+    String environmentDescriptorJson =
+        "{\"name\":\"shell\",\"version\":\"1\",\"description\":\"shell tool\","
+            + "\"rendererKey\":\"renderer\",\"executionMode\":\"ENVIRONMENT\","
+            + "\"sideEffect\":\"READ_ONLY\",\"timeoutMillis\":0,"
+            + "\"inputSchema\":{\"type\":\"object\",\"properties\":{},"
+            + "\"required\":[],\"additionalProperties\":false}}";
+    String capabilitiesJson =
+        "{\"tools\":[" + environmentDescriptorJson + "," + cloudDescriptorJson + "]}";
+    ToolEnvironment environment = new ToolEnvironment();
+    environment.setId(123L);
+    environment.setName("env-123");
+    environment.setCapabilitiesJson(capabilitiesJson);
+
+    ToolDescriptor localCloud =
+        new ToolDescriptor(
+            "shell",
+            "1",
+            "local cloud shell",
+            "shell",
+            new ToolParamsSchema("", Map.of(), Set.of(), false),
+            ToolExecutionMode.CLOUD,
+            ToolSideEffect.READ_ONLY,
+            Duration.ofSeconds(5));
+    try (Fixture fixture = new Fixture(factory, List.of())) {
+      fixture.path(snapshot);
+      fixture.model(model(11L, 22L, MODEL_CONFIG));
+      fixture.provider(provider(22L, "openai"));
+      fixture.environment(environment);
+
+      // 1) malformed grammar: 缺少 '/'
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              fixture.resolver.resolve(
+                  7L, AgentRuntimeConfig.from(snapshot).withTools(List.of("environment:123"))));
+
+      // 2) malformed grammar: 缺少 '@version'
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              fixture.resolver.resolve(
+                  7L,
+                  AgentRuntimeConfig.from(snapshot).withTools(List.of("environment:123/shell"))));
+
+      // 3) 非正数字 id
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              fixture.resolver.resolve(
+                  7L,
+                  AgentRuntimeConfig.from(snapshot).withTools(List.of("environment:abc/shell@1"))));
+
+      // 3a) plus-signed id 拒绝
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              fixture.resolver.resolve(
+                  7L,
+                  AgentRuntimeConfig.from(snapshot)
+                      .withTools(List.of("environment:+123/shell@1"))));
+
+      // 3b) 负数 id 拒绝
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              fixture.resolver.resolve(
+                  7L,
+                  AgentRuntimeConfig.from(snapshot)
+                      .withTools(List.of("environment:-123/shell@1"))));
+
+      // 3c) overflow id 拒绝
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              fixture.resolver.resolve(
+                  7L,
+                  AgentRuntimeConfig.from(snapshot)
+                      .withTools(List.of("environment:99999999999999999999/shell@1"))));
+
+      // 4) Environment id 不存在
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              fixture.resolver.resolve(
+                  7L,
+                  AgentRuntimeConfig.from(snapshot).withTools(List.of("environment:999/shell@1"))));
+    }
+
+    // 5) unknown capability name@version
+    try (Fixture fixture = new Fixture(factory, List.of())) {
+      fixture.path(snapshot);
+      fixture.model(model(11L, 22L, MODEL_CONFIG));
+      fixture.provider(provider(22L, "openai"));
+      fixture.environment(environment);
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              fixture.resolver.resolve(
+                  7L,
+                  AgentRuntimeConfig.from(snapshot)
+                      .withTools(List.of("environment:123/missing@1"))));
+    }
+
+    // 6) non-ENVIRONMENT descriptor: environment:123/cloud-tool@1 不被允许
+    try (Fixture fixture = new Fixture(factory, List.of())) {
+      fixture.path(snapshot);
+      fixture.model(model(11L, 22L, MODEL_CONFIG));
+      fixture.provider(provider(22L, "openai"));
+      fixture.environment(environment);
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              fixture.resolver.resolve(
+                  7L,
+                  AgentRuntimeConfig.from(snapshot)
+                      .withTools(List.of("environment:123/cloud-tool@1"))));
+    }
+
+    // 7) collision: 本地 cloud-shell 与 Environment 的 shell@1 名字重复
+    try (Fixture fixture =
+        new Fixture(factory, List.of(toolFromDescriptor(localCloud, ToolExecutionMode.CLOUD)))) {
+      fixture.path(snapshot);
+      fixture.model(model(11L, 22L, MODEL_CONFIG));
+      fixture.provider(provider(22L, "openai"));
+      fixture.environment(environment);
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              fixture.resolver.resolve(
+                  7L,
+                  AgentRuntimeConfig.from(snapshot)
+                      .withTools(List.of("shell@1", "environment:123/shell@1"))));
+    }
+  }
+
   private void assertCachePolicy(
       ProviderType type,
       String persistedType,
@@ -348,11 +557,40 @@ class DatabaseTurnResourceResolverTest {
     };
   }
 
+  private static Tool toolFromDescriptor(
+      ToolDescriptor descriptor, ToolExecutionMode executionMode) {
+    ToolDescriptor effective =
+        descriptor.executionMode() == executionMode
+            ? descriptor
+            : new ToolDescriptor(
+                descriptor.name(),
+                descriptor.version(),
+                descriptor.description(),
+                descriptor.rendererKey(),
+                descriptor.inputSchema(),
+                executionMode,
+                descriptor.sideEffect(),
+                descriptor.timeout());
+    return new Tool() {
+      @Override
+      public ToolDescriptor descriptor() {
+        return effective;
+      }
+
+      @Override
+      public ToolExecutionHandle execute(
+          ToolExecutionRequest request, ToolExecutionListener listener) {
+        throw new UnsupportedOperationException("not executed by resolver test");
+      }
+    };
+  }
+
   private static final class Fixture implements AutoCloseable {
     private final SessionStore sessions = mock(SessionStore.class);
     private final SessionEntryStore entries = mock(SessionEntryStore.class);
     private final AgentModelRepository models = mock(AgentModelRepository.class);
     private final AgentProviderRepository providers = mock(AgentProviderRepository.class);
+    private final ToolEnvironmentRepository environments = mock(ToolEnvironmentRepository.class);
     private final HarnessExtensionHost host;
     private final DatabaseTurnResourceResolver resolver;
 
@@ -391,6 +629,8 @@ class DatabaseTurnResourceResolverTest {
               new AgentModelRuntimeConfigParser(objectMapper),
               host,
               properties,
+              environments,
+              new DaemonToolCapabilitiesCodec(),
               objectMapper);
     }
 
@@ -413,6 +653,14 @@ class DatabaseTurnResourceResolverTest {
 
     private void provider(AgentProvider provider) {
       when(providers.getById(provider.getId())).thenReturn(provider);
+    }
+
+    private void environment(ToolEnvironment environment) {
+      when(environments.getById(environment.getId())).thenReturn(environment);
+    }
+
+    private void environment(long id) {
+      when(environments.getById(id)).thenReturn(null);
     }
 
     @Override

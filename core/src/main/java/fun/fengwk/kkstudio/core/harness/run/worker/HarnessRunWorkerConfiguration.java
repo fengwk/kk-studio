@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.core.agent.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
+import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.core.harness.run.resource.DatabaseTurnResourceResolver;
 import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
@@ -22,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.run.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.runtime.run.RunWorkerConfig;
 import fun.fengwk.kkstudio.harness.runtime.run.ToolPreparationPort;
 import fun.fengwk.kkstudio.harness.runtime.run.TurnResourceResolver;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
 import java.time.Clock;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -74,6 +76,8 @@ public class HarnessRunWorkerConfiguration {
       AgentModelRuntimeConfigParser modelConfigParser,
       HarnessExtensionHost host,
       HarnessRuntimeProperties properties,
+      ToolEnvironmentRepository environmentRepository,
+      DaemonToolCapabilitiesCodec capabilitiesCodec,
       ObjectMapper objectMapper) {
     return new DatabaseTurnResourceResolver(
         sessionStore,
@@ -83,6 +87,8 @@ public class HarnessRunWorkerConfiguration {
         modelConfigParser,
         host,
         properties,
+        environmentRepository,
+        capabilitiesCodec,
         objectMapper);
   }
 

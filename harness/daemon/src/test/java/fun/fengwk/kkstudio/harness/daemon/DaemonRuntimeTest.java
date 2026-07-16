@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
@@ -122,6 +123,29 @@ class DaemonRuntimeTest {
     assertEquals("boolean", nested.path("properties").path("force").path("type").asText());
     assertEquals(List.of("force"), jsonTexts(nested.path("required")));
     assertTrue(nested.path("additionalProperties").asBoolean());
+  }
+
+  /**
+   * Daemon 发出的 CAPABILITIES payload 必须能被 Cloud 共享的 codec 解码回完整 {@link
+   * fun.fengwk.kkstudio.harness.tool.ToolDescriptor} 列表，避免 Cloud/Daemon 协议漂移。
+   */
+  @Test
+  void capabilitiesPayloadIsFullyDecodableBySharedCodec() throws InterruptedException {
+    DaemonToolCapabilitiesCodec codec = new DaemonToolCapabilitiesCodec();
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new SchemaTool());
+
+    runtime.start();
+    transport.awaitConnections(1);
+    List<DaemonEnvelope> handshake = transport.takeMessages(3);
+
+    DaemonToolCapabilitiesCodec.DaemonToolCapabilities capabilities =
+        codec.decode(handshake.get(1).payloadJson());
+
+    assertEquals(1, capabilities.tools().size());
+    assertEquals("schema", capabilities.tools().get(0).name());
+    assertEquals("2.1.0", capabilities.tools().get(0).version());
+    assertEquals(ToolExecutionMode.ENVIRONMENT, capabilities.tools().get(0).executionMode());
   }
 
   /** READY 后必须在配置周期内发送 HEARTBEAT。 */
