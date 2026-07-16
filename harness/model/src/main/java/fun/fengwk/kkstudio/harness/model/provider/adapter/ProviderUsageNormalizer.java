@@ -220,7 +220,9 @@ final class ProviderUsageNormalizer {
     rejectNegative(providerTotal, "provider total tokens");
     long billedInput = subtractCategory(input, cached, "cached content tokens");
     long billedOutput = subtractCategory(output, thoughts, "thoughts tokens");
-    return new ModelUsage(billedInput, billedOutput, 0, 0, 0, 0, providerTotal);
+    // cached/thoughts 是 Provider 单独计费的类别，必须保留到 ModelUsage 的 cacheRead / reasoning，
+    // 不然后续 ModelCost 无法按这两类计费。
+    return new ModelUsage(billedInput, billedOutput, cached, 0, 0, thoughts, providerTotal);
   }
 
   private static long valueOrZero(Integer value) {
@@ -349,59 +351,83 @@ final class ProviderUsageNormalizer {
     if (usage == null) {
       return "{}";
     }
-    ObjectNode node = OBJECT_MAPPER.createObjectNode();
+    // KISS：直接对每个 SDK typed usage 按 Provider API 的 JSON 字段名展开，禁止反射或万能抽取器。
     if (usage instanceof OpenAiTokenUsage openAi) {
-      putIfPresent(node, "inputTokenCount", openAi.inputTokenCount());
-      putIfPresent(node, "outputTokenCount", openAi.outputTokenCount());
-      putIfPresent(node, "totalTokenCount", openAi.totalTokenCount());
-      if (openAi.inputTokensDetails() != null) {
-        ObjectNode details = OBJECT_MAPPER.createObjectNode();
-        putIfPresent(details, "cachedTokens", openAi.inputTokensDetails().cachedTokens());
-        if (details.size() > 0) {
-          node.set("inputTokensDetails", details);
-        }
-      }
-      if (openAi.outputTokensDetails() != null) {
-        ObjectNode details = OBJECT_MAPPER.createObjectNode();
-        putIfPresent(details, "reasoningTokens", openAi.outputTokensDetails().reasoningTokens());
-        if (details.size() > 0) {
-          node.set("outputTokensDetails", details);
-        }
-      }
-    } else if (usage instanceof OpenAiOfficialTokenUsage openAi) {
-      putIfPresent(node, "inputTokenCount", openAi.inputTokenCount());
-      putIfPresent(node, "outputTokenCount", openAi.outputTokenCount());
-      putIfPresent(node, "totalTokenCount", openAi.totalTokenCount());
-      if (openAi.inputTokensDetails() != null) {
-        ObjectNode details = OBJECT_MAPPER.createObjectNode();
-        putIfPresent(details, "cachedTokens", openAi.inputTokensDetails().cachedTokens());
-        if (details.size() > 0) {
-          node.set("inputTokensDetails", details);
-        }
-      }
-      if (openAi.outputTokensDetails() != null) {
-        ObjectNode details = OBJECT_MAPPER.createObjectNode();
-        putIfPresent(details, "reasoningTokens", openAi.outputTokensDetails().reasoningTokens());
-        if (details.size() > 0) {
-          node.set("outputTokensDetails", details);
-        }
-      }
-    } else if (usage instanceof AnthropicTokenUsage anthropic) {
-      putIfPresent(node, "inputTokenCount", anthropic.inputTokenCount());
-      putIfPresent(node, "outputTokenCount", anthropic.outputTokenCount());
-      putIfPresent(node, "cacheCreationInputTokens", anthropic.cacheCreationInputTokens());
-      putIfPresent(node, "cacheReadInputTokens", anthropic.cacheReadInputTokens());
-    } else if (usage instanceof GoogleAiGeminiTokenUsage google) {
-      putIfPresent(node, "inputTokenCount", google.inputTokenCount());
-      putIfPresent(node, "outputTokenCount", google.outputTokenCount());
-      putIfPresent(node, "totalTokenCount", google.totalTokenCount());
-      putIfPresent(node, "cachedContentTokenCount", google.cachedContentTokenCount());
-      putIfPresent(node, "thoughtsTokenCount", google.thoughtsTokenCount());
-    } else {
-      putIfPresent(node, "inputTokenCount", usage.inputTokenCount());
-      putIfPresent(node, "outputTokenCount", usage.outputTokenCount());
-      putIfPresent(node, "totalTokenCount", usage.totalTokenCount());
+      return openAiChatTypedUsageJson(openAi);
     }
+    if (usage instanceof OpenAiOfficialTokenUsage openAi) {
+      return openAiResponsesTypedUsageJson(openAi);
+    }
+    if (usage instanceof AnthropicTokenUsage anthropic) {
+      return anthropicTypedUsageJson(anthropic);
+    }
+    if (usage instanceof GoogleAiGeminiTokenUsage google) {
+      return googleTypedUsageJson(google);
+    }
+    ObjectNode node = OBJECT_MAPPER.createObjectNode();
+    // 非 Provider 特定的通用 TokenUsage：保留 SDK 内部 camelCase 字段名。
+    putIfPresent(node, "inputTokenCount", usage.inputTokenCount());
+    putIfPresent(node, "outputTokenCount", usage.outputTokenCount());
+    putIfPresent(node, "totalTokenCount", usage.totalTokenCount());
+    return writeJsonString(node);
+  }
+
+  /**
+   * OpenAI Chat Completions Provider API JSON 字段名：{@code prompt_tokens} / {@code
+   * completion_tokens}。
+   */
+  private static String openAiChatTypedUsageJson(OpenAiTokenUsage openAi) {
+    ObjectNode node = OBJECT_MAPPER.createObjectNode();
+    putIfPresent(node, "prompt_tokens", openAi.inputTokenCount());
+    putIfPresent(node, "completion_tokens", openAi.outputTokenCount());
+    putIfPresent(node, "total_tokens", openAi.totalTokenCount());
+    if (openAi.inputTokensDetails() != null) {
+      ObjectNode details = OBJECT_MAPPER.createObjectNode();
+      putIfPresent(details, "cached_tokens", openAi.inputTokensDetails().cachedTokens());
+      if (details.size() > 0) {
+        node.set("prompt_tokens_details", details);
+      }
+    }
+    if (openAi.outputTokensDetails() != null) {
+      ObjectNode details = OBJECT_MAPPER.createObjectNode();
+      putIfPresent(details, "reasoning_tokens", openAi.outputTokensDetails().reasoningTokens());
+      if (details.size() > 0) {
+        node.set("completion_tokens_details", details);
+      }
+    }
+    return writeJsonString(node);
+  }
+
+  /** OpenAI Responses API JSON 字段名：{@code input_tokens} / {@code output_tokens}。 */
+  private static String openAiResponsesTypedUsageJson(OpenAiOfficialTokenUsage openAi) {
+    ObjectNode node = OBJECT_MAPPER.createObjectNode();
+    putIfPresent(node, "input_tokens", openAi.inputTokenCount());
+    putIfPresent(node, "output_tokens", openAi.outputTokenCount());
+    putIfPresent(node, "total_tokens", openAi.totalTokenCount());
+    if (openAi.inputTokensDetails() != null) {
+      ObjectNode details = OBJECT_MAPPER.createObjectNode();
+      putIfPresent(details, "cached_tokens", openAi.inputTokensDetails().cachedTokens());
+      if (details.size() > 0) {
+        node.set("input_tokens_details", details);
+      }
+    }
+    if (openAi.outputTokensDetails() != null) {
+      ObjectNode details = OBJECT_MAPPER.createObjectNode();
+      putIfPresent(details, "reasoning_tokens", openAi.outputTokensDetails().reasoningTokens());
+      if (details.size() > 0) {
+        node.set("output_tokens_details", details);
+      }
+    }
+    return writeJsonString(node);
+  }
+
+  /** Anthropic API JSON 字段名：{@code input_tokens} / {@code output_tokens} 等；不伪造 total。 */
+  private static String anthropicTypedUsageJson(AnthropicTokenUsage anthropic) {
+    ObjectNode node = OBJECT_MAPPER.createObjectNode();
+    putIfPresent(node, "input_tokens", anthropic.inputTokenCount());
+    putIfPresent(node, "output_tokens", anthropic.outputTokenCount());
+    putIfPresent(node, "cache_creation_input_tokens", anthropic.cacheCreationInputTokens());
+    putIfPresent(node, "cache_read_input_tokens", anthropic.cacheReadInputTokens());
     return writeJsonString(node);
   }
 
@@ -421,13 +447,8 @@ final class ProviderUsageNormalizer {
     return typedProviderUsageJson(usage);
   }
 
-  private static String googleRawUsageJson(TokenUsage usage) {
-    if (usage == null) {
-      return "{}";
-    }
-    if (!(usage instanceof GoogleAiGeminiTokenUsage google)) {
-      return typedProviderUsageJson(usage);
-    }
+  /** Google Gemini API JSON 字段名：{@code promptTokenCount} / {@code candidatesTokenCount} 等。 */
+  private static String googleTypedUsageJson(GoogleAiGeminiTokenUsage google) {
     ObjectNode node = OBJECT_MAPPER.createObjectNode();
     putIfPresent(node, "promptTokenCount", google.inputTokenCount());
     putIfPresent(node, "candidatesTokenCount", google.outputTokenCount());
@@ -435,6 +456,16 @@ final class ProviderUsageNormalizer {
     putIfPresent(node, "thoughtsTokenCount", google.thoughtsTokenCount());
     putIfPresent(node, "totalTokenCount", google.totalTokenCount());
     return writeJsonString(node);
+  }
+
+  private static String googleRawUsageJson(TokenUsage usage) {
+    if (usage == null) {
+      return "{}";
+    }
+    if (usage instanceof GoogleAiGeminiTokenUsage google) {
+      return googleTypedUsageJson(google);
+    }
+    return typedProviderUsageJson(usage);
   }
 
   private static void putIfPresent(ObjectNode node, String name, Integer value) {
