@@ -6,7 +6,7 @@ import java.util.List;
 /** T15 harness run query service. */
 public interface HarnessRunQueryService {
 
-    HarnessRunDTO getRun(String runId);
+  HarnessRunDTO getRun(String runId);
 
-    List<HarnessRunDTO> listRuns(String sessionId);
+  List<HarnessRunDTO> listRuns(String sessionId);
 }

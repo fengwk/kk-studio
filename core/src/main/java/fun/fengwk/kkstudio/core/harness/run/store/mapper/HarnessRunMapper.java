@@ -236,5 +236,4 @@ public interface HarnessRunMapper extends BaseMapper {
       """)
   @ResultMap("harnessRunResultMap")
   List<HarnessRunDO> listBySessionOrderByCreateTimeAsc(@Param("sessionId") long sessionId);
-
 }

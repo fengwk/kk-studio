@@ -9,24 +9,24 @@ import org.springframework.stereotype.Component;
 @Component
 public class HarnessRunDtoConverter {
 
-    public HarnessRunDTO convert(HarnessRunDO source) {
-        if (source == null) {
-            return null;
-        }
-        HarnessRunDTO target = new HarnessRunDTO();
-        target.setRunId(HarnessIds.format(source.getId()));
-        target.setSessionId(HarnessIds.format(source.getSessionId()));
-        target.setTriggerEntryId(HarnessIds.format(source.getTriggerEntryId()));
-        target.setStatus(source.getStatus());
-        target.setTurnIndex(source.getTurnIndex());
-        target.setAttempt(source.getAttempt());
-        target.setEventSequence(source.getEventSequence());
-        target.setNextAttemptAt(source.getNextAttemptAt());
-        target.setCancelRequestedAt(source.getCancelRequestedAt());
-        target.setStartedAt(source.getStartedAt());
-        target.setFinishedAt(source.getFinishedAt());
-        target.setCreateTime(source.getCreateTime());
-        target.setUpdateTime(source.getUpdateTime());
-        return target;
+  public HarnessRunDTO convert(HarnessRunDO source) {
+    if (source == null) {
+      return null;
     }
+    HarnessRunDTO target = new HarnessRunDTO();
+    target.setRunId(HarnessIds.format(source.getId()));
+    target.setSessionId(HarnessIds.format(source.getSessionId()));
+    target.setTriggerEntryId(HarnessIds.format(source.getTriggerEntryId()));
+    target.setStatus(source.getStatus());
+    target.setTurnIndex(source.getTurnIndex());
+    target.setAttempt(source.getAttempt());
+    target.setEventSequence(source.getEventSequence());
+    target.setNextAttemptAt(source.getNextAttemptAt());
+    target.setCancelRequestedAt(source.getCancelRequestedAt());
+    target.setStartedAt(source.getStartedAt());
+    target.setFinishedAt(source.getFinishedAt());
+    target.setCreateTime(source.getCreateTime());
+    target.setUpdateTime(source.getUpdateTime());
+    return target;
+  }
 }

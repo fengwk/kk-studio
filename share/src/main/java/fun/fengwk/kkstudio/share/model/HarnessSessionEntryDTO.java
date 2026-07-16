@@ -7,11 +7,11 @@ import lombok.Data;
 @Data
 public class HarnessSessionEntryDTO {
 
-    private String sessionEntryId;
-    private String sessionId;
-    private String parentEntryId;
-    private String runId;
-    private String entryType;
-    private String payloadJson;
-    private LocalDateTime createTime;
+  private String sessionEntryId;
+  private String sessionId;
+  private String parentEntryId;
+  private String runId;
+  private String entryType;
+  private String payloadJson;
+  private LocalDateTime createTime;
 }

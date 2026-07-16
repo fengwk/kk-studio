@@ -6,6 +6,6 @@ import lombok.Data;
 @Data
 public class HarnessSessionCreateDTO {
 
-    private String agentDefinitionId;
-    private String title;
+  private String agentDefinitionId;
+  private String title;
 }

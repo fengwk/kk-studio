@@ -61,6 +61,7 @@ public class StudioAgentResourceControllerTest {
     AgentModelCreateDTO model = new AgentModelCreateDTO();
     model.setName("model-" + suffix);
     model.setProviderId(providerId);
+    configureExecutableModel(model);
     String modelId =
         id(
             mockMvc
@@ -150,6 +151,7 @@ public class StudioAgentResourceControllerTest {
     AgentModelCreateDTO disposableModel = new AgentModelCreateDTO();
     disposableModel.setName("disposable-model-" + suffix);
     disposableModel.setProviderId(disposableProviderId);
+    configureExecutableModel(disposableModel);
     String disposableModelId =
         id(
             mockMvc
@@ -189,5 +191,13 @@ public class StudioAgentResourceControllerTest {
   private String id(String response) throws Exception {
     JsonNode node = objectMapper.readTree(response);
     return node.get("data").get("id").asText();
+  }
+
+  private static void configureExecutableModel(AgentModelCreateDTO model) {
+    model.setCapabilitiesJson("[\"TEXT\",\"TOOLS\"]");
+    model.setConfigJson(
+        """
+        {"contextWindow":32768,"maxOutputTokens":4096,"inputModalities":["TEXT"],"variants":[{"name":"default","maxOutputTokens":4096}],"pricing":{"currency":"USD","pricingTier":"test","serviceTier":"default","serviceTierMultiplier":1,"version":"v1","inputPerMillionTokens":0,"outputPerMillionTokens":0,"cacheReadPerMillionTokens":0,"cacheWritePerMillionTokens":0,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0}}
+        """);
   }
 }
