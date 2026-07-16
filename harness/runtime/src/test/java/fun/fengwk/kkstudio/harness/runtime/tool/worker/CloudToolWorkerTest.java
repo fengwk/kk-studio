@@ -310,6 +310,7 @@ class CloudToolWorkerTest {
 
     assertTrue(fixture.transactions.terminal.await(2, TimeUnit.SECONDS));
     assertEquals(ToolInvocationStatus.FAILED, fixture.transactions.status);
+    assertTrue(fixture.tool.handle.cancelledLatch.await(1, TimeUnit.SECONDS));
     assertTrue(fixture.tool.handle.cancelled);
     assertTrue(text(fixture.transactions.result).contains("deadline"));
   }
@@ -326,6 +327,7 @@ class CloudToolWorkerTest {
     fixture.worker.executeNext("worker-a");
 
     assertTrue(fixture.store.heartbeatFailure.await(1, TimeUnit.SECONDS));
+    assertTrue(fixture.tool.handle.cancelledLatch.await(1, TimeUnit.SECONDS));
     assertTrue(fixture.tool.handle.cancelled);
   }
 
@@ -343,6 +345,7 @@ class CloudToolWorkerTest {
     fixture.worker.executeNext("worker-a");
 
     assertTrue(fixture.store.terminalRead.await(1, TimeUnit.SECONDS));
+    assertTrue(fixture.tool.handle.cancelledLatch.await(1, TimeUnit.SECONDS));
     assertTrue(fixture.tool.handle.cancelled);
   }
 
@@ -393,6 +396,7 @@ class CloudToolWorkerTest {
 
     assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
     assertEquals(1, fixture.transactions.coordinations);
+    assertTrue(fixture.tool.handle.cancelledLatch.await(1, TimeUnit.SECONDS));
     assertTrue(fixture.tool.handle.cancelled);
     assertTrue(toolCompletions(fixture).isEmpty());
   }
@@ -831,10 +835,12 @@ class CloudToolWorkerTest {
 
   private static final class Handle implements ToolExecutionHandle {
     private boolean cancelled;
+    private final CountDownLatch cancelledLatch = new CountDownLatch(1);
 
     @Override
     public void cancel() {
       cancelled = true;
+      cancelledLatch.countDown();
     }
 
     @Override

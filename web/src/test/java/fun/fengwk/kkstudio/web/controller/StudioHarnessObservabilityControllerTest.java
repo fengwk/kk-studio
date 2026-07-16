@@ -73,9 +73,7 @@ import org.springframework.test.web.servlet.MvcResult;
  * is used.
  */
 @AutoConfigureMockMvc
-@SpringBootTest(
-    classes = WebTestApplication.class,
-    properties = "kk-studio.harness.runtime.workers-enabled=false")
+@SpringBootTest(classes = WebTestApplication.class)
 class StudioHarnessObservabilityControllerTest {
 
   private static final Instant NOW = Instant.parse("2026-07-16T00:00:00Z");
@@ -326,7 +324,7 @@ class StudioHarnessObservabilityControllerTest {
     assertTrue(body.contains("\"rootSessionId\":\"" + seed.rootSessionId + "\""), body);
   }
 
-  /** Query cursor takes precedence over Last-Event-ID; query=2 emits only sequence 2. */
+  /** Query cursor takes precedence over Last-Event-ID for the Root Activity event-id cursor. */
   @Test
   void queryCursorTakesPrecedenceOverLastEventId() throws Exception {
     Seed seed = seedRun("sse-cursor");
@@ -350,9 +348,8 @@ class StudioHarnessObservabilityControllerTest {
             seed.run.id());
     assertTrue(secondEventId > firstEventId);
 
-    // With query cursor == first event id, the stream emits nothing because both Run events sit at
-    // id > firstEventId but the query parameter is honoured and skips past the first event when the
-    // SSE event id matches a previously-seen cursor value.
+    // With query cursor == first event id, the stream emits only the second event. The query
+    // parameter is honoured and skips the first event whose SSE id is already acknowledged.
     MvcResult streamResult =
         mockMvc
             .perform(
