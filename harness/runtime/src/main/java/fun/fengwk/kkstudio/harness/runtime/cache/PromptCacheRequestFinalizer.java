@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.cache;
 
 import fun.fengwk.kkstudio.harness.agent.extension.BeforeProviderRequestInterceptor;
-import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheMode;
@@ -48,22 +47,15 @@ public final class PromptCacheRequestFinalizer implements BeforeProviderRequestI
     this(sessionId, new PromptCacheAffinityKeyFactory());
   }
 
-  public long sessionId() {
-    return sessionId;
-  }
-
   @Override
   public ProviderRequest intercept(ProviderRequest request) {
     Objects.requireNonNull(request, "request");
-    ModelDescriptor model = request.model();
-    if (model == null) {
-      throw new IllegalArgumentException("request.model() must not be null");
-    }
-    PromptCacheCapability capability = model.promptCachePolicy().capability();
-    PromptCacheRetention retention = model.promptCachePolicy().retention();
+    Objects.requireNonNull(request.model(), "request.model()");
+    PromptCacheCapability capability = request.model().promptCachePolicy().capability();
+    PromptCacheRetention retention = request.model().promptCachePolicy().retention();
     ProviderCacheControl resolved = resolve(request, capability, retention);
     return new ProviderRequest(
-        model, request.variant(), request.messages(), request.tools(), resolved);
+        request.model(), request.variant(), request.messages(), request.tools(), resolved);
   }
 
   private ProviderCacheControl resolve(
@@ -71,28 +63,18 @@ public final class PromptCacheRequestFinalizer implements BeforeProviderRequestI
     if (retention == PromptCacheRetention.NONE) {
       return ProviderCacheControl.none();
     }
-    switch (capability.mode()) {
-      case UNKNOWN:
-      case UNSUPPORTED:
-      case AUTOMATIC:
-        return ProviderCacheControl.none();
-      case AFFINITY:
-        return affinityControl(request);
-      case BREAKPOINTS:
-        return breakpointControl(request, capability);
-      default:
-        return ProviderCacheControl.none();
+    PromptCacheMode mode = capability.mode();
+    if (mode == PromptCacheMode.AFFINITY) {
+      return ProviderCacheControl.affinity(retention, keyFactory.create(sessionId, request));
     }
-  }
-
-  private ProviderCacheControl affinityControl(ProviderRequest request) {
-    PromptCacheRetention retention = request.model().promptCachePolicy().retention();
-    String key = keyFactory.create(sessionId, request);
-    return ProviderCacheControl.affinity(retention, key);
+    if (mode == PromptCacheMode.BREAKPOINTS) {
+      return breakpointControl(request, capability, retention);
+    }
+    return ProviderCacheControl.none();
   }
 
   private ProviderCacheControl breakpointControl(
-      ProviderRequest request, PromptCacheCapability capability) {
+      ProviderRequest request, PromptCacheCapability capability, PromptCacheRetention retention) {
     Set<PromptCacheBreakpoint> supported = capability.supportedBreakpoints();
     EnumSet<PromptCacheBreakpoint> resolved = EnumSet.noneOf(PromptCacheBreakpoint.class);
     if (supported.contains(PromptCacheBreakpoint.SYSTEM) && hasLeadingSystem(request)) {
@@ -104,18 +86,15 @@ public final class PromptCacheRequestFinalizer implements BeforeProviderRequestI
     if (resolved.isEmpty()) {
       return ProviderCacheControl.none();
     }
-    String key = keyFactory.create(sessionId, request);
     return ProviderCacheControl.breakpoints(
-        request.model().promptCachePolicy().retention(), key, resolved);
+        retention, keyFactory.create(sessionId, request), resolved);
   }
 
   private static boolean hasLeadingSystem(ProviderRequest request) {
-    for (ProviderMessage message : request.messages()) {
-      if (message.role() != ProviderMessageRole.SYSTEM) {
-        return false;
-      }
-      return true;
+    if (request.messages().isEmpty()) {
+      return false;
     }
-    return false;
+    ProviderMessage first = request.messages().get(0);
+    return first.role() == ProviderMessageRole.SYSTEM;
   }
 }

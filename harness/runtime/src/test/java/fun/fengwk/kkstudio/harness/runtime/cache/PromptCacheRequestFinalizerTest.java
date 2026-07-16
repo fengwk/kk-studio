@@ -41,7 +41,14 @@ class PromptCacheRequestFinalizerTest {
   void bindsSessionIdAndRejectsInvalid() {
     assertThrows(IllegalArgumentException.class, () -> new PromptCacheRequestFinalizer(0L));
     assertThrows(IllegalArgumentException.class, () -> new PromptCacheRequestFinalizer(-1L));
-    assertEquals(SESSION_ID, new PromptCacheRequestFinalizer(SESSION_ID).sessionId());
+    // 验证构造期 sessionId 绑定：两个不同 sessionId 的 finalizer 必须在同一 request 上产生不同 affinity key。
+    ProviderRequest request =
+        requestWith(affinityModel(), ProviderCacheControl.none(), List.of(), List.of());
+    PromptCacheRequestFinalizer a = new PromptCacheRequestFinalizer(101L);
+    PromptCacheRequestFinalizer b = new PromptCacheRequestFinalizer(202L);
+    assertNotEquals(
+        a.intercept(request).cacheControl().affinityKey(),
+        b.intercept(request).cacheControl().affinityKey());
   }
 
   @Test

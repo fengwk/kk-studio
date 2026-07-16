@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
@@ -27,8 +28,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderVideoBlock;
 import java.math.BigDecimal;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -50,33 +49,6 @@ class PromptCacheAffinityKeyFactoryTest {
     assertThrows(IllegalArgumentException.class, () -> factory.create(0L, request));
     assertThrows(IllegalArgumentException.class, () -> factory.create(-1L, request));
     assertThrows(NullPointerException.class, () -> factory.create(SESSION_ID, null));
-  }
-
-  @Test
-  void writeContentCoversAllSealedBranches() throws NoSuchAlgorithmException {
-    MessageDigest md = MessageDigest.getInstance("SHA-256");
-    // 直接调用 package-private writeContentForTest 强制覆盖 sealed 全部分支，保证未来新增 block 类型
-    // 不会让 digest 路径产生隐式丢弃；TEST 关注 digest 输出的稳定性。
-    PromptCacheAffinityKeyFactory.writeContentForTest(md, 0, 0, new ProviderTextBlock("t"));
-    PromptCacheAffinityKeyFactory.writeContentForTest(
-        md, 0, 1, new ProviderImageBlock("image/png", "u:a"));
-    PromptCacheAffinityKeyFactory.writeContentForTest(
-        md, 0, 2, new ProviderAudioBlock("audio/mp3", "u:b"));
-    PromptCacheAffinityKeyFactory.writeContentForTest(
-        md, 0, 3, new ProviderVideoBlock("video/mp4", "u:c"));
-    PromptCacheAffinityKeyFactory.writeContentForTest(md, 0, 4, new ProviderThinkingBlock("th"));
-    PromptCacheAffinityKeyFactory.writeContentForTest(md, 0, 5, new ProviderJsonBlock("{\"j\":1}"));
-    PromptCacheAffinityKeyFactory.writeContentForTest(
-        md, 0, 6, new ProviderToolCallBlock(new ProviderToolCall("c1", "alpha", "{}")));
-    PromptCacheAffinityKeyFactory.writeContentForTest(
-        md,
-        0,
-        7,
-        new ProviderToolResultBlock(
-            "c1", "alpha", List.of(new ProviderTextBlock("ok")), false, "{}"));
-    byte[] bytes = md.digest();
-    // sanity: digest produced non-trivial output
-    assertTrue(bytes.length == 32);
   }
 
   @Test
@@ -370,6 +342,80 @@ class PromptCacheAffinityKeyFactoryTest {
             SESSION_ID, baseRequestWithModel(model(101L, 202L, ProviderType.ANTHROPIC, "m1"))));
   }
 
+  /**
+   * NUL 字段边界回归：image 的 mediaType 与 source 必须以独立 length-prefixed frame 写入，不能用任何形式的 NUL
+   * 拼接。两个对象的拼接后字节序列完全相同，但 key 不得相同。
+   */
+  @Test
+  void nulBoundaryCollisionImageMediaTypeAndSource() {
+    ProviderRequest a = requestWithLeadingImage("a\0b", "c");
+    ProviderRequest b = requestWithLeadingImage("a", "b\0c");
+    assertNotEquals(factory.create(SESSION_ID, a), factory.create(SESSION_ID, b));
+  }
+
+  /** 同等的 audio / video 复合块也必须避免 NUL 拼接碰撞。 */
+  @Test
+  void nulBoundaryCollisionAudioVideo() {
+    ProviderRequest audioA = requestWithLeadingAudio("a\0b", "c");
+    ProviderRequest audioB = requestWithLeadingAudio("a", "b\0c");
+    assertNotEquals(factory.create(SESSION_ID, audioA), factory.create(SESSION_ID, audioB));
+
+    ProviderRequest videoA = requestWithLeadingVideo("video/mp4", "a\0b");
+    ProviderRequest videoB = requestWithLeadingVideo("video/mp4", "a\0b\0");
+    // 仅在尾部追加 NUL 看似不影响媒体，但 length-prefixed 框架下仍必须切 key。
+    assertNotEquals(factory.create(SESSION_ID, videoA), factory.create(SESSION_ID, videoB));
+  }
+
+  /** tool definition 各字段必须独立成帧：name / description / inputSchemaJson 的 NUL 重排或追加都必须切 key。 */
+  @Test
+  void toolDefinitionFieldCollision() {
+    ProviderRequest a = baseRequest(tool("alpha", "desc", "{}"));
+    ProviderRequest b = baseRequest(tool("a\0desc", "alpha", "{}"));
+    assertNotEquals(factory.create(SESSION_ID, a), factory.create(SESSION_ID, b));
+
+    ProviderRequest c = baseRequest(tool("alpha", "desc", "{\"a\":1}"));
+    ProviderRequest d = baseRequest(tool("alpha", "desc", "{\"a\":1,\"\":}"));
+    assertNotEquals(factory.create(SESSION_ID, c), factory.create(SESSION_ID, d));
+  }
+
+  /** 合法 SYSTEM nested 类型（Text/Image/Audio/Video/Thinking/Json）通过真实 {@code create} 路径覆盖。 */
+  @Test
+  void legalSystemNestedTypesAreAllCoveredViaCreate() {
+    String textKey =
+        factory.create(SESSION_ID, baseRequestWithSystemMessage(new ProviderTextBlock("S-text")));
+    String imageKey =
+        factory.create(
+            SESSION_ID, baseRequestWithSystemMessage(new ProviderImageBlock("image/png", "u:img")));
+    String audioKey =
+        factory.create(
+            SESSION_ID, baseRequestWithSystemMessage(new ProviderAudioBlock("audio/mp3", "u:aud")));
+    String videoKey =
+        factory.create(
+            SESSION_ID, baseRequestWithSystemMessage(new ProviderVideoBlock("video/mp4", "u:vid")));
+    String thinkingKey =
+        factory.create(
+            SESSION_ID, baseRequestWithSystemMessage(new ProviderThinkingBlock("think")));
+    String jsonKey =
+        factory.create(
+            SESSION_ID, baseRequestWithSystemMessage(new ProviderJsonBlock("{\"k\":1}")));
+
+    assertTrue(textKey.startsWith("pc1-"));
+    assertTrue(imageKey.startsWith("pc1-"));
+    assertTrue(audioKey.startsWith("pc1-"));
+    assertTrue(videoKey.startsWith("pc1-"));
+    assertTrue(thinkingKey.startsWith("pc1-"));
+    assertTrue(jsonKey.startsWith("pc1-"));
+    // 不同类型之间互不相同，证明每条分支都进入 digest。
+    assertNotEquals(textKey, imageKey);
+    assertNotEquals(textKey, audioKey);
+    assertNotEquals(textKey, videoKey);
+    assertNotEquals(textKey, thinkingKey);
+    assertNotEquals(textKey, jsonKey);
+    assertNotEquals(imageKey, audioKey);
+    assertNotEquals(imageKey, videoKey);
+    assertNotEquals(thinkingKey, jsonKey);
+  }
+
   private static ProviderRequest baseRequest() {
     return baseRequestWithModel(model(101L, 202L, ProviderType.OPENAI, "m1"));
   }
@@ -420,6 +466,33 @@ class PromptCacheAffinityKeyFactoryTest {
 
   private static ProviderToolDefinition tool(String name, String description, String schema) {
     return new ProviderToolDefinition(name, description, schema);
+  }
+
+  private static ProviderRequest baseRequestWithSystemMessage(ProviderContentBlock block) {
+    return baseRequestWithSystemMessages(List.of(block));
+  }
+
+  private static ProviderRequest baseRequestWithSystemMessages(
+      List<ProviderContentBlock> leadingSystemContents) {
+    ProviderRequest template = baseRequest();
+    return new ProviderRequest(
+        template.model(),
+        template.variant(),
+        List.of(new ProviderMessage(ProviderMessageRole.SYSTEM, leadingSystemContents)),
+        template.tools(),
+        template.cacheControl());
+  }
+
+  private static ProviderRequest requestWithLeadingImage(String mediaType, String source) {
+    return baseRequestWithSystemMessage(new ProviderImageBlock(mediaType, source));
+  }
+
+  private static ProviderRequest requestWithLeadingAudio(String mediaType, String source) {
+    return baseRequestWithSystemMessage(new ProviderAudioBlock(mediaType, source));
+  }
+
+  private static ProviderRequest requestWithLeadingVideo(String mediaType, String source) {
+    return baseRequestWithSystemMessage(new ProviderVideoBlock(mediaType, source));
   }
 
   private static List<ProviderMessage> appendDynamic(
