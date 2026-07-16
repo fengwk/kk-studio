@@ -46,7 +46,7 @@ export interface ModelUsageSummaryDTO {
   cacheHitRecordCount: BackendLong
   cacheHitRatio: BackendBigDecimal
   tokenReadRatio: BackendBigDecimal
-  unamortizedCacheWriteTokens: BackendBigDecimal
+  unamortizedCacheWriteTokens: BackendLong
   costs: ModelUsageCostSummaryDTO[]
 }
 
