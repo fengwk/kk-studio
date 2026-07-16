@@ -131,6 +131,35 @@ class MysqlModelUsageRecordStoreIntegrationTest {
     assertTrue(store.listByRunId(99L).isEmpty());
   }
 
+  /** Session 与 Model scope 查询均按 id asc，并且不会泄漏其它 scope 的记录。 */
+  @Test
+  void listBySessionAndModelOrdersByIdAscAndIsolatesScopes() {
+    ModelUsageRecord first =
+        insert(
+            idGenerator.newModelUsageRecordId(), 11L, 21L, 31L, 1, 0, draftWithoutCache(201L), NOW);
+    ModelUsageRecord second =
+        insert(
+            idGenerator.newModelUsageRecordId(), 11L, 22L, 32L, 1, 0, draftWithoutCache(202L), NOW);
+    ModelUsageRecord otherSession =
+        insert(
+            idGenerator.newModelUsageRecordId(), 12L, 23L, 33L, 1, 0, draftWithoutCache(201L), NOW);
+
+    assertEquals(
+        List.of(first.id(), second.id()),
+        store.listBySessionId(11L).stream().map(ModelUsageRecord::id).toList());
+    assertEquals(
+        List.of(otherSession.id()),
+        store.listBySessionId(12L).stream().map(ModelUsageRecord::id).toList());
+    assertEquals(
+        List.of(first.id(), otherSession.id()),
+        store.listByModelResourceId(201L).stream().map(ModelUsageRecord::id).toList());
+    assertEquals(
+        List.of(second.id()),
+        store.listByModelResourceId(202L).stream().map(ModelUsageRecord::id).toList());
+    assertTrue(store.listBySessionId(99L).isEmpty());
+    assertTrue(store.listByModelResourceId(999L).isEmpty());
+  }
+
   /** unique(assistant_entry_id) 必须拦截重复的 Assistant Entry 写入。 */
   @Test
   void duplicateAssistantEntryIdIsRejected() {
@@ -174,6 +203,16 @@ class MysqlModelUsageRecordStoreIntegrationTest {
 
           @Override
           public List<ModelUsageRecordDO> listByRunId(long runId) {
+            return List.of();
+          }
+
+          @Override
+          public List<ModelUsageRecordDO> listBySessionId(long sessionId) {
+            return List.of();
+          }
+
+          @Override
+          public List<ModelUsageRecordDO> listByModelResourceId(long modelResourceId) {
             return List.of();
           }
         };
@@ -279,6 +318,10 @@ class MysqlModelUsageRecordStoreIntegrationTest {
   }
 
   private static ModelUsageDraft draftWithoutCache() {
+    return draftWithoutCache(2L);
+  }
+
+  private static ModelUsageDraft draftWithoutCache(long modelResourceId) {
     ModelUsage usage = new ModelUsage(1, 0, 0, 0, 0, 0, 1);
     ModelPricing pricing =
         new ModelPricing(
@@ -296,7 +339,7 @@ class MysqlModelUsageRecordStoreIntegrationTest {
     ModelCost cost = ModelCost.calculate(pricing, usage);
     return new ModelUsageDraft(
         1L,
-        2L,
+        modelResourceId,
         ProviderType.OPENAI,
         "model",
         PromptCacheMode.UNSUPPORTED,

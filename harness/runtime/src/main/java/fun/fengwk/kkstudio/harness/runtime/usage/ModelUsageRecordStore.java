@@ -9,7 +9,7 @@ import java.util.Optional;
  * <ul>
  *   <li>{@link #insert(ModelUsageRecord)} 在与 Assistant Entry 同一事务中写入账本
  *   <li>{@link #findByAssistantEntryId(long)} 仅返回一条；用于完整性校验与补算
- *   <li>{@link #listByRunId(long)} 按 run 拉取所有账本行；不再做聚合
+ *   <li>三个 list 方法按 scope 拉取所有账本行；不在 store 内做聚合
  * </ul>
  */
 public interface ModelUsageRecordStore {
@@ -27,4 +27,10 @@ public interface ModelUsageRecordStore {
 
   /** 按 run id 拉取所有账本；按 id asc，便于回放与对账。 */
   List<ModelUsageRecord> listByRunId(long runId);
+
+  /** 按 session id 拉取所有账本；按 id asc。 */
+  List<ModelUsageRecord> listBySessionId(long sessionId);
+
+  /** 按 model resource id 拉取所有账本；按 id asc。 */
+  List<ModelUsageRecord> listByModelResourceId(long modelResourceId);
 }
