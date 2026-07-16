@@ -32,7 +32,7 @@ public class S3StorageProperties {
   private String accessKey;
   private String secretKey;
 
-  /** 公开访问基础 URL（保留兼容现有调用方）。 */
+  /** 公开访问基础 URL（用于服务端合成永久直链；与浏览器预签名 URL 无关）。 */
   private String publicBaseUrl;
 
   /** 签名默认有效期（秒），未设置时取 {@link #DEFAULT_PRESIGN_EXPIRES_SECONDS}. */

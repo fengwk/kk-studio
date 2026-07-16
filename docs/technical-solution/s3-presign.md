@@ -45,7 +45,7 @@ kk-studio:
       secret-key: ${S3_SECRET_KEY}
       presign-default-expires-seconds: 600    # 可选
       presign-max-expires-seconds: 3600       # 可选
-      public-base-url: ...                    # 兼容既有 publicUrl 解析逻辑
+      public-base-url: ...                    # 服务端合成永久直链时使用的公开基础 URL（与浏览器预签名 URL 无关）
 ```
 
 启用开关：`kk-studio.storage.s3.enabled=true` 未设置时，`S3Client`、`S3Presigner`、`S3StorageService`、`S3PresignService`、`StudioS3PresignController` 都不会被注册，部署可以安全地省略对象存储配置。

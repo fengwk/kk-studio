@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiCreateDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiUpdateDTO;
+import java.util.NoSuchElementException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -140,6 +141,16 @@ public class ComfyuiWorkflowApiServiceTest {
             IllegalArgumentException.class,
             () -> comfyuiWorkflowApiService.deleteWorkflow("not-a-number"));
     assertTrue(nonNumeric.getMessage().contains("id"));
+  }
+
+  @Test
+  public void shouldThrowNoSuchElementForUnknownButParseableId() {
+    // 解析合法但数据库中找不到的 id 必须以 NoSuchElementException 报告，controller 再翻译为 404。
+    NoSuchElementException notFound =
+        assertThrows(
+            NoSuchElementException.class,
+            () -> comfyuiWorkflowApiService.deleteWorkflow("999999999999999"));
+    assertTrue(notFound.getMessage().contains("comfyui workflow api not found"));
   }
 
   private static ComfyuiWorkflowApiCreateDTO newComfyuiWorkflowApiCreateDTO(String apiName) {

@@ -80,7 +80,7 @@ kk-studio:
 
 两个依赖都已加入根 `pom.xml` 的 `dependencyManagement` 与 `core/pom.xml` 的 `<dependencies>`。convention4j parent 保留 `1.2.1`。
 
-**远程发布前置条件**：`convention4j-comfyui:1.2.2` 目前仅在本地 `~/.m2` 仓库可用（`/home/fengwk/proj/convention4j` 的本地 `mvn install` 产物）。远程环境必须先把该坐标发布到内网 Maven 仓库，否则构建会因 SNAPSHOT / 未发布 metadata 报错。
+**远程发布前置条件**：`convention4j-comfyui:1.2.2` 目前仅在本地 `~/.m2` 仓库可用（`/home/fengwk/proj/convention4j` 的本地 `mvn install` 产物）。远程环境必须先把该坐标发布到内网 Maven 仓库，否则依赖解析会失败。
 
 ## 实现位置
 

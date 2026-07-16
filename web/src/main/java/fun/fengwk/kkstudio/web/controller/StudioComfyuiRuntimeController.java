@@ -10,11 +10,12 @@ import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunRequestDTO;
 import java.nio.charset.StandardCharsets;
 import lombok.AllArgsConstructor;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -22,20 +23,27 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * ComfyUI 无状态任务 API。
  *
- * <p>{@code runId} 直接等于 ComfyUI prompt / job id，不在后端持久化。输出下载只能按当前 job outputs 中的 node/media/index
+ * <p>控制器总是注册的；{@link ComfyuiRuntimeService} 也是总是可注入的 bean。 当 {@code
+ * kk-studio.comfyui.enabled=false} 或没有 {@code ComfyUIClient} 时，运行期方法会抛 {@link
+ * IllegalStateException}， 本控制器将其翻译为 HTTP 503，明确告诉调用方服务未启用，而非 404。
+ *
+ * <p>{@code runId} 直接等于 ComfyUI prompt / job id，不在后端持久化。 输出下载只能按当前 job outputs 中的 node/media/index
  * 精确解析。
  *
  * @author fengwk
  */
 @AllArgsConstructor
-@ConditionalOnProperty(prefix = "kk-studio.comfyui", name = "enabled", havingValue = "true")
 @RequestMapping("/api/comfyui")
 @RestController
 public class StudioComfyuiRuntimeController {
+
+  private static final String DISABLED_RUNTIME_PREFIX = "ComfyUI runtime is disabled";
+  private static final String UNAVAILABLE_CLIENT_PREFIX = "ComfyUI client is unavailable";
 
   private final ComfyuiRuntimeService comfyuiRuntimeService;
 
@@ -43,19 +51,31 @@ public class StudioComfyuiRuntimeController {
   public Result<ComfyuiWorkflowRunDTO> run(
       @PathVariable("apiName") String apiName,
       @RequestBody(required = false) ComfyuiWorkflowRunRequestDTO request) {
-    return Results.created(comfyuiRuntimeService.run(apiName, request));
+    try {
+      return Results.created(comfyuiRuntimeService.run(apiName, request));
+    } catch (IllegalArgumentException error) {
+      throw translateNotFound(error);
+    }
   }
 
   @GetMapping("/runs/{runId}")
   public Result<ComfyuiWorkflowJobDTO> getJob(
       @PathVariable("runId") String runId,
       @RequestParam(value = "select", required = false) String select) {
-    return Results.ok(comfyuiRuntimeService.getJob(runId, select));
+    try {
+      return Results.ok(comfyuiRuntimeService.getJob(runId, select));
+    } catch (IllegalArgumentException error) {
+      throw translateNotFound(error);
+    }
   }
 
   @PostMapping("/runs/{runId}/cancel")
   public Result<ComfyuiWorkflowCancelDTO> cancel(@PathVariable("runId") String runId) {
-    return Results.ok(comfyuiRuntimeService.cancel(runId));
+    try {
+      return Results.ok(comfyuiRuntimeService.cancel(runId));
+    } catch (IllegalArgumentException error) {
+      throw translateNotFound(error);
+    }
   }
 
   @GetMapping("/runs/{runId}/files/{nodeId}/{mediaType}/{index}")
@@ -74,5 +94,32 @@ public class StudioComfyuiRuntimeController {
         .contentType(MediaType.parseMediaType(download.getContentType()))
         .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
         .body(download.getBytes());
+  }
+
+  /**
+   * 明确把"运行期未启用 / 客户端不可用"的 {@link IllegalStateException} 翻译为 503，避免与 404 混淆。其它 {@link
+   * IllegalStateException} 保持原样交给全局 handler。
+   */
+  @ExceptionHandler(IllegalStateException.class)
+  public ResponseStatusException handleRuntimeUnavailable(IllegalStateException error) {
+    String message = error.getMessage();
+    if (message != null
+        && (message.startsWith(DISABLED_RUNTIME_PREFIX)
+            || message.startsWith(UNAVAILABLE_CLIENT_PREFIX))) {
+      return new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, message, error);
+    }
+    throw error;
+  }
+
+  /**
+   * 把"运行期提交路径上 apiName 找不到已启用卡片"的 {@link IllegalArgumentException} 翻译为 404，其它 {@link
+   * IllegalArgumentException}（参数 / 选择器 / binding 校验）保持 400。
+   */
+  private static RuntimeException translateNotFound(IllegalArgumentException error) {
+    String message = error.getMessage();
+    if (message != null && message.startsWith("enabled ComfyUI workflow not found:")) {
+      return new ResponseStatusException(HttpStatus.NOT_FOUND, message, error);
+    }
+    return error;
   }
 }
