@@ -1,10 +1,8 @@
 import { useDeferredValue, useMemo, useState } from 'react'
 import { filterAgents, filterModels, filterProviders, filterSessions } from '@/features/ai/ai-console-utils'
-import { filterComfyuiWorkflows } from '@/features/ai/comfyui-utils'
 import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO } from '@/shared/api/contracts'
 import { useAiConsoleResourceController } from '@/features/ai/useAiConsoleResourceController'
 import { useAiConsoleSessionController } from '@/features/ai/useAiConsoleSessionController'
-import { useComfyuiController } from '@/features/ai/useComfyuiController'
 
 export function useAiConsoleController() {
   const [search, setSearch] = useState('')
@@ -12,7 +10,6 @@ export function useAiConsoleController() {
 
   const resourceController = useAiConsoleResourceController()
   const sessionController = useAiConsoleSessionController(resourceController.agents)
-  const comfyuiController = useComfyuiController()
 
   const agentsByName = useMemo(() => new Map(resourceController.agents.map((agent) => [agent.name, agent])), [resourceController.agents])
   const filteredSessions = useMemo(
@@ -22,23 +19,14 @@ export function useAiConsoleController() {
   const filteredAgents = useMemo(() => filterAgents(resourceController.agents, deferredSearch), [deferredSearch, resourceController.agents])
   const filteredModels = useMemo(() => filterModels(resourceController.models, deferredSearch), [deferredSearch, resourceController.models])
   const filteredProviders = useMemo(() => filterProviders(resourceController.providers, deferredSearch), [deferredSearch, resourceController.providers])
-  const filteredComfyuiWorkflows = useMemo(
-    () => filterComfyuiWorkflows(comfyuiController.workflows, deferredSearch),
-    [comfyuiController.workflows, deferredSearch],
-  )
 
   const queryResults = [
     resourceController.providersQuery,
     resourceController.modelsQuery,
     resourceController.agentsQuery,
     sessionController.sessionsQuery,
-    comfyuiController.workflowsQuery,
   ]
-  const mutationErrors = [
-    resourceController.resourceMutationError,
-    sessionController.sessionMutationError,
-    comfyuiController.mutationError,
-  ]
+  const mutationErrors = [resourceController.resourceMutationError, sessionController.sessionMutationError]
 
   const busy = queryResults.some((query) => query.isLoading)
   const error = queryResults.find((query) => query.error)?.error ?? null
@@ -80,21 +68,10 @@ export function useAiConsoleController() {
       onEdit: (provider: AgentProviderDTO) => resourceController.openEditProvider(provider.id),
       onDelete: (provider: AgentProviderDTO) => resourceController.deleteProvider(provider.name, provider.id),
     },
-    comfyuiPanelProps: {
-      workflows: filteredComfyuiWorkflows,
-      deletePending: comfyuiController.deletePending,
-      onCreate: comfyuiController.openCreate,
-      onRun: comfyuiController.openRun,
-      onEdit: comfyuiController.openEdit,
-      onDelete: comfyuiController.requestDelete,
-    },
     createSessionModal: sessionController.createSessionModal,
     editSessionModal: sessionController.editSessionModal,
     sessionDeleteConfirmModal: sessionController.deleteConfirmModal,
     resourceEditorModal: resourceController.resourceEditorModal,
     resourceDeleteConfirmModal: resourceController.deleteConfirmModal,
-    comfyuiEditorModal: comfyuiController.editorModalProps,
-    comfyuiDeleteConfirmModal: comfyuiController.deleteConfirmModal,
-    comfyuiRunModal: comfyuiController.runModalProps,
   }
 }

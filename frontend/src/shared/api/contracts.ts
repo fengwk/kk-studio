@@ -179,7 +179,7 @@ export interface AgentRunDTO {
   updateTime: BackendDateTime
 }
 
-export type ComfyuiWorkflowId = number | string
+export type ComfyuiWorkflowId = string
 
 export type ComfyuiBindingKind = 'parameter' | 'file'
 

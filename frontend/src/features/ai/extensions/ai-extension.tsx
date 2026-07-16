@@ -8,11 +8,15 @@ import { ComfyuiWorkflowsPanel } from '@/features/ai/ComfyuiWorkflowsPanel'
 import { ComfyuiRunModal } from '@/features/ai/ComfyuiRunModal'
 import { AgentSessionPage } from '@/features/ai/AgentSessionPage'
 import { useAiConsoleController } from '@/features/ai/useAiConsoleController'
+import { useComfyuiPageController } from '@/features/ai/useComfyuiPageController'
 import type { ExtensionComponentProps, TrustedReactExtension } from '@/platform/extensions/types'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 
 type AiConsoleController = ReturnType<typeof useAiConsoleController>
 const AiConsoleContext = createContext<AiConsoleController | null>(null)
+
+type ComfyuiPageController = ReturnType<typeof useComfyuiPageController>
+const ComfyuiContext = createContext<ComfyuiPageController | null>(null)
 
 function AiConsoleRuntime({ children }: PropsWithChildren) {
   const controller = useAiConsoleController()
@@ -115,22 +119,62 @@ function ProvidersResourcePanel() {
 
 function ComfyuiPage({ children }: ExtensionComponentProps) {
   return (
-    <AiConsoleRuntime>
-      <AiConsoleFrame content={<ComfyuiPanel />}>
+    <ComfyuiRuntime>
+      <ComfyuiFrame content={<ComfyuiPanel />}>
         {children}
-      </AiConsoleFrame>
+      </ComfyuiFrame>
       <ComfyuiRunModalHost />
-    </AiConsoleRuntime>
+    </ComfyuiRuntime>
+  )
+}
+
+function ComfyuiRuntime({ children }: PropsWithChildren) {
+  const controller = useComfyuiPageController()
+  return <ComfyuiContext.Provider value={controller}>{children}</ComfyuiContext.Provider>
+}
+
+function useOptionalComfyui() {
+  return useContext(ComfyuiContext)
+}
+
+function ComfyuiFrame({ content, children }: ExtensionComponentProps & { content: ReactNode }) {
+  const controller = useContext(ComfyuiContext)
+  if (!controller) {
+    throw new Error('ComfyuiRuntime is required')
+  }
+  return (
+    <section className="screen active">
+      <nav className="subbar">
+        <div className="ai-mark">AI</div>
+        <NavigationSlot />
+        <SearchField value={controller.search} onChange={controller.setSearch} />
+      </nav>
+      <div className="screen-body">
+        {controller.busy && <StateBlock title="正在加载 ComfyUI 工作流" />}
+        {controller.error && <StateBlock title={controller.error instanceof Error ? controller.error.message : '工作流加载失败'} tone="danger" />}
+        {controller.mutationError && (
+          <StateBlock title={controller.mutationError instanceof Error ? controller.mutationError.message : '工作流操作失败'} tone="danger" />
+        )}
+        {!controller.busy && !controller.error && content}
+      </div>
+      {children}
+    </section>
   )
 }
 
 function ComfyuiPanel() {
-  const controller = useAiConsole()
+  const controller = useContext(ComfyuiContext)
+  if (!controller) {
+    throw new Error('ComfyuiRuntime is required')
+  }
   return <ComfyuiWorkflowsPanel {...controller.comfyuiPanelProps} />
 }
 
 function ComfyuiRunModalHost() {
-  const controller = useAiConsole()
+  const controller = useContext(ComfyuiContext)
+  if (!controller) {
+    return null
+  }
   const runModal = controller.comfyuiRunModal
   if (!runModal.workflow) {
     return null
@@ -170,12 +214,12 @@ function ResourceDeleteDialog() {
 }
 
 function ComfyuiWorkflowEditorDialog() {
-  const controller = useOptionalAiConsole()
+  const controller = useOptionalComfyui()
   return controller ? <ComfyuiWorkflowEditorModal {...controller.comfyuiEditorModal} /> : null
 }
 
 function ComfyuiDeleteDialog() {
-  const controller = useOptionalAiConsole()
+  const controller = useOptionalComfyui()
   return controller ? <ConfirmActionModal {...controller.comfyuiDeleteConfirmModal} /> : null
 }
 
