@@ -33,7 +33,7 @@ import java.util.Objects;
  *       字段必须单独成帧，绝不依赖分隔字符或 NUL 拼接，因此字段值包含 NUL 也不会与跨字段拼接碰撞。
  *   <li>版本字段独立标记，用于将来在不破坏旧 key 的前提下增量调整算法。
  *   <li>输入：版本、sessionId、provider/model resource ID、providerType、Provider modelId、连续 leading SYSTEM
- *       messages 的完整 typed contents（每个 content 独立帧；嵌套 ToolResult 的 contents 也递归逐块成帧）、按请求顺序的 tool
+ *       messages 的完整合法 typed contents（每个 content 独立成帧），以及按请求顺序的 tool
  *       name/description/inputSchemaJson。
  * </ul>
  */
