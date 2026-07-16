@@ -78,9 +78,9 @@ kk-studio:
 - `fun.fengwk.convention4j:convention4j-comfyui:1.2.2`：SDK 直接依赖。
 - `com.jayway.jsonpath:json-path:2.9.0`：selector 解析与校验。
 
-两个依赖都已加入根 `pom.xml` 的 `dependencyManagement` 与 `core/pom.xml` 的 `<dependencies>`。convention4j parent 保留 `1.2.1`。
+两个依赖都已加入根 `pom.xml` 的 `dependencyManagement` 与 `core/pom.xml` 的 `<dependencies>`。根 `pom.xml` 的 `<parent>` 与 `convention4j-comfyui` 同批对齐到 `1.2.2`，所有 convention4j 依赖（包含 `convention4j-common`、`convention4j-spring-boot-starter` 等）随同一发布批次解析，避免出现 `convention4j-comfyui:1.2.2` 自身 `common` 仍被旧 parent 管理降级的情况。
 
-**远程发布前置条件**：`convention4j-comfyui:1.2.2` 目前仅在本地 `~/.m2` 仓库可用（`/home/fengwk/proj/convention4j` 的本地 `mvn install` 产物）。远程环境必须先把该坐标发布到内网 Maven 仓库，否则依赖解析会失败。
+**远程发布前置条件**：`convention4j:1.2.2` 发布批次在 22 个模块上的本地 `~/.m2` 安装仅用于开发期验证。远程环境必须把 `fun.fengwk.convention4j` 全套 `1.2.2` 构件（不止 `convention4j-comfyui`，还需 `convention4j-parent` 及所有 starter / tracer / oauth2 等 1.2.2 发布批次构件）发布到内网 Maven 仓库，依赖解析才可复现。
 
 ## 实现位置
 
