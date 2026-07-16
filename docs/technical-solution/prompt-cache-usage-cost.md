@@ -431,4 +431,3 @@ tokenReadRatio =
 | Schema 全字段 round-trip、unique keys、查询顺序与索引 | [`MysqlModelUsageRecordStoreIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/usage/store/MysqlModelUsageRecordStoreIntegrationTest.java) |
 | ratio、按 affinity key 的 waste、多币种与空 scope | [`ModelUsageAggregationServiceImplTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/usage/service/impl/ModelUsageAggregationServiceImplTest.java) |
 | 三个 endpoint、字符串大整数 ID 与非法 ID | [`StudioModelUsageControllerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/StudioModelUsageControllerTest.java) |
-
