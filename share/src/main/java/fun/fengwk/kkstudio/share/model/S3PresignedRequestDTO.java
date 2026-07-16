@@ -13,7 +13,7 @@ import lombok.Data;
 @Data
 public class S3PresignedRequestDTO {
 
-    private String key;
-    private String contentType;
-    private Long expiresInSeconds;
+  private String key;
+  private String contentType;
+  private Long expiresInSeconds;
 }
