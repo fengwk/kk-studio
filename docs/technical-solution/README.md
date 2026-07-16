@@ -15,6 +15,7 @@ flowchart TD
     A --> G[agent-engine.md<br/>agent 内核]
     A --> H[harness-extensions.md<br/>Harness 扩展]
     A --> I[prompt-cache-usage-cost.md<br/>Prompt Cache、Usage 与成本账本]
+    A --> J[s3-presign.md<br/>S3 预签名直传]
 ```
 
 ## 阅读顺序
@@ -29,6 +30,7 @@ flowchart TD
 | 6 | [agent-engine.md](agent-engine.md) | `agent` 模块执行内核 | 深入运行时与事件语义 |
 | 7 | [harness-extensions.md](harness-extensions.md) | typed registry、hook 顺序、factory 与 lifecycle | 扩展 Harness 执行链 |
 | 8 | [prompt-cache-usage-cost.md](prompt-cache-usage-cost.md) | cache control、usage、pricing、ledger 与聚合 API | 修改模型调用计量与缓存链路 |
+| 9 | [s3-presign.md](s3-presign.md) | 固定 bucket、path-style 的 S3 预签名直传 / 直下载 | 接入浏览器到对象存储的直传链路 |
 
 ## 按主题索引
 
@@ -42,6 +44,7 @@ flowchart TD
 | agent 内核 | [agent-engine.md](agent-engine.md) |
 | Harness 扩展 | [harness-extensions.md](harness-extensions.md) |
 | Prompt Cache、Usage 与成本账本 | [prompt-cache-usage-cost.md](prompt-cache-usage-cost.md) |
+| S3 预签名直传 | [s3-presign.md](s3-presign.md) |
 
 ## 维护规则
 
