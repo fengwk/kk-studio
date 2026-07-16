@@ -19,30 +19,23 @@ import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocolException;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolArraySchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolBooleanSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolNumberSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolObjectSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolSchemaElement;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 import java.time.Duration;
-import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -212,88 +205,18 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   private void sendCapabilities(ActiveConnection connection) {
-    ObjectNode payload = envelopeCodec.createPayload();
-    ArrayNode tools = payload.putArray("tools");
-    for (ToolDescriptor descriptor : toolRegistry.descriptors()) {
-      writeDescriptor(tools.addObject(), descriptor);
+    DaemonToolCapabilitiesCodec capabilitiesCodec = new DaemonToolCapabilitiesCodec();
+    List<ToolDescriptor> descriptors = new ArrayList<>(toolRegistry.descriptors());
+    for (ToolDescriptor descriptor : descriptors) {
+      if (descriptor.executionMode() != ToolExecutionMode.ENVIRONMENT) {
+        throw new IllegalStateException(
+            "daemon tool must use ENVIRONMENT execution mode: " + descriptor.name());
+      }
     }
-    sendOn(connection, DaemonMessageType.CAPABILITIES, null, envelopeCodec.writeJson(payload));
-  }
-
-  private void writeDescriptor(ObjectNode target, ToolDescriptor descriptor) {
-    target.put("name", descriptor.name());
-    target.put("version", descriptor.version());
-    target.put("description", descriptor.description());
-    target.put("rendererKey", descriptor.rendererKey());
-    target.put("executionMode", descriptor.executionMode().name());
-    target.put("sideEffect", descriptor.sideEffect().name());
-    target.put("timeoutMillis", descriptor.timeout().toMillis());
-    target.set("inputSchema", schemaPayload(descriptor.inputSchema()));
-  }
-
-  private ObjectNode schemaPayload(ToolParamsSchema schema) {
-    ObjectNode target = envelopeCodec.createPayload();
-    writeObjectSchema(
-        target,
-        "object",
-        schema.description(),
-        schema.properties(),
-        schema.required(),
-        schema.additionalProperties());
-    return target;
-  }
-
-  private ObjectNode schemaPayload(ToolSchemaElement schema) {
-    ObjectNode target = envelopeCodec.createPayload();
-    if (schema instanceof ToolStringSchema) {
-      target.put("type", "string");
-    } else if (schema instanceof ToolIntegerSchema) {
-      target.put("type", "integer");
-    } else if (schema instanceof ToolNumberSchema) {
-      target.put("type", "number");
-    } else if (schema instanceof ToolBooleanSchema) {
-      target.put("type", "boolean");
-    } else if (schema instanceof ToolEnumSchema enumSchema) {
-      target.put("type", "string");
-      ArrayNode values = target.putArray("enum");
-      enumSchema.values().forEach(values::add);
-    } else if (schema instanceof ToolArraySchema arraySchema) {
-      target.put("type", "array");
-      target.set("items", schemaPayload(arraySchema.items()));
-    } else if (schema instanceof ToolObjectSchema objectSchema) {
-      writeObjectSchema(
-          target,
-          "object",
-          objectSchema.description(),
-          objectSchema.properties(),
-          objectSchema.required(),
-          objectSchema.additionalProperties());
-      return target;
-    } else {
-      throw new IllegalArgumentException("unsupported tool schema: " + schema.getClass());
-    }
-    if (schema.description() != null) {
-      target.put("description", schema.description());
-    }
-    return target;
-  }
-
-  private void writeObjectSchema(
-      ObjectNode target,
-      String type,
-      String description,
-      Map<String, ToolSchemaElement> properties,
-      Set<String> required,
-      boolean additionalProperties) {
-    target.put("type", type);
-    if (description != null) {
-      target.put("description", description);
-    }
-    ObjectNode wireProperties = target.putObject("properties");
-    properties.forEach((name, schema) -> wireProperties.set(name, schemaPayload(schema)));
-    ArrayNode wireRequired = target.putArray("required");
-    required.forEach(wireRequired::add);
-    target.put("additionalProperties", additionalProperties);
+    String payloadJson =
+        capabilitiesCodec.encode(
+            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.copyOf(descriptors)));
+    sendOn(connection, DaemonMessageType.CAPABILITIES, null, payloadJson);
   }
 
   private void sendReady(ActiveConnection connection) {

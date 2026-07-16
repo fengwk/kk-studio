@@ -9,6 +9,9 @@ import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelRuntimeConfigParse
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
+import fun.fengwk.kkstudio.core.environment.service.ToolEnvironmentIds;
+import fun.fengwk.kkstudio.core.environment.service.model.ToolEnvironment;
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
@@ -30,14 +33,23 @@ import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryStore;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /** Resolves a frozen Harness context to persisted Provider, model, variant, and tool resources. */
 public final class DatabaseTurnResourceResolver implements TurnResourceResolver {
+
+  private static final String ENVIRONMENT_REFERENCE_PREFIX = "environment:";
 
   private final SessionStore sessionStore;
   private final SessionEntryStore entryStore;
@@ -46,6 +58,8 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
   private final AgentModelRuntimeConfigParser modelConfigParser;
   private final HarnessExtensionHost extensionHost;
   private final HarnessRuntimeProperties properties;
+  private final ToolEnvironmentRepository environmentRepository;
+  private final DaemonToolCapabilitiesCodec capabilitiesCodec;
   private final ObjectMapper objectMapper;
 
   public DatabaseTurnResourceResolver(
@@ -56,6 +70,8 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
       AgentModelRuntimeConfigParser modelConfigParser,
       HarnessExtensionHost extensionHost,
       HarnessRuntimeProperties properties,
+      ToolEnvironmentRepository environmentRepository,
+      DaemonToolCapabilitiesCodec capabilitiesCodec,
       ObjectMapper objectMapper) {
     this.sessionStore = Objects.requireNonNull(sessionStore, "sessionStore");
     this.entryStore = Objects.requireNonNull(entryStore, "entryStore");
@@ -64,6 +80,9 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
     this.extensionHost = Objects.requireNonNull(extensionHost, "extensionHost");
     this.properties = Objects.requireNonNull(properties, "properties");
+    this.environmentRepository =
+        Objects.requireNonNull(environmentRepository, "environmentRepository");
+    this.capabilitiesCodec = Objects.requireNonNull(capabilitiesCodec, "capabilitiesCodec");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
   }
 
@@ -196,16 +215,88 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
 
   private List<ToolBinding> toolBindings(List<String> frozenTools) {
     List<ToolBinding> result = new ArrayList<>();
+    Set<String> descriptorNames = new HashSet<>();
     for (String reference : List.copyOf(Objects.requireNonNull(frozenTools, "tools"))) {
-      Tool tool = resolveTool(reference);
-      if (ToolTargetType.fromExecutionMode(tool.descriptor().executionMode())
-          == ToolTargetType.ENVIRONMENT) {
-        throw new IllegalArgumentException(
-            "frozen ENVIRONMENT tool requires an environment binding: " + reference);
+      ToolBinding binding;
+      if (isEnvironmentReference(reference)) {
+        binding = resolveEnvironmentTool(reference);
+      } else {
+        Tool tool = resolveTool(reference);
+        if (ToolTargetType.fromExecutionMode(tool.descriptor().executionMode())
+            == ToolTargetType.ENVIRONMENT) {
+          throw new IllegalArgumentException(
+              "frozen ENVIRONMENT tool requires an environment binding: " + reference);
+        }
+        binding = ToolBinding.of(tool.descriptor());
       }
-      result.add(ToolBinding.of(tool.descriptor()));
+      String descriptorName = binding.descriptor().name();
+      if (!descriptorNames.add(descriptorName)) {
+        throw new IllegalArgumentException(
+            "frozen tool descriptor names must be unique across bindings: " + descriptorName);
+      }
+      result.add(binding);
     }
     return List.copyOf(result);
+  }
+
+  private static boolean isEnvironmentReference(String reference) {
+    return reference != null && reference.startsWith(ENVIRONMENT_REFERENCE_PREFIX);
+  }
+
+  private ToolBinding resolveEnvironmentTool(String reference) {
+    String body = reference.substring(ENVIRONMENT_REFERENCE_PREFIX.length());
+    int slash = body.indexOf('/');
+    if (slash <= 0 || slash == body.length() - 1) {
+      throw new IllegalArgumentException(
+          "frozen Environment reference must use environment:<id>/<tool>@<version>: " + reference);
+    }
+    String idPart = body.substring(0, slash);
+    String toolPart = body.substring(slash + 1);
+    long environmentId;
+    try {
+      environmentId = ToolEnvironmentIds.parsePositive(idPart, "environmentId");
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          "frozen Environment reference id must be an unsigned positive decimal: " + reference,
+          error);
+    }
+    int at = toolPart.lastIndexOf('@');
+    if (at <= 0 || at == toolPart.length() - 1) {
+      throw new IllegalArgumentException(
+          "frozen Environment tool reference must include name@version: " + reference);
+    }
+    String toolName = toolPart.substring(0, at);
+    String toolVersion = toolPart.substring(at + 1);
+    if (toolName.isBlank() || toolVersion.isBlank()) {
+      throw new IllegalArgumentException(
+          "frozen Environment tool name and version must not be blank: " + reference);
+    }
+    ToolEnvironment environment = environmentRepository.getById(environmentId);
+    if (environment == null) {
+      throw new IllegalArgumentException("frozen Environment not found: " + reference);
+    }
+    DaemonToolCapabilitiesCodec.DaemonToolCapabilities capabilities;
+    try {
+      capabilities = capabilitiesCodec.decode(environment.getCapabilitiesJson());
+    } catch (RuntimeException error) {
+      throw new IllegalArgumentException(
+          "persisted Environment capabilitiesJson is not a canonical Daemon CAPABILITIES payload: "
+              + reference,
+          error);
+    }
+    Map<String, ToolDescriptor> byKey = new LinkedHashMap<>();
+    for (ToolDescriptor descriptor : capabilities.tools()) {
+      byKey.put(descriptor.name() + "@" + descriptor.version(), descriptor);
+    }
+    ToolDescriptor descriptor = byKey.get(toolName + "@" + toolVersion);
+    if (descriptor == null) {
+      throw new IllegalArgumentException("frozen Environment capability not found: " + reference);
+    }
+    if (descriptor.executionMode() != ToolExecutionMode.ENVIRONMENT) {
+      throw new IllegalArgumentException(
+          "frozen Environment tool must use ENVIRONMENT execution mode: " + reference);
+    }
+    return new ToolBinding(descriptor, ToolTargetType.ENVIRONMENT, environmentId);
   }
 
   private Tool resolveTool(String reference) {

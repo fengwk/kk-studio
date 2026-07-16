@@ -316,3 +316,16 @@ create table if not exists comfyui_workflow_api (
     primary key (id),
     unique (api_name)
 );
+
+create table if not exists tool_environment (
+    id                    bigint not null,
+    name                  varchar(128) not null,
+    description           varchar(512),
+    capabilities_json     text not null,
+    last_seen_at          timestamp(3),
+    gmt_create            timestamp(3) not null default current_timestamp(),
+    gmt_modified          timestamp(3) not null default current_timestamp(),
+    version               bigint not null default 0,
+    primary key (id),
+    unique (name)
+);
