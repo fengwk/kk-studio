@@ -1,9 +1,8 @@
 package fun.fengwk.kkstudio.share.model;
 
+import java.util.Map;
 import lombok.Builder;
 import lombok.Data;
-
-import java.util.Map;
 
 /**
  * S3 预签名响应。
@@ -17,18 +16,18 @@ import java.util.Map;
 @Builder
 public class S3PresignedResponseDTO {
 
-    private String bucket;
-    private String key;
+  private String bucket;
+  private String key;
 
-    /** HTTP 方法（PUT 用于上传、GET 用于下载）。 */
-    private String method;
+  /** HTTP 方法（PUT 用于上传、GET 用于下载）。 */
+  private String method;
 
-    /** 已签名的 URL（浏览器可直接 PUT/GET）。 */
-    private String url;
+  /** 已签名的 URL（浏览器可直接 PUT/GET）。 */
+  private String url;
 
-    /** 调用方发起请求时必须显式设置的 signed headers；不包含浏览器自动发送的 Host。 */
-    private Map<String, String> headers;
+  /** 调用方发起请求时必须显式设置的 signed headers；不包含浏览器自动发送的 Host。 */
+  private Map<String, String> headers;
 
-    /** 签名过期时刻（UTC，ISO-8601 字符串）。 */
-    private String expiresAt;
+  /** 签名过期时刻（UTC，ISO-8601 字符串）。 */
+  private String expiresAt;
 }

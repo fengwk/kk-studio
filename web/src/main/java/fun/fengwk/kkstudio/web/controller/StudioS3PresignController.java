@@ -5,9 +5,7 @@ import fun.fengwk.convention4j.common.result.Results;
 import fun.fengwk.kkstudio.core.storage.S3PresignService;
 import fun.fengwk.kkstudio.share.model.S3PresignedRequestDTO;
 import fun.fengwk.kkstudio.share.model.S3PresignedResponseDTO;
-
 import lombok.AllArgsConstructor;
-
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -28,22 +26,21 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/s3")
 public class StudioS3PresignController {
 
-    private final S3PresignService s3PresignService;
+  private final S3PresignService s3PresignService;
 
-    /** 为上传（PUT）生成预签名 URL 与调用方必须显式设置的 headers。 */
-    @PostMapping("/presigned-uploads")
-    public Result<S3PresignedResponseDTO> presignUpload(
-            @RequestBody S3PresignedRequestDTO request) {
-        return Results.ok(
-                s3PresignService.presignUpload(
-                        request.getKey(), request.getContentType(), request.getExpiresInSeconds()));
-    }
+  /** 为上传（PUT）生成预签名 URL 与调用方必须显式设置的 headers。 */
+  @PostMapping("/presigned-uploads")
+  public Result<S3PresignedResponseDTO> presignUpload(@RequestBody S3PresignedRequestDTO request) {
+    return Results.ok(
+        s3PresignService.presignUpload(
+            request.getKey(), request.getContentType(), request.getExpiresInSeconds()));
+  }
 
-    /** 为下载（GET）生成预签名 URL 与调用方必须显式设置的 headers。 */
-    @PostMapping("/presigned-downloads")
-    public Result<S3PresignedResponseDTO> presignDownload(
-            @RequestBody S3PresignedRequestDTO request) {
-        return Results.ok(
-                s3PresignService.presignDownload(request.getKey(), request.getExpiresInSeconds()));
-    }
+  /** 为下载（GET）生成预签名 URL 与调用方必须显式设置的 headers。 */
+  @PostMapping("/presigned-downloads")
+  public Result<S3PresignedResponseDTO> presignDownload(
+      @RequestBody S3PresignedRequestDTO request) {
+    return Results.ok(
+        s3PresignService.presignDownload(request.getKey(), request.getExpiresInSeconds()));
+  }
 }
