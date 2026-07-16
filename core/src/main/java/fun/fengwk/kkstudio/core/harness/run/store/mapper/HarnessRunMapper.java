@@ -224,4 +224,17 @@ public interface HarnessRunMapper extends BaseMapper {
 
   @Select("select count(*) from tool_invocation where run_id = #{runId}")
   int countToolInvocations(@Param("runId") long runId);
+
+  @Select(
+      """
+      select id, session_id, trigger_entry_id, status, turn_index, attempt, event_sequence,
+             lease_owner, lease_until, next_attempt_at, cancel_requested_at,
+             gmt_create as create_time, started_at, finished_at, gmt_modified as update_time
+      from harness_run
+      where session_id = #{sessionId}
+      order by gmt_create asc, id asc
+      """)
+  @ResultMap("harnessRunResultMap")
+  List<HarnessRunDO> listBySessionOrderByCreateTimeAsc(@Param("sessionId") long sessionId);
+
 }
