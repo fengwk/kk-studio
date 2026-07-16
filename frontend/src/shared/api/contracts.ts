@@ -16,6 +16,40 @@ export type BackendDateTime = string | number[] | null
 
 export type AgentResourceId = number | string
 
+export type BackendLong = number | string
+
+export type BackendBigDecimal = number | string
+
+export interface ModelUsageCostSummaryDTO {
+  currency: string
+  input: BackendBigDecimal
+  output: BackendBigDecimal
+  cacheRead: BackendBigDecimal
+  cacheWrite: BackendBigDecimal
+  cacheWriteLong: BackendBigDecimal
+  reasoning: BackendBigDecimal
+  total: BackendBigDecimal
+}
+
+export interface ModelUsageSummaryDTO {
+  scopeType: 'run' | 'session' | 'model'
+  scopeId: string
+  recordCount: BackendLong
+  inputTokens: BackendLong
+  outputTokens: BackendLong
+  cacheReadTokens: BackendLong
+  cacheWriteTokens: BackendLong
+  cacheWriteLongTokens: BackendLong
+  reasoningTokens: BackendLong
+  providerTotalTokens: BackendLong
+  cacheEligibleRecordCount: BackendLong
+  cacheHitRecordCount: BackendLong
+  cacheHitRatio: BackendBigDecimal
+  tokenReadRatio: BackendBigDecimal
+  unamortizedCacheWriteTokens: BackendBigDecimal
+  costs: ModelUsageCostSummaryDTO[]
+}
+
 export interface AgentProviderDTO {
   id: AgentResourceId
   name: string
