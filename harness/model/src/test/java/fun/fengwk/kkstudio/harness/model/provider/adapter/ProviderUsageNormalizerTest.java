@@ -218,7 +218,7 @@ class ProviderUsageNormalizerTest {
     assertNull(rawUsageFields(result.rawUsageJson()).get("content"));
   }
 
-  /** SSE 没有任何 usage 节点时回退 typed OpenAiTokenUsage 字段 JSON。 */
+  /** SSE 没有任何 usage 节点时回退 typed OpenAI Chat 字段 JSON，使用 Chat Completions API 字段名。 */
   @Test
   void openAiChatSseWithoutUsageFallsBackToTypedUsage() throws Exception {
     OpenAiTokenUsage usage =
@@ -238,12 +238,15 @@ class ProviderUsageNormalizerTest {
         ProviderUsageNormalizer.normalize(ProviderType.OPENAI, metadata);
 
     JsonNode parsed = OBJECT_MAPPER.readTree(result.rawUsageJson());
-    assertEquals(10, parsed.path("inputTokenCount").asInt());
-    assertEquals(5, parsed.path("outputTokenCount").asInt());
-    assertEquals(15, parsed.path("totalTokenCount").asInt());
+    assertEquals(10, parsed.path("prompt_tokens").asInt());
+    assertEquals(5, parsed.path("completion_tokens").asInt());
+    assertEquals(15, parsed.path("total_tokens").asInt());
+    assertTrue(parsed.path("inputTokenCount").isMissingNode(), () -> result.rawUsageJson());
+    assertTrue(parsed.path("outputTokenCount").isMissingNode(), () -> result.rawUsageJson());
+    assertTrue(parsed.path("totalTokenCount").isMissingNode(), () -> result.rawUsageJson());
   }
 
-  /** OpenAI Chat 完全缺少 SSE metadata 时，必须回退到 typed provider 字段 JSON。 */
+  /** OpenAI Chat 完全缺少 SSE metadata 时，必须回退到 typed Chat Completions API 字段 JSON。 */
   @Test
   void openAiChatWithoutRawSseFallsBackToTypedUsage() throws Exception {
     OpenAiTokenUsage usage =
@@ -262,9 +265,11 @@ class ProviderUsageNormalizerTest {
         ProviderUsageNormalizer.normalize(ProviderType.OPENAI, metadata);
 
     JsonNode parsed = OBJECT_MAPPER.readTree(result.rawUsageJson());
-    assertEquals(2, parsed.path("inputTokenCount").asInt());
-    assertEquals(3, parsed.path("outputTokenCount").asInt());
-    assertEquals(5, parsed.path("totalTokenCount").asInt());
+    assertEquals(2, parsed.path("prompt_tokens").asInt());
+    assertEquals(3, parsed.path("completion_tokens").asInt());
+    assertEquals(5, parsed.path("total_tokens").asInt());
+    assertTrue(parsed.path("inputTokenCount").isMissingNode(), () -> result.rawUsageJson());
+    assertTrue(parsed.path("outputTokenCount").isMissingNode(), () -> result.rawUsageJson());
   }
 
   // ---------- OpenAI Responses ----------
@@ -368,9 +373,11 @@ class ProviderUsageNormalizerTest {
         ProviderUsageNormalizer.normalize(ProviderType.OPENAI_RESPONSES, metadata);
 
     JsonNode parsed = OBJECT_MAPPER.readTree(result.rawUsageJson());
-    assertEquals(7, parsed.path("inputTokenCount").asInt());
-    assertEquals(11, parsed.path("outputTokenCount").asInt());
-    assertEquals(18, parsed.path("totalTokenCount").asInt());
+    assertEquals(7, parsed.path("input_tokens").asInt());
+    assertEquals(11, parsed.path("output_tokens").asInt());
+    assertEquals(18, parsed.path("total_tokens").asInt());
+    assertTrue(parsed.path("inputTokenCount").isMissingNode(), () -> result.rawUsageJson());
+    assertTrue(parsed.path("outputTokenCount").isMissingNode(), () -> result.rawUsageJson());
   }
 
   // ---------- Google Gemini ----------
@@ -396,7 +403,8 @@ class ProviderUsageNormalizerTest {
     ProviderUsageNormalizer.NormalizedUsage result =
         ProviderUsageNormalizer.normalize(ProviderType.GOOGLE, metadata);
 
-    assertEquals(new ModelUsage(100, 30, 0, 0, 0, 0, 300), result.modelUsage());
+    // 七类语义：cached/thoughts 必须保留到 cacheRead/reasoning，后续 ModelCost 才能按两类独立计费。
+    assertEquals(new ModelUsage(100, 30, 20, 0, 0, 30, 300), result.modelUsage());
     assertEquals("gemini-1", result.requestId());
     assertNull(result.serviceTier());
   }
@@ -420,7 +428,8 @@ class ProviderUsageNormalizerTest {
     ProviderUsageNormalizer.NormalizedUsage result =
         ProviderUsageNormalizer.normalize(ProviderType.GOOGLE, metadata);
 
-    assertEquals(new ModelUsage(40, 35, 0, 0, 0, 0, 0), result.modelUsage());
+    // providerTotal=0，但 cached/thoughts 仍按七类语义保留。
+    assertEquals(new ModelUsage(40, 35, 10, 0, 0, 5, 0), result.modelUsage());
   }
 
   /** Google 没有 raw transport 时使用 Provider 原字段名生成 typed usage JSON。 */
@@ -607,7 +616,7 @@ class ProviderUsageNormalizerTest {
 
   // ---------- Common ----------
 
-  /** typed provider 字段 JSON 在 Anthropic fallback 时生成正确的 Provider 字段名。 */
+  /** typed provider 字段 JSON 在 Anthropic fallback 时使用 Anthropic API 字段名；绝不伪造 total。 */
   @Test
   void anthropicTypedUsageJsonUsesAnthropicFieldNames() throws Exception {
     AnthropicTokenUsage usage =
@@ -627,13 +636,22 @@ class ProviderUsageNormalizerTest {
         ProviderUsageNormalizer.normalize(ProviderType.ANTHROPIC, metadata);
 
     JsonNode parsed = OBJECT_MAPPER.readTree(result.rawUsageJson());
-    assertEquals(10, parsed.path("inputTokenCount").asInt());
-    assertEquals(5, parsed.path("outputTokenCount").asInt());
-    assertEquals(3, parsed.path("cacheCreationInputTokens").asInt());
-    assertEquals(2, parsed.path("cacheReadInputTokens").asInt());
+    assertEquals(10, parsed.path("input_tokens").asInt());
+    assertEquals(5, parsed.path("output_tokens").asInt());
+    assertEquals(3, parsed.path("cache_creation_input_tokens").asInt());
+    assertEquals(2, parsed.path("cache_read_input_tokens").asInt());
+    // SDK 内部 camelCase 字段名不应泄露到 fallback JSON。
+    assertTrue(parsed.path("inputTokenCount").isMissingNode(), () -> result.rawUsageJson());
+    assertTrue(parsed.path("outputTokenCount").isMissingNode(), () -> result.rawUsageJson());
+    assertTrue(
+        parsed.path("cacheCreationInputTokens").isMissingNode(), () -> result.rawUsageJson());
+    assertTrue(parsed.path("cacheReadInputTokens").isMissingNode(), () -> result.rawUsageJson());
+    // Anthropic API 无原生 total，禁止伪造。
+    assertTrue(parsed.path("total_tokens").isMissingNode(), () -> result.rawUsageJson());
+    assertTrue(parsed.path("totalTokenCount").isMissingNode(), () -> result.rawUsageJson());
   }
 
-  /** typed provider 字段 JSON 在 OpenAiTokenUsage fallback 时生成正确的 Provider 字段名。 */
+  /** typed provider 字段 JSON 在 OpenAI Chat fallback 时使用 Chat Completions API 字段名。 */
   @Test
   void openAiChatTypedUsageJsonUsesOpenAiFieldNames() throws Exception {
     OpenAiTokenUsage usage =
@@ -641,6 +659,10 @@ class ProviderUsageNormalizerTest {
             .inputTokenCount(10)
             .outputTokenCount(5)
             .totalTokenCount(15)
+            .inputTokensDetails(
+                OpenAiTokenUsage.InputTokensDetails.builder().cachedTokens(2).build())
+            .outputTokensDetails(
+                OpenAiTokenUsage.OutputTokensDetails.builder().reasoningTokens(1).build())
             .build();
     OpenAiChatResponseMetadata metadata =
         OpenAiChatResponseMetadata.builder()
@@ -652,15 +674,23 @@ class ProviderUsageNormalizerTest {
         ProviderUsageNormalizer.normalize(ProviderType.OPENAI, metadata);
 
     JsonNode parsed = OBJECT_MAPPER.readTree(result.rawUsageJson());
-    assertEquals(10, parsed.path("inputTokenCount").asInt());
-    assertEquals(5, parsed.path("outputTokenCount").asInt());
-    assertEquals(15, parsed.path("totalTokenCount").asInt());
-    // 嵌套 details 仅在原始 SDK 对象存在时出现，未设置时不应出现空对象。
-    assertTrue(parsed.path("inputTokensDetails").isMissingNode());
-    assertTrue(parsed.path("outputTokensDetails").isMissingNode());
+    assertEquals(10, parsed.path("prompt_tokens").asInt());
+    assertEquals(5, parsed.path("completion_tokens").asInt());
+    assertEquals(15, parsed.path("total_tokens").asInt());
+    assertEquals(2, parsed.path("prompt_tokens_details").path("cached_tokens").asInt());
+    assertEquals(1, parsed.path("completion_tokens_details").path("reasoning_tokens").asInt());
+    // SDK 内部 camelCase 字段名不应出现。
+    assertTrue(parsed.path("inputTokenCount").isMissingNode(), () -> result.rawUsageJson());
+    assertTrue(parsed.path("outputTokenCount").isMissingNode(), () -> result.rawUsageJson());
+    assertTrue(parsed.path("totalTokenCount").isMissingNode(), () -> result.rawUsageJson());
+    assertTrue(parsed.path("inputTokensDetails").isMissingNode(), () -> result.rawUsageJson());
+    assertTrue(parsed.path("outputTokensDetails").isMissingNode(), () -> result.rawUsageJson());
+    // Responses API 字段名不属于 OpenAI Chat fallback。
+    assertTrue(parsed.path("input_tokens").isMissingNode(), () -> result.rawUsageJson());
+    assertTrue(parsed.path("output_tokens").isMissingNode(), () -> result.rawUsageJson());
   }
 
-  /** typed provider 字段 JSON 在 OpenAiOfficialTokenUsage fallback 时包含 inputTokensDetails 嵌套。 */
+  /** typed provider 字段 JSON 在 OpenAI Responses fallback 时使用 Responses API 字段名与嵌套 details。 */
   @Test
   void openAiResponsesTypedUsageJsonIncludesNestedDetails() throws Exception {
     OpenAiOfficialTokenUsage usage =
@@ -683,11 +713,20 @@ class ProviderUsageNormalizerTest {
         ProviderUsageNormalizer.normalize(ProviderType.OPENAI_RESPONSES, metadata);
 
     JsonNode parsed = OBJECT_MAPPER.readTree(result.rawUsageJson());
-    assertEquals(20, parsed.path("inputTokenCount").asInt());
-    assertEquals(40, parsed.path("outputTokenCount").asInt());
-    assertEquals(60, parsed.path("totalTokenCount").asInt());
-    assertEquals(5, parsed.path("inputTokensDetails").path("cachedTokens").asInt());
-    assertEquals(7, parsed.path("outputTokensDetails").path("reasoningTokens").asInt());
+    assertEquals(20, parsed.path("input_tokens").asInt());
+    assertEquals(40, parsed.path("output_tokens").asInt());
+    assertEquals(60, parsed.path("total_tokens").asInt());
+    assertEquals(5, parsed.path("input_tokens_details").path("cached_tokens").asInt());
+    assertEquals(7, parsed.path("output_tokens_details").path("reasoning_tokens").asInt());
+    // SDK 内部 camelCase 字段名不应出现。
+    assertTrue(parsed.path("inputTokenCount").isMissingNode(), () -> result.rawUsageJson());
+    assertTrue(parsed.path("outputTokenCount").isMissingNode(), () -> result.rawUsageJson());
+    assertTrue(parsed.path("totalTokenCount").isMissingNode(), () -> result.rawUsageJson());
+    assertTrue(parsed.path("inputTokensDetails").isMissingNode(), () -> result.rawUsageJson());
+    assertTrue(parsed.path("outputTokensDetails").isMissingNode(), () -> result.rawUsageJson());
+    // Chat Completions 字段名不属于 Responses fallback。
+    assertTrue(parsed.path("prompt_tokens").isMissingNode(), () -> result.rawUsageJson());
+    assertTrue(parsed.path("completion_tokens").isMissingNode(), () -> result.rawUsageJson());
   }
 
   /** typed provider 字段 JSON 在通用 TokenUsage fallback 时使用通用字段名。 */
