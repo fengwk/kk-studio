@@ -47,4 +47,16 @@ public class AgentRuntimeWebTestConfiguration {
   public Executor agentRunTaskExecutor() {
     return Runnable::run;
   }
+
+  /**
+   * Force the SSE runtime to execute inline so {@code MockMvc#asyncDispatch} can deterministically
+   * observe the streamed events without depending on the default {@link
+   * org.springframework.core.task.SimpleAsyncTaskExecutor}'s daemon scheduling. Not marked {@link
+   * Primary} so the existing {@code agentRunTaskExecutor} primary remains the autowire target for
+   * callers that take a plain {@link Executor}.
+   */
+  @Bean(name = "agentEventStreamTaskExecutor")
+  public Executor agentEventStreamTaskExecutor() {
+    return Runnable::run;
+  }
 }
