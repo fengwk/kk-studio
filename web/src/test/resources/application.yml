@@ -28,3 +28,8 @@ convention:
   snowflake-id:
     initial-timestamp: 1702214261706
     worker-id: 0
+
+kk-studio:
+  harness:
+    runtime:
+      workers-enabled: false
