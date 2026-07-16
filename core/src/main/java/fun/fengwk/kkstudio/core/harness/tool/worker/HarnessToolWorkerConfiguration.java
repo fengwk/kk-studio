@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.harness.tool.worker;
 
+import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskRuntime;
@@ -16,6 +17,7 @@ import java.time.Clock;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
@@ -46,7 +48,9 @@ public class HarnessToolWorkerConfiguration {
   @ConditionalOnBean(TaskRuntime.class)
   @ConditionalOnMissingBean
   public TaskTool taskTool(
-      TaskRuntime runtime, ScheduledExecutorService toolWorkerScheduler, Clock clock) {
+      TaskRuntime runtime,
+      @Qualifier("toolWorkerScheduler") ScheduledExecutorService toolWorkerScheduler,
+      Clock clock) {
     return new TaskTool(runtime, toolWorkerScheduler, clock);
   }
 
@@ -68,7 +72,7 @@ public class HarnessToolWorkerConfiguration {
       ArtifactStore artifactStore,
       ToolWorkerConfig config,
       Clock clock,
-      ScheduledExecutorService toolWorkerScheduler,
+      @Qualifier("toolWorkerScheduler") ScheduledExecutorService toolWorkerScheduler,
       HarnessLifecycleObservers lifecycleObservers) {
     return new CloudToolWorker(
         store,
@@ -80,5 +84,14 @@ public class HarnessToolWorkerConfiguration {
         clock,
         toolWorkerScheduler,
         lifecycleObservers);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  public CloudToolWorkerLifecycle cloudToolWorkerLifecycle(
+      CloudToolWorker worker,
+      HarnessRuntimeProperties properties,
+      @Qualifier("harnessWorkerScheduler") ScheduledExecutorService scheduler) {
+    return new CloudToolWorkerLifecycle(worker, properties, scheduler);
   }
 }
