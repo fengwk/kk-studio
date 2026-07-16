@@ -1,0 +1,61 @@
+package fun.fengwk.kkstudio.web.controller;
+
+import fun.fengwk.convention4j.api.page.Page;
+import fun.fengwk.convention4j.api.page.PageQuery;
+import fun.fengwk.convention4j.api.result.Result;
+import fun.fengwk.convention4j.common.result.Results;
+import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.ComfyuiWorkflowApiService;
+import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiCreateDTO;
+import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiDTO;
+import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiUpdateDTO;
+import lombok.AllArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * ComfyUI 工作流卡片 CRUD 接口。
+ *
+ * <p>所有路径 / DTO 边界上的 id 都是十进制字符串形式的 snowflake id（与项目内其它 snowflake 资源保持一致）， 由服务层在内部严格解析为 {@code
+ * long} 后再访问数据库。
+ *
+ * @author fengwk
+ */
+@AllArgsConstructor
+@RequestMapping("/api/comfyui/workflows")
+@RestController
+public class StudioComfyuiWorkflowApiController {
+
+  private final ComfyuiWorkflowApiService comfyuiWorkflowApiService;
+
+  @GetMapping
+  public Result<Page<ComfyuiWorkflowApiDTO>> pageWorkflows(
+      @RequestParam(value = "pageNumber", defaultValue = "1") int pageNumber,
+      @RequestParam(value = "pageSize", defaultValue = "50") int pageSize) {
+    return Results.ok(comfyuiWorkflowApiService.pageWorkflows(new PageQuery(pageNumber, pageSize)));
+  }
+
+  @PostMapping
+  public Result<ComfyuiWorkflowApiDTO> createWorkflow(
+      @RequestBody ComfyuiWorkflowApiCreateDTO createDTO) {
+    return Results.created(comfyuiWorkflowApiService.createWorkflow(createDTO));
+  }
+
+  @PutMapping("/{id}")
+  public Result<ComfyuiWorkflowApiDTO> updateWorkflow(
+      @PathVariable("id") String id, @RequestBody ComfyuiWorkflowApiUpdateDTO updateDTO) {
+    return Results.ok(comfyuiWorkflowApiService.updateWorkflow(id, updateDTO));
+  }
+
+  @DeleteMapping("/{id}")
+  public Result<Void> deleteWorkflow(@PathVariable("id") String id) {
+    comfyuiWorkflowApiService.deleteWorkflow(id);
+    return Results.noContent();
+  }
+}

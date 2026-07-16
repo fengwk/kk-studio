@@ -78,10 +78,27 @@ public class S3StorageServiceImpl implements S3StorageService {
   @Override
   public byte[] download(String key) {
     String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
-    ResponseBytes<GetObjectResponse> response =
-        s3Client.getObjectAsBytes(
-            GetObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build());
+    ResponseBytes<GetObjectResponse> response = getObject(normalizedKey);
     return response.asByteArray();
+  }
+
+  @Override
+  public S3ObjectContent download(String key, long maxSizeBytes) {
+    Assert.isTrue(maxSizeBytes >= 0L, "maxSizeBytes must be greater than or equal to 0");
+    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+    HeadObjectRequest headRequest =
+        HeadObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build();
+    long contentLength = s3Client.headObject(headRequest).contentLength();
+    Assert.isTrue(contentLength <= maxSizeBytes, "S3 object exceeds max input file size");
+    ResponseBytes<GetObjectResponse> response = getObject(normalizedKey);
+    byte[] bytes = response.asByteArray();
+    Assert.isTrue(bytes.length <= maxSizeBytes, "S3 object exceeds max input file size");
+    return new S3ObjectContent(bytes, response.response().contentType());
+  }
+
+  private ResponseBytes<GetObjectResponse> getObject(String normalizedKey) {
+    return s3Client.getObjectAsBytes(
+        GetObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build());
   }
 
   private String normalizePublicBaseUrl(String publicBaseUrl) {

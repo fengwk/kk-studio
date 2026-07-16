@@ -15,6 +15,7 @@ public final class AgentIdGenerator {
   public static final String AGENT_SESSION = "agent_session";
   public static final String AGENT_SESSION_EVENT = "agent_session_event";
   public static final String AGENT_RUN = "agent_run";
+  public static final String COMFYUI_WORKFLOW_API = "comfyui_workflow_api";
   public static final String HARNESS_SESSION = "harness_session";
   public static final String HARNESS_SESSION_ENTRY = "harness_session_entry";
   public static final String HARNESS_RUN = "harness_run";
@@ -48,6 +49,10 @@ public final class AgentIdGenerator {
 
   public static long nextRunId() {
     return GlobalSnowflakeIdGenerator.next(AGENT_RUN);
+  }
+
+  public static long nextComfyuiWorkflowApiId() {
+    return GlobalSnowflakeIdGenerator.next(COMFYUI_WORKFLOW_API);
   }
 
   public static long nextHarnessSessionId() {

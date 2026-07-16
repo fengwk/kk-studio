@@ -281,3 +281,19 @@ create table if not exists model_usage_record (
     key idx_model_usage_record_session (session_id, id),
     key idx_model_usage_record_model (model_resource_id, id)
 ) engine=InnoDB default charset=utf8mb4 comment='durable model usage ledger: per Assistant Entry 唯一一行';
+
+create table if not exists comfyui_workflow_api (
+    id                    bigint not null comment '主键',
+    api_name              varchar(64) not null comment '对外 api 名（小写字母开头、仅含 [a-z0-9-]）',
+    name                  varchar(128) not null comment '展示名',
+    description           varchar(512) comment '描述',
+    workflow_json         longtext not null comment 'ComfyUI API 格式 workflow JSON',
+    input_bindings_json   longtext not null comment '输入绑定 JSON 数组',
+    default_selector      varchar(1024) comment '默认 JSONPath selector',
+    enabled               tinyint(1) not null comment '是否启用',
+    gmt_create            datetime(3) not null default current_timestamp(3) comment '创建时间',
+    gmt_modified          datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
+    version               bigint not null default '0' comment '数据版本号',
+    primary key (id),
+    unique key uk_comfyui_workflow_api_api_name (api_name)
+) engine=InnoDB default charset=utf8mb4 comment='comfyui workflow api card';
