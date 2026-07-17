@@ -32,6 +32,17 @@ describe('session-events', () => {
     ])
   })
 
+  it('materializes an assistant row for thinking-only streams before any text delta', () => {
+    const timeline = buildSessionTimeline([], [
+      runEvent('started', 'assistant_started', {}),
+      runEvent('think', 'assistant_delta_batch', { deltas: [{ kind: 'thinking', text: 'only thinking' }] }),
+    ])
+
+    expect(timeline.messages).toMatchObject([
+      { role: 'assistant', text: '', thinking: 'only thinking', status: 'streaming' },
+    ])
+  })
+
   it('does not duplicate an Assistant that has already materialized as a durable Entry', () => {
     const timeline = buildSessionTimeline([
       entry('assistant', 'message', messagePayload('ASSISTANT', [{ type: 'text', text: '已持久化回答' }])),
