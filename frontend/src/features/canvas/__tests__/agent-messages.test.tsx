@@ -58,7 +58,7 @@ describe('CanvasAgentMessage dispatcher', () => {
 
     rerender(
       <CanvasAgentMessage
-        message={{ kind: 'run' }}
+        message={{ kind: 'run', runId: 'run' }}
         run={baseRun}
         onRunAction={onRunAction}
       />,
