@@ -1,13 +1,14 @@
 import type { ReactNode, RefObject } from 'react'
 import { SessionComposer } from '@/features/ai/session-panel/SessionComposer'
+import { SessionErrorPanel } from '@/features/ai/session-panel/SessionErrorPanel'
 import { SessionFooter } from '@/features/ai/session-panel/SessionFooter'
 import { SessionHeader } from '@/features/ai/session-panel/SessionHeader'
 import { SessionTranscript } from '@/features/ai/session-panel/SessionTranscript'
 import type { DialogueMessage } from '@/features/ai/session-events'
 
 /**
- * Reusable session panel shell aligned with pi interactive layout:
- * header -> scroll transcript (per-message components) -> composer -> footer.
+ * Reusable session panel shell (pi layout + canvas-thread visual language):
+ * header -> scroll transcript -> error panel -> composer dock -> footer.
  */
 export function SessionPanel({
   sidebar,
@@ -23,6 +24,8 @@ export function SessionPanel({
   composerPending,
   activeRun,
   controlsPending,
+  actionError,
+  onDismissActionError,
   onDraftChange,
   onSubmit,
   onSteer,
@@ -44,6 +47,8 @@ export function SessionPanel({
   composerPending: boolean
   activeRun: boolean
   controlsPending: boolean
+  actionError?: string | null
+  onDismissActionError?: () => void
   onDraftChange: (draft: string) => void
   onSubmit: () => void
   onSteer: () => void
@@ -62,8 +67,13 @@ export function SessionPanel({
           loading={messagesLoading}
           error={messagesError}
           bodyRef={bodyRef}
+          pending={composerPending}
+          activeRun={activeRun}
         />
         {banner}
+        {actionError ? (
+          <SessionErrorPanel message={actionError} onDismiss={onDismissActionError} />
+        ) : null}
         <SessionComposer
           draft={draft}
           activeRun={activeRun}

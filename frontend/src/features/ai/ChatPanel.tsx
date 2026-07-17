@@ -40,6 +40,8 @@ export function ChatPanel({
   observability,
   taskTimeline,
   controlsPending,
+  actionError,
+  onDismissActionError,
   onDraftChange,
   onSubmit,
   onSteer,
@@ -82,6 +84,8 @@ export function ChatPanel({
     decidePermission: (invocationId: string, decision: 'allow' | 'deny') => void
   }
   controlsPending: boolean
+  actionError?: string | null
+  onDismissActionError?: () => void
   onDraftChange: (draft: string) => void
   onSubmit: () => void
   onSteer: () => void
@@ -121,6 +125,8 @@ export function ChatPanel({
       composerPending={pending}
       activeRun={activeRun}
       controlsPending={controlsPending}
+      actionError={actionError}
+      onDismissActionError={onDismissActionError}
       onDraftChange={onDraftChange}
       onSubmit={onSubmit}
       onSteer={onSteer}

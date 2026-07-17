@@ -106,9 +106,11 @@ public class HarnessRunTransactionService implements RunTransactions {
     if (session.getActiveRunId() != null) {
       throw new IllegalStateException("session already has an active run");
     }
-    if (!Objects.equals(session.getLeafEntryId(), expectedLeafEntryId)) {
-      throw new ConcurrentModificationException("session leaf changed before run submission");
-    }
+    // Append-only chat path: client leaf is a best-effort hint. Stale tips soft-rebase onto the
+    // current session leaf so UI lag never blocks continuing the main branch.
+    // expectedLeafEntryId remains in the API for future intentional branch checkout.
+    Long tipLeaf = session.getLeafEntryId();
+    Long parentLeaf = tipLeaf;
 
     long runId = idGenerator.newRunId();
     long entryId = idGenerator.newSessionEntryId();
@@ -117,13 +119,13 @@ public class HarnessRunTransactionService implements RunTransactions {
         entry(
             entryId,
             sessionId,
-            expectedLeafEntryId,
+            parentLeaf,
             runId,
             "message",
             payloadCodec.encode(new MessageEntryPayload(userMessage)),
             timestamp));
     runMapper.insert(queuedRun(runId, sessionId, entryId, timestamp));
-    if (sessionMapper.attachRun(sessionId, expectedLeafEntryId, entryId, runId, timestamp) != 1) {
+    if (sessionMapper.attachRun(sessionId, tipLeaf, entryId, runId, timestamp) != 1) {
       throw new ConcurrentModificationException("cannot attach active run to session");
     }
     return toRun(runMapper.find(runId));
