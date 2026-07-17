@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.studio.service;
 
+import fun.fengwk.kkstudio.studio.StudioWorkspaces;
 import fun.fengwk.kkstudio.studio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.studio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasSnapshot;
@@ -17,6 +18,7 @@ public class StubCanvasQueryService implements CanvasQueryService {
 
   @Override
   public List<CanvasDocument> listDocuments(long workspaceId) {
+    StudioWorkspaces.requireDefault(workspaceId);
     return List.of();
   }
 }

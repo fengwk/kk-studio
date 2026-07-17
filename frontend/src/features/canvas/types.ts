@@ -1,4 +1,13 @@
-/** Domain types for the Canvas feature demo model (not React Flow contracts). */
+/**
+ * Canvas presentation model used by the local demo UI.
+ *
+ * This is not the React Flow contract and not the wire DTO.
+ * Durable Studio vocabulary is `StudioNodeKind` + backend `studio` module.
+ * Mapping: `./domain-map.ts` and `docs/technical-solution/domain-map.md`.
+ */
+
+/** Backend CanvasNodeKind. Presentation nodes always carry this. */
+export type StudioNodeKind = 'RESOURCE' | 'FUNCTION' | 'GROUP'
 
 export type GenerationMode = 'text' | 'image' | 'video'
 
@@ -6,6 +15,7 @@ export type GeneratorStatus = 'draft' | 'generated'
 
 export type AgentRunStatus = 'running' | 'paused' | 'succeeded'
 
+/** UI renderer key — finer than StudioNodeKind. */
 export type CanvasNodeType =
   | 'frame'
   | 'web'
@@ -66,7 +76,10 @@ export interface GenerationProfile {
 
 export interface CanvasNodeBase extends CanvasRect {
   id: string
+  /** UI renderer / presentation subtype. */
   type: CanvasNodeType
+  /** Durable Studio kind (RESOURCE | FUNCTION | GROUP). */
+  domainKind: StudioNodeKind
   title: string
 }
 
@@ -109,10 +122,16 @@ export interface ResultNode extends CanvasNodeBase {
 
 export type CanvasNode = FrameNode | ContentNode | GeneratorNode | AgentRunNode | ResultNode
 
+/**
+ * Presentation visibility edge.
+ * Maps to backend CanvasLink. Does NOT represent ResourceReference dependency.
+ */
 export interface CanvasLink {
   id: string
   source: string
   target: string
+  /** Always visibility in the demo; ResourceReference is a separate future model. */
+  role: 'visibility'
 }
 
 export type ThreadMessage =

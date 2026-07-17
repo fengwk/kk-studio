@@ -156,6 +156,7 @@ export function createInitialNodes(): CanvasNode[] {
     {
       id: 'frame',
       type: 'frame',
+      domainKind: 'GROUP',
       x: 70,
       y: 110,
       width: 610,
@@ -166,6 +167,7 @@ export function createInitialNodes(): CanvasNode[] {
     {
       id: 'web',
       type: 'web',
+      domainKind: 'RESOURCE',
       x: 110,
       y: 175,
       width: 158,
@@ -177,6 +179,7 @@ export function createInitialNodes(): CanvasNode[] {
     {
       id: 'image',
       type: 'image',
+      domainKind: 'RESOURCE',
       x: 291,
       y: 175,
       width: 158,
@@ -188,6 +191,7 @@ export function createInitialNodes(): CanvasNode[] {
     {
       id: 'file',
       type: 'file',
+      domainKind: 'RESOURCE',
       x: 472,
       y: 175,
       width: 158,
@@ -199,6 +203,7 @@ export function createInitialNodes(): CanvasNode[] {
     {
       id: 'note',
       type: 'text',
+      domainKind: 'RESOURCE',
       x: 110,
       y: 365,
       width: 310,
@@ -210,6 +215,7 @@ export function createInitialNodes(): CanvasNode[] {
     {
       id: 'run',
       type: 'run',
+      domainKind: 'FUNCTION',
       x: 760,
       y: 290,
       width: 275,
@@ -222,6 +228,7 @@ export function createInitialNodes(): CanvasNode[] {
     {
       id: 'matrix',
       type: 'matrix',
+      domainKind: 'RESOURCE',
       x: 1145,
       y: 145,
       width: 286,
@@ -233,6 +240,7 @@ export function createInitialNodes(): CanvasNode[] {
     {
       id: 'result-a',
       type: 'result',
+      domainKind: 'RESOURCE',
       x: 1145,
       y: 405,
       width: 178,
@@ -244,6 +252,7 @@ export function createInitialNodes(): CanvasNode[] {
     {
       id: 'result-b',
       type: 'result',
+      domainKind: 'RESOURCE',
       x: 1350,
       y: 405,
       width: 178,
@@ -255,6 +264,7 @@ export function createInitialNodes(): CanvasNode[] {
     {
       id: 'direction',
       type: 'text',
+      domainKind: 'RESOURCE',
       x: 1550,
       y: 200,
       width: 260,
@@ -277,5 +287,10 @@ export function createInitialLinks(): CanvasLink[] {
     ['run', 'result-b'],
     ['matrix', 'direction'],
   ]
-  return pairs.map(([source, target]) => ({ id: `${source}->${target}`, source, target }))
+  return pairs.map(([source, target]) => ({
+    id: `${source}->${target}`,
+    source,
+    target,
+    role: 'visibility' as const,
+  }))
 }

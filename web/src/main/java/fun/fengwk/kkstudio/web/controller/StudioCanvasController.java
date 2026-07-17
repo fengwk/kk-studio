@@ -11,14 +11,14 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.core.studio.service.StudioDtoMapper;
-import fun.fengwk.kkstudio.core.studio.service.StudioNotImplementedException;
 import fun.fengwk.kkstudio.share.model.studio.ApplyCanvasCommandsRequestDTO;
 import fun.fengwk.kkstudio.share.model.studio.CanvasDocumentDTO;
 import fun.fengwk.kkstudio.share.model.studio.CanvasSnapshotDTO;
 import fun.fengwk.kkstudio.share.model.studio.CreateCanvasRequestDTO;
+import fun.fengwk.kkstudio.studio.StudioFeatureNotReadyException;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasQueryService;
+import fun.fengwk.kkstudio.web.studio.StudioWebMapper;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
  * Canvas HTTP boundary.
  *
  * <p>Routes are registered now; durable command/query adapters still throw {@link
- * StudioNotImplementedException}.
+ * StudioFeatureNotReadyException}.
  */
 @RestController
 @RequestMapping("/api/canvases")
@@ -40,7 +40,7 @@ public class StudioCanvasController {
   @GetMapping
   public List<CanvasDocumentDTO> list(@RequestParam("workspaceId") long workspaceId) {
     return canvasQueryService.listDocuments(workspaceId).stream()
-        .map(StudioDtoMapper::toDto)
+        .map(StudioWebMapper::toDto)
         .collect(Collectors.toList());
   }
 
@@ -48,7 +48,7 @@ public class StudioCanvasController {
   public ResponseEntity<CanvasSnapshotDTO> get(@PathVariable("canvasId") long canvasId) {
     return canvasQueryService
         .findSnapshot(canvasId)
-        .map(StudioDtoMapper::toDto)
+        .map(StudioWebMapper::toDto)
         .map(ResponseEntity::ok)
         .orElseGet(() -> ResponseEntity.notFound().build());
   }
@@ -58,9 +58,9 @@ public class StudioCanvasController {
     try {
       long workspaceId = Long.parseLong(request.getWorkspaceId());
       CanvasDocumentDTO dto =
-          StudioDtoMapper.toDto(canvasCommandService.createCanvas(workspaceId, request.getTitle()));
+          StudioWebMapper.toDto(canvasCommandService.createCanvas(workspaceId, request.getTitle()));
       return ResponseEntity.status(HttpStatus.CREATED).body(dto);
-    } catch (StudioNotImplementedException ex) {
+    } catch (StudioFeatureNotReadyException ex) {
       return notImplemented(ex);
     }
   }
@@ -70,7 +70,7 @@ public class StudioCanvasController {
       @PathVariable("canvasId") long canvasId, @RequestBody ApplyCanvasCommandsRequestDTO request) {
     try {
       CanvasSnapshotDTO dto =
-          StudioDtoMapper.toDto(
+          StudioWebMapper.toDto(
               canvasCommandService.applyCommands(
                   canvasId,
                   Long.parseLong(request.getBaseRevision()),
@@ -78,12 +78,12 @@ public class StudioCanvasController {
                   request.getRequestHash(),
                   request.getCommandsJson()));
       return ResponseEntity.ok(dto);
-    } catch (StudioNotImplementedException ex) {
+    } catch (StudioFeatureNotReadyException ex) {
       return notImplemented(ex);
     }
   }
 
-  private static ResponseEntity<String> notImplemented(StudioNotImplementedException ex) {
+  private static ResponseEntity<String> notImplemented(StudioFeatureNotReadyException ex) {
     return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).body(ex.getMessage());
   }
 }

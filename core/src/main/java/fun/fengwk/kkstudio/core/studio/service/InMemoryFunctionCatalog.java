@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.studio.service;
 
+import fun.fengwk.kkstudio.studio.StudioWorkspaces;
 import fun.fengwk.kkstudio.studio.model.FunctionDefinition;
 import fun.fengwk.kkstudio.studio.model.FunctionRef;
 import fun.fengwk.kkstudio.studio.model.FunctionScope;
@@ -60,6 +61,7 @@ public class InMemoryFunctionCatalog implements FunctionCatalog {
 
   @Override
   public List<FunctionDefinition> listVisible(long workspaceId) {
+    StudioWorkspaces.requireDefault(workspaceId);
     // SYSTEM functions only for now; workspace-scoped catalog is TODO.
     return List.copyOf(definitions.values());
   }
