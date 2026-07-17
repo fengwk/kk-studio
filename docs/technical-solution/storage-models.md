@@ -56,7 +56,7 @@ Subagent task 的 child Session、child Run、working-copy policy/revision 和�
 
 ## 兼容资源表
 
-`agent_session`、`agent_session_event` 和 `agent_run` 是嵌入式 `agent` 模块的独立持久模型。Harness 聊天和前端 Timeline 不读取这些表；Harness 运行时只使用 `harness_*`、`tool_*`、`model_usage_record` 和 `tool_environment` 表。
+Harness 运行时与前端 Timeline 只使用 `harness_*`、`tool_*`、`model_usage_record` 和 `tool_environment` 表。Provider / Model / AgentDefinition 资源使用 `agent_provider`、`agent_model`、`agent_definition` 表。
 
 ## 事务与删除
 

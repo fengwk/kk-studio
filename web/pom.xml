@@ -15,11 +15,7 @@
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-core</artifactId>
         </dependency>
-        <dependency>
-            <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-agent</artifactId>
-        </dependency>
-        <dependency>
+<dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-share</artifactId>
         </dependency>

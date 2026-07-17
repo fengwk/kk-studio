@@ -200,17 +200,15 @@ class MysqlHarnessSessionStoreTest {
     assertFalse(entryColumns.contains("entry_id"));
   }
 
-  /** 旧 Run/Event 噪声不参与新 Context path 查询。 */
+  /** 其他 Session 的 Entry 噪声不参与目标 Context path 查询。 */
   @Test
-  void shouldLoadOnlyTargetEntryPathWithTenThousandLegacyEvents() {
+  void shouldLoadOnlyTargetEntryPathWithTenThousandNoiseEntries() {
     jdbcTemplate.update(
         """
-        insert into agent_session_event (
-            id, event_id, session_id, parent_event_id, run_id, event_type, payload_json,
-            gmt_create, gmt_modified, version
+        insert into harness_session_entry (
+            id, session_id, parent_entry_id, run_id, entry_type, payload_json, gmt_create
         )
-        select 900000000 + n, concat('noise-', n), 'noise-session', 'root', null,
-               'assistant_delta', '{}', current_timestamp, current_timestamp, 0
+        select 900000000 + n, 888000000, null, null, 'MESSAGE', '{}', current_timestamp
         from system_range(1, 10000) as noise(n)
         """);
     long sessionId = id();

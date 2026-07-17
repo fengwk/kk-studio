@@ -4,11 +4,9 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Import;
 
-/**
- * @author fengwk
- */
+/** Web module Spring Boot test entry. */
 @SpringBootApplication
-@Import(AgentRuntimeWebTestConfiguration.class)
+@Import(HarnessWebTestConfiguration.class)
 public class WebTestApplication {
 
   public static void main(String[] args) {

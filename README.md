@@ -42,7 +42,6 @@ flowchart LR
 | `web/` | Spring Boot REST、SSE 与 WebSocket adapter |
 | `share/` | HTTP DTO |
 | `frontend/` | React + TypeScript + Vite 控制面 |
-| `agent/` | Provider/Model/Agent 管理和嵌入式运行时支持 |
 | `docs/technical-solution/` | 当前生效的技术设计 |
 
 ## 本地开发

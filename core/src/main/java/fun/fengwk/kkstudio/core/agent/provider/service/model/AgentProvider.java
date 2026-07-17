@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.core.agent.provider.service.model;
 
-import fun.fengwk.kkstudio.agent.provider.ProviderType;
+import fun.fengwk.kkstudio.share.model.AgentProviderType;
 import java.time.LocalDateTime;
 import lombok.Data;
 
@@ -11,7 +11,7 @@ public class AgentProvider {
   private Long id;
   private String name;
   private String description;
-  private ProviderType providerType;
+  private AgentProviderType providerType;
   private String baseUrl;
   private String credential;
   private String configJson;

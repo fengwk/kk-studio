@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.web.WebTestApplication;
-import fun.fengwk.kkstudio.web.testing.StubProviderManager;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
@@ -54,7 +53,6 @@ public class StudioRunControlControllerTest {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
-  @Autowired private StubProviderManager stubProviderManager;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private MysqlHarnessSessionStore sessionStore;
   @Autowired private SnowflakeSessionIdGenerator sessionIdGen;
@@ -65,7 +63,6 @@ public class StudioRunControlControllerTest {
   @BeforeEach
   public void resetState() {
     jdbc.update("delete from model_usage_record");
-    stubProviderManager.reset();
     jdbc.update("delete from harness_run_control_message");
     jdbc.update("delete from harness_run_event");
     jdbc.update("delete from harness_run");

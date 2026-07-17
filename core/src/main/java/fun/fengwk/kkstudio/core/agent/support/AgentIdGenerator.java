@@ -12,9 +12,6 @@ public final class AgentIdGenerator {
   public static final String AGENT_PROVIDER = "agent_provider";
   public static final String AGENT_MODEL = "agent_model";
   public static final String AGENT_DEFINITION = "agent_definition";
-  public static final String AGENT_SESSION = "agent_session";
-  public static final String AGENT_SESSION_EVENT = "agent_session_event";
-  public static final String AGENT_RUN = "agent_run";
   public static final String COMFYUI_WORKFLOW_API = "comfyui_workflow_api";
   public static final String HARNESS_SESSION = "harness_session";
   public static final String HARNESS_SESSION_ENTRY = "harness_session_entry";
@@ -38,18 +35,6 @@ public final class AgentIdGenerator {
 
   public static long nextAgentId() {
     return GlobalSnowflakeIdGenerator.next(AGENT_DEFINITION);
-  }
-
-  public static long nextSessionId() {
-    return GlobalSnowflakeIdGenerator.next(AGENT_SESSION);
-  }
-
-  public static long nextEventId() {
-    return GlobalSnowflakeIdGenerator.next(AGENT_SESSION_EVENT);
-  }
-
-  public static long nextRunId() {
-    return GlobalSnowflakeIdGenerator.next(AGENT_RUN);
   }
 
   public static long nextComfyuiWorkflowApiId() {

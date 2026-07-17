@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.core.agent.provider.service.impl;
 
 import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextProviderId;
 
-import fun.fengwk.kkstudio.agent.provider.ProviderType;
+import fun.fengwk.kkstudio.share.model.AgentProviderType;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.share.model.AgentProviderEditablePropertiesDTO;
@@ -70,7 +70,7 @@ final class AgentProviderMutationFactory {
       return new Mutation(
           name,
           editableSupport.trimToNull(properties.getDescription()),
-          ProviderType.valueOf(providerType),
+          AgentProviderType.valueOf(providerType),
           editableSupport.trimToNull(properties.getBaseUrl()),
           credential,
           configJson);
@@ -82,7 +82,7 @@ final class AgentProviderMutationFactory {
   record Mutation(
       String name,
       String description,
-      ProviderType providerType,
+      AgentProviderType providerType,
       String baseUrl,
       String credential,
       String configJson) {}
