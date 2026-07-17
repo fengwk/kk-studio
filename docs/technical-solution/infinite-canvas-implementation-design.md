@@ -17,6 +17,18 @@
 | 并发 | Revision + Command 幂等键 + 数据库状态机 + Worker lease |
 | 事件 | Append-only Event + cursor SSE，刷新和断线可恢复 |
 
+### 1.1 代码落地进度（当前）
+
+| 项 | 状态 |
+| --- | --- |
+| Maven module `studio` | 已注册；纯领域包 `model` / `canvas` / `workflow` / `runtime` |
+| core Studio 适配 | `StudioConfiguration` + stub services + 内存 FunctionCatalog |
+| share DTO | `share.model.studio.*` |
+| web API | `/api/canvases`、`/api/functions`、`/api/workflows` |
+| 生成 Provider | **未实现**（`system.generate-*` 仅 Catalog 定义） |
+| Agent Function Adapter | **未实现**（`system.agent.execute` 仅 Catalog 定义） |
+| DB schema / Worker | **未实现** |
+
 ## 2. 核心原则
 
 ### 2.1 Canvas 与 Workflow 分离
