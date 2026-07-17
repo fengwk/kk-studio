@@ -18,6 +18,7 @@ flowchart TD
     A --> J[s3-presign.md<br/>S3 预签名直传]
     A --> K[comfyui-workflow-api.md<br/>ComfyUI 工作流与 S3 直传后端]
     A --> L[environment-daemon-gateway.md<br/>Environment Daemon Gateway]
+    A --> M[prompt-to-artifact.md<br/>Prompt 到 Artifact 数据流]
 ```
 
 ## 阅读顺序
@@ -35,6 +36,7 @@ flowchart TD
 | 9 | [s3-presign.md](s3-presign.md) | 固定 bucket、path-style 的 S3 预签名直传 / 直下载 | 接入浏览器到对象存储的直传链路 |
 | 10 | [comfyui-workflow-api.md](comfyui-workflow-api.md) | ComfyUI 工作流卡片 CRUD + 无状态提交 / 查询 / 取消 + S3 输入桥 + job-scoped 输出下载 | 接入 ComfyUI 控制台与 S3 直传后端 |
 | 11 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Environment 注册、Daemon v1 WebSocket、持久 ToolInvocation 分发与回调 | 接入远端 Environment Tool |
+| 12 | [prompt-to-artifact.md](prompt-to-artifact.md) | Prompt、Provider、Tool、Artifact 和浏览器读取的端到端事实链 | 修改跨边界执行或 artifact 呈现 |
 
 ## 按主题索引
 
@@ -51,6 +53,7 @@ flowchart TD
 | S3 预签名直传 | [s3-presign.md](s3-presign.md) |
 | ComfyUI 工作流与 S3 直传后端 | [comfyui-workflow-api.md](comfyui-workflow-api.md) |
 | Environment Daemon Gateway | [environment-daemon-gateway.md](environment-daemon-gateway.md) |
+| Prompt 到 Artifact 数据流 | [prompt-to-artifact.md](prompt-to-artifact.md) |
 
 ## 维护规则
 

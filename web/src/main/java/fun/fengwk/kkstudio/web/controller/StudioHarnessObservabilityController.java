@@ -17,6 +17,7 @@ import java.util.List;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.InvalidMediaTypeException;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -137,7 +138,8 @@ public class StudioHarnessObservabilityController {
   }
 
   /**
-   * Artifact GET returns the persisted bytes with the original {@code mediaType}. Blank or
+   * Artifact GET returns persisted bytes with the original valid {@code mediaType}. Response headers
+   * prevent MIME sniffing and sandbox document artifacts before a browser renders them. Blank or
    * non-positive identifiers translate to 400; unknown ids translate to 404. There is intentionally
    * no JSON / base64 fallback so consumers can pipe the response directly to file outputs.
    */
@@ -150,9 +152,19 @@ public class StudioHarnessObservabilityController {
       throw translate(error);
     }
     HttpHeaders headers = new HttpHeaders();
-    headers.setContentType(MediaType.parseMediaType(artifact.mediaType()));
+    headers.setContentType(safeMediaType(artifact.mediaType()));
     headers.setContentLength(artifact.sizeBytes());
+    headers.set("X-Content-Type-Options", "nosniff");
+    headers.set("Content-Security-Policy", "sandbox");
     return new ResponseEntity<>(new ByteArrayResource(artifact.content()), headers, HttpStatus.OK);
+  }
+
+  private static MediaType safeMediaType(String mediaType) {
+    try {
+      return MediaType.parseMediaType(mediaType);
+    } catch (InvalidMediaTypeException ignored) {
+      return MediaType.APPLICATION_OCTET_STREAM;
+    }
   }
 
   private static String resumeOrLastEventId(String queryValue, String lastEventId) {

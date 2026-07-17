@@ -84,9 +84,12 @@ function renderToolAttachmentMedia(
       <audio className="tool-attachment-media audio" src={src} controls preload="metadata" />
     )
   }
-  return (
-    <video className="tool-attachment-media video" src={src} controls preload="metadata" playsInline />
-  )
+  if (attachment.type === 'video') {
+    return (
+      <video className="tool-attachment-media video" src={src} controls preload="metadata" playsInline />
+    )
+  }
+  return <div className="tool-attachment-fallback">{formatToolAttachmentFallback(attachment)}</div>
 }
 
 function formatToolStatus(status?: DialogueMessage['status']): string {

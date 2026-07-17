@@ -302,13 +302,13 @@ function toArtifactAttachment(content: Record<string, unknown>): ToolAttachment[
   const mediaType = getString(content.mediaType)
   const type = artifactType(mediaType)
   const artifactId = getString(content.artifactId)
-  if (!type || !artifactId) {
+  if (!artifactId) {
     return []
   }
   return [{ type, name: artifactId, mime: mediaType, data: `/api/artifacts/${encodeURIComponent(artifactId)}` }]
 }
 
-function artifactType(mediaType: string): ToolAttachmentType | null {
+function artifactType(mediaType: string): ToolAttachmentType {
   if (mediaType.startsWith('image/')) {
     return 'image'
   }
@@ -318,5 +318,5 @@ function artifactType(mediaType: string): ToolAttachmentType | null {
   if (mediaType.startsWith('video/')) {
     return 'video'
   }
-  return null
+  return 'file'
 }
