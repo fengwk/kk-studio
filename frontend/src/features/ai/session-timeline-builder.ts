@@ -52,7 +52,7 @@ export function buildSessionTimeline(entries: HarnessSessionEntryDTO[], runEvent
           if (kind === 'text') {
             appendStreamingAssistantText(state, messages, getString(delta.text))
           } else if (kind === 'thinking') {
-            appendStreamingAssistantThinking(state, getString(delta.text))
+            appendStreamingAssistantThinking(state, messages, getString(delta.text))
           }
         }
         activeAssistants.set(event.runId, state)
@@ -315,15 +315,17 @@ function appendStreamingAssistantText(state: StreamingAssistant, messages: Dialo
   message.text += visible
 }
 
-function appendStreamingAssistantThinking(state: StreamingAssistant, delta: string) {
+function appendStreamingAssistantThinking(
+  state: StreamingAssistant,
+  messages: DialogueMessage[],
+  delta: string,
+) {
   if (!delta) {
     return
   }
-  if (state.message) {
-    state.message.thinking = (state.message.thinking ?? '') + delta
-  } else {
-    state.pendingThinking += delta
-  }
+  // Thinking-only streams must materialize an assistant row immediately (pi shows thinking blocks live).
+  const message = ensureStreamingAssistantMessage(state, messages)
+  message.thinking = (message.thinking ?? '') + delta
 }
 
 function completeStreamingAssistant(
@@ -346,9 +348,11 @@ function completeStreamingAssistant(
     return
   }
   const tail = state.textFilter.finish()
-  if (tail) {
+  if (tail || state.pendingThinking || failureMessage) {
     const message = ensureStreamingAssistantMessage(state, messages)
-    message.text += tail
+    if (tail) {
+      message.text += tail
+    }
   }
   if (state.message) {
     state.message.status = failureMessage ? 'error' : 'done'

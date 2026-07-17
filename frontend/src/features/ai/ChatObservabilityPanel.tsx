@@ -9,6 +9,8 @@ export function ChatObservabilityPanel({
   decisionPending,
   onYoloChange,
   onDecision,
+  compact = false,
+  permissionsOnly = false,
 }: {
   yolo?: SessionYoloDTO
   usage?: ModelUsageSummaryDTO
@@ -18,11 +20,31 @@ export function ChatObservabilityPanel({
   decisionPending: boolean
   onYoloChange: (enabled: boolean) => void
   onDecision: (invocationId: string, decision: 'allow' | 'deny') => void
+  compact?: boolean
+  permissionsOnly?: boolean
 }) {
   const pendingDecisions = toolInvocations.filter((invocation) => invocation.status === 'WAITING_APPROVAL')
 
+  if (permissionsOnly) {
+    if (pendingDecisions.length === 0) {
+      return null
+    }
+    return (
+      <section className="chat-observability session-permission-banner" aria-label="工具授权">
+        {pendingDecisions.map((invocation) => (
+          <PermissionRequest
+            key={invocation.id}
+            invocation={invocation}
+            pending={decisionPending}
+            onDecision={onDecision}
+          />
+        ))}
+      </section>
+    )
+  }
+
   return (
-    <section className="chat-observability" aria-label="会话运行信息">
+    <section className={`chat-observability ${compact ? 'compact' : ''}`} aria-label="会话运行信息">
       <label className="yolo-toggle">
         <input
           type="checkbox"
@@ -33,14 +55,15 @@ export function ChatObservabilityPanel({
         <span>YOLO：自动批准工具调用</span>
       </label>
       <UsageSummary usage={usage} />
-      {pendingDecisions.map((invocation) => (
-        <PermissionRequest
-          key={invocation.id}
-          invocation={invocation}
-          pending={decisionPending}
-          onDecision={onDecision}
-        />
-      ))}
+      {!compact &&
+        pendingDecisions.map((invocation) => (
+          <PermissionRequest
+            key={invocation.id}
+            invocation={invocation}
+            pending={decisionPending}
+            onDecision={onDecision}
+          />
+        ))}
       {Boolean(error) && <span className="observability-error">部分运行信息加载失败。</span>}
     </section>
   )
