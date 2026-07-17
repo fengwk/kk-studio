@@ -11,15 +11,15 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.core.studio.service.StudioDtoMapper;
-import fun.fengwk.kkstudio.core.studio.service.StudioNotImplementedException;
 import fun.fengwk.kkstudio.share.model.studio.FunctionDefinitionDTO;
 import fun.fengwk.kkstudio.share.model.studio.FunctionRunDTO;
 import fun.fengwk.kkstudio.share.model.studio.SubmitFunctionRunRequestDTO;
+import fun.fengwk.kkstudio.studio.StudioFeatureNotReadyException;
 import fun.fengwk.kkstudio.studio.model.FunctionRef;
 import fun.fengwk.kkstudio.studio.runtime.FunctionCatalog;
 import fun.fengwk.kkstudio.studio.runtime.FunctionExecutionRequest;
 import fun.fengwk.kkstudio.studio.runtime.FunctionRuntimeService;
+import fun.fengwk.kkstudio.web.studio.StudioWebMapper;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -41,7 +41,7 @@ public class StudioFunctionController {
   @GetMapping
   public List<FunctionDefinitionDTO> list(@RequestParam("workspaceId") long workspaceId) {
     return functionCatalog.listVisible(workspaceId).stream()
-        .map(StudioDtoMapper::toDto)
+        .map(StudioWebMapper::toDto)
         .collect(Collectors.toList());
   }
 
@@ -50,7 +50,7 @@ public class StudioFunctionController {
       @PathVariable("functionId") String functionId, @PathVariable("version") String version) {
     return functionCatalog
         .find(new FunctionRef(functionId, version))
-        .map(StudioDtoMapper::toDto)
+        .map(StudioWebMapper::toDto)
         .map(ResponseEntity::ok)
         .orElseGet(() -> ResponseEntity.notFound().build());
   }
@@ -67,9 +67,9 @@ public class StudioFunctionController {
               request.getConfigSnapshotJson() == null ? "{}" : request.getConfigSnapshotJson(),
               parseNullableLong(request.getConfigRevision()),
               request.getIdempotencyKey());
-      FunctionRunDTO dto = StudioDtoMapper.toDto(functionRuntimeService.submit(executionRequest));
+      FunctionRunDTO dto = StudioWebMapper.toDto(functionRuntimeService.submit(executionRequest));
       return ResponseEntity.status(HttpStatus.ACCEPTED).body(dto);
-    } catch (StudioNotImplementedException ex) {
+    } catch (StudioFeatureNotReadyException ex) {
       return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).body(ex.getMessage());
     } catch (IllegalArgumentException ex) {
       return ResponseEntity.badRequest().body(ex.getMessage());
@@ -80,7 +80,7 @@ public class StudioFunctionController {
   public ResponseEntity<FunctionRunDTO> getRun(@PathVariable("runId") long runId) {
     return functionRuntimeService
         .findRun(runId)
-        .map(StudioDtoMapper::toDto)
+        .map(StudioWebMapper::toDto)
         .map(ResponseEntity::ok)
         .orElseGet(() -> ResponseEntity.notFound().build());
   }

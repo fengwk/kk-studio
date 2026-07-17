@@ -157,6 +157,7 @@ function initializeGeneratorNode(
   return {
     id: base.id,
     type: 'generator',
+    domainKind: 'FUNCTION',
     x: base.x,
     y: base.y,
     width: profile.size.width,
@@ -236,6 +237,7 @@ function placeGeneratedResult(
   const result: ResultNode = {
     id,
     type: 'result',
+    domainKind: 'RESOURCE',
     x: position.x,
     y: position.y,
     width: size.width,
@@ -252,7 +254,7 @@ function placeGeneratedResult(
     nodes: [...cleaned.nodes, result],
     links: [
       ...cleaned.links,
-      { id: `${run.id}->${result.id}`, source: run.id, target: result.id },
+      { id: `${run.id}->${result.id}`, source: run.id, target: result.id, role: 'visibility' },
     ],
     selectedIds: [result.id],
     activeGeneratorId: null,
@@ -555,6 +557,7 @@ export function canvasReducer(state: CanvasDocumentState, action: CanvasAction):
       const node: CanvasNode = {
         id,
         type: 'text',
+        domainKind: 'RESOURCE',
         x: Math.round((action.stage.width / 2 - state.viewport.x) / scale - 120),
         y: Math.round((action.stage.height / 2 - state.viewport.y) / scale - 52),
         width: 240,

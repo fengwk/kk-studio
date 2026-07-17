@@ -8,6 +8,7 @@
 flowchart TD
     A[docs/README.md]
     A --> B[technical-solution/README.md]
+    A --> D[technical-solution/domain-map.md]
     A --> I[product-design/infinite-canvas-prototype.md]
     A --> K[product-design/infinite-canvas-product-logic.md]
     A --> M[product-design/frontend-design-system.md]
@@ -27,6 +28,7 @@ flowchart TD
 | 文档 | 角色 | 说明 |
 | --- | --- | --- |
 | [technical-solution/README.md](technical-solution/README.md) | 技术方案入口 | 汇总已落地架构与当前批准的目标落地设计 |
+| [technical-solution/domain-map.md](technical-solution/domain-map.md) | 领域词汇 | Harness/Studio 双域词汇与前后端映射 |
 | [product-design/infinite-canvas-prototype.md](product-design/infinite-canvas-prototype.md) | 产品原型 | 定义无限画布的产品定位、页面原型、交互和视觉边界；可直接打开 [交互原型](product-design/infinite-canvas-prototype/index.html) |
 | [product-design/infinite-canvas-product-logic.md](product-design/infinite-canvas-product-logic.md) | 产品逻辑 | 定义 Node、Resource、Link、ResourceReference、Function、Workflow、传播、运行和 MVP 闭环标准 |
 | [product-design/frontend-design-system.md](product-design/frontend-design-system.md) | 前端设计规范 | 定义全局 token、AppShell、组件与 Agent 面板模块化约定；明确视觉统一进度与迁移清单 |

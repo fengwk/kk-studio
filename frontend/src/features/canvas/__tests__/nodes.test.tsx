@@ -53,6 +53,7 @@ describe('canvas node renderers', () => {
       const draft: GeneratorNode = {
         id: `g-${mode}`,
         type: 'generator',
+        domainKind: 'FUNCTION',
         x: 0,
         y: 0,
         width: GENERATION_PROFILES[mode].size.width,
@@ -91,6 +92,7 @@ describe('canvas node renderers', () => {
     renderDomain({
       id: 'generated-1',
       type: 'result',
+      domainKind: 'RESOURCE',
       x: 0,
       y: 0,
       width: 196,

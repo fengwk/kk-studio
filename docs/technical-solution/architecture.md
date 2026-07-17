@@ -1,89 +1,128 @@
 # 架构总览
 
-`kk-studio` 是全局单实例的 Agent Studio。它以数据库中的 Harness Session、Run、Run Event、Tool Invocation、Task、Control、Usage、Artifact 和 Environment 作为可恢复事实；HTTP、SSE、WebSocket、worker 与 daemon connection 都是可丢弃的传输或执行载体。
+`kk-studio` 是**全局单实例**产品，由两个并列产品域组成：
 
-## 系统拓扑
+| 域 | 一句话 |
+| --- | --- |
+| **Harness / AI** | 可恢复的 Agent 会话执行与观测 |
+| **Studio / Canvas** | 资源优先的多模态画布工作台（Function / Workflow） |
+
+两者共享同一部署与 `web` 入口，但**领域模型、状态机、存储事实与前端 feature 分离**。
+
+词汇与映射见 [domain-map.md](domain-map.md)。
+
+## 1. 系统拓扑
 
 ```mermaid
 flowchart LR
     Browser[浏览器]
-    Frontend[frontend<br/>React + React Query]
-    Web[web<br/>HTTP / SSE / WebSocket adapter]
-    Core[core<br/>application adapters]
-    Studio[studio<br/>Canvas / Function / Workflow domain]
-    Runtime[harness/*<br/>model / tool / agent / runtime]
+    FE_AI[frontend/features/ai]
+    FE_CV[frontend/features/canvas]
+    Web[web]
+    Core[core adapters]
+    Studio[studio domain]
+    Harness[harness/* domain]
     Store[(MySQL / H2)]
-    Environment[Environment Daemon]
-    S3[(S3-compatible storage)]
+    S3[(Object storage)]
+    Env[Environment Daemon]
 
-    Browser --> Frontend
-    Frontend --> Web
+    Browser --> FE_AI
+    Browser --> FE_CV
+    FE_AI --> Web
+    FE_CV -.->|演示本地状态; API 待接| Web
     Web --> Core
     Core --> Studio
-    Core --> Runtime
+    Core --> Harness
     Core --> Store
-    Browser --> S3
-    Environment <-->|Daemon v1 WebSocket| Web
     Core --> S3
+    Browser --> S3
+    Env <-->|WebSocket| Web
 ```
 
-浏览器经 `web` 访问全局资源、Harness 控制面和可恢复 SSE。ComfyUI 输入输出使用浏览器到固定 bucket 的预签名直传；服务端只保存 object key 和元数据，不代理对象 bytes。Environment Daemon 只通过 WebSocket adapter 连接，Core 不依赖具体传输协议。
+## 2. 模块边界
 
-## 模块边界
+| 模块 | 职责 | 禁止 |
+| --- | --- | --- |
+| `studio` | Canvas / Resource / Function / Workflow 纯领域与端口 | Spring、MyBatis、HTTP、Harness 类型 |
+| `harness/*` | Agent 会话执行领域（Session/Run/Tool/Task） | 依赖 studio、承载 Canvas 语义 |
+| `core` | 两边的持久化、事务、worker、S3、ComfyUI、Studio stub/adapters | 成为第二个“万能领域层” |
+| `web` | HTTP / SSE / WebSocket 适配；DTO 映射 | 领域状态机 |
+| `share` | HTTP DTO | 领域规则 |
+| `frontend` | React：`features/ai`、`features/canvas`、platform shell | 把后端契约写死在 UI 组件内部 |
 
-| 模块 | 职责 |
-| --- | --- |
-| `studio` | Canvas / Resource / Function / Workflow 纯领域契约与运行时端口；不依赖 Spring/Harness |
-| `harness/model` | Provider 无关的模型、用量、成本与 cache 合约 |
-| `harness/tool` | Tool 描述、内容、schema 与 Daemon wire protocol |
-| `harness/agent` | Provider 调用与单轮 Agent Turn 合约 |
-| `harness/runtime` | Session Entry、Run、事件、权限、控制、Task 和 worker port 的领域语义 |
-| `harness/daemon` | Environment 侧 Tool daemon 运行时与编码工具 |
-| `core` | MyBatis 持久化、事务、运行时装配、worker、S3、ComfyUI、Environment gateway 与 Studio 适配器 |
-| `web` | REST、SSE 和 WebSocket transport adapter；不承载领域状态 |
-| `share` | HTTP DTO 边界 |
-| `frontend` | React 页面、持久事实投影和 cursor 驱动 SSE 客户端 |
+依赖方向：
 
-Provider / Model / AgentDefinition 是全局资源管理面，位于 `core.agent.definition|model|provider`；会话执行与观测只走 `harness/*` + `core.harness` 单轨。
+```text
+web → core → studio
+          → harness/*
+web → share
+core → share
+frontend → web APIs (via shared/api)
+```
 
-## 持久模型
+## 3. Harness 事实（已落地）
 
 | 事实 | 职责 |
 | --- | --- |
-| Session / Session Entry | Session 树、冻结 Agent Snapshot 与完整语义消息历史 |
-| Run / Run Event | 可重试的执行单元、流式进度、终态与实时投影 |
-| Tool Invocation / Artifact | 工具权限、分发、结果与持久 artifact bytes |
-| Root Activity / Subagent Task | 根 Session 范围的任务树、子代理状态与权限 relay |
-| Run Control | steer、follow-up 与 abort 的可恢复命令 |
-| Usage / Cost | 每次模型调用的不可变计量账本和聚合 |
-| Tool Environment | 全局 Environment 元数据、daemon capability 与 heartbeat |
+| Session / Entry | 完整语义历史与冻结 Agent Snapshot |
+| Run / Run Event | 执行单元、流式覆盖、终态 |
+| Tool Invocation / Artifact | 工具权限、结果、媒体 |
+| Root Activity / Subagent Task | 任务树与权限 relay |
+| Run Control | steer / follow-up / abort |
+| Usage / Cost | 计量账本 |
+| Tool Environment | daemon 元数据与 heartbeat |
 
-Session Entry 保存可重放的完整语义；Run Event 保存运行中增量和状态变化。前端以 Entry 作为聊天历史基线，只在尚未物化的区间以 Run Event 构建实时覆盖层。
+前端 AI 以 Entry 为历史基线，Run Event 仅覆盖尚未物化区间；SSE cursor 可恢复。
 
-## 一致性与并发
+## 4. Studio 事实（目标；骨架已立）
 
-- 全局资源模型不包含 Tenant、Workspace membership、RBAC 或 ACL。
-- 运行时配置、Session Agent Snapshot 与 Environment tool/version/capability binding 都是执行时冻结事实。
-- 事务锁顺序固定为 `Run -> Session -> Root -> Invocation/Task/Control`。
-- Assistant Entry、Usage 和对应 Run Event 按同一稳定事务写入。
-- SSE 按数据库 cursor 重放，且只在成功发送后推进 cursor。
-- Tool worker、Environment gateway 的 lease 和结果状态持久化，连接断开不伪造终态结果。
+| 事实 | 职责 | 代码状态 |
+| --- | --- | --- |
+| CanvasDocument + revision | 画布文档 | 领域类型 + stub command/query |
+| CanvasNode (RESOURCE/FUNCTION/GROUP) | 画布节点 | 领域类型 |
+| CanvasLink | 可见性 | 领域类型 |
+| ResourceReference | 实际依赖 | 领域类型 |
+| Resource / ResourceVersion | 资源身份与不可变版本 | 领域类型 |
+| FunctionDefinition / FunctionRun | 能力目录与执行 | Catalog 内存种子；Run stub |
+| WorkflowDocument / Version | 工作流程序 | 领域类型 + stub |
 
-## Studio 当前落地状态
+生成 Provider、Agent Adapter、DB 表、Worker：**未实现**（显式 `StudioFeatureNotReadyException` / HTTP 501）。
 
-| 能力 | 状态 |
+## 5. Workspace 策略
+
+- 单实例，无 membership/RBAC。
+- 默认 workspace：`1`（`StudioWorkspaces.DEFAULT_ID`）。
+- API 保留 `workspaceId` 参数；非默认值拒绝。
+
+## 6. 前端结构
+
+```text
+frontend/src
+├── app/                 启动与 Extension 注册
+├── platform/            shell / workbench / extensions
+├── features/ai/         Harness 控制台（真 API）
+├── features/canvas/     Studio 画布演示（本地状态 + domainKind 映射）
+├── shared/api/          HTTP 客户端（含 studio-service 契约）
+└── styles.css           全局设计 token
+```
+
+Canvas 表现模型与 Studio 词汇映射：`features/canvas/domain-map.ts`。
+
+## 7. 清晰度规则（必须遵守）
+
+1. **双域不混写**：Canvas 不引用 Harness Session 类型；Harness 不引用 CanvasDocument。
+2. **Agent 进入 Studio 只有 Function 门面**：`system.agent.execute`。
+3. **Link 与 Reference 不混称**：演示连线 = visibility；依赖另建。
+4. **stub 必须诚实**：未实现走 not-ready，不伪造成功路径。
+5. **文档进度与代码一致**：见各文档“落地进度”表。
+
+## 8. 入口文档
+
+| 文档 | 用途 |
 | --- | --- |
-| `studio` 纯领域模块 | 已落地骨架：`model` / `canvas` / `workflow` / `runtime` |
-| Function Catalog | 内存种子：text/image/video/agent system Function 定义 |
-| Canvas / Workflow / Function 写路径 | core stub + HTTP 路由；返回 `501 Not Implemented` 或空查询 |
-| 生成 Provider / Agent Adapter | **未实现**，明确 TODO |
-| 持久化表 / Worker | **未实现**，下一切片 |
-
-## 入口文档
-
-- [无限画布与 Workflow](infinite-canvas-implementation-design.md)：Studio 领域与运行时目标契约。
-- [Harness 运行时](cloud-embedded-agent-runtime.md)：消息提交、Run、worker、Tool 和 Daemon 的执行链。
-- [后端落地设计](backend-implementation-design.md)：HTTP/SSE 边界、分层和错误语义。
-- [前端落地设计](frontend-implementation-design.md)：聊天、Task Timeline 与 cursor 投影。
-- [存储模型](storage-models.md)：表、初始化资源与存储约束。
-- [Environment Daemon Gateway](environment-daemon-gateway.md)：Environment、协议与持久分发。
+| [domain-map.md](domain-map.md) | 词汇与前后端映射 |
+| [infinite-canvas-implementation-design.md](infinite-canvas-implementation-design.md) | Studio 目标契约 |
+| [cloud-embedded-agent-runtime.md](cloud-embedded-agent-runtime.md) | Harness 执行链 |
+| [frontend-implementation-design.md](frontend-implementation-design.md) | 前端落地 |
+| [frontend-design-system.md](../product-design/frontend-design-system.md) | 视觉 token |
+| [storage-models.md](storage-models.md) | 存储（Harness 已落地；Studio 表待补） |

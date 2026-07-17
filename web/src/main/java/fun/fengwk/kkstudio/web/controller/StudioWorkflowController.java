@@ -11,11 +11,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.core.studio.service.StudioDtoMapper;
-import fun.fengwk.kkstudio.core.studio.service.StudioNotImplementedException;
 import fun.fengwk.kkstudio.share.model.studio.WorkflowDocumentDTO;
+import fun.fengwk.kkstudio.studio.StudioFeatureNotReadyException;
 import fun.fengwk.kkstudio.studio.workflow.WorkflowCommandService;
 import fun.fengwk.kkstudio.studio.workflow.WorkflowQueryService;
+import fun.fengwk.kkstudio.web.studio.StudioWebMapper;
 
 import java.util.List;
 import java.util.Map;
@@ -33,7 +33,7 @@ public class StudioWorkflowController {
   @GetMapping
   public List<WorkflowDocumentDTO> list(@RequestParam("workspaceId") long workspaceId) {
     return workflowQueryService.listDocuments(workspaceId).stream()
-        .map(StudioDtoMapper::toDto)
+        .map(StudioWebMapper::toDto)
         .collect(Collectors.toList());
   }
 
@@ -41,7 +41,7 @@ public class StudioWorkflowController {
   public ResponseEntity<WorkflowDocumentDTO> get(@PathVariable("workflowId") long workflowId) {
     return workflowQueryService
         .findDocument(workflowId)
-        .map(StudioDtoMapper::toDto)
+        .map(StudioWebMapper::toDto)
         .map(ResponseEntity::ok)
         .orElseGet(() -> ResponseEntity.notFound().build());
   }
@@ -52,9 +52,9 @@ public class StudioWorkflowController {
       long workspaceId = Long.parseLong(body.get("workspaceId"));
       String name = body.getOrDefault("name", "Untitled Workflow");
       WorkflowDocumentDTO dto =
-          StudioDtoMapper.toDto(workflowCommandService.createWorkflow(workspaceId, name));
+          StudioWebMapper.toDto(workflowCommandService.createWorkflow(workspaceId, name));
       return ResponseEntity.status(HttpStatus.CREATED).body(dto);
-    } catch (StudioNotImplementedException ex) {
+    } catch (StudioFeatureNotReadyException ex) {
       return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).body(ex.getMessage());
     }
   }

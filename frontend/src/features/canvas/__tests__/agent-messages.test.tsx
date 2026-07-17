@@ -7,6 +7,7 @@ import type { AgentRunNode } from '@/features/canvas/types'
 const baseRun: AgentRunNode = {
   id: 'run',
   type: 'run',
+  domainKind: 'FUNCTION',
   x: 0,
   y: 0,
   width: 280,

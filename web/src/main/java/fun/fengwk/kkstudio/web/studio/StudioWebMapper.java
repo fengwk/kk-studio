@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.core.studio.service;
+package fun.fengwk.kkstudio.web.studio;
 
 import fun.fengwk.kkstudio.share.model.studio.CanvasDocumentDTO;
 import fun.fengwk.kkstudio.share.model.studio.CanvasLinkDTO;
@@ -19,10 +19,10 @@ import fun.fengwk.kkstudio.studio.workflow.WorkflowDocument;
 
 import java.util.stream.Collectors;
 
-/** Maps studio domain objects to share DTOs. */
-public final class StudioDtoMapper {
+/** Web-layer mapper from studio domain objects to share DTOs. */
+public final class StudioWebMapper {
 
-  private StudioDtoMapper() {}
+  private StudioWebMapper() {}
 
   public static CanvasDocumentDTO toDto(CanvasDocument document) {
     CanvasDocumentDTO dto = new CanvasDocumentDTO();
@@ -40,11 +40,11 @@ public final class StudioDtoMapper {
     CanvasSnapshotDTO dto = new CanvasSnapshotDTO();
     dto.setDocument(toDto(snapshot.document()));
     dto.setNodes(
-        snapshot.nodes().stream().map(StudioDtoMapper::toDto).collect(Collectors.toList()));
+        snapshot.nodes().stream().map(StudioWebMapper::toDto).collect(Collectors.toList()));
     dto.setLinks(
-        snapshot.links().stream().map(StudioDtoMapper::toDto).collect(Collectors.toList()));
+        snapshot.links().stream().map(StudioWebMapper::toDto).collect(Collectors.toList()));
     dto.setReferences(
-        snapshot.references().stream().map(StudioDtoMapper::toDto).collect(Collectors.toList()));
+        snapshot.references().stream().map(StudioWebMapper::toDto).collect(Collectors.toList()));
     return dto;
   }
 
