@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { hasActiveRun } from '@/features/ai/session-events'
 import { loadRunEventHistory, mergeRunEventLists } from '@/features/ai/harness-run-event-stream'
@@ -5,6 +6,8 @@ import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
 import type { HarnessRunDTO, RunEventDTO } from '@/shared/api/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
+
+const TERMINAL_RUN_STATUSES = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED'])
 
 export function useAgentSessionQueries(sessionId: string) {
   const queryClient = useQueryClient()
@@ -21,11 +24,6 @@ export function useAgentSessionQueries(sessionId: string) {
     queryFn: () => harnessService.getSession(sessionId),
     enabled: Boolean(sessionId),
   })
-  const entriesQuery = useQuery({
-    queryKey: queryKeys.sessions.entries(sessionId),
-    queryFn: () => harnessService.listEntries(sessionId),
-    enabled: Boolean(sessionId),
-  })
   const runsQuery = useQuery({
     queryKey: queryKeys.sessions.runs(sessionId),
     queryFn: () => harnessService.listRuns(sessionId),
@@ -38,6 +36,15 @@ export function useAgentSessionQueries(sessionId: string) {
   const latestRun = runs.at(-1)
   const activeRun = runs.find((run) => ['QUEUED', 'RUNNING', 'WAITING_TOOLS'].includes(run.status))
   const eventRunId = latestRun?.runId ?? ''
+
+  // Poll entries while a run is active so assistant rows appear even if SSE never connected.
+  const entriesQuery = useQuery({
+    queryKey: queryKeys.sessions.entries(sessionId),
+    queryFn: () => harnessService.listEntries(sessionId),
+    enabled: Boolean(sessionId),
+    refetchInterval: activeRun ? 1000 : false,
+  })
+
   const runEventsQuery = useQuery({
     queryKey: queryKeys.runs.events(eventRunId),
     queryFn: async () => {
@@ -52,6 +59,14 @@ export function useAgentSessionQueries(sessionId: string) {
     },
     enabled: Boolean(eventRunId),
   })
+
+  // Terminal runs without live SSE still need a final entries refresh for durable ASSISTANT rows.
+  useEffect(() => {
+    if (!sessionId || !latestRun || !TERMINAL_RUN_STATUSES.has(latestRun.status)) {
+      return
+    }
+    void queryClient.invalidateQueries({ queryKey: queryKeys.sessions.entries(sessionId) })
+  }, [latestRun, queryClient, sessionId])
 
   return {
     agentsQuery,
