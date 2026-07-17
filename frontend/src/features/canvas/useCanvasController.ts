@@ -6,6 +6,7 @@ import {
   getActiveGenerator,
   getContextDescription,
 } from '@/features/canvas/reducer'
+import { useCanvasKeyboard } from '@/features/canvas/useCanvasKeyboard'
 import type {
   AddMenuAction,
   AgentContextMode,
@@ -382,102 +383,31 @@ export function useCanvasController() {
     dispatch({ type: 'focus-agent-prompt' })
   }, [])
 
-  const handleKeyboard = useCallback((event: KeyboardEvent) => {
-    const target = event.target as HTMLElement | null
-    const isTyping = Boolean(
-      target
-      && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable),
-    )
-    const isButton = Boolean(target?.closest?.('button'))
-    const modifier = event.metaKey || event.ctrlKey
+  const clearSelection = useCallback(() => {
+    dispatch({ type: 'clear-selection' })
+  }, [])
 
-    if (modifier && event.key.toLowerCase() === 'k') {
-      if (state.view !== 'editor') {
-        return
-      }
-      event.preventDefault()
-      if (state.helpOpen) {
-        setHelpOpen(false, undefined, false)
-      }
-      if (state.researchOpen) {
-        setResearchOpen(false, undefined, false)
-      }
-      dispatch({ type: 'focus-agent-prompt' })
-      return
-    }
+  const deleteSelection = useCallback(() => {
+    dispatch({ type: 'delete-selection' })
+  }, [])
 
-    if (event.key === 'Escape') {
-      if (state.helpOpen) {
-        setHelpOpen(false)
-      } else if (state.researchOpen) {
-        setResearchOpen(false)
-      } else if (state.activeGeneratorId) {
-        closeGenerator(true)
-      } else if (state.addMenuOpen) {
-        closeAddMenu(true)
-      } else if (state.threadOpen) {
-        collapseThread()
-      } else if (state.view === 'editor') {
-        dispatch({ type: 'clear-selection' })
-        stageElementRef.current?.focus({ preventScroll: true })
-      }
-      return
-    }
-
-    if (state.view !== 'editor') {
-      return
-    }
-
-    const deleteKey = event.key === 'Delete' || event.key === 'Backspace'
-    if (deleteKey && !isTyping) {
-      event.preventDefault()
-      dispatch({ type: 'delete-selection' })
-      return
-    }
-
-    if (isTyping || isButton || state.helpOpen || state.researchOpen) {
-      return
-    }
-
-    if (event.key === '0') {
-      event.preventDefault()
-      fitViewRef.current?.()
-    } else if (event.key === '1') {
-      event.preventDefault()
-      zoomRef.current?.(1)
-    } else if (event.key.toLowerCase() === 'f') {
-      event.preventDefault()
-      focusSelectionRef.current?.()
-    } else if (event.key.toLowerCase() === 'v') {
-      event.preventDefault()
-      setTool('select')
-    } else if (event.key.toLowerCase() === 'h') {
-      event.preventDefault()
-      setTool('hand')
-    } else if (event.key.toLowerCase() === 't') {
-      event.preventDefault()
-      createTextNode()
-    }
-  }, [
-    closeAddMenu,
-    closeGenerator,
-    collapseThread,
-    createTextNode,
+  useCanvasKeyboard({
+    state,
+    stageElementRef,
+    fitViewRef,
+    focusSelectionRef,
+    zoomRef,
     setHelpOpen,
     setResearchOpen,
+    closeGenerator,
+    closeAddMenu,
+    collapseThread,
+    clearSelection,
+    deleteSelection,
+    focusAgentPrompt: focusAgentDock,
     setTool,
-    state.activeGeneratorId,
-    state.addMenuOpen,
-    state.helpOpen,
-    state.researchOpen,
-    state.threadOpen,
-    state.view,
-  ])
-
-  useEffect(() => {
-    window.addEventListener('keydown', handleKeyboard)
-    return () => window.removeEventListener('keydown', handleKeyboard)
-  }, [handleKeyboard])
+    createTextNode,
+  })
 
   return useMemo(() => ({
     state,
