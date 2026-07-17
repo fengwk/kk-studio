@@ -260,6 +260,76 @@ class EnvironmentDaemonGatewayTest {
     assertFalse(messageTypes(connection.envelopes()).contains(DaemonMessageType.INVOKE));
   }
 
+  /** Frozen NON_IDEMPOTENT recovery wins before a concurrent cancellation request. */
+  @Test
+  void prioritizesRecoveredNonIdempotentOverCancellation() {
+    Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT, true);
+    ToolInvocation cancelled = withStatus(fixture.invocation, ToolInvocationStatus.RUNNING);
+    ClaimedToolInvocation claimed = new ClaimedToolInvocation(cancelled, true);
+    when(fixture.invocationStore.claimDue(eq(ENVIRONMENT_ID), anyString(), eq(NOW), any()))
+        .thenReturn(Optional.of(claimed));
+    FakeConnection connection = new FakeConnection("connection-recovered-cancelled");
+    fixture.gateway.open(connection);
+    fixture.gateway.receive(connection.connectionId(), hello(0));
+    fixture.gateway.receive(connection.connectionId(), capabilities(1, fixture.capabilitiesJson));
+    fixture.gateway.receive(connection.connectionId(), ready(2));
+
+    verify(fixture.transactions)
+        .terminate(
+            eq(claimed),
+            eq(ToolInvocationStatus.UNKNOWN),
+            any(ToolResult.class),
+            eq("non-idempotent invocation lease expired"),
+            eq(NOW));
+    assertFalse(messageTypes(connection.envelopes()).contains(DaemonMessageType.INVOKE));
+  }
+
+  /** Frozen NON_IDEMPOTENT recovery wins before deadline evaluation. */
+  @Test
+  void prioritizesRecoveredNonIdempotentOverDeadline() {
+    Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT, true);
+    ToolInvocation expired = withDeadline(fixture.invocation, NOW.minusMillis(1));
+    ClaimedToolInvocation claimed = new ClaimedToolInvocation(expired, true);
+    when(fixture.invocationStore.claimDue(eq(ENVIRONMENT_ID), anyString(), eq(NOW), any()))
+        .thenReturn(Optional.of(claimed));
+    FakeConnection connection = new FakeConnection("connection-recovered-expired");
+    fixture.gateway.open(connection);
+    fixture.gateway.receive(connection.connectionId(), hello(0));
+    fixture.gateway.receive(connection.connectionId(), capabilities(1, fixture.capabilitiesJson));
+    fixture.gateway.receive(connection.connectionId(), ready(2));
+
+    verify(fixture.transactions)
+        .terminate(
+            eq(claimed),
+            eq(ToolInvocationStatus.UNKNOWN),
+            any(ToolResult.class),
+            eq("non-idempotent invocation lease expired"),
+            eq(NOW));
+    assertFalse(messageTypes(connection.envelopes()).contains(DaemonMessageType.INVOKE));
+  }
+
+  /** Frozen NON_IDEMPOTENT recovery wins before current Environment descriptor resolution. */
+  @Test
+  void prioritizesRecoveredNonIdempotentOverDescriptorAvailability() {
+    Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT, true);
+    when(fixture.environmentRepository.getById(ENVIRONMENT_ID)).thenReturn(null);
+    FakeConnection connection = new FakeConnection("connection-recovered-unavailable");
+    fixture.gateway.open(connection);
+    fixture.gateway.receive(connection.connectionId(), hello(0));
+    fixture.gateway.receive(connection.connectionId(), capabilities(1, fixture.capabilitiesJson));
+    fixture.gateway.receive(connection.connectionId(), ready(2));
+
+    verify(fixture.transactions)
+        .terminate(
+            eq(fixture.claimed),
+            eq(ToolInvocationStatus.UNKNOWN),
+            any(ToolResult.class),
+            eq("non-idempotent invocation lease expired"),
+            eq(NOW));
+    verify(fixture.environmentRepository, never()).getById(ENVIRONMENT_ID);
+    assertFalse(messageTypes(connection.envelopes()).contains(DaemonMessageType.INVOKE));
+  }
+
   /**
    * STARTED replay and HEARTBEAT are transport facts; FAILED is converted to one durable terminal.
    */

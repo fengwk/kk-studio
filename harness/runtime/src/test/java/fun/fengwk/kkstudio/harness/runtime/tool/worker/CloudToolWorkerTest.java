@@ -301,12 +301,9 @@ class CloudToolWorkerTest {
         fixture, ToolInvocationStatus.UNKNOWN, "non-idempotent invocation lease expired");
   }
 
-  /**
-   * Recovery fails when the currently registered same-name/version/target descriptor has drifted
-   * sideEffect away from the frozen invocation value; the drifted tool is never executed.
-   */
+  /** Frozen NON_IDEMPOTENT recovery wins before current registry descriptor validation. */
   @Test
-  void rejectsRecoveredInvocationWhenRegisteredSideEffectDrifted() throws Exception {
+  void prioritizesRecoveredNonIdempotentOverDescriptorDrift() throws Exception {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
     fixture.store.recovered = true;
     // Freeze NON_IDEMPOTENT on the durable invocation while registry now advertises READ_ONLY.
@@ -318,41 +315,41 @@ class CloudToolWorkerTest {
 
     assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
     assertEquals(0, fixture.tool.executions);
-    assertEquals(ToolInvocationStatus.FAILED, fixture.transactions.status);
-    assertTrue(fixture.transactions.errorMessage.contains("unavailable"));
+    assertEquals(ToolInvocationStatus.UNKNOWN, fixture.transactions.status);
+    assertToolCompletion(
+        fixture, ToolInvocationStatus.UNKNOWN, "non-idempotent invocation lease expired");
   }
 
-  /**
-   * Lease recovery uses the frozen invocation sideEffect even if the registry descriptor still
-   * matches name/version/target but would have advertised a safer class.
-   */
+  /** Frozen NON_IDEMPOTENT recovery wins before a concurrent cancellation request. */
   @Test
-  void usesFrozenSideEffectForRecoveredNonIdempotentDecision() throws Exception {
+  void prioritizesRecoveredNonIdempotentOverCancellation() throws Exception {
     Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT, NOW.plusSeconds(30));
     fixture.store.recovered = true;
-    // Registry now advertises READ_ONLY for the same identity; frozen NON_IDEMPOTENT still wins.
-    fixture.registry =
-        (name, version) ->
-            Optional.of(
-                new RecordingTool(
-                    new ToolDescriptor(
-                        "tool",
-                        "1",
-                        "test tool",
-                        null,
-                        new ToolParamsSchema("input", Map.of(), Set.of(), false),
-                        ToolExecutionMode.CLOUD,
-                        ToolSideEffect.READ_ONLY,
-                        Duration.ofSeconds(5))));
+    fixture.store.current = copyWithCancel(fixture.store.current, NOW);
     fixture.rebuildWorker();
 
     fixture.worker.executeNext("worker-a");
 
     assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
     assertEquals(0, fixture.tool.executions);
-    // Drifted sideEffect fails descriptor matching before recovery decision.
-    assertEquals(ToolInvocationStatus.FAILED, fixture.transactions.status);
-    assertTrue(fixture.transactions.errorMessage.contains("unavailable"));
+    assertEquals(ToolInvocationStatus.UNKNOWN, fixture.transactions.status);
+    assertToolCompletion(
+        fixture, ToolInvocationStatus.UNKNOWN, "non-idempotent invocation lease expired");
+  }
+
+  /** Frozen NON_IDEMPOTENT recovery wins before deadline evaluation. */
+  @Test
+  void prioritizesRecoveredNonIdempotentOverDeadline() throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT, NOW.minusMillis(1));
+    fixture.store.recovered = true;
+
+    fixture.worker.executeNext("worker-a");
+
+    assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
+    assertEquals(0, fixture.tool.executions);
+    assertEquals(ToolInvocationStatus.UNKNOWN, fixture.transactions.status);
+    assertToolCompletion(
+        fixture, ToolInvocationStatus.UNKNOWN, "non-idempotent invocation lease expired");
   }
 
   /** Deadline owns the terminal race and asks the best-effort in-memory handle to cancel. */

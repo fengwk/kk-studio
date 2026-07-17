@@ -125,6 +125,17 @@ public final class CloudToolWorker {
       fail(claimed, "Tool worker cannot execute target " + invocation.targetType() + ".");
       return;
     }
+    // A reclaimed non-idempotent call may already have produced an external side effect. UNKNOWN
+    // must win over cancellation, deadline, and current registry drift checks.
+    if (claimed.recoveredLease() && invocation.sideEffect() == ToolSideEffect.NON_IDEMPOTENT) {
+      terminate(
+          claimed,
+          ToolInvocationStatus.UNKNOWN,
+          ToolResult.error(
+              invocation.toolCallId(), "Tool ownership was lost; side effect result is unknown."),
+          "non-idempotent invocation lease expired");
+      return;
+    }
     if (invocation.cancelRequestedAt() != null
         || invocation.status() == ToolInvocationStatus.CANCEL_REQUESTED) {
       terminate(
@@ -150,17 +161,6 @@ public final class CloudToolWorker {
       return;
     }
     Tool tool = resolved.get();
-    // Lease recovery decisions use the side-effect frozen on the durable invocation, not a
-    // freshly resolved registry descriptor that may have drifted.
-    if (claimed.recoveredLease() && invocation.sideEffect() == ToolSideEffect.NON_IDEMPOTENT) {
-      terminate(
-          claimed,
-          ToolInvocationStatus.UNKNOWN,
-          ToolResult.error(
-              invocation.toolCallId(), "Tool ownership was lost; side effect result is unknown."),
-          "non-idempotent invocation lease expired");
-      return;
-    }
     if (!transactions.start(claimed, clock.instant())) {
       return;
     }
