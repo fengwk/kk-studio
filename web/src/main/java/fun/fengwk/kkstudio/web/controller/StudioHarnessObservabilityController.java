@@ -1,19 +1,11 @@
 package fun.fengwk.kkstudio.web.controller;
 
 import static fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits.normalizeLimit;
-import static fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits.parseOptionalCursor;
 import static fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits.requireNonNegativeCursor;
+import static fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits.resolveResumeCursor;
 
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
-import fun.fengwk.kkstudio.core.harness.observability.service.HarnessObservabilityQueryService;
-import fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.Artifact;
-import fun.fengwk.kkstudio.share.model.RootActivityDTO;
-import fun.fengwk.kkstudio.share.model.RunEventDTO;
-import fun.fengwk.kkstudio.share.model.SubagentTaskDTO;
-import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
-import java.util.List;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -29,10 +21,19 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import fun.fengwk.kkstudio.core.harness.observability.service.HarnessObservabilityQueryService;
+import fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.Artifact;
+import fun.fengwk.kkstudio.share.model.RootActivityDTO;
+import fun.fengwk.kkstudio.share.model.RunEventDTO;
+import fun.fengwk.kkstudio.share.model.SubagentTaskDTO;
+import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
+
+import java.util.List;
+
 /**
- * T15 harness observability endpoints. Strict 400 vs 404 semantics are enforced by inspecting the
- * originating {@link IllegalArgumentException} message; the legacy /api/agent/** surface remains
- * untouched.
+ * Harness observability endpoints. Strict 400 vs 404 semantics are enforced by inspecting the
+ * originating {@link IllegalArgumentException} message.
  */
 @RestController
 @RequestMapping("/api")
@@ -70,8 +71,7 @@ public class StudioHarnessObservabilityController {
       @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId,
       @RequestParam(value = "idleTimeoutMillis", required = false) Long idleTimeoutMillis) {
     try {
-      long cursor =
-          parseOptionalCursor(resumeOrLastEventId(afterSequence, lastEventId), "afterSequence");
+      long cursor = resolveResumeCursor(afterSequence, lastEventId, "afterSequence");
       return sseEmitter.openRunStream(id, cursor, idleTimeoutMillis);
     } catch (IllegalArgumentException error) {
       throw translate(error);
@@ -102,8 +102,7 @@ public class StudioHarnessObservabilityController {
       @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId,
       @RequestParam(value = "idleTimeoutMillis", required = false) Long idleTimeoutMillis) {
     try {
-      long cursor =
-          parseOptionalCursor(resumeOrLastEventId(afterEventId, lastEventId), "afterEventId");
+      long cursor = resolveResumeCursor(afterEventId, lastEventId, "afterEventId");
       return sseEmitter.openRootActivityStream(id, cursor, idleTimeoutMillis);
     } catch (IllegalArgumentException error) {
       throw translate(error);
@@ -166,10 +165,6 @@ public class StudioHarnessObservabilityController {
     } catch (InvalidMediaTypeException ignored) {
       return MediaType.APPLICATION_OCTET_STREAM;
     }
-  }
-
-  private static String resumeOrLastEventId(String queryValue, String lastEventId) {
-    return queryValue != null && !queryValue.isBlank() ? queryValue : lastEventId;
   }
 
   private static RuntimeException translate(IllegalArgumentException error) {

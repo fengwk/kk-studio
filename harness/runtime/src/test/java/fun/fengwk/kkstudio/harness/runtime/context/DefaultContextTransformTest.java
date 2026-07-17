@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.harness.runtime.context;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
@@ -14,9 +16,9 @@ import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolsetChangeEntryPayload;
+
 import java.time.Instant;
 import java.util.List;
-import org.junit.jupiter.api.Test;
 
 class DefaultContextTransformTest {
   private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");

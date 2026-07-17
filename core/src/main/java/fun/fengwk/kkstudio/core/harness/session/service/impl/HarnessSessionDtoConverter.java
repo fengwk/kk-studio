@@ -1,11 +1,12 @@
 package fun.fengwk.kkstudio.core.harness.session.service.impl;
 
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionEntryDO;
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.share.model.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
-import org.springframework.stereotype.Component;
 
 /** Maps harness session / entry persistence rows to share DTOs. */
 @Component

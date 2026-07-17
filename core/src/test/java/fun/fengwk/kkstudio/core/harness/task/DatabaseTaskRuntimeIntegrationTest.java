@@ -5,6 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
+import org.springframework.jdbc.core.JdbcTemplate;
+
 import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.harness.control.service.HarnessRunAbortService;
 import fun.fengwk.kkstudio.core.harness.run.store.SnowflakeRunIdGenerator;
@@ -33,6 +42,7 @@ import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
+
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -48,14 +58,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Primary;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 /** H2 durability coverage for the task aggregate and its root activity projection. */
 @SpringBootTest(
@@ -771,10 +773,11 @@ class DatabaseTaskRuntimeIntegrationTest {
     jdbc.update(
         "insert into tool_invocation (id, run_id, assistant_entry_id, ordinal, tool_call_id,"
             + " tool_name, tool_version, target_type, environment_id, arguments_json, status,"
-            + " permission_action, permission_decision, deadline_at, lease_owner, lease_until,"
-            + " cancel_requested_at, result_json, error_message, gmt_create, started_at,"
-            + " finished_at, gmt_modified) values (?, ?, ?, ?, ?, 'task', '1', 'CONTROL', null,"
-            + " '{}', 'RUNNING', 'NONE', null, ?, null, null, null, null, null, ?, null, null, ?)",
+            + " permission_action, permission_decision, side_effect, deadline_at, lease_owner,"
+            + " lease_until, cancel_requested_at, result_json, error_message, gmt_create,"
+            + " started_at, finished_at, gmt_modified) values (?, ?, ?, ?, ?, 'task', '1',"
+            + " 'CONTROL', null, '{}', 'RUNNING', 'NONE', null, 'IDEMPOTENT', ?, null, null, null,"
+            + " null, null, ?, null, null, ?)",
         id,
         runId,
         assistantEntryId,
@@ -919,10 +922,11 @@ class DatabaseTaskRuntimeIntegrationTest {
     jdbc.update(
         "insert into tool_invocation (id, run_id, assistant_entry_id, ordinal, tool_call_id,"
             + " tool_name, tool_version, target_type, environment_id, arguments_json, status,"
-            + " permission_action, permission_decision, deadline_at, lease_owner, lease_until,"
-            + " cancel_requested_at, result_json, error_message, gmt_create, started_at,"
-            + " finished_at, gmt_modified) values (?, ?, ?, ?, ?, 'read', '1', 'CLOUD', null, '{}',"
-            + " 'SUCCEEDED', 'NONE', null, ?, null, null, null, ?, null, ?, ?, ?, ?)",
+            + " permission_action, permission_decision, side_effect, deadline_at, lease_owner,"
+            + " lease_until, cancel_requested_at, result_json, error_message, gmt_create,"
+            + " started_at, finished_at, gmt_modified) values (?, ?, ?, ?, ?, 'read', '1', 'CLOUD',"
+            + " null, '{}', 'SUCCEEDED', 'NONE', null, 'READ_ONLY', ?, null, null, null, ?, null,"
+            + " ?, ?, ?, ?)",
         id,
         runId,
         longValue("select trigger_entry_id from harness_run where id = ?", runId),

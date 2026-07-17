@@ -7,17 +7,19 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import fun.fengwk.kkstudio.core.storage.configuration.S3StorageProperties;
-import fun.fengwk.kkstudio.share.model.S3PresignedResponseDTO;
-import java.net.URI;
-import java.time.Instant;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+
+import fun.fengwk.kkstudio.core.storage.configuration.S3StorageProperties;
+import fun.fengwk.kkstudio.share.model.S3PresignedResponseDTO;
+
+import java.net.URI;
+import java.time.Instant;
+import java.util.Map;
 
 /**
  * {@link S3PresignService} 单元测试.

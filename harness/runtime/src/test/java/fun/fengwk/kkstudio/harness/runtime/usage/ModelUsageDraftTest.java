@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
@@ -22,10 +24,10 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
-import org.junit.jupiter.api.Test;
 
 class ModelUsageDraftTest {
   private static final ModelUsage USAGE = new ModelUsage(1, 2, 3, 4, 5, 6, 21);

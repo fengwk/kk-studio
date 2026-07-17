@@ -2,6 +2,14 @@ package fun.fengwk.kkstudio.web.controller;
 
 import static fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits.requireNonNegativeCursor;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Component;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
 import fun.fengwk.kkstudio.core.harness.observability.service.HarnessObservabilityQueryService;
 import fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits;
 import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
@@ -9,16 +17,13 @@ import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMappe
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.share.model.RootActivityDTO;
 import fun.fengwk.kkstudio.share.model.RunEventDTO;
+
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.stereotype.Component;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
  * Reusable database-backed SSE runtime for Run event and Root activity streams.
@@ -65,8 +70,8 @@ public class StudioHarnessObservabilitySseEmitter {
     long idle = normalizeIdleTimeoutMillis(idleTimeoutMillis);
     SseEmitter emitter = new SseEmitter(EMITTER_TIMEOUT_MILLIS);
     AtomicBoolean active = registerCallbacks(emitter);
-    eventStreamTaskExecutor.execute(
-        () -> emitRunEvents(parsedRunId, afterSequence, idle, emitter, active));
+    submitStream(
+        () -> emitRunEvents(parsedRunId, afterSequence, idle, emitter, active), emitter, "run");
     return emitter;
   }
 
@@ -82,11 +87,23 @@ public class StudioHarnessObservabilitySseEmitter {
     long idle = normalizeIdleTimeoutMillis(idleTimeoutMillis);
     SseEmitter emitter = new SseEmitter(EMITTER_TIMEOUT_MILLIS);
     AtomicBoolean active = registerCallbacks(emitter);
-    eventStreamTaskExecutor.execute(
+    submitStream(
         () ->
-            emitRootActivities(
-                parsedSessionId, rootSessionId, afterEventId, idle, emitter, active));
+            emitRootActivities(parsedSessionId, rootSessionId, afterEventId, idle, emitter, active),
+        emitter,
+        "root activity");
     return emitter;
+  }
+
+  private void submitStream(Runnable task, SseEmitter emitter, String streamKind) {
+    try {
+      eventStreamTaskExecutor.execute(task);
+    } catch (RejectedExecutionException error) {
+      // Fail the HTTP request promptly; do not leave the client with an open but inert SSE body.
+      emitter.complete();
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE, streamKind + " event stream capacity exceeded", error);
+    }
   }
 
   private static long normalizeIdleTimeoutMillis(Long idleTimeoutMillis) {

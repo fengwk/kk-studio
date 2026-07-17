@@ -6,8 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.util.Locale;
 import org.junit.jupiter.api.Test;
+
+import java.util.Locale;
 
 /**
  * {@link ComfyuiWorkflowApiBindingsParser} 的输入合同校验测试。

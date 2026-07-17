@@ -2,11 +2,12 @@ package fun.fengwk.kkstudio.core.agent.definition.service.converter;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.AllArgsConstructor;
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionDTO;
-import lombok.AllArgsConstructor;
-import org.springframework.stereotype.Component;
 
 /** Converts global Agent definitions to public DTOs. */
 @AllArgsConstructor

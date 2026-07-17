@@ -1,9 +1,11 @@
 package fun.fengwk.kkstudio.core.harness.tool.service;
 
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionYoloResolver;
+
 import java.util.Objects;
-import org.springframework.stereotype.Component;
 
 /** Root Session 创建时从全局 settings 继承 defaultYolo。 */
 @Component

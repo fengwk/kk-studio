@@ -7,6 +7,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
@@ -19,11 +22,10 @@ import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecord;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecordStore;
 import fun.fengwk.kkstudio.share.model.ModelUsageCostSummaryDTO;
 import fun.fengwk.kkstudio.share.model.ModelUsageSummaryDTO;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 
 class ModelUsageAggregationServiceImplTest {
 

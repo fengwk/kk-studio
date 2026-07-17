@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.harness.agent;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -17,12 +19,12 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import org.junit.jupiter.api.Test;
 
 /** Agent Turn 输入边界测试。 */
 class AgentTurnRequestTest {

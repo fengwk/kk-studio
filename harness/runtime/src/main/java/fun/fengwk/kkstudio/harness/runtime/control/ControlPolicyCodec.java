@@ -7,10 +7,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 /**
  * 严格解码 execution policy JSON 中由本切片关心的 control 字段。
  *
- * <p>输入必须为 JSON object；其它字段（如 maxTurns/maxDepth）一律忽略，只对
- * {@code steeringMode} 与 {@code followUpMode} 做严格解析。两字段缺失或为 null
- * 都视为默认 {@link ControlConsumptionMode#ONE_AT_A_TIME}；只接受字面量字符串
- * {@code ONE_AT_A_TIME} 或 {@code ALL}，其余类型或值明确报错。
+ * <p>输入必须为 JSON object；其它字段（如 maxTurns/maxDepth）一律忽略，只对 {@code steeringMode} 与 {@code followUpMode}
+ * 做严格解析。两字段缺失或为 null 都视为默认 {@link ControlConsumptionMode#ONE_AT_A_TIME}；只接受字面量字符串 {@code
+ * ONE_AT_A_TIME} 或 {@code ALL}，其余类型或值明确报错。
  */
 public final class ControlPolicyCodec {
 
@@ -49,10 +48,7 @@ public final class ControlPolicyCodec {
       return ControlConsumptionMode.valueOf(text);
     } catch (IllegalArgumentException exception) {
       throw new IllegalArgumentException(
-          "execution policy."
-              + field
-              + " must be one of ONE_AT_A_TIME/ALL but was: "
-              + text,
+          "execution policy." + field + " must be one of ONE_AT_A_TIME/ALL but was: " + text,
           exception);
     }
   }

@@ -9,6 +9,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+
 import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.harness.control.store.MysqlRunControlMessageStore;
 import fun.fengwk.kkstudio.core.harness.control.store.SnowflakeRunControlIdGenerator;
@@ -39,17 +45,13 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshotEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * Database-level abort contracts for durable controls, terminal repair and transaction rollback.

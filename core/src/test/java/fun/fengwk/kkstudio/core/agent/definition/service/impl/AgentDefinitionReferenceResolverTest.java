@@ -4,10 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.model.repo.AgentModelRepository;
-import org.junit.jupiter.api.Test;
 
 /** Missing and duplicate global Agent references fail before persistence changes. */
 public class AgentDefinitionReferenceResolverTest {

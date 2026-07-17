@@ -3,10 +3,13 @@ package fun.fengwk.kkstudio.core.agent.model.runtime;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -14,7 +17,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import org.springframework.stereotype.Component;
 
 /** Strictly parses the executable portion of persisted Agent model JSON. */
 @Component

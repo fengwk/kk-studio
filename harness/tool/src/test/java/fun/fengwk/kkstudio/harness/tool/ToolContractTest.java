@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.harness.tool;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
@@ -10,11 +12,11 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolArraySchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
+
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import org.junit.jupiter.api.Test;
 
 /** Tool schema、执行与 Daemon wire 契约测试。 */
 class ToolContractTest {

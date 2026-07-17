@@ -7,12 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.convention4j.api.page.PageQuery;
-import fun.fengwk.kkstudio.share.model.AgentProviderType;
-import fun.fengwk.kkstudio.core.CoreTestApplication;
-import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+
+import fun.fengwk.kkstudio.core.CoreTestApplication;
+import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.share.model.AgentProviderType;
 
 /** Global provider repository contract. */
 @SpringBootTest(classes = CoreTestApplication.class)

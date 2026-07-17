@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.task;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -15,6 +16,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
+
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
@@ -34,6 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * thread ever waits for child execution.
  */
 public final class TaskTool implements Tool {
+  private static final System.Logger LOGGER = System.getLogger(TaskTool.class.getName());
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   public static final Duration DEFAULT_POLL_INTERVAL = Duration.ofSeconds(1);
   private static final ToolDescriptor DESCRIPTOR =
@@ -98,12 +101,21 @@ public final class TaskTool implements Tool {
       if (inspection.terminal()) {
         complete(handle, inspection.report());
       } else {
-        handle.future =
-            scheduler.scheduleWithFixedDelay(
-                () -> inspect(handle),
-                pollInterval.toMillis(),
-                pollInterval.toMillis(),
-                TimeUnit.MILLISECONDS);
+        try {
+          ScheduledFuture<?> future =
+              scheduler.scheduleWithFixedDelay(
+                  () -> inspect(handle),
+                  pollInterval.toMillis(),
+                  pollInterval.toMillis(),
+                  TimeUnit.MILLISECONDS);
+          handle.future = future;
+          if (handle.cancelled.get() || handle.completed.get()) {
+            cancelFuture(handle);
+          }
+        } catch (RuntimeException scheduleError) {
+          // Durable child is already running; without a poll schedule the parent would orphan it.
+          failAfterDurableChild(handle, scheduleError);
+        }
       }
     } catch (RuntimeException error) {
       if (handle.completed.compareAndSet(false, true)) {
@@ -114,7 +126,7 @@ public final class TaskTool implements Tool {
   }
 
   private void inspect(Handle handle) {
-    if (handle.completed.get()) {
+    if (handle.cancelled.get() || handle.completed.get()) {
       return;
     }
     try {
@@ -124,11 +136,34 @@ public final class TaskTool implements Tool {
         complete(handle, inspection.report());
       }
     } catch (RuntimeException error) {
-      if (handle.completed.compareAndSet(false, true)) {
-        cancelFuture(handle);
-        handle.listener.onComplete(ToolResult.error(handle.request.call().id(), message(error)));
-      }
+      // Transient inspect failures must not terminalize the parent while the durable child may
+      // still be running; keep the poll schedule and recover on a later tick.
+      LOGGER.log(
+          System.Logger.Level.WARNING,
+          () ->
+              "TaskTool inspect failed for invocation "
+                  + handle.request.context().invocationId()
+                  + "; will retry",
+          error);
     }
+  }
+
+  private void failAfterDurableChild(Handle handle, RuntimeException error) {
+    if (!handle.completed.compareAndSet(false, true)) {
+      return;
+    }
+    cancelFuture(handle);
+    try {
+      runtime.cancelTree(handle.request.context().invocationId(), clock.instant());
+    } catch (RuntimeException cancelError) {
+      LOGGER.log(
+          System.Logger.Level.WARNING,
+          () ->
+              "TaskTool failed to cancel durable child after scheduler rejection for invocation "
+                  + handle.request.context().invocationId(),
+          cancelError);
+    }
+    handle.listener.onComplete(ToolResult.error(handle.request.call().id(), message(error)));
   }
 
   private void complete(Handle handle, TaskReport report) {
@@ -152,6 +187,7 @@ public final class TaskTool implements Tool {
     ScheduledFuture<?> future = handle.future;
     if (future != null) {
       future.cancel(false);
+      handle.future = null;
     }
   }
 

@@ -1,9 +1,6 @@
 package fun.fengwk.kkstudio.core.harness.control.store.mapper;
 
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
-import fun.fengwk.kkstudio.core.harness.control.store.model.HarnessRunControlMessageDO;
-import java.time.LocalDateTime;
-import java.util.List;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -12,6 +9,11 @@ import org.apache.ibatis.annotations.ResultMap;
 import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
+
+import fun.fengwk.kkstudio.core.harness.control.store.model.HarnessRunControlMessageDO;
+
+import java.time.LocalDateTime;
+import java.util.List;
 
 /** harness_run_control_message 行级 MyBatis 映射；状态 CAS 全部以 {@code status='PENDING'} 为前置条件。 */
 @Mapper

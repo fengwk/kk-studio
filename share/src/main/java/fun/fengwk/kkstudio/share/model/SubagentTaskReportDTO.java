@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.share.model;
 
-import java.util.List;
 import lombok.Data;
+
+import java.util.List;
 
 /** Structured terminal child report; all durable bigint identifiers are JSON strings. */
 @Data

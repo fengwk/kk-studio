@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.core.environment.gateway;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.springframework.stereotype.Service;
+
 import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
 import fun.fengwk.kkstudio.core.environment.service.ToolEnvironmentCapabilityApplicationService;
 import fun.fengwk.kkstudio.core.environment.service.ToolEnvironmentIds;
@@ -32,6 +34,7 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Clock;
@@ -45,7 +48,6 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
-import org.springframework.stereotype.Service;
 
 /**
  * Connection-local Daemon v1 protocol handling and durable Environment invocation dispatch.
@@ -375,6 +377,17 @@ public class EnvironmentDaemonGateway {
         return;
       }
       ToolInvocation invocation = claimed.invocation();
+      // A reclaimed non-idempotent call may already have changed the Environment. UNKNOWN must
+      // win over cancellation, deadline, and current capability/descriptor checks.
+      if (claimed.recoveredLease() && invocation.sideEffect() == ToolSideEffect.NON_IDEMPOTENT) {
+        String message = "Tool ownership was lost; side effect result is unknown.";
+        complete(
+            new ActiveInvocation(claimed, null, state.connection.connectionId()),
+            ToolInvocationStatus.UNKNOWN,
+            ToolResult.error(invocation.toolCallId(), message),
+            "non-idempotent invocation lease expired");
+        return;
+      }
       if (invocation.status() == ToolInvocationStatus.CANCEL_REQUESTED
           || invocation.cancelRequestedAt() != null) {
         complete(
@@ -404,16 +417,6 @@ public class EnvironmentDaemonGateway {
             ToolInvocationStatus.FAILED,
             ToolResult.error(invocation.toolCallId(), message),
             message);
-        return;
-      }
-      if (claimed.recoveredLease()
-          && binding.descriptor().sideEffect() == ToolSideEffect.NON_IDEMPOTENT) {
-        String message = "Tool ownership was lost; side effect result is unknown.";
-        complete(
-            new ActiveInvocation(claimed, binding, state.connection.connectionId()),
-            ToolInvocationStatus.UNKNOWN,
-            ToolResult.error(invocation.toolCallId(), message),
-            "non-idempotent invocation lease expired");
         return;
       }
       if (!transactions.start(claimed, now)) {
@@ -478,6 +481,13 @@ public class EnvironmentDaemonGateway {
     if (descriptor.executionMode() != ToolExecutionMode.ENVIRONMENT) {
       throw new IllegalArgumentException(
           "Environment capability must use ENVIRONMENT execution mode");
+    }
+    if (descriptor.sideEffect() != invocation.sideEffect()) {
+      throw new IllegalArgumentException(
+          "Environment capability sideEffect does not match frozen invocation: "
+              + invocation.toolName()
+              + "@"
+              + invocation.toolVersion());
     }
     return new ToolBinding(descriptor, ToolTargetType.ENVIRONMENT, environmentId);
   }

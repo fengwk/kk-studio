@@ -1,10 +1,5 @@
 package fun.fengwk.kkstudio.core.storage.configuration;
 
-import fun.fengwk.kkstudio.core.storage.S3PresignService;
-import fun.fengwk.kkstudio.core.storage.S3PresignServiceImpl;
-import fun.fengwk.kkstudio.core.storage.S3StorageService;
-import fun.fengwk.kkstudio.core.storage.S3StorageServiceImpl;
-import java.net.URI;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -18,6 +13,13 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+
+import fun.fengwk.kkstudio.core.storage.S3PresignService;
+import fun.fengwk.kkstudio.core.storage.S3PresignServiceImpl;
+import fun.fengwk.kkstudio.core.storage.S3StorageService;
+import fun.fengwk.kkstudio.core.storage.S3StorageServiceImpl;
+
+import java.net.URI;
 
 /**
  * S3 存储配置.

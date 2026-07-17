@@ -10,7 +10,8 @@ public class ControlPolicyTest {
 
   @Test
   public void modeForReturnsSteeringOrFollowUp() {
-    ControlPolicy policy = new ControlPolicy(ControlConsumptionMode.ALL, ControlConsumptionMode.ALL);
+    ControlPolicy policy =
+        new ControlPolicy(ControlConsumptionMode.ALL, ControlConsumptionMode.ALL);
     assertEquals(ControlConsumptionMode.ALL, policy.modeFor(RunControlKind.STEER));
     assertEquals(ControlConsumptionMode.ALL, policy.modeFor(RunControlKind.FOLLOW_UP));
   }

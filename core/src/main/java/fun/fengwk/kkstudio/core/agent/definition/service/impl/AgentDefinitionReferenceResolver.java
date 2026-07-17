@@ -1,11 +1,12 @@
 package fun.fengwk.kkstudio.core.agent.definition.service.impl;
 
+import lombok.AllArgsConstructor;
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
-import lombok.AllArgsConstructor;
-import org.springframework.stereotype.Component;
 
 /** Resolves global Agent definition and model references. */
 @AllArgsConstructor

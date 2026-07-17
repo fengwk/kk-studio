@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderVideoBlock;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;

@@ -1,9 +1,11 @@
 package fun.fengwk.kkstudio.core.harness.run.service;
 
-import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunEventMapper;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import fun.fengwk.kkstudio.core.harness.run.store.HarnessRunEventWriter;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
-import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunEventDO;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionEntryMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
@@ -16,7 +18,6 @@ import fun.fengwk.kkstudio.harness.runtime.control.RunControlKind;
 import fun.fengwk.kkstudio.harness.runtime.control.RunControlMessage;
 import fun.fengwk.kkstudio.harness.runtime.control.RunControlMessageStore;
 import fun.fengwk.kkstudio.harness.runtime.run.AgentRun;
-import fun.fengwk.kkstudio.harness.runtime.run.RunEvent;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventPayloads;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
@@ -39,6 +40,7 @@ import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecord;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecordIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecordStore;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
+
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -49,17 +51,15 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class HarnessRunTransactionService implements RunTransactions {
   private final HarnessRunMapper runMapper;
-  private final HarnessRunEventMapper eventMapper;
   private final HarnessSessionMapper sessionMapper;
   private final HarnessSessionEntryMapper entryMapper;
   private final ToolInvocationMapper invocationMapper;
   private final RunIdGenerator idGenerator;
+  private final HarnessRunEventWriter eventWriter;
   private final ModelUsageRecordStore usageRecordStore;
   private final ModelUsageRecordIdGenerator usageRecordIdGenerator;
   private final ToolPreparationService toolPreparationService;
@@ -69,22 +69,22 @@ public class HarnessRunTransactionService implements RunTransactions {
 
   public HarnessRunTransactionService(
       HarnessRunMapper runMapper,
-      HarnessRunEventMapper eventMapper,
       HarnessSessionMapper sessionMapper,
       HarnessSessionEntryMapper entryMapper,
       ToolInvocationMapper invocationMapper,
       RunIdGenerator idGenerator,
+      HarnessRunEventWriter eventWriter,
       ModelUsageRecordStore usageRecordStore,
       ModelUsageRecordIdGenerator usageRecordIdGenerator,
       ToolPreparationService toolPreparationService,
       ToolPolicyResolver policyResolver,
       RunControlMessageStore controlStore) {
     this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
-    this.eventMapper = Objects.requireNonNull(eventMapper, "eventMapper");
     this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
     this.entryMapper = Objects.requireNonNull(entryMapper, "entryMapper");
     this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
+    this.eventWriter = Objects.requireNonNull(eventWriter, "eventWriter");
     this.usageRecordStore = Objects.requireNonNull(usageRecordStore, "usageRecordStore");
     this.usageRecordIdGenerator =
         Objects.requireNonNull(usageRecordIdGenerator, "usageRecordIdGenerator");
@@ -329,11 +329,7 @@ public class HarnessRunTransactionService implements RunTransactions {
   /** 在同一事务内按序追加外部事件。 */
   @Transactional
   public void appendExternalEvents(long runId, List<RunEventDraft> events, Instant now) {
-    HarnessRunDO run = runMapper.findForUpdate(runId);
-    if (run == null) {
-      throw new IllegalArgumentException("unknown run: " + runId);
-    }
-    appendEventsInternal(run, events, now);
+    eventWriter.lockAndAppend(runId, events, now);
   }
 
   @Override
@@ -607,7 +603,8 @@ public class HarnessRunTransactionService implements RunTransactions {
         || run.getAttempt() != claimedRun.attempt()) {
       return null;
     }
-    HarnessSessionDO session = requireSessionForUpdate(claimedRun.sessionId());
+    // Run is locked; Session then Root before lower-order locks or event id allocation.
+    HarnessSessionDO session = eventWriter.lockSessionAndRoot(claimedRun.sessionId());
     if (!Objects.equals(session.getActiveRunId(), claimedRun.id())) {
       throw new IllegalStateException("session active run does not match claimed run");
     }
@@ -615,38 +612,7 @@ public class HarnessRunTransactionService implements RunTransactions {
   }
 
   private void appendEventsInternal(HarnessRunDO run, List<RunEventDraft> drafts, Instant now) {
-    List<RunEventDraft> events = List.copyOf(Objects.requireNonNull(drafts, "eventDrafts"));
-    if (events.isEmpty()) {
-      throw new IllegalArgumentException("eventDrafts must not be empty");
-    }
-    long expectedSequence = run.getEventSequence();
-    long finalSequence = Math.addExact(expectedSequence, events.size());
-    if (runMapper.updateEventSequence(run.getId(), expectedSequence, finalSequence, utc(now))
-        != 1) {
-      throw new ConcurrentModificationException("cannot allocate run event sequences");
-    }
-    long sequence = expectedSequence;
-    for (RunEventDraft draft : events) {
-      RunEvent event =
-          new RunEvent(
-              idGenerator.newRunEventId(),
-              run.getId(),
-              ++sequence,
-              draft.type(),
-              draft.payloadJson(),
-              now);
-      HarnessRunEventDO target = new HarnessRunEventDO();
-      target.setId(event.id());
-      target.setRunId(event.runId());
-      target.setSequence(event.sequence());
-      target.setEventType(event.type().value());
-      target.setPayloadJson(event.payloadJson());
-      target.setCreateTime(utc(event.createdAt()));
-      if (eventMapper.insert(target) != 1) {
-        throw new ConcurrentModificationException("cannot append run event");
-      }
-    }
-    run.setEventSequence(finalSequence);
+    eventWriter.appendLocked(run, drafts, now);
   }
 
   private long appendEntry(
@@ -756,6 +722,8 @@ public class HarnessRunTransactionService implements RunTransactions {
                   invocation.call().id(),
                   "toolName",
                   invocation.call().toolName(),
+                  "arguments",
+                  invocation.call().argumentsJson(),
                   "status",
                   invocation.initialStatus().name())));
       if (invocation.initialStatus() == ToolInvocationStatus.WAITING_APPROVAL) {
@@ -798,6 +766,7 @@ public class HarnessRunTransactionService implements RunTransactions {
     target.setArgumentsJson(source.call().argumentsJson());
     target.setStatus(source.initialStatus().name());
     target.setPermissionAction(source.permissionAction().name());
+    target.setSideEffect(source.binding().descriptor().sideEffect().name());
     target.setDeadlineAt(utc(source.deadlineAt()));
     target.setResultJson(source.resultJson());
     target.setErrorMessage(source.errorMessage());

@@ -10,8 +10,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.kkstudio.share.model.S3PresignedRequestDTO;
-import fun.fengwk.kkstudio.web.WebTestApplication;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -19,6 +17,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+
+import fun.fengwk.kkstudio.share.model.S3PresignedRequestDTO;
+import fun.fengwk.kkstudio.web.WebTestApplication;
 
 /**
  * {@link StudioS3PresignController} 端到端测试.

@@ -2,13 +2,15 @@ package fun.fengwk.kkstudio.core.comfyui.workflow_api.service.impl;
 
 import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextComfyuiWorkflowApiId;
 
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.model.ComfyuiWorkflowApi;
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiBindingsParser;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiCreateDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiUpdateDTO;
+
 import java.util.regex.Pattern;
-import org.springframework.stereotype.Component;
 
 /**
  * ComfyuiWorkflowApi 写路径的入参校验、标准化与实体组装。

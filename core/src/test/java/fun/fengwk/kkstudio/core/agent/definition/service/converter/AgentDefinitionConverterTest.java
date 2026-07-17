@@ -4,8 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import org.junit.jupiter.api.Test;
+
+import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 
 /** Stored Agent configuration is either decoded losslessly or rejected. */
 public class AgentDefinitionConverterTest {

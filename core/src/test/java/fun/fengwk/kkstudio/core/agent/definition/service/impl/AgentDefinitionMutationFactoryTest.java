@@ -4,15 +4,17 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
+
 import java.util.Arrays;
 import java.util.List;
-import org.junit.jupiter.api.Test;
 
 /** Structured definition config is normalized before it is stored. */
 public class AgentDefinitionMutationFactoryTest {
@@ -138,8 +140,7 @@ public class AgentDefinitionMutationFactoryTest {
     badSteeringCreate.setName("agent");
     badSteeringCreate.setConfig(badSteeringConfig);
     IllegalArgumentException steeringException =
-        assertThrows(
-            IllegalArgumentException.class, () -> factory.newAgent(2L, badSteeringCreate));
+        assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, badSteeringCreate));
     assertEquals(
         "executionPolicy.steeringMode must be one of ONE_AT_A_TIME/ALL but was: WHENEVER",
         steeringException.getMessage());
@@ -152,8 +153,7 @@ public class AgentDefinitionMutationFactoryTest {
     badFollowUpCreate.setName("agent");
     badFollowUpCreate.setConfig(badFollowUpConfig);
     IllegalArgumentException followUpException =
-        assertThrows(
-            IllegalArgumentException.class, () -> factory.newAgent(2L, badFollowUpCreate));
+        assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, badFollowUpCreate));
     assertEquals(
         "executionPolicy.followUpMode must be one of ONE_AT_A_TIME/ALL but was: WHENEVER",
         followUpException.getMessage());

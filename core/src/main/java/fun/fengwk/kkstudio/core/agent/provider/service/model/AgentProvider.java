@@ -1,8 +1,10 @@
 package fun.fengwk.kkstudio.core.agent.provider.service.model;
 
-import fun.fengwk.kkstudio.share.model.AgentProviderType;
-import java.time.LocalDateTime;
 import lombok.Data;
+
+import fun.fengwk.kkstudio.share.model.AgentProviderType;
+
+import java.time.LocalDateTime;
 
 /** Global Agent provider resource. */
 @Data

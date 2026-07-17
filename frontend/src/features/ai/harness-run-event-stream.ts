@@ -28,3 +28,20 @@ export function mergeRunEvent(events: RunEventDTO[], event: RunEventDTO): RunEve
 export function mergeRunEventLists(base: RunEventDTO[], incoming: RunEventDTO[]): RunEventDTO[] {
   return incoming.reduce(mergeRunEvent, base)
 }
+
+export async function loadRunEventHistory(
+  fetchPage: (afterSequence: number, limit: number) => Promise<RunEventDTO[]>,
+  pageSize = 200,
+): Promise<RunEventDTO[]> {
+  let events: RunEventDTO[] = []
+  let cursor = 0
+  while (true) {
+    const page = await fetchPage(cursor, pageSize)
+    events = mergeRunEventLists(events, page)
+    const nextCursor = page.reduce((maximum, event) => Math.max(maximum, event.sequence), cursor)
+    if (page.length < pageSize || nextCursor <= cursor) {
+      return events
+    }
+    cursor = nextCursor
+  }
+}

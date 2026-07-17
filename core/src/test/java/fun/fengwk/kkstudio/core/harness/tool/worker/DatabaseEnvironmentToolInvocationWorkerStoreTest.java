@@ -11,6 +11,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
 import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
@@ -19,10 +21,11 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ClaimedToolInvocation;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
-import org.junit.jupiter.api.Test;
 
 /** Unit contracts for Environment-specific contention, validation, and lease predicates. */
 class DatabaseEnvironmentToolInvocationWorkerStoreTest {
@@ -139,6 +142,7 @@ class DatabaseEnvironmentToolInvocationWorkerStoreTest {
         ToolInvocationStatus.RUNNING,
         PermissionAction.ALLOW,
         null,
+        ToolSideEffect.READ_ONLY,
         NOW.plusSeconds(60),
         "worker",
         NOW.plusSeconds(30),

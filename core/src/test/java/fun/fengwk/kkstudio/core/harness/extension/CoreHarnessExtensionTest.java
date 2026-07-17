@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
@@ -37,6 +39,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -44,7 +47,6 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import org.junit.jupiter.api.Test;
 
 class CoreHarnessExtensionTest {
   private static final Path ROOT = Path.of("/tmp/core-harness-extension");

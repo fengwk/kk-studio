@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.core.environment.service.model;
 
-import java.time.LocalDateTime;
 import lombok.Data;
+
+import java.time.LocalDateTime;
 
 /** Global Environment (Daemon) registry row. */
 @Data

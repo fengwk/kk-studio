@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -14,12 +16,12 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.junit.jupiter.api.Test;
 
 /** 关注：andThen 返回新不可变 chain 且原 chain 不变；null 必失败；顺序严格保持（所有原 hooks 先执行，最后追加项执行）。 */
 class ProviderRequestInterceptorChainAndThenTest {

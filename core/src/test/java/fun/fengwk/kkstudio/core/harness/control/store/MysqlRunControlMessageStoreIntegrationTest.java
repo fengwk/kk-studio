@@ -6,6 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
+
 import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.harness.runtime.control.ControlConsumptionMode;
 import fun.fengwk.kkstudio.harness.runtime.control.RunControlIdGenerator;
@@ -15,19 +22,15 @@ import fun.fengwk.kkstudio.harness.runtime.control.RunControlStatus;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
- * 真实 H2 schema 上的端到端覆盖：独立 ID namespace、nullable originalRunId、insert/find、按 kind/run/session 隔离、id asc 排序、
- * markConsumed/Promoted/Cleared 的 CAS 幂等性、clearPendingByRun 批量回写，以及 schema 没有 workspace/tenant 列的断言。
+ * 真实 H2 schema 上的端到端覆盖：独立 ID namespace、nullable originalRunId、insert/find、按 kind/run/session 隔离、id
+ * asc 排序、 markConsumed/Promoted/Cleared 的 CAS 幂等性、clearPendingByRun 批量回写，以及 schema 没有
+ * workspace/tenant 列的断言。
  */
 @SpringBootTest(classes = CoreTestApplication.class)
 class MysqlRunControlMessageStoreIntegrationTest {
@@ -133,7 +136,8 @@ class MysqlRunControlMessageStoreIntegrationTest {
     assertFalse(byRunSteer.contains(third));
     assertFalse(byRunFollowUp.contains(first));
 
-    // session=11 PENDING 包含 first, second, third, otherRunSteer, followUpAgain（不含 otherSessionSteer 因为 session=12）
+    // session=11 PENDING 包含 first, second, third, otherRunSteer, followUpAgain（不含 otherSessionSteer
+    // 因为 session=12）
     List<Long> bySession = ids(store.listPendingBySession(11L));
     assertEquals(List.of(first, second, third, otherRunSteer, followUpAgain), bySession);
     assertEquals(List.of(otherSessionSteer), ids(store.listPendingBySession(12L)));
@@ -345,8 +349,7 @@ class MysqlRunControlMessageStoreIntegrationTest {
                         99L,
                         NOW,
                         NOW.plusSeconds(1))));
-    assertEquals(
-        "control insert only accepts PENDING but was CONSUMED", exception.getMessage());
+    assertEquals("control insert only accepts PENDING but was CONSUMED", exception.getMessage());
   }
 
   private long insertPending(long sessionId, Long originalRunId, RunControlKind kind) {

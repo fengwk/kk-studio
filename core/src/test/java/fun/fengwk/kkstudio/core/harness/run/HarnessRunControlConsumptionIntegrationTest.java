@@ -9,6 +9,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+
 import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.harness.control.store.MysqlRunControlMessageStore;
 import fun.fengwk.kkstudio.core.harness.control.store.SnowflakeRunControlIdGenerator;
@@ -49,6 +55,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+
 import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -57,11 +64,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 @SpringBootTest(classes = CoreTestApplication.class)
 class HarnessRunControlConsumptionIntegrationTest {

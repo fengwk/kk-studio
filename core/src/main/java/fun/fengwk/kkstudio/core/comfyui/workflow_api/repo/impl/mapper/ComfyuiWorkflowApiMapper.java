@@ -1,8 +1,6 @@
 package fun.fengwk.kkstudio.core.comfyui.workflow_api.repo.impl.mapper;
 
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
-import fun.fengwk.kkstudio.core.comfyui.workflow_api.repo.impl.model.ComfyuiWorkflowApiDO;
-import java.util.List;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
@@ -12,6 +10,10 @@ import org.apache.ibatis.annotations.ResultMap;
 import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
+
+import fun.fengwk.kkstudio.core.comfyui.workflow_api.repo.impl.model.ComfyuiWorkflowApiDO;
+
+import java.util.List;
 
 /**
  * @author fengwk

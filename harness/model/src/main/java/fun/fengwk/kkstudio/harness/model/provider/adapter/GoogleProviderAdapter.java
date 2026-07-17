@@ -2,10 +2,12 @@ package fun.fengwk.kkstudio.harness.model.provider.adapter;
 
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.googleai.GoogleAiGeminiStreamingChatModel;
+
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+
 import java.util.Objects;
 
 /** Google Gemini Provider adapter。 */

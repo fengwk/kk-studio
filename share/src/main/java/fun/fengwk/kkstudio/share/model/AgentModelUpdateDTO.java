@@ -8,5 +8,4 @@ import lombok.EqualsAndHashCode;
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
-public class AgentModelUpdateDTO extends AgentModelEditablePropertiesDTO {
-}
+public class AgentModelUpdateDTO extends AgentModelEditablePropertiesDTO {}
