@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { CanvasAgentDock } from '@/features/canvas/CanvasAgentDock'
 import { CanvasGenerationWorkbench } from '@/features/canvas/CanvasGenerationWorkbench'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
+import { CANVAS_THEME } from '@/features/canvas/canvas-theme'
 import { MAX_ZOOM, MIN_ZOOM } from '@/features/canvas/data'
 import { computeSelectionToolbarPosition, selectionBounds, viewportsEqual } from '@/features/canvas/geometry'
 import { extractPositionUpdates } from '@/features/canvas/node-position-changes'
@@ -243,8 +244,8 @@ function StageInner() {
             variant={BackgroundVariant.Dots}
             gap={18}
             size={0.75}
-            color="#252927"
-            bgColor="#0d0f0e"
+            color={CANVAS_THEME.stageDot}
+            bgColor={CANVAS_THEME.stageBg}
           />
           <MiniMap
             className="canvas-minimap"
@@ -252,7 +253,7 @@ function StageInner() {
             zoomable
             ariaLabel="画布小地图"
             maskColor="rgba(13,15,14,0.55)"
-            nodeColor="#5d6762"
+            nodeColor={CANVAS_THEME.minimapNode}
             style={{ width: 120, height: 78 }}
           />
         </ReactFlow>

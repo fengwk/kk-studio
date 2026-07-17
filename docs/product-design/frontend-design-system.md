@@ -7,7 +7,7 @@
 | 视觉事实源 | 无限画布产品原型（`docs/product-design/infinite-canvas-prototype/`） |
 | 实现入口 | `frontend/src/styles.css` 的 `:root` token |
 | 工程分层 | `app` / `platform` / `features/*` / `shared` |
-| 当前状态 | **基础层已统一，组件层未完全统一** |
+| 当前状态 | **Token / Shell / CSS 业务色已统一；React 原语库按需延后** |
 
 相关文档：
 
@@ -24,29 +24,34 @@
 | 全局 token | 已落地 | `:root` 以 Canvas 色板为唯一色值来源 |
 | AppShell | 已统一 | 取消 `app-frame-ai` / `app-frame-canvas` 双视觉分叉 |
 | Brand / Topnav / Avatar | 已统一 | 全站 K mark、下划线导航、统一 avatar |
-| Canvas 色板 | 已收敛 | `canvas.css` 不再维护独立 token 表 |
+| CSS 业务硬编码色 | 已清零 | `styles.css` 业务规则与 `canvas.css` 不再含裸 hex |
+| Canvas 色板 | 已收敛 | `canvas.css` 只消费全局 token |
 | Canvas Agent 面板结构 | 已模块化 | Dock / Thread / Composer / 分型消息 |
+| Canvas 快捷键 | 已拆分 | `useCanvasKeyboard` 独立于主 controller |
 
-### 1.2 未完全统一（真实缺口）
+### 1.2 仍可改进（非阻塞）
 
 | 层 | 状态 | 说明 |
 | --- | --- | --- |
-| AI 组件表面 | 部分 | 多数已吃 token，但仍有硬编码旧色（如 `#d4d4d8`、`#fca5a5`、`#fcd34d`） |
-| Canvas 组件表面 | 部分 | 大量组件仍直接写 hex，未全部映射到 token |
-| 组件原语库 | 未建立 | 尚无统一 `Button` / `Input` / `Card` / `Modal` React 原语 |
-| 间距与圆角阶梯 | 部分 | token 有 radius；spacing scale 尚未 token 化 |
-| 图标体系 | 部分 | Shell/AI 用 `lucide-react`，Canvas 局部仍用手写 SVG |
+| 组件原语库 | 未建立 | 尚无统一 `Button` / `Input` / `Card` / `Modal` React 原语；**当前不急**，AI 与 Canvas class 复用已够用 |
+| 间距阶梯 token | 部分 | radius 已 token 化；spacing scale 可按需补 |
+| 图标体系 | 部分 | Shell/AI 用 `lucide-react`，Canvas Dock 保留精确 SVG |
+| `useCanvasController` | 可继续拆 | 已抽键盘；timer/dialog focus 可再拆，但收益递减 |
+| `reducer.ts` | 可按域拆 | 体量大但边界清晰；无强制拆文件必要 |
+| AI/Canvas 共享 Agent UI | 延后 | 数据契约不同，等 Canvas 接真实 Session 再抽 platform 层 |
 
-**结论：前端还不是“样式已全统一”的完成态。** 当前完成的是：
+**结论：CSS 层视觉 token 已统一；模块化以“够用即止”。** 当前完成：
 
 ```text
 单一设计事实源
 + 全局 token
 + 统一外壳
-+ Canvas Agent 面板模块化结构
++ CSS 业务规则零裸 hex
++ Canvas Agent 面板模块化
++ Canvas 快捷键拆分
 ```
 
-下一阶段必须把组件层硬编码色值清零，并沉淀共享 UI 原语。
+后续仅在真实复用痛点出现时再抽 React 原语库与共享 Agent UI。
 
 ## 2. 设计原则
 
@@ -388,28 +393,38 @@ frontend/src
 | Canvas 交互 | 既有 page / smoke / focus 回归 |
 | 样式重构 | lint + test + build 全过 |
 
-## 9. 迁移清单（组件层统一）
+## 9. 迁移清单与模块化审查
 
-按优先级推进：
+### 9.1 视觉迁移
 
-1. **清零 `styles.css` 非 token 硬编码色**
-   将残留 zinc/red/yellow hex 映射到 `--fg*` / `--danger` / `--orange` 等。
-2. **清零 `canvas.css` 组件硬编码色**
-   composer、template card、节点装饰色等改为 token 或少量语义扩展 token。
-3. **补齐 spacing token**
-   例如 `--space-1` … `--space-7`，替换魔法数字。
-4. **沉淀最小原语**（确有复用后再做）
-   `Button` / `IconButton` / `TextField` / `SurfaceCard` / `ModalFrame`。
-5. **Agent UI 共享层评估**
-   当 Canvas 接入真实 Harness Session 后，再抽取共享 transcript/composer adapter。
+| 项 | 状态 |
+| --- | --- |
+| `styles.css` 业务规则裸 hex | 已完成 |
+| `canvas.css` 裸 hex | 已完成 |
+| React Flow 等需字符串色值的 API | 通过 `canvas-theme.ts` 镜像 token |
+| spacing token 化 | 可选后续 |
 
 完成判据：
 
 ```text
+# 业务 CSS 中不应再出现裸 hex（:root 定义除外）
 rg "#[0-9a-fA-F]{3,8}" frontend/src/styles.css frontend/src/features/**/*.css
 ```
 
-除 `:root` token 定义行与不可避免的位图/第三方覆盖外，业务样式硬编码色值趋近于 0。
+### 9.2 模块化审查结论（KISS）
+
+| 模块 | 结论 | 动作 |
+| --- | --- | --- |
+| AI Chat / 资源 / ComfyUI | 已充分模块化 | 保持，不重拆 |
+| Canvas Agent 面板 | 已按 pi/Chat 分型 | 保持 |
+| `useCanvasKeyboard` | 边界清晰 | **已拆出** |
+| `useCanvasController` 剩余 | timer/dialog/refs 内聚 | 暂不继续拆 |
+| `reducer.ts` | 单一状态机可读 | 暂不拆 |
+| `CanvasStage` | RF 投影边界正确 | 保持 |
+| 共享 React 原语库 | 无强复用痛点 | **现在不做** |
+| platform Agent UI | 契约未统一 | **等 Session 接入再做** |
+
+原则：只有当文件职责混杂、测试困难或跨 feature 复制时才继续拆；不为“看起来更模块”而拆。
 
 ## 10. 当前实现索引
 
@@ -420,6 +435,8 @@ rg "#[0-9a-fA-F]{3,8}" frontend/src/styles.css frontend/src/features/**/*.css
 | AI Chat 模块 | `frontend/src/features/ai/ChatPanel.tsx` 等 |
 | Canvas 样式 | `frontend/src/features/canvas/canvas.css` |
 | Canvas Agent 面板 | `frontend/src/features/canvas/agent/**` |
+| Canvas 快捷键 | `frontend/src/features/canvas/useCanvasKeyboard.ts` |
+| Canvas JS 主题镜像 | `frontend/src/features/canvas/canvas-theme.ts` |
 | 设计原型 | `docs/product-design/infinite-canvas-prototype/` |
 
 ## 11. 维护规则
