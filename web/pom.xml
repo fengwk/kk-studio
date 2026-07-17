@@ -15,9 +15,23 @@
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-core</artifactId>
         </dependency>
-<dependency>
+        <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-share</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-model</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-tool</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.convention4j</groupId>
@@ -52,7 +66,7 @@
                         </goals>
                     </execution>
                 </executions>
-</plugin>
+            </plugin>
             <plugin>
                 <groupId>com.diffplug.spotless</groupId>
                 <artifactId>spotless-maven-plugin</artifactId>
