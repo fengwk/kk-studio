@@ -48,4 +48,18 @@ public final class ObservabilityLimits {
     }
     return parsed;
   }
+
+  /**
+   * Resolve the resume cursor for native EventSource reconnects.
+   *
+   * <p>The browser keeps the original query cursor on automatic reconnect and additionally supplies
+   * {@code Last-Event-ID}. Taking the maximum of both valid non-negative decimals never rewinds
+   * progress back to the original query value. Values stay decimal strings until this Java long
+   * parse so Root Activity snowflake IDs are not coerced through JavaScript numbers.
+   */
+  public static long resolveResumeCursor(String queryValue, String lastEventId, String field) {
+    long fromQuery = parseOptionalCursor(queryValue, field);
+    long fromHeader = parseOptionalCursor(lastEventId, field);
+    return Math.max(fromQuery, fromHeader);
+  }
 }

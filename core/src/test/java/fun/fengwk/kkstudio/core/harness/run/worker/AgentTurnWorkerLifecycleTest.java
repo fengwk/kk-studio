@@ -125,6 +125,73 @@ class AgentTurnWorkerLifecycleTest {
     lifecycle.stop();
   }
 
+  /**
+   * A normally completed handle is released on the next poll so the lifecycle can claim again
+   * without waiting for heartbeat lease loss.
+   */
+  @Test
+  void releasesCompletedTurnOnPollWithoutHeartbeatFailure() {
+    AgentTurnWorker worker = mock(AgentTurnWorker.class);
+    ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
+    doReturn(mock(ScheduledFuture.class))
+        .when(scheduler)
+        .scheduleWithFixedDelay(any(Runnable.class), eq(0L), anyLong(), eq(TimeUnit.MILLISECONDS));
+    doReturn(mock(ScheduledFuture.class))
+        .when(scheduler)
+        .scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), eq(TimeUnit.MILLISECONDS));
+    RecordingHandle first = new RecordingHandle();
+    RecordingHandle second = new RecordingHandle();
+    ClaimedTurn firstTurn = new ClaimedTurn(run(), first);
+    ClaimedTurn secondTurn = new ClaimedTurn(run(), second);
+    when(worker.executeNext("worker-test-turn"))
+        .thenReturn(Optional.of(firstTurn))
+        .thenReturn(Optional.of(secondTurn));
+    AgentTurnWorkerLifecycle lifecycle = lifecycle(worker, scheduler);
+
+    lifecycle.start();
+    lifecycle.pollOnce();
+    verify(worker, times(1)).executeNext("worker-test-turn");
+
+    // Still running: poll must not claim another turn.
+    lifecycle.pollOnce();
+    verify(worker, times(1)).executeNext("worker-test-turn");
+
+    first.done = true;
+    lifecycle.pollOnce();
+    verify(worker, times(2)).executeNext("worker-test-turn");
+    assertFalse(first.cancelled);
+    assertFalse(second.cancelled);
+
+    lifecycle.stop();
+    assertTrue(second.cancelled);
+  }
+
+  /** Heartbeat also releases a completed turn without canceling it. */
+  @Test
+  void heartbeatReleasesCompletedTurnWithoutCancel() {
+    AgentTurnWorker worker = mock(AgentTurnWorker.class);
+    ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
+    doReturn(mock(ScheduledFuture.class))
+        .when(scheduler)
+        .scheduleWithFixedDelay(any(Runnable.class), eq(0L), anyLong(), eq(TimeUnit.MILLISECONDS));
+    doReturn(mock(ScheduledFuture.class))
+        .when(scheduler)
+        .scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), eq(TimeUnit.MILLISECONDS));
+    RecordingHandle handle = new RecordingHandle();
+    ClaimedTurn turn = new ClaimedTurn(run(), handle);
+    when(worker.executeNext("worker-test-turn")).thenReturn(Optional.of(turn));
+    AgentTurnWorkerLifecycle lifecycle = lifecycle(worker, scheduler);
+
+    lifecycle.start();
+    lifecycle.pollOnce();
+    handle.done = true;
+    lifecycle.heartbeatOnce();
+    assertFalse(handle.cancelled);
+    lifecycle.pollOnce();
+    verify(worker, times(2)).executeNext("worker-test-turn");
+    lifecycle.stop();
+  }
+
   /** Partial scheduler startup is rolled back and asynchronous stop always invokes its callback. */
   @Test
   void rollsBackSchedulerStartFailureAndInvokesStopCallback() {
@@ -178,15 +245,22 @@ class AgentTurnWorkerLifecycleTest {
 
   private static final class RecordingHandle implements AgentTurnHandle {
     private boolean cancelled;
+    private boolean done;
 
     @Override
     public void cancel() {
       cancelled = true;
+      done = true;
     }
 
     @Override
     public boolean isCancelled() {
       return cancelled;
+    }
+
+    @Override
+    public boolean isDone() {
+      return done;
     }
   }
 }

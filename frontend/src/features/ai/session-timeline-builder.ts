@@ -23,20 +23,33 @@ export function buildSessionTimeline(entries: HarnessSessionEntryDTO[], runEvent
   const runtimeContext: RuntimeContext = {}
   const activeTools = new Map<string, ToolDialogueMessage>()
   const activeAssistants = new Map<string, StreamingAssistant>()
+  // How many assistant completion cycles already have a durable Entry for each run. Only that many
+  // completed overlays are skipped; unmaterialized completions stay visible as done bubbles.
+  const remainingMaterializedAssistants = countDurableAssistantsByRun(entries)
+  const suppressedRuns = new Set<string>()
 
   for (const entry of entries) {
     projectDurableEntry(entry, messages, runtimeContext)
   }
 
-  const lastMaterializedAssistant = runEvents.map((event) => event.type).lastIndexOf('assistant_completed')
-  for (const event of runEvents.slice(lastMaterializedAssistant + 1)) {
+  for (const event of runEvents) {
     const payload = parsePayload(event.payloadJson)
 
     switch (event.type) {
-      case 'assistant_started':
+      case 'assistant_started': {
+        if ((remainingMaterializedAssistants.get(event.runId) ?? 0) > 0) {
+          suppressedRuns.add(event.runId)
+          activeAssistants.delete(event.runId)
+          break
+        }
+        suppressedRuns.delete(event.runId)
         activeAssistants.set(event.runId, newStreamingAssistant(event))
         break
+      }
       case 'assistant_delta_batch': {
+        if (suppressedRuns.has(event.runId)) {
+          break
+        }
         const state = activeAssistants.get(event.runId) ?? newStreamingAssistant(event)
         for (const delta of getRecordList(payload.deltas)) {
           const kind = getString(delta.kind)
@@ -49,9 +62,36 @@ export function buildSessionTimeline(entries: HarnessSessionEntryDTO[], runEvent
         activeAssistants.set(event.runId, state)
         break
       }
+      case 'assistant_completed': {
+        if ((remainingMaterializedAssistants.get(event.runId) ?? 0) > 0) {
+          remainingMaterializedAssistants.set(
+            event.runId,
+            (remainingMaterializedAssistants.get(event.runId) ?? 1) - 1,
+          )
+          suppressedRuns.delete(event.runId)
+          activeAssistants.delete(event.runId)
+          break
+        }
+        // Entry refetch has not landed yet: keep the streamed assistant and mark it done.
+        completeStreamingAssistant(activeAssistants.get(event.runId), messages, event, '')
+        activeAssistants.delete(event.runId)
+        suppressedRuns.delete(event.runId)
+        break
+      }
       case 'assistant_failed':
+        if (suppressedRuns.has(event.runId) && (remainingMaterializedAssistants.get(event.runId) ?? 0) > 0) {
+          // A failed attempt that already has a durable assistant should not re-project.
+          remainingMaterializedAssistants.set(
+            event.runId,
+            (remainingMaterializedAssistants.get(event.runId) ?? 1) - 1,
+          )
+          suppressedRuns.delete(event.runId)
+          activeAssistants.delete(event.runId)
+          break
+        }
         completeStreamingAssistant(activeAssistants.get(event.runId), messages, event, getString(payload.message))
         activeAssistants.delete(event.runId)
+        suppressedRuns.delete(event.runId)
         break
       case 'tool_prepared':
         prepareStreamingTool(activeTools, messages, event, payload)
@@ -77,6 +117,22 @@ export function buildSessionTimeline(entries: HarnessSessionEntryDTO[], runEvent
   }
 
   return { messages, runtimeContext }
+}
+
+function countDurableAssistantsByRun(entries: HarnessSessionEntryDTO[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const entry of entries) {
+    if (entry.entryType !== 'message' || !entry.runId) {
+      continue
+    }
+    const payload = parsePayload(entry.payloadJson)
+    const message = asRecord(payload.message)
+    if (getString(message.role) !== 'ASSISTANT') {
+      continue
+    }
+    counts.set(entry.runId, (counts.get(entry.runId) ?? 0) + 1)
+  }
+  return counts
 }
 
 function projectDurableEntry(entry: HarnessSessionEntryDTO, messages: DialogueMessage[], runtimeContext: RuntimeContext) {

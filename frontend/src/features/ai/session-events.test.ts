@@ -49,6 +49,52 @@ describe('session-events', () => {
     ])
   })
 
+  it('keeps a streamed Assistant when completion arrives before durable Entry materialization', () => {
+    const timeline = buildSessionTimeline([], [
+      runEvent('started', 'assistant_started', {}),
+      runEvent('delta', 'assistant_delta_batch', { deltas: [{ kind: 'text', text: '尚未落库' }] }),
+      runEvent('completed', 'assistant_completed', {}),
+    ])
+
+    expect(timeline.messages).toMatchObject([
+      { role: 'assistant', text: '尚未落库', status: 'done' },
+    ])
+  })
+
+  it('dedupes the streamed Assistant once the durable Entry arrives', () => {
+    const events = [
+      runEvent('started', 'assistant_started', {}),
+      runEvent('delta', 'assistant_delta_batch', { deltas: [{ kind: 'text', text: '最终回答' }] }),
+      runEvent('completed', 'assistant_completed', {}),
+    ]
+    const before = buildSessionTimeline([], events)
+    expect(before.messages).toMatchObject([{ role: 'assistant', text: '最终回答', status: 'done' }])
+
+    const after = buildSessionTimeline([
+      entry('assistant', 'message', messagePayload('ASSISTANT', [{ type: 'text', text: '最终回答' }])),
+    ], events)
+    expect(after.messages).toMatchObject([
+      { role: 'assistant', text: '最终回答', status: 'done' },
+    ])
+    expect(after.messages).toHaveLength(1)
+  })
+
+  it('keeps failed terminal run details from persisted Run Events without a live stream', () => {
+    const timeline = buildSessionTimeline([
+      entry('user', 'message', messagePayload('USER', [{ type: 'text', text: '继续' }])),
+    ], [
+      runEvent('started', 'assistant_started', {}),
+      runEvent('partial', 'assistant_delta_batch', { deltas: [{ kind: 'text', text: '半成品' }] }),
+      runEvent('failed', 'assistant_failed', { message: 'provider timeout' }),
+      runEvent('run-failed', 'run_failed', { message: 'run failed' }),
+    ])
+
+    expect(timeline.messages).toMatchObject([
+      { role: 'user', text: '继续' },
+      { role: 'assistant', text: '半成品\nprovider timeout', status: 'error' },
+    ])
+  })
+
   it('projects durable system, compaction, error and media variants while ignoring non-dialogue Entries', () => {
     const timeline = buildSessionTimeline([
       entry('compaction', 'compaction', { summary: '上下文已压缩' }),

@@ -160,10 +160,11 @@ class TaskToolTest {
   }
 
   /**
-   * Poll errors finish once and cancellation without a context remains a harmless local operation.
+   * Transient inspect failures keep polling so a still-running durable child is not orphaned; the
+   * parent completes only after a later successful terminal inspection.
    */
   @Test
-  void completesPollingErrorsAndHandlesContextlessCancellation() throws Exception {
+  void keepsPollingAfterTransientInspectFailure() throws Exception {
     RecordingRuntime runtime = new RecordingRuntime();
     runtime.inspectError = new IllegalArgumentException("inspect failed");
     TaskTool tool =
@@ -172,14 +173,58 @@ class TaskToolTest {
     RecordingListener listener = new RecordingListener();
     ToolExecutionHandle handle =
         tool.execute(request("{\"subagent_type\":\"Coder\",\"prompt\":\"x\"}"), listener);
-    assertTrue(listener.completed.await(1, TimeUnit.SECONDS));
-    assertTrue(listener.result.error());
-    assertTrue(text(listener.result).contains("inspect failed"));
 
+    assertFalse(listener.completed.await(40, TimeUnit.MILLISECONDS));
+    assertEquals(0, runtime.cancels);
+    runtime.inspectError = null;
+    runtime.terminal = true;
+    assertTrue(listener.completed.await(1, TimeUnit.SECONDS));
+    assertFalse(listener.result.error());
+    assertFalse(handle.isCancelled());
+  }
+
+  /**
+   * If the poll schedule cannot be installed after a durable child exists, cancel the tree before
+   * returning a Tool error so the child is not left ownerless.
+   */
+  @Test
+  void cancelsDurableChildWhenPollingCannotBeScheduled() {
+    RecordingRuntime runtime = new RecordingRuntime();
+    ScheduledExecutorService rejecting = Executors.newSingleThreadScheduledExecutor();
+    rejecting.shutdown();
+    try {
+      TaskTool tool =
+          new TaskTool(
+              runtime, rejecting, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), Duration.ofMillis(5));
+      RecordingListener listener = new RecordingListener();
+      ToolExecutionHandle handle =
+          tool.execute(request("{\"subagent_type\":\"Coder\",\"prompt\":\"x\"}"), listener);
+
+      assertEquals(0L, listener.completed.getCount());
+      assertTrue(listener.result.error());
+      assertTrue(text(listener.result).toLowerCase().contains("reject"));
+      assertEquals(1, runtime.cancels);
+      assertEquals(41L, runtime.cancelledInvocationId);
+      handle.cancel();
+      handle.cancel();
+      assertEquals(1, runtime.cancels);
+    } finally {
+      rejecting.shutdownNow();
+    }
+  }
+
+  /** Cancellation without a durable context remains a harmless local operation. */
+  @Test
+  void handlesContextlessCancellation() {
+    RecordingRuntime runtime = new RecordingRuntime();
+    TaskTool tool =
+        new TaskTool(
+            runtime, scheduler, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), Duration.ofMillis(5));
     ToolExecutionHandle contextless =
         tool.execute(requestWithoutContext(), new RecordingListener());
     contextless.cancel();
     assertTrue(contextless.isCancelled());
+    assertEquals(0, runtime.cancels);
   }
 
   /** Constructors reject invalid polling intervals before a scheduler can be used. */

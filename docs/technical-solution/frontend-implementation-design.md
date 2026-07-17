@@ -65,11 +65,13 @@
 | `tool_delta_batch` | 追加部分 Tool Result 文本与 artifact 引用 |
 | `tool_completed` | 标记临时工具节点完成或失败 |
 
-每次 `assistant_completed` 都已经与语义 Assistant Entry 原子持久化。投影器仅处理最后一个 `assistant_completed` 之后的 Run Event，避免 SSE 回放重复渲染已物化的 Assistant 内容。
+每次 `assistant_completed` 都已经与语义 Assistant Entry 原子持久化。投影器按该 Run 上已存在的 durable Assistant Entry 数量决定跳过多少个已物化完成周期；尚未物化的 `assistant_completed` 会把当前流式 Assistant 标记为 `done`，避免 Entry refetch 完成前气泡消失，Entry 到达后不再重复投影。
+
+页面会为最新 Run 拉取并缓存 Run Event（含终态失败细节），仅在 Run 仍处于 active 状态时打开 SSE。
 
 ### SSE cursor 恢复
 
-页面先使用 `listRunEvents` 获取快照，再用当前最大 `sequence` 打开 EventSource。收到 `run_event` 后以 sequence 去重并排序；浏览器自动重连时携带上一个 SSE event id，服务端从数据库 cursor 继续发送。终态 Event 会失效 Session、Entry、Run 与 Session 列表 query，使持久化基线重新成为唯一显示结果。
+页面先使用 `listRunEvents` 获取快照，再用当前最大 `sequence` 打开 EventSource。收到 `run_event` 后以 sequence 去重并排序；浏览器自动重连时携带上一个 SSE event id，服务端取 query cursor 与 `Last-Event-ID` 的较大者继续发送。终态 Event 会失效 Session、Entry、Run 与 Session 列表 query，使持久化基线重新成为唯一显示结果。
 
 ## Root Activity 与 Subagent Task
 

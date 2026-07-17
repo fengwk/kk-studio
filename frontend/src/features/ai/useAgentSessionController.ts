@@ -12,13 +12,24 @@ export function useAgentSessionController(sessionId: string) {
   const [draft, setDraft] = useState('')
   const bodyRef = useRef<HTMLDivElement>(null)
 
-  const { sessions, agents, session, entries, runs, activeRun: currentRun, runEvents, sessionQuery, entriesQuery, runEventsQuery } = useAgentSessionQueries(sessionId)
+  const {
+    sessions,
+    agents,
+    session,
+    entries,
+    runs,
+    activeRun: currentActiveRun,
+    runEvents,
+    sessionQuery,
+    entriesQuery,
+    runEventsQuery,
+  } = useAgentSessionQueries(sessionId)
   const createMessageMutation = useAgentSessionMessageMutation(sessionId, session?.leafEntryId ?? null, () => setDraft(''))
   const agentsById = new Map(agents.map((agent) => [String(agent.id), agent]))
   const timeline = buildSessionTimeline(entries, runEvents)
   const activeRun = hasActiveRun(runs)
   const currentAgent = session ? agentsById.get(session.agentDefinitionId) : undefined
-  const observability = useHarnessSessionObservability(sessionId, currentRun)
+  const observability = useHarnessSessionObservability(sessionId, currentActiveRun)
   const rootTaskSessionId = session && !session.parentSessionId ? sessionId : ''
   const taskTimeline = useHarnessTaskTimeline(
     rootTaskSessionId,
@@ -27,7 +38,12 @@ export function useAgentSessionController(sessionId: string) {
   const runControls = useHarnessRunControls(sessionId)
 
   useChatTranscriptAutoScroll(bodyRef, timeline.messages.length, entries.length + runEvents.length)
-  useHarnessRunEventStream(sessionId, currentRun?.runId ?? null, runEventsQuery.isSuccess)
+  // Fetch/cache covers the latest run; only open SSE while a run is still active.
+  useHarnessRunEventStream(
+    sessionId,
+    currentActiveRun?.runId ?? null,
+    Boolean(currentActiveRun) && runEventsQuery.isSuccess,
+  )
 
   function submitMessage() {
     const content = draft.trim()

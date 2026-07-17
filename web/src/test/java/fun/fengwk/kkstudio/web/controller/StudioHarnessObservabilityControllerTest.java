@@ -350,16 +350,17 @@ class StudioHarnessObservabilityControllerTest {
     assertTrue(body.contains("\"rootSessionId\":\"" + seed.rootSessionId + "\""), body);
   }
 
-  /** Query cursor takes precedence over Last-Event-ID for the Root Activity event-id cursor. */
+  /**
+   * Resume cursor is the maximum of the query value and Last-Event-ID so native EventSource
+   * reconnects never rewind to the original query cursor.
+   */
   @Test
-  void queryCursorTakesPrecedenceOverLastEventId() throws Exception {
+  void resumeCursorUsesMaximumOfQueryAndLastEventId() throws Exception {
     Seed seed = seedRun("sse-cursor");
     forceRootInactive(seed.rootSessionId);
 
-    // The SSE event id for root activity is the global harness_run_event Snowflake id; the SSE
-    // cursor value is therefore a Snowflake id, while the persisted sequence is 1, 2, ... so we
-    // capture both first and second event ids and pass the first as the cursor to demonstrate that
-    // the query parameter overrides the Last-Event-ID header.
+    // Root activity SSE ids are global harness_run_event Snowflake ids kept as decimal strings
+    // until Java long parsing.
     long firstEventId =
         jdbc.queryForObject(
             "select id from harness_run_event where run_id = ? order by sequence asc limit 1",
@@ -374,8 +375,7 @@ class StudioHarnessObservabilityControllerTest {
             seed.run.id());
     assertTrue(secondEventId > firstEventId);
 
-    // With query cursor == first event id, the stream emits only the second event. The query
-    // parameter is honoured and skips the first event whose SSE id is already acknowledged.
+    // Query cursor wins when it is larger than Last-Event-ID.
     MvcResult streamResult =
         mockMvc
             .perform(
@@ -390,15 +390,11 @@ class StudioHarnessObservabilityControllerTest {
         mockMvc.perform(asyncDispatch(streamResult)).andExpect(status().isOk()).andReturn();
     String afterFirst = dispatched.getResponse().getContentAsString();
     assertTrue(afterFirst.contains("event:root_activity"), afterFirst);
-    // The first event id must NOT be re-emitted because the query cursor advanced past it.
     assertEquals(0, countSubstring(afterFirst, "id:" + firstEventId));
-    // The second event id must be emitted.
     assertTrue(afterFirst.contains("id:" + secondEventId), afterFirst);
 
-    // Now flip the precedence: provide a query cursor of 0 (from-scratch) but a Last-Event-ID
-    // header that points at the first event. The query cursor (0) must win and both events must
-    // be emitted. This proves query > header precedence: if header won, the first event would be
-    // suppressed.
+    // Automatic reconnect supplies Last-Event-ID while the original query cursor stays 0; the
+    // larger header must win so progress is not reset.
     MvcResult streamResult2 =
         mockMvc
             .perform(
@@ -411,9 +407,9 @@ class StudioHarnessObservabilityControllerTest {
             .andReturn();
     MvcResult dispatched2 =
         mockMvc.perform(asyncDispatch(streamResult2)).andExpect(status().isOk()).andReturn();
-    String fromZero = dispatched2.getResponse().getContentAsString();
-    assertTrue(fromZero.contains("id:" + firstEventId), fromZero);
-    assertTrue(fromZero.contains("id:" + secondEventId), fromZero);
+    String fromHeader = dispatched2.getResponse().getContentAsString();
+    assertEquals(0, countSubstring(fromHeader, "id:" + firstEventId));
+    assertTrue(fromHeader.contains("id:" + secondEventId), fromHeader);
   }
 
   /**
