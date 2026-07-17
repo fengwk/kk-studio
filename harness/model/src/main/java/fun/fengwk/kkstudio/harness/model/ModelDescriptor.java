@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.model;
 
 import fun.fengwk.kkstudio.harness.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;

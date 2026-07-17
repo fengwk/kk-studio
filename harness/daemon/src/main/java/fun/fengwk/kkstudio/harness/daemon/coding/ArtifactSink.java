@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
+
 import java.io.IOException;
 
 /** Stores complete local tool output outside the bounded model preview. */

@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
+
 import java.util.Objects;
 
 /** 复用 SessionEntryJsonCodec 无损编码/解码完整 USER AgentMessage，拒绝非 USER 与损坏 payload。 */

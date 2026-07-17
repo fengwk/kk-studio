@@ -14,21 +14,12 @@
 
 ## Java Formatting
 
-- `share` / `core` / `web` 的权威格式工具是 Spotless：Google Java Format `1.18.0`（GOOGLE）+ `removeUnusedImports` + importOrder `#,,fun.fengwk.kkstudio,javax,java`。
-- `harness/*` 当前未挂载 Spotless，以 Google Java Format `1.18.0` 为准。
-- pure GJF dry-run 与 Spotless importOrder 不完全一致时，以 Spotless 配置为准。
-- 提交前只格式化本切片实际改动的 Java 文件；禁止顺手全仓格式化无关历史文件。
-- 推荐命令：
-  - `share` / `core` / `web`：`env JAVA_HOME=$JAVA_HOME_17 mvn -pl <module> spotless:apply`
-  - `harness/*`：对改动文件执行 GJF `1.18.0 --replace`
-  - 检查：`spotless:check`；harness 用 GJF `--dry-run --set-exit-if-changed`
-- 根 POM 使用 `ratchetFrom=origin/master` 限制 Spotless 检查范围；全仓格式化债务清理需显式临时去掉 ratchet，并在隔离 worktree 完成。
-- git worktree 中 Spotless ratchet 可能因 JGit 无法定位仓库失败；此时用无 ratchet 的定向 `spotless:check`/`apply`，或 `-Dspotless.check.skip=true` 后补做定向格式检查。
+- 全仓权威格式工具是 Spotless：Google Java Format `1.18.0`（GOOGLE）+ `removeUnusedImports` + importOrder `#,,fun.fengwk.kkstudio,javax,java`。
+- 根 POM 在 `validate` 阶段对所有模块执行 `spotless:check`；格式不通过则构建失败。
+- 提交前只格式化本切片实际改动的 Java 文件：`env JAVA_HOME=$JAVA_HOME_17 mvn -pl <module> spotless:apply`。
+- 禁止顺手全仓格式化无关历史文件；全仓对齐仅在独立格式化切片中进行。
 
 ## Docs
 
-- 项目文档按照当前文档风格维护到 `./docs/`。
-- 技术方案文档不设置版本与最新代码保持一致。
-- 技术方案文档必须上下文无关，只描述当前生效的职责、结构、协议、约束与实现方案。
-- 技术方案文档只写与实现目标相关的方案和系统设计，不写不做什么，不写被否决方案，不写会话过程或依赖历史版本才能理解的内容。
-- 技术方案文档必须保证一个没有任何历史上下文的 Agent 也可以直接阅读并接手工作。
+- 项目文档按当前风格维护到 `./docs/`，与最新代码保持一致，不另设文档版本。
+- 技术方案文档必须自洽可读：只描述当前生效的职责、结构、协议、约束与实现；不写否决项、会话过程或依赖历史上下文才能理解的内容。

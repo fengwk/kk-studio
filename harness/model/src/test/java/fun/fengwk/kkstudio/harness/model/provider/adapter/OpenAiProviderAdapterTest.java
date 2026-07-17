@@ -3,13 +3,15 @@ package fun.fengwk.kkstudio.harness.model.provider.adapter;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+
 import java.time.Duration;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
 
 class OpenAiProviderAdapterTest {
 

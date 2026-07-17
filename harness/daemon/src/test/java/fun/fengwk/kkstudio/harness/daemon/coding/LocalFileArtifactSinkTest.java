@@ -3,12 +3,14 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 /** Local file artifact sink 的 store / read / path-boundary 契约测试。 */
 class LocalFileArtifactSinkTest {

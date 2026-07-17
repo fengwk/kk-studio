@@ -10,13 +10,4 @@
     </parent>
 
     <artifactId>kk-studio-share</artifactId>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>com.diffplug.spotless</groupId>
-                <artifactId>spotless-maven-plugin</artifactId>
-            </plugin>
-        </plugins>
-    </build>
 </project>

@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.harness.runtime.context.SessionContext;
 import fun.fengwk.kkstudio.harness.runtime.extension.BeforeCompactionContext;
 import fun.fengwk.kkstudio.harness.runtime.extension.BeforeCompactionInterceptor;
 import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
+
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
