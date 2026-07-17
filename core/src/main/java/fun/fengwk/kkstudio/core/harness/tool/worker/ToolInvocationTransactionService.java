@@ -198,7 +198,7 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
   @Override
   public int coordinateReadyRuns(Instant now) {
     int coordinated = 0;
-    for (HarnessRunDO run : runMapper.listWaitingTools(COORDINATION_SCAN_LIMIT)) {
+    for (HarnessRunDO run : runMapper.listReadyWaitingTools(COORDINATION_SCAN_LIMIT)) {
       try {
         if (coordinationService.coordinate(run.getId(), now)) {
           coordinated++;
