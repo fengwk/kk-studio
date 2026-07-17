@@ -301,6 +301,60 @@ class CloudToolWorkerTest {
         fixture, ToolInvocationStatus.UNKNOWN, "non-idempotent invocation lease expired");
   }
 
+  /**
+   * Recovery fails when the currently registered same-name/version/target descriptor has drifted
+   * sideEffect away from the frozen invocation value; the drifted tool is never executed.
+   */
+  @Test
+  void rejectsRecoveredInvocationWhenRegisteredSideEffectDrifted() throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+    fixture.store.recovered = true;
+    // Freeze NON_IDEMPOTENT on the durable invocation while registry now advertises READ_ONLY.
+    fixture.store.current =
+        copyWithSideEffect(fixture.store.current, ToolSideEffect.NON_IDEMPOTENT);
+    fixture.rebuildWorker();
+
+    fixture.worker.executeNext("worker-a");
+
+    assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
+    assertEquals(0, fixture.tool.executions);
+    assertEquals(ToolInvocationStatus.FAILED, fixture.transactions.status);
+    assertTrue(fixture.transactions.errorMessage.contains("unavailable"));
+  }
+
+  /**
+   * Lease recovery uses the frozen invocation sideEffect even if the registry descriptor still
+   * matches name/version/target but would have advertised a safer class.
+   */
+  @Test
+  void usesFrozenSideEffectForRecoveredNonIdempotentDecision() throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT, NOW.plusSeconds(30));
+    fixture.store.recovered = true;
+    // Registry now advertises READ_ONLY for the same identity; frozen NON_IDEMPOTENT still wins.
+    fixture.registry =
+        (name, version) ->
+            Optional.of(
+                new RecordingTool(
+                    new ToolDescriptor(
+                        "tool",
+                        "1",
+                        "test tool",
+                        null,
+                        new ToolParamsSchema("input", Map.of(), Set.of(), false),
+                        ToolExecutionMode.CLOUD,
+                        ToolSideEffect.READ_ONLY,
+                        Duration.ofSeconds(5))));
+    fixture.rebuildWorker();
+
+    fixture.worker.executeNext("worker-a");
+
+    assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
+    assertEquals(0, fixture.tool.executions);
+    // Drifted sideEffect fails descriptor matching before recovery decision.
+    assertEquals(ToolInvocationStatus.FAILED, fixture.transactions.status);
+    assertTrue(fixture.transactions.errorMessage.contains("unavailable"));
+  }
+
   /** Deadline owns the terminal race and asks the best-effort in-memory handle to cancel. */
   @Test
   void timesOutAndCancelsHandleWithoutWaitingForToolCallback() throws Exception {
@@ -558,6 +612,35 @@ class CloudToolWorkerTest {
         status,
         source.permissionAction(),
         source.permissionDecision(),
+        source.sideEffect(),
+        source.deadlineAt(),
+        source.leaseOwner(),
+        source.leaseUntil(),
+        source.cancelRequestedAt(),
+        source.resultJson(),
+        source.errorMessage(),
+        source.createdAt(),
+        source.startedAt(),
+        source.finishedAt(),
+        source.updatedAt());
+  }
+
+  private ToolInvocation copyWithSideEffect(ToolInvocation source, ToolSideEffect sideEffect) {
+    return new ToolInvocation(
+        source.id(),
+        source.runId(),
+        source.assistantEntryId(),
+        source.ordinal(),
+        source.toolCallId(),
+        source.toolName(),
+        source.toolVersion(),
+        source.targetType(),
+        source.environmentId(),
+        source.argumentsJson(),
+        source.status(),
+        source.permissionAction(),
+        source.permissionDecision(),
+        sideEffect,
         source.deadlineAt(),
         source.leaseOwner(),
         source.leaseUntil(),
@@ -585,6 +668,7 @@ class CloudToolWorkerTest {
         source.status(),
         source.permissionAction(),
         source.permissionDecision(),
+        source.sideEffect(),
         source.deadlineAt(),
         source.leaseOwner(),
         source.leaseUntil(),
@@ -612,6 +696,7 @@ class CloudToolWorkerTest {
         source.status(),
         source.permissionAction(),
         source.permissionDecision(),
+        source.sideEffect(),
         source.deadlineAt(),
         source.leaseOwner(),
         source.leaseUntil(),
@@ -678,6 +763,7 @@ class CloudToolWorkerTest {
         ToolInvocationStatus.RUNNING,
         PermissionAction.ALLOW,
         null,
+        descriptor.sideEffect(),
         deadline,
         "worker-a",
         deadline.plusSeconds(60),

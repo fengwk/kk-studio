@@ -103,10 +103,11 @@ class DatabaseEnvironmentToolInvocationWorkerStoreIntegrationTest {
     jdbcTemplate.update(
         "insert into tool_invocation (id, run_id, assistant_entry_id, ordinal, tool_call_id,"
             + " tool_name, tool_version, target_type, environment_id, arguments_json, status,"
-            + " permission_action, permission_decision, deadline_at, lease_owner, lease_until,"
-            + " cancel_requested_at, result_json, error_message, gmt_create, started_at,"
-            + " finished_at, gmt_modified) values (?, ?, ?, 0, ?, 'read', '1', ?, ?, '{}',"
-            + " 'QUEUED', 'ALLOW', null, ?, null, null, null, null, null, ?, null, null, ?)",
+            + " permission_action, permission_decision, side_effect, deadline_at, lease_owner,"
+            + " lease_until, cancel_requested_at, result_json, error_message, gmt_create,"
+            + " started_at, finished_at, gmt_modified) values (?, ?, ?, 0, ?, 'read', '1', ?, ?,"
+            + " '{}', 'QUEUED', 'ALLOW', null, 'READ_ONLY', ?, null, null, null, null, null, ?,"
+            + " null, null, ?)",
         id,
         runId,
         assistantEntryId,

@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolPermissionDecision;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -49,6 +50,7 @@ public class MysqlToolInvocationStore {
         source.getPermissionDecision() == null
             ? null
             : ToolPermissionDecision.valueOf(source.getPermissionDecision()),
+        ToolSideEffect.valueOf(source.getSideEffect()),
         instant(source.getDeadlineAt()),
         source.getLeaseOwner(),
         instant(source.getLeaseUntil()),

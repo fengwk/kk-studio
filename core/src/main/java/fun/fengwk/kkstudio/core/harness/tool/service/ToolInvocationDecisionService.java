@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
+import fun.fengwk.kkstudio.core.harness.run.store.HarnessRunEventWriter;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
 import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
@@ -31,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ToolInvocationDecisionService {
   private final ToolInvocationMapper invocationMapper;
   private final HarnessRunMapper runMapper;
+  private final HarnessRunEventWriter eventWriter;
   private final MysqlToolInvocationStore invocationStore;
   private final HarnessRunTransactionService runTransactions;
   private final ObjectMapper objectMapper;
@@ -39,12 +41,14 @@ public class ToolInvocationDecisionService {
   public ToolInvocationDecisionService(
       ToolInvocationMapper invocationMapper,
       HarnessRunMapper runMapper,
+      HarnessRunEventWriter eventWriter,
       MysqlToolInvocationStore invocationStore,
       HarnessRunTransactionService runTransactions,
       ObjectMapper objectMapper,
       Clock harnessRunClock) {
     this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
     this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
+    this.eventWriter = Objects.requireNonNull(eventWriter, "eventWriter");
     this.invocationStore = Objects.requireNonNull(invocationStore, "invocationStore");
     this.runTransactions = Objects.requireNonNull(runTransactions, "runTransactions");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
@@ -62,6 +66,8 @@ public class ToolInvocationDecisionService {
     if (run == null) {
       throw new IllegalStateException("tool invocation run does not exist: " + observed.getRunId());
     }
+    // Run is locked; Session/Root before Invocation.
+    eventWriter.lockSessionAndRoot(run.getSessionId());
     ToolInvocationDO current = invocationMapper.findForUpdate(invocationId);
     if (current == null || !Objects.equals(current.getRunId(), run.getId())) {
       throw new IllegalStateException("tool invocation changed while acquiring decision locks");

@@ -120,6 +120,7 @@ create table if not exists tool_invocation (
     status                varchar(32) not null comment '持久状态',
     permission_action     varchar(16) not null comment 'ALLOW/ASK/DENY',
     permission_decision   varchar(16) null comment '用户 ALLOW/DENY 决定',
+    side_effect           varchar(32) not null comment '冻结 ToolSideEffect',
     deadline_at           datetime(3) not null comment '冻结 deadline',
     lease_owner           varchar(128) null comment '执行 lease owner',
     lease_until           datetime(3) null comment '执行 lease 截止',
@@ -149,7 +150,7 @@ create table if not exists tool_artifact (
     primary key (id)
 ) engine=InnoDB default charset=utf8mb4 comment='globally addressable tool output artifact';
 
-create table harness_subagent_task (
+create table if not exists harness_subagent_task (
     parent_invocation_id  bigint not null comment 'task ToolInvocation idempotency key',
     parent_session_id     bigint not null,
     child_session_id      bigint not null,

@@ -631,7 +631,7 @@ class EnvironmentDaemonGatewayTest {
     environment.setId(ENVIRONMENT_ID);
     environment.setCapabilitiesJson(capabilitiesJson);
     when(environmentRepository.getById(ENVIRONMENT_ID)).thenReturn(environment);
-    ToolInvocation invocation = invocation();
+    ToolInvocation invocation = invocation(sideEffect);
     ClaimedToolInvocation claimed = new ClaimedToolInvocation(invocation, recovered);
     when(invocationStore.claimDue(eq(ENVIRONMENT_ID), anyString(), eq(NOW), any()))
         .thenReturn(Optional.of(claimed));
@@ -671,7 +671,7 @@ class EnvironmentDaemonGatewayTest {
         capabilitiesJson);
   }
 
-  private ToolInvocation invocation() {
+  private ToolInvocation invocation(ToolSideEffect sideEffect) {
     return new ToolInvocation(
         INVOCATION_ID,
         7001L,
@@ -686,6 +686,7 @@ class EnvironmentDaemonGatewayTest {
         ToolInvocationStatus.RUNNING,
         PermissionAction.ALLOW,
         null,
+        sideEffect,
         NOW.plusSeconds(60),
         "gateway-test-environment-42",
         NOW.plusSeconds(30),
@@ -713,6 +714,7 @@ class EnvironmentDaemonGatewayTest {
         status,
         source.permissionAction(),
         source.permissionDecision(),
+        source.sideEffect(),
         source.deadlineAt(),
         source.leaseOwner(),
         source.leaseUntil(),
@@ -740,6 +742,7 @@ class EnvironmentDaemonGatewayTest {
         source.status(),
         source.permissionAction(),
         source.permissionDecision(),
+        source.sideEffect(),
         deadlineAt,
         source.leaseOwner(),
         source.leaseUntil(),
@@ -767,6 +770,7 @@ class EnvironmentDaemonGatewayTest {
         source.status(),
         source.permissionAction(),
         source.permissionDecision(),
+        source.sideEffect(),
         source.deadlineAt(),
         source.leaseOwner(),
         source.leaseUntil(),

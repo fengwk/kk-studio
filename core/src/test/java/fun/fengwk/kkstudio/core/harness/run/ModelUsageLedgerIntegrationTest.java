@@ -347,8 +347,8 @@ class ModelUsageLedgerIntegrationTest {
     jdbc.update(
         "insert into tool_invocation (id, run_id, assistant_entry_id, ordinal, tool_call_id,"
             + " tool_name, tool_version, target_type, arguments_json, status, permission_action,"
-            + " deadline_at, gmt_create, gmt_modified) values (?, ?, ?, 0, ?, 'read', '1',"
-            + " 'CLOUD', '{}', 'QUEUED', 'ALLOW', ?, ?, ?)",
+            + " side_effect, deadline_at, gmt_create, gmt_modified) values (?, ?, ?, 0, ?, 'read',"
+            + " '1', 'CLOUD', '{}', 'QUEUED', 'ALLOW', 'READ_ONLY', ?, ?, ?)",
         invocationIds.newInvocationId(),
         runId,
         sessionIds.newEntryId(),

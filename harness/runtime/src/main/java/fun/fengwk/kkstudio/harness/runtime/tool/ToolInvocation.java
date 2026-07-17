@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.tool;
 
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import java.time.Instant;
 import java.util.Objects;
 
@@ -19,6 +20,7 @@ public record ToolInvocation(
     ToolInvocationStatus status,
     PermissionAction permissionAction,
     ToolPermissionDecision permissionDecision,
+    ToolSideEffect sideEffect,
     Instant deadlineAt,
     String leaseOwner,
     Instant leaseUntil,
@@ -56,6 +58,7 @@ public record ToolInvocation(
     argumentsJson = requireNonBlank(argumentsJson, "argumentsJson");
     status = Objects.requireNonNull(status, "status");
     permissionAction = Objects.requireNonNull(permissionAction, "permissionAction");
+    sideEffect = Objects.requireNonNull(sideEffect, "sideEffect");
     deadlineAt = Objects.requireNonNull(deadlineAt, "deadlineAt");
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
     updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");

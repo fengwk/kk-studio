@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ClaimedToolInvocation;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -139,6 +140,7 @@ class DatabaseEnvironmentToolInvocationWorkerStoreTest {
         ToolInvocationStatus.RUNNING,
         PermissionAction.ALLOW,
         null,
+        ToolSideEffect.READ_ONLY,
         NOW.plusSeconds(60),
         "worker",
         NOW.plusSeconds(30),

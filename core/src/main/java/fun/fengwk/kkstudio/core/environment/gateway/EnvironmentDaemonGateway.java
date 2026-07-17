@@ -406,8 +406,8 @@ public class EnvironmentDaemonGateway {
             message);
         return;
       }
-      if (claimed.recoveredLease()
-          && binding.descriptor().sideEffect() == ToolSideEffect.NON_IDEMPOTENT) {
+      // Lease recovery uses the side-effect frozen on the durable invocation.
+      if (claimed.recoveredLease() && invocation.sideEffect() == ToolSideEffect.NON_IDEMPOTENT) {
         String message = "Tool ownership was lost; side effect result is unknown.";
         complete(
             new ActiveInvocation(claimed, binding, state.connection.connectionId()),
@@ -478,6 +478,13 @@ public class EnvironmentDaemonGateway {
     if (descriptor.executionMode() != ToolExecutionMode.ENVIRONMENT) {
       throw new IllegalArgumentException(
           "Environment capability must use ENVIRONMENT execution mode");
+    }
+    if (descriptor.sideEffect() != invocation.sideEffect()) {
+      throw new IllegalArgumentException(
+          "Environment capability sideEffect does not match frozen invocation: "
+              + invocation.toolName()
+              + "@"
+              + invocation.toolVersion());
     }
     return new ToolBinding(descriptor, ToolTargetType.ENVIRONMENT, environmentId);
   }

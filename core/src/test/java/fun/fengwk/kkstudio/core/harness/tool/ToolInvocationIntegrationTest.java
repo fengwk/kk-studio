@@ -814,11 +814,112 @@ class ToolInvocationIntegrationTest {
         "{bad",
         claimed.invocation().id());
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> toolTransactions.coordinateReadyRuns(NOW.plusSeconds(4)));
+    // Isolated per-Run coordination swallows the malformed Run without rolling back peers.
+    assertEquals(0, toolTransactions.coordinateReadyRuns(NOW.plusSeconds(4)));
     assertEquals(leafBefore, sessionStore.find(run.sessionId()).orElseThrow().leafEntryId());
     assertEquals(RunStatus.WAITING_TOOLS, runStore.find(run.run().id()).orElseThrow().status());
+  }
+
+  /**
+   * A malformed ready Run is skipped in its own transaction; earlier successful coordination stays
+   * committed and later ready Runs continue.
+   */
+  @Test
+  void isolatesFailedRunCoordinationWithoutRollingBackPeers() {
+    configureToolSettings("{}");
+    Claimed goodFirst = claimedRun(false);
+    Claimed bad = claimedRun(false);
+    Claimed goodSecond = claimedRun(false);
+    assertTrue(
+        prepare(
+            goodFirst.run(),
+            List.of(new ToolCall("good-first", "read", "{\"path\":\"a\"}")),
+            List.of(binding("read"))));
+    assertTrue(
+        prepare(
+            bad.run(),
+            List.of(new ToolCall("bad", "read", "{\"path\":\"b\"}")),
+            List.of(binding("read"))));
+    assertTrue(
+        prepare(
+            goodSecond.run(),
+            List.of(new ToolCall("good-second", "read", "{\"path\":\"c\"}")),
+            List.of(binding("read"))));
+
+    ClaimedToolInvocation firstClaim =
+        workerStore.claimDue("tool-a", NOW.plusSeconds(2), Duration.ofMinutes(1)).orElseThrow();
+    assertTrue(toolTransactions.start(firstClaim, NOW.plusSeconds(2)));
+    assertTrue(
+        toolTransactions.terminate(
+            firstClaim,
+            ToolInvocationStatus.SUCCEEDED,
+            new ToolResult(
+                firstClaim.invocation().toolCallId(),
+                List.of(new TextToolContent("ok-1")),
+                false,
+                "{}",
+                true),
+            null,
+            NOW.plusSeconds(2)));
+
+    ClaimedToolInvocation badClaim =
+        workerStore.claimDue("tool-b", NOW.plusSeconds(3), Duration.ofMinutes(1)).orElseThrow();
+    assertTrue(toolTransactions.start(badClaim, NOW.plusSeconds(3)));
+    assertTrue(
+        toolTransactions.terminate(
+            badClaim,
+            ToolInvocationStatus.SUCCEEDED,
+            new ToolResult(
+                badClaim.invocation().toolCallId(),
+                List.of(new TextToolContent("ok-bad")),
+                false,
+                "{}",
+                true),
+            null,
+            NOW.plusSeconds(3)));
+    jdbcTemplate.update(
+        "update tool_invocation set result_json = ? where id = ?",
+        "{bad",
+        badClaim.invocation().id());
+
+    ClaimedToolInvocation secondClaim =
+        workerStore.claimDue("tool-c", NOW.plusSeconds(4), Duration.ofMinutes(1)).orElseThrow();
+    assertTrue(toolTransactions.start(secondClaim, NOW.plusSeconds(4)));
+    assertTrue(
+        toolTransactions.terminate(
+            secondClaim,
+            ToolInvocationStatus.SUCCEEDED,
+            new ToolResult(
+                secondClaim.invocation().toolCallId(),
+                List.of(new TextToolContent("ok-2")),
+                false,
+                "{}",
+                true),
+            null,
+            NOW.plusSeconds(4)));
+
+    assertEquals(2, toolTransactions.coordinateReadyRuns(NOW.plusSeconds(5)));
+    assertEquals(RunStatus.QUEUED, runStore.find(goodFirst.run().id()).orElseThrow().status());
+    assertEquals(RunStatus.WAITING_TOOLS, runStore.find(bad.run().id()).orElseThrow().status());
+    assertEquals(RunStatus.QUEUED, runStore.find(goodSecond.run().id()).orElseThrow().status());
+  }
+
+  /** Prepared invocations freeze ToolSideEffect for later recovery decisions. */
+  @Test
+  void persistsFrozenToolSideEffectOnInvocation() {
+    configureToolSettings("{}");
+    Claimed run = claimedRun(false);
+    assertTrue(
+        prepare(
+            run.run(),
+            List.of(new ToolCall("side-effect", "write", "{\"path\":\"a\"}")),
+            List.of(binding("write"))));
+    ToolInvocation invocation = invocationStore.listByRun(run.run().id()).get(0);
+    assertEquals(ToolSideEffect.IDEMPOTENT, invocation.sideEffect());
+    String stored =
+        jdbcTemplate.queryForObject(
+            "select side_effect from tool_invocation where id = ?", String.class, invocation.id());
+    assertEquals(ToolSideEffect.IDEMPOTENT.name(), stored);
   }
 
   /**
