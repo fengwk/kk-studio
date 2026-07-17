@@ -19,38 +19,34 @@ export function AppShell({ children }: PropsWithChildren) {
   const aiActive = !canvasMode && isAiRoute(location.pathname)
 
   return (
-    <div className={`app-frame ${canvasMode ? 'app-frame-canvas' : 'app-frame-ai'}`}>
+    <div className="app-frame">
       <header className="topbar">
         <div className="topbar-left">
           <Link to={canvasMode ? '/canvas' : '/sessions'} className="brand" aria-label="KK Studio">
-            {canvasMode ? <span className="brand-mark" aria-hidden="true">K</span> : null}
+            <span className="brand-mark" aria-hidden="true">K</span>
             <span>KK Studio</span>
           </Link>
         </div>
         <div className="topbar-center">
           <nav className="topnav" aria-label="Primary">
             <Link className={aiActive ? 'active' : undefined} to="/sessions">
-              {!canvasMode ? <Bot aria-hidden="true" /> : null}
+              <Bot aria-hidden="true" />
               <span>AI</span>
             </Link>
             <Link className={canvasMode ? 'active' : undefined} to="/canvas">
-              {!canvasMode ? <Grid2X2 aria-hidden="true" /> : null}
+              <Grid2X2 aria-hidden="true" />
               <span>画布</span>
             </Link>
             <button type="button" disabled title="资产库将在后续版本开放">
-              {!canvasMode ? <Layers3 aria-hidden="true" /> : null}
+              <Layers3 aria-hidden="true" />
               <span>资产</span>
             </button>
           </nav>
         </div>
         <div className="topbar-right">
-          {canvasMode ? (
-            <div className="avatar" title="当前工作区" aria-label="当前工作区">FL</div>
-          ) : (
-            <div className="avatar" title="KK Studio">
-              <UserRound aria-hidden="true" />
-            </div>
-          )}
+          <div className="avatar" title="当前工作区" aria-label="当前工作区">
+            <UserRound aria-hidden="true" />
+          </div>
         </div>
       </header>
       <main className="stage">{children}</main>
