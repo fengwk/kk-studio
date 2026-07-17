@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.share.model;
 
-import java.time.LocalDateTime;
 import lombok.Data;
+
+import java.time.LocalDateTime;
 
 /**
  * Public read representation of an Environment.

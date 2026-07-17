@@ -1,8 +1,9 @@
 package fun.fengwk.kkstudio.core.agent.provider.service.converter;
 
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
-import org.springframework.stereotype.Component;
 
 /** Converts providers to credential-free public DTOs. */
 @Component

@@ -4,8 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
 import org.junit.jupiter.api.Test;
+
+import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
 
 /** 直接调用 {@link SnowflakeModelUsageRecordIdGenerator} 验证它分配的 id 与已有 namespace 互不冲突。 */
 class SnowflakeModelUsageRecordIdGeneratorTest {

@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.core.harness.session.store.model;
 
-import java.time.LocalDateTime;
 import lombok.Data;
+
+import java.time.LocalDateTime;
 
 @Data
 public class HarnessSessionEntryDO {

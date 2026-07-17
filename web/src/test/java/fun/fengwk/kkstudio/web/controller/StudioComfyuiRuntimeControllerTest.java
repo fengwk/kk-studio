@@ -13,14 +13,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.kkstudio.core.comfyui.ComfyuiFileDownload;
-import fun.fengwk.kkstudio.core.comfyui.ComfyuiProperties;
-import fun.fengwk.kkstudio.core.comfyui.ComfyuiRuntimeService;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowCancelDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowJobDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunRequestDTO;
-import fun.fengwk.kkstudio.web.WebTestApplication;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +22,15 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+
+import fun.fengwk.kkstudio.core.comfyui.ComfyuiFileDownload;
+import fun.fengwk.kkstudio.core.comfyui.ComfyuiProperties;
+import fun.fengwk.kkstudio.core.comfyui.ComfyuiRuntimeService;
+import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowCancelDTO;
+import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowJobDTO;
+import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunDTO;
+import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunRequestDTO;
+import fun.fengwk.kkstudio.web.WebTestApplication;
 
 /**
  * {@link StudioComfyuiRuntimeController} HTTP 契约测试。

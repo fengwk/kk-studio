@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.harness.tool.configuration;
 
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsCodec;
+
 import java.util.Objects;
 
 /** Normalizes and exposes deployment Tool settings directly. */

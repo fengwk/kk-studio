@@ -1,12 +1,5 @@
 package fun.fengwk.kkstudio.core.storage;
 
-import fun.fengwk.kkstudio.core.storage.configuration.S3StorageProperties;
-import fun.fengwk.kkstudio.share.model.S3PresignedResponseDTO;
-import java.time.Duration;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
 import org.springframework.util.Assert;
 import org.springframework.util.MimeTypeUtils;
 import org.springframework.util.StringUtils;
@@ -18,6 +11,15 @@ import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignReques
 import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
+
+import fun.fengwk.kkstudio.core.storage.configuration.S3StorageProperties;
+import fun.fengwk.kkstudio.share.model.S3PresignedResponseDTO;
+
+import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * {@link S3PresignService} 的默认实现：基于 AWS SDK v2 的 {@link S3Presigner} 在本地完成签名， 不与 S3 产生任何 IO。bucket

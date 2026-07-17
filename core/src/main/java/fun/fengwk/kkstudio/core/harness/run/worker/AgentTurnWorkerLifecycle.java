@@ -1,9 +1,12 @@
 package fun.fengwk.kkstudio.core.harness.run.worker;
 
+import org.springframework.context.SmartLifecycle;
+
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.harness.runtime.run.AgentTurnWorker;
 import fun.fengwk.kkstudio.harness.runtime.run.AgentTurnWorker.ClaimedTurn;
 import fun.fengwk.kkstudio.harness.runtime.run.RunWorkerConfig;
+
 import java.lang.System.Logger.Level;
 import java.time.Duration;
 import java.util.Objects;
@@ -13,7 +16,6 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import org.springframework.context.SmartLifecycle;
 
 /** Process lifecycle for one database-claimed Agent turn at a time. */
 public final class AgentTurnWorkerLifecycle implements SmartLifecycle {

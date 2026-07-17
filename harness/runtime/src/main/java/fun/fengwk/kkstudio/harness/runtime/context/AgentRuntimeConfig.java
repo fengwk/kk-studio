@@ -5,8 +5,13 @@ import java.util.List;
 
 /** Context 路径末端生效的 Agent 配置。 */
 public record AgentRuntimeConfig(
-    String systemPrompt, String modelId, String variant, List<String> tools, List<String> skills,
-    List<String> allowedSubagents, String executionPolicyJson) {
+    String systemPrompt,
+    String modelId,
+    String variant,
+    List<String> tools,
+    List<String> skills,
+    List<String> allowedSubagents,
+    String executionPolicyJson) {
   public AgentRuntimeConfig {
     tools = List.copyOf(tools);
     skills = List.copyOf(skills);

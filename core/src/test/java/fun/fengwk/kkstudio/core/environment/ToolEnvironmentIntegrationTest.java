@@ -8,16 +8,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
-import fun.fengwk.kkstudio.core.CoreTestApplication;
-import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
-import fun.fengwk.kkstudio.core.environment.service.model.ToolEnvironment;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
+
+import fun.fengwk.kkstudio.core.CoreTestApplication;
+import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
+import fun.fengwk.kkstudio.core.environment.service.model.ToolEnvironment;
+
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 /** H2-backed repository integration coverage for the global Environment registry. */
 @SpringBootTest(classes = CoreTestApplication.class)

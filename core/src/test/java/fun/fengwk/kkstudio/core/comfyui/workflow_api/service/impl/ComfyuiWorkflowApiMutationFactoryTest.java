@@ -8,13 +8,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.model.ComfyuiWorkflowApi;
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiBindings;
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiBindingsParser;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiCreateDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiUpdateDTO;
+
 import java.util.List;
-import org.junit.jupiter.api.Test;
 
 /**
  * ComfyuiWorkflowApiMutationFactory 的聚焦行为测试。

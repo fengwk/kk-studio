@@ -1,6 +1,9 @@
 package fun.fengwk.kkstudio.core.environment.gateway;
 
+import org.springframework.context.SmartLifecycle;
+
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
+
 import java.lang.System.Logger.Level;
 import java.time.Duration;
 import java.util.Objects;
@@ -8,7 +11,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import org.springframework.context.SmartLifecycle;
 
 /** Polls ready Environment connections for durable dispatch, cancellation, and lease recovery. */
 public final class EnvironmentDaemonGatewayLifecycle implements SmartLifecycle {

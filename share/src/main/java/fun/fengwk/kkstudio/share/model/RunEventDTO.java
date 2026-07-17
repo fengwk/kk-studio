@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.share.model;
 
-import java.time.Instant;
 import lombok.Data;
+
+import java.time.Instant;
 
 /**
  * T15 Run event query projection. The SSE event id must equal the decimal string of {@code

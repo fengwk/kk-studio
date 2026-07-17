@@ -10,5 +10,4 @@ import org.springframework.context.annotation.Configuration;
 @BaseMapperScan
 @ComponentScan
 @Configuration
-public class CoreAutoConfiguration {
-}
+public class CoreAutoConfiguration {}

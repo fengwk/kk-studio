@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.core.storage;
 
-import java.nio.charset.StandardCharsets;
 import org.springframework.util.Assert;
+
+import java.nio.charset.StandardCharsets;
 
 /**
  * S3 对象键的统一校验入口。

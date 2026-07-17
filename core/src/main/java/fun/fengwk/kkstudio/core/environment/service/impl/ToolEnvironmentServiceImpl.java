@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.core.environment.service.impl;
 
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
+import org.springframework.stereotype.Service;
+
 import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
 import fun.fengwk.kkstudio.core.environment.service.ToolEnvironmentService;
 import fun.fengwk.kkstudio.core.environment.service.converter.ToolEnvironmentConverter;
@@ -9,7 +11,6 @@ import fun.fengwk.kkstudio.core.environment.service.model.ToolEnvironment;
 import fun.fengwk.kkstudio.share.model.ToolEnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.model.ToolEnvironmentDTO;
 import fun.fengwk.kkstudio.share.model.ToolEnvironmentUpdateDTO;
-import org.springframework.stereotype.Service;
 
 /** Environment CRUD service; capabilities and last-seen are managed by the application service. */
 @Service

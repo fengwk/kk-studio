@@ -4,6 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+
 import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.harness.run.worker.AgentTurnWorkerLifecycle;
 import fun.fengwk.kkstudio.core.harness.tool.worker.CloudToolWorkerLifecycle;
@@ -19,11 +23,9 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryDraft;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionTree;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.CloudToolWorker;
+
 import java.util.List;
 import java.util.Set;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest(classes = CoreTestApplication.class)
 class HarnessRuntimeWiringIntegrationTest {

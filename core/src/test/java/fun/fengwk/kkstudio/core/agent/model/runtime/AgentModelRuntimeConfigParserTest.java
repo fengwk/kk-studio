@@ -5,12 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
-import org.junit.jupiter.api.Test;
 
 class AgentModelRuntimeConfigParserTest {
 

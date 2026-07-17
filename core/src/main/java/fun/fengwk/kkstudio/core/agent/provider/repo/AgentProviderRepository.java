@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.agent.provider.repo;
 
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
+
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 
 /** Global provider repository. */

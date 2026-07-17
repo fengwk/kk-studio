@@ -2,15 +2,16 @@ package fun.fengwk.kkstudio.web.controller;
 
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
-import fun.fengwk.kkstudio.core.storage.S3PresignService;
-import fun.fengwk.kkstudio.share.model.S3PresignedRequestDTO;
-import fun.fengwk.kkstudio.share.model.S3PresignedResponseDTO;
 import lombok.AllArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import fun.fengwk.kkstudio.core.storage.S3PresignService;
+import fun.fengwk.kkstudio.share.model.S3PresignedRequestDTO;
+import fun.fengwk.kkstudio.share.model.S3PresignedResponseDTO;
 
 /**
  * S3 预签名 API：仅生成签名 URL，不与 S3 产生 IO。

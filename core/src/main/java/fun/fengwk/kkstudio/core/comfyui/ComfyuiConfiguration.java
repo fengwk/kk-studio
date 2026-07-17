@@ -4,8 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.convention4j.comfyui.ComfyUIClient;
 import fun.fengwk.convention4j.comfyui.ComfyUIClientFactory;
 import fun.fengwk.convention4j.comfyui.ComfyUIClientOptions;
-import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiLookupService;
-import fun.fengwk.kkstudio.core.storage.S3StorageService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -13,6 +11,9 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.util.Assert;
+
+import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiLookupService;
+import fun.fengwk.kkstudio.core.storage.S3StorageService;
 
 /**
  * ComfyUI 无状态客户端与运行服务配置。

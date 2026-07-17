@@ -10,14 +10,9 @@ import lombok.Data;
 @Data
 public class GptImage2Response {
 
-    /**
-     * 生成的图片
-     */
-    private ImageData image;
+  /** 生成的图片 */
+  private ImageData image;
 
-    /**
-     * 对话文本
-     */
-    private String conversationText;
-
+  /** 对话文本 */
+  private String conversationText;
 }

@@ -1,6 +1,11 @@
 package fun.fengwk.kkstudio.core.harness.tool.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
 import fun.fengwk.kkstudio.core.harness.tool.configuration.DeploymentToolSettingsProvider;
 import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProperties;
 import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProvider;
@@ -11,10 +16,6 @@ import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsCodec;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolPreparationService;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 
 /** Tool preparation 的可信编译期组件装配。 */
 @Configuration(proxyBeanMethods = false)

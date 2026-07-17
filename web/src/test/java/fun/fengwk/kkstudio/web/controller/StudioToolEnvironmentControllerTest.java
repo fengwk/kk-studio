@@ -11,10 +11,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
-import fun.fengwk.kkstudio.share.model.ToolEnvironmentCreateDTO;
-import fun.fengwk.kkstudio.share.model.ToolEnvironmentUpdateDTO;
-import fun.fengwk.kkstudio.web.WebTestApplication;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -23,6 +19,11 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+
+import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
+import fun.fengwk.kkstudio.share.model.ToolEnvironmentCreateDTO;
+import fun.fengwk.kkstudio.share.model.ToolEnvironmentUpdateDTO;
+import fun.fengwk.kkstudio.web.WebTestApplication;
 
 /**
  * {@link StudioToolEnvironmentController} end-to-end tests.

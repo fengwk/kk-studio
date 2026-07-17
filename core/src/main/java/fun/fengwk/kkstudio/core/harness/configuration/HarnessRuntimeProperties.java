@@ -1,10 +1,11 @@
 package fun.fengwk.kkstudio.core.harness.configuration;
 
+import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.UUID;
-import lombok.Data;
-import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /** Process-local Harness resource boundary and durable worker polling settings. */
 @Data

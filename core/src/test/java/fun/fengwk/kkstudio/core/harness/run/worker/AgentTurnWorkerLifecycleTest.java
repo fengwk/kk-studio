@@ -12,6 +12,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.harness.agent.AgentTurnHandle;
 import fun.fengwk.kkstudio.harness.runtime.run.AgentRun;
@@ -19,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.run.AgentTurnWorker;
 import fun.fengwk.kkstudio.harness.runtime.run.AgentTurnWorker.ClaimedTurn;
 import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
 import fun.fengwk.kkstudio.harness.runtime.run.RunWorkerConfig;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -26,7 +29,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import org.junit.jupiter.api.Test;
 
 class AgentTurnWorkerLifecycleTest {
 

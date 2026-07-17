@@ -3,13 +3,15 @@ package fun.fengwk.kkstudio.core.agent.definition.repo.impl;
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import fun.fengwk.convention4j.common.page.Pages;
+import lombok.AllArgsConstructor;
+import org.springframework.stereotype.Repository;
+
 import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.mapper.AgentDefinitionMapper;
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.model.AgentDefinitionDO;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
+
 import java.util.List;
-import lombok.AllArgsConstructor;
-import org.springframework.stereotype.Repository;
 
 /** MySQL-backed global Agent definition repository. */
 @AllArgsConstructor

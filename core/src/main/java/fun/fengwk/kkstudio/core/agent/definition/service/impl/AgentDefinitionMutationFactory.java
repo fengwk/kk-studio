@@ -4,14 +4,16 @@ import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextAgentI
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.harness.runtime.control.ControlConsumptionMode;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
+
 import java.util.List;
-import org.springframework.stereotype.Component;
 
 /**
  * Normalizes the persisted agent definition and serializes its structured execution configuration.
@@ -98,8 +100,10 @@ final class AgentDefinitionMutationFactory {
     validatePositive(result.getIdleTimeoutMillis(), "executionPolicy.idleTimeoutMillis");
     validatePositive(result.getRunTimeoutMillis(), "executionPolicy.runTimeoutMillis");
     // 控制消费模式只对非 null 值严格解析；null 表示由 frozen snapshot decode 决定默认值。
-    result.setSteeringMode(parseControlMode(result.getSteeringMode(), "executionPolicy.steeringMode"));
-    result.setFollowUpMode(parseControlMode(result.getFollowUpMode(), "executionPolicy.followUpMode"));
+    result.setSteeringMode(
+        parseControlMode(result.getSteeringMode(), "executionPolicy.steeringMode"));
+    result.setFollowUpMode(
+        parseControlMode(result.getFollowUpMode(), "executionPolicy.followUpMode"));
     return result;
   }
 

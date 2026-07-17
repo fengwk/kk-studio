@@ -17,14 +17,16 @@ public class ControlMessageCodecTest {
 
   @Test
   public void roundTripsPlainUserText() {
-    AgentMessage message = new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hi")));
+    AgentMessage message =
+        new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hi")));
     AgentMessage decoded = codec.decode(codec.encode(message));
     assertEquals(message, decoded);
   }
 
   @Test
   public void rejectsAssistantOnEncode() {
-    AgentMessage message = new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("hi")));
+    AgentMessage message =
+        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("hi")));
     IllegalArgumentException exception =
         assertThrows(IllegalArgumentException.class, () -> codec.encode(message));
     assertTrue(exception.getMessage().contains("USER"));
@@ -32,7 +34,8 @@ public class ControlMessageCodecTest {
 
   @Test
   public void rejectsSystemOnEncode() {
-    AgentMessage message = new AgentMessage(AgentMessageRole.SYSTEM, List.of(new TextMessageContent("sys")));
+    AgentMessage message =
+        new AgentMessage(AgentMessageRole.SYSTEM, List.of(new TextMessageContent("sys")));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(message));
   }
 
@@ -56,7 +59,8 @@ public class ControlMessageCodecTest {
     // 即使 metadata/role 任意变化，SYSTEM 在我们这条链路上永远不能解码成 USER；
     // 既可能在底层 codec 因结构性约束抛错，也可能在我们的 requireUser 抛错，
     // 但都必须明确抛 IllegalArgumentException 而不能沉默接受。
-    String missingMetadata = "{\"message\":{\"role\":\"SYSTEM\",\"contents\":[{\"type\":\"text\",\"text\":\"sys\"}]}}";
+    String missingMetadata =
+        "{\"message\":{\"role\":\"SYSTEM\",\"contents\":[{\"type\":\"text\",\"text\":\"sys\"}]}}";
     assertThrows(IllegalArgumentException.class, () -> codec.decode(missingMetadata));
   }
 
@@ -86,7 +90,8 @@ public class ControlMessageCodecTest {
 
   @Test
   public void encodesUserOnlyViaMessageEntryPayload() {
-    AgentMessage user = new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hi")));
+    AgentMessage user =
+        new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hi")));
     String json = codec.encode(user);
     assertTrue(json.contains("\"role\":\"USER\""));
     assertTrue(json.contains("\"text\":\"hi\""));
@@ -95,7 +100,8 @@ public class ControlMessageCodecTest {
 
   @Test
   public void multipleRoundTripsAreStable() {
-    AgentMessage original = new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello world")));
+    AgentMessage original =
+        new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello world")));
     String first = codec.encode(original);
     AgentMessage mid = codec.decode(first);
     String second = codec.encode(mid);

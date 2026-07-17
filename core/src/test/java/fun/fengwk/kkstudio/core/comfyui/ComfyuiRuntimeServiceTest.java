@@ -21,6 +21,14 @@ import fun.fengwk.convention4j.comfyui.ComfyUIJob;
 import fun.fengwk.convention4j.comfyui.PromptSubmission;
 import fun.fengwk.convention4j.comfyui.input.UploadResult;
 import fun.fengwk.convention4j.comfyui.workflow.Workflow;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.util.unit.DataSize;
+import reactor.core.publisher.Mono;
+
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiBindings;
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiBindingsParser;
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiLookupService;
@@ -30,16 +38,10 @@ import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowJobDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunFileDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunRequestDTO;
+
 import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.mockito.InOrder;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.util.unit.DataSize;
-import reactor.core.publisher.Mono;
 
 /**
  * {@link ComfyuiRuntimeService} 核心无状态映射测试。

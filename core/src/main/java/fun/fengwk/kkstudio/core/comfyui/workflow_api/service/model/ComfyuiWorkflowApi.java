@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.core.comfyui.workflow_api.service.model;
 
-import java.time.LocalDateTime;
 import lombok.Data;
+
+import java.time.LocalDateTime;
 
 /**
  * ComfyUI workflow API card 领域实体。

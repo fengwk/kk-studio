@@ -1,8 +1,9 @@
 package fun.fengwk.kkstudio.core.harness.usage.store.model;
 
+import lombok.Data;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import lombok.Data;
 
 /** model_usage_record 行映射；完整平铺一次 ModelUsageDraft 的所有字段。 */
 @Data

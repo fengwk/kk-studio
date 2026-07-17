@@ -1,11 +1,14 @@
 package fun.fengwk.kkstudio.core.harness.tool.worker;
 
+import org.springframework.stereotype.Repository;
+
 import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
 import fun.fengwk.kkstudio.core.harness.tool.worker.store.ToolArtifactDO;
 import fun.fengwk.kkstudio.core.harness.tool.worker.store.ToolArtifactMapper;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.Artifact;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
+
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
@@ -14,7 +17,6 @@ import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.Objects;
 import java.util.Optional;
-import org.springframework.stereotype.Repository;
 
 /** Database-backed globally addressable immutable tool output store. */
 @Repository
