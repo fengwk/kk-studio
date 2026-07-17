@@ -108,7 +108,12 @@ public final class AgentTurnWorkerLifecycle implements SmartLifecycle {
   }
 
   void pollOnce() {
-    if (!running.get() || active.get() != null) {
+    if (!running.get()) {
+      return;
+    }
+    // Release a normally completed turn immediately so the next claim does not wait for the
+    // heartbeat lease-loss cycle.
+    if (!releaseIfDone()) {
       return;
     }
     Optional<ClaimedTurn> claimed = worker.executeNext(workerId);
@@ -129,6 +134,10 @@ public final class AgentTurnWorkerLifecycle implements SmartLifecycle {
     if (turn == null) {
       return;
     }
+    if (turn.handle().isDone()) {
+      active.compareAndSet(turn, null);
+      return;
+    }
     boolean owned;
     try {
       owned = worker.heartbeat(turn);
@@ -143,6 +152,20 @@ public final class AgentTurnWorkerLifecycle implements SmartLifecycle {
         active.compareAndSet(turn, null);
       }
     }
+  }
+
+  /**
+   * @return {@code true} when the lifecycle is idle and may claim the next turn
+   */
+  private boolean releaseIfDone() {
+    ClaimedTurn turn = active.get();
+    if (turn == null) {
+      return true;
+    }
+    if (!turn.handle().isDone()) {
+      return false;
+    }
+    return active.compareAndSet(turn, null);
   }
 
   private void pollSafely() {

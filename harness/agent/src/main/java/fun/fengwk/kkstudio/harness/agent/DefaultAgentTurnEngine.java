@@ -217,13 +217,13 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
       }
       bind(callbackStream);
       try {
+        // Aggregate and deliver deltas under the same monitor as terminal transition so a late
+        // onDelta cannot race past onCompleted/onFailed once the turn has finished.
         synchronized (this) {
           if (terminal.get()) {
             return;
           }
           aggregate(event);
-        }
-        if (!terminal.get()) {
           handler.onDelta(event);
         }
       } catch (RuntimeException error) {
@@ -236,47 +236,41 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
     @Override
     public void onComplete(ProviderResponse response, ProviderStream callbackStream) {
       bind(callbackStream);
-      if (!terminal.compareAndSet(false, true)) {
-        return;
-      }
-      if (cancelled.get()) {
-        handler.onFailed(
-            new ProviderException(ProviderErrorKind.CANCELLED, "assistant turn cancelled"));
-        return;
-      }
-      ProviderRequest boundRequest = finalRequest.get();
-      if (boundRequest == null) {
-        handler.onFailed(
-            new ProviderException(
-                ProviderErrorKind.INVALID_REQUEST, "final provider request was never bound"));
-        return;
-      }
-      try {
-        AgentTurnResult result;
-        synchronized (this) {
-          validateStopReason(response);
-          if (response.stopReason() == ProviderStopReason.CANCELLED) {
-            result = null;
-          } else {
-            emitFinalGaps(response);
-            List<ToolCall> calls = validateToolCalls(response);
-            result =
-                new AgentTurnResult(
-                    new AgentAssistantMessage(response.text(), response.thinking(), calls),
-                    response,
-                    boundRequest);
-          }
+      synchronized (this) {
+        if (!terminal.compareAndSet(false, true)) {
+          return;
         }
-        if (result == null) {
+        if (cancelled.get()) {
           handler.onFailed(
               new ProviderException(ProviderErrorKind.CANCELLED, "assistant turn cancelled"));
-        } else {
-          handler.onCompleted(result);
+          return;
         }
-      } catch (RuntimeException error) {
-        handler.onFailed(
-            new ProviderException(
-                ProviderErrorKind.INVALID_REQUEST, "invalid provider response", error));
+        ProviderRequest boundRequest = finalRequest.get();
+        if (boundRequest == null) {
+          handler.onFailed(
+              new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST, "final provider request was never bound"));
+          return;
+        }
+        try {
+          validateStopReason(response);
+          if (response.stopReason() == ProviderStopReason.CANCELLED) {
+            handler.onFailed(
+                new ProviderException(ProviderErrorKind.CANCELLED, "assistant turn cancelled"));
+            return;
+          }
+          emitFinalGaps(response);
+          List<ToolCall> calls = validateToolCalls(response);
+          handler.onCompleted(
+              new AgentTurnResult(
+                  new AgentAssistantMessage(response.text(), response.thinking(), calls),
+                  response,
+                  boundRequest));
+        } catch (RuntimeException error) {
+          handler.onFailed(
+              new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST, "invalid provider response", error));
+        }
       }
     }
 
@@ -295,9 +289,11 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
       if (current != null) {
         current.cancel();
       }
-      if (terminal.compareAndSet(false, true)) {
-        handler.onFailed(
-            new ProviderException(ProviderErrorKind.CANCELLED, "assistant turn cancelled"));
+      synchronized (this) {
+        if (terminal.compareAndSet(false, true)) {
+          handler.onFailed(
+              new ProviderException(ProviderErrorKind.CANCELLED, "assistant turn cancelled"));
+        }
       }
     }
 
@@ -305,6 +301,11 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
     public boolean isCancelled() {
       ProviderStream current = stream.get();
       return cancelled.get() || (current != null && current.isCancelled());
+    }
+
+    @Override
+    public boolean isDone() {
+      return terminal.get();
     }
 
     private void bind(ProviderStream callbackStream) {
@@ -318,8 +319,10 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
     }
 
     private void fail(ProviderException error) {
-      if (terminal.compareAndSet(false, true)) {
-        handler.onFailed(Objects.requireNonNull(error, "error"));
+      synchronized (this) {
+        if (terminal.compareAndSet(false, true)) {
+          handler.onFailed(Objects.requireNonNull(error, "error"));
+        }
       }
     }
 

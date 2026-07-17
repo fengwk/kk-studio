@@ -51,7 +51,7 @@ ComfyUI 和 S3 接口的边界由 [ComfyUI 工作流 API](comfyui-workflow-api.m
 
 ## SSE 与可恢复投影
 
-Run Event 与 Root Activity SSE 都先从数据库读取 cursor 之后的事实，并在每次成功 `send` 后推进 cursor。请求参数 cursor 优先于 `Last-Event-ID`；合法 cursor 可断线重连，错误 cursor 返回 `400`。SSE emitter 不保留业务 EventBus 或执行状态。
+Run Event 与 Root Activity SSE 都先从数据库读取 cursor 之后的事实，并在每次成功 `send` 后推进 cursor。恢复 cursor 取查询参数与 `Last-Event-ID` 中合法非负十进制值的较大者，避免原生 EventSource 自动重连时被原始 query cursor 回退；错误 cursor 返回 `400`。SSE 轮询线程池有界，过载时拒绝新连接并返回 `503`。SSE emitter 不保留业务 EventBus 或执行状态。
 
 ## Tool、Environment 与 Artifact
 

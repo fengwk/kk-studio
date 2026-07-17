@@ -53,6 +53,11 @@ public final class AgentTurnWorker {
         public boolean isCancelled() {
           return true;
         }
+
+        @Override
+        public boolean isDone() {
+          return true;
+        }
       };
 
   private final RunStore runStore;

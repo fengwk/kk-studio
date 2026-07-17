@@ -402,6 +402,7 @@ class DefaultAgentTurnEngineTest {
     AgentTurnHandle handle = new DefaultAgentTurnEngine(provider).execute(request(), handler);
 
     assertFalse(handle.isCancelled());
+    assertTrue(handle.isDone());
     assertEquals(List.of("started", "delta", "completed"), handler.events);
     assertEquals("ok", handler.result.assistantMessage().text());
   }
@@ -418,6 +419,7 @@ class DefaultAgentTurnEngineTest {
     provider.fail(new ProviderException(ProviderErrorKind.TRANSIENT, "ignored"));
 
     assertTrue(provider.stream.isCancelled());
+    assertTrue(handle.isDone());
     assertEquals(List.of("started", "failed"), handler.events);
   }
 

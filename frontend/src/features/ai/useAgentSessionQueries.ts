@@ -33,19 +33,22 @@ export function useAgentSessionQueries(sessionId: string) {
     refetchInterval: (query) => (hasActiveRun((query.state.data as HarnessRunDTO[] | undefined) ?? []) ? 1200 : false),
   })
   const runs = runsQuery.data ?? []
+  // Always materialize events for the latest run (including terminal failed details). SSE stays
+  // gated on an active run in the controller.
+  const latestRun = runs.at(-1)
   const activeRun = runs.find((run) => ['QUEUED', 'RUNNING', 'WAITING_TOOLS'].includes(run.status))
+  const eventRunId = latestRun?.runId ?? ''
   const runEventsQuery = useQuery({
-    queryKey: queryKeys.runs.events(activeRun?.runId ?? ''),
+    queryKey: queryKeys.runs.events(eventRunId),
     queryFn: async () => {
-      const runId = activeRun?.runId
-      if (!runId) {
+      if (!eventRunId) {
         return []
       }
-      const snapshot = await harnessService.listRunEvents(runId)
-      const cached = queryClient.getQueryData<RunEventDTO[]>(queryKeys.runs.events(runId)) ?? []
+      const snapshot = await harnessService.listRunEvents(eventRunId)
+      const cached = queryClient.getQueryData<RunEventDTO[]>(queryKeys.runs.events(eventRunId)) ?? []
       return mergeRunEventLists(snapshot, cached)
     },
-    enabled: Boolean(activeRun),
+    enabled: Boolean(eventRunId),
   })
 
   return {
@@ -60,6 +63,7 @@ export function useAgentSessionQueries(sessionId: string) {
     session: sessionQuery.data,
     entries: entriesQuery.data ?? [],
     runs,
+    latestRun,
     activeRun,
     runEvents: runEventsQuery.data ?? [],
   }
