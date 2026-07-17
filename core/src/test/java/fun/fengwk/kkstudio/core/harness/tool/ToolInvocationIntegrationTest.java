@@ -8,11 +8,19 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+
 import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.harness.control.service.HarnessRunAbortService;
 import fun.fengwk.kkstudio.core.harness.run.service.DatabaseToolPreparationPort;
 import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
 import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
+import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
+import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
 import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
 import fun.fengwk.kkstudio.core.harness.session.store.SnowflakeSessionIdGenerator;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
@@ -66,6 +74,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
+
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -80,11 +89,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 @SpringBootTest(classes = CoreTestApplication.class)
 class ToolInvocationIntegrationTest {
@@ -94,6 +98,7 @@ class ToolInvocationIntegrationTest {
   @Autowired private MysqlHarnessSessionStore sessionStore;
   @Autowired private SnowflakeSessionIdGenerator sessionIds;
   @Autowired private MysqlHarnessRunStore runStore;
+  @Autowired private HarnessRunMapper runMapper;
   @Autowired private HarnessRunTransactionService transactions;
   @Autowired private DatabaseToolPreparationPort preparationPort;
   @Autowired private MysqlToolInvocationStore invocationStore;
@@ -814,11 +819,148 @@ class ToolInvocationIntegrationTest {
         "{bad",
         claimed.invocation().id());
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> toolTransactions.coordinateReadyRuns(NOW.plusSeconds(4)));
+    // Isolated per-Run coordination swallows the malformed Run without rolling back peers.
+    assertEquals(0, toolTransactions.coordinateReadyRuns(NOW.plusSeconds(4)));
     assertEquals(leafBefore, sessionStore.find(run.sessionId()).orElseThrow().leafEntryId());
     assertEquals(RunStatus.WAITING_TOOLS, runStore.find(run.run().id()).orElseThrow().status());
+  }
+
+  /** A low-id non-ready Run must not consume the bounded ready coordination scan. */
+  @Test
+  void readyRunScanSkipsEarlierNonTerminalRun() {
+    configureToolSettings("{\"permission\":{\"write\":\"ask\"}}");
+    Claimed blocked = claimedRun(false);
+    assertTrue(
+        prepare(
+            blocked.run(),
+            List.of(new ToolCall("blocked", "write", "{\"path\":\"blocked.txt\"}")),
+            List.of(binding("write"))));
+
+    configureToolSettings("{}");
+    Claimed ready = claimedRun(false);
+    assertTrue(
+        prepare(
+            ready.run(),
+            List.of(new ToolCall("ready", "read", "{\"path\":\"ready.txt\"}")),
+            List.of(binding("read"))));
+    ClaimedToolInvocation claimed =
+        workerStore
+            .claimDue("ready-worker", NOW.plusSeconds(2), Duration.ofMinutes(1))
+            .orElseThrow();
+    assertEquals(ready.run().id(), claimed.invocation().runId());
+    assertTrue(toolTransactions.start(claimed, NOW.plusSeconds(2)));
+    assertTrue(
+        toolTransactions.terminate(
+            claimed,
+            ToolInvocationStatus.SUCCEEDED,
+            new ToolResult("ready", List.of(new TextToolContent("done")), false, "{}", true),
+            null,
+            NOW.plusSeconds(3)));
+
+    List<HarnessRunDO> readyRuns = runMapper.listReadyWaitingTools(1);
+    assertEquals(List.of(ready.run().id()), readyRuns.stream().map(HarnessRunDO::getId).toList());
+  }
+
+  /**
+   * A malformed ready Run is skipped in its own transaction; earlier successful coordination stays
+   * committed and later ready Runs continue.
+   */
+  @Test
+  void isolatesFailedRunCoordinationWithoutRollingBackPeers() {
+    configureToolSettings("{}");
+    Claimed goodFirst = claimedRun(false);
+    Claimed bad = claimedRun(false);
+    Claimed goodSecond = claimedRun(false);
+    assertTrue(
+        prepare(
+            goodFirst.run(),
+            List.of(new ToolCall("good-first", "read", "{\"path\":\"a\"}")),
+            List.of(binding("read"))));
+    assertTrue(
+        prepare(
+            bad.run(),
+            List.of(new ToolCall("bad", "read", "{\"path\":\"b\"}")),
+            List.of(binding("read"))));
+    assertTrue(
+        prepare(
+            goodSecond.run(),
+            List.of(new ToolCall("good-second", "read", "{\"path\":\"c\"}")),
+            List.of(binding("read"))));
+
+    ClaimedToolInvocation firstClaim =
+        workerStore.claimDue("tool-a", NOW.plusSeconds(2), Duration.ofMinutes(1)).orElseThrow();
+    assertTrue(toolTransactions.start(firstClaim, NOW.plusSeconds(2)));
+    assertTrue(
+        toolTransactions.terminate(
+            firstClaim,
+            ToolInvocationStatus.SUCCEEDED,
+            new ToolResult(
+                firstClaim.invocation().toolCallId(),
+                List.of(new TextToolContent("ok-1")),
+                false,
+                "{}",
+                true),
+            null,
+            NOW.plusSeconds(2)));
+
+    ClaimedToolInvocation badClaim =
+        workerStore.claimDue("tool-b", NOW.plusSeconds(3), Duration.ofMinutes(1)).orElseThrow();
+    assertTrue(toolTransactions.start(badClaim, NOW.plusSeconds(3)));
+    assertTrue(
+        toolTransactions.terminate(
+            badClaim,
+            ToolInvocationStatus.SUCCEEDED,
+            new ToolResult(
+                badClaim.invocation().toolCallId(),
+                List.of(new TextToolContent("ok-bad")),
+                false,
+                "{}",
+                true),
+            null,
+            NOW.plusSeconds(3)));
+    jdbcTemplate.update(
+        "update tool_invocation set result_json = ? where id = ?",
+        "{bad",
+        badClaim.invocation().id());
+
+    ClaimedToolInvocation secondClaim =
+        workerStore.claimDue("tool-c", NOW.plusSeconds(4), Duration.ofMinutes(1)).orElseThrow();
+    assertTrue(toolTransactions.start(secondClaim, NOW.plusSeconds(4)));
+    assertTrue(
+        toolTransactions.terminate(
+            secondClaim,
+            ToolInvocationStatus.SUCCEEDED,
+            new ToolResult(
+                secondClaim.invocation().toolCallId(),
+                List.of(new TextToolContent("ok-2")),
+                false,
+                "{}",
+                true),
+            null,
+            NOW.plusSeconds(4)));
+
+    assertEquals(2, toolTransactions.coordinateReadyRuns(NOW.plusSeconds(5)));
+    assertEquals(RunStatus.QUEUED, runStore.find(goodFirst.run().id()).orElseThrow().status());
+    assertEquals(RunStatus.WAITING_TOOLS, runStore.find(bad.run().id()).orElseThrow().status());
+    assertEquals(RunStatus.QUEUED, runStore.find(goodSecond.run().id()).orElseThrow().status());
+  }
+
+  /** Prepared invocations freeze ToolSideEffect for later recovery decisions. */
+  @Test
+  void persistsFrozenToolSideEffectOnInvocation() {
+    configureToolSettings("{}");
+    Claimed run = claimedRun(false);
+    assertTrue(
+        prepare(
+            run.run(),
+            List.of(new ToolCall("side-effect", "write", "{\"path\":\"a\"}")),
+            List.of(binding("write"))));
+    ToolInvocation invocation = invocationStore.listByRun(run.run().id()).get(0);
+    assertEquals(ToolSideEffect.IDEMPOTENT, invocation.sideEffect());
+    String stored =
+        jdbcTemplate.queryForObject(
+            "select side_effect from tool_invocation where id = ?", String.class, invocation.id());
+    assertEquals(ToolSideEffect.IDEMPOTENT.name(), stored);
   }
 
   /**
@@ -896,6 +1038,21 @@ class ToolInvocationIntegrationTest {
                     || event.type() == RunEventType.TOOL_COMPLETED
                     || event.type() == RunEventType.TOOL_REQUEUED)
         .forEach(event -> assertToolEventAttempt(event, run.run()));
+    List<RunEvent> completedEvents =
+        runStore.listAfter(run.run().id(), 0, 20).stream()
+            .filter(event -> event.type() == RunEventType.TOOL_COMPLETED)
+            .toList();
+    assertEquals(2, completedEvents.size());
+    assertTrue(
+        completedEvents.stream()
+            .anyMatch(
+                event ->
+                    event.payloadJson().contains("\"toolCallId\":\"second-completes-first\"")));
+    assertTrue(
+        completedEvents.stream()
+            .anyMatch(
+                event ->
+                    event.payloadJson().contains("\"toolCallId\":\"first-completes-second\"")));
     Session session = sessionStore.find(run.sessionId()).orElseThrow();
     List<SessionEntry> path = sessionStore.loadPath(run.sessionId(), session.leafEntryId());
     List<String> toolCallIds =

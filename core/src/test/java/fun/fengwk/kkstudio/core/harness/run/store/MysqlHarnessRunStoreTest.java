@@ -12,15 +12,20 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunEventMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
+import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
+import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
 import fun.fengwk.kkstudio.harness.runtime.run.RunIdGenerator;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
-import org.junit.jupiter.api.Test;
+import java.util.ConcurrentModificationException;
 
 class MysqlHarnessRunStoreTest {
   private static final Instant NOW = Instant.parse("2026-02-01T00:00:00Z");
@@ -68,24 +73,34 @@ class MysqlHarnessRunStoreTest {
   void rejectsUnpersistedRunEvent() {
     HarnessRunMapper runMapper = mock(HarnessRunMapper.class);
     HarnessRunEventMapper eventMapper = mock(HarnessRunEventMapper.class);
+    HarnessSessionMapper sessionMapper = mock(HarnessSessionMapper.class);
     RunIdGenerator idGenerator = mock(RunIdGenerator.class);
     HarnessRunDO run = new HarnessRunDO();
     run.setId(1L);
+    run.setSessionId(9L);
     run.setEventSequence(0L);
+    HarnessSessionDO session = new HarnessSessionDO();
+    session.setId(9L);
+    session.setRootSessionId(9L);
     when(runMapper.findForUpdate(1L)).thenReturn(run);
+    when(sessionMapper.findForUpdate(9L)).thenReturn(session);
     when(runMapper.updateEventSequence(anyLong(), anyLong(), anyLong(), any(LocalDateTime.class)))
         .thenReturn(1);
     when(idGenerator.newRunEventId()).thenReturn(2L);
     when(eventMapper.insert(any())).thenReturn(0);
-    MysqlHarnessRunStore store = new MysqlHarnessRunStore(runMapper, eventMapper, idGenerator);
+    MysqlHarnessRunStore store =
+        new MysqlHarnessRunStore(
+            runMapper,
+            eventMapper,
+            new HarnessRunEventWriter(runMapper, eventMapper, sessionMapper, idGenerator));
 
     assertThrows(
-        IllegalStateException.class,
+        ConcurrentModificationException.class,
         () -> store.append(1L, RunEventType.RUN_STARTED, "{\"schemaVersion\":1}", NOW));
   }
 
   private static MysqlHarnessRunStore store(HarnessRunMapper runMapper) {
     return new MysqlHarnessRunStore(
-        runMapper, mock(HarnessRunEventMapper.class), mock(RunIdGenerator.class));
+        runMapper, mock(HarnessRunEventMapper.class), mock(HarnessRunEventWriter.class));
   }
 }

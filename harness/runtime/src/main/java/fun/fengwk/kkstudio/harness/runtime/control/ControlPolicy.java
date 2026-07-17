@@ -3,7 +3,8 @@ package fun.fengwk.kkstudio.harness.runtime.control;
 import java.util.Objects;
 
 /** 入队时定型的冻结 policy：每个 kind 各自决定消费模式。 */
-public record ControlPolicy(ControlConsumptionMode steeringMode, ControlConsumptionMode followUpMode) {
+public record ControlPolicy(
+    ControlConsumptionMode steeringMode, ControlConsumptionMode followUpMode) {
 
   /** 默认 policy：所有 kind 走 ONE_AT_A_TIME。 */
   public static final ControlPolicy DEFAULT =

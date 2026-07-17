@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -16,6 +18,7 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolObjectSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolSchemaElement;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
+
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -26,7 +29,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
-import org.junit.jupiter.api.Test;
 
 /** Daemon v1 CAPABILITIES payload codec 的双向与拒绝契约测试。 */
 class DaemonToolCapabilitiesCodecTest {

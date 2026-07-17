@@ -49,6 +49,70 @@ describe('session-events', () => {
     ])
   })
 
+  it('keeps a streamed Assistant when completion arrives before durable Entry materialization', () => {
+    const timeline = buildSessionTimeline([], [
+      runEvent('started', 'assistant_started', {}),
+      runEvent('delta', 'assistant_delta_batch', { deltas: [{ kind: 'text', text: '尚未落库' }] }),
+      runEvent('completed', 'assistant_completed', {}),
+    ])
+
+    expect(timeline.messages).toMatchObject([
+      { role: 'assistant', text: '尚未落库', status: 'done' },
+    ])
+  })
+
+  it('dedupes the streamed Assistant once the durable Entry arrives', () => {
+    const events = [
+      runEvent('started', 'assistant_started', {}),
+      runEvent('delta', 'assistant_delta_batch', { deltas: [{ kind: 'text', text: '最终回答' }] }),
+      runEvent('completed', 'assistant_completed', {}),
+    ]
+    const before = buildSessionTimeline([], events)
+    expect(before.messages).toMatchObject([{ role: 'assistant', text: '最终回答', status: 'done' }])
+
+    const after = buildSessionTimeline([
+      entry('assistant', 'message', messagePayload('ASSISTANT', [{ type: 'text', text: '最终回答' }])),
+    ], events)
+    expect(after.messages).toMatchObject([
+      { role: 'assistant', text: '最终回答', status: 'done' },
+    ])
+    expect(after.messages).toHaveLength(1)
+  })
+
+  it('does not consume a durable Assistant match on an earlier failed retry attempt', () => {
+    const timeline = buildSessionTimeline([
+      entry('assistant', 'message', messagePayload('ASSISTANT', [{ type: 'text', text: '最终成功' }])),
+    ], [
+      runEvent('attempt-1-start', 'assistant_started', {}, 1),
+      runEvent('attempt-1-delta', 'assistant_delta_batch', { deltas: [{ kind: 'text', text: '旧半成品' }] }, 2),
+      runEvent('attempt-1-failed', 'assistant_failed', { message: 'retrying' }, 3),
+      runEvent('attempt-2-start', 'assistant_started', {}, 4),
+      runEvent('attempt-2-delta', 'assistant_delta_batch', { deltas: [{ kind: 'text', text: '最终成功' }] }, 5),
+      runEvent('attempt-2-completed', 'assistant_completed', {}, 6),
+    ])
+
+    expect(timeline.messages).toMatchObject([
+      { role: 'assistant', text: '最终成功', status: 'done' },
+    ])
+    expect(timeline.messages).toHaveLength(1)
+  })
+
+  it('keeps failed terminal run details from persisted Run Events without a live stream', () => {
+    const timeline = buildSessionTimeline([
+      entry('user', 'message', messagePayload('USER', [{ type: 'text', text: '继续' }])),
+    ], [
+      runEvent('started', 'assistant_started', {}),
+      runEvent('partial', 'assistant_delta_batch', { deltas: [{ kind: 'text', text: '半成品' }] }),
+      runEvent('failed', 'assistant_failed', { message: 'provider timeout' }),
+      runEvent('run-failed', 'run_failed', { message: 'run failed' }),
+    ])
+
+    expect(timeline.messages).toMatchObject([
+      { role: 'user', text: '继续' },
+      { role: 'assistant', text: '半成品\nprovider timeout', status: 'error' },
+    ])
+  })
+
   it('projects durable system, compaction, error and media variants while ignoring non-dialogue Entries', () => {
     const timeline = buildSessionTimeline([
       entry('compaction', 'compaction', { summary: '上下文已压缩' }),
@@ -157,12 +221,57 @@ describe('session-events', () => {
     }])
   })
 
+  it('carries durable Assistant tool-call arguments into the matching Tool result', () => {
+    const timeline = buildSessionTimeline([
+      entry('assistant-call', 'message', messagePayload('ASSISTANT', [{
+        type: 'tool_call',
+        toolCallId: 'call-1',
+        toolName: 'read',
+        argumentsJson: '{"path":"README.md"}',
+      }])),
+      entry('tool-result', 'message', messagePayload('TOOL', [{
+        type: 'tool_result',
+        toolCallId: 'call-1',
+        toolName: 'read',
+        contents: [{ type: 'text', text: 'done' }],
+        error: false,
+        detailsJson: '{}',
+      }])),
+    ], [])
+
+    expect(timeline.messages).toMatchObject([
+      { role: 'tool', toolCallId: 'call-1', arguments: '{"path":"README.md"}', text: 'done' },
+    ])
+  })
+
+  it('does not duplicate a tool cycle that has already materialized as a durable result Entry', () => {
+    const timeline = buildSessionTimeline([
+      entry('tool-result', 'message', messagePayload('TOOL', [{
+        type: 'tool_result',
+        toolCallId: 'call-1',
+        toolName: 'read',
+        contents: [{ type: 'text', text: 'durable result' }],
+        error: false,
+        detailsJson: '{}',
+      }])),
+    ], [
+      runEvent('prepared', 'tool_prepared', { invocationId: 'inv-1', toolCallId: 'call-1', toolName: 'read', arguments: '{}' }),
+      runEvent('started', 'tool_started', { invocationId: 'inv-1', toolCallId: 'call-1' }),
+      runEvent('completed', 'tool_completed', { invocationId: 'inv-1', status: 'SUCCEEDED', error: false }),
+    ])
+
+    expect(timeline.messages).toMatchObject([
+      { role: 'tool', toolCallId: 'call-1', text: 'durable result', status: 'done' },
+    ])
+    expect(timeline.messages).toHaveLength(1)
+  })
+
   it('projects prepared tool progress and partial results while a run is active', () => {
     const timeline = buildSessionTimeline([], [
-      runEvent('prepared', 'tool_prepared', { toolCallId: 'call-1', toolName: 'web_search', arguments: '{"q":"上海天气"}' }),
-      runEvent('started', 'tool_started', { toolCallId: 'call-1' }),
-      runEvent('partial', 'tool_delta_batch', { partialResults: [{ toolCallId: 'call-1', contents: [{ type: 'text', text: '晴 32C' }], error: false, details: {} }] }),
-      runEvent('completed', 'tool_completed', { toolCallId: 'call-1', error: false }),
+      runEvent('prepared', 'tool_prepared', { invocationId: 'inv-1', toolCallId: 'call-1', toolName: 'web_search', arguments: '{"q":"上海天气"}' }),
+      runEvent('started', 'tool_started', { invocationId: 'inv-1', toolCallId: 'call-1' }),
+      runEvent('partial', 'tool_delta_batch', { invocationId: 'inv-1', partialResults: [{ toolCallId: 'call-1', contents: [{ type: 'text', text: '晴 32C' }], error: false, details: {} }] }),
+      runEvent('completed', 'tool_completed', { invocationId: 'inv-1', status: 'SUCCEEDED', error: false }),
     ])
 
     expect(timeline.messages).toMatchObject([{
@@ -209,11 +318,11 @@ function messagePayload(role: string, contents: Record<string, unknown>[]) {
   return { message: { role, contents }, assistantMetadata: role === 'ASSISTANT' ? {} : null }
 }
 
-function runEvent(eventId: string, type: string, payload: Record<string, unknown>): RunEventDTO {
+function runEvent(eventId: string, type: string, payload: Record<string, unknown>, sequence = eventId.length): RunEventDTO {
   return {
     eventId,
     runId: '2',
-    sequence: eventId.length,
+    sequence,
     type,
     payloadJson: JSON.stringify(payload),
     createTime: '2026-06-20T02:00:00',

@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.web.environment;
 
-import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentGatewayProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.web.servlet.server.ServletWebServerFactory;
@@ -10,6 +9,8 @@ import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
 import org.springframework.web.socket.server.standard.ServletServerContainerFactoryBean;
+
+import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentGatewayProperties;
 
 /** WebSocket transport registration for the Daemon v1 Environment gateway. */
 @Configuration(proxyBeanMethods = false)

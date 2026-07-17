@@ -14,7 +14,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
+
+import fun.fengwk.kkstudio.core.harness.run.store.HarnessRunEventWriter;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
@@ -26,15 +31,12 @@ import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
 import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskRuntime;
+
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.mockito.InOrder;
 
 class HarnessRunAbortServiceTest {
 
@@ -47,7 +49,7 @@ class HarnessRunAbortServiceTest {
   private ToolInvocationMapper invocationMapper;
   private HarnessSubagentTaskMapper taskMapper;
   private RunControlMessageStore controlStore;
-  private HarnessRunTransactionService runTransactions;
+  private HarnessRunEventWriter eventWriter;
   private TaskRuntime taskRuntime;
   private HarnessRunAbortService service;
 
@@ -58,7 +60,7 @@ class HarnessRunAbortServiceTest {
     invocationMapper = mock(ToolInvocationMapper.class);
     taskMapper = mock(HarnessSubagentTaskMapper.class);
     controlStore = mock(RunControlMessageStore.class);
-    runTransactions = mock(HarnessRunTransactionService.class);
+    eventWriter = mock(HarnessRunEventWriter.class);
     taskRuntime = mock(TaskRuntime.class);
     service =
         new HarnessRunAbortService(
@@ -67,7 +69,7 @@ class HarnessRunAbortServiceTest {
             invocationMapper,
             taskMapper,
             controlStore,
-            runTransactions,
+            eventWriter,
             taskRuntime);
   }
 
@@ -76,10 +78,10 @@ class HarnessRunAbortServiceTest {
   void rejectsUnknownSessionWithoutSideEffects() {
     assertThrows(IllegalArgumentException.class, () -> service.abort(SESSION_ID, NOW));
 
-    verifyNoInteractions(runMapper, invocationMapper, taskMapper, controlStore, runTransactions);
+    verifyNoInteractions(runMapper, invocationMapper, taskMapper, controlStore, eventWriter);
   }
 
-  /** The no-active path locks only Session and clears controls including run-less follow-ups. */
+  /** The no-active path locks Session/Root and clears controls including run-less follow-ups. */
   @Test
   void clearsPendingControlsWhenNoRunIsActive() {
     HarnessSessionDO session = session(null);
@@ -92,8 +94,9 @@ class HarnessRunAbortServiceTest {
     assertNull(result.runId());
     assertNull(result.status());
     assertNull(result.requestedAt());
+    verify(eventWriter).lockRoot(session);
     verify(controlStore).clearPendingBySession(SESSION_ID, NOW);
-    verifyNoInteractions(runMapper, invocationMapper, taskMapper, runTransactions, taskRuntime);
+    verifyNoInteractions(runMapper, invocationMapper, taskMapper, taskRuntime);
   }
 
   /** A run appearing after the no-active hint is a conflict instead of a Session-to-Run relock. */
@@ -105,7 +108,7 @@ class HarnessRunAbortServiceTest {
     assertThrows(RunAbortConflictException.class, () -> service.abort(SESSION_ID, NOW));
 
     verify(controlStore, never()).clearPendingBySession(SESSION_ID, NOW);
-    verifyNoInteractions(runMapper, invocationMapper, taskMapper, runTransactions, taskRuntime);
+    verifyNoInteractions(runMapper, invocationMapper, taskMapper, taskRuntime);
   }
 
   /** A missing hinted Run is repaired only while Session still points at the same id. */
@@ -113,7 +116,7 @@ class HarnessRunAbortServiceTest {
   void repairsMissingRunPointerAndKeepsItsIdInTheResult() {
     HarnessSessionDO session = session(RUN_ID);
     when(sessionMapper.find(SESSION_ID)).thenReturn(session);
-    when(sessionMapper.findForUpdate(SESSION_ID)).thenReturn(session);
+    when(eventWriter.lockSessionAndRoot(SESSION_ID)).thenReturn(session);
     when(sessionMapper.clearActiveRun(SESSION_ID, RUN_ID, utc(NOW))).thenReturn(1);
 
     HarnessRunAbortService.AbortResult result = service.abort(SESSION_ID, NOW);
@@ -122,7 +125,7 @@ class HarnessRunAbortServiceTest {
     assertNull(result.status());
     verify(sessionMapper).clearActiveRun(SESSION_ID, RUN_ID, utc(NOW));
     verify(controlStore).clearPendingBySession(SESSION_ID, NOW);
-    verifyNoInteractions(invocationMapper, taskMapper, runTransactions, taskRuntime);
+    verifyNoInteractions(invocationMapper, taskMapper, taskRuntime);
   }
 
   /** A terminal Run cannot receive a synthetic abort event; only its stale pointer is repaired. */
@@ -132,7 +135,7 @@ class HarnessRunAbortServiceTest {
     HarnessRunDO run = run(RunStatus.SUCCEEDED, null);
     when(sessionMapper.find(SESSION_ID)).thenReturn(session);
     when(runMapper.findForUpdate(RUN_ID)).thenReturn(run);
-    when(sessionMapper.findForUpdate(SESSION_ID)).thenReturn(session);
+    when(eventWriter.lockSessionAndRoot(SESSION_ID)).thenReturn(session);
     when(sessionMapper.clearActiveRun(SESSION_ID, RUN_ID, utc(NOW))).thenReturn(1);
 
     HarnessRunAbortService.AbortResult result = service.abort(SESSION_ID, NOW);
@@ -140,7 +143,7 @@ class HarnessRunAbortServiceTest {
     assertEquals(RunStatus.SUCCEEDED, result.status());
     assertFalse(result.newlyRequested());
     verify(runMapper, never()).requestCancel(RUN_ID, utc(NOW));
-    verifyNoInteractions(invocationMapper, taskMapper, runTransactions, taskRuntime);
+    verifyNoInteractions(invocationMapper, taskMapper, taskRuntime);
   }
 
   /** The first abort writes one event, clears controls and propagates to tools and task trees. */
@@ -151,7 +154,7 @@ class HarnessRunAbortServiceTest {
     HarnessRunDO run = run(RunStatus.RUNNING, null);
     when(sessionMapper.find(SESSION_ID)).thenReturn(session);
     when(runMapper.findForUpdate(RUN_ID)).thenReturn(run);
-    when(sessionMapper.findForUpdate(SESSION_ID)).thenReturn(session);
+    when(eventWriter.lockSessionAndRoot(SESSION_ID)).thenReturn(session);
     when(runMapper.requestCancel(RUN_ID, utc(NOW))).thenReturn(1);
     when(taskMapper.listTaskInvocationIdsByParentRun(RUN_ID)).thenReturn(List.of(31L, 32L));
 
@@ -161,7 +164,7 @@ class HarnessRunAbortServiceTest {
     assertEquals(RunStatus.RUNNING, result.status());
     assertEquals(NOW, result.requestedAt());
     ArgumentCaptor<List<RunEventDraft>> events = ArgumentCaptor.forClass(List.class);
-    verify(runTransactions).appendExternalEvents(eq(RUN_ID), events.capture(), eq(NOW));
+    verify(eventWriter).appendLocked(eq(run), events.capture(), eq(NOW));
     assertEquals(1, events.getValue().size());
     assertEquals(RunEventType.ABORT_REQUESTED, events.getValue().get(0).type());
     assertTrue(events.getValue().get(0).payloadJson().contains("\"sessionId\":11"));
@@ -180,16 +183,17 @@ class HarnessRunAbortServiceTest {
     Instant precise = Instant.parse("2026-07-16T00:00:00.123456789Z");
     Instant timestamp = precise.truncatedTo(ChronoUnit.MILLIS);
     HarnessSessionDO session = session(RUN_ID);
+    HarnessRunDO run = run(RunStatus.RUNNING, null);
     when(sessionMapper.find(SESSION_ID)).thenReturn(session);
-    when(runMapper.findForUpdate(RUN_ID)).thenReturn(run(RunStatus.RUNNING, null));
-    when(sessionMapper.findForUpdate(SESSION_ID)).thenReturn(session);
+    when(runMapper.findForUpdate(RUN_ID)).thenReturn(run);
+    when(eventWriter.lockSessionAndRoot(SESSION_ID)).thenReturn(session);
     when(runMapper.requestCancel(RUN_ID, utc(timestamp))).thenReturn(1);
     when(taskMapper.listTaskInvocationIdsByParentRun(RUN_ID)).thenReturn(List.of());
 
     HarnessRunAbortService.AbortResult result = service.abort(SESSION_ID, precise);
 
     assertEquals(timestamp, result.requestedAt());
-    verify(runTransactions).appendExternalEvents(eq(RUN_ID), anyList(), eq(timestamp));
+    verify(eventWriter).appendLocked(eq(run), anyList(), eq(timestamp));
     verify(controlStore).clearPendingBySession(SESSION_ID, timestamp);
     verify(invocationMapper).requestCancelByRun(RUN_ID, utc(timestamp));
   }
@@ -202,14 +206,14 @@ class HarnessRunAbortServiceTest {
     HarnessRunDO run = run(RunStatus.WAITING_TOOLS, requestedAt);
     when(sessionMapper.find(SESSION_ID)).thenReturn(session);
     when(runMapper.findForUpdate(RUN_ID)).thenReturn(run);
-    when(sessionMapper.findForUpdate(SESSION_ID)).thenReturn(session);
+    when(eventWriter.lockSessionAndRoot(SESSION_ID)).thenReturn(session);
     when(taskMapper.listTaskInvocationIdsByParentRun(RUN_ID)).thenReturn(List.of());
 
     HarnessRunAbortService.AbortResult result = service.abort(SESSION_ID, NOW);
 
     assertFalse(result.newlyRequested());
     assertEquals(requestedAt, result.requestedAt());
-    verify(runTransactions, never()).appendExternalEvents(eq(RUN_ID), anyList(), eq(NOW));
+    verify(eventWriter, never()).appendLocked(eq(run), anyList(), eq(NOW));
     verify(controlStore).clearPendingBySession(SESSION_ID, NOW);
     verify(invocationMapper).requestCancelByRun(RUN_ID, utc(NOW));
   }
@@ -220,11 +224,11 @@ class HarnessRunAbortServiceTest {
     HarnessSessionDO session = session(RUN_ID);
     when(sessionMapper.find(SESSION_ID)).thenReturn(session);
     when(runMapper.findForUpdate(RUN_ID)).thenReturn(run(RunStatus.QUEUED, null));
-    when(sessionMapper.findForUpdate(SESSION_ID)).thenReturn(session);
+    when(eventWriter.lockSessionAndRoot(SESSION_ID)).thenReturn(session);
 
     assertThrows(IllegalStateException.class, () -> service.abort(SESSION_ID, NOW));
 
-    verifyNoInteractions(invocationMapper, taskMapper, controlStore, runTransactions, taskRuntime);
+    verifyNoInteractions(invocationMapper, taskMapper, controlStore, taskRuntime);
   }
 
   private static HarnessSessionDO session(Long activeRunId) {

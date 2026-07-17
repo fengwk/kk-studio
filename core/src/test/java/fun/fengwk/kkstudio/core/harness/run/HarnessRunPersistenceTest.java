@@ -9,12 +9,25 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+
 import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.harness.run.service.DatabaseToolPreparationPort;
 import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
+import fun.fengwk.kkstudio.core.harness.run.store.HarnessRunEventWriter;
 import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
 import fun.fengwk.kkstudio.core.harness.run.store.SnowflakeRunIdGenerator;
+import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunEventMapper;
+import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
+import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
+import fun.fengwk.kkstudio.core.harness.task.store.DatabaseRootActivityStore;
 import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
@@ -23,6 +36,7 @@ import fun.fengwk.kkstudio.harness.runtime.run.AgentRun;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEvent;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
+import fun.fengwk.kkstudio.harness.runtime.run.RunIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -36,6 +50,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.task.RootActivity;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -43,6 +58,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+
 import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -57,12 +73,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 @SpringBootTest(classes = CoreTestApplication.class)
 class HarnessRunPersistenceTest {
@@ -73,7 +85,12 @@ class HarnessRunPersistenceTest {
   @Autowired private HarnessRunTransactionService transactions;
   @Autowired private DatabaseToolPreparationPort toolPreparation;
   @Autowired private MysqlToolInvocationStore invocationStore;
+  @Autowired private DatabaseRootActivityStore rootActivityStore;
   @Autowired private SnowflakeRunIdGenerator idGenerator;
+  @Autowired private HarnessRunMapper runMapper;
+  @Autowired private HarnessRunEventMapper eventMapper;
+  @Autowired private HarnessSessionMapper sessionMapper;
+  @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private JdbcTemplate jdbcTemplate;
 
   @BeforeEach
@@ -220,6 +237,70 @@ class HarnessRunPersistenceTest {
     assertEquals(runCount, claimedRunIds.size());
   }
 
+  /**
+   * Root lock prevents a sibling Run from allocating its event id until the first writer commits.
+   */
+  @Test
+  void concurrentSiblingRunAppendsPreserveRootActivityCursor() throws Exception {
+    Seed root = seedSession();
+    Seed child = seedChild(root.sessionId());
+    AgentRun runA =
+        transactions.submitUserMessage(root.sessionId(), root.snapshotId(), user("a"), NOW);
+    AgentRun runB =
+        transactions.submitUserMessage(child.sessionId(), child.snapshotId(), user("b"), NOW);
+
+    BlockingRunEventIdGenerator blockingIds = new BlockingRunEventIdGenerator();
+    HarnessRunEventWriter writer =
+        new HarnessRunEventWriter(runMapper, eventMapper, sessionMapper, blockingIds);
+    TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    boolean allocatedBeforeFirstCommit = false;
+    try {
+      Future<?> first =
+          executor.submit(
+              () ->
+                  transactionTemplate.executeWithoutResult(
+                      ignored ->
+                          writer.lockAndAppend(
+                              runA.id(),
+                              List.of(
+                                  new RunEventDraft(
+                                      RunEventType.TURN_STARTED, "{\"schemaVersion\":1}")),
+                              NOW)));
+      assertTrue(blockingIds.firstGenerated.await(5, TimeUnit.SECONDS));
+      Future<?> second =
+          executor.submit(
+              () ->
+                  transactionTemplate.executeWithoutResult(
+                      ignored -> {
+                        runMapper.findForUpdate(runB.id());
+                        sessionMapper.findForUpdate(runB.sessionId());
+                        blockingIds.secondStarted.countDown();
+                        writer.lockAndAppend(
+                            runB.id(),
+                            List.of(
+                                new RunEventDraft(
+                                    RunEventType.TURN_STARTED, "{\"schemaVersion\":1}")),
+                            NOW);
+                      }));
+      assertTrue(blockingIds.secondStarted.await(5, TimeUnit.SECONDS));
+      allocatedBeforeFirstCommit = blockingIds.secondGenerated.await(250, TimeUnit.MILLISECONDS);
+      blockingIds.releaseFirst.countDown();
+      first.get(5, TimeUnit.SECONDS);
+      second.get(5, TimeUnit.SECONDS);
+    } finally {
+      blockingIds.releaseFirst.countDown();
+      executor.shutdownNow();
+    }
+
+    assertFalse(allocatedBeforeFirstCommit);
+    assertTrue(blockingIds.secondGenerated.await(5, TimeUnit.SECONDS));
+    List<RootActivity> committed = rootActivityStore.list(root.sessionId(), 0, 10);
+    assertEquals(
+        List.of(blockingIds.firstId, blockingIds.secondId),
+        committed.stream().map(RootActivity::eventId).toList());
+  }
+
   /** RunEvent 并发 append 原子分配连续 sequence，cursor 只返回指定位置之后的事件。 */
   @Test
   void allocatesRunEventSequenceAtomicallyAndReadsByCursor() throws Exception {
@@ -349,6 +430,13 @@ class HarnessRunPersistenceTest {
         List.of(
             RunEventType.ASSISTANT_COMPLETED, RunEventType.TOOL_PREPARED, RunEventType.RUN_WAITING),
         runStore.listAfter(queued.id(), 0, 10).stream().map(RunEvent::type).toList());
+    String preparedPayload =
+        runStore.listAfter(queued.id(), 0, 10).stream()
+            .filter(event -> event.type() == RunEventType.TOOL_PREPARED)
+            .findFirst()
+            .orElseThrow()
+            .payloadJson();
+    assertTrue(preparedPayload.contains("\"arguments\":\"{}\""), preparedPayload);
     assertEquals(
         assistant("calling", List.of(call)),
         sessionStore.find(seed.sessionId(), session.leafEntryId()).orElseThrow().payload());
@@ -708,6 +796,7 @@ class HarnessRunPersistenceTest {
             "status",
             "permission_action",
             "permission_decision",
+            "side_effect",
             "deadline_at",
             "lease_owner",
             "lease_until",
@@ -742,6 +831,35 @@ class HarnessRunPersistenceTest {
     long sessionId = idGenerator.newSessionEntryId();
     Session session = Session.root(sessionId, 1L, "run-test", false, NOW);
     sessionStore.create(session);
+    long snapshotId = idGenerator.newSessionEntryId();
+    AgentSnapshot snapshot =
+        new AgentSnapshot("system", "model", "default", List.of(), List.of(), List.of(), "{}");
+    AgentSnapshotEntryPayload payload = new AgentSnapshotEntryPayload(snapshot);
+    sessionStore.append(
+        new SessionEntry(snapshotId, sessionId, null, null, payload.type(), payload, NOW),
+        null,
+        0L);
+    return new Seed(sessionId, snapshotId);
+  }
+
+  private Seed seedChild(long rootSessionId) {
+    long sessionId = idGenerator.newSessionEntryId();
+    Session child =
+        new Session(
+            sessionId,
+            1L,
+            "child-run-test",
+            null,
+            null,
+            rootSessionId,
+            rootSessionId,
+            null,
+            1,
+            false,
+            0,
+            NOW,
+            NOW);
+    sessionStore.createFork(child, List.of());
     long snapshotId = idGenerator.newSessionEntryId();
     AgentSnapshot snapshot =
         new AgentSnapshot("system", "model", "default", List.of(), List.of(), List.of(), "{}");
@@ -859,6 +977,41 @@ class HarnessRunPersistenceTest {
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
       throw new AssertionError(error);
+    }
+  }
+
+  private static final class BlockingRunEventIdGenerator implements RunIdGenerator {
+    private final long firstId = Long.MAX_VALUE - 10;
+    private final long secondId = Long.MAX_VALUE - 9;
+    private final CountDownLatch firstGenerated = new CountDownLatch(1);
+    private final CountDownLatch releaseFirst = new CountDownLatch(1);
+    private final CountDownLatch secondStarted = new CountDownLatch(1);
+    private final CountDownLatch secondGenerated = new CountDownLatch(1);
+    private final AtomicInteger calls = new AtomicInteger();
+
+    @Override
+    public long newRunId() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public long newRunEventId() {
+      int call = calls.incrementAndGet();
+      if (call == 1) {
+        firstGenerated.countDown();
+        await(releaseFirst);
+        return firstId;
+      }
+      if (call == 2) {
+        secondGenerated.countDown();
+        return secondId;
+      }
+      throw new AssertionError("unexpected event id allocation: " + call);
+    }
+
+    @Override
+    public long newSessionEntryId() {
+      throw new UnsupportedOperationException();
     }
   }
 

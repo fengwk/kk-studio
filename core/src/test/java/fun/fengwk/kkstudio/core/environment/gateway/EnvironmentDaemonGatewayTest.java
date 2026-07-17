@@ -14,6 +14,9 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
 import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
 import fun.fengwk.kkstudio.core.environment.service.ToolEnvironmentCapabilityApplicationService;
 import fun.fengwk.kkstudio.core.environment.service.model.ToolEnvironment;
@@ -43,6 +46,7 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -52,8 +56,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
 /** Unit contracts for the transport-neutral durable Environment Daemon gateway. */
 class EnvironmentDaemonGatewayTest {
@@ -257,6 +259,76 @@ class EnvironmentDaemonGatewayTest {
             any(ToolResult.class),
             eq("non-idempotent invocation lease expired"),
             eq(NOW));
+    assertFalse(messageTypes(connection.envelopes()).contains(DaemonMessageType.INVOKE));
+  }
+
+  /** Frozen NON_IDEMPOTENT recovery wins before a concurrent cancellation request. */
+  @Test
+  void prioritizesRecoveredNonIdempotentOverCancellation() {
+    Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT, true);
+    ToolInvocation cancelled = withStatus(fixture.invocation, ToolInvocationStatus.RUNNING);
+    ClaimedToolInvocation claimed = new ClaimedToolInvocation(cancelled, true);
+    when(fixture.invocationStore.claimDue(eq(ENVIRONMENT_ID), anyString(), eq(NOW), any()))
+        .thenReturn(Optional.of(claimed));
+    FakeConnection connection = new FakeConnection("connection-recovered-cancelled");
+    fixture.gateway.open(connection);
+    fixture.gateway.receive(connection.connectionId(), hello(0));
+    fixture.gateway.receive(connection.connectionId(), capabilities(1, fixture.capabilitiesJson));
+    fixture.gateway.receive(connection.connectionId(), ready(2));
+
+    verify(fixture.transactions)
+        .terminate(
+            eq(claimed),
+            eq(ToolInvocationStatus.UNKNOWN),
+            any(ToolResult.class),
+            eq("non-idempotent invocation lease expired"),
+            eq(NOW));
+    assertFalse(messageTypes(connection.envelopes()).contains(DaemonMessageType.INVOKE));
+  }
+
+  /** Frozen NON_IDEMPOTENT recovery wins before deadline evaluation. */
+  @Test
+  void prioritizesRecoveredNonIdempotentOverDeadline() {
+    Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT, true);
+    ToolInvocation expired = withDeadline(fixture.invocation, NOW.minusMillis(1));
+    ClaimedToolInvocation claimed = new ClaimedToolInvocation(expired, true);
+    when(fixture.invocationStore.claimDue(eq(ENVIRONMENT_ID), anyString(), eq(NOW), any()))
+        .thenReturn(Optional.of(claimed));
+    FakeConnection connection = new FakeConnection("connection-recovered-expired");
+    fixture.gateway.open(connection);
+    fixture.gateway.receive(connection.connectionId(), hello(0));
+    fixture.gateway.receive(connection.connectionId(), capabilities(1, fixture.capabilitiesJson));
+    fixture.gateway.receive(connection.connectionId(), ready(2));
+
+    verify(fixture.transactions)
+        .terminate(
+            eq(claimed),
+            eq(ToolInvocationStatus.UNKNOWN),
+            any(ToolResult.class),
+            eq("non-idempotent invocation lease expired"),
+            eq(NOW));
+    assertFalse(messageTypes(connection.envelopes()).contains(DaemonMessageType.INVOKE));
+  }
+
+  /** Frozen NON_IDEMPOTENT recovery wins before current Environment descriptor resolution. */
+  @Test
+  void prioritizesRecoveredNonIdempotentOverDescriptorAvailability() {
+    Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT, true);
+    when(fixture.environmentRepository.getById(ENVIRONMENT_ID)).thenReturn(null);
+    FakeConnection connection = new FakeConnection("connection-recovered-unavailable");
+    fixture.gateway.open(connection);
+    fixture.gateway.receive(connection.connectionId(), hello(0));
+    fixture.gateway.receive(connection.connectionId(), capabilities(1, fixture.capabilitiesJson));
+    fixture.gateway.receive(connection.connectionId(), ready(2));
+
+    verify(fixture.transactions)
+        .terminate(
+            eq(fixture.claimed),
+            eq(ToolInvocationStatus.UNKNOWN),
+            any(ToolResult.class),
+            eq("non-idempotent invocation lease expired"),
+            eq(NOW));
+    verify(fixture.environmentRepository, never()).getById(ENVIRONMENT_ID);
     assertFalse(messageTypes(connection.envelopes()).contains(DaemonMessageType.INVOKE));
   }
 
@@ -631,7 +703,7 @@ class EnvironmentDaemonGatewayTest {
     environment.setId(ENVIRONMENT_ID);
     environment.setCapabilitiesJson(capabilitiesJson);
     when(environmentRepository.getById(ENVIRONMENT_ID)).thenReturn(environment);
-    ToolInvocation invocation = invocation();
+    ToolInvocation invocation = invocation(sideEffect);
     ClaimedToolInvocation claimed = new ClaimedToolInvocation(invocation, recovered);
     when(invocationStore.claimDue(eq(ENVIRONMENT_ID), anyString(), eq(NOW), any()))
         .thenReturn(Optional.of(claimed));
@@ -671,7 +743,7 @@ class EnvironmentDaemonGatewayTest {
         capabilitiesJson);
   }
 
-  private ToolInvocation invocation() {
+  private ToolInvocation invocation(ToolSideEffect sideEffect) {
     return new ToolInvocation(
         INVOCATION_ID,
         7001L,
@@ -686,6 +758,7 @@ class EnvironmentDaemonGatewayTest {
         ToolInvocationStatus.RUNNING,
         PermissionAction.ALLOW,
         null,
+        sideEffect,
         NOW.plusSeconds(60),
         "gateway-test-environment-42",
         NOW.plusSeconds(30),
@@ -713,6 +786,7 @@ class EnvironmentDaemonGatewayTest {
         status,
         source.permissionAction(),
         source.permissionDecision(),
+        source.sideEffect(),
         source.deadlineAt(),
         source.leaseOwner(),
         source.leaseUntil(),
@@ -740,6 +814,7 @@ class EnvironmentDaemonGatewayTest {
         source.status(),
         source.permissionAction(),
         source.permissionDecision(),
+        source.sideEffect(),
         deadlineAt,
         source.leaseOwner(),
         source.leaseUntil(),
@@ -767,6 +842,7 @@ class EnvironmentDaemonGatewayTest {
         source.status(),
         source.permissionAction(),
         source.permissionDecision(),
+        source.sideEffect(),
         source.deadlineAt(),
         source.leaseOwner(),
         source.leaseUntil(),

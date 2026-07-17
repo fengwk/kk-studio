@@ -11,6 +11,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
@@ -34,6 +37,7 @@ import fun.fengwk.kkstudio.harness.model.provider.adapter.GoogleProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.adapter.OpenAiProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.adapter.OpenAiResponsesProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.adapter.ProviderAdapter;
+
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.InetSocketAddress;
@@ -51,8 +55,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
 
 /** 当前四种 Provider 对本地 HTTP 探针保持与旧 agent 相同的请求契约。 */
 class ProviderAdapterContractTest {

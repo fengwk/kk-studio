@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -12,17 +15,19 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Delayed;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
 
 class TaskToolTest {
   private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -160,10 +165,11 @@ class TaskToolTest {
   }
 
   /**
-   * Poll errors finish once and cancellation without a context remains a harmless local operation.
+   * Transient inspect failures keep polling so a still-running durable child is not orphaned; the
+   * parent completes only after a later successful terminal inspection.
    */
   @Test
-  void completesPollingErrorsAndHandlesContextlessCancellation() throws Exception {
+  void keepsPollingAfterTransientInspectFailure() throws Exception {
     RecordingRuntime runtime = new RecordingRuntime();
     runtime.inspectError = new IllegalArgumentException("inspect failed");
     TaskTool tool =
@@ -172,14 +178,92 @@ class TaskToolTest {
     RecordingListener listener = new RecordingListener();
     ToolExecutionHandle handle =
         tool.execute(request("{\"subagent_type\":\"Coder\",\"prompt\":\"x\"}"), listener);
-    assertTrue(listener.completed.await(1, TimeUnit.SECONDS));
-    assertTrue(listener.result.error());
-    assertTrue(text(listener.result).contains("inspect failed"));
 
+    assertFalse(listener.completed.await(40, TimeUnit.MILLISECONDS));
+    assertEquals(0, runtime.cancels);
+    runtime.inspectError = null;
+    runtime.terminal = true;
+    assertTrue(listener.completed.await(1, TimeUnit.SECONDS));
+    assertFalse(listener.result.error());
+    assertFalse(handle.isCancelled());
+  }
+
+  /**
+   * If the poll schedule cannot be installed after a durable child exists, cancel the tree before
+   * returning a Tool error so the child is not left ownerless.
+   */
+  @Test
+  void cancelsDurableChildWhenPollingCannotBeScheduled() {
+    RecordingRuntime runtime = new RecordingRuntime();
+    ScheduledExecutorService rejecting = Executors.newSingleThreadScheduledExecutor();
+    rejecting.shutdown();
+    try {
+      TaskTool tool =
+          new TaskTool(
+              runtime, rejecting, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), Duration.ofMillis(5));
+      RecordingListener listener = new RecordingListener();
+      ToolExecutionHandle handle =
+          tool.execute(request("{\"subagent_type\":\"Coder\",\"prompt\":\"x\"}"), listener);
+
+      assertEquals(0L, listener.completed.getCount());
+      assertTrue(listener.result.error());
+      assertTrue(text(listener.result).toLowerCase().contains("reject"));
+      assertEquals(1, runtime.cancels);
+      assertEquals(41L, runtime.cancelledInvocationId);
+      handle.cancel();
+      handle.cancel();
+      assertEquals(1, runtime.cancels);
+    } finally {
+      rejecting.shutdownNow();
+    }
+  }
+
+  /** A synchronous first poll cannot publish a periodic future after completion. */
+  @Test
+  void cancelsPollFutureWhenInspectionCompletesBeforeScheduleReturns() {
+    RecordingRuntime runtime = new RecordingRuntime();
+    runtime.terminalOnInspect = true;
+    RecordingScheduledFuture future = new RecordingScheduledFuture();
+    ScheduledThreadPoolExecutor inlineScheduler =
+        new ScheduledThreadPoolExecutor(1) {
+          @Override
+          public ScheduledFuture<?> scheduleWithFixedDelay(
+              Runnable command, long initialDelay, long delay, TimeUnit unit) {
+            command.run();
+            return future;
+          }
+        };
+    try {
+      TaskTool tool =
+          new TaskTool(
+              runtime,
+              inlineScheduler,
+              Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
+              Duration.ofMillis(5));
+      RecordingListener listener = new RecordingListener();
+
+      tool.execute(request("{\"subagent_type\":\"Coder\",\"prompt\":\"x\"}"), listener);
+
+      assertEquals(0L, listener.completed.getCount());
+      assertFalse(listener.result.error());
+      assertTrue(future.cancelled);
+    } finally {
+      inlineScheduler.shutdownNow();
+    }
+  }
+
+  /** Cancellation without a durable context remains a harmless local operation. */
+  @Test
+  void handlesContextlessCancellation() {
+    RecordingRuntime runtime = new RecordingRuntime();
+    TaskTool tool =
+        new TaskTool(
+            runtime, scheduler, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), Duration.ofMillis(5));
     ToolExecutionHandle contextless =
         tool.execute(requestWithoutContext(), new RecordingListener());
     contextless.cancel();
     assertTrue(contextless.isCancelled());
+    assertEquals(0, runtime.cancels);
   }
 
   /** Constructors reject invalid polling intervals before a scheduler can be used. */
@@ -264,6 +348,7 @@ class TaskToolTest {
   private static final class RecordingRuntime implements TaskRuntime {
     private final Instant now = Instant.EPOCH;
     private boolean terminal;
+    private boolean terminalOnInspect;
     private RuntimeException startError;
     private RuntimeException inspectError;
     private int starts;
@@ -285,7 +370,7 @@ class TaskToolTest {
       if (inspectError != null) {
         throw inspectError;
       }
-      return inspection(parentInvocationId, terminal);
+      return inspection(parentInvocationId, terminal || terminalOnInspect);
     }
 
     @Override
@@ -316,6 +401,46 @@ class TaskToolTest {
               ? new TaskReport(3, 4, state, "done", List.of(), 1, 2, WorkingCopyPolicy.FORK, null)
               : null;
       return new TaskInspection(task, report);
+    }
+  }
+
+  private static final class RecordingScheduledFuture implements ScheduledFuture<Object> {
+    private boolean cancelled;
+
+    @Override
+    public long getDelay(TimeUnit unit) {
+      return 0;
+    }
+
+    @Override
+    public int compareTo(Delayed other) {
+      return 0;
+    }
+
+    @Override
+    public boolean cancel(boolean mayInterruptIfRunning) {
+      cancelled = true;
+      return true;
+    }
+
+    @Override
+    public boolean isCancelled() {
+      return cancelled;
+    }
+
+    @Override
+    public boolean isDone() {
+      return cancelled;
+    }
+
+    @Override
+    public Object get() {
+      return null;
+    }
+
+    @Override
+    public Object get(long timeout, TimeUnit unit) {
+      return null;
     }
   }
 }

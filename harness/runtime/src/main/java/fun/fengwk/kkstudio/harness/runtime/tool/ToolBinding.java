@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.tool;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+
 import java.util.Objects;
 
 /** 单 Turn 冻结的工具描述与执行目标绑定；模型只接收其中的 descriptor。 */

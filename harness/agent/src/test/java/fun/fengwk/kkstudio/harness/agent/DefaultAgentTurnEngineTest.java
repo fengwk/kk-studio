@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.agent.extension.BeforeProviderRequestInterceptor;
 import fun.fengwk.kkstudio.harness.agent.extension.ProviderRequestInterceptorChain;
 import fun.fengwk.kkstudio.harness.model.ModelCapability;
@@ -43,6 +45,7 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolNumberSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolObjectSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
+
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -51,7 +54,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
-import org.junit.jupiter.api.Test;
+import java.util.concurrent.TimeUnit;
 
 class DefaultAgentTurnEngineTest {
 
@@ -402,8 +405,47 @@ class DefaultAgentTurnEngineTest {
     AgentTurnHandle handle = new DefaultAgentTurnEngine(provider).execute(request(), handler);
 
     assertFalse(handle.isCancelled());
+    assertTrue(handle.isDone());
     assertEquals(List.of("started", "delta", "completed"), handler.events);
     assertEquals("ok", handler.result.assistantMessage().text());
+  }
+
+  /** isDone becomes visible only after the terminal handler has returned. */
+  @Test
+  void reportsDoneAfterTerminalDeliveryCompletes() throws Exception {
+    ManualModelProvider provider = new ManualModelProvider();
+    CountDownLatch entered = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    AgentTurnEventHandler handler =
+        new AgentTurnEventHandler() {
+          @Override
+          public void onStarted() {}
+
+          @Override
+          public void onDelta(ProviderStreamEvent event) {}
+
+          @Override
+          public void onCompleted(AgentTurnResult result) {
+            entered.countDown();
+            await(release);
+          }
+
+          @Override
+          public void onFailed(ProviderException error) {}
+        };
+    AgentTurnHandle handle = new DefaultAgentTurnEngine(provider).execute(request(), handler);
+    Thread callback =
+        new Thread(
+            () -> provider.complete(response("ok", "", List.of(), ProviderStopReason.COMPLETED)));
+
+    callback.start();
+    assertTrue(entered.await(5, TimeUnit.SECONDS));
+    assertFalse(handle.isDone());
+    release.countDown();
+    callback.join(5_000L);
+
+    assertFalse(callback.isAlive());
+    assertTrue(handle.isDone());
   }
 
   /** cancel 发生在第一条 Provider 回调前时，后续 complete/error 都不能突破已选择的失败终态。 */
@@ -418,6 +460,7 @@ class DefaultAgentTurnEngineTest {
     provider.fail(new ProviderException(ProviderErrorKind.TRANSIENT, "ignored"));
 
     assertTrue(provider.stream.isCancelled());
+    assertTrue(handle.isDone());
     assertEquals(List.of("started", "failed"), handler.events);
   }
 

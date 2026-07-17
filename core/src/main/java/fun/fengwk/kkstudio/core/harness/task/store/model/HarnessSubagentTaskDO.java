@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.core.harness.task.store.model;
 
-import java.time.LocalDateTime;
 import lombok.Data;
+
+import java.time.LocalDateTime;
 
 /** Database representation of the durable parent Invocation to child Run relation. */
 @Data

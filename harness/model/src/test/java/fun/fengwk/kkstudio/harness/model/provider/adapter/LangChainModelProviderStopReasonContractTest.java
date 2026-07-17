@@ -3,8 +3,9 @@ package fun.fengwk.kkstudio.harness.model.provider.adapter;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import dev.langchain4j.model.output.FinishReason;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
 import org.junit.jupiter.api.Test;
+
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
 
 /** LangChain4j finish reason 必须无损归一化到 Provider 公共契约。 */
 class LangChainModelProviderStopReasonContractTest {

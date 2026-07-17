@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.core.harness.tool.store.model;
 
-import java.time.LocalDateTime;
 import lombok.Data;
+
+import java.time.LocalDateTime;
 
 @Data
 public class ToolInvocationDO {
@@ -18,6 +19,7 @@ public class ToolInvocationDO {
   private String status;
   private String permissionAction;
   private String permissionDecision;
+  private String sideEffect;
   private LocalDateTime deadlineAt;
   private String leaseOwner;
   private LocalDateTime leaseUntil;

@@ -8,6 +8,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
+
 import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.harness.run.service.DatabaseToolPreparationPort;
 import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
@@ -46,6 +53,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+
 import java.nio.file.Path;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -54,12 +62,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Assistant Entry 与模型 usage ledger 的真实数据库事务契约。 */
 @SpringBootTest(classes = CoreTestApplication.class)
@@ -347,8 +349,8 @@ class ModelUsageLedgerIntegrationTest {
     jdbc.update(
         "insert into tool_invocation (id, run_id, assistant_entry_id, ordinal, tool_call_id,"
             + " tool_name, tool_version, target_type, arguments_json, status, permission_action,"
-            + " deadline_at, gmt_create, gmt_modified) values (?, ?, ?, 0, ?, 'read', '1',"
-            + " 'CLOUD', '{}', 'QUEUED', 'ALLOW', ?, ?, ?)",
+            + " side_effect, deadline_at, gmt_create, gmt_modified) values (?, ?, ?, 0, ?, 'read',"
+            + " '1', 'CLOUD', '{}', 'QUEUED', 'ALLOW', 'READ_ONLY', ?, ?, ?)",
         invocationIds.newInvocationId(),
         runId,
         sessionIds.newEntryId(),

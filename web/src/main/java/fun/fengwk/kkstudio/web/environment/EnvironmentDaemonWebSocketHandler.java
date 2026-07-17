@@ -1,14 +1,16 @@
 package fun.fengwk.kkstudio.web.environment;
 
-import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonConnection;
-import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonGateway;
-import java.io.IOException;
-import java.util.Objects;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
+
+import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonConnection;
+import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonGateway;
+
+import java.io.IOException;
+import java.util.Objects;
 
 /**
  * Spring WebSocket adapter; durable protocol semantics remain in {@link EnvironmentDaemonGateway}.

@@ -11,10 +11,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
-import fun.fengwk.kkstudio.share.model.ToolEnvironmentCreateDTO;
-import fun.fengwk.kkstudio.share.model.ToolEnvironmentUpdateDTO;
-import fun.fengwk.kkstudio.web.WebTestApplication;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -23,6 +19,11 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+
+import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
+import fun.fengwk.kkstudio.share.model.ToolEnvironmentCreateDTO;
+import fun.fengwk.kkstudio.share.model.ToolEnvironmentUpdateDTO;
+import fun.fengwk.kkstudio.web.WebTestApplication;
 
 /**
  * {@link StudioToolEnvironmentController} end-to-end tests.
@@ -256,9 +257,9 @@ public class StudioToolEnvironmentControllerTest {
     jdbcTemplate.update(
         "insert into tool_invocation (id, run_id, assistant_entry_id, ordinal, tool_call_id, "
             + "tool_name, tool_version, target_type, environment_id, arguments_json, status, "
-            + "permission_action, deadline_at) "
-            + "values (?, 1, 1, 1, ?, ?, ?, 'ENVIRONMENT', ?, '{}', 'QUEUED', 'ALLOW', "
-            + "current_timestamp(3))",
+            + "permission_action, side_effect, deadline_at) "
+            + "values (?, 1, 1, 1, ?, ?, ?, 'ENVIRONMENT', ?, '{}', 'QUEUED', 'ALLOW',"
+            + " 'READ_ONLY', current_timestamp(3))",
         invocationId,
         "call-" + envId,
         "shell",

@@ -1,16 +1,21 @@
 package fun.fengwk.kkstudio.core.harness.run.store;
 
+import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunEventMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunEventDO;
 import fun.fengwk.kkstudio.harness.runtime.run.AgentRun;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEvent;
+import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventStore;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
-import fun.fengwk.kkstudio.harness.runtime.run.RunIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
 import fun.fengwk.kkstudio.harness.runtime.run.RunStore;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -18,9 +23,6 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 
 /** MySQL/H2 Durable Run queue 与线性 Run Event Journal。 */
 @Repository
@@ -29,13 +31,15 @@ public class MysqlHarnessRunStore implements RunStore, RunEventStore {
 
   private final HarnessRunMapper runMapper;
   private final HarnessRunEventMapper eventMapper;
-  private final RunIdGenerator idGenerator;
+  private final HarnessRunEventWriter eventWriter;
 
   public MysqlHarnessRunStore(
-      HarnessRunMapper runMapper, HarnessRunEventMapper eventMapper, RunIdGenerator idGenerator) {
+      HarnessRunMapper runMapper,
+      HarnessRunEventMapper eventMapper,
+      HarnessRunEventWriter eventWriter) {
     this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
     this.eventMapper = Objects.requireNonNull(eventMapper, "eventMapper");
-    this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
+    this.eventWriter = Objects.requireNonNull(eventWriter, "eventWriter");
   }
 
   @Override
@@ -81,21 +85,9 @@ public class MysqlHarnessRunStore implements RunStore, RunEventStore {
   @Override
   @Transactional
   public RunEvent append(long runId, RunEventType type, String payloadJson, Instant createdAt) {
-    HarnessRunDO run = runMapper.findForUpdate(runId);
-    if (run == null) {
-      throw new IllegalArgumentException("unknown run: " + runId);
-    }
-    long sequence = run.getEventSequence() + 1;
-    if (runMapper.updateEventSequence(runId, run.getEventSequence(), sequence, utc(createdAt))
-        != 1) {
-      throw new IllegalStateException("cannot allocate run event sequence: " + runId);
-    }
-    RunEvent event =
-        new RunEvent(idGenerator.newRunEventId(), runId, sequence, type, payloadJson, createdAt);
-    if (eventMapper.insert(toDO(event)) != 1) {
-      throw new IllegalStateException("cannot append run event: " + runId);
-    }
-    return event;
+    return eventWriter
+        .lockAndAppend(runId, List.of(new RunEventDraft(type, payloadJson)), createdAt)
+        .get(0);
   }
 
   @Override
@@ -123,17 +115,6 @@ public class MysqlHarnessRunStore implements RunStore, RunEventStore {
         instant(source.getStartedAt()),
         instant(source.getFinishedAt()),
         instant(source.getUpdateTime()));
-  }
-
-  private HarnessRunEventDO toDO(RunEvent event) {
-    HarnessRunEventDO target = new HarnessRunEventDO();
-    target.setId(event.id());
-    target.setRunId(event.runId());
-    target.setSequence(event.sequence());
-    target.setEventType(event.type().value());
-    target.setPayloadJson(event.payloadJson());
-    target.setCreateTime(utc(event.createdAt()));
-    return target;
   }
 
   private RunEvent toEvent(HarnessRunEventDO source) {

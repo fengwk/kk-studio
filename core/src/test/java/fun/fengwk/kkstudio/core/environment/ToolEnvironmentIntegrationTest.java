@@ -8,16 +8,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
-import fun.fengwk.kkstudio.core.CoreTestApplication;
-import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
-import fun.fengwk.kkstudio.core.environment.service.model.ToolEnvironment;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
+
+import fun.fengwk.kkstudio.core.CoreTestApplication;
+import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
+import fun.fengwk.kkstudio.core.environment.service.model.ToolEnvironment;
+
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 /** H2-backed repository integration coverage for the global Environment registry. */
 @SpringBootTest(classes = CoreTestApplication.class)
@@ -115,9 +117,9 @@ class ToolEnvironmentIntegrationTest {
     jdbcTemplate.update(
         "insert into tool_invocation (id, run_id, assistant_entry_id, ordinal, tool_call_id, "
             + "tool_name, tool_version, target_type, environment_id, arguments_json, status, "
-            + "permission_action, deadline_at) "
-            + "values (?, 1, 1, 1, ?, ?, ?, 'ENVIRONMENT', ?, '{}', 'QUEUED', 'ALLOW', "
-            + "current_timestamp(3))",
+            + "permission_action, side_effect, deadline_at) "
+            + "values (?, 1, 1, 1, ?, ?, ?, 'ENVIRONMENT', ?, '{}', 'QUEUED', 'ALLOW',"
+            + " 'READ_ONLY', current_timestamp(3))",
         invocationId,
         "call-" + environmentId,
         "shell",

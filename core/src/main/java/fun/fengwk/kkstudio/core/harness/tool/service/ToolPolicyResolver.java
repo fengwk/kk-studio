@@ -1,11 +1,13 @@
 package fun.fengwk.kkstudio.core.harness.tool.service;
 
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
 import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
+
 import java.util.Objects;
-import org.springframework.stereotype.Component;
 
 /** 在事务锁内解析全局 Tool settings 与 Root Session 动态 YOLO。 */
 @Component

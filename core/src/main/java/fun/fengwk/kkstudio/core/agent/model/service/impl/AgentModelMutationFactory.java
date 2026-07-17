@@ -2,11 +2,12 @@ package fun.fengwk.kkstudio.core.agent.model.service.impl;
 
 import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextModelId;
 
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.share.model.AgentModelEditablePropertiesDTO;
-import org.springframework.stereotype.Component;
 
 /** Normalizes mutable model configuration. */
 @Component

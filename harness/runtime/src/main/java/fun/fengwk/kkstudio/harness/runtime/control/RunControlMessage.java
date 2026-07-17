@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.control;
 
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+
 import java.time.Instant;
 import java.util.Objects;
 
@@ -9,12 +10,13 @@ import java.util.Objects;
  * 已接受并持久化的 control 行不可变快照。
  *
  * <p>字段一致性约束：
+ *
  * <ul>
- *   <li>id/会话 id 必须正整数；run id 可为 null（用于 FOLLOW_UP 在无 active Run 时直接 PROMOTED）</li>
- *   <li>kind/message/消费模式/status/createdAt 不可空；message.role 必须为 USER</li>
- *   <li>PENDING 时 consumedRunId/consumedEntryId/consumedAt 必须全部为 null</li>
- *   <li>CONSUMED/PROMOTED 时三个 consumed 字段必须同时存在且非 null</li>
- *   <li>CLEARED 时仅 consumedAt 必须存在；consumedRunId/consumedEntryId 必须为 null</li>
+ *   <li>id/会话 id 必须正整数；run id 可为 null（用于 FOLLOW_UP 在无 active Run 时直接 PROMOTED）
+ *   <li>kind/message/消费模式/status/createdAt 不可空；message.role 必须为 USER
+ *   <li>PENDING 时 consumedRunId/consumedEntryId/consumedAt 必须全部为 null
+ *   <li>CONSUMED/PROMOTED 时三个 consumed 字段必须同时存在且非 null
+ *   <li>CLEARED 时仅 consumedAt 必须存在；consumedRunId/consumedEntryId 必须为 null
  * </ul>
  */
 public record RunControlMessage(

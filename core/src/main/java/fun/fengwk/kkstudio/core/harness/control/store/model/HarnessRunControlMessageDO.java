@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.core.harness.control.store.model;
 
-import java.time.LocalDateTime;
 import lombok.Data;
+
+import java.time.LocalDateTime;
 
 /** harness_run_control_message 行映射；runId 可为 null（FOLLOW_UP 直接 promotion 时没有 active run）。 */
 @Data

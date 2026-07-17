@@ -2,12 +2,15 @@ package fun.fengwk.kkstudio.core.harness.task.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.mapper.AgentDefinitionMapper;
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.model.AgentDefinitionDO;
+import fun.fengwk.kkstudio.core.harness.run.store.HarnessRunEventWriter;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunEventMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
-import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunEventDO;
 import fun.fengwk.kkstudio.core.harness.session.HarnessAgentSnapshotResolver;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionEntryMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
@@ -46,6 +49,7 @@ import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -59,8 +63,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Database implementation of durable task start/resume/inspection. The lock order is parent Run,
@@ -72,6 +74,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private final HarnessRunMapper runMapper;
   private final HarnessRunEventMapper eventMapper;
+  private final HarnessRunEventWriter eventWriter;
   private final HarnessSessionMapper sessionMapper;
   private final HarnessSessionEntryMapper entryMapper;
   private final ToolInvocationMapper invocationMapper;
@@ -86,6 +89,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
   public DatabaseTaskRuntime(
       HarnessRunMapper runMapper,
       HarnessRunEventMapper eventMapper,
+      HarnessRunEventWriter eventWriter,
       HarnessSessionMapper sessionMapper,
       HarnessSessionEntryMapper entryMapper,
       ToolInvocationMapper invocationMapper,
@@ -97,6 +101,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       HarnessAgentSnapshotResolver snapshotResolver) {
     this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
     this.eventMapper = Objects.requireNonNull(eventMapper, "eventMapper");
+    this.eventWriter = Objects.requireNonNull(eventWriter, "eventWriter");
     this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
     this.entryMapper = Objects.requireNonNull(entryMapper, "entryMapper");
     this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
@@ -406,14 +411,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
   }
 
   private HarnessSessionDO lockRoot(HarnessSessionDO parent) {
-    HarnessSessionDO root = requireSessionForUpdate(parent.getRootSessionId());
-    if (root.getId().equals(parent.getId())) {
-      return root;
-    }
-    if (root.getParentSessionId() != null || root.getRootSessionId() != root.getId()) {
-      throw new IllegalStateException("invalid root session");
-    }
-    return root;
+    return eventWriter.lockRoot(parent);
   }
 
   private AgentSnapshot parentSnapshot(long sessionId) {
@@ -709,21 +707,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
 
   private void appendEvent(
       HarnessRunDO run, RunEventType type, String payload, LocalDateTime timestamp) {
-    long next = run.getEventSequence() + 1;
-    if (runMapper.updateEventSequence(run.getId(), run.getEventSequence(), next, timestamp) != 1) {
-      throw new IllegalStateException("cannot allocate task event sequence");
-    }
-    HarnessRunEventDO event = new HarnessRunEventDO();
-    event.setId(runIds.newRunEventId());
-    event.setRunId(run.getId());
-    event.setSequence(next);
-    event.setEventType(type.value());
-    event.setPayloadJson(payload);
-    event.setCreateTime(timestamp);
-    if (eventMapper.insert(event) != 1) {
-      throw new IllegalStateException("cannot append task event");
-    }
-    run.setEventSequence(next);
+    // Callers already hold Run -> Session -> Root before task event append.
+    eventWriter.appendLocked(run, type, payload, timestamp.toInstant(ZoneOffset.UTC));
   }
 
   private HarnessRunDO requireRun(long runId) {

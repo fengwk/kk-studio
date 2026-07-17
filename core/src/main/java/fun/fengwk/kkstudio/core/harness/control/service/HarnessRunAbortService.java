@@ -2,7 +2,10 @@ package fun.fengwk.kkstudio.core.harness.control.service;
 
 import static java.util.Objects.requireNonNull;
 
-import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import fun.fengwk.kkstudio.core.harness.run.store.HarnessRunEventWriter;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
@@ -15,18 +18,17 @@ import fun.fengwk.kkstudio.harness.runtime.run.RunEventPayloads;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
 import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskRuntime;
+
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Objects;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 持久化 Session 级 abort 命令。数据库是取消事实源；本服务只请求取消并传播，不直接终结非终态 Run。 active path 固定按 Run -> Session
- * 加锁，no-active path 只锁 Session，任意传播失败均整体回滚。
+ * 持久化 Session 级 abort 命令。数据库是取消事实源；本服务只请求取消并传播，不直接终结非终态 Run。active path 固定按 Run -> Session -> Root
+ * 加锁，no-active path 按 Session -> Root 加锁，任意传播失败均整体回滚。
  */
 @Service
 public class HarnessRunAbortService {
@@ -36,7 +38,7 @@ public class HarnessRunAbortService {
   private final ToolInvocationMapper invocationMapper;
   private final HarnessSubagentTaskMapper taskMapper;
   private final RunControlMessageStore controlStore;
-  private final HarnessRunTransactionService runTransactions;
+  private final HarnessRunEventWriter eventWriter;
   private final TaskRuntime taskRuntime;
 
   public HarnessRunAbortService(
@@ -45,14 +47,14 @@ public class HarnessRunAbortService {
       ToolInvocationMapper invocationMapper,
       HarnessSubagentTaskMapper taskMapper,
       RunControlMessageStore controlStore,
-      HarnessRunTransactionService runTransactions,
+      HarnessRunEventWriter eventWriter,
       TaskRuntime taskRuntime) {
     this.sessionMapper = requireNonNull(sessionMapper, "sessionMapper");
     this.runMapper = requireNonNull(runMapper, "runMapper");
     this.invocationMapper = requireNonNull(invocationMapper, "invocationMapper");
     this.taskMapper = requireNonNull(taskMapper, "taskMapper");
     this.controlStore = requireNonNull(controlStore, "controlStore");
-    this.runTransactions = requireNonNull(runTransactions, "runTransactions");
+    this.eventWriter = requireNonNull(eventWriter, "eventWriter");
     this.taskRuntime = requireNonNull(taskRuntime, "taskRuntime");
   }
 
@@ -72,6 +74,7 @@ public class HarnessRunAbortService {
 
     if (activeHint == null) {
       HarnessSessionDO lockedSession = requireSessionForUpdate(sessionId);
+      eventWriter.lockRoot(lockedSession);
       if (lockedSession.getActiveRunId() != null) {
         throw new RunAbortConflictException(
             "session active run changed under lock, abort rejected for session " + sessionId);
@@ -81,7 +84,10 @@ public class HarnessRunAbortService {
     }
 
     HarnessRunDO lockedRun = runMapper.findForUpdate(activeHint);
-    HarnessSessionDO lockedSession = requireSessionForUpdate(sessionId);
+    if (lockedRun != null && lockedRun.getSessionId() != sessionId) {
+      throw new IllegalStateException("active run does not belong to session: " + activeHint);
+    }
+    HarnessSessionDO lockedSession = eventWriter.lockSessionAndRoot(sessionId);
 
     if (lockedRun == null) {
       Long lockedActive = lockedSession.getActiveRunId();
@@ -126,8 +132,8 @@ public class HarnessRunAbortService {
       throw new IllegalStateException("cannot request run cancellation: " + activeHint);
     }
     if (newlyRequested) {
-      runTransactions.appendExternalEvents(
-          activeHint,
+      eventWriter.appendLocked(
+          lockedRun,
           List.of(
               new RunEventDraft(
                   RunEventType.ABORT_REQUESTED,

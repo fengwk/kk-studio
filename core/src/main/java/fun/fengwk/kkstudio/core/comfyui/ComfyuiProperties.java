@@ -1,9 +1,10 @@
 package fun.fengwk.kkstudio.core.comfyui;
 
-import java.time.Duration;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.util.unit.DataSize;
+
+import java.time.Duration;
 
 /**
  * ComfyUI runtime 配置。

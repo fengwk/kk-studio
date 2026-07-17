@@ -1,9 +1,10 @@
 package fun.fengwk.kkstudio.share.model;
 
+import lombok.Data;
+
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Objects;
-import lombok.Data;
 
 @Data
 public class ModelUsageSummaryDTO {

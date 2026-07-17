@@ -126,6 +126,7 @@ create table if not exists tool_invocation (
     status                varchar(32) not null,
     permission_action     varchar(16) not null,
     permission_decision   varchar(16),
+    side_effect           varchar(32) not null,
     deadline_at           timestamp(3) not null,
     lease_owner           varchar(128),
     lease_until           timestamp(3),

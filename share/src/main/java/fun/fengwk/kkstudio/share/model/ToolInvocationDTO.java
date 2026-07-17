@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.share.model;
 
-import java.time.Instant;
 import lombok.Data;
+
+import java.time.Instant;
 
 /** T15 ToolInvocation read projection; ids are decimal strings of the underlying bigint values. */
 @Data

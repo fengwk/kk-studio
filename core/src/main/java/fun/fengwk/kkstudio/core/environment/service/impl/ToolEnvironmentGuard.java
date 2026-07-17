@@ -1,10 +1,12 @@
 package fun.fengwk.kkstudio.core.environment.service.impl;
 
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
 import fun.fengwk.kkstudio.core.environment.service.ToolEnvironmentIds;
 import fun.fengwk.kkstudio.core.environment.service.model.ToolEnvironment;
+
 import java.util.NoSuchElementException;
-import org.springframework.stereotype.Component;
 
 /**
  * Guard for the Environment CRUD path: id parsing, uniqueness, and durable-reference checks.

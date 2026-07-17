@@ -2,11 +2,12 @@ package fun.fengwk.kkstudio.core.agent.provider.service.impl;
 
 import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextProviderId;
 
-import fun.fengwk.kkstudio.share.model.AgentProviderType;
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.share.model.AgentProviderEditablePropertiesDTO;
-import org.springframework.stereotype.Component;
+import fun.fengwk.kkstudio.share.model.AgentProviderType;
 
 /** Normalizes mutable provider configuration while keeping credentials out of public DTOs. */
 @Component

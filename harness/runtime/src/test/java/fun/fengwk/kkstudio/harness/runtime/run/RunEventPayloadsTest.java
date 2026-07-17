@@ -6,10 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
+
 import java.time.Instant;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
 
 class RunEventPayloadsTest {
   private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");

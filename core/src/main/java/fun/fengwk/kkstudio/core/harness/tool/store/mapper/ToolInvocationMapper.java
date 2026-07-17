@@ -1,9 +1,6 @@
 package fun.fengwk.kkstudio.core.harness.tool.store.mapper;
 
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
-import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
-import java.time.LocalDateTime;
-import java.util.List;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -13,13 +10,18 @@ import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
 @Mapper
 public interface ToolInvocationMapper extends BaseMapper {
   String COLUMNS =
       """
       ti.id, ti.run_id, ti.assistant_entry_id, ti.ordinal, ti.tool_call_id, ti.tool_name,
       ti.tool_version, ti.target_type, ti.environment_id, ti.arguments_json, ti.status,
-      ti.permission_action, ti.permission_decision, ti.deadline_at, ti.lease_owner,
+      ti.permission_action, ti.permission_decision, ti.side_effect, ti.deadline_at, ti.lease_owner,
       ti.lease_until, ti.cancel_requested_at, ti.result_json, ti.error_message,
       ti.gmt_create as create_time, ti.started_at, ti.finished_at,
       ti.gmt_modified as update_time
@@ -30,12 +32,13 @@ public interface ToolInvocationMapper extends BaseMapper {
       insert into tool_invocation (
           id, run_id, assistant_entry_id, ordinal, tool_call_id, tool_name, tool_version,
           target_type, environment_id, arguments_json, status, permission_action,
-          permission_decision, deadline_at, lease_owner, lease_until, cancel_requested_at,
-          result_json, error_message, gmt_create, started_at, finished_at, gmt_modified
+          permission_decision, side_effect, deadline_at, lease_owner, lease_until,
+          cancel_requested_at, result_json, error_message, gmt_create, started_at, finished_at,
+          gmt_modified
       ) values (
           #{id}, #{runId}, #{assistantEntryId}, #{ordinal}, #{toolCallId}, #{toolName},
           #{toolVersion}, #{targetType}, #{environmentId}, #{argumentsJson}, #{status},
-          #{permissionAction}, #{permissionDecision}, #{deadlineAt}, #{leaseOwner},
+          #{permissionAction}, #{permissionDecision}, #{sideEffect}, #{deadlineAt}, #{leaseOwner},
           #{leaseUntil}, #{cancelRequestedAt}, #{resultJson}, #{errorMessage}, #{createTime},
           #{startedAt}, #{finishedAt}, #{updateTime}
       )
@@ -59,6 +62,7 @@ public interface ToolInvocationMapper extends BaseMapper {
         @Result(column = "status", property = "status"),
         @Result(column = "permission_action", property = "permissionAction"),
         @Result(column = "permission_decision", property = "permissionDecision"),
+        @Result(column = "side_effect", property = "sideEffect"),
         @Result(column = "deadline_at", property = "deadlineAt"),
         @Result(column = "lease_owner", property = "leaseOwner"),
         @Result(column = "lease_until", property = "leaseUntil"),

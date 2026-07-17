@@ -3,7 +3,10 @@ package fun.fengwk.kkstudio.harness.runtime.run;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -13,7 +16,6 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Queue;
-import org.junit.jupiter.api.Test;
 
 class DeltaBatcherTest {
   private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");

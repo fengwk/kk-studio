@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.share.model;
 
-import java.time.Instant;
 import lombok.Data;
+
+import java.time.Instant;
 
 /** Cursorable root-session tree activity event. All Snowflake IDs are serialized as strings. */
 @Data

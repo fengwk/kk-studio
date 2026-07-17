@@ -7,6 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.ToolCompleted;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
@@ -28,6 +31,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -43,8 +47,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
 
 class CloudToolWorkerTest {
   private static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
@@ -290,6 +292,57 @@ class CloudToolWorkerTest {
   @Test
   void marksReclaimedNonIdempotentInvocationUnknown() throws Exception {
     Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT, NOW.plusSeconds(30));
+    fixture.store.recovered = true;
+
+    fixture.worker.executeNext("worker-a");
+
+    assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
+    assertEquals(0, fixture.tool.executions);
+    assertEquals(ToolInvocationStatus.UNKNOWN, fixture.transactions.status);
+    assertToolCompletion(
+        fixture, ToolInvocationStatus.UNKNOWN, "non-idempotent invocation lease expired");
+  }
+
+  /** Frozen NON_IDEMPOTENT recovery wins before current registry descriptor validation. */
+  @Test
+  void prioritizesRecoveredNonIdempotentOverDescriptorDrift() throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+    fixture.store.recovered = true;
+    // Freeze NON_IDEMPOTENT on the durable invocation while registry now advertises READ_ONLY.
+    fixture.store.current =
+        copyWithSideEffect(fixture.store.current, ToolSideEffect.NON_IDEMPOTENT);
+    fixture.rebuildWorker();
+
+    fixture.worker.executeNext("worker-a");
+
+    assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
+    assertEquals(0, fixture.tool.executions);
+    assertEquals(ToolInvocationStatus.UNKNOWN, fixture.transactions.status);
+    assertToolCompletion(
+        fixture, ToolInvocationStatus.UNKNOWN, "non-idempotent invocation lease expired");
+  }
+
+  /** Frozen NON_IDEMPOTENT recovery wins before a concurrent cancellation request. */
+  @Test
+  void prioritizesRecoveredNonIdempotentOverCancellation() throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT, NOW.plusSeconds(30));
+    fixture.store.recovered = true;
+    fixture.store.current = copyWithCancel(fixture.store.current, NOW);
+    fixture.rebuildWorker();
+
+    fixture.worker.executeNext("worker-a");
+
+    assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
+    assertEquals(0, fixture.tool.executions);
+    assertEquals(ToolInvocationStatus.UNKNOWN, fixture.transactions.status);
+    assertToolCompletion(
+        fixture, ToolInvocationStatus.UNKNOWN, "non-idempotent invocation lease expired");
+  }
+
+  /** Frozen NON_IDEMPOTENT recovery wins before deadline evaluation. */
+  @Test
+  void prioritizesRecoveredNonIdempotentOverDeadline() throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT, NOW.minusMillis(1));
     fixture.store.recovered = true;
 
     fixture.worker.executeNext("worker-a");
@@ -558,6 +611,35 @@ class CloudToolWorkerTest {
         status,
         source.permissionAction(),
         source.permissionDecision(),
+        source.sideEffect(),
+        source.deadlineAt(),
+        source.leaseOwner(),
+        source.leaseUntil(),
+        source.cancelRequestedAt(),
+        source.resultJson(),
+        source.errorMessage(),
+        source.createdAt(),
+        source.startedAt(),
+        source.finishedAt(),
+        source.updatedAt());
+  }
+
+  private ToolInvocation copyWithSideEffect(ToolInvocation source, ToolSideEffect sideEffect) {
+    return new ToolInvocation(
+        source.id(),
+        source.runId(),
+        source.assistantEntryId(),
+        source.ordinal(),
+        source.toolCallId(),
+        source.toolName(),
+        source.toolVersion(),
+        source.targetType(),
+        source.environmentId(),
+        source.argumentsJson(),
+        source.status(),
+        source.permissionAction(),
+        source.permissionDecision(),
+        sideEffect,
         source.deadlineAt(),
         source.leaseOwner(),
         source.leaseUntil(),
@@ -585,6 +667,7 @@ class CloudToolWorkerTest {
         source.status(),
         source.permissionAction(),
         source.permissionDecision(),
+        source.sideEffect(),
         source.deadlineAt(),
         source.leaseOwner(),
         source.leaseUntil(),
@@ -612,6 +695,7 @@ class CloudToolWorkerTest {
         source.status(),
         source.permissionAction(),
         source.permissionDecision(),
+        source.sideEffect(),
         source.deadlineAt(),
         source.leaseOwner(),
         source.leaseUntil(),
@@ -678,6 +762,7 @@ class CloudToolWorkerTest {
         ToolInvocationStatus.RUNNING,
         PermissionAction.ALLOW,
         null,
+        descriptor.sideEffect(),
         deadline,
         "worker-a",
         deadline.plusSeconds(60),

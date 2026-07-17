@@ -2,6 +2,9 @@ package fun.fengwk.kkstudio.core.agent.definition.service.impl;
 
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
+import lombok.AllArgsConstructor;
+import org.springframework.stereotype.Service;
+
 import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.agent.definition.service.AgentDefinitionService;
 import fun.fengwk.kkstudio.core.agent.definition.service.converter.AgentDefinitionConverter;
@@ -9,8 +12,6 @@ import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
-import lombok.AllArgsConstructor;
-import org.springframework.stereotype.Service;
 
 /** Global Agent definition CRUD. */
 @AllArgsConstructor

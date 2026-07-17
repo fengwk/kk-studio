@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.session;
 
-public record ModelChangeEntryPayload(String modelId, String variant) implements SessionEntryPayload {
+public record ModelChangeEntryPayload(String modelId, String variant)
+    implements SessionEntryPayload {
   public ModelChangeEntryPayload {
     if (modelId == null || modelId.isBlank()) {
       throw new IllegalArgumentException("modelId must not be blank");

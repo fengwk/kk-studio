@@ -46,7 +46,7 @@ Harness 的关系数据库是执行和恢复的唯一事实源。H2 与 MySQL sc
 | `harness_subagent_task` | parent invocation 到 child Session/Run 的 durable relation | `parent_invocation_id` 主键 |
 | `harness_run_control_message` | steer / follow-up 的消费记录 | pending control 查询和 Session 查询索引 |
 
-`tool_invocation` 冻结 Tool name/version、target、Environment ID、interceptor 后 arguments、权限策略和 deadline。Environment worker 使用 `(environment_id, status, deadline_at, id)` 的受限索引；连接断开不改变 Invocation 的 durable 终态。Artifact bytes 不存入 Session payload，Session/Tool Result 只保存 artifact reference。
+`tool_invocation` 冻结 Tool name/version、target、Environment ID、interceptor 后 arguments、权限策略、`side_effect` 与 deadline。Lease recovery 与 descriptor 匹配使用冻结 `side_effect`，不回看当前 registry。Environment worker 使用 `(environment_id, status, deadline_at, id)` 的受限索引；连接断开不改变 Invocation 的 durable 终态。Artifact bytes 不存入 Session payload，Session/Tool Result 只保存 artifact reference。
 
 Subagent task 的 child Session、child Run、working-copy policy/revision 和终态 report 都可由任务表读取。Root Activity 由持久 Session/Run/Task/Invocation/Control 事实查询构建，不单独维护内存 EventBus。
 
@@ -61,6 +61,9 @@ Harness 运行时与前端 Timeline 只使用 `harness_*`、`tool_*`、`model_us
 ## 事务与删除
 
 - Harness 持久写入遵守 `Run -> Session -> Root -> Invocation/Task/Control` 锁顺序。
+- Root Activity 以 Snowflake `harness_run_event.id` 为 cursor；同 root 下不同 Run 在分配/插入 event id 前必须先持有 Root 锁，保证更小 id 不会在更大 id 对客户端可见后才提交。
+- RunEvent sequence 分配与插入统一由 `HarnessRunEventWriter` 完成。
+- WAITING_TOOLS 协调对每个 ready Run 使用独立事务；单个坏 Run 只跳过自身，不影响同次扫描中的其他 Run。
 - Assistant Entry、Usage Record 和对应 Run Event 原子写入。
 - Environment 删除由服务层在存在 Tool Invocation 引用时拒绝，避免删除仍可恢复的 execution binding。
 - ComfyUI job 是远端系统事实，数据库只保存工作流定义；输入和输出对象使用固定 bucket 的预签名边界。

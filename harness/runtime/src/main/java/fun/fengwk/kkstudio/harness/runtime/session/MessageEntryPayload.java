@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.session;
 
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
+
 import java.util.Objects;
 
 public record MessageEntryPayload(AgentMessage message, AssistantMessageMetadata assistantMetadata)
