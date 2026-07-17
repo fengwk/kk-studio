@@ -269,3 +269,71 @@ create table if not exists tool_environment (
     primary key (id),
     unique key uk_tool_environment_name (name)
 ) engine=InnoDB default charset=utf8mb4 comment='global environment daemon registry';
+
+create table if not exists canvas_document (
+    id                  bigint not null comment '主键',
+    workspace_id        bigint not null comment '工作区',
+    title               varchar(256) not null comment '标题',
+    schema_version      int not null comment 'schema 版本',
+    revision            bigint not null comment '业务 revision',
+    lifecycle           varchar(32) not null comment '生命周期',
+    home_viewport_json  longtext not null comment '默认视口 JSON',
+    gmt_create          datetime(3) not null default current_timestamp(3) comment '创建时间',
+    gmt_modified        datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
+    version             bigint not null default '0' comment '行版本',
+    primary key (id),
+    key idx_canvas_document_workspace (workspace_id, gmt_modified)
+) engine=InnoDB default charset=utf8mb4 comment='canvas 文档';
+
+create table if not exists canvas_node (
+    id                  bigint not null comment '主键',
+    canvas_id           bigint not null comment '画布',
+    kind                varchar(32) not null comment 'RESOURCE/FUNCTION/GROUP',
+    node_type           varchar(128) not null comment '节点类型',
+    node_type_version   int not null comment '类型版本',
+    name                varchar(256) not null comment '名称',
+    parent_group_id     bigint null comment '父 Group',
+    x                   double not null comment 'x',
+    y                   double not null comment 'y',
+    width               double not null comment '宽',
+    height              double not null comment '高',
+    rotation            double not null comment '旋转',
+    z_index             bigint not null comment '层级',
+    locked              tinyint(1) not null comment '锁定',
+    hidden              tinyint(1) not null comment '隐藏',
+    validity            varchar(32) not null comment '有效性',
+    data_json           longtext not null comment '子类型数据',
+    revision            bigint not null comment '节点 revision',
+    gmt_deleted         datetime(3) null comment '删除时间',
+    gmt_create          datetime(3) not null default current_timestamp(3) comment '创建时间',
+    gmt_modified        datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
+    version             bigint not null default '0' comment '行版本',
+    primary key (id),
+    key idx_canvas_node_canvas (canvas_id, gmt_deleted)
+) engine=InnoDB default charset=utf8mb4 comment='canvas 节点';
+
+create table if not exists canvas_link (
+    id                  bigint not null comment '主键',
+    canvas_id           bigint not null comment '画布',
+    source_node_id      bigint not null comment '源节点',
+    target_node_id      bigint not null comment '目标节点',
+    revision            bigint not null comment 'revision',
+    gmt_create          datetime(3) not null default current_timestamp(3) comment '创建时间',
+    primary key (id),
+    unique key uk_canvas_link (canvas_id, source_node_id, target_node_id)
+) engine=InnoDB default charset=utf8mb4 comment='canvas 可见 Link';
+
+create table if not exists canvas_command (
+    id                  bigint not null comment '主键',
+    command_id          varchar(128) not null comment '客户端幂等键',
+    workspace_id        bigint not null comment '工作区',
+    canvas_id           bigint not null comment '画布',
+    base_revision       bigint not null comment '基线 revision',
+    result_revision     bigint not null comment '结果 revision',
+    request_hash        varchar(128) not null comment '请求哈希',
+    payload_json        longtext not null comment '命令载荷',
+    result_json         longtext not null comment '结果快照摘要',
+    gmt_create          datetime(3) not null default current_timestamp(3) comment '创建时间',
+    primary key (id),
+    unique key uk_canvas_command (workspace_id, command_id)
+) engine=InnoDB default charset=utf8mb4 comment='canvas 幂等命令';

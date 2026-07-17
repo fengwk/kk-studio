@@ -330,6 +330,25 @@ Color tokens come from global product design tokens in styles.css. */
   opacity: .8;
 }
 
+.canvas-feature .project-card.create-card {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+}
+
+.canvas-feature .project-preview.create-preview {
+  display: grid;
+  place-items: center;
+  min-height: 110px;
+  background: var(--surface-soft);
+}
+
+.canvas-feature .create-plus {
+  color: var(--green);
+  font-size: 42px;
+  font-weight: 500;
+  line-height: 1;
+}
+
 .canvas-feature .project-state {
   position: absolute;
   top: 18px;
