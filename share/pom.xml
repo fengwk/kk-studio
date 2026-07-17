@@ -3,64 +3,19 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>fun.fengwk.convention4j</groupId>
-        <artifactId>convention4j-parent</artifactId>
-        <version>1.2.1</version>
-        <relativePath />
+        <groupId>fun.fengwk.kk-studio</groupId>
+        <artifactId>kk-studio-parent</artifactId>
+        <version>1.0.0</version>
+        <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <groupId>fun.fengwk.kk-studio</groupId>
     <artifactId>kk-studio-share</artifactId>
-    <version>1.0.0</version>
-
-    <name>${project.groupId}:${project.artifactId}</name>
-    <description>share</description>
-    <url>https://github.com/fengwk/share</url>
-    <licenses>
-        <license>
-            <name>The Apache License, Version 2.0</name>
-            <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
-        </license>
-    </licenses>
-    <scm>
-        <url>git@github.com:fengwk/share.git</url>
-        <connection>scm:git:git@github.com:fengwk/share.git</connection>
-        <developerConnection>scm:git:git@github.com:fengwk/share.git</developerConnection>
-    </scm>
-    <developers>
-        <developer>
-            <name>fengwk</name>
-            <email>759543714@qq.com</email>
-            <url>https://github.com/fengwk</url>
-        </developer>
-    </developers>
 
     <build>
         <plugins>
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-checkstyle-plugin</artifactId>
-                <version>3.3.0</version>
-                <configuration>
-                    <configLocation>${project.basedir}/../checkstyle.xml</configLocation>
-                    <includeTestSourceDirectory>true</includeTestSourceDirectory>
-                    <consoleOutput>true</consoleOutput>
-                    <failsOnError>true</failsOnError>
-                </configuration>
-                <executions>
-                    <execution>
-                        <id>checkstyle-validate</id>
-                        <phase>validate</phase>
-                        <goals>
-                            <goal>check</goal>
-                        </goals>
-                    </execution>
-                </executions>
-</plugin>
-            <plugin>
                 <groupId>com.diffplug.spotless</groupId>
                 <artifactId>spotless-maven-plugin</artifactId>
-                <version>2.43.0</version>
             </plugin>
         </plugins>
     </build>
