@@ -240,6 +240,62 @@ export interface SessionYoloDTO {
   enabled: boolean
 }
 
+export interface ToolArtifactRefDTO {
+  artifactId: string
+  mediaType: string
+  sizeBytes: BackendLong
+}
+
+export interface SubagentTaskReportDTO {
+  childSessionId: string
+  childRunId: string
+  status: string
+  finalReport: string | null
+  artifacts: ToolArtifactRefDTO[]
+  turnCount: number | null
+  toolCount: number | null
+  workingCopyPolicy: string | null
+  workingCopyRevision: string | null
+}
+
+export interface SubagentTaskDTO {
+  parentInvocationId: string
+  parentSessionId: string
+  childSessionId: string
+  childRunId: string
+  targetAgent: string
+  workingCopyPolicy: string
+  workingCopyRevision: string | null
+  maxTurns: number
+  idleTimeoutMillis: BackendLong | null
+  status: string
+  report: SubagentTaskReportDTO | null
+  createTime: BackendDateTime
+  updateTime: BackendDateTime
+}
+
+export interface RunControlDTO {
+  id: string
+  sessionId: string
+  runId: string | null
+  consumedRunId: string | null
+  consumedEntryId: string | null
+  kind: string
+  consumptionMode: string
+  status: string
+  content: string
+  createdAt: BackendDateTime
+  consumedAt: BackendDateTime
+}
+
+export interface RunAbortDTO {
+  sessionId: string
+  runId: string | null
+  newlyRequested: boolean
+  status: string | null
+  requestedAt: BackendDateTime
+}
+
 export type ComfyuiWorkflowId = string
 
 export type ComfyuiBindingKind = 'parameter' | 'file'
