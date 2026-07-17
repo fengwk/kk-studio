@@ -26,8 +26,13 @@ export function AgentSessionPage() {
       pending={controller.pending}
       disabled={controller.disabled}
       observability={controller.observability}
+      taskTimeline={controller.taskTimeline}
+      controlsPending={controller.controlsPending}
       onDraftChange={controller.setDraft}
       onSubmit={controller.submitMessage}
+      onSteer={controller.submitSteer}
+      onFollowUp={controller.submitFollowUp}
+      onAbort={controller.abortRun}
     />
   )
 }

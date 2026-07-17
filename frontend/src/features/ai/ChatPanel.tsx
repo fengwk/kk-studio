@@ -2,12 +2,16 @@ import type { RefObject } from 'react'
 import { ChatComposer, ChatRuntimeBar, ChatSidebar } from '@/features/ai/ChatPanelParts'
 import { ChatObservabilityPanel } from '@/features/ai/ChatObservabilityPanel'
 import { ChatTranscript } from '@/features/ai/ChatTranscript'
+import { TaskTimelinePanel } from '@/features/ai/TaskTimelinePanel'
+import type { SubagentTaskNode } from '@/features/ai/subagent-task-tree'
+import type { RelayPermission } from '@/features/ai/useHarnessTaskTimeline'
 import type { SessionTimeline } from '@/features/ai/session-events'
 import type {
   AgentDefinitionDTO,
   HarnessRunDTO,
   HarnessSessionDTO,
   ModelUsageSummaryDTO,
+  RootActivityDTO,
   SessionYoloDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts'
@@ -30,8 +34,13 @@ export function ChatPanel({
   pending,
   disabled,
   observability,
+  taskTimeline,
+  controlsPending,
   onDraftChange,
   onSubmit,
+  onSteer,
+  onFollowUp,
+  onAbort,
 }: {
   sessions: HarnessSessionDTO[]
   agentsById: Map<string, AgentDefinitionDTO>
@@ -59,8 +68,21 @@ export function ChatPanel({
     setYolo: (enabled: boolean) => void
     decideTool: (invocationId: string, decision: 'allow' | 'deny') => void
   }
+  taskTimeline: {
+    activities: RootActivityDTO[]
+    taskTree: SubagentTaskNode[]
+    relayPermissions: RelayPermission[]
+    taskTimelineError: unknown
+    taskTimelineLoading: boolean
+    permissionDecisionPending: boolean
+    decidePermission: (invocationId: string, decision: 'allow' | 'deny') => void
+  }
+  controlsPending: boolean
   onDraftChange: (draft: string) => void
   onSubmit: () => void
+  onSteer: () => void
+  onFollowUp: () => void
+  onAbort: () => void
 }) {
   return (
     <section className="chat-shell">
@@ -78,14 +100,29 @@ export function ChatPanel({
           onYoloChange={observability.setYolo}
           onDecision={observability.decideTool}
         />
+        {!session?.parentSessionId && (
+          <TaskTimelinePanel
+            activities={taskTimeline.activities}
+            taskTree={taskTimeline.taskTree}
+            relayPermissions={taskTimeline.relayPermissions}
+            loading={taskTimeline.taskTimelineLoading}
+            error={taskTimeline.taskTimelineError}
+            decisionPending={taskTimeline.permissionDecisionPending}
+            onDecision={taskTimeline.decidePermission}
+          />
+        )}
         <ChatTranscript messages={timeline.messages} loading={messagesLoading} error={messagesError} bodyRef={bodyRef} />
         <ChatComposer
           draft={draft}
           activeRun={activeRun}
           pending={pending}
           disabled={disabled}
+          controlsPending={controlsPending}
           onDraftChange={onDraftChange}
           onSubmit={onSubmit}
+          onSteer={onSteer}
+          onFollowUp={onFollowUp}
+          onAbort={onAbort}
         />
       </main>
     </section>

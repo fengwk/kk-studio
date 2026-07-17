@@ -11,7 +11,7 @@
 | 服务端状态 | React Query |
 | 资源 API | `/api/providers`、`/api/models`、`/api/agents` |
 | Harness API | `/api/sessions`、`/api/runs`、`/api/tool-invocations`、`/api/usage` |
-| 实时通道 | 数据库 cursor 驱动的 Run SSE |
+| 实时通道 | 数据库 cursor 驱动的 Run SSE 与 Root Activity SSE |
 | 视觉实现 | `styles.css` 与 AI Extension Host 组件 |
 
 ## 路由
@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | `/` | redirect | 跳转至 `/sessions` |
 | `/sessions` | Chat 列表 | 全局根 Session、新建 Session |
-| `/sessions/:sessionId` | Chat 详情 | Entry 时间线、Run 状态、工具、权限、Usage/Cost |
+| `/sessions/:sessionId` | Chat 详情 | Entry 时间线、Run 状态、Task Timeline、工具、权限、Usage/Cost 与控制操作 |
 | `/agents` | Agent 管理 | Agent CRUD |
 | `/models` | Model 管理 | Model CRUD |
 | `/providers` | Provider 管理 | Provider CRUD |
@@ -38,8 +38,11 @@
 | `listRuns` | `GET /api/sessions/{id}/runs` | Session Run 状态 |
 | `listRunEvents` | `GET /api/runs/{id}/events?afterSequence=` | Run Event 快照与 cursor 恢复 |
 | `createRunEventStream` | `GET /api/runs/{id}/events/stream?afterSequence=` | Run Event SSE；服务端 event id 是 sequence |
+| `listRootActivities` / `createRootActivityStream` | `GET /api/sessions/{id}/activities`、`GET /api/sessions/{id}/activities/stream?afterEventId=` | Root Session 树的 activity 快照与 SSE |
+| `listSessionTasks` | `GET /api/sessions/{id}/tasks` | 指定 parent Session 的直接 Subagent Task 与终态 Report |
 | `listToolInvocations` | `GET /api/runs/{id}/tool-invocations` | 工具、目标类型与 Environment 绑定 |
 | `decideToolInvocation` | `POST /api/tool-invocations/{id}/decision` | 持久化 allow / deny 决策 |
+| `steer` / `followUp` / `abortRun` | `POST /api/sessions/{id}/steer`、`/follow-ups`、`/abort` | Root Run 控制命令 |
 | `getYolo` / `setYolo` | `GET` / `PUT /api/sessions/{id}/yolo` | 根 Session YOLO 策略 |
 | `getSessionUsage` | `GET /api/usage/sessions/{id}` | Token、cache 与 Cost 汇总 |
 | `GET /api/artifacts/{id}` | Artifact bytes | Tool artifact 的原始媒体资源 |
@@ -68,6 +71,14 @@
 
 页面先使用 `listRunEvents` 获取快照，再用当前最大 `sequence` 打开 EventSource。收到 `run_event` 后以 sequence 去重并排序；浏览器自动重连时携带上一个 SSE event id，服务端从数据库 cursor 继续发送。终态 Event 会失效 Session、Entry、Run 与 Session 列表 query，使持久化基线重新成为唯一显示结果。
 
+## Root Activity 与 Subagent Task
+
+Root Session 额外使用 `RootActivityDTO` 构建任务时间线。活动的 SSE cursor 是 `eventId` 雪花 ID 的十进制字符串，前端按字符串位数和字典序比较，绝不转换为 JavaScript number。`root_activity` 事件与 REST 快照按 eventId 去重、排序；浏览器重连沿用 SSE 的 Last-Event-ID。
+
+仅根 Session 展示 Task Timeline。前端从根 Session 开始调用 `GET /sessions/{id}/tasks`，再递归读取每个 child Session 的直接任务，构造 `SubagentTaskNode` 树。路径集合阻断循环关系，相同 child Session 的请求在一次加载内共享。Task 节点展示 target agent、状态、child report、working-copy policy/revision、turn/tool 计数与 artifact 链接；child session 可从节点直接打开。
+
+Root Activity 中的 `permission_requested` / `permission_resolved` 会派生出子代理权限 relay。relay 使用 invocation ID 调用已有 Tool Invocation 决策 API；它不是内存审批队列，刷新后由 Activity 快照重建。`steer`、`follow-up` 和 `abort` 直接提交持久 Run Control 命令，随后失效 Activity、Run 和 Entry query。
+
 ## 运行观测与交互
 
 Chat 详情的观测栏直接读取持久事实：
@@ -88,9 +99,14 @@ frontend/src
 ├── features/ai
 │   ├── useAgentSessionController.ts
 │   ├── useHarnessRunEventStream.ts
+│   ├── useHarnessRootActivityStream.ts
 │   ├── useHarnessSessionObservability.ts
+│   ├── useHarnessTaskTimeline.ts
+│   ├── useHarnessRunControls.ts
 │   ├── session-timeline-builder.ts
-│   └── ChatObservabilityPanel.tsx
+│   ├── subagent-task-tree.ts
+│   ├── ChatObservabilityPanel.tsx
+│   └── TaskTimelinePanel.tsx
 ├── shared/api
 │   ├── agent-service.ts
 │   ├── harness-service.ts

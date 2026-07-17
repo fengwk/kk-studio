@@ -22,11 +22,17 @@ vi.mock('@/shared/api/harness-service', () => ({
     listRuns: vi.fn(),
     listRunEvents: vi.fn(),
     createRunEventStream: vi.fn(),
+    listRootActivities: vi.fn(),
+    createRootActivityStream: vi.fn(),
+    listSessionTasks: vi.fn(),
     getYolo: vi.fn(),
     setYolo: vi.fn(),
     getSessionUsage: vi.fn(),
     listToolInvocations: vi.fn(),
     decideToolInvocation: vi.fn(),
+    steer: vi.fn(),
+    followUp: vi.fn(),
+    abortRun: vi.fn(),
   },
 }))
 
@@ -52,10 +58,12 @@ class FakeEventSource {
 
 describe('AgentSessionPage', () => {
   const streams: FakeEventSource[] = []
+  const rootStreams: FakeEventSource[] = []
 
   beforeEach(() => {
     vi.clearAllMocks()
     streams.length = 0
+    rootStreams.length = 0
     vi.mocked(agentService.listAgents).mockResolvedValue(page([agent]))
     vi.mocked(harnessService.listSessions).mockResolvedValue([session])
     vi.mocked(harnessService.getSession).mockResolvedValue(session)
@@ -66,6 +74,8 @@ describe('AgentSessionPage', () => {
     ])
     vi.mocked(harnessService.listRuns).mockResolvedValue([run('SUCCEEDED')])
     vi.mocked(harnessService.listRunEvents).mockResolvedValue([])
+    vi.mocked(harnessService.listRootActivities).mockResolvedValue([])
+    vi.mocked(harnessService.listSessionTasks).mockResolvedValue([])
     vi.mocked(harnessService.getYolo).mockResolvedValue({ sessionId: '1', rootSessionId: '1', enabled: false })
     vi.mocked(harnessService.setYolo).mockResolvedValue({ sessionId: '1', rootSessionId: '1', enabled: true })
     vi.mocked(harnessService.getSessionUsage).mockResolvedValue({
@@ -93,7 +103,15 @@ describe('AgentSessionPage', () => {
       streams.push(stream)
       return stream as unknown as EventSource
     })
+    vi.mocked(harnessService.createRootActivityStream).mockImplementation(() => {
+      const stream = new FakeEventSource()
+      rootStreams.push(stream)
+      return stream as unknown as EventSource
+    })
     vi.mocked(harnessService.createMessage).mockResolvedValue(entry('user-2', 'message', messagePayload('USER', [{ type: 'text', text: '继续' }])))
+    vi.mocked(harnessService.steer).mockResolvedValue({} as never)
+    vi.mocked(harnessService.followUp).mockResolvedValue({} as never)
+    vi.mocked(harnessService.abortRun).mockResolvedValue({} as never)
   })
 
   it('renders the durable Entry timeline and submits with the current leaf id', async () => {
@@ -119,7 +137,7 @@ describe('AgentSessionPage', () => {
     queryClient.setQueryData(queryKeys.runs.events('other-run'), [runEvent('other', 'other-run', 1, 'assistant_started', {})])
 
     await waitFor(() => expect(harnessService.createRunEventStream).toHaveBeenCalledWith('2', 0))
-    expect(screen.getByPlaceholderText('给 AI 发送消息...')).toBeDisabled()
+    expect(screen.getByPlaceholderText('给 AI 发送消息...')).toBeEnabled()
 
     await act(async () => {
       streams[0]?.emit('run_event', runEvent('delta', '2', 1, 'assistant_delta_batch', { deltas: [{ kind: 'text', text: '实时回答' }] }))
@@ -168,6 +186,63 @@ describe('AgentSessionPage', () => {
 
     await user.click(screen.getByRole('checkbox', { name: 'YOLO：自动批准工具调用' }))
     await waitFor(() => expect(harnessService.setYolo).toHaveBeenCalledWith('1', true))
+  })
+
+  it('opens the root activity stream and sends steer, follow-up and abort controls', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.listRuns).mockResolvedValue([run('RUNNING')])
+    renderSession()
+
+    await waitFor(() => {
+      expect(harnessService.createRootActivityStream).toHaveBeenCalledWith('1', '0')
+    })
+    const composer = screen.getByPlaceholderText('给 AI 发送消息...')
+    await user.type(composer, '优先检查边界')
+    await user.click(screen.getByRole('button', { name: '插入指令' }))
+    await waitFor(() => expect(harnessService.steer).toHaveBeenCalledWith('1', '优先检查边界'))
+
+    await user.type(composer, '完成后继续')
+    await user.click(screen.getByRole('button', { name: '排队追问' }))
+    await waitFor(() => expect(harnessService.followUp).toHaveBeenCalledWith('1', '完成后继续'))
+
+    await user.click(screen.getByRole('button', { name: '终止运行' }))
+    await waitFor(() => expect(harnessService.abortRun).toHaveBeenCalledWith('1'))
+  })
+
+  it('relays a child-session permission from the root activity stream and removes it after resolution', async () => {
+    const user = userEvent.setup()
+    renderSession()
+
+    await waitFor(() => expect(harnessService.createRootActivityStream).toHaveBeenCalledWith('1', '0'))
+    await act(async () => {
+      rootStreams[0]?.emit('root_activity', rootActivity('100', 'subagent_started', '1', {
+        childSessionId: 'child-1',
+        targetAgent: 'researcher',
+      }))
+    })
+    await waitFor(() => expect(harnessService.listSessionTasks).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText('启动子代理 researcher')).toBeInTheDocument()
+    await act(async () => {
+      rootStreams[0]?.emit('root_activity', rootActivity('101', 'permission_requested', 'child-1', {
+        invocationId: 'child-invocation',
+        tool: 'write_file',
+        workdir: '/child/repo',
+        arguments: '{}',
+      }))
+    })
+
+    expect(await screen.findByText('子代理权限：write_file')).toBeInTheDocument()
+    expect(screen.getByText('/child/repo · {}')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '允许' }))
+    await waitFor(() => expect(harnessService.decideToolInvocation).toHaveBeenCalledWith('child-invocation', 'allow'))
+
+    await act(async () => {
+      rootStreams[0]?.emit('root_activity', rootActivity('102', 'permission_resolved', 'child-1', {
+        invocationId: 'child-invocation',
+        decision: 'ALLOW',
+      }))
+    })
+    await waitFor(() => expect(screen.queryByText('子代理权限：write_file')).not.toBeInTheDocument())
   })
 
   it('does not open a run stream for a terminal session and closes an active stream on unmount', async () => {
@@ -272,6 +347,19 @@ function runEvent(eventId: string, runId: string, sequence: number, type: string
     eventId,
     runId,
     sequence,
+    type,
+    payloadJson: JSON.stringify(payload),
+    createTime: '2026-06-20T02:00:00',
+  }
+}
+
+function rootActivity(eventId: string, type: string, sessionId: string, payload: Record<string, unknown>) {
+  return {
+    rootSessionId: '1',
+    sessionId,
+    runId: 'child-run',
+    eventId,
+    sequence: 1,
     type,
     payloadJson: JSON.stringify(payload),
     createTime: '2026-06-20T02:00:00',

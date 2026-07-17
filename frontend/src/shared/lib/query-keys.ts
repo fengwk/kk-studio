@@ -20,6 +20,7 @@ export const queryKeys = {
     entries: (sessionId: string) => ['sessions', 'detail', sessionId, 'entries'] as const,
     runs: (sessionId: string) => ['sessions', 'detail', sessionId, 'runs'] as const,
     activities: (sessionId: string) => ['sessions', 'detail', sessionId, 'activities'] as const,
+    taskTree: (sessionId: string) => ['sessions', 'detail', sessionId, 'task-tree'] as const,
     yolo: (sessionId: string) => ['sessions', 'detail', sessionId, 'yolo'] as const,
   },
   runs: {
