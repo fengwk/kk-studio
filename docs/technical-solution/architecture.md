@@ -9,7 +9,8 @@ flowchart LR
     Browser[浏览器]
     Frontend[frontend<br/>React + React Query]
     Web[web<br/>HTTP / SSE / WebSocket adapter]
-    Core[core<br/>Harness application services]
+    Core[core<br/>application adapters]
+    Studio[studio<br/>Canvas / Function / Workflow domain]
     Runtime[harness/*<br/>model / tool / agent / runtime]
     Store[(MySQL / H2)]
     Environment[Environment Daemon]
@@ -18,6 +19,7 @@ flowchart LR
     Browser --> Frontend
     Frontend --> Web
     Web --> Core
+    Core --> Studio
     Core --> Runtime
     Core --> Store
     Browser --> S3
@@ -31,12 +33,13 @@ flowchart LR
 
 | 模块 | 职责 |
 | --- | --- |
+| `studio` | Canvas / Resource / Function / Workflow 纯领域契约与运行时端口；不依赖 Spring/Harness |
 | `harness/model` | Provider 无关的模型、用量、成本与 cache 合约 |
 | `harness/tool` | Tool 描述、内容、schema 与 Daemon wire protocol |
 | `harness/agent` | Provider 调用与单轮 Agent Turn 合约 |
 | `harness/runtime` | Session Entry、Run、事件、权限、控制、Task 和 worker port 的领域语义 |
 | `harness/daemon` | Environment 侧 Tool daemon 运行时与编码工具 |
-| `core` | MyBatis 持久化、事务、运行时装配、worker、S3、ComfyUI 与 Environment gateway |
+| `core` | MyBatis 持久化、事务、运行时装配、worker、S3、ComfyUI、Environment gateway 与 Studio 适配器 |
 | `web` | REST、SSE 和 WebSocket transport adapter；不承载领域状态 |
 | `share` | HTTP DTO 边界 |
 | `frontend` | React 页面、持久事实投影和 cursor 驱动 SSE 客户端 |
@@ -66,8 +69,19 @@ Session Entry 保存可重放的完整语义；Run Event 保存运行中增量�
 - SSE 按数据库 cursor 重放，且只在成功发送后推进 cursor。
 - Tool worker、Environment gateway 的 lease 和结果状态持久化，连接断开不伪造终态结果。
 
+## Studio 当前落地状态
+
+| 能力 | 状态 |
+| --- | --- |
+| `studio` 纯领域模块 | 已落地骨架：`model` / `canvas` / `workflow` / `runtime` |
+| Function Catalog | 内存种子：text/image/video/agent system Function 定义 |
+| Canvas / Workflow / Function 写路径 | core stub + HTTP 路由；返回 `501 Not Implemented` 或空查询 |
+| 生成 Provider / Agent Adapter | **未实现**，明确 TODO |
+| 持久化表 / Worker | **未实现**，下一切片 |
+
 ## 入口文档
 
+- [无限画布与 Workflow](infinite-canvas-implementation-design.md)：Studio 领域与运行时目标契约。
 - [Harness 运行时](cloud-embedded-agent-runtime.md)：消息提交、Run、worker、Tool 和 Daemon 的执行链。
 - [后端落地设计](backend-implementation-design.md)：HTTP/SSE 边界、分层和错误语义。
 - [前端落地设计](frontend-implementation-design.md)：聊天、Task Timeline 与 cursor 投影。
