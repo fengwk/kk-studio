@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { SAVE_SETTLE_MS } from '@/features/canvas/data'
 import {
   canvasReducer,
   createInitialCanvasState,
   getActiveGenerator,
   getContextDescription,
 } from '@/features/canvas/reducer'
+import { useCanvasKeyboard } from '@/features/canvas/useCanvasKeyboard'
+import { useCanvasTimers } from '@/features/canvas/useCanvasTimers'
 import type {
   AddMenuAction,
   AgentContextMode,
@@ -23,9 +24,6 @@ export function useCanvasController() {
   const [state, dispatch] = useReducer(canvasReducer, undefined, createInitialCanvasState)
   const [stageMetrics, setStageMetricsState] = useState<StageMetrics>(DEFAULT_STAGE)
   const stageMetricsRef = useRef<StageMetrics>(DEFAULT_STAGE)
-  const toastTimerRef = useRef<number | null>(null)
-  const saveTimerRef = useRef<number | null>(null)
-  const runTimerRef = useRef<number | null>(null)
   const fitViewRef = useRef<(() => void) | null>(null)
   const focusSelectionRef = useRef<(() => void) | null>(null)
   const zoomRef = useRef<((scale: number) => void) | null>(null)
@@ -40,87 +38,17 @@ export function useCanvasController() {
   const researchCloseRef = useRef<HTMLButtonElement | null>(null)
   const helpDialogRef = useRef<HTMLDialogElement | null>(null)
 
-  const clearToastTimer = useCallback(() => {
-    if (toastTimerRef.current !== null) {
-      window.clearTimeout(toastTimerRef.current)
-      toastTimerRef.current = null
-    }
-  }, [])
-
-  const clearSaveTimer = useCallback(() => {
-    if (saveTimerRef.current !== null) {
-      window.clearTimeout(saveTimerRef.current)
-      saveTimerRef.current = null
-    }
-  }, [])
-
-  const showToast = useCallback((message: string) => {
-    dispatch({ type: 'set-toast', toast: message })
-    clearToastTimer()
-    toastTimerRef.current = window.setTimeout(() => {
-      dispatch({ type: 'set-toast', toast: null })
-      toastTimerRef.current = null
-    }, 2400)
-  }, [clearToastTimer])
-
-  useEffect(() => {
-    if (!state.toast) {
-      return clearToastTimer
-    }
-    clearToastTimer()
-    toastTimerRef.current = window.setTimeout(() => {
-      dispatch({ type: 'set-toast', toast: null })
-      toastTimerRef.current = null
-    }, 2400)
-    return clearToastTimer
-  }, [state.toast, clearToastTimer])
-
-  useEffect(() => {
-    if (state.saveState !== 'saving') {
-      return clearSaveTimer
-    }
-    clearSaveTimer()
-    saveTimerRef.current = window.setTimeout(() => {
-      dispatch({ type: 'set-save-state', saveState: 'saved' })
-      saveTimerRef.current = null
-    }, SAVE_SETTLE_MS)
-    return clearSaveTimer
-  }, [state.saveState, state.nodes, state.links, clearSaveTimer])
-
-  const stopRunTimer = useCallback(() => {
-    if (runTimerRef.current !== null) {
-      window.clearInterval(runTimerRef.current)
-      runTimerRef.current = null
-    }
-  }, [])
-
-  useEffect(() => {
-    const run = state.nodes.find((node) => node.type === 'run')
-    if (!run || run.type !== 'run' || run.status !== 'running') {
-      stopRunTimer()
-      return stopRunTimer
-    }
-    if (runTimerRef.current !== null) {
-      return stopRunTimer
-    }
-    runTimerRef.current = window.setInterval(() => {
-      dispatch({ type: 'tick-agent-run', stage: stageMetricsRef.current })
-    }, 620)
-    return stopRunTimer
-  }, [state.nodes, stopRunTimer])
-
-  useEffect(() => () => {
-    clearToastTimer()
-    clearSaveTimer()
-    stopRunTimer()
-  }, [clearToastTimer, clearSaveTimer, stopRunTimer])
+  const { showToast, stopRunTimer } = useCanvasTimers({
+    state,
+    dispatch,
+    stageMetricsRef,
+  })
 
   useEffect(() => {
     if (state.focusAgentPromptToken > 0) {
       agentPromptRef.current?.focus()
     }
   }, [state.focusAgentPromptToken])
-
   useEffect(() => {
     if (state.focusGenerationPromptToken <= 0) {
       return
@@ -382,102 +310,31 @@ export function useCanvasController() {
     dispatch({ type: 'focus-agent-prompt' })
   }, [])
 
-  const handleKeyboard = useCallback((event: KeyboardEvent) => {
-    const target = event.target as HTMLElement | null
-    const isTyping = Boolean(
-      target
-      && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable),
-    )
-    const isButton = Boolean(target?.closest?.('button'))
-    const modifier = event.metaKey || event.ctrlKey
+  const clearSelection = useCallback(() => {
+    dispatch({ type: 'clear-selection' })
+  }, [])
 
-    if (modifier && event.key.toLowerCase() === 'k') {
-      if (state.view !== 'editor') {
-        return
-      }
-      event.preventDefault()
-      if (state.helpOpen) {
-        setHelpOpen(false, undefined, false)
-      }
-      if (state.researchOpen) {
-        setResearchOpen(false, undefined, false)
-      }
-      dispatch({ type: 'focus-agent-prompt' })
-      return
-    }
+  const deleteSelection = useCallback(() => {
+    dispatch({ type: 'delete-selection' })
+  }, [])
 
-    if (event.key === 'Escape') {
-      if (state.helpOpen) {
-        setHelpOpen(false)
-      } else if (state.researchOpen) {
-        setResearchOpen(false)
-      } else if (state.activeGeneratorId) {
-        closeGenerator(true)
-      } else if (state.addMenuOpen) {
-        closeAddMenu(true)
-      } else if (state.threadOpen) {
-        collapseThread()
-      } else if (state.view === 'editor') {
-        dispatch({ type: 'clear-selection' })
-        stageElementRef.current?.focus({ preventScroll: true })
-      }
-      return
-    }
-
-    if (state.view !== 'editor') {
-      return
-    }
-
-    const deleteKey = event.key === 'Delete' || event.key === 'Backspace'
-    if (deleteKey && !isTyping) {
-      event.preventDefault()
-      dispatch({ type: 'delete-selection' })
-      return
-    }
-
-    if (isTyping || isButton || state.helpOpen || state.researchOpen) {
-      return
-    }
-
-    if (event.key === '0') {
-      event.preventDefault()
-      fitViewRef.current?.()
-    } else if (event.key === '1') {
-      event.preventDefault()
-      zoomRef.current?.(1)
-    } else if (event.key.toLowerCase() === 'f') {
-      event.preventDefault()
-      focusSelectionRef.current?.()
-    } else if (event.key.toLowerCase() === 'v') {
-      event.preventDefault()
-      setTool('select')
-    } else if (event.key.toLowerCase() === 'h') {
-      event.preventDefault()
-      setTool('hand')
-    } else if (event.key.toLowerCase() === 't') {
-      event.preventDefault()
-      createTextNode()
-    }
-  }, [
-    closeAddMenu,
-    closeGenerator,
-    collapseThread,
-    createTextNode,
+  useCanvasKeyboard({
+    state,
+    stageElementRef,
+    fitViewRef,
+    focusSelectionRef,
+    zoomRef,
     setHelpOpen,
     setResearchOpen,
+    closeGenerator,
+    closeAddMenu,
+    collapseThread,
+    clearSelection,
+    deleteSelection,
+    focusAgentPrompt: focusAgentDock,
     setTool,
-    state.activeGeneratorId,
-    state.addMenuOpen,
-    state.helpOpen,
-    state.researchOpen,
-    state.threadOpen,
-    state.view,
-  ])
-
-  useEffect(() => {
-    window.addEventListener('keydown', handleKeyboard)
-    return () => window.removeEventListener('keydown', handleKeyboard)
-  }, [handleKeyboard])
+    createTextNode,
+  })
 
   return useMemo(() => ({
     state,

@@ -125,7 +125,7 @@ describe('Canvas feature vertical slice', () => {
     })
   })
 
-  it('marks Canvas nav active inside AppShell while preserving AI brand/avatar and canvas mode class', () => {
+  it('uses a unified AppShell visual language on both AI and Canvas routes', () => {
     const ai = render(
       <MemoryRouter initialEntries={['/sessions']}>
         <AppShell>
@@ -133,8 +133,10 @@ describe('Canvas feature vertical slice', () => {
         </AppShell>
       </MemoryRouter>,
     )
-    expect(ai.container.querySelector('.app-frame-ai')).toBeTruthy()
-    expect(ai.container.querySelector('.brand-mark')).toBeNull()
+    expect(ai.container.querySelector('.app-frame')).toBeTruthy()
+    expect(ai.container.querySelector('.app-frame-ai')).toBeNull()
+    expect(ai.container.querySelector('.app-frame-canvas')).toBeNull()
+    expect(ai.container.querySelector('.brand-mark')).toHaveTextContent('K')
     expect(ai.getByRole('link', { name: /AI/ })).toHaveClass('active')
     expect(ai.getByRole('link', { name: /画布/ })).not.toHaveClass('active')
     expect(ai.container.querySelector('.avatar svg')).toBeTruthy()
@@ -147,11 +149,12 @@ describe('Canvas feature vertical slice', () => {
         </AppShell>
       </MemoryRouter>,
     )
-    expect(canvas.container.querySelector('.app-frame-canvas')).toBeTruthy()
+    expect(canvas.container.querySelector('.app-frame')).toBeTruthy()
+    expect(canvas.container.querySelector('.app-frame-canvas')).toBeNull()
     expect(canvas.container.querySelector('.brand-mark')).toHaveTextContent('K')
     expect(canvas.getByRole('link', { name: /画布/ })).toHaveClass('active')
     expect(canvas.getByRole('link', { name: /AI/ })).not.toHaveClass('active')
-    expect(canvas.getByLabelText('当前工作区')).toHaveTextContent('FL')
+    expect(canvas.container.querySelector('.avatar svg')).toBeTruthy()
   })
 
   it('renders /canvas through the application host and highlights the shell nav', async () => {
