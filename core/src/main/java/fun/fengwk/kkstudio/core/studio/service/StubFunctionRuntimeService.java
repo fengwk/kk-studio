@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.core.studio.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.studio.StudioFeatureNotReadyException;
+import fun.fengwk.kkstudio.studio.StudioWorkspaces;
 import fun.fengwk.kkstudio.studio.model.FunctionRun;
 import fun.fengwk.kkstudio.studio.runtime.FunctionCatalog;
 import fun.fengwk.kkstudio.studio.runtime.FunctionExecutionRequest;
@@ -33,6 +35,7 @@ public class StubFunctionRuntimeService implements FunctionRuntimeService {
   @Override
   public FunctionRun submit(FunctionExecutionRequest request) {
     Objects.requireNonNull(request, "request");
+    StudioWorkspaces.requireDefault(request.workspaceId());
     functionCatalog
         .find(request.functionRef())
         .orElseThrow(
@@ -42,7 +45,7 @@ public class StubFunctionRuntimeService implements FunctionRuntimeService {
     log.info(
         "Rejecting Function submit for {} — runtime adapter not implemented",
         request.functionRef());
-    throw new StudioNotImplementedException(
+    throw new StudioFeatureNotReadyException(
         "FunctionRuntimeService.submit(" + request.functionRef().functionId() + ")");
   }
 
@@ -53,6 +56,6 @@ public class StubFunctionRuntimeService implements FunctionRuntimeService {
 
   @Override
   public FunctionRun cancel(long runId) {
-    throw new StudioNotImplementedException("FunctionRuntimeService.cancel");
+    throw new StudioFeatureNotReadyException("FunctionRuntimeService.cancel");
   }
 }

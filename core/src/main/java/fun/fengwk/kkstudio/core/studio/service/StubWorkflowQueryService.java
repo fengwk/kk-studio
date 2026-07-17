@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.studio.service;
 
+import fun.fengwk.kkstudio.studio.StudioWorkspaces;
 import fun.fengwk.kkstudio.studio.workflow.WorkflowDocument;
 import fun.fengwk.kkstudio.studio.workflow.WorkflowQueryService;
 import fun.fengwk.kkstudio.studio.workflow.WorkflowVersion;
@@ -17,6 +18,7 @@ public class StubWorkflowQueryService implements WorkflowQueryService {
 
   @Override
   public List<WorkflowDocument> listDocuments(long workspaceId) {
+    StudioWorkspaces.requireDefault(workspaceId);
     return List.of();
   }
 

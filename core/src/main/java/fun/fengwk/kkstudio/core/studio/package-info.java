@@ -1,7 +1,8 @@
 /**
- * Studio application adapters.
+ * Studio application adapters (composition root for Studio ports).
  *
- * <p>Implements {@code studio} ports with persistence, workers and provider integrations. Current
- * beans are intentional stubs until generation/provider APIs are available.
+ * <p>Owns Spring wiring and future persistence/provider implementations. Domain types and ports
+ * live in {@code fun.fengwk.kkstudio.studio}. HTTP mapping lives in {@code
+ * fun.fengwk.kkstudio.web.studio}.
  */
 package fun.fengwk.kkstudio.core.studio;
