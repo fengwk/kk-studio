@@ -235,6 +235,7 @@ class EnvironmentDaemonWebSocketDaemonIntegrationTest {
         status,
         PermissionAction.ALLOW,
         null,
+        ToolSideEffect.READ_ONLY,
         now.plusSeconds(30),
         "gateway-test-environment-42",
         now.plusSeconds(15),

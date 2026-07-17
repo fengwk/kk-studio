@@ -1,52 +1,32 @@
 package fun.fengwk.kkstudio.core.harness.tool.worker;
 
-import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunEventMapper;
+import fun.fengwk.kkstudio.core.harness.run.store.HarnessRunEventWriter;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
-import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunEventDO;
-import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionEntryMapper;
-import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
-import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
-import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionEntryDO;
 import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
 import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
-import fun.fengwk.kkstudio.harness.runtime.run.RunEvent;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventPayloads;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
-import fun.fengwk.kkstudio.harness.runtime.run.RunIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.ArtifactMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ClaimedToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolResultJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
-import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
-import java.util.ConcurrentModificationException;
 import java.util.List;
 import java.util.Objects;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** Atomically journals Tool state changes and materializes terminal results in source order. */
+/** Atomically journals Tool state changes; terminal materialization is per-Run coordinated. */
+@Slf4j
 @Service
 public class ToolInvocationTransactionService implements ToolInvocationTransactions {
   private static final int COORDINATION_SCAN_LIMIT = 100;
@@ -54,27 +34,20 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
   private final ToolInvocationMapper invocationMapper;
   private final MysqlToolInvocationStore invocationStore;
   private final HarnessRunMapper runMapper;
-  private final HarnessRunEventMapper eventMapper;
-  private final HarnessSessionMapper sessionMapper;
-  private final HarnessSessionEntryMapper entryMapper;
-  private final RunIdGenerator idGenerator;
-  private final SessionEntryJsonCodec entryCodec = new SessionEntryJsonCodec();
+  private final HarnessRunEventWriter eventWriter;
+  private final ToolInvocationCoordinationService coordinationService;
 
   public ToolInvocationTransactionService(
       ToolInvocationMapper invocationMapper,
       MysqlToolInvocationStore invocationStore,
       HarnessRunMapper runMapper,
-      HarnessRunEventMapper eventMapper,
-      HarnessSessionMapper sessionMapper,
-      HarnessSessionEntryMapper entryMapper,
-      RunIdGenerator idGenerator) {
+      HarnessRunEventWriter eventWriter,
+      ToolInvocationCoordinationService coordinationService) {
     this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
     this.invocationStore = Objects.requireNonNull(invocationStore, "invocationStore");
     this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
-    this.eventMapper = Objects.requireNonNull(eventMapper, "eventMapper");
-    this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
-    this.entryMapper = Objects.requireNonNull(entryMapper, "entryMapper");
-    this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
+    this.eventWriter = Objects.requireNonNull(eventWriter, "eventWriter");
+    this.coordinationService = Objects.requireNonNull(coordinationService, "coordinationService");
   }
 
   /**
@@ -96,11 +69,13 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
     if (run == null) {
       return false;
     }
+    // Run is locked; Session/Root before Invocation and before event id allocation.
+    eventWriter.lockSessionAndRoot(run.getSessionId());
     ToolInvocation invocation = lockOwned(claimed, now, run.getId());
     if (invocation == null) {
       return false;
     }
-    appendEvents(
+    eventWriter.appendLocked(
         run,
         List.of(
             new RunEventDraft(
@@ -132,6 +107,7 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
     if (run == null) {
       return false;
     }
+    eventWriter.lockSessionAndRoot(run.getSessionId());
     ToolInvocation invocation = lockOwned(claimed, now, run.getId());
     if (invocation == null) {
       return false;
@@ -139,7 +115,7 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
     for (ToolResult partial : batch) {
       requireResultFor(invocation, partial);
     }
-    appendEvents(
+    eventWriter.appendLocked(
         run,
         List.of(
             new RunEventDraft(
@@ -174,6 +150,7 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
     if (run == null) {
       return false;
     }
+    eventWriter.lockSessionAndRoot(run.getSessionId());
     ToolInvocation invocation = lockOwned(claimed, now, run.getId());
     if (invocation == null) {
       return false;
@@ -190,7 +167,7 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
         != 1) {
       return false;
     }
-    appendEvents(
+    eventWriter.appendLocked(
         run,
         List.of(
             new RunEventDraft(
@@ -212,61 +189,31 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
     return true;
   }
 
+  /**
+   * Scans ready Runs without a surrounding transaction; each Run coordinates through a separate
+   * Spring proxy transaction so failures stay isolated.
+   */
   @Override
-  @Transactional
   public int coordinateReadyRuns(Instant now) {
     int coordinated = 0;
     for (HarnessRunDO run : runMapper.listWaitingTools(COORDINATION_SCAN_LIMIT)) {
-      if (coordinate(run.getId(), now)) {
-        coordinated++;
+      try {
+        if (coordinationService.coordinate(run.getId(), now)) {
+          coordinated++;
+        }
+      } catch (RuntimeException error) {
+        log.warn(
+            "skipping tool coordination for waiting run {} after isolated failure",
+            run.getId(),
+            error);
       }
     }
     return coordinated;
   }
 
-  @Transactional
+  /** Delegates to the per-Run transactional coordinator for direct single-run tests/callers. */
   public boolean coordinate(long runId, Instant now) {
-    // Deliberately lock Run before Session, matching all cross-aggregate Tool completion paths.
-    HarnessRunDO run = runMapper.findForUpdate(runId);
-    if (run == null || !RunStatus.WAITING_TOOLS.name().equals(run.getStatus())) {
-      return false;
-    }
-    HarnessSessionDO session = sessionMapper.findForUpdate(run.getSessionId());
-    if (session == null || !Objects.equals(session.getActiveRunId(), runId)) {
-      throw new IllegalStateException("waiting run does not own its session");
-    }
-    if (invocationMapper.countNonTerminalByRun(runId) != 0) {
-      return false;
-    }
-    List<ToolInvocation> invocations = invocationStore.listByRun(runId);
-    if (invocations.isEmpty()) {
-      throw new IllegalStateException("waiting run has no tool invocations");
-    }
-    for (ToolInvocation invocation : invocations) {
-      if (!invocation.status().isTerminal() || invocation.resultJson() == null) {
-        throw new IllegalStateException("terminal invocation lacks durable ToolResult");
-      }
-      appendToolResult(session, runId, invocation, now);
-    }
-    if (runMapper.requeueWaitingTools(runId, utc(now)) != 1) {
-      throw new ConcurrentModificationException("waiting run changed during tool coordination");
-    }
-    appendEvents(
-        run,
-        List.of(
-            new RunEventDraft(
-                RunEventType.TOOL_REQUEUED,
-                RunEventPayloads.of(
-                    "status",
-                    RunStatus.QUEUED.name(),
-                    "count",
-                    invocations.size(),
-                    "attempt",
-                    run.getAttempt(),
-                    "turnIndex",
-                    run.getTurnIndex()))),
-        now);
-    return true;
+    return coordinationService.coordinate(runId, now);
   }
 
   private HarnessRunDO lockWaitingRun(long runId) {
@@ -294,86 +241,9 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
     return invocation;
   }
 
-  private void appendToolResult(
-      HarnessSessionDO session, long runId, ToolInvocation invocation, Instant now) {
-    ToolResult result = ToolResultJsonCodec.decode(invocation.resultJson());
-    requireResultFor(invocation, result);
-    List<AgentMessageContent> contents = new ArrayList<>();
-    for (ToolContent content : result.contents()) {
-      contents.add(toMessageContent(content));
-    }
-    ToolResultMessageContent toolResult =
-        new ToolResultMessageContent(
-            invocation.toolCallId(),
-            invocation.toolName(),
-            contents,
-            result.error(),
-            result.detailsJson());
-    MessageEntryPayload payload =
-        new MessageEntryPayload(new AgentMessage(AgentMessageRole.TOOL, List.of(toolResult)));
-    long entryId = idGenerator.newSessionEntryId();
-    HarnessSessionEntryDO entry = new HarnessSessionEntryDO();
-    entry.setId(entryId);
-    entry.setSessionId(session.getId());
-    entry.setParentEntryId(session.getLeafEntryId());
-    entry.setRunId(runId);
-    entry.setEntryType(payload.type().value());
-    entry.setPayloadJson(entryCodec.encode(payload));
-    entry.setCreateTime(utc(now));
-    if (entryMapper.insert(entry) != 1
-        || sessionMapper.advanceActiveRunLeaf(
-                session.getId(), runId, session.getLeafEntryId(), entryId, utc(now))
-            != 1) {
-      throw new ConcurrentModificationException("cannot append ToolResult entry");
-    }
-    session.setLeafEntryId(entryId);
-  }
-
-  private AgentMessageContent toMessageContent(ToolContent content) {
-    if (content instanceof TextToolContent text) {
-      return new TextMessageContent(text.text());
-    }
-    if (content instanceof JsonToolContent json) {
-      return new JsonMessageContent(json.json());
-    }
-    if (content instanceof ArtifactToolContent artifact) {
-      return new ArtifactMessageContent(
-          artifact.artifact().artifactId(), artifact.artifact().mediaType(), null);
-    }
-    throw new IllegalArgumentException("unsupported ToolResult content: " + content.getClass());
-  }
-
   private void requireResultFor(ToolInvocation invocation, ToolResult result) {
     if (result == null || !invocation.toolCallId().equals(result.toolCallId())) {
       throw new IllegalArgumentException("ToolResult must match frozen toolCallId");
-    }
-  }
-
-  private void appendEvents(HarnessRunDO run, List<RunEventDraft> drafts, Instant now) {
-    long sequence = run.getEventSequence();
-    long finalSequence = Math.addExact(sequence, drafts.size());
-    if (runMapper.updateEventSequence(run.getId(), sequence, finalSequence, utc(now)) != 1) {
-      throw new ConcurrentModificationException("cannot allocate Tool run event sequence");
-    }
-    for (RunEventDraft draft : drafts) {
-      RunEvent event =
-          new RunEvent(
-              idGenerator.newRunEventId(),
-              run.getId(),
-              ++sequence,
-              draft.type(),
-              draft.payloadJson(),
-              now);
-      HarnessRunEventDO target = new HarnessRunEventDO();
-      target.setId(event.id());
-      target.setRunId(event.runId());
-      target.setSequence(event.sequence());
-      target.setEventType(event.type().value());
-      target.setPayloadJson(event.payloadJson());
-      target.setCreateTime(utc(now));
-      if (eventMapper.insert(target) != 1) {
-        throw new ConcurrentModificationException("cannot append Tool run event");
-      }
     }
   }
 

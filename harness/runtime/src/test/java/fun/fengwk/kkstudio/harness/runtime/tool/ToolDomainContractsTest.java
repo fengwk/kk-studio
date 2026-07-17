@@ -243,6 +243,7 @@ class ToolDomainContractsTest {
         ToolInvocationStatus.QUEUED,
         PermissionAction.ALLOW,
         null,
+        ToolSideEffect.READ_ONLY,
         NOW,
         null,
         null,

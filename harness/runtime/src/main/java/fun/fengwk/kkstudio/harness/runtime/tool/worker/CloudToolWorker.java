@@ -150,8 +150,9 @@ public final class CloudToolWorker {
       return;
     }
     Tool tool = resolved.get();
-    if (claimed.recoveredLease()
-        && tool.descriptor().sideEffect() == ToolSideEffect.NON_IDEMPOTENT) {
+    // Lease recovery decisions use the side-effect frozen on the durable invocation, not a
+    // freshly resolved registry descriptor that may have drifted.
+    if (claimed.recoveredLease() && invocation.sideEffect() == ToolSideEffect.NON_IDEMPOTENT) {
       terminate(
           claimed,
           ToolInvocationStatus.UNKNOWN,
@@ -191,7 +192,8 @@ public final class CloudToolWorker {
     return tool.descriptor().name().equals(invocation.toolName())
         && tool.descriptor().version().equals(invocation.toolVersion())
         && ToolTargetType.fromExecutionMode(tool.descriptor().executionMode())
-            == invocation.targetType();
+            == invocation.targetType()
+        && tool.descriptor().sideEffect() == invocation.sideEffect();
   }
 
   private boolean supportedTarget(ToolInvocation invocation) {

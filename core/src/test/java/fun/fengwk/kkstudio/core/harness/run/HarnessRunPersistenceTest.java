@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService
 import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
 import fun.fengwk.kkstudio.core.harness.run.store.SnowflakeRunIdGenerator;
 import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
+import fun.fengwk.kkstudio.core.harness.task.store.DatabaseRootActivityStore;
 import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
@@ -36,6 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.task.RootActivity;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -53,11 +55,14 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -73,6 +78,7 @@ class HarnessRunPersistenceTest {
   @Autowired private HarnessRunTransactionService transactions;
   @Autowired private DatabaseToolPreparationPort toolPreparation;
   @Autowired private MysqlToolInvocationStore invocationStore;
+  @Autowired private DatabaseRootActivityStore rootActivityStore;
   @Autowired private SnowflakeRunIdGenerator idGenerator;
   @Autowired private JdbcTemplate jdbcTemplate;
 
@@ -218,6 +224,84 @@ class HarnessRunPersistenceTest {
 
     assertEquals(queuedRunIds, claimedRunIds);
     assertEquals(runCount, claimedRunIds.size());
+  }
+
+  /**
+   * Same-root concurrent appends serialize event-id allocation under Root lock so progressive
+   * RootActivity cursors never permanently miss a lower id committed after a higher id.
+   */
+  @Test
+  void concurrentSiblingRunAppendsPreserveRootActivityCursor() throws Exception {
+    Seed root = seedSession();
+    Seed child = seedChild(root.sessionId());
+    AgentRun runA =
+        transactions.submitUserMessage(root.sessionId(), root.snapshotId(), user("a"), NOW);
+    AgentRun runB =
+        transactions.submitUserMessage(child.sessionId(), child.snapshotId(), user("b"), NOW);
+
+    int writers = 2;
+    int eventsPerRun = 40;
+    ExecutorService executor = Executors.newFixedThreadPool(writers + 1);
+    CountDownLatch start = new CountDownLatch(1);
+    AtomicBoolean writing = new AtomicBoolean(true);
+    Set<Long> observed = ConcurrentHashMap.newKeySet();
+    AtomicLong cursor = new AtomicLong(0L);
+    Future<?> reader =
+        executor.submit(
+            () -> {
+              await(start);
+              while (true) {
+                List<RootActivity> page =
+                    rootActivityStore.list(root.sessionId(), cursor.get(), 50);
+                for (RootActivity activity : page) {
+                  observed.add(activity.eventId());
+                  cursor.updateAndGet(current -> Math.max(current, activity.eventId()));
+                }
+                if (!writing.get()) {
+                  List<RootActivity> finalPage =
+                      rootActivityStore.list(root.sessionId(), cursor.get(), 50);
+                  for (RootActivity activity : finalPage) {
+                    observed.add(activity.eventId());
+                    cursor.updateAndGet(current -> Math.max(current, activity.eventId()));
+                  }
+                  break;
+                }
+                Thread.onSpinWait();
+              }
+            });
+    List<Future<?>> writersFutures = new ArrayList<>();
+    for (AgentRun run : List.of(runA, runB)) {
+      writersFutures.add(
+          executor.submit(
+              () -> {
+                await(start);
+                for (int i = 0; i < eventsPerRun; i++) {
+                  transactions.appendExternalEvent(
+                      run.id(),
+                      new RunEventDraft(
+                          RunEventType.TURN_STARTED, "{\"schemaVersion\":1,\"ordinal\":" + i + "}"),
+                      NOW.plusMillis(i));
+                }
+              }));
+    }
+    start.countDown();
+    for (Future<?> future : writersFutures) {
+      future.get();
+    }
+    writing.set(false);
+    reader.get();
+    executor.shutdownNow();
+
+    List<RootActivity> all = rootActivityStore.list(root.sessionId(), 0, 1000);
+    Set<Long> committed = new HashSet<>();
+    long previous = 0L;
+    for (RootActivity activity : all) {
+      assertTrue(activity.eventId() > previous);
+      previous = activity.eventId();
+      committed.add(activity.eventId());
+    }
+    assertEquals(eventsPerRun * 2, committed.size());
+    assertEquals(committed, observed);
   }
 
   /** RunEvent 并发 append 原子分配连续 sequence，cursor 只返回指定位置之后的事件。 */
@@ -708,6 +792,7 @@ class HarnessRunPersistenceTest {
             "status",
             "permission_action",
             "permission_decision",
+            "side_effect",
             "deadline_at",
             "lease_owner",
             "lease_until",
@@ -742,6 +827,35 @@ class HarnessRunPersistenceTest {
     long sessionId = idGenerator.newSessionEntryId();
     Session session = Session.root(sessionId, 1L, "run-test", false, NOW);
     sessionStore.create(session);
+    long snapshotId = idGenerator.newSessionEntryId();
+    AgentSnapshot snapshot =
+        new AgentSnapshot("system", "model", "default", List.of(), List.of(), List.of(), "{}");
+    AgentSnapshotEntryPayload payload = new AgentSnapshotEntryPayload(snapshot);
+    sessionStore.append(
+        new SessionEntry(snapshotId, sessionId, null, null, payload.type(), payload, NOW),
+        null,
+        0L);
+    return new Seed(sessionId, snapshotId);
+  }
+
+  private Seed seedChild(long rootSessionId) {
+    long sessionId = idGenerator.newSessionEntryId();
+    Session child =
+        new Session(
+            sessionId,
+            1L,
+            "child-run-test",
+            null,
+            null,
+            rootSessionId,
+            rootSessionId,
+            null,
+            1,
+            false,
+            0,
+            NOW,
+            NOW);
+    sessionStore.createFork(child, List.of());
     long snapshotId = idGenerator.newSessionEntryId();
     AgentSnapshot snapshot =
         new AgentSnapshot("system", "model", "default", List.of(), List.of(), List.of(), "{}");

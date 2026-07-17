@@ -115,9 +115,9 @@ class ToolEnvironmentIntegrationTest {
     jdbcTemplate.update(
         "insert into tool_invocation (id, run_id, assistant_entry_id, ordinal, tool_call_id, "
             + "tool_name, tool_version, target_type, environment_id, arguments_json, status, "
-            + "permission_action, deadline_at) "
-            + "values (?, 1, 1, 1, ?, ?, ?, 'ENVIRONMENT', ?, '{}', 'QUEUED', 'ALLOW', "
-            + "current_timestamp(3))",
+            + "permission_action, side_effect, deadline_at) "
+            + "values (?, 1, 1, 1, ?, ?, ?, 'ENVIRONMENT', ?, '{}', 'QUEUED', 'ALLOW',"
+            + " 'READ_ONLY', current_timestamp(3))",
         invocationId,
         "call-" + environmentId,
         "shell",

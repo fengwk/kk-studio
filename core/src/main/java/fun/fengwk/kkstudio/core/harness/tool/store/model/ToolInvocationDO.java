@@ -18,6 +18,7 @@ public class ToolInvocationDO {
   private String status;
   private String permissionAction;
   private String permissionDecision;
+  private String sideEffect;
   private LocalDateTime deadlineAt;
   private String leaseOwner;
   private LocalDateTime leaseUntil;
