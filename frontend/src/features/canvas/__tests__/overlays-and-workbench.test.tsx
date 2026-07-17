@@ -10,6 +10,22 @@ import { CanvasRuntimeProvider, useCanvasRuntime } from '@/features/canvas/Canva
 import { GENERATION_PROFILES } from '@/features/canvas/data'
 import { PlusIcon, SendIcon } from '@/features/canvas/icons'
 
+vi.mock('@/shared/api/studio-service', () => ({
+  DEFAULT_WORKSPACE_ID: '1',
+  listCanvases: vi.fn(async () => []),
+  createCanvas: vi.fn(async () => ({
+    id: '1002',
+    workspaceId: '1',
+    title: '未命名画布',
+    schemaVersion: 1,
+    revision: '0',
+    lifecycle: 'ACTIVE',
+    homeViewportJson: '{}',
+  })),
+  listFunctions: vi.fn(async () => []),
+  getCanvasSnapshot: vi.fn(async () => ({ document: {}, nodes: [], links: [], references: [] })),
+}))
+
 vi.mock('@xyflow/react', async () => {
   const React = await import('react')
   return {
@@ -141,11 +157,10 @@ describe('canvas overlays and workbench', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/文本生成完成/)
   })
 
-  it('covers library template and idea create interactions', async () => {
+  it('covers create-card interaction on library', async () => {
     const user = userEvent.setup()
     render(<LibraryHarness />)
-    await user.click(screen.getByRole('button', { name: /空白画布/ }))
-    await user.click(screen.getByRole('button', { name: /从想法创建/ }))
+    await user.click(await screen.findByRole('button', { name: '创建新画布' }))
     expect(await screen.findByLabelText(/无限画布/)).toBeInTheDocument()
   })
 

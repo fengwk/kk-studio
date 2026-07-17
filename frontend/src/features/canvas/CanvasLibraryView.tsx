@@ -1,22 +1,34 @@
-import { LIBRARY_CARDS, TEMPLATES } from '@/features/canvas/data'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
-import { getLibraryFilterCounts } from '@/features/canvas/reducer'
-import type { LibraryFilter } from '@/features/canvas/types'
+import {
+  createCanvas,
+  DEFAULT_WORKSPACE_ID,
+  listCanvases,
+  type CanvasDocumentDTO,
+} from '@/shared/api/studio-service'
 
 export function CanvasLibraryView() {
-  const {
-    state,
-    setIdea,
-    createFromIdea,
-    selectTemplate,
-    setLibraryFilter,
-    openEditor,
-    setResearchOpen,
-    setToast,
-  } = useCanvasRuntime()
+  const { openEditor, setResearchOpen, setToast } = useCanvasRuntime()
+  const queryClient = useQueryClient()
 
-  const counts = getLibraryFilterCounts(LIBRARY_CARDS)
-  const cards = LIBRARY_CARDS.filter((card) => state.libraryFilter === 'all' || card.owner === state.libraryFilter)
+  const canvasesQuery = useQuery({
+    queryKey: ['studio', 'canvases', DEFAULT_WORKSPACE_ID],
+    queryFn: () => listCanvases(DEFAULT_WORKSPACE_ID),
+  })
+
+  const createMutation = useMutation({
+    mutationFn: (title: string) => createCanvas(title, DEFAULT_WORKSPACE_ID),
+    onSuccess: async (created) => {
+      await queryClient.invalidateQueries({ queryKey: ['studio', 'canvases'] })
+      setToast(`已创建画布「${created.title}」`)
+      openEditor()
+    },
+    onError: (error: Error) => {
+      setToast(error.message || '创建画布失败')
+    },
+  })
+
+  const canvases = canvasesQuery.data ?? []
 
   return (
     <section className="view library-view active" id="libraryView" tabIndex={-1} aria-labelledby="libraryTitle">
@@ -32,7 +44,7 @@ export function CanvasLibraryView() {
               <br />
               放在同一个空间。
             </h1>
-            <p>从一句目标开始，让 Agent 在画布中规划、执行，并留下可以继续编辑的结果。</p>
+            <p>创建画布，组织资源，调用 Function 与 Agent。</p>
           </div>
           <button
             className="text-button"
@@ -45,125 +57,69 @@ export function CanvasLibraryView() {
           </button>
         </div>
 
-        <div className="idea-composer">
-          <span className="sparkle">✦</span>
-          <input
-            value={state.idea}
-            onChange={(event) => setIdea(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
-                createFromIdea()
-              }
-            }}
-            aria-label="描述想完成的工作"
-          />
-          <button className="primary-button" type="button" onClick={createFromIdea}>
-            从想法创建
-            {' '}
-            <span>→</span>
-          </button>
-        </div>
-
-        <section className="template-section" aria-labelledby="templateTitle">
-          <div className="section-heading">
-            <h2 id="templateTitle">从模板快速开始</h2>
-            <button className="text-button" type="button" onClick={() => setToast('全部模板库将在完整产品中打开（原型模拟）')}>
-              全部模板
-              {' '}
-              <span>→</span>
-            </button>
-          </div>
-          <div className="template-grid" role="group" aria-label="画布模板">
-            {TEMPLATES.map((template) => {
-              const selected = state.selectedTemplate === template.name
-              return (
-                <button
-                  key={template.id}
-                  type="button"
-                  className={`template-card ${selected ? 'selected' : ''}`}
-                  aria-pressed={selected}
-                  onClick={() => selectTemplate(template.name)}
-                >
-                  <span className={`template-icon ${template.iconTone}`}>{template.icon}</span>
-                  <strong>{template.name}</strong>
-                  <small>{template.description}</small>
-                </button>
-              )
-            })}
-          </div>
-        </section>
-
         <section className="canvas-library" aria-labelledby="canvasTitle">
           <div className="section-heading library-toolbar">
             <div>
               <h2 id="canvasTitle">你的画布</h2>
-              <div className="filter-tabs" role="group" aria-label="画布筛选">
-                {(
-                  [
-                    ['all', '全部', counts.all],
-                    ['mine', '我的', counts.mine],
-                    ['collab', '与我协作', counts.collab],
-                  ] as const
-                ).map(([filter, label, count]) => {
-                  const active = state.libraryFilter === filter
-                  return (
-                    <button
-                      key={filter}
-                      type="button"
-                      className={active ? 'active' : undefined}
-                      aria-pressed={active}
-                      onClick={() => setLibraryFilter(filter as LibraryFilter)}
-                    >
-                      {label}
-                      {' '}
-                      <span>{count}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-            <div className="library-controls">
-              <button className="search-button" type="button" onClick={() => setToast('画布搜索将在完整产品中打开（原型模拟）')}>
-                ⌕ 搜索画布
-              </button>
-              <button className="icon-button" type="button" aria-label="切换画布网格" onClick={() => setToast('当前使用网格视图（原型模拟）')}>
-                ▦
-              </button>
             </div>
           </div>
 
+          {canvasesQuery.isLoading ? (
+            <div className="state-block" role="status">正在加载画布</div>
+          ) : null}
+          {canvasesQuery.isError ? (
+            <div className="state-block danger" role="alert">
+              画布列表加载失败：
+              {(canvasesQuery.error as Error).message}
+            </div>
+          ) : null}
+
           <div className="project-grid">
-            {cards.map((card) => (
+            <button
+              type="button"
+              className="project-card create-card"
+              aria-label="创建新画布"
+              disabled={createMutation.isPending}
+              onClick={() => createMutation.mutate('未命名画布')}
+            >
+              <div className="project-preview create-preview">
+                <span className="create-plus">+</span>
+              </div>
+              <strong>创建新画布</strong>
+              <small>空白画布 · 立即开始</small>
+            </button>
+
+            {canvases.map((canvas) => (
               <button
-                key={card.id}
+                key={canvas.id}
                 type="button"
-                className={`project-card ${card.featured ? 'feature' : ''} ${card.muted ? 'muted' : ''}`}
-                data-library-owner={card.owner}
-                onClick={openEditor}
+                className="project-card"
+                onClick={() => {
+                  setToast(`打开「${canvas.title}」`)
+                  openEditor()
+                }}
               >
-                {card.runStateLabel ? (
-                  <span className={`project-state ${card.runState ?? ''}`} data-project-run-state>
-                    {card.runStateLabel}
-                  </span>
-                ) : null}
-                <div className={`project-preview ${card.preview}-preview`}>
+                <div className="project-preview research-preview">
                   <i />
                   <i />
                   <i />
-                  {card.preview === 'research' ? <i /> : null}
-                  {card.previewBadge ? <b>{card.previewBadge}</b> : null}
                 </div>
-                <strong>{card.title}</strong>
+                <strong>{canvas.title}</strong>
                 <small>
-                  <span data-project-object-count>{card.objectsLabel}</span>
+                  revision
                   {' '}
-                  ·
+                  {canvas.revision}
                   {' '}
-                  {card.editedLabel}
+                  · 工作区
+                  {' '}
+                  {canvas.workspaceId}
                 </small>
                 <div className="project-footer">
-                  <span>{card.footerLeft}</span>
-                  <span>{card.footerRight}</span>
+                  <span>真实画布</span>
+                  <span>
+                    #
+                    {shortId(canvas)}
+                  </span>
                 </div>
               </button>
             ))}
@@ -172,4 +128,8 @@ export function CanvasLibraryView() {
       </div>
     </section>
   )
+}
+
+function shortId(canvas: CanvasDocumentDTO) {
+  return canvas.id.length > 6 ? canvas.id.slice(-6) : canvas.id
 }

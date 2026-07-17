@@ -8,6 +8,33 @@ import { CanvasPage } from '@/features/canvas/CanvasPage'
 import { canvasExtension } from '@/features/canvas/extensions/canvas-extension'
 import { AppShell } from '@/platform/shell/AppShell'
 
+
+vi.mock('@/shared/api/studio-service', () => ({
+  DEFAULT_WORKSPACE_ID: '1',
+  listCanvases: vi.fn(async () => ([
+    {
+      id: '1001',
+      workspaceId: '1',
+      title: '竞品研究与产品方案',
+      schemaVersion: 1,
+      revision: '0',
+      lifecycle: 'ACTIVE',
+      homeViewportJson: '{}',
+    },
+  ])),
+  createCanvas: vi.fn(async (title: string) => ({
+    id: '1002',
+    workspaceId: '1',
+    title: title || '未命名画布',
+    schemaVersion: 1,
+    revision: '0',
+    lifecycle: 'ACTIVE',
+    homeViewportJson: '{}',
+  })),
+  listFunctions: vi.fn(async () => []),
+  getCanvasSnapshot: vi.fn(async () => ({ document: {}, nodes: [], links: [], references: [] })),
+}))
+
 vi.mock('@xyflow/react', async () => {
   const React = await import('react')
   return {
@@ -38,7 +65,7 @@ describe('Canvas feature vertical slice', () => {
     expect(canvasExtension.navigation).toBeUndefined()
   })
 
-  it('filters library cards and enters the editor', async () => {
+  it('shows create card and real canvas cards, then enters the editor', async () => {
     const user = userEvent.setup()
     render(
       <MemoryRouter>
@@ -47,14 +74,12 @@ describe('Canvas feature vertical slice', () => {
     )
 
     expect(screen.getByRole('heading', { name: /把想法、资料和结果/ })).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: /竞品研究与产品方案|产品视觉方向探索|Agent 工具设计|短片概念草案/ })).toHaveLength(4)
+    expect(screen.queryByRole('heading', { name: /从模板快速开始/ })).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '创建新画布' })).toBeInTheDocument()
+    const card = await screen.findByRole('button', { name: /竞品研究/ })
+    expect(card).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /我的/ }))
-    expect(screen.getByRole('status')).toHaveTextContent('画布筛选已更新')
-    expect(screen.getByRole('button', { name: /产品视觉方向探索/ })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /竞品研究与产品方案/ })).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: /产品视觉方向探索/ }))
+    await user.click(card)
     expect(screen.getByLabelText(/无限画布/)).toBeInTheDocument()
     expect(screen.getByText('已保存')).toBeInTheDocument()
   })
@@ -66,7 +91,7 @@ describe('Canvas feature vertical slice', () => {
         <CanvasPage />
       </MemoryRouter>,
     )
-    await user.click(screen.getByRole('button', { name: /竞品研究与产品方案/ }))
+    await user.click(await screen.findByRole('button', { name: /竞品研究/ }))
 
     const addButton = screen.getByRole('button', { name: '添加内容' })
     await user.click(addButton)
@@ -90,7 +115,7 @@ describe('Canvas feature vertical slice', () => {
         <CanvasPage />
       </MemoryRouter>,
     )
-    await user.click(screen.getByRole('button', { name: /竞品研究与产品方案/ }))
+    await user.click(await screen.findByRole('button', { name: /竞品研究/ }))
 
     const prompt = screen.getByLabelText('向 Agent 描述任务')
     await user.type(prompt, '继续整理矩阵')
@@ -114,7 +139,7 @@ describe('Canvas feature vertical slice', () => {
         <CanvasPage />
       </MemoryRouter>,
     )
-    await user.click(screen.getByRole('button', { name: /竞品研究与产品方案/ }))
+    await user.click(await screen.findByRole('button', { name: /竞品研究/ }))
     await user.click(screen.getByRole('button', { name: '查看快捷操作' }))
     await waitFor(() => expect(document.getElementById('helpDialog')).toHaveAttribute('open'))
 
@@ -178,7 +203,7 @@ describe('Canvas feature vertical slice', () => {
         </AppShell>
       </MemoryRouter>,
     )
-    await user.click(screen.getByRole('button', { name: /竞品研究与产品方案/ }))
+    await user.click(await screen.findByRole('button', { name: /竞品研究/ }))
     expect(await screen.findByLabelText(/无限画布/)).toBeInTheDocument()
 
     // Same-route SPA brand navigation must not keep the user stuck in editor.
