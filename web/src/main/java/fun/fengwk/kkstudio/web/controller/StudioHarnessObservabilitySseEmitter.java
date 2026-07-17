@@ -23,11 +23,10 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 /**
  * Reusable database-backed SSE runtime for Run event and Root activity streams.
  *
- * <p>Reuses the existing {@code agentEventStreamTaskExecutor} (no new EventBus), polls the
- * persisted run/activity store at 250ms cadence, sends a 5s {@code heartbeat}, and closes the
- * stream after 30s of inactivity once the corresponding Run has reached a terminal state or the
- * root tree has no active run. Local cursors are only advanced after a successful {@code
- * emitter.send(...)}.
+ * <p>Uses {@code harnessEventStreamTaskExecutor} (no EventBus), polls the persisted run/activity
+ * store at 250ms cadence, sends a 5s {@code heartbeat}, and closes the stream after 30s of
+ * inactivity once the corresponding Run has reached a terminal state or the root tree has no active
+ * run. Local cursors are only advanced after a successful {@code emitter.send(...)}.
  */
 @Component
 public class StudioHarnessObservabilitySseEmitter {
@@ -50,7 +49,7 @@ public class StudioHarnessObservabilitySseEmitter {
       HarnessObservabilityQueryService observabilityService,
       MysqlHarnessRunStore runStore,
       HarnessSessionMapper sessionMapper,
-      @Qualifier("agentEventStreamTaskExecutor") Executor eventStreamTaskExecutor) {
+      @Qualifier("harnessEventStreamTaskExecutor") Executor eventStreamTaskExecutor) {
     this.observabilityService = observabilityService;
     this.runStore = runStore;
     this.sessionMapper = sessionMapper;

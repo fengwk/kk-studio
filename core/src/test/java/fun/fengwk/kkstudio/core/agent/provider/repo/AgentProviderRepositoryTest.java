@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.convention4j.api.page.PageQuery;
-import fun.fengwk.kkstudio.agent.provider.ProviderType;
+import fun.fengwk.kkstudio.share.model.AgentProviderType;
 import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import org.junit.jupiter.api.Test;
@@ -46,7 +46,7 @@ public class AgentProviderRepositoryTest {
     AgentProvider provider = new AgentProvider();
     provider.setId(nextProviderId());
     provider.setName(name);
-    provider.setProviderType(ProviderType.openai);
+    provider.setProviderType(AgentProviderType.openai);
     provider.setConfigJson("{}");
     return provider;
   }

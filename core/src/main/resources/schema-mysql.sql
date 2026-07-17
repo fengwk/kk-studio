@@ -42,48 +42,6 @@ create table if not exists agent_definition (
     unique key uk_agent_definition_name (name)
 ) engine=InnoDB default charset=utf8mb4 comment='agent definition';
 
-create table if not exists agent_session (
-    id                     bigint not null comment '主键',
-    session_id             varchar(64) not null comment 'session 业务 id',
-    agent_id               bigint null comment '绑定的 agent id',
-    agent_name             varchar(64) null comment '绑定的 agent 名称快照',
-    title                  varchar(256) null comment 'session 标题',
-    current_head_event_id  varchar(64) not null comment '当前默认 head event id',
-    gmt_create             datetime(3) not null default current_timestamp(3) comment '创建时间',
-    gmt_modified           datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
-    version                bigint not null default '0' comment '数据版本号',
-    primary key (id),
-    unique key uk_agent_session_session_id (session_id)
-) engine=InnoDB default charset=utf8mb4 comment='agent session';
-
-create table if not exists agent_session_event (
-    id               bigint not null comment '主键',
-    event_id         varchar(64) not null comment 'event 业务 id',
-    session_id       varchar(64) not null comment 'session 业务 id',
-    parent_event_id  varchar(64) not null comment '父 event id',
-    run_id           varchar(64) null comment 'run 业务 id',
-    event_type       varchar(64) not null comment '事件类型',
-    payload_json     longtext not null comment 'payload JSON',
-    gmt_create       datetime(3) not null default current_timestamp(3) comment '创建时间',
-    gmt_modified     datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
-    version          bigint not null default '0' comment '数据版本号',
-    primary key (id),
-    unique key uk_agent_session_event_id (event_id)
-) engine=InnoDB default charset=utf8mb4 comment='agent session event';
-
-create table if not exists agent_run (
-    id                bigint not null comment '主键',
-    run_id            varchar(64) not null comment 'run 业务 id',
-    session_id        varchar(64) not null comment 'session 业务 id',
-    trigger_event_id  varchar(64) not null comment '触发 run 的 event id',
-    status            varchar(32) not null comment 'run 状态',
-    gmt_create        datetime(3) not null default current_timestamp(3) comment '创建时间',
-    gmt_modified      datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
-    version           bigint not null default '0' comment '数据版本号',
-    primary key (id),
-    unique key uk_agent_run_run_id (run_id)
-) engine=InnoDB default charset=utf8mb4 comment='agent run';
-
 create table if not exists harness_session (
     id                    bigint not null comment '唯一业务与主键',
     agent_definition_id   bigint null comment '创建时 agent definition',

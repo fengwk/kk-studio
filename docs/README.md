@@ -13,7 +13,7 @@ flowchart TD
     B --> E[backend-implementation-design.md]
     B --> F[storage-models.md]
     B --> G[frontend-implementation-design.md]
-    B --> H[agent-engine.md]
+    B --> H[harness-extensions.md]
 ```
 
 ## 入口索引

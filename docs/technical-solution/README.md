@@ -12,7 +12,6 @@ flowchart TD
     A --> D[backend-implementation-design.md<br/>后端实现]
     A --> E[storage-models.md<br/>存储模型]
     A --> F[frontend-implementation-design.md<br/>前端实现]
-    A --> G[agent-engine.md<br/>agent 包执行内核]
     A --> H[harness-extensions.md<br/>Harness 扩展]
     A --> I[prompt-cache-usage-cost.md<br/>Prompt Cache、Usage 与成本账本]
     A --> J[s3-presign.md<br/>S3 预签名直传]
@@ -30,13 +29,12 @@ flowchart TD
 | 3 | [backend-implementation-design.md](backend-implementation-design.md) | `share` / `core` / `web` 的 HTTP、SSE 和 WebSocket 边界 | 修改后端控制面 |
 | 4 | [storage-models.md](storage-models.md) | 表结构、资源文件、seed 语义 | 调整存储或初始化脚本 |
 | 5 | [frontend-implementation-design.md](frontend-implementation-design.md) | 路由、状态管理、测试边界 | 修改前端页面或 API 适配 |
-| 6 | [agent-engine.md](agent-engine.md) | `agent` 模块执行内核 | 修改 Provider/Model/Agent 管理的嵌入式运行时支持 |
-| 7 | [harness-extensions.md](harness-extensions.md) | typed registry、hook 顺序、factory 与 lifecycle | 扩展 Harness 执行链 |
-| 8 | [prompt-cache-usage-cost.md](prompt-cache-usage-cost.md) | cache control、usage、pricing、ledger 与聚合 API | 修改模型调用计量与缓存链路 |
-| 9 | [s3-presign.md](s3-presign.md) | 固定 bucket、path-style 的 S3 预签名直传 / 直下载 | 接入浏览器到对象存储的直传链路 |
-| 10 | [comfyui-workflow-api.md](comfyui-workflow-api.md) | ComfyUI 工作流卡片 CRUD + 无状态提交 / 查询 / 取消 + S3 输入桥 + job-scoped 输出下载 | 接入 ComfyUI 控制台与 S3 直传后端 |
-| 11 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Environment 注册、Daemon v1 WebSocket、持久 ToolInvocation 分发与回调 | 接入远端 Environment Tool |
-| 12 | [prompt-to-artifact.md](prompt-to-artifact.md) | Prompt、Provider、Tool、Artifact 和浏览器读取的端到端事实链 | 修改跨边界执行或 artifact 呈现 |
+| 6 | [harness-extensions.md](harness-extensions.md) | typed registry、hook 顺序、factory 与 lifecycle | 扩展 Harness 执行链 |
+| 7 | [prompt-cache-usage-cost.md](prompt-cache-usage-cost.md) | cache control、usage、pricing、ledger 与聚合 API | 修改模型调用计量与缓存链路 |
+| 8 | [s3-presign.md](s3-presign.md) | 固定 bucket、path-style 的 S3 预签名直传 / 直下载 | 接入浏览器到对象存储的直传链路 |
+| 9 | [comfyui-workflow-api.md](comfyui-workflow-api.md) | ComfyUI 工作流卡片 CRUD + 无状态提交 / 查询 / 取消 + S3 输入桥 + job-scoped 输出下载 | 接入 ComfyUI 控制台与 S3 直传后端 |
+| 10 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Environment 注册、Daemon v1 WebSocket、持久 ToolInvocation 分发与回调 | 接入远端 Environment Tool |
+| 11 | [prompt-to-artifact.md](prompt-to-artifact.md) | Prompt、Provider、Tool、Artifact 和浏览器读取的端到端事实链 | 修改跨边界执行或 artifact 呈现 |
 
 ## 按主题索引
 
@@ -47,7 +45,6 @@ flowchart TD
 | 后端实现 | [backend-implementation-design.md](backend-implementation-design.md) |
 | 存储模型 | [storage-models.md](storage-models.md) |
 | 前端实现 | [frontend-implementation-design.md](frontend-implementation-design.md) |
-| agent 包执行内核 | [agent-engine.md](agent-engine.md) |
 | Harness 扩展 | [harness-extensions.md](harness-extensions.md) |
 | Prompt Cache、Usage 与成本账本 | [prompt-cache-usage-cost.md](prompt-cache-usage-cost.md) |
 | S3 预签名直传 | [s3-presign.md](s3-presign.md) |

@@ -41,7 +41,7 @@ flowchart LR
 | `share` | HTTP DTO 边界 |
 | `frontend` | React 页面、持久事实投影和 cursor 驱动 SSE 客户端 |
 
-旧 `agent` 模块仍提供 Provider/Model/Agent 管理资源和嵌入式运行时支持；Harness 会话执行的稳定语义由 `harness/*` 和 `core.harness` 定义。
+Provider / Model / AgentDefinition 是全局资源管理面，位于 `core.agent.definition|model|provider`；会话执行与观测只走 `harness/*` + `core.harness` 单轨。
 
 ## 持久模型
 

@@ -42,48 +42,6 @@ create table if not exists agent_definition (
     unique (name)
 );
 
-create table if not exists agent_session (
-    id                     bigint not null,
-    session_id             varchar(64) not null,
-    agent_id               bigint,
-    agent_name             varchar(64),
-    title                  varchar(256),
-    current_head_event_id  varchar(64) not null,
-    gmt_create             timestamp(3) not null default current_timestamp(),
-    gmt_modified           timestamp(3) not null default current_timestamp(),
-    version                bigint not null default 0,
-    primary key (id),
-    unique (session_id)
-);
-
-create table if not exists agent_session_event (
-    id               bigint not null,
-    event_id         varchar(64) not null,
-    session_id       varchar(64) not null,
-    parent_event_id  varchar(64) not null,
-    run_id           varchar(64),
-    event_type       varchar(64) not null,
-    payload_json     text not null,
-    gmt_create       timestamp(3) not null default current_timestamp(),
-    gmt_modified     timestamp(3) not null default current_timestamp(),
-    version          bigint not null default 0,
-    primary key (id),
-    unique (event_id)
-);
-
-create table if not exists agent_run (
-    id                bigint not null,
-    run_id            varchar(64) not null,
-    session_id        varchar(64) not null,
-    trigger_event_id  varchar(64) not null,
-    status            varchar(32) not null,
-    gmt_create        timestamp(3) not null default current_timestamp(),
-    gmt_modified      timestamp(3) not null default current_timestamp(),
-    version           bigint not null default 0,
-    primary key (id),
-    unique (run_id)
-);
-
 create table if not exists harness_session (
     id                    bigint not null,
     agent_definition_id   bigint,

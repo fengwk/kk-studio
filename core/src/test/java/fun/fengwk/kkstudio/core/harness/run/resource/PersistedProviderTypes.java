@@ -1,13 +1,13 @@
 package fun.fengwk.kkstudio.core.harness.run.resource;
 
-import fun.fengwk.kkstudio.agent.provider.ProviderType;
+import fun.fengwk.kkstudio.share.model.AgentProviderType;
 
-/** Keeps the legacy persisted enum out of tests that also exercise the Harness ProviderType. */
+/** Resource-side provider type helper for tests that also exercise Harness ProviderType. */
 final class PersistedProviderTypes {
 
   private PersistedProviderTypes() {}
 
-  static ProviderType from(String value) {
-    return ProviderType.valueOf(value);
+  static AgentProviderType from(String value) {
+    return AgentProviderType.valueOf(value);
   }
 }

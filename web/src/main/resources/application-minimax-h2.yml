@@ -32,15 +32,6 @@ convention:
     initial-timestamp: 1702214261706
     worker-id: 0
 
-kk-studio:
-  agent:
-    runtime:
-      providers:
-        minimax:
-          provider-type: openai
-          base-url: ${MINIMAX_BASE_URL:https://api.minimax.io/v1}
-          api-key: ${MINIMAX_API_KEY}
-          timeout: 120s
 
 logging:
   level:
