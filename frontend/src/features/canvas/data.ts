@@ -1,0 +1,281 @@
+import type {
+  CanvasLink,
+  CanvasNode,
+  CanvasViewport,
+  GenerationMode,
+  GenerationProfile,
+  LibraryCard,
+  TemplateCard,
+} from '@/features/canvas/types'
+
+export const MIN_ZOOM = 0.25
+export const MAX_ZOOM = 1.45
+export const DEFAULT_VIEWPORT: CanvasViewport = { x: 80, y: 20, scale: 0.6 }
+export const SAVE_SETTLE_MS = 650
+
+export const RUN_STEPS = [
+  '提取定位与目标用户',
+  '归纳交互与对象',
+  '生成能力矩阵',
+  '形成 MVP 页面方向',
+] as const
+
+export const DEFAULT_CONTEXT_IDS = ['web', 'image', 'file'] as const
+
+export const GENERATION_PROFILES: Record<GenerationMode, GenerationProfile> = {
+  text: {
+    label: '文本生成',
+    icon: 'T',
+    prompt: '将画布中的竞品观察整理为一段清晰、有判断力的产品定位说明。',
+    cost: '≈ 3 积分',
+    size: { width: 300, height: 196 },
+    capabilities: ['自由写作', '参考改写', '结构提炼', '继续扩写'],
+    groups: [
+      { key: '模型', values: ['Claude · Sonnet', 'GPT · 4.1', 'Gemini · Pro'] },
+      { key: '长度', values: ['精炼', '标准', '详细'] },
+      { key: '语气', values: ['专业', '叙事', '直接'] },
+      { key: '格式', values: ['段落', '要点', '大纲'] },
+    ],
+  },
+  image: {
+    label: '图片生成',
+    icon: '◒',
+    prompt: '低饱和黑白产品视觉，留出清晰的编辑空间。',
+    cost: '≈ 8 积分',
+    size: { width: 240, height: 224 },
+    capabilities: ['文生图', '多图参考', '风格迁移', '局部重绘'],
+    groups: [
+      { key: '模型', values: ['Flux · Pro', 'SDXL · Turbo', 'Ideogram · V3'] },
+      { key: '比例', values: ['1:1', '4:3', '16:9'] },
+      { key: '数量', values: ['4 张', '2 张', '1 张'] },
+      { key: '风格', values: ['电影感', '编辑感', '极简'] },
+    ],
+  },
+  video: {
+    label: '视频生成',
+    icon: '▻',
+    prompt: '黑灰创作工作台缓慢推镜，抽象素材在画布中展开，保持克制的镜头运动。',
+    cost: '≈ 28 积分',
+    size: { width: 286, height: 214 },
+    capabilities: ['首尾帧', '多图参考', '动作模仿', '全能参考', '视频编辑'],
+    groups: [
+      { key: '模型', values: ['Kling · 1.6', 'Runway · Gen-3', 'Luma · Ray 2'] },
+      { key: '规格', values: ['16:9 · 1080p', '9:16 · 1080p', '1:1 · 720p'] },
+      { key: '时长', values: ['6 秒', '4 秒', '10 秒'] },
+      { key: '镜头', values: ['缓慢推镜', '固定镜头', '横向移动'] },
+    ],
+  },
+}
+
+export const TEMPLATES: TemplateCard[] = [
+  { id: 'blank', name: '空白画布', description: '从任意内容开始', icon: '＋', iconTone: 'blank' },
+  { id: 'research', name: '研究与归纳', description: '资料 → 洞察 → 方案', icon: '⌘', iconTone: 'research' },
+  { id: 'visual', name: '视觉方向探索', description: '参考 → 变体 → 精修', icon: '◒', iconTone: 'visual' },
+  { id: 'story', name: '故事与分镜', description: '大纲 → 镜头 → 资产', icon: '↗', iconTone: 'story' },
+  { id: 'tech', name: '技术方案', description: '问题 → 架构 → 计划', icon: '⌗', iconTone: 'tech' },
+]
+
+export const LIBRARY_CARDS: LibraryCard[] = [
+  {
+    id: 'research-canvas',
+    title: '竞品研究与产品方案',
+    owner: 'collab',
+    objectsLabel: '18 个对象',
+    editedLabel: '刚刚编辑',
+    footerLeft: 'FL · KK',
+    footerRight: '↗',
+    preview: 'research',
+    featured: true,
+    runState: 'completed',
+    runStateLabel: '✓ 最近任务已完成',
+    previewBadge: '竞品研究',
+  },
+  {
+    id: 'visual-canvas',
+    title: '产品视觉方向探索',
+    owner: 'mine',
+    objectsLabel: '24 个对象',
+    editedLabel: '昨天',
+    footerLeft: 'FL',
+    footerRight: '···',
+    preview: 'visual',
+  },
+  {
+    id: 'agent-tools',
+    title: 'Agent 工具设计',
+    owner: 'collab',
+    objectsLabel: '42 个对象',
+    editedLabel: '2 天前',
+    footerLeft: 'FL · YQ',
+    footerRight: '···',
+    preview: 'technical',
+  },
+  {
+    id: 'story-draft',
+    title: '短片概念草案',
+    owner: 'mine',
+    objectsLabel: '26 个对象',
+    editedLabel: '5 天前',
+    footerLeft: 'FL',
+    footerRight: '···',
+    preview: 'story',
+    muted: true,
+  },
+]
+
+export const ADD_MENU_ITEMS: Array<{ action: 'text' | 'image' | 'video' | 'file' | 'frame'; label: string; icon: string }> = [
+  { action: 'text', label: '文本生成', icon: 'T' },
+  { action: 'image', label: '图片生成', icon: '◒' },
+  { action: 'video', label: '视频生成', icon: '▻' },
+  { action: 'file', label: '文件', icon: '▤' },
+  { action: 'frame', label: 'Frame', icon: '□' },
+]
+
+export const RESEARCH_CONTENT: Record<'research' | 'architecture' | 'roadmap', Array<{ title: string; body: string; phase?: string }>> = {
+  research: [
+    { title: 'NeoWOW', body: '首页想法输入、模板分类、个人/协作画布与 Skill 闭环值得借鉴；产品底层仍须保持通用，而非绑定垂直领域。' },
+    { title: 'WorkRally · Seko', body: 'WorkRally 证明 Agent/CLI 可操作带状态的画布对象；Seko 证明“灵感 → 自动策划”有效。一句话创建应先展示计划，而不是黑盒一键完成。' },
+    { title: 'Miro AI · tldraw Computer', body: '整张画布可以作为 Prompt，Agent 可以在空间中构建结构。执行过程应该成为可见对象，但普通用户不应手工搭建工作流。' },
+    { title: '本地 infinite-canvas', body: 'CSS 视口变换、节点/存储分层、导入导出是有效参考；避免反常框选、永久大 Dock、业务字段堆积和大页面耦合。' },
+  ],
+  architecture: [
+    { title: 'Agent 原生的多模态创作工作区', body: '资料、想法和产物存在同一空间。输入 → Agent Run → 可编辑结果，过程可见、来源可追溯。' },
+    { title: 'React Flow 初步选型', body: 'MIT 许可，适合富 DOM 节点和 Agent 状态；内置拖拽、视口、多选、MiniMap、Controls。它只承担交互渲染，领域模型保持独立。' },
+    { title: 'AGPL 风险', body: '本地 infinite-canvas 为 AGPL-3.0。仅作为行为和模块边界参考，不直接复制源码。' },
+  ],
+  roadmap: [
+    { title: '交互原型', body: '中性暗色 Stage、底部 Agent Dock、生成节点和上下文操作台，验证产品表达。', phase: 'A' },
+    { title: '画布 MVP', body: '持久化、统一命令历史、素材引用、自动保存和节点/动作注册表。', phase: 'B' },
+    { title: 'Agent 原生能力', body: '选区/整图上下文、SSE 状态、画布命令、暂停重试与来源追踪。', phase: 'C' },
+    { title: '协作与生态', body: '实时协作、只读分享、创作回放、Playbook / Skill 市场与用量策略。', phase: 'D' },
+  ],
+}
+
+export function createInitialNodes(): CanvasNode[] {
+  return [
+    {
+      id: 'frame',
+      type: 'frame',
+      x: 70,
+      y: 110,
+      width: 610,
+      height: 430,
+      title: '资料 Frame · 输入',
+      subtitle: '3 个外部资料 + 研究笔记',
+    },
+    {
+      id: 'web',
+      type: 'web',
+      x: 110,
+      y: 175,
+      width: 158,
+      height: 162,
+      title: 'NeoWOW 画布与工作流',
+      copy: '一句目标、模板和作品闭环',
+      meta: '网页 · 3 分钟前',
+    },
+    {
+      id: 'image',
+      type: 'image',
+      x: 291,
+      y: 175,
+      width: 158,
+      height: 162,
+      title: '竞品编辑器截图',
+      copy: '空间组织与低视觉重量',
+      meta: '图片 · 2.4 MB',
+    },
+    {
+      id: 'file',
+      type: 'file',
+      x: 472,
+      y: 175,
+      width: 158,
+      height: 162,
+      title: 'Miro AI / Seko / tldraw 摘录',
+      copy: '整图上下文、Agent 执行与画布结果',
+      meta: 'PDF · 12 页',
+    },
+    {
+      id: 'note',
+      type: 'text',
+      x: 110,
+      y: 365,
+      width: 310,
+      height: 128,
+      title: '研究问题',
+      copy: '如何让 Agent 理解画布上下文，并把可编辑结果稳定地放回来源附近？',
+      meta: '文本 · 已同步',
+    },
+    {
+      id: 'run',
+      type: 'run',
+      x: 760,
+      y: 290,
+      width: 275,
+      height: 235,
+      title: '竞品研究与归纳',
+      status: 'succeeded',
+      progress: 4,
+      total: 4,
+    },
+    {
+      id: 'matrix',
+      type: 'matrix',
+      x: 1145,
+      y: 145,
+      width: 286,
+      height: 192,
+      title: '竞品能力矩阵',
+      copy: '定位、上下文与执行过程对比',
+      meta: '结构化结果',
+    },
+    {
+      id: 'result-a',
+      type: 'result',
+      x: 1145,
+      y: 405,
+      width: 178,
+      height: 174,
+      title: '方案 A · 研究画布',
+      copy: '输入 → 运行 → 可编辑结论',
+      variant: 'A',
+    },
+    {
+      id: 'result-b',
+      type: 'result',
+      x: 1350,
+      y: 405,
+      width: 178,
+      height: 174,
+      title: '方案 B · 创作空间',
+      copy: '对象驱动的连续生成',
+      variant: 'B',
+    },
+    {
+      id: 'direction',
+      type: 'text',
+      x: 1550,
+      y: 200,
+      width: 260,
+      height: 145,
+      title: '产品定位',
+      copy: 'Agent 原生的多模态创作工作区。过程可见，结果可编辑、可追溯。',
+      meta: '最终结论',
+    },
+  ]
+}
+
+export function createInitialLinks(): CanvasLink[] {
+  const pairs: Array<[string, string]> = [
+    ['web', 'run'],
+    ['image', 'run'],
+    ['file', 'run'],
+    ['note', 'run'],
+    ['run', 'matrix'],
+    ['run', 'result-a'],
+    ['run', 'result-b'],
+    ['matrix', 'direction'],
+  ]
+  return pairs.map(([source, target]) => ({ id: `${source}->${target}`, source, target }))
+}

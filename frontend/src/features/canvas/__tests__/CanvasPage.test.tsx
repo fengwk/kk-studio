@@ -1,0 +1,185 @@
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
+import { describe, expect, it, vi } from 'vitest'
+import App from '@/app/App'
+import { AppProviders } from '@/app/providers'
+import { CanvasPage } from '@/features/canvas/CanvasPage'
+import { canvasExtension } from '@/features/canvas/extensions/canvas-extension'
+import { AppShell } from '@/platform/shell/AppShell'
+
+vi.mock('@xyflow/react', async () => {
+  const React = await import('react')
+  return {
+    ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    ReactFlow: ({ children, nodeTypes }: { children: React.ReactNode; nodeTypes?: Record<string, unknown> }) => {
+      // Keep a handle so tests can assert nodeTypes identity stays stable across rerenders.
+      ;(globalThis as { __canvasNodeTypes?: unknown }).__canvasNodeTypes = nodeTypes
+      return <div data-testid="react-flow">{children}</div>
+    },
+    Background: () => <div data-testid="rf-background" />,
+    BackgroundVariant: { Dots: 'dots' },
+    MiniMap: () => <div data-testid="rf-minimap" />,
+    SelectionMode: { Partial: 'partial' },
+    useReactFlow: () => ({
+      fitView: vi.fn(async () => undefined),
+      setViewport: vi.fn(async () => undefined),
+      getViewport: () => ({ x: 80, y: 20, zoom: 0.6 }),
+      zoomTo: vi.fn(async () => undefined),
+    }),
+  }
+})
+
+describe('Canvas feature vertical slice', () => {
+  it('registers builtin.canvas page contribution without navigation pollution', () => {
+    // Canvas must not publish into AI NavigationSlot via extension.navigation.
+    expect(canvasExtension.id).toBe('builtin.canvas')
+    expect(canvasExtension.pages?.[0]?.path).toBe('canvas')
+    expect(canvasExtension.navigation).toBeUndefined()
+  })
+
+  it('filters library cards and enters the editor', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <CanvasPage />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('heading', { name: /把想法、资料和结果/ })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /竞品研究与产品方案|产品视觉方向探索|Agent 工具设计|短片概念草案/ })).toHaveLength(4)
+
+    await user.click(screen.getByRole('button', { name: /我的/ }))
+    expect(screen.getByRole('status')).toHaveTextContent('画布筛选已更新')
+    expect(screen.getByRole('button', { name: /产品视觉方向探索/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /竞品研究与产品方案/ })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /产品视觉方向探索/ }))
+    expect(screen.getByLabelText(/无限画布/)).toBeInTheDocument()
+    expect(screen.getByText('已保存')).toBeInTheDocument()
+  })
+
+  it('supports add menu keyboard navigation and fixed generator creation', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <CanvasPage />
+      </MemoryRouter>,
+    )
+    await user.click(screen.getByRole('button', { name: /竞品研究与产品方案/ }))
+
+    const addButton = screen.getByRole('button', { name: '添加内容' })
+    await user.click(addButton)
+    const menu = screen.getByRole('menu', { name: '添加内容' })
+    expect(within(menu).getAllByRole('menuitem')).toHaveLength(5)
+
+    await user.keyboard('{ArrowDown}{ArrowDown}{Home}{End}{Escape}')
+    expect(menu).not.toBeVisible()
+
+    await user.click(addButton)
+    await user.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: /图片生成/ }))
+    expect(screen.getByRole('status')).toHaveTextContent('已创建图片生成节点')
+    expect(screen.getByLabelText(/提交图片生成/)).toBeInTheDocument()
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument()
+  })
+
+  it('runs agent controls from dock and resets the demo', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <CanvasPage />
+      </MemoryRouter>,
+    )
+    await user.click(screen.getByRole('button', { name: /竞品研究与产品方案/ }))
+
+    const prompt = screen.getByLabelText('向 Agent 描述任务')
+    await user.type(prompt, '继续整理矩阵')
+    await user.click(screen.getByRole('button', { name: '发送给 Agent' }))
+    const thread = screen.getByLabelText('Agent 消息与运行状态')
+    expect(thread).toBeVisible()
+    expect(within(thread).getByText('继续整理矩阵')).toBeInTheDocument()
+
+    const pause = await screen.findAllByRole('button', { name: '暂停' })
+    await user.click(pause[0])
+    expect((await screen.findAllByRole('button', { name: '继续' })).length).toBeGreaterThan(0)
+
+    await user.click(screen.getByRole('button', { name: '重置' }))
+    expect(screen.getByRole('status')).toHaveTextContent('演示和 Agent 消息已重置')
+  })
+
+  it('closes modal help and focuses the Agent Dock on Ctrl-K', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <CanvasPage />
+      </MemoryRouter>,
+    )
+    await user.click(screen.getByRole('button', { name: /竞品研究与产品方案/ }))
+    await user.click(screen.getByRole('button', { name: '查看快捷操作' }))
+    await waitFor(() => expect(document.getElementById('helpDialog')).toHaveAttribute('open'))
+
+    await user.keyboard('{Control>}k{/Control}')
+    await waitFor(() => {
+      expect(document.getElementById('helpDialog')).not.toHaveAttribute('open')
+      expect(screen.getByLabelText('向 Agent 描述任务')).toHaveFocus()
+    })
+  })
+
+  it('marks Canvas nav active inside AppShell while preserving AI brand/avatar and canvas mode class', () => {
+    const ai = render(
+      <MemoryRouter initialEntries={['/sessions']}>
+        <AppShell>
+          <div>ai</div>
+        </AppShell>
+      </MemoryRouter>,
+    )
+    expect(ai.container.querySelector('.app-frame-ai')).toBeTruthy()
+    expect(ai.container.querySelector('.brand-mark')).toBeNull()
+    expect(ai.getByRole('link', { name: /AI/ })).toHaveClass('active')
+    expect(ai.getByRole('link', { name: /画布/ })).not.toHaveClass('active')
+    expect(ai.container.querySelector('.avatar svg')).toBeTruthy()
+    ai.unmount()
+
+    const canvas = render(
+      <MemoryRouter initialEntries={['/canvas']}>
+        <AppShell>
+          <div>canvas</div>
+        </AppShell>
+      </MemoryRouter>,
+    )
+    expect(canvas.container.querySelector('.app-frame-canvas')).toBeTruthy()
+    expect(canvas.container.querySelector('.brand-mark')).toHaveTextContent('K')
+    expect(canvas.getByRole('link', { name: /画布/ })).toHaveClass('active')
+    expect(canvas.getByRole('link', { name: /AI/ })).not.toHaveClass('active')
+    expect(canvas.getByLabelText('当前工作区')).toHaveTextContent('FL')
+  })
+
+  it('renders /canvas through the application host and highlights the shell nav', async () => {
+    window.history.replaceState({}, '', '/canvas')
+    render(
+      <AppProviders>
+        <App />
+      </AppProviders>,
+    )
+    expect(await screen.findByRole('heading', { name: /把想法、资料和结果/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /画布/ })).toHaveClass('active')
+    expect(screen.getByRole('link', { name: /AI/ })).not.toHaveClass('active')
+  })
+
+  it('returns to Canvas Library when brand is clicked while editor is open on /canvas', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/canvas']}>
+        <AppShell>
+          <CanvasPage />
+        </AppShell>
+      </MemoryRouter>,
+    )
+    await user.click(screen.getByRole('button', { name: /竞品研究与产品方案/ }))
+    expect(await screen.findByLabelText(/无限画布/)).toBeInTheDocument()
+
+    // Same-route SPA brand navigation must not keep the user stuck in editor.
+    await user.click(screen.getByRole('link', { name: 'KK Studio' }))
+    expect(await screen.findByRole('heading', { name: /把想法、资料和结果/ })).toBeInTheDocument()
+  })
+})
