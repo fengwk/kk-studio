@@ -13,6 +13,8 @@ import fun.fengwk.kkstudio.core.harness.control.service.HarnessRunAbortService;
 import fun.fengwk.kkstudio.core.harness.run.service.DatabaseToolPreparationPort;
 import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
 import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
+import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
+import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
 import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
 import fun.fengwk.kkstudio.core.harness.session.store.SnowflakeSessionIdGenerator;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
@@ -94,6 +96,7 @@ class ToolInvocationIntegrationTest {
   @Autowired private MysqlHarnessSessionStore sessionStore;
   @Autowired private SnowflakeSessionIdGenerator sessionIds;
   @Autowired private MysqlHarnessRunStore runStore;
+  @Autowired private HarnessRunMapper runMapper;
   @Autowired private HarnessRunTransactionService transactions;
   @Autowired private DatabaseToolPreparationPort preparationPort;
   @Autowired private MysqlToolInvocationStore invocationStore;
@@ -818,6 +821,42 @@ class ToolInvocationIntegrationTest {
     assertEquals(0, toolTransactions.coordinateReadyRuns(NOW.plusSeconds(4)));
     assertEquals(leafBefore, sessionStore.find(run.sessionId()).orElseThrow().leafEntryId());
     assertEquals(RunStatus.WAITING_TOOLS, runStore.find(run.run().id()).orElseThrow().status());
+  }
+
+  /** A low-id non-ready Run must not consume the bounded ready coordination scan. */
+  @Test
+  void readyRunScanSkipsEarlierNonTerminalRun() {
+    configureToolSettings("{\"permission\":{\"write\":\"ask\"}}");
+    Claimed blocked = claimedRun(false);
+    assertTrue(
+        prepare(
+            blocked.run(),
+            List.of(new ToolCall("blocked", "write", "{\"path\":\"blocked.txt\"}")),
+            List.of(binding("write"))));
+
+    configureToolSettings("{}");
+    Claimed ready = claimedRun(false);
+    assertTrue(
+        prepare(
+            ready.run(),
+            List.of(new ToolCall("ready", "read", "{\"path\":\"ready.txt\"}")),
+            List.of(binding("read"))));
+    ClaimedToolInvocation claimed =
+        workerStore
+            .claimDue("ready-worker", NOW.plusSeconds(2), Duration.ofMinutes(1))
+            .orElseThrow();
+    assertEquals(ready.run().id(), claimed.invocation().runId());
+    assertTrue(toolTransactions.start(claimed, NOW.plusSeconds(2)));
+    assertTrue(
+        toolTransactions.terminate(
+            claimed,
+            ToolInvocationStatus.SUCCEEDED,
+            new ToolResult("ready", List.of(new TextToolContent("done")), false, "{}", true),
+            null,
+            NOW.plusSeconds(3)));
+
+    List<HarnessRunDO> readyRuns = runMapper.listReadyWaitingTools(1);
+    assertEquals(List.of(ready.run().id()), readyRuns.stream().map(HarnessRunDO::getId).toList());
   }
 
   /**
