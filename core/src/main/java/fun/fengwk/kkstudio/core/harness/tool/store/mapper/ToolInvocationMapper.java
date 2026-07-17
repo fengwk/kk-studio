@@ -109,6 +109,28 @@ public interface ToolInvocationMapper extends BaseMapper {
   @ResultMap("toolInvocationResultMap")
   ToolInvocationDO findClaimCandidate(@Param("now") LocalDateTime now);
 
+  @Select(
+      """
+      select
+      """
+          + COLUMNS
+          + """
+      from tool_invocation ti
+      join harness_run r on r.id = ti.run_id
+      where r.status = 'WAITING_TOOLS'
+        and ti.target_type = 'ENVIRONMENT'
+        and ti.environment_id = #{environmentId}
+        and (ti.status = 'QUEUED'
+          or (ti.status = 'CANCEL_REQUESTED'
+            and (ti.lease_owner is null or ti.lease_until is null or ti.lease_until <= #{now}))
+          or (ti.status = 'RUNNING' and ti.lease_until <= #{now}))
+      order by ti.deadline_at asc, ti.id asc
+      limit 1
+      """)
+  @ResultMap("toolInvocationResultMap")
+  ToolInvocationDO findEnvironmentClaimCandidate(
+      @Param("environmentId") long environmentId, @Param("now") LocalDateTime now);
+
   @Update(
       """
       update tool_invocation
@@ -134,11 +156,54 @@ public interface ToolInvocationMapper extends BaseMapper {
   @Update(
       """
       update tool_invocation
+      set status = case when status = 'CANCEL_REQUESTED' then status else 'RUNNING' end,
+          lease_owner = #{owner}, lease_until = #{leaseUntil},
+          started_at = coalesce(started_at, #{now}), gmt_modified = #{now}
+      where id = #{id}
+        and target_type = 'ENVIRONMENT'
+        and environment_id = #{environmentId}
+        and exists (
+          select 1 from harness_run r where r.id = tool_invocation.run_id
+            and r.status = 'WAITING_TOOLS'
+        )
+        and (status = 'QUEUED'
+          or (status = 'CANCEL_REQUESTED'
+            and (lease_owner is null or lease_until is null or lease_until <= #{now}))
+          or (status = 'RUNNING' and lease_until <= #{now}))
+      """)
+  int claimEnvironment(
+      @Param("id") long id,
+      @Param("environmentId") long environmentId,
+      @Param("owner") String owner,
+      @Param("now") LocalDateTime now,
+      @Param("leaseUntil") LocalDateTime leaseUntil);
+
+  @Update(
+      """
+      update tool_invocation
       set lease_until = #{leaseUntil}, gmt_modified = #{now}
       where id = #{id} and status = 'RUNNING' and lease_owner = #{owner} and lease_until > #{now}
       """)
   int heartbeat(
       @Param("id") long id,
+      @Param("owner") String owner,
+      @Param("now") LocalDateTime now,
+      @Param("leaseUntil") LocalDateTime leaseUntil);
+
+  @Update(
+      """
+      update tool_invocation
+      set lease_until = #{leaseUntil}, gmt_modified = #{now}
+      where id = #{id}
+        and target_type = 'ENVIRONMENT'
+        and environment_id = #{environmentId}
+        and status in ('RUNNING', 'CANCEL_REQUESTED')
+        and lease_owner = #{owner}
+        and lease_until > #{now}
+      """)
+  int heartbeatEnvironment(
+      @Param("id") long id,
+      @Param("environmentId") long environmentId,
       @Param("owner") String owner,
       @Param("now") LocalDateTime now,
       @Param("leaseUntil") LocalDateTime leaseUntil);

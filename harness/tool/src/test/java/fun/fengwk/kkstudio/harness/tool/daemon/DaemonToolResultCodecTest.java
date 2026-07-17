@@ -184,6 +184,22 @@ class DaemonToolResultCodecTest {
     assertTrue(error.getMessage().contains("sizeBytes"));
   }
 
+  /** Base64 文本长度必须先与声明大小匹配，避免伪造小 sizeBytes 时分配超额字节数组。 */
+  @Test
+  void rejectsOversizedBase64BeforeDecoding() {
+    String payload =
+        "{\"result\":{\"toolCallId\":\"c\",\"error\":false,\"details\":{},"
+            + "\"contents\":[{\"type\":\"artifact\",\"artifactId\":\"x\","
+            + "\"mediaType\":\"text/plain\",\"sizeBytes\":1,\"contentBase64\":\"YWFhYQ==\"}]}}";
+
+    DaemonProtocolException error =
+        assertThrows(
+            DaemonProtocolException.class, () -> codec.decodeResult(payload, failReader(), 8));
+
+    assertTrue(error.getMessage().contains("canonical Base64"));
+    assertTrue(error.getMessage().contains("sizeBytes"));
+  }
+
   /** 缺少 padding 的 Base64 与发端 canonical 形式不一致，必须拒绝。 */
   @Test
   void rejectsNonCanonicalBase64() {
@@ -215,6 +231,62 @@ class DaemonToolResultCodecTest {
             });
     ArtifactToolContent artifact = (ArtifactToolContent) decoded.contents().get(0);
     assertEquals("global-empty", artifact.artifact().artifactId());
+  }
+
+  /** artifact 上限必须在 Base64 解码与 receiver 写入前按声明 sizeBytes 拒绝。 */
+  @Test
+  void rejectsArtifactLargerThanConfiguredLimitBeforeDecode() {
+    String payload =
+        "{\"result\":{\"toolCallId\":\"c\",\"error\":false,\"details\":{},"
+            + "\"contents\":[{\"type\":\"artifact\",\"artifactId\":\"x\","
+            + "\"mediaType\":\"text/plain\",\"sizeBytes\":2,\"contentBase64\":\"!\"}]}}";
+    DaemonProtocolException error =
+        assertThrows(
+            DaemonProtocolException.class, () -> codec.decodeResult(payload, failReader(), 1));
+    assertTrue(error.getMessage().contains("exceeds maximumArtifactBytes"));
+  }
+
+  /** 声明大小恰等于上限时仍按常规 Base64 与 receiver 契约处理。 */
+  @Test
+  void acceptsArtifactAtConfiguredLimit() {
+    String payload =
+        "{\"result\":{\"toolCallId\":\"c\",\"error\":false,\"details\":{},"
+            + "\"contents\":[{\"type\":\"artifact\",\"artifactId\":\"x\","
+            + "\"mediaType\":\"text/plain\",\"sizeBytes\":1,\"contentBase64\":\"YQ==\"}]}}";
+    ToolResult decoded =
+        codec.decodeResult(
+            payload, (mediaType, size, bytes) -> new ArtifactRef("global", mediaType, size), 1);
+    assertEquals(
+        "global", ((ArtifactToolContent) decoded.contents().get(0)).artifact().artifactId());
+  }
+
+  /**
+   * A callback for another invocation is rejected before its artifact reader can create storage.
+   */
+  @Test
+  void rejectsUnexpectedInvocationBeforePersistingArtifacts() {
+    String payload =
+        "{\"result\":{\"toolCallId\":\"other\",\"error\":false,\"details\":{},"
+            + "\"contents\":[{\"type\":\"artifact\",\"artifactId\":\"x\","
+            + "\"mediaType\":\"text/plain\",\"sizeBytes\":1,\"contentBase64\":\"YQ==\"}]}}";
+
+    DaemonProtocolException error =
+        assertThrows(
+            DaemonProtocolException.class,
+            () -> codec.decodeResultForInvocation(payload, "expected", failReader(), 1));
+
+    assertTrue(error.getMessage().contains("toolCallId"));
+  }
+
+  /**
+   * Invocation-bound decoding requires an expected id and keeps the configured size bound valid.
+   */
+  @Test
+  void validatesInvocationBoundDecodeArguments() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decodeResultForInvocation("{}", " ", failReader(), 1));
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeResult("{}", failReader(), -1));
   }
 
   /** 缺失字段、未知字段、未知 type 都必须在 wire 边界明确拒绝。 */

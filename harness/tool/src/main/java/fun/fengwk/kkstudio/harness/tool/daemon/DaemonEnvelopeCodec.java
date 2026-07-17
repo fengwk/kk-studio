@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.Iterator;
+import java.util.Set;
 
 /**
  * Daemon v1 envelope 的 JSON codec。
@@ -13,6 +15,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 public final class DaemonEnvelopeCodec {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final Set<String> ENVELOPE_FIELDS =
+      Set.of(
+          "protocolVersion", "messageType", "environmentId", "invocationId", "sequence", "payload");
 
   /** 将 envelope 编码为协议规定的 JSON 字段。 */
   public String encode(DaemonEnvelope envelope) {
@@ -35,6 +40,7 @@ public final class DaemonEnvelopeCodec {
   /** 解码且校验单个 v1 envelope。 */
   public DaemonEnvelope decode(String json) {
     JsonNode root = readObject(json, "envelope");
+    rejectUnknownFields(root);
     int protocolVersion = requiredInt(root, "protocolVersion");
     if (protocolVersion != DaemonProtocol.VERSION_1) {
       throw new DaemonProtocolException("unsupported protocolVersion: " + protocolVersion);
@@ -109,6 +115,16 @@ public final class DaemonEnvelopeCodec {
       return value;
     } catch (JsonProcessingException error) {
       throw new DaemonProtocolException(fieldName + " must be valid JSON", error);
+    }
+  }
+
+  private void rejectUnknownFields(JsonNode root) {
+    Iterator<String> fields = root.fieldNames();
+    while (fields.hasNext()) {
+      String field = fields.next();
+      if (!ENVELOPE_FIELDS.contains(field)) {
+        throw new DaemonProtocolException("envelope has unknown field: " + field);
+      }
     }
   }
 

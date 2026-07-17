@@ -232,6 +232,7 @@ public final class DaemonRuntime implements AutoCloseable {
     ObjectNode payload = envelopeCodec.createPayload();
     payload.put("daemonId", config.daemonId());
     payload.put("protocolVersion", DaemonProtocol.VERSION_1);
+    payload.put("gatewayToken", config.gatewayToken());
     sendOn(connection, DaemonMessageType.HELLO, null, envelopeCodec.writeJson(payload));
   }
 

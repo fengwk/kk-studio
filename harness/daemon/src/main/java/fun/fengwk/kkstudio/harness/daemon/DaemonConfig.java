@@ -13,7 +13,8 @@ public record DaemonConfig(
     Duration heartbeatInterval,
     Duration initialReconnectDelay,
     Duration maxReconnectDelay,
-    Duration defaultToolTimeout) {
+    Duration defaultToolTimeout,
+    String gatewayToken) {
 
   public DaemonConfig {
     gatewayUri = Objects.requireNonNull(gatewayUri, "gatewayUri");
@@ -29,6 +30,7 @@ public record DaemonConfig(
       throw new IllegalArgumentException("initialReconnectDelay must not exceed maxReconnectDelay");
     }
     defaultToolTimeout = requirePositive(defaultToolTimeout, "defaultToolTimeout");
+    gatewayToken = requireNonBlank(gatewayToken, "gatewayToken");
   }
 
   /** 从 JVM system properties 读取可直接启动的最小配置。 */
@@ -40,7 +42,8 @@ public record DaemonConfig(
         durationProperty("kkstudio.daemon.heartbeat", Duration.ofSeconds(15)),
         durationProperty("kkstudio.daemon.reconnect-initial", Duration.ofSeconds(1)),
         durationProperty("kkstudio.daemon.reconnect-max", Duration.ofSeconds(30)),
-        durationProperty("kkstudio.daemon.tool-timeout", Duration.ofMinutes(5)));
+        durationProperty("kkstudio.daemon.tool-timeout", Duration.ofMinutes(5)),
+        requiredProperty("kkstudio.daemon.gateway-token"));
   }
 
   private static Duration durationProperty(String name, Duration defaultValue) {

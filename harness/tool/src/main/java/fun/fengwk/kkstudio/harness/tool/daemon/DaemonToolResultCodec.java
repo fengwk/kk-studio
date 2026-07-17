@@ -82,7 +82,49 @@ public final class DaemonToolResultCodec {
    * @throws DaemonProtocolException 任何协议层错误。
    */
   public ToolResult decodeResult(String payloadJson, DaemonArtifactContentReader artifactReader) {
+    return decodeResult(payloadJson, artifactReader, Long.MAX_VALUE);
+  }
+
+  /**
+   * 将 v1 wire JSON 文本解码为 {@link ToolResult}，并在 Base64 分配前限制单个 artifact 的声明字节数。
+   *
+   * @param payloadJson wire JSON 文本。
+   * @param artifactReader artifact 持久化 SPI。
+   * @param maximumArtifactBytes 单个 artifact 可接受的最大原始字节数。
+   * @return 还原后的 {@link ToolResult}；{@link ArtifactToolContent} 使用 reader 返回的全局 ref。
+   * @throws DaemonProtocolException 任何协议层错误。
+   */
+  public ToolResult decodeResult(
+      String payloadJson, DaemonArtifactContentReader artifactReader, long maximumArtifactBytes) {
+    return decodeResult(payloadJson, null, artifactReader, maximumArtifactBytes);
+  }
+
+  /**
+   * Decodes a result for one expected daemon invocation before any artifact content is persisted.
+   *
+   * <p>The expected wire {@code toolCallId} is verified before traversing {@code contents}, so an
+   * unrelated callback cannot create orphaned artifact records through the reader SPI.
+   */
+  public ToolResult decodeResultForInvocation(
+      String payloadJson,
+      String expectedToolCallId,
+      DaemonArtifactContentReader artifactReader,
+      long maximumArtifactBytes) {
+    if (expectedToolCallId == null || expectedToolCallId.isBlank()) {
+      throw new IllegalArgumentException("expectedToolCallId must not be blank");
+    }
+    return decodeResult(payloadJson, expectedToolCallId, artifactReader, maximumArtifactBytes);
+  }
+
+  private ToolResult decodeResult(
+      String payloadJson,
+      String expectedToolCallId,
+      DaemonArtifactContentReader artifactReader,
+      long maximumArtifactBytes) {
     Objects.requireNonNull(artifactReader, "artifactReader");
+    if (maximumArtifactBytes < 0) {
+      throw new IllegalArgumentException("maximumArtifactBytes must not be negative");
+    }
     ObjectNode root = readRootObject(payloadJson, "result");
     Set<String> allowedTop = Set.of("result");
     rejectUnknownFields(root, allowedTop, "result");
@@ -94,6 +136,9 @@ public final class DaemonToolResultCodec {
     Set<String> allowedResult = Set.of("toolCallId", "error", "details", "contents");
     rejectUnknownFields(resultObject, allowedResult, "result");
     String toolCallId = requiredText(resultObject, "toolCallId", "result");
+    if (expectedToolCallId != null && !expectedToolCallId.equals(toolCallId)) {
+      throw new DaemonProtocolException("result toolCallId does not match expected invocationId");
+    }
     boolean error = requiredBoolean(resultObject, "error", "result");
     JsonNode detailsNode = resultObject.get("details");
     if (detailsNode == null || detailsNode.isNull()) {
@@ -113,7 +158,9 @@ public final class DaemonToolResultCodec {
     List<ToolContent> contents = new ArrayList<>();
     int index = 0;
     for (JsonNode element : contentsNode) {
-      contents.add(readContent(element, "result.contents[" + index + "]", artifactReader));
+      contents.add(
+          readContent(
+              element, "result.contents[" + index + "]", artifactReader, maximumArtifactBytes));
       index++;
     }
     return new ToolResult(toolCallId, List.copyOf(contents), error, detailsJson, false);
@@ -161,7 +208,10 @@ public final class DaemonToolResultCodec {
   }
 
   private ToolContent readContent(
-      JsonNode node, String context, DaemonArtifactContentReader artifactReader) {
+      JsonNode node,
+      String context,
+      DaemonArtifactContentReader artifactReader,
+      long maximumArtifactBytes) {
     ObjectNode obj = requiredObject(node, context);
     Set<String> allowed = Set.of("type", "text");
     String type = requiredText(obj, "type", context);
@@ -189,7 +239,21 @@ public final class DaemonToolResultCodec {
         if (sizeBytes < 0) {
           throw new DaemonProtocolException(context + " 'sizeBytes' must not be negative");
         }
+        if (sizeBytes > maximumArtifactBytes) {
+          throw new DaemonProtocolException(
+              context
+                  + " 'sizeBytes' exceeds maximumArtifactBytes: declared="
+                  + sizeBytes
+                  + " maximum="
+                  + maximumArtifactBytes);
+        }
         String contentBase64 = requiredString(obj, "contentBase64", context);
+        if ((long) contentBase64.length() != canonicalBase64Length(sizeBytes)) {
+          throw new DaemonProtocolException(
+              context
+                  + " 'contentBase64' must use canonical Base64 with encoded length matching "
+                  + "'sizeBytes'");
+        }
         byte[] bytes;
         try {
           bytes = Base64.getDecoder().decode(contentBase64);
@@ -329,6 +393,14 @@ public final class DaemonToolResultCodec {
       throw new DaemonProtocolException(context + " '" + field + "' must be a long integer");
     }
     return value.longValue();
+  }
+
+  private long canonicalBase64Length(long sizeBytes) {
+    long groups = sizeBytes / 3;
+    if (sizeBytes % 3 != 0) {
+      groups++;
+    }
+    return groups > Long.MAX_VALUE / 4 ? Long.MAX_VALUE : groups * 4;
   }
 
   private void rejectUnknownFields(ObjectNode obj, Set<String> allowed, String context) {
