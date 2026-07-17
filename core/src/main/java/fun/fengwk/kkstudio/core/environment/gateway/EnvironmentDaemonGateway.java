@@ -375,6 +375,17 @@ public class EnvironmentDaemonGateway {
         return;
       }
       ToolInvocation invocation = claimed.invocation();
+      // A reclaimed non-idempotent call may already have changed the Environment. UNKNOWN must
+      // win over cancellation, deadline, and current capability/descriptor checks.
+      if (claimed.recoveredLease() && invocation.sideEffect() == ToolSideEffect.NON_IDEMPOTENT) {
+        String message = "Tool ownership was lost; side effect result is unknown.";
+        complete(
+            new ActiveInvocation(claimed, null, state.connection.connectionId()),
+            ToolInvocationStatus.UNKNOWN,
+            ToolResult.error(invocation.toolCallId(), message),
+            "non-idempotent invocation lease expired");
+        return;
+      }
       if (invocation.status() == ToolInvocationStatus.CANCEL_REQUESTED
           || invocation.cancelRequestedAt() != null) {
         complete(
@@ -404,16 +415,6 @@ public class EnvironmentDaemonGateway {
             ToolInvocationStatus.FAILED,
             ToolResult.error(invocation.toolCallId(), message),
             message);
-        return;
-      }
-      // Lease recovery uses the side-effect frozen on the durable invocation.
-      if (claimed.recoveredLease() && invocation.sideEffect() == ToolSideEffect.NON_IDEMPOTENT) {
-        String message = "Tool ownership was lost; side effect result is unknown.";
-        complete(
-            new ActiveInvocation(claimed, binding, state.connection.connectionId()),
-            ToolInvocationStatus.UNKNOWN,
-            ToolResult.error(invocation.toolCallId(), message),
-            "non-idempotent invocation lease expired");
         return;
       }
       if (!transactions.start(claimed, now)) {
