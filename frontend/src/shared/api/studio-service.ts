@@ -3,8 +3,7 @@ import { apiClient } from '@/shared/api/client'
 /**
  * Studio HTTP contract.
  *
- * Write paths currently return 501 until core adapters are implemented.
- * Always use DEFAULT_WORKSPACE_ID until multi-workspace exists.
+ * Canvas list/create are durable. Function submit and workflow writes may still be stubbed.
  */
 
 export const DEFAULT_WORKSPACE_ID = '1'
@@ -46,4 +45,18 @@ export async function listCanvases(
   return apiClient.get<CanvasDocumentDTO[]>('/canvases', {
     params: { workspaceId },
   })
+}
+
+export async function createCanvas(
+  title: string,
+  workspaceId: string = DEFAULT_WORKSPACE_ID,
+): Promise<CanvasDocumentDTO> {
+  return apiClient.post<CanvasDocumentDTO>('/canvases', {
+    workspaceId,
+    title,
+  })
+}
+
+export async function getCanvasSnapshot(canvasId: string): Promise<CanvasDocumentDTO> {
+  return apiClient.get(`/canvases/${encodeURIComponent(canvasId)}`)
 }

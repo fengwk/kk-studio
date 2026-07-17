@@ -7,6 +7,32 @@ import { extractPositionUpdates } from '@/features/canvas/node-position-changes'
 import { canvasNodeTypes } from '@/features/canvas/nodes/CanvasNodeRenderers'
 import { canvasReducer, createInitialCanvasState } from '@/features/canvas/reducer'
 
+vi.mock('@/shared/api/studio-service', () => ({
+  DEFAULT_WORKSPACE_ID: '1',
+  listCanvases: vi.fn(async () => ([
+    {
+      id: '1001',
+      workspaceId: '1',
+      title: '竞品研究与产品方案',
+      schemaVersion: 1,
+      revision: '0',
+      lifecycle: 'ACTIVE',
+      homeViewportJson: '{}',
+    },
+  ])),
+  createCanvas: vi.fn(async () => ({
+    id: '1002',
+    workspaceId: '1',
+    title: '未命名画布',
+    schemaVersion: 1,
+    revision: '0',
+    lifecycle: 'ACTIVE',
+    homeViewportJson: '{}',
+  })),
+  listFunctions: vi.fn(async () => []),
+  getCanvasSnapshot: vi.fn(async () => ({ document: {}, nodes: [], links: [], references: [] })),
+}))
+
 /**
  * Intentionally does NOT mock @xyflow/react.
  * Catches Maximum update depth / #002 / missing handles #008.
@@ -27,7 +53,7 @@ describe('Canvas React Flow smoke (real package)', () => {
       </MemoryRouter>,
     )
 
-    await user.click(screen.getByRole('button', { name: /竞品研究与产品方案/ }))
+    await user.click(await screen.findByRole('button', { name: /竞品研究/ }))
     const stage = await screen.findByLabelText(/无限画布/)
     expect(stage).toBeInTheDocument()
 
@@ -67,7 +93,7 @@ describe('Canvas React Flow smoke (real package)', () => {
         <CanvasPage />
       </MemoryRouter>,
     )
-    await user.click(screen.getByRole('button', { name: /竞品研究与产品方案/ }))
+    await user.click(await screen.findByRole('button', { name: /竞品研究/ }))
     await screen.findByLabelText(/无限画布/)
 
     await user.keyboard('h')
@@ -95,7 +121,7 @@ describe('Canvas React Flow smoke (real package)', () => {
         <CanvasPage />
       </MemoryRouter>,
     )
-    await user.click(screen.getByRole('button', { name: /竞品研究与产品方案/ }))
+    await user.click(await screen.findByRole('button', { name: /竞品研究/ }))
     await user.click(screen.getByRole('button', { name: '添加内容' }))
     await user.click(screen.getByRole('menuitem', { name: /文本生成/ }))
     await waitFor(() => {

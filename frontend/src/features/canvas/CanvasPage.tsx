@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { CanvasEditor } from '@/features/canvas/CanvasEditor'
 import { CanvasLibraryView } from '@/features/canvas/CanvasLibraryView'
@@ -35,9 +36,15 @@ function CanvasPageBody() {
 }
 
 export function CanvasPage() {
+  const [queryClient] = useState(() => new QueryClient({
+    defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
+  }))
+
   return (
-    <CanvasRuntimeProvider>
-      <CanvasPageBody />
-    </CanvasRuntimeProvider>
+    <QueryClientProvider client={queryClient}>
+      <CanvasRuntimeProvider>
+        <CanvasPageBody />
+      </CanvasRuntimeProvider>
+    </QueryClientProvider>
   )
 }

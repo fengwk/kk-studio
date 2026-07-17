@@ -288,3 +288,71 @@ create table if not exists tool_environment (
     primary key (id),
     unique (name)
 );
+
+create table if not exists canvas_document (
+    id                  bigint not null,
+    workspace_id        bigint not null,
+    title               varchar(256) not null,
+    schema_version      integer not null,
+    revision            bigint not null,
+    lifecycle           varchar(32) not null,
+    home_viewport_json  text not null,
+    gmt_create          timestamp(3) not null default current_timestamp(),
+    gmt_modified        timestamp(3) not null default current_timestamp(),
+    version             bigint not null default 0,
+    primary key (id)
+);
+create index if not exists idx_canvas_document_workspace on canvas_document (workspace_id, gmt_modified);
+
+create table if not exists canvas_node (
+    id                  bigint not null,
+    canvas_id           bigint not null,
+    kind                varchar(32) not null,
+    node_type           varchar(128) not null,
+    node_type_version   integer not null,
+    name                varchar(256) not null,
+    parent_group_id     bigint,
+    x                   double not null,
+    y                   double not null,
+    width               double not null,
+    height              double not null,
+    rotation            double not null,
+    z_index             bigint not null,
+    locked              boolean not null,
+    hidden              boolean not null,
+    validity            varchar(32) not null,
+    data_json           text not null,
+    revision            bigint not null,
+    gmt_deleted         timestamp(3),
+    gmt_create          timestamp(3) not null default current_timestamp(),
+    gmt_modified        timestamp(3) not null default current_timestamp(),
+    version             bigint not null default 0,
+    primary key (id)
+);
+create index if not exists idx_canvas_node_canvas on canvas_node (canvas_id, gmt_deleted);
+
+create table if not exists canvas_link (
+    id                  bigint not null,
+    canvas_id           bigint not null,
+    source_node_id      bigint not null,
+    target_node_id      bigint not null,
+    revision            bigint not null,
+    gmt_create          timestamp(3) not null default current_timestamp(),
+    primary key (id),
+    unique (canvas_id, source_node_id, target_node_id)
+);
+
+create table if not exists canvas_command (
+    id                  bigint not null,
+    command_id          varchar(128) not null,
+    workspace_id        bigint not null,
+    canvas_id           bigint not null,
+    base_revision       bigint not null,
+    result_revision     bigint not null,
+    request_hash        varchar(128) not null,
+    payload_json        text not null,
+    result_json         text not null,
+    gmt_create          timestamp(3) not null default current_timestamp(),
+    primary key (id),
+    unique (workspace_id, command_id)
+);
