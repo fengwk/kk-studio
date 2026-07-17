@@ -6,12 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+
 import java.time.Instant;
 import java.util.List;
-import org.junit.jupiter.api.Test;
 
 /** {@link RunControlMessage} compact-constructor 对所有 status 的字段一致性不变量。 */
 public class RunControlMessageTest {

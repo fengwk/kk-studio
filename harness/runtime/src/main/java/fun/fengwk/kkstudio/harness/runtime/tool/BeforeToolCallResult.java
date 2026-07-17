@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.tool;
 
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
+
 import java.util.Objects;
 
 /** beforeToolCall 可替换绑定 descriptor 或参数 JSON；permission 仅由末端边界产生。 */

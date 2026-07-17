@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.harness.runtime.usage;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
@@ -10,9 +12,9 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheMode;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+
 import java.math.BigDecimal;
 import java.time.Instant;
-import org.junit.jupiter.api.Test;
 
 class ModelUsageRecordTest {
   private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");

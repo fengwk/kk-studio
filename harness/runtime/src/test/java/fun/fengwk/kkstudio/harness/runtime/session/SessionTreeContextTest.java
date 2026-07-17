@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
@@ -13,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.context.ContextState;
 import fun.fengwk.kkstudio.harness.runtime.context.DefaultContextTransform;
 import fun.fengwk.kkstudio.harness.runtime.context.SessionContext;
 import fun.fengwk.kkstudio.harness.runtime.context.SessionContextBuilder;
+
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -26,7 +29,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import org.junit.jupiter.api.Test;
 
 class SessionTreeContextTest {
   private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");

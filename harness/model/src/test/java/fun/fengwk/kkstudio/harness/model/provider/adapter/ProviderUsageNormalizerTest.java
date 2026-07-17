@@ -22,10 +22,12 @@ import dev.langchain4j.model.openaiofficial.OpenAiOfficialResponsesChatResponseM
 import dev.langchain4j.model.openaiofficial.OpenAiOfficialTokenUsage;
 import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.output.TokenUsage;
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+
 import java.util.List;
-import org.junit.jupiter.api.Test;
 
 /**
  * {@link ProviderUsageNormalizer} 的七类语义、metadata 与 raw usage JSON 契约测试。

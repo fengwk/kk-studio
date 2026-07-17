@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import fun.fengwk.kkstudio.harness.daemon.DaemonToolRegistry;
+
 import java.util.Objects;
 
 /** Registers the production Environment coding-tool set in stable capability order. */

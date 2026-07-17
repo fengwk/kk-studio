@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.harness.runtime.tool;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -10,11 +12,11 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
-import org.junit.jupiter.api.Test;
 
 class ToolDomainContractsTest {
   private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");

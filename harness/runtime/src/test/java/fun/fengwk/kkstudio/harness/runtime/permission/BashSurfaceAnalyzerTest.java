@@ -5,10 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Test;
+
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
 
 class BashSurfaceAnalyzerTest {
   private final BashSurfaceAnalyzer analyzer = new BashSurfaceAnalyzer();
