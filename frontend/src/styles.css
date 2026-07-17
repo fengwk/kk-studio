@@ -100,10 +100,25 @@ a {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
   font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.01em;
   white-space: nowrap;
+}
+
+.brand-mark {
+  display: grid;
+  width: 23px;
+  height: 23px;
+  place-items: center;
+  border-radius: 7px 7px 7px 2px;
+  color: #102015;
+  background: var(--green-primary);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .topnav {
@@ -149,6 +164,89 @@ a {
   height: 14px;
 }
 
+/* Canvas primary shell: design-prototype top nav without capsule background. */
+.app-frame-canvas {
+  background: #101412;
+  color: #edf2ed;
+}
+
+.app-frame-canvas .topbar {
+  height: 58px;
+  gap: 30px;
+  padding: 0 28px;
+  border-bottom-color: #2b342f;
+  background: rgba(16, 20, 18, 0.85);
+  backdrop-filter: blur(14px);
+  justify-content: flex-start;
+}
+
+.app-frame-canvas .topbar-left {
+  flex: 0 0 auto;
+}
+
+.app-frame-canvas .topbar-center {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.app-frame-canvas .topbar-right {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.app-frame-canvas .brand {
+  font-weight: 720;
+  letter-spacing: -0.025em;
+}
+
+.app-frame-canvas .brand-mark {
+  color: #102015;
+  background: #71e79a;
+}
+
+.app-frame-canvas .topnav {
+  gap: 5px;
+  height: 100%;
+  align-items: center;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.app-frame-canvas .topnav a,
+.app-frame-canvas .topnav button {
+  position: relative;
+  height: 100%;
+  padding: 0 11px;
+  border-radius: 0;
+  color: #919c94;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: none;
+}
+
+.app-frame-canvas .topnav a.active {
+  background: transparent;
+  color: #edf2ed;
+  box-shadow: none;
+}
+
+.app-frame-canvas .topnav a.active::after {
+  position: absolute;
+  right: 11px;
+  bottom: 0;
+  left: 11px;
+  height: 2px;
+  border-radius: 2px;
+  background: #71e79a;
+  content: "";
+}
+
+.app-frame-canvas .topnav button:disabled {
+  opacity: 0.78;
+}
+
 .avatar {
   width: 32px;
   height: 32px;
@@ -164,6 +262,17 @@ a {
 .avatar svg {
   width: 14px;
   height: 14px;
+}
+
+.app-frame-canvas .avatar {
+  width: 28px;
+  height: 28px;
+  color: #d8fae1;
+  background: #355344;
+  border-color: transparent;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .stage {
