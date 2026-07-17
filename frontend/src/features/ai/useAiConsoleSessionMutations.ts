@@ -1,45 +1,25 @@
-import { toSessionTitleUpdate } from '@/features/ai/ai-console-utils'
 import { useInvalidateMutation } from '@/features/ai/useInvalidateMutation'
-import { createSessionApi } from '@/shared/api/agent-service'
+import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 export function useAiConsoleSessionMutations({
-  selectedAgentName,
+  selectedAgentId,
   sessionTitle,
   onSessionCreated,
-  onSessionUpdated,
-  onSessionDeleted,
 }: {
-  selectedAgentName: string
+  selectedAgentId: string
   sessionTitle: string
-  onSessionCreated: (session: Awaited<ReturnType<ReturnType<typeof createSessionApi>['create']>>) => void | Promise<void>
-  onSessionUpdated: () => void | Promise<void>
-  onSessionDeleted: () => void | Promise<void>
+  onSessionCreated: (session: Awaited<ReturnType<typeof harnessService.createSession>>) => void | Promise<void>
 }) {
-  const sessionApi = createSessionApi()
   const createSessionMutation = useInvalidateMutation({
-    mutationFn: () => sessionApi.create({ agentName: selectedAgentName, title: sessionTitle.trim() || undefined }),
+    mutationFn: () => harnessService.createSession({ agentDefinitionId: selectedAgentId, title: sessionTitle.trim() || undefined }),
     invalidateQueryKeys: [queryKeys.sessions.list],
     onSuccess: onSessionCreated,
-  })
-  const updateSessionMutation = useInvalidateMutation({
-    mutationFn: ({ sessionId, title }: { sessionId: string; title: string }) => sessionApi.update(sessionId, toSessionTitleUpdate(title)),
-    invalidateQueryKeys: [queryKeys.sessions.list],
-    onSuccess: onSessionUpdated,
-  })
-  const deleteSessionMutation = useInvalidateMutation({
-    mutationFn: (sessionId: string) => sessionApi.remove(sessionId),
-    invalidateQueryKeys: [queryKeys.sessions.list],
-    onSuccess: onSessionDeleted,
   })
 
   return {
     createSession: () => createSessionMutation.mutate(undefined),
-    updateSession: (sessionId: string, title: string) => updateSessionMutation.mutate({ sessionId, title }),
-    deleteSession: (sessionId: string) => deleteSessionMutation.mutate(sessionId),
-    sessionMutationError: createSessionMutation.error || updateSessionMutation.error || deleteSessionMutation.error,
-    sessionDeletePending: deleteSessionMutation.isPending,
+    sessionMutationError: createSessionMutation.error,
     createSessionPending: createSessionMutation.isPending,
-    updateSessionPending: updateSessionMutation.isPending,
   }
 }

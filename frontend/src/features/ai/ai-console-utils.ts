@@ -1,11 +1,5 @@
-import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, AgentSessionDTO, AgentSessionUpdateDTO, BackendDateTime } from '@/shared/api/contracts'
+import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, BackendDateTime, HarnessSessionDTO } from '@/shared/api/contracts'
 import type { ResourceModal } from '@/features/ai/ai-console-types'
-
-export function toSessionTitleUpdate(title: string): AgentSessionUpdateDTO {
-  return {
-    title: title.trim() || null,
-  }
-}
 
 export function resourceTitle(modal: ResourceModal): string {
   const prefix = modal.mode === 'create' ? '新建' : '编辑'
@@ -18,10 +12,10 @@ export function resourceTitle(modal: ResourceModal): string {
   return `${prefix} Agent`
 }
 
-export function filterSessions(sessions: AgentSessionDTO[], agentsByName: Map<string, AgentDefinitionDTO>, search: string): AgentSessionDTO[] {
+export function filterSessions(sessions: HarnessSessionDTO[], agentsById: Map<string, AgentDefinitionDTO>, search: string): HarnessSessionDTO[] {
   return sessions.filter((session) => {
-    const agent = agentsByName.get(session.agentName)
-    return includesSearch(`${session.sessionId} ${session.title ?? ''} ${session.agentName} ${agent?.name ?? ''}`, search)
+    const agent = agentsById.get(session.agentDefinitionId)
+    return includesSearch(`${session.sessionId} ${session.title ?? ''} ${session.agentDefinitionId} ${agent?.name ?? ''}`, search)
   })
 }
 

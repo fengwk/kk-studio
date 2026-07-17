@@ -8,7 +8,6 @@ import {
   formatJsonSummary,
   includesSearch,
   resourceTitle,
-  toSessionTitleUpdate,
 } from '@/features/ai/ai-console-utils'
 import {
   emptyAgentDraft,
@@ -220,16 +219,20 @@ describe('ai-console-utils', () => {
       defaultProvider: 'minimax',
       defaultModel: 'MiniMax-M2.7',
     })
-    expect(toSessionTitleUpdate(' renamed ')).toEqual({ title: 'renamed' })
-    expect(toSessionTitleUpdate('   ')).toEqual({ title: null })
   })
 
   it('filters resources and formats helper values', () => {
     const sessions = [
       {
         sessionId: 'session-1',
-        agentName: 'assistant',
+        agentDefinitionId: 'agent-1',
         title: 'Script Review',
+        rootSessionId: 'session-1',
+        parentSessionId: null,
+        depth: 0,
+        leafEntryId: 'entry-1',
+        activeRunId: null,
+        yoloEnabled: false,
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:01:00',
       },
@@ -277,7 +280,7 @@ describe('ai-console-utils', () => {
       },
     ]
 
-    expect(filterSessions(sessions, new Map([['assistant', agents[0]]]), 'script')).toHaveLength(1)
+    expect(filterSessions(sessions, new Map([['agent-1', agents[0]]]), 'script')).toHaveLength(1)
     expect(filterAgents(agents, 'cloud')).toHaveLength(1)
     expect(filterModels(models, 'm2.7')).toHaveLength(1)
     expect(filterProviders(providers, 'endpoint')).toHaveLength(1)

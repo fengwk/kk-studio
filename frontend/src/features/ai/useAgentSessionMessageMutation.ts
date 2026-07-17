@@ -1,15 +1,28 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { invalidateSessionQueries } from '@/features/ai/agent-session-query-support'
-import { createSessionApi } from '@/shared/api/agent-service'
+import { harnessService } from '@/shared/api/harness-service'
+import { queryKeys } from '@/shared/lib/query-keys'
 
-export function useAgentSessionMessageMutation(sessionId: string, onSubmitted: () => void | Promise<void>) {
+export function useAgentSessionMessageMutation(
+  sessionId: string,
+  expectedLeafEntryId: string | null,
+  onSubmitted: () => void | Promise<void>,
+) {
   const queryClient = useQueryClient()
-  const sessionApi = createSessionApi()
   return useMutation({
-    mutationFn: (content: string) => sessionApi.createMessage(sessionId, { content }),
+    mutationFn: (content: string) => {
+      if (!expectedLeafEntryId) {
+        throw new Error('会话尚未准备好接收消息')
+      }
+      return harnessService.createMessage(sessionId, { content, expectedLeafEntryId })
+    },
     onSuccess: async () => {
       await onSubmitted()
-      await invalidateSessionQueries(queryClient, sessionId)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions.detail(sessionId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions.entries(sessionId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions.runs(sessionId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions.list }),
+      ])
     },
   })
 }

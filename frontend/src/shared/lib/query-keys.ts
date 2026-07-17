@@ -17,8 +17,14 @@ export const queryKeys = {
     all: ['sessions'] as const,
     list: ['sessions', 'list'] as const,
     detail: (sessionId: string) => ['sessions', 'detail', sessionId] as const,
-    events: (sessionId: string) => ['sessions', 'detail', sessionId, 'events'] as const,
+    entries: (sessionId: string) => ['sessions', 'detail', sessionId, 'entries'] as const,
     runs: (sessionId: string) => ['sessions', 'detail', sessionId, 'runs'] as const,
+    activities: (sessionId: string) => ['sessions', 'detail', sessionId, 'activities'] as const,
+    yolo: (sessionId: string) => ['sessions', 'detail', sessionId, 'yolo'] as const,
+  },
+  runs: {
+    events: (runId: string) => ['runs', 'detail', runId, 'events'] as const,
+    toolInvocations: (runId: string) => ['runs', 'detail', runId, 'tool-invocations'] as const,
   },
   usage: {
     all: ['usage'] as const,

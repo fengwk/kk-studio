@@ -24,6 +24,22 @@ describe('tool-attachments', () => {
         data: 'data:video/mp4;base64,dmlkZW8=',
       }),
     ).toBe('data:video/mp4;base64,dmlkZW8=')
+    expect(
+      toToolAttachmentSrc({
+        type: 'image',
+        name: 'artifact',
+        mime: 'image/png',
+        data: '/api/artifacts/1',
+      }),
+    ).toBe('/api/artifacts/1')
+    expect(
+      toToolAttachmentSrc({
+        type: 'image',
+        name: 'remote',
+        mime: 'image/png',
+        data: 'https://example.test/image.png',
+      }),
+    ).toBe('https://example.test/image.png')
   })
 
   it('exposes consistent labels and fallbacks', () => {
@@ -38,5 +54,7 @@ describe('tool-attachments', () => {
     expect(getToolAttachmentLabel(attachment)).toBe('audio/mpeg')
     expect(toToolAttachmentSrc(attachment)).toBeNull()
     expect(formatToolAttachmentFallback(attachment)).toBe('[audio] audio/mpeg')
+    expect(getToolAttachmentLabel({ ...attachment, mime: '' })).toBe('audio attachment')
+    expect(formatToolAttachmentFallback({ ...attachment, mime: '', name: 'preview.mp3' })).toBe('[audio] preview.mp3')
   })
 })

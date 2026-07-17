@@ -1,20 +1,14 @@
 import { AgentResourceCard, CreateCard, ModelResourceCard, ProviderResourceCard, SessionCard } from '@/features/ai/AiConsoleCards'
-import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, AgentSessionDTO } from '@/shared/api/contracts'
+import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, HarnessSessionDTO } from '@/shared/api/contracts'
 
 export function ChatSessionsPanel({
   sessions,
-  agentsByName,
-  deletePending,
+  agentsById,
   onCreate,
-  onEdit,
-  onDelete,
 }: {
-  sessions: AgentSessionDTO[]
-  agentsByName: Map<string, AgentDefinitionDTO>
-  deletePending: boolean
+  sessions: HarnessSessionDTO[]
+  agentsById: Map<string, AgentDefinitionDTO>
   onCreate: () => void
-  onEdit: (session: AgentSessionDTO) => void
-  onDelete: (session: AgentSessionDTO) => void
 }) {
   return (
     <div className="cards-grid">
@@ -23,10 +17,7 @@ export function ChatSessionsPanel({
         <SessionCard
           key={session.sessionId}
           session={session}
-          agent={agentsByName.get(session.agentName)}
-          onEdit={() => onEdit(session)}
-          onDelete={() => onDelete(session)}
-          deletePending={deletePending}
+          agent={agentsById.get(session.agentDefinitionId)}
         />
       ))}
     </div>

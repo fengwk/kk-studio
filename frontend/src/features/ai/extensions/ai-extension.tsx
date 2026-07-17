@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, type PropsWithChildren, type ReactNode } from 'react'
 import { SearchField, StateBlock } from '@/features/ai/AiConsoleCards'
-import { ConfirmActionModal, CreateSessionModal, EditSessionModal, ResourceEditorModal } from '@/features/ai/AiConsoleModals'
+import { ConfirmActionModal, CreateSessionModal, ResourceEditorModal } from '@/features/ai/AiConsoleModals'
 import { AgentsPanel, ChatSessionsPanel, ModelsPanel, ProvidersPanel } from '@/features/ai/AiConsolePanels'
 import { ComfyuiWorkflowEditorModal } from '@/features/ai/ComfyuiWorkflowEditorModal'
 import { ComfyuiWorkflowsPanel } from '@/features/ai/ComfyuiWorkflowsPanel'
@@ -193,19 +193,9 @@ function CreateSessionDialog() {
   return controller ? <CreateSessionModal {...controller.createSessionModal} /> : null
 }
 
-function EditSessionDialog() {
-  const controller = useOptionalAiConsole()
-  return controller ? <EditSessionModal {...controller.editSessionModal} /> : null
-}
-
 function ResourceEditorDialog() {
   const controller = useOptionalAiConsole()
   return controller ? <ResourceEditorModal {...controller.resourceEditorModal} /> : null
-}
-
-function SessionDeleteDialog() {
-  const controller = useOptionalAiConsole()
-  return controller ? <ConfirmActionModal {...controller.sessionDeleteConfirmModal} /> : null
 }
 
 function ResourceDeleteDialog() {
@@ -242,9 +232,7 @@ export const aiExtension: TrustedReactExtension = {
   ],
   dialogs: [
     { id: 'ai.create-session', component: CreateSessionDialog },
-    { id: 'ai.edit-session', component: EditSessionDialog },
     { id: 'ai.resource-editor', component: ResourceEditorDialog },
-    { id: 'ai.delete-session', component: SessionDeleteDialog },
     { id: 'ai.delete-resource', component: ResourceDeleteDialog },
     { id: 'ai.comfyui-editor', component: ComfyuiWorkflowEditorDialog },
     { id: 'ai.comfyui-delete', component: ComfyuiDeleteDialog },

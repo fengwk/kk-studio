@@ -3,17 +3,17 @@ import type { KeyboardEvent } from 'react'
 import { ChatRunStatus } from '@/features/ai/ChatRunStatus'
 import { Link } from 'react-router-dom'
 import type { SessionTimeline } from '@/features/ai/session-events'
-import type { AgentDefinitionDTO, AgentRunDTO, AgentSessionDTO } from '@/shared/api/contracts'
+import type { AgentDefinitionDTO, HarnessRunDTO, HarnessSessionDTO } from '@/shared/api/contracts'
 
 export function ChatSidebar({
   sessions,
-  agentsByName,
+  agentsById,
   activeSessionId,
   title,
   onBack,
 }: {
-  sessions: AgentSessionDTO[]
-  agentsByName: Map<string, AgentDefinitionDTO>
+  sessions: HarnessSessionDTO[]
+  agentsById: Map<string, AgentDefinitionDTO>
   activeSessionId: string
   title: string
   onBack: () => void
@@ -31,7 +31,7 @@ export function ChatSidebar({
       </div>
       <div className="chat-list">
         {sessions.map((item) => {
-          const agent = agentsByName.get(item.agentName)
+          const agent = agentsById.get(item.agentDefinitionId)
           return (
             <Link
               key={item.sessionId}
@@ -39,7 +39,7 @@ export function ChatSidebar({
               to={`/sessions/${encodeURIComponent(item.sessionId)}`}
             >
               <MessageSquare aria-hidden="true" />
-              <span>{item.title || agent?.name || item.agentName || item.sessionId}</span>
+              <span>{item.title || agent?.name || item.sessionId}</span>
             </Link>
           )
         })}
@@ -55,16 +55,16 @@ export function ChatRuntimeBar({
   runs,
   activeRun,
 }: {
-  session?: AgentSessionDTO
+  session?: HarnessSessionDTO
   agent?: AgentDefinitionDTO
   timeline: SessionTimeline
-  runs: AgentRunDTO[]
+  runs: HarnessRunDTO[]
   activeRun: boolean
 }) {
   const runtimeProvider = timeline.runtimeContext.provider || agent?.defaultProviderName || '-'
   const runtimeModel = timeline.runtimeContext.model || agent?.defaultModelName || '-'
   const runtimeVariant = timeline.runtimeContext.variant || agent?.defaultVariant || '-'
-  const agentLabel = agent?.name || timeline.runtimeContext.agentName || session?.agentName || 'Agent'
+  const agentLabel = agent?.name || session?.agentDefinitionId || 'Agent'
 
   return (
     <div className="chat-runtime-bar">

@@ -10,7 +10,7 @@ export function AgentSessionPage() {
   return (
     <ChatPanel
       sessions={controller.sessions}
-      agentsByName={controller.agentsByName}
+      agentsById={controller.agentsById}
       activeSessionId={sessionId}
       title={controller.title}
       onBack={() => navigate('/sessions')}
@@ -25,6 +25,7 @@ export function AgentSessionPage() {
       draft={controller.draft}
       pending={controller.pending}
       disabled={controller.disabled}
+      observability={controller.observability}
       onDraftChange={controller.setDraft}
       onSubmit={controller.submitMessage}
     />

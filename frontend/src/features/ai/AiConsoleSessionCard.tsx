@@ -1,20 +1,14 @@
-import { ChevronRight, MessageSquare, Pencil, Trash2 } from 'lucide-react'
+import { ChevronRight, MessageSquare } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { formatBackendDate } from '@/features/ai/ai-console-utils'
-import type { AgentDefinitionDTO, AgentSessionDTO } from '@/shared/api/contracts'
+import type { AgentDefinitionDTO, HarnessSessionDTO } from '@/shared/api/contracts'
 
 export function SessionCard({
   session,
   agent,
-  onEdit,
-  onDelete,
-  deletePending,
 }: {
-  session: AgentSessionDTO
+  session: HarnessSessionDTO
   agent?: AgentDefinitionDTO
-  onEdit: () => void
-  onDelete: () => void
-  deletePending: boolean
 }) {
   const navigate = useNavigate()
   const sessionLabel = session.title || session.sessionId
@@ -27,12 +21,12 @@ export function SessionCard({
           </div>
           <div className="text-content">
             <h3>{session.title || 'Untitled Chat'}</h3>
-            <p>{agent?.name || session.agentName}</p>
+            <p>{agent?.name || session.agentDefinitionId}</p>
           </div>
         </div>
       </div>
       <div className="meta-block">
-        <MetaRow label="Agent" value={session.agentName} />
+        <MetaRow label="Agent" value={agent?.name || session.agentDefinitionId} />
         <MetaRow label="Updated" value={formatBackendDate(session.updateTime)} />
       </div>
       <div className="chat-card-foot split">
@@ -44,14 +38,6 @@ export function SessionCard({
         >
           <ChevronRight aria-hidden="true" />
           进入会话
-        </button>
-        <button className="action-enter-btn" type="button" aria-label={`编辑 Chat ${sessionLabel}`} onClick={onEdit}>
-          <Pencil aria-hidden="true" />
-          编辑
-        </button>
-        <button className="action-enter-btn danger" type="button" aria-label={`删除 Chat ${sessionLabel}`} onClick={onDelete} disabled={deletePending}>
-          <Trash2 aria-hidden="true" />
-          删除
         </button>
       </div>
     </article>

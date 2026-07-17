@@ -50,4 +50,10 @@ public class HarnessSessionQueryServiceImpl implements HarnessSessionQueryServic
     List<HarnessSessionEntryDO> rows = entryMapper.listBySession(parsed);
     return rows.stream().map(converter::convert).collect(Collectors.toList());
   }
+
+  @Override
+  public List<HarnessSessionDTO> listRootSessions() {
+    List<HarnessSessionDO> rows = sessionMapper.listRoots();
+    return rows.stream().map(converter::convert).collect(Collectors.toList());
+  }
 }

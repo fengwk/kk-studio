@@ -1003,6 +1003,89 @@ textarea::placeholder {
   font-size: 11px;
 }
 
+.chat-observability {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 42px;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(20, 20, 23, 0.7);
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.yolo-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.yolo-toggle input {
+  accent-color: var(--green-primary);
+}
+
+.usage-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-request {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  margin-left: auto;
+  padding: 7px 9px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: var(--radius-md);
+  background: rgba(120, 83, 18, 0.16);
+}
+
+.permission-request div:first-child {
+  min-width: 0;
+}
+
+.permission-request strong,
+.permission-request span {
+  display: block;
+}
+
+.permission-request strong {
+  color: #fcd34d;
+  font-size: 12px;
+}
+
+.permission-request span {
+  overflow: hidden;
+  color: var(--fg-dim);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.permission-actions .ghost-btn,
+.permission-actions .btn-primary {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.observability-error {
+  color: #fca5a5;
+  white-space: nowrap;
+}
+
 .chat-body {
   flex: 1;
   min-height: 0;

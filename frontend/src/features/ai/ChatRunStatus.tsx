@@ -1,13 +1,13 @@
-import type { AgentRunDTO, BackendDateTime } from '@/shared/api/contracts'
+import type { BackendDateTime, HarnessRunDTO } from '@/shared/api/contracts'
 
 export function ChatRunStatus({
   runs,
   activeRun,
 }: {
-  runs: AgentRunDTO[]
+  runs: HarnessRunDTO[]
   activeRun: boolean
 }) {
-  const latestRun = runs[0]
+  const latestRun = runs.at(-1)
   const label = latestRun ? latestRun.status : 'no run'
 
   return (

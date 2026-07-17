@@ -12,10 +12,6 @@ vi.mock('@/shared/api/agent-service', () => ({
     listProviders: vi.fn(),
     listModels: vi.fn(),
     listAgents: vi.fn(),
-    listSessions: vi.fn(),
-    createSession: vi.fn(),
-    updateSession: vi.fn(),
-    deleteSession: vi.fn(),
     createProvider: vi.fn(),
     updateProvider: vi.fn(),
     deleteProvider: vi.fn(),
@@ -108,7 +104,7 @@ describe('useComfyuiPageController', () => {
     vi.useRealTimers()
   })
 
-  it('only queries comfyuiService.listWorkflows and never touches legacy agent endpoints', async () => {
+  it('only queries comfyuiService.listWorkflows and never touches agent endpoints', async () => {
     renderHook()
 
     await waitFor(() => expect(comfyuiService.listWorkflows).toHaveBeenCalled())
@@ -116,7 +112,6 @@ describe('useComfyuiPageController', () => {
     expect(agentService.listProviders).not.toHaveBeenCalled()
     expect(agentService.listModels).not.toHaveBeenCalled()
     expect(agentService.listAgents).not.toHaveBeenCalled()
-    expect(agentService.listSessions).not.toHaveBeenCalled()
   })
 
   it('loads workflow data, surfaces busy/error state, and exposes its own search filter', async () => {
@@ -136,7 +131,7 @@ describe('useComfyuiPageController', () => {
     await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent('image'))
   })
 
-  it('does not invoke legacy create/update/delete endpoints when CRUD handlers fire', async () => {
+  it('does not invoke agent create/update/delete endpoints when CRUD handlers fire', async () => {
     vi.mocked(comfyuiService.listWorkflows).mockResolvedValue({
       pageNumber: 1,
       pageSize: 100,
@@ -163,18 +158,14 @@ describe('useComfyuiPageController', () => {
       expect(agentService.createAgent).not.toHaveBeenCalled()
       expect(agentService.updateAgent).not.toHaveBeenCalled()
       expect(agentService.deleteAgent).not.toHaveBeenCalled()
-      expect(agentService.createSession).not.toHaveBeenCalled()
-      expect(agentService.updateSession).not.toHaveBeenCalled()
-      expect(agentService.deleteSession).not.toHaveBeenCalled()
     })
   })
 
-  it('surfaces comfyui workflow errors without falling back to legacy endpoints', async () => {
+  it('surfaces comfyui workflow errors without falling back to agent endpoints', async () => {
     vi.mocked(comfyuiService.listWorkflows).mockRejectedValue(new Error('comfyui offline'))
     renderHook()
 
     await waitFor(() => expect(screen.getByTestId('error')).toHaveTextContent('comfyui offline'))
     expect(agentService.listProviders).not.toHaveBeenCalled()
-    expect(agentService.listSessions).not.toHaveBeenCalled()
   })
 })

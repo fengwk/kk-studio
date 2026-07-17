@@ -5,7 +5,7 @@ import type { AgentDefinitionDTO } from '@/shared/api/contracts'
 export function CreateSessionModal({
   open,
   agents,
-  selectedAgentName,
+  selectedAgentId,
   sessionTitle,
   pending,
   onClose,
@@ -15,11 +15,11 @@ export function CreateSessionModal({
 }: {
   open: boolean
   agents: AgentDefinitionDTO[]
-  selectedAgentName: string
+  selectedAgentId: string
   sessionTitle: string
   pending: boolean
   onClose: () => void
-  onSelectAgent: (agentName: string) => void
+  onSelectAgent: (agentId: string) => void
   onSessionTitleChange: (title: string) => void
   onSubmit: FormEventHandler<HTMLFormElement>
 }) {
@@ -34,9 +34,9 @@ export function CreateSessionModal({
         <div className="modal-body">
           <label className="form-group">
             <span>Agent</span>
-            <select value={selectedAgentName} onChange={(event) => onSelectAgent(event.target.value)} required>
+            <select value={selectedAgentId} onChange={(event) => onSelectAgent(event.target.value)} required>
               {agents.map((agent) => (
-                <option key={agent.id} value={agent.name}>
+                <option key={agent.id} value={String(agent.id)}>
                   {agent.name}
                 </option>
               ))}
@@ -48,7 +48,7 @@ export function CreateSessionModal({
           </label>
         </div>
         <div className="modal-footer">
-          <button type="submit" className="btn-primary" disabled={!selectedAgentName || pending}>
+          <button type="submit" className="btn-primary" disabled={!selectedAgentId || pending}>
             确认创建
           </button>
         </div>

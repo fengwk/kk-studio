@@ -5,30 +5,30 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentSessionPage } from '@/features/ai/AgentSessionPage'
 import { agentService } from '@/shared/api/agent-service'
+import { harnessService } from '@/shared/api/harness-service'
+import type { HarnessRunDTO, HarnessSessionDTO, HarnessSessionEntryDTO, RunEventDTO } from '@/shared/api/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
 
-vi.mock('@/shared/api/agent-service', () => {
-  const agentService = {
-    listAgents: vi.fn(),
+vi.mock('@/shared/api/agent-service', () => ({
+  agentService: { listAgents: vi.fn() },
+}))
+
+vi.mock('@/shared/api/harness-service', () => ({
+  harnessService: {
     listSessions: vi.fn(),
     getSession: vi.fn(),
-    listEvents: vi.fn(),
-    listRuns: vi.fn(),
+    listEntries: vi.fn(),
     createMessage: vi.fn(),
-    createEventStream: vi.fn(),
-  }
-  return {
-    agentService,
-    createSessionApi: () => ({
-      list: () => agentService.listSessions(),
-      get: (sessionId: string) => agentService.getSession(sessionId),
-      createMessage: (sessionId: string, data: unknown) => agentService.createMessage(sessionId, data),
-      listEvents: (sessionId: string) => agentService.listEvents(sessionId),
-      listRuns: (sessionId: string) => agentService.listRuns(sessionId),
-      createEventStream: (sessionId: string) => agentService.createEventStream(sessionId),
-    }),
-  }
-})
+    listRuns: vi.fn(),
+    listRunEvents: vi.fn(),
+    createRunEventStream: vi.fn(),
+    getYolo: vi.fn(),
+    setYolo: vi.fn(),
+    getSessionUsage: vi.fn(),
+    listToolInvocations: vi.fn(),
+    decideToolInvocation: vi.fn(),
+  },
+}))
 
 class FakeEventSource {
   private readonly listeners = new Map<string, Array<(event: MessageEvent<string>) => void>>()
@@ -36,19 +36,13 @@ class FakeEventSource {
   closed = false
 
   addEventListener(type: string, listener: EventListener) {
-    const listeners = this.listeners.get(type) ?? []
-    listeners.push(listener as (event: MessageEvent<string>) => void)
-    this.listeners.set(type, listeners)
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener as (event: MessageEvent<string>) => void])
   }
 
   emit(type: string, data: unknown) {
     for (const listener of this.listeners.get(type) ?? []) {
       listener({ data: JSON.stringify(data) } as MessageEvent<string>)
     }
-  }
-
-  listenerCount(type: string): number {
-    return this.listeners.get(type)?.length ?? 0
   }
 
   close() {
@@ -62,477 +56,230 @@ describe('AgentSessionPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     streams.length = 0
-    vi.mocked(agentService.createEventStream).mockImplementation(() => {
+    vi.mocked(agentService.listAgents).mockResolvedValue(page([agent]))
+    vi.mocked(harnessService.listSessions).mockResolvedValue([session])
+    vi.mocked(harnessService.getSession).mockResolvedValue(session)
+    vi.mocked(harnessService.listEntries).mockResolvedValue([
+      entry('snapshot', 'agent_snapshot', { snapshot: { modelId: 'MiniMax-M2.7', variant: 'default' } }),
+      entry('user-1', 'message', messagePayload('USER', [{ type: 'text', text: '检查第一集大纲' }])),
+      entry('assistant-1', 'message', messagePayload('ASSISTANT', [{ type: 'text', text: '结构完整' }])),
+    ])
+    vi.mocked(harnessService.listRuns).mockResolvedValue([run('SUCCEEDED')])
+    vi.mocked(harnessService.listRunEvents).mockResolvedValue([])
+    vi.mocked(harnessService.getYolo).mockResolvedValue({ sessionId: '1', rootSessionId: '1', enabled: false })
+    vi.mocked(harnessService.setYolo).mockResolvedValue({ sessionId: '1', rootSessionId: '1', enabled: true })
+    vi.mocked(harnessService.getSessionUsage).mockResolvedValue({
+      scopeType: 'session',
+      scopeId: '1',
+      recordCount: 1,
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheReadTokens: 3,
+      cacheWriteTokens: 0,
+      cacheWriteLongTokens: 0,
+      reasoningTokens: 0,
+      providerTotalTokens: 15,
+      cacheEligibleRecordCount: 1,
+      cacheHitRecordCount: 1,
+      cacheHitRatio: '1',
+      tokenReadRatio: '0.2',
+      unamortizedCacheWriteTokens: 0,
+      costs: [{ currency: 'USD', input: '0.000001', output: '0.000002', cacheRead: '0', cacheWrite: '0', cacheWriteLong: '0', reasoning: '0', total: '0.000003' }],
+    })
+    vi.mocked(harnessService.listToolInvocations).mockResolvedValue([])
+    vi.mocked(harnessService.decideToolInvocation).mockResolvedValue({} as never)
+    vi.mocked(harnessService.createRunEventStream).mockImplementation(() => {
       const stream = new FakeEventSource()
       streams.push(stream)
       return stream as unknown as EventSource
     })
-    vi.mocked(agentService.listAgents).mockResolvedValue({
-      pageNumber: 1,
-      pageSize: 50,
-      totalCount: 1,
-      results: [
-        {
-          id: 'agent-1',
-          agentName: 'default-assistant',
-          name: 'Default Assistant',
-          description: null,
-          systemPrompt: null,
-          defaultProviderId: 'provider-1',
-          defaultProviderName: 'minimax',
-          defaultModelId: 'model-1',
-          defaultModelName: 'MiniMax-M2.7',
-          defaultVariant: 'default',
-          toolsJson: '[]',
-          createTime: '2026-06-20T02:00:00',
-          updateTime: '2026-06-20T02:00:00',
-        },
-      ],
-    })
-    vi.mocked(agentService.listSessions).mockResolvedValue({
-      pageNumber: 1,
-      pageSize: 50,
-      totalCount: 1,
-      results: [
-        {
-          sessionId: 'session-1',
-          agentId: 'agent-1',
-          agentName: 'default-assistant',
-          title: 'Script Review',
-          createTime: '2026-06-20T02:00:00',
-          updateTime: '2026-06-20T02:01:00',
-        },
-      ],
-    })
-    vi.mocked(agentService.getSession).mockResolvedValue({
-      sessionId: 'session-1',
-      agentId: 'agent-1',
-      agentName: 'default-assistant',
-      title: 'Script Review',
-      createTime: '2026-06-20T02:00:00',
-      updateTime: '2026-06-20T02:01:00',
-    })
-    vi.mocked(agentService.listEvents).mockResolvedValue([
-      {
-        eventId: 'event-1',
-        sessionId: 'session-1',
-        parentEventId: 'root',
-        runId: 'run-1',
-        eventType: 'user_message',
-        payloadJson: '{"content":"检查第一集大纲"}',
-        createTime: '2026-06-20T02:00:00',
-      },
-      {
-        eventId: 'event-2',
-        sessionId: 'session-1',
-        parentEventId: 'event-1',
-        runId: 'run-1',
-        eventType: 'assistant_delta',
-        payloadJson: '{"textDelta":"结构完整"}',
-        createTime: '2026-06-20T02:01:00',
-      },
-      {
-        eventId: 'event-3',
-        sessionId: 'session-1',
-        parentEventId: 'event-2',
-        runId: 'run-1',
-        eventType: 'assistant_end',
-        payloadJson: '{"metadata":{"finishReason":"stop"}}',
-        createTime: '2026-06-20T02:01:01',
-      },
-    ])
-    vi.mocked(agentService.listRuns).mockResolvedValue([
-      {
-        runId: 'run-1',
-        sessionId: 'session-1',
-        triggerEventId: 'event-1',
-        status: 'succeeded',
-        createTime: '2026-06-20T02:00:00',
-        updateTime: '2026-06-20T02:01:02',
-      },
-    ])
-    vi.mocked(agentService.createMessage).mockResolvedValue({
-      eventId: 'event-4',
-      sessionId: 'session-1',
-      parentEventId: 'event-3',
-      runId: 'run-2',
-      eventType: 'user_message',
-      payloadJson: '{"content":"继续"}',
-      createTime: '2026-06-20T02:02:00',
-    })
+    vi.mocked(harnessService.createMessage).mockResolvedValue(entry('user-2', 'message', messagePayload('USER', [{ type: 'text', text: '继续' }])))
   })
 
-  it('renders event-backed dialogue and submits new messages', async () => {
+  it('renders the durable Entry timeline and submits with the current leaf id', async () => {
     const user = userEvent.setup()
     renderSession()
 
     expect(await screen.findByText('检查第一集大纲')).toBeInTheDocument()
     expect(screen.getByText('结构完整')).toBeInTheDocument()
-    expect(screen.getByText('succeeded')).toBeInTheDocument()
-    expect(screen.getByText('2026-06-20 02:01')).toBeInTheDocument()
+    expect(screen.getByText('SUCCEEDED')).toBeInTheDocument()
 
     await user.type(screen.getByPlaceholderText('给 AI 发送消息...'), '继续')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
     await waitFor(() => {
-      expect(agentService.createMessage).toHaveBeenCalledWith('session-1', { content: '继续' })
+      expect(harnessService.createMessage).toHaveBeenCalledWith('1', { content: '继续', expectedLeafEntryId: 'snapshot' })
     })
   })
 
-  it('disables message submission while the session has an active run', async () => {
-    vi.mocked(agentService.listRuns).mockResolvedValueOnce([
-      {
-        runId: 'run-active',
-        sessionId: 'session-1',
-        triggerEventId: 'event-1',
-        status: 'running',
-        createTime: '2026-06-20T02:00:00',
-        updateTime: '2026-06-20T02:01:02',
-      },
-    ])
-
-    renderSession()
-
-    await waitFor(() => {
-      expect(screen.getAllByText('running').length).toBeGreaterThan(0)
-    })
-    expect(screen.getByPlaceholderText('给 AI 发送消息...')).toBeDisabled()
-    expect(agentService.createMessage).not.toHaveBeenCalled()
-  })
-
-  it('merges streamed events into only the active session cache', async () => {
-    // A seeded second-session cache detects accidental cross-session event writes.
-    vi.mocked(agentService.listEvents).mockResolvedValue([])
+  it('uses the active run SSE stream for live deltas without crossing run caches', async () => {
+    vi.mocked(harnessService.listRuns).mockResolvedValue([run('RUNNING')])
+    vi.mocked(harnessService.listEntries).mockResolvedValue([entry('snapshot', 'agent_snapshot', { snapshot: { modelId: 'MiniMax-M2.7', variant: 'default' } })])
     const { queryClient } = renderSession()
-    const otherSessionEvents = [{
-      eventId: 'event-other',
-      sessionId: 'session-2',
-      parentEventId: 'root',
-      runId: null,
-      eventType: 'user_message',
-      payloadJson: '{"content":"other session"}',
-      createTime: '2026-06-20T02:00:00',
-    }]
-    queryClient.setQueryData(queryKeys.sessions.events('session-2'), otherSessionEvents)
+    queryClient.setQueryData(queryKeys.runs.events('other-run'), [runEvent('other', 'other-run', 1, 'assistant_started', {})])
 
-    await waitFor(() => {
-      expect(agentService.createEventStream).toHaveBeenCalledWith('session-1')
-    })
-    expect(await screen.findByText('发送消息以开启全新对话。')).toBeInTheDocument()
-    expect(streams.at(-1)?.listenerCount('session_event')).toBe(1)
-
-    await act(async () => {
-      streams.at(-1)?.emit('session_event', null)
-      streams.at(-1)?.emit('session_event', {
-        eventId: 'event-stream-1',
-        sessionId: 'session-1',
-        parentEventId: 'root',
-        runId: 'run-stream',
-        eventType: 'assistant_delta',
-        payloadJson: '{"textDelta":"streamed answer"}',
-        createTime: '2026-06-20T02:02:00',
-      })
-    })
-
-    expect(queryClient.getQueryData(queryKeys.sessions.events('session-1'))).toEqual([
-      {
-        eventId: 'event-stream-1',
-        sessionId: 'session-1',
-        parentEventId: 'root',
-        runId: 'run-stream',
-        eventType: 'assistant_delta',
-        payloadJson: '{"textDelta":"streamed answer"}',
-        createTime: '2026-06-20T02:02:00',
-      },
-    ])
-    expect(queryClient.getQueryData(queryKeys.sessions.events('session-2'))).toEqual(otherSessionEvents)
-
-    expect(await screen.findByText('streamed answer')).toBeInTheDocument()
-  })
-
-  it('does not refetch session queries after merging streamed events', async () => {
-    vi.mocked(agentService.listEvents).mockResolvedValue([])
-    renderSession()
-
-    await waitFor(() => {
-      expect(agentService.createEventStream).toHaveBeenCalledWith('session-1')
-    })
-    expect(await screen.findByText('发送消息以开启全新对话。')).toBeInTheDocument()
-
-    vi.mocked(agentService.listEvents).mockClear()
-    vi.mocked(agentService.listRuns).mockClear()
-    vi.mocked(agentService.getSession).mockClear()
-    vi.mocked(agentService.listSessions).mockClear()
-
-    await act(async () => {
-      streams.at(-1)?.emit('session_event', {
-        eventId: 'event-stream-2',
-        sessionId: 'session-1',
-        parentEventId: 'root',
-        runId: 'run-stream',
-        eventType: 'assistant_delta',
-        payloadJson: '{"textDelta":"streamed answer"}',
-        createTime: '2026-06-20T02:02:00',
-      })
-    })
-
-    expect(await screen.findByText('streamed answer')).toBeInTheDocument()
-    expect(agentService.listEvents).not.toHaveBeenCalled()
-    expect(agentService.listRuns).not.toHaveBeenCalled()
-    expect(agentService.getSession).not.toHaveBeenCalled()
-    expect(agentService.listSessions).not.toHaveBeenCalled()
-  })
-
-  it('submits with Enter and ignores Shift Enter', async () => {
-    const user = userEvent.setup()
-    renderSession()
-
-    expect(await screen.findByText('检查第一集大纲')).toBeInTheDocument()
-    const input = screen.getByPlaceholderText('给 AI 发送消息...')
-    await user.type(input, '键盘提交')
-    await user.keyboard('{Shift>}{Enter}{/Shift}')
-    expect(agentService.createMessage).not.toHaveBeenCalled()
-
-    await user.keyboard('{Enter}')
-
-    await waitFor(() => {
-      expect(agentService.createMessage).toHaveBeenCalledWith('session-1', { content: '键盘提交' })
-    })
-  })
-
-  it('renders empty dialogue and active run status', async () => {
-    vi.mocked(agentService.getSession).mockResolvedValueOnce({
-      sessionId: 'session-1',
-      agentId: 'agent-1',
-      agentName: 'default-assistant',
-      title: null,
-      createTime: '2026-06-20T02:00:00',
-      updateTime: '2026-06-20T02:01:00',
-    })
-    vi.mocked(agentService.listEvents).mockResolvedValueOnce([])
-    vi.mocked(agentService.listRuns).mockResolvedValueOnce([
-      {
-        runId: 'run-2',
-        sessionId: 'session-1',
-        triggerEventId: 'event-4',
-        status: 'queued',
-        createTime: '2026-06-20T02:02:00',
-        updateTime: null,
-      },
-    ])
-
-    renderSession()
-
-    expect(await screen.findByText('发送消息以开启全新对话。')).toBeInTheDocument()
-    expect(screen.getByText('queued')).toBeInTheDocument()
-    expect(screen.getByText('running')).toBeInTheDocument()
-    expect(screen.getByText('-')).toBeInTheDocument()
-  })
-
-  it('does not render empty assistant bubbles', async () => {
-    vi.mocked(agentService.listEvents).mockResolvedValueOnce([
-      {
-        eventId: 'event-1',
-        sessionId: 'session-1',
-        parentEventId: 'root',
-        runId: 'run-1',
-        eventType: 'user_message',
-        payloadJson: '{"content":"只看用户消息"}',
-        createTime: '2026-06-20T02:00:00',
-      },
-      {
-        eventId: 'event-2',
-        sessionId: 'session-1',
-        parentEventId: 'event-1',
-        runId: 'run-1',
-        eventType: 'assistant_start',
-        payloadJson: '{}',
-        createTime: '2026-06-20T02:01:00',
-      },
-      {
-        eventId: 'event-3',
-        sessionId: 'session-1',
-        parentEventId: 'event-2',
-        runId: 'run-1',
-        eventType: 'assistant_end',
-        payloadJson: '{}',
-        createTime: '2026-06-20T02:01:01',
-      },
-    ])
-
-    const { container } = renderSession()
-
-    expect(await screen.findByText('只看用户消息')).toBeInTheDocument()
-    expect(container.querySelectorAll('.msg-wrapper.bot')).toHaveLength(0)
-  })
-
-  it('renders tool execution messages from session events', async () => {
-    // Tool lifecycle events should surface as first-class transcript nodes instead of being dropped.
-    vi.mocked(agentService.listEvents).mockResolvedValueOnce([
-      {
-        eventId: 'event-1',
-        sessionId: 'session-1',
-        parentEventId: 'root',
-        runId: 'run-1',
-        eventType: 'assistant_start',
-        payloadJson: '{}',
-        createTime: '2026-06-20T02:00:00',
-      },
-      {
-        eventId: 'event-2',
-        sessionId: 'session-1',
-        parentEventId: 'event-1',
-        runId: 'run-1',
-        eventType: 'assistant_delta',
-        payloadJson: '{"textDelta":"我先查一下。"}',
-        createTime: '2026-06-20T02:00:01',
-      },
-      {
-        eventId: 'event-3',
-        sessionId: 'session-1',
-        parentEventId: 'event-2',
-        runId: 'run-1',
-        eventType: 'tool_start',
-        payloadJson: '{"toolCallId":"tool-1","toolName":"web_search","arguments":"{\\"q\\":\\"上海天气\\"}"}',
-        createTime: '2026-06-20T02:00:02',
-      },
-      {
-        eventId: 'event-4',
-        sessionId: 'session-1',
-        parentEventId: 'event-3',
-        runId: 'run-1',
-        eventType: 'tool_delta',
-        payloadJson: '{"toolCallId":"tool-1","contentDeltas":[{"index":0,"contentDelta":{"type":"text","text":"晴 32C"}}]}',
-        createTime: '2026-06-20T02:00:03',
-      },
-      {
-        eventId: 'event-5',
-        sessionId: 'session-1',
-        parentEventId: 'event-4',
-        runId: 'run-1',
-        eventType: 'tool_end',
-        payloadJson: '{"toolCallId":"tool-1"}',
-        createTime: '2026-06-20T02:00:04',
-      },
-    ])
-
-    renderSession()
-
-    expect(await screen.findByText('我先查一下。')).toBeInTheDocument()
-    expect(screen.getByText('web_search')).toBeInTheDocument()
-    expect(screen.getByText('{"q":"上海天气"}')).toBeInTheDocument()
-    expect(screen.getByText('晴 32C')).toBeInTheDocument()
-    expect(screen.getByText('done')).toBeInTheDocument()
-  })
-
-  it('renders actual media previews for tool attachments', async () => {
-    // Base64 media and prebuilt data URLs should both render as previewable transcript attachments.
-    vi.mocked(agentService.listEvents).mockResolvedValueOnce([
-      {
-        eventId: 'event-1',
-        sessionId: 'session-1',
-        parentEventId: 'root',
-        runId: 'run-1',
-        eventType: 'tool_start',
-        payloadJson: '{"toolCallId":"tool-media","toolName":"media_tool","arguments":"{}"}',
-        createTime: '2026-06-20T02:00:00',
-      },
-      {
-        eventId: 'event-2',
-        sessionId: 'session-1',
-        parentEventId: 'event-1',
-        runId: 'run-1',
-        eventType: 'tool_delta',
-        payloadJson: JSON.stringify({
-          toolCallId: 'tool-media',
-          contentDeltas: [
-            { index: 0, contentDelta: { type: 'image', name: 'cover.png', mime: 'image/png', data: 'aW1n' } },
-            { index: 1, contentDelta: { type: 'audio', name: 'preview.mp3', mime: 'audio/mpeg', data: 'YXVkaW8=' } },
-            {
-              index: 2,
-              contentDelta: {
-                type: 'video',
-                name: 'preview.mp4',
-                mime: 'video/mp4',
-                data: 'data:video/mp4;base64,dmlkZW8=',
-              },
-            },
-          ],
-        }),
-        createTime: '2026-06-20T02:00:01',
-      },
-      {
-        eventId: 'event-3',
-        sessionId: 'session-1',
-        parentEventId: 'event-2',
-        runId: 'run-1',
-        eventType: 'tool_end',
-        payloadJson: '{"toolCallId":"tool-media"}',
-        createTime: '2026-06-20T02:00:02',
-      },
-    ])
-
-    const { container } = renderSession()
-
-    expect(await screen.findByText('media_tool')).toBeInTheDocument()
-    expect(screen.getByAltText('cover.png')).toHaveAttribute('src', 'data:image/png;base64,aW1n')
-    expect(container.querySelector('audio')).toHaveAttribute('src', 'data:audio/mpeg;base64,YXVkaW8=')
-    expect(container.querySelector('video')).toHaveAttribute('src', 'data:video/mp4;base64,dmlkZW8=')
-    expect(container.querySelectorAll('.tool-attachment-link')).toHaveLength(3)
-  })
-
-  it('renders session loading errors and disables the composer without session data', async () => {
-    vi.mocked(agentService.getSession).mockRejectedValueOnce(new Error('not found'))
-
-    renderSession()
-
-    expect(screen.getByText('正在加载会话')).toBeInTheDocument()
-    expect(await screen.findByText('会话加载失败')).toBeInTheDocument()
+    await waitFor(() => expect(harnessService.createRunEventStream).toHaveBeenCalledWith('2', 0))
     expect(screen.getByPlaceholderText('给 AI 发送消息...')).toBeDisabled()
-  })
 
-  it('does not create a stream when the event snapshot query fails', async () => {
-    vi.mocked(agentService.listEvents).mockRejectedValueOnce(new Error('events offline'))
-
-    renderSession()
-
-    expect(await screen.findByText('会话加载失败')).toBeInTheDocument()
-    expect(agentService.createEventStream).not.toHaveBeenCalled()
-  })
-
-  it('closes the active event stream on unmount', async () => {
-    const rendered = renderSession()
-
-    await waitFor(() => {
-      expect(agentService.createEventStream).toHaveBeenCalledWith('session-1')
+    await act(async () => {
+      streams[0]?.emit('run_event', runEvent('delta', '2', 1, 'assistant_delta_batch', { deltas: [{ kind: 'text', text: '实时回答' }] }))
     })
 
-    const stream = streams.at(-1)
-    expect(stream?.closed).toBe(false)
+    expect(await screen.findByText('实时回答')).toBeInTheDocument()
+    expect(queryClient.getQueryData(queryKeys.runs.events('other-run'))).toEqual([runEvent('other', 'other-run', 1, 'assistant_started', {})])
+  })
 
-    rendered.unmount()
+  it('shows persisted permission, Environment and YOLO controls for an active invocation', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.listRuns).mockResolvedValue([run('WAITING_TOOLS')])
+    vi.mocked(harnessService.listToolInvocations).mockResolvedValue([{
+      id: 'invocation-1',
+      runId: '2',
+      assistantEntryId: 'assistant-1',
+      ordinal: 0,
+      toolCallId: 'call-1',
+      toolName: 'workspace_edit',
+      toolVersion: '1.0',
+      targetType: 'ENVIRONMENT',
+      environmentId: '42',
+      argumentsJson: '{}',
+      status: 'WAITING_APPROVAL',
+      permissionAction: 'ASK',
+      permissionDecision: null,
+      deadlineAt: null,
+      leaseOwner: null,
+      leaseUntil: null,
+      cancelRequestedAt: null,
+      resultJson: null,
+      errorMessage: null,
+      createTime: '2026-06-20T02:00:00',
+      startedAt: null,
+      finishedAt: null,
+      updateTime: '2026-06-20T02:00:00',
+    }])
+    renderSession()
+
+    expect(await screen.findByText('需要工具授权：workspace_edit')).toBeInTheDocument()
+    expect(screen.getByText('ENVIRONMENT / environment:42')).toBeInTheDocument()
+    expect(screen.getByText('Usage：15 tokens（cache 3） · USD0.000003')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '允许' }))
+    await waitFor(() => expect(harnessService.decideToolInvocation).toHaveBeenCalledWith('invocation-1', 'allow'))
+
+    await user.click(screen.getByRole('checkbox', { name: 'YOLO：自动批准工具调用' }))
+    await waitFor(() => expect(harnessService.setYolo).toHaveBeenCalledWith('1', true))
+  })
+
+  it('does not open a run stream for a terminal session and closes an active stream on unmount', async () => {
+    const terminal = renderSession()
+    await screen.findByText('检查第一集大纲')
+    expect(harnessService.createRunEventStream).not.toHaveBeenCalled()
+    terminal.unmount()
+
+    vi.mocked(harnessService.listRuns).mockResolvedValue([run('WAITING_TOOLS')])
+    const active = renderSession()
+    await waitFor(() => expect(harnessService.createRunEventStream).toHaveBeenCalled())
+    const stream = streams.at(-1)
+
+    active.unmount()
 
     expect(stream?.closed).toBe(true)
   })
 
-  it('skips session-specific queries when session id is missing', async () => {
+  it('does not issue detail, Entry, run or stream requests without a session id', async () => {
     renderSession({ initialEntries: ['/sessions'], routePath: '/sessions' })
 
     await waitFor(() => {
       expect(agentService.listAgents).toHaveBeenCalled()
-      expect(agentService.listSessions).toHaveBeenCalled()
+      expect(harnessService.listSessions).toHaveBeenCalled()
     })
-
-    expect(agentService.getSession).not.toHaveBeenCalled()
-    expect(agentService.listEvents).not.toHaveBeenCalled()
-    expect(agentService.listRuns).not.toHaveBeenCalled()
-    expect(agentService.createEventStream).not.toHaveBeenCalled()
-    expect(screen.getByPlaceholderText('给 AI 发送消息...')).toBeDisabled()
+    expect(harnessService.getSession).not.toHaveBeenCalled()
+    expect(harnessService.listEntries).not.toHaveBeenCalled()
+    expect(harnessService.listRuns).not.toHaveBeenCalled()
+    expect(harnessService.createRunEventStream).not.toHaveBeenCalled()
   })
 })
 
+const agent = {
+  id: 'agent-1',
+  name: 'Default Assistant',
+  description: null,
+  systemPrompt: null,
+  defaultProviderId: 'provider-1',
+  defaultProviderName: 'minimax',
+  defaultModelId: 'model-1',
+  defaultModelName: 'MiniMax-M2.7',
+  defaultVariant: 'default',
+  toolsJson: '[]',
+  createTime: null,
+  updateTime: null,
+}
+
+const session: HarnessSessionDTO = {
+  sessionId: '1',
+  agentDefinitionId: 'agent-1',
+  title: 'Script Review',
+  rootSessionId: '1',
+  parentSessionId: null,
+  depth: 0,
+  leafEntryId: 'snapshot',
+  activeRunId: null,
+  yoloEnabled: false,
+  createTime: '2026-06-20T02:00:00',
+  updateTime: '2026-06-20T02:01:00',
+}
+
+function page<T>(results: T[]) {
+  return { pageNumber: 1, pageSize: 50, totalCount: results.length, results }
+}
+
+function entry(sessionEntryId: string, entryType: string, payload: Record<string, unknown>): HarnessSessionEntryDTO {
+  return {
+    sessionEntryId,
+    sessionId: '1',
+    parentEntryId: null,
+    runId: entryType === 'agent_snapshot' ? null : '2',
+    entryType,
+    payloadJson: JSON.stringify(payload),
+    createTime: '2026-06-20T02:00:00',
+  }
+}
+
+function messagePayload(role: string, contents: Record<string, unknown>[]) {
+  return { message: { role, contents }, assistantMetadata: role === 'ASSISTANT' ? {} : null }
+}
+
+function run(status: string): HarnessRunDTO {
+  return {
+    runId: '2',
+    sessionId: '1',
+    triggerEntryId: 'user-1',
+    status,
+    turnIndex: 0,
+    attempt: 1,
+    eventSequence: 0,
+    nextAttemptAt: null,
+    cancelRequestedAt: null,
+    startedAt: null,
+    finishedAt: null,
+    createTime: '2026-06-20T02:00:00',
+    updateTime: '2026-06-20T02:01:00',
+  }
+}
+
+function runEvent(eventId: string, runId: string, sequence: number, type: string, payload: Record<string, unknown>): RunEventDTO {
+  return {
+    eventId,
+    runId,
+    sequence,
+    type,
+    payloadJson: JSON.stringify(payload),
+    createTime: '2026-06-20T02:00:00',
+  }
+}
+
 function renderSession({
-  initialEntries = ['/sessions/session-1'],
+  initialEntries = ['/sessions/1'],
   routePath = '/sessions/:sessionId',
 }: {
   initialEntries?: string[]
