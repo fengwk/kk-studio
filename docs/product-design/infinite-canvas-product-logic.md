@@ -1,100 +1,187 @@
 # 无限画布产品逻辑
 
-> 产品定位、页面结构、交互原型和视觉规范见 [`infinite-canvas-prototype.md`](infinite-canvas-prototype.md)。本文是无限画布对象、状态、流程、约束和异常恢复规则的产品逻辑事实源。
+> 产品定位、页面结构、交互原型和视觉规范见 [`infinite-canvas-prototype.md`](infinite-canvas-prototype.md)。工程模块、存储、协议和运行时见 [`infinite-canvas-implementation-design.md`](../technical-solution/infinite-canvas-implementation-design.md)。本文是无限画布与 Workflow 的产品逻辑事实源。
 
-## 1. 产品逻辑结论
+## 1. 产品结论
 
-无限画布的核心不是“在一个大平面上放节点”，而是让用户和 Agent 围绕同一份可持久化文档协作：
+无限画布是人和总控 Agent 共同使用的资源工作台，不是 Workflow 编辑器本身。产品以以下关系为地基：
 
 ```text
-创建或导入内容
--> 明确选择上下文
--> 发起直接生成或 Agent 任务
--> 观察可暂停、可恢复的执行过程
--> 结果稳定落位并保留来源
--> 用户继续编辑、生成、组织或撤销画布变更
+Resource 是数据
+Function 是行为
+Node 是 Canvas 中的资源与能力载体
+Link 决定上游资源对谁可见
+@ResourceReference 表达节点实际使用了哪个资源
+Workflow 将多个 Function 固化为新的 Function
 ```
 
-产品存在两条互补的 AI 执行路径：
+完整闭环：
 
-| 路径 | 入口 | 适用任务 | 产品结果 |
-| --- | --- | --- | --- |
-| Agent 任务 | 底部 Agent Dock | 跨对象理解、规划、多步骤编排和批量创建 | 创建独立 Agent Run，产出一个或多个可编辑对象 |
-| 直接生成 | 固定类型 Generator 节点 | 单个文本、图片或视频生成任务 | 保持节点身份和位置不变，成功后原地切换当前输出 |
+```text
+资源进入 Canvas
+-> 用户或 Agent 组织 Node 与 Link
+-> 下游通过 @ 引用当前可见资源
+-> FunctionNode 执行并发布新 Resource
+-> 资源变化沿实际引用依赖向后传播
+-> 稳定子过程在 Workflow Canvas 中固化
+-> Workflow 发布为 Function 后回到 Canvas 复用
+```
 
-两条路径共享以下基座：
+核心公式：
 
-- 明确且不可变的上下文快照。
-- 独立于画布文档的执行记录。
-- 统一资产引用和来源追踪。
-- 统一画布命令、自动保存和撤销恢复。
-- 权限、成本、错误和重试规则。
+```text
+Canvas = Nodes + Links + ResourceReferences
 
-### 1.1 动作路由
+Node -> 0..N current Resources
 
-对象工具条、快捷添加和 Agent Dock 最终都路由到有限的产品执行类型：
+Function(Resource Inputs, Config) -> Resource Outputs
 
-| 动作特征 | 执行类型 | 示例 |
+Workflow(Function[]) -> Function
+```
+
+## 2. 核心概念
+
+### 2.1 Node
+
+Canvas 上所有可寻址、可选择、可移动、可连接的对象都是 Node。Node 统一具备身份、布局、层级和资源暴露能力。
+
+首期只有三类核心 Node：
+
+| Node | 职责 | 资源来源 |
 | --- | --- | --- |
-| 纯本地、确定性修改 | Canvas Command | 编辑文本、移动、成组、调整 Frame |
-| 单一模态、显式参数、原地输出 | Generation Run | 文本生成、图片生成、视频生成 |
-| 跨对象、多步骤、需要规划 | Agent Run | 归纳资料、建立矩阵、生成一组页面方向 |
-| 外部内容进入画布 | Import Job | 上传文件、解析 URL、OCR |
-| 发布、删除或高成本副作用 | 等待用户确认后执行 | 批量覆盖、外部发布、高额生成 |
+| ResourceNode | 承载上传、粘贴、编辑或提取出的具体内容 | 用户、导入器或其他 Node 的提取结果 |
+| FunctionNode | 引用一个 Function，绑定输入并执行 | Function Run 成功输出 |
+| GroupNode | 组织成员并聚合成员当前资源 | 成员 Resource 的递归聚合 |
 
-对象动作只声明输入类型、执行类型和结果落位策略，不能直接调用某个页面组件或任意修改 Store。
+文本、图片、视频、音频、文档和结构化数据是 ResourceNode 的不同视图，不再分别形成互不相干的顶层执行模型。图片生成、视频生成、Agent 和 Workflow 都是 FunctionNode 的不同 Function 实现。
 
-## 2. 状态归属
+### 2.2 Resource
 
-产品状态按职责分为五层，不能全部堆入一个前端 Store 或 `metadata` 字段。
+Resource 是 Node 当前对外提供的实际数据。没有产生实际数据时，Node 的资源列表为空；系统不创建假的 `EmptyResource`。
+
+Resource 具备稳定逻辑身份，内容变化通过不可变 ResourceVersion 表达：
+
+```text
+Resource
+├── 稳定 id
+├── 所属 Node
+├── output channel / item key
+├── kind
+├── displayName
+└── currentVersionId
+
+ResourceVersion
+├── 不可变 id
+├── version
+├── payloadRef
+├── metadata
+├── contentHash
+└── producedByRunId
+```
+
+普通 `@ResourceReference` 跟随 Resource 的当前版本；一次执行开始后冻结具体 ResourceVersion。
+
+### 2.3 Link
+
+Link 是两个 Canvas Node 之间的有向可见关系：
+
+```text
+Source Node -> Target Node
+```
+
+它只表示 Target 可以看到 Source 当前对外提供的 Resource。Link 可以在 Source 尚无 Resource 时提前建立。
+
+### 2.4 ResourceReference
+
+Target 在 Prompt、参数、输入槽或结构化配置中选择一个已经存在的可见 Resource 后，形成 ResourceReference：
+
+```text
+Link       = 可以看到谁
+@Reference = 实际使用了谁
+```
+
+只有 ResourceReference 才形成执行依赖和变化传播。仅有 Link、没有实际引用时，上游变化不会使下游失效。
+
+### 2.5 Function
+
+Function 是稳定、可注册、可执行的资源变换定义：
+
+```text
+Function
+  named Resource Inputs
+  + Config
+  -> named Resource Outputs
+```
+
+Function 来源包括：
+
+- 系统基础 Function，例如图片生成、视频生成、OCR、格式转换和校验。
+- Workflow Function，由 Workflow Definition 发布得到。
+- Agent Function，通过低耦合 Agent 执行端口接入。
+
+### 2.6 Workflow
+
+Workflow 是独立建模、独立编辑、独立版本化的 Function 组合程序。Workflow Canvas 中的 Binding 表示未来 Step 输出，不使用 Canvas Link 或 `@ResourceReference` 语义。
+
+发布后的 Workflow Version 作为 Function 出现在 Function Library 中，Canvas 通过普通 FunctionNode 引用它。
+
+## 3. 状态归属
 
 | 状态层 | 内容 | 持久化 | 协作语义 |
 | --- | --- | --- | --- |
-| 画布文档 | Item、Relation、层级、位置、样式、文档 revision | 服务端持久化 | 多用户共享 |
-| 执行记录 | Agent Run、Generation Run、步骤、上下文快照、成本、错误 | 服务端持久化 | 多用户可见 |
-| 资产 | 原始文件、生成媒体、缩略图、索引和元数据 | 工作区资产存储 | 按权限共享 |
-| 用户视图 | 当前 viewport、上次打开位置、个人显示偏好 | 用户级持久化 | 不覆盖他人视图 |
-| 临时交互 | 选区、当前工具、打开的浮层、拖拽中位置、输入法组合态 | 当前会话 | 不进入共享文档 |
+| CanvasDocument | Node、Link、ResourceReference、Group 层级、布局、revision | 服务端 | Workspace 内共享 |
+| Resource | 稳定身份、当前版本、历史版本、Payload、来源 | 服务端与对象存储 | 按 Workspace 权限共享 |
+| Function Catalog | 系统 Function、Workflow Function、Function 签名 | 服务端或代码注册 | Workspace 可发现 |
+| Execution | FunctionRun、输入快照、输出、成本、日志和错误 | 服务端 | 多端可观察 |
+| Workflow | Draft、Version、Step、Binding、策略和测试结果 | 服务端 | Workspace 内共享 |
+| 用户视图 | viewport、个人面板和显示偏好 | 用户级 | 不覆盖他人视图 |
+| 临时交互 | 选区、拖拽、框选、打开的浮层、IME 状态 | 当前前端会话 | 不进入共享文档 |
 
 关键边界：
 
-- 当前选区不是文档内容。
-- 当前 viewport 不是多人共享状态；文档可以保存一个公共“首页视图”，但每个用户的实时视口独立。
-- Agent Run 和 Generation Run 不能只存在于消息列表，也不能依赖节点组件存活。
-- Generator 的当前输出属于画布对象，生成过程属于执行记录。
-- Dock 输入草稿属于用户和画布，可单独恢复，但不进入撤销历史。
+- 当前选区和实时 viewport 不是 CanvasDocument 内容。
+- Link 和 ResourceReference 是不同事实，不能从视觉连线直接推断执行依赖。
+- ResourceVersion 不因重命名、移动或样式变化而创建。
+- FunctionRun 不依赖 FunctionNode 组件存活。
+- Workflow Definition 不保存某张 Canvas 的具体 Node ID。
+- Agent Session、Run、Tool 等内部结构不进入 Canvas 领域模型。
 
-## 3. 领域对象
+## 4. CanvasDocument 与 Node
 
-### 3.1 Workspace、Project 与 CanvasDocument
-
-用户首期只感知“画布”，内部仍保留稳定分层：
-
-```text
-Workspace
--> Project
--> CanvasDocument
--> CanvasItem / CanvasRelation
-```
-
-| 对象 | 核心字段 | 逻辑职责 |
-| --- | --- | --- |
-| Workspace | `id`, `name`, `members`, `policy` | 权限、资产、模型和用量边界 |
-| Project | `id`, `title`, `coverAssetId`, `updatedAt` | 聚合一组画布和共享资产 |
-| CanvasDocument | `id`, `schemaVersion`, `revision`, `title`, `lifecycle`, `homeViewport?` | 画布内容的唯一共享事实源 |
-
-`CanvasDocument.lifecycle` 使用 `draft / active / archived`；`revision` 在每个成功命令后单调递增。客户端提交变更时必须携带基准 revision，禁止静默覆盖更新后的文档。
-
-### 3.2 CanvasItem
-
-所有可见对象共享以下通用字段：
+### 4.1 CanvasDocument
 
 ```ts
-interface CanvasItem {
+interface CanvasDocument {
   id: string
-  type: string
+  workspaceId: string
+  title: string
+  schemaVersion: number
   revision: number
-  parentId?: string
+  lifecycle: 'draft' | 'active' | 'archived'
+  homeViewport?: Viewport
+}
+```
+
+规则：
+
+1. `revision` 在每个成功 Canvas Command 后单调递增。
+2. 所有修改携带 `baseRevision`，冲突时不能静默覆盖。
+3. 文档保存公共首页视图；每个用户的实时 viewport 独立保存。
+4. `archived` 文档只读，恢复为 `active` 后才允许修改。
+5. 归档时存在 active FunctionRun 默认拒绝；用户先取消或等待终态，归档后的晚到输出不得发布。
+
+### 4.2 CanvasNode
+
+```ts
+interface CanvasNode {
+  id: string
+  canvasId: string
+  kind: 'resource' | 'function' | 'group'
+  nodeType: string
+  nodeTypeVersion: number
+  revision: number
+  name: string
+  parentGroupId?: string
   transform: {
     x: number
     y: number
@@ -105,496 +192,776 @@ interface CanvasItem {
   zIndex: number
   locked: boolean
   hidden: boolean
+  validity: 'empty' | 'current' | 'stale' | 'broken'
   data: unknown
-  origin?: {
-    actor: 'user' | 'agent' | 'generator' | 'importer'
-    runId?: string
-    provisional?: boolean
-  }
 }
 ```
 
 通用规则：
 
-1. `id` 创建后永久稳定，`revision` 在对象内容或通用字段变更后递增。
-2. `type` 创建后不可原地修改；“转换”通过创建新对象并建立来源关系完成。
-3. 位置、尺寸、层级、锁定和可见性属于通用字段，不进入类型私有数据。
-4. `parentId` 只能指向同一文档内的 Frame，且层级关系不得形成环。
-5. Item 的 transform 使用世界坐标；移动 Frame 时以同一命令批量平移全部后代。
-6. 所有坐标和尺寸必须是有限数值，宽高必须大于零。
-7. Item 删除后，当前文档不得保留指向它的悬空 Relation；历史执行记录仍保留原始引用。
+1. Node ID 创建后永久稳定。
+2. `kind` 和 `nodeType` 创建后不可原地转换；NodeDefinition 只允许迁移 `nodeTypeVersion`，跨类型转换通过创建新 Node 并迁移 ResourceReference 完成。
+3. 世界坐标使用有限数值，宽高必须大于零。
+4. 锁定 Node 不能被用户普通编辑或 Agent Command 修改。
+5. 隐藏 Node 不进入默认资源选择和 Agent 自动上下文，但不破坏已有显式 ResourceReference；隐藏属于展示状态，不改变 Group 聚合语义。
+6. Node 可以在没有 Resource 时建立 Link。
+7. Node 是否能被 `@` 引用取决于是否存在可用 Resource，而不是是否存在 Link。
 
-### 3.3 Item 类型
+### 4.3 ResourceNode
 
-| 类型 | 核心语义 | 关键状态 |
-| --- | --- | --- |
-| Text | 可直接编辑的文本内容 | 编辑中、已保存 |
-| Image / Video / Audio | 引用工作区 Asset 的媒体内容 | 处理中、可用、失败 |
-| File / Web Card | 外部资料和提取结果 | 上传、解析、索引状态 |
-| Frame | 空间容器和上下文边界 | 折叠、布局策略 |
-| Generator | 固定模态的生成配置和当前输出 | 草稿脏状态、当前输出、活跃 Generation Run |
-| Agent Run Item | Agent Run 的画布投影 | 从执行记录派生状态 |
-| Result Group | 一次执行的多个候选结果 | 主结果、展开状态 |
-| Structured Data | 表格、矩阵或结构化结果 | schema、排序和筛选状态 |
-
-### 3.4 GeneratorItem
-
-Generator 节点创建时固定为 `text`、`image` 或 `video`，操作台不提供类型切换。
+ResourceNode 保存资源编辑方式和展示配置：
 
 ```ts
-interface GeneratorItemData {
-  generatorType: 'text' | 'image' | 'video'
-  draft: {
-    prompt: string
-    capabilityId: string
-    parameters: Record<string, unknown>
-    referenceItemIds: string[]
+interface ResourceNodeData {
+  editorKind: 'text' | 'image' | 'video' | 'audio' | 'document' | 'structured'
+  primaryResourceId?: string
+  presentation: Record<string, unknown>
+}
+```
+
+典型来源：
+
+- 上传图片形成 Image ResourceNode。
+- 上传文档形成 Document ResourceNode。
+- 粘贴文本形成 Text ResourceNode。
+- 从 FunctionNode 输出中“提取为独立节点”形成新的 ResourceNode。
+
+ResourceNode 内容编辑成功后发布新的 ResourceVersion，并使所有实际引用它的后代失效。
+
+### 4.4 FunctionNode
+
+```ts
+interface FunctionNodeData {
+  functionRef: {
+    functionId: string
+    version: string
   }
-  draftRevision: number
-  currentOutput?: {
-    runId: string
-    sourceDraftRevision: number
-    text?: string
-    assetIds?: string[]
-    summary?: string
-    generatedAt: string
-  }
-  lastRunId?: string
+  config: Record<string, unknown>
+  configRevision: number
 }
 ```
 
-Generator 节点没有单一的 `draft / generated` 业务状态。界面状态由三个正交维度派生：
+输入绑定来自 CanvasResourceReference，输出来自 Node 所属 Resource，运行态来自 FunctionRun；三者不在 `data` 中重复保存。
 
-- 是否已有 `currentOutput`。
-- `draftRevision` 是否不同于 `currentOutput.sourceDraftRevision`。
-- 是否存在活跃或失败的 Generation Run。
+规则：
 
-每次 Prompt、能力、参数或参考素材变化都递增 `draftRevision`。提交时记录该 revision 和完整配置快照；后续编辑不会改变正在运行的任务。
+1. `functionId` 创建后固定；切换到同一 Function 的新 Version 必须显式执行 `UpgradeFunctionVersion` 并通过输入、输出和 Config 迁移校验，更换 Function ID 使用“替换节点”命令。
+2. 修改 Config 后递增 `configRevision`；新增、修改或删除输入引用由 ResourceReference 集合单独表达。两类语义变化都会重新计算 validity。
+3. 每个 FunctionNode 同时只允许一个 active FunctionRun。
+4. FunctionRun 使用提交瞬间的 Config 和 ResourceVersion 快照。
+5. 执行成功后原子发布输出 ResourceVersion。
+6. 执行失败或取消不清空上一次成功输出。
+7. 运行期间允许继续编辑 Config；晚到结果保留在 Run 历史中，只有 Node 仍可发布、执行主体仍有权限，且 Function Version、Config revision、Reference 集合、当前 ResourceVersion 和声明参与语义的字段均与输入快照一致时才能发布为 Node 当前输出。
+8. FunctionNode 可以在首次成功前与下游建立 Link；下游资源选择中不会出现尚未产生的输出。
 
-因此，用户修改一个已经生成过的节点时，旧输出继续保留，节点显示“已有结果 + 未提交修改”，不能因为 Prompt 改动而丢失当前结果。
-
-### 3.5 AgentThread、AgentRun 与 GenerationRun
-
-每张画布拥有一个默认 Agent Thread，用于保存 Dock 中的用户消息、Agent 消息和运行摘要。
-
-| 对象 | 核心职责 |
-| --- | --- |
-| AgentThread | 持久化画布内的消息顺序和默认 Agent Session 引用 |
-| AgentRun | 表达一次逻辑任务、计划、上下文、步骤、输出和当前尝试 |
-| AgentRunAttempt | 表达一次实际 runtime 执行；重试产生新 attempt |
-| GenerationRun | 表达一次 Generator 提交的配置快照、状态、成本和输出 |
+### 4.5 GroupNode
 
 ```ts
-interface AgentRun {
-  id: string
-  threadId: string
-  goal: string
-  status: 'draft' | 'queued' | 'running' | 'paused' | 'waiting-for-input'
-    | 'succeeded' | 'failed' | 'cancelled'
-  contextSnapshotId: string
-  currentAttemptId?: string
-  outputItemIds: string[]
-}
-
-interface AgentRunAttempt {
-  id: string
-  runId: string
-  attemptNo: number
-  retryOfAttemptId?: string
-  status: 'queued' | 'running' | 'paused' | 'waiting-for-input'
-    | 'succeeded' | 'failed' | 'cancelled'
-  stepIds: string[]
-  error?: { code: string; message: string }
-}
-
-interface GenerationRun {
-  id: string
-  generatorItemId: string
-  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
-  configSnapshotRef: string
-  contextSnapshotId: string
-  outputText?: string
-  outputAssetIds: string[]
-  estimatedCost?: number
-  actualCost?: number
+interface GroupNodeData {
+  collapsed: boolean
+  layout: 'free' | 'stack' | 'grid'
+  resourceMode: 'recursive-members'
 }
 ```
 
-Agent Run 的画布卡片只保存 `runId` 和布局信息，标题、步骤和状态从执行记录读取。删除画布卡片不能删除执行审计记录。
+Group 规则：
 
-### 3.6 CanvasRelation
+1. 一个 Node 最多属于一个直接父 Group。
+2. Group 可以嵌套，但层级不得形成环。
+3. 移动 Group 时以一个 Command 批量移动全部后代。
+4. 调整 Group 大小不缩放成员内容。
+5. 将 Group Link 到下游后，下游可以看到 Group 递归成员的当前有效 Resource；`@Group` 聚合包含隐藏成员，避免展示开关改变执行输入。
+6. `@Group` 表示聚合成员资源集合，不复制 Payload。
+7. Group 集合按稳定 Resource 地址排序，画布位置与 zIndex 不影响输入顺序；需要业务顺序时使用显式 Sequence Resource 或 Workflow。
+8. Group 成员或成员 Resource 变化时，引用 Group 集合的后代进入 `stale`。
+9. 删除非空 Group 默认把直接成员提升到该 Group 的父级并保持世界坐标与相对 zIndex；“连同内容删除”是单独的破坏性动作。
 
-```ts
-interface CanvasRelation {
-  id: string
-  kind: 'references' | 'derived-from' | 'sequence' | 'manual'
-  sourceItemId: string
-  targetItemId: string
-  createdBy: 'user' | 'system'
-  hidden?: boolean
-}
-```
+## 5. Resource 身份、版本与命名
 
-| 关系 | 语义 | 生命周期 |
-| --- | --- | --- |
-| `references` | 对象或 Run 使用另一个对象作为输入 | 输入快照创建时生成 |
-| `derived-from` | 结果由 Run、Generator 或其他对象产生 | 系统生成，不允许破坏来源事实 |
-| `sequence` | 内容的业务顺序 | 用户或模板创建 |
-| `manual` | 用户表达的自定义逻辑连接 | 用户可自由创建和删除 |
-
-关系是语义数据，连接线只是它的视图。隐藏连接线不能删除关系。
-
-### 3.7 Asset
+### 5.1 Resource 与 ResourceVersion
 
 ```ts
-interface Asset {
+interface Resource {
   id: string
   workspaceId: string
-  kind: 'image' | 'video' | 'audio' | 'file'
-  status: 'processing' | 'ready' | 'failed'
-  uri?: string
-  mimeType: string
-  checksum?: string
+  owner: {
+    type: 'canvas-node' | 'function-run'
+    id: string
+    canvasId?: string
+  }
+  channelKey: string
+  itemKey: string
+  kind: 'text' | 'image' | 'video' | 'audio' | 'document' | 'json' | 'bundle'
+  displayName: string
+  currentVersionId: string
+  available: boolean
+}
+
+interface ResourceVersion {
+  id: string
+  resourceId: string
+  version: number
+  payloadRef: string
   metadata: Record<string, unknown>
-  originRunId?: string
+  contentHash?: string
+  producedByRunId?: string
+  createdAt: string
 }
 ```
 
-Asset 保存二进制内容和处理结果，CanvasItem 只持有 Asset ID 与展示数据。相同 checksum 的导入可以复用底层内容，但每个画布对象仍保持独立身份、布局和来源关系。
+`Resource.id` 是逻辑地址，`ResourceVersion.id` 是某次不可变内容。移动 Node、修改显示名和改变画布样式不会创建 ResourceVersion。
 
-## 4. 全局不变量
+Resource 有两种所有者：
 
-以下规则对所有流程成立：
+- `canvas-node`：Canvas 对外可 Link 和引用的稳定 Resource。
+- `function-run`：FunctionRun 的不可变输出，供 Workflow Binding、Run 历史和最终发布使用。
 
-1. 画布文档只能通过 Canvas Command 修改。
-2. Agent、Generator、Importer 和用户使用同一命令入口，不能直接写前端状态。
-3. 每个执行任务使用提交时生成的不可变上下文和参数快照。
-4. 用户在运行期间移动、编辑或删除来源对象，不会隐式改变已经提交的任务。
-5. 空选区不允许偷偷回退到“默认资料”；界面必须明确显示本次只使用用户当前输入。
-6. 同一张画布在 MVP 中只允许一个会修改画布的活跃 Agent Run。
-7. 同一个 Generator 节点同一时间只允许一个活跃 Generation Run；不同 Generator 可并行。
-8. 重试创建新的执行尝试，不删除上一次输出、运行记录或用户已编辑内容。
-9. Agent 和 Generator 结果必须能够追溯到运行记录、输入对象和参数快照。
-10. 生成成功只原子替换 Generator 的当前输出，不修改节点类型、ID 和世界坐标。
-11. 运行失败不能覆盖已有成功结果。
-12. 活跃 Run、非空 Frame 和有下游来源关系的对象不能被静默破坏。
-13. 保存状态必须反映真实持久化结果，定时器或动画不能伪造“已保存”。
-14. 当前文档中的 Relation 两端必须存在，Frame 层级必须无环。
-15. 锁定 Item 不能被普通编辑、删除或 Agent 命令修改；解锁必须是显式用户动作。
-16. 用户手动移动过的结果不会在重试、刷新或状态同步后被自动拉回默认位置。
+Executor 总是先把成功输出保存为 Run 所属 Resource。FunctionRun 由 Canvas FunctionNode 发起且仍满足发布条件时，再复用同一 Payload 为 Node 所属 Resource 创建新版本；Workflow 中间 Step 因此不需要伪造 Canvas Node。
 
-## 5. 选择与上下文
+### 5.2 输出通道
 
-### 5.1 选择
+Function 使用稳定输出通道描述结果：
 
-选择是用户当前会话状态：
+```text
+generateStoryboard
+├── storyboardImages: Image[]
+└── assetResources: Resource[]
+```
 
-- 单击替换选区。
-- `Shift` 单击追加或取消。
-- 框选不默认选中 Frame；直接单击 Frame 才选择容器。
-- 多选动作只展示所有对象都支持的能力交集。
-- 选择 Generator 且选区只有一个对象时，打开对应节点操作台。
+Canvas Node 所属 Resource 的稳定地址由以下字段组成：
 
-### 5.2 上下文范围
+```text
+ownerNodeId + channelKey + itemKey
+```
 
-Dock 提供以下上下文范围：
+单资源通道使用固定 `itemKey = value`。多资源通道优先使用 Function 返回的语义 key；没有语义 key 时 Executor 必须先规范化稳定顺序，再使用 `item-0001`、`item-0002`。同一通道内 key 重复或顺序不确定视为输出契约错误。
 
-| 范围 | 输入 |
-| --- | --- |
-| 当前选区 | 提交瞬间选中的合格对象 |
-| 当前 Frame | 选中 Frame 及其全部可访问后代 |
-| 整张画布 | 当前文档内可访问、可见且适合作为输入的对象和关系摘要 |
+### 5.3 多资源
 
-MVP 界面可先展示“当前选区 / 整张画布”，但领域模型保留 Frame 范围。
+一个 Node 可以同时对外提供多个 Resource：
 
-当前选区为零时：
+```text
+生图 FunctionNode
+└── images
+    ├── item-0001
+    ├── item-0002
+    ├── item-0003
+    └── item-0004
+```
 
-- “当前选区”明确显示 `0` 和“仅使用当前输入”。
-- Prompt 非空时仍可提交，ContextSnapshot 的对象列表为空。
-- 不使用硬编码对象、上次选区或不可见默认资料补足上下文。
+下游有三种使用方式：
 
-### 5.3 ContextSnapshot
+1. 引用整个输出通道，例如 `@角色候选.images`。
+2. 引用其中一个 item，例如 `@角色候选.images/候选02`。
+3. 将某个 item 提取为独立 ResourceNode，再单独编辑和连接。
 
-提交 Agent 或生成任务时创建快照：
+普通 Canvas 不自动把 N 个 Resource 扇出为 N 次执行。目标输入声明 `cardinality = many` 时一次消费整个集合；声明 `one` 时必须明确选择一个 item。
+
+一次成功 Run 对已声明输出通道执行完整替换：仍存在的 `itemKey` 创建新版本，本次缺失的旧 item 标记不可用。引用整个通道的下游进入 stale；引用已消失 item 的下游进入 broken。
+
+逐项独立执行属于 Workflow `ForEach`，不通过额外的 Canvas“打散节点”隐式触发高成本任务。
+
+### 5.4 当前版本与历史固定
+
+普通 `@` 引用跟随逻辑 Resource 的当前版本：
+
+```text
+@图1 -> Resource 图1 -> currentVersion
+```
+
+执行记录冻结：
+
+```text
+@图1 -> ResourceVersion v3
+```
+
+如果用户需要永久保留历史内容，应执行“提取为独立 ResourceNode”或“从历史版本创建节点”。普通引用不提供隐式历史 pin 模式。
+
+### 5.5 命名与冲突
+
+- Node 名称、Resource `displayName` 均允许重复。
+- 机器引用始终保存 ID 和 key，不保存名称字符串。
+- 单资源默认继承 Node 名称。
+- 多资源默认使用“Node 名称 + 序号”或 Function 提供的语义名称。
+- `@` Mention 显示名称、类型、缩略图和 Group 路径，内部保存 ResourceReference。
+- 重命名不会断开引用。
+- 导出到文件系统时才处理文件名冲突，并自动增加后缀。
+
+## 6. Link 与 ResourceReference
+
+### 6.1 Link
 
 ```ts
-interface ContextSnapshot {
+interface CanvasLink {
+  id: string
   canvasId: string
-  canvasRevision: number
-  scope: 'selection' | 'frame' | 'whole' | 'references'
-  itemRefs: Array<{
-    itemId: string
-    itemRevision: number
-    snapshotRef: string
-  }>
-  relations: Array<{
-    kind: 'references' | 'derived-from' | 'sequence' | 'manual'
-    sourceItemId: string
-    targetItemId: string
-  }>
-  assetRefs: string[]
-  capturedAt: string
+  sourceNodeId: string
+  targetNodeId: string
 }
-```
-
-`snapshotRef` 指向提交时固化的上下文材料，而不是运行时重新读取当前 Item。关系也按提交时的结构复制到快照，因此来源对象后续变化或删除不会改变已开始的任务。Agent Run 使用选区、Frame 或整图范围；Generation Run 使用 Generator 中显式配置的 `references`。
-
-组装规则：
-
-1. Text、结构化数据和已解析文件提供文本内容或摘要。
-2. Image、Video、Audio 提供 Asset 引用、缩略信息和可用索引。
-3. Frame 展开为后代对象，并保留层级和顺序信息。
-4. Generator 默认提供当前成功输出；没有输出的草稿仅在显式选中时提供配置摘要。
-5. Agent Run 卡默认不进入整图上下文；显式选中时提供目标、状态和输出摘要。
-6. 隐藏、已删除、无权限和尚未解析完成的内容不进入快照，并在提交前给出可解释提示。
-7. 整图上下文通过 Indexer 和摘要控制输入预算，不直接把所有二进制内容拼入 Prompt。
-
-## 6. 对象创建与导入
-
-| 入口 | 创建逻辑 |
-| --- | --- |
-| `T` 或双击空白处 | 创建普通 Text Item，并立即进入编辑 |
-| Dock `+ -> 文本生成` | 创建固定类型的 Text Generator |
-| Dock `+ -> 图片生成` | 创建固定类型的 Image Generator |
-| Dock `+ -> 视频生成` | 创建固定类型的 Video Generator |
-| Dock `+ -> 文件` | 打开文件选择器并创建 Import Job |
-| Dock `+ -> Frame` | 在当前视口安全区创建空 Frame |
-| 粘贴文本、图片、URL | 按内容类型创建对应对象 |
-| 拖入多个文件 | 创建临时 Frame，Import Job 完成后填入子对象 |
-
-从已有对象执行“生成图片”“生成视频”等跨模态动作时，在来源附近创建目标类型 Generator，并自动填入 `referenceItemIds`；不修改来源对象类型，也不把来源对象替换为结果。
-
-新对象位置遵循以下顺序：
-
-1. 用户指针附近。
-2. 当前视口安全区中心。
-3. 对象来源或选区右侧。
-4. 无碰撞搜索位置。
-
-创建位置是世界坐标，不被固定世界尺寸夹回；必要时只平移 viewport 使对象避开 Dock 和屏幕边界。
-
-### 6.1 Import Job
-
-文件和 URL 导入是异步任务：
-
-```text
-queued -> acquiring -> processing -> succeeded
-                                 \-> failed
-                                 \-> cancelled
-```
-
-- 用户选择文件或提交 URL 后立即创建稳定占位对象，避免重复操作。
-- 成功后原地补齐 Asset、预览、文本提取和索引。
-- 失败对象保留在原位，显示错误、重试和替换文件入口。
-- 重试复用对象身份，不创建重复卡片。
-
-## 7. Generator 产品逻辑
-
-### 7.1 Generation Run 状态机
-
-```mermaid
-stateDiagram-v2
-    [*] --> Queued: 提交有效草稿
-    Queued --> Running: Provider 接受任务
-    Queued --> Cancelled: 用户取消
-    Queued --> Failed: 调度失败
-    Running --> Succeeded: 输出完成
-    Running --> Failed: Provider 或处理失败
-    Running --> Cancelled: 用户取消
-    Failed --> Queued: 创建重试 attempt
-    Succeeded --> Queued: 修改草稿后再次提交
-```
-
-### 7.2 提交流程
-
-1. 校验 Generator 类型、Prompt、参数和参考素材。
-2. 确认同一节点没有活跃 Generation Run。
-3. 解析引用对象权限和 Asset 可用状态。
-4. 计算成本预估；达到确认阈值时先请求用户确认。
-5. 保存当前草稿并创建不可变配置快照。
-6. 创建 `queued` Generation Run，节点显示运行状态，但保留旧输出。
-7. Provider 执行期间允许用户移动节点；草稿编辑只影响下一次提交。
-8. 成功后写入新 Asset，并原子更新 `currentOutput`。
-9. 旧输出进入历史，可在操作台中恢复或比较。
-10. Thread 追加完成摘要，但不强制展开或覆盖用户滚动位置。
-
-### 7.3 失败与重试
-
-- 没有旧输出时，节点显示错误占位和重试入口。
-- 有旧输出时，继续展示旧输出，同时标记“上次生成失败”。
-- 重试默认使用失败 attempt 的配置快照；“使用当前草稿重试”创建另一条新 attempt。
-- Provider 已开始处理后产生的实际费用进入运行记录；调度前失败不计费。
-- Run 取消后的晚到结果只进入审计和历史，不得自动替换 `currentOutput`。
-- 删除活跃 Generator 时必须先确认并取消运行，不能由键盘删除静默中止。
-
-### 7.4 多结果
-
-当模型返回多个候选结果时：
-
-- Generator 节点继续保持单一位置。
-- `currentOutput` 指向用户或系统默认选中的主结果。
-- 其余候选保存在该 Generation Run 的输出列表中。
-- 用户展开候选后可创建 Result Group，或把某个候选拖出为独立内容对象。
-
-## 8. Agent Dock 与 Agent Run
-
-### 8.1 Dock 逻辑
-
-- 每张画布拥有一个默认持久化 Thread。
-- 上下文范围属于下一条待发送消息，而不是已经运行的任务。
-- 输入框为空时不提交。
-- 存在活跃 Agent Run 时不接受第二个会修改画布的任务，并保留用户输入草稿。
-- Thread 收起只影响显示，不停止运行或丢失消息。
-- Run 的状态更新不会强制滚动正在阅读旧消息的用户。
-
-### 8.2 Agent Run 状态机
-
-```mermaid
-stateDiagram-v2
-    [*] --> Draft: 生成或编辑计划
-    Draft --> Queued: 用户确认或无需确认
-    Queued --> Running: Runtime 开始执行
-    Queued --> Cancelled: 用户取消
-    Queued --> Failed: 调度失败
-    Running --> Paused: 用户暂停
-    Paused --> Running: 用户继续
-    Running --> WaitingForInput: 需要确认或补充输入
-    WaitingForInput --> Running: 用户响应
-    Running --> Succeeded: 全部步骤完成
-    Running --> Failed: 执行失败
-    Running --> Cancelled: 用户取消
-    Paused --> Cancelled: 用户取消
-    WaitingForInput --> Cancelled: 用户取消
-    Failed --> Queued: 创建新 attempt
-    Succeeded --> Queued: 重新运行为新 attempt
-```
-
-### 8.3 状态与动作
-
-| 状态 | 用户动作 | 画布表现 |
-| --- | --- | --- |
-| Draft | 编辑计划、确认、取消 | Run 卡显示计划和预计影响 |
-| Queued | 取消 | 显示排队和预估等待 |
-| Running | 暂停、取消、查看步骤 | 当前步骤和增量输出可见 |
-| Paused | 继续、重新开始、取消 | 保留进度和已完成步骤 |
-| WaitingForInput | 选择、补充输入、取消 | 在 Run 卡原地展示问题，不弹全局对话框 |
-| Succeeded | 查看输出、再次运行、从画布移除卡片 | 输出可编辑且来源可追溯 |
-| Failed | 查看错误、重试、更换配置 | 保留已完成步骤和失败占位 |
-| Cancelled | 查看记录、重新运行、从画布移除卡片 | 保留审计和已产生输出 |
-
-`Queued`、`Running`、`Paused` 和 `WaitingForInput` 都属于 active 状态，都会占用当前画布唯一的 Agent 执行槽位。
-
-暂停采用安全边界语义：点击暂停后设置 `pauseRequested`，正在进行的模型或 Tool 调用允许完成，但不会调度下一步；到达步骤边界后才进入 `Paused`。等待期间界面显示“正在暂停”，不能把按钮点击瞬间伪装成已暂停。
-
-取消同样是协作式操作。设置 `cancelRequested` 后禁止新的 Tool 和 Canvas Command；已经发出的外部调用可以结束并写入审计，但其晚到结果不能在 Run 进入 `Cancelled` 后自动接纳到画布。
-
-“重试”和“继续”不同：
-
-- 继续恢复同一个 attempt。
-- 重试或重新开始创建新 attempt，并通过 `retryOfAttemptId` 关联旧 attempt。
-- 从 Paused 重新开始需要确认，旧 attempt 转为 Cancelled。
-
-### 8.4 发送流程
-
-```text
-用户提交消息
--> 校验角色、活跃 Run 和上下文
--> 创建 ContextSnapshot
--> 事务写入用户消息、逻辑 AgentRun 和 queued attempt
--> 在来源附近创建 Agent Run Item
--> Runtime 执行并流式写入步骤事件
--> Agent 通过 Canvas Command 创建临时骨架和结果
--> 成功后完成结果，失败时保留错误与可重试状态
-```
-
-### 8.5 Agent 修改画布
-
-Agent 只能提交意图级命令：
-
-```text
-CreateItems
-UpdateItems
-MoveItems
-ResizeItems
-DeleteItems
-CreateRelations
-GroupItems
-AcceptRunOutputs
 ```
 
 规则：
 
-1. 新建、补充和整理 Agent 自己创建的对象可自动执行。
-2. 删除用户已有内容、覆盖高价值内容、发布外部资源或产生高额费用时进入 `WaitingForInput`。
-3. 运行中创建的骨架和结果带 `origin.runId` 和 `origin.provisional = true`，完成前显示为不可编辑的临时状态。
-4. 成功后通过 `AcceptRunOutputs` 将临时结果批量转为可编辑内容；失败或取消时保留错误占位，用户可保留或清理。
-5. 用户编辑已完成输出后，该对象成为普通可编辑内容但继续保留 `origin.runId`；后续重试不得覆盖。
+1. Link 可以连接空 Node。
+2. Link 不复制、不转移 Resource 所有权。
+3. Target NodeDefinition 必须声明至少一个可绑定 targetPath；首期 GroupNode 不作为 Link Target，避免无消费语义的连线。
+4. Target 只看到直接入边 Source 的 Resource；普通 Link 不递归穿透多跳节点。
+5. Group Link 展开 Group 的递归成员 Resource。
+6. 创建或删除一个未被引用的 Link 不触发资源传播。
+7. 同一 Source 与 Target 之间只保留一条 Link。
+8. Link 不表达 Workflow 执行顺序。
 
-### 8.6 与现有 Agent 运行时的边界
-
-现有运行链路和存储状态见 [`cloud-embedded-agent-runtime.md`](../technical-solution/cloud-embedded-agent-runtime.md) 与 [`storage-models.md`](../technical-solution/storage-models.md)。
-
-当前 Agent Session 已具备 `queued / running / succeeded / failed` 和“同一 Session 一个 active run”约束。画布 MVP 可让一张 CanvasDocument 绑定一个默认 Agent Session，并复用消息、事件、Run 和 SSE 能力。
-
-产品层的逻辑 `AgentRun` 聚合多个 attempt；现有存储中的 `agent_run` 对应一次实际执行，应映射为 `AgentRunAttempt`。正式实现需要新增逻辑任务聚合，或在现有 Run 上补充稳定的 `rootRunId / retryOfRunId` 关系，不能把重试覆盖成同一条记录。
-
-以下产品状态需要运行时扩展后才能真实提供：
-
-- `Draft` 计划确认。
-- `Paused` 与继续。
-- `WaitingForInput`。
-- `Cancelled`。
-- Canvas Command 事件和运行输出引用。
-
-在运行时支持前，正式产品不得仅用前端定时器或按钮伪造这些状态。
-
-## 9. 结果、来源与落位
-
-### 9.1 来源链
-
-Agent 任务使用稳定阅读方向：
+### 6.2 可见资源
 
 ```text
-输入对象或 Frame
--> Agent Run Item
--> Result / Result Group
+visibleResources(target)
+=
+union(currentResources(source) for incomingLinks(target))
 ```
 
-- 输入对象到 Run 使用 `references`。
-- Run 到结果使用 `derived-from`。
-- 结果保存 `origin.runId`。
-- 选中结果时可查看输入快照、参数、模型、时间和成本。
+只返回：
 
-Generator 原地生成不创建新的画布节点，但 `currentOutput.runId` 必须指向 Generation Run。
+- 已经存在。
+- 当前可用。
+- 用户有权限。
+- 未隐藏。
+- 与目标输入类型兼容。
 
-### 9.2 默认落位
+首次成功前为空的 FunctionNode 不会出现在下游 `@` 资源项中；成功发布后自动进入可见列表。
 
-1. 没有画布来源：Run 位于当前视口安全区中心，结果位于 Run 右侧。
-2. 单一来源：Run 位于来源右侧，结果位于 Run 右侧。
-3. 多选来源：以选区包围盒为锚点。
-4. Frame 来源：以 Frame 右侧为锚点，避免覆盖内部内容。
-5. 多个结果：先创建 Result Group，再按网格展开。
-6. 碰撞时按列和行搜索最近空位。
-7. 屏幕空间不足时平移 viewport，使新对象位于 Dock 上方；不改写已经确定的世界坐标。
-8. 用户手动移动后记录 `placementMode = 'manual'`，后续同步不再自动重排。
+### 6.3 ResourceReference
 
-## 10. Frame 逻辑
+```ts
+interface ResourceReference {
+  id: string
+  targetNodeId: string
+  targetPath: string
+  visibilityLinkId: string
+  dependencySourceNodeId: string
+  selector:
+    | { type: 'resource'; resourceId: string }
+    | { type: 'channel'; ownerNodeId: string; channelKey: string }
+    | { type: 'group'; groupNodeId: string; mode: 'recursive-current' }
+}
+```
 
-Frame 是结构容器，不只是背景矩形。
+`visibilityLinkId` 表示该引用通过哪条 Link 获得可见性；`selector` 表示实际使用的数据。两者必须分开，因为通过 Group Link 可以选择 Group 中某个成员的 Resource。
 
-- Item 进入 Frame 后设置 `parentId`。
-- 移动 Frame 同步移动全部后代，保持相对位置。
-- 调整 Frame 尺寸不缩放内部内容。
-- 将 Item 拖出边界并释放后移除 `parentId`。
-- 选择 Frame 作为上下文时展开全部可访问后代，并保留层级顺序。
-- Frame 折叠只改变视图，后代仍存在且可被 Agent 引用。
-- Frame 层级必须无环；MVP 交互只开放一层 Frame，schema 保留后续嵌套能力。
-- 删除空 Frame 可立即执行。
-- 删除非空 Frame 必须确认；默认动作是“仅移除 Frame，内容留在原位”，另提供“删除 Frame 与全部内容”。
+- `resource` 引用一个逻辑 Resource item。
+- `channel` 引用某个 Node 输出通道的当前完整集合。
+- `group` 引用 Group 当前递归成员集合。
+- `dependencySourceNodeId` 由服务端从 selector 推导并保存为传播索引；成员 Resource 经 Group Link 被选择时，它指向实际成员 Node，而不是 Group。
 
-## 11. 保存、命令与撤销
+创建规则：
 
-### 11.1 Canvas Command
+1. `visibilityLinkId` 必须指向 Target；Link Source 必须是 selector 所有者，或当前包含 selector 所有者的祖先 Group。
+2. `resource` 与 `channel` 当前必须解析到可用 Resource；`group` 可以解析为当前非空的递归集合。
+3. Resource kind、cardinality 和 schema 必须满足目标输入定义。
+4. Channel/Group 集合不做隐式类型过滤；集合内每个 Resource 都必须兼容，否则引用为 broken。需要子集时显式选择 Resource 或使用 Workflow 过滤 Function。
+5. 新引用不能让包含 Group 聚合边的有效依赖图形成环；Group 内成员不能通过 `@Group` 间接依赖包含自己的集合。
+6. 同一输入槽按 FunctionInput 的 cardinality 限制引用数量。
+7. Group 成员移出可见 Group 后，依赖该 Group Link 的成员引用立即变为 broken。
+
+### 6.4 删除 Link
+
+Link 下存在以其为 `visibilityLinkId` 的 ResourceReference 时，普通删除被拒绝。用户必须选择：
+
+- 取消并保留 Link。
+- 同时移除引用；目标与后代进入 `stale` 或 `broken`。
+
+Agent Command 必须显式使用“unlink-and-remove-references”，不能静默破坏依赖。
+
+## 7. 依赖传播与有效性
+
+### 7.1 依赖图
+
+有效依赖图由两类边组成：
+
+```text
+ResourceReference: dependencySourceNodeId -> targetNodeId
+Group aggregation: memberNodeId -> parentGroupId
+```
+
+递归 Group 通过逐级聚合边表达。有效依赖图必须是有向无环图，因此 Group 不能引用自己的递归聚合结果。Link 图只负责可见性，可以包含双向 Link，但不得包含自连接。
+
+### 7.2 Node 有效性
+
+| 状态 | 含义 | 是否可新建引用 |
+| --- | --- | --- |
+| empty | 输入与配置可执行，但尚无当前 Resource | 否 |
+| current | 当前 Resource 与 Config、输入版本一致 | 是 |
+| stale | 保留旧输出，但输入或 Config 已变化 | 否 |
+| broken | 必填引用丢失、类型不兼容、NodeDefinition/Function Version 缺失或 Payload 不可用 | 否 |
+
+状态按 `broken > stale > empty > current` 的条件优先级计算：先判断依赖和 Payload 是否损坏；有可用旧输出但快照不匹配时为 stale；输入有效但没有当前输出时为 empty；其余为 current。ResourceNode 的内容当前可用时为 `current`；FunctionNode 的有效性由最新发布 Run 的 Function Version、输入快照、Config revision 和当前 ResourceReference 共同决定。Run 状态是独立维度，不写入 validity。
+
+### 7.3 传播触发
+
+以下变化触发传播：
+
+- Resource 发布新当前版本。
+- Resource 变为不可用或被删除。
+- FunctionNode Config 发生语义变化。
+- 新增、修改或删除 ResourceReference。
+- Group 成员或递归成员 Resource 变化。
+- FunctionNode 切换到新的 Function Version。
+
+以下变化不触发传播：
+
+- Node 移动、缩放、旋转和 zIndex 变化。
+- viewport 变化。
+- Group 折叠和展开。
+- 纯展示样式变化。
+- 打开或关闭面板。
+
+Resource 名称只有在 Function 明确声明“名称参与输入”时才属于语义变化。
+
+### 7.4 传播结果
+
+传播只更新有效性，不自动调用高成本 Function：
+
+```text
+上游变化
+-> 直接依赖节点 stale / broken
+-> 继续标记全部后代
+-> 用户选择更新当前节点、更新到此处或更新后续链路
+```
+
+旧 ResourceVersion 继续可查看、下载和从历史创建新节点，但 stale Node 的旧输出默认不能被新建引用。
+
+### 7.5 更新链路
+
+- “运行当前节点”：必填上游必须为 current。
+- “更新到此处”：按拓扑顺序运行当前节点依赖的 stale 祖先，再运行当前节点。
+- “更新后续链路”：展示执行计划、成本和确认点后按拓扑推进。
+- stale ResourceNode 没有 Function 可自动刷新，是执行计划中的人工编辑边界。
+
+任何自动推进都必须由用户或 Workflow Runtime 显式发起，Canvas 传播本身不执行 Function。
+
+## 8. Function 与执行
+
+### 8.1 FunctionDefinition
+
+```ts
+interface FunctionDefinition {
+  id: string
+  version: string
+  name: string
+  description: string
+  kind: 'system' | 'workflow' | 'agent'
+  scope: 'system' | 'workspace'
+  workspaceId?: string
+  inputs: FunctionInput[]
+  outputs: FunctionOutput[]
+  configSchema: Record<string, unknown>
+  executionPolicy: {
+    sideEffect: 'read-only' | 'idempotent' | 'non-idempotent'
+    timeoutMillis?: number
+    cacheable: boolean
+  }
+}
+
+interface FunctionInput {
+  key: string
+  displayName: string
+  acceptedKinds: string[]
+  cardinality: 'one' | 'many'
+  required: boolean
+  schema?: Record<string, unknown>
+  semanticFields?: string[]
+}
+
+interface FunctionOutput {
+  key: string
+  displayName: string
+  producedKinds: string[]
+  cardinality: 'one' | 'many'
+  required: boolean
+  schema?: Record<string, unknown>
+}
+```
+
+输入使用同一数量规则：required one 为 1，optional one 为 0..1，required many 为 1..N，optional many 为 0..N。
+
+输出数量规则：`one + required` 必须恰好 1 项，`one + optional` 为 0..1 项，`many + required` 为 1..N 项，`many + optional` 为 0..N 项。Node 在所有输出均为空时不创建假 Resource。
+
+Function Version 不可变。FunctionNode 始终引用具体版本，升级需要显式操作并触发 stale 传播。
+
+### 8.2 FunctionRun
+
+```ts
+interface FunctionRun {
+  id: string
+  workspaceId: string
+  canvasId?: string
+  functionNodeId?: string
+  functionRef: { id: string; version: string }
+  status: 'queued' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'cancelled'
+  configRevision?: number
+  inputSnapshot: FunctionInputSnapshot[]
+  parentRunId?: string
+  retryOfRunId?: string
+  attempt: number
+  outputResources: RunOutputReference[]
+  publication: {
+    status: 'not-applicable' | 'published' | 'not-published'
+    reason?: 'superseded' | 'permission-revoked' | 'node-deleted'
+  }
+  error?: { code: string; message: string }
+}
+
+interface FunctionInputSnapshot {
+  inputKey: string
+  referenceIds: string[]
+  resourceVersions: ResourceVersionReference[]
+}
+
+interface ResourceVersionReference {
+  resourceId: string
+  resourceVersionId: string
+  kind: Resource['kind']
+  semanticHash: string
+}
+
+interface RunOutputReference {
+  channelKey: string
+  itemKey: string
+  resourceId: string
+  resourceVersionId: string
+}
+```
+
+集合输入在快照中保留规范化 item 顺序。Workflow Step 的输入使用相同结构，只是 ResourceVersion 来自 Workflow Input 或上游 Run 所属 Resource。
+
+执行流程：
+
+1. 校验 FunctionNode 当前输入。
+2. 冻结 Function Version、Config revision 和 ResourceVersion。
+3. 创建 FunctionRun。
+4. 执行实现。
+5. 校验输出契约，并保存 Run 所属 Resource 与 ResourceVersion。
+6. 如果由 Canvas FunctionNode 发起，重新校验 Function Version、Config revision、Reference 集合及当前输入版本。
+7. 条件一致时通过系统 Canvas Command 原子发布 Node 所属 ResourceVersion；不一致时标记 `not-published` 及原因，只保留 Run 输出。
+8. 更新 FunctionNode 有效性，并在实际发布后向引用后代传播 stale。
+
+Function 输出按 Run 原子提交：只有输出契约完整通过后才成为可消费的 Run Resource。failed/cancelled Run 的部分结果只能作为诊断 Artifact 保留，不能被 Workflow Binding 或 Canvas 发布。
+
+### 8.3 运行期间编辑
+
+运行期间可以修改 Config、ResourceReference 或上游 Resource，但不会改变当前 Run。Run 完成时：
+
+- Node 与权限仍可发布，且 Function Version、Config revision、Reference ID 集合、当前 ResourceVersion 和 semanticHash 均与输入快照一致：输出发布为 current，Node 置为 `current`。
+- 任一条件已变化：Run 可以成功，但输出只保留在 Run 历史，`publication.status = not-published`、`reason = superseded`；Node 按当前输入与已有输出重新计算为 empty、stale 或 broken。
+- Run 已取消：晚到结果只进入审计，不发布为当前输出。
+
+### 8.4 重试与历史
+
+- 继续恢复同一次可恢复 Run。
+- 执行策略允许的瞬时错误可以在同一 Run 内增加 attempt；用户重试创建新的 FunctionRun，并通过 retryOf 关联旧 Run。
+- 重新运行使用当前 Config 和当前输入版本。
+- 历史输出不被新运行删除。
+- FunctionNode 输出本身只通过 Run 发布；需要人工编辑时先提取为独立 ResourceNode，提取结果不会被后续运行覆盖。
+
+### 8.5 并发
+
+- 同一个 FunctionNode 同时只有一个 active Run。
+- 不同 FunctionNode 可以并行。
+- Workflow Runtime 可以并行执行无依赖 Step。
+- 非幂等 Function 发生未知终态时必须等待人工确认，不能自动重试。
+
+## 9. Workflow 产品逻辑
+
+### 9.1 独立 Workflow Canvas
+
+Workflow 使用独立页面和领域模型：
+
+```text
+Workflow Canvas
+├── InputParamNode
+├── FunctionStepNode
+├── ForEachNode
+├── ConditionNode
+├── ApprovalNode
+├── OutputNode
+└── WorkflowBinding
+```
+
+它可以复用平移、缩放、选择和节点渲染基础设施，但不复用 Canvas Link、ResourceReference、保存 Store 或传播状态机。
+
+### 9.2 Workflow Definition
+
+```ts
+interface WorkflowDefinition {
+  id: string
+  workspaceId: string
+  name: string
+  description: string
+  schemaVersion: number
+  draftRevision: number
+  inputs: WorkflowInput[]
+  steps: WorkflowStep[]
+  bindings: WorkflowBinding[]
+  outputs: WorkflowOutput[]
+  policies: WorkflowPolicy
+  presentation: Record<string, { x: number; y: number; width?: number; height?: number }>
+}
+```
+
+Workflow Input 和 Output 共同形成发布后的 Function 签名。`presentation` 只保存 Workflow Canvas 布局，不参与执行和 Function contentHash。
+
+### 9.3 Workflow Binding
+
+Workflow Binding 可以在没有任何实际 Resource 时建立：
+
+```text
+Input Param -> Step Input
+Step Output -> Step Input
+Step Output -> Workflow Output
+```
+
+它表达运行时未来值的传递，与 Canvas 的当前资源引用完全不同。
+
+### 9.4 Function Step
+
+每个 FunctionStep 引用具体 Function Version：
+
+```ts
+interface FunctionStep {
+  id: string
+  functionRef: { id: string; version: string }
+  config: Record<string, unknown>
+  retryPolicy?: {
+    maxAttempts: number
+    backoffMillis: number
+  }
+}
+```
+
+系统基础 Function、Agent Function 和已发布 Workflow Function 使用同一 Step 结构。MVP 禁止 Workflow 递归调用自己或形成 Function 依赖环。
+
+### 9.5 ForEach
+
+ForEach 接收一个 Resource Collection，并为每个 item 展开相同子步骤：
+
+```text
+Resource[]
+-> ForEach resource
+   -> TransformResource(resource)
+-> Resource[]
+```
+
+规则：
+
+- 每个 iteration 有稳定 key。
+- iteration 可以并行。
+- 输出按输入顺序或语义 key 聚合。
+- ForEach 必须声明最大项目数和最大并发；运行输入超过上限时拒绝或重新确认。
+- 执行前按实际项目数展示预计成本。
+- 默认 fail-fast；可显式配置 collect-errors。
+- ForEach 是 Workflow 控制结构，不自动出现在普通 Canvas。
+
+### 9.6 Condition 与 Approval
+
+- Condition 只能基于已声明的结构化值选择分支。
+- Approval 在高成本、发布、删除或不确定结果处挂起 WorkflowRun。
+- 任意自由循环不进入首期；重复处理使用 ForEach，复杂迭代由受约束 Function 或 Agent 完成。
+
+### 9.7 Workflow Version
+
+Workflow Draft 可反复编辑；发布前必须通过：
+
+- 图无环校验。
+- Function Version 存在性校验。
+- 输入输出类型与 cardinality 校验。
+- 必填参数可达性校验。
+- ForEach 聚合校验。
+- 权限、成本和副作用检查。
+- 测试样例执行。
+
+发布生成不可变 WorkflowVersion，并在 Function Library 注册对应 Workflow Function。已有 Canvas FunctionNode 固定旧版本，升级必须显式执行。
+
+Workflow Draft 独立保存 Test Case。输入 Fixture 固定具体 ResourceVersion 或内联标量，Assertion 只检查输出 kind、数量、schema 和显式字段；发布记录本次 Test Summary，但测试数据不进入 Function 运行签名。
+用于发布的 Test Summary 必须对应当前规范化语义 contentHash；只调整 presentation 不会使测试失效，修改 AST、签名或执行策略会失效。
+
+### 9.8 Workflow DSL
+
+Workflow 执行语义的唯一事实源是结构化 AST；可视化图使用 AST 加 presentation，文本 DSL 只读写 AST：
+
+```text
+Workflow DSL
+<-> Workflow Definition AST
+-> Runtime Execution Plan
+
+Workflow Canvas
+<-> Workflow Definition AST + presentation
+```
+
+概念语法：
+
+```text
+workflow generateStoryboard(story: Text) -> images: Image[] {
+  scenes = exec splitStoryboard(story)
+  reviewed = exec reviewStoryboard(scenes)
+  assets = exec extractAssets(reviewed)
+  generated = foreach asset in assets {
+    exec generateAsset(asset)
+  }
+  images = exec composeStoryboard(reviewed, generated)
+  emit images
+}
+```
+
+DSL 不直接执行任意宿主语言代码。
+
+### 9.9 Workflow Run
+
+Workflow Function 被调用时创建父 FunctionRun，内部 Step 创建子 FunctionRun：
+
+```text
+Workflow FunctionRun
+├── Step FunctionRun
+├── Step FunctionRun
+├── ForEach
+│   ├── Iteration FunctionRun
+│   └── Iteration FunctionRun
+└── Step FunctionRun
+```
+
+运行时只调度输入已经准备完成的 Step，支持持久等待、恢复、取消、缓存和部分重试。
+取消父 Workflow FunctionRun 时向非终态子 Run 传播取消请求；无法中止的外部调用只保留审计结果，不再被父 Run 聚合或发布。
+
+### 9.10 Workflow 在 Canvas 中的表现
+
+Workflow 发布后在 Canvas 中仍是普通 FunctionNode：
+
+```text
+[创意 ResourceNode]
+        -> [分镜 Workflow FunctionNode]
+        -> [后续 FunctionNode]
+```
+
+Workflow FunctionNode 可以在首次输出前建立下游 Link；下游在输出实际存在后才能通过 `@` 引用。
+
+### 9.11 从 Canvas 固化 Workflow
+
+用户或 Agent 选择一段稳定过程并执行“提取为 Workflow”：
+
+1. 实际 ResourceReference 边界转换为 Workflow Input。
+2. 选区内 FunctionNode 转换为 FunctionStep。
+3. 选区内实际引用转换为 Workflow Binding。
+4. 对外输出转换为 Workflow Output。
+5. 当前具体 Resource 进入 Test Fixture，不默认写死为常量。
+6. Group 和布局只用于初始 Workflow Canvas 排版，不改变执行语义。
+7. 用户在 Workflow Canvas 中确认参数、常量、错误策略和输出后发布。
+
+仅有 Link、没有实际 `@` 引用的关系不自动转换为 Workflow Binding。
+
+## 10. 核心用户流程
+
+### 10.1 上传图片并继续生成
+
+```text
+上传图片
+-> 创建 Image ResourceNode
+-> 发布 Image Resource
+-> Link 到 Image Generation FunctionNode
+-> 在 FunctionNode 中选择 @图片
+-> 执行
+-> FunctionNode 发布新 Image Resource
+```
+
+### 10.2 预先连接空 FunctionNode
+
+```text
+创建生图 FunctionNode（无 Resource）
+-> 先 Link 到视频 FunctionNode
+-> 视频节点暂时看不到可引用图片
+-> 生图成功发布图片
+-> 视频节点资源列表出现该图片
+-> 用户选择 @图片后才建立实际依赖
+```
+
+### 10.3 多图处理
+
+```text
+生图 FunctionNode 输出 4 张图
+-> 下游 many 输入可引用整个 images 通道
+-> one 输入要求选择具体 item
+-> 独立编辑时提取 item 为 ResourceNode
+-> 逐项生成视频时在 Workflow 中使用 ForEach
+```
+
+### 10.4 Group 复用
+
+```text
+将角色图、场景图和文档放入 Group
+-> Group 聚合成员资源
+-> Link Group 到下游
+-> 下游选择 @Group 或具体成员资源
+```
+
+### 10.5 稳定过程固化
+
+```text
+首次由人或总控 Agent 在 Canvas 调试
+-> 选择稳定 FunctionNode 子图
+-> 提取 Workflow Draft
+-> 定义 Input / Output
+-> 测试并发布
+-> 以后在 Canvas 只创建一个 Workflow FunctionNode
+```
+
+## 11. Agent 接入边界
+
+Agent 的具体 Harness、Session、Run 和前端面板在 Agent 基座稳定后接入。Canvas 与 Workflow 只依赖以下产品级能力：
+
+```text
+Agent Catalog
+  查询可用 Agent
+
+Agent Execution
+  使用 Agent 配置、输入 Resource 和任务描述发起执行
+
+Tool Registration
+  Canvas / Workflow 注册模块 Tool
+```
+
+Canvas 和 Workflow 只保存 Agent Adapter 可解析的不透明 AgentRef。默认产品体验优先从 Workspace Agent Library 选择统一管理的 Agent；是否支持内联 Agent Spec、AgentRef 的最终格式、Snapshot 字段和 SessionMode 等待 Agent 基座稳定后确定，不能写入 Canvas 核心 schema。每次 Agent FunctionRun 开始时必须由 Adapter 冻结可审计的 Agent 解析结果，避免运行中配置漂移；无论最终适配方式如何，Canvas 都不建立第二套 Agent Runtime。
+
+模块 Tool 由各自领域拥有；以下是逻辑能力名，最终 ToolDescriptor、版本和注册 SPI 等待 Agent 基座稳定后适配：
+
+```text
+canvas.inspect
+canvas.apply
+workflow.inspect
+workflow.apply
+workflow.validate
+workflow.test
+workflow.publish
+function.search
+function.execute
+```
+
+Tool 只能调用 Canvas/Workflow Command Service，不能直接修改数据库或前端 Store。Agent 默认最终文本转为 Text Resource，额外图片、文档和结构化结果作为其他 Resource 发布；用户编辑最终报告时先提取为独立 Text ResourceNode。
+Harness Artifact 只是 Output Payload 来源，必须经 Adapter 转成 ResourceStore Payload 和 Run 所属 Resource，不能直接充当产品 Resource 身份。
+
+Dock 直接执行没有 FunctionNode owner，finalReport 首先是 Run 所属 Text Resource 并显示在 Thread；“放到画布”或“编辑”通过 Command 提取为 ResourceNode。Agent FunctionNode 执行则按普通发布 barrier 原地发布输出。
+
+底部 Agent Dock 是总控 Agent 的交互入口，不是新的 Canvas 基础对象。总控 Agent 通过 Tool 创建 Node、Link、ResourceReference、Workflow Draft 和 FunctionRun。
+
+Dock 提交冻结 `canvasId + revision + contextMode + selectedNodeIds`：
+
+- 当前选区模式只解析选中 Node 当前有效且有权限的 ResourceVersion。
+- 整张 Canvas 模式只发送结构摘要和受限 `canvas.inspect` Scope，Agent 按需读取 Node/Resource，不把全部 Payload 无上限塞入 Prompt。
+- hidden Node 不进入自动上下文；用户显式引用的 Resource 仍可按权限使用。
+- 上下文超过模型预算时先按类型、大小和用户固定项生成可解释裁剪结果，不静默随机丢弃。
+- Agent 写入仍使用提交后的最新 baseRevision；若 Canvas 已变化，Command 按正常冲突规则处理。
+
+Canvas/Workflow 调用 `system.agent.execute` 是产品层 Agent Function；Agent 内部通过 `task` 等 Tool 委派 Subagent 属于 Harness 内部执行树，两者不共享 Canvas Node 或 Workflow Step 模型。
+
+## 12. Command、保存与撤销
+
+所有共享文档修改统一通过 Canvas Command：
 
 ```ts
 interface CanvasCommand {
@@ -602,201 +969,163 @@ interface CanvasCommand {
   canvasId: string
   baseRevision: number
   actor: { type: 'user' | 'agent' | 'system'; id: string }
-  operations: unknown[]
-  createdAt: string
+  type: string
+  payloadVersion: number
+  payload: unknown
 }
 ```
 
-- 一个用户意图对应一个命令批次。
-- 对象拖拽、连续输入和尺寸调整在结束时合并为单个撤销单元；用户 viewport 缩放不进入文档撤销历史。
-- 命令服务原子校验、应用并递增文档 revision。
-- 同一 `commandId` 重复提交必须幂等。
-- Agent Run 的外部调用、费用和执行记录不可通过画布撤销删除。
+Workflow Draft 使用独立但同构的 WorkflowCommand，携带 `workflowId`、`baseDraftRevision`、`commandId` 和 actor，并以相同 local ref 机制原子创建 Step 与 Binding。Canvas Command 与 WorkflowCommand 不共享 payload 类型或 revision。
 
-### 11.2 自动保存状态
+核心命令：
 
-| 状态 | 准确定义 |
+```text
+UpdateCanvasMetadata
+SetCanvasLifecycle
+CreateNodes
+UpdateNodes
+MoveNodes
+DuplicateNodes
+DeleteNodes
+CreateLinks
+DeleteLinks
+BindResourceReferences
+UnbindResourceReferences
+CreateGroup
+MoveIntoGroup
+RemoveGroup
+PublishFunctionOutputs
+UpgradeFunctionVersion
+```
+
+规则：
+
+- 成功命令返回新 document revision。
+- `commandId` 是幂等键；相同 ID 只有请求内容一致时才返回原结果，内容不同必须报幂等冲突。
+- 批量创建使用 command-local ref；同一批后续操作可以引用新对象，服务端在结果中返回 local ref 到稳定 ID 的映射。
+- 拖拽、尺寸调整和连续文本输入合并为一个撤销单元。
+- viewport、选区和浮层不进入文档撤销历史。
+- Function 外部副作用、成本和运行审计不由普通 Undo 删除。
+- Undo `PublishFunctionOutputs` 只恢复 Node 当前 Resource 指针；ResourceVersion 和 FunctionRun 仍保留。
+- 用户显式“恢复此历史版本”会复用旧 Payload 创建一个新的单调 ResourceVersion；只有 Undo 补偿命令可以把 current pointer 暂时指回前一版本。
+- Schema migration 是 Undo 边界；迁移前 Command 仍可审计，但不会用旧 inverse 修改新 schema。
+- 协作中 Undo 仍以当前 revision 提交补偿命令；若目标字段已被他人修改，返回冲突并要求确认，不静默覆盖后来变更。
+- 保存状态必须来自服务端确认，不能由前端定时器伪造。
+
+## 13. 删除、复制与历史
+
+| 对象 | 默认行为 |
 | --- | --- |
-| 已保存 | 本地无待提交命令，最新服务端 revision 已确认 |
-| 保存中 | 存在正在提交或等待确认的命令 |
-| 保存失败 | 至少一个命令未持久化，需要重试或解决冲突 |
+| Node 无下游引用 | 删除 Node、Link 和当前文档内 Resource 投影 |
+| Node 有下游引用 | 提示受影响节点；确认后删除引用并传播 broken/stale |
+| FunctionNode 有 active Run | 先取消或等待终态 |
+| 非空 Group | 默认只删除 Group，成员留在原位 |
+| ResourceVersion | 不直接删除；按引用和保留策略回收 Payload |
+| Workflow Draft | 无 active 测试 Run 时可删除 |
+| Workflow Version | 已发布版本不可修改；被引用时不可物理删除 |
 
-客户端先乐观应用命令，再进入持久化队列。刷新时加载服务端文档，并在基准 revision 仍有效时重放本地未确认命令。
+Node 删除在保留期内保存 tombstone，Run 所属 Resource、FunctionRun、Command 和审计引用不级联删除。恢复命令可以在 ID 未被回收前重建 Canvas 投影。
 
-### 11.3 撤销与重做
+复制 Node 时创建新 Node ID。ResourceNode 复制可以复用不可变 Payload，但必须创建新的逻辑 Resource 身份。FunctionNode 复制保留 Function Version 与 Config，清空运行态和输出。
 
-- 撤销通过逆向 Canvas Command 完成，不回滚数据库事务历史。
-- 删除、移动、编辑、Frame 层级、关系和 Agent 结果接纳均可撤销。
-- 撤销 Agent 结果只移除其画布影响，Run、消息、费用和审计记录保留。
-- 如果用户已经编辑 Agent 输出，撤销整次运行前必须提示哪些对象会受影响。
-- 协作阶段通过基于 revision 的补偿命令处理，不使用前端快照覆盖远端内容。
+复制多选或 Group 时递归复制选区内 Node，并重映射选区内部 Group 层级、Link 和 ResourceReference；与选区外部相连的 Link/Reference 默认不复制，避免新副本意外依赖或影响外部 Node。
 
-## 12. 删除与恢复
+Canvas 导出包包含 schemaVersion、固定 revision 的 Node/Link/Reference 快照、当前 ResourceVersion manifest 和选择携带的 Payload；默认不导出凭据、Agent 内部 Session、费用和完整 Run 日志。导入时为 Canvas、Node 和 Resource 分配新 ID 并重映射引用，FunctionRef 保持具体版本；目标 Workspace 无法解析的 Function 或 Payload 以 broken 状态保留，不静默替换。
 
-| 对象 | 删除规则 |
-| --- | --- |
-| 普通 Item | 通过命令删除，关系同步清理，可撤销 |
-| 非空 Frame | 必须选择保留或删除后代 |
-| 活跃 Agent Run Item | 先取消 Run；不能静默删除卡片和定时器 |
-| 终态 Agent Run Item | 可从画布移除，Run 记录和 Thread 摘要保留 |
-| 活跃 Generator | 先确认取消 Generation Run |
-| Generator | 删除节点不立即物理删除已生成 Asset |
-| 有下游结果的来源对象 | 删除前提示受影响结果数；结果继续存在，来源面板显示“来源已删除” |
+## 14. 权限、成本与风险动作
 
-Asset 只有在没有任何 Item、Run 或历史版本引用并超过保留期后才可物理清理。
-
-## 13. 权限、成本与高风险动作
-
-### 13.1 角色
-
-| 动作 | Owner | Editor | Viewer |
+| 能力 | Viewer | Editor | Owner |
 | --- | --- | --- | --- |
-| 查看、平移、缩放、检查来源 | 允许 | 允许 | 允许 |
-| 创建和编辑 Item | 允许 | 允许 | 禁止 |
-| 发起 Agent / Generation Run | 允许 | 允许，受工作区策略限制 | 禁止 |
-| 删除画布、管理成员和策略 | 允许 | 禁止 | 禁止 |
-| 导出 | 允许 | 按策略 | 按策略 |
+| 查看 Canvas、Workflow 和运行 | 是 | 是 | 是 |
+| 编辑 Node、Link、Reference | 否 | 是 | 是 |
+| 执行普通 Function | 否 | 是 | 是 |
+| 编辑 Workflow Draft | 否 | 是 | 是 |
+| 发布 Workflow Version | 否 | 按策略 | 是 |
+| 管理 Function / Agent / 模型凭据 | 否 | 否 | 是 |
 
-Agent 和 Skill 继承发起用户的有效权限，不能绕过工作区策略访问 Asset 或执行动作。
+执行前确认：
 
-### 13.2 需要确认的动作
+- 显示 Function、模型、预计用量和最大成本。
+- ForEach 使用“单次成本 × 项目数”计算上界。
+- 高成本、外部发布、批量删除和非幂等 Function 必须显式确认。
+- Provider 已开始处理后产生的费用进入 Run 记录。
+- 权限撤销后，未开始的 Run 取消；已开始的外部调用按执行策略记录结果但不自动发布。
 
-- 删除或覆盖用户已有内容。
-- 发布、分享或写入外部系统。
-- 访问受限 Asset。
-- 预计成本超过工作区阈值。
-- 一次批量修改超过配置数量。
-- 从 Paused 状态重新开始并放弃当前 attempt。
+## 15. 异常与恢复
 
-确认发生在对应 Run 卡或 Generator 操作台内，不使用脱离上下文的全局弹窗。
-
-## 14. 异常与恢复
-
-| 场景 | 产品行为 |
+| 场景 | 行为 |
 | --- | --- |
-| 保存失败 | 保留本地命令和未保存标识，提供重试，不显示“已保存” |
-| revision 冲突 | 拉取新 revision，尝试重放无冲突命令；无法合并时展示受影响对象 |
-| Agent 调度失败 | Run 进入 Failed，不创建伪造结果，可重试 |
-| Agent 部分完成 | Run 进入 Failed 并展示已完成步骤；已有临时输出不自动删除 |
-| Generation 失败 | 保留旧输出和当前草稿，显示错误与重试 |
-| 上传或解析失败 | 占位对象保留，支持重试或替换来源 |
-| 页面刷新 | 恢复文档、用户 viewport、Thread 和所有非终态 Run |
-| SSE 断开 | 标记状态可能过期并重连；通过 Run 查询校准终态 |
-| 来源被删除 | 已提交快照继续执行；结果来源面板显示缺失对象 |
-| 权限被撤销 | 阻止新命令，取消或失败仍需访问资源的执行 |
-| 余额不足 | 提交前阻止运行，保留输入和配置 |
+| Canvas 保存失败 | 保留本地待提交 Command，展示失败并允许重试 |
+| Revision 冲突 | 拉取最新文档，重放无冲突命令；语义冲突要求用户处理 |
+| Link 来源无 Resource | Link 保留，下游可见资源为空 |
+| 已引用 Resource 变为不可用 | Reference 标记 broken，目标和后代传播 |
+| Function 执行失败 | 保留旧输出和完整错误，可使用同一快照重试 |
+| Function 晚到结果 | Cancelled 后不发布；Config、Reference 或上游版本已变时只保留在 Run 历史 |
+| Workflow Step 失败 | 按 Step policy 重试；耗尽后父 Run 失败或等待处理 |
+| ForEach 部分失败 | fail-fast 取消剩余项，或 collect-errors 聚合成功与错误 |
+| 页面刷新 | 从服务端恢复文档、用户视图、active Run 和待处理确认 |
+| SSE 断开 | 使用 cursor 重连并补齐事件 |
+| 浏览器离线 | 本地 Command 排队；恢复后按 revision 提交 |
 
-## 15. 画布库与新建流程
+## 16. 原型映射
 
-### 15.1 画布卡片
+当前交互原型继续用于验证视觉和交互，不代表最终领域实现。
 
-画布卡片信息必须由真实数据派生：
-
-- 对象数只统计未删除的 CanvasItem，不把 Relation 计入“对象”。
-- 运行状态来自最新活跃 Agent Run 或 Generation Run。
-- 更新时间来自最后一个成功持久化命令。
-- 所有者和协作者来自权限数据。
-- 缩略图由当前公共首页视图或自动内容包围盒生成。
-
-### 15.2 新建画布
-
-| 入口 | 流程 |
+| 原型概念 | 正式产品映射 |
 | --- | --- |
-| 空白画布 | 创建空 CanvasDocument，进入编辑器 |
-| 一句话创建 | 创建 Draft Canvas -> Agent 生成计划 -> 用户确认 -> 执行计划 |
-| 导入资料 | 创建 CanvasDocument -> 创建 Import Job -> 自动形成资料 Frame |
-| 使用模板 | 实例化对象和关系 -> 填写模板变量 -> 进入编辑器 |
+| 文本、图片、文件节点 | ResourceNode |
+| 文本/图片/视频生成节点 | FunctionNode，分别引用系统生成 Function |
+| 节点参考素材 | 由 Link 可见资源和 `@ResourceReference` 派生 |
+| Generator 当前结果 | FunctionNode 输出 Resource |
+| Agent Run 卡片 | Agent FunctionRun 的 Canvas 投影或运行详情 |
+| Frame | GroupNode 的空间视图 |
+| Result Group | GroupNode 或多资源输出通道视图 |
+| Agent Dock | 总控 Agent 交互入口 |
+| Thread | Agent Session / FunctionRun Activity 视图 |
 
-“一句话创建”在用户确认前不得调用高成本生成能力或批量修改画布。用户拒绝计划时保留 Draft Canvas 和输入内容，可继续编辑计划或切换为空白画布。
+原型中的固定世界尺寸、硬编码资源、定时器运行、伪保存、Frame 视觉分组和独立 `referenceItemIds` 均不是正式产品事实源。
 
-## 16. 当前原型逻辑对照
+## 17. 分期
 
-状态定义：
+### P0：领域地基
 
-- **可交互**：原型中已有真实前端状态转换。
-- **模拟**：界面可演示，但使用定时器、硬编码结果或 Toast。
-- **方案**：产品文档已定义，原型未实现。
-- **需纠正**：原型行为与本文确定的产品逻辑不一致。
+- CanvasDocument、Node、Link、ResourceReference 和 Command。
+- Resource / ResourceVersion 与 Payload 存储。
+- ResourceNode、FunctionNode、GroupNode。
+- Function Catalog、系统 Function 注册和 FunctionRun。
+- 引用 DAG、stale 传播、保存、撤销和刷新恢复。
+- 文件、文本和图片导入。
 
-| 逻辑 | 当前状态 | 证据或差异 |
-| --- | --- | --- |
-| 平移、缩放、选择、框选、拖动 | 可交互 | `infinite-canvas-prototype/app.js:612-984` |
-| 固定类型 Generator 创建与独立配置 | 可交互 | `app.js:254-267`, `app.js:1581-1615` |
-| Generator 原地更新 | 模拟 | `app.js:1617-1643` 立即成功，无异步 Run |
-| Generator 输出与草稿分离 | 需纠正 | 当前 `draft/generated` 在 Prompt 修改后覆盖显示状态 |
-| Add Menu、Thread、Generator 面板互斥 | 可交互 | `app.js:1223-1266` |
-| Agent 暂停、继续、重试 | 模拟 | `app.js:1016-1127` 使用单个定时器和固定 Run |
-| Agent 上下文快照 | 需纠正 | `app.js:475-498` 空选区隐式回退硬编码资料 |
-| Agent Run 历史与 retry attempt | 需纠正 | 当前复用 `id = run`，重试前删除生成结果 |
-| Agent 失败、等待输入、取消 | 方案 | 原型只覆盖 running、paused、succeeded |
-| 自动保存 | 需纠正 | `app.js:641-650` 只用 420ms 定时器切换文案 |
-| 删除与恢复 | 模拟 | 删除 Run 会直接停止定时器；重置恢复硬编码场景 |
-| Frame 容器和子对象联动 | 方案 | 当前 Frame 只有视觉节点，没有 `parentId` 行为 |
-| Relation 语义 | 需纠正 | 当前只保存 `[sourceId, targetId]`，没有 `kind` 和稳定 ID |
-| 结果来源与落位 | 模拟 | 有无碰撞落位和连线，但没有持久化来源记录 |
-| 从想法创建计划确认 | 需纠正 | `app.js:1907-1916` 直接打开预设演示画布 |
-| 文件导入、Frame 创建、参考选择 | 模拟 | `app.js:1886-1896`, `app.js:1965` 仅 Toast |
-| Library 对象数 | 需纠正 | `app.js:595-597` 把 Node 和 Relation 一起计数 |
-| Thread、消息和 Run 恢复 | 方案 | 当前全部保存在内存 State |
-| 命令历史、撤销重做和 revision | 方案 | 原型直接修改对象数组 |
-| 权限、费用和高风险确认 | 方案 | 原型仅展示静态积分估算 |
-| 无限坐标空间 | 需纠正 | 原型 SVG 和 MiniMap 仍使用 `2600 x 1600` 固定世界尺寸 |
+### P1：Workflow 闭环
 
-## 17. 逻辑缺口优先级
+- Workflow Draft、独立 Workflow Canvas 和校验。
+- FunctionStep、ForEach、Output 和 WorkflowRun。
+- Workflow Version 发布并注册为 Function。
+- Canvas 提取 Workflow 和 Workflow FunctionNode。
+- 成本、缓存、重试和测试 Fixture。
 
-### P0：进入正式 MVP 开发前必须闭环
+### P2：Agent 与协作
 
-| 主题 | 闭环标准 |
-| --- | --- |
-| 状态归属 | 文档、执行、资产、用户视图和临时交互分层明确 |
-| Canvas Command | 所有文档修改统一经过命令、revision 和真实保存状态 |
-| ContextSnapshot | 无隐式上下文，提交后不可变，可追溯 item revision |
-| Agent Run | 一个 active run、完整状态机、attempt 历史、重试不删结果 |
-| Generator | 固定类型，草稿、当前输出和 Generation Run 分离 |
-| Asset 基础 | 上传和生成媒体具备稳定 Asset ID、权限和引用生命周期 |
-| Frame | `parentId`、移动联动、上下文展开和安全删除规则落地 |
-| 来源与删除 | 每个结果可追溯，删除和撤销不破坏运行审计 |
-| 新建画布 | 一句话创建必须经过计划确认 |
-| 持久化恢复 | 刷新后恢复文档、Thread 和非终态执行 |
+- Agent Catalog / Execution Port。
+- Canvas/Workflow Tool Adapter。
+- 总控 Agent Dock 和嵌入式 Activity Panel。
+- 多人实时协作、权限和评论。
+- Function、Workflow 和作品市场。
 
-### P1：形成完整可用的创作闭环
+## 18. 产品逻辑验收
 
-| 主题 | 闭环标准 |
-| --- | --- |
-| Import Job 与索引 | 多文件/URL 获取、解析、OCR、索引和失败重试 |
-| Result Group | 多候选主结果、展开、比较和继续生成 |
-| 成本与权限 | 预估、余额、阈值确认、角色和高风险动作策略 |
-| 异常恢复 | 保存冲突、SSE 重连、Provider 失败和部分输出处理 |
-| 无限空间 | 解除固定世界尺寸，完成大画布性能与虚拟化策略 |
-| 分享与导出 | Viewer 权限、只读分享和来源可见性 |
-
-### P2：协作与生态
-
-- 实时协作、Presence 和协作撤销。
-- 多 Agent Thread 和任务队列。
-- Playbook / Skill 参数化保存与复用。
-- 创作过程回放和公开作品。
-- 模板、Skill 和作品市场。
-- 工作区用量、配额和商业授权策略。
-
-## 18. Agent 原生 MVP 产品逻辑验收
-
-以下标准覆盖画布基座和首个 Agent 闭环，全部满足后产品才具备对外可用的 Agent 原生 MVP 逻辑。
-
-1. 用户可以从空白、想法、导入和模板四种入口创建画布。
-2. 一句话创建在实际执行前展示可编辑计划并等待确认。
-3. Text、媒体、文件、Frame、Generator 和 Agent Run 均有稳定身份和持久化字段。
-4. Frame 移动会联动内部对象，选择 Frame 可正确组装后代上下文。
-5. 当前选区为空时不会读取隐藏默认资料。
-6. 每个任务都保存提交时的 ContextSnapshot 和参数快照。
-7. 同一画布只允许一个会修改画布的活跃 Agent Run，用户输入草稿不会因此丢失。
-8. Agent Run 的暂停、继续、等待输入、失败、取消和重试具有明确语义。
-9. 重试创建新 attempt，不删除旧结果或用户已编辑内容。
-10. Generator 类型固定，修改 Prompt 不会删除当前成功输出。
-11. Generation Run 失败时保留旧输出，成功时原子替换当前输出。
-12. 所有 Agent 和 Generator 结果都能追溯输入、运行、模型、参数、时间和成本。
-13. 自动保存状态与服务端确认一致，刷新后恢复最后持久化文档和非终态运行。
-14. 删除、Frame 层级、关系和 Agent 结果接纳可撤销；执行审计和费用不可被普通撤销抹除。
-15. 运行中对象、非空 Frame 和高风险动作不会被静默删除或覆盖。
-16. 画布卡片对象数、运行状态和更新时间均由真实数据派生。
-17. 新结果默认落在来源附近，避让已有内容和 Dock，用户移动后不被自动重排。
+1. 任意 Node 可以在没有 Resource 时建立 Link。
+2. 下游只能 `@` 已经存在、当前有效且通过 Link 可见的 Resource。
+3. 仅有 Link 不形成依赖，实际 ResourceReference 才触发传播。
+4. Resource 名称可以重复，引用始终基于稳定 ID 和 key。
+5. Resource 内容变化创建不可变版本，普通引用跟随当前版本，Run 冻结具体版本。
+6. 多资源输出支持整体引用和单项引用，普通 Canvas 不隐式扇出高成本执行。
+7. FunctionNode 成功后原子发布 Resource，失败和取消不覆盖旧结果。
+8. 上游语义变化使实际依赖后代 stale 或 broken，但不会自动调用 Function。
+9. Group 移动联动成员，并可作为聚合 Resource 集合被引用。
+10. Workflow 在独立 Canvas 中构建，Binding 可以引用未来 Step 输出。
+11. Workflow 发布为不可变 Function Version，普通 Canvas 只通过 FunctionNode 使用。
+12. Workflow ForEach 能逐项执行并聚合结果，执行前可估算成本。
+13. Canvas 与 Workflow 所有修改都经过带 revision 的 Command。
+14. 页面刷新、执行恢复和 SSE 重连不会丢失已确认状态。
+15. Agent 接入不要求 Canvas 依赖 Harness 内部 Session、Run 或 Tool 类型。

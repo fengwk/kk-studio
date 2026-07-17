@@ -12,6 +12,7 @@ flowchart TD
     A --> K[product-design/infinite-canvas-product-logic.md]
     I --> J[product-design/infinite-canvas-prototype/index.html]
     B --> C[architecture.md]
+    B --> L[infinite-canvas-implementation-design.md]
     B --> D[cloud-embedded-agent-runtime.md]
     B --> E[backend-implementation-design.md]
     B --> F[storage-models.md]
@@ -23,9 +24,10 @@ flowchart TD
 
 | 文档 | 角色 | 说明 |
 | --- | --- | --- |
-| [technical-solution/README.md](technical-solution/README.md) | 技术方案入口 | 汇总当前架构、运行时、前后端实现和存储模型 |
+| [technical-solution/README.md](technical-solution/README.md) | 技术方案入口 | 汇总已落地架构与当前批准的目标落地设计 |
 | [product-design/infinite-canvas-prototype.md](product-design/infinite-canvas-prototype.md) | 产品原型 | 定义无限画布的产品定位、页面原型、交互和视觉边界；可直接打开 [交互原型](product-design/infinite-canvas-prototype/index.html) |
-| [product-design/infinite-canvas-product-logic.md](product-design/infinite-canvas-product-logic.md) | 产品逻辑 | 定义领域对象、状态归属、上下文、Agent / Generator 执行、保存撤销、异常恢复和 MVP 闭环标准 |
+| [product-design/infinite-canvas-product-logic.md](product-design/infinite-canvas-product-logic.md) | 产品逻辑 | 定义 Node、Resource、Link、ResourceReference、Function、Workflow、传播、运行和 MVP 闭环标准 |
+| [technical-solution/infinite-canvas-implementation-design.md](technical-solution/infinite-canvas-implementation-design.md) | 无限画布技术方案 | 定义领域模块、存储、Command、Function/Workflow Runtime、Web API、前端状态和低耦合 Agent Port |
 
 ## 维护规则
 
@@ -33,4 +35,4 @@ flowchart TD
 | --- | --- |
 | 单一事实来源 | 同一主题只维护一份当前有效文档，不维护历史版本分叉 |
 | 上下文无关 | 文档应让新接手的 Agent 不依赖会话历史即可理解 |
-| 状态边界明确 | 技术方案描述当前实现；产品设计描述当前确定的目标形态和验收边界 |
+| 状态边界明确 | 已落地方案必须与代码一致；目标落地设计必须明确其实施边界，不能把尚不存在的类、表或 API 写成现状 |
