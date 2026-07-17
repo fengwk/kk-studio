@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.core.harness.tool.service;
 
-import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
+import fun.fengwk.kkstudio.core.harness.run.store.HarnessRunEventWriter;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ConcurrentModificationException;
+import java.util.List;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,17 +24,17 @@ import org.springframework.transaction.annotation.Transactional;
 public class HarnessSessionYoloService {
   private final HarnessSessionMapper sessionMapper;
   private final HarnessRunMapper runMapper;
-  private final HarnessRunTransactionService runTransactions;
+  private final HarnessRunEventWriter eventWriter;
   private final Clock clock;
 
   public HarnessSessionYoloService(
       HarnessSessionMapper sessionMapper,
       HarnessRunMapper runMapper,
-      HarnessRunTransactionService runTransactions,
+      HarnessRunEventWriter eventWriter,
       Clock harnessRunClock) {
     this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
     this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
-    this.runTransactions = Objects.requireNonNull(runTransactions, "runTransactions");
+    this.eventWriter = Objects.requireNonNull(eventWriter, "eventWriter");
     this.clock = Objects.requireNonNull(harnessRunClock, "harnessRunClock");
   }
 
@@ -50,8 +51,9 @@ public class HarnessSessionYoloService {
         directRunId != null
             ? directRunId
             : sessionMapper.findAnyActiveRunIdByRoot(initialRoot.getId());
+    HarnessRunDO candidateRun = null;
     if (candidateRunId != null) {
-      HarnessRunDO candidateRun = runMapper.findForUpdate(candidateRunId);
+      candidateRun = runMapper.findForUpdate(candidateRunId);
       if (candidateRun == null) {
         throw new IllegalStateException("active run does not exist: " + candidateRunId);
       }
@@ -99,11 +101,12 @@ public class HarnessSessionYoloService {
         throw new IllegalStateException("cannot update root session yolo");
       }
       if (candidateRunId != null) {
-        runTransactions.appendExternalEvent(
-            candidateRunId,
-            new RunEventDraft(
-                RunEventType.RUNTIME_STATE_CHANGED,
-                RunEventPayloads.of("rootSessionId", root.getId(), "yoloEnabled", enabled)),
+        eventWriter.appendLocked(
+            candidateRun,
+            List.of(
+                new RunEventDraft(
+                    RunEventType.RUNTIME_STATE_CHANGED,
+                    RunEventPayloads.of("rootSessionId", root.getId(), "yoloEnabled", enabled))),
             now);
       }
     }

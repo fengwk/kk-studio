@@ -12,9 +12,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.harness.run.service.DatabaseToolPreparationPort;
 import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
+import fun.fengwk.kkstudio.core.harness.run.store.HarnessRunEventWriter;
 import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
 import fun.fengwk.kkstudio.core.harness.run.store.SnowflakeRunIdGenerator;
+import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunEventMapper;
+import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
+import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
 import fun.fengwk.kkstudio.core.harness.task.store.DatabaseRootActivityStore;
 import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
@@ -24,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.run.AgentRun;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEvent;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
+import fun.fengwk.kkstudio.harness.runtime.run.RunIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -55,19 +60,19 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @SpringBootTest(classes = CoreTestApplication.class)
 class HarnessRunPersistenceTest {
@@ -80,6 +85,10 @@ class HarnessRunPersistenceTest {
   @Autowired private MysqlToolInvocationStore invocationStore;
   @Autowired private DatabaseRootActivityStore rootActivityStore;
   @Autowired private SnowflakeRunIdGenerator idGenerator;
+  @Autowired private HarnessRunMapper runMapper;
+  @Autowired private HarnessRunEventMapper eventMapper;
+  @Autowired private HarnessSessionMapper sessionMapper;
+  @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private JdbcTemplate jdbcTemplate;
 
   @BeforeEach
@@ -227,8 +236,7 @@ class HarnessRunPersistenceTest {
   }
 
   /**
-   * Same-root concurrent appends serialize event-id allocation under Root lock so progressive
-   * RootActivity cursors never permanently miss a lower id committed after a higher id.
+   * Root lock prevents a sibling Run from allocating its event id until the first writer commits.
    */
   @Test
   void concurrentSiblingRunAppendsPreserveRootActivityCursor() throws Exception {
@@ -239,69 +247,56 @@ class HarnessRunPersistenceTest {
     AgentRun runB =
         transactions.submitUserMessage(child.sessionId(), child.snapshotId(), user("b"), NOW);
 
-    int writers = 2;
-    int eventsPerRun = 40;
-    ExecutorService executor = Executors.newFixedThreadPool(writers + 1);
-    CountDownLatch start = new CountDownLatch(1);
-    AtomicBoolean writing = new AtomicBoolean(true);
-    Set<Long> observed = ConcurrentHashMap.newKeySet();
-    AtomicLong cursor = new AtomicLong(0L);
-    Future<?> reader =
-        executor.submit(
-            () -> {
-              await(start);
-              while (true) {
-                List<RootActivity> page =
-                    rootActivityStore.list(root.sessionId(), cursor.get(), 50);
-                for (RootActivity activity : page) {
-                  observed.add(activity.eventId());
-                  cursor.updateAndGet(current -> Math.max(current, activity.eventId()));
-                }
-                if (!writing.get()) {
-                  List<RootActivity> finalPage =
-                      rootActivityStore.list(root.sessionId(), cursor.get(), 50);
-                  for (RootActivity activity : finalPage) {
-                    observed.add(activity.eventId());
-                    cursor.updateAndGet(current -> Math.max(current, activity.eventId()));
-                  }
-                  break;
-                }
-                Thread.onSpinWait();
-              }
-            });
-    List<Future<?>> writersFutures = new ArrayList<>();
-    for (AgentRun run : List.of(runA, runB)) {
-      writersFutures.add(
+    BlockingRunEventIdGenerator blockingIds = new BlockingRunEventIdGenerator();
+    HarnessRunEventWriter writer =
+        new HarnessRunEventWriter(runMapper, eventMapper, sessionMapper, blockingIds);
+    TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    boolean allocatedBeforeFirstCommit = false;
+    try {
+      Future<?> first =
           executor.submit(
-              () -> {
-                await(start);
-                for (int i = 0; i < eventsPerRun; i++) {
-                  transactions.appendExternalEvent(
-                      run.id(),
-                      new RunEventDraft(
-                          RunEventType.TURN_STARTED, "{\"schemaVersion\":1,\"ordinal\":" + i + "}"),
-                      NOW.plusMillis(i));
-                }
-              }));
+              () ->
+                  transactionTemplate.executeWithoutResult(
+                      ignored ->
+                          writer.lockAndAppend(
+                              runA.id(),
+                              List.of(
+                                  new RunEventDraft(
+                                      RunEventType.TURN_STARTED, "{\"schemaVersion\":1}")),
+                              NOW)));
+      assertTrue(blockingIds.firstGenerated.await(5, TimeUnit.SECONDS));
+      Future<?> second =
+          executor.submit(
+              () ->
+                  transactionTemplate.executeWithoutResult(
+                      ignored -> {
+                        runMapper.findForUpdate(runB.id());
+                        sessionMapper.findForUpdate(runB.sessionId());
+                        blockingIds.secondStarted.countDown();
+                        writer.lockAndAppend(
+                            runB.id(),
+                            List.of(
+                                new RunEventDraft(
+                                    RunEventType.TURN_STARTED, "{\"schemaVersion\":1}")),
+                            NOW);
+                      }));
+      assertTrue(blockingIds.secondStarted.await(5, TimeUnit.SECONDS));
+      allocatedBeforeFirstCommit = blockingIds.secondGenerated.await(250, TimeUnit.MILLISECONDS);
+      blockingIds.releaseFirst.countDown();
+      first.get(5, TimeUnit.SECONDS);
+      second.get(5, TimeUnit.SECONDS);
+    } finally {
+      blockingIds.releaseFirst.countDown();
+      executor.shutdownNow();
     }
-    start.countDown();
-    for (Future<?> future : writersFutures) {
-      future.get();
-    }
-    writing.set(false);
-    reader.get();
-    executor.shutdownNow();
 
-    List<RootActivity> all = rootActivityStore.list(root.sessionId(), 0, 1000);
-    Set<Long> committed = new HashSet<>();
-    long previous = 0L;
-    for (RootActivity activity : all) {
-      assertTrue(activity.eventId() > previous);
-      previous = activity.eventId();
-      committed.add(activity.eventId());
-    }
-    assertEquals(eventsPerRun * 2, committed.size());
-    assertEquals(committed, observed);
+    assertFalse(allocatedBeforeFirstCommit);
+    assertTrue(blockingIds.secondGenerated.await(5, TimeUnit.SECONDS));
+    List<RootActivity> committed = rootActivityStore.list(root.sessionId(), 0, 10);
+    assertEquals(
+        List.of(blockingIds.firstId, blockingIds.secondId),
+        committed.stream().map(RootActivity::eventId).toList());
   }
 
   /** RunEvent 并发 append 原子分配连续 sequence，cursor 只返回指定位置之后的事件。 */
@@ -433,6 +428,13 @@ class HarnessRunPersistenceTest {
         List.of(
             RunEventType.ASSISTANT_COMPLETED, RunEventType.TOOL_PREPARED, RunEventType.RUN_WAITING),
         runStore.listAfter(queued.id(), 0, 10).stream().map(RunEvent::type).toList());
+    String preparedPayload =
+        runStore.listAfter(queued.id(), 0, 10).stream()
+            .filter(event -> event.type() == RunEventType.TOOL_PREPARED)
+            .findFirst()
+            .orElseThrow()
+            .payloadJson();
+    assertTrue(preparedPayload.contains("\"arguments\":\"{}\""), preparedPayload);
     assertEquals(
         assistant("calling", List.of(call)),
         sessionStore.find(seed.sessionId(), session.leafEntryId()).orElseThrow().payload());
@@ -973,6 +975,41 @@ class HarnessRunPersistenceTest {
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
       throw new AssertionError(error);
+    }
+  }
+
+  private static final class BlockingRunEventIdGenerator implements RunIdGenerator {
+    private final long firstId = Long.MAX_VALUE - 10;
+    private final long secondId = Long.MAX_VALUE - 9;
+    private final CountDownLatch firstGenerated = new CountDownLatch(1);
+    private final CountDownLatch releaseFirst = new CountDownLatch(1);
+    private final CountDownLatch secondStarted = new CountDownLatch(1);
+    private final CountDownLatch secondGenerated = new CountDownLatch(1);
+    private final AtomicInteger calls = new AtomicInteger();
+
+    @Override
+    public long newRunId() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public long newRunEventId() {
+      int call = calls.incrementAndGet();
+      if (call == 1) {
+        firstGenerated.countDown();
+        await(releaseFirst);
+        return firstId;
+      }
+      if (call == 2) {
+        secondGenerated.countDown();
+        return secondId;
+      }
+      throw new AssertionError("unexpected event id allocation: " + call);
+    }
+
+    @Override
+    public long newSessionEntryId() {
+      throw new UnsupportedOperationException();
     }
   }
 

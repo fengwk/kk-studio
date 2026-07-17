@@ -997,6 +997,21 @@ class ToolInvocationIntegrationTest {
                     || event.type() == RunEventType.TOOL_COMPLETED
                     || event.type() == RunEventType.TOOL_REQUEUED)
         .forEach(event -> assertToolEventAttempt(event, run.run()));
+    List<RunEvent> completedEvents =
+        runStore.listAfter(run.run().id(), 0, 20).stream()
+            .filter(event -> event.type() == RunEventType.TOOL_COMPLETED)
+            .toList();
+    assertEquals(2, completedEvents.size());
+    assertTrue(
+        completedEvents.stream()
+            .anyMatch(
+                event ->
+                    event.payloadJson().contains("\"toolCallId\":\"second-completes-first\"")));
+    assertTrue(
+        completedEvents.stream()
+            .anyMatch(
+                event ->
+                    event.payloadJson().contains("\"toolCallId\":\"first-completes-second\"")));
     Session session = sessionStore.find(run.sessionId()).orElseThrow();
     List<SessionEntry> path = sessionStore.loadPath(run.sessionId(), session.leafEntryId());
     List<String> toolCallIds =

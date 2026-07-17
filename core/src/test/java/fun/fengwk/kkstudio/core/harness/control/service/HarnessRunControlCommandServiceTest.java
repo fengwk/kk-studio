@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
+import fun.fengwk.kkstudio.core.harness.run.store.HarnessRunEventWriter;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionEntryMapper;
@@ -52,6 +53,7 @@ class HarnessRunControlCommandServiceTest {
   private RunControlMessageStore controlStore;
   private RunControlIdGenerator controlIds;
   private HarnessRunTransactionService runTransactions;
+  private HarnessRunEventWriter eventWriter;
   private HarnessRunControlCommandService service;
 
   @BeforeEach
@@ -62,9 +64,16 @@ class HarnessRunControlCommandServiceTest {
     controlStore = mock(RunControlMessageStore.class);
     controlIds = mock(RunControlIdGenerator.class);
     runTransactions = mock(HarnessRunTransactionService.class);
+    eventWriter = mock(HarnessRunEventWriter.class);
     service =
         new HarnessRunControlCommandService(
-            sessionMapper, entryMapper, runMapper, controlStore, controlIds, runTransactions);
+            sessionMapper,
+            entryMapper,
+            runMapper,
+            controlStore,
+            controlIds,
+            runTransactions,
+            eventWriter);
   }
 
   /** An active command cannot report acceptance when its durable insert affected no row. */
@@ -73,7 +82,7 @@ class HarnessRunControlCommandServiceTest {
     HarnessSessionDO active = session(RUN_ID, LEAF_ID);
     when(sessionMapper.find(SESSION_ID)).thenReturn(active);
     when(runMapper.findForUpdate(RUN_ID)).thenReturn(run(RunStatus.RUNNING));
-    when(sessionMapper.findForUpdate(SESSION_ID)).thenReturn(active);
+    when(eventWriter.lockSessionAndRoot(SESSION_ID)).thenReturn(active);
     when(entryMapper.findLatestOnPathByType(
             SESSION_ID, LEAF_ID, SessionEntryType.AGENT_SNAPSHOT.value()))
         .thenReturn(snapshot());
@@ -92,7 +101,7 @@ class HarnessRunControlCommandServiceTest {
     HarnessSessionDO active = session(RUN_ID, LEAF_ID);
     when(sessionMapper.find(SESSION_ID)).thenReturn(active);
     when(runMapper.findForUpdate(RUN_ID)).thenReturn(run(RunStatus.RUNNING));
-    when(sessionMapper.findForUpdate(SESSION_ID)).thenReturn(active);
+    when(eventWriter.lockSessionAndRoot(SESSION_ID)).thenReturn(active);
     when(entryMapper.findLatestOnPathByType(
             SESSION_ID, LEAF_ID, SessionEntryType.AGENT_SNAPSHOT.value()))
         .thenReturn(snapshot());
@@ -103,7 +112,7 @@ class HarnessRunControlCommandServiceTest {
         service.submit(SESSION_ID, RunControlKind.STEER, user("steer"), precise);
 
     assertEquals(timestamp, result.createdAt());
-    verify(runTransactions).appendExternalEvents(eq(RUN_ID), anyList(), eq(timestamp));
+    verify(eventWriter).appendLocked(any(HarnessRunDO.class), anyList(), eq(timestamp));
   }
 
   /** A direct promotion fails deterministically when the control terminal CAS loses. */
@@ -119,6 +128,7 @@ class HarnessRunControlCommandServiceTest {
     when(controlStore.insert(any(RunControlMessage.class))).thenReturn(1);
     when(runTransactions.submitUserMessage(SESSION_ID, LEAF_ID, user("follow"), NOW))
         .thenReturn(queuedRun());
+    when(runMapper.findForUpdate(NEW_RUN_ID)).thenReturn(newRun());
 
     assertThrows(
         IllegalStateException.class,
@@ -132,7 +142,7 @@ class HarnessRunControlCommandServiceTest {
     HarnessSessionDO inactive = session(null, LEAF_ID);
     when(sessionMapper.find(SESSION_ID)).thenReturn(hint);
     when(runMapper.findForUpdate(RUN_ID)).thenReturn(run(RunStatus.RUNNING));
-    when(sessionMapper.findForUpdate(SESSION_ID)).thenReturn(inactive);
+    when(eventWriter.lockSessionAndRoot(SESSION_ID)).thenReturn(inactive);
     when(entryMapper.findLatestOnPathByType(
             SESSION_ID, LEAF_ID, SessionEntryType.AGENT_SNAPSHOT.value()))
         .thenReturn(snapshot());
@@ -140,6 +150,7 @@ class HarnessRunControlCommandServiceTest {
     when(controlStore.insert(any(RunControlMessage.class))).thenReturn(1);
     when(runTransactions.submitUserMessage(SESSION_ID, LEAF_ID, user("race"), NOW))
         .thenReturn(queuedRun());
+    when(runMapper.findForUpdate(NEW_RUN_ID)).thenReturn(newRun());
     when(controlStore.markPromoted(CONTROL_ID, NEW_RUN_ID, NEW_ENTRY_ID, NOW)).thenReturn(true);
 
     RunControlMessage result =
@@ -175,6 +186,12 @@ class HarnessRunControlCommandServiceTest {
     run.setId(RUN_ID);
     run.setSessionId(SESSION_ID);
     run.setStatus(status.name());
+    return run;
+  }
+
+  private static HarnessRunDO newRun() {
+    HarnessRunDO run = run(RunStatus.QUEUED);
+    run.setId(NEW_RUN_ID);
     return run;
   }
 
