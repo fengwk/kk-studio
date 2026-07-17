@@ -12,7 +12,7 @@
 | 资源 API | `/api/providers`、`/api/models`、`/api/agents` |
 | Harness API | `/api/sessions`、`/api/runs`、`/api/tool-invocations`、`/api/usage` |
 | 实时通道 | 数据库 cursor 驱动的 Run SSE 与 Root Activity SSE |
-| 视觉实现 | `styles.css` 与 AI Extension Host 组件 |
+| 视觉实现 | 全局 token 以 Canvas 设计为事实源，见 [前端设计规范](../product-design/frontend-design-system.md)；组件层仍在迁移 |
 
 ## 路由
 

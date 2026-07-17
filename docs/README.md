@@ -10,6 +10,7 @@ flowchart TD
     A --> B[technical-solution/README.md]
     A --> I[product-design/infinite-canvas-prototype.md]
     A --> K[product-design/infinite-canvas-product-logic.md]
+    A --> M[product-design/frontend-design-system.md]
     I --> J[product-design/infinite-canvas-prototype/index.html]
     B --> C[architecture.md]
     B --> L[infinite-canvas-implementation-design.md]
@@ -18,6 +19,7 @@ flowchart TD
     B --> F[storage-models.md]
     B --> G[frontend-implementation-design.md]
     B --> H[harness-extensions.md]
+    M --> G
 ```
 
 ## 入口索引
@@ -27,6 +29,7 @@ flowchart TD
 | [technical-solution/README.md](technical-solution/README.md) | 技术方案入口 | 汇总已落地架构与当前批准的目标落地设计 |
 | [product-design/infinite-canvas-prototype.md](product-design/infinite-canvas-prototype.md) | 产品原型 | 定义无限画布的产品定位、页面原型、交互和视觉边界；可直接打开 [交互原型](product-design/infinite-canvas-prototype/index.html) |
 | [product-design/infinite-canvas-product-logic.md](product-design/infinite-canvas-product-logic.md) | 产品逻辑 | 定义 Node、Resource、Link、ResourceReference、Function、Workflow、传播、运行和 MVP 闭环标准 |
+| [product-design/frontend-design-system.md](product-design/frontend-design-system.md) | 前端设计规范 | 定义全局 token、AppShell、组件与 Agent 面板模块化约定；明确视觉统一进度与迁移清单 |
 | [technical-solution/infinite-canvas-implementation-design.md](technical-solution/infinite-canvas-implementation-design.md) | 无限画布技术方案 | 定义领域模块、存储、Command、Function/Workflow Runtime、Web API、前端状态和低耦合 Agent Port |
 
 ## 维护规则
