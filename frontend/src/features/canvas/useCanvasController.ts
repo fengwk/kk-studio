@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { SAVE_SETTLE_MS } from '@/features/canvas/data'
 import {
   canvasReducer,
   createInitialCanvasState,
@@ -7,6 +6,7 @@ import {
   getContextDescription,
 } from '@/features/canvas/reducer'
 import { useCanvasKeyboard } from '@/features/canvas/useCanvasKeyboard'
+import { useCanvasTimers } from '@/features/canvas/useCanvasTimers'
 import type {
   AddMenuAction,
   AgentContextMode,
@@ -24,9 +24,6 @@ export function useCanvasController() {
   const [state, dispatch] = useReducer(canvasReducer, undefined, createInitialCanvasState)
   const [stageMetrics, setStageMetricsState] = useState<StageMetrics>(DEFAULT_STAGE)
   const stageMetricsRef = useRef<StageMetrics>(DEFAULT_STAGE)
-  const toastTimerRef = useRef<number | null>(null)
-  const saveTimerRef = useRef<number | null>(null)
-  const runTimerRef = useRef<number | null>(null)
   const fitViewRef = useRef<(() => void) | null>(null)
   const focusSelectionRef = useRef<(() => void) | null>(null)
   const zoomRef = useRef<((scale: number) => void) | null>(null)
@@ -41,87 +38,17 @@ export function useCanvasController() {
   const researchCloseRef = useRef<HTMLButtonElement | null>(null)
   const helpDialogRef = useRef<HTMLDialogElement | null>(null)
 
-  const clearToastTimer = useCallback(() => {
-    if (toastTimerRef.current !== null) {
-      window.clearTimeout(toastTimerRef.current)
-      toastTimerRef.current = null
-    }
-  }, [])
-
-  const clearSaveTimer = useCallback(() => {
-    if (saveTimerRef.current !== null) {
-      window.clearTimeout(saveTimerRef.current)
-      saveTimerRef.current = null
-    }
-  }, [])
-
-  const showToast = useCallback((message: string) => {
-    dispatch({ type: 'set-toast', toast: message })
-    clearToastTimer()
-    toastTimerRef.current = window.setTimeout(() => {
-      dispatch({ type: 'set-toast', toast: null })
-      toastTimerRef.current = null
-    }, 2400)
-  }, [clearToastTimer])
-
-  useEffect(() => {
-    if (!state.toast) {
-      return clearToastTimer
-    }
-    clearToastTimer()
-    toastTimerRef.current = window.setTimeout(() => {
-      dispatch({ type: 'set-toast', toast: null })
-      toastTimerRef.current = null
-    }, 2400)
-    return clearToastTimer
-  }, [state.toast, clearToastTimer])
-
-  useEffect(() => {
-    if (state.saveState !== 'saving') {
-      return clearSaveTimer
-    }
-    clearSaveTimer()
-    saveTimerRef.current = window.setTimeout(() => {
-      dispatch({ type: 'set-save-state', saveState: 'saved' })
-      saveTimerRef.current = null
-    }, SAVE_SETTLE_MS)
-    return clearSaveTimer
-  }, [state.saveState, state.nodes, state.links, clearSaveTimer])
-
-  const stopRunTimer = useCallback(() => {
-    if (runTimerRef.current !== null) {
-      window.clearInterval(runTimerRef.current)
-      runTimerRef.current = null
-    }
-  }, [])
-
-  useEffect(() => {
-    const run = state.nodes.find((node) => node.type === 'run')
-    if (!run || run.type !== 'run' || run.status !== 'running') {
-      stopRunTimer()
-      return stopRunTimer
-    }
-    if (runTimerRef.current !== null) {
-      return stopRunTimer
-    }
-    runTimerRef.current = window.setInterval(() => {
-      dispatch({ type: 'tick-agent-run', stage: stageMetricsRef.current })
-    }, 620)
-    return stopRunTimer
-  }, [state.nodes, stopRunTimer])
-
-  useEffect(() => () => {
-    clearToastTimer()
-    clearSaveTimer()
-    stopRunTimer()
-  }, [clearToastTimer, clearSaveTimer, stopRunTimer])
+  const { showToast, stopRunTimer } = useCanvasTimers({
+    state,
+    dispatch,
+    stageMetricsRef,
+  })
 
   useEffect(() => {
     if (state.focusAgentPromptToken > 0) {
       agentPromptRef.current?.focus()
     }
   }, [state.focusAgentPromptToken])
-
   useEffect(() => {
     if (state.focusGenerationPromptToken <= 0) {
       return

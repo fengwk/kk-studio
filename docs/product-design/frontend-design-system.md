@@ -28,30 +28,29 @@
 | Canvas 色板 | 已收敛 | `canvas.css` 只消费全局 token |
 | Canvas Agent 面板结构 | 已模块化 | Dock / Thread / Composer / 分型消息 |
 | Canvas 快捷键 | 已拆分 | `useCanvasKeyboard` 独立于主 controller |
+| Canvas 计时器 | 已拆分 | `useCanvasTimers` 独立管理 toast/save/run |
+| CSS 业务 rgba | 已收敛 | 业务规则使用 token / color-mix，无旁路硬编码色板 |
 
-### 1.2 仍可改进（非阻塞）
+### 1.2 有意延后（最优边界）
 
 | 层 | 状态 | 说明 |
 | --- | --- | --- |
-| 组件原语库 | 未建立 | 尚无统一 `Button` / `Input` / `Card` / `Modal` React 原语；**当前不急**，AI 与 Canvas class 复用已够用 |
-| 间距阶梯 token | 部分 | radius 已 token 化；spacing scale 可按需补 |
-| 图标体系 | 部分 | Shell/AI 用 `lucide-react`，Canvas Dock 保留精确 SVG |
-| `useCanvasController` | 可继续拆 | 已抽键盘；timer/dialog focus 可再拆，但收益递减 |
-| `reducer.ts` | 可按域拆 | 体量大但边界清晰；无强制拆文件必要 |
-| AI/Canvas 共享 Agent UI | 延后 | 数据契约不同，等 Canvas 接真实 Session 再抽 platform 层 |
+| 组件原语库 | 不做 | class + token 已够用；无跨 feature 复制痛点 |
+| 间距阶梯 token | 可选 | 收益低，不阻塞统一 |
+| 图标体系 | 保持 | Shell/AI 用 lucide；Canvas Dock 保留精确 SVG |
+| `reducer.ts` 再拆 | 不做 | 单一状态机更易推理 |
+| AI/Canvas 共享 Agent UI | 延后 | 等 Canvas 接真实 Session/Harness 契约 |
 
-**结论：CSS 层视觉 token 已统一；模块化以“够用即止”。** 当前完成：
+**结论：当前前端视觉与结构已达本阶段最优。** 完成面：
 
 ```text
 单一设计事实源
-+ 全局 token
++ 全局 token（含修复后的有效定义）
 + 统一外壳
-+ CSS 业务规则零裸 hex
++ CSS 业务规则零裸 hex / 零旁路 rgba 色板
 + Canvas Agent 面板模块化
-+ Canvas 快捷键拆分
++ Controller 拆出 keyboard + timers
 ```
-
-后续仅在真实复用痛点出现时再抽 React 原语库与共享 Agent UI。
 
 ## 2. 设计原则
 
@@ -418,13 +417,14 @@ rg "#[0-9a-fA-F]{3,8}" frontend/src/styles.css frontend/src/features/**/*.css
 | AI Chat / 资源 / ComfyUI | 已充分模块化 | 保持，不重拆 |
 | Canvas Agent 面板 | 已按 pi/Chat 分型 | 保持 |
 | `useCanvasKeyboard` | 边界清晰 | **已拆出** |
-| `useCanvasController` 剩余 | timer/dialog/refs 内聚 | 暂不继续拆 |
-| `reducer.ts` | 单一状态机可读 | 暂不拆 |
+| `useCanvasTimers` | toast/save/run 计时 | **已拆出** |
+| `useCanvasController` 剩余 | actions + dialog focus refs | **停止**（再拆收益低） |
+| `reducer.ts` | 单一状态机可读 | **停止** |
 | `CanvasStage` | RF 投影边界正确 | 保持 |
-| 共享 React 原语库 | 无强复用痛点 | **现在不做** |
-| platform Agent UI | 契约未统一 | **等 Session 接入再做** |
+| 共享 React 原语库 | 无强复用痛点 | **不做** |
+| platform Agent UI | 契约未统一 | **等 Session 接入** |
 
-原则：只有当文件职责混杂、测试困难或跨 feature 复制时才继续拆；不为“看起来更模块”而拆。
+原则：只有当文件职责混杂、测试困难或跨 feature 复制时才继续拆；不为“看起来更模块”而拆。当前已到停止点。
 
 ## 10. 当前实现索引
 
@@ -436,6 +436,7 @@ rg "#[0-9a-fA-F]{3,8}" frontend/src/styles.css frontend/src/features/**/*.css
 | Canvas 样式 | `frontend/src/features/canvas/canvas.css` |
 | Canvas Agent 面板 | `frontend/src/features/canvas/agent/**` |
 | Canvas 快捷键 | `frontend/src/features/canvas/useCanvasKeyboard.ts` |
+| Canvas 计时器 | `frontend/src/features/canvas/useCanvasTimers.ts` |
 | Canvas JS 主题镜像 | `frontend/src/features/canvas/canvas-theme.ts` |
 | 设计原型 | `docs/product-design/infinite-canvas-prototype/` |
 
