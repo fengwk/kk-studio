@@ -30,6 +30,7 @@ export function TaskTimelinePanel({
   error,
   decisionPending,
   onDecision,
+  permissionsOnly = false,
 }: {
   activities: RootActivityDTO[]
   taskTree: SubagentTaskNode[]
@@ -38,10 +39,29 @@ export function TaskTimelinePanel({
   error: unknown
   decisionPending: boolean
   onDecision: (invocationId: string, decision: 'allow' | 'deny') => void
+  permissionsOnly?: boolean
 }) {
   const [selectedInvocationId, setSelectedInvocationId] = useState<string | null>(null)
   const selected = findTask(taskTree, selectedInvocationId)
   const timeline = activities.filter((activity) => TIMELINE_TYPES.has(activity.type))
+
+  if (permissionsOnly) {
+    if (relayPermissions.length === 0) {
+      return null
+    }
+    return (
+      <section className="task-timeline-panel permissions-only" aria-label="子代理权限">
+        {relayPermissions.map((permission) => (
+          <PermissionRelay
+            key={permission.invocationId}
+            permission={permission}
+            pending={decisionPending}
+            onDecision={onDecision}
+          />
+        ))}
+      </section>
+    )
+  }
 
   return (
     <section className="task-timeline-panel" aria-label="任务时间线">
