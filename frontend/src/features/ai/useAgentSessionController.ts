@@ -8,8 +8,19 @@ import { useHarnessRunControls } from '@/features/ai/useHarnessRunControls'
 import { useHarnessSessionObservability } from '@/features/ai/useHarnessSessionObservability'
 import { useHarnessTaskTimeline } from '@/features/ai/useHarnessTaskTimeline'
 
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+  if (typeof error === 'string' && error.trim()) {
+    return error
+  }
+  return '请求失败'
+}
+
 export function useAgentSessionController(sessionId: string) {
   const [draft, setDraft] = useState('')
+  const [actionError, setActionError] = useState<string | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
 
   const {
@@ -24,7 +35,7 @@ export function useAgentSessionController(sessionId: string) {
     entriesQuery,
     runEventsQuery,
   } = useAgentSessionQueries(sessionId)
-  const createMessageMutation = useAgentSessionMessageMutation(sessionId, session?.leafEntryId ?? null, () => setDraft(''))
+  const createMessageMutation = useAgentSessionMessageMutation(sessionId, () => setDraft(''))
   const agentsById = new Map(agents.map((agent) => [String(agent.id), agent]))
   const timeline = buildSessionTimeline(entries, runEvents)
   const activeRun = hasActiveRun(runs)
@@ -38,7 +49,6 @@ export function useAgentSessionController(sessionId: string) {
   const runControls = useHarnessRunControls(sessionId)
 
   useChatTranscriptAutoScroll(bodyRef, timeline.messages.length, entries.length + runEvents.length)
-  // Fetch/cache covers the latest run; only open SSE while a run is still active.
   useHarnessRunEventStream(
     sessionId,
     currentActiveRun?.runId ?? null,
@@ -50,7 +60,13 @@ export function useAgentSessionController(sessionId: string) {
     if (!content || activeRun || createMessageMutation.isPending) {
       return
     }
-    createMessageMutation.mutate(content)
+    setActionError(null)
+    createMessageMutation.mutate(content, {
+      onError: (error) => {
+        // Keep draft so the user can retry; surface a pi-style error panel.
+        setActionError(errorMessage(error))
+      },
+    })
   }
 
   function submitSteer() {
@@ -58,7 +74,11 @@ export function useAgentSessionController(sessionId: string) {
     if (!content || !activeRun || runControls.pending) {
       return
     }
-    runControls.steer.mutate(content, { onSuccess: () => setDraft('') })
+    setActionError(null)
+    runControls.steer.mutate(content, {
+      onSuccess: () => setDraft(''),
+      onError: (error) => setActionError(errorMessage(error)),
+    })
   }
 
   function submitFollowUp() {
@@ -66,14 +86,21 @@ export function useAgentSessionController(sessionId: string) {
     if (!content || runControls.pending) {
       return
     }
-    runControls.followUp.mutate(content, { onSuccess: () => setDraft('') })
+    setActionError(null)
+    runControls.followUp.mutate(content, {
+      onSuccess: () => setDraft(''),
+      onError: (error) => setActionError(errorMessage(error)),
+    })
   }
 
   function abortRun() {
     if (!activeRun || runControls.pending) {
       return
     }
-    runControls.abort.mutate()
+    setActionError(null)
+    runControls.abort.mutate(undefined, {
+      onError: (error) => setActionError(errorMessage(error)),
+    })
   }
 
   return {
@@ -86,7 +113,7 @@ export function useAgentSessionController(sessionId: string) {
     runs,
     activeRun,
     messagesLoading: sessionQuery.isLoading || entriesQuery.isLoading,
-    messagesError: sessionQuery.error || entriesQuery.error || runEventsQuery.error || runControls.error,
+    messagesError: sessionQuery.error || entriesQuery.error || runEventsQuery.error,
     bodyRef,
     draft,
     pending: createMessageMutation.isPending,
@@ -94,6 +121,8 @@ export function useAgentSessionController(sessionId: string) {
     observability,
     taskTimeline,
     controlsPending: runControls.pending,
+    actionError,
+    dismissActionError: () => setActionError(null),
     setDraft,
     submitMessage,
     submitSteer,

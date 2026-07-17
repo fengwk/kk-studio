@@ -60,12 +60,16 @@ export function useAgentSessionQueries(sessionId: string) {
     enabled: Boolean(eventRunId),
   })
 
-  // Terminal runs without live SSE still need a final entries refresh for durable ASSISTANT rows.
+  // Terminal runs without live SSE still need a final refresh for ASSISTANT entries and leaf CAS.
   useEffect(() => {
     if (!sessionId || !latestRun || !TERMINAL_RUN_STATUSES.has(latestRun.status)) {
       return
     }
-    void queryClient.invalidateQueries({ queryKey: queryKeys.sessions.entries(sessionId) })
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.sessions.detail(sessionId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.sessions.entries(sessionId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.sessions.runs(sessionId) }),
+    ])
   }, [latestRun, queryClient, sessionId])
 
   return {
