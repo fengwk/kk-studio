@@ -16,6 +16,7 @@
 
     <modules>
         <module>share</module>
+        <module>studio</module>
         <module>core</module>
         <module>web</module>
         <module>harness</module>
@@ -38,6 +39,11 @@
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
                 <artifactId>kk-studio-share</artifactId>
+                <version>${kk-studio.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>fun.fengwk.kk-studio</groupId>
+                <artifactId>kk-studio-studio</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>
