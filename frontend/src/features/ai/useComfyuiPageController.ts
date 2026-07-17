@@ -5,10 +5,8 @@ import { useComfyuiController } from '@/features/ai/useComfyuiController'
 /**
  * Isolated controller for the ComfyUI workflow page.
  *
- * Unlike `useAiConsoleController`, this hook never touches the legacy
- * `/api/agent/**` resource or session endpoints, so the page keeps working
- * after those endpoints disappear. It exposes only the ComfyUI workflow
- * state plus a local search box that filters workflows client-side.
+ * This hook exposes only ComfyUI workflow state plus a local search box that
+ * filters workflows client-side.
  */
 export function useComfyuiPageController() {
   const [search, setSearch] = useState('')

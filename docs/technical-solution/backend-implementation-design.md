@@ -1,190 +1,69 @@
 # 后端落地设计
 
-本文描述当前已经落地的 `share`、`core`、`web` 三层实现，以及云端内嵌 agent MVP 的后端控制面。
+本文描述当前 `share`、`core` 和 `web` 的 Harness 控制面。领域状态由 `core` 管理，`web` 仅负责 HTTP、SSE 和 WebSocket 适配。
 
-## 实现摘要
-
-| 主题 | 当前状态 |
-| --- | --- |
-| API 范围 | provider / model / agent / session / event / event stream / run |
-| 运行时 | message submit 后调度 embedded runtime |
-| 存储初始化 | H2 schema/seed + MySQL schema/seed |
-| 共享契约 | `share` 统一承载 `Agent*DTO` |
-| 本地验收 | 支持 `local-h2` + 验收 stub provider |
-
-## 模块依赖
+## 分层
 
 ```mermaid
 flowchart LR
-    Frontend[frontend]
-    Web[web]
-    Core[core]
-    Agent[agent]
-    Share[share]
+    Client[Browser / Daemon]
+    Web[web controllers and adapters]
+    Core[core application services]
+    Runtime[harness runtime ports]
+    Store[(MySQL / H2 / S3)]
 
-    Frontend --> Web
-    Web --> Core
-    Web --> Share
-    Core --> Agent
-    Core --> Share
+    Client --> Web --> Core --> Runtime
+    Core --> Store
 ```
 
-## 上层模型边界
+| 层 | 职责 |
+| --- | --- |
+| `share` | DTO、JSON 字段和 HTTP 数据边界 |
+| `web` | 路由、参数解析、SSE emitter、WebSocket adapter、HTTP 状态映射 |
+| `core.harness` | Session、Run、Task、Tool、Control、Usage、Artifact 的应用服务与持久化 |
+| `core.environment` | 全局 Environment CRUD、capability/heartbeat 应用和 daemon gateway |
+| `harness/*` | Provider、Turn、Session、Run、Tool 和协议领域合约 |
 
-| 上层模型 | agent 包对齐 | 上层允许扩展 |
+## API 边界
+
+所有 Snowflake ID 在 HTTP 载荷和路径中均为正十进制字符串。格式非法、负 cursor 或非法 limit 返回 `400`；格式合法但不存在的资源返回 `404`；版本、状态或引用冲突返回 `409`。
+
+| 域 | 接口 | 用途 |
 | --- | --- | --- |
-| `AgentProviderDTO` / `agent_provider` | `ProviderInfo.providerType/baseUrl/apiKey/timeout` | `name/description` 仅用于管理和展示 |
-| `AgentModelDTO` / `agent_model` | `ModelInfo.provider/name/defaultVariant/variants` 与 `Variant` | `description` 仅用于管理和展示 |
-| `AgentDefinitionDTO` / `agent_definition` | `AgentInfo.name/systemPrompt/defaultProvider/defaultModel/defaultVariant/tools` | `description` 仅用于管理和展示 |
-| `AgentSessionDTO` / `agent_session` | `agent.session.Session` 的 session/head 语义 | `title` 用于控制面 |
+| Provider / Model / Agent | `/api/providers`、`/api/models`、`/api/agents` | 全局 Agent 资源 CRUD |
+| Harness Session | `GET` / `POST /api/sessions`、`GET /api/sessions/{id}` | 根 Session 列表、创建和读取 |
+| Session Entry | `GET /api/sessions/{id}/entries`、`POST /api/sessions/{id}/messages` | 完整消息历史和用户消息提交 |
+| Run | `GET /api/sessions/{id}/runs`、`GET /api/runs/{id}` | Run 状态查询 |
+| Run Event | `GET /api/runs/{id}/events`、`/events/stream` | cursor 查询与 `run_event` SSE |
+| Root Activity / Task | `GET /api/sessions/{id}/activities`、`/activities/stream`、`/tasks` | Root Activity SSE 和子代理任务查询 |
+| Tool | `GET /api/runs/{id}/tool-invocations`、`POST /api/tool-invocations/{id}/decision` | Tool 状态与权限决策 |
+| Control / YOLO | `/api/sessions/{id}/steer`、`/follow-ups`、`/abort`、`/yolo` | 可恢复运行控制与根 Session 策略 |
+| Artifact / Usage | `/api/artifacts/{id}`、`/api/usage/sessions/{id}` | 原始 artifact bytes 和用量/成本汇总 |
+| Environment | `/api/environments`、`/api/environments/daemon/v1` | 全局 Environment CRUD 与 daemon WebSocket |
 
-`ProviderInfo` 不承载模型参数，也不承载 variant 请求参数。模型请求参数只能通过 `agent_model.variants_json` 映射到 `Variant`。
+ComfyUI 和 S3 接口的边界由 [ComfyUI 工作流 API](comfyui-workflow-api.md) 与 [S3 预签名](s3-presign.md) 定义。
 
-## Message 主链路
+## Session 与 Run
 
-```mermaid
-sequenceDiagram
-    participant FE as frontend
-    participant WEB as web
-    participant SESSION as AgentSessionService
-    participant RUN as AgentRunService
-    participant RUNTIME as AgentRunRuntimeService
-    participant AGENT as agent
+创建根 Session 时解析 Agent 定义并持久化冻结 Snapshot。提交用户消息以 `expectedLeafEntryId` 防止分支覆盖，并在同一事务内写入 User Entry 与 queued Run。Run worker 从数据库 claim 工作，使用冻结配置构建 Turn；Session Entry 保存完整用户、assistant、tool 和 artifact 语义，Run Event 保存增量和执行状态。
 
-    FE->>WEB: POST /api/agent/sessions/{sessionId}/messages
-    WEB->>SESSION: createMessage(...)
-    SESSION->>SESSION: 锁定 session 并确认无 active run
-    SESSION->>RUN: 写 user_message、推进 head、创建 queued run
-    SESSION-->>WEB: 返回已提交的 user_message
-    WEB->>RUNTIME: scheduleQueuedRun(...)
-    RUNTIME->>AGENT: load session + AgentInfo + ModelInfo + ProviderInfo
-    AGENT-->>RUNTIME: append set_* / assistant_*
-    FE->>WEB: GET /api/agent/sessions/{sessionId}/events/stream
-    WEB-->>FE: event: session_event
+事务锁顺序固定为 `Run -> Session -> Root -> Invocation/Task/Control`。Assistant Entry、Usage 和 Run Event 一起提交，使崩溃恢复后的历史与账本一致。
+
+## SSE 与可恢复投影
+
+Run Event 与 Root Activity SSE 都先从数据库读取 cursor 之后的事实，并在每次成功 `send` 后推进 cursor。请求参数 cursor 优先于 `Last-Event-ID`；合法 cursor 可断线重连，错误 cursor 返回 `400`。SSE emitter 不保留业务 EventBus 或执行状态。
+
+## Tool、Environment 与 Artifact
+
+Tool Invocation 在数据库中经历权限、lease、partial 与 terminal 状态。Cloud、Control 和 Environment 分别使用受限的 worker 查询和 lease 语义；Environment gateway 的连接注册表只保存 transient connection handle。Environment daemon 返回的 artifact bytes 经协议校验后写入全局 ArtifactStore，Artifact HTTP 接口返回原 media type 的原始 bytes。
+
+Environment REST CRUD 不接受 capability 或 last-seen 字段；这两个 daemon-owned 事实仅由认证后的 daemon protocol 更新。协议、token、envelope 和 artifact 限制见 [Environment Daemon Gateway](environment-daemon-gateway.md)。
+
+## 验证
+
+```bash
+env JAVA_HOME=$JAVA_HOME_17 mvn clean verify -Dspotless.check.skip=true
+env JAVA_HOME=$JAVA_HOME_17 mvn validate -Dspotless.check.skip=true
 ```
 
-Message 写入事务遵循以下约束：
-
-- 通过 `select ... for update` 锁定 session 行，同一 session 的消息提交串行化。
-- session 已存在 `queued` 或 `running` run 时拒绝新消息，避免并行 Agent 分叉并产生不可见回答。
-- `user_message`、queued run 和 session current head 在同一事务内写入。
-- `web` 在事务方法返回后调度 runtime；executor 拒绝任务时，queued run 立即转为 `failed`，不会长期停留在 active 状态。
-- 删除 session 时先锁定 session 并拒绝 active run，再在同一事务内删除 run、event 和 session 主记录。
-- branch 回放与 `agent` 模块保持一致：`root` 表示空链，非 root head 只沿 `parentEventId` 回放严格祖先链。
-
-## `share` DTO 清单
-
-| DTO | 用途 |
-| --- | --- |
-| `AgentProviderDTO`、`AgentProviderCreateDTO`、`AgentProviderUpdateDTO` | Provider CRUD |
-| `AgentModelDTO`、`AgentModelCreateDTO`、`AgentModelUpdateDTO` | Model CRUD |
-| `AgentDefinitionDTO`、`AgentDefinitionCreateDTO`、`AgentDefinitionUpdateDTO` | Agent CRUD |
-| `AgentSessionDTO`、`AgentSessionCreateDTO`、`AgentSessionUpdateDTO` | Chat session CRUD |
-| `AgentSessionMessageCreateDTO` | 用户消息提交 |
-| `AgentSessionEventDTO` | session branch event |
-| `AgentRunDTO` | run 查询结果 |
-
-DTO 规则：
-
-| 规则 | 说明 |
-| --- | --- |
-| 字段命名 | 与 JSON 字段保持一致 |
-| 业务标识 | provider/model/agent/session/event/run 全部使用业务 id 或业务键 |
-| `payloadJson` | 当前直接透传字符串 |
-| JSON 配置字段 | service 层校验对象或数组边界 |
-
-## `core` 包结构
-
-```text
-fun.fengwk.kkstudio.core.agent
-├── definition
-├── model
-├── provider
-├── run
-├── runtime
-├── session
-└── support
-```
-
-| 包 | 职责 |
-| --- | --- |
-| `provider` | provider 仓储、领域模型、CRUD 服务、DTO 转换 |
-| `model` | model 仓储、领域模型、CRUD 服务、variant JSON 校验 |
-| `definition` | agent definition 仓储、领域模型、CRUD 服务、provider/model 引用校验 |
-| `session` | session / event 仓储、branch 回放、message submit 入口 |
-| `run` | run 仓储、领域模型、状态迁移服务 |
-| `runtime` | runtime 自动配置、embedded runtime 执行、agent 包模型组装 |
-| `support` | 业务 id 生成 |
-
-## `web` API
-
-| 域 | Method | Path | Query / Body | 返回 |
-| --- | --- | --- | --- | --- |
-| Provider | `GET` | `/api/agent/providers` | `pageNumber`, `pageSize` | `Result<Page<AgentProviderDTO>>` |
-| Provider | `POST` | `/api/agent/providers` | `AgentProviderCreateDTO` | `Result<AgentProviderDTO>` |
-| Provider | `PUT` | `/api/agent/providers/{id}` | `AgentProviderUpdateDTO` | `Result<AgentProviderDTO>` |
-| Provider | `DELETE` | `/api/agent/providers/{id}` | 无 | `204` |
-| Model | `GET` | `/api/agent/models` | `pageNumber`, `pageSize` | `Result<Page<AgentModelDTO>>` |
-| Model | `POST` | `/api/agent/models` | `AgentModelCreateDTO` | `Result<AgentModelDTO>` |
-| Model | `PUT` | `/api/agent/models/{id}` | `AgentModelUpdateDTO` | `Result<AgentModelDTO>` |
-| Model | `DELETE` | `/api/agent/models/{id}` | 无 | `204` |
-| Agent | `GET` | `/api/agent/agents` | `pageNumber`, `pageSize` | `Result<Page<AgentDefinitionDTO>>` |
-| Agent | `POST` | `/api/agent/agents` | `AgentDefinitionCreateDTO` | `Result<AgentDefinitionDTO>` |
-| Agent | `PUT` | `/api/agent/agents/{id}` | `AgentDefinitionUpdateDTO` | `Result<AgentDefinitionDTO>` |
-| Agent | `DELETE` | `/api/agent/agents/{id}` | 无 | `204` |
-| Session | `GET` | `/api/agent/sessions` | `pageNumber`, `pageSize` | `Result<Page<AgentSessionDTO>>` |
-| Session | `POST` | `/api/agent/sessions` | `AgentSessionCreateDTO` | `Result<AgentSessionDTO>` |
-| Session | `GET` | `/api/agent/sessions/{sessionId}` | 无 | `Result<AgentSessionDTO>` |
-| Session | `PUT` | `/api/agent/sessions/{sessionId}` | `AgentSessionUpdateDTO` | `Result<AgentSessionDTO>` |
-| Session | `DELETE` | `/api/agent/sessions/{sessionId}` | 无 | `204` |
-| Message | `POST` | `/api/agent/sessions/{sessionId}/messages` | `AgentSessionMessageCreateDTO` | `Result<AgentSessionEventDTO>` |
-| Event | `GET` | `/api/agent/sessions/{sessionId}/events` | `headEventId` 可选 | `Result<List<AgentSessionEventDTO>>` |
-| Event Stream | `GET` | `/api/agent/sessions/{sessionId}/events/stream` | `headEventId`、`idleTimeoutMillis` 可选 | `text/event-stream` |
-| Run | `GET` | `/api/agent/sessions/{sessionId}/runs` | 无 | `Result<List<AgentRunDTO>>` |
-
-SSE 事件：
-
-| 事件名 | data |
-| --- | --- |
-| `session_event` | `AgentSessionEventDTO` |
-| `heartbeat` | `{ "timestampMillis": number }` |
-
-SSE 当前行为：
-
-| 场景 | 当前实现 |
-| --- | --- |
-| 默认 current head 订阅 | controller 维护 `lastEmittedEventId`，每轮通过增量查询只拉取新事件 |
-| 显式 `headEventId` 订阅 | 保留 branch 快照语义，继续按指定 head 全量重建 |
-| 去重 | 同一连接内按 `eventId` 去重后再发送 `session_event` |
-| 空闲退出 | 使用 `hasActiveRun(sessionId)` 判定是否仍有 `queued/running` run，而不是每轮拉全量 runs |
-
-## 本地 H2 验收模式
-
-| 项目 | 说明 |
-| --- | --- |
-| Spring Profile | `local-h2` |
-| 配置文件 | `web/src/main/resources/application-local-h2.yml` |
-| 数据库 | 本地 H2 内存库，服务重启即清空业务数据 |
-| Provider | `LocalH2AcceptanceConfiguration` 注入 `AcceptanceStubProviderManager` |
-| Run 调度 | `agentRunTaskExecutor` 使用同步执行器，便于手工验收 |
-| SSE 调度 | `agentEventStreamTaskExecutor` 独立异步执行 |
-| 雪花 ID | 固定 `convention.snowflake-id.worker-id = 0`，不依赖 Redis 申请 worker id |
-
-## 测试边界
-
-| 层级 | 测试类 | 验证内容 |
-| --- | --- | --- |
-| `core` service | `AgentProviderServiceTest`、`AgentModelServiceTest`、`AgentDefinitionServiceTest` | Provider/Model/Agent CRUD 与引用校验 |
-| `core` service | `AgentSessionServiceTest` | session 创建、编辑、删除、message submit、runtime 结果 |
-| `core` service | `AgentRunServiceTest` | run 查询与状态 |
-| `web` controller | `StudioAgentResourceControllerTest` | provider/model/agent CRUD API |
-| `web` controller | `StudioAgentSessionControllerTest` | session CRUD、message、events、SSE |
-| `web` controller | `StudioAgentRunControllerTest` | run API |
-
-## 验证命令
-
-| 目标 | 命令 |
-| --- | --- |
-| 后端完整验证 | `env JAVA_HOME=$JAVA_HOME_17 mvn clean verify` |
-| 后端局部验证 | `env JAVA_HOME=$JAVA_HOME_17 mvn -pl web -am test` |
-| 后端打包 | `env JAVA_HOME=$JAVA_HOME_17 mvn -pl web -am -DskipTests package` |
+Java 代码还需通过仓库 Checkstyle、Google Java Format 1.18.0 strict dry-run、newline audit 和 `git diff --check`。

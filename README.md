@@ -1,146 +1,83 @@
 # kk-studio
 
-`kk-studio` 当前是一套前后端分离的云端内嵌 Agent Studio MVP。主链路为 `provider / model / agent / session / event / run`，后端运行时以 `agent` 包数据结构为准组装执行上下文。
+`kk-studio` 是全局单实例的 Agent Studio。Harness 将 Session、Run、Run Event、Tool Invocation、Task、Control、Usage、Artifact 和 Environment 持久化为唯一可恢复事实；前端通过 REST 和数据库 cursor 驱动的 SSE 重建页面状态。
 
-## 快速导览
+## 能力摘要
 
-| 主题 | 当前状态 | 入口 |
-| --- | --- | --- |
-| 产品形态 | 前后端分离控制面 | `frontend/` + `web/` |
-| 后端主链路 | provider / model / agent / session / event / run / embedded runtime | `core/` `web/` |
-| 前端主链路 | Agent 控制台、Provider/Model/Agent CRUD、Chat 列表与详情 | `frontend/src/features/ai/` |
-| 运行时模型 | 服务端单进程 embedded runtime | `docs/technical-solution/cloud-embedded-agent-runtime.md` |
-| 技术方案入口 | 当前生效方案文档 | [docs/technical-solution/README.md](docs/technical-solution/README.md) |
+| 领域 | 已落地能力 |
+| --- | --- |
+| Agent 资源 | Provider、Model、Agent 的全局 CRUD 与运行时配置 |
+| Harness Chat | 冻结 Agent Snapshot、完整 Session Entry、可恢复 Run 与 Run Event 流 |
+| Tool | 权限、YOLO、Cloud/Environment 执行、artifact 与媒体预览 |
+| Subagent | Root Activity、递归 Task Tree、child report、权限 relay 与 Run Control |
+| 用量与成本 | Prompt Cache、不可变 Usage Record、价格快照和 Session 聚合 |
+| Environment | 全局 Environment Registry、认证后的 Daemon v1 WebSocket gateway |
+| ComfyUI | 工作流卡片 CRUD、无状态远端 job、浏览器经 S3 预签名直传输入/输出 |
 
 ## 系统拓扑
 
 ```mermaid
 flowchart LR
-    Browser[浏览器]
+    Browser[Browser]
     Frontend[frontend<br/>React + Vite]
-    Web[web<br/>HTTP API + SSE]
-    Core[core<br/>领域服务 + runtime]
-    Agent[agent<br/>执行内核]
-    Share[share<br/>共享 DTO]
+    Web[web<br/>REST / SSE / WebSocket]
+    Core[core<br/>Harness application services]
+    Runtime[harness/*]
     DB[(MySQL / H2)]
+    S3[(S3)]
+    Daemon[Environment Daemon]
 
-    Browser --> Frontend
-    Frontend -->|/api| Web
-    Web --> Core
-    Web --> Share
-    Core --> Share
-    Core --> Agent
+    Browser --> Frontend --> Web --> Core --> Runtime
     Core --> DB
+    Browser --> S3
+    Daemon <-->|Daemon v1| Web
 ```
-
-## 当前能力
-
-| 领域 | 已落地能力 |
-| --- | --- |
-| Provider | 创建、编辑、删除、分页查询；运行时映射为 `ProviderInfo` 的 `providerType/baseUrl/apiKey/timeout` |
-| Model | 创建、编辑、删除、分页查询；运行时映射为 `ModelInfo` 和 `Variant` |
-| Agent | 创建、编辑、删除、分页查询；运行时映射为 `AgentInfo` |
-| Chat | 创建、编辑、删除 session，提交 message，基于 `agent_session_event` 投影聊天消息 |
-| 流式事件 | `GET /api/agent/sessions/{sessionId}/events/stream` 以 SSE 推送 `session_event` |
-| Runtime | `queued -> running -> succeeded/failed`，事务提交后调度 embedded runtime |
-| 存储初始化 | H2 schema/seed、MySQL schema/seed |
 
 ## 仓库结构
 
 | 目录 | 角色 |
 | --- | --- |
-| `agent/` | 执行内核，定义 `AgentInfo`、`ModelInfo`、`Variant`、`ProviderInfo`、session event 与 provider 调用语义 |
-| `core/` | 领域服务、仓储、runtime 组装 |
-| `web/` | Spring Boot HTTP API 与 SSE 入口 |
-| `share/` | 前后端共享 DTO |
+| `harness/` | Provider、Tool、Agent Turn、Session/Run runtime 与 Environment daemon |
+| `core/` | 持久化、应用服务、worker、Environment gateway、S3 与 ComfyUI 集成 |
+| `web/` | Spring Boot REST、SSE 与 WebSocket adapter |
+| `share/` | HTTP DTO |
 | `frontend/` | React + TypeScript + Vite 控制面 |
-| `docs/` | 当前技术方案 |
+| `agent/` | Provider/Model/Agent 管理和嵌入式运行时支持 |
+| `docs/technical-solution/` | 当前生效的技术设计 |
 
-## 本地 MiniMax 开发模式
+## 本地开发
 
-默认开发入口只保留一个：`scripts/dev.sh`。它默认启动 `minimax-h2`，并把默认资源收敛为：
-
-- provider: `minimax`
-- model: `MiniMax-M2.7`
-- agent: `default-assistant`
-
-启动前需要提供 `MINIMAX_API_KEY`。脚本会在后端启动后把内存 H2 中的默认 `minimax` provider 同步成当前环境变量里的真实连接信息。
+使用 JDK 17：
 
 ```bash
-MINIMAX_API_KEY=xxx scripts/dev.sh start
-```
-
-常用命令：
-
-| 目标 | 命令 |
-| --- | --- |
-| 启动 | `MINIMAX_API_KEY=xxx scripts/dev.sh start` |
-| 停止 | `scripts/dev.sh stop` |
-| 重启 | `MINIMAX_API_KEY=xxx scripts/dev.sh restart` |
-| 查看状态 | `scripts/dev.sh status` |
-| 查看日志 | `scripts/dev.sh logs` |
-| 持续跟踪日志 | `scripts/dev.sh tail` |
-
-默认地址：
-
-| 服务 | 地址 |
-| --- | --- |
-| 后端 | `http://127.0.0.1:18080` |
-| 前端 | `http://127.0.0.1:5173` |
-
-
-## MySQL 运行准备
-
-```bash
-mysql -h <host> -P <port> -u <user> -p <database> < core/src/main/resources/schema-mysql.sql
-mysql -h <host> -P <port> -u <user> -p <database> < core/src/main/resources/data-mysql.sql
-```
-
-最小 seed：
-
-| 表 | 默认记录 |
-| --- | --- |
-| `agent_provider` | `stub` |
-| `agent_model` | `stub / acceptance-stub` |
-| `agent_definition` | `default-assistant` |
-
-真实模型需要在控制台或 SQL 中创建真实 provider/model/agent。Provider 存储只承载连接配置和展示信息，不承载模型参数；模型参数放在 model variants 中，agent 只绑定默认 provider/model/variant 与 system prompt/tools。
-
-## 启动前后端
-
-以下方式只适合调试单独进程；不会自动执行 `scripts/dev.sh` 里的 provider 同步步骤。
-
-后端：
-
-```bash
-env JAVA_HOME=$JAVA_HOME_17 mvn -pl web -am package -DskipTests
-MINIMAX_API_KEY=xxx $JAVA_HOME_17/bin/java -jar web/target/kk-studio-web-1.0.0.jar --spring.profiles.active=minimax-h2 --server.port=18080
+env JAVA_HOME=$JAVA_HOME_17 mvn clean verify -Dspotless.check.skip=true
 ```
 
 前端：
 
 ```bash
 cd frontend
-npm install
-API_PROXY_TARGET=http://127.0.0.1:18080 npm run dev -- --host 127.0.0.1 --port 5173
+npm ci
+npm test
+npm run lint
+npm run build
+npm run coverage
 ```
 
-## 验收命令
+使用 MiniMax 的本地 H2 开发入口：
 
-| 目标 | 命令 |
-| --- | --- |
-| 后端完整验证 | `env JAVA_HOME=$JAVA_HOME_17 mvn clean verify` |
-| 前端 lint | `cd frontend && npm run lint` |
-| 前端覆盖率 | `cd frontend && npm run coverage` |
-| 前端构建 | `cd frontend && npm run build` |
+```bash
+MINIMAX_API_KEY=xxx scripts/dev.sh start
+```
 
-## 最小验收流程
+默认地址：后端 `http://127.0.0.1:18080`，前端 `http://127.0.0.1:5173`。
 
-| 步骤 | 预期结果 |
-| --- | --- |
-| 打开 `/agent/providers` | 可看到默认 Provider，并可执行 CRUD |
-| 打开 `/agent/models` | 可看到默认 Model，并可执行 CRUD |
-| 打开 `/agent/agents` | 可看到默认 Agent，并可执行 CRUD |
-| 打开 `/agent/sessions` | 可创建、编辑、删除 Chat |
-| 进入 `/agent/sessions/{sessionId}` | 可发送 message |
-| 观察聊天详情 | SSE 推送 `assistant_delta`，页面实时追加 assistant 文本 |
+## 技术方案
+
+从 [技术方案文档地图](docs/technical-solution/README.md) 开始。关键文档：
+
+- [架构总览](docs/technical-solution/architecture.md)
+- [Harness 执行运行时](docs/technical-solution/cloud-embedded-agent-runtime.md)
+- [后端落地设计](docs/technical-solution/backend-implementation-design.md)
+- [前端落地设计](docs/technical-solution/frontend-implementation-design.md)
+- [Environment Daemon Gateway](docs/technical-solution/environment-daemon-gateway.md)
