@@ -1,132 +1,66 @@
 # 存储模型
 
-本文描述云端内嵌 Agent Studio 当前使用的数据库结构与初始化资源。数据库只持久化已经参与管理或运行时行为的数据，不保留未消费的扩展字段。
+Harness 的关系数据库是执行和恢复的唯一事实源。H2 与 MySQL schema 均维护在 `core/src/main/resources/`；测试 schema 位于 `core/src/test/resources/`。S3 只保存 ComfyUI 对象和浏览器直传对象，不承担 Harness 事务状态。
 
 ## 资源文件
 
 | 文件 | 用途 |
 | --- | --- |
-| `core/src/main/resources/schema-h2.sql` | H2 表结构，供本地运行使用 |
-| `core/src/main/resources/data-h2.sql` | `local-h2` 验收 stub seed |
-| `core/src/main/resources/data-minimax-h2.sql` | `minimax-h2` 开发 seed |
-| `core/src/main/resources/schema-mysql.sql` | MySQL 5.7 兼容表结构 |
-| `core/src/main/resources/data-mysql.sql` | MySQL 最小 seed |
-| `core/src/test/resources/schema-h2.sql` | Core 测试表结构 |
-| `core/src/test/resources/data-h2.sql` | Core 测试 seed |
+| `schema-h2.sql` / `schema-mysql.sql` | H2 与 MySQL 的完整表结构 |
+| `data-h2.sql` | 本地 H2 最小 seed |
+| `data-minimax-h2.sql` | MiniMax H2 开发 seed |
+| `data-mysql.sql` | MySQL 最小 seed |
+| `src/test/resources/schema-h2.sql` | Core 集成测试 schema |
 
-## 表清单
+## 全局资源
 
-| 表 | 职责 | 业务键 |
+| 表 | 职责 | 关键约束 |
 | --- | --- | --- |
-| `agent_provider` | Provider 连接配置与展示信息 | `name` |
-| `agent_model` | 模型与 variants | `provider_id + name` |
-| `agent_definition` | Agent 定义 | `name` |
-| `agent_session` | Chat session 元数据与当前事件指针 | `session_id` |
-| `agent_session_event` | Session 事件树 | `event_id` |
-| `agent_run` | Message submit 触发的 runtime run | `run_id` |
+| `agent_provider` | Provider 连接和配置 | `name` 唯一 |
+| `agent_model` | 模型能力和配置 | `name` 唯一 |
+| `agent_definition` | Agent 定义、默认模型和 config | `name` 唯一 |
+| `tool_environment` | 全局 Environment daemon registry | `name` 唯一；capability/last-seen 由 daemon 更新 |
+| `comfyui_workflow_api` | ComfyUI 工作流卡片 | `api_name` 唯一 |
 
-## `agent_provider`
+这些资源不带 Tenant、Workspace membership 或 ACL。资源 `version` 支持并发修改检测；一次 Run 使用解析后的 Agent Snapshot 与 Environment binding，不回看可变资源配置。
 
-| 字段 | 说明 |
-| --- | --- |
-| `id` | 内部主键 |
-| `name` | Provider 业务名称 |
-| `description` | 展示描述 |
-| `provider_type` | `ProviderType` |
-| `base_url` | Provider 服务地址 |
-| `api_key` | Provider 访问凭据 |
-| `timeout_millis` | 请求总超时 |
-| `gmt_create` / `gmt_modified` | 创建、更新时间 |
+## Harness Session 与 Run
 
-运行时映射只使用 `provider_type/base_url/api_key/timeout_millis` 构造 `ProviderInfo`。
+| 表 | 职责 | 关键字段/索引 |
+| --- | --- | --- |
+| `harness_session` | 根/子 Session 树和执行指针 | `root_session_id`、`parent_session_id`、`leaf_entry_id`、`active_run_id`、`yolo_enabled` |
+| `harness_session_entry` | 完整语义历史 | `session_id`、`parent_entry_id`、`run_id`、`entry_type`、`payload_json` |
+| `harness_run` | durable Run 与 claim lease | `session_id`、`trigger_entry_id`、`status`、`event_sequence`、`lease_*`、`cancel_requested_at` |
+| `harness_run_event` | Run 内线性 event journal | `(run_id, sequence)` 唯一 |
 
-## `agent_model`
+`harness_session_entry.payload_json` 是严格 Session Entry JSON 边界，保存消息、冻结 Snapshot 和 compaction 语义。`harness_run_event.payload_json` 保存带 schema version 的实时进度和状态。Session Entry 是完整历史基线，Run Event 是运行中覆盖层。
 
-| 字段 | 说明 |
-| --- | --- |
-| `id` | 内部主键 |
-| `provider_id` | 所属 Provider |
-| `name` | 模型名称 |
-| `description` | 展示描述 |
-| `default_variant` | 默认 variant 名称 |
-| `variants_json` | `Variant` JSON 数组 |
-| `gmt_create` / `gmt_modified` | 创建、更新时间 |
+`harness_run` 的 claim 查询使用 `(status, next_attempt_at, lease_until, id)` 索引；worker restart 后可重新 claim 已过期 lease。根/子关系通过 `root_session_id` 和 `parent_session_id` 保持，根 Session 的 `yolo_enabled` 是共享策略事实。
 
-`variants_json` 承载运行时支持的模型请求参数，包括 `temperature`、`maxOutputTokens`、`topP`、`topK`、`frequencyPenalty`、`presencePenalty` 和 `stopSequences`。
+## Tool、Task 与 Control
 
-## `agent_definition`
+| 表 | 职责 | 关键约束 |
+| --- | --- | --- |
+| `tool_invocation` | Tool 权限、目标、lease、结果与终态 | `(run_id, tool_call_id)` 和 `(assistant_entry_id, ordinal)` 唯一 |
+| `tool_artifact` | 全局不可变 Tool 输出 bytes | content、media type、size、SHA-256 一起持久化 |
+| `harness_subagent_task` | parent invocation 到 child Session/Run 的 durable relation | `parent_invocation_id` 主键 |
+| `harness_run_control_message` | steer / follow-up 的消费记录 | pending control 查询和 Session 查询索引 |
 
-| 字段 | 说明 |
-| --- | --- |
-| `id` | 内部主键 |
-| `name` | `AgentInfo.name` |
-| `description` | 展示描述 |
-| `system_prompt` | `AgentInfo.systemPrompt` |
-| `default_provider_id` | 默认 Provider |
-| `default_model_id` | 默认 Model |
-| `default_variant` | 默认 variant |
-| `tools_json` | Agent 声明的工具名称 JSON 数组 |
-| `gmt_create` / `gmt_modified` | 创建、更新时间 |
+`tool_invocation` 冻结 Tool name/version、target、Environment ID、interceptor 后 arguments、权限策略和 deadline。Environment worker 使用 `(environment_id, status, deadline_at, id)` 的受限索引；连接断开不改变 Invocation 的 durable 终态。Artifact bytes 不存入 Session payload，Session/Tool Result 只保存 artifact reference。
 
-## `agent_session`
+Subagent task 的 child Session、child Run、working-copy policy/revision 和终态 report 都可由任务表读取。Root Activity 由持久 Session/Run/Task/Invocation/Control 事实查询构建，不单独维护内存 EventBus。
 
-| 字段 | 说明 |
-| --- | --- |
-| `id` | 内部主键 |
-| `session_id` | Session 业务 ID |
-| `agent_id` | 绑定的 Agent ID |
-| `agent_name` | 绑定时的 Agent 名称快照 |
-| `title` | Session 标题 |
-| `current_head_event_id` | 当前默认继续点；初始值为 `root` |
-| `gmt_create` / `gmt_modified` | 创建、更新时间 |
+## Usage 与成本
 
-系统只维护一个当前继续点，因此 `current_head_event_id` 是唯一 head 事实来源，不额外维护命名 head 表。
+`model_usage_record` 对每个 Assistant Entry 只保存一条不可变账本记录。它冻结 provider/model、Prompt Cache 策略和命中、token 明细、stop reason、价格版本与成本分项；`assistant_entry_id` 和 `(run_id, attempt, turn_index)` 都有唯一约束。Session 用量 API 只聚合账本，不从当前模型配置重算历史成本。
 
-## `agent_session_event`
+## 兼容资源表
 
-| 字段 | 说明 |
-| --- | --- |
-| `id` | 内部顺序主键 |
-| `event_id` | Event 业务 ID |
-| `session_id` | 所属 Session |
-| `parent_event_id` | 父 Event ID，根节点使用 `root` |
-| `run_id` | 关联 Run ID，可为空 |
-| `event_type` | 事件类型，同时决定 payload 的反序列化类型 |
-| `payload_json` | Payload JSON 字符串 |
-| `gmt_create` / `gmt_modified` | 创建、更新时间 |
+`agent_session`、`agent_session_event` 和 `agent_run` 是嵌入式 `agent` 模块的独立持久模型。Harness 聊天和前端 Timeline 不读取这些表；Harness 运行时只使用 `harness_*`、`tool_*`、`model_usage_record` 和 `tool_environment` 表。
 
-`parent_event_id` 构成事件树。默认读取从 `agent_session.current_head_event_id` 沿父链回放；显式传入 `headEventId` 时从指定事件沿父链回放。
+## 事务与删除
 
-## `agent_run`
-
-| 字段 | 说明 |
-| --- | --- |
-| `id` | 内部主键 |
-| `run_id` | Run 业务 ID |
-| `session_id` | 所属 Session |
-| `trigger_event_id` | 触发 Run 的 `user_message` Event ID |
-| `status` | `queued`、`running`、`succeeded`、`failed` |
-| `gmt_create` / `gmt_modified` | 创建、更新时间 |
-
-同一 Session 同时只允许一个 `queued` 或 `running` Run。
-
-## 聚合删除
-
-删除 Session 时先锁定 Session 并确认不存在 active Run，然后在同一事务内删除：
-
-1. `agent_run`
-2. `agent_session_event`
-3. `agent_session`
-
-## 最小 seed
-
-| Profile / 数据文件 | 表 | 记录 | 说明 |
-| --- | --- | --- | --- |
-| `local-h2` / `data-h2.sql` | `agent_provider` | `stub` | 本地验收 Provider |
-| `local-h2` / `data-h2.sql` | `agent_model` | `acceptance-stub` | 本地验收 Model |
-| `local-h2` / `data-h2.sql` | `agent_definition` | `default-assistant` | 本地验收 Agent |
-| `minimax-h2` / `data-minimax-h2.sql` | `agent_provider` | `minimax` | 本地开发 Provider，启动脚本同步真实凭据 |
-| `minimax-h2` / `data-minimax-h2.sql` | `agent_model` | `MiniMax-M2.7` | 本地开发 Model |
-| `minimax-h2` / `data-minimax-h2.sql` | `agent_definition` | `default-assistant` | 本地开发 Agent |
-
-`local-h2` 由 `LocalH2AcceptanceConfiguration` 注入 `AcceptanceStubProviderManager`，不访问外部 Provider。
+- Harness 持久写入遵守 `Run -> Session -> Root -> Invocation/Task/Control` 锁顺序。
+- Assistant Entry、Usage Record 和对应 Run Event 原子写入。
+- Environment 删除由服务层在存在 Tool Invocation 引用时拒绝，避免删除仍可恢复的 execution binding。
+- ComfyUI job 是远端系统事实，数据库只保存工作流定义；输入和输出对象使用固定 bucket 的预签名边界。

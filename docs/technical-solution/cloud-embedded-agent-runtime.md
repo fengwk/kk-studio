@@ -1,93 +1,54 @@
-# 云端内嵌 agent runtime
+# Harness 执行运行时
 
-本文描述当前仓库已经落地的云端 embedded runtime 形态。
+本文描述 Harness Session 从用户消息到可恢复 Run、Tool、子代理和终态的执行链。所有执行进度以数据库记录为准，worker 和连接可以重启或丢失。
 
-## 运行时摘要
-
-| 主题 | 当前状态 |
-| --- | --- |
-| 运行模型 | 服务端单进程 embedded runtime |
-| 触发方式 | `web` 在 message 写事务返回后调用 `scheduleQueuedRun` |
-| 存储位置 | session / event / run 统一落在 `core` 使用的存储 |
-| 刷新方式 | session events 使用 SSE，active runs 使用轮询 |
-| ToolRegistry | 当前运行时组装为空列表 |
-
-## 运行模型
+## 运行时结构
 
 ```mermaid
 flowchart LR
-    Frontend[frontend]
-    Web[web]
-    Core[core]
-    Agent[agent]
-    Store[(session/event/run 存储)]
+    Message[Session message submit]
+    Session[Session Entry + frozen snapshot]
+    Run[Durable Run]
+    Turn[Agent Turn Worker]
+    Tool[Tool Invocation Workers]
+    Daemon[Environment Daemon]
+    Events[Run Event / Root Activity]
+    Store[(Database / Artifact Store)]
 
-    Frontend --> Web
-    Web --> Core
-    Core --> Agent
-    Core --> Store
+    Message --> Session --> Run --> Turn
+    Turn --> Tool
+    Tool <--> Daemon
+    Turn --> Events
+    Tool --> Events
+    Session --> Store
+    Run --> Store
+    Tool --> Store
 ```
 
-## 执行链路
+## 消息到终态
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant F as frontend
-    participant W as web
-    participant S as AgentSessionService
-    participant R as AgentRunRuntimeService
-    participant E as EmbeddedAgentRunRuntimeService
-    participant A as agent
-    participant DB as Store
+1. `POST /api/sessions/{id}/messages` 校验叶节点，写入 User Session Entry，并创建 queued Run。
+2. Run worker 以 durable claim 获取 Run，加载 Session Tree、冻结 Agent Snapshot、控制消息和可用 Tool binding。
+3. Agent Turn 将 provider 输出的 Assistant、Tool Call 和 Tool Result 语义写为 Session Entry；流式进度和状态变化写为 Run Event。
+4. Tool Invocation 按权限策略等待 allow/deny、YOLO 或 worker 分发。Cloud Tool 在服务端执行；Environment Tool 由持久 gateway 分发给匹配的 daemon。
+5. Tool terminal result、artifact、usage 和 cost 写入后，Run 继续下一轮或进入 completed、failed 或 cancelled 终态。
 
-    U->>F: 在 session 页提交 message
-    F->>W: POST /api/agent/sessions/{sessionId}/messages
-    W->>S: createMessage(sessionId, content)
-    S->>DB: 锁定 session 并确认无 active run
-    S->>DB: 写入 user_message 与 queued run
-    S->>DB: 前移 session current head
-    S-->>W: 返回已提交的 user_message
-    W->>R: scheduleQueuedRun(runId, sessionId, content)
-    R->>E: executeQueuedRun(...)
-    E->>DB: run -> running
-    E->>A: 重载 session branch 并提交 UserRequest
-    A->>DB: 追加 set_agent_info / set_model_info / assistant_*
-    E->>DB: 推进 head 指针
-    E->>DB: run -> succeeded / failed
-    W-->>F: SSE 推送 session events
-    F->>W: active run 期间轮询 runs
-```
+一个 Run 的完整消息历史由 Session Entry 重放；Run Event 只提供未物化实时进度。Provider 流和 SSE 中断不会改变已经提交的持久事实。
 
-## 执行步骤
+## 控制与权限
 
-| 步骤 | 行为 | 说明 |
-| --- | --- | --- |
-| 1 | 锁定 session 并检查 active run | 同一 session 只允许一个 `queued/running` run |
-| 2 | 追加 `user_message` / `text` 事件 | 由 `AgentSessionService` 在事务内写入 |
-| 3 | 创建 `queued` run | `triggerEventId` 指向刚创建的 `user_message` |
-| 4 | 前移 session current head | 精确指向当前 `user_message` |
-| 5 | `web` 在事务返回后调度 runtime | executor 拒绝任务时 queued run 立即转为 `failed` |
-| 6 | run 进入 `running` | 由 `EmbeddedAgentRunRuntimeService` 执行 |
-| 7 | 重载分支并继续追加事件 | `set_agent_info`、`set_model_info`、`assistant_*` |
-| 8 | 再次前移 head | 指向最新 assistant 事件 |
-| 9 | run 进入 `succeeded` 或 `failed` | 终态持久化 |
+`steer` 和 `follow-up` 都写为带消费状态的 Run Control Message；worker 在定义的边界消费它们。`abort` 持久化 cancel 请求，worker、Tool worker 和 gateway 在后续 poll 中观察并协作取消。控制命令不会依赖内存队列。
 
-## 运行约束
+Tool permission 以 Invocation 状态表示。`POST /api/tool-invocations/{id}/decision` 原子决定 allow 或 deny；根 Session 的 YOLO 策略在执行前参与权限裁决。子代理的权限请求同时写入 Root Activity，因此根 UI 可以投影为可恢复 relay。
 
-| 主题 | 当前规则 |
-| --- | --- |
-| 调度模型 | 单进程 executor 调度；同一 session 只允许一个 active run |
-| 推送方式 | `events` 使用 SSE，active `runs` 使用轮询 |
-| Tool 组装 | 从 `AgentInfo.tools` 声明中解析当前已注册工具 |
-| Provider 配置 | 通过 `kk-studio.agent.runtime.providers.<providerName>` 解析 |
-| local-h2 验收 | `LocalH2AcceptanceConfiguration` 使用 stub provider 返回 `stub response` |
-| 事件流 | 控制面 `user_message` 与 runtime `set_*` / `assistant_*` 混合保存 |
+## 子代理与 Root Activity
 
-## 模块边界
+Subagent Task 保存 child Session、child Run、目标 Agent、状态、working-copy 事实和终态 report。Root Activity 将根 Session 树内的 Run、Task、Tool、Permission 和 Control 进度归集成 cursor 查询与 SSE；Task 树和权限 relay 都可从 REST snapshot 恢复。
 
-| 模块 | 职责 |
-| --- | --- |
-| `agent` | 主循环、provider 调用、session event 投影与 branch 重放 |
-| `core` | run 调度、状态迁移、事件落库、执行上下文组装 |
-| `web` | session / run 查询、消息提交 API |
+## Environment 执行
+
+Environment binding 在 Run 资源解析时冻结为 `environment:<id>/<tool>@<version>`。gateway 在 dispatch 前验证 binding 和 invoke payload，写入 durable lease 后才发送。daemon connection 断开只释放 transient active state；未完成 invocation 由 lease recovery 和后续 poll 接管。daemon 返回的所有 envelope、phase、scope、sequence、payload、Base64 与大小都经过严格校验。
+
+## 计量与成本
+
+每次 provider 调用产生不可变 Model Usage Record。Prompt cache 命中/创建信息与 token 明细一起持久化，价格快照计算的成本写入 ledger；Session API 只返回聚合结果。详细字段和 cache 策略见 [Prompt Cache、Usage 与成本账本](prompt-cache-usage-cost.md)。
