@@ -6,19 +6,21 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
+
 import fun.fengwk.kkstudio.core.harness.observability.service.HarnessObservabilityQueryService;
 import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
 import fun.fengwk.kkstudio.harness.runtime.run.AgentRun;
 import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
+
 import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.junit.jupiter.api.Test;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
 
 class StudioHarnessObservabilitySseEmitterTest {
 

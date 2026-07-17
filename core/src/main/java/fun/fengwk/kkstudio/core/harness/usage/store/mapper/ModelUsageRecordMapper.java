@@ -1,8 +1,6 @@
 package fun.fengwk.kkstudio.core.harness.usage.store.mapper;
 
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
-import fun.fengwk.kkstudio.core.harness.usage.store.model.ModelUsageRecordDO;
-import java.util.List;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -10,6 +8,10 @@ import org.apache.ibatis.annotations.Result;
 import org.apache.ibatis.annotations.ResultMap;
 import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
+
+import fun.fengwk.kkstudio.core.harness.usage.store.model.ModelUsageRecordDO;
+
+import java.util.List;
 
 /**
  * model_usage_record 行级 MyBatis 映射；幂等由 unique(assistant_entry_id) 与 unique(run_id, attempt,

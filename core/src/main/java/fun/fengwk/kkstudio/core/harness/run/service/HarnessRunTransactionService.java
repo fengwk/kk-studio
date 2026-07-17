@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.core.harness.run.service;
 
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import fun.fengwk.kkstudio.core.harness.run.store.HarnessRunEventWriter;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
@@ -37,6 +40,7 @@ import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecord;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecordIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecordStore;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
+
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -47,8 +51,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class HarnessRunTransactionService implements RunTransactions {

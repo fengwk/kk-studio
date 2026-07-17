@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.core.harness.observability.service.impl;
 import static fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits.normalizeLimit;
 import static fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits.requireNonNegativeCursor;
 
+import org.springframework.stereotype.Service;
+
 import fun.fengwk.kkstudio.core.harness.observability.service.HarnessObservabilityQueryService;
 import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
@@ -18,9 +20,9 @@ import fun.fengwk.kkstudio.share.model.RootActivityDTO;
 import fun.fengwk.kkstudio.share.model.RunEventDTO;
 import fun.fengwk.kkstudio.share.model.SubagentTaskDTO;
 import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
+
 import java.util.List;
 import java.util.Optional;
-import org.springframework.stereotype.Service;
 
 /**
  * Default observability query implementation. Validates existence of Run/Session up front so the

@@ -2,6 +2,9 @@ package fun.fengwk.kkstudio.core.harness.control.service;
 
 import static java.util.Objects.requireNonNull;
 
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import fun.fengwk.kkstudio.core.harness.run.store.HarnessRunEventWriter;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
@@ -15,14 +18,13 @@ import fun.fengwk.kkstudio.harness.runtime.run.RunEventPayloads;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
 import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskRuntime;
+
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Objects;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 持久化 Session 级 abort 命令。数据库是取消事实源；本服务只请求取消并传播，不直接终结非终态 Run。active path 固定按 Run -> Session -> Root

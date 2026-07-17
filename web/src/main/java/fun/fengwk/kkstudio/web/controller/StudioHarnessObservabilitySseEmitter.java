@@ -2,19 +2,6 @@ package fun.fengwk.kkstudio.web.controller;
 
 import static fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits.requireNonNegativeCursor;
 
-import fun.fengwk.kkstudio.core.harness.observability.service.HarnessObservabilityQueryService;
-import fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits;
-import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
-import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
-import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
-import fun.fengwk.kkstudio.share.model.RootActivityDTO;
-import fun.fengwk.kkstudio.share.model.RunEventDTO;
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.Executor;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -22,6 +9,21 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import fun.fengwk.kkstudio.core.harness.observability.service.HarnessObservabilityQueryService;
+import fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits;
+import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
+import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
+import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
+import fun.fengwk.kkstudio.share.model.RootActivityDTO;
+import fun.fengwk.kkstudio.share.model.RunEventDTO;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Reusable database-backed SSE runtime for Run event and Root activity streams.

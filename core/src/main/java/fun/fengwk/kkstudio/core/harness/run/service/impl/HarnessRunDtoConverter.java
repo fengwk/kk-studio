@@ -1,9 +1,10 @@
 package fun.fengwk.kkstudio.core.harness.run.service.impl;
 
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.share.model.HarnessRunDTO;
-import org.springframework.stereotype.Component;
 
 /** Maps harness run persistence rows to share DTOs. */
 @Component

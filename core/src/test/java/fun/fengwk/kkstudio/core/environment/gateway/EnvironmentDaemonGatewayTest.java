@@ -14,6 +14,9 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
 import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
 import fun.fengwk.kkstudio.core.environment.service.ToolEnvironmentCapabilityApplicationService;
 import fun.fengwk.kkstudio.core.environment.service.model.ToolEnvironment;
@@ -43,6 +46,7 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -52,8 +56,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
 /** Unit contracts for the transport-neutral durable Environment Daemon gateway. */
 class EnvironmentDaemonGatewayTest {

@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
 import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
 import fun.fengwk.kkstudio.core.harness.run.worker.HarnessRunWorkerConfiguration;
@@ -41,6 +43,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -50,7 +53,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import org.junit.jupiter.api.Test;
 
 class HarnessExtensionConfigurationTest {
   @Test

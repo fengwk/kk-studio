@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.core.harness.tool.worker;
 
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import fun.fengwk.kkstudio.core.harness.run.store.HarnessRunEventWriter;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
@@ -30,6 +33,7 @@ import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -37,8 +41,6 @@ import java.util.ArrayList;
 import java.util.ConcurrentModificationException;
 import java.util.List;
 import java.util.Objects;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Spring-proxy-safe per-Run tool coordination. Each ready Run commits in its own transaction so one

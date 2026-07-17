@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.core.harness.run.store;
 
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunEventMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
@@ -10,6 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.run.RunEvent;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
 import fun.fengwk.kkstudio.harness.runtime.run.RunIdGenerator;
+
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -17,7 +20,6 @@ import java.util.ArrayList;
 import java.util.ConcurrentModificationException;
 import java.util.List;
 import java.util.Objects;
-import org.springframework.stereotype.Component;
 
 /**
  * Single durable writer for harness_run_event sequence allocation and insertion.

@@ -6,6 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.convention4j.api.page.PageQuery;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+
 import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.agent.provider.service.AgentProviderService;
 import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
@@ -13,9 +17,6 @@ import fun.fengwk.kkstudio.share.model.AgentModelDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 
 /** Model and provider references are global. */
 @SpringBootTest(classes = CoreTestApplication.class)

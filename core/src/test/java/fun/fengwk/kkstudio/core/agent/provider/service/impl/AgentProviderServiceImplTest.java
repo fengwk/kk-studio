@@ -4,12 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.service.converter.AgentProviderConverter;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
-import org.junit.jupiter.api.Test;
 
 /** Persistence failures must not be reported as successful provider mutations. */
 public class AgentProviderServiceImplTest {

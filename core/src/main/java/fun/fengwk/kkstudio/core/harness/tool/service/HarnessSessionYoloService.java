@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.core.harness.tool.service;
 
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import fun.fengwk.kkstudio.core.harness.run.store.HarnessRunEventWriter;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
@@ -9,6 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventPayloads;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
 import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -16,8 +20,6 @@ import java.time.ZoneOffset;
 import java.util.ConcurrentModificationException;
 import java.util.List;
 import java.util.Objects;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /** Root Session YOLO 显式 set；Child 始终动态读取所属 Root。 */
 @Service

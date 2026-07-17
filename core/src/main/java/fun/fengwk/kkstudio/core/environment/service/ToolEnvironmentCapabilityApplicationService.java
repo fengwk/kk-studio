@@ -1,13 +1,15 @@
 package fun.fengwk.kkstudio.core.environment.service;
 
+import org.springframework.stereotype.Service;
+
 import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
+
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.NoSuchElementException;
-import org.springframework.stereotype.Service;
 
 /**
  * Daemon-facing application service for updating Environment capability facts.

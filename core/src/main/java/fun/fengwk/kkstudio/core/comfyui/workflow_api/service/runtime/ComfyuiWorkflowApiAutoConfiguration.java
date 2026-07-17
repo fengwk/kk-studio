@@ -1,9 +1,10 @@
 package fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.kkstudio.core.comfyui.workflow_api.repo.ComfyuiWorkflowApiRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import fun.fengwk.kkstudio.core.comfyui.workflow_api.repo.ComfyuiWorkflowApiRepository;
 
 /**
  * 把 {@link ComfyuiWorkflowApiBindingsParser} 与 {@link ComfyuiWorkflowApiLookupService} 作为 Spring

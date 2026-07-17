@@ -4,12 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.agent.definition.service.converter.AgentDefinitionConverter;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
-import org.junit.jupiter.api.Test;
 
 /** Persistence and identifier failures must not be reported as successful Agent mutations. */
 public class AgentDefinitionServiceImplTest {

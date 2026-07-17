@@ -1,8 +1,9 @@
 package fun.fengwk.kkstudio.share.model;
 
-import java.util.Map;
 import lombok.Builder;
 import lombok.Data;
+
+import java.util.Map;
 
 /**
  * S3 预签名响应。

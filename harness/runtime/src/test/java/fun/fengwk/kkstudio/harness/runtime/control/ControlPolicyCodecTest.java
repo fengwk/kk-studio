@@ -7,8 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link ControlPolicyCodec} 必须在输入为非 object、缺少字段、非字符串字段、未知枚举值等情况下明确报错，
- * 同时正确忽略 maxTurns 等无关字段并允许两种合法枚举值。
+ * {@link ControlPolicyCodec} 必须在输入为非 object、缺少字段、非字符串字段、未知枚举值等情况下明确报错， 同时正确忽略 maxTurns
+ * 等无关字段并允许两种合法枚举值。
  */
 public class ControlPolicyCodecTest {
 
@@ -20,7 +20,8 @@ public class ControlPolicyCodecTest {
 
   @Test
   public void defaultsWhenFieldsAreExplicitlyNull() {
-    ControlPolicy policy = ControlPolicyCodec.decode("{\"steeringMode\":null,\"followUpMode\":null}");
+    ControlPolicy policy =
+        ControlPolicyCodec.decode("{\"steeringMode\":null,\"followUpMode\":null}");
     assertEquals(ControlPolicy.DEFAULT, policy);
   }
 

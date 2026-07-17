@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.share.model;
 
-import java.time.LocalDateTime;
 import lombok.Data;
+
+import java.time.LocalDateTime;
 
 /** 持久控制消息投影；所有 bigint ID 以字符串传输。 */
 @Data

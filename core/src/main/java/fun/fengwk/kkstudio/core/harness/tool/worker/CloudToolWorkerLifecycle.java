@@ -1,7 +1,10 @@
 package fun.fengwk.kkstudio.core.harness.tool.worker;
 
+import org.springframework.context.SmartLifecycle;
+
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.CloudToolWorker;
+
 import java.lang.System.Logger.Level;
 import java.time.Duration;
 import java.util.Objects;
@@ -9,7 +12,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import org.springframework.context.SmartLifecycle;
 
 /** Process lifecycle that polls at most one durable Cloud/Control tool when none is active. */
 public final class CloudToolWorkerLifecycle implements SmartLifecycle {

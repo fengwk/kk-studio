@@ -1,13 +1,15 @@
 package fun.fengwk.kkstudio.core.harness.task.store;
 
+import org.springframework.stereotype.Repository;
+
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunEventMapper;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
 import fun.fengwk.kkstudio.harness.runtime.task.RootActivity;
 import fun.fengwk.kkstudio.harness.runtime.task.RootActivityStore;
+
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
-import org.springframework.stereotype.Repository;
 
 /** SQL-backed root tree activity cursor; event id is globally ordered across descendant Runs. */
 @Repository

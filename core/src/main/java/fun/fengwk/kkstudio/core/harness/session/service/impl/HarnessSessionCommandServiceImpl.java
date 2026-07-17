@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.core.harness.session.service.impl;
 
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.mapper.AgentDefinitionMapper;
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.model.AgentDefinitionDO;
 import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
@@ -25,11 +28,10 @@ import fun.fengwk.kkstudio.share.model.HarnessSessionCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionMessageCreateDTO;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /** T15 harness session command service: create-root and submit-user-message. */
 @Service

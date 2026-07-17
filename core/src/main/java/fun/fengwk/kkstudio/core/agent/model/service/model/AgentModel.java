@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.core.agent.model.service.model;
 
-import java.time.LocalDateTime;
 import lombok.Data;
+
+import java.time.LocalDateTime;
 
 /** Global Agent model resource. */
 @Data

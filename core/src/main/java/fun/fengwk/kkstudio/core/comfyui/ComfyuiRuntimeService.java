@@ -10,6 +10,10 @@ import fun.fengwk.convention4j.comfyui.ComfyUIJob;
 import fun.fengwk.convention4j.comfyui.PromptSubmission;
 import fun.fengwk.convention4j.comfyui.input.UploadResult;
 import fun.fengwk.convention4j.comfyui.workflow.Workflow;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.util.MimeTypeUtils;
+import org.springframework.util.StringUtils;
+
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiBindings;
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiBindings.Binding;
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiBindings.Kind;
@@ -25,6 +29,7 @@ import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowJobDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunFileDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunRequestDTO;
+
 import java.net.URLConnection;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -39,9 +44,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.util.MimeTypeUtils;
-import org.springframework.util.StringUtils;
 
 /**
  * 基于持久工作流配置的无状态 ComfyUI 运行服务。

@@ -2,6 +2,9 @@ package fun.fengwk.kkstudio.core.harness.task.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.mapper.AgentDefinitionMapper;
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.model.AgentDefinitionDO;
 import fun.fengwk.kkstudio.core.harness.run.store.HarnessRunEventWriter;
@@ -46,6 +49,7 @@ import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -59,8 +63,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Database implementation of durable task start/resume/inspection. The lock order is parent Run,

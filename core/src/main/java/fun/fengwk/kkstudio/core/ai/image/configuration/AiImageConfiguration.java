@@ -14,18 +14,17 @@ import java.net.http.HttpClient;
 @Configuration
 public class AiImageConfiguration {
 
-    @Bean
-    public HttpClient httpClient() {
-        HttpClient.Builder builder = HttpClient.newBuilder();
-        ProxySettings proxySettings = ProxySettings.fromEnvironment(System.getenv());
-        if (proxySettings.isEnabled()) {
-            builder.proxy(proxySettings.toProxySelector());
-            Authenticator authenticator = proxySettings.toAuthenticator();
-            if (authenticator != null) {
-                builder.authenticator(authenticator);
-            }
-        }
-        return builder.build();
+  @Bean
+  public HttpClient httpClient() {
+    HttpClient.Builder builder = HttpClient.newBuilder();
+    ProxySettings proxySettings = ProxySettings.fromEnvironment(System.getenv());
+    if (proxySettings.isEnabled()) {
+      builder.proxy(proxySettings.toProxySelector());
+      Authenticator authenticator = proxySettings.toAuthenticator();
+      if (authenticator != null) {
+        builder.authenticator(authenticator);
+      }
     }
-
+    return builder.build();
+  }
 }

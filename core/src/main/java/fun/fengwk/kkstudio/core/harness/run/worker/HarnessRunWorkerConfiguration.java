@@ -1,6 +1,13 @@
 package fun.fengwk.kkstudio.core.harness.run.worker;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
 import fun.fengwk.kkstudio.core.agent.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
@@ -24,18 +31,13 @@ import fun.fengwk.kkstudio.harness.runtime.run.RunWorkerConfig;
 import fun.fengwk.kkstudio.harness.runtime.run.ToolPreparationPort;
 import fun.fengwk.kkstudio.harness.runtime.run.TurnResourceResolver;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
+
 import java.time.Clock;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 
 /** 当 Provider/Model 与 Compaction 端口就绪时装配数据库驱动的 Agent Turn Worker。 */
 @Configuration(proxyBeanMethods = false)

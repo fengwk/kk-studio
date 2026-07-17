@@ -1,13 +1,15 @@
 package fun.fengwk.kkstudio.core.environment.service.impl;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
 import fun.fengwk.kkstudio.core.environment.service.model.ToolEnvironment;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEmptyCapabilities;
 import fun.fengwk.kkstudio.share.model.ToolEnvironmentEditablePropertiesDTO;
+
 import java.util.function.LongSupplier;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
 
 /**
  * Normalizes mutable Environment fields; capability and last-seen are not editable through DTO.

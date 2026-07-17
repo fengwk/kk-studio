@@ -4,8 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
 import org.junit.jupiter.api.Test;
+
+import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
 
 /** 直接调用 {@link SnowflakeRunControlIdGenerator} 验证它分配的 id 与 Run id 来自独立 namespace。 */
 class SnowflakeRunControlIdGeneratorTest {
@@ -25,8 +26,7 @@ class SnowflakeRunControlIdGeneratorTest {
    */
   @Test
   void controlMessageNamespaceIsDistinctFromRunNamespace() {
-    assertNotEquals(
-        AgentIdGenerator.HARNESS_RUN, AgentIdGenerator.HARNESS_RUN_CONTROL_MESSAGE);
+    assertNotEquals(AgentIdGenerator.HARNESS_RUN, AgentIdGenerator.HARNESS_RUN_CONTROL_MESSAGE);
     assertNotEquals(
         AgentIdGenerator.HARNESS_RUN_EVENT, AgentIdGenerator.HARNESS_RUN_CONTROL_MESSAGE);
     assertEquals("harness_run_control_message", AgentIdGenerator.HARNESS_RUN_CONTROL_MESSAGE);

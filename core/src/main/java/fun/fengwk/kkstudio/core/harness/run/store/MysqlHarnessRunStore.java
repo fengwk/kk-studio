@@ -1,5 +1,9 @@
 package fun.fengwk.kkstudio.core.harness.run.store;
 
+import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunEventMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
@@ -11,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.run.RunEventStore;
 import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
 import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
 import fun.fengwk.kkstudio.harness.runtime.run.RunStore;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -18,9 +23,6 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 
 /** MySQL/H2 Durable Run queue 与线性 Run Event Journal。 */
 @Repository
