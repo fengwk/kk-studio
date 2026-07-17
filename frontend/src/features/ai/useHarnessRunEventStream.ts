@@ -5,7 +5,13 @@ import { harnessService } from '@/shared/api/harness-service'
 import type { RunEventDTO } from '@/shared/api/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
 
-const ENTRY_MATERIALIZATION_EVENTS = new Set(['assistant_completed', 'run_completed', 'run_failed', 'run_cancelled'])
+const ENTRY_MATERIALIZATION_EVENTS = new Set([
+  'assistant_completed',
+  'tool_requeued',
+  'run_completed',
+  'run_failed',
+  'run_cancelled',
+])
 const TERMINAL_RUN_EVENTS = new Set(['run_completed', 'run_failed', 'run_cancelled'])
 
 export function useHarnessRunEventStream(sessionId: string, runId: string | null, enabled: boolean) {

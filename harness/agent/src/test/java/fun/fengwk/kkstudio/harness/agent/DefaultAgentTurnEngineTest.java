@@ -51,6 +51,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 class DefaultAgentTurnEngineTest {
@@ -405,6 +406,44 @@ class DefaultAgentTurnEngineTest {
     assertTrue(handle.isDone());
     assertEquals(List.of("started", "delta", "completed"), handler.events);
     assertEquals("ok", handler.result.assistantMessage().text());
+  }
+
+  /** isDone becomes visible only after the terminal handler has returned. */
+  @Test
+  void reportsDoneAfterTerminalDeliveryCompletes() throws Exception {
+    ManualModelProvider provider = new ManualModelProvider();
+    CountDownLatch entered = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    AgentTurnEventHandler handler =
+        new AgentTurnEventHandler() {
+          @Override
+          public void onStarted() {}
+
+          @Override
+          public void onDelta(ProviderStreamEvent event) {}
+
+          @Override
+          public void onCompleted(AgentTurnResult result) {
+            entered.countDown();
+            await(release);
+          }
+
+          @Override
+          public void onFailed(ProviderException error) {}
+        };
+    AgentTurnHandle handle = new DefaultAgentTurnEngine(provider).execute(request(), handler);
+    Thread callback =
+        new Thread(
+            () -> provider.complete(response("ok", "", List.of(), ProviderStopReason.COMPLETED)));
+
+    callback.start();
+    assertTrue(entered.await(5, TimeUnit.SECONDS));
+    assertFalse(handle.isDone());
+    release.countDown();
+    callback.join(5_000L);
+
+    assertFalse(callback.isAlive());
+    assertTrue(handle.isDone());
   }
 
   /** cancel 发生在第一条 Provider 回调前时，后续 complete/error 都不能突破已选择的失败终态。 */

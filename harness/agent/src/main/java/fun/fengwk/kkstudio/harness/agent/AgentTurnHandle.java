@@ -10,9 +10,9 @@ public interface AgentTurnHandle {
   boolean isCancelled();
 
   /**
-   * 当前 Turn 是否已到达终态（成功完成、失败或取消）。
+   * 当前 Turn 是否已完成终态回调交付（成功完成、失败或取消）。
    *
-   * <p>生命周期轮询用该信号释放 active slot，而无需等待心跳 lease 失败。
+   * <p>只有终态 handler 返回后才为 {@code true}；生命周期轮询可据此安全释放 active slot，而无需等待心跳 lease 失败。
    */
   boolean isDone();
 }

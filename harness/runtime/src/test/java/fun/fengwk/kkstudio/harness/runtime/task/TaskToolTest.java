@@ -18,8 +18,11 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Delayed;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -213,6 +216,40 @@ class TaskToolTest {
     }
   }
 
+  /** A synchronous first poll cannot publish a periodic future after completion. */
+  @Test
+  void cancelsPollFutureWhenInspectionCompletesBeforeScheduleReturns() {
+    RecordingRuntime runtime = new RecordingRuntime();
+    runtime.terminalOnInspect = true;
+    RecordingScheduledFuture future = new RecordingScheduledFuture();
+    ScheduledThreadPoolExecutor inlineScheduler =
+        new ScheduledThreadPoolExecutor(1) {
+          @Override
+          public ScheduledFuture<?> scheduleWithFixedDelay(
+              Runnable command, long initialDelay, long delay, TimeUnit unit) {
+            command.run();
+            return future;
+          }
+        };
+    try {
+      TaskTool tool =
+          new TaskTool(
+              runtime,
+              inlineScheduler,
+              Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
+              Duration.ofMillis(5));
+      RecordingListener listener = new RecordingListener();
+
+      tool.execute(request("{\"subagent_type\":\"Coder\",\"prompt\":\"x\"}"), listener);
+
+      assertEquals(0L, listener.completed.getCount());
+      assertFalse(listener.result.error());
+      assertTrue(future.cancelled);
+    } finally {
+      inlineScheduler.shutdownNow();
+    }
+  }
+
   /** Cancellation without a durable context remains a harmless local operation. */
   @Test
   void handlesContextlessCancellation() {
@@ -309,6 +346,7 @@ class TaskToolTest {
   private static final class RecordingRuntime implements TaskRuntime {
     private final Instant now = Instant.EPOCH;
     private boolean terminal;
+    private boolean terminalOnInspect;
     private RuntimeException startError;
     private RuntimeException inspectError;
     private int starts;
@@ -330,7 +368,7 @@ class TaskToolTest {
       if (inspectError != null) {
         throw inspectError;
       }
-      return inspection(parentInvocationId, terminal);
+      return inspection(parentInvocationId, terminal || terminalOnInspect);
     }
 
     @Override
@@ -361,6 +399,46 @@ class TaskToolTest {
               ? new TaskReport(3, 4, state, "done", List.of(), 1, 2, WorkingCopyPolicy.FORK, null)
               : null;
       return new TaskInspection(task, report);
+    }
+  }
+
+  private static final class RecordingScheduledFuture implements ScheduledFuture<Object> {
+    private boolean cancelled;
+
+    @Override
+    public long getDelay(TimeUnit unit) {
+      return 0;
+    }
+
+    @Override
+    public int compareTo(Delayed other) {
+      return 0;
+    }
+
+    @Override
+    public boolean cancel(boolean mayInterruptIfRunning) {
+      cancelled = true;
+      return true;
+    }
+
+    @Override
+    public boolean isCancelled() {
+      return cancelled;
+    }
+
+    @Override
+    public boolean isDone() {
+      return cancelled;
+    }
+
+    @Override
+    public Object get() {
+      return null;
+    }
+
+    @Override
+    public Object get(long timeout, TimeUnit unit) {
+      return null;
     }
   }
 }

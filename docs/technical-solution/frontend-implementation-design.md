@@ -53,7 +53,7 @@
 
 ### 持久基线与实时覆盖层
 
-`HarnessSessionEntryDTO[]` 是聊天历史的唯一基线：`message` Entry 投影为 user、assistant、tool 气泡，`agent_snapshot` 提供冻结模型/variant 摘要，`compaction` 提供系统摘要。Tool Result 中的 artifact 内容映射到 `/api/artifacts/{artifactId}`，浏览器直接加载媒体，不读取或重组 artifact bytes。
+`HarnessSessionEntryDTO[]` 是聊天历史的唯一基线：`message` Entry 投影为 user、assistant、tool 气泡，`agent_snapshot` 提供冻结模型/variant 摘要，`compaction` 提供系统摘要。持久 Assistant Tool Call 的参数按 Session 路径关联到后续 Tool Result；Tool Result 中的 artifact 内容映射到 `/api/artifacts/{artifactId}`，浏览器直接加载媒体，不读取或重组 artifact bytes。
 
 活动 Run 的 `RunEventDTO[]` 只用于尚未物化的实时覆盖层：
 
@@ -65,13 +65,13 @@
 | `tool_delta_batch` | 追加部分 Tool Result 文本与 artifact 引用 |
 | `tool_completed` | 标记临时工具节点完成或失败 |
 
-每次 `assistant_completed` 都已经与语义 Assistant Entry 原子持久化。投影器按该 Run 上已存在的 durable Assistant Entry 数量决定跳过多少个已物化完成周期；尚未物化的 `assistant_completed` 会把当前流式 Assistant 标记为 `done`，避免 Entry refetch 完成前气泡消失，Entry 到达后不再重复投影。
+每次 `assistant_completed` 都已经与语义 Assistant Entry 原子持久化。投影器将 Run Event 中截至第 N 个 `assistant_completed` 的前缀视为 N 个 durable Assistant Entry 已覆盖的历史；失败重试不会消耗该匹配。尚未物化的 `assistant_completed` 会把当前流式 Assistant 标记为 `done`，避免 Entry refetch 完成前气泡消失。已物化的 Tool Result 同样按 Run 与 Tool Call 顺序抑制对应 Invocation 覆盖层，避免刷新后重复气泡。
 
-页面会为最新 Run 拉取并缓存 Run Event（含终态失败细节），仅在 Run 仍处于 active 状态时打开 SSE。
+页面会分页拉全并缓存最新 Run 的 Run Event（含终态失败细节），仅在 Run 仍处于 active 状态时打开 SSE。
 
 ### SSE cursor 恢复
 
-页面先使用 `listRunEvents` 获取快照，再用当前最大 `sequence` 打开 EventSource。收到 `run_event` 后以 sequence 去重并排序；浏览器自动重连时携带上一个 SSE event id，服务端取 query cursor 与 `Last-Event-ID` 的较大者继续发送。终态 Event 会失效 Session、Entry、Run 与 Session 列表 query，使持久化基线重新成为唯一显示结果。
+页面先使用 `listRunEvents` 按最大页长读取到末页，再用当前最大 `sequence` 打开 EventSource。收到 `run_event` 后以 sequence 去重并排序；浏览器自动重连时携带上一个 SSE event id，服务端取 query cursor 与 `Last-Event-ID` 的较大者继续发送。`tool_requeued` 与 Assistant/Run 终态 Event 会触发 Entry 刷新；Run 终态还会失效 Session、Run 与 Session 列表 query，使持久化基线重新成为唯一显示结果。
 
 ## Root Activity 与 Subagent Task
 

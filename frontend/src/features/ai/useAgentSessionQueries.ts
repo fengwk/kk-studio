@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { hasActiveRun } from '@/features/ai/session-events'
-import { mergeRunEventLists } from '@/features/ai/harness-run-event-stream'
+import { loadRunEventHistory, mergeRunEventLists } from '@/features/ai/harness-run-event-stream'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
 import type { HarnessRunDTO, RunEventDTO } from '@/shared/api/contracts'
@@ -44,7 +44,9 @@ export function useAgentSessionQueries(sessionId: string) {
       if (!eventRunId) {
         return []
       }
-      const snapshot = await harnessService.listRunEvents(eventRunId)
+      const snapshot = await loadRunEventHistory((afterSequence, limit) =>
+        harnessService.listRunEvents(eventRunId, afterSequence, limit),
+      )
       const cached = queryClient.getQueryData<RunEventDTO[]>(queryKeys.runs.events(eventRunId)) ?? []
       return mergeRunEventLists(snapshot, cached)
     },

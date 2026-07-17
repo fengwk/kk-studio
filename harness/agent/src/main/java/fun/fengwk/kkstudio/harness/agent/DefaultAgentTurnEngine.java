@@ -194,6 +194,7 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
     private final AtomicReference<ProviderRequest> finalRequest = new AtomicReference<>();
     private final AtomicBoolean cancelled = new AtomicBoolean();
     private final AtomicBoolean terminal = new AtomicBoolean();
+    private final AtomicBoolean done = new AtomicBoolean();
     private final StringBuilder text = new StringBuilder();
     private final StringBuilder thinking = new StringBuilder();
     private final Map<Integer, PartialToolCall> partialToolCalls = new HashMap<>();
@@ -240,19 +241,19 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
         if (!terminal.compareAndSet(false, true)) {
           return;
         }
-        if (cancelled.get()) {
-          handler.onFailed(
-              new ProviderException(ProviderErrorKind.CANCELLED, "assistant turn cancelled"));
-          return;
-        }
-        ProviderRequest boundRequest = finalRequest.get();
-        if (boundRequest == null) {
-          handler.onFailed(
-              new ProviderException(
-                  ProviderErrorKind.INVALID_REQUEST, "final provider request was never bound"));
-          return;
-        }
         try {
+          if (cancelled.get()) {
+            handler.onFailed(
+                new ProviderException(ProviderErrorKind.CANCELLED, "assistant turn cancelled"));
+            return;
+          }
+          ProviderRequest boundRequest = finalRequest.get();
+          if (boundRequest == null) {
+            handler.onFailed(
+                new ProviderException(
+                    ProviderErrorKind.INVALID_REQUEST, "final provider request was never bound"));
+            return;
+          }
           validateStopReason(response);
           if (response.stopReason() == ProviderStopReason.CANCELLED) {
             handler.onFailed(
@@ -270,6 +271,8 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
           handler.onFailed(
               new ProviderException(
                   ProviderErrorKind.INVALID_REQUEST, "invalid provider response", error));
+        } finally {
+          done.set(true);
         }
       }
     }
@@ -291,8 +294,12 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
       }
       synchronized (this) {
         if (terminal.compareAndSet(false, true)) {
-          handler.onFailed(
-              new ProviderException(ProviderErrorKind.CANCELLED, "assistant turn cancelled"));
+          try {
+            handler.onFailed(
+                new ProviderException(ProviderErrorKind.CANCELLED, "assistant turn cancelled"));
+          } finally {
+            done.set(true);
+          }
         }
       }
     }
@@ -305,7 +312,7 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
 
     @Override
     public boolean isDone() {
-      return terminal.get();
+      return done.get();
     }
 
     private void bind(ProviderStream callbackStream) {
@@ -321,7 +328,11 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
     private void fail(ProviderException error) {
       synchronized (this) {
         if (terminal.compareAndSet(false, true)) {
-          handler.onFailed(Objects.requireNonNull(error, "error"));
+          try {
+            handler.onFailed(Objects.requireNonNull(error, "error"));
+          } finally {
+            done.set(true);
+          }
         }
       }
     }
