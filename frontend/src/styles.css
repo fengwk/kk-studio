@@ -9,7 +9,7 @@
   --border: #2b342f;
   --border-hover: #3e4b43;
   --line: var(--border);
-  --line-strong: #3e4b43;
+  --line-strong: var(--border-hover);
   --fg: #edf2ed;
   --fg-muted: #919c94;
   --fg-dim: #9da89f;
@@ -41,15 +41,19 @@
   --danger-strong: #e07070;
   --danger-border: rgba(240, 133, 133, 0.35);
   --danger-gradient: linear-gradient(180deg, #f0a0a0 0%, #e07070 100%);
-  --scrim: var(--scrim);
+  --scrim: rgba(0, 0, 0, 0.72);
   --shadow-lg: 0 24px 80px rgba(0, 0, 0, 0.55);
   --shadow-md: 0 12px 24px -8px rgba(0, 0, 0, 0.45);
-  --white-02: var(--white-02);
-  --white-04: var(--white-04);
-  --white-06: var(--white-06);
-  --topbar-bg: var(--topbar-bg);
-  --avatar-fg: var(--avatar-fg);
+  --shadow-composer: 0 18px 55px rgba(0, 0, 0, 0.22);
+  --shadow-drawer: -22px 0 60px rgba(0, 0, 0, 0.38);
+  --white-02: rgba(255, 255, 255, 0.02);
+  --white-04: rgba(255, 255, 255, 0.04);
+  --white-06: rgba(255, 255, 255, 0.06);
+  --topbar-bg: rgba(16, 20, 18, 0.85);
+  --avatar-fg: #d8fae1;
   --focus-ring: rgba(113, 231, 154, 0.18);
+  --overlay-surface: rgba(17, 18, 18, 0.97);
+  --overlay-surface-strong: rgba(17, 18, 18, 0.98);
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
@@ -365,7 +369,7 @@ textarea::placeholder {
 
 .info-card {
   min-height: 180px;
-  background: linear-gradient(180deg, var(--white-02) 0%, rgba(255, 255, 255, 0) 100%), var(--surface);
+  background: linear-gradient(180deg, var(--white-02) 0%, transparent 100%), var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 24px;
