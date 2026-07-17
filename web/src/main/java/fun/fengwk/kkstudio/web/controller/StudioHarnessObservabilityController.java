@@ -32,9 +32,8 @@ import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
 import java.util.List;
 
 /**
- * T15 harness observability endpoints. Strict 400 vs 404 semantics are enforced by inspecting the
- * originating {@link IllegalArgumentException} message; the legacy /api/agent/** surface remains
- * untouched.
+ * Harness observability endpoints. Strict 400 vs 404 semantics are enforced by inspecting the
+ * originating {@link IllegalArgumentException} message.
  */
 @RestController
 @RequestMapping("/api")
