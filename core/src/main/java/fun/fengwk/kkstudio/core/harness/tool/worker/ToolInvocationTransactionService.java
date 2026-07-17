@@ -177,6 +177,8 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
                     invocation.id(),
                     "ordinal",
                     invocation.ordinal(),
+                    "toolCallId",
+                    invocation.toolCallId(),
                     "status",
                     terminalStatus.name(),
                     "error",

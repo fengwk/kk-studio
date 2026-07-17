@@ -720,6 +720,8 @@ public class HarnessRunTransactionService implements RunTransactions {
                   invocation.call().id(),
                   "toolName",
                   invocation.call().toolName(),
+                  "arguments",
+                  invocation.call().argumentsJson(),
                   "status",
                   invocation.initialStatus().name())));
       if (invocation.initialStatus() == ToolInvocationStatus.WAITING_APPROVAL) {

@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.core.harness.tool.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
 import fun.fengwk.kkstudio.core.harness.run.store.HarnessRunEventWriter;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
@@ -23,6 +22,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,7 +34,6 @@ public class ToolInvocationDecisionService {
   private final HarnessRunMapper runMapper;
   private final HarnessRunEventWriter eventWriter;
   private final MysqlToolInvocationStore invocationStore;
-  private final HarnessRunTransactionService runTransactions;
   private final ObjectMapper objectMapper;
   private final Clock clock;
 
@@ -43,14 +42,12 @@ public class ToolInvocationDecisionService {
       HarnessRunMapper runMapper,
       HarnessRunEventWriter eventWriter,
       MysqlToolInvocationStore invocationStore,
-      HarnessRunTransactionService runTransactions,
       ObjectMapper objectMapper,
       Clock harnessRunClock) {
     this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
     this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
     this.eventWriter = Objects.requireNonNull(eventWriter, "eventWriter");
     this.invocationStore = Objects.requireNonNull(invocationStore, "invocationStore");
-    this.runTransactions = Objects.requireNonNull(runTransactions, "runTransactions");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
     this.clock = Objects.requireNonNull(harnessRunClock, "harnessRunClock");
   }
@@ -124,17 +121,18 @@ public class ToolInvocationDecisionService {
         != 1) {
       throw new ToolDecisionConflictException(invocationId);
     }
-    runTransactions.appendExternalEvent(
-        current.getRunId(),
-        new RunEventDraft(
-            RunEventType.PERMISSION_RESOLVED,
-            RunEventPayloads.of(
-                "invocationId",
-                invocationId,
-                "decision",
-                decision.name(),
-                "status",
-                status.name())),
+    eventWriter.appendLocked(
+        run,
+        List.of(
+            new RunEventDraft(
+                RunEventType.PERMISSION_RESOLVED,
+                RunEventPayloads.of(
+                    "invocationId",
+                    invocationId,
+                    "decision",
+                    decision.name(),
+                    "status",
+                    status.name()))),
         now);
     return invocationStore.find(invocationId).orElseThrow();
   }

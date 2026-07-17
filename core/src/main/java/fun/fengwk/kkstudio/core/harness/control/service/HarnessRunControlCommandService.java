@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.harness.control.service;
 import static java.util.Objects.requireNonNull;
 
 import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
+import fun.fengwk.kkstudio.core.harness.run.store.HarnessRunEventWriter;
 import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
 import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionEntryMapper;
@@ -43,6 +44,7 @@ public class HarnessRunControlCommandService {
   private final RunControlMessageStore controlStore;
   private final RunControlIdGenerator controlIdGenerator;
   private final HarnessRunTransactionService runTransactions;
+  private final HarnessRunEventWriter eventWriter;
   private final SessionEntryJsonCodec payloadCodec = new SessionEntryJsonCodec();
 
   public HarnessRunControlCommandService(
@@ -51,13 +53,15 @@ public class HarnessRunControlCommandService {
       HarnessRunMapper runMapper,
       RunControlMessageStore controlStore,
       RunControlIdGenerator controlIdGenerator,
-      HarnessRunTransactionService runTransactions) {
+      HarnessRunTransactionService runTransactions,
+      HarnessRunEventWriter eventWriter) {
     this.sessionMapper = requireNonNull(sessionMapper, "sessionMapper");
     this.sessionEntryMapper = requireNonNull(sessionEntryMapper, "sessionEntryMapper");
     this.runMapper = requireNonNull(runMapper, "runMapper");
     this.controlStore = requireNonNull(controlStore, "controlStore");
     this.controlIdGenerator = requireNonNull(controlIdGenerator, "controlIdGenerator");
     this.runTransactions = requireNonNull(runTransactions, "runTransactions");
+    this.eventWriter = requireNonNull(eventWriter, "eventWriter");
   }
 
   /** 接受完整 USER 消息；返回 PENDING 或已直接提升的 PROMOTED 快照。 */
@@ -82,8 +86,10 @@ public class HarnessRunControlCommandService {
     }
 
     HarnessRunDO lockedRun = runMapper.findForUpdate(activeHint);
-    HarnessSessionDO lockedSession =
-        requireNonNull(sessionMapper.findForUpdate(sessionId), "session disappeared while locking");
+    if (lockedRun != null && lockedRun.getSessionId() != sessionId) {
+      throw new IllegalStateException("active run does not belong to session: " + activeHint);
+    }
+    HarnessSessionDO lockedSession = eventWriter.lockSessionAndRoot(sessionId);
     if (lockedRun == null || isTerminal(lockedRun)) {
       return submitAfterActiveRunEnded(
           lockedSession, activeHint, kind, userMessage, timestamp, "active run is unavailable");
@@ -119,16 +125,15 @@ public class HarnessRunControlCommandService {
             null,
             timestamp,
             null);
-    if (controlStore.insert(pending) != 1) {
-      throw new IllegalStateException("cannot insert control message: " + controlId);
-    }
-
     RunEventDraft requested =
         new RunEventDraft(
             requestedEventType(kind),
             RunEventPayloads.of(
                 "controlId", controlId, "kind", kind.name(), "consumptionMode", mode.name()));
-    runTransactions.appendExternalEvents(activeHint, List.of(requested), timestamp);
+    eventWriter.appendLocked(lockedRun, List.of(requested), timestamp);
+    if (controlStore.insert(pending) != 1) {
+      throw new IllegalStateException("cannot insert control message: " + controlId);
+    }
 
     return pending;
   }
@@ -137,6 +142,7 @@ public class HarnessRunControlCommandService {
       long sessionId, RunControlKind kind, AgentMessage userMessage, Instant now) {
     HarnessSessionDO session =
         requireNonNull(sessionMapper.findForUpdate(sessionId), "session disappeared while locking");
+    eventWriter.lockRoot(session);
     Long currentActive = session.getActiveRunId();
     if (currentActive != null) {
       throw new RunControlConflictException(
@@ -158,30 +164,11 @@ public class HarnessRunControlCommandService {
     long controlId = controlIdGenerator.newControlMessageId();
     ControlPolicy policy = freezePolicy(session);
     ControlConsumptionMode mode = policy.modeFor(kind);
-    RunControlMessage pending =
-        new RunControlMessage(
-            controlId,
-            session.getId(),
-            null,
-            kind,
-            mode,
-            userMessage,
-            RunControlStatus.PENDING,
-            null,
-            null,
-            now,
-            null);
-    if (controlStore.insert(pending) != 1) {
-      throw new IllegalStateException("cannot insert control message: " + controlId);
-    }
     AgentRun newRun =
         runTransactions.submitUserMessage(
             session.getId(), session.getLeafEntryId(), userMessage, now);
     long newRunId = newRun.id();
     long triggerEntryId = newRun.triggerEntryId();
-    if (!controlStore.markPromoted(controlId, newRunId, triggerEntryId, now)) {
-      throw new IllegalStateException("cannot mark control promoted: " + controlId);
-    }
     List<RunEventDraft> events =
         List.of(
             new RunEventDraft(
@@ -201,7 +188,28 @@ public class HarnessRunControlCommandService {
                     newRunId,
                     "entryId",
                     triggerEntryId)));
-    runTransactions.appendExternalEvents(newRunId, events, now);
+    HarnessRunDO lockedNewRun =
+        requireNonNull(runMapper.findForUpdate(newRunId), "promoted run disappeared");
+    eventWriter.appendLocked(lockedNewRun, events, now);
+    RunControlMessage pending =
+        new RunControlMessage(
+            controlId,
+            session.getId(),
+            null,
+            kind,
+            mode,
+            userMessage,
+            RunControlStatus.PENDING,
+            null,
+            null,
+            now,
+            null);
+    if (controlStore.insert(pending) != 1) {
+      throw new IllegalStateException("cannot insert control message: " + controlId);
+    }
+    if (!controlStore.markPromoted(controlId, newRunId, triggerEntryId, now)) {
+      throw new IllegalStateException("cannot mark control promoted: " + controlId);
+    }
     return new RunControlMessage(
         controlId,
         session.getId(),
