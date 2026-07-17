@@ -34,44 +34,44 @@ describe('AiConsoleCards', () => {
 
   it('renders session fallback fields and navigates to the session route', async () => {
     const user = userEvent.setup()
-    const onEdit = vi.fn()
-    const onDelete = vi.fn()
     renderWithRouter(
       <SessionCard
         session={{
           sessionId: 'session-1',
-          agentId: 'agent-1',
-          agentName: 'default-assistant',
+          agentDefinitionId: 'agent-1',
           title: null,
+          rootSessionId: 'session-1',
+          parentSessionId: null,
+          depth: 0,
+          leafEntryId: 'entry-1',
+          activeRunId: null,
+          yoloEnabled: false,
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:01:00',
         }}
-        onEdit={onEdit}
-        onDelete={onDelete}
-        deletePending={false}
       />,
     )
 
     expect(screen.getByText('Untitled Chat')).toBeInTheDocument()
-    expect(screen.getAllByText('default-assistant').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('agent-1').length).toBeGreaterThan(0)
 
     await user.click(screen.getByRole('button', { name: '进入会话 session-1' }))
     expect(screen.getByTestId('location')).toHaveTextContent('/sessions/session-1')
-
-    await user.click(screen.getByRole('button', { name: '编辑 Chat session-1' }))
-    await user.click(screen.getByRole('button', { name: '删除 Chat session-1' }))
-    expect(onEdit).toHaveBeenCalledTimes(1)
-    expect(onDelete).toHaveBeenCalledTimes(1)
   })
 
-  it('uses agent name override and disables pending session deletion', () => {
+  it('uses the resolved agent name for the session card', () => {
     renderWithRouter(
       <SessionCard
         session={{
           sessionId: 'session-2',
-          agentId: 'agent-1',
-          agentName: 'fallback-agent',
+          agentDefinitionId: 'agent-1',
           title: 'Named Session',
+          rootSessionId: 'session-2',
+          parentSessionId: null,
+          depth: 0,
+          leafEntryId: 'entry-2',
+          activeRunId: null,
+          yoloEnabled: false,
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:01:00',
         }}
@@ -89,14 +89,10 @@ describe('AiConsoleCards', () => {
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:00:00',
         }}
-        onEdit={() => undefined}
-        onDelete={() => undefined}
-        deletePending
       />,
     )
 
-    expect(screen.getByText('preferred-agent')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '删除 Chat Named Session' })).toBeDisabled()
+    expect(screen.getAllByText('preferred-agent')).toHaveLength(2)
   })
 
   it('renders agent card fallbacks and start action', async () => {

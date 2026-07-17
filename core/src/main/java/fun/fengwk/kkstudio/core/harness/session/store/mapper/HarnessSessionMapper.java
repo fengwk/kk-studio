@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.harness.session.store.mapper;
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
 import java.time.LocalDateTime;
+import java.util.List;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -119,6 +120,18 @@ public interface HarnessSessionMapper extends BaseMapper {
       limit 1
       """)
   Long findAnyActiveRunIdByRoot(@Param("rootSessionId") long rootSessionId);
+
+  @Select(
+      """
+      select id, agent_definition_id, title, leaf_entry_id, active_run_id,
+             parent_session_id, root_session_id, parent_invocation_id, depth, yolo_enabled,
+             version, gmt_create as create_time, gmt_modified as update_time
+      from harness_session
+      where parent_session_id is null
+      order by gmt_modified desc, id desc
+      """)
+  @ResultMap("harnessSessionResultMap")
+  List<HarnessSessionDO> listRoots();
 
   @Update(
       """

@@ -1,42 +1,83 @@
 # 前端落地设计
 
-本文描述当前 `frontend/` 工程的实际结构、页面范围、后端契约和测试边界。
+本文描述当前 `frontend/` 工程的页面结构、Harness API 契约、持久化时间线投影和验证边界。
 
 ## 前端摘要
 
-| 主题 | 当前状态 |
-| --- | --- |
-| 工程目录 | `frontend/` |
-| 运行方式 | 独立 Vite 工程 |
-| 页面范围 | AI 控制台、Provider/Model/Agent CRUD、Chat 列表、Chat 详情 |
-| 服务端状态 | React Query |
-| API 来源 | `web` 暴露的 `/api/agent/*` |
-| 事件流 | `EventSource` 订阅 `/api/agent/sessions/{sessionId}/events/stream` |
-| 视觉来源 | `/mnt/c/Users/fengwk/Downloads/kk-studio-v17.html` 的 AI 模块原型 |
-
-## 产品主线
-
 | 主题 | 当前实现 |
 | --- | --- |
-| 主目标 | 云端内嵌 agent MVP |
-| 数据模型 | 以后端 provider / model / agent / session / event / run 为准 |
-| Chat 消息 | 由 session events 投影生成，前端直接可见 `user` / `assistant` / `tool` 三类节点 |
-| 刷新方式 | events 使用 SSE 推送，runs 在存在 `queued/running` 时轮询 |
+| 工程目录 | `frontend/` 独立 Vite 工程 |
+| 页面范围 | Chat、Provider/Model/Agent 资源管理、ComfyUI 工作流 |
+| 服务端状态 | React Query |
+| 资源 API | `/api/providers`、`/api/models`、`/api/agents` |
+| Harness API | `/api/sessions`、`/api/runs`、`/api/tool-invocations`、`/api/usage` |
+| 实时通道 | 数据库 cursor 驱动的 Run SSE |
+| 视觉实现 | `styles.css` 与 AI Extension Host 组件 |
 
-## 技术栈
+## 路由
 
-| 组件 | 角色 |
+| 路由 | 页面 | 说明 |
+| --- | --- | --- |
+| `/` | redirect | 跳转至 `/sessions` |
+| `/sessions` | Chat 列表 | 全局根 Session、新建 Session |
+| `/sessions/:sessionId` | Chat 详情 | Entry 时间线、Run 状态、工具、权限、Usage/Cost |
+| `/agents` | Agent 管理 | Agent CRUD |
+| `/models` | Model 管理 | Model CRUD |
+| `/providers` | Provider 管理 | Provider CRUD |
+| `/comfyui` | ComfyUI 工作流 | 独立工作流运行时 |
+
+## API 边界
+
+`shared/api/agent-service.ts` 只承载 Provider、Model、Agent 与 Usage 的资源接口。`shared/api/harness-service.ts` 是 Harness 会话、Run、观测和控制的唯一前端边界。
+
+| Harness service | HTTP 接口 | 用途 |
+| --- | --- | --- |
+| `listSessions` / `createSession` / `getSession` | `GET` / `POST /api/sessions`、`GET /api/sessions/{id}` | 根 Session 列表、创建与读取 |
+| `listEntries` | `GET /api/sessions/{id}/entries` | 完整持久 Session Entry 时间线 |
+| `createMessage` | `POST /api/sessions/{id}/messages` | 以 `expectedLeafEntryId` 提交用户消息 |
+| `listRuns` | `GET /api/sessions/{id}/runs` | Session Run 状态 |
+| `listRunEvents` | `GET /api/runs/{id}/events?afterSequence=` | Run Event 快照与 cursor 恢复 |
+| `createRunEventStream` | `GET /api/runs/{id}/events/stream?afterSequence=` | Run Event SSE；服务端 event id 是 sequence |
+| `listToolInvocations` | `GET /api/runs/{id}/tool-invocations` | 工具、目标类型与 Environment 绑定 |
+| `decideToolInvocation` | `POST /api/tool-invocations/{id}/decision` | 持久化 allow / deny 决策 |
+| `getYolo` / `setYolo` | `GET` / `PUT /api/sessions/{id}/yolo` | 根 Session YOLO 策略 |
+| `getSessionUsage` | `GET /api/usage/sessions/{id}` | Token、cache 与 Cost 汇总 |
+| `GET /api/artifacts/{id}` | Artifact bytes | Tool artifact 的原始媒体资源 |
+
+所有 Snowflake ID 在 TypeScript 契约中保持十进制字符串；前端不将 ID 作为 JavaScript number 使用。
+
+## Chat 时间线
+
+### 持久基线与实时覆盖层
+
+`HarnessSessionEntryDTO[]` 是聊天历史的唯一基线：`message` Entry 投影为 user、assistant、tool 气泡，`agent_snapshot` 提供冻结模型/variant 摘要，`compaction` 提供系统摘要。Tool Result 中的 artifact 内容映射到 `/api/artifacts/{artifactId}`，浏览器直接加载媒体，不读取或重组 artifact bytes。
+
+活动 Run 的 `RunEventDTO[]` 只用于尚未物化的实时覆盖层：
+
+| Run Event | 前端行为 |
 | --- | --- |
-| React 19 | 页面与组件 |
-| TypeScript | 类型约束 |
-| Vite | 开发与生产构建 |
-| React Router 7 | 路由 |
-| React Query 5 | 服务端状态管理 |
-| Axios | HTTP client |
-| EventSource | SSE 事件流 |
-| Lucide React | 图标 |
-| Vitest + Testing Library | 单元测试与页面测试 |
-| ESLint | 静态检查 |
+| `assistant_started` / `assistant_delta_batch` | 创建并追加流式 assistant 文本与 thinking |
+| `assistant_failed` | 标记当前流式 assistant 为错误 |
+| `tool_prepared` / `tool_started` | 显示待执行或执行中的工具调用 |
+| `tool_delta_batch` | 追加部分 Tool Result 文本与 artifact 引用 |
+| `tool_completed` | 标记临时工具节点完成或失败 |
+
+每次 `assistant_completed` 都已经与语义 Assistant Entry 原子持久化。投影器仅处理最后一个 `assistant_completed` 之后的 Run Event，避免 SSE 回放重复渲染已物化的 Assistant 内容。
+
+### SSE cursor 恢复
+
+页面先使用 `listRunEvents` 获取快照，再用当前最大 `sequence` 打开 EventSource。收到 `run_event` 后以 sequence 去重并排序；浏览器自动重连时携带上一个 SSE event id，服务端从数据库 cursor 继续发送。终态 Event 会失效 Session、Entry、Run 与 Session 列表 query，使持久化基线重新成为唯一显示结果。
+
+## 运行观测与交互
+
+Chat 详情的观测栏直接读取持久事实：
+
+- YOLO 开关更新根 Session 的持久策略。
+- `WAITING_APPROVAL` Invocation 显示 tool、target type、Environment ID 与 allow / deny 操作。
+- Session Usage 显示输入/输出 token、cache read 与聚合 Cost。
+- Tool artifact 在时间线内显示 image、audio、video 预览和原始内容链接。
+
+前端不维护可恢复的 EventBus、工具状态机或租约；断线、刷新和重连后全部状态由 REST 快照和数据库驱动的 SSE 重建。
 
 ## 工程结构
 
@@ -44,156 +85,28 @@
 frontend/src
 ├── app
 ├── platform
-├── features
-│   └── ai
-├── shared
-│   ├── api
-│   └── lib
-├── main.tsx
-├── styles.css
-└── test-setup.ts
+├── features/ai
+│   ├── useAgentSessionController.ts
+│   ├── useHarnessRunEventStream.ts
+│   ├── useHarnessSessionObservability.ts
+│   ├── session-timeline-builder.ts
+│   └── ChatObservabilityPanel.tsx
+├── shared/api
+│   ├── agent-service.ts
+│   ├── harness-service.ts
+│   └── contracts.ts
+├── shared/lib/query-keys.ts
+└── styles.css
 ```
 
-| 目录 | 职责 |
-| --- | --- |
-| `app` | 应用装配、providers、router |
-| `platform/shell` | 顶部壳层与主框架 |
-| `features/ai` | AI 控制台、Chat 详情、事件聚合、聊天组件 |
-| `shared/api` | 后端 DTO、HTTP client、agent service、SSE 工厂 |
-| `shared/lib` | query keys 等共享工具 |
-| `styles.css` | 全局样式 |
-
-## 路由
-
-| 路由 | 页面 | 说明 |
-| --- | --- | --- |
-| `/` | redirect | 跳转到 `/agent/sessions` |
-| `/agent/sessions` | `AiConsolePage` | Chat / session 卡片列表 |
-| `/agent/agents` | `AiConsolePage` | Agent CRUD |
-| `/agent/models` | `AiConsolePage` | Model CRUD |
-| `/agent/providers` | `AiConsolePage` | Provider CRUD |
-| `/agent/sessions/:sessionId` | `AgentSessionPage` | 会话详情、事件流消息、run 状态、消息提交 |
-
-## AI 控制台拆分
-
-| 组件 | 职责 |
-| --- | --- |
-| `AiConsolePage` | 页面壳层、tab 导航、错误态与弹窗装配 |
-| `useAiConsoleController` | 搜索态、tab 跳转、四个 panel 的装配 |
-| `useAiConsoleResourceController` | Provider / Model / Agent 查询、CRUD、资源编辑弹窗状态 |
-| `useAiConsoleSessionController` | Session 查询、CRUD、新建与重命名弹窗状态 |
-| `AiConsolePanels` | Chat / Agent / Model / Provider 卡片列表 |
-| `AiConsoleModals` | Session 与资源编辑弹窗 |
-| `AiResourceForms` | Provider / Model / Agent 结构化录入表单 |
-
-## 结构化录入
-
-Provider / Model / Agent 的录入以可见字段为主，不要求用户直接填写原始 JSON。
-
-| 资源 | 当前录入方式 |
-| --- | --- |
-| Provider | 常规输入框、下拉选择、密码框、数值输入 |
-| Model | Provider / 名称 / 描述 / default variant 输入框与下拉框，variants 使用结构化列表编辑 |
-| Agent | 名称 / 描述 / system prompt 输入框，默认 model / variant 下拉框，tools 使用字符串列表编辑 |
-
-## 后端契约
-
-统一响应外层：
-
-```ts
-export interface ResultEnvelope<T> {
-  status: number
-  code: string
-  message: string
-  data: T
-}
-```
-
-分页结构：
-
-```ts
-export interface PageResult<T> {
-  pageNumber: number
-  pageSize: number
-  totalCount: number | string
-  results: T[]
-}
-```
-
-服务函数与后端接口映射：
-
-| 服务函数 | 后端接口 | 用途 |
-| --- | --- | --- |
-| `listProviders` / `createProvider` / `updateProvider` / `deleteProvider` | `/api/agent/providers` | Provider CRUD |
-| `listModels` / `createModel` / `updateModel` / `deleteModel` | `/api/agent/models` | Model CRUD |
-| `listAgents` / `createAgent` / `updateAgent` / `deleteAgent` | `/api/agent/agents` | Agent CRUD |
-| `listSessions` / `createSession` / `getSession` / `updateSession` / `deleteSession` | `/api/agent/sessions` | Chat CRUD |
-| `createMessage` | `POST /api/agent/sessions/{sessionId}/messages` | 提交用户消息 |
-| `listEvents` | `GET /api/agent/sessions/{sessionId}/events` | branch events 快照 |
-| `createEventStream` | `GET /api/agent/sessions/{sessionId}/events/stream` | branch events SSE |
-| `listRuns` | `GET /api/agent/sessions/{sessionId}/runs` | run 列表 |
-
-## Chat 组件拆分
-
-| 组件 | 职责 |
-| --- | --- |
-| `AgentSessionPage` | 读取路由参数、装配聊天页 |
-| `useAgentSessionController` | 查询 session、订阅 SSE、提交消息、组装页面状态 |
-| `ChatSidebar` | 左侧会话列表 |
-| `ChatRuntimeBar` | 当前 agent/provider/model/variant 与 run 状态 |
-| `ChatTranscript` | user / assistant / tool 消息列表、加载态、错误态、空态 |
-| `ChatComposer` | 输入框和发送按钮 |
-| `RunStatus` | 最新 run 状态展示 |
-
-## 事件渲染
-
-`AgentSessionPage` 不要求后端提供 message 视图，前端通过 `features/ai/session-events.ts` 将事件流聚合为聊天消息。
-
-| 事件类型 | 前端行为 |
-| --- | --- |
-| `user_message` | 渲染 user 气泡，读取 `payloadJson.content` |
-| `set_agent_info` | 更新当前 runtime agent 摘要 |
-| `set_model_info` | 更新当前 provider / model / variant 摘要 |
-| `assistant_start` | 创建 assistant 气泡 |
-| `assistant_delta` | 追加 assistant 文本增量 |
-| `assistant_end` | 将 assistant 气泡置为完成 |
-| `assistant_error` | 渲染失败态 assistant 气泡 |
-| `tool_start` | 创建 tool 气泡，展示 tool name 与 arguments |
-| `tool_delta` | 追加 tool result 文本或媒体预览附件 |
-| `tool_end` | 将 tool 气泡置为完成 |
-| `tool_error` | 将 tool 气泡置为失败，并保留错误信息 |
-
-## 状态管理
-
-| 主题 | 当前规则 |
-| --- | --- |
-| server state | 统一交给 React Query |
-| provider/model/agent/session 列表 | 分别使用独立 query key |
-| session 详情 | `metadata`、`events`、`runs` 分别建独立 query |
-| message submit | 成功后失效 session detail、events、runs、session list |
-| events 快照 | 页面进入时调用 `listEvents` 重建当前 branch |
-| events 流 | `session_event` 合并进 events query cache，按 `eventId` 去重；timeline 直接消费合并后的 event cache |
-| runs 刷新 | 存在 `queued/running` 时轮询 |
-| message composer | session 存在 active run 时禁用发送，等待当前 run 进入终态 |
-
-## 测试边界
-
-| 层级 | 文件 | 验证目标 |
-| --- | --- | --- |
-| client 单测 | `client.test.ts` | 响应 envelope 解包、错误消息归一化、HTTP 方法委托 |
-| service 单测 | `agent-service.test.ts` | 后端路径与 DTO 映射正确 |
-| 事件单测 | `session-events.test.ts` | event -> message 聚合、run 状态 |
-| 表单单测 | `AiResourceForms.test.tsx` | Provider / Model / Agent 结构化录入交互 |
-| 页面测试 | `AiConsolePage.test.tsx` | provider/model/agent/session CRUD 渲染与交互 |
-| 页面测试 | `AgentSessionPage.test.tsx` | 事件渲染、SSE 合并、run 状态、message submit、空态与错误态 |
-
-覆盖率门禁按 `statements / branches / functions / lines >= 80%` 执行。
-
-## 验证命令
+## 验证
 
 ```bash
 cd frontend
+npm test
 npm run lint
-npm run coverage
 npm run build
+npm run coverage
 ```
+
+前端覆盖率门禁使用 statements / branches / functions / lines 均不低于 80%。

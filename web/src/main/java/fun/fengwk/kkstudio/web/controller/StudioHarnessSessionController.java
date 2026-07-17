@@ -28,6 +28,11 @@ public class StudioHarnessSessionController {
   private final HarnessSessionCommandService commandService;
   private final HarnessSessionQueryService queryService;
 
+  @GetMapping
+  public Result<List<HarnessSessionDTO>> listRootSessions() {
+    return Results.ok(queryService.listRootSessions());
+  }
+
   @PostMapping
   public Result<HarnessSessionDTO> createSession(@RequestBody HarnessSessionCreateDTO createDTO) {
     try {

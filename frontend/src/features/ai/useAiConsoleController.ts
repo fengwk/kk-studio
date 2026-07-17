@@ -11,10 +11,10 @@ export function useAiConsoleController() {
   const resourceController = useAiConsoleResourceController()
   const sessionController = useAiConsoleSessionController(resourceController.agents)
 
-  const agentsByName = useMemo(() => new Map(resourceController.agents.map((agent) => [agent.name, agent])), [resourceController.agents])
+  const agentsById = useMemo(() => new Map(resourceController.agents.map((agent) => [String(agent.id), agent])), [resourceController.agents])
   const filteredSessions = useMemo(
-    () => filterSessions(sessionController.sessions, agentsByName, deferredSearch),
-    [agentsByName, deferredSearch, sessionController.sessions],
+    () => filterSessions(sessionController.sessions, agentsById, deferredSearch),
+    [agentsById, deferredSearch, sessionController.sessions],
   )
   const filteredAgents = useMemo(() => filterAgents(resourceController.agents, deferredSearch), [deferredSearch, resourceController.agents])
   const filteredModels = useMemo(() => filterModels(resourceController.models, deferredSearch), [deferredSearch, resourceController.models])
@@ -40,17 +40,14 @@ export function useAiConsoleController() {
     mutationError,
     chatPanelProps: {
       sessions: filteredSessions,
-      agentsByName,
-      deletePending: sessionController.sessionDeletePending,
+      agentsById,
       onCreate: () => sessionController.openCreateSession(),
-      onEdit: sessionController.openEditSession,
-      onDelete: sessionController.deleteSession,
     },
     agentPanelProps: {
       agents: filteredAgents,
       deletePending: resourceController.agentDeletePending,
       onCreate: resourceController.openCreateAgent,
-      onStart: (agent: AgentDefinitionDTO) => sessionController.openCreateSession(agent.name),
+      onStart: (agent: AgentDefinitionDTO) => sessionController.openCreateSession(String(agent.id)),
       onEdit: (agent: AgentDefinitionDTO) => resourceController.openEditAgent(agent.id),
       onDelete: (agent: AgentDefinitionDTO) => resourceController.deleteAgent(agent.name, agent.id),
     },
@@ -69,8 +66,6 @@ export function useAiConsoleController() {
       onDelete: (provider: AgentProviderDTO) => resourceController.deleteProvider(provider.name, provider.id),
     },
     createSessionModal: sessionController.createSessionModal,
-    editSessionModal: sessionController.editSessionModal,
-    sessionDeleteConfirmModal: sessionController.deleteConfirmModal,
     resourceEditorModal: resourceController.resourceEditorModal,
     resourceDeleteConfirmModal: resourceController.deleteConfirmModal,
   }

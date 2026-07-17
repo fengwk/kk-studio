@@ -9,7 +9,7 @@ export function toToolAttachmentSrc(attachment: ToolAttachment): string | null {
   if (!data) {
     return null
   }
-  if (/^(data:|blob:|https?:\/\/)/i.test(data)) {
+  if (/^(data:|blob:|https?:\/\/|\/)/i.test(data)) {
     return data
   }
   const mime = attachment.mime.trim() || 'application/octet-stream'

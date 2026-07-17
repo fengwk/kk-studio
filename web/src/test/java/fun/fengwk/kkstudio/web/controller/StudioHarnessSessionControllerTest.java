@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -9,6 +10,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.web.WebTestApplication;
+import java.sql.Timestamp;
+import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -117,6 +120,89 @@ class StudioHarnessSessionControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.runId").value(runId))
         .andExpect(jsonPath("$.data.sessionId").value(sessionId));
+  }
+
+  /**
+   * GET /api/sessions 只返回 parent_session_id 为空的根 Session，按 gmt_modified desc、id desc 排序；id
+   * 仍为十进制字符串。
+   */
+  @Test
+  void listsOnlyRootSessionsOrderedByRecentUpdate() throws Exception {
+    long rootOld = 1001L;
+    long rootMid = 1002L;
+    long rootNew = 1003L;
+    long child = 1099L;
+    Instant base = Instant.parse("2026-07-17T00:00:00Z");
+
+    insertRoot(rootOld, "root-old", Timestamp.from(base));
+    insertRoot(rootMid, "root-mid", Timestamp.from(base.plusSeconds(60)));
+    insertRoot(rootNew, "root-new", Timestamp.from(base.plusSeconds(120)));
+    insertChild(child, rootOld, Timestamp.from(base.plusSeconds(180)));
+
+    mockMvc
+        .perform(get("/api/sessions"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.length()").value(3))
+        .andExpect(jsonPath("$.data[0].sessionId").value(Long.toString(rootNew)))
+        .andExpect(jsonPath("$.data[0].title").value("root-new"))
+        .andExpect(jsonPath("$.data[1].sessionId").value(Long.toString(rootMid)))
+        .andExpect(jsonPath("$.data[1].title").value("root-mid"))
+        .andExpect(jsonPath("$.data[2].sessionId").value(Long.toString(rootOld)))
+        .andExpect(jsonPath("$.data[2].title").value("root-old"))
+        .andExpect(jsonPath("$.data[?(@.sessionId == '" + child + "')]").doesNotExist());
+
+    MvcResult result = mockMvc.perform(get("/api/sessions")).andExpect(status().isOk()).andReturn();
+    JsonNode arr = data(result);
+    assertTrue(arr.isArray());
+    for (JsonNode node : arr) {
+      assertTrue(node.path("sessionId").isTextual());
+      assertTrue(node.path("sessionId").asText().matches("\\d+"));
+      assertTrue(!node.has("parentSessionId") || node.path("parentSessionId").isNull());
+      assertEquals(0, node.path("depth").asInt());
+    }
+  }
+
+  /** 同 gmt_modified 时按 id desc 兜底排序。 */
+  @Test
+  void tiesOnGmtModifiedBreakByIdDescending() throws Exception {
+    long rootA = 2001L;
+    long rootB = 2002L;
+    Instant sameInstant = Instant.parse("2026-07-17T01:00:00Z");
+    insertRoot(rootA, "tie-a", Timestamp.from(sameInstant));
+    insertRoot(rootB, "tie-b", Timestamp.from(sameInstant));
+
+    mockMvc
+        .perform(get("/api/sessions"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].sessionId").value(Long.toString(rootB)))
+        .andExpect(jsonPath("$.data[1].sessionId").value(Long.toString(rootA)));
+  }
+
+  private void insertRoot(long id, String title, Timestamp gmtModified) {
+    jdbc.update(
+        "insert into harness_session (id, agent_definition_id, title, leaf_entry_id,"
+            + " active_run_id, parent_session_id, root_session_id, parent_invocation_id, depth,"
+            + " yolo_enabled, gmt_create, gmt_modified, version) values (?, 1, ?, null, null,"
+            + " null, ?, null, 0, false, ?, ?, 0)",
+        id,
+        title,
+        id,
+        gmtModified,
+        gmtModified);
+  }
+
+  private void insertChild(long id, long parentId, Timestamp gmtModified) {
+    jdbc.update(
+        "insert into harness_session (id, agent_definition_id, title, leaf_entry_id,"
+            + " active_run_id, parent_session_id, root_session_id, parent_invocation_id, depth,"
+            + " yolo_enabled, gmt_create, gmt_modified, version) values (?, 1, 'child-of-"
+            + parentId
+            + "', null, null, ?, ?, null, 1, false, ?, ?, 0)",
+        id,
+        parentId,
+        parentId,
+        gmtModified,
+        gmtModified);
   }
 
   /** 非法 bigint ID 是请求错误，未知的 Session、Run、AgentDefinition 是资源不存在。 */

@@ -1,252 +1,238 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentRunDTO, AgentSessionEventDTO } from '@/shared/api/contracts'
+import type { HarnessRunDTO, HarnessSessionEntryDTO, RunEventDTO } from '@/shared/api/contracts'
 import { buildSessionTimeline, hasActiveRun } from '@/features/ai/session-events'
 
 describe('session-events', () => {
-  it('projects backend events into user and assistant messages', () => {
-    const events: AgentSessionEventDTO[] = [
-      event('e1', 'user_message', { content: 'hello' }, 'run-1'),
-      event('e2', 'set_agent_info', { agentName: 'default-assistant' }, 'run-1'),
-      event('e3', 'set_model_info', { provider: 'minimax', model: 'MiniMax-M2.7', variant: 'default' }, 'run-1'),
-      event('e4', 'assistant_start', {}, 'run-1'),
-      event('e5', 'assistant_delta', { textDelta: 'hi ' }, 'run-1'),
-      event('e6', 'assistant_delta', { textDelta: 'there' }, 'run-1'),
-      event('e7', 'assistant_end', { metadata: { finishReason: 'stop' } }, 'run-1'),
-    ]
-
-    const timeline = buildSessionTimeline(events)
-
-    expect(timeline.runtimeContext).toEqual({
-      agentName: 'default-assistant',
-      provider: 'minimax',
-      model: 'MiniMax-M2.7',
-      variant: 'default',
-    })
-    expect(timeline.messages).toHaveLength(2)
-    expect(timeline.messages[0]).toMatchObject({ role: 'user', text: 'hello', status: 'done' })
-    expect(timeline.messages[1]).toMatchObject({ role: 'assistant', text: 'hi there', status: 'done' })
-  })
-
-  it('renders assistant errors as failed assistant messages', () => {
-    const timeline = buildSessionTimeline([event('e1', 'assistant_error', { message: 'provider failed' }, 'run-1')])
-
-    expect(timeline.messages[0]).toMatchObject({ role: 'assistant', text: 'provider failed', status: 'error' })
-  })
-
-  it('keeps thinking deltas out of user-visible assistant text', () => {
+  it('projects durable entries as the transcript baseline', () => {
     const timeline = buildSessionTimeline([
-      event('e1', 'assistant_start', {}, 'run-1'),
-      event('e2', 'assistant_delta', { thinkingDelta: 'internal reasoning' }, 'run-1'),
-      event('e3', 'assistant_delta', { textDelta: 'final answer' }, 'run-1'),
+      entry('snapshot', 'agent_snapshot', { snapshot: { modelId: 'MiniMax-M2.7', variant: 'default' } }),
+      entry('user', 'message', messagePayload('USER', [{ type: 'text', text: '检查大纲' }])),
+      entry('assistant', 'message', messagePayload('ASSISTANT', [
+        { type: 'thinking', text: '先梳理结构。' },
+        { type: 'text', text: '结构完整。' },
+      ])),
+    ], [])
+
+    expect(timeline.runtimeContext).toEqual({ model: 'MiniMax-M2.7', variant: 'default' })
+    expect(timeline.messages).toMatchObject([
+      { role: 'user', text: '检查大纲', status: 'done' },
+      { role: 'assistant', text: '结构完整。', thinking: '先梳理结构。', status: 'done' },
+    ])
+  })
+
+  it('uses active run events only for the live assistant projection', () => {
+    const timeline = buildSessionTimeline([], [
+      runEvent('started', 'assistant_started', {}),
+      runEvent('delta-1', 'assistant_delta_batch', { deltas: [{ kind: 'thinking', text: 'draft ' }, { kind: 'text', text: '<think>hidden</think>final ' }] }),
+      runEvent('delta-2', 'assistant_delta_batch', { deltas: [{ kind: 'text', text: 'answer' }] }),
     ])
 
-    expect(timeline.messages[0]).toMatchObject({ role: 'assistant', text: 'final answer', status: 'streaming' })
+    expect(timeline.messages).toMatchObject([
+      { role: 'assistant', text: 'final answer', thinking: 'draft ', status: 'streaming' },
+    ])
   })
 
-  it('splits think tags out of streamed assistant text across chunk boundaries', () => {
+  it('does not duplicate an Assistant that has already materialized as a durable Entry', () => {
     const timeline = buildSessionTimeline([
-      event('e1', 'assistant_start', {}, 'run-1'),
-      event('e2', 'assistant_delta', { textDelta: '<thi' }, 'run-1'),
-      event('e3', 'assistant_delta', { textDelta: 'nk>draft plan' }, 'run-1'),
-      event('e4', 'assistant_delta', { textDelta: '</th' }, 'run-1'),
-      event('e5', 'assistant_delta', { textDelta: 'ink>\n\nfinal answer' }, 'run-1'),
-      event('e6', 'assistant_end', {}, 'run-1'),
+      entry('assistant', 'message', messagePayload('ASSISTANT', [{ type: 'text', text: '已持久化回答' }])),
+    ], [
+      runEvent('started', 'assistant_started', {}),
+      runEvent('old-delta', 'assistant_delta_batch', { deltas: [{ kind: 'text', text: '已持久化回答' }] }),
+      runEvent('completed', 'assistant_completed', {}),
+      runEvent('next-started', 'assistant_started', {}),
+      runEvent('next-delta', 'assistant_delta_batch', { deltas: [{ kind: 'text', text: '新的实时回答' }] }),
     ])
 
-    expect(timeline.messages).toHaveLength(1)
-    expect(timeline.messages[0]).toMatchObject({ role: 'assistant', text: 'final answer', status: 'done' })
+    expect(timeline.messages).toMatchObject([
+      { role: 'assistant', text: '已持久化回答', status: 'done' },
+      { role: 'assistant', text: '新的实时回答', status: 'streaming' },
+    ])
   })
 
-  it('keeps assistant attempts separate even inside the same run', () => {
+  it('projects durable system, compaction, error and media variants while ignoring non-dialogue Entries', () => {
     const timeline = buildSessionTimeline([
-      event('e1', 'assistant_start', {}, 'run-1'),
-      event('e2', 'assistant_delta', { textDelta: 'first answer' }, 'run-1'),
-      event('e3', 'assistant_end', {}, 'run-1'),
-      event('e4', 'assistant_start', {}, 'run-1'),
-      event('e5', 'assistant_delta', { textDelta: 'second answer' }, 'run-1'),
-      event('e6', 'assistant_end', {}, 'run-1'),
-    ])
+      entry('compaction', 'compaction', { summary: '上下文已压缩' }),
+      entry('empty-compaction', 'compaction', { summary: '' }),
+      entry('system', 'message', messagePayload('SYSTEM', [{ type: 'json', json: '{"mode":"review"}' }])),
+      entry('assistant-thinking', 'message', messagePayload('ASSISTANT', [{ type: 'thinking', text: '仅思考' }])),
+      entry('tool-result', 'message', messagePayload('TOOL', [{
+        type: 'tool_result',
+        toolCallId: 'call-2',
+        toolName: 'media_tool',
+        contents: [
+          { type: 'artifact', artifactId: 'audio-1', mediaType: 'audio/mpeg', preview: null },
+          { type: 'artifact', artifactId: 'video-1', mediaType: 'video/mp4', preview: null },
+          { type: 'artifact', artifactId: 'binary-1', mediaType: 'application/octet-stream', preview: null },
+        ],
+        error: true,
+        detailsJson: '{}',
+      }])),
+      entry('label', 'label', { label: 'ignored' }),
+    ], [])
 
-    expect(timeline.messages).toHaveLength(2)
-    expect(timeline.messages[0]).toMatchObject({ role: 'assistant', text: 'first answer', status: 'done' })
-    expect(timeline.messages[1]).toMatchObject({ role: 'assistant', text: 'second answer', status: 'done' })
+    expect(timeline.messages).toMatchObject([
+      { role: 'system', text: '上下文已压缩' },
+      { role: 'system', text: '{"mode":"review"}' },
+      { role: 'assistant', text: '', thinking: '仅思考' },
+      {
+        role: 'tool',
+        toolCallId: 'call-2',
+        status: 'error',
+        errorMessage: '工具执行失败。',
+        attachments: [
+          { type: 'audio', data: '/api/artifacts/audio-1' },
+          { type: 'video', data: '/api/artifacts/video-1' },
+        ],
+      },
+    ])
   })
 
-  it('drops assistant attempts that never produce visible text', () => {
-    const timeline = buildSessionTimeline([
-      event('e1', 'assistant_start', {}, 'run-1'),
-      event('e2', 'assistant_delta', { thinkingDelta: 'hidden reasoning' }, 'run-1'),
-      event('e3', 'assistant_end', {}, 'run-1'),
+  it('marks streamed assistant failures with and without a started attempt', () => {
+    const absent = { ...runEvent('absent', 'assistant_failed', { message: 'provider unavailable' }), runId: 'other' }
+    const timeline = buildSessionTimeline([], [
+      runEvent('started', 'assistant_started', {}),
+      runEvent('partial', 'assistant_delta_batch', { deltas: [{ kind: 'text', text: 'partial' }, { kind: 'unknown', text: 'ignored' }] }),
+      runEvent('failed', 'assistant_failed', { message: 'network failed' }),
+      absent,
     ])
 
-    expect(timeline.messages).toEqual([])
+    expect(timeline.messages).toMatchObject([
+      { role: 'assistant', text: 'partial\nnetwork failed', status: 'error' },
+      { role: 'assistant', text: 'provider unavailable', status: 'error' },
+    ])
   })
 
-  it('projects tool lifecycle events into visible tool messages', () => {
-    // Tool execution must remain observable in the transcript, including arguments and streamed output.
-    const timeline = buildSessionTimeline([
-      event('e1', 'assistant_start', {}, 'run-1'),
-      event('e2', 'assistant_delta', { textDelta: '我先查一下。' }, 'run-1'),
-      event('e3', 'tool_start', { toolCallId: 'tool-1', toolName: 'web_search', arguments: '{"q":"上海天气"}' }, 'run-1'),
-      event('e4', 'tool_delta', { toolCallId: 'tool-1', contentDeltas: [{ index: 0, contentDelta: { type: 'text', text: '晴 32C' } }] }, 'run-1'),
-      event('e5', 'tool_end', { toolCallId: 'tool-1' }, 'run-1'),
-      event('e6', 'assistant_end', {}, 'run-1'),
+  it('retains valid live tool output while ignoring malformed or duplicate tool events', () => {
+    const timeline = buildSessionTimeline([], [
+      runEvent('missing-call', 'tool_prepared', { toolName: 'ignored' }),
+      runEvent('prepared', 'tool_prepared', { toolCallId: 'call-3', toolName: '', arguments: '{}' }),
+      runEvent('duplicate', 'tool_prepared', { toolCallId: 'call-3', toolName: 'changed' }),
+      runEvent('unknown-start', 'tool_started', { toolCallId: 'unknown' }),
+      runEvent('unknown-partial', 'tool_delta_batch', { partialResults: [{ toolCallId: 'unknown', contents: [] }] }),
+      runEvent('partial', 'tool_delta_batch', {
+        partialResults: [{
+          toolCallId: 'call-3',
+          contents: [
+            { type: 'text', text: 'first' },
+            { type: 'text', text: 'second' },
+            { type: 'artifact', artifactId: 'image-1', mediaType: 'image/png' },
+          ],
+          error: true,
+        }],
+      }),
+      runEvent('completed', 'tool_completed', { toolCallId: 'call-3', error: true }),
     ])
 
-    expect(timeline.messages).toHaveLength(2)
-    expect(timeline.messages[0]).toMatchObject({ role: 'assistant', text: '我先查一下。', status: 'done' })
-    expect(timeline.messages[1]).toMatchObject({
+    expect(timeline.messages).toMatchObject([{
       role: 'tool',
-      toolCallId: 'tool-1',
+      toolCallId: 'call-3',
+      toolName: 'Tool',
+      text: 'first\nsecond',
+      errorMessage: '工具执行失败。',
+      status: 'error',
+      attachments: [{ type: 'image', data: '/api/artifacts/image-1' }],
+    }])
+  })
+
+  it('projects durable tool results and resolves persisted artifacts through the artifact endpoint', () => {
+    const timeline = buildSessionTimeline([
+      entry('tool-result', 'message', messagePayload('TOOL', [{
+        type: 'tool_result',
+        toolCallId: 'call-1',
+        toolName: 'image_tool',
+        contents: [{ type: 'text', text: '生成完成' }, { type: 'artifact', artifactId: '9001', mediaType: 'image/png', preview: null }],
+        error: false,
+        detailsJson: '{}',
+      }])),
+    ], [])
+
+    expect(timeline.messages).toMatchObject([{
+      role: 'tool',
+      toolCallId: 'call-1',
+      toolName: 'image_tool',
+      text: '生成完成',
+      status: 'done',
+      attachments: [{ type: 'image', mime: 'image/png', data: '/api/artifacts/9001' }],
+    }])
+  })
+
+  it('projects prepared tool progress and partial results while a run is active', () => {
+    const timeline = buildSessionTimeline([], [
+      runEvent('prepared', 'tool_prepared', { toolCallId: 'call-1', toolName: 'web_search', arguments: '{"q":"上海天气"}' }),
+      runEvent('started', 'tool_started', { toolCallId: 'call-1' }),
+      runEvent('partial', 'tool_delta_batch', { partialResults: [{ toolCallId: 'call-1', contents: [{ type: 'text', text: '晴 32C' }], error: false, details: {} }] }),
+      runEvent('completed', 'tool_completed', { toolCallId: 'call-1', error: false }),
+    ])
+
+    expect(timeline.messages).toMatchObject([{
+      role: 'tool',
+      toolCallId: 'call-1',
       toolName: 'web_search',
       arguments: '{"q":"上海天气"}',
       text: '晴 32C',
       status: 'done',
-    })
+    }])
   })
 
-  it('preserves tool media attachments for later rendering', () => {
-    // Mixed text/media tool deltas must keep ordered attachments so the UI can render actual previews.
+  it('ignores malformed entry and event payloads without corrupting the timeline', () => {
     const timeline = buildSessionTimeline([
-      event('e1', 'tool_start', { toolCallId: 'tool-3', toolName: 'media_tool', arguments: '{}' }, 'run-1'),
-      event(
-        'e2',
-        'tool_delta',
-        {
-          toolCallId: 'tool-3',
-          contentDeltas: [
-            { index: 0, contentDelta: { type: 'text', text: '生成完成' } },
-            { index: 1, contentDelta: { type: 'image', name: 'cover.png', mime: 'image/png', data: 'aW1n' } },
-            { index: 2, contentDelta: { type: 'audio', name: 'preview.mp3', mime: 'audio/mpeg', data: 'YXVkaW8=' } },
-          ],
-        },
-        'run-1',
-      ),
-      event('e3', 'tool_end', { toolCallId: 'tool-3' }, 'run-1'),
+      { ...entry('bad-entry', 'message', {}), payloadJson: '{bad' },
+    ], [
+      { ...runEvent('bad-event', 'assistant_delta_batch', {}), payloadJson: '{bad' },
     ])
 
-    expect(timeline.messages).toHaveLength(1)
-    expect(timeline.messages[0]).toMatchObject({
-      role: 'tool',
-      toolName: 'media_tool',
-      text: '生成完成',
-      status: 'done',
-      attachments: [
-        { type: 'image', name: 'cover.png', mime: 'image/png', data: 'aW1n' },
-        { type: 'audio', name: 'preview.mp3', mime: 'audio/mpeg', data: 'YXVkaW8=' },
-      ],
-    })
+    expect(timeline).toEqual({ messages: [], runtimeContext: {} })
   })
 
-  it('keeps tool failures visible even when the tool never emitted output', () => {
-    // Error-only tool paths should still produce a readable transcript node instead of disappearing.
-    const timeline = buildSessionTimeline([
-      event('e1', 'tool_error', { toolCallId: 'tool-2', message: 'tool timed out' }, 'run-1'),
-    ])
-
-    expect(timeline.messages).toHaveLength(1)
-    expect(timeline.messages[0]).toMatchObject({
-      role: 'tool',
-      toolCallId: 'tool-2',
-      toolName: 'Tool',
-      text: 'tool timed out',
-      errorMessage: 'tool timed out',
-      status: 'error',
-    })
-  })
-
-  it('detects active runs', () => {
-    expect(hasActiveRun([run('queued')])).toBe(true)
-    expect(hasActiveRun([run('running')])).toBe(true)
-    expect(hasActiveRun([run('succeeded')])).toBe(false)
-    expect(hasActiveRun([run('failed')])).toBe(false)
-  })
-
-  it('keeps timeline stable for missing payloads and fallback values', () => {
-    const timeline = buildSessionTimeline([
-      rawEvent('e1', 'user_message', null, null),
-      rawEvent('e2', 'set_model_info', '{"provider":"minimax","model":"MiniMax-M2.7"}', 'run-1'),
-      rawEvent('e3', 'set_model_info', '{"provider":123,"variant":"chat"}', 'run-1'),
-      rawEvent('e4', 'assistant_start', '{}', null),
-      rawEvent('e4', 'assistant_delta', '{"textDelta":123}', null),
-      rawEvent('e5', 'assistant_error', '{}', 'run-error'),
-      rawEvent('e6', 'assistant_end', '{"metadata":["not-record"]}', 'run-end'),
-      rawEvent('e7', 'unknown_event', '{}', null),
-    ])
-
-    expect(timeline.runtimeContext).toEqual({ provider: 'minimax', model: 'MiniMax-M2.7', variant: 'chat' })
-    expect(timeline.messages[0]).toMatchObject({ role: 'user', runId: null, text: '' })
-    expect(timeline.messages[1]).toMatchObject({ role: 'assistant', text: 'Assistant failed', status: 'error' })
-  })
-
-
-  it('captures thinking deltas emitted alongside visible assistant text', () => {
-    const timeline = buildSessionTimeline([
-      event("e1", "assistant_start", {}, "run-1"),
-      event("e2", "assistant_delta", { textDelta: "final " }, "run-1"),
-      event("e3", "assistant_delta", { thinkingDelta: "verify " }, "run-1"),
-      event("e4", "assistant_delta", { textDelta: "answer" }, "run-1"),
-      event("e5", "assistant_delta", { thinkingDelta: "more thinking" }, "run-1"),
-      event("e6", "assistant_end", {}, "run-1"),
-    ])
-
-    expect(timeline.messages).toHaveLength(1)
-    expect(timeline.messages[0]).toMatchObject({
-      role: "assistant",
-      text: "final answer",
-      thinking: "verify more thinking",
-      status: "done",
-    })
-  })
-
-
-  it('flushes thinking that arrives before the first text delta', () => {
-    // Providers like MiniMax reasoning models stream thinking deltas first and
-    // only start emitting text once the model commits to an answer. The early
-    // thinking must still be preserved on the resulting message.
-    const timeline = buildSessionTimeline([
-      event("e1", "assistant_start", {}, "run-1"),
-      event("e2", "assistant_delta", { thinkingDelta: "step 1 " }, "run-1"),
-      event("e3", "assistant_delta", { thinkingDelta: "step 2 " }, "run-1"),
-      event("e4", "assistant_delta", { textDelta: "final answer" }, "run-1"),
-      event("e5", "assistant_delta", { thinkingDelta: "verify" }, "run-1"),
-      event("e6", "assistant_end", {}, "run-1"),
-    ])
-
-    expect(timeline.messages).toHaveLength(1)
-    expect(timeline.messages[0]).toMatchObject({
-      role: "assistant",
-      text: "final answer",
-      thinking: "step 1 step 2 verify",
-      status: "done",
-    })
+  it('treats queued, running and waiting-tools runs as active', () => {
+    expect(hasActiveRun([run('QUEUED')])).toBe(true)
+    expect(hasActiveRun([run('RUNNING')])).toBe(true)
+    expect(hasActiveRun([run('WAITING_TOOLS')])).toBe(true)
+    expect(hasActiveRun([run('SUCCEEDED')])).toBe(false)
   })
 })
 
-function event(eventId: string, eventType: string, payload: Record<string, unknown>, runId: string | null): AgentSessionEventDTO {
-  return rawEvent(eventId, eventType, JSON.stringify(payload), runId)
-}
-
-function rawEvent(eventId: string, eventType: string, payloadJson: string | null, runId: string | null): AgentSessionEventDTO {
+function entry(sessionEntryId: string, entryType: string, payload: Record<string, unknown>): HarnessSessionEntryDTO {
   return {
-    eventId,
-    sessionId: 'session-1',
-    parentEventId: 'root',
-    runId,
-    eventType,
-    payloadJson,
+    sessionEntryId,
+    sessionId: '1',
+    parentEntryId: null,
+    runId: entryType === 'agent_snapshot' ? null : '2',
+    entryType,
+    payloadJson: JSON.stringify(payload),
     createTime: '2026-06-20T02:00:00',
   }
 }
 
+function messagePayload(role: string, contents: Record<string, unknown>[]) {
+  return { message: { role, contents }, assistantMetadata: role === 'ASSISTANT' ? {} : null }
+}
 
-function run(status: string): AgentRunDTO {
+function runEvent(eventId: string, type: string, payload: Record<string, unknown>): RunEventDTO {
   return {
-    runId: `run-${status}`,
-    sessionId: 'session-1',
-    triggerEventId: 'event-1',
-    status,
+    eventId,
+    runId: '2',
+    sequence: eventId.length,
+    type,
+    payloadJson: JSON.stringify(payload),
     createTime: '2026-06-20T02:00:00',
-    updateTime: '2026-06-20T02:01:00',
+  }
+}
+
+function run(status: string): HarnessRunDTO {
+  return {
+    runId: '2',
+    sessionId: '1',
+    triggerEntryId: '3',
+    status,
+    turnIndex: 0,
+    attempt: 1,
+    eventSequence: 0,
+    nextAttemptAt: null,
+    cancelRequestedAt: null,
+    startedAt: null,
+    finishedAt: null,
+    createTime: '2026-06-20T02:00:00',
+    updateTime: '2026-06-20T02:00:00',
   }
 }

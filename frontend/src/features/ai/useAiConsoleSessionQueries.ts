@@ -1,16 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
-import { createSessionApi } from '@/shared/api/agent-service'
+import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 export function useAiConsoleSessionQueries() {
-  const sessionApi = createSessionApi()
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions.list,
-    queryFn: sessionApi.list,
+    queryFn: () => harnessService.listSessions(),
   })
 
   return {
     sessionsQuery,
-    sessions: sessionsQuery.data?.results ?? [],
+    sessions: sessionsQuery.data ?? [],
   }
 }

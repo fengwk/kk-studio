@@ -4,19 +4,23 @@ import App from '@/app/App'
 import { AppProviders } from '@/app/providers'
 import { agentService } from '@/shared/api/agent-service'
 import { comfyuiService } from '@/shared/api/comfyui-service'
+import { harnessService } from '@/shared/api/harness-service'
 
 vi.mock('@/shared/api/agent-service', () => {
   const agentService = {
     listProviders: vi.fn(),
     listModels: vi.fn(),
     listAgents: vi.fn(),
-    listSessions: vi.fn(),
   }
-  return {
-    agentService,
-    createSessionApi: () => ({ list: () => agentService.listSessions() }),
-  }
+  return { agentService }
 })
+
+vi.mock('@/shared/api/harness-service', () => ({
+  harnessService: {
+    listSessions: vi.fn(),
+    createSession: vi.fn(),
+  },
+}))
 
 vi.mock('@/shared/api/comfyui-service', () => ({
   comfyuiService: {
@@ -61,10 +65,15 @@ const agent = {
   updateTime: null,
 }
 const session = {
-  sessionId: 'session-1',
-  agentId: agent.id,
-  agentName: agent.name,
+  sessionId: '1',
+  agentDefinitionId: agent.id,
   title: 'Acceptance chat',
+  rootSessionId: '1',
+  parentSessionId: null,
+  depth: 0,
+  leafEntryId: '2',
+  activeRunId: null,
+  yoloEnabled: false,
   createTime: null,
   updateTime: null,
 }
@@ -80,7 +89,7 @@ describe('App', () => {
     vi.mocked(agentService.listProviders).mockResolvedValue(page([provider]))
     vi.mocked(agentService.listModels).mockResolvedValue(page([model]))
     vi.mocked(agentService.listAgents).mockResolvedValue(page([agent]))
-    vi.mocked(agentService.listSessions).mockResolvedValue(page([session]))
+    vi.mocked(harnessService.listSessions).mockResolvedValue([session])
     vi.mocked(comfyuiService.listWorkflows).mockResolvedValue(page([]))
   })
 
@@ -106,7 +115,7 @@ describe('App', () => {
     expect(window.location.pathname).toBe(path)
   })
 
-  it('renders the ComfyUI workflow page through its own isolated runtime and never queries legacy agent endpoints', async () => {
+  it('renders the ComfyUI workflow page through its own isolated runtime without querying agent or Harness sessions', async () => {
     vi.mocked(comfyuiService.listWorkflows).mockResolvedValue(page([]))
 
     window.history.replaceState({}, '', '/comfyui')
@@ -116,10 +125,10 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: '新建 ComfyUI Workflow' })).toBeInTheDocument()
     await waitFor(() => expect(comfyuiService.listWorkflows).toHaveBeenCalled())
 
-    // No legacy provider/model/agent/session API may be queried while ComfyUI is the active route.
+    // No agent or Harness session API may be queried while ComfyUI is the active route.
     expect(agentService.listProviders).not.toHaveBeenCalled()
     expect(agentService.listModels).not.toHaveBeenCalled()
     expect(agentService.listAgents).not.toHaveBeenCalled()
-    expect(agentService.listSessions).not.toHaveBeenCalled()
+    expect(harnessService.listSessions).not.toHaveBeenCalled()
   })
 })

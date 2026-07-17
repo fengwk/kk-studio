@@ -10,4 +10,7 @@ public interface HarnessSessionQueryService {
   HarnessSessionDTO getSession(String sessionId);
 
   List<HarnessSessionEntryDTO> listEntries(String sessionId);
+
+  /** Lists all global root sessions ordered by recent update time. */
+  List<HarnessSessionDTO> listRootSessions();
 }
