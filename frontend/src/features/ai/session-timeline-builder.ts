@@ -23,33 +23,29 @@ export function buildSessionTimeline(entries: HarnessSessionEntryDTO[], runEvent
   const runtimeContext: RuntimeContext = {}
   const activeTools = new Map<string, ToolDialogueMessage>()
   const activeAssistants = new Map<string, StreamingAssistant>()
-  // How many assistant completion cycles already have a durable Entry for each run. Only that many
-  // completed overlays are skipped; unmaterialized completions stay visible as done bubbles.
-  const remainingMaterializedAssistants = countDurableAssistantsByRun(entries)
-  const suppressedRuns = new Set<string>()
+  const durableToolArguments = new Map<string, string[]>()
+  // Durable Assistant Entries cover the Run Event prefix through the matching completed cycle.
+  // Events after that cutoff remain the live overlay, including a completion whose Entry refetch
+  // has not landed yet.
+  const materializedCutoffs = findMaterializedAssistantCutoffs(entries, runEvents)
+  const materializedToolCycles = findMaterializedToolCycles(entries, runEvents)
+  const suppressedTools = new Set<string>()
 
   for (const entry of entries) {
-    projectDurableEntry(entry, messages, runtimeContext)
+    projectDurableEntry(entry, messages, runtimeContext, durableToolArguments)
   }
 
   for (const event of runEvents) {
+    if (event.sequence <= (materializedCutoffs.get(event.runId) ?? 0)) {
+      continue
+    }
     const payload = parsePayload(event.payloadJson)
 
     switch (event.type) {
-      case 'assistant_started': {
-        if ((remainingMaterializedAssistants.get(event.runId) ?? 0) > 0) {
-          suppressedRuns.add(event.runId)
-          activeAssistants.delete(event.runId)
-          break
-        }
-        suppressedRuns.delete(event.runId)
+      case 'assistant_started':
         activeAssistants.set(event.runId, newStreamingAssistant(event))
         break
-      }
       case 'assistant_delta_batch': {
-        if (suppressedRuns.has(event.runId)) {
-          break
-        }
         const state = activeAssistants.get(event.runId) ?? newStreamingAssistant(event)
         for (const delta of getRecordList(payload.deltas)) {
           const kind = getString(delta.kind)
@@ -63,51 +59,49 @@ export function buildSessionTimeline(entries: HarnessSessionEntryDTO[], runEvent
         break
       }
       case 'assistant_completed': {
-        if ((remainingMaterializedAssistants.get(event.runId) ?? 0) > 0) {
-          remainingMaterializedAssistants.set(
-            event.runId,
-            (remainingMaterializedAssistants.get(event.runId) ?? 1) - 1,
-          )
-          suppressedRuns.delete(event.runId)
-          activeAssistants.delete(event.runId)
-          break
-        }
         // Entry refetch has not landed yet: keep the streamed assistant and mark it done.
         completeStreamingAssistant(activeAssistants.get(event.runId), messages, event, '')
         activeAssistants.delete(event.runId)
-        suppressedRuns.delete(event.runId)
         break
       }
       case 'assistant_failed':
-        if (suppressedRuns.has(event.runId) && (remainingMaterializedAssistants.get(event.runId) ?? 0) > 0) {
-          // A failed attempt that already has a durable assistant should not re-project.
-          remainingMaterializedAssistants.set(
-            event.runId,
-            (remainingMaterializedAssistants.get(event.runId) ?? 1) - 1,
-          )
-          suppressedRuns.delete(event.runId)
-          activeAssistants.delete(event.runId)
-          break
-        }
         completeStreamingAssistant(activeAssistants.get(event.runId), messages, event, getString(payload.message))
         activeAssistants.delete(event.runId)
-        suppressedRuns.delete(event.runId)
         break
-      case 'tool_prepared':
+      case 'tool_prepared': {
+        const key = toolEventKey(event, payload)
+        if (materializedToolCycles.has(key)) {
+          suppressedTools.add(key)
+          break
+        }
         prepareStreamingTool(activeTools, messages, event, payload)
         break
+      }
       case 'tool_started': {
-        const tool = activeTools.get(getString(payload.toolCallId))
+        const key = toolEventKey(event, payload)
+        if (suppressedTools.has(key)) {
+          break
+        }
+        const tool = activeTools.get(key)
         if (tool) {
           tool.status = 'streaming'
         }
         break
       }
-      case 'tool_delta_batch':
-        appendStreamingToolResults(activeTools, payload)
+      case 'tool_delta_batch': {
+        const key = toolEventKey(event, payload)
+        if (key && suppressedTools.has(key)) {
+          break
+        }
+        appendStreamingToolResults(activeTools, event, payload)
         break
+      }
       case 'tool_completed': {
-        const tool = activeTools.get(getString(payload.toolCallId))
+        const key = toolEventKey(event, payload)
+        if (suppressedTools.delete(key)) {
+          break
+        }
+        const tool = activeTools.get(key)
         if (tool) {
           tool.status = payload.error === true ? 'error' : 'done'
         }
@@ -119,7 +113,10 @@ export function buildSessionTimeline(entries: HarnessSessionEntryDTO[], runEvent
   return { messages, runtimeContext }
 }
 
-function countDurableAssistantsByRun(entries: HarnessSessionEntryDTO[]): Map<string, number> {
+function findMaterializedAssistantCutoffs(
+  entries: HarnessSessionEntryDTO[],
+  runEvents: RunEventDTO[],
+): Map<string, number> {
   const counts = new Map<string, number>()
   for (const entry of entries) {
     if (entry.entryType !== 'message' || !entry.runId) {
@@ -132,10 +129,73 @@ function countDurableAssistantsByRun(entries: HarnessSessionEntryDTO[]): Map<str
     }
     counts.set(entry.runId, (counts.get(entry.runId) ?? 0) + 1)
   }
-  return counts
+  const cutoffs = new Map<string, number>()
+  const maximumSequences = new Map<string, number>()
+  for (const event of runEvents) {
+    maximumSequences.set(event.runId, Math.max(maximumSequences.get(event.runId) ?? 0, event.sequence))
+    const remaining = counts.get(event.runId) ?? 0
+    if (event.type !== 'assistant_completed' || remaining <= 0) {
+      continue
+    }
+    cutoffs.set(event.runId, event.sequence)
+    counts.set(event.runId, remaining - 1)
+  }
+  // Parallel initial queries can observe the Entry commit before their Run Event snapshot. In that
+  // case the durable baseline is authoritative, so suppress the stale event prefix already loaded.
+  for (const [runId, remaining] of counts) {
+    if (remaining > 0) {
+      cutoffs.set(runId, maximumSequences.get(runId) ?? 0)
+    }
+  }
+  return cutoffs
 }
 
-function projectDurableEntry(entry: HarnessSessionEntryDTO, messages: DialogueMessage[], runtimeContext: RuntimeContext) {
+function findMaterializedToolCycles(entries: HarnessSessionEntryDTO[], runEvents: RunEventDTO[]): Set<string> {
+  const counts = new Map<string, number>()
+  for (const entry of entries) {
+    if (entry.entryType !== 'message' || !entry.runId) {
+      continue
+    }
+    const message = asRecord(parsePayload(entry.payloadJson).message)
+    if (getString(message.role) !== 'TOOL') {
+      continue
+    }
+    for (const content of getRecordList(message.contents)) {
+      if (getString(content.type) !== 'tool_result') {
+        continue
+      }
+      const key = toolCallKey(entry.runId, getString(content.toolCallId))
+      if (key) {
+        counts.set(key, (counts.get(key) ?? 0) + 1)
+      }
+    }
+  }
+  const materialized = new Set<string>()
+  for (const event of runEvents) {
+    if (event.type !== 'tool_prepared') {
+      continue
+    }
+    const payload = parsePayload(event.payloadJson)
+    const callKey = toolCallKey(event.runId, getString(payload.toolCallId))
+    const remaining = counts.get(callKey) ?? 0
+    if (!callKey || remaining <= 0) {
+      continue
+    }
+    const cycleKey = toolEventKey(event, payload)
+    if (cycleKey) {
+      materialized.add(cycleKey)
+      counts.set(callKey, remaining - 1)
+    }
+  }
+  return materialized
+}
+
+function projectDurableEntry(
+  entry: HarnessSessionEntryDTO,
+  messages: DialogueMessage[],
+  runtimeContext: RuntimeContext,
+  durableToolArguments: Map<string, string[]>,
+) {
   const payload = parsePayload(entry.payloadJson)
   if (entry.entryType === 'agent_snapshot') {
     const snapshot = asRecord(payload.snapshot)
@@ -179,6 +239,15 @@ function projectDurableEntry(entry: HarnessSessionEntryDTO, messages: DialogueMe
     return
   }
   if (role === 'ASSISTANT') {
+    for (const content of contents.filter((candidate) => getString(candidate.type) === 'tool_call')) {
+      const key = toolCallKey(entry.runId ?? '', getString(content.toolCallId))
+      if (!key) {
+        continue
+      }
+      const argumentsQueue = durableToolArguments.get(key) ?? []
+      argumentsQueue.push(getString(content.argumentsJson))
+      durableToolArguments.set(key, argumentsQueue)
+    }
     const text = contents.filter((content) => getString(content.type) === 'text').map(contentText).join('')
     const thinking = contents.filter((content) => getString(content.type) === 'thinking').map(contentText).join('')
     if (text || thinking) {
@@ -196,12 +265,22 @@ function projectDurableEntry(entry: HarnessSessionEntryDTO, messages: DialogueMe
   }
   if (role === 'TOOL') {
     for (const content of contents.filter((candidate) => getString(candidate.type) === 'tool_result')) {
-      messages.push(projectToolResult(entry, content))
+      const key = toolCallKey(entry.runId ?? '', getString(content.toolCallId))
+      const argumentsQueue = durableToolArguments.get(key) ?? []
+      const argumentsJson = argumentsQueue.shift() ?? ''
+      if (argumentsQueue.length === 0) {
+        durableToolArguments.delete(key)
+      }
+      messages.push(projectToolResult(entry, content, argumentsJson))
     }
   }
 }
 
-function projectToolResult(entry: HarnessSessionEntryDTO, content: Record<string, unknown>): ToolDialogueMessage {
+function projectToolResult(
+  entry: HarnessSessionEntryDTO,
+  content: Record<string, unknown>,
+  argumentsJson: string,
+): ToolDialogueMessage {
   const contents = getRecordList(content.contents)
   const error = content.error === true
   return {
@@ -210,7 +289,7 @@ function projectToolResult(entry: HarnessSessionEntryDTO, content: Record<string
     runId: entry.runId,
     toolCallId: getString(content.toolCallId),
     toolName: getString(content.toolName),
-    arguments: '',
+    arguments: argumentsJson,
     text: contents.map(contentText).filter(Boolean).join('\n'),
     attachments: contents.flatMap(toArtifactAttachment),
     errorMessage: error ? '工具执行失败。' : undefined,
@@ -305,7 +384,8 @@ function prepareStreamingTool(
   payload: Record<string, unknown>,
 ) {
   const toolCallId = getString(payload.toolCallId)
-  if (!toolCallId || activeTools.has(toolCallId)) {
+  const key = toolEventKey(event, payload)
+  if (!toolCallId || !key || activeTools.has(key)) {
     return
   }
   const tool: ToolDialogueMessage = {
@@ -320,13 +400,19 @@ function prepareStreamingTool(
     createdAt: event.createTime,
     status: 'streaming',
   }
-  activeTools.set(toolCallId, tool)
+  activeTools.set(key, tool)
   messages.push(tool)
 }
 
-function appendStreamingToolResults(activeTools: Map<string, ToolDialogueMessage>, payload: Record<string, unknown>) {
+function appendStreamingToolResults(
+  activeTools: Map<string, ToolDialogueMessage>,
+  event: RunEventDTO,
+  payload: Record<string, unknown>,
+) {
+  const invocationKey = toolEventKey(event, payload)
   for (const result of getRecordList(payload.partialResults)) {
-    const tool = activeTools.get(getString(result.toolCallId))
+    const key = invocationKey || toolCallKey(event.runId, getString(result.toolCallId))
+    const tool = activeTools.get(key)
     if (!tool) {
       continue
     }
@@ -338,6 +424,17 @@ function appendStreamingToolResults(activeTools: Map<string, ToolDialogueMessage
       tool.errorMessage = '工具执行失败。'
     }
   }
+}
+
+function toolEventKey(event: RunEventDTO, payload: Record<string, unknown>): string {
+  const invocationId = getString(payload.invocationId)
+  return invocationId
+    ? `${event.runId}:invocation:${invocationId}`
+    : toolCallKey(event.runId, getString(payload.toolCallId))
+}
+
+function toolCallKey(runId: string, toolCallId: string): string {
+  return toolCallId ? `${runId}:call:${toolCallId}` : ''
 }
 
 function contentText(content: Record<string, unknown>): string {

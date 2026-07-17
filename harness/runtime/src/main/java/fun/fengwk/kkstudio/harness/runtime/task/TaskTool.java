@@ -100,12 +100,16 @@ public final class TaskTool implements Tool {
         complete(handle, inspection.report());
       } else {
         try {
-          handle.future =
+          ScheduledFuture<?> future =
               scheduler.scheduleWithFixedDelay(
                   () -> inspect(handle),
                   pollInterval.toMillis(),
                   pollInterval.toMillis(),
                   TimeUnit.MILLISECONDS);
+          handle.future = future;
+          if (handle.cancelled.get() || handle.completed.get()) {
+            cancelFuture(handle);
+          }
         } catch (RuntimeException scheduleError) {
           // Durable child is already running; without a poll schedule the parent would orphan it.
           failAfterDurableChild(handle, scheduleError);
@@ -120,7 +124,7 @@ public final class TaskTool implements Tool {
   }
 
   private void inspect(Handle handle) {
-    if (handle.completed.get()) {
+    if (handle.cancelled.get() || handle.completed.get()) {
       return;
     }
     try {

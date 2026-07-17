@@ -24,8 +24,10 @@ export function createHarnessService(client: HttpClient = apiClient) {
     createMessage: (sessionId: string, data: HarnessSessionMessageCreateDTO): Promise<HarnessSessionEntryDTO> =>
       client.post(`/sessions/${encodeURIComponent(sessionId)}/messages`, data),
     listRuns: (sessionId: string): Promise<HarnessRunDTO[]> => client.get(`/sessions/${encodeURIComponent(sessionId)}/runs`),
-    listRunEvents: (runId: string, afterSequence = 0): Promise<RunEventDTO[]> =>
-      client.get(`/runs/${encodeURIComponent(runId)}/events`, { params: { afterSequence } }),
+    listRunEvents: (runId: string, afterSequence = 0, limit?: number): Promise<RunEventDTO[]> =>
+      client.get(`/runs/${encodeURIComponent(runId)}/events`, {
+        params: { afterSequence, ...(limit === undefined ? {} : { limit }) },
+      }),
     listRootActivities: (sessionId: string, afterEventId = '0'): Promise<RootActivityDTO[]> =>
       client.get(`/sessions/${encodeURIComponent(sessionId)}/activities`, { params: { afterEventId } }),
     listSessionTasks: (sessionId: string): Promise<SubagentTaskDTO[]> =>
