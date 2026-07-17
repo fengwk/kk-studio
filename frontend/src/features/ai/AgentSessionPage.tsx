@@ -28,6 +28,8 @@ export function AgentSessionPage() {
       observability={controller.observability}
       taskTimeline={controller.taskTimeline}
       controlsPending={controller.controlsPending}
+      actionError={controller.actionError}
+      onDismissActionError={controller.dismissActionError}
       onDraftChange={controller.setDraft}
       onSubmit={controller.submitMessage}
       onSteer={controller.submitSteer}
