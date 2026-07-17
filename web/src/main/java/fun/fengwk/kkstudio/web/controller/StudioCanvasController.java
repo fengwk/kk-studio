@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.share.model.studio.CanvasDocumentDTO;
 import fun.fengwk.kkstudio.share.model.studio.CanvasSnapshotDTO;
 import fun.fengwk.kkstudio.share.model.studio.CreateCanvasRequestDTO;
 import fun.fengwk.kkstudio.studio.StudioFeatureNotReadyException;
+import fun.fengwk.kkstudio.studio.StudioWorkspaces;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.web.studio.StudioWebMapper;
@@ -23,12 +24,7 @@ import fun.fengwk.kkstudio.web.studio.StudioWebMapper;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * Canvas HTTP boundary.
- *
- * <p>Routes are registered now; durable command/query adapters still throw {@link
- * StudioFeatureNotReadyException}.
- */
+/** Canvas HTTP boundary for the minimal durable slice. */
 @RestController
 @RequestMapping("/api/canvases")
 @RequiredArgsConstructor
@@ -38,7 +34,8 @@ public class StudioCanvasController {
   private final CanvasCommandService canvasCommandService;
 
   @GetMapping
-  public List<CanvasDocumentDTO> list(@RequestParam("workspaceId") long workspaceId) {
+  public List<CanvasDocumentDTO> list(
+      @RequestParam(value = "workspaceId", defaultValue = "1") long workspaceId) {
     return canvasQueryService.listDocuments(workspaceId).stream()
         .map(StudioWebMapper::toDto)
         .collect(Collectors.toList());
@@ -54,14 +51,20 @@ public class StudioCanvasController {
   }
 
   @PostMapping
-  public ResponseEntity<?> create(@RequestBody CreateCanvasRequestDTO request) {
+  public ResponseEntity<?> create(@RequestBody(required = false) CreateCanvasRequestDTO request) {
     try {
-      long workspaceId = Long.parseLong(request.getWorkspaceId());
+      long workspaceId =
+          request == null || request.getWorkspaceId() == null || request.getWorkspaceId().isBlank()
+              ? StudioWorkspaces.DEFAULT_ID
+              : Long.parseLong(request.getWorkspaceId());
+      String title = request == null ? null : request.getTitle();
       CanvasDocumentDTO dto =
-          StudioWebMapper.toDto(canvasCommandService.createCanvas(workspaceId, request.getTitle()));
+          StudioWebMapper.toDto(canvasCommandService.createCanvas(workspaceId, title));
       return ResponseEntity.status(HttpStatus.CREATED).body(dto);
+    } catch (IllegalArgumentException ex) {
+      return ResponseEntity.badRequest().body(ex.getMessage());
     } catch (StudioFeatureNotReadyException ex) {
-      return notImplemented(ex);
+      return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).body(ex.getMessage());
     }
   }
 
@@ -78,12 +81,16 @@ public class StudioCanvasController {
                   request.getRequestHash(),
                   request.getCommandsJson()));
       return ResponseEntity.ok(dto);
+    } catch (IllegalStateException ex) {
+      if ("REVISION_CONFLICT".equals(ex.getMessage())
+          || "IDEMPOTENCY_CONFLICT".equals(ex.getMessage())) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ex.getMessage());
+      }
+      return ResponseEntity.badRequest().body(ex.getMessage());
+    } catch (IllegalArgumentException ex) {
+      return ResponseEntity.badRequest().body(ex.getMessage());
     } catch (StudioFeatureNotReadyException ex) {
-      return notImplemented(ex);
+      return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).body(ex.getMessage());
     }
-  }
-
-  private static ResponseEntity<String> notImplemented(StudioFeatureNotReadyException ex) {
-    return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).body(ex.getMessage());
   }
 }

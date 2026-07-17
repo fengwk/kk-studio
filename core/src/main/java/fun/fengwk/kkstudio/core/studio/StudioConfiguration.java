@@ -1,11 +1,15 @@
 package fun.fengwk.kkstudio.core.studio;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasCommandMapper;
+import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasDocumentMapper;
+import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasLinkMapper;
+import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasNodeMapper;
+import fun.fengwk.kkstudio.core.studio.service.DurableCanvasService;
 import fun.fengwk.kkstudio.core.studio.service.InMemoryFunctionCatalog;
-import fun.fengwk.kkstudio.core.studio.service.StubCanvasCommandService;
-import fun.fengwk.kkstudio.core.studio.service.StubCanvasQueryService;
 import fun.fengwk.kkstudio.core.studio.service.StubFunctionRuntimeService;
 import fun.fengwk.kkstudio.core.studio.service.StubResourceStore;
 import fun.fengwk.kkstudio.core.studio.service.StubWorkflowCommandService;
@@ -18,7 +22,7 @@ import fun.fengwk.kkstudio.studio.runtime.ResourceStore;
 import fun.fengwk.kkstudio.studio.workflow.WorkflowCommandService;
 import fun.fengwk.kkstudio.studio.workflow.WorkflowQueryService;
 
-/** Wires Studio ports. Replace stubs with durable adapters in later slices. */
+/** Wires Studio ports. Canvas is durable; Function runtime / Workflow remain stubbed. */
 @Configuration
 public class StudioConfiguration {
 
@@ -33,13 +37,24 @@ public class StudioConfiguration {
   }
 
   @Bean
-  public CanvasQueryService canvasQueryService() {
-    return new StubCanvasQueryService();
+  public DurableCanvasService durableCanvasService(
+      CanvasDocumentMapper documentMapper,
+      CanvasNodeMapper nodeMapper,
+      CanvasLinkMapper linkMapper,
+      CanvasCommandMapper commandMapper,
+      ObjectMapper objectMapper) {
+    return new DurableCanvasService(
+        documentMapper, nodeMapper, linkMapper, commandMapper, objectMapper);
   }
 
   @Bean
-  public CanvasCommandService canvasCommandService() {
-    return new StubCanvasCommandService();
+  public CanvasQueryService canvasQueryService(DurableCanvasService durableCanvasService) {
+    return durableCanvasService;
+  }
+
+  @Bean
+  public CanvasCommandService canvasCommandService(DurableCanvasService durableCanvasService) {
+    return durableCanvasService;
   }
 
   @Bean
