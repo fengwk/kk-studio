@@ -244,6 +244,8 @@ class StudioHarnessObservabilityControllerTest {
             .perform(get("/api/artifacts/{id}", ref.artifactId()))
             .andExpect(status().isOk())
             .andExpect(header().string("Content-Type", "text/plain"))
+            .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+            .andExpect(header().string("Content-Security-Policy", "sandbox"))
             .andReturn();
     assertArrayEquals("hello".getBytes(), okResult.getResponse().getContentAsByteArray());
 
@@ -252,6 +254,30 @@ class StudioHarnessObservabilityControllerTest {
     mockMvc.perform(get("/api/artifacts/{id}", "abc")).andExpect(status().isBadRequest());
 
     mockMvc.perform(get("/api/artifacts/{id}", "9999999999")).andExpect(status().isNotFound());
+  }
+
+  /** Invalid legacy media metadata must not make raw artifact retrieval a server error. */
+  @Test
+  void fallsBackToOctetStreamForMalformedPersistedArtifactMediaType() throws Exception {
+    long artifactId = runIds.newRunEventId();
+    jdbc.update(
+        "insert into tool_artifact (id, media_type, encoding, content, size_bytes, sha256, gmt_create)"
+            + " values (?, ?, ?, ?, ?, ?, ?)",
+        artifactId,
+        "not a media type",
+        "identity",
+        new byte[] {1},
+        1L,
+        "digest",
+        Timestamp.from(NOW));
+
+    mockMvc
+        .perform(get("/api/artifacts/{id}", artifactId))
+        .andExpect(status().isOk())
+        .andExpect(header().string("Content-Type", "application/octet-stream"))
+        .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+        .andExpect(header().string("Content-Security-Policy", "sandbox"))
+        .andExpect(content().bytes(new byte[] {1}));
   }
 
   /** SSE delivers persisted run events with name=run_event and id=sequence decimal. */

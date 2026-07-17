@@ -2,7 +2,7 @@ import type { BackendDateTime } from '@/shared/api/contracts'
 
 export type DialogueRole = 'user' | 'assistant' | 'system' | 'tool'
 export type DialogueStatus = 'streaming' | 'done' | 'error'
-export type ToolAttachmentType = 'image' | 'audio' | 'video'
+export type ToolAttachmentType = 'image' | 'audio' | 'video' | 'file'
 
 export interface ToolAttachment {
   type: ToolAttachmentType

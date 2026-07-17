@@ -55,7 +55,7 @@ Run Event 与 Root Activity SSE 都先从数据库读取 cursor 之后的事实�
 
 ## Tool、Environment 与 Artifact
 
-Tool Invocation 在数据库中经历权限、lease、partial 与 terminal 状态。Cloud、Control 和 Environment 分别使用受限的 worker 查询和 lease 语义；Environment gateway 的连接注册表只保存 transient connection handle。Environment daemon 返回的 artifact bytes 经协议校验后写入全局 ArtifactStore，Artifact HTTP 接口返回原 media type 的原始 bytes。
+Tool Invocation 在数据库中经历权限、lease、partial 与 terminal 状态。Cloud、Control 和 Environment 分别使用受限的 worker 查询和 lease 语义；Environment gateway 的连接注册表只保存 transient connection handle。Environment daemon 返回的 artifact bytes 经协议校验后写入全局 ArtifactStore。Artifact HTTP 接口返回原始 bytes 和有效的持久 media type；异常的既有 media metadata 降级为 `application/octet-stream`，并统一附加 `X-Content-Type-Options: nosniff` 和 `Content-Security-Policy: sandbox`。
 
 Environment REST CRUD 不接受 capability 或 last-seen 字段；这两个 daemon-owned 事实仅由认证后的 daemon protocol 更新。协议、token、envelope 和 artifact 限制见 [Environment Daemon Gateway](environment-daemon-gateway.md)。
 

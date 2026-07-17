@@ -82,6 +82,7 @@ describe('session-events', () => {
         attachments: [
           { type: 'audio', data: '/api/artifacts/audio-1' },
           { type: 'video', data: '/api/artifacts/video-1' },
+          { type: 'file', mime: 'application/octet-stream', data: '/api/artifacts/binary-1' },
         ],
       },
     ])

@@ -86,7 +86,7 @@ Chat 详情的观测栏直接读取持久事实：
 - YOLO 开关更新根 Session 的持久策略。
 - `WAITING_APPROVAL` Invocation 显示 tool、target type、Environment ID 与 allow / deny 操作。
 - Session Usage 显示输入/输出 token、cache read 与聚合 Cost。
-- Tool artifact 在时间线内显示 image、audio、video 预览和原始内容链接。
+- Tool artifact 在时间线内显示 image、audio、video 预览；其它 media type 以文件占位和原始内容链接呈现，不会在投影时丢弃。
 
 前端不维护可恢复的 EventBus、工具状态机或租约；断线、刷新和重连后全部状态由 REST 快照和数据库驱动的 SSE 重建。
 
