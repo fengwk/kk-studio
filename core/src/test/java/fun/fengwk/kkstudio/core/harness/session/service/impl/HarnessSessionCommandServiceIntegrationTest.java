@@ -105,18 +105,27 @@ class HarnessSessionCommandServiceIntegrationTest {
   }
 
   @Test
-  void submitUserMessageRejectsLeafConflict() {
-    HarnessSessionDTO root = commandService.createRootSession(create("leaf-conflict"));
+  void submitUserMessageSoftRebasesStaleLeafOntoCurrentTip() {
+    HarnessSessionDTO root = commandService.createRootSession(create("leaf-soft-rebase"));
+    String snapshotLeaf = root.getLeafEntryId();
     HarnessSessionMessageCreateDTO first = new HarnessSessionMessageCreateDTO();
     first.setContent("first");
-    first.setExpectedLeafEntryId(root.getLeafEntryId());
-    commandService.submitUserMessage(root.getSessionId(), first);
+    first.setExpectedLeafEntryId(snapshotLeaf);
+    HarnessSessionEntryDTO firstEntry =
+        commandService.submitUserMessage(root.getSessionId(), first);
+
+    // Finish the first run so a follow-up message is allowed; tip has moved past snapshotLeaf.
+    jdbc.update(
+        "update harness_session set active_run_id = null where id = ?",
+        Long.parseLong(root.getSessionId()));
 
     HarnessSessionMessageCreateDTO stale = new HarnessSessionMessageCreateDTO();
-    stale.setContent("stale");
-    stale.setExpectedLeafEntryId(root.getLeafEntryId());
-    assertThrows(
-        RuntimeException.class, () -> commandService.submitUserMessage(root.getSessionId(), stale));
+    stale.setContent("continue-from-stale-tip");
+    stale.setExpectedLeafEntryId(snapshotLeaf);
+    HarnessSessionEntryDTO second = commandService.submitUserMessage(root.getSessionId(), stale);
+    assertNotNull(second.getRunId());
+    assertTrue(second.getPayloadJson().contains("continue-from-stale-tip"));
+    assertNotNull(firstEntry.getSessionEntryId());
   }
 
   @Test
