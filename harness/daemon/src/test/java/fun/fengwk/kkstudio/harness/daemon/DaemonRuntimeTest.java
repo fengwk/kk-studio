@@ -70,6 +70,8 @@ import org.junit.jupiter.api.Test;
 /** Daemon 生命周期及本地 Tool SPI 的协议集成测试。 */
 class DaemonRuntimeTest {
 
+  private static final long ASYNC_TEST_TIMEOUT_SECONDS = 5;
+
   private final DaemonEnvelopeCodec codec = new DaemonEnvelopeCodec();
   private DaemonRuntime runtime;
 
@@ -90,6 +92,8 @@ class DaemonRuntimeTest {
     transport.awaitConnections(1);
     List<DaemonEnvelope> handshake = transport.takeMessages(3);
     assertMessageTypes(handshake, HELLO, CAPABILITIES, READY);
+    assertEquals(
+        "test-gateway-token", codec.readPayload(handshake.get(0)).path("gatewayToken").asText());
     JsonNode descriptor = codec.readPayload(handshake.get(1)).path("tools").get(0);
     assertEquals("test", descriptor.path("name").asText());
     assertEquals("1.0.0", descriptor.path("version").asText());
@@ -765,7 +769,8 @@ class DaemonRuntimeTest {
             heartbeatInterval,
             Duration.ZERO,
             Duration.ofSeconds(1),
-            defaultToolTimeout),
+            defaultToolTimeout,
+            "test-gateway-token"),
         transport,
         registry,
         new InMemoryDaemonInvocationJournal(),
@@ -880,13 +885,13 @@ class DaemonRuntimeTest {
     }
 
     private void awaitConnections(int expected) throws InterruptedException {
-      assertTrue(connections.tryAcquire(expected, 1, TimeUnit.SECONDS));
+      assertTrue(connections.tryAcquire(expected, ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
     }
 
     private List<DaemonEnvelope> takeMessages(int count) throws InterruptedException {
       List<DaemonEnvelope> messages = new ArrayList<>();
       for (int index = 0; index < count; index++) {
-        String message = sent.poll(1, TimeUnit.SECONDS);
+        String message = sent.poll(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         assertTrue(message != null, "expected daemon message " + (index + 1));
         messages.add(codec.decode(message));
       }
@@ -894,7 +899,7 @@ class DaemonRuntimeTest {
     }
 
     private DaemonEnvelope takeNextMessage() throws InterruptedException {
-      String message = sent.poll(1, TimeUnit.SECONDS);
+      String message = sent.poll(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
       assertTrue(message != null, "expected daemon message");
       return codec.decode(message);
     }

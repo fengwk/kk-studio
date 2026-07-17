@@ -42,6 +42,9 @@ class DaemonEnvelopeCodecTest {
     assertProtocolError(
         "{\"protocolVersion\":1,\"messageType\":\"READY\",\"environmentId\":\"e\","
             + "\"sequence\":0,\"payload\":[]}");
+    assertProtocolError(
+        "{\"protocolVersion\":1,\"messageType\":\"READY\",\"environmentId\":\"e\","
+            + "\"sequence\":0,\"payload\":{},\"unexpected\":true}");
   }
 
   private void assertProtocolError(String json) {

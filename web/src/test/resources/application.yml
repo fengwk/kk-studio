@@ -33,3 +33,5 @@ kk-studio:
   harness:
     runtime:
       workers-enabled: false
+    environment-gateway:
+      daemon-token: test-daemon-token
