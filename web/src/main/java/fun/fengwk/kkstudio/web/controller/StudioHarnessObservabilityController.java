@@ -138,10 +138,11 @@ public class StudioHarnessObservabilityController {
   }
 
   /**
-   * Artifact GET returns persisted bytes with the original valid {@code mediaType}. Response headers
-   * prevent MIME sniffing and sandbox document artifacts before a browser renders them. Blank or
-   * non-positive identifiers translate to 400; unknown ids translate to 404. There is intentionally
-   * no JSON / base64 fallback so consumers can pipe the response directly to file outputs.
+   * Artifact GET returns persisted bytes with the original valid {@code mediaType}. Response
+   * headers prevent MIME sniffing and sandbox document artifacts before a browser renders them.
+   * Blank or non-positive identifiers translate to 400; unknown ids translate to 404. There is
+   * intentionally no JSON / base64 fallback so consumers can pipe the response directly to file
+   * outputs.
    */
   @GetMapping("/artifacts/{id}")
   public ResponseEntity<ByteArrayResource> getArtifact(@PathVariable("id") String id) {

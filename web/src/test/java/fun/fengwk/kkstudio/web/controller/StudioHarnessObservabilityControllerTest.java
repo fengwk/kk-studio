@@ -261,8 +261,8 @@ class StudioHarnessObservabilityControllerTest {
   void fallsBackToOctetStreamForMalformedPersistedArtifactMediaType() throws Exception {
     long artifactId = runIds.newRunEventId();
     jdbc.update(
-        "insert into tool_artifact (id, media_type, encoding, content, size_bytes, sha256, gmt_create)"
-            + " values (?, ?, ?, ?, ?, ?, ?)",
+        "insert into tool_artifact (id, media_type, encoding, content, size_bytes, sha256,"
+            + " gmt_create) values (?, ?, ?, ?, ?, ?, ?)",
         artifactId,
         "not a media type",
         "identity",
