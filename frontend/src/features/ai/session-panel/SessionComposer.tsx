@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { PlusIcon, SendIcon } from '@/features/canvas/icons'
 import { SessionCommandPalette } from '@/features/ai/session-panel/SessionCommandPalette'
-import type { SessionCommand } from '@/features/ai/session-panel/session-commands'
+import { filterSessionCommands, type SessionCommand } from '@/features/ai/session-panel/session-commands'
 
 const TEXTAREA_MIN_HEIGHT = 37
 const TEXTAREA_LINE_HEIGHT = 19
@@ -10,7 +10,7 @@ const TEXTAREA_MAX_HEIGHT = TEXTAREA_MIN_HEIGHT + TEXTAREA_LINE_HEIGHT * (TEXTAR
 
 /**
  * Canvas-style dock: + opens command table; typing `/` also opens it with search.
- * Shift+Enter grows the textarea upward up to 10 lines, then scrolls.
+ * Composer keeps focus while typing and after send/cancel.
  */
 export function SessionComposer({
   draft,
@@ -34,6 +34,7 @@ export function SessionComposer({
   const [menuOpen, setMenuOpen] = useState(false)
   const [menuQuery, setMenuQuery] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const wasPendingRef = useRef(false)
 
   const slashMode = draft.startsWith('/')
   const open = menuOpen || slashMode
@@ -55,23 +56,36 @@ export function SessionComposer({
     el.style.overflowY = el.scrollHeight > TEXTAREA_MAX_HEIGHT ? 'auto' : 'hidden'
   }, [draft])
 
-  function openMenu() {
-    setMenuOpen(true)
-    setMenuQuery('')
-  }
+  // After send completes (pending true -> false), keep typing in the composer.
+  useEffect(() => {
+    if (wasPendingRef.current && !pending && !disabled) {
+      focusComposer()
+    }
+    wasPendingRef.current = pending
+  }, [pending, disabled])
 
   function focusComposer() {
-    // Palette search input unmounts asynchronously; retry focus a few times.
     const tryFocus = (attempt: number) => {
       const el = textareaRef.current
-      if (el && document.activeElement !== el) {
+      if (!el || el.disabled) {
+        if (attempt < 5) {
+          window.setTimeout(() => tryFocus(attempt + 1), 16)
+        }
+        return
+      }
+      if (document.activeElement !== el) {
         el.focus({ preventScroll: true })
       }
-      if (attempt < 3 && document.activeElement !== textareaRef.current) {
+      if (attempt < 5 && document.activeElement !== el) {
         window.setTimeout(() => tryFocus(attempt + 1), 16)
       }
     }
     window.setTimeout(() => tryFocus(0), 0)
+  }
+
+  function openMenu() {
+    setMenuOpen(true)
+    setMenuQuery('')
   }
 
   function closeMenu(options?: { restoreFocus?: boolean }) {
@@ -100,12 +114,25 @@ export function SessionComposer({
       closeMenu({ restoreFocus: true })
       return
     }
+    if (open && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+      // Keep focus in textarea; palette selection is mouse-driven in slash mode.
+      return
+    }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       if (open) {
+        // In slash mode Enter executes the first matching command.
+        if (slashMode) {
+          event.preventDefault()
+          const command = filterSessionCommands(query)[0]
+          if (command) {
+            handleSelect(command)
+          }
+        }
         return
       }
       event.preventDefault()
       onSubmit()
+      focusComposer()
     }
   }
 
@@ -121,6 +148,7 @@ export function SessionComposer({
       <SessionCommandPalette
         open={open}
         query={query}
+        captureFocus={!slashMode}
         onQueryChange={(value) => {
           if (slashMode) {
             onDraftChange(`/${value}`)
@@ -129,7 +157,7 @@ export function SessionComposer({
           }
         }}
         onSelect={handleSelect}
-        onClose={closeMenu}
+        onClose={() => closeMenu({ restoreFocus: true })}
       />
       <div className="session-dock">
         <button
@@ -137,7 +165,7 @@ export function SessionComposer({
           type="button"
           aria-label="打开命令表"
           aria-expanded={open}
-          onClick={() => (open ? closeMenu() : openMenu())}
+          onClick={() => (open ? closeMenu({ restoreFocus: true }) : openMenu())}
           disabled={disabled || controlsPending}
         >
           <PlusIcon />
@@ -148,7 +176,7 @@ export function SessionComposer({
           onChange={(event) => handleChange(event.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="告诉 Agent 下一步要完成什么…（/ 打开命令）"
-          disabled={disabled || pending}
+          disabled={disabled}
           rows={1}
           aria-label="给 AI 发送消息"
         />
@@ -156,7 +184,10 @@ export function SessionComposer({
           className="session-dock-send"
           type="button"
           aria-label="发送消息"
-          onClick={onSubmit}
+          onClick={() => {
+            onSubmit()
+            focusComposer()
+          }}
           disabled={!canSend}
         >
           <SendIcon />
