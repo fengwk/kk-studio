@@ -2,7 +2,8 @@ import type { RefObject } from 'react'
 import { ChatRuntimeBarStatus, ChatSidebar } from '@/features/ai/ChatPanelParts'
 import { ChatObservabilityPanel } from '@/features/ai/ChatObservabilityPanel'
 import { SessionPanel } from '@/features/ai/session-panel'
-import { TaskTimelinePanel } from '@/features/ai/TaskTimelinePanel'
+import { SessionActivityWidget } from '@/features/ai/session-panel/SessionActivityWidget'
+import { SessionSubagentWidget } from '@/features/ai/session-panel/SessionSubagentWidget'
 import type { SubagentTaskNode } from '@/features/ai/subagent-task-tree'
 import type { RelayPermission } from '@/features/ai/useHarnessTaskTimeline'
 import type { SessionTimeline } from '@/features/ai/session-events'
@@ -17,8 +18,8 @@ import type {
 } from '@/shared/api/contracts'
 
 /**
- * Harness adapter over the reusable SessionPanel shell.
- * Domain-specific chrome (sidebar, yolo/usage, task activity) is composed around the panel.
+ * Harness adapter over SessionPanel.
+ * No top status bar — working indicator lives in the widget zone.
  */
 export function ChatPanel({
   sessions,
@@ -27,7 +28,6 @@ export function ChatPanel({
   title,
   onBack,
   session,
-  agent,
   timeline,
   runs,
   activeRun,
@@ -92,15 +92,9 @@ export function ChatPanel({
   onFollowUp: () => void
   onAbort: () => void
 }) {
-  const agentLabel = agent?.name || session?.agentDefinitionId || 'Agent'
-  const runtimeProvider = timeline.runtimeContext.provider || agent?.defaultProviderName || '-'
-  const runtimeModel = timeline.runtimeContext.model || agent?.defaultModelName || '-'
-  const runtimeVariant = timeline.runtimeContext.variant || agent?.defaultVariant || '-'
   const pendingPermissions = observability.toolInvocations.filter(
     (invocation) => invocation.status === 'WAITING_APPROVAL',
   )
-  const hasRelayPermissions = taskTimeline.relayPermissions.length > 0
-  const showPermissionBanner = pendingPermissions.length > 0 || hasRelayPermissions
 
   return (
     <SessionPanel
@@ -113,9 +107,6 @@ export function ChatPanel({
           onBack={onBack}
         />
       }
-      title={agentLabel}
-      subtitle={`${runtimeProvider} / ${runtimeModel} / ${runtimeVariant}`}
-      status={<ChatRuntimeBarStatus runs={runs} activeRun={activeRun} />}
       messages={timeline.messages}
       messagesLoading={messagesLoading}
       messagesError={messagesError}
@@ -132,9 +123,15 @@ export function ChatPanel({
       onSteer={onSteer}
       onFollowUp={onFollowUp}
       onAbort={onAbort}
-      banner={
-        showPermissionBanner ? (
-          <div className="session-banner">
+      widgets={
+        <>
+          {!session?.parentSessionId ? (
+            <>
+              <SessionActivityWidget activities={taskTimeline.activities} />
+              <SessionSubagentWidget taskTree={taskTimeline.taskTree} />
+            </>
+          ) : null}
+          {pendingPermissions.length > 0 ? (
             <ChatObservabilityPanel
               yolo={observability.yolo}
               usage={undefined}
@@ -146,27 +143,49 @@ export function ChatPanel({
               onDecision={observability.decideTool}
               permissionsOnly
             />
-            {!session?.parentSessionId && hasRelayPermissions ? (
-              <TaskTimelinePanel
-                activities={[]}
-                taskTree={[]}
-                relayPermissions={taskTimeline.relayPermissions}
-                loading={false}
-                error={null}
-                decisionPending={taskTimeline.permissionDecisionPending}
-                onDecision={taskTimeline.decidePermission}
-                permissionsOnly
-              />
-            ) : null}
-          </div>
-        ) : null
+          ) : null}
+          {!session?.parentSessionId && taskTimeline.relayPermissions.length > 0
+            ? taskTimeline.relayPermissions.map((permission) => (
+              <div key={permission.invocationId} className="session-permission-line">
+                <strong>
+                  子代理权限：
+                  {permission.tool}
+                </strong>
+                <span>
+                  {permission.workdir}
+                  {' · '}
+                  {permission.arguments}
+                </span>
+                <div className="session-permission-actions">
+                  <button
+                    type="button"
+                    disabled={taskTimeline.permissionDecisionPending}
+                    onClick={() => taskTimeline.decidePermission(permission.invocationId, 'deny')}
+                  >
+                    拒绝
+                  </button>
+                  <button
+                    type="button"
+                    disabled={taskTimeline.permissionDecisionPending}
+                    onClick={() => taskTimeline.decidePermission(permission.invocationId, 'allow')}
+                  >
+                    允许
+                  </button>
+                </div>
+              </div>
+            ))
+            : null}
+        </>
       }
       footer={
         <>
+          <div className="session-footer-meta">
+            <ChatRuntimeBarStatus runs={runs} activeRun={activeRun} />
+          </div>
           <ChatObservabilityPanel
             yolo={observability.yolo}
             usage={observability.usage}
-            toolInvocations={observability.toolInvocations}
+            toolInvocations={[]}
             error={observability.observabilityError}
             yoloPending={observability.yoloPending}
             decisionPending={observability.decisionPending}
@@ -174,20 +193,6 @@ export function ChatPanel({
             onDecision={observability.decideTool}
             compact
           />
-          {!session?.parentSessionId ? (
-            <details className="session-activity-drawer">
-              <summary>活动 / 子代理</summary>
-              <TaskTimelinePanel
-                activities={taskTimeline.activities}
-                taskTree={taskTimeline.taskTree}
-                relayPermissions={[]}
-                loading={taskTimeline.taskTimelineLoading}
-                error={taskTimeline.taskTimelineError}
-                decisionPending={taskTimeline.permissionDecisionPending}
-                onDecision={taskTimeline.decidePermission}
-              />
-            </details>
-          ) : null}
         </>
       }
     />

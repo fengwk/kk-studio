@@ -1027,7 +1027,7 @@ Color tokens come from global product design tokens in styles.css. */
 }
 
 .canvas-feature .agent-dock textarea::placeholder {
-  color:var(--green-primary);
+  color:var(--fg-dim);
   opacity:1;
 }
 

@@ -311,6 +311,20 @@ describe('session-events', () => {
     expect(hasActiveRun([run('WAITING_TOOLS')])).toBe(true)
     expect(hasActiveRun([run('SUCCEEDED')])).toBe(false)
   })
+
+  it('dedupes when run event sequence arrives as a string (Jackson long)', () => {
+    const events = [
+      { ...runEvent('started', 'assistant_started', {}), sequence: '1' as unknown as number },
+      { ...runEvent('delta', 'assistant_delta_batch', { deltas: [{ kind: 'text', text: '最终回答' }] }), sequence: '2' as unknown as number },
+      { ...runEvent('completed', 'assistant_completed', {}), sequence: '10' as unknown as number },
+    ]
+    const timeline = buildSessionTimeline([
+      entry('assistant', 'message', messagePayload('ASSISTANT', [{ type: 'text', text: '最终回答' }])),
+    ], events)
+    expect(timeline.messages.filter((message) => message.role === 'assistant')).toHaveLength(1)
+    expect(timeline.messages).toMatchObject([{ role: 'assistant', text: '最终回答', status: 'done' }])
+  })
+
 })
 
 function entry(sessionEntryId: string, entryType: string, payload: Record<string, unknown>): HarnessSessionEntryDTO {

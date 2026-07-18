@@ -2,10 +2,9 @@ import type { TextDialogueMessage } from '@/features/ai/session-events'
 
 export function SystemMessageBlock({ message }: { message: TextDialogueMessage }) {
   return (
-    <article className="session-row system">
-      <div className={`session-bubble system ${message.status === 'error' ? 'error' : ''}`}>
-        {message.text}
-      </div>
-    </article>
+    <section className={`session-block session-block-system ${message.status === 'error' ? 'error' : ''}`}>
+      <div className="session-block-label">system</div>
+      <div className="session-block-body">{message.text}</div>
+    </section>
   )
 }
