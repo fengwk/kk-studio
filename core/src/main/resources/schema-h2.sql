@@ -77,22 +77,23 @@ create index if not exists idx_harness_session_entry_session_id
 create index if not exists idx_harness_session_entry_parent on harness_session_entry (parent_entry_id);
 create index if not exists idx_harness_session_entry_run on harness_session_entry (run_id, id);
 
+-- durable Agent 执行单元：排队 / 租约 claim / 多 turn / 终态均可恢复
 create table if not exists harness_run (
-    id                  bigint not null,
-    session_id          bigint not null,
-    trigger_entry_id    bigint not null,
-    status              varchar(32) not null,
-    turn_index          integer not null,
-    attempt             integer not null,
-    event_sequence      bigint not null,
-    lease_owner         varchar(128),
-    lease_until         timestamp(3),
-    next_attempt_at     timestamp(3) not null,
-    cancel_requested_at timestamp(3),
-    gmt_create          timestamp(3) not null default current_timestamp(),
-    started_at          timestamp(3),
-    finished_at         timestamp(3),
-    gmt_modified        timestamp(3) not null default current_timestamp(),
+    id                  bigint not null,                 -- 业务主键
+    session_id          bigint not null,                 -- 所属 session
+    trigger_entry_id    bigint not null,                 -- 触发本 run 的 entry（通常 USER）
+    status              varchar(32) not null,            -- QUEUED/RUNNING/WAITING_TOOLS/SUCCEEDED/FAILED/CANCELLED
+    turn_index          integer not null,                -- 同 run 内 turn 序号
+    attempt             integer not null,                -- claim 次数（与 lease CAS）
+    event_sequence      bigint not null,                 -- 已分配 run event 最大 sequence
+    lease_owner         varchar(128),                    -- 当前 worker；仅 RUNNING 非空
+    lease_until         timestamp(3),                    -- 租约截止；过期可 reclaim
+    next_attempt_at     timestamp(3) not null,           -- 下次可 claim 时间
+    cancel_requested_at timestamp(3),                    -- abort 请求时间
+    gmt_create          timestamp(3) not null default current_timestamp(), -- 创建时间
+    started_at          timestamp(3),                    -- 首次开始时间
+    finished_at         timestamp(3),                    -- 终态时间
+    gmt_modified        timestamp(3) not null default current_timestamp(), -- 更新时间
     primary key (id)
 );
 

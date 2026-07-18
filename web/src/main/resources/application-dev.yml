@@ -6,14 +6,14 @@ spring:
       schema-locations:
         - classpath:schema-h2.sql
       data-locations:
-        - classpath:data-minimax-h2.sql
+        - classpath:data-dev.sql
 
   datasource:
     multi:
       primary:
         primary: true
         driver-class-name: org.h2.Driver
-        url: jdbc:h2:mem:kk-studio-minimax-h2;DB_CLOSE_DELAY=-1;MODE=MySQL;DATABASE_TO_LOWER=TRUE
+        url: jdbc:h2:mem:kk-studio-dev;DB_CLOSE_DELAY=-1;MODE=MySQL;DATABASE_TO_LOWER=TRUE
         username: SA
 
   h2:
@@ -31,7 +31,6 @@ convention:
   snowflake-id:
     initial-timestamp: 1702214261706
     worker-id: 0
-
 
 logging:
   level:

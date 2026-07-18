@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.core.harness.tool.worker.store;
+package fun.fengwk.kkstudio.core.harness.tool.store.mapper;
 
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
 import org.apache.ibatis.annotations.Insert;
@@ -7,6 +7,8 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Result;
 import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
+
+import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolArtifactDO;
 
 @Mapper
 public interface ToolArtifactMapper extends BaseMapper {

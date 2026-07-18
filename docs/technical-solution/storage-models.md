@@ -7,8 +7,8 @@ Harness 的关系数据库是执行和恢复的唯一事实源。H2 与 MySQL sc
 | 文件 | 用途 |
 | --- | --- |
 | `schema-h2.sql` / `schema-mysql.sql` | H2 与 MySQL 的完整表结构 |
-| `data-h2.sql` | 本地 H2 最小 seed |
-| `data-minimax-h2.sql` | MiniMax H2 开发 seed |
+| `data-dev.sql` | `dev` profile：内存 H2 + stub provider 最小 seed |
+| `data-e2e.sql` | `e2e` profile：内存 H2 + 真模型 seed（默认 MiniMax，可替换） |
 | `data-mysql.sql` | MySQL 最小 seed |
 | `src/test/resources/schema-h2.sql` | Core 集成测试 schema |
 

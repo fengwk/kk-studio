@@ -1,10 +1,10 @@
-package fun.fengwk.kkstudio.core.harness.tool.worker;
+package fun.fengwk.kkstudio.core.harness.tool.store;
 
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
-import fun.fengwk.kkstudio.core.harness.tool.worker.store.ToolArtifactDO;
-import fun.fengwk.kkstudio.core.harness.tool.worker.store.ToolArtifactMapper;
+import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolArtifactMapper;
+import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolArtifactDO;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.Artifact;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;

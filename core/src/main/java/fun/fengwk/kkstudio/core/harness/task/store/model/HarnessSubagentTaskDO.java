@@ -4,20 +4,45 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** Database representation of the durable parent Invocation to child Run relation. */
+/** {@code harness_subagent_task} 行映射：父 ToolInvocation 到 child Session/Run 的 durable 关系。 */
 @Data
 public class HarnessSubagentTaskDO {
+  /** 主键：父 task ToolInvocation id（执行幂等键）。 */
   private Long parentInvocationId;
+
+  /** 父 Session id。 */
   private Long parentSessionId;
+
+  /** 子 Session id。 */
   private Long childSessionId;
+
+  /** 子 Run id。 */
   private Long childRunId;
+
+  /** 目标子 Agent 标识。 */
   private String targetAgent;
+
+  /** working-copy 策略。 */
   private String workingCopyPolicy;
+
+  /** working-copy 修订标识。 */
   private String workingCopyRevision;
+
+  /** 子任务最大 turn 数。 */
   private Integer maxTurns;
+
+  /** 空闲超时（毫秒）；可空表示未限制。 */
   private Long idleTimeoutMillis;
+
+  /** 任务状态。 */
   private String status;
+
+  /** 终态 report JSON。 */
   private String reportJson;
+
+  /** 创建时间（映射 {@code gmt_create}）。 */
   private LocalDateTime createTime;
+
+  /** 更新时间（映射 {@code gmt_modified}）。 */
   private LocalDateTime updateTime;
 }

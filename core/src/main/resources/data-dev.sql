@@ -2,7 +2,7 @@ merge into agent_provider (
     id, name, description, provider_type, base_url, credential, config_json,
     gmt_create, gmt_modified, version
 ) key (id) values (
-    1, 'stub', 'Local deterministic provider for development and acceptance tests.',
+    1, 'stub', 'Deterministic stub provider for offline dev profile.',
     'openai', 'http://stub.local/v1', 'stub-key', '{"timeoutMillis":60000}',
     current_timestamp(), current_timestamp(), 0
 );
