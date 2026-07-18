@@ -974,7 +974,7 @@ Color tokens come from global product design tokens in styles.css. */
   border:1px solid var(--stage-dot);
   border-radius:15px;
   background: var(--overlay-surface);
-  box-shadow: var(--shadow-lg), inset 0 1px var(--white-06);
+  box-shadow: none;
   backdrop-filter:blur(18px);
 }
 
@@ -1020,7 +1020,7 @@ Color tokens come from global product design tokens in styles.css. */
   overflow-y:auto;
   border:0;
   outline:0;
-  color:var(--fg-muted);
+  color:#ffffff;
   background:transparent;
   font-size:13px;
   line-height:19px;
