@@ -1397,15 +1397,22 @@ textarea::placeholder {
   height: 37px;
   flex: 0 0 37px;
   place-items: center;
-  border-radius: 50%;
+  border-radius: 999px;
   border: 0;
   cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
+/* + : dark/flat by default, circular lift on hover */
 .session-dock-add {
-  border: 1px solid var(--fg-dim);
-  color: var(--fg-muted);
-  background: var(--surface-raised);
+  color: var(--fg-dim);
+  background: transparent;
+}
+
+.session-dock-add:hover:not(:disabled),
+.session-dock-add:focus-visible:not(:disabled) {
+  color: var(--fg);
+  background: var(--surface-active);
 }
 
 .session-dock-add:disabled,
@@ -1417,6 +1424,11 @@ textarea::placeholder {
 .session-dock-send {
   color: var(--stage-bg);
   background: var(--fg);
+  border-radius: 999px;
+}
+
+.session-dock-send:hover:not(:disabled) {
+  background: var(--fg-muted);
 }
 
 .session-dock textarea {
