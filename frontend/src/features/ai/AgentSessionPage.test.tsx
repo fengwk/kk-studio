@@ -178,7 +178,7 @@ describe('AgentSessionPage', () => {
 
     expect(await screen.findByText('需要工具授权：workspace_edit')).toBeInTheDocument()
     expect(screen.getByText('ENVIRONMENT / environment:42')).toBeInTheDocument()
-    expect(await screen.findByText(/agent:/)).toBeInTheDocument()
+    expect(await screen.findByText(/agent:Default Assistant/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '允许' }))
     await waitFor(() => expect(harnessService.decideToolInvocation).toHaveBeenCalledWith('invocation-1', 'allow'))
