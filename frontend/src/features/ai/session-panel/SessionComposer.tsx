@@ -1,9 +1,9 @@
-import { LoaderCircle, Send, Square } from 'lucide-react'
 import type { KeyboardEvent } from 'react'
+import { PlusIcon, SendIcon } from '@/features/canvas/icons'
 
 /**
- * Canvas-dock inspired composer: single clean input row + send.
- * Secondary run controls stay compact when a run is active.
+ * Canvas prototype dock: + | textarea | send.
+ * Gray placeholder/chrome (no green tint).
  */
 export function SessionComposer({
   draft,
@@ -16,6 +16,7 @@ export function SessionComposer({
   onSteer,
   onFollowUp,
   onAbort,
+  onAdd,
 }: {
   draft: string
   activeRun: boolean
@@ -27,6 +28,7 @@ export function SessionComposer({
   onSteer: () => void
   onFollowUp: () => void
   onAbort: () => void
+  onAdd?: () => void
 }) {
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -37,41 +39,33 @@ export function SessionComposer({
 
   return (
     <div className="session-composer">
-      {(pending || activeRun) && (
-        <div className="session-run-strip" aria-live="polite">
-          <LoaderCircle className="session-spin" aria-hidden="true" />
-          <span>{pending ? '正在发送…' : 'Agent 运行中…'}</span>
-          {activeRun ? (
-            <button
-              type="button"
-              className="session-abort-link"
-              onClick={onAbort}
-              disabled={controlsPending}
-            >
-              <Square aria-hidden="true" />
-              终止
-            </button>
-          ) : null}
-        </div>
-      )}
       <div className="session-dock">
+        <button
+          className="session-dock-add"
+          type="button"
+          aria-label="添加内容"
+          onClick={onAdd}
+          disabled={disabled}
+        >
+          <PlusIcon />
+        </button>
         <textarea
           value={draft}
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="给 AI 发送消息..."
+          placeholder="告诉 Agent 下一步要完成什么…"
           disabled={disabled || pending}
           rows={1}
           aria-label="给 AI 发送消息"
         />
         <button
-          className="session-send"
+          className="session-dock-send"
           type="button"
           aria-label="发送消息"
           onClick={onSubmit}
           disabled={!draft.trim() || pending || disabled || activeRun}
         >
-          {pending ? <LoaderCircle className="session-spin" aria-hidden="true" /> : <Send aria-hidden="true" />}
+          <SendIcon />
         </button>
       </div>
       <div className="session-composer-extra">
@@ -95,7 +89,7 @@ export function SessionComposer({
         </button>
         <button
           type="button"
-          className="session-extra-btn danger"
+          className="session-extra-btn"
           aria-label="终止运行"
           onClick={onAbort}
           disabled={!activeRun || controlsPending}

@@ -1,4 +1,5 @@
 import type { HarnessSessionEntryDTO, RunEventDTO } from '@/shared/api/contracts'
+import { normalizeRunEvent } from '@/features/ai/harness-run-event-stream'
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/session-event-payload'
 import { ThinkTagTextFilter } from '@/features/ai/session-event-think-filter'
 import type {
@@ -35,7 +36,11 @@ export function buildSessionTimeline(entries: HarnessSessionEntryDTO[], runEvent
     projectDurableEntry(entry, messages, runtimeContext, durableToolArguments)
   }
 
-  for (const event of runEvents) {
+  for (const rawEvent of runEvents) {
+    const event = normalizeRunEvent(rawEvent)
+    if (!event) {
+      continue
+    }
     if (event.sequence <= (materializedCutoffs.get(event.runId) ?? 0)) {
       continue
     }
@@ -127,11 +132,16 @@ function findMaterializedAssistantCutoffs(
     if (getString(message.role) !== 'ASSISTANT') {
       continue
     }
-    counts.set(entry.runId, (counts.get(entry.runId) ?? 0) + 1)
+    const runId = String(entry.runId)
+    counts.set(runId, (counts.get(runId) ?? 0) + 1)
   }
   const cutoffs = new Map<string, number>()
   const maximumSequences = new Map<string, number>()
-  for (const event of runEvents) {
+  for (const rawEvent of runEvents) {
+    const event = normalizeRunEvent(rawEvent)
+    if (!event) {
+      continue
+    }
     maximumSequences.set(event.runId, Math.max(maximumSequences.get(event.runId) ?? 0, event.sequence))
     const remaining = counts.get(event.runId) ?? 0
     if (event.type !== 'assistant_completed' || remaining <= 0) {
@@ -171,8 +181,9 @@ function findMaterializedToolCycles(entries: HarnessSessionEntryDTO[], runEvents
     }
   }
   const materialized = new Set<string>()
-  for (const event of runEvents) {
-    if (event.type !== 'tool_prepared') {
+  for (const rawEvent of runEvents) {
+    const event = normalizeRunEvent(rawEvent)
+    if (!event || event.type !== 'tool_prepared') {
       continue
     }
     const payload = parsePayload(event.payloadJson)

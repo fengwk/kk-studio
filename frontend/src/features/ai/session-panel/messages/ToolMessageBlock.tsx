@@ -7,7 +7,8 @@ import { getToolRenderer, type ToolRenderContext } from '@/features/ai/session-p
 import type { ToolAttachment, ToolDialogueMessage } from '@/features/ai/session-events'
 
 /**
- * Tool row with optional per-tool renderCall / renderResult overrides (pi ToolDefinition).
+ * Tool turn as separate full-width call/result blocks.
+ * Custom tools may override via registerToolRenderer(name, { renderCall, renderResult }).
  */
 export function ToolMessageBlock({ message }: { message: ToolDialogueMessage }) {
   const context: ToolRenderContext = {
@@ -24,47 +25,44 @@ export function ToolMessageBlock({ message }: { message: ToolDialogueMessage }) 
   const resultNode = renderer?.renderResult?.(context)
 
   return (
-    <article className={`session-row tool ${message.status === 'error' ? 'error' : ''}`}>
-      <div className="session-bubble tool">
-        <div className="session-tool-head">
-          <strong>{context.toolName}</strong>
+    <div className={`session-turn session-turn-tool ${message.status === 'error' ? 'error' : ''}`}>
+      <section className="session-block session-block-tool-call">
+        <div className="session-block-label">
+          tool call ·
+          {' '}
+          {context.toolName}
           <span className={`session-tool-status ${message.status ?? 'done'}`}>
             {formatToolStatus(message.status)}
           </span>
         </div>
-        <div className="session-tool-call">
-          {callNode ?? <DefaultToolCall context={context} />}
+        <div className="session-block-body">{callNode ?? <DefaultToolCall context={context} />}</div>
+      </section>
+      <section className="session-block session-block-tool-result">
+        <div className="session-block-label">
+          tool result ·
+          {' '}
+          {context.toolName}
         </div>
-        <div className="session-tool-result">
-          {resultNode ?? <DefaultToolResult context={context} />}
-        </div>
-      </div>
-    </article>
+        <div className="session-block-body">{resultNode ?? <DefaultToolResult context={context} />}</div>
+      </section>
+    </div>
   )
 }
 
 function DefaultToolCall({ context }: { context: ToolRenderContext }) {
   if (!context.arguments.trim()) {
-    return null
+    return <span className="session-tool-placeholder">（无参数）</span>
   }
-  return (
-    <div className="session-tool-section">
-      <span className="session-tool-label">call</span>
-      <pre className="session-tool-pre">{context.arguments}</pre>
-    </div>
-  )
+  return <pre className="session-tool-pre">{context.arguments}</pre>
 }
 
 function DefaultToolResult({ context }: { context: ToolRenderContext }) {
   const hasText = context.text.trim().length > 0
   const hasAttachments = context.attachments.length > 0
   return (
-    <div className="session-tool-section">
-      <span className="session-tool-label">result</span>
+    <>
       {hasText ? <pre className="session-tool-pre">{context.text}</pre> : null}
-      {!hasText && !hasAttachments ? (
-        <p className="session-tool-placeholder">{placeholder(context)}</p>
-      ) : null}
+      {!hasText && !hasAttachments ? <p className="session-tool-placeholder">{placeholder(context)}</p> : null}
       {hasAttachments ? (
         <div className="session-tool-attachments">
           {context.attachments.map((attachment, index) => (
@@ -78,7 +76,7 @@ function DefaultToolResult({ context }: { context: ToolRenderContext }) {
       {context.errorMessage && context.errorMessage !== context.text ? (
         <p className="session-tool-error">{context.errorMessage}</p>
       ) : null}
-    </div>
+    </>
   )
 }
 
