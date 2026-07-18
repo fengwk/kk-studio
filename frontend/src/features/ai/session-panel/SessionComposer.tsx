@@ -60,16 +60,26 @@ export function SessionComposer({
     setMenuQuery('')
   }
 
-  function closeMenu() {
+  function focusComposer() {
+    // Defer until after palette unmount so focus is not stolen by the closing search input.
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+    })
+  }
+
+  function closeMenu(options?: { restoreFocus?: boolean }) {
     setMenuOpen(false)
     setMenuQuery('')
     if (draft.startsWith('/')) {
       onDraftChange('')
     }
+    if (options?.restoreFocus !== false) {
+      focusComposer()
+    }
   }
 
   function handleSelect(command: SessionCommand) {
-    closeMenu()
+    closeMenu({ restoreFocus: true })
     if (draft.startsWith('/')) {
       onDraftChange('')
     }
