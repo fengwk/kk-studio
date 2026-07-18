@@ -61,10 +61,17 @@ export function SessionComposer({
   }
 
   function focusComposer() {
-    // Defer until after palette unmount so focus is not stolen by the closing search input.
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus()
-    })
+    // Palette search input unmounts asynchronously; retry focus a few times.
+    const tryFocus = (attempt: number) => {
+      const el = textareaRef.current
+      if (el && document.activeElement !== el) {
+        el.focus({ preventScroll: true })
+      }
+      if (attempt < 3 && document.activeElement !== textareaRef.current) {
+        window.setTimeout(() => tryFocus(attempt + 1), 16)
+      }
+    }
+    window.setTimeout(() => tryFocus(0), 0)
   }
 
   function closeMenu(options?: { restoreFocus?: boolean }) {
@@ -89,7 +96,8 @@ export function SessionComposer({
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === 'Escape' && open) {
       event.preventDefault()
-      closeMenu()
+      event.stopPropagation()
+      closeMenu({ restoreFocus: true })
       return
     }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {

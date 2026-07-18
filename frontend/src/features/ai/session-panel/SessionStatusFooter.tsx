@@ -1,9 +1,4 @@
-import type {
-  AgentDefinitionDTO,
-  ModelUsageSummaryDTO,
-  SessionYoloDTO,
-} from '@/shared/api/contracts'
-import type { SessionTimeline } from '@/features/ai/session-events'
+import type { ModelUsageSummaryDTO, SessionYoloDTO } from '@/shared/api/contracts'
 
 /**
  * pi-style single-line status footer (all left, | separated):
@@ -18,12 +13,10 @@ export function SessionStatusFooter({
   usage,
   contextWindow,
 }: {
-  agent?: AgentDefinitionDTO
   agentName?: string
   providerName?: string
   modelName?: string
   variantName?: string
-  timeline?: SessionTimeline
   yolo?: SessionYoloDTO
   usage?: ModelUsageSummaryDTO
   contextWindow?: number
@@ -40,15 +33,17 @@ export function SessionStatusFooter({
   const cacheWrite = asInt(usage?.cacheWriteTokens) + asInt(usage?.cacheWriteLongTokens)
   const used = input + output
   const limit = contextWindow && contextWindow > 0 ? contextWindow : 0
-  const hitRatio = asNumber(usage?.cacheHitRatio)
-  const hitPercent = hitRatio > 1 ? hitRatio : hitRatio * 100
+  // Prefer explicit ratio; fall back to hit/eligible counts; then cacheRead / prompt tokens (pi).
+  const hitPercent = resolveCacheHitPercent(usage, cacheRead, input)
   const cost = (usage?.costs ?? []).reduce((sum, item) => sum + asNumber(item.total), 0)
 
-  const modelPart = provider
-    ? `(${provider}) ${model || '-'} · ${variant}`
-    : model
-      ? `${model} · ${variant}`
-      : variant
+  const modelPart = [
+    provider ? `(${provider})` : '',
+    model || 'unknown-model',
+    `· ${variant}`,
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   const parts = [`agent:${agentLabel}`, modelPart]
   if (yoloOn) {
@@ -60,12 +55,10 @@ export function SessionStatusFooter({
     `↓${formatTokens(output)}`,
     `R${formatTokens(cacheRead)}`,
     `W${formatTokens(cacheWrite)}`,
+    `CH${hitPercent.toFixed(1)}%`,
+    `$${cost.toFixed(3)}`,
+    limit > 0 ? `${formatTokens(used)}/${formatTokens(limit)}` : formatTokens(used),
   ]
-  if (cacheRead > 0 || cacheWrite > 0) {
-    stats.push(`CH${hitPercent.toFixed(1)}%`)
-  }
-  stats.push(`$${cost.toFixed(3)}`)
-  stats.push(limit > 0 ? `${formatTokens(used)}/${formatTokens(limit)}` : formatTokens(used))
 
   const line = `${parts.join(' | ')} | ${stats.join(' ')}`
 
@@ -74,6 +67,27 @@ export function SessionStatusFooter({
       <div className="session-status-line">{line}</div>
     </footer>
   )
+}
+
+function resolveCacheHitPercent(
+  usage: ModelUsageSummaryDTO | undefined,
+  cacheRead: number,
+  input: number,
+): number {
+  const ratio = asNumber(usage?.cacheHitRatio)
+  if (ratio > 0) {
+    return ratio > 1 ? ratio : ratio * 100
+  }
+  const hits = asInt(usage?.cacheHitRecordCount)
+  const eligible = asInt(usage?.cacheEligibleRecordCount)
+  if (eligible > 0) {
+    return (hits / eligible) * 100
+  }
+  const prompt = input + cacheRead
+  if (prompt > 0 && cacheRead > 0) {
+    return (cacheRead / prompt) * 100
+  }
+  return 0
 }
 
 function clean(value?: string | null): string {

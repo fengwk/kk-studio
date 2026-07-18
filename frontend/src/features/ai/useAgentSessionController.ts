@@ -46,8 +46,8 @@ export function useAgentSessionController(sessionId: string) {
   const runtimeLabels = resolveRuntimeLabels(
     currentAgent,
     timeline,
-    models as Array<{ id: string | number; name: string; providerId: string | number; providerName?: string; configJson?: string }>,
-    providers,
+    models as Array<Record<string, unknown>>,
+    providers as Array<Record<string, unknown>>,
   )
   const observability = useHarnessSessionObservability(sessionId, currentActiveRun)
   const rootTaskSessionId = session && !session.parentSessionId ? sessionId : ''
@@ -153,46 +153,63 @@ export function useAgentSessionController(sessionId: string) {
 }
 
 function resolveRuntimeLabels(
-  agent: ReturnType<typeof useAgentSessionQueries> extends never ? never : any,
+  agent: unknown,
   timeline: ReturnType<typeof buildSessionTimeline>,
-  models: Array<{ id: string | number; name: string; providerId: string | number; providerName?: string; configJson?: string }>,
-  providers: Array<{ id: string | number; name: string }>,
+  models: Array<Record<string, unknown>>,
+  providers: Array<Record<string, unknown>>,
 ) {
-  const agentRecord = (agent ?? {}) as Record<string, unknown>
-  const modelId = String(
-    agentRecord.defaultModelId
-      ?? agentRecord.modelId
-      ?? timeline.runtimeContext.model
-      ?? '',
+  const agentRecord = asRecord(agent)
+  const modelId = firstNonEmpty(
+    agentRecord.defaultModelId,
+    agentRecord.modelId,
+    timeline.runtimeContext.model,
   )
-  const model = models.find((item) => String(item.id) === modelId)
-  const providerId = String(model?.providerId ?? agentRecord.defaultProviderId ?? '')
-  const provider = providers.find((item) => String(item.id) === providerId)
+  const model = models.find((item) => String(item.id) === modelId) ?? {}
+  const providerId = firstNonEmpty(model.providerId, agentRecord.defaultProviderId)
+  const provider = providers.find((item) => String(item.id) === providerId) ?? {}
   const contextWindow = parseContextWindow(model)
 
   return {
-    agentName: String(agentRecord.name ?? 'agent'),
-    providerName: provider?.name || String(agentRecord.defaultProviderName ?? model?.providerName ?? ''),
-    modelName: model?.name || String(agentRecord.defaultModelName ?? ''),
-    variantName: String(
-      timeline.runtimeContext.variant
-        ?? agentRecord.variant
-        ?? agentRecord.defaultVariant
-        ?? 'default',
+    agentName: firstNonEmpty(agentRecord.name, 'agent'),
+    providerName: firstNonEmpty(provider.name, agentRecord.defaultProviderName, model.providerName),
+    modelName: firstNonEmpty(model.name, agentRecord.defaultModelName),
+    variantName: firstNonEmpty(
+      timeline.runtimeContext.variant,
+      agentRecord.variant,
+      agentRecord.defaultVariant,
+      'default',
     ),
     contextWindow,
   }
 }
 
-function parseContextWindow(model: { configJson?: string } | undefined): number | undefined {
-  if (!model?.configJson) {
+function parseContextWindow(model: Record<string, unknown>): number | undefined {
+  const raw = model.configJson ?? model.config
+  if (!raw) {
     return undefined
   }
   try {
-    const config = JSON.parse(model.configJson) as { contextWindow?: number }
-    const value = Number(config.contextWindow)
+    const config = typeof raw === 'string' ? JSON.parse(raw) : raw
+    const value = Number((config as { contextWindow?: number }).contextWindow)
     return Number.isFinite(value) && value > 0 ? value : undefined
   } catch {
     return undefined
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+}
+
+function firstNonEmpty(...values: unknown[]): string {
+  for (const value of values) {
+    if (value == null) {
+      continue
+    }
+    const text = String(value).trim()
+    if (text && text !== '-' && text !== 'undefined' && text !== 'null') {
+      return text
+    }
+  }
+  return ''
 }
