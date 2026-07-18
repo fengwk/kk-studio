@@ -37,6 +37,7 @@ export function SessionCommandPalette({
           onKeyDown={(event) => {
             if (event.key === 'Escape') {
               event.preventDefault()
+              event.stopPropagation()
               onClose()
               return
             }
