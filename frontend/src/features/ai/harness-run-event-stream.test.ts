@@ -10,6 +10,7 @@ import type { RunEventDTO } from '@/shared/api/contracts'
 describe('harness run event stream', () => {
   it('accepts only complete positive-sequence run events', () => {
     expect(parseRunEvent(JSON.stringify(event(3)))).toMatchObject({ eventId: 'event-3', sequence: 3 })
+    expect(parseRunEvent(JSON.stringify({ ...event(10), sequence: '10' }))).toMatchObject({ sequence: 10 })
     expect(parseRunEvent(JSON.stringify({ eventId: 'event', runId: 'run', type: 'run_started', sequence: 0 }))).toBeNull()
     expect(parseRunEvent('{bad')).toBeNull()
   })
