@@ -46,21 +46,13 @@ class StudioModelUsageControllerTest {
     jdbc.update("delete from model_usage_record");
   }
 
-  /** 三个真实映射都保留超出 JavaScript 安全整数范围的字符串 ID。 */
   @Test
-  void exposesRunSessionAndModelPathsWithStringLargeIds() throws Exception {
+  void exposesThreadSessionAndModelPathsWithStringLargeIds() throws Exception {
     recordStore.insert(
         new ModelUsageRecord(
-            recordIds.newModelUsageRecordId(),
-            LARGE_ID,
-            LARGE_ID,
-            LARGE_ID,
-            1,
-            0,
-            draft(LARGE_ID),
-            NOW));
+            recordIds.newModelUsageRecordId(), LARGE_ID, LARGE_ID, LARGE_ID, draft(LARGE_ID), NOW));
 
-    for (String scope : List.of("runs", "sessions", "models")) {
+    for (String scope : List.of("threads", "sessions", "models")) {
       String scopeType = scope.substring(0, scope.length() - 1);
       mockMvc
           .perform(get("/api/usage/{scope}/{id}", scope, Long.toString(LARGE_ID)))
@@ -79,10 +71,9 @@ class StudioModelUsageControllerTest {
     }
   }
 
-  /** 非数字、非正数和 long 溢出都必须在 controller 以 IllegalArgumentException 拒绝。 */
   @Test
   void rejectsInvalidIdsOnAllPaths() throws Exception {
-    for (String scope : List.of("runs", "sessions", "models")) {
+    for (String scope : List.of("threads", "sessions", "models")) {
       for (String invalid : List.of("abc", "0", "-1", "9223372036854775808")) {
         mockMvc
             .perform(get("/api/usage/{scope}/{id}", scope, invalid))

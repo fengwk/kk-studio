@@ -2,24 +2,17 @@ import { ChevronRight, ExternalLink, GitBranch, ShieldCheck } from 'lucide-react
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { formatBackendDate } from '@/features/ai/ai-console-utils'
-import { getString, parsePayload } from '@/features/ai/session-event-payload'
+import { getString, parsePayload } from '@/features/ai/thread-event-payload'
 import type { SubagentTaskNode } from '@/features/ai/subagent-task-tree'
 import type { RootActivityDTO } from '@/shared/api/contracts'
 import type { RelayPermission } from '@/features/ai/useHarnessTaskTimeline'
 
 const TIMELINE_TYPES = new Set([
   'subagent_started',
-  'subagent_resumed',
   'subagent_completed',
   'subagent_cancel_requested',
   'permission_requested',
   'permission_resolved',
-  'steer_requested',
-  'follow_up_requested',
-  'steer_consumed',
-  'follow_up_consumed',
-  'control_promoted',
-  'abort_requested',
 ])
 
 export function TaskTimelinePanel({
@@ -43,7 +36,7 @@ export function TaskTimelinePanel({
 }) {
   const [selectedInvocationId, setSelectedInvocationId] = useState<string | null>(null)
   const selected = findTask(taskTree, selectedInvocationId)
-  const timeline = activities.filter((activity) => TIMELINE_TYPES.has(activity.type))
+  const timeline = activities.filter((activity) => TIMELINE_TYPES.has(activity.eventType))
 
   if (permissionsOnly) {
     if (relayPermissions.length === 0) {
@@ -143,9 +136,11 @@ function ChildTaskViewer({ node }: { node: SubagentTaskNode }) {
           <strong>{task.targetAgent}</strong>
           <span>{report?.status ?? task.status}</span>
         </div>
-        <Link to={`/sessions/${encodeURIComponent(task.childSessionId)}`} title="打开子会话">
-          <ExternalLink aria-hidden="true" />
-        </Link>
+        {task.childThreadId ? (
+          <Link to={`/threads/${encodeURIComponent(task.childThreadId)}`} title="打开子对话">
+            <ExternalLink aria-hidden="true" />
+          </Link>
+        ) : null}
       </div>
       <div className="child-task-revision">
         <GitBranch aria-hidden="true" />
@@ -191,12 +186,11 @@ function PermissionRelay({
 function activityLabel(activity: RootActivityDTO): string {
   const payload = parsePayload(activity.payloadJson)
   const childSessionId = getString(payload.childSessionId)
-  const targetAgent = getString(payload.targetAgent)
-  switch (activity.type) {
+  // Backend SUBAGENT_STARTED payload uses `target`.
+  const target = getString(payload.target)
+  switch (activity.eventType) {
     case 'subagent_started':
-      return `启动子代理 ${targetAgent || childSessionId}`
-    case 'subagent_resumed':
-      return `恢复子代理 ${targetAgent || childSessionId}`
+      return `启动子代理 ${target || childSessionId}`
     case 'subagent_completed':
       return `子代理完成：${getString(payload.status) || childSessionId}`
     case 'subagent_cancel_requested':
@@ -205,20 +199,8 @@ function activityLabel(activity: RootActivityDTO): string {
       return `等待工具授权：${getString(payload.tool) || getString(payload.invocationId)}`
     case 'permission_resolved':
       return `工具授权已${getString(payload.decision)}`
-    case 'steer_requested':
-      return '已提交 steer 指令'
-    case 'follow_up_requested':
-      return '已提交 follow-up'
-    case 'steer_consumed':
-      return '已消费 steer 指令'
-    case 'follow_up_consumed':
-      return '已消费 follow-up'
-    case 'control_promoted':
-      return 'follow-up 已提升为 Run'
-    case 'abort_requested':
-      return '已请求终止 Run'
     default:
-      return activity.type
+      return activity.eventType
   }
 }
 

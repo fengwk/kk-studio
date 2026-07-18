@@ -9,10 +9,6 @@ import static org.mockito.Mockito.mock;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
-import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
-import fun.fengwk.kkstudio.core.harness.run.worker.HarnessRunWorkerConfiguration;
-import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
 import fun.fengwk.kkstudio.core.harness.tool.service.HarnessToolConfiguration;
 import fun.fengwk.kkstudio.core.harness.tool.worker.HarnessToolWorkerConfiguration;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtension;
@@ -22,11 +18,6 @@ import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
 import fun.fengwk.kkstudio.harness.runtime.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
-import fun.fengwk.kkstudio.harness.runtime.run.AgentTurnWorker;
-import fun.fengwk.kkstudio.harness.runtime.run.CompactionService;
-import fun.fengwk.kkstudio.harness.runtime.run.RunWorkerConfig;
-import fun.fengwk.kkstudio.harness.runtime.run.ToolPreparationPort;
-import fun.fengwk.kkstudio.harness.runtime.run.TurnResourceResolver;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
@@ -54,6 +45,7 @@ import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
+/** Extension Host 与 Tool worker 装配；Run worker 已删除，改为只验证 Thread 时代保留的扩展点。 */
 class HarnessExtensionConfigurationTest {
   @Test
   void loadsCustomExtensionWithCoreAndBuildsLifecycleFromHost() {
@@ -108,22 +100,6 @@ class HarnessExtensionConfigurationTest {
               scheduler,
               new HarnessLifecycleObservers(host.lifecycleObservers()));
       assertNotNull(cloudToolWorker);
-
-      HarnessRunWorkerConfiguration runConfiguration = new HarnessRunWorkerConfiguration();
-      AgentTurnWorker turnWorker =
-          runConfiguration.agentTurnWorker(
-              mock(MysqlHarnessRunStore.class),
-              mock(HarnessRunTransactionService.class),
-              mock(ToolPreparationPort.class),
-              mock(MysqlHarnessSessionStore.class),
-              host,
-              new HarnessLifecycleObservers(host.lifecycleObservers()),
-              mock(TurnResourceResolver.class),
-              mock(CompactionService.class),
-              RunWorkerConfig.DEFAULT,
-              Clock.systemUTC(),
-              (delay, task) -> task.run());
-      assertNotNull(turnWorker);
     } finally {
       scheduler.shutdownNow();
       host.close();

@@ -46,13 +46,10 @@ create table if not exists harness_session (
     id                    bigint not null,
     agent_definition_id   bigint,
     title                 varchar(256),
-    leaf_entry_id         bigint,
-    active_run_id         bigint,
     parent_session_id     bigint,
     root_session_id       bigint not null,
     parent_invocation_id  bigint,
     depth                 integer not null,
-    yolo_enabled          boolean not null,
     gmt_create            timestamp(3) not null default current_timestamp(),
     gmt_modified          timestamp(3) not null default current_timestamp(),
     version               bigint not null default 0,
@@ -65,7 +62,6 @@ create table if not exists harness_session_entry (
     id               bigint not null,
     session_id       bigint not null,
     parent_entry_id  bigint,
-    run_id           bigint,
     entry_type       varchar(32) not null,
     payload_json     text not null,
     gmt_create       timestamp(3) not null default current_timestamp(),
@@ -75,46 +71,61 @@ create table if not exists harness_session_entry (
 create index if not exists idx_harness_session_entry_session_id
     on harness_session_entry (session_id, id);
 create index if not exists idx_harness_session_entry_parent on harness_session_entry (parent_entry_id);
-create index if not exists idx_harness_session_entry_run on harness_session_entry (run_id, id);
 
-create table if not exists harness_run (
-    id                  bigint not null,
-    session_id          bigint not null,
-    trigger_entry_id    bigint not null,
-    status              varchar(32) not null,
-    turn_index          integer not null,
-    attempt             integer not null,
-    event_sequence      bigint not null,
-    lease_owner         varchar(128),
-    lease_until         timestamp(3),
-    next_attempt_at     timestamp(3) not null,
-    cancel_requested_at timestamp(3),
-    gmt_create          timestamp(3) not null default current_timestamp(),
-    started_at          timestamp(3),
-    finished_at         timestamp(3),
-    gmt_modified        timestamp(3) not null default current_timestamp(),
+-- durable user execution panel / tree cursor
+create table if not exists harness_thread (
+    id                    bigint not null,                 -- 业务主键
+    session_id            bigint not null,                 -- 所属 session tree
+    head_entry_id         bigint not null,                 -- 当前 tree cursor
+    agent_definition_id   bigint,                          -- 冻结 agent definition 引用
+    runtime_config_json   text not null,                   -- 冻结 runtime config JSON
+    yolo_enabled          boolean not null,                -- thread 级 YOLO
+    input_sequence        bigint not null,                 -- 已分配 input sequence 最大值
+    processor_token       varchar(128),                    -- 当前 processor fencing token
+    processor_until       timestamp(3),                    -- token 租约截止
+    gmt_create            timestamp(3) not null default current_timestamp(),
+    gmt_modified          timestamp(3) not null default current_timestamp(),
+    version               bigint not null default 0,
     primary key (id)
 );
 
-create index if not exists idx_harness_run_claim
-    on harness_run (status, next_attempt_at, lease_until, id);
+create index if not exists idx_harness_thread_session on harness_thread (session_id, id);
 
-create table if not exists harness_run_event (
-    id           bigint not null,
-    run_id       bigint not null,
-    sequence     bigint not null,
-    event_type   varchar(64) not null,
-    payload_json text not null,
-    gmt_create   timestamp(3) not null default current_timestamp(),
+create table if not exists harness_thread_input (
+    id                 bigint not null,
+    thread_id          bigint not null,
+    sequence           bigint not null,
+    input_type         varchar(32) not null,
+    payload_json       text not null,
+    client_message_id  varchar(128),
+    applied_entry_id   bigint,
+    applied_at         timestamp(3),
+    gmt_create         timestamp(3) not null default current_timestamp(),
     primary key (id),
-    unique (run_id, sequence)
+    unique (thread_id, sequence)
 );
 
-create index if not exists idx_harness_run_event_run on harness_run_event (run_id, id);
+create unique index if not exists uk_harness_thread_input_client
+    on harness_thread_input (thread_id, client_message_id);
+create index if not exists idx_harness_thread_input_pending
+    on harness_thread_input (thread_id, applied_entry_id, sequence);
+
+create table if not exists harness_thread_event (
+    id                 bigint not null,
+    thread_id          bigint not null,
+    subject_entry_id   bigint,
+    event_type         varchar(64) not null,
+    payload_json       text not null,
+    gmt_create         timestamp(3) not null default current_timestamp(),
+    primary key (id)
+);
+
+create index if not exists idx_harness_thread_event_thread
+    on harness_thread_event (thread_id, id);
 
 create table if not exists tool_invocation (
     id                    bigint not null,
-    run_id                bigint not null,
+    thread_id             bigint not null,
     assistant_entry_id    bigint not null,
     ordinal               integer not null,
     tool_call_id          varchar(256) not null,
@@ -138,12 +149,12 @@ create table if not exists tool_invocation (
     finished_at           timestamp(3),
     gmt_modified          timestamp(3) not null default current_timestamp(),
     primary key (id),
-    unique (run_id, tool_call_id),
+    unique (thread_id, tool_call_id),
     unique (assistant_entry_id, ordinal)
 );
 
-create index if not exists idx_tool_invocation_run_status
-    on tool_invocation (run_id, status, ordinal);
+create index if not exists idx_tool_invocation_thread_status
+    on tool_invocation (thread_id, status, ordinal);
 
 create index if not exists idx_tool_invocation_claim
     on tool_invocation (target_type, status, deadline_at, id);
@@ -165,53 +176,29 @@ create table if not exists tool_artifact (
 create table if not exists harness_subagent_task (
     parent_invocation_id  bigint not null,
     parent_session_id     bigint not null,
+    parent_thread_id      bigint not null,
     child_session_id      bigint not null,
-    child_run_id          bigint not null,
+    child_thread_id       bigint not null,
     target_agent          varchar(128) not null,
     working_copy_policy   varchar(32) not null,
     working_copy_revision varchar(512),
     max_turns             integer not null,
-    idle_timeout_millis   bigint,
     status                varchar(32) not null,
     report_json           text,
     gmt_create            timestamp(3) not null default current_timestamp(),
     gmt_modified          timestamp(3) not null default current_timestamp(),
-    primary key (parent_invocation_id)
+    primary key (parent_invocation_id),
+    unique (child_thread_id)
 );
 
-create index if not exists idx_harness_subagent_task_child
-    on harness_subagent_task (child_session_id, child_run_id);
 create index if not exists idx_harness_subagent_task_parent
     on harness_subagent_task (parent_session_id, status);
-
-create table if not exists harness_run_control_message (
-    id                 bigint not null,
-    session_id         bigint not null,
-    run_id             bigint,
-    control_kind       varchar(16) not null,
-    consumption_mode   varchar(32) not null,
-    message_json       text not null,
-    status             varchar(16) not null,
-    consumed_run_id    bigint,
-    consumed_entry_id  bigint,
-    gmt_create         timestamp(3) not null default current_timestamp(),
-    consumed_at        timestamp(3),
-    gmt_modified       timestamp(3) not null default current_timestamp(),
-    primary key (id)
-);
-
-create index if not exists idx_harness_control_pending
-    on harness_run_control_message (run_id, control_kind, status, id);
-create index if not exists idx_harness_control_session
-    on harness_run_control_message (session_id, status, id);
 
 create table if not exists model_usage_record (
     id                                 bigint not null,
     session_id                         bigint not null,
-    run_id                             bigint not null,
+    thread_id                          bigint not null,
     assistant_entry_id                 bigint not null,
-    attempt                            integer not null,
-    turn_index                         integer not null,
     provider_resource_id               bigint not null,
     model_resource_id                  bigint not null,
     provider_type                      varchar(64) not null,
@@ -252,11 +239,10 @@ create table if not exists model_usage_record (
     raw_usage_json                     clob not null,
     gmt_create                         timestamp(3) not null default current_timestamp(),
     primary key (id),
-    unique (assistant_entry_id),
-    unique (run_id, attempt, turn_index)
+    unique (assistant_entry_id)
 );
 
-create index if not exists idx_model_usage_record_run on model_usage_record (run_id, id);
+create index if not exists idx_model_usage_record_thread on model_usage_record (thread_id, id);
 create index if not exists idx_model_usage_record_session on model_usage_record (session_id, id);
 create index if not exists idx_model_usage_record_model on model_usage_record (model_resource_id, id);
 

@@ -67,6 +67,43 @@ class CloudToolWorkerTest {
     assertEquals(0, fixture.tool.executions);
   }
 
+  /** Thread-scoped dispatch validates its durable owner before claiming work. */
+  @Test
+  void rejectsInvalidThreadScopedDispatchArguments() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+
+    assertThrows(
+        IllegalArgumentException.class, () -> fixture.worker.dispatchDueForThread(" ", 2L));
+    assertThrows(
+        IllegalArgumentException.class, () -> fixture.worker.dispatchDueForThread("worker-a", 0L));
+    assertEquals(0, fixture.tool.executions);
+  }
+
+  /** Thread-scoped stores are claimed until the current Thread has no more due work. */
+  @Test
+  void dispatchesDueWorkThroughThreadScopedStore() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+
+    assertEquals(1, fixture.worker.dispatchDueForThread("worker-a", 2L));
+
+    assertEquals(List.of(2L, 2L), fixture.store.scopedThreadIds);
+    assertEquals(1, fixture.tool.executions);
+    assertTrue(fixture.worker.hasActiveExecution());
+  }
+
+  /** Non-scoped stores retain the recovery fallback of one global claim per dispatch call. */
+  @Test
+  void fallsBackToSingleGlobalClaimForLegacyStoreCapability() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+    ToolInvocationWorkerStore globalOnly = new GlobalOnlyStore(fixture.store);
+    CloudToolWorker worker = fixture.newWorker(globalOnly, ToolWorkerConfig.DEFAULT);
+
+    assertEquals(1, worker.dispatchDueForThread("worker-a", 2L));
+
+    assertEquals(1, fixture.tool.executions);
+    assertTrue(worker.hasActiveExecution());
+  }
+
   /** Dispatch returns before callbacks and batches partials outside the Session result path. */
   @Test
   void dispatchesAsynchronouslyAndFlushesPartialsBeforeTerminal() throws Exception {
@@ -75,7 +112,7 @@ class CloudToolWorkerTest {
     assertTrue(fixture.worker.executeNext("worker-a").isPresent());
     assertNotNull(fixture.tool.listener);
     assertEquals(1L, fixture.tool.request.context().invocationId());
-    assertEquals(2L, fixture.tool.request.context().runId());
+    assertEquals(2L, fixture.tool.request.context().threadId());
     fixture.tool.listener.onPartial(result("partial"));
     fixture.tool.listener.onComplete(result("complete"));
 
@@ -84,7 +121,6 @@ class CloudToolWorkerTest {
     assertEquals(List.of("partial"), texts(fixture.transactions.partials.get(0)));
     assertEquals(ToolInvocationStatus.SUCCEEDED, fixture.transactions.status);
     assertEquals("complete", text(fixture.transactions.result));
-    assertTrue(fixture.transactions.coordinations >= 1);
     assertFalse(fixture.tool.handle.cancelled);
     assertToolCompletion(fixture, ToolInvocationStatus.SUCCEEDED, null);
   }
@@ -230,7 +266,52 @@ class CloudToolWorkerTest {
         fixture, ToolInvocationStatus.FAILED, "Frozen tool tool@1 is unavailable.");
   }
 
-  /** pre-execution terminal CAS 丢失时既不发布 observation，也不触发 terminal coordination。 */
+  /** A registry hit with a descriptor drift is still unavailable to the frozen invocation. */
+  @Test
+  void failsFrozenToolDescriptorDriftWithoutExecution() throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+    RecordingTool drifted = new RecordingTool(descriptor(ToolSideEffect.IDEMPOTENT));
+    fixture.registry = (name, version) -> Optional.of(drifted);
+    fixture.rebuildWorker();
+
+    fixture.worker.executeNext("worker-a");
+
+    assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
+    assertEquals(0, drifted.executions);
+    assertEquals(ToolInvocationStatus.FAILED, fixture.transactions.status);
+    assertTrue(text(fixture.transactions.result).contains("unavailable"));
+  }
+
+  /** Losing the start CAS prevents any process-local Tool side effect. */
+  @Test
+  void skipsExecutionWhenStartOwnershipCasIsLost() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+    fixture.transactions.startResult = false;
+
+    fixture.worker.executeNext("worker-a");
+
+    assertEquals(1, fixture.transactions.started);
+    assertEquals(0, fixture.tool.executions);
+    assertFalse(fixture.worker.hasActiveExecution());
+    assertTrue(toolCompletions(fixture).isEmpty());
+  }
+
+  /** A synchronous execute exception is converted into one durable FAILED result. */
+  @Test
+  void terminalizesSynchronousToolExecuteFailure() throws Exception {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
+    fixture.tool.executionFailure = new IllegalStateException("execute failed");
+
+    fixture.worker.executeNext("worker-a");
+
+    assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
+    assertEquals(ToolInvocationStatus.FAILED, fixture.transactions.status);
+    assertEquals("execute failed", fixture.transactions.errorMessage);
+    assertTrue(text(fixture.transactions.result).contains("execute failed"));
+    assertFalse(fixture.worker.hasActiveExecution());
+  }
+
+  /** pre-execution terminal CAS 丢失时不发布 observation。 */
   @Test
   void doesNotObserveLostPreExecutionTerminalCas() throws Exception {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
@@ -241,11 +322,10 @@ class CloudToolWorkerTest {
     fixture.worker.executeNext("worker-a");
 
     assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
-    assertEquals(1, fixture.transactions.coordinations);
     assertTrue(toolCompletions(fixture).isEmpty());
   }
 
-  /** observer RuntimeException 由真实 Worker dispatcher 隔离，不改变 terminal CAS 与 coordination。 */
+  /** observer RuntimeException 由真实 Worker dispatcher 隔离，不改变 terminal CAS。 */
   @Test
   void isolatesObserverFailureFromToolTermination() throws Exception {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
@@ -263,28 +343,6 @@ class CloudToolWorkerTest {
 
     assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
     assertEquals(ToolInvocationStatus.SUCCEEDED, fixture.transactions.status);
-    assertEquals(2, fixture.transactions.coordinations);
-    assertToolCompletion(fixture, ToolInvocationStatus.SUCCEEDED, null);
-  }
-
-  /** CAS=true 后 coordinate 抛错：Tool observation 已经发布，不能因 coordination 失败而漏发。 */
-  @Test
-  void publishesToolCompletionBeforeCoordinateThrows() throws Exception {
-    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
-    fixture.transactions.coordinateFailure = true;
-    fixture.rebuildWorker();
-
-    fixture.worker.executeNext("worker-a");
-
-    try {
-      fixture.tool.listener.onComplete(result("complete"));
-    } catch (IllegalStateException expected) {
-      // coordinate 抛错会让 listener 回调传出；生产侧由 Spring 事务或 wrapper 隔离。
-    }
-
-    assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
-    assertEquals(ToolInvocationStatus.SUCCEEDED, fixture.transactions.status);
-    assertTrue(fixture.transactions.coordinations >= 2);
     assertToolCompletion(fixture, ToolInvocationStatus.SUCCEEDED, null);
   }
 
@@ -417,7 +475,7 @@ class CloudToolWorkerTest {
         IllegalStateException.class, () -> fixture.tool.listener.onComplete(result("complete")));
 
     assertTrue(fixture.tool.handle.cancelled);
-    assertEquals(1, fixture.transactions.coordinations);
+    assertFalse(fixture.worker.hasActiveExecution());
   }
 
   /**
@@ -448,7 +506,6 @@ class CloudToolWorkerTest {
     fixture.tool.listener.onComplete(result("late"));
 
     assertTrue(fixture.transactions.terminal.await(1, TimeUnit.SECONDS));
-    assertEquals(1, fixture.transactions.coordinations);
     assertTrue(fixture.tool.handle.cancelledLatch.await(1, TimeUnit.SECONDS));
     assertTrue(fixture.tool.handle.cancelled);
     assertTrue(toolCompletions(fixture).isEmpty());
@@ -500,7 +557,7 @@ class CloudToolWorkerTest {
     assertEquals("0123456789", new String(fixture.artifacts.content, StandardCharsets.UTF_8));
   }
 
-  /** Empty Tool results get a durable text representation so ordinal coordination can advance. */
+  /** Empty Tool results get a durable text representation. */
   @Test
   void normalizesEmptyTerminalResultWithoutCancellingSuccessfulHandle() throws Exception {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
@@ -554,7 +611,7 @@ class CloudToolWorkerTest {
     assertEquals(1, completions.size());
     ToolCompleted completed = completions.get(0);
     assertEquals(1L, completed.invocationId());
-    assertEquals(2L, completed.runId());
+    assertEquals(2L, completed.threadId());
     assertEquals(status, completed.status());
     assertEquals(errorMessage, completed.error());
     assertEquals(fixture.transactions.terminalAt, completed.occurredAt());
@@ -599,7 +656,7 @@ class CloudToolWorkerTest {
   private ToolInvocation copyWithStatus(ToolInvocation source, ToolInvocationStatus status) {
     return new ToolInvocation(
         source.id(),
-        source.runId(),
+        source.threadId(),
         source.assistantEntryId(),
         source.ordinal(),
         source.toolCallId(),
@@ -627,7 +684,7 @@ class CloudToolWorkerTest {
   private ToolInvocation copyWithSideEffect(ToolInvocation source, ToolSideEffect sideEffect) {
     return new ToolInvocation(
         source.id(),
-        source.runId(),
+        source.threadId(),
         source.assistantEntryId(),
         source.ordinal(),
         source.toolCallId(),
@@ -655,7 +712,7 @@ class CloudToolWorkerTest {
   private ToolInvocation copyWithEnvironmentTarget(ToolInvocation source) {
     return new ToolInvocation(
         source.id(),
-        source.runId(),
+        source.threadId(),
         source.assistantEntryId(),
         source.ordinal(),
         source.toolCallId(),
@@ -683,7 +740,7 @@ class CloudToolWorkerTest {
   private ToolInvocation copyWithCancel(ToolInvocation source, Instant cancelledAt) {
     return new ToolInvocation(
         source.id(),
-        source.runId(),
+        source.threadId(),
         source.assistantEntryId(),
         source.ordinal(),
         source.toolCallId(),
@@ -731,19 +788,23 @@ class CloudToolWorkerTest {
     }
 
     private void rebuildWorker(ToolWorkerConfig config) {
+      worker = newWorker(store, config);
+    }
+
+    private CloudToolWorker newWorker(
+        ToolInvocationWorkerStore claimStore, ToolWorkerConfig config) {
       ScheduledExecutorService scheduler = new ScheduledThreadPoolExecutor(2);
       schedulers.add(scheduler);
-      worker =
-          new CloudToolWorker(
-              store,
-              transactions,
-              registry,
-              interceptorChain,
-              artifacts,
-              config,
-              Clock.fixed(NOW, ZoneOffset.UTC),
-              scheduler,
-              lifecycleObservers);
+      return new CloudToolWorker(
+          claimStore,
+          transactions,
+          registry,
+          interceptorChain,
+          artifacts,
+          config,
+          Clock.fixed(NOW, ZoneOffset.UTC),
+          scheduler,
+          lifecycleObservers);
     }
   }
 
@@ -787,11 +848,13 @@ class CloudToolWorkerTest {
         Duration.ofSeconds(30));
   }
 
-  private static final class RecordingStore implements ToolInvocationWorkerStore {
+  private static final class RecordingStore
+      implements ToolInvocationWorkerStore, ThreadScopedToolClaimStore {
     private volatile ToolInvocation current;
     private boolean claimed;
     private boolean recovered;
     private volatile boolean heartbeatResult = true;
+    private final List<Long> scopedThreadIds = new ArrayList<>();
     private final CountDownLatch heartbeatFailure = new CountDownLatch(1);
     private final CountDownLatch terminalRead = new CountDownLatch(1);
     private final CountDownLatch cancelRead = new CountDownLatch(1);
@@ -808,6 +871,16 @@ class CloudToolWorkerTest {
       }
       claimed = true;
       return Optional.of(new ClaimedToolInvocation(current, recovered));
+    }
+
+    @Override
+    public Optional<ClaimedToolInvocation> claimDueForThread(
+        String owner, long threadId, Instant now, Duration leaseDuration) {
+      scopedThreadIds.add(threadId);
+      if (current.threadId() != threadId) {
+        return Optional.empty();
+      }
+      return claimDue(owner, now, leaseDuration);
     }
 
     @Override
@@ -830,14 +903,33 @@ class CloudToolWorkerTest {
     }
   }
 
+  private record GlobalOnlyStore(ToolInvocationWorkerStore delegate)
+      implements ToolInvocationWorkerStore {
+
+    @Override
+    public Optional<ClaimedToolInvocation> claimDue(
+        String owner, Instant now, Duration leaseDuration) {
+      return delegate.claimDue(owner, now, leaseDuration);
+    }
+
+    @Override
+    public boolean heartbeat(ClaimedToolInvocation claimed, Instant now, Duration leaseDuration) {
+      return delegate.heartbeat(claimed, now, leaseDuration);
+    }
+
+    @Override
+    public Optional<ToolInvocation> find(long invocationId) {
+      return delegate.find(invocationId);
+    }
+  }
+
   private static final class RecordingTransactions implements ToolInvocationTransactions {
     private final CountDownLatch terminal = new CountDownLatch(1);
     private final List<List<ToolResult>> partials = new ArrayList<>();
+    private boolean startResult = true;
     private boolean terminalResult = true;
     private boolean partialFailure;
-    private boolean coordinateFailure;
     private int started;
-    private int coordinations;
     private int terminateCalls;
     private ToolInvocationStatus status;
     private ToolResult result;
@@ -847,7 +939,7 @@ class CloudToolWorkerTest {
     @Override
     public boolean start(ClaimedToolInvocation claimed, Instant now) {
       started++;
-      return true;
+      return startResult;
     }
 
     @Override
@@ -875,15 +967,6 @@ class CloudToolWorkerTest {
       terminal.countDown();
       return terminalResult;
     }
-
-    @Override
-    public int coordinateReadyRuns(Instant now) {
-      coordinations++;
-      if (coordinateFailure && coordinations >= 2) {
-        throw new IllegalStateException("coordinate queue unavailable");
-      }
-      return 0;
-    }
   }
 
   private static final class RecordingTool implements Tool {
@@ -892,6 +975,7 @@ class CloudToolWorkerTest {
     private ToolExecutionListener listener;
     private ToolExecutionRequest request;
     private boolean completeSynchronously;
+    private RuntimeException executionFailure;
     private int executions;
 
     private RecordingTool(ToolDescriptor descriptor) {
@@ -909,6 +993,9 @@ class CloudToolWorkerTest {
       executions++;
       this.request = request;
       this.listener = listener;
+      if (executionFailure != null) {
+        throw executionFailure;
+      }
       if (completeSynchronously) {
         listener.onComplete(
             new ToolResult(

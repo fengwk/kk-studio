@@ -1,18 +1,17 @@
 import { ArrowLeft, MessageSquare, Plus } from 'lucide-react'
-import { ChatRunStatus } from '@/features/ai/ChatRunStatus'
 import { Link } from 'react-router-dom'
-import type { AgentDefinitionDTO, HarnessRunDTO, HarnessSessionDTO } from '@/shared/api/contracts'
+import type { AgentDefinitionDTO, HarnessThreadDTO } from '@/shared/api/contracts'
 
 export function ChatSidebar({
-  sessions,
+  threads,
   agentsById,
-  activeSessionId,
+  activeThreadId,
   title,
   onBack,
 }: {
-  sessions: HarnessSessionDTO[]
+  threads: HarnessThreadDTO[]
   agentsById: Map<string, AgentDefinitionDTO>
-  activeSessionId: string
+  activeThreadId: string
   title: string
   onBack: () => void
 }) {
@@ -23,35 +22,26 @@ export function ChatSidebar({
           <ArrowLeft aria-hidden="true" />
         </button>
         <h1>{title}</h1>
-        <Link className="sidebar-icon-btn" to="/sessions" title="新建会话">
+        <Link className="sidebar-icon-btn" to="/threads" title="新建对话">
           <Plus aria-hidden="true" />
         </Link>
       </div>
       <div className="chat-list">
-        {sessions.map((item) => {
-          const agent = agentsById.get(item.agentDefinitionId)
+        {threads.map((item) => {
+          const agent = item.agentDefinitionId ? agentsById.get(item.agentDefinitionId) : undefined
+          const label = item.sessionTitle || agent?.name || item.threadId
           return (
             <Link
-              key={item.sessionId}
-              className={`chat-item ${item.sessionId === activeSessionId ? 'active' : ''}`}
-              to={`/sessions/${encodeURIComponent(item.sessionId)}`}
+              key={item.threadId}
+              className={`chat-item ${item.threadId === activeThreadId ? 'active' : ''}`}
+              to={`/threads/${encodeURIComponent(item.threadId)}`}
             >
               <MessageSquare aria-hidden="true" />
-              <span>{item.title || agent?.name || item.sessionId}</span>
+              <span>{label}</span>
             </Link>
           )
         })}
       </div>
     </aside>
   )
-}
-
-export function ChatRuntimeBarStatus({
-  runs,
-  activeRun,
-}: {
-  runs: HarnessRunDTO[]
-  activeRun: boolean
-}) {
-  return <ChatRunStatus runs={runs} activeRun={activeRun} />
 }

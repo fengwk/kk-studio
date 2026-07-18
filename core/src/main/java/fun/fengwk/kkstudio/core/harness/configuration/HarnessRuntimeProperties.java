@@ -15,6 +15,13 @@ public class HarnessRuntimeProperties {
   private boolean workersEnabled = true;
   private String workerId = "kk-studio-harness-" + UUID.randomUUID();
   private Duration pollInterval = Duration.ofMillis(100);
+
+  /** 低频 Thread 恢复扫描间隔；默认约 30s。 */
+  private Duration threadRecoveryInterval = Duration.ofSeconds(30);
+
+  /** 单次恢复扫描最多 kick 的 Thread 数。 */
+  private int threadRecoveryBatchSize = 100;
+
   private Path environmentRoot = Path.of(System.getProperty("user.dir", "."));
   private Path workdir = Path.of(".");
 

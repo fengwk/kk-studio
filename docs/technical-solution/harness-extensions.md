@@ -25,10 +25,10 @@ public interface HarnessExtension {
 | 模块 | 职责 |
 | --- | --- |
 | `harness/agent` | Provider request interceptor contract 与串行执行链 |
-| `harness/runtime` | Extension Host、typed registry、Context / Tool / Compaction hooks、lifecycle observation 与 factory contract |
+| `harness/runtime` | Extension Host、typed registry、Context / Tool / Compaction hooks、lifecycle observation 与 factory contract；`ThreadProcessor` 消费这些 hooks |
 | `core` | Spring 装配、内置 Permission / Provider / Tool contribution |
 
-Host 只装载应用显式提供的已编译实例。Run、Session Entry、Tool Invocation 和 Run Event 继续由原生 Runtime 与数据库状态机管理。
+Host 只装载应用显式提供的已编译实例。Session Entry、AgentThread、ThreadInput、Tool Invocation 和 ThreadEvent 继续由原生 Runtime 与数据库状态机管理。
 
 ## 装载与顺序
 
@@ -49,7 +49,7 @@ Extension 可通过 `registry.onDispose(...)` 注册清理动作。Host 关闭�
 
 | Extension point | 输入输出 | 生效位置 |
 | --- | --- | --- |
-| `ContextTransform` | `ContextState -> ContextState` | Session active leaf path 完成默认转换后 |
+| `ContextTransform` | `ContextState -> ContextState` | Session head path 完成默认转换后 |
 | `BeforeProviderRequestInterceptor` | `ProviderRequest -> ProviderRequest` | 标准 Provider request 构建完成后、`ModelProvider.stream(...)` 前 |
 | `BeforeToolCallInterceptor` | `BeforeToolCallContext -> BeforeToolCallResult` | Tool Invocation 创建前 |
 | `AfterToolCallInterceptor` | `AfterToolCallContext -> ToolResult` | Tool callback 完成后、Invocation terminal CAS 前 |
@@ -68,7 +68,7 @@ Tool before chain 分为普通修改器和唯一 `PermissionBoundaryInterceptor`
 ordinary before hooks
   -> 每步 tool name / descriptor schema / arguments 校验
   -> PermissionBoundaryInterceptor
-  -> 原生 ToolPreparationService 创建 durable Invocation
+  -> 原生 prepareTools 创建 durable Invocation
 ```
 
 `PermissionEvaluator` 是 Core 内置的 permission boundary。`ToolInterceptorChain` 总是把该 boundary 放到普通修改器之后，并要求：
@@ -76,48 +76,40 @@ ordinary before hooks
 - 普通修改器的 permission action 与 prompt preview 保持为空。
 - Tool name 在整个 before chain 中保持不变。
 - 每个修改结果立即通过当前 descriptor schema 校验。
-- Permission boundary 读取最终 binding、arguments、Tool settings、YOLO 和路径上下文。
+- Permission boundary 读取最终 binding、arguments、Tool settings、**Thread YOLO** 和路径上下文。
 - Permission boundary 产生最终 permission，并原样返回最终 binding 与 arguments。
 
-Permission 结果由原生 `ToolPreparationService` 转换为 `QUEUED`、`WAITING_APPROVAL` 或 deterministic `FAILED` Invocation。Invocation 状态迁移由原生 Runtime 独占执行。
+Permission 结果由原生 prepare 路径转换为 `QUEUED`、`WAITING_APPROVAL` 或 deterministic `FAILED` Invocation。Invocation 状态迁移由原生 Runtime 独占执行。
 
-Tool 执行完成后，after chain 在 terminal CAS 前串行变换最终 `ToolResult`。After hook 必须保持 `toolCallId`；hook 失败会生成 deterministic error result，并由原生 Tool worker 将 Invocation 持久化为 `FAILED`。
+Tool 执行完成后，after chain 在 terminal CAS 前串行变换最终 `ToolResult`。After hook 必须保持 `toolCallId`；hook 失败会生成 deterministic error result，并由原生路径将 Invocation 持久化为 `FAILED`。
 
 ## Context、Provider 与 Compaction
 
 ### Context
 
-`SessionContextBuilder` 先执行 `DefaultContextTransform`，再按 Host 顺序执行全部 `ContextTransform`，最后投影为 `AgentMessage`。Extension 接收前一 transform 的完整 `ContextState`。
+`SessionContextBuilder` 先执行 `DefaultContextTransform`，再按 Host 顺序执行全部 `ContextTransform`，最后投影为 `AgentMessage`。Extension 接收前一 transform 的完整 `ContextState`。Context 以当前 Thread head 路径为输入。
 
 ### Provider request
 
-`DefaultAgentTurnEngine` 完成 model、variant、messages 和 tools 的标准 request 构建后执行 Provider interceptor chain。最终 request 才会交给 `ModelProvider.stream(...)`。Interceptor 失败通过 Turn failure 进入 Run terminal 状态机。
+`DefaultAgentTurnEngine` 完成 model、variant、messages 和 tools 的标准 request 构建后执行 Provider interceptor chain。`ThreadProcessor` 再为当前 `sessionId` 追加 `PromptCacheRequestFinalizer`。最终 request 交给 `ModelProvider.stream(...)`。Interceptor 或 Provider 永久失败进入 Thread 失败路径并写 ThreadEvent；需新的 durable 触发才恢复处理。
 
 ### Compaction
 
-`InterceptingCompactionService` 使用固定 session id 串行执行全部 before-compaction hooks，并把最终 `SessionContext` 交给实际 `CompactionService`。Hook 或 delegate 失败由 `AgentTurnWorker` 持久化为 Run `FAILED`；并发 abort 仍由事务层 cancel-wins。
+`InterceptingCompactionService` 使用固定 session id 串行执行全部 before-compaction hooks，并把最终 `SessionContext` 交给实际 `CompactionService`。Hook 或 delegate 失败由 `ThreadProcessor` 持久化为 Thread 失败事件；成功路径写 Compaction Entry 与 `compaction_*` ThreadEvent。
 
 ## Lifecycle observation
 
 Lifecycle observer 接收以下 typed observation：
 
-- `TurnStarted`
-- `AssistantCompleted`
-- `RunTerminated`
-- `CompactionCompleted`
-- `ToolCompleted`
+- `TurnStarted(threadId, sessionId, occurredAt)`
+- `AssistantCompleted(threadId, sessionId, toolCallCount, stopReason, occurredAt)`
+- `ThreadIdle(threadId, sessionId, occurredAt)`
+- `CompactionCompleted(threadId, sessionId, firstKeptEntryId, occurredAt)`
+- `ToolCompleted(invocationId, threadId, status, error, occurredAt)`
 
-Observation 只在对应数据库 transition 成功后发布，并复用该 transition 的时间戳。Run transition 可能发生 cancel-wins，因此 Worker 在 transaction 返回后重新读取 Run，以数据库中的实际状态决定发布内容：
+Observation 只在对应数据库 transition 成功后发布，并复用该 transition 的时间戳。可靠恢复与审计使用数据库 Thread、Session Entry、Invocation 和 ThreadEvent，不以 observer 为真源。
 
-| Durable Run 状态 | Observation |
-| --- | --- |
-| `SUCCEEDED` | `AssistantCompleted`，随后 `RunTerminated(SUCCEEDED)` |
-| control requeue 后 `QUEUED` | `AssistantCompleted` |
-| Tool preparation 后 `WAITING_TOOLS` | `AssistantCompleted` |
-| cancel-wins 后 `CANCELLED` | `RunTerminated(CANCELLED)` |
-| compaction requeue 后 `QUEUED` | `CompactionCompleted` |
-
-Observer 按 Host 顺序调用。单个 observer 的 `RuntimeException` 会在数据库提交后记录 warning，后续 observer 继续执行。可靠恢复与审计使用数据库 Run、Session Entry、Invocation、Control 和 Run Event。
+Observer 按 Host 顺序调用。单个 observer 的 `RuntimeException` 会在数据库提交后记录 warning，后续 observer 继续执行。
 
 ## Core 内置扩展
 
@@ -145,6 +137,7 @@ flowchart TD
     H --> G[HarnessLifecycleObservers]
     H --> P[ProviderFactory lookup]
     H --> T[ToolFactory lookup]
+    H --> TP[ThreadProcessor wiring]
 ```
 
-`HarnessExtensionHost` 是 Runtime hook 和 factory contribution 的唯一 Spring 装配入口。各执行组件只消费 Host 冻结后的不可变列表或 lookup。
+`HarnessExtensionHost` 是 Runtime hook 和 factory contribution 的唯一 Spring 装配入口。`ThreadProcessor` 与 Tool worker 只消费 Host 冻结后的不可变列表或 lookup。

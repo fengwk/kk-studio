@@ -1,238 +1,101 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import static fun.fengwk.kkstudio.web.HarnessUsageFixtures.toolCallsUsageDraft;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import fun.fengwk.kkstudio.core.harness.run.service.DatabaseToolPreparationPort;
-import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
-import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
-import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
-import fun.fengwk.kkstudio.core.harness.session.store.SnowflakeSessionIdGenerator;
-import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProperties;
-import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
-import fun.fengwk.kkstudio.harness.model.ModelCost;
-import fun.fengwk.kkstudio.harness.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
-import fun.fengwk.kkstudio.harness.runtime.run.AgentRun;
-import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
-import fun.fengwk.kkstudio.harness.runtime.run.RunEventPayloads;
-import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshotEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
-import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
-import fun.fengwk.kkstudio.harness.runtime.session.SessionTree;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.tool.ToolCall;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
-import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
+import fun.fengwk.kkstudio.core.harness.tool.service.ToolInvocationDecisionService;
+import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
 import fun.fengwk.kkstudio.web.WebTestApplication;
 
-import java.math.BigDecimal;
-import java.nio.file.Path;
-import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
+/**
+ * Global tool permission decision HTTP：成功 JSON（大整数 id 字符串）、409 冲突与 400 边界。
+ *
+ * <p>Service 用 mock 隔离，不重复数据库集成。
+ */
 @AutoConfigureMockMvc
 @SpringBootTest(classes = WebTestApplication.class)
 class StudioToolInvocationControllerTest {
-  private static final Instant NOW = Instant.parse("2026-06-01T00:00:00Z");
+
+  /** Greater than JS Number.MAX_SAFE_INTEGER so the API must keep it as a decimal string. */
+  private static final long LARGE_ID = 9_007_199_254_740_993L;
 
   @Autowired private MockMvc mockMvc;
-  @Autowired private ToolSettingsProperties toolSettingsProperties;
-  @Autowired private MysqlHarnessSessionStore sessionStore;
-  @Autowired private SnowflakeSessionIdGenerator sessionIds;
-  @Autowired private MysqlHarnessRunStore runStore;
-  @Autowired private HarnessRunTransactionService transactions;
-  @Autowired private DatabaseToolPreparationPort preparationPort;
-  @Autowired private MysqlToolInvocationStore invocationStore;
-  @Autowired private SessionTree sessionTree;
-  @Autowired private JdbcTemplate jdbcTemplate;
 
-  @BeforeEach
-  void clean() {
-    jdbcTemplate.update("delete from model_usage_record");
-    jdbcTemplate.update("delete from tool_invocation");
-    jdbcTemplate.update("delete from harness_run_event");
-    jdbcTemplate.update("delete from harness_run");
-    jdbcTemplate.update("delete from harness_session_entry");
-    jdbcTemplate.update("delete from harness_session");
-  }
+  @MockitoBean private ToolInvocationDecisionService decisionService;
 
-  /** Global Decision API 同决定幂等，冲突返回 409。 */
+  /** 成功路径返回 OK，且大于 JS safe integer 的 id 仍以字符串序列化。 */
   @Test
-  void decidesPermissionIdempotentlyAndRejectsConflictGlobally() throws Exception {
-    configureToolSettings("{\"permission\":{\"write\":\"ask\"}}");
-    ToolInvocation invocation = askInvocation();
-    String endpoint = "/api/tool-invocations/" + invocation.id() + "/decision";
+  void decidesSuccessfullyWithStringLargeIds() throws Exception {
+    ToolInvocationDTO dto = new ToolInvocationDTO();
+    dto.setId(Long.toString(LARGE_ID));
+    dto.setThreadId(Long.toString(LARGE_ID + 1));
+    dto.setStatus("QUEUED");
+    dto.setPermissionDecision("ALLOW");
+    when(decisionService.decide(eq(LARGE_ID), any())).thenReturn(dto);
 
     mockMvc
         .perform(
-            post(endpoint)
+            post("/api/tool-invocations/{id}/decision", LARGE_ID)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"decision\":\"allow\"}"))
         .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.id").value(Long.toString(LARGE_ID)))
+        .andExpect(jsonPath("$.data.threadId").value(Long.toString(LARGE_ID + 1)))
         .andExpect(jsonPath("$.data.status").value("QUEUED"))
         .andExpect(jsonPath("$.data.permissionDecision").value("ALLOW"));
+  }
+
+  /** IllegalStateException 映射 409 Conflict。 */
+  @Test
+  void mapsIllegalStateExceptionToConflict() throws Exception {
+    when(decisionService.decide(eq(LARGE_ID), any()))
+        .thenThrow(new IllegalStateException("invocation is not waiting approval"));
+
     mockMvc
         .perform(
-            post(endpoint)
+            post("/api/tool-invocations/{id}/decision", LARGE_ID)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"decision\":\"allow\"}"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.permissionDecision").value("ALLOW"));
-    mockMvc
-        .perform(
-            post(endpoint)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"decision\":\"deny\"}"))
         .andExpect(status().isConflict());
-
-    ToolInvocation denied = askInvocation();
-    mockMvc
-        .perform(
-            post("/api/tool-invocations/{invocationId}/decision", denied.id())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"decision\":\"deny\"}"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("FAILED"))
-        .andExpect(jsonPath("$.data.permissionDecision").value("DENY"))
-        .andExpect(jsonPath("$.data.errorMessage").value("Permission denied by user for write."));
   }
 
-  /** Global YOLO set 支持 Child 动态 Root 读取，无 active Run 也可由 GET 观察。 */
+  /** 非法 path id / body 与 IllegalArgumentException 走当前 400 行为。 */
   @Test
-  void setsAndReadsChildRootYoloWithoutActiveRun() throws Exception {
-    configureToolSettings("{\"defaultYolo\":true}");
-    Session root = sessionTree.create(null, "root");
-    Session child = sessionTree.fork(root.id(), null);
-
-    mockMvc
-        .perform(get("/api/sessions/{sessionId}/yolo", child.id()))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.rootSessionId").value(Long.toString(root.id())))
-        .andExpect(jsonPath("$.data.enabled").value(true));
+  void mapsInvalidPathBodyAndIllegalArgumentToBadRequest() throws Exception {
     mockMvc
         .perform(
-            put("/api/sessions/{sessionId}/yolo", child.id())
+            post("/api/tool-invocations/{id}/decision", "abc")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"enabled\":false}"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.rootSessionId").value(Long.toString(root.id())))
-        .andExpect(jsonPath("$.data.enabled").value(false));
-    mockMvc
-        .perform(get("/api/sessions/{sessionId}/yolo", root.id()))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.enabled").value(false));
-    mockMvc
-        .perform(
-            put("/api/sessions/{sessionId}/yolo", child.id())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{}"))
+                .content("{\"decision\":\"allow\"}"))
         .andExpect(status().isBadRequest());
-  }
 
-  private ToolInvocation askInvocation() {
-    long sessionId = sessionIds.newSessionId();
-    sessionStore.create(Session.root(sessionId, null, "session", false, NOW));
-    long snapshotId = sessionIds.newEntryId();
-    AgentSnapshotEntryPayload snapshot =
-        new AgentSnapshotEntryPayload(
-            new AgentSnapshot("system", "model", "default", List.of(), List.of(), List.of(), "{}"));
-    sessionStore.append(
-        new SessionEntry(snapshotId, sessionId, null, null, snapshot.type(), snapshot, NOW),
-        null,
-        0L);
-    AgentRun queued =
-        transactions.submitUserMessage(sessionId, snapshotId, user(), NOW.plusMillis(1));
-    AgentRun claimed =
-        runStore.claimDue("web-worker", NOW.plusMillis(1), Duration.ofMinutes(1)).orElseThrow();
-    ToolCall call = new ToolCall("call", "write", "{\"path\":\"notes.txt\"}");
-    preparationPort.prepare(
-        claimed,
-        assistant(List.of(call)),
-        toolCallsUsageDraft(),
-        List.of(call),
-        List.of(binding()),
-        Path.of("/tmp/environment"),
-        Path.of("/tmp/environment"),
-        List.of(
-            new RunEventDraft(
-                RunEventType.ASSISTANT_COMPLETED, RunEventPayloads.forAttempt(claimed))),
-        NOW.plusSeconds(1));
-    return invocationStore.listByRun(queued.id()).get(0);
-  }
+    mockMvc
+        .perform(
+            post("/api/tool-invocations/{id}/decision", LARGE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{"))
+        .andExpect(status().isBadRequest());
 
-  private void configureToolSettings(String settingsJson) {
-    toolSettingsProperties.setSettingsJson(settingsJson);
-  }
+    when(decisionService.decide(eq(LARGE_ID), any()))
+        .thenThrow(new IllegalArgumentException("decision must be allow or deny"));
 
-  private static AgentMessage user() {
-    return new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("go")));
-  }
-
-  private static MessageEntryPayload assistant(List<ToolCall> calls) {
-    List<AgentMessageContent> contents = new ArrayList<>();
-    contents.add(new TextMessageContent("calling"));
-    calls.forEach(
-        call ->
-            contents.add(
-                new ToolCallMessageContent(call.id(), call.toolName(), call.argumentsJson())));
-    return new MessageEntryPayload(
-        new AgentMessage(AgentMessageRole.ASSISTANT, contents),
-        new AssistantMessageMetadata(
-            ProviderStopReason.TOOL_CALLS,
-            new ModelUsage(1, 1, 0, 0, 0, 0, 2),
-            new ModelCost(
-                "USD",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO)));
-  }
-
-  private static ToolBinding binding() {
-    return ToolBinding.of(
-        new ToolDescriptor(
-            "write",
-            "1",
-            "write",
-            null,
-            new ToolParamsSchema(
-                "", Map.of("path", new ToolStringSchema("path")), Set.of("path"), false),
-            ToolExecutionMode.CLOUD,
-            ToolSideEffect.IDEMPOTENT,
-            Duration.ofSeconds(30)));
+    mockMvc
+        .perform(
+            post("/api/tool-invocations/{id}/decision", LARGE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"decision\":\"maybe\"}"))
+        .andExpect(status().isBadRequest());
   }
 }

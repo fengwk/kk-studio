@@ -46,11 +46,10 @@ public final class TaskTool implements Tool {
           "Delegate a task to an allowed durable subagent.",
           "task",
           new ToolParamsSchema(
-              "Starts or resumes a subagent task.",
+              "Starts a durable subagent task (same parent invocation is idempotent).",
               Map.of(
                   "subagent_type", new ToolStringSchema("Allowed target agent name."),
                   "prompt", new ToolStringSchema("Complete task instruction."),
-                  "session_id", new ToolStringSchema("Optional child session id to resume."),
                   "working_copy_policy",
                       new ToolEnumSchema(
                           "Working copy isolation policy.",
@@ -200,20 +199,14 @@ public final class TaskTool implements Tool {
       Iterator<String> names = root.fieldNames();
       while (names.hasNext()) {
         String name = names.next();
-        if (!Set.of("subagent_type", "prompt", "session_id", "working_copy_policy")
-            .contains(name)) {
+        if (!Set.of("subagent_type", "prompt", "working_copy_policy").contains(name)) {
           throw new IllegalArgumentException("task arguments contain unknown field: " + name);
         }
       }
       String type = text(root, "subagent_type", true);
       String prompt = text(root, "prompt", true);
-      Long sessionId = null;
-      if (root.has("session_id") && !root.get("session_id").isNull()) {
-        sessionId = parseSnowflakeId(text(root, "session_id", true), "session_id");
-      }
       String policy = text(root, "working_copy_policy", false);
-      return new TaskCommand(
-          type, prompt, sessionId, policy == null ? null : WorkingCopyPolicy.parse(policy));
+      return new TaskCommand(type, prompt, policy == null ? null : WorkingCopyPolicy.parse(policy));
     } catch (IOException error) {
       throw new IllegalArgumentException("task arguments must be valid JSON", error);
     }
@@ -223,17 +216,6 @@ public final class TaskTool implements Tool {
     return error.getMessage() == null || error.getMessage().isBlank()
         ? "Task execution failed."
         : error.getMessage();
-  }
-
-  private static long parseSnowflakeId(String value, String field) {
-    if (!value.matches("[1-9][0-9]*")) {
-      throw new IllegalArgumentException(field + " must be a positive decimal string");
-    }
-    try {
-      return Long.parseLong(value);
-    } catch (NumberFormatException error) {
-      throw new IllegalArgumentException(field + " is outside the signed 64-bit range", error);
-    }
   }
 
   private static String text(JsonNode root, String field, boolean required) {

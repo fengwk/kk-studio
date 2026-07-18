@@ -15,9 +15,9 @@ public final class AgentIdGenerator {
   public static final String COMFYUI_WORKFLOW_API = "comfyui_workflow_api";
   public static final String HARNESS_SESSION = "harness_session";
   public static final String HARNESS_SESSION_ENTRY = "harness_session_entry";
-  public static final String HARNESS_RUN = "harness_run";
-  public static final String HARNESS_RUN_EVENT = "harness_run_event";
-  public static final String HARNESS_RUN_CONTROL_MESSAGE = "harness_run_control_message";
+  public static final String HARNESS_THREAD = "harness_thread";
+  public static final String HARNESS_THREAD_INPUT = "harness_thread_input";
+  public static final String HARNESS_THREAD_EVENT = "harness_thread_event";
   public static final String MODEL_USAGE_RECORD = "model_usage_record";
   public static final String TOOL_INVOCATION = "tool_invocation";
   public static final String TOOL_ARTIFACT = "tool_artifact";
@@ -53,16 +53,16 @@ public final class AgentIdGenerator {
     return GlobalSnowflakeIdGenerator.next(HARNESS_SESSION_ENTRY);
   }
 
-  public static long nextHarnessRunId() {
-    return GlobalSnowflakeIdGenerator.next(HARNESS_RUN);
+  public static long nextHarnessThreadId() {
+    return GlobalSnowflakeIdGenerator.next(HARNESS_THREAD);
   }
 
-  public static long nextHarnessRunEventId() {
-    return GlobalSnowflakeIdGenerator.next(HARNESS_RUN_EVENT);
+  public static long nextHarnessThreadInputId() {
+    return GlobalSnowflakeIdGenerator.next(HARNESS_THREAD_INPUT);
   }
 
-  public static long nextHarnessRunControlMessageId() {
-    return GlobalSnowflakeIdGenerator.next(HARNESS_RUN_CONTROL_MESSAGE);
+  public static long nextHarnessThreadEventId() {
+    return GlobalSnowflakeIdGenerator.next(HARNESS_THREAD_EVENT);
   }
 
   public static long nextModelUsageRecordId() {

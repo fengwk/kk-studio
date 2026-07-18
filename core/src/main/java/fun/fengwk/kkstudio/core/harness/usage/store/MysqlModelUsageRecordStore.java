@@ -51,8 +51,8 @@ public class MysqlModelUsageRecordStore implements ModelUsageRecordStore {
   }
 
   @Override
-  public List<ModelUsageRecord> listByRunId(long runId) {
-    return mapper.listByRunId(runId).stream().map(this::toRecord).toList();
+  public List<ModelUsageRecord> listByThreadId(long threadId) {
+    return mapper.listByThreadId(threadId).stream().map(this::toRecord).toList();
   }
 
   @Override
@@ -74,10 +74,8 @@ public class MysqlModelUsageRecordStore implements ModelUsageRecordStore {
     ModelUsageRecordDO target = new ModelUsageRecordDO();
     target.setId(record.id());
     target.setSessionId(record.sessionId());
-    target.setRunId(record.runId());
+    target.setThreadId(record.threadId());
     target.setAssistantEntryId(record.assistantEntryId());
-    target.setAttempt(record.attempt());
-    target.setTurnIndex(record.turnIndex());
     target.setProviderResourceId(draft.providerResourceId());
     target.setModelResourceId(draft.modelResourceId());
     target.setProviderType(draft.providerType().name());
@@ -173,10 +171,8 @@ public class MysqlModelUsageRecordStore implements ModelUsageRecordStore {
     return new ModelUsageRecord(
         source.getId(),
         source.getSessionId(),
-        source.getRunId(),
+        source.getThreadId(),
         source.getAssistantEntryId(),
-        source.getAttempt(),
-        source.getTurnIndex(),
         draft,
         instant(source.getCreateTime()));
   }

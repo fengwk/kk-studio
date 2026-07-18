@@ -1,54 +1,142 @@
 # Harness 执行运行时
 
-本文描述 Harness Session 从用户消息到可恢复 Run、Tool、子代理和终态的执行链。所有执行进度以数据库记录为准，worker 和连接可以重启或丢失。
+本文描述 Harness 从用户输入进入 Thread mailbox，到 ThreadProcessor 按 Turn 推进、Tool/Subagent 收敛并释放 token 的执行链。所有执行进度以数据库记录为准；进程、worker 与连接可以重启或丢失。
 
 ## 运行时结构
 
 ```mermaid
 flowchart LR
-    Message[Session message submit]
-    Session[Session Entry + frozen snapshot]
-    Run[Durable Run]
-    Turn[Agent Turn Worker]
-    Tool[Tool Invocation Workers]
+    Submit[Thread input submit 202]
+    Queue[ThreadInput mailbox]
+    Kick[ThreadKick]
+    Proc[ThreadProcessor]
+    Session[Session Entry Tree]
+    Tool[Tool Invocation]
     Daemon[Environment Daemon]
-    Events[Run Event / Root Activity]
+    Events[ThreadEvent journal]
     Store[(Database / Artifact Store)]
 
-    Message --> Session --> Run --> Turn
-    Turn --> Tool
+    Submit --> Queue --> Kick --> Proc
+    Proc --> Session
+    Proc --> Tool
     Tool <--> Daemon
-    Turn --> Events
-    Tool --> Events
+    Proc --> Events
+    Queue --> Store
     Session --> Store
-    Run --> Store
     Tool --> Store
+    Events --> Store
 ```
 
-## 消息到终态
+## 所有权表
 
-1. `POST /api/sessions/{id}/messages` 校验叶节点，写入 User Session Entry，并创建 queued Run。
-2. Run worker 以 durable claim 获取 Run，加载 Session Tree、冻结 Agent Snapshot、控制消息和可用 Tool binding。
-3. Agent Turn 将 provider 输出的 Assistant、Tool Call 和 Tool Result 语义写为 Session Entry；流式进度和状态变化写为 Run Event。
-4. Tool Invocation 按权限策略等待 allow/deny、YOLO 或 worker 分发。Cloud Tool 在服务端执行；Environment Tool 由持久 gateway 分发给匹配的 daemon。
-5. Tool terminal result、artifact、usage 和 cost 写入后，Run 继续下一轮或进入 completed、failed 或 cancelled 终态。
+| 概念 | 职责 | 持久化 |
+| --- | --- | --- |
+| Session | 共享 append-only Entry Tree | `harness_session` |
+| Entry | 语义 durable 真源 | `harness_session_entry` |
+| AgentThread | 用户面板/actor：head 游标、冻结配置、YOLO、input sequence、processor fencing | `harness_thread` |
+| Branch(thread) | root→head 路径 | **不持久化**，查询时派生 |
+| ThreadInput | 有序输入队列与幂等键 | `harness_thread_input` |
+| ThreadEvent | 流式/状态可观测覆盖层；全局 eventId cursor | `harness_thread_event` |
+| ToolInvocation | 工具执行与副作用幂等边界 | `tool_invocation` |
+| SubagentTask | parent invocation → child Session + child Thread | `harness_subagent_task` |
+| Turn | 一次模型请求 + 其 Tool 处理 | **仅运行时**，不持久化 |
 
-一个 Run 的完整消息历史由 Session Entry 重放；Run Event 只提供未物化实时进度。Provider 流和 SSE 中断不会改变已经提交的持久事实。
+## 提交到空闲
 
-## 控制与权限
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant API as Thread API
+    participant Q as ThreadInput
+    participant P as ThreadProcessor
+    participant DB as Database
 
-`steer` 和 `follow-up` 都写为带消费状态的 Run Control Message；worker 在定义的边界消费它们。`abort` 持久化 cancel 请求，worker、Tool worker 和 gateway 在后续 poll 中观察并协作取消。控制命令不会依赖内存队列。
+    C->>API: POST /threads/{id}/messages
+    API->>DB: lock Thread row; allocate sequence; insert input
+    API-->>C: 202 ThreadInputDTO
+    API->>P: kick(threadId)
+    P->>DB: tryAcquire(processorToken, lease)
+    alt acquire 成功
+        loop until idle
+            P->>DB: 收敛 tool / apply terminal results
+            alt current head requires model
+                P->>DB: beginTurn
+                P->>P: model stream + deltas
+                alt final assistant
+                    P->>DB: commitFinalAssistant + usage
+                else tool calls
+                    P->>DB: prepareTools + invocations
+                    P->>DB: append THREAD_WAITING; releaseForExternalWait
+                end
+            else pending input exists
+                P->>DB: applyNextInput (exactly-once)
+            end
+        end
+        P->>DB: releaseIfIdle
+    else token 仍有效
+        Note over P: 当前 holder 继续；kick 被吸收
+    end
+```
 
-Tool permission 以 Invocation 状态表示。`POST /api/tool-invocations/{id}/decision` 原子决定 allow 或 deny；根 Session 的 YOLO 策略在执行前参与权限裁决。子代理的权限请求同时写入 Root Activity，因此根 UI 可以投影为可恢复 relay。
+文字步骤：
 
-## 子代理与 Root Activity
+1. `POST /api/threads/{threadId}/messages`（或 `PUT .../yolo` / `PUT .../agent`）在 Thread 行锁下分配 `sequence`、写入 `ThreadInput`，`clientMessageId` 幂等；HTTP **202**。
+2. 提交事务后 `ThreadKick.kick(threadId)` 激活有界 `ThreadProcessor`。
+3. Processor `tryAcquire`：仅当 `processor_token` 为空或 `processor_until` 已过期时写入新 token 与租约；持有期间按 `lease/3` 心跳 `renew`。
+4. 主循环从 durable 事实恢复：先收敛非终态 Tool / 应用已终态 Tool Result，再在 **Turn 边界** 优先偿还模型侧工作，然后 `applyNextInput`。
+5. `beginTurn` 原子录取并写 `TURN_STARTED`；通过后发起 **一次** Provider 请求。Delta 批量写入 ThreadEvent；终态时写 Assistant Entry + `model_usage_record`（同一事务），或 `prepareTools` 创建 Invocation。
+6. 需要外部等待（权限、工具执行、subagent）时，Processor 先写 `THREAD_WAITING`，再由 `releaseForExternalWait` 在 Thread 行锁下确认并释放 token；完成后再 kick。
+7. final assistant 且 queue 空且无待处理 tool 时写 `THREAD_IDLE` 并 `releaseIfIdle`。
 
-Subagent Task 保存 child Session、child Run、目标 Agent、状态、working-copy 事实和终态 report。Root Activity 将根 Session 树内的 Run、Task、Tool、Permission 和 Control 进度归集成 cursor 查询与 SSE；Task 树和权限 relay 都可从 REST snapshot 恢复。
+## Turn 边界与幂等
+
+- **Turn**：一次 LLM 请求及其工具处理；不落库。Assistant Entry ID 关联流式事件与 Usage。
+- **Input → Entry**：`markApplied` exactly-once；在 Thread 行锁与 processor token 校验下推进 `head_entry_id`。
+- **LLM**：at-least-once。崩溃后可再次请求；已成功提交的 Assistant Entry / Usage 由唯一键保护。
+- **Tool**：`tool_invocation.id` 是副作用幂等边界；decision 与 terminal 锁序为 **非锁 peek → 锁 Thread → 锁 invocation**，commit 后 kick。
+
+## 权限与 YOLO
+
+YOLO 是 **Thread** 字段（`yolo_enabled`）。`SET_YOLO` / `SET_AGENT` 作为有序 input 在 Turn 边界生效，不即时改写进行中的模型请求。
+
+`POST /api/tool-invocations/{id}/decision` 原子写入 allow/deny，并 kick 所属 Thread。子代理权限请求投影到 Root Activity，根 UI 可作 relay。
+
+## 子代理
+
+Subagent Task 创建 **child Session + child Thread**，记录 `parent_invocation_id`、`parent_thread_id`、`max_turns`、working-copy 与终态 report。子 Thread 独立 Processor；完成后 report 回父 invocation 并 kick 父 Thread。任务取消树与 `maxTurns` 由 runtime 和 `ThreadTurnAdmission` 在 `beginTurn` 边界线性化评估。
+
+## ThreadEvent 与 Entry
+
+| 层 | 职责 |
+| --- | --- |
+| Entry | 语义 durable 真源；transcript 基线 |
+| ThreadEvent | 流式 delta、权限/工具进度、thread waiting/idle/failed；**可观测覆盖层** |
+
+事件类型包括：`thread_started`、`turn_started`、`assistant_*`、`compaction_*`、`input_applied`、`tool_*`、`permission_*`、`subagent_*`、`thread_waiting`、`thread_idle`、`thread_failed`。
+
+SSE：`GET /api/threads/{id}/events/stream`，事件名 `thread_event`，event id 为全局十进制 `eventId`；恢复时取 query `afterEventId` 与 `Last-Event-ID` 中合法非负值的较大者。
 
 ## Environment 执行
 
-Environment binding 在 Run 资源解析时冻结为 `environment:<id>/<tool>@<version>`。gateway 在 dispatch 前验证 binding 和 invoke payload，写入 durable lease 后才发送。daemon connection 断开只释放 transient active state；未完成 invocation 由 lease recovery 和后续 poll 接管。daemon 返回的所有 envelope、phase、scope、sequence、payload、Base64 与大小都经过严格校验。
+Environment binding 在 Turn 资源解析时冻结。gateway 在 dispatch 前校验 binding 与 payload，写入 durable lease 后发送。连接断开只释放 transient handle；未完成 invocation 由 lease 与 ThreadProcessor / recovery kick 接管。
 
 ## 计量与成本
 
-每次 provider 调用产生不可变 Model Usage Record。Prompt cache 命中/创建信息与 token 明细一起持久化，价格快照计算的成本写入 ledger；Session API 只返回聚合结果。详细字段和 cache 策略见 [Prompt Cache、Usage 与成本账本](prompt-cache-usage-cost.md)。
+每次成功 Provider 调用写一条不可变 `model_usage_record`，归属 `session_id` + `thread_id` + **唯一** `assistant_entry_id`。聚合 API 按 Thread / Session / Model 读取账本。详见 [Prompt Cache、Usage 与成本账本](prompt-cache-usage-cost.md)。
+
+## 失败与多节点矩阵
+
+| 场景 | 行为 |
+| --- | --- |
+| 重复 `clientMessageId` 入队 | 返回既有 ThreadInput；不再次分配 sequence |
+| enqueue 成功、kick 丢失 | 低频 recovery 扫描 pending input 后 kick |
+| 节点 A 持有 token，节点 B kick | B `tryAcquire` 失败；A 继续 |
+| lease 过期 / 持有者崩溃 | 其他节点可 acquire；以 DB token 为准 |
+| 模型流中途崩溃 | 未提交 Assistant 可重试；已提交 Entry/Usage 不重复 |
+| Provider 永久失败 | 写 `THREAD_FAILED` 类事件并停止；需新的 durable 触发（如新 input）才继续 |
+| Tool terminal / permission | 锁 Thread 后锁 invocation；after-commit kick |
+| external wait 释放 | `releaseForExternalWait` 原子释放 token |
+| SSE 断线 | 仅丢可观测增量；以 Entry + 重放 events 恢复 |
+| recovery 扫描 | 仅 expired token 或 pending input / due tool / head 终态 tool；**不**选择纯 `WAITING_APPROVAL` 无 work 的 idle Thread |
+
+配置：`kk-studio.harness.runtime.threadRecoveryInterval`（默认 30s）、`threadRecoveryBatchSize`（默认 100）。主路径是事件触发，recovery 不是主轮询。

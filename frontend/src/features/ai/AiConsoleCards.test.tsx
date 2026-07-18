@@ -9,7 +9,7 @@ import {
   ModelResourceCard,
   ProviderResourceCard,
   SearchField,
-  SessionCard,
+  ThreadCard,
   StateBlock,
 } from '@/features/ai/AiConsoleCards'
 
@@ -32,20 +32,20 @@ describe('AiConsoleCards', () => {
     expect(onClick).toHaveBeenCalledTimes(1)
   })
 
-  it('renders session fallback fields and navigates to the session route', async () => {
+  it('renders thread fallback fields and navigates to the thread route', async () => {
     const user = userEvent.setup()
     renderWithRouter(
-      <SessionCard
-        session={{
+      <ThreadCard
+        thread={{
+          threadId: 'thread-1',
           sessionId: 'session-1',
+          sessionTitle: null,
+          headEntryId: 'entry-1',
           agentDefinitionId: 'agent-1',
-          title: null,
-          rootSessionId: 'session-1',
-          parentSessionId: null,
-          depth: 0,
-          leafEntryId: 'entry-1',
-          activeRunId: null,
+          runtimeConfigJson: null,
           yoloEnabled: false,
+          inputSequence: 0,
+          processing: false,
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:01:00',
         }}
@@ -55,23 +55,23 @@ describe('AiConsoleCards', () => {
     expect(screen.getByText('Untitled Chat')).toBeInTheDocument()
     expect(screen.getAllByText('agent-1').length).toBeGreaterThan(0)
 
-    await user.click(screen.getByRole('button', { name: '进入会话 session-1' }))
-    expect(screen.getByTestId('location')).toHaveTextContent('/sessions/session-1')
+    await user.click(screen.getByRole('button', { name: '进入对话 thread-1' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('/threads/thread-1')
   })
 
-  it('uses the resolved agent name for the session card', () => {
+  it('uses the resolved agent name for the thread card', () => {
     renderWithRouter(
-      <SessionCard
-        session={{
+      <ThreadCard
+        thread={{
+          threadId: 'thread-2',
           sessionId: 'session-2',
+          sessionTitle: 'Named Session',
+          headEntryId: 'entry-2',
           agentDefinitionId: 'agent-1',
-          title: 'Named Session',
-          rootSessionId: 'session-2',
-          parentSessionId: null,
-          depth: 0,
-          leafEntryId: 'entry-2',
-          activeRunId: null,
+          runtimeConfigJson: null,
           yoloEnabled: false,
+          inputSequence: 0,
+          processing: false,
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:01:00',
         }}
@@ -229,7 +229,7 @@ describe('AiConsoleCards', () => {
 
 function renderWithRouter(element: ReactNode) {
   return render(
-    <MemoryRouter initialEntries={['/sessions']}>
+    <MemoryRouter initialEntries={['/threads']}>
       <Routes>
         <Route path="*" element={<>{element}<LocationProbe /></>} />
       </Routes>

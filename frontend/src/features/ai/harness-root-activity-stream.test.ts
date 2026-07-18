@@ -4,9 +4,11 @@ import type { RootActivityDTO } from '@/shared/api/contracts'
 
 describe('harness root activity stream', () => {
   it('accepts complete root activity events with large decimal identifiers', () => {
-    expect(parseRootActivity(JSON.stringify(activity('344139441037639680')))).toMatchObject({ eventId: '344139441037639680' })
+    expect(parseRootActivity(JSON.stringify(activity('344139441037639680')))).toMatchObject({
+      eventId: '344139441037639680',
+    })
     expect(parseRootActivity(JSON.stringify({ ...activity('1'), eventId: '0' }))).toBeNull()
-    expect(parseRootActivity(JSON.stringify({ ...activity('1'), sequence: -1 }))).toBeNull()
+    expect(parseRootActivity(JSON.stringify({ ...activity('1'), threadId: '' }))).toBeNull()
     expect(parseRootActivity('{bad')).toBeNull()
   })
 
@@ -24,10 +26,9 @@ function activity(eventId: string): RootActivityDTO {
   return {
     rootSessionId: '1',
     sessionId: '2',
-    runId: '3',
+    threadId: '3',
     eventId,
-    sequence: 1,
-    type: 'subagent_started',
+    eventType: 'subagent_started',
     payloadJson: '{}',
     createTime: '2026-06-20T02:00:00Z',
   }

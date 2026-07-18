@@ -32,7 +32,7 @@ export interface ModelUsageCostSummaryDTO {
 }
 
 export interface ModelUsageSummaryDTO {
-  scopeType: 'run' | 'session' | 'model'
+  scopeType: 'thread' | 'session' | 'model'
   scopeId: string
   recordCount: BackendLong
   inputTokens: BackendLong
@@ -138,6 +138,7 @@ export interface AgentDefinitionUpdateDTO extends AgentDefinitionEditablePropert
   defaultModel?: string
 }
 
+/** Session tree container; shared Entry root for Threads/tasks/activities. */
 export interface HarnessSessionDTO {
   sessionId: string
   agentDefinitionId: string
@@ -145,54 +146,74 @@ export interface HarnessSessionDTO {
   rootSessionId: string
   parentSessionId: string | null
   depth: number
-  leafEntryId: string | null
-  activeRunId: string | null
-  yoloEnabled: boolean
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
 
-export interface HarnessSessionCreateDTO {
-  agentDefinitionId: string
-  title?: string
-}
-
-export interface HarnessSessionMessageCreateDTO {
-  content: string
-  expectedLeafEntryId: string
-}
-
 export interface HarnessSessionEntryDTO {
-  sessionEntryId: string
+  entryId: string
   sessionId: string
   parentEntryId: string | null
-  runId: string | null
   entryType: string
   payloadJson: string
   createTime: BackendDateTime
 }
 
-export interface HarnessRunDTO {
-  runId: string
+/** AgentThread query projection; ids are decimal strings. */
+export interface HarnessThreadDTO {
+  threadId: string
   sessionId: string
-  triggerEntryId: string
-  status: string
-  turnIndex: number
-  attempt: number
-  eventSequence: number
-  nextAttemptAt: BackendDateTime
-  cancelRequestedAt: BackendDateTime
-  startedAt: BackendDateTime
-  finishedAt: BackendDateTime
+  sessionTitle: string | null
+  headEntryId: string | null
+  /** May be null for fork threads that have not pinned an agent definition. */
+  agentDefinitionId: string | null
+  runtimeConfigJson: string | null
+  yoloEnabled: boolean
+  inputSequence: number
+  processing: boolean
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
 
-export interface RunEventDTO {
-  eventId: string
-  runId: string
+export interface HarnessThreadCreateDTO {
+  agentDefinitionId?: string
+  title?: string
+  sessionId?: string
+  fromEntryId?: string
+  yoloEnabled?: boolean
+}
+
+export interface HarnessThreadMessageCreateDTO {
+  content: string
+  clientMessageId?: string
+}
+
+export interface HarnessThreadYoloSetDTO {
+  yoloEnabled: boolean
+}
+
+export interface HarnessThreadAgentSetDTO {
+  agentDefinitionId: string
+}
+
+export interface HarnessThreadInputDTO {
+  inputId: string
+  threadId: string
   sequence: number
-  type: string
+  inputType: string
+  payloadJson: string
+  clientMessageId: string | null
+  appliedEntryId: string | null
+  appliedAt: BackendDateTime
+  createTime: BackendDateTime
+}
+
+/** Thread event journal; eventId is the SSE cursor. */
+export interface ThreadEventDTO {
+  eventId: string
+  threadId: string
+  subjectEntryId: string | null
+  eventType: string
   payloadJson: string
   createTime: BackendDateTime
 }
@@ -200,17 +221,16 @@ export interface RunEventDTO {
 export interface RootActivityDTO {
   rootSessionId: string
   sessionId: string
-  runId: string
+  threadId: string
   eventId: string
-  sequence: number
-  type: string
+  eventType: string
   payloadJson: string
   createTime: BackendDateTime
 }
 
 export interface ToolInvocationDTO {
   id: string
-  runId: string
+  threadId: string
   assistantEntryId: string
   ordinal: number
   toolCallId: string
@@ -234,12 +254,6 @@ export interface ToolInvocationDTO {
   updateTime: BackendDateTime
 }
 
-export interface SessionYoloDTO {
-  sessionId: string
-  rootSessionId: string
-  enabled: boolean
-}
-
 export interface ToolArtifactRefDTO {
   artifactId: string
   mediaType: string
@@ -248,7 +262,7 @@ export interface ToolArtifactRefDTO {
 
 export interface SubagentTaskReportDTO {
   childSessionId: string
-  childRunId: string
+  childThreadId?: string
   status: string
   finalReport: string | null
   artifacts: ToolArtifactRefDTO[]
@@ -261,39 +275,17 @@ export interface SubagentTaskReportDTO {
 export interface SubagentTaskDTO {
   parentInvocationId: string
   parentSessionId: string
+  parentThreadId: string | null
   childSessionId: string
-  childRunId: string
+  childThreadId: string | null
   targetAgent: string
   workingCopyPolicy: string
   workingCopyRevision: string | null
   maxTurns: number
-  idleTimeoutMillis: BackendLong | null
   status: string
   report: SubagentTaskReportDTO | null
   createTime: BackendDateTime
   updateTime: BackendDateTime
-}
-
-export interface RunControlDTO {
-  id: string
-  sessionId: string
-  runId: string | null
-  consumedRunId: string | null
-  consumedEntryId: string | null
-  kind: string
-  consumptionMode: string
-  status: string
-  content: string
-  createdAt: BackendDateTime
-  consumedAt: BackendDateTime
-}
-
-export interface RunAbortDTO {
-  sessionId: string
-  runId: string | null
-  newlyRequested: boolean
-  status: string | null
-  requestedAt: BackendDateTime
 }
 
 export type ComfyuiWorkflowId = string

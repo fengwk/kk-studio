@@ -40,7 +40,6 @@ class ModelUsageAggregationServiceImplTest {
     service = new ModelUsageAggregationServiceImpl(recordStore);
   }
 
-  /** 多币种必须独立且稳定排序；cache 指标只看 eligible，waste 必须按 key 截断，不能全局抵消。 */
   @Test
   void aggregatesTokensCostsEligibleRatiosAndAffinityWaste() {
     ModelUsageRecord usdWrite =
@@ -50,12 +49,12 @@ class ModelUsageAggregationServiceImplTest {
         record(3L, eligible("EUR", "beta", usage(5, 6, 70, 0, 0, 2, 83)));
     ModelUsageRecord nonEligible =
         record(4L, nonEligible("USD", usage(1000, 8, 500, 7, 9, 4, 1528)));
-    when(recordStore.listByRunId(21L))
+    when(recordStore.listByThreadId(21L))
         .thenReturn(List.of(usdWrite, usdRead, eurOtherKey, nonEligible));
 
-    ModelUsageSummaryDTO summary = service.summarizeRun(21L);
+    ModelUsageSummaryDTO summary = service.summarizeThread(21L);
 
-    assertEquals("run", summary.getScopeType());
+    assertEquals("thread", summary.getScopeType());
     assertEquals("21", summary.getScopeId());
     assertEquals(4L, summary.getRecordCount());
     assertEquals(1020L, summary.getInputTokens());
@@ -79,7 +78,6 @@ class ModelUsageAggregationServiceImplTest {
         summary.getCosts().get(1));
   }
 
-  /** null affinity key 必须以 record id 分桶，否则一条 read 会错误摊销另一条 write。 */
   @Test
   void treatsNullAffinityKeysAsIndependentRecords() {
     ModelUsageRecord write = record(11L, eligible("USD", null, usage(0, 0, 0, 50, 0, 0, 50)));
@@ -93,30 +91,28 @@ class ModelUsageAggregationServiceImplTest {
     assertDecimal("1.000000", summary.getTokenReadRatio());
   }
 
-  /** 三种空 scope 都返回带正确字符串 ID 的全零结果，并调用对应 store 查询。 */
   @Test
   void returnsZeroSummariesForEmptyScopes() {
-    when(recordStore.listByRunId(41L)).thenReturn(List.of());
+    when(recordStore.listByThreadId(41L)).thenReturn(List.of());
     when(recordStore.listBySessionId(42L)).thenReturn(List.of());
     when(recordStore.listByModelResourceId(43L)).thenReturn(List.of());
 
-    assertEmpty(service.summarizeRun(41L), "run", "41");
+    assertEmpty(service.summarizeThread(41L), "thread", "41");
     assertEmpty(service.summarizeSession(42L), "session", "42");
     assertEmpty(service.summarizeModel(43L), "model", "43");
-    verify(recordStore).listByRunId(41L);
+    verify(recordStore).listByThreadId(41L);
     verify(recordStore).listBySessionId(42L);
     verify(recordStore).listByModelResourceId(43L);
   }
 
-  /** 任一 token 分类求和溢出必须立即失败，不能静默回绕。 */
   @Test
   void rejectsTokenOverflow() {
     ModelUsageRecord maximum =
         record(21L, nonEligible("USD", usage(Long.MAX_VALUE, 0, 0, 0, 0, 0, 0)));
     ModelUsageRecord one = record(22L, nonEligible("USD", usage(1, 0, 0, 0, 0, 0, 0)));
-    when(recordStore.listByRunId(51L)).thenReturn(List.of(maximum, one));
+    when(recordStore.listByThreadId(51L)).thenReturn(List.of(maximum, one));
 
-    assertThrows(ArithmeticException.class, () -> service.summarizeRun(51L));
+    assertThrows(ArithmeticException.class, () -> service.summarizeThread(51L));
   }
 
   private static void assertEmpty(ModelUsageSummaryDTO summary, String scopeType, String scopeId) {
@@ -139,7 +135,7 @@ class ModelUsageAggregationServiceImplTest {
   }
 
   private static ModelUsageRecord record(long id, ModelUsageDraft draft) {
-    return new ModelUsageRecord(id, 11L, 21L, 100L + id, 1, (int) id, draft, NOW);
+    return new ModelUsageRecord(id, 11L, 21L, 100L + id, draft, NOW);
   }
 
   private static ModelUsageDraft eligible(String currency, String key, ModelUsage usage) {

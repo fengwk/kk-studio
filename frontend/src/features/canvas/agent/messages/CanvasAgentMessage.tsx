@@ -5,7 +5,7 @@ import { RunThreadMessage } from '@/features/canvas/agent/messages/RunThreadMess
 import { UserThreadMessage } from '@/features/canvas/agent/messages/UserThreadMessage'
 
 /**
- * Message-kind dispatcher, analogous to ChatMessageBubble and pi's per-type components.
+ * Message-kind dispatcher, analogous to MessageList and pi's per-type components.
  * Keeps thread rendering open for new message kinds without growing the dock shell.
  */
 export function CanvasAgentMessage({

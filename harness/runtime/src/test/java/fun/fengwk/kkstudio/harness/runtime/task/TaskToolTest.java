@@ -122,9 +122,7 @@ class TaskToolTest {
     for (String arguments :
         List.of(
             "{\"subagent_type\":\"\",\"prompt\":\"x\"}",
-            "{\"subagent_type\":\"Coder\",\"prompt\":\"\"}",
-            "{\"subagent_type\":\"Coder\",\"prompt\":\"x\",\"session_id\":\"0\"}",
-            "{\"subagent_type\":\"Coder\",\"prompt\":\"x\",\"session_id\":\"999999999999999999999\"}")) {
+            "{\"subagent_type\":\"Coder\",\"prompt\":\"\"}")) {
       RecordingListener listener = new RecordingListener();
       tool.execute(request(arguments), listener);
       assertTrue(listener.result.error());
@@ -138,12 +136,9 @@ class TaskToolTest {
     assertEquals("Task execution failed.", text(runtimeFailure.result));
   }
 
-  /**
-   * Optional task arguments parse into a pending durable command and terminal handles ignore
-   * cancel.
-   */
+  /** Optional working_copy_policy parses into a pending durable command. */
   @Test
-  void parsesOptionalSessionAndWorkingCopyPolicy() {
+  void parsesOptionalWorkingCopyPolicy() {
     RecordingRuntime runtime = new RecordingRuntime();
     TaskTool tool =
         new TaskTool(
@@ -151,7 +146,7 @@ class TaskToolTest {
     ToolExecutionHandle pending =
         tool.execute(
             request(
-                "{\"subagent_type\":\"Coder\",\"prompt\":\"x\",\"session_id\":\"123\",\"working_copy_policy\":\"NONE\"}"),
+                "{\"subagent_type\":\"Coder\",\"prompt\":\"x\",\"working_copy_policy\":\"NONE\"}"),
             new RecordingListener());
     pending.cancel();
     assertEquals(1, runtime.cancels);
@@ -385,13 +380,13 @@ class TaskToolTest {
           new SubagentTask(
               invocationId,
               2,
+              20,
               3,
               4,
               "Coder",
               WorkingCopyPolicy.FORK,
               null,
               50,
-              null,
               state,
               null,
               now,
