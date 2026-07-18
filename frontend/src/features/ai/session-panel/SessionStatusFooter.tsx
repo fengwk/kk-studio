@@ -6,26 +6,32 @@ import type {
 import type { SessionTimeline } from '@/features/ai/session-events'
 
 /**
- * pi-style status footer:
+ * pi-style single-line status footer (all left, | separated):
  * agent:name | (provider) model · variant | YOLO? | ↑in ↓out Rread Wwrite CHhit% $cost used/limit
  */
 export function SessionStatusFooter({
-  agent,
-  timeline,
+  agentName,
+  providerName,
+  modelName,
+  variantName,
   yolo,
   usage,
   contextWindow,
 }: {
   agent?: AgentDefinitionDTO
-  timeline: SessionTimeline
+  agentName?: string
+  providerName?: string
+  modelName?: string
+  variantName?: string
+  timeline?: SessionTimeline
   yolo?: SessionYoloDTO
   usage?: ModelUsageSummaryDTO
   contextWindow?: number
 }) {
-  const agentName = agent?.name || 'agent'
-  const provider = timeline.runtimeContext.provider || agent?.defaultProviderName || '-'
-  const model = timeline.runtimeContext.model || agent?.defaultModelName || '-'
-  const variant = timeline.runtimeContext.variant || agent?.defaultVariant || 'default'
+  const agentLabel = clean(agentName) || 'agent'
+  const provider = clean(providerName)
+  const model = clean(modelName)
+  const variant = clean(variantName) || 'default'
   const yoloOn = Boolean(yolo?.enabled)
 
   const input = asInt(usage?.inputTokens)
@@ -37,15 +43,18 @@ export function SessionStatusFooter({
   const hitRatio = asNumber(usage?.cacheHitRatio)
   const hitPercent = hitRatio > 1 ? hitRatio : hitRatio * 100
   const cost = (usage?.costs ?? []).reduce((sum, item) => sum + asNumber(item.total), 0)
-  const currency = usage?.costs?.[0]?.currency === 'USD' || !usage?.costs?.[0]?.currency ? '$' : usage.costs[0].currency
 
-  const parts = [
-    `agent:${agentName}`,
-    `(${provider}) ${model} · ${variant}`,
-  ]
+  const modelPart = provider
+    ? `(${provider}) ${model || '-'} · ${variant}`
+    : model
+      ? `${model} · ${variant}`
+      : variant
+
+  const parts = [`agent:${agentLabel}`, modelPart]
   if (yoloOn) {
     parts.push('YOLO')
   }
+
   const stats = [
     `↑${formatTokens(input)}`,
     `↓${formatTokens(output)}`,
@@ -55,17 +64,24 @@ export function SessionStatusFooter({
   if (cacheRead > 0 || cacheWrite > 0) {
     stats.push(`CH${hitPercent.toFixed(1)}%`)
   }
-  stats.push(`${currency}${cost.toFixed(3)}`)
+  stats.push(`$${cost.toFixed(3)}`)
   stats.push(limit > 0 ? `${formatTokens(used)}/${formatTokens(limit)}` : formatTokens(used))
+
+  const line = `${parts.join(' | ')} | ${stats.join(' ')}`
 
   return (
     <footer className="session-status-footer" aria-label="会话状态">
-      <div className="session-status-line">
-        <span>{parts.join(' | ')}</span>
-        <span className="session-status-stats">{stats.join(' ')}</span>
-      </div>
+      <div className="session-status-line">{line}</div>
     </footer>
   )
+}
+
+function clean(value?: string | null): string {
+  const text = (value ?? '').trim()
+  if (!text || text === '-' || text === 'undefined' || text === 'null') {
+    return ''
+  }
+  return text
 }
 
 function formatTokens(count: number): string {

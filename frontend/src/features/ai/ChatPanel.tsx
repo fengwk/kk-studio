@@ -32,6 +32,7 @@ export function ChatPanel({
   session,
   agent,
   timeline,
+  runtimeLabels,
   activeRun,
   messagesLoading,
   messagesError,
@@ -56,6 +57,13 @@ export function ChatPanel({
   session?: HarnessSessionDTO
   agent?: AgentDefinitionDTO
   timeline: SessionTimeline
+  runtimeLabels?: {
+    agentName: string
+    providerName: string
+    modelName: string
+    variantName: string
+    contextWindow?: number
+  }
   runs?: HarnessRunDTO[]
   activeRun: boolean
   messagesLoading: boolean
@@ -175,8 +183,11 @@ export function ChatPanel({
       }
       footer={
         <SessionStatusFooter
-          agent={agent}
-          timeline={timeline}
+          agentName={runtimeLabels?.agentName || agent?.name}
+          providerName={runtimeLabels?.providerName || agent?.defaultProviderName}
+          modelName={runtimeLabels?.modelName || agent?.defaultModelName}
+          variantName={runtimeLabels?.variantName || agent?.defaultVariant}
+          contextWindow={runtimeLabels?.contextWindow}
           yolo={observability.yolo}
           usage={observability.usage}
         />

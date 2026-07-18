@@ -15,6 +15,14 @@ export function useAgentSessionQueries(sessionId: string) {
     queryKey: queryKeys.agents.list,
     queryFn: () => agentService.listAgents(),
   })
+  const modelsQuery = useQuery({
+    queryKey: queryKeys.models.list,
+    queryFn: () => agentService.listModels(),
+  })
+  const providersQuery = useQuery({
+    queryKey: queryKeys.providers.list,
+    queryFn: () => agentService.listProviders(),
+  })
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions.list,
     queryFn: () => harnessService.listSessions(),
@@ -74,12 +82,16 @@ export function useAgentSessionQueries(sessionId: string) {
 
   return {
     agentsQuery,
+    modelsQuery,
+    providersQuery,
     sessionsQuery,
     sessionQuery,
     entriesQuery,
     runsQuery,
     runEventsQuery,
     agents: agentsQuery.data?.results ?? [],
+    models: modelsQuery.data?.results ?? [],
+    providers: providersQuery.data?.results ?? [],
     sessions: sessionsQuery.data ?? [],
     session: sessionQuery.data,
     entries: entriesQuery.data ?? [],
