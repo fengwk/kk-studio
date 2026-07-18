@@ -3,7 +3,9 @@ import { ChatSidebar } from '@/features/ai/ChatPanelParts'
 import { ChatObservabilityPanel } from '@/features/ai/ChatObservabilityPanel'
 import { SessionPanel } from '@/features/ai/session-panel'
 import { SessionActivityWidget } from '@/features/ai/session-panel/SessionActivityWidget'
+import { SessionStatusFooter } from '@/features/ai/session-panel/SessionStatusFooter'
 import { SessionSubagentWidget } from '@/features/ai/session-panel/SessionSubagentWidget'
+import type { SessionCommand } from '@/features/ai/session-panel/session-commands'
 import type { SubagentTaskNode } from '@/features/ai/subagent-task-tree'
 import type { RelayPermission } from '@/features/ai/useHarnessTaskTimeline'
 import type { SessionTimeline } from '@/features/ai/session-events'
@@ -19,7 +21,7 @@ import type {
 
 /**
  * Harness adapter over SessionPanel.
- * No top status bar — working indicator lives in the widget zone.
+ * Commands live in +// palette; footer is a pi-style status line (no YOLO checkbox).
  */
 export function ChatPanel({
   sessions,
@@ -28,6 +30,7 @@ export function ChatPanel({
   title,
   onBack,
   session,
+  agent,
   timeline,
   activeRun,
   messagesLoading,
@@ -43,9 +46,7 @@ export function ChatPanel({
   onDismissActionError,
   onDraftChange,
   onSubmit,
-  onSteer,
-  onFollowUp,
-  onAbort,
+  onCommand,
 }: {
   sessions: HarnessSessionDTO[]
   agentsById: Map<string, AgentDefinitionDTO>
@@ -87,9 +88,7 @@ export function ChatPanel({
   onDismissActionError?: () => void
   onDraftChange: (draft: string) => void
   onSubmit: () => void
-  onSteer: () => void
-  onFollowUp: () => void
-  onAbort: () => void
+  onCommand: (command: SessionCommand) => void
 }) {
   const pendingPermissions = observability.toolInvocations.filter(
     (invocation) => invocation.status === 'WAITING_APPROVAL',
@@ -119,9 +118,7 @@ export function ChatPanel({
       onDismissActionError={onDismissActionError}
       onDraftChange={onDraftChange}
       onSubmit={onSubmit}
-      onSteer={onSteer}
-      onFollowUp={onFollowUp}
-      onAbort={onAbort}
+      onCommand={onCommand}
       widgets={
         <>
           {!session?.parentSessionId ? (
@@ -177,16 +174,11 @@ export function ChatPanel({
         </>
       }
       footer={
-        <ChatObservabilityPanel
+        <SessionStatusFooter
+          agent={agent}
+          timeline={timeline}
           yolo={observability.yolo}
           usage={observability.usage}
-          toolInvocations={[]}
-          error={observability.observabilityError}
-          yoloPending={observability.yoloPending}
-          decisionPending={observability.decisionPending}
-          onYoloChange={observability.setYolo}
-          onDecision={observability.decideTool}
-          compact
         />
       }
     />

@@ -1,14 +1,14 @@
 import type { ReactNode, RefObject } from 'react'
 import { SessionComposer } from '@/features/ai/session-panel/SessionComposer'
 import { SessionErrorPanel } from '@/features/ai/session-panel/SessionErrorPanel'
-import { SessionFooter } from '@/features/ai/session-panel/SessionFooter'
 import { SessionTranscript } from '@/features/ai/session-panel/SessionTranscript'
 import { SessionWidgetStack } from '@/features/ai/session-panel/SessionWidgetStack'
+import type { SessionCommand } from '@/features/ai/session-panel/session-commands'
 import type { DialogueMessage } from '@/features/ai/session-events'
 
 /**
- * Full-bleed session panel aligned with pi layout zones:
- * dialogue (blocks) -> widgets (working / subagents) -> input dock -> footer.
+ * Full-bleed session panel:
+ * dialogue -> widgets -> input(+// commands) -> footer
  */
 export function SessionPanel({
   sidebar,
@@ -25,9 +25,7 @@ export function SessionPanel({
   onDismissActionError,
   onDraftChange,
   onSubmit,
-  onSteer,
-  onFollowUp,
-  onAbort,
+  onCommand,
   widgets,
   footer,
 }: {
@@ -45,9 +43,7 @@ export function SessionPanel({
   onDismissActionError?: () => void
   onDraftChange: (draft: string) => void
   onSubmit: () => void
-  onSteer: () => void
-  onFollowUp: () => void
-  onAbort: () => void
+  onCommand: (command: SessionCommand) => void
   widgets?: ReactNode
   footer?: ReactNode
 }) {
@@ -74,11 +70,9 @@ export function SessionPanel({
           controlsPending={controlsPending}
           onDraftChange={onDraftChange}
           onSubmit={onSubmit}
-          onSteer={onSteer}
-          onFollowUp={onFollowUp}
-          onAbort={onAbort}
+          onCommand={onCommand}
         />
-        <SessionFooter>{footer}</SessionFooter>
+        {footer}
       </main>
     </section>
   )

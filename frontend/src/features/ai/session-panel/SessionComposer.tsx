@@ -1,9 +1,10 @@
-import type { KeyboardEvent } from 'react'
+import { useMemo, useState, type KeyboardEvent } from 'react'
 import { PlusIcon, SendIcon } from '@/features/canvas/icons'
+import { SessionCommandPalette } from '@/features/ai/session-panel/SessionCommandPalette'
+import type { SessionCommand } from '@/features/ai/session-panel/session-commands'
 
 /**
- * Canvas prototype dock: + | textarea | send.
- * Control buttons only appear when they are actionable (run active).
+ * Canvas-style dock: + opens command table; typing `/` also opens it with search.
  */
 export function SessionComposer({
   draft,
@@ -13,10 +14,7 @@ export function SessionComposer({
   controlsPending,
   onDraftChange,
   onSubmit,
-  onSteer,
-  onFollowUp,
-  onAbort,
-  onAdd,
+  onCommand,
 }: {
   draft: string
   activeRun: boolean
@@ -25,35 +23,94 @@ export function SessionComposer({
   controlsPending: boolean
   onDraftChange: (draft: string) => void
   onSubmit: () => void
-  onSteer: () => void
-  onFollowUp: () => void
-  onAbort: () => void
-  onAdd?: () => void
+  onCommand: (command: SessionCommand) => void
 }) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuQuery, setMenuQuery] = useState('')
+
+  const slashMode = draft.startsWith('/')
+  const open = menuOpen || slashMode
+  const query = slashMode ? draft.slice(1) : menuQuery
+
+  const canSend = useMemo(
+    () => Boolean(draft.trim()) && !pending && !disabled && !activeRun && !draft.startsWith('/'),
+    [activeRun, disabled, draft, pending],
+  )
+
+  function openMenu() {
+    setMenuOpen(true)
+    setMenuQuery('')
+  }
+
+  function closeMenu() {
+    setMenuOpen(false)
+    setMenuQuery('')
+    if (draft.startsWith('/')) {
+      onDraftChange('')
+    }
+  }
+
+  function handleSelect(command: SessionCommand) {
+    closeMenu()
+    if (draft.startsWith('/')) {
+      onDraftChange('')
+    }
+    onCommand(command)
+  }
+
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === 'Escape' && open) {
+      event.preventDefault()
+      closeMenu()
+      return
+    }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+      if (open) {
+        return
+      }
       event.preventDefault()
       onSubmit()
     }
   }
 
+  function handleChange(value: string) {
+    onDraftChange(value)
+    if (value.startsWith('/')) {
+      setMenuOpen(false)
+    }
+  }
+
   return (
     <div className="session-composer">
+      <SessionCommandPalette
+        open={open}
+        query={query}
+        onQueryChange={(value) => {
+          if (slashMode) {
+            onDraftChange(`/${value}`)
+          } else {
+            setMenuQuery(value)
+          }
+        }}
+        onSelect={handleSelect}
+        onClose={closeMenu}
+      />
       <div className="session-dock">
         <button
           className="session-dock-add"
           type="button"
-          aria-label="添加内容"
-          onClick={onAdd}
-          disabled={disabled}
+          aria-label="打开命令表"
+          aria-expanded={open}
+          onClick={() => (open ? closeMenu() : openMenu())}
+          disabled={disabled || controlsPending}
         >
           <PlusIcon />
         </button>
         <textarea
           value={draft}
-          onChange={(event) => onDraftChange(event.target.value)}
+          onChange={(event) => handleChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="告诉 Agent 下一步要完成什么…"
+          placeholder="告诉 Agent 下一步要完成什么…（/ 打开命令）"
           disabled={disabled || pending}
           rows={1}
           aria-label="给 AI 发送消息"
@@ -63,42 +120,11 @@ export function SessionComposer({
           type="button"
           aria-label="发送消息"
           onClick={onSubmit}
-          disabled={!draft.trim() || pending || disabled || activeRun}
+          disabled={!canSend}
         >
           <SendIcon />
         </button>
       </div>
-      {activeRun ? (
-        <div className="session-composer-extra">
-          <button
-            type="button"
-            className="session-extra-btn"
-            aria-label="插入指令"
-            onClick={onSteer}
-            disabled={!draft.trim() || controlsPending}
-          >
-            Steer
-          </button>
-          <button
-            type="button"
-            className="session-extra-btn"
-            aria-label="排队追问"
-            onClick={onFollowUp}
-            disabled={!draft.trim() || controlsPending}
-          >
-            排队
-          </button>
-          <button
-            type="button"
-            className="session-extra-btn"
-            aria-label="终止运行"
-            onClick={onAbort}
-            disabled={controlsPending}
-          >
-            终止
-          </button>
-        </div>
-      ) : null}
     </div>
   )
 }
