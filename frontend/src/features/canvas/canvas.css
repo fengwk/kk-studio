@@ -984,20 +984,28 @@ Color tokens come from global product design tokens in styles.css. */
   height:37px;
   flex:0 0 37px;
   place-items:center;
-  border-radius:50%;
+  border-radius:999px;
+  border:0;
+  transition:background-color .15s ease,color .15s ease;
 }
 
+/* + : dark/flat by default, circular lift on hover */
 .canvas-feature .dock-add {
-  border:1px solid var(--fg-dim);
-  color:var(--fg-muted);
-  background:var(--surface-raised);
+  color:var(--fg-dim);
+  background:transparent;
   font-size:21px;
   line-height:1;
 }
 
+.canvas-feature .dock-add:hover:not(:disabled),
+.canvas-feature .dock-add:focus-visible:not(:disabled) {
+  color:var(--fg);
+  background:var(--surface-active);
+}
+
 .canvas-feature .dock-add[aria-expanded="true"] {
-  color:var(--stage-bg);
-  background:var(--fg);
+  color:var(--fg);
+  background:var(--surface-active);
 }
 
 .canvas-feature .agent-dock textarea {
