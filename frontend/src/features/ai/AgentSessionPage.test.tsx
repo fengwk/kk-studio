@@ -120,7 +120,6 @@ describe('AgentSessionPage', () => {
 
     expect(await screen.findByText('检查第一集大纲')).toBeInTheDocument()
     expect(screen.getByText('结构完整')).toBeInTheDocument()
-    expect(screen.getByText('SUCCEEDED')).toBeInTheDocument()
 
     await user.type(screen.getByPlaceholderText('告诉 Agent 下一步要完成什么…'), '继续')
     await user.click(screen.getByRole('button', { name: '发送消息' }))

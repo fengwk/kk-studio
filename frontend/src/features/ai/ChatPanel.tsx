@@ -1,5 +1,5 @@
 import type { RefObject } from 'react'
-import { ChatRuntimeBarStatus, ChatSidebar } from '@/features/ai/ChatPanelParts'
+import { ChatSidebar } from '@/features/ai/ChatPanelParts'
 import { ChatObservabilityPanel } from '@/features/ai/ChatObservabilityPanel'
 import { SessionPanel } from '@/features/ai/session-panel'
 import { SessionActivityWidget } from '@/features/ai/session-panel/SessionActivityWidget'
@@ -29,7 +29,6 @@ export function ChatPanel({
   onBack,
   session,
   timeline,
-  runs,
   activeRun,
   messagesLoading,
   messagesError,
@@ -56,7 +55,7 @@ export function ChatPanel({
   session?: HarnessSessionDTO
   agent?: AgentDefinitionDTO
   timeline: SessionTimeline
-  runs: HarnessRunDTO[]
+  runs?: HarnessRunDTO[]
   activeRun: boolean
   messagesLoading: boolean
   messagesError: unknown
@@ -178,22 +177,17 @@ export function ChatPanel({
         </>
       }
       footer={
-        <>
-          <div className="session-footer-meta">
-            <ChatRuntimeBarStatus runs={runs} activeRun={activeRun} />
-          </div>
-          <ChatObservabilityPanel
-            yolo={observability.yolo}
-            usage={observability.usage}
-            toolInvocations={[]}
-            error={observability.observabilityError}
-            yoloPending={observability.yoloPending}
-            decisionPending={observability.decisionPending}
-            onYoloChange={observability.setYolo}
-            onDecision={observability.decideTool}
-            compact
-          />
-        </>
+        <ChatObservabilityPanel
+          yolo={observability.yolo}
+          usage={observability.usage}
+          toolInvocations={[]}
+          error={observability.observabilityError}
+          yoloPending={observability.yoloPending}
+          decisionPending={observability.decisionPending}
+          onYoloChange={observability.setYolo}
+          onDecision={observability.decideTool}
+          compact
+        />
       }
     />
   )

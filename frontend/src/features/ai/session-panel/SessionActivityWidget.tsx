@@ -1,12 +1,25 @@
 import { getString, parsePayload } from '@/features/ai/session-event-payload'
 import type { RootActivityDTO } from '@/shared/api/contracts'
 
-/** Compact activity lines for the widget zone (not a multi-column tree panel). */
+const LIVE_ACTIVITY_TYPES = new Set([
+  'subagent_started',
+  'subagent_resumed',
+  'subagent_completed',
+  'subagent_cancel_requested',
+  'permission_requested',
+  'permission_resolved',
+])
+
+/**
+ * Compact live activity lines for the widget zone.
+ * Omits noisy control chatter (follow-up / steer / abort spam).
+ */
 export function SessionActivityWidget({ activities }: { activities: RootActivityDTO[] }) {
   const lines = activities
+    .filter((activity) => LIVE_ACTIVITY_TYPES.has(activity.type))
     .map(activityLabel)
     .filter(Boolean)
-    .slice(-8)
+    .slice(-6)
   if (lines.length === 0) {
     return null
   }
@@ -38,12 +51,6 @@ function activityLabel(activity: RootActivityDTO): string {
       return `等待工具授权：${getString(payload.tool) || getString(payload.invocationId)}`
     case 'permission_resolved':
       return `工具授权已${getString(payload.decision)}`
-    case 'steer_requested':
-      return '已提交 steer 指令'
-    case 'follow_up_requested':
-      return '已提交 follow-up'
-    case 'abort_requested':
-      return '已请求终止'
     default:
       return ''
   }

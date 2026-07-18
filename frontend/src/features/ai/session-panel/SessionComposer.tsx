@@ -3,7 +3,7 @@ import { PlusIcon, SendIcon } from '@/features/canvas/icons'
 
 /**
  * Canvas prototype dock: + | textarea | send.
- * Gray placeholder/chrome (no green tint).
+ * Control buttons only appear when they are actionable (run active).
  */
 export function SessionComposer({
   draft,
@@ -68,36 +68,37 @@ export function SessionComposer({
           <SendIcon />
         </button>
       </div>
-      <div className="session-composer-extra">
-        <button
-          type="button"
-          className="session-extra-btn"
-          aria-label="插入指令"
-          onClick={onSteer}
-          disabled={!activeRun || !draft.trim() || controlsPending}
-        >
-          Steer
-        </button>
-        <button
-          type="button"
-          className="session-extra-btn"
-          aria-label="排队追问"
-          onClick={onFollowUp}
-          disabled={!draft.trim() || controlsPending}
-        >
-          排队
-        </button>
-        <button
-          type="button"
-          className="session-extra-btn"
-          aria-label="终止运行"
-          onClick={onAbort}
-          disabled={!activeRun || controlsPending}
-        >
-          终止
-        </button>
-        <span className="session-extra-hint">{activeRun ? 'running' : 'idle'}</span>
-      </div>
+      {activeRun ? (
+        <div className="session-composer-extra">
+          <button
+            type="button"
+            className="session-extra-btn"
+            aria-label="插入指令"
+            onClick={onSteer}
+            disabled={!draft.trim() || controlsPending}
+          >
+            Steer
+          </button>
+          <button
+            type="button"
+            className="session-extra-btn"
+            aria-label="排队追问"
+            onClick={onFollowUp}
+            disabled={!draft.trim() || controlsPending}
+          >
+            排队
+          </button>
+          <button
+            type="button"
+            className="session-extra-btn"
+            aria-label="终止运行"
+            onClick={onAbort}
+            disabled={controlsPending}
+          >
+            终止
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }
