@@ -121,7 +121,7 @@ describe('AgentSessionPage', () => {
     expect(await screen.findByText('检查第一集大纲')).toBeInTheDocument()
     expect(screen.getByText('结构完整')).toBeInTheDocument()
 
-    await user.type(screen.getByPlaceholderText('告诉 Agent 下一步要完成什么…'), '继续')
+    await user.type(screen.getByPlaceholderText(/告诉 Agent/), '继续')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
     await waitFor(() => {
@@ -136,7 +136,7 @@ describe('AgentSessionPage', () => {
     queryClient.setQueryData(queryKeys.runs.events('other-run'), [runEvent('other', 'other-run', 1, 'assistant_started', {})])
 
     await waitFor(() => expect(harnessService.createRunEventStream).toHaveBeenCalledWith('2', 0))
-    expect(screen.getByPlaceholderText('告诉 Agent 下一步要完成什么…')).toBeEnabled()
+    expect(screen.getByPlaceholderText(/告诉 Agent/)).toBeEnabled()
 
     await act(async () => {
       streams[0]?.emit('run_event', runEvent('delta', '2', 1, 'assistant_delta_batch', { deltas: [{ kind: 'text', text: '实时回答' }] }))
@@ -178,12 +178,13 @@ describe('AgentSessionPage', () => {
 
     expect(await screen.findByText('需要工具授权：workspace_edit')).toBeInTheDocument()
     expect(screen.getByText('ENVIRONMENT / environment:42')).toBeInTheDocument()
-    expect(screen.getByText('Usage：15 tokens（cache 3） · USD0.000003')).toBeInTheDocument()
+    expect(await screen.findByText(/agent:/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '允许' }))
     await waitFor(() => expect(harnessService.decideToolInvocation).toHaveBeenCalledWith('invocation-1', 'allow'))
 
-    await user.click(screen.getByRole('checkbox', { name: 'YOLO：自动批准工具调用' }))
+    await user.click(screen.getByRole('button', { name: '打开命令表' }))
+    await user.click(screen.getByRole('option', { name: /yolo/i }))
     await waitFor(() => expect(harnessService.setYolo).toHaveBeenCalledWith('1', true))
   })
 
@@ -195,16 +196,19 @@ describe('AgentSessionPage', () => {
     await waitFor(() => {
       expect(harnessService.createRootActivityStream).toHaveBeenCalledWith('1', '0')
     })
-    const composer = screen.getByPlaceholderText('告诉 Agent 下一步要完成什么…')
+    const composer = screen.getByPlaceholderText(/告诉 Agent/)
     await user.type(composer, '优先检查边界')
-    await user.click(screen.getByRole('button', { name: '插入指令' }))
+    await user.click(screen.getByRole('button', { name: '打开命令表' }))
+    await user.click(screen.getByRole('option', { name: /steer/i }))
     await waitFor(() => expect(harnessService.steer).toHaveBeenCalledWith('1', '优先检查边界'))
 
     await user.type(composer, '完成后继续')
-    await user.click(screen.getByRole('button', { name: '排队追问' }))
+    await user.click(screen.getByRole('button', { name: '打开命令表' }))
+    await user.click(screen.getByRole('option', { name: /follow-up/i }))
     await waitFor(() => expect(harnessService.followUp).toHaveBeenCalledWith('1', '完成后继续'))
 
-    await user.click(screen.getByRole('button', { name: '终止运行' }))
+    await user.click(screen.getByRole('button', { name: '打开命令表' }))
+    await user.click(screen.getByRole('option', { name: /abort/i }))
     await waitFor(() => expect(harnessService.abortRun).toHaveBeenCalledWith('1'))
   })
 
