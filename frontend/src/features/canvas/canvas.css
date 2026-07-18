@@ -884,12 +884,13 @@ Color tokens come from global product design tokens in styles.css. */
 .canvas-feature .selection-toolbar button {
   padding:5px 7px;
   border-radius:5px;
-  color:var(--green-primary);
+  color:var(--fg-muted);
   font-size:10px;
   white-space:nowrap;
 }
 
 .canvas-feature .selection-toolbar button:hover {
+  color:var(--fg);
   background:var(--line);
 }
 
@@ -905,7 +906,7 @@ Color tokens come from global product design tokens in styles.css. */
   bottom:14px;
   left:16px;
   z-index:4;
-  color:var(--green-primary);
+  color:var(--fg-dim);
   font-size:10px;
   pointer-events:none;
 }
@@ -915,7 +916,7 @@ Color tokens come from global product design tokens in styles.css. */
   border:1px solid var(--line-strong);
   border-bottom-width:2px;
   border-radius:3px;
-  color:var(--green-primary);
+  color:var(--fg-muted);
   background:var(--surface-active);
   font-family:inherit;
   font-size:9px;
@@ -943,7 +944,7 @@ Color tokens come from global product design tokens in styles.css. */
   min-width:27px;
   height:27px;
   border-right:1px solid var(--line-strong);
-  color:var(--green-primary);
+  color:var(--fg-muted);
   font-size:12px;
 }
 
@@ -952,7 +953,7 @@ Color tokens come from global product design tokens in styles.css. */
 }
 
 .canvas-feature .zoom-controls button:hover {
-  color:var(--green);
+  color:var(--fg);
   background:var(--line-strong);
 }
 
@@ -1136,7 +1137,7 @@ Color tokens come from global product design tokens in styles.css. */
 
 .canvas-feature .context-description {
   margin:7px 3px 8px;
-  color:var(--green-primary);
+  color:var(--fg-dim);
   font-size:10px;
   line-height:1.4;
 }
@@ -1155,7 +1156,7 @@ Color tokens come from global product design tokens in styles.css. */
   max-width:88%;
   padding:8px 10px;
   border-radius:9px;
-  color:var(--green-primary);
+  color:var(--fg);
   background:var(--surface-active);
   font-size:11px;
   line-height:1.45;
@@ -1176,7 +1177,7 @@ Color tokens come from global product design tokens in styles.css. */
 .canvas-feature .thread-message strong {
   display:block;
   margin-bottom:3px;
-  color:var(--green-primary);
+  color:var(--fg-muted);
   font-size:10px;
 }
 
@@ -1248,7 +1249,7 @@ Color tokens come from global product design tokens in styles.css. */
 }
 
 .canvas-feature .reference-add {
-  color:var(--green);
+  color:var(--fg-muted);
   background:var(--surface-soft);
   font-size:18px;
 }
@@ -1256,7 +1257,7 @@ Color tokens come from global product design tokens in styles.css. */
 .canvas-feature .generation-prompt-label {
   display:block;
   margin:0 0 5px;
-  color:var(--green-primary);
+  color:var(--fg-muted);
   font-size:10px;
 }
 
@@ -1270,7 +1271,7 @@ Color tokens come from global product design tokens in styles.css. */
   border-radius:8px;
   padding:9px;
   outline:0;
-  color:var(--green-primary);
+  color:var(--fg);
   background:var(--surface-raised);
   font-size:12px;
   line-height:1.4;
@@ -1300,14 +1301,14 @@ Color tokens come from global product design tokens in styles.css. */
   padding:4px 7px;
   border:1px solid var(--line-strong);
   border-radius:999px;
-  color:var(--green-primary);
+  color:var(--fg-muted);
   background:var(--surface-raised);
   font-size:9px;
 }
 
 .canvas-feature .parameter-chips button:hover,.canvas-feature .parameter-chips button:focus-visible {
-  border-color:var(--green-border);
-  color:var(--green-primary);
+  border-color:var(--border-hover);
+  color:var(--fg);
   background:var(--stage-dot);
 }
 
@@ -1315,7 +1316,7 @@ Color tokens come from global product design tokens in styles.css. */
   display:flex;
   align-items:center;
   gap:6px;
-  color:var(--green-primary);
+  color:var(--fg-muted);
   font-size:10px;
   white-space:nowrap;
 }
@@ -1811,7 +1812,7 @@ Color tokens come from global product design tokens in styles.css. */
   display:-webkit-box;
   overflow:hidden;
   margin:0;
-  color:var(--green-primary);
+  color:var(--fg-muted);
   font-size:9px;
   line-height:1.45;
   -webkit-box-orient:vertical;
@@ -1913,7 +1914,7 @@ Color tokens come from global product design tokens in styles.css. */
   z-index:2;
   padding:3px 5px;
   border-radius:4px;
-  color:var(--green-primary);
+  color:var(--fg-muted);
   background: color-mix(in srgb, var(--surface) 72%, transparent);
   font-size:8px;
   content:"草稿";
@@ -1975,7 +1976,7 @@ Color tokens come from global product design tokens in styles.css. */
 
 .canvas-feature .generation-panel-head strong {
   overflow:hidden;
-  color:var(--green-primary);
+  color:var(--fg);
   font-size:12px;
   text-overflow:ellipsis;
   white-space:nowrap;
@@ -1984,7 +1985,7 @@ Color tokens come from global product design tokens in styles.css. */
 .canvas-feature .generation-node-status {
   padding:3px 6px;
   border-radius:999px;
-  color:var(--green-primary);
+  color:var(--fg-muted);
   background:var(--surface-active);
   font-size:8px;
 }
@@ -2006,7 +2007,7 @@ Color tokens come from global product design tokens in styles.css. */
   height:25px;
   place-items:center;
   border-radius:50%;
-  color:var(--green-primary);
+  color:var(--fg-muted);
 }
 
 .canvas-feature .generation-panel-actions button:hover {

@@ -1,4 +1,4 @@
-import { Bot, Grid2X2, Layers3, UserRound } from 'lucide-react'
+import { Bot, Grid2X2, Layers3, UserRound, Workflow } from 'lucide-react'
 import type { PropsWithChildren } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
@@ -9,20 +9,24 @@ function isAiRoute(pathname: string) {
     || pathname.startsWith('/agents')
     || pathname.startsWith('/models')
     || pathname.startsWith('/providers')
-    || pathname.startsWith('/comfyui')
   )
 }
 
 export function AppShell({ children }: PropsWithChildren) {
   const location = useLocation()
   const canvasMode = location.pathname.startsWith('/canvas')
-  const aiActive = !canvasMode && isAiRoute(location.pathname)
+  const comfyuiMode = location.pathname.startsWith('/comfyui')
+  const aiActive = !canvasMode && !comfyuiMode && isAiRoute(location.pathname)
 
   return (
     <div className="app-frame">
       <header className="topbar">
         <div className="topbar-left">
-          <Link to={canvasMode ? '/canvas' : '/sessions'} className="brand" aria-label="KK Studio">
+          <Link
+            to={canvasMode ? '/canvas' : comfyuiMode ? '/comfyui' : '/sessions'}
+            className="brand"
+            aria-label="KK Studio"
+          >
             <span className="brand-mark" aria-hidden="true">K</span>
             <span>KK Studio</span>
           </Link>
@@ -36,6 +40,10 @@ export function AppShell({ children }: PropsWithChildren) {
             <Link className={canvasMode ? 'active' : undefined} to="/canvas">
               <Grid2X2 aria-hidden="true" />
               <span>画布</span>
+            </Link>
+            <Link className={comfyuiMode ? 'active' : undefined} to="/comfyui">
+              <Workflow aria-hidden="true" />
+              <span>ComfyUI</span>
             </Link>
             <button type="button" disabled title="资产库将在后续版本开放">
               <Layers3 aria-hidden="true" />

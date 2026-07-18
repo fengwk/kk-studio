@@ -32,9 +32,7 @@ export function AgentSessionPage() {
       onDismissActionError={controller.dismissActionError}
       onDraftChange={controller.setDraft}
       onSubmit={controller.submitMessage}
-      onSteer={controller.submitSteer}
-      onFollowUp={controller.submitFollowUp}
-      onAbort={controller.abortRun}
+      onCommand={controller.runCommand}
     />
   )
 }

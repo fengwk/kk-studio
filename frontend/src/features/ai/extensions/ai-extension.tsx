@@ -145,8 +145,7 @@ function ComfyuiFrame({ content, children }: ExtensionComponentProps & { content
   return (
     <section className="screen active">
       <nav className="subbar">
-        <div className="ai-mark">AI</div>
-        <NavigationSlot />
+        <div className="ai-mark">ComfyUI</div>
         <SearchField value={controller.search} onChange={controller.setSearch} />
       </nav>
       <div className="screen-body">
@@ -228,7 +227,6 @@ export const aiExtension: TrustedReactExtension = {
     { id: 'ai.nav.agents', label: 'Agent', path: 'agents', priority: 100 },
     { id: 'ai.nav.models', label: 'Model', path: 'models', priority: 100 },
     { id: 'ai.nav.providers', label: 'Provider', path: 'providers', priority: 100 },
-    { id: 'ai.nav.comfyui', label: 'Workflow', path: 'comfyui', priority: 100 },
   ],
   dialogs: [
     { id: 'ai.create-session', component: CreateSessionDialog },
