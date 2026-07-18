@@ -30,7 +30,7 @@ import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
 import fun.fengwk.kkstudio.core.harness.run.store.SnowflakeRunIdGenerator;
 import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
 import fun.fengwk.kkstudio.core.harness.session.store.SnowflakeSessionIdGenerator;
-import fun.fengwk.kkstudio.core.harness.tool.worker.DatabaseArtifactStore;
+import fun.fengwk.kkstudio.core.harness.tool.store.DatabaseArtifactStore;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;

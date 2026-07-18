@@ -9,7 +9,7 @@ BACKEND_HOST=${BACKEND_HOST:-127.0.0.1}
 BACKEND_PORT=${BACKEND_PORT:-18080}
 FRONTEND_HOST=${FRONTEND_HOST:-127.0.0.1}
 FRONTEND_PORT=${FRONTEND_PORT:-5173}
-SPRING_PROFILE=${SPRING_PROFILES_ACTIVE:-minimax-h2}
+SPRING_PROFILE=${SPRING_PROFILES_ACTIVE:-e2e}
 
 BACKEND_URL="http://$BACKEND_HOST:$BACKEND_PORT"
 FRONTEND_URL="http://$FRONTEND_HOST:$FRONTEND_PORT"
@@ -33,7 +33,7 @@ usage() {
 Usage: $0 {start|stop|restart|status|logs|tail}
 
 Commands:
-  start    Package backend, sync seeded MiniMax provider, then start backend and frontend dev servers.
+  start    Package backend, optionally sync e2e provider credentials, then start backend and frontend.
   stop     Stop managed dev servers and, by default, listeners on dev ports.
   restart  Stop then start.
   status   Print process status and URLs.
@@ -43,8 +43,8 @@ Commands:
 Environment:
   BACKEND_PORT=18080
   FRONTEND_PORT=5173
-  SPRING_PROFILES_ACTIVE=minimax-h2
-  MINIMAX_API_KEY=<required when minimax-h2 is enabled>
+  SPRING_PROFILES_ACTIVE=e2e   # dev = H2+stub; e2e = H2+real provider seed
+  MINIMAX_API_KEY=<required when e2e seed still uses MiniMax>
   MINIMAX_BASE_URL=https://api.minimax.io/v1
   DEV_KILL_PORTS=true
   DEV_SKIP_PACKAGE=false
@@ -97,9 +97,11 @@ resolve_minimax_base_url() {
   normalize_minimax_base_url "${MINIMAX_BASE_URL:-${MINIMAX_CHAT_BASE_URL:-https://api.minimax.io/v1}}"
 }
 
-require_minimax_env() {
-  if profile_enabled minimax-h2 && [ -z "${MINIMAX_API_KEY:-}" ]; then
-    echo "MINIMAX_API_KEY is required when SPRING_PROFILES_ACTIVE includes minimax-h2" >&2
+require_e2e_provider_env() {
+  # Current data-e2e.sql seeds MiniMax; require its key when e2e is active.
+  # When e2e seed switches to another provider, update this guard accordingly.
+  if profile_enabled e2e && [ -z "${MINIMAX_API_KEY:-}" ]; then
+    echo "MINIMAX_API_KEY is required when SPRING_PROFILES_ACTIVE includes e2e (current e2e seed uses MiniMax)" >&2
     exit 1
   fi
 }
@@ -237,7 +239,7 @@ start_all() {
   local java_home
   local minimax_base_url
   java_home=$(resolve_java_home)
-  require_minimax_env
+  require_e2e_provider_env
   minimax_base_url=$(resolve_minimax_base_url)
 
   mkdir -p "$WORK_DIR"
@@ -258,7 +260,8 @@ start_all() {
   echo "$DETACHED_PID" > "$BACKEND_PID_FILE"
   wait_http "$BACKEND_URL/api/agent/agents" backend
 
-  if profile_enabled minimax-h2; then
+  if profile_enabled e2e; then
+    # Sync credentials for the current e2e seed provider (MiniMax by default).
     sync_seeded_minimax_provider "$minimax_base_url"
   fi
 
