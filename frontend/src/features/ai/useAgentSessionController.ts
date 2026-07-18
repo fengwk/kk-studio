@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { buildSessionTimeline, hasActiveRun } from '@/features/ai/session-events'
+import type { SessionCommand } from '@/features/ai/session-panel/session-commands'
 import { useAgentSessionMessageMutation } from '@/features/ai/useAgentSessionMessageMutation'
 import { useAgentSessionQueries } from '@/features/ai/useAgentSessionQueries'
 import { useChatTranscriptAutoScroll } from '@/features/ai/useChatTranscriptAutoScroll'
@@ -57,50 +58,63 @@ export function useAgentSessionController(sessionId: string) {
 
   function submitMessage() {
     const content = draft.trim()
-    if (!content || activeRun || createMessageMutation.isPending) {
+    if (!content || content.startsWith('/') || activeRun || createMessageMutation.isPending) {
       return
     }
     setActionError(null)
     createMessageMutation.mutate(content, {
-      onError: (error) => {
-        // Keep draft so the user can retry; surface a pi-style error panel.
-        setActionError(errorMessage(error))
-      },
-    })
-  }
-
-  function submitSteer() {
-    const content = draft.trim()
-    if (!content || !activeRun || runControls.pending) {
-      return
-    }
-    setActionError(null)
-    runControls.steer.mutate(content, {
-      onSuccess: () => setDraft(''),
       onError: (error) => setActionError(errorMessage(error)),
     })
   }
 
-  function submitFollowUp() {
-    const content = draft.trim()
-    if (!content || runControls.pending) {
-      return
-    }
+  function runCommand(command: SessionCommand) {
     setActionError(null)
-    runControls.followUp.mutate(content, {
-      onSuccess: () => setDraft(''),
-      onError: (error) => setActionError(errorMessage(error)),
-    })
-  }
-
-  function abortRun() {
-    if (!activeRun || runControls.pending) {
-      return
+    switch (command.id) {
+      case 'yolo': {
+        const enabled = !(observability.yolo?.enabled ?? false)
+        observability.setYolo(enabled)
+        return
+      }
+      case 'steer': {
+        const content = draft.trim()
+        if (!content || !activeRun || runControls.pending) {
+          setActionError('Steer 需要运行中且输入区有内容')
+          return
+        }
+        runControls.steer.mutate(content, {
+          onSuccess: () => setDraft(''),
+          onError: (error) => setActionError(errorMessage(error)),
+        })
+        return
+      }
+      case 'follow-up': {
+        const content = draft.trim()
+        if (!content || runControls.pending) {
+          setActionError('Follow-up 需要输入区有内容')
+          return
+        }
+        runControls.followUp.mutate(content, {
+          onSuccess: () => setDraft(''),
+          onError: (error) => setActionError(errorMessage(error)),
+        })
+        return
+      }
+      case 'abort': {
+        if (!activeRun || runControls.pending) {
+          setActionError('当前没有可终止的运行')
+          return
+        }
+        runControls.abort.mutate(undefined, {
+          onError: (error) => setActionError(errorMessage(error)),
+        })
+        return
+      }
+      case 'clear-draft':
+        setDraft('')
+        return
+      default:
+        setActionError(`未知命令：${command.id}`)
     }
-    setActionError(null)
-    runControls.abort.mutate(undefined, {
-      onError: (error) => setActionError(errorMessage(error)),
-    })
   }
 
   return {
@@ -120,13 +134,11 @@ export function useAgentSessionController(sessionId: string) {
     disabled: !session || !session.leafEntryId,
     observability,
     taskTimeline,
-    controlsPending: runControls.pending,
+    controlsPending: runControls.pending || observability.yoloPending,
     actionError,
     dismissActionError: () => setActionError(null),
     setDraft,
     submitMessage,
-    submitSteer,
-    submitFollowUp,
-    abortRun,
+    runCommand,
   }
 }

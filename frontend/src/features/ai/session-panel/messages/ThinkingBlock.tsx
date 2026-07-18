@@ -1,10 +1,17 @@
-/** Thinking traces are not shown in the main transcript (content remains in timeline data). */
+/** Full-width thinking content block — no title, muted surface only. */
 export function ThinkingBlock({
-  thinking: _thinking,
-  streaming: _streaming,
+  thinking,
+  streaming,
 }: {
   thinking: string
   streaming: boolean
 }) {
-  return null
+  if (!thinking.trim()) {
+    return null
+  }
+  return (
+    <section className={`session-block session-block-thinking ${streaming ? 'streaming' : ''}`}>
+      <div className="session-block-body session-thinking-text">{thinking}</div>
+    </section>
+  )
 }
