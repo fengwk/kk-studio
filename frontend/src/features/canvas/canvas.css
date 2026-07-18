@@ -1065,7 +1065,7 @@ Color tokens come from global product design tokens in styles.css. */
   border:1px solid var(--stage-dot);
   border-radius:13px;
   background: var(--overlay-surface-strong);
-  box-shadow: var(--shadow-lg);
+  box-shadow: none;
   backdrop-filter:blur(18px);
 }
 
@@ -1672,7 +1672,7 @@ Color tokens come from global product design tokens in styles.css. */
   gap:10px;
   padding:7px 9px;
   border-radius:7px;
-  color:var(--green-primary);
+  color:var(--fg);
   font-size:12px;
   text-align:left;
   white-space:nowrap;
@@ -1691,7 +1691,7 @@ Color tokens come from global product design tokens in styles.css. */
   place-items:center;
   border:1px solid var(--line-strong);
   border-radius:6px;
-  color:var(--green);
+  color:var(--fg-muted);
   background:var(--surface-active);
   font-size:11px;
 }
