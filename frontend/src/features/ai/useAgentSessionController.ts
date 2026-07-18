@@ -27,6 +27,8 @@ export function useAgentSessionController(sessionId: string) {
   const {
     sessions,
     agents,
+    models,
+    providers,
     session,
     entries,
     runs,
@@ -41,6 +43,12 @@ export function useAgentSessionController(sessionId: string) {
   const timeline = buildSessionTimeline(entries, runEvents)
   const activeRun = hasActiveRun(runs)
   const currentAgent = session ? agentsById.get(session.agentDefinitionId) : undefined
+  const runtimeLabels = resolveRuntimeLabels(
+    currentAgent,
+    timeline,
+    models as Array<{ id: string | number; name: string; providerId: string | number; providerName?: string; configJson?: string }>,
+    providers,
+  )
   const observability = useHarnessSessionObservability(sessionId, currentActiveRun)
   const rootTaskSessionId = session && !session.parentSessionId ? sessionId : ''
   const taskTimeline = useHarnessTaskTimeline(
@@ -124,6 +132,7 @@ export function useAgentSessionController(sessionId: string) {
     title: session?.title || 'Chat',
     agent: currentAgent,
     timeline,
+    runtimeLabels,
     runs,
     activeRun,
     messagesLoading: sessionQuery.isLoading || entriesQuery.isLoading,
@@ -140,5 +149,50 @@ export function useAgentSessionController(sessionId: string) {
     setDraft,
     submitMessage,
     runCommand,
+  }
+}
+
+function resolveRuntimeLabels(
+  agent: ReturnType<typeof useAgentSessionQueries> extends never ? never : any,
+  timeline: ReturnType<typeof buildSessionTimeline>,
+  models: Array<{ id: string | number; name: string; providerId: string | number; providerName?: string; configJson?: string }>,
+  providers: Array<{ id: string | number; name: string }>,
+) {
+  const agentRecord = (agent ?? {}) as Record<string, unknown>
+  const modelId = String(
+    agentRecord.defaultModelId
+      ?? agentRecord.modelId
+      ?? timeline.runtimeContext.model
+      ?? '',
+  )
+  const model = models.find((item) => String(item.id) === modelId)
+  const providerId = String(model?.providerId ?? agentRecord.defaultProviderId ?? '')
+  const provider = providers.find((item) => String(item.id) === providerId)
+  const contextWindow = parseContextWindow(model)
+
+  return {
+    agentName: String(agentRecord.name ?? 'agent'),
+    providerName: provider?.name || String(agentRecord.defaultProviderName ?? model?.providerName ?? ''),
+    modelName: model?.name || String(agentRecord.defaultModelName ?? ''),
+    variantName: String(
+      timeline.runtimeContext.variant
+        ?? agentRecord.variant
+        ?? agentRecord.defaultVariant
+        ?? 'default',
+    ),
+    contextWindow,
+  }
+}
+
+function parseContextWindow(model: { configJson?: string } | undefined): number | undefined {
+  if (!model?.configJson) {
+    return undefined
+  }
+  try {
+    const config = JSON.parse(model.configJson) as { contextWindow?: number }
+    const value = Number(config.contextWindow)
+    return Number.isFinite(value) && value > 0 ? value : undefined
+  } catch {
+    return undefined
   }
 }

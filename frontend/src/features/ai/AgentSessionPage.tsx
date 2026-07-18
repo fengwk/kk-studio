@@ -17,6 +17,7 @@ export function AgentSessionPage() {
       session={controller.session}
       agent={controller.agent}
       timeline={controller.timeline}
+      runtimeLabels={controller.runtimeLabels}
       runs={controller.runs}
       activeRun={controller.activeRun}
       messagesLoading={controller.messagesLoading}
