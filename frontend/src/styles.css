@@ -1615,13 +1615,19 @@ textarea::placeholder {
   color: var(--fg-dim);
 }
 
-.session-command-search input {
+.session-command-search input,
+.session-command-query {
   flex: 1;
   border: 0;
   outline: 0;
   background: transparent;
   color: #fff;
   font-size: 13px;
+}
+
+.session-command-query {
+  color: var(--fg-muted);
+  min-height: 20px;
 }
 
 .session-command-list {
