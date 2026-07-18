@@ -1077,8 +1077,28 @@ textarea::placeholder {
   overflow-wrap: anywhere;
 }
 
+/* User vs assistant: different surface so roles read at a glance */
+.session-block-user {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-active);
+  border: 1px solid var(--border);
+}
+
 .session-block-user .session-block-body {
   color: var(--fg-muted);
+}
+
+.session-block-assistant {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: transparent;
+}
+
+.session-block-thinking {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--scrim);
 }
 
 .session-block-thinking .session-block-body,
