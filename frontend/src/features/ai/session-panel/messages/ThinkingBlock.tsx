@@ -1,25 +1,18 @@
-import { ChevronDown } from 'lucide-react'
-
-/** Collapsible thinking trace — pi AssistantMessage thinking block for the web. */
+/** Full-width thinking content block. */
 export function ThinkingBlock({
   thinking,
   streaming,
-  hasText,
 }: {
   thinking: string
   streaming: boolean
-  hasText: boolean
 }) {
   if (!thinking.trim()) {
     return null
   }
   return (
-    <details className="session-thinking" open={streaming && !hasText}>
-      <summary>
-        <ChevronDown aria-hidden="true" />
-        <span>{streaming && !hasText ? 'Thinking…' : '思考过程'}</span>
-      </summary>
-      <div className="session-thinking-body">{thinking}</div>
-    </details>
+    <section className={`session-block session-block-thinking ${streaming ? 'streaming' : ''}`}>
+      <div className="session-block-label">{streaming ? 'thinking…' : 'thinking'}</div>
+      <div className="session-block-body session-thinking-text">{thinking}</div>
+    </section>
   )
 }

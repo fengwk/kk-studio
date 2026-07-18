@@ -122,7 +122,7 @@ describe('AgentSessionPage', () => {
     expect(screen.getByText('结构完整')).toBeInTheDocument()
     expect(screen.getByText('SUCCEEDED')).toBeInTheDocument()
 
-    await user.type(screen.getByPlaceholderText('给 AI 发送消息...'), '继续')
+    await user.type(screen.getByPlaceholderText('告诉 Agent 下一步要完成什么…'), '继续')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
     await waitFor(() => {
@@ -137,7 +137,7 @@ describe('AgentSessionPage', () => {
     queryClient.setQueryData(queryKeys.runs.events('other-run'), [runEvent('other', 'other-run', 1, 'assistant_started', {})])
 
     await waitFor(() => expect(harnessService.createRunEventStream).toHaveBeenCalledWith('2', 0))
-    expect(screen.getByPlaceholderText('给 AI 发送消息...')).toBeEnabled()
+    expect(screen.getByPlaceholderText('告诉 Agent 下一步要完成什么…')).toBeEnabled()
 
     await act(async () => {
       streams[0]?.emit('run_event', runEvent('delta', '2', 1, 'assistant_delta_batch', { deltas: [{ kind: 'text', text: '实时回答' }] }))
@@ -196,7 +196,7 @@ describe('AgentSessionPage', () => {
     await waitFor(() => {
       expect(harnessService.createRootActivityStream).toHaveBeenCalledWith('1', '0')
     })
-    const composer = screen.getByPlaceholderText('给 AI 发送消息...')
+    const composer = screen.getByPlaceholderText('告诉 Agent 下一步要完成什么…')
     await user.type(composer, '优先检查边界')
     await user.click(screen.getByRole('button', { name: '插入指令' }))
     await waitFor(() => expect(harnessService.steer).toHaveBeenCalledWith('1', '优先检查边界'))
