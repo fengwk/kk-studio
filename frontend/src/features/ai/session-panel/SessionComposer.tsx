@@ -1,10 +1,16 @@
-import { useMemo, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { PlusIcon, SendIcon } from '@/features/canvas/icons'
 import { SessionCommandPalette } from '@/features/ai/session-panel/SessionCommandPalette'
 import type { SessionCommand } from '@/features/ai/session-panel/session-commands'
 
+const TEXTAREA_MIN_HEIGHT = 37
+const TEXTAREA_LINE_HEIGHT = 19
+const TEXTAREA_MAX_LINES = 10
+const TEXTAREA_MAX_HEIGHT = TEXTAREA_MIN_HEIGHT + TEXTAREA_LINE_HEIGHT * (TEXTAREA_MAX_LINES - 1)
+
 /**
  * Canvas-style dock: + opens command table; typing `/` also opens it with search.
+ * Shift+Enter grows the textarea upward up to 10 lines, then scrolls.
  */
 export function SessionComposer({
   draft,
@@ -27,6 +33,7 @@ export function SessionComposer({
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [menuQuery, setMenuQuery] = useState('')
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const slashMode = draft.startsWith('/')
   const open = menuOpen || slashMode
@@ -36,6 +43,17 @@ export function SessionComposer({
     () => Boolean(draft.trim()) && !pending && !disabled && !activeRun && !draft.startsWith('/'),
     [activeRun, disabled, draft, pending],
   )
+
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) {
+      return
+    }
+    el.style.height = 'auto'
+    const next = Math.max(TEXTAREA_MIN_HEIGHT, Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT))
+    el.style.height = `${next}px`
+    el.style.overflowY = el.scrollHeight > TEXTAREA_MAX_HEIGHT ? 'auto' : 'hidden'
+  }, [draft])
 
   function openMenu() {
     setMenuOpen(true)
@@ -107,6 +125,7 @@ export function SessionComposer({
           <PlusIcon />
         </button>
         <textarea
+          ref={textareaRef}
           value={draft}
           onChange={(event) => handleChange(event.target.value)}
           onKeyDown={handleKeyDown}
