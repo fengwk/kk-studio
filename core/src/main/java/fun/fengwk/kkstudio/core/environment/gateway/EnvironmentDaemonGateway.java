@@ -150,7 +150,6 @@ public class EnvironmentDaemonGateway {
   /** Durable worker tick; exposed for lifecycle scheduling and deterministic integration tests. */
   public void pollOnce() {
     Instant now = clock.instant();
-    transactions.coordinateReadyRuns(now);
     List<ConnectionState> readyConnections;
     synchronized (this) {
       readyConnections =
@@ -532,8 +531,7 @@ public class EnvironmentDaemonGateway {
     Instant now = clock.instant();
     if (transactions.terminate(active.claimed, status, result, error, now)) {
       lifecycleObservers.publish(
-          new ToolCompleted(invocation.id(), invocation.runId(), status, error, now));
-      transactions.coordinateReadyRuns(now);
+          new ToolCompleted(invocation.id(), invocation.threadId(), status, error, now));
     }
     removeActive(active);
   }

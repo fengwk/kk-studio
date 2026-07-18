@@ -1,1 +1,1 @@
-export { SessionTranscript as ChatTranscript } from '@/features/ai/session-panel'
+export { ThreadTranscript as ChatTranscript } from '@/features/ai/thread-panel'

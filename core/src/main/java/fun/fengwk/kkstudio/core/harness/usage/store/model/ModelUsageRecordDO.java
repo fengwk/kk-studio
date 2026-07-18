@@ -5,26 +5,20 @@ import lombok.Data;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
-/** {@code model_usage_record} 行映射：一次 Provider 调用的不可变用量/成本账本（按 Assistant Entry 唯一）。 */
+/** {@code model_usage_record} 行映射：一次 Assistant Entry 的模型用量账本。 */
 @Data
 public class ModelUsageRecordDO {
-  /** 账本主键（独立 Snowflake namespace）。 */
+  /** 业务主键。 */
   private Long id;
 
   /** 所属 Session。 */
   private Long sessionId;
 
-  /** 所属 Run。 */
-  private Long runId;
+  /** 所属 Thread。 */
+  private Long threadId;
 
-  /** 产生账本的 Assistant Entry（唯一）。 */
+  /** 产生账本的 Assistant Entry。 */
   private Long assistantEntryId;
-
-  /** 写入时的 Run attempt。 */
-  private Integer attempt;
-
-  /** 写入时的 Run turnIndex。 */
-  private Integer turnIndex;
 
   /** 冻结的 provider 资源 id。 */
   private Long providerResourceId;
@@ -71,75 +65,75 @@ public class ModelUsageRecordDO {
   /** reasoning tokens。 */
   private Long usageReasoningTokens;
 
-  /** Provider 报告的 total tokens。 */
+  /** Provider 报告总 tokens。 */
   private Long usageProviderTotalTokens;
 
   /** 成本币种。 */
   private String costCurrency;
 
-  /** input 成本。 */
+  /** 输入 token 成本。 */
   private BigDecimal costInput;
 
-  /** output 成本。 */
+  /** 输出 token 成本。 */
   private BigDecimal costOutput;
 
-  /** cache read 成本。 */
+  /** 缓存读取 token 成本。 */
   private BigDecimal costCacheRead;
 
-  /** cache write 成本。 */
+  /** 短期缓存写入 token 成本。 */
   private BigDecimal costCacheWrite;
 
-  /** cache write long 成本。 */
+  /** 长期缓存写入 token 成本。 */
   private BigDecimal costCacheWriteLong;
 
-  /** reasoning 成本。 */
+  /** 推理 token 成本。 */
   private BigDecimal costReasoning;
 
-  /** 六分项成本之和。 */
+  /** 本次 Assistant Entry 总成本。 */
   private BigDecimal costTotal;
 
-  /** pricing 币种。 */
+  /** 计价快照币种。 */
   private String pricingCurrency;
 
-  /** 冻结的 pricing tier。 */
+  /** 计价层级。 */
   private String pricingTier;
 
-  /** 冻结的 service tier。 */
+  /** 计价服务层级。 */
   private String pricingServiceTier;
 
-  /** service tier 乘数。 */
+  /** 服务层级价格乘数。 */
   private BigDecimal pricingServiceTierMultiplier;
 
-  /** 冻结的 pricing version。 */
+  /** 计价配置版本。 */
   private String pricingVersion;
 
-  /** input 单价（每百万 tokens）。 */
+  /** 每百万输入 token 单价。 */
   private BigDecimal pricingInputPerMillionTokens;
 
-  /** output 单价（每百万 tokens）。 */
+  /** 每百万输出 token 单价。 */
   private BigDecimal pricingOutputPerMillionTokens;
 
-  /** cache read 单价（每百万 tokens）。 */
+  /** 每百万缓存读取 token 单价。 */
   private BigDecimal pricingCacheReadPerMillionTokens;
 
-  /** cache write 单价（每百万 tokens）。 */
+  /** 每百万短期缓存写入 token 单价。 */
   private BigDecimal pricingCacheWritePerMillionTokens;
 
-  /** cache write long 单价（每百万 tokens）。 */
+  /** 每百万长期缓存写入 token 单价。 */
   private BigDecimal pricingCacheWriteLongPerMillionTokens;
 
-  /** reasoning 单价（每百万 tokens）。 */
+  /** 每百万推理 token 单价。 */
   private BigDecimal pricingReasoningPerMillionTokens;
 
-  /** Provider 报告的 request id。 */
+  /** Provider 返回的请求 id。 */
   private String requestId;
 
-  /** Provider 报告的 service tier。 */
+  /** Provider 实际报告的服务层级。 */
   private String reportedServiceTier;
 
-  /** Provider 原始 usage JSON（不含正文）。 */
+  /** Provider 原始 usage JSON。 */
   private String rawUsageJson;
 
-  /** 入库时间（映射 {@code gmt_create}）。 */
+  /** 创建时间（映射 {@code gmt_create}）。 */
   private LocalDateTime createTime;
 }

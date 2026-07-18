@@ -10,8 +10,8 @@ public class ToolInvocationDO {
   /** 主键与执行幂等键（Snowflake）。 */
   private Long id;
 
-  /** 所属 Run。 */
-  private Long runId;
+  /** 所属 Thread。 */
+  private Long threadId;
 
   /** 产生该调用的 Assistant Entry。 */
   private Long assistantEntryId;

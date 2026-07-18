@@ -8,7 +8,7 @@ import java.util.Objects;
 /** Deterministic terminal child summary returned as the task ToolResult. */
 public record TaskReport(
     long childSessionId,
-    long childRunId,
+    long childThreadId,
     TaskState terminalState,
     String finalAssistantReport,
     List<ArtifactRef> artifacts,
@@ -17,7 +17,7 @@ public record TaskReport(
     WorkingCopyPolicy workingCopyPolicy,
     String workingCopyRevision) {
   public TaskReport {
-    if (childSessionId <= 0 || childRunId <= 0) {
+    if (childSessionId <= 0 || childThreadId <= 0) {
       throw new IllegalArgumentException("child ids must be positive");
     }
     terminalState = Objects.requireNonNull(terminalState, "terminalState");

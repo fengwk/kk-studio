@@ -31,14 +31,14 @@ public class MysqlToolInvocationStore {
     return Optional.ofNullable(mapper.find(id)).map(this::toInvocation);
   }
 
-  public List<ToolInvocation> listByRun(long runId) {
-    return mapper.listByRun(runId).stream().map(this::toInvocation).toList();
+  public List<ToolInvocation> listByThread(long threadId) {
+    return mapper.listByThread(threadId).stream().map(this::toInvocation).toList();
   }
 
   public ToolInvocation toInvocation(ToolInvocationDO source) {
     return new ToolInvocation(
         source.getId(),
-        source.getRunId(),
+        source.getThreadId(),
         source.getAssistantEntryId(),
         source.getOrdinal(),
         source.getToolCallId(),

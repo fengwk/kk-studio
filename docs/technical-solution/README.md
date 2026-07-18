@@ -29,7 +29,7 @@ flowchart TD
 | 1 | [architecture.md](architecture.md) | 双域拓扑、模块边界、落地进度 | 先建立全局认知 |
 | 2 | [domain-map.md](domain-map.md) | Harness/Studio 词汇与前后端映射 | 统一命名与对接 |
 | 3 | [infinite-canvas-implementation-design.md](infinite-canvas-implementation-design.md) | Canvas、Resource、Function、Workflow 和 Agent Port | 实现无限画布与 Workflow |
-| 4 | [cloud-embedded-agent-runtime.md](cloud-embedded-agent-runtime.md) | Harness Run、Tool、Task、Control 与 Daemon 执行链路 | 理解消息提交后发生什么 |
+| 4 | [cloud-embedded-agent-runtime.md](cloud-embedded-agent-runtime.md) | Session Tree、AgentThread、Tool、Task 与 Daemon 执行链路 | 理解输入入队后如何按 Turn 推进 |
 | 5 | [backend-implementation-design.md](backend-implementation-design.md) | `share` / `core` / `web` 的 HTTP、SSE 和 WebSocket 边界 | 修改后端控制面 |
 | 6 | [storage-models.md](storage-models.md) | 表结构、资源文件、seed 语义 | 调整存储或初始化脚本 |
 | 7 | [frontend-implementation-design.md](frontend-implementation-design.md) | 路由、状态管理、测试边界；视觉约定见 [前端设计规范](../product-design/frontend-design-system.md) | 修改前端页面或 API 适配 |

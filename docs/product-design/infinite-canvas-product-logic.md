@@ -913,7 +913,7 @@ Workflow FunctionNode 可以在首次输出前建立下游 Link；下游在输�
 
 ## 11. Agent 接入边界
 
-Agent 的具体 Harness、Session、Run 和前端面板在 Agent 基座稳定后接入。Canvas 与 Workflow 只依赖以下产品级能力：
+Agent 执行内核与用户 Thread 面板由 Harness 拥有。Canvas 与 Workflow 不依赖 Harness 内部模型，只依赖以下产品级能力：
 
 ```text
 Agent Catalog
@@ -926,9 +926,9 @@ Tool Registration
   Canvas / Workflow 注册模块 Tool
 ```
 
-Canvas 和 Workflow 只保存 Agent Adapter 可解析的不透明 AgentRef。默认产品体验优先从 Workspace Agent Library 选择统一管理的 Agent；是否支持内联 Agent Spec、AgentRef 的最终格式、Snapshot 字段和 SessionMode 等待 Agent 基座稳定后确定，不能写入 Canvas 核心 schema。每次 Agent FunctionRun 开始时必须由 Adapter 冻结可审计的 Agent 解析结果，避免运行中配置漂移；无论最终适配方式如何，Canvas 都不建立第二套 Agent Runtime。
+Canvas 和 Workflow 只保存 Agent Adapter 可解析的不透明 AgentRef。默认产品体验优先从 Workspace Agent Library 选择统一管理的 Agent；是否支持内联 Agent Spec、AgentRef 的编码与 Snapshot 字段由 Adapter 定义，不能扩散到 Canvas 核心 schema。每次 Agent FunctionRun 开始时必须由 Adapter 冻结可审计的 Agent 解析结果，避免运行中配置漂移；无论最终适配方式如何，Canvas 都不建立第二套 Agent Runtime。
 
-模块 Tool 由各自领域拥有；以下是逻辑能力名，最终 ToolDescriptor、版本和注册 SPI 等待 Agent 基座稳定后适配：
+模块 Tool 由各自领域拥有；以下是稳定逻辑能力名，ToolDescriptor、版本和注册 SPI 由 Agent Adapter 映射：
 
 ```text
 canvas.inspect
@@ -943,9 +943,9 @@ function.execute
 ```
 
 Tool 只能调用 Canvas/Workflow Command Service，不能直接修改数据库或前端 Store。Agent 默认最终文本转为 Text Resource，额外图片、文档和结构化结果作为其他 Resource 发布；用户编辑最终报告时先提取为独立 Text ResourceNode。
-Harness Artifact 只是 Output Payload 来源，必须经 Adapter 转成 ResourceStore Payload 和 Run 所属 Resource，不能直接充当产品 Resource 身份。
+Harness Artifact 只是 Output Payload 来源，必须经 Adapter 转成 ResourceStore Payload 和 Studio FunctionRun 所属 Resource，不能直接充当产品 Resource 身份。
 
-Dock 直接执行没有 FunctionNode owner，finalReport 首先是 Run 所属 Text Resource 并显示在 Thread；“放到画布”或“编辑”通过 Command 提取为 ResourceNode。Agent FunctionNode 执行则按普通发布 barrier 原地发布输出。
+Dock 直接执行没有 FunctionNode owner，finalReport 首先是 Studio FunctionRun 所属 Text Resource，并由 Agent Activity 显示；“放到画布”或“编辑”通过 Command 提取为 ResourceNode。Agent FunctionNode 执行则按普通发布 barrier 原地发布输出。
 
 底部 Agent Dock 是总控 Agent 的交互入口，不是新的 Canvas 基础对象。总控 Agent 通过 Tool 创建 Node、Link、ResourceReference、Workflow Draft 和 FunctionRun。
 
@@ -1128,4 +1128,4 @@ Canvas 导出包包含 schemaVersion、固定 revision 的 Node/Link/Reference �
 12. Workflow ForEach 能逐项执行并聚合结果，执行前可估算成本。
 13. Canvas 与 Workflow 所有修改都经过带 revision 的 Command。
 14. 页面刷新、执行恢复和 SSE 重连不会丢失已确认状态。
-15. Agent 接入不要求 Canvas 依赖 Harness 内部 Session、Run 或 Tool 类型。
+15. Agent 接入不要求 Canvas 依赖 Harness 内部 Session、AgentThread、ThreadInput 或 Tool 类型。

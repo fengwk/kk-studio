@@ -204,17 +204,18 @@ sync_seeded_minimax_provider() {
     --arg description "MiniMax provider for local development and real-agent verification." \
     --arg providerType "openai" \
     --arg baseUrl "$minimax_base_url" \
-    --arg apiKey "$MINIMAX_API_KEY" \
+    --arg credential "$MINIMAX_API_KEY" \
+    --arg configJson '{"timeoutMillis":120000}' \
     '{
       name: $name,
       description: $description,
       providerType: $providerType,
       baseUrl: $baseUrl,
-      apiKey: $apiKey,
-      timeoutMillis: 120000
+      credential: $credential,
+      configJson: $configJson
     }')
   step "Syncing seeded MiniMax provider"
-  curl -fsS -X PUT "$BACKEND_URL/api/agent/providers/1" \
+  curl -fsS -X PUT "$BACKEND_URL/api/providers/1" \
     -H 'Content-Type: application/json' \
     -d "$payload" >/dev/null
 }
@@ -258,7 +259,7 @@ start_all() {
     --server.address="$BACKEND_HOST" \
     --server.port="$BACKEND_PORT"
   echo "$DETACHED_PID" > "$BACKEND_PID_FILE"
-  wait_http "$BACKEND_URL/api/agent/agents" backend
+  wait_http "$BACKEND_URL/api/agents?pageNumber=1&pageSize=1" backend
 
   if profile_enabled e2e; then
     # Sync credentials for the current e2e seed provider (MiniMax by default).
@@ -271,7 +272,7 @@ start_all() {
     --host "$FRONTEND_HOST" \
     --port "$FRONTEND_PORT"
   echo "$DETACHED_PID" > "$FRONTEND_PID_FILE"
-  wait_http "$FRONTEND_URL/agent/sessions" frontend
+  wait_http "$FRONTEND_URL/threads" frontend
 
   echo "Dev environment is running"
   echo "Backend:  $BACKEND_URL"

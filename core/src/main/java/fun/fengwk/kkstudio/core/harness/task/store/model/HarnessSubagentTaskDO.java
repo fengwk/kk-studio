@@ -4,7 +4,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** {@code harness_subagent_task} 行映射：父 ToolInvocation 到 child Session/Run 的 durable 关系。 */
+/** {@code harness_subagent_task} 行映射：父 ToolInvocation 到 child Session/Thread 的 durable 关系。 */
 @Data
 public class HarnessSubagentTaskDO {
   /** 主键：父 task ToolInvocation id（执行幂等键）。 */
@@ -13,11 +13,14 @@ public class HarnessSubagentTaskDO {
   /** 父 Session id。 */
   private Long parentSessionId;
 
+  /** 父 Thread id。 */
+  private Long parentThreadId;
+
   /** 子 Session id。 */
   private Long childSessionId;
 
-  /** 子 Run id。 */
-  private Long childRunId;
+  /** 子 Thread id。 */
+  private Long childThreadId;
 
   /** 目标子 Agent 标识。 */
   private String targetAgent;
@@ -30,9 +33,6 @@ public class HarnessSubagentTaskDO {
 
   /** 子任务最大 turn 数。 */
   private Integer maxTurns;
-
-  /** 空闲超时（毫秒）；可空表示未限制。 */
-  private Long idleTimeoutMillis;
 
   /** 任务状态。 */
   private String status;

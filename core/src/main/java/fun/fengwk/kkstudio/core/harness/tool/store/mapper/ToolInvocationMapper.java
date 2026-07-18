@@ -19,7 +19,7 @@ import java.util.List;
 public interface ToolInvocationMapper extends BaseMapper {
   String COLUMNS =
       """
-      ti.id, ti.run_id, ti.assistant_entry_id, ti.ordinal, ti.tool_call_id, ti.tool_name,
+      ti.id, ti.thread_id, ti.assistant_entry_id, ti.ordinal, ti.tool_call_id, ti.tool_name,
       ti.tool_version, ti.target_type, ti.environment_id, ti.arguments_json, ti.status,
       ti.permission_action, ti.permission_decision, ti.side_effect, ti.deadline_at, ti.lease_owner,
       ti.lease_until, ti.cancel_requested_at, ti.result_json, ti.error_message,
@@ -30,13 +30,13 @@ public interface ToolInvocationMapper extends BaseMapper {
   @Insert(
       """
       insert into tool_invocation (
-          id, run_id, assistant_entry_id, ordinal, tool_call_id, tool_name, tool_version,
+          id, thread_id, assistant_entry_id, ordinal, tool_call_id, tool_name, tool_version,
           target_type, environment_id, arguments_json, status, permission_action,
           permission_decision, side_effect, deadline_at, lease_owner, lease_until,
           cancel_requested_at, result_json, error_message, gmt_create, started_at, finished_at,
           gmt_modified
       ) values (
-          #{id}, #{runId}, #{assistantEntryId}, #{ordinal}, #{toolCallId}, #{toolName},
+          #{id}, #{threadId}, #{assistantEntryId}, #{ordinal}, #{toolCallId}, #{toolName},
           #{toolVersion}, #{targetType}, #{environmentId}, #{argumentsJson}, #{status},
           #{permissionAction}, #{permissionDecision}, #{sideEffect}, #{deadlineAt}, #{leaseOwner},
           #{leaseUntil}, #{cancelRequestedAt}, #{resultJson}, #{errorMessage}, #{createTime},
@@ -50,7 +50,7 @@ public interface ToolInvocationMapper extends BaseMapper {
       id = "toolInvocationResultMap",
       value = {
         @Result(column = "id", property = "id"),
-        @Result(column = "run_id", property = "runId"),
+        @Result(column = "thread_id", property = "threadId"),
         @Result(column = "assistant_entry_id", property = "assistantEntryId"),
         @Result(column = "ordinal", property = "ordinal"),
         @Result(column = "tool_call_id", property = "toolCallId"),
@@ -87,11 +87,11 @@ public interface ToolInvocationMapper extends BaseMapper {
           + COLUMNS
           + """
       from tool_invocation ti
-      where ti.run_id = #{runId}
+      where ti.thread_id = #{threadId}
       order by ti.ordinal
       """)
   @ResultMap("toolInvocationResultMap")
-  List<ToolInvocationDO> listByRun(@Param("runId") long runId);
+  List<ToolInvocationDO> listByThread(@Param("threadId") long threadId);
 
   @Select(
       """
@@ -100,9 +100,7 @@ public interface ToolInvocationMapper extends BaseMapper {
           + COLUMNS
           + """
       from tool_invocation ti
-      join harness_run r on r.id = ti.run_id
-      where r.status = 'WAITING_TOOLS'
-        and ti.target_type in ('CLOUD', 'CONTROL')
+      where ti.target_type in ('CLOUD', 'CONTROL')
         and (ti.status = 'QUEUED'
           or (ti.status = 'CANCEL_REQUESTED'
             and (ti.lease_owner is null or ti.lease_until is null or ti.lease_until <= #{now}))
@@ -120,9 +118,27 @@ public interface ToolInvocationMapper extends BaseMapper {
           + COLUMNS
           + """
       from tool_invocation ti
-      join harness_run r on r.id = ti.run_id
-      where r.status = 'WAITING_TOOLS'
-        and ti.target_type = 'ENVIRONMENT'
+      where ti.thread_id = #{threadId}
+        and ti.target_type in ('CLOUD', 'CONTROL')
+        and (ti.status = 'QUEUED'
+          or (ti.status = 'CANCEL_REQUESTED'
+            and (ti.lease_owner is null or ti.lease_until is null or ti.lease_until <= #{now}))
+          or (ti.status = 'RUNNING' and ti.lease_until <= #{now}))
+      order by ti.deadline_at asc, ti.id asc
+      limit 1
+      """)
+  @ResultMap("toolInvocationResultMap")
+  ToolInvocationDO findClaimCandidateForThread(
+      @Param("threadId") long threadId, @Param("now") LocalDateTime now);
+
+  @Select(
+      """
+      select
+      """
+          + COLUMNS
+          + """
+      from tool_invocation ti
+      where ti.target_type = 'ENVIRONMENT'
         and ti.environment_id = #{environmentId}
         and (ti.status = 'QUEUED'
           or (ti.status = 'CANCEL_REQUESTED'
@@ -142,10 +158,6 @@ public interface ToolInvocationMapper extends BaseMapper {
           lease_owner = #{owner}, lease_until = #{leaseUntil},
           started_at = coalesce(started_at, #{now}), gmt_modified = #{now}
       where id = #{id}
-        and exists (
-          select 1 from harness_run r where r.id = tool_invocation.run_id
-            and r.status = 'WAITING_TOOLS'
-        )
         and (status = 'QUEUED'
           or (status = 'CANCEL_REQUESTED'
             and (lease_owner is null or lease_until is null or lease_until <= #{now}))
@@ -166,10 +178,6 @@ public interface ToolInvocationMapper extends BaseMapper {
       where id = #{id}
         and target_type = 'ENVIRONMENT'
         and environment_id = #{environmentId}
-        and exists (
-          select 1 from harness_run r where r.id = tool_invocation.run_id
-            and r.status = 'WAITING_TOOLS'
-        )
         and (status = 'QUEUED'
           or (status = 'CANCEL_REQUESTED'
             and (lease_owner is null or lease_until is null or lease_until <= #{now}))
@@ -232,9 +240,9 @@ public interface ToolInvocationMapper extends BaseMapper {
       """
       select count(*)
       from tool_invocation
-      where run_id = #{runId} and status not in ('SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN')
+      where thread_id = #{threadId} and status not in ('SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN')
       """)
-  long countNonTerminalByRun(@Param("runId") long runId);
+  long countNonTerminalByThread(@Param("threadId") long threadId);
 
   @Update(
       """
@@ -268,7 +276,7 @@ public interface ToolInvocationMapper extends BaseMapper {
   @Update(
       "update tool_invocation set status = case when status in ('PREPARING', 'WAITING_APPROVAL',"
           + " 'QUEUED', 'RUNNING') then 'CANCEL_REQUESTED' else status end, cancel_requested_at ="
-          + " coalesce(cancel_requested_at, #{now}), gmt_modified = #{now} where run_id = #{runId}"
+          + " coalesce(cancel_requested_at, #{now}), gmt_modified = #{now} where thread_id = #{threadId}"
           + " and status not in ('SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN')")
-  int requestCancelByRun(@Param("runId") long runId, @Param("now") LocalDateTime now);
+  int requestCancelByThread(@Param("threadId") long threadId, @Param("now") LocalDateTime now);
 }

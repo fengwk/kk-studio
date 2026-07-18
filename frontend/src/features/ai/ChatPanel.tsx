@@ -1,39 +1,36 @@
 import type { RefObject } from 'react'
 import { ChatSidebar } from '@/features/ai/ChatPanelParts'
 import { ChatObservabilityPanel } from '@/features/ai/ChatObservabilityPanel'
-import { SessionPanel } from '@/features/ai/session-panel'
-import { SessionActivityWidget } from '@/features/ai/session-panel/SessionActivityWidget'
-import { SessionStatusFooter } from '@/features/ai/session-panel/SessionStatusFooter'
-import { SessionSubagentWidget } from '@/features/ai/session-panel/SessionSubagentWidget'
-import type { SessionCommand } from '@/features/ai/session-panel/session-commands'
+import { ThreadPanel } from '@/features/ai/thread-panel'
+import { ThreadActivityWidget } from '@/features/ai/thread-panel/ThreadActivityWidget'
+import { ThreadStatusFooter } from '@/features/ai/thread-panel/ThreadStatusFooter'
+import { ThreadSubagentWidget } from '@/features/ai/thread-panel/ThreadSubagentWidget'
+import type { ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
 import type { SubagentTaskNode } from '@/features/ai/subagent-task-tree'
 import type { RelayPermission } from '@/features/ai/useHarnessTaskTimeline'
-import type { SessionTimeline } from '@/features/ai/session-events'
+import type { ThreadTimeline } from '@/features/ai/thread-events'
 import type {
   AgentDefinitionDTO,
-  HarnessRunDTO,
-  HarnessSessionDTO,
+  HarnessThreadDTO,
   ModelUsageSummaryDTO,
   RootActivityDTO,
-  SessionYoloDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts'
 
 /**
- * Harness adapter over SessionPanel.
- * Commands live in +// palette; footer is a pi-style status line (no YOLO checkbox).
+ * Harness adapter over ThreadPanel for AgentThread.
+ * Commands live in +// palette; footer is a pi-style status line.
  */
 export function ChatPanel({
-  sessions,
+  threads,
   agentsById,
-  activeSessionId,
+  activeThreadId,
   title,
   onBack,
-  session,
   agent,
   timeline,
   runtimeLabels,
-  activeRun,
+  working,
   messagesLoading,
   messagesError,
   bodyRef,
@@ -49,14 +46,13 @@ export function ChatPanel({
   onSubmit,
   onCommand,
 }: {
-  sessions: HarnessSessionDTO[]
+  threads: HarnessThreadDTO[]
   agentsById: Map<string, AgentDefinitionDTO>
-  activeSessionId: string
+  activeThreadId: string
   title: string
   onBack: () => void
-  session?: HarnessSessionDTO
   agent?: AgentDefinitionDTO
-  timeline: SessionTimeline
+  timeline: ThreadTimeline
   runtimeLabels?: {
     agentName: string
     providerName: string
@@ -64,8 +60,7 @@ export function ChatPanel({
     variantName: string
     contextWindow?: number
   }
-  runs?: HarnessRunDTO[]
-  activeRun: boolean
+  working: boolean
   messagesLoading: boolean
   messagesError: unknown
   bodyRef: RefObject<HTMLDivElement | null>
@@ -73,7 +68,7 @@ export function ChatPanel({
   pending: boolean
   disabled: boolean
   observability: {
-    yolo?: SessionYoloDTO
+    yolo?: { enabled: boolean }
     usage?: ModelUsageSummaryDTO
     toolInvocations: ToolInvocationDTO[]
     observabilityError: unknown
@@ -96,19 +91,19 @@ export function ChatPanel({
   onDismissActionError?: () => void
   onDraftChange: (draft: string) => void
   onSubmit: () => void
-  onCommand: (command: SessionCommand) => void
+  onCommand: (command: ThreadCommand) => void
 }) {
   const pendingPermissions = observability.toolInvocations.filter(
     (invocation) => invocation.status === 'WAITING_APPROVAL',
   )
 
   return (
-    <SessionPanel
+    <ThreadPanel
       sidebar={
         <ChatSidebar
-          sessions={sessions}
+          threads={threads}
           agentsById={agentsById}
-          activeSessionId={activeSessionId}
+          activeThreadId={activeThreadId}
           title={title}
           onBack={onBack}
         />
@@ -120,7 +115,7 @@ export function ChatPanel({
       draft={draft}
       composerDisabled={disabled}
       composerPending={pending}
-      activeRun={activeRun}
+      working={working}
       controlsPending={controlsPending}
       actionError={actionError}
       onDismissActionError={onDismissActionError}
@@ -129,15 +124,11 @@ export function ChatPanel({
       onCommand={onCommand}
       widgets={
         <>
-          {!session?.parentSessionId ? (
-            <>
-              <SessionActivityWidget activities={taskTimeline.activities} />
-              <SessionSubagentWidget taskTree={taskTimeline.taskTree} />
-            </>
-          ) : null}
+          <ThreadActivityWidget activities={taskTimeline.activities} />
+          <ThreadSubagentWidget taskTree={taskTimeline.taskTree} />
           {pendingPermissions.length > 0 ? (
             <ChatObservabilityPanel
-              yolo={observability.yolo}
+              yolo={undefined}
               usage={undefined}
               toolInvocations={observability.toolInvocations}
               error={null}
@@ -148,47 +139,47 @@ export function ChatPanel({
               permissionsOnly
             />
           ) : null}
-          {!session?.parentSessionId && taskTimeline.relayPermissions.length > 0
+          {taskTimeline.relayPermissions.length > 0
             ? taskTimeline.relayPermissions.map((permission) => (
-              <div key={permission.invocationId} className="session-permission-line">
-                <strong>
-                  子代理权限：
-                  {permission.tool}
-                </strong>
-                <span>
-                  {permission.workdir}
-                  {' · '}
-                  {permission.arguments}
-                </span>
-                <div className="session-permission-actions">
-                  <button
-                    type="button"
-                    disabled={taskTimeline.permissionDecisionPending}
-                    onClick={() => taskTimeline.decidePermission(permission.invocationId, 'deny')}
-                  >
-                    拒绝
-                  </button>
-                  <button
-                    type="button"
-                    disabled={taskTimeline.permissionDecisionPending}
-                    onClick={() => taskTimeline.decidePermission(permission.invocationId, 'allow')}
-                  >
-                    允许
-                  </button>
+                <div key={permission.invocationId} className="thread-permission-line">
+                  <strong>
+                    子代理权限：
+                    {permission.tool}
+                  </strong>
+                  <span>
+                    {permission.workdir}
+                    {' · '}
+                    {permission.arguments}
+                  </span>
+                  <div className="thread-permission-actions">
+                    <button
+                      type="button"
+                      disabled={taskTimeline.permissionDecisionPending}
+                      onClick={() => taskTimeline.decidePermission(permission.invocationId, 'deny')}
+                    >
+                      拒绝
+                    </button>
+                    <button
+                      type="button"
+                      disabled={taskTimeline.permissionDecisionPending}
+                      onClick={() => taskTimeline.decidePermission(permission.invocationId, 'allow')}
+                    >
+                      允许
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))
+              ))
             : null}
         </>
       }
       footer={
-        <SessionStatusFooter
+        <ThreadStatusFooter
           agentName={runtimeLabels?.agentName || agent?.name}
           providerName={runtimeLabels?.providerName || agent?.defaultProviderName}
           modelName={runtimeLabels?.modelName || agent?.defaultModelName}
           variantName={runtimeLabels?.variantName || agent?.defaultVariant}
           contextWindow={runtimeLabels?.contextWindow}
-          yolo={observability.yolo}
+          yoloEnabled={observability.yolo?.enabled}
           usage={observability.usage}
         />
       }

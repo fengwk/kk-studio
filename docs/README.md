@@ -20,6 +20,11 @@ flowchart TD
     B --> F[storage-models.md]
     B --> G[frontend-implementation-design.md]
     B --> H[harness-extensions.md]
+    B --> N[prompt-cache-usage-cost.md]
+    B --> O[prompt-to-artifact.md]
+    B --> P[s3-presign.md]
+    B --> Q[comfyui-workflow-api.md]
+    B --> R[environment-daemon-gateway.md]
     M --> G
 ```
 

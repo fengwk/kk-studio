@@ -136,7 +136,6 @@ class EnvironmentDaemonGatewayTest {
             eq(NOW));
     assertEquals("provider-call", terminal.getValue().toolCallId());
     assertEquals("done", ((TextToolContent) terminal.getValue().contents().get(0)).text());
-    verify(fixture.transactions).coordinateReadyRuns(NOW);
   }
 
   /**
@@ -774,7 +773,7 @@ class EnvironmentDaemonGatewayTest {
   private ToolInvocation withStatus(ToolInvocation source, ToolInvocationStatus status) {
     return new ToolInvocation(
         source.id(),
-        source.runId(),
+        source.threadId(),
         source.assistantEntryId(),
         source.ordinal(),
         source.toolCallId(),
@@ -802,7 +801,7 @@ class EnvironmentDaemonGatewayTest {
   private ToolInvocation withDeadline(ToolInvocation source, Instant deadlineAt) {
     return new ToolInvocation(
         source.id(),
-        source.runId(),
+        source.threadId(),
         source.assistantEntryId(),
         source.ordinal(),
         source.toolCallId(),
@@ -830,7 +829,7 @@ class EnvironmentDaemonGatewayTest {
   private ToolInvocation withArguments(ToolInvocation source, String argumentsJson) {
     return new ToolInvocation(
         source.id(),
-        source.runId(),
+        source.threadId(),
         source.assistantEntryId(),
         source.ordinal(),
         source.toolCallId(),

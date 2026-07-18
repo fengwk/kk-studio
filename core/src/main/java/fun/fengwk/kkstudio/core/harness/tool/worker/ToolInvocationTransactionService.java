@@ -1,20 +1,19 @@
 package fun.fengwk.kkstudio.core.harness.tool.worker;
 
-import lombok.extern.slf4j.Slf4j;
+import com.fasterxml.jackson.databind.JsonNode;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import fun.fengwk.kkstudio.core.harness.run.store.HarnessRunEventWriter;
-import fun.fengwk.kkstudio.core.harness.run.store.mapper.HarnessRunMapper;
-import fun.fengwk.kkstudio.core.harness.run.store.model.HarnessRunDO;
-import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
+import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
-import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
-import fun.fengwk.kkstudio.harness.runtime.run.RunEventPayloads;
-import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
-import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventPayloads;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventType;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ClaimedToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
@@ -27,72 +26,43 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
 
-/** Atomically journals Tool state changes; terminal materialization is per-Run coordinated. */
-@Slf4j
+/** 原子写入 Tool 状态。锁序：非锁 peek → 锁 Thread → 锁 invocation → 校验仍属该 Thread，避免与 processor 死锁。 */
 @Service
 public class ToolInvocationTransactionService implements ToolInvocationTransactions {
-  private static final int COORDINATION_SCAN_LIMIT = 100;
-
   private final ToolInvocationMapper invocationMapper;
-  private final MysqlToolInvocationStore invocationStore;
-  private final HarnessRunMapper runMapper;
-  private final HarnessRunEventWriter eventWriter;
-  private final ToolInvocationCoordinationService coordinationService;
+  private final HarnessThreadMapper threadMapper;
+  private final ThreadEventStore eventStore;
+  private final ThreadKick threadKick;
 
   public ToolInvocationTransactionService(
       ToolInvocationMapper invocationMapper,
-      MysqlToolInvocationStore invocationStore,
-      HarnessRunMapper runMapper,
-      HarnessRunEventWriter eventWriter,
-      ToolInvocationCoordinationService coordinationService) {
+      HarnessThreadMapper threadMapper,
+      ThreadEventStore eventStore,
+      @Lazy ThreadKick threadKick) {
     this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
-    this.invocationStore = Objects.requireNonNull(invocationStore, "invocationStore");
-    this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
-    this.eventWriter = Objects.requireNonNull(eventWriter, "eventWriter");
-    this.coordinationService = Objects.requireNonNull(coordinationService, "coordinationService");
-  }
-
-  /**
-   * Records an idempotent cancellation request; the owner remains responsible for its terminal
-   * race.
-   */
-  @Transactional
-  public boolean requestCancel(long invocationId, Instant now) {
-    if (invocationId <= 0) {
-      throw new IllegalArgumentException("invocationId must be positive");
-    }
-    return invocationMapper.requestCancel(invocationId, utc(now)) == 1;
+    this.threadMapper = Objects.requireNonNull(threadMapper, "threadMapper");
+    this.eventStore = Objects.requireNonNull(eventStore, "eventStore");
+    this.threadKick = Objects.requireNonNull(threadKick, "threadKick");
   }
 
   @Override
   @Transactional
   public boolean start(ClaimedToolInvocation claimed, Instant now) {
-    HarnessRunDO run = lockWaitingRun(claimed.invocation().runId());
-    if (run == null) {
+    ToolInvocationDO row = lockOwnedClaim(claimed);
+    if (row == null) {
       return false;
     }
-    // Run is locked; Session/Root before Invocation and before event id allocation.
-    eventWriter.lockSessionAndRoot(run.getSessionId());
-    ToolInvocation invocation = lockOwned(claimed, now, run.getId());
-    if (invocation == null) {
-      return false;
-    }
-    eventWriter.appendLocked(
-        run,
-        List.of(
-            new RunEventDraft(
-                RunEventType.TOOL_STARTED,
-                RunEventPayloads.of(
-                    "invocationId",
-                    invocation.id(),
-                    "ordinal",
-                    invocation.ordinal(),
-                    "toolCallId",
-                    invocation.toolCallId(),
-                    "attempt",
-                    run.getAttempt(),
-                    "turnIndex",
-                    run.getTurnIndex()))),
+    eventStore.append(
+        row.getThreadId(),
+        row.getAssistantEntryId(),
+        ThreadEventType.TOOL_STARTED,
+        ThreadEventPayloads.of(
+            "invocationId",
+            Long.toString(row.getId()),
+            "toolCallId",
+            row.getToolCallId(),
+            "toolName",
+            row.getToolName()),
         now);
     return true;
   }
@@ -101,38 +71,24 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
   @Transactional
   public boolean appendPartial(
       ClaimedToolInvocation claimed, List<ToolResult> partials, Instant now) {
-    List<ToolResult> batch = List.copyOf(Objects.requireNonNull(partials, "partials"));
-    if (batch.isEmpty()) {
+    ToolInvocationDO row = lockOwnedClaim(claimed);
+    if (row == null) {
+      return false;
+    }
+    if (partials == null || partials.isEmpty()) {
       return true;
     }
-    HarnessRunDO run = lockWaitingRun(claimed.invocation().runId());
-    if (run == null) {
-      return false;
-    }
-    eventWriter.lockSessionAndRoot(run.getSessionId());
-    ToolInvocation invocation = lockOwned(claimed, now, run.getId());
-    if (invocation == null) {
-      return false;
-    }
-    for (ToolResult partial : batch) {
-      requireResultFor(invocation, partial);
-    }
-    eventWriter.appendLocked(
-        run,
-        List.of(
-            new RunEventDraft(
-                RunEventType.TOOL_DELTA_BATCH,
-                RunEventPayloads.of(
-                    "invocationId",
-                    invocation.id(),
-                    "ordinal",
-                    invocation.ordinal(),
-                    "partialResults",
-                    batch.stream().map(ToolResultJsonCodec::encode).toList(),
-                    "attempt",
-                    run.getAttempt(),
-                    "turnIndex",
-                    run.getTurnIndex()))),
+    eventStore.append(
+        row.getThreadId(),
+        row.getAssistantEntryId(),
+        ThreadEventType.TOOL_DELTA_BATCH,
+        ThreadEventPayloads.of(
+            "invocationId",
+            Long.toString(row.getId()),
+            "toolCallId",
+            row.getToolCallId(),
+            "partialResults",
+            canonicalResults(partials)),
         now);
     return true;
   }
@@ -145,110 +101,122 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
       ToolResult result,
       String errorMessage,
       Instant now) {
-    if (terminalStatus == null || !terminalStatus.isTerminal()) {
-      throw new IllegalArgumentException("terminalStatus must be terminal");
-    }
-    HarnessRunDO run = lockWaitingRun(claimed.invocation().runId());
-    if (run == null) {
+    ToolInvocationDO row = lockInvocationOwningThreadFirst(claimed.invocation().id());
+    if (row == null) {
       return false;
     }
-    eventWriter.lockSessionAndRoot(run.getSessionId());
-    ToolInvocation invocation = lockOwned(claimed, now, run.getId());
-    if (invocation == null) {
+    if (ToolInvocationStatus.valueOf(row.getStatus()).isTerminal()) {
+      // 已终态：幂等观察，kick 以便 processor 收敛。
+      afterCommitKick(row.getThreadId());
+      return true;
+    }
+    // 非终态必须仍由 claim 的 lease owner 持有；禁止用当前行 owner 代替 stale claim。
+    if (!ownerMatches(claimed, row)) {
       return false;
     }
-    invocation.status().requireTransitionTo(terminalStatus);
-    requireResultFor(invocation, result);
-    if (invocationMapper.terminateOwned(
-            invocation.id(),
-            claimed.invocation().leaseOwner(),
+    String claimedOwner =
+        blankToNull(claimed.invocation().leaseOwner()) == null
+            ? ""
+            : claimed.invocation().leaseOwner();
+    String resultJson = result == null ? null : ToolResultJsonCodec.encode(result);
+    int updated =
+        invocationMapper.terminateOwned(
+            row.getId(), claimedOwner, terminalStatus.name(), resultJson, errorMessage, utc(now));
+    if (updated != 1) {
+      afterCommitKick(row.getThreadId());
+      return false;
+    }
+    if (result != null) {
+      eventStore.append(
+          row.getThreadId(),
+          row.getAssistantEntryId(),
+          ThreadEventType.TOOL_DELTA_BATCH,
+          ThreadEventPayloads.of(
+              "invocationId",
+              Long.toString(row.getId()),
+              "toolCallId",
+              row.getToolCallId(),
+              "partialResults",
+              List.of(ToolResultJsonCodec.encodeNode(result))),
+          now);
+    }
+    eventStore.append(
+        row.getThreadId(),
+        row.getAssistantEntryId(),
+        ThreadEventType.TOOL_COMPLETED,
+        ThreadEventPayloads.of(
+            "invocationId",
+            Long.toString(row.getId()),
+            "toolCallId",
+            row.getToolCallId(),
+            "status",
             terminalStatus.name(),
-            ToolResultJsonCodec.encode(result),
-            errorMessage,
-            utc(now))
-        != 1) {
-      return false;
-    }
-    eventWriter.appendLocked(
-        run,
-        List.of(
-            new RunEventDraft(
-                RunEventType.TOOL_COMPLETED,
-                RunEventPayloads.of(
-                    "invocationId",
-                    invocation.id(),
-                    "ordinal",
-                    invocation.ordinal(),
-                    "toolCallId",
-                    invocation.toolCallId(),
-                    "status",
-                    terminalStatus.name(),
-                    "error",
-                    result.error(),
-                    "attempt",
-                    run.getAttempt(),
-                    "turnIndex",
-                    run.getTurnIndex()))),
+            "error",
+            terminalStatus != ToolInvocationStatus.SUCCEEDED,
+            "errorMessage",
+            errorMessage),
         now);
+    afterCommitKick(row.getThreadId());
     return true;
   }
 
-  /**
-   * Scans ready Runs without a surrounding transaction; each Run coordinates through a separate
-   * Spring proxy transaction so failures stay isolated.
-   */
-  @Override
-  public int coordinateReadyRuns(Instant now) {
-    int coordinated = 0;
-    for (HarnessRunDO run : runMapper.listReadyWaitingTools(COORDINATION_SCAN_LIMIT)) {
-      try {
-        if (coordinationService.coordinate(run.getId(), now)) {
-          coordinated++;
-        }
-      } catch (RuntimeException error) {
-        log.warn(
-            "skipping tool coordination for waiting run {} after isolated failure",
-            run.getId(),
-            error);
-      }
-    }
-    return coordinated;
+  private static List<JsonNode> canonicalResults(List<ToolResult> partials) {
+    return partials.stream().map(ToolResultJsonCodec::encodeNode).toList();
   }
 
-  /** Delegates to the per-Run transactional coordinator for direct single-run tests/callers. */
-  public boolean coordinate(long runId, Instant now) {
-    return coordinationService.coordinate(runId, now);
-  }
-
-  private HarnessRunDO lockWaitingRun(long runId) {
-    HarnessRunDO run = runMapper.findForUpdate(runId);
-    if (run == null || !RunStatus.WAITING_TOOLS.name().equals(run.getStatus())) {
+  /** start/partial：校验 durable lease owner/status 仍匹配 claim。 */
+  private ToolInvocationDO lockOwnedClaim(ClaimedToolInvocation claimed) {
+    ToolInvocationDO row = lockInvocationOwningThreadFirst(claimed.invocation().id());
+    if (row == null) {
       return null;
     }
-    return run;
-  }
-
-  private ToolInvocation lockOwned(ClaimedToolInvocation claimed, Instant now, long runId) {
-    ToolInvocationDO source = invocationMapper.findForUpdate(claimed.invocation().id());
-    if (source == null) {
+    if (!ownerMatches(claimed, row)) {
       return null;
     }
-    ToolInvocation invocation = invocationStore.toInvocation(source);
-    if (invocation.runId() != runId
-        || (invocation.status() != ToolInvocationStatus.RUNNING
-            && invocation.status() != ToolInvocationStatus.CANCEL_REQUESTED)
-        || !Objects.equals(invocation.leaseOwner(), claimed.invocation().leaseOwner())
-        || invocation.leaseUntil() == null
-        || !invocation.leaseUntil().isAfter(now)) {
+    if (ToolInvocationStatus.valueOf(row.getStatus()).isTerminal()) {
       return null;
     }
-    return invocation;
+    return row;
   }
 
-  private void requireResultFor(ToolInvocation invocation, ToolResult result) {
-    if (result == null || !invocation.toolCallId().equals(result.toolCallId())) {
-      throw new IllegalArgumentException("ToolResult must match frozen toolCallId");
+  private static boolean ownerMatches(ClaimedToolInvocation claimed, ToolInvocationDO row) {
+    return Objects.equals(
+        blankToNull(claimed.invocation().leaseOwner()), blankToNull(row.getLeaseOwner()));
+  }
+
+  private static String blankToNull(String value) {
+    return value == null || value.isBlank() ? null : value;
+  }
+
+  /** 锁序固定：非锁查找 threadId → 锁 Thread → 锁 invocation → 校验仍属于该 Thread。 */
+  private ToolInvocationDO lockInvocationOwningThreadFirst(long invocationId) {
+    ToolInvocationDO peek = invocationMapper.find(invocationId);
+    if (peek == null) {
+      return null;
     }
+    long threadId = peek.getThreadId();
+    if (threadMapper.findForUpdate(threadId) == null) {
+      throw new IllegalStateException("owning thread missing for invocation " + invocationId);
+    }
+    ToolInvocationDO row = invocationMapper.findForUpdate(invocationId);
+    if (row == null || !Objects.equals(row.getThreadId(), threadId)) {
+      return null;
+    }
+    return row;
+  }
+
+  private void afterCommitKick(long threadId) {
+    if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+      threadKick.kick(threadId);
+      return;
+    }
+    TransactionSynchronizationManager.registerSynchronization(
+        new TransactionSynchronization() {
+          @Override
+          public void afterCommit() {
+            threadKick.kick(threadId);
+          }
+        });
   }
 
   private static LocalDateTime utc(Instant value) {

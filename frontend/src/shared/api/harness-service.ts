@@ -1,58 +1,60 @@
 import { apiBaseUrl, apiClient, type HttpClient } from '@/shared/api/client'
 import type {
-  HarnessRunDTO,
-  HarnessSessionCreateDTO,
   HarnessSessionDTO,
   HarnessSessionEntryDTO,
-  HarnessSessionMessageCreateDTO,
+  HarnessThreadAgentSetDTO,
+  HarnessThreadCreateDTO,
+  HarnessThreadDTO,
+  HarnessThreadInputDTO,
+  HarnessThreadMessageCreateDTO,
+  HarnessThreadYoloSetDTO,
   ModelUsageSummaryDTO,
   RootActivityDTO,
-  RunAbortDTO,
-  RunControlDTO,
-  RunEventDTO,
-  SessionYoloDTO,
   SubagentTaskDTO,
+  ThreadEventDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts'
 
 export function createHarnessService(client: HttpClient = apiClient) {
   return {
-    listSessions: (): Promise<HarnessSessionDTO[]> => client.get('/sessions'),
-    createSession: (data: HarnessSessionCreateDTO): Promise<HarnessSessionDTO> => client.post('/sessions', data),
-    getSession: (sessionId: string): Promise<HarnessSessionDTO> => client.get(`/sessions/${encodeURIComponent(sessionId)}`),
-    listEntries: (sessionId: string): Promise<HarnessSessionEntryDTO[]> => client.get(`/sessions/${encodeURIComponent(sessionId)}/entries`),
-    createMessage: (sessionId: string, data: HarnessSessionMessageCreateDTO): Promise<HarnessSessionEntryDTO> =>
-      client.post(`/sessions/${encodeURIComponent(sessionId)}/messages`, data),
-    listRuns: (sessionId: string): Promise<HarnessRunDTO[]> => client.get(`/sessions/${encodeURIComponent(sessionId)}/runs`),
-    listRunEvents: (runId: string, afterSequence = 0, limit?: number): Promise<RunEventDTO[]> =>
-      client.get(`/runs/${encodeURIComponent(runId)}/events`, {
-        params: { afterSequence, ...(limit === undefined ? {} : { limit }) },
+    listThreads: (): Promise<HarnessThreadDTO[]> => client.get('/threads'),
+    createThread: (data: HarnessThreadCreateDTO): Promise<HarnessThreadDTO> => client.post('/threads', data),
+    getThread: (threadId: string): Promise<HarnessThreadDTO> =>
+      client.get(`/threads/${encodeURIComponent(threadId)}`),
+    listSessionThreads: (sessionId: string): Promise<HarnessThreadDTO[]> =>
+      client.get(`/sessions/${encodeURIComponent(sessionId)}/threads`),
+    submitThreadMessage: (threadId: string, data: HarnessThreadMessageCreateDTO): Promise<HarnessThreadInputDTO> =>
+      client.post(`/threads/${encodeURIComponent(threadId)}/messages`, data),
+    setThreadYolo: (threadId: string, data: HarnessThreadYoloSetDTO): Promise<HarnessThreadInputDTO> =>
+      client.put(`/threads/${encodeURIComponent(threadId)}/yolo`, data),
+    setThreadAgent: (threadId: string, data: HarnessThreadAgentSetDTO): Promise<HarnessThreadInputDTO> =>
+      client.put(`/threads/${encodeURIComponent(threadId)}/agent`, data),
+    listThreadEntries: (threadId: string): Promise<HarnessSessionEntryDTO[]> =>
+      client.get(`/threads/${encodeURIComponent(threadId)}/entries`),
+    listThreadInputs: (threadId: string): Promise<HarnessThreadInputDTO[]> =>
+      client.get(`/threads/${encodeURIComponent(threadId)}/inputs`),
+    listThreadEvents: (threadId: string, afterEventId = '0', limit?: number): Promise<ThreadEventDTO[]> =>
+      client.get(`/threads/${encodeURIComponent(threadId)}/events`, {
+        params: { afterEventId, ...(limit === undefined ? {} : { limit }) },
       }),
+    listThreadToolInvocations: (threadId: string): Promise<ToolInvocationDTO[]> =>
+      client.get(`/threads/${encodeURIComponent(threadId)}/tool-invocations`),
+    getThreadUsage: (threadId: string): Promise<ModelUsageSummaryDTO> =>
+      client.get(`/usage/threads/${encodeURIComponent(threadId)}`),
+    listSessions: (): Promise<HarnessSessionDTO[]> => client.get('/sessions'),
+    getSession: (sessionId: string): Promise<HarnessSessionDTO> =>
+      client.get(`/sessions/${encodeURIComponent(sessionId)}`),
+    listSessionEntries: (sessionId: string): Promise<HarnessSessionEntryDTO[]> =>
+      client.get(`/sessions/${encodeURIComponent(sessionId)}/entries`),
     listRootActivities: (sessionId: string, afterEventId = '0'): Promise<RootActivityDTO[]> =>
       client.get(`/sessions/${encodeURIComponent(sessionId)}/activities`, { params: { afterEventId } }),
     listSessionTasks: (sessionId: string): Promise<SubagentTaskDTO[]> =>
       client.get(`/sessions/${encodeURIComponent(sessionId)}/tasks`),
-    listToolInvocations: (runId: string): Promise<ToolInvocationDTO[]> =>
-      client.get(`/runs/${encodeURIComponent(runId)}/tool-invocations`),
-    getSessionUsage: (sessionId: string): Promise<ModelUsageSummaryDTO> =>
-      client.get(`/usage/sessions/${encodeURIComponent(sessionId)}`),
-    getYolo: (sessionId: string): Promise<SessionYoloDTO> => client.get(`/sessions/${encodeURIComponent(sessionId)}/yolo`),
-    setYolo: (sessionId: string, enabled: boolean): Promise<SessionYoloDTO> =>
-      client.put(`/sessions/${encodeURIComponent(sessionId)}/yolo`, { enabled }),
     decideToolInvocation: (invocationId: string, decision: 'allow' | 'deny'): Promise<ToolInvocationDTO> =>
       client.post(`/tool-invocations/${encodeURIComponent(invocationId)}/decision`, { decision }),
-    steer: (sessionId: string, content: string): Promise<RunControlDTO> =>
-      client.post(`/sessions/${encodeURIComponent(sessionId)}/steer`, { content }),
-    followUp: (sessionId: string, content: string): Promise<RunControlDTO> =>
-      client.post(`/sessions/${encodeURIComponent(sessionId)}/follow-ups`, { content }),
-    abortRun: (sessionId: string): Promise<RunAbortDTO> => client.post(`/sessions/${encodeURIComponent(sessionId)}/abort`),
-    createRunEventStream: (runId: string, afterSequence: number): EventSource => {
-      const query = new URLSearchParams({ afterSequence: String(afterSequence) })
-      return new EventSource(`${apiBaseUrl}/runs/${encodeURIComponent(runId)}/events/stream?${query}`)
-    },
-    createRootActivityStream: (sessionId: string, afterEventId: string): EventSource => {
+    createThreadEventStream: (threadId: string, afterEventId = '0'): EventSource => {
       const query = new URLSearchParams({ afterEventId })
-      return new EventSource(`${apiBaseUrl}/sessions/${encodeURIComponent(sessionId)}/activities/stream?${query}`)
+      return new EventSource(`${apiBaseUrl}/threads/${encodeURIComponent(threadId)}/events/stream?${query}`)
     },
   }
 }

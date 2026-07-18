@@ -6,7 +6,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskRuntime;
@@ -88,12 +87,6 @@ public class HarnessToolWorkerConfiguration {
         lifecycleObservers);
   }
 
-  @Bean
-  @ConditionalOnMissingBean
-  public CloudToolWorkerLifecycle cloudToolWorkerLifecycle(
-      CloudToolWorker worker,
-      HarnessRuntimeProperties properties,
-      @Qualifier("harnessWorkerScheduler") ScheduledExecutorService scheduler) {
-    return new CloudToolWorkerLifecycle(worker, properties, scheduler);
-  }
+  // Periodic CloudToolWorker polling removed: tools are launched by ThreadProcessor.dispatchDue
+  // and resume via ToolInvocationTransactions.terminate -> ThreadKick.
 }
