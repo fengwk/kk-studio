@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 import fun.fengwk.kkstudio.core.harness.usage.service.ModelUsageAggregationService;
 import fun.fengwk.kkstudio.share.model.ModelUsageSummaryDTO;
 
-/** 模型调用账本的 Run、Session 与 Model 聚合 API。 */
+/** 模型调用账本的 Thread、Session 与 Model 聚合 API。 */
 @AllArgsConstructor
 @RequestMapping("/api/usage")
 @RestController
@@ -19,9 +19,9 @@ public class StudioModelUsageController {
 
   private final ModelUsageAggregationService aggregationService;
 
-  @GetMapping("/runs/{runId}")
-  public Result<ModelUsageSummaryDTO> summarizeRun(@PathVariable("runId") String runId) {
-    return Results.ok(aggregationService.summarizeRun(parsePositiveLong(runId, "runId")));
+  @GetMapping("/threads/{threadId}")
+  public Result<ModelUsageSummaryDTO> summarizeThread(@PathVariable("threadId") String threadId) {
+    return Results.ok(aggregationService.summarizeThread(parsePositiveLong(threadId, "threadId")));
   }
 
   @GetMapping("/sessions/{sessionId}")

@@ -1,6 +1,6 @@
 # Prompt Cache、Usage 与 Cost Ledger
 
-本文描述 Harness 当前生效的提示缓存控制、模型用量归一化、成本快照、原子账本和聚合查询方案。一次成功的 Provider 调用以最终 `ProviderRequest` 和完成时 `ProviderResponse` 为输入，生成 Assistant Entry 与一条不可变 `model_usage_record`；聚合层再按 Run、Session 或 Model 读取账本。
+本文描述 Harness 当前生效的提示缓存控制、模型用量归一化、成本快照、原子账本和聚合查询方案。一次成功的 Provider 调用以最终 `ProviderRequest` 和完成时 `ProviderResponse` 为输入，生成 Assistant Entry 与一条不可变 `model_usage_record`；聚合层再按 Thread、Session 或 Model 读取账本。
 
 ## 端到端链路
 
@@ -12,17 +12,17 @@ flowchart LR
     D --> E[ProviderResponse<br/>usage metadata]
     E --> F[ModelUsageDraft]
     F --> G[Assistant Entry + model_usage_record<br/>同一事务]
-    G --> H[Run / Session / Model 聚合 API]
+    G --> H[Thread / Session / Model 聚合 API]
 ```
 
 链路中的事实边界如下：
 
 1. `DefaultAgentTurnEngine` 先构造 `cacheControl = NONE` 的标准请求。
 2. Extension Host 提供的 `BeforeProviderRequestInterceptor` 按注册顺序串行修改请求。
-3. `AgentTurnWorker` 为每个 Run 在全部 hooks 之后追加绑定当前 `sessionId` 的 `PromptCacheRequestFinalizer`。
+3. `ThreadProcessor` 为当前 AgentThread 在全部 hooks 之后追加绑定 `thread.sessionId()` 的 `PromptCacheRequestFinalizer`。
 4. Finalizer 覆盖请求中已有的 cache control，Provider Adapter 只接收最终控制结果。
-5. Provider 完成后，`AgentTurnResult` 保留实际发送的最终请求；`ModelUsageDraft.from(...)` 从该请求和响应冻结缓存、模型、用量、成本与 Provider metadata。
-6. Assistant Entry 与 `model_usage_record` 在同一事务中写入。
+5. Provider 完成后，Turn handler 保留实际发送的最终请求；`ModelUsageDraft.from(...)` 从该请求和响应冻结缓存、模型、用量、成本与 Provider metadata。
+6. `HarnessThreadTransactionService` 在 processor token fencing 下将 Assistant Entry、`model_usage_record`、Thread head 与对应 ThreadEvents 原子提交；工具调用路径还在同一事务中写 Tool Invocations。
 
 ## Prompt Cache 控制
 
@@ -220,47 +220,43 @@ Draft 从最终 `ProviderRequest` 读取 model、cache mode、最终 retention �
 `ModelUsageRecord` 在 Draft 外增加：
 
 ```text
-id, sessionId, runId, assistantEntryId,
-attempt, turnIndex, createdAt
+id, sessionId, threadId, assistantEntryId, createdAt
 ```
 
 Assistant Entry 的 `AssistantMessageMetadata` 同时保存 `stopReason`、`ModelUsage` 和 `ModelCost`。Assistant metadata 必须且只能出现在 ASSISTANT message 中；账本通过 `assistantEntryId` 与该 Entry 一一关联。
 
-无工具完成路径与工具准备路径都由 `HarnessRunTransactionService` 的事务方法提交：
+无工具完成路径与工具准备路径都由 `HarnessThreadTransactionService` 的事务方法提交：
 
 ```text
-lock and verify run ownership
--> cancel-wins check
--> append Assistant Entry and advance session leaf by CAS
+lock Thread and verify processor token
+-> append Assistant Entry
 -> insert model_usage_record with the same assistantEntryId
 -> optional: insert Tool Invocations
--> transition Run and append Run Events
+-> advance AgentThread head with processor fencing
+-> append terminal ThreadEvents
 ```
 
 原子性规则：
 
-- Run 不存在、不是 `RUNNING`、lease owner 不匹配或 attempt 不匹配时，方法返回 `false`，不写 Assistant Entry、账本或 Invocation。
-- 锁定后发现 `cancelRequestedAt` 时先执行 cancel transition，方法返回 `true`，不写 Assistant Entry、账本或 Invocation。
-- session leaf、Run transition、event sequence 等任一 CAS 影响行数不是 1 时抛出 `ConcurrentModificationException`，整个事务回滚。
-- 账本 unique 冲突或账本之后的 Invocation unique 冲突会回滚本次事务中已经追加的 Assistant Entry、账本、Invocation、Run transition 和 Events。
+- Thread 不存在或 `processorToken` 不匹配时，方法返回 `false`，不写 Assistant Entry、账本或 Invocation。
+- Assistant Entry 和账本先写入；若 Thread head fencing advance 失败，抛出 `ConcurrentModificationException` 并回滚整个事务，禁止留下孤儿 Entry 或账本。
+- 工具准备路径中的 Invocation 唯一键冲突，同样回滚 Assistant Entry、账本、Invocation、head 与 ThreadEvents。
+- Provider 调用属于外部 at-least-once 边界；持久提交以 processor token、唯一 `assistant_entry_id` 和 Invocation 唯一键阻止同一成功事实重复落库。
 
 账本由数据库唯一键保证每个成功完成事实只写一次：
 
 - `unique (assistant_entry_id)`
-- `unique (run_id, attempt, turn_index)`
 
 ## `model_usage_record` Schema
 
-生产 H2 与 MySQL schema 都包含同一组 45 个字段。除 `cache_affinity_key`、`request_id`、`reported_service_tier` 外，其余字段均为 `NOT NULL`。
+生产 H2 与 MySQL schema 包含同一组字段。除 `cache_affinity_key`、`request_id`、`reported_service_tier` 外，其余业务字段均为 `NOT NULL`。
 
 | 分组 | 字段 | H2 类型 | MySQL 类型 |
 | --- | --- | --- | --- |
 | 标识 | `id` | `bigint` | `bigint` |
 | 归属 | `session_id` | `bigint` | `bigint` |
-| 归属 | `run_id` | `bigint` | `bigint` |
+| 归属 | `thread_id` | `bigint` | `bigint` |
 | 归属 | `assistant_entry_id` | `bigint` | `bigint` |
-| 执行 | `attempt` | `integer` | `int` |
-| 执行 | `turn_index` | `integer` | `int` |
 | Provider | `provider_resource_id` | `bigint` | `bigint` |
 | Model | `model_resource_id` | `bigint` | `bigint` |
 | Provider | `provider_type` | `varchar(64)` | `varchar(64)` |
@@ -306,8 +302,7 @@ lock and verify run ownership
 ```text
 primary key (id)
 unique (assistant_entry_id)
-unique (run_id, attempt, turn_index)
-index (run_id, id)
+index (thread_id, id)
 index (session_id, id)
 index (model_resource_id, id)
 ```
@@ -316,8 +311,7 @@ MySQL 中对应名称为：
 
 ```text
 uk_model_usage_record_assistant_entry
-uk_model_usage_record_run_attempt_turn
-idx_model_usage_record_run
+idx_model_usage_record_thread
 idx_model_usage_record_session
 idx_model_usage_record_model
 ```
@@ -332,7 +326,7 @@ H2 使用 `numeric(32,12)`、`clob`、`timestamp(3)`；MySQL 使用 `decimal(32,
 
 | Scope | Endpoint | Store 查询 | `scopeType` |
 | --- | --- | --- | --- |
-| Run | `GET /api/usage/runs/{runId}` | `listByRunId` | `run` |
+| Thread | `GET /api/usage/threads/{threadId}` | `listByThreadId` | `thread` |
 | Session | `GET /api/usage/sessions/{sessionId}` | `listBySessionId` | `session` |
 | Model | `GET /api/usage/models/{modelId}` | `listByModelResourceId` | `model` |
 
@@ -416,7 +410,7 @@ tokenReadRatio =
 
 ### 解析失败语义
 
-缺失或类型错误的必要字段、`contextWindow` 小于 `maxOutputTokens`、未知 enum 值、重复变体名、未注册工具等任何不合规输入都会在 `AgentModelMutationFactory`（写入阶段）或 `DatabaseTurnResourceResolver`（Turn 启动阶段）抛出 `IllegalArgumentException`，并阻止模型进入 Turn 队列。任何可以写库但不能执行的 `agent_model` 记录都被视为非法，立即失败。
+缺失或类型错误的必要字段、`contextWindow` 小于 `maxOutputTokens`、未知 enum 值、重复变体名、未注册工具等任何不合规输入都会在 `AgentModelMutationFactory`（写入阶段）或 `DatabaseTurnResourceResolver`（Turn 启动阶段）抛出 `IllegalArgumentException`，并阻止 Provider Turn。任何可以写库但不能执行的 `agent_model` 记录都被视为非法，立即失败。
 
 ### 模型 CRUD 契约
 
@@ -441,12 +435,13 @@ tokenReadRatio =
 
 ### 进程生命周期
 
-`AgentTurnWorkerLifecycle` 与 `CloudToolWorkerLifecycle` 都实现 `SmartLifecycle`：
+`ThreadProcessor` 是由 `ThreadKick` 激活的有界执行器，不是周期 Turn worker：
 
-- 每次 tick 至多派发一个 active turn/tool，未在数据库 `claimDue` 成功时不创建新 handle。
-- `AgentTurnWorkerLifecycle` 按 `RunWorkerConfig.heartbeatInterval` 调用 `worker.heartbeat(turn)`；数据库 `claim`/`heartbeat` 失败或异常时立即 `handle.cancel()` 并清空 active 句柄，依赖数据库的 lease/attempt 复用保证不会重复执行。
-- 任何 scheduler `start` 异常会回滚 `running` 标志并取消已注册的 future。
-- `stop` 始终取消 future 并调用 `worker.stop()` 释放本地 Cloud tool 句柄；持久状态由 lease 自然回收，不伪造 terminal CAS。
+- input、权限决定、Tool terminal 与 Subagent completion 都在事务提交后 kick 所属 Thread。
+- Processor 从数据库获取 `processor_token` / `processor_until`；Provider 调用期间按 lease 的三分之一续租，丢租后先标记 ownership lost，再取消本地 handle 并拒绝后续 delta/callback 提交。
+- Provider 完成后由 `commitFinalAssistant` 或 `prepareTools` 在同一事务中写 Assistant Entry 与账本；token fencing 失败时整笔提交回滚。
+- `ThreadRecoveryLifecycle` 只低频 kick expired token、pending input、due/expired Tool 或 head 上待应用 terminal Tool Result；它不是 Usage、Turn 或 Tool 的主轮询器。
+- Cloud/Control Tool 由 ThreadProcessor 对当前 Thread 调用 `dispatchDueForThread`；Environment Tool 由 daemon gateway 基于 durable Invocation 推进。
 
 ## Validation
 
@@ -454,13 +449,9 @@ tokenReadRatio =
 | --- | --- |
 | 配置解析、缺字段、类型错误、enum 未知、变体重复 | [`AgentModelRuntimeConfigParserTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/agent/model/runtime/AgentModelRuntimeConfigParserTest.java) |
 | Mutation 拒绝不可执行 JSON、保留/重新校验部分更新 | [`AgentModelMutationFactoryTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/agent/model/service/impl/AgentModelMutationFactoryTest.java) |
-| 真实资源解析、provider 映射、cache policy 强约束、tool binding 边界、environmentRoot 强制 | [`DatabaseTurnResourceResolverTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/run/resource/DatabaseTurnResourceResolverTest.java) |
 | workdir 不能逃逸 environmentRoot、properties 边界 | [`HarnessRuntimePropertiesTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/configuration/HarnessRuntimePropertiesTest.java) |
-| Turn worker lifecycle: claim gate / heartbeat loss / stop cancel / scheduler 启动回滚 | [`AgentTurnWorkerLifecycleTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/run/worker/AgentTurnWorkerLifecycleTest.java) |
-| Cloud tool worker lifecycle: active gate / start 拒绝 / stop 释放本地句柄 | [`CloudToolWorkerLifecycleTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/tool/worker/CloudToolWorkerLifecycleTest.java) |
-| Spring 装配后 `AgentTurnWorker` / `CloudToolWorker` / 真实 `TurnResourceResolver` / `CompactionService` (empty) | [`HarnessRuntimeWiringIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/run/HarnessRuntimeWiringIntegrationTest.java) |
-| `RunWorkerConfig` heartbeat 必须 < lease，非法配置拒绝 | [`RunContractsTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/run/RunContractsTest.java) |
-| Cloud tool 进程停止仅取消本地 handle，不伪造 durable terminal | [`CloudToolWorkerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/tool/worker/CloudToolWorkerTest.java) |
+| Thread Turn、lease heartbeat、并发 enqueue、Usage 原子提交与失败语义 | [`ThreadProcessorIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/ThreadProcessorIntegrationTest.java) |
+| Recovery 只选择可恢复 durable work | [`HarnessThreadRecoveryMapperTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/store/HarnessThreadRecoveryMapperTest.java)、[`ThreadRecoveryLifecycleTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/worker/ThreadRecoveryLifecycleTest.java) |
 
 ## 组件与文件地图
 
@@ -468,17 +459,17 @@ tokenReadRatio =
 | --- | --- | --- |
 | Cache domain | capability、policy、最终 control | [`PromptCacheCapability.java`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/cache/PromptCacheCapability.java)、[`PromptCachePolicy.java`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/cache/PromptCachePolicy.java)、[`ProviderCacheControl.java`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/cache/ProviderCacheControl.java) |
 | Request chain | hook 串行顺序与 final request | [`ProviderRequestInterceptorChain.java`](../../harness/agent/src/main/java/fun/fengwk/kkstudio/harness/agent/extension/ProviderRequestInterceptorChain.java)、[`DefaultAgentTurnEngine.java`](../../harness/agent/src/main/java/fun/fengwk/kkstudio/harness/agent/DefaultAgentTurnEngine.java) |
-| Session finalization | per-run finalizer 与 affinity key | [`AgentTurnWorker.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/run/AgentTurnWorker.java)、[`PromptCacheRequestFinalizer.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheRequestFinalizer.java)、[`PromptCacheAffinityKeyFactory.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheAffinityKeyFactory.java) |
+| Session finalization | ThreadProcessor 追加 finalizer 与 affinity key | [`ThreadProcessor.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadProcessor.java)、[`PromptCacheRequestFinalizer.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheRequestFinalizer.java)、[`PromptCacheAffinityKeyFactory.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheAffinityKeyFactory.java) |
 | Provider capability | Core factory 注册 | [`CoreHarnessExtension.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/extension/CoreHarnessExtension.java)、[`ProviderFactory.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/extension/ProviderFactory.java) |
 | Provider mapping | control 校验与 OpenAI、Anthropic、Google Adapter | [`CacheRequestValidator.java`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/adapter/CacheRequestValidator.java)、[`OpenAiProviderAdapter.java`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/adapter/OpenAiProviderAdapter.java)、[`OpenAiResponsesProviderAdapter.java`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/adapter/OpenAiResponsesProviderAdapter.java)、[`AnthropicProviderAdapter.java`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/adapter/AnthropicProviderAdapter.java)、[`GoogleProviderAdapter.java`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/adapter/GoogleProviderAdapter.java) |
 | Usage normalization | 七类 usage、metadata、raw usage | [`ProviderUsageNormalizer.java`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/adapter/ProviderUsageNormalizer.java)、[`ProviderResponse.java`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/ProviderResponse.java) |
 | Pricing/cost | 请求价格与成本快照 | [`ModelUsage.java`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/ModelUsage.java)、[`ModelPricing.java`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/ModelPricing.java)、[`ModelCost.java`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/ModelCost.java) |
 | Ledger domain | Assistant metadata、Draft、Record、Store port | [`AssistantMessageMetadata.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/session/AssistantMessageMetadata.java)、[`MessageEntryPayload.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/session/MessageEntryPayload.java)、[`ModelUsageDraft.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageDraft.java)、[`ModelUsageRecord.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageRecord.java)、[`ModelUsageRecordStore.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageRecordStore.java) |
-| Ledger transaction | Assistant/ledger/invocation 原子提交 | [`HarnessRunTransactionService.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/run/service/HarnessRunTransactionService.java) |
+| Ledger transaction | Assistant/ledger/invocation/head/events 原子提交 | [`HarnessThreadTransactionService.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/thread/service/HarnessThreadTransactionService.java) |
 | Ledger persistence | MyBatis 行映射与 domain 转换 | [`MysqlModelUsageRecordStore.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/usage/store/MysqlModelUsageRecordStore.java)、[`ModelUsageRecordMapper.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/usage/store/mapper/ModelUsageRecordMapper.java)、[`ModelUsageRecordDO.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/usage/store/model/ModelUsageRecordDO.java) |
 | Schema | H2 与 MySQL DDL | [`schema-h2.sql`](../../core/src/main/resources/schema-h2.sql)、[`schema-mysql.sql`](../../core/src/main/resources/schema-mysql.sql) |
 | Aggregation/API | scope 聚合、指标、Controller、DTO | [`ModelUsageAggregationServiceImpl.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/usage/service/impl/ModelUsageAggregationServiceImpl.java)、[`ModelUsageSummaryAccumulator.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/usage/service/impl/ModelUsageSummaryAccumulator.java)、[`StudioModelUsageController.java`](../../web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioModelUsageController.java)、[`ModelUsageSummaryDTO.java`](../../share/src/main/java/fun/fengwk/kkstudio/share/model/ModelUsageSummaryDTO.java) |
-| Frontend contract | 大整数与 decimal 类型边界、API client | [`contracts.ts`](../../frontend/src/shared/api/contracts.ts)、[`agent-service.ts`](../../frontend/src/shared/api/agent-service.ts) |
+| Frontend contract | 大整数与 decimal 类型边界、Thread/Session/Model API client | [`contracts.ts`](../../frontend/src/shared/api/contracts.ts)、[`harness-service.ts`](../../frontend/src/shared/api/harness-service.ts)、[`agent-service.ts`](../../frontend/src/shared/api/agent-service.ts) |
 
 ## 验证面
 
@@ -490,7 +481,6 @@ tokenReadRatio =
 | Provider capability 与 HTTP cache 字段映射 | [`CoreHarnessExtensionTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/extension/CoreHarnessExtensionTest.java)、[`ProviderAdapterContractTest.java`](../../harness/model/src/test/java/fun/fengwk/kkstudio/harness/model/ProviderAdapterContractTest.java) |
 | 七类 usage、provider total、raw usage 正文隔离 | [`ProviderUsageNormalizerTest.java`](../../harness/model/src/test/java/fun/fengwk/kkstudio/harness/model/provider/adapter/ProviderUsageNormalizerTest.java) |
 | 六分项成本、multiplier、scale 与公共不变量 | [`ModelContractTest.java`](../../harness/model/src/test/java/fun/fengwk/kkstudio/harness/model/ModelContractTest.java)、[`ModelUsageDraftTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageDraftTest.java) |
-| Assistant/ledger/invocation 原子性、cancel、lost ownership、事务回滚 | [`ModelUsageLedgerIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/run/ModelUsageLedgerIntegrationTest.java) |
-| Schema 全字段 round-trip、unique keys、查询顺序与索引 | [`MysqlModelUsageRecordStoreIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/usage/store/MysqlModelUsageRecordStoreIntegrationTest.java) |
-| ratio、按 affinity key 的 waste、多币种与空 scope | [`ModelUsageAggregationServiceImplTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/usage/service/impl/ModelUsageAggregationServiceImplTest.java) |
-| 三个 endpoint、字符串大整数 ID 与非法 ID | [`StudioModelUsageControllerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/StudioModelUsageControllerTest.java) |
+| Assistant/账本提交、processor fencing、两条 USER 的有序 Provider Turn | [`ThreadProcessorIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/ThreadProcessorIntegrationTest.java) |
+| Record 的 Thread 归属、不变量与正 ID | [`ModelUsageRecordTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageRecordTest.java) |
+| 前端 Thread Usage API 路径与十进制字符串 ID | [`harness-service.test.ts`](../../frontend/src/shared/api/harness-service.test.ts)、[`agent-service.test.ts`](../../frontend/src/shared/api/agent-service.test.ts) |

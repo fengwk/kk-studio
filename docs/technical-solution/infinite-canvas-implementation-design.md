@@ -22,12 +22,15 @@
 | 项 | 状态 |
 | --- | --- |
 | Maven module `studio` | 已注册；纯领域包 `model` / `canvas` / `workflow` / `runtime` |
-| core Studio 适配 | `StudioConfiguration` + stub services + 内存 FunctionCatalog |
+| core Studio 适配 | `DurableCanvasService` + 内存 FunctionCatalog；Resource/Workflow/Function Runtime 仍为 stub |
 | share DTO | `share.model.studio.*` |
 | web API | `/api/canvases`、`/api/functions`、`/api/workflows` |
+| Canvas DB schema | H2/MySQL 已落地 `canvas_document` / `canvas_node` / `canvas_link` / `canvas_command` |
+| Canvas Command | 已支持 create text/generate-text/link、move nodes、delete node；revision 与幂等冲突已落地 |
+| Canvas 前端 | Library/Create 已接真实 API；Editor snapshot 与 command 闭环待接 |
 | 生成 Provider | **未实现**（`system.generate-*` 仅 Catalog 定义） |
 | Agent Function Adapter | **未实现**（`system.agent.execute` 仅 Catalog 定义） |
-| DB schema / Worker | **未实现** |
+| Resource / FunctionRun / Workflow schema 与 Worker | **未实现** |
 
 ## 2. 核心原则
 
@@ -1071,7 +1074,7 @@ Workflow Output 聚合 Step 的 Run 所属 Resource 后，创建父 FunctionRun 
 
 ## 15. Agent 接入边界
 
-Agent Harness 完成后由 `core` 提供适配器，`studio` 不依赖其实现。本方案只冻结端口职责，不冻结 AgentRef、Snapshot、SessionMode、HTTP API 或 Harness 类型。
+Agent Harness 已以 Session Entry Tree 与 AgentThread 落地；Studio Agent Adapter 仍由 `core` 提供，`studio` 不依赖其实现。本方案只冻结端口职责，不冻结 AgentRef、Snapshot、HTTP API 或 Harness 类型。
 
 本节 Java 片段表示 studio 侧所需的最小归一化语义，不是对未来 Agent Harness API 的签名要求；Adapter 可以按最终 Harness 契约转换。
 
@@ -1113,12 +1116,11 @@ public record AgentExecutionRequest(
 public record AgentExecutionResult(
     String finalReport,
     List<OutputPublication> resources,
-    String externalSessionRef,
-    String externalRunRef) {}
+    String activityRef) {}
 ```
 
 Harness ArtifactRef 由 Adapter 读取或转存到 ResourceStore，再生成 OutputPublication；Artifact ID 不作为 studio Resource ID。
-Dock 直接调用的 finalReport 保持 Run owner，并由 Thread 展示；用户选择放入 Canvas 时通过 `CreateNodes` 提取。FunctionNode 调用才进入 Canvas output publication barrier。
+Dock 直接调用的 finalReport 保持 Studio FunctionRun owner，并由 Agent activity adapter 展示；用户选择放入 Canvas 时通过 `CreateNodes` 提取。FunctionNode 调用才进入 Canvas output publication barrier。
 
 ### 15.3 Tool Registration
 
@@ -1190,7 +1192,7 @@ core/src/main/java/fun/fengwk/kkstudio/core/studio
 
 ## 17. 存储模型
 
-MySQL 5.7 与 H2 使用同一逻辑 schema。所有 `*_json` 字段使用 `longtext` 并在 application/domain codec 中校验，不依赖数据库专有 JSON 查询；业务 ID 使用 BIGINT，Web 层序列化为字符串；通用时间字段沿用仓库 `gmt_create` / `gmt_modified` 命名。除 append-only Event/Version 表外，可更新表统一带 `version` 行版本用于持久化 CAS，它与 Canvas/Workflow 业务 revision 不同。
+本节定义完整目标 schema；当前仅落地 `canvas_document`、`canvas_node`、`canvas_link` 与 `canvas_command`，具体当前字段以 [storage-models.md](storage-models.md) 和 H2/MySQL schema 为准。完整目标中 MySQL 5.7 与 H2 使用同一逻辑 schema。所有 `*_json` 字段使用 `longtext` 并在 application/domain codec 中校验，不依赖数据库专有 JSON 查询；业务 ID 使用 BIGINT，Web 层序列化为字符串；通用时间字段沿用仓库 `gmt_create` / `gmt_modified` 命名。除 append-only Event/Version 表外，可更新表统一带 `version` 行版本用于持久化 CAS，它与 Canvas/Workflow 业务 revision 不同。
 
 ### 17.1 表清单
 
@@ -1864,7 +1866,7 @@ interface NodeRendererContribution {
 
 Function renderer 根据 `rendererKey` 选择生成、Agent、Workflow 或通用 FunctionNode UI。未知类型使用可检查的 fallback，不阻止打开文档。
 
-Agent Activity 通过前端 Adapter DTO 和可选 `AgentActivityContribution` 嵌入，只接收 externalSessionRef/externalRunRef 与只读 activity stream；Canvas feature 不导入 Harness Session Store、Timeline builder 或 Tool renderer 实现。Contribution 不可用时显示通用 FunctionRun 状态和跳转链接。
+Agent Activity 通过前端 Adapter DTO 和可选 `AgentActivityContribution` 嵌入，只接收不透明 `activityRef` 与只读 activity stream；Canvas feature 不导入 Harness Thread Store、Timeline builder 或 Tool renderer 实现。Contribution 不可用时显示通用 FunctionRun 状态和跳转链接。
 
 ### 20.6 Resource Mention
 

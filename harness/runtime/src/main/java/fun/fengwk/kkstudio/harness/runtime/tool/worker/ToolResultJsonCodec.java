@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /** Strict persistence codec for final and partial Tool results. */
 public final class ToolResultJsonCodec {
@@ -22,15 +23,21 @@ public final class ToolResultJsonCodec {
 
   private ToolResultJsonCodec() {}
 
-  public static String encode(ToolResult result) {
+  /** Canonical object tree used by persistence and ThreadEvent partialResults. */
+  public static JsonNode encodeNode(ToolResult result) {
+    Objects.requireNonNull(result, "result");
     ObjectNode node = OBJECT_MAPPER.createObjectNode();
     node.put("toolCallId", result.toolCallId());
     ArrayNode contents = node.putArray("contents");
     result.contents().forEach(content -> contents.add(encodeContent(content)));
     node.put("error", result.error());
     node.set("details", readObject(result.detailsJson(), "detailsJson"));
+    return node;
+  }
+
+  public static String encode(ToolResult result) {
     try {
-      return OBJECT_MAPPER.writeValueAsString(node);
+      return OBJECT_MAPPER.writeValueAsString(encodeNode(result));
     } catch (JsonProcessingException exception) {
       throw new IllegalArgumentException("cannot encode tool result", exception);
     }

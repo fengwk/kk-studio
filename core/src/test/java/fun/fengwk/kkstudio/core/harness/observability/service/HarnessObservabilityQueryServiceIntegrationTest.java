@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.core.harness.observability.service;
 
-import static fun.fengwk.kkstudio.core.harness.HarnessUsageFixtures.toolCallsUsageDraft;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -15,282 +14,247 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.harness.observability.service.impl.HarnessObservabilityQueryServiceImpl;
-import fun.fengwk.kkstudio.core.harness.run.service.DatabaseToolPreparationPort;
-import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
-import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
-import fun.fengwk.kkstudio.core.harness.run.store.SnowflakeRunIdGenerator;
-import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
-import fun.fengwk.kkstudio.core.harness.session.store.SnowflakeSessionIdGenerator;
-import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProperties;
-import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
-import fun.fengwk.kkstudio.core.harness.tool.worker.DatabaseArtifactStore;
-import fun.fengwk.kkstudio.harness.model.ModelCost;
-import fun.fengwk.kkstudio.harness.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
-import fun.fengwk.kkstudio.harness.runtime.run.AgentRun;
-import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
-import fun.fengwk.kkstudio.harness.runtime.run.RunEventPayloads;
-import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshotEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
-import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
+import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
+import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
+import fun.fengwk.kkstudio.core.harness.task.store.mapper.HarnessSubagentTaskMapper;
+import fun.fengwk.kkstudio.core.harness.task.store.model.HarnessSubagentTaskDO;
+import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadEventMapper;
+import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadMapper;
+import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadDO;
+import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadEventDO;
+import fun.fengwk.kkstudio.core.harness.tool.store.DatabaseArtifactStore;
+import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
+import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
+import fun.fengwk.kkstudio.harness.runtime.task.TaskReport;
+import fun.fengwk.kkstudio.harness.runtime.task.TaskResultFormatter;
+import fun.fengwk.kkstudio.harness.runtime.task.TaskState;
+import fun.fengwk.kkstudio.harness.runtime.task.WorkingCopyPolicy;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventType;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.Artifact;
-import fun.fengwk.kkstudio.harness.tool.ToolCall;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
-import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
+import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.share.model.RootActivityDTO;
-import fun.fengwk.kkstudio.share.model.RunEventDTO;
 import fun.fengwk.kkstudio.share.model.SubagentTaskDTO;
 import fun.fengwk.kkstudio.share.model.SubagentTaskReportDTO;
+import fun.fengwk.kkstudio.share.model.ThreadEventDTO;
 import fun.fengwk.kkstudio.share.model.ToolArtifactRefDTO;
 import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
 
-import java.math.BigDecimal;
-import java.nio.file.Path;
-import java.sql.Timestamp;
-import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayList;
+import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 /**
- * Integration coverage for the observability query service: Run event sequence cursor paging, root
- * activity eventId cursor + child-session root resolution, tool invocation projection (with the new
- * persistent fields), subagent task projection including the report payload, and artifact bytes
- * round-trip.
+ * Observability query integration: ThreadEvent id-cursor paging, root-tree activity projection,
+ * tool invocation / subagent task DTO fields, and artifact lookup against the current Thread
+ * schema.
  */
 @SpringBootTest(classes = CoreTestApplication.class)
 class HarnessObservabilityQueryServiceIntegrationTest {
 
-  private static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
+  private static final LocalDateTime NOW = LocalDateTime.of(2026, 7, 1, 0, 0);
 
   @Autowired private HarnessObservabilityQueryServiceImpl service;
-  @Autowired private MysqlHarnessSessionStore sessionStore;
-  @Autowired private SnowflakeSessionIdGenerator sessionIds;
-  @Autowired private MysqlHarnessRunStore runStore;
-  @Autowired private HarnessRunTransactionService transactions;
-  @Autowired private DatabaseToolPreparationPort preparationPort;
-  @Autowired private MysqlToolInvocationStore invocationStore;
-  @Autowired private SnowflakeRunIdGenerator runIds;
+  @Autowired private HarnessSessionMapper sessionMapper;
+  @Autowired private HarnessThreadMapper threadMapper;
+  @Autowired private HarnessThreadEventMapper eventMapper;
+  @Autowired private ToolInvocationMapper invocationMapper;
+  @Autowired private HarnessSubagentTaskMapper taskMapper;
   @Autowired private DatabaseArtifactStore artifactStore;
-  @Autowired private ToolSettingsProperties toolSettingsProperties;
   @Autowired private JdbcTemplate jdbc;
 
   @BeforeEach
   void clean() {
     jdbc.update("delete from model_usage_record");
     jdbc.update("delete from tool_artifact");
-    jdbc.update("delete from harness_run_control_message");
     jdbc.update("delete from harness_subagent_task");
     jdbc.update("delete from tool_invocation");
-    jdbc.update("delete from harness_run_event");
-    jdbc.update("delete from harness_run");
+    jdbc.update("delete from harness_thread_event");
+    jdbc.update("delete from harness_thread_input");
+    jdbc.update("delete from harness_thread");
     jdbc.update("delete from harness_session_entry");
     jdbc.update("delete from harness_session");
   }
 
-  /**
-   * Run events page in sequence order; cursor must be exclusive of the previous sequence. Run event
-   * DTO eventId is the Snowflake id, which differs from the SSE event id (sequence decimal).
-   */
+  /** Thread events page by exclusive event-id cursor and project decimal-string Snowflake ids. */
   @Test
-  void pagesRunEventsBySequenceCursor() {
-    SessionFixture fixture = seedRoot("run-events", false);
-    AgentRun run =
-        transactions.submitUserMessage(fixture.sessionId, fixture.snapshotId, user("hi"), NOW);
-    for (int i = 1; i <= 5; i++) {
-      runStore.append(
-          run.id(),
-          RunEventType.TURN_STARTED,
-          "{\"schemaVersion\":1,\"ordinal\":" + i + "}",
-          NOW.plusMillis(i));
-    }
+  void pagesThreadEventsByEventIdCursor() {
+    long threadId = 7_100_001L;
+    insertThread(threadId, 7_100_101L);
+    // Deliberately reverse createTime so ordering must follow id ASC, not wall-clock.
+    insertEvent(7_100_201L, threadId, ThreadEventType.TURN_STARTED, NOW.plusSeconds(5));
+    insertEvent(7_100_202L, threadId, ThreadEventType.ASSISTANT_STARTED, NOW.plusSeconds(1));
+    insertEvent(7_100_203L, threadId, ThreadEventType.ASSISTANT_COMPLETED, NOW.plusSeconds(3));
+    insertEvent(7_100_204L, threadId, ThreadEventType.THREAD_IDLE, NOW.plusSeconds(2));
+    insertEvent(7_100_205L, threadId, ThreadEventType.THREAD_STARTED, NOW);
 
-    List<RunEventDTO> page1 = service.listRunEvents(Long.toString(run.id()), 0, 2);
-    assertEquals(List.of(1L, 2L), page1.stream().map(RunEventDTO::getSequence).toList());
-    // RunEventDTO.eventId is the global Snowflake id (source.id()), never the sequence.
-    assertEquals(Long.toString(run.id()), page1.get(0).getRunId());
-    // The Snowflake id must be a positive number distinct from the Run-event sequence (1, 2, ...).
-    long snowflakeId = Long.parseLong(page1.get(0).getEventId());
-    assertTrue(snowflakeId > 1000, "eventId should be a Snowflake value: " + snowflakeId);
-    assertTrue(snowflakeId != page1.get(0).getSequence(), "eventId != sequence");
-    assertEquals("turn_started", page1.get(0).getType());
+    List<ThreadEventDTO> page1 = service.listThreadEvents(Long.toString(threadId), 0, 2);
+    assertEquals(
+        List.of("7100201", "7100202"), page1.stream().map(ThreadEventDTO::getEventId).toList());
+    assertEquals(Long.toString(threadId), page1.get(0).getThreadId());
+    assertEquals(ThreadEventType.TURN_STARTED.value(), page1.get(0).getEventType());
+    assertNotNull(page1.get(0).getCreateTime());
 
-    List<RunEventDTO> page2 = service.listRunEvents(Long.toString(run.id()), 2, 10);
-    assertEquals(List.of(3L, 4L, 5L), page2.stream().map(RunEventDTO::getSequence).toList());
+    List<ThreadEventDTO> page2 =
+        service.listThreadEvents(
+            Long.toString(threadId), Long.parseLong(page1.get(1).getEventId()), 10);
+    assertEquals(
+        List.of("7100203", "7100204", "7100205"),
+        page2.stream().map(ThreadEventDTO::getEventId).toList());
 
-    // Run events must serialize all Snowflake bigints as JSON strings.
-    assertEquals(Long.toString(run.id()), page2.get(0).getRunId());
+    // Unknown thread id is a no-op query; invalid ids still reject at the parser boundary.
+    assertTrue(service.listThreadEvents("9999999999", 0, 10).isEmpty());
+    assertThrows(IllegalArgumentException.class, () -> service.listThreadEvents("abc", 0, 10));
+    assertThrows(IllegalArgumentException.class, () -> service.listThreadEvents("0", 0, 10));
   }
 
-  /** Descendant session ids must resolve through rootSessionId before paging activity. */
+  /**
+   * Root activity resolves child sessions to the root tree, pages by exclusive eventId, and keeps
+   * sibling root trees isolated.
+   */
   @Test
-  void pagesRootActivityForChildSessionThroughRootResolution() {
-    SessionFixture root = seedRoot("root", false);
-    SessionFixture child = seedChild(root.sessionId, "child");
+  void pagesRootActivitiesAcrossChildSessionsWithRootIsolation() {
+    long rootSessionId = 7_200_001L;
+    long childSessionId = 7_200_002L;
+    long otherRootSessionId = 7_200_003L;
+    long rootThreadId = 7_200_101L;
+    long childThreadId = 7_200_102L;
+    long otherThreadId = 7_200_103L;
 
-    AgentRun rootRun =
-        transactions.submitUserMessage(root.sessionId, root.snapshotId, user("root"), NOW);
-    AgentRun childRun =
-        transactions.submitUserMessage(child.sessionId, child.snapshotId, user("child"), NOW);
-    runStore.append(
-        rootRun.id(),
-        RunEventType.TURN_STARTED,
-        "{\"schemaVersion\":1,\"k\":\"root\"}",
-        NOW.plusMillis(1));
-    runStore.append(
-        childRun.id(),
-        RunEventType.TURN_STARTED,
-        "{\"schemaVersion\":1,\"k\":\"child\"}",
-        NOW.plusMillis(2));
+    insertRootSession(rootSessionId, "root");
+    insertChildSession(childSessionId, rootSessionId, "child");
+    insertRootSession(otherRootSessionId, "other");
+    insertThread(rootThreadId, rootSessionId);
+    insertThread(childThreadId, childSessionId);
+    insertThread(otherThreadId, otherRootSessionId);
 
-    // Querying via the child session id must still see root-tree events.
+    insertEvent(7_200_201L, rootThreadId, ThreadEventType.TURN_STARTED, NOW);
+    insertEvent(7_200_202L, childThreadId, ThreadEventType.SUBAGENT_STARTED, NOW.plusSeconds(1));
+    insertEvent(7_200_203L, otherThreadId, ThreadEventType.TURN_STARTED, NOW.plusSeconds(2));
+
+    // Query via the child session must still surface the whole root tree (root + child events).
     List<RootActivityDTO> activity =
-        service.listRootActivities(Long.toString(child.sessionId), 0, 10);
+        service.listRootActivities(Long.toString(childSessionId), 0, 10);
     assertEquals(2, activity.size());
-    assertEquals(Long.toString(root.sessionId), activity.get(0).getRootSessionId());
-    assertEquals(Long.toString(root.sessionId), activity.get(1).getRootSessionId());
+    assertEquals(Long.toString(rootSessionId), activity.get(0).getRootSessionId());
+    assertEquals(Long.toString(rootSessionId), activity.get(1).getRootSessionId());
+    assertEquals(Long.toString(rootThreadId), activity.get(0).getThreadId());
+    assertEquals(Long.toString(childThreadId), activity.get(1).getThreadId());
+    assertEquals(
+        List.of("7200201", "7200202"), activity.stream().map(RootActivityDTO::getEventId).toList());
 
     long cursor = Long.parseLong(activity.get(0).getEventId());
     List<RootActivityDTO> tail =
-        service.listRootActivities(Long.toString(child.sessionId), cursor, 10);
+        service.listRootActivities(Long.toString(childSessionId), cursor, 10);
     assertEquals(1, tail.size());
-    assertTrue(Long.parseLong(tail.get(0).getEventId()) > cursor);
-    assertEquals(Long.toString(child.sessionId), tail.get(0).getSessionId());
+    assertEquals("7200202", tail.get(0).getEventId());
+    assertEquals(Long.toString(childSessionId), tail.get(0).getSessionId());
 
-    // Sibling root trees must not leak activity into the current root.
-    SessionFixture otherRoot = seedRoot("other", false);
-    AgentRun otherRun =
-        transactions.submitUserMessage(
-            otherRoot.sessionId, otherRoot.snapshotId, user("other"), NOW);
-    runStore.append(
-        otherRun.id(),
-        RunEventType.TURN_STARTED,
-        "{\"schemaVersion\":1,\"k\":\"other\"}",
-        NOW.plusMillis(3));
     assertTrue(
-        service.listRootActivities(Long.toString(child.sessionId), 0, 50).stream()
-            .allMatch(e -> Long.parseLong(e.getRootSessionId()) == root.sessionId));
+        service.listRootActivities(Long.toString(childSessionId), 0, 50).stream()
+            .allMatch(e -> rootSessionId == Long.parseLong(e.getRootSessionId())));
+
+    IllegalArgumentException missing =
+        assertThrows(
+            IllegalArgumentException.class, () -> service.listRootActivities("9999999999", 0, 10));
+    assertTrue(missing.getMessage().startsWith("unknown session:"));
   }
 
-  /** Tool invocation projection must carry every persistent field and survive JSON parsing. */
+  /** Tool invocation list is ordinal-ordered and projects the durable Thread-scoped fields. */
   @Test
-  void projectsToolInvocationWithAllPersistentFields() {
-    SessionFixture fixture = seedRoot("tool", false);
-    AgentRun queued =
-        transactions.submitUserMessage(fixture.sessionId, fixture.snapshotId, user("go"), NOW);
-    AgentRun claimed =
-        runStore.claimDue("worker-tool", NOW.plusMillis(1), Duration.ofMinutes(1)).orElseThrow();
-    assertEquals(queued.id(), claimed.id());
+  void projectsToolInvocationsByOrdinalWithPersistentFields() {
+    long threadId = 7_300_001L;
+    long assistantEntryId = 7_300_501L;
+    insertThread(threadId, 7_300_101L);
 
-    preparationPort.prepare(
-        claimed,
-        assistantMessage(List.of(new ToolCall("call-1", "write", "{\"path\":\"notes.txt\"}"))),
-        toolCallsUsageDraft(),
-        List.of(new ToolCall("call-1", "write", "{\"path\":\"notes.txt\"}")),
-        List.of(cloudBinding("write")),
-        Path.of("/tmp/environment"),
-        Path.of("/tmp/environment"),
-        List.of(
-            new RunEventDraft(
-                RunEventType.ASSISTANT_COMPLETED, RunEventPayloads.forAttempt(claimed))),
-        NOW.plusSeconds(1));
-    ToolInvocation stored = invocationStore.listByRun(queued.id()).get(0);
+    // Insert higher ordinal first; projection must still return ordinal ASC.
+    insertInvocation(
+        7_300_301L, threadId, assistantEntryId, 1, "call-b", "read", "QUEUED", "ALLOW", null);
+    insertInvocation(
+        7_300_302L, threadId, assistantEntryId, 0, "call-a", "write", "RUNNING", "ASK", "ALLOW");
 
-    List<ToolInvocationDTO> projected = service.listToolInvocations(Long.toString(queued.id()));
-    assertEquals(1, projected.size());
-    ToolInvocationDTO dto = projected.get(0);
-    assertEquals(Long.toString(stored.id()), dto.getId());
-    assertEquals(Long.toString(stored.runId()), dto.getRunId());
-    assertEquals(Long.toString(stored.assistantEntryId()), dto.getAssistantEntryId());
-    assertEquals(stored.toolName(), dto.getToolName());
-    assertEquals(stored.toolCallId(), dto.getToolCallId());
-    assertEquals(stored.toolVersion(), dto.getToolVersion());
-    assertEquals(stored.targetType().name(), dto.getTargetType());
-    assertEquals(stored.argumentsJson(), dto.getArgumentsJson());
-    assertEquals(stored.status().name(), dto.getStatus());
-    assertEquals(stored.permissionAction().name(), dto.getPermissionAction());
-    assertNotNull(dto.getDeadlineAt());
-    assertNotNull(dto.getCreateTime());
+    List<ToolInvocationDTO> projected = service.listToolInvocations(Long.toString(threadId));
+    assertEquals(2, projected.size());
+    assertEquals(List.of(0, 1), projected.stream().map(ToolInvocationDTO::getOrdinal).toList());
 
-    ToolInvocationDTO single = service.getToolInvocation(Long.toString(stored.id()));
-    assertEquals(stored.toolName(), single.getToolName());
+    ToolInvocationDTO first = projected.get(0);
+    assertEquals("7300302", first.getId());
+    assertEquals(Long.toString(threadId), first.getThreadId());
+    assertEquals(Long.toString(assistantEntryId), first.getAssistantEntryId());
+    assertEquals("write", first.getToolName());
+    assertEquals("1", first.getToolVersion());
+    assertEquals("CLOUD", first.getTargetType());
+    assertEquals("{\"path\":\"notes.txt\"}", first.getArgumentsJson());
+    assertEquals("RUNNING", first.getStatus());
+    assertEquals("ASK", first.getPermissionAction());
+    assertEquals("ALLOW", first.getPermissionDecision());
+    assertNotNull(first.getDeadlineAt());
+    assertNotNull(first.getCreateTime());
+
+    ToolInvocationDTO single = service.getToolInvocation("7300302");
+    assertEquals("write", single.getToolName());
+    assertEquals(0, single.getOrdinal());
+
+    assertTrue(service.listToolInvocations("9999999999").isEmpty());
+    IllegalArgumentException missing =
+        assertThrows(IllegalArgumentException.class, () -> service.getToolInvocation("9999999999"));
+    assertTrue(missing.getMessage().startsWith("unknown tool invocation:"));
+    assertThrows(IllegalArgumentException.class, () -> service.getToolInvocation("abc"));
   }
 
-  /** Subagent task projection must read mapper output and parse the persisted report JSON. */
+  /** Session task projection surfaces parent/child Thread ids and decodes the report payload. */
   @Test
-  void projectsSubagentTasksForParentSession() {
-    SessionFixture root = seedRoot("subagent", false);
-    long parentInvocation = runIds.newRunEventId();
-    long childSession = sessionIds.newSessionId();
-    long childRun = runIds.newRunId();
+  void projectsSessionTasksAndRejectsMalformedReportJson() {
+    long parentSessionId = 7_400_001L;
+    long parentThreadId = 7_400_101L;
+    long childSessionId = 7_400_002L;
+    long childThreadId = 7_400_102L;
+    long parentInvocationId = 7_400_301L;
+    insertRootSession(parentSessionId, "parent-tasks");
+
     String reportJson =
-        "{"
-            + "\"childSessionId\":\""
-            + childSession
-            + "\","
-            + "\"childRunId\":\""
-            + childRun
-            + "\","
-            + "\"status\":\"SUCCEEDED\","
-            + "\"finalReport\":\"done\","
-            + "\"turnCount\":3,"
-            + "\"toolCount\":2,"
-            + "\"workingCopyPolicy\":\"FORK\","
-            + "\"workingCopyRevision\":\"rev-1\","
-            + "\"artifacts\":["
-            + "  {\"artifactId\":\"11\",\"mediaType\":\"text/plain\",\"sizeBytes\":4}"
-            + "]}";
-    jdbc.update(
-        "insert into harness_subagent_task"
-            + " (parent_invocation_id, parent_session_id, child_session_id, child_run_id,"
-            + " target_agent, working_copy_policy, working_copy_revision, max_turns,"
-            + " idle_timeout_millis, status, report_json, gmt_create, gmt_modified) values"
-            + " (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        parentInvocation,
-        root.sessionId,
-        childSession,
-        childRun,
-        "Child",
-        "FORK",
-        "rev-1",
-        5,
-        30000L,
-        "SUCCEEDED",
-        reportJson,
-        Timestamp.from(NOW),
-        Timestamp.from(NOW.plusSeconds(1)));
+        TaskResultFormatter.json(
+            new TaskReport(
+                childSessionId,
+                childThreadId,
+                TaskState.SUCCEEDED,
+                "done",
+                List.of(new ArtifactRef("11", "text/plain", 4L)),
+                3,
+                2,
+                WorkingCopyPolicy.FORK,
+                "rev-1"));
 
-    List<SubagentTaskDTO> tasks = service.listSessionTasks(Long.toString(root.sessionId));
+    HarnessSubagentTaskDO task = new HarnessSubagentTaskDO();
+    task.setParentInvocationId(parentInvocationId);
+    task.setParentSessionId(parentSessionId);
+    task.setParentThreadId(parentThreadId);
+    task.setChildSessionId(childSessionId);
+    task.setChildThreadId(childThreadId);
+    task.setTargetAgent("Child");
+    task.setWorkingCopyPolicy(WorkingCopyPolicy.FORK.name());
+    task.setWorkingCopyRevision("rev-1");
+    task.setMaxTurns(5);
+    task.setStatus(TaskState.SUCCEEDED.name());
+    task.setReportJson(reportJson);
+    task.setCreateTime(NOW);
+    task.setUpdateTime(NOW.plusSeconds(1));
+    taskMapper.insert(task);
+
+    List<SubagentTaskDTO> tasks = service.listSessionTasks(Long.toString(parentSessionId));
     assertEquals(1, tasks.size());
-    SubagentTaskDTO task = tasks.get(0);
-    assertEquals(Long.toString(parentInvocation), task.getParentInvocationId());
-    assertEquals(Long.toString(root.sessionId), task.getParentSessionId());
-    assertEquals(Long.toString(childSession), task.getChildSessionId());
-    assertEquals(Long.toString(childRun), task.getChildRunId());
-    assertEquals("Child", task.getTargetAgent());
-    assertEquals(5, task.getMaxTurns());
-    assertEquals(30000L, task.getIdleTimeoutMillis());
+    SubagentTaskDTO projected = tasks.get(0);
+    assertEquals(Long.toString(parentInvocationId), projected.getParentInvocationId());
+    assertEquals(Long.toString(parentSessionId), projected.getParentSessionId());
+    assertEquals(Long.toString(parentThreadId), projected.getParentThreadId());
+    assertEquals(Long.toString(childSessionId), projected.getChildSessionId());
+    assertEquals(Long.toString(childThreadId), projected.getChildThreadId());
+    assertEquals("Child", projected.getTargetAgent());
+    assertEquals(5, projected.getMaxTurns());
+    assertEquals(TaskState.SUCCEEDED.name(), projected.getStatus());
 
-    SubagentTaskReportDTO report = task.getReport();
+    SubagentTaskReportDTO report = projected.getReport();
     assertNotNull(report);
-    assertEquals(Long.toString(childSession), report.getChildSessionId());
-    assertEquals(Long.toString(childRun), report.getChildRunId());
+    assertEquals(Long.toString(childSessionId), report.getChildSessionId());
+    assertEquals(Long.toString(childThreadId), report.getChildThreadId());
     assertEquals("SUCCEEDED", report.getStatus());
     assertEquals("done", report.getFinalReport());
     assertEquals(3, report.getTurnCount());
@@ -302,37 +266,34 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     assertEquals("11", artifact.getArtifactId());
     assertEquals("text/plain", artifact.getMediaType());
     assertEquals(4L, artifact.getSizeBytes());
-  }
 
-  /** Non-empty malformed report_json must throw IllegalStateException, not silently return null. */
-  @Test
-  void malformedReportJsonThrowsIllegalStateException() {
-    long sessionId = sessionIds.newSessionId();
-    sessionStore.create(Session.root(sessionId, null, "corrupted-report", false, NOW));
-    jdbc.update(
-        "insert into harness_subagent_task"
-            + " (parent_invocation_id, parent_session_id, child_session_id, child_run_id,"
-            + " target_agent, working_copy_policy, working_copy_revision, max_turns,"
-            + " idle_timeout_millis, status, report_json, gmt_create, gmt_modified) values"
-            + " (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        runIds.newRunEventId(),
-        sessionId,
-        sessionIds.newSessionId(),
-        runIds.newRunId(),
-        "Child",
-        "FORK",
-        "rev-1",
-        5,
-        30000L,
-        "PENDING",
-        "{not-json}",
-        Timestamp.from(NOW),
-        Timestamp.from(NOW));
+    // Malformed non-blank report_json must fail conversion rather than silently null the report.
+    long badSessionId = 7_400_011L;
+    insertRootSession(badSessionId, "bad-report");
+    HarnessSubagentTaskDO bad = new HarnessSubagentTaskDO();
+    bad.setParentInvocationId(7_400_311L);
+    bad.setParentSessionId(badSessionId);
+    bad.setParentThreadId(7_400_111L);
+    bad.setChildSessionId(7_400_012L);
+    bad.setChildThreadId(7_400_112L);
+    bad.setTargetAgent("Child");
+    bad.setWorkingCopyPolicy(WorkingCopyPolicy.FORK.name());
+    bad.setWorkingCopyRevision("rev-1");
+    bad.setMaxTurns(5);
+    bad.setStatus(TaskState.RUNNING.name());
+    bad.setReportJson("{not-json}");
+    bad.setCreateTime(NOW);
+    bad.setUpdateTime(NOW);
+    taskMapper.insert(bad);
     assertThrows(
-        IllegalStateException.class, () -> service.listSessionTasks(Long.toString(sessionId)));
+        IllegalArgumentException.class,
+        () -> service.listSessionTasks(Long.toString(badSessionId)));
+
+    // Unknown parent session simply returns empty under the current query contract.
+    assertTrue(service.listSessionTasks("9999999999").isEmpty());
   }
 
-  /** Artifact resolution returns raw bytes; illegal ids throw IllegalArgumentException (400). */
+  /** Artifact lookup returns raw bytes; missing/invalid ids map to IllegalArgumentException. */
   @Test
   void resolvesArtifactBytesAndDistinguishesMissingFromInvalid() {
     var ref = artifactStore.save("application/json", "raw", "{\"ok\":true}".getBytes());
@@ -351,124 +312,91 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     assertThrows(IllegalArgumentException.class, () -> service.getArtifact("-1"));
   }
 
-  /** Unknown session/run must surface as IllegalArgumentException with the documented prefix. */
-  @Test
-  void unknownSessionAndRunYieldMissingResourceExceptions() {
-    SessionFixture fixture = seedRoot("unknown", false);
-
-    IllegalArgumentException sessionMissing =
-        assertThrows(
-            IllegalArgumentException.class, () -> service.listRootActivities("9999999999", 0, 10));
-    assertTrue(sessionMissing.getMessage().startsWith("unknown session:"));
-
-    IllegalArgumentException runMissing =
-        assertThrows(
-            IllegalArgumentException.class, () -> service.listRunEvents("9999999999", 0, 10));
-    assertTrue(runMissing.getMessage().startsWith("unknown run:"));
-
-    IllegalArgumentException sessionForTasks =
-        assertThrows(IllegalArgumentException.class, () -> service.listSessionTasks("9999999999"));
-    assertTrue(sessionForTasks.getMessage().startsWith("unknown session:"));
-
-    // Existing session + valid cursor must not throw.
-    assertTrue(service.listRootActivities(Long.toString(fixture.sessionId), 0, 10).isEmpty());
-
-    // Sanity: tool invocation query against an unknown run yields an explicit missing prefix.
-    IllegalArgumentException invocationRunMissing =
-        assertThrows(
-            IllegalArgumentException.class, () -> service.listToolInvocations("9999999999"));
-    assertTrue(invocationRunMissing.getMessage().startsWith("unknown run:"));
-
-    IllegalArgumentException invocationMissing =
-        assertThrows(IllegalArgumentException.class, () -> service.getToolInvocation("9999999999"));
-    assertTrue(invocationMissing.getMessage().startsWith("unknown tool invocation:"));
-  }
-
   // -------------------- fixtures --------------------
 
-  private SessionFixture seedRoot(String title, boolean yoloEnabled) {
-    long sessionId = sessionIds.newSessionId();
-    sessionStore.create(Session.root(sessionId, null, title, yoloEnabled, NOW));
-    long snapshotId = sessionIds.newEntryId();
-    AgentSnapshotEntryPayload snapshot =
-        new AgentSnapshotEntryPayload(
-            new AgentSnapshot("system", "model", "default", List.of(), List.of(), List.of(), "{}"));
-    sessionStore.append(
-        new SessionEntry(snapshotId, sessionId, null, null, snapshot.type(), snapshot, NOW),
-        null,
-        0L);
-    return new SessionFixture(sessionId, snapshotId);
+  private void insertRootSession(long sessionId, String title) {
+    HarnessSessionDO session = new HarnessSessionDO();
+    session.setId(sessionId);
+    session.setAgentDefinitionId(1L);
+    session.setTitle(title);
+    session.setRootSessionId(sessionId);
+    session.setDepth(0);
+    session.setVersion(0L);
+    session.setCreateTime(NOW);
+    session.setUpdateTime(NOW);
+    sessionMapper.insert(session);
   }
 
-  private SessionFixture seedChild(long rootSessionId, String title) {
-    long sessionId = sessionIds.newSessionId();
-    Session child =
-        new Session(
-            sessionId,
-            null,
-            title,
-            null,
-            null,
-            rootSessionId,
-            rootSessionId,
-            null,
-            1,
-            false,
-            0,
-            NOW,
-            NOW);
-    sessionStore.createFork(child, List.of());
-    long snapshotId = sessionIds.newEntryId();
-    AgentSnapshotEntryPayload snapshot =
-        new AgentSnapshotEntryPayload(
-            new AgentSnapshot("system", "model", "default", List.of(), List.of(), List.of(), "{}"));
-    sessionStore.append(
-        new SessionEntry(snapshotId, sessionId, null, null, snapshot.type(), snapshot, NOW),
-        null,
-        0L);
-    return new SessionFixture(sessionId, snapshotId);
+  private void insertChildSession(long sessionId, long rootSessionId, String title) {
+    HarnessSessionDO session = new HarnessSessionDO();
+    session.setId(sessionId);
+    session.setAgentDefinitionId(1L);
+    session.setTitle(title);
+    session.setParentSessionId(rootSessionId);
+    session.setRootSessionId(rootSessionId);
+    session.setDepth(1);
+    session.setVersion(0L);
+    session.setCreateTime(NOW);
+    session.setUpdateTime(NOW);
+    sessionMapper.insert(session);
   }
 
-  private static AgentMessage user(String text) {
-    return new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)));
+  private void insertThread(long threadId, long sessionId) {
+    HarnessThreadDO thread = new HarnessThreadDO();
+    thread.setId(threadId);
+    thread.setSessionId(sessionId);
+    thread.setHeadEntryId(1L);
+    thread.setAgentDefinitionId(1L);
+    thread.setRuntimeConfigJson("{}");
+    thread.setYoloEnabled(false);
+    thread.setInputSequence(0L);
+    thread.setVersion(0L);
+    thread.setCreateTime(NOW);
+    thread.setUpdateTime(NOW);
+    threadMapper.insert(thread);
   }
 
-  private static MessageEntryPayload assistantMessage(List<ToolCall> calls) {
-    List<AgentMessageContent> contents = new ArrayList<>();
-    contents.add(new TextMessageContent("calling"));
-    calls.forEach(
-        call ->
-            contents.add(
-                new ToolCallMessageContent(call.id(), call.toolName(), call.argumentsJson())));
-    return new MessageEntryPayload(
-        new AgentMessage(AgentMessageRole.ASSISTANT, contents),
-        new AssistantMessageMetadata(
-            ProviderStopReason.TOOL_CALLS,
-            new ModelUsage(1, 1, 0, 0, 0, 0, 2),
-            new ModelCost(
-                "USD",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO)));
+  private void insertEvent(
+      long eventId, long threadId, ThreadEventType type, LocalDateTime createTime) {
+    HarnessThreadEventDO event = new HarnessThreadEventDO();
+    event.setId(eventId);
+    event.setThreadId(threadId);
+    event.setEventType(type.value());
+    event.setPayloadJson("{\"schemaVersion\":1}");
+    event.setCreateTime(createTime);
+    eventMapper.insert(event);
   }
 
-  private static ToolBinding cloudBinding(String name) {
-    return ToolBinding.of(
-        new ToolDescriptor(
-            name,
-            "1",
-            name,
-            null,
-            new ToolParamsSchema(
-                "", Map.of("path", new ToolStringSchema("path")), Set.of("path"), false),
-            ToolExecutionMode.CLOUD,
-            ToolSideEffect.IDEMPOTENT,
-            Duration.ofSeconds(30)));
+  private void insertInvocation(
+      long id,
+      long threadId,
+      long assistantEntryId,
+      int ordinal,
+      String toolCallId,
+      String toolName,
+      String status,
+      String permissionAction,
+      String permissionDecision) {
+    ToolInvocationDO row = new ToolInvocationDO();
+    row.setId(id);
+    row.setThreadId(threadId);
+    row.setAssistantEntryId(assistantEntryId);
+    row.setOrdinal(ordinal);
+    row.setToolCallId(toolCallId);
+    row.setToolName(toolName);
+    row.setToolVersion("1");
+    row.setTargetType("CLOUD");
+    row.setArgumentsJson("{\"path\":\"notes.txt\"}");
+    row.setStatus(status);
+    row.setPermissionAction(permissionAction);
+    row.setPermissionDecision(permissionDecision);
+    row.setSideEffect("IDEMPOTENT");
+    row.setDeadlineAt(NOW.plusHours(1));
+    row.setCreateTime(NOW);
+    row.setUpdateTime(NOW);
+    if ("RUNNING".equals(status)) {
+      row.setStartedAt(NOW.plusSeconds(1));
+    }
+    invocationMapper.insert(row);
   }
-
-  private record SessionFixture(long sessionId, long snapshotId) {}
 }

@@ -4,7 +4,7 @@
 
 | 域 | 说明 |
 | --- | --- |
-| **Harness / AI** | 可恢复 Agent 会话、Run、Tool、观测 |
+| **Harness / AI** | 可恢复 Agent Thread、Tool 与观测 |
 | **Studio / Canvas** | 资源优先的画布工作台、Function、Workflow |
 
 架构事实源：
@@ -14,9 +14,9 @@
 
 ## 能力摘要
 
-- Harness：Session Entry 基线 + Run Event 覆盖 + SSE cursor 恢复
-- Studio：领域模块 `studio` 已立；Catalog 可列；写路径多为 stub（501）
-- 前端：AI 接真实 API；Canvas 为带 `domainKind` 的高保真本地演示
+- Harness：Session Entry Tree 基线 + ThreadEvent journal + SSE cursor 恢复
+- Studio：Canvas 文档、节点、Link、Command 已最小持久化；Resource、FunctionRun、Workflow Runtime 待补
+- 前端：AI 接真实 Thread API；Canvas Library/Create 接真实 API，Editor 仍使用本地交互投影
 
 ## 模块
 

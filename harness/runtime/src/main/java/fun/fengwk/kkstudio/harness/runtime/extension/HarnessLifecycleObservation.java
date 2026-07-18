@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.extension;
 
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
-import fun.fengwk.kkstudio.harness.runtime.run.RunStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 
 import java.time.Instant;
@@ -11,30 +10,27 @@ import java.util.Objects;
 public sealed interface HarnessLifecycleObservation
     permits HarnessLifecycleObservation.TurnStarted,
         HarnessLifecycleObservation.AssistantCompleted,
-        HarnessLifecycleObservation.RunTerminated,
+        HarnessLifecycleObservation.ThreadIdle,
         HarnessLifecycleObservation.CompactionCompleted,
         HarnessLifecycleObservation.ToolCompleted {
 
-  record TurnStarted(long runId, long sessionId, int attempt, int turnIndex, Instant occurredAt)
+  record TurnStarted(long threadId, long sessionId, Instant occurredAt)
       implements HarnessLifecycleObservation {
     public TurnStarted {
-      requireRunAndSessionIds(runId, sessionId);
-      if (attempt <= 0 || turnIndex < 0) {
-        throw new IllegalArgumentException("attempt must be positive and turnIndex non-negative");
-      }
+      requireThreadAndSessionIds(threadId, sessionId);
       occurredAt = Objects.requireNonNull(occurredAt, "occurredAt");
     }
   }
 
   record AssistantCompleted(
-      long runId,
+      long threadId,
       long sessionId,
       int toolCallCount,
       ProviderStopReason stopReason,
       Instant occurredAt)
       implements HarnessLifecycleObservation {
     public AssistantCompleted {
-      requireRunAndSessionIds(runId, sessionId);
+      requireThreadAndSessionIds(threadId, sessionId);
       if (toolCallCount < 0) {
         throw new IllegalArgumentException("toolCallCount must not be negative");
       }
@@ -43,22 +39,19 @@ public sealed interface HarnessLifecycleObservation
     }
   }
 
-  record RunTerminated(long runId, long sessionId, RunStatus status, Instant occurredAt)
+  record ThreadIdle(long threadId, long sessionId, Instant occurredAt)
       implements HarnessLifecycleObservation {
-    public RunTerminated {
-      requireRunAndSessionIds(runId, sessionId);
-      status = Objects.requireNonNull(status, "status");
-      if (!status.terminal()) {
-        throw new IllegalArgumentException("status must be terminal");
-      }
+    public ThreadIdle {
+      requireThreadAndSessionIds(threadId, sessionId);
       occurredAt = Objects.requireNonNull(occurredAt, "occurredAt");
     }
   }
 
-  record CompactionCompleted(long runId, long sessionId, long firstKeptEntryId, Instant occurredAt)
+  record CompactionCompleted(
+      long threadId, long sessionId, long firstKeptEntryId, Instant occurredAt)
       implements HarnessLifecycleObservation {
     public CompactionCompleted {
-      requireRunAndSessionIds(runId, sessionId);
+      requireThreadAndSessionIds(threadId, sessionId);
       if (firstKeptEntryId <= 0) {
         throw new IllegalArgumentException("firstKeptEntryId must be positive");
       }
@@ -67,11 +60,15 @@ public sealed interface HarnessLifecycleObservation
   }
 
   record ToolCompleted(
-      long invocationId, long runId, ToolInvocationStatus status, String error, Instant occurredAt)
+      long invocationId,
+      long threadId,
+      ToolInvocationStatus status,
+      String error,
+      Instant occurredAt)
       implements HarnessLifecycleObservation {
     public ToolCompleted {
-      if (invocationId <= 0 || runId <= 0) {
-        throw new IllegalArgumentException("invocationId and runId must be positive");
+      if (invocationId <= 0 || threadId <= 0) {
+        throw new IllegalArgumentException("invocationId and threadId must be positive");
       }
       status = Objects.requireNonNull(status, "status");
       if (!status.isTerminal()) {
@@ -81,9 +78,9 @@ public sealed interface HarnessLifecycleObservation
     }
   }
 
-  private static void requireRunAndSessionIds(long runId, long sessionId) {
-    if (runId <= 0 || sessionId <= 0) {
-      throw new IllegalArgumentException("runId and sessionId must be positive");
+  private static void requireThreadAndSessionIds(long threadId, long sessionId) {
+    if (threadId <= 0 || sessionId <= 0) {
+      throw new IllegalArgumentException("threadId and sessionId must be positive");
     }
   }
 }

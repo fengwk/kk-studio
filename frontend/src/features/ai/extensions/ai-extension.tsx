@@ -1,12 +1,12 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, type PropsWithChildren, type ReactNode } from 'react'
 import { SearchField, StateBlock } from '@/features/ai/AiConsoleCards'
-import { ConfirmActionModal, CreateSessionModal, ResourceEditorModal } from '@/features/ai/AiConsoleModals'
-import { AgentsPanel, ChatSessionsPanel, ModelsPanel, ProvidersPanel } from '@/features/ai/AiConsolePanels'
+import { ConfirmActionModal, CreateThreadModal, ResourceEditorModal } from '@/features/ai/AiConsoleModals'
+import { AgentsPanel, ChatThreadsPanel, ModelsPanel, ProvidersPanel } from '@/features/ai/AiConsolePanels'
 import { ComfyuiWorkflowEditorModal } from '@/features/ai/ComfyuiWorkflowEditorModal'
 import { ComfyuiWorkflowsPanel } from '@/features/ai/ComfyuiWorkflowsPanel'
 import { ComfyuiRunModal } from '@/features/ai/ComfyuiRunModal'
-import { AgentSessionPage } from '@/features/ai/AgentSessionPage'
+import { AgentThreadPage } from '@/features/ai/AgentThreadPage'
 import { useAiConsoleController } from '@/features/ai/useAiConsoleController'
 import { useComfyuiPageController } from '@/features/ai/useComfyuiPageController'
 import type { ExtensionComponentProps, TrustedReactExtension } from '@/platform/extensions/types'
@@ -57,19 +57,19 @@ function AiConsoleFrame({ content, children }: ExtensionComponentProps & { conte
   )
 }
 
-function SessionsPage({ children }: ExtensionComponentProps) {
+function ThreadsPage({ children }: ExtensionComponentProps) {
   return (
     <AiConsoleRuntime>
-      <AiConsoleFrame content={<SessionsPanel />}>
+      <AiConsoleFrame content={<ThreadsPanel />}>
         {children}
       </AiConsoleFrame>
     </AiConsoleRuntime>
   )
 }
 
-function SessionsPanel() {
+function ThreadsPanel() {
   const controller = useAiConsole()
-  return <ChatSessionsPanel {...controller.chatPanelProps} />
+  return <ChatThreadsPanel {...controller.chatPanelProps} />
 }
 
 function AgentsPage({ children }: ExtensionComponentProps) {
@@ -187,9 +187,9 @@ function ComfyuiRunModalHost() {
   )
 }
 
-function CreateSessionDialog() {
+function CreateThreadDialog() {
   const controller = useOptionalAiConsole()
-  return controller ? <CreateSessionModal {...controller.createSessionModal} /> : null
+  return controller ? <CreateThreadModal {...controller.createThreadModal} /> : null
 }
 
 function ResourceEditorDialog() {
@@ -215,21 +215,21 @@ function ComfyuiDeleteDialog() {
 export const aiExtension: TrustedReactExtension = {
   id: 'builtin.ai',
   pages: [
-    { id: 'ai.sessions', path: 'sessions', component: SessionsPage, priority: 100 },
+    { id: 'ai.threads', path: 'threads', component: ThreadsPage, priority: 100 },
     { id: 'ai.agents', path: 'agents', component: AgentsPage, priority: 100 },
     { id: 'ai.models', path: 'models', component: ModelsPage, priority: 100 },
     { id: 'ai.providers', path: 'providers', component: ProvidersPage, priority: 100 },
     { id: 'ai.comfyui', path: 'comfyui', component: ComfyuiPage, priority: 100 },
-    { id: 'ai.session', path: 'sessions/:sessionId', component: AgentSessionPage, priority: 100 },
+    { id: 'ai.thread', path: 'threads/:threadId', component: AgentThreadPage, priority: 100 },
   ],
   navigation: [
-    { id: 'ai.nav.sessions', label: 'Chat', path: 'sessions', priority: 100 },
+    { id: 'ai.nav.threads', label: 'Chat', path: 'threads', priority: 100 },
     { id: 'ai.nav.agents', label: 'Agent', path: 'agents', priority: 100 },
     { id: 'ai.nav.models', label: 'Model', path: 'models', priority: 100 },
     { id: 'ai.nav.providers', label: 'Provider', path: 'providers', priority: 100 },
   ],
   dialogs: [
-    { id: 'ai.create-session', component: CreateSessionDialog },
+    { id: 'ai.create-thread', component: CreateThreadDialog },
     { id: 'ai.resource-editor', component: ResourceEditorDialog },
     { id: 'ai.delete-resource', component: ResourceDeleteDialog },
     { id: 'ai.comfyui-editor', component: ComfyuiWorkflowEditorDialog },

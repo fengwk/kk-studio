@@ -8,7 +8,7 @@ spring:
       schema-locations:
         - classpath:schema-h2.sql
       data-locations:
-        - classpath:data-h2.sql
+        - classpath:data-dev.sql
 
   datasource:
     multi:

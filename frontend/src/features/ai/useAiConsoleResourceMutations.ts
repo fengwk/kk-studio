@@ -55,12 +55,12 @@ export function useAiConsoleResourceMutations({
   })
   const updateAgentMutation = useInvalidateMutation({
     mutationFn: ({ id, data }: { id: AgentResourceId; data: AgentDefinitionUpdateDTO }) => agentService.updateAgent(id, data),
-    invalidateQueryKeys: [queryKeys.agents.list, queryKeys.sessions.list],
+    invalidateQueryKeys: [queryKeys.agents.list, queryKeys.threads.list],
     onSuccess: onResourceSaved,
   })
   const deleteAgentMutation = useInvalidateMutation({
     mutationFn: (id: AgentResourceId) => agentService.deleteAgent(id),
-    invalidateQueryKeys: [queryKeys.agents.list, queryKeys.sessions.list],
+    invalidateQueryKeys: [queryKeys.agents.list, queryKeys.threads.list],
     onSuccess: onDeleteCompleted,
   })
 

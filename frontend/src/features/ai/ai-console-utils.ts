@@ -1,4 +1,4 @@
-import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, BackendDateTime, HarnessSessionDTO } from '@/shared/api/contracts'
+import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, BackendDateTime, HarnessThreadDTO } from '@/shared/api/contracts'
 import type { ResourceModal } from '@/features/ai/ai-console-types'
 
 export function resourceTitle(modal: ResourceModal): string {
@@ -12,10 +12,17 @@ export function resourceTitle(modal: ResourceModal): string {
   return `${prefix} Agent`
 }
 
-export function filterSessions(sessions: HarnessSessionDTO[], agentsById: Map<string, AgentDefinitionDTO>, search: string): HarnessSessionDTO[] {
-  return sessions.filter((session) => {
-    const agent = agentsById.get(session.agentDefinitionId)
-    return includesSearch(`${session.sessionId} ${session.title ?? ''} ${session.agentDefinitionId} ${agent?.name ?? ''}`, search)
+export function filterThreads(
+  threads: HarnessThreadDTO[],
+  agentsById: Map<string, AgentDefinitionDTO>,
+  search: string,
+): HarnessThreadDTO[] {
+  return threads.filter((thread) => {
+    const agent = thread.agentDefinitionId ? agentsById.get(thread.agentDefinitionId) : undefined
+    return includesSearch(
+      `${thread.threadId} ${thread.sessionId} ${thread.sessionTitle ?? ''} ${thread.agentDefinitionId ?? ''} ${agent?.name ?? ''}`,
+      search,
+    )
   })
 }
 

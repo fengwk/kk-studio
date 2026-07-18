@@ -123,6 +123,6 @@ class DefaultContextTransformTest {
   }
 
   private static SessionEntry entry(long id, Long parentId, SessionEntryPayload payload) {
-    return new SessionEntry(id, SESSION_ID, parentId, null, payload.type(), payload, NOW);
+    return new SessionEntry(id, SESSION_ID, parentId, payload.type(), payload, NOW);
   }
 }

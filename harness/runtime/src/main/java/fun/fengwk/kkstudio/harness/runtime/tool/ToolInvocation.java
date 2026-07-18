@@ -6,10 +6,10 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import java.time.Instant;
 import java.util.Objects;
 
-/** 持久 ToolInvocation 快照。 */
+/** 持久 ToolInvocation 快照；thread 关联，不再绑定 Run。 */
 public record ToolInvocation(
     long id,
-    long runId,
+    long threadId,
     long assistantEntryId,
     int ordinal,
     String toolCallId,
@@ -34,7 +34,7 @@ public record ToolInvocation(
     Instant updatedAt) {
 
   public ToolInvocation {
-    if (id <= 0 || runId <= 0 || assistantEntryId <= 0) {
+    if (id <= 0 || threadId <= 0 || assistantEntryId <= 0) {
       throw new IllegalArgumentException("invocation ids must be positive");
     }
     if (ordinal < 0) {

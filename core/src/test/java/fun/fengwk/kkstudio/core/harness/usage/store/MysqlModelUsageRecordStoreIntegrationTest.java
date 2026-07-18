@@ -34,8 +34,8 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 真实 H2 schema 上的端到端覆盖：独立 ID namespace、扁平 ModelUsageDraft 全字段 round-trip、 两类 unique 键冲突、id asc
- * 排序、并发受影响 !=1 行为、schema 列/索引约束。
+ * 真实 H2 schema 上的端到端覆盖：独立 ID namespace、扁平 ModelUsageDraft 全字段 round-trip、Assistant Entry unique
+ * 键、id asc 排序、并发受影响 !=1 行为、schema 列/索引约束。
  */
 @SpringBootTest(classes = CoreTestApplication.class)
 class MysqlModelUsageRecordStoreIntegrationTest {
@@ -52,7 +52,7 @@ class MysqlModelUsageRecordStoreIntegrationTest {
     jdbc.update("delete from model_usage_record");
   }
 
-  /** 每个账本 id 必须来自独立 namespace，不能与 Run/Control 等其它表冲突。 */
+  /** 每个账本 id 必须来自独立 namespace。 */
   @Test
   void generatesIdsFromIndependentNamespace() {
     long idA = idGenerator.newModelUsageRecordId();
@@ -67,7 +67,7 @@ class MysqlModelUsageRecordStoreIntegrationTest {
   void insertAndFindByAssistantEntryIdRoundTripsAllFields() {
     ModelUsageDraft draft = draftWithAffinity();
     ModelUsageRecord original =
-        new ModelUsageRecord(idGenerator.newModelUsageRecordId(), 11L, 21L, 31L, 1, 0, draft, NOW);
+        new ModelUsageRecord(idGenerator.newModelUsageRecordId(), 11L, 21L, 31L, draft, NOW);
 
     assertEquals(1, store.insert(original));
 
@@ -76,10 +76,8 @@ class MysqlModelUsageRecordStoreIntegrationTest {
     ModelUsageRecord found = loaded.get();
     assertEquals(original.id(), found.id());
     assertEquals(11L, found.sessionId());
-    assertEquals(21L, found.runId());
+    assertEquals(21L, found.threadId());
     assertEquals(31L, found.assistantEntryId());
-    assertEquals(1, found.attempt());
-    assertEquals(0, found.turnIndex());
     assertEquals(NOW, found.createdAt());
 
     ModelUsageDraft loadedDraft = found.draft();
@@ -105,7 +103,7 @@ class MysqlModelUsageRecordStoreIntegrationTest {
   void insertAndFindSupportsNullCacheAffinityKey() {
     ModelUsageDraft draft = draftWithoutCache();
     ModelUsageRecord original =
-        new ModelUsageRecord(idGenerator.newModelUsageRecordId(), 11L, 21L, 41L, 1, 1, draft, NOW);
+        new ModelUsageRecord(idGenerator.newModelUsageRecordId(), 11L, 21L, 41L, draft, NOW);
     assertEquals(1, store.insert(original));
 
     ModelUsageRecord found = store.findByAssistantEntryId(41L).orElseThrow();
@@ -113,38 +111,35 @@ class MysqlModelUsageRecordStoreIntegrationTest {
     assertEquals(PromptCacheRetention.NONE, found.draft().promptCacheRetention());
     assertFalse(found.draft().cacheEligible());
     assertEquals(null, found.draft().cacheAffinityKey());
-    assertEquals(1, found.turnIndex());
   }
 
-  /** listByRunId 按 id asc 排序，且仅返回该 run 的记录；其它 run 互不干扰。 */
+  /** listByThreadId 按 id asc 排序，且仅返回该 Thread 的记录。 */
   @Test
-  void listByRunIdOrdersByIdAscAndIsolatesByRun() {
+  void listByThreadIdOrdersByIdAscAndIsolatesByThread() {
     ModelUsageRecord a =
-        insert(idGenerator.newModelUsageRecordId(), 11L, 21L, 31L, 1, 0, draftWithoutCache(), NOW);
+        insert(idGenerator.newModelUsageRecordId(), 11L, 21L, 31L, draftWithoutCache(), NOW);
     ModelUsageRecord b =
-        insert(idGenerator.newModelUsageRecordId(), 11L, 21L, 32L, 1, 1, draftWithoutCache(), NOW);
-    ModelUsageRecord otherRun =
-        insert(idGenerator.newModelUsageRecordId(), 11L, 22L, 33L, 1, 0, draftWithoutCache(), NOW);
+        insert(idGenerator.newModelUsageRecordId(), 11L, 21L, 32L, draftWithoutCache(), NOW);
+    ModelUsageRecord otherThread =
+        insert(idGenerator.newModelUsageRecordId(), 11L, 22L, 33L, draftWithoutCache(), NOW);
 
-    List<Long> byRun = store.listByRunId(21L).stream().map(ModelUsageRecord::id).toList();
-    assertEquals(List.of(a.id(), b.id()), byRun);
+    List<Long> byThread = store.listByThreadId(21L).stream().map(ModelUsageRecord::id).toList();
+    assertEquals(List.of(a.id(), b.id()), byThread);
     assertEquals(
-        List.of(otherRun.id()), store.listByRunId(22L).stream().map(ModelUsageRecord::id).toList());
-    assertTrue(store.listByRunId(99L).isEmpty());
+        List.of(otherThread.id()),
+        store.listByThreadId(22L).stream().map(ModelUsageRecord::id).toList());
+    assertTrue(store.listByThreadId(99L).isEmpty());
   }
 
   /** Session 与 Model scope 查询均按 id asc，并且不会泄漏其它 scope 的记录。 */
   @Test
   void listBySessionAndModelOrdersByIdAscAndIsolatesScopes() {
     ModelUsageRecord first =
-        insert(
-            idGenerator.newModelUsageRecordId(), 11L, 21L, 31L, 1, 0, draftWithoutCache(201L), NOW);
+        insert(idGenerator.newModelUsageRecordId(), 11L, 21L, 31L, draftWithoutCache(201L), NOW);
     ModelUsageRecord second =
-        insert(
-            idGenerator.newModelUsageRecordId(), 11L, 22L, 32L, 1, 0, draftWithoutCache(202L), NOW);
+        insert(idGenerator.newModelUsageRecordId(), 11L, 22L, 32L, draftWithoutCache(202L), NOW);
     ModelUsageRecord otherSession =
-        insert(
-            idGenerator.newModelUsageRecordId(), 12L, 23L, 33L, 1, 0, draftWithoutCache(201L), NOW);
+        insert(idGenerator.newModelUsageRecordId(), 12L, 23L, 33L, draftWithoutCache(201L), NOW);
 
     assertEquals(
         List.of(first.id(), second.id()),
@@ -166,26 +161,11 @@ class MysqlModelUsageRecordStoreIntegrationTest {
   @Test
   void duplicateAssistantEntryIdIsRejected() {
     long id = idGenerator.newModelUsageRecordId();
-    store.insert(new ModelUsageRecord(id, 11L, 21L, 31L, 1, 0, draftWithoutCache(), NOW));
+    store.insert(new ModelUsageRecord(id, 11L, 21L, 31L, draftWithoutCache(), NOW));
     long other = idGenerator.newModelUsageRecordId();
     assertThrows(
         DataIntegrityViolationException.class,
-        () ->
-            store.insert(
-                new ModelUsageRecord(other, 11L, 21L, 31L, 2, 1, draftWithoutCache(), NOW)));
-  }
-
-  /** unique(run_id, attempt, turn_index) 必须拦截同 (run, attempt, turn) 的重复写入。 */
-  @Test
-  void duplicateRunAttemptTurnIsRejected() {
-    long id = idGenerator.newModelUsageRecordId();
-    store.insert(new ModelUsageRecord(id, 11L, 21L, 31L, 1, 0, draftWithoutCache(), NOW));
-    long other = idGenerator.newModelUsageRecordId();
-    assertThrows(
-        DataIntegrityViolationException.class,
-        () ->
-            store.insert(
-                new ModelUsageRecord(other, 11L, 21L, 41L, 1, 0, draftWithoutCache(), NOW)));
+        () -> store.insert(new ModelUsageRecord(other, 11L, 21L, 31L, draftWithoutCache(), NOW)));
   }
 
   /** affected != 1 必须以 ConcurrentModificationException 上抛（用假 mapper 替换注入）。 */
@@ -204,7 +184,7 @@ class MysqlModelUsageRecordStoreIntegrationTest {
           }
 
           @Override
-          public List<ModelUsageRecordDO> listByRunId(long runId) {
+          public List<ModelUsageRecordDO> listByThreadId(long threadId) {
             return List.of();
           }
 
@@ -221,7 +201,7 @@ class MysqlModelUsageRecordStoreIntegrationTest {
     MysqlModelUsageRecordStore localStore = new MysqlModelUsageRecordStore(stubMapper);
     ModelUsageRecord record =
         new ModelUsageRecord(
-            idGenerator.newModelUsageRecordId(), 11L, 21L, 31L, 1, 0, draftWithoutCache(), NOW);
+            idGenerator.newModelUsageRecordId(), 11L, 21L, 31L, draftWithoutCache(), NOW);
     assertThrows(ConcurrentModificationException.class, () -> localStore.insert(record));
   }
 
@@ -237,7 +217,7 @@ class MysqlModelUsageRecordStoreIntegrationTest {
     assertFalse(joined.contains("workspace"), joined);
     assertFalse(joined.contains("tenant"), joined);
     assertTrue(joined.contains("assistant_entry_id"), joined);
-    assertTrue(joined.contains("run_id"), joined);
+    assertTrue(joined.contains("thread_id"), joined);
     assertTrue(joined.contains("session_id"), joined);
     assertTrue(joined.contains("model_resource_id"), joined);
     assertTrue(joined.contains("raw_usage_json"), joined);
@@ -253,8 +233,8 @@ class MysqlModelUsageRecordStoreIntegrationTest {
                 + " where lower(table_name) = 'model_usage_record'",
             String.class);
     assertTrue(
-        indexes.stream().anyMatch("idx_model_usage_record_run"::equalsIgnoreCase),
-        "missing run index: " + indexes);
+        indexes.stream().anyMatch("idx_model_usage_record_thread"::equalsIgnoreCase),
+        "missing thread index: " + indexes);
     assertTrue(
         indexes.stream().anyMatch("idx_model_usage_record_session"::equalsIgnoreCase),
         "missing session index: " + indexes);
@@ -272,15 +252,12 @@ class MysqlModelUsageRecordStoreIntegrationTest {
   private ModelUsageRecord insert(
       long id,
       long sessionId,
-      long runId,
+      long threadId,
       long assistantEntryId,
-      int attempt,
-      int turnIndex,
       ModelUsageDraft draft,
       Instant createdAt) {
     ModelUsageRecord record =
-        new ModelUsageRecord(
-            id, sessionId, runId, assistantEntryId, attempt, turnIndex, draft, createdAt);
+        new ModelUsageRecord(id, sessionId, threadId, assistantEntryId, draft, createdAt);
     store.insert(record);
     return record;
   }

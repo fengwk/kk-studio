@@ -20,8 +20,8 @@ public class ModelUsageAggregationServiceImpl implements ModelUsageAggregationSe
   }
 
   @Override
-  public ModelUsageSummaryDTO summarizeRun(long runId) {
-    return summarize("run", runId, recordStore.listByRunId(runId));
+  public ModelUsageSummaryDTO summarizeThread(long threadId) {
+    return summarize("thread", threadId, recordStore.listByThreadId(threadId));
   }
 
   @Override

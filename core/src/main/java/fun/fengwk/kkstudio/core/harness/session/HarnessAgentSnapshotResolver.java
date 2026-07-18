@@ -36,21 +36,30 @@ public class HarnessAgentSnapshotResolver {
     this.objectMapper = objectMapper;
   }
 
-  /** Resolve the latest AGENT_SNAPSHOT on the active path of the given session. */
+  /** Resolve the latest AGENT_SNAPSHOT for the session (session-wide latest by id). */
   public AgentSnapshot snapshotOnCurrentPath(HarnessSessionDO session) {
     if (session == null) {
       throw new IllegalArgumentException("session must not be null");
     }
-    if (session.getLeafEntryId() == null) {
-      throw new IllegalStateException(
-          "session has no current leaf for agent snapshot lookup: " + session.getId());
+    HarnessSessionEntryDO entry =
+        sessionEntryMapper.findLatestByType(
+            session.getId(), SessionEntryType.AGENT_SNAPSHOT.value());
+    if (entry == null) {
+      throw new IllegalStateException("session has no frozen agent snapshot: " + session.getId());
     }
+    SessionEntryPayload payload =
+        entryCodec.decode(SessionEntryType.AGENT_SNAPSHOT, entry.getPayloadJson());
+    return ((AgentSnapshotEntryPayload) payload).snapshot();
+  }
+
+  /** Resolve AGENT_SNAPSHOT on a specific head path. */
+  public AgentSnapshot snapshotOnPath(long sessionId, long headEntryId) {
     HarnessSessionEntryDO entry =
         sessionEntryMapper.findLatestOnPathByType(
-            session.getId(), session.getLeafEntryId(), SessionEntryType.AGENT_SNAPSHOT.value());
+            sessionId, headEntryId, SessionEntryType.AGENT_SNAPSHOT.value());
     if (entry == null) {
       throw new IllegalStateException(
-          "session has no frozen agent snapshot on its current path: " + session.getId());
+          "session has no frozen agent snapshot on path head=" + headEntryId);
     }
     SessionEntryPayload payload =
         entryCodec.decode(SessionEntryType.AGENT_SNAPSHOT, entry.getPayloadJson());

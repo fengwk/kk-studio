@@ -1,0 +1,12 @@
+package fun.fengwk.kkstudio.share.model;
+
+import lombok.Data;
+
+/** 向 Thread 队列提交用户消息。 */
+@Data
+public class HarnessThreadMessageCreateDTO {
+  private String content;
+
+  /** 客户端幂等键；可选。 */
+  private String clientMessageId;
+}

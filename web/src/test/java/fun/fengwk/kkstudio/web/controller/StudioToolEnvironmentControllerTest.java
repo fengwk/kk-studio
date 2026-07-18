@@ -255,7 +255,7 @@ public class StudioToolEnvironmentControllerTest {
     long envId = Long.parseLong(id);
     long invocationId = 700_000_000_000_000_000L + envId;
     jdbcTemplate.update(
-        "insert into tool_invocation (id, run_id, assistant_entry_id, ordinal, tool_call_id, "
+        "insert into tool_invocation (id, thread_id, assistant_entry_id, ordinal, tool_call_id, "
             + "tool_name, tool_version, target_type, environment_id, arguments_json, status, "
             + "permission_action, side_effect, deadline_at) "
             + "values (?, 1, 1, 1, ?, ?, ?, 'ENVIRONMENT', ?, '{}', 'QUEUED', 'ALLOW',"

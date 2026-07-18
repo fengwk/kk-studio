@@ -7,102 +7,73 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** Session 的单 leaf checkout、CAS append 和 fork 领域操作。 */
+/** Session Tree 的 append 与 fork 领域操作；执行游标属于 AgentThread，不再维护 session leaf。 */
 public final class SessionTree {
   private final SessionStore sessionStore;
   private final SessionEntryStore entryStore;
   private final SessionIdGenerator idGenerator;
-  private final SessionYoloResolver yoloResolver;
   private final Clock clock;
 
   public SessionTree(
       SessionStore sessionStore,
       SessionEntryStore entryStore,
       SessionIdGenerator idGenerator,
-      SessionYoloResolver yoloResolver,
       Clock clock) {
     this.sessionStore = Objects.requireNonNull(sessionStore, "sessionStore");
     this.entryStore = Objects.requireNonNull(entryStore, "entryStore");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
-    this.yoloResolver = Objects.requireNonNull(yoloResolver, "yoloResolver");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
   public Session create(Long agentDefinitionId, String title) {
     long sessionId = idGenerator.newSessionId();
-    Session session =
-        Session.root(
-            sessionId, agentDefinitionId, title, yoloResolver.defaultYolo(), clock.instant());
+    Session session = Session.root(sessionId, agentDefinitionId, title, clock.instant());
     sessionStore.create(session);
     return session;
   }
 
-  public AppendResult append(long sessionId, Long expectedLeafEntryId, SessionEntryDraft draft) {
-    Session session = requireSession(sessionId);
-    if (!Objects.equals(session.leafEntryId(), expectedLeafEntryId)) {
-      return AppendResult.conflict();
-    }
-    if (expectedLeafEntryId != null) {
-      entryStore.loadPath(sessionId, expectedLeafEntryId);
+  /** 在指定 parent 下追加 Entry（parent 即 Thread head 或任意合法父节点）。 */
+  public AppendResult append(long sessionId, Long parentEntryId, SessionEntryDraft draft) {
+    requireSession(sessionId);
+    if (parentEntryId != null) {
+      entryStore.loadPath(sessionId, parentEntryId);
     }
     SessionEntry entry =
         new SessionEntry(
             idGenerator.newEntryId(),
             sessionId,
-            expectedLeafEntryId,
-            draft.runId(),
+            parentEntryId,
             draft.payload().type(),
             draft.payload(),
             clock.instant());
-    try {
-      sessionStore.append(entry, expectedLeafEntryId, session.version());
-      return AppendResult.appended(entry);
-    } catch (SessionLeafConflictException exception) {
-      return AppendResult.conflict();
-    }
+    sessionStore.append(entry);
+    return AppendResult.appended(entry);
   }
 
-  /** 将 active leaf 切换到任一有效的同 Session Entry；active-run 约束由上层执行。 */
-  public boolean checkout(long sessionId, Long expectedLeafEntryId, long targetEntryId) {
-    Session session = requireSession(sessionId);
-    if (!Objects.equals(session.leafEntryId(), expectedLeafEntryId)) {
-      return false;
-    }
-    entryStore.loadPath(sessionId, targetEntryId);
-    return sessionStore.compareAndSetLeaf(
-        sessionId, expectedLeafEntryId, session.version(), targetEntryId);
-  }
-
-  /** 复制源 Session 的当前路径为 child Session，Entry id 不跨 Session 复用。 */
-  public Session fork(long sourceSessionId, Long expectedLeafEntryId) {
+  /**
+   * 复制源 Session 从根到 fromEntryId 的路径为 child Session；Entry id 不跨 Session 复用。 leaf 不再写在 Session
+   * 上——调用方用返回路径的末节点创建 child Thread。
+   */
+  public ForkResult fork(long sourceSessionId, long fromEntryId) {
     Session source = requireSession(sourceSessionId);
-    if (!Objects.equals(source.leafEntryId(), expectedLeafEntryId)) {
-      throw new SessionLeafConflictException(sourceSessionId, expectedLeafEntryId);
-    }
-    List<SessionEntry> sourcePath =
-        expectedLeafEntryId == null
-            ? List.of()
-            : entryStore.loadPath(sourceSessionId, expectedLeafEntryId);
+    List<SessionEntry> sourcePath = entryStore.loadPath(sourceSessionId, fromEntryId);
     long targetSessionId = idGenerator.newSessionId();
     List<SessionEntry> clone = clonePath(sourcePath, targetSessionId);
-    Long targetLeaf = clone.isEmpty() ? null : clone.get(clone.size() - 1).id();
     Session fork =
         new Session(
             targetSessionId,
             source.agentDefinitionId(),
             source.title(),
-            targetLeaf,
-            null,
             source.id(),
             source.rootSessionId(),
             null,
             source.depth() + 1,
-            false,
             0,
             clock.instant(),
             clock.instant());
     sessionStore.createFork(fork, clone);
-    return fork;
+    long headEntryId = clone.get(clone.size() - 1).id();
+    return new ForkResult(fork, headEntryId, clone);
   }
 
   public List<SessionEntry> listChildren(long sessionId, Long parentEntryId) {
@@ -126,7 +97,6 @@ public final class SessionTree {
               cloneId,
               targetSessionId,
               parentId,
-              null,
               source.type(),
               source.payload(),
               clock.instant()));
@@ -139,5 +109,15 @@ public final class SessionTree {
     return sessionStore
         .find(sessionId)
         .orElseThrow(() -> new IllegalArgumentException("unknown session: " + sessionId));
+  }
+
+  public record ForkResult(Session session, long headEntryId, List<SessionEntry> entries) {
+    public ForkResult {
+      session = Objects.requireNonNull(session, "session");
+      if (headEntryId <= 0) {
+        throw new IllegalArgumentException("headEntryId must be positive");
+      }
+      entries = List.copyOf(Objects.requireNonNull(entries, "entries"));
+    }
   }
 }
