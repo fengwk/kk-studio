@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { filterSessionCommands, type SessionCommand } from '@/features/ai/session-panel/session-commands'
 
 export function SessionCommandPalette({
@@ -7,19 +7,29 @@ export function SessionCommandPalette({
   onQueryChange,
   onSelect,
   onClose,
+  captureFocus = true,
 }: {
   open: boolean
   query: string
   onQueryChange: (query: string) => void
   onSelect: (command: SessionCommand) => void
   onClose: () => void
+  /** When false (slash mode), keep typing in the main composer textarea. */
+  captureFocus?: boolean
 }) {
   const commands = useMemo(() => filterSessionCommands(query), [query])
   const [index, setIndex] = useState(0)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setIndex(0)
   }, [query, open])
+
+  useEffect(() => {
+    if (open && captureFocus) {
+      inputRef.current?.focus()
+    }
+  }, [open, captureFocus])
 
   if (!open) {
     return null
@@ -27,40 +37,47 @@ export function SessionCommandPalette({
 
   return (
     <div className="session-command-palette" role="listbox" aria-label="命令表">
-      <div className="session-command-search">
-        <span>/</span>
-        <input
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="搜索命令…"
-          autoFocus
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') {
-              event.preventDefault()
-              event.stopPropagation()
-              onClose()
-              return
-            }
-            if (event.key === 'ArrowDown') {
-              event.preventDefault()
-              setIndex((value) => Math.min(value + 1, Math.max(commands.length - 1, 0)))
-              return
-            }
-            if (event.key === 'ArrowUp') {
-              event.preventDefault()
-              setIndex((value) => Math.max(value - 1, 0))
-              return
-            }
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              const command = commands[index]
-              if (command) {
-                onSelect(command)
+      {captureFocus ? (
+        <div className="session-command-search">
+          <span>/</span>
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            placeholder="搜索命令…"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                event.stopPropagation()
+                onClose()
+                return
               }
-            }
-          }}
-        />
-      </div>
+              if (event.key === 'ArrowDown') {
+                event.preventDefault()
+                setIndex((value) => Math.min(value + 1, Math.max(commands.length - 1, 0)))
+                return
+              }
+              if (event.key === 'ArrowUp') {
+                event.preventDefault()
+                setIndex((value) => Math.max(value - 1, 0))
+                return
+              }
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                const command = commands[index]
+                if (command) {
+                  onSelect(command)
+                }
+              }
+            }}
+          />
+        </div>
+      ) : (
+        <div className="session-command-search">
+          <span>/</span>
+          <span className="session-command-query">{query || '搜索命令…'}</span>
+        </div>
+      )}
       <ul className="session-command-list">
         {commands.length === 0 ? <li className="session-command-empty">无匹配命令</li> : null}
         {commands.map((command, commandIndex) => (
