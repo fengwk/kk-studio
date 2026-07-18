@@ -1,181 +1,151 @@
 package fun.fengwk.kkstudio.core.harness.observability.service.impl;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.harness.task.store.model.HarnessSubagentTaskDO;
-import fun.fengwk.kkstudio.harness.runtime.run.RunEvent;
+import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadEventDO;
+import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
 import fun.fengwk.kkstudio.harness.runtime.task.RootActivity;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.task.TaskReport;
+import fun.fengwk.kkstudio.harness.runtime.task.TaskResultFormatter;
+import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.share.model.RootActivityDTO;
-import fun.fengwk.kkstudio.share.model.RunEventDTO;
 import fun.fengwk.kkstudio.share.model.SubagentTaskDTO;
 import fun.fengwk.kkstudio.share.model.SubagentTaskReportDTO;
+import fun.fengwk.kkstudio.share.model.ThreadEventDTO;
 import fun.fengwk.kkstudio.share.model.ToolArtifactRefDTO;
 import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
 
-import java.time.Instant;
-import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 
-/** Maps the persistent observability projections to share DTOs. */
 @Component
 public class HarnessObservabilityDtoConverter {
 
-  private final ObjectMapper objectMapper;
-
-  public HarnessObservabilityDtoConverter(ObjectMapper objectMapper) {
-    this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
-  }
-
-  public RunEventDTO convert(RunEvent source) {
-    if (source == null) {
-      return null;
+  public ThreadEventDTO convert(HarnessThreadEventDO row) {
+    ThreadEventDTO dto = new ThreadEventDTO();
+    dto.setEventId(Long.toString(row.getId()));
+    dto.setThreadId(Long.toString(row.getThreadId()));
+    if (row.getSubjectEntryId() != null) {
+      dto.setSubjectEntryId(Long.toString(row.getSubjectEntryId()));
     }
-    RunEventDTO target = new RunEventDTO();
-    target.setEventId(HarnessIds.format(source.id()));
-    target.setRunId(HarnessIds.format(source.runId()));
-    target.setSequence(source.sequence());
-    target.setType(source.type().value());
-    target.setPayloadJson(source.payloadJson());
-    target.setCreateTime(source.createdAt());
-    return target;
+    dto.setEventType(row.getEventType());
+    dto.setPayloadJson(row.getPayloadJson());
+    dto.setCreateTime(row.getCreateTime());
+    return dto;
   }
 
-  public RootActivityDTO convert(RootActivity source) {
-    if (source == null) {
-      return null;
+  public ToolInvocationDTO convert(ToolInvocationDO row) {
+    ToolInvocationDTO dto = new ToolInvocationDTO();
+    dto.setId(Long.toString(row.getId()));
+    dto.setThreadId(Long.toString(row.getThreadId()));
+    dto.setAssistantEntryId(Long.toString(row.getAssistantEntryId()));
+    dto.setOrdinal(row.getOrdinal());
+    dto.setToolCallId(row.getToolCallId());
+    dto.setToolName(row.getToolName());
+    dto.setToolVersion(row.getToolVersion());
+    dto.setTargetType(row.getTargetType());
+    if (row.getEnvironmentId() != null) {
+      dto.setEnvironmentId(Long.toString(row.getEnvironmentId()));
     }
-    RootActivityDTO target = new RootActivityDTO();
-    target.setRootSessionId(HarnessIds.format(source.rootSessionId()));
-    target.setSessionId(HarnessIds.format(source.sessionId()));
-    target.setRunId(HarnessIds.format(source.runId()));
-    target.setEventId(Long.toString(source.eventId()));
-    target.setSequence(source.sequence());
-    target.setType(source.type().value());
-    target.setPayloadJson(source.payloadJson());
-    target.setCreateTime(source.createdAt());
-    return target;
-  }
-
-  public ToolInvocationDTO convert(ToolInvocation source) {
-    if (source == null) {
-      return null;
+    dto.setArgumentsJson(row.getArgumentsJson());
+    dto.setStatus(row.getStatus());
+    dto.setPermissionAction(row.getPermissionAction());
+    dto.setPermissionDecision(row.getPermissionDecision());
+    if (row.getDeadlineAt() != null) {
+      dto.setDeadlineAt(row.getDeadlineAt().toInstant(ZoneOffset.UTC));
     }
-    ToolInvocationDTO target = new ToolInvocationDTO();
-    target.setId(HarnessIds.format(source.id()));
-    target.setRunId(HarnessIds.format(source.runId()));
-    target.setAssistantEntryId(HarnessIds.format(source.assistantEntryId()));
-    target.setOrdinal(source.ordinal());
-    target.setToolCallId(source.toolCallId());
-    target.setToolName(source.toolName());
-    target.setToolVersion(source.toolVersion());
-    target.setTargetType(source.targetType().name());
-    target.setEnvironmentId(
-        source.environmentId() == null ? null : HarnessIds.format(source.environmentId()));
-    target.setArgumentsJson(source.argumentsJson());
-    target.setStatus(source.status().name());
-    target.setPermissionAction(source.permissionAction().name());
-    target.setPermissionDecision(
-        source.permissionDecision() == null ? null : source.permissionDecision().name());
-    target.setDeadlineAt(source.deadlineAt());
-    target.setLeaseOwner(source.leaseOwner());
-    target.setLeaseUntil(source.leaseUntil());
-    target.setCancelRequestedAt(source.cancelRequestedAt());
-    target.setResultJson(source.resultJson());
-    target.setErrorMessage(source.errorMessage());
-    target.setCreateTime(source.createdAt());
-    target.setStartedAt(source.startedAt());
-    target.setFinishedAt(source.finishedAt());
-    target.setUpdateTime(source.updatedAt());
-    return target;
-  }
-
-  public SubagentTaskDTO convert(HarnessSubagentTaskDO source) {
-    if (source == null) {
-      return null;
+    dto.setLeaseOwner(row.getLeaseOwner());
+    if (row.getLeaseUntil() != null) {
+      dto.setLeaseUntil(row.getLeaseUntil().toInstant(ZoneOffset.UTC));
     }
-    SubagentTaskDTO target = new SubagentTaskDTO();
-    target.setParentInvocationId(HarnessIds.format(source.getParentInvocationId()));
-    target.setParentSessionId(HarnessIds.format(source.getParentSessionId()));
-    target.setChildSessionId(HarnessIds.format(source.getChildSessionId()));
-    target.setChildRunId(HarnessIds.format(source.getChildRunId()));
-    target.setTargetAgent(source.getTargetAgent());
-    target.setWorkingCopyPolicy(source.getWorkingCopyPolicy());
-    target.setWorkingCopyRevision(source.getWorkingCopyRevision());
-    target.setMaxTurns(source.getMaxTurns());
-    target.setIdleTimeoutMillis(source.getIdleTimeoutMillis());
-    target.setStatus(source.getStatus());
-    target.setReport(parseReport(source.getReportJson()));
-    target.setCreateTime(instant(source.getCreateTime()));
-    target.setUpdateTime(instant(source.getUpdateTime()));
-    return target;
-  }
-
-  private SubagentTaskReportDTO parseReport(String reportJson) {
-    if (reportJson == null || reportJson.isBlank()) {
-      return null;
+    if (row.getCancelRequestedAt() != null) {
+      dto.setCancelRequestedAt(row.getCancelRequestedAt().toInstant(ZoneOffset.UTC));
     }
-    try {
-      JsonNode root = objectMapper.readTree(reportJson);
-      if (root == null || !root.isObject()) {
-        throw new IllegalStateException("report_json root is not a JSON object: " + reportJson);
-      }
-      SubagentTaskReportDTO target = new SubagentTaskReportDTO();
-      target.setChildSessionId(textOrNull(root, "childSessionId"));
-      target.setChildRunId(textOrNull(root, "childRunId"));
-      target.setStatus(textOrNull(root, "status"));
-      target.setFinalReport(textOrNull(root, "finalReport"));
-      target.setTurnCount(intOrNull(root, "turnCount"));
-      target.setToolCount(intOrNull(root, "toolCount"));
-      target.setWorkingCopyPolicy(textOrNull(root, "workingCopyPolicy"));
-      target.setWorkingCopyRevision(textOrNull(root, "workingCopyRevision"));
-      target.setArtifacts(parseArtifacts(root));
-      return target;
-    } catch (RuntimeException error) {
-      throw error;
-    } catch (Exception error) {
-      throw new IllegalStateException("malformed report_json: " + reportJson, error);
+    dto.setResultJson(row.getResultJson());
+    dto.setErrorMessage(row.getErrorMessage());
+    if (row.getCreateTime() != null) {
+      dto.setCreateTime(row.getCreateTime().toInstant(ZoneOffset.UTC));
     }
-  }
-
-  private List<ToolArtifactRefDTO> parseArtifacts(JsonNode root) {
-    JsonNode node = root.get("artifacts");
-    if (node == null || !node.isArray()) {
-      return null;
+    if (row.getStartedAt() != null) {
+      dto.setStartedAt(row.getStartedAt().toInstant(ZoneOffset.UTC));
     }
-    List<ToolArtifactRefDTO> refs = new ArrayList<>(node.size());
-    for (JsonNode item : node) {
-      ToolArtifactRefDTO ref = new ToolArtifactRefDTO();
-      ref.setArtifactId(textOrNull(item, "artifactId"));
-      ref.setMediaType(textOrNull(item, "mediaType"));
-      ref.setSizeBytes(longOrNull(item, "sizeBytes"));
-      refs.add(ref);
+    if (row.getFinishedAt() != null) {
+      dto.setFinishedAt(row.getFinishedAt().toInstant(ZoneOffset.UTC));
     }
-    return refs;
+    if (row.getUpdateTime() != null) {
+      dto.setUpdateTime(row.getUpdateTime().toInstant(ZoneOffset.UTC));
+    }
+    return dto;
   }
 
-  private static String textOrNull(JsonNode node, String field) {
-    JsonNode value = node.get(field);
-    return value == null || value.isNull() ? null : value.asText();
+  public RootActivityDTO convert(RootActivity activity) {
+    RootActivityDTO dto = new RootActivityDTO();
+    dto.setRootSessionId(Long.toString(activity.rootSessionId()));
+    dto.setSessionId(Long.toString(activity.sessionId()));
+    dto.setThreadId(Long.toString(activity.threadId()));
+    dto.setEventId(Long.toString(activity.eventId()));
+    dto.setEventType(activity.type().value());
+    dto.setPayloadJson(activity.payloadJson());
+    dto.setCreateTime(activity.createdAt().atOffset(ZoneOffset.UTC).toLocalDateTime());
+    return dto;
   }
 
-  private static Integer intOrNull(JsonNode node, String field) {
-    JsonNode value = node.get(field);
-    return value == null || value.isNull() ? null : value.asInt();
+  public SubagentTaskDTO convert(HarnessSubagentTaskDO row) {
+    SubagentTaskDTO dto = new SubagentTaskDTO();
+    dto.setParentInvocationId(Long.toString(row.getParentInvocationId()));
+    dto.setParentSessionId(Long.toString(row.getParentSessionId()));
+    if (row.getParentThreadId() != null) {
+      dto.setParentThreadId(Long.toString(row.getParentThreadId()));
+    }
+    dto.setChildSessionId(Long.toString(row.getChildSessionId()));
+    if (row.getChildThreadId() != null) {
+      dto.setChildThreadId(Long.toString(row.getChildThreadId()));
+    }
+    dto.setTargetAgent(row.getTargetAgent());
+    dto.setWorkingCopyPolicy(row.getWorkingCopyPolicy());
+    dto.setWorkingCopyRevision(row.getWorkingCopyRevision());
+    dto.setMaxTurns(row.getMaxTurns());
+    dto.setStatus(row.getStatus());
+    if (row.getReportJson() != null && !row.getReportJson().isBlank()) {
+      dto.setReport(convertReport(TaskResultFormatter.decodeJson(row.getReportJson())));
+    }
+    if (row.getCreateTime() != null) {
+      dto.setCreateTime(row.getCreateTime().toInstant(ZoneOffset.UTC));
+    }
+    if (row.getUpdateTime() != null) {
+      dto.setUpdateTime(row.getUpdateTime().toInstant(ZoneOffset.UTC));
+    }
+    return dto;
   }
 
-  private static Long longOrNull(JsonNode node, String field) {
-    JsonNode value = node.get(field);
-    return value == null || value.isNull() ? null : value.asLong();
+  private SubagentTaskReportDTO convertReport(TaskReport report) {
+    SubagentTaskReportDTO dto = new SubagentTaskReportDTO();
+    dto.setChildSessionId(Long.toString(report.childSessionId()));
+    dto.setChildThreadId(Long.toString(report.childThreadId()));
+    dto.setStatus(report.terminalState().name());
+    dto.setFinalReport(report.finalAssistantReport());
+    dto.setTurnCount(report.turnCount());
+    dto.setToolCount(report.toolCount());
+    dto.setWorkingCopyPolicy(report.workingCopyPolicy().name());
+    dto.setWorkingCopyRevision(report.workingCopyRevision());
+    dto.setArtifacts(toArtifactDtos(report.artifacts()));
+    return dto;
   }
 
-  private static Instant instant(LocalDateTime value) {
-    return value == null ? null : value.toInstant(ZoneOffset.UTC);
+  private List<ToolArtifactRefDTO> toArtifactDtos(List<ArtifactRef> artifacts) {
+    if (artifacts == null || artifacts.isEmpty()) {
+      return List.of();
+    }
+    return artifacts.stream()
+        .map(
+            ref -> {
+              ToolArtifactRefDTO dto = new ToolArtifactRefDTO();
+              dto.setArtifactId(ref.artifactId());
+              dto.setMediaType(ref.mediaType());
+              dto.setSizeBytes(ref.sizeBytes());
+              return dto;
+            })
+        .toList();
   }
 }

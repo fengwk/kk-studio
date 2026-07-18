@@ -25,10 +25,10 @@ class TaskDomainTest {
   void defaultsWorkingCopyPolicyAndValidatesArguments() {
     assertEquals(
         WorkingCopyPolicy.SHARE_READ_ONLY,
-        new TaskCommand("RepositoryExplorer", "inspect", null, null).workingCopyPolicy());
+        new TaskCommand("RepositoryExplorer", "inspect", null).workingCopyPolicy());
     assertEquals(
         WorkingCopyPolicy.EXCLUSIVE,
-        new TaskCommand("Coder", "write", null, WorkingCopyPolicy.EXCLUSIVE).workingCopyPolicy());
+        new TaskCommand("Coder", "write", WorkingCopyPolicy.EXCLUSIVE).workingCopyPolicy());
     assertEquals(WorkingCopyPolicy.FORK, WorkingCopyPolicy.defaultFor("Coder"));
     assertEquals(WorkingCopyPolicy.FORK, WorkingCopyPolicy.parse("FORK"));
     assertThrows(IllegalArgumentException.class, () -> WorkingCopyPolicy.parse(null));
@@ -36,8 +36,8 @@ class TaskDomainTest {
     assertThrows(IllegalArgumentException.class, () -> WorkingCopyPolicy.parse("fork"));
     assertThrows(IllegalArgumentException.class, () -> WorkingCopyPolicy.defaultFor(null));
     assertThrows(IllegalArgumentException.class, () -> WorkingCopyPolicy.defaultFor(" "));
-    assertThrows(IllegalArgumentException.class, () -> new TaskCommand(" ", "prompt", null, null));
-    assertThrows(IllegalArgumentException.class, () -> new TaskCommand("Coder", " ", null, null));
+    assertThrows(IllegalArgumentException.class, () -> new TaskCommand(" ", "prompt", null));
+    assertThrows(IllegalArgumentException.class, () -> new TaskCommand("Coder", " ", null));
   }
 
   /**
@@ -80,19 +80,14 @@ class TaskDomainTest {
   @Test
   void decodesFrozenPoliciesStrictly() {
     assertEquals(
-        new TaskPolicy(4, 3, 9, 2, Duration.ofMillis(7)),
+        new TaskPolicy(4, 3, 9, 2),
         TaskPolicyCodec.decode(
-            "{\"maxDepth\":4,\"maxDirectSubagents\":3,\"maxTotalSubagents\":9,\"maxTurns\":2,\"idleTimeoutMillis\":7}"));
+            "{\"maxDepth\":4,\"maxDirectSubagents\":3,\"maxTotalSubagents\":9,\"maxTurns\":2}"));
     assertEquals(TaskPolicy.defaults(), TaskPolicyCodec.decode("{}"));
     assertThrows(IllegalArgumentException.class, () -> TaskPolicyCodec.decode("[]"));
     assertThrows(IllegalArgumentException.class, () -> TaskPolicyCodec.decode("not-json"));
     for (String field :
-        List.of(
-            "maxDepth",
-            "maxDirectSubagents",
-            "maxTotalSubagents",
-            "maxTurns",
-            "idleTimeoutMillis")) {
+        List.of("maxDepth", "maxDirectSubagents", "maxTotalSubagents", "maxTurns")) {
       assertThrows(
           IllegalArgumentException.class, () -> TaskPolicyCodec.decode("{\"" + field + "\":0}"));
       assertThrows(

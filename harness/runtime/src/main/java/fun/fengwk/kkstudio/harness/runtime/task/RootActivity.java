@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.task;
 
-import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventType;
 
 import java.time.Instant;
 import java.util.Objects;
@@ -9,18 +9,14 @@ import java.util.Objects;
 public record RootActivity(
     long rootSessionId,
     long sessionId,
-    long runId,
+    long threadId,
     long eventId,
-    long sequence,
-    RunEventType type,
+    ThreadEventType type,
     String payloadJson,
     Instant createdAt) {
   public RootActivity {
-    if (rootSessionId <= 0 || sessionId <= 0 || runId <= 0 || eventId <= 0) {
+    if (rootSessionId <= 0 || sessionId <= 0 || threadId <= 0 || eventId <= 0) {
       throw new IllegalArgumentException("root activity ids must be positive");
-    }
-    if (sequence <= 0) {
-      throw new IllegalArgumentException("sequence must be positive");
     }
     type = Objects.requireNonNull(type, "type");
     payloadJson = Objects.requireNonNull(payloadJson, "payloadJson");

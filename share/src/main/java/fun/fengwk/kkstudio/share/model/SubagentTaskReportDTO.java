@@ -8,7 +8,7 @@ import java.util.List;
 @Data
 public class SubagentTaskReportDTO {
   private String childSessionId;
-  private String childRunId;
+  private String childThreadId;
   private String status;
   private String finalReport;
   private List<ToolArtifactRefDTO> artifacts;

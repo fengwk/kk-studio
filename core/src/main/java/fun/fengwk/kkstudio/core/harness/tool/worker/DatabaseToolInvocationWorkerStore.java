@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ClaimedToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.ThreadScopedToolClaimStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationWorkerStore;
 
 import java.time.Duration;
@@ -23,7 +24,8 @@ import java.util.Optional;
  * Database claim port for Cloud/Control leases; all compare-and-set predicates live in the mapper.
  */
 @Repository
-public class DatabaseToolInvocationWorkerStore implements ToolInvocationWorkerStore {
+public class DatabaseToolInvocationWorkerStore
+    implements ToolInvocationWorkerStore, ThreadScopedToolClaimStore {
   private static final int MAX_CLAIM_CONTENTION_RETRIES = 64;
 
   private final ToolInvocationMapper invocationMapper;
@@ -83,6 +85,37 @@ public class DatabaseToolInvocationWorkerStore implements ToolInvocationWorkerSt
   @Override
   public Optional<ToolInvocation> find(long invocationId) {
     return invocationStore.find(invocationId);
+  }
+
+  @Override
+  @Transactional(propagation = Propagation.NOT_SUPPORTED)
+  public Optional<ClaimedToolInvocation> claimDueForThread(
+      String leaseOwner, long threadId, Instant now, Duration leaseDuration) {
+    Objects.requireNonNull(now, "now");
+    Objects.requireNonNull(leaseDuration, "leaseDuration");
+    if (leaseOwner == null
+        || leaseOwner.isBlank()
+        || threadId <= 0
+        || leaseDuration.isZero()
+        || leaseDuration.isNegative()) {
+      throw new IllegalArgumentException("lease owner, threadId and duration must be valid");
+    }
+    LocalDateTime timestamp = utc(now);
+    LocalDateTime leaseUntil = utc(now.plus(leaseDuration));
+    for (int retry = 0; retry < MAX_CLAIM_CONTENTION_RETRIES; retry++) {
+      ToolInvocationDO candidate =
+          invocationMapper.findClaimCandidateForThread(threadId, timestamp);
+      if (candidate == null) {
+        return Optional.empty();
+      }
+      boolean recovered = ToolInvocationStatus.RUNNING.name().equals(candidate.getStatus());
+      if (invocationMapper.claim(candidate.getId(), leaseOwner, timestamp, leaseUntil) != 1) {
+        continue;
+      }
+      ToolInvocation invocation = invocationStore.find(candidate.getId()).orElseThrow();
+      return Optional.of(new ClaimedToolInvocation(invocation, recovered));
+    }
+    return Optional.empty();
   }
 
   private static LocalDateTime utc(Instant instant) {

@@ -8,7 +8,6 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
-import fun.fengwk.kkstudio.harness.runtime.control.ControlConsumptionMode;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
@@ -97,30 +96,7 @@ final class AgentDefinitionMutationFactory {
     validatePositive(result.getMaxDepth(), "executionPolicy.maxDepth");
     validatePositive(result.getMaxDirectSubagents(), "executionPolicy.maxDirectSubagents");
     validatePositive(result.getMaxTotalSubagents(), "executionPolicy.maxTotalSubagents");
-    validatePositive(result.getIdleTimeoutMillis(), "executionPolicy.idleTimeoutMillis");
-    validatePositive(result.getRunTimeoutMillis(), "executionPolicy.runTimeoutMillis");
-    // 控制消费模式只对非 null 值严格解析；null 表示由 frozen snapshot decode 决定默认值。
-    result.setSteeringMode(
-        parseControlMode(result.getSteeringMode(), "executionPolicy.steeringMode"));
-    result.setFollowUpMode(
-        parseControlMode(result.getFollowUpMode(), "executionPolicy.followUpMode"));
     return result;
-  }
-
-  private String parseControlMode(String value, String fieldName) {
-    if (value == null) {
-      return null;
-    }
-    String trimmed = value.trim();
-    if (trimmed.isEmpty()) {
-      throw new IllegalArgumentException(fieldName + " must not be blank when present");
-    }
-    try {
-      return ControlConsumptionMode.valueOf(trimmed).name();
-    } catch (IllegalArgumentException exception) {
-      throw new IllegalArgumentException(
-          fieldName + " must be one of ONE_AT_A_TIME/ALL but was: " + value, exception);
-    }
   }
 
   private void validatePositive(Number value, String fieldName) {

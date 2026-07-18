@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveSessionAgentId } from '@/features/ai/ai-console-page-helpers'
+import { resolveThreadAgentId } from '@/features/ai/ai-console-page-helpers'
 import {
   buildResourceSubmitPlan,
   createAgentEditorPlan,
@@ -11,13 +11,13 @@ import {
 } from '@/features/ai/ai-resource-editor-plans'
 
 describe('ai-console-page-helpers', () => {
-  it('resolves the preferred session agent id', () => {
+  it('resolves the preferred thread agent id', () => {
     const agents = [agent()]
 
-    expect(resolveSessionAgentId('explicit-agent', 'selected-agent', agents)).toBe('explicit-agent')
-    expect(resolveSessionAgentId(undefined, 'selected-agent', agents)).toBe('selected-agent')
-    expect(resolveSessionAgentId(undefined, '', agents)).toBe('agent-1')
-    expect(resolveSessionAgentId(undefined, '', [])).toBe('')
+    expect(resolveThreadAgentId('explicit-agent', 'selected-agent', agents)).toBe('explicit-agent')
+    expect(resolveThreadAgentId(undefined, 'selected-agent', agents)).toBe('selected-agent')
+    expect(resolveThreadAgentId(undefined, '', agents)).toBe('agent-1')
+    expect(resolveThreadAgentId(undefined, '', [])).toBe('')
   })
 
   it('builds create and edit editor plans with fallbacks', () => {

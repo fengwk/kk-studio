@@ -14,54 +14,61 @@ function createClient(): HttpClient {
 describe('harnessService', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('maps session, entry, run and observability queries to the Harness API', async () => {
+  it('maps Thread, entry, input and observability queries to the Thread API', async () => {
     const client = createClient()
     const service = createHarnessService(client)
 
-    await service.listSessions()
-    await service.createSession({ agentDefinitionId: '1', title: 'Draft' })
-    await service.getSession('session /1')
-    await service.listEntries('session /1')
-    await service.createMessage('session /1', { content: 'hello', expectedLeafEntryId: '2' })
-    await service.listRuns('session /1')
-    await service.listRunEvents('run /2', 7)
+    await service.listThreads()
+    await service.createThread({ agentDefinitionId: '1', title: 'Draft' })
+    await service.getThread('thread /1')
+    await service.listSessionThreads('session /1')
+    await service.submitThreadMessage('thread /1', { content: 'hello', clientMessageId: 'cid-1' })
+    await service.setThreadYolo('thread /1', { yoloEnabled: true })
+    await service.setThreadAgent('thread /1', { agentDefinitionId: '9' })
+    await service.listThreadEntries('thread /1')
+    await service.listThreadInputs('thread /1')
+    await service.listThreadEvents('thread /1', '7')
+    await service.listThreadEvents('thread /1', '9007199254740993', 50)
+    await service.listThreadToolInvocations('thread /1')
+    await service.getThreadUsage('thread /1')
     await service.listRootActivities('session /1', '9')
     await service.listSessionTasks('session /1')
-    await service.listToolInvocations('run /2')
-    await service.getYolo('session /1')
-    await service.setYolo('session /1', true)
     await service.decideToolInvocation('tool /3', 'allow')
-    await service.steer('session /1', 'redirect')
-    await service.followUp('session /1', 'continue')
-    await service.abortRun('session /1')
 
-    expect(client.get).toHaveBeenNthCalledWith(1, '/sessions')
-    expect(client.post).toHaveBeenNthCalledWith(1, '/sessions', { agentDefinitionId: '1', title: 'Draft' })
-    expect(client.get).toHaveBeenNthCalledWith(2, '/sessions/session%20%2F1')
-    expect(client.get).toHaveBeenNthCalledWith(3, '/sessions/session%20%2F1/entries')
-    expect(client.post).toHaveBeenNthCalledWith(2, '/sessions/session%20%2F1/messages', { content: 'hello', expectedLeafEntryId: '2' })
-    expect(client.get).toHaveBeenNthCalledWith(4, '/sessions/session%20%2F1/runs')
-    expect(client.get).toHaveBeenNthCalledWith(5, '/runs/run%20%2F2/events', { params: { afterSequence: 7 } })
-    expect(client.get).toHaveBeenNthCalledWith(6, '/sessions/session%20%2F1/activities', { params: { afterEventId: '9' } })
-    expect(client.get).toHaveBeenNthCalledWith(7, '/sessions/session%20%2F1/tasks')
-    expect(client.get).toHaveBeenNthCalledWith(8, '/runs/run%20%2F2/tool-invocations')
-    expect(client.get).toHaveBeenNthCalledWith(9, '/sessions/session%20%2F1/yolo')
-    expect(client.put).toHaveBeenCalledWith('/sessions/session%20%2F1/yolo', { enabled: true })
+    expect(client.get).toHaveBeenNthCalledWith(1, '/threads')
+    expect(client.post).toHaveBeenNthCalledWith(1, '/threads', { agentDefinitionId: '1', title: 'Draft' })
+    expect(client.get).toHaveBeenNthCalledWith(2, '/threads/thread%20%2F1')
+    expect(client.get).toHaveBeenNthCalledWith(3, '/sessions/session%20%2F1/threads')
+    expect(client.post).toHaveBeenNthCalledWith(2, '/threads/thread%20%2F1/messages', {
+      content: 'hello',
+      clientMessageId: 'cid-1',
+    })
+    expect(client.put).toHaveBeenNthCalledWith(1, '/threads/thread%20%2F1/yolo', { yoloEnabled: true })
+    expect(client.put).toHaveBeenNthCalledWith(2, '/threads/thread%20%2F1/agent', { agentDefinitionId: '9' })
+    expect(client.get).toHaveBeenNthCalledWith(4, '/threads/thread%20%2F1/entries')
+    expect(client.get).toHaveBeenNthCalledWith(5, '/threads/thread%20%2F1/inputs')
+    expect(client.get).toHaveBeenNthCalledWith(6, '/threads/thread%20%2F1/events', { params: { afterEventId: '7' } })
+    expect(client.get).toHaveBeenNthCalledWith(7, '/threads/thread%20%2F1/events', {
+      params: { afterEventId: '9007199254740993', limit: 50 },
+    })
+    expect(client.get).toHaveBeenNthCalledWith(8, '/threads/thread%20%2F1/tool-invocations')
+    expect(client.get).toHaveBeenNthCalledWith(9, '/usage/threads/thread%20%2F1')
+    expect(client.get).toHaveBeenNthCalledWith(10, '/sessions/session%20%2F1/activities', {
+      params: { afterEventId: '9' },
+    })
+    expect(client.get).toHaveBeenNthCalledWith(11, '/sessions/session%20%2F1/tasks')
     expect(client.post).toHaveBeenNthCalledWith(3, '/tool-invocations/tool%20%2F3/decision', { decision: 'allow' })
-    expect(client.post).toHaveBeenNthCalledWith(4, '/sessions/session%20%2F1/steer', { content: 'redirect' })
-    expect(client.post).toHaveBeenNthCalledWith(5, '/sessions/session%20%2F1/follow-ups', { content: 'continue' })
-    expect(client.post).toHaveBeenNthCalledWith(6, '/sessions/session%20%2F1/abort')
   })
 
-  it('creates cursor-based run and root activity streams', () => {
+  it('creates cursor-based thread event streams with decimal string cursors', () => {
     const eventSource = vi.fn()
     vi.stubGlobal('EventSource', eventSource)
     const service = createHarnessService(createClient())
 
-    service.createRunEventStream('run /2', 7)
-    service.createRootActivityStream('session /1', '9')
+    service.createThreadEventStream('thread /2', '9007199254740993')
 
-    expect(eventSource).toHaveBeenNthCalledWith(1, '/api/runs/run%20%2F2/events/stream?afterSequence=7')
-    expect(eventSource).toHaveBeenNthCalledWith(2, '/api/sessions/session%20%2F1/activities/stream?afterEventId=9')
+    expect(eventSource).toHaveBeenCalledWith(
+      '/api/threads/thread%20%2F2/events/stream?afterEventId=9007199254740993',
+    )
   })
 })

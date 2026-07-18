@@ -1,112 +1,126 @@
 # 前端落地设计
 
-本文描述当前 `frontend/` 工程的页面结构、Harness API 契约、持久化时间线投影和验证边界。
+本文描述当前 `frontend/` 工程的页面结构、Harness Thread API 契约、transcript 投影和验证边界。
 
 ## 前端摘要
 
 | 主题 | 当前实现 |
 | --- | --- |
 | 工程目录 | `frontend/` 独立 Vite 工程 |
-| 页面范围 | Chat、Provider/Model/Agent 资源管理、ComfyUI 工作流 |
+| 页面范围 | Chat（Thread）、Provider/Model/Agent 资源管理、ComfyUI 工作流 |
 | 服务端状态 | React Query |
 | 资源 API | `/api/providers`、`/api/models`、`/api/agents` |
-| Harness API | `/api/sessions`、`/api/runs`、`/api/tool-invocations`、`/api/usage` |
-| 实时通道 | 数据库 cursor 驱动的 Run SSE 与 Root Activity SSE |
+| Harness API | `/api/threads`、`/api/sessions`（只读树/activities/tasks）、`/api/tool-invocations`、`/api/usage` |
+| 实时通道 | 数据库 cursor 驱动的 Thread Event SSE |
 | 视觉实现 | 全局 token 以 Canvas 设计为事实源，见 [前端设计规范](../product-design/frontend-design-system.md)；组件层仍在迁移 |
 
 ## 路由
 
 | 路由 | 页面 | 说明 |
 | --- | --- | --- |
-| `/` | redirect | 跳转至 `/sessions` |
-| `/sessions` | Chat 列表 | 全局根 Session、新建 Session |
-| `/sessions/:sessionId` | Chat 详情 | Entry 时间线、Run 状态、Task Timeline、工具、权限、Usage/Cost 与控制操作 |
+| `/` | redirect | 跳转至 `/threads` |
+| `/threads` | Chat 列表 | 全局 Thread 列表、新建 Thread |
+| `/threads/:threadId` | Chat 详情 | Thread transcript、处理状态、Task Timeline、工具权限、Usage |
 | `/agents` | Agent 管理 | Agent CRUD |
 | `/models` | Model 管理 | Model CRUD |
 | `/providers` | Provider 管理 | Provider CRUD |
 | `/comfyui` | ComfyUI 工作流 | 独立工作流运行时 |
 
+扩展注册：`frontend/src/features/ai/extensions/ai-extension.tsx`（`ai.threads`、`ai.thread` 等）。
+
 ## API 边界
 
-`shared/api/agent-service.ts` 只承载 Provider、Model、Agent 与 Usage 的资源接口。`shared/api/harness-service.ts` 是 Harness 会话、Run、观测和控制的唯一前端边界。
+`shared/api/agent-service.ts` 承载 Provider、Model、Agent 与 Model 级 Usage。`shared/api/harness-service.ts` 是 Harness Thread / Session 观测的唯一前端边界。
 
 | Harness service | HTTP 接口 | 用途 |
 | --- | --- | --- |
-| `listSessions` / `createSession` / `getSession` | `GET` / `POST /api/sessions`、`GET /api/sessions/{id}` | 根 Session 列表、创建与读取 |
-| `listEntries` | `GET /api/sessions/{id}/entries` | 完整持久 Session Entry 时间线 |
-| `createMessage` | `POST /api/sessions/{id}/messages` | 以 `expectedLeafEntryId` 提交用户消息 |
-| `listRuns` | `GET /api/sessions/{id}/runs` | Session Run 状态 |
-| `listRunEvents` | `GET /api/runs/{id}/events?afterSequence=` | Run Event 快照与 cursor 恢复 |
-| `createRunEventStream` | `GET /api/runs/{id}/events/stream?afterSequence=` | Run Event SSE；服务端 event id 是 sequence |
-| `listRootActivities` / `createRootActivityStream` | `GET /api/sessions/{id}/activities`、`GET /api/sessions/{id}/activities/stream?afterEventId=` | Root Session 树的 activity 快照与 SSE |
-| `listSessionTasks` | `GET /api/sessions/{id}/tasks` | 指定 parent Session 的直接 Subagent Task 与终态 Report |
-| `listToolInvocations` | `GET /api/runs/{id}/tool-invocations` | 工具、目标类型与 Environment 绑定 |
-| `decideToolInvocation` | `POST /api/tool-invocations/{id}/decision` | 持久化 allow / deny 决策 |
-| `steer` / `followUp` / `abortRun` | `POST /api/sessions/{id}/steer`、`/follow-ups`、`/abort` | Root Run 控制命令 |
-| `getYolo` / `setYolo` | `GET` / `PUT /api/sessions/{id}/yolo` | 根 Session YOLO 策略 |
-| `getSessionUsage` | `GET /api/usage/sessions/{id}` | Token、cache 与 Cost 汇总 |
-| `GET /api/artifacts/{id}` | Artifact bytes | Tool artifact 的原始媒体资源 |
+| `listThreads` / `createThread` / `getThread` | `GET` / `POST /api/threads`、`GET /api/threads/{id}` | Thread 列表、创建与读取 |
+| `listSessionThreads` | `GET /api/sessions/{id}/threads` | Session 上的 Thread |
+| `submitThreadMessage` | `POST /api/threads/{id}/messages` | 入队用户消息（202；`clientMessageId` 幂等） |
+| `setThreadYolo` / `setThreadAgent` | `PUT /api/threads/{id}/yolo`、`/agent` | 入队设置变更（202） |
+| `listThreadEntries` | `GET /api/threads/{id}/entries` | root→head 路径 Entries |
+| `listThreadInputs` | `GET /api/threads/{id}/inputs` | 有序 inputs（含 pending） |
+| `listThreadEvents` | `GET /api/threads/{id}/events?afterEventId=` | ThreadEvent 快照 |
+| `createThreadEventStream` | `GET /api/threads/{id}/events/stream?afterEventId=` | SSE；event name `thread_event`，id = `eventId` |
+| `listThreadToolInvocations` | `GET /api/threads/{id}/tool-invocations` | Thread 工具投影 |
+| `getThreadUsage` | `GET /api/usage/threads/{id}` | Thread Usage/Cost |
+| `listSessions` / `getSession` / `listSessionEntries` | `GET /api/sessions`、`/{id}`、`/{id}/entries` | Session 只读 |
+| `listRootActivities` | `GET /api/sessions/{id}/activities` | Root Activity 快照 |
+| `listSessionTasks` | `GET /api/sessions/{id}/tasks` | 直接子 SubagentTask |
+| `decideToolInvocation` | `POST /api/tool-invocations/{id}/decision` | allow / deny |
 
 所有 Snowflake ID 在 TypeScript 契约中保持十进制字符串；前端不将 ID 作为 JavaScript number 使用。
 
-## Chat 时间线
+## Chat transcript
 
-### 持久基线与实时覆盖层
+### 投影公式
 
-`HarnessSessionEntryDTO[]` 是聊天历史的唯一基线：`message` Entry 投影为 user、assistant、tool 气泡，`agent_snapshot` 提供冻结模型/variant 摘要，`compaction` 提供系统摘要。持久 Assistant Tool Call 的参数按 Session 路径关联到后续 Tool Result；Tool Result 中的 artifact 内容映射到 `/api/artifacts/{artifactId}`，浏览器直接加载媒体，不读取或重组 artifact bytes。
+`buildThreadTimeline(entries, inputs, threadEvents)`（`thread-timeline-builder.ts`）：
 
-活动 Run 的 `RunEventDTO[]` 只用于尚未物化的实时覆盖层：
+```text
+transcript =
+  path Entries（语义基线）
+  + 尚未物化的 USER_MESSAGE inputs
+  + active ThreadEvents（流式 / 工具覆盖层）
+```
 
-| Run Event | 前端行为 |
+| 来源 | 前端行为 |
 | --- | --- |
-| `assistant_started` / `assistant_delta_batch` | 创建并追加流式 assistant 文本与 thinking |
-| `assistant_failed` | 标记当前流式 assistant 为错误 |
-| `tool_prepared` / `tool_started` | 显示待执行或执行中的工具调用 |
-| `tool_delta_batch` | 追加部分 Tool Result 文本与 artifact 引用 |
-| `tool_completed` | 标记临时工具节点完成或失败 |
+| `message` / `agent_snapshot` / `compaction` Entry | 稳定气泡与冻结摘要 |
+| unapplied `user_message` input | 立即显示用户气泡（`pendingInput`），Entry 出现后抑制 |
+| `assistant_started` / `assistant_delta_batch` | 流式 assistant / thinking；以 `subjectEntryId` 关联 |
+| `assistant_completed` / Entry 物化 | 抑制对应 stream 覆盖层 |
+| `assistant_failed` | 标记流式 assistant 错误 |
+| `tool_*` / `permission_*` | 工具与权限覆盖；Entry 物化后抑制 |
+| Tool Result artifact | 映射 `/api/artifacts/{artifactId}` 原生预览或文件链 |
 
-每次 `assistant_completed` 都已经与语义 Assistant Entry 原子持久化。投影器将 Run Event 中截至第 N 个 `assistant_completed` 的前缀视为 N 个 durable Assistant Entry 已覆盖的历史；失败重试不会消耗该匹配。尚未物化的 `assistant_completed` 会把当前流式 Assistant 标记为 `done`，避免 Entry refetch 完成前气泡消失。已物化的 Tool Result 同样按 Run 与 Tool Call 顺序抑制对应 Invocation 覆盖层，避免刷新后重复气泡。
-
-页面会分页拉全并缓存最新 Run 的 Run Event（含终态失败细节），仅在 Run 仍处于 active 状态时打开 SSE。
+连续重叠提交：composer 使用 `clientMessageId` 与 202 入队，不等待前一轮处理结束；pending inputs 与 processing 状态可同时可见。
 
 ### SSE cursor 恢复
 
-页面先使用 `listRunEvents` 按最大页长读取到末页，再用当前最大 `sequence` 打开 EventSource。收到 `run_event` 后以 sequence 去重并排序；浏览器自动重连时携带上一个 SSE event id，服务端取 query cursor 与 `Last-Event-ID` 的较大者继续发送。`tool_requeued` 与 Assistant/Run 终态 Event 会触发 Entry 刷新；Run 终态还会失效 Session、Run 与 Session 列表 query，使持久化基线重新成为唯一显示结果。
+先分页 `listThreadEvents` 拉到末页，再用最后一个后端事件的 `eventId` 打开 EventSource。收到 `thread_event` 后以 `eventId` 字符串去重并按接收顺序追加；浏览器重连携带 `Last-Event-ID`。REST page 与 SSE 均以后端 journal 顺序为准，前端不按时间、sequence 或 ID 重排。分页前进校验使用字符串位数 + 字典序比较 `eventId`，**绝不**转为 JavaScript number。
+
+终态类事件与 idle/failed 触发 entries / inputs / tool / usage query 失效，使 durable 基线重新成为唯一显示结果。
 
 ## Root Activity 与 Subagent Task
 
-Root Session 额外使用 `RootActivityDTO` 构建任务时间线。活动的 SSE cursor 是 `eventId` 雪花 ID 的十进制字符串，前端按字符串位数和字典序比较，绝不转换为 JavaScript number。`root_activity` 事件与 REST 快照按 eventId 去重、排序；浏览器重连沿用 SSE 的 Last-Event-ID。
-
-仅根 Session 展示 Task Timeline。前端从根 Session 开始调用 `GET /sessions/{id}/tasks`，再递归读取每个 child Session 的直接任务，构造 `SubagentTaskNode` 树。路径集合阻断循环关系，相同 child Session 的请求在一次加载内共享。Task 节点展示 target agent、状态、child report、working-copy policy/revision、turn/tool 计数与 artifact 链接；child session 可从节点直接打开。
-
-Root Activity 中的 `permission_requested` / `permission_resolved` 会派生出子代理权限 relay。relay 使用 invocation ID 调用已有 Tool Invocation 决策 API；它不是内存审批队列，刷新后由 Activity 快照重建。`steer`、`follow-up` 和 `abort` 直接提交持久 Run Control 命令，随后失效 Activity、Run 和 Entry query。
+详情页使用 `RootActivityDTO` 与 `listSessionTasks` 构建任务时间线（`useHarnessTaskTimeline`、`subagent-task-tree.ts`、`TaskTimelinePanel.tsx`）。从 Thread 所属 root Session 递归拉取直接任务；路径集合阻断循环。权限 relay 调用同一 Tool decision API；刷新后由 REST 快照重建。
 
 ## 运行观测与交互
 
-Chat 详情的观测栏直接读取持久事实：
+`useHarnessThreadObservability`：
 
-- YOLO 开关更新根 Session 的持久策略。
-- `WAITING_APPROVAL` Invocation 显示 tool、target type、Environment ID 与 allow / deny 操作。
-- Session Usage 显示输入/输出 token、cache read 与聚合 Cost。
-- Tool artifact 在时间线内显示 image、audio、video 预览；其它 media type 以文件占位和原始内容链接呈现，不会在投影时丢弃。
+- YOLO 通过 `setThreadYolo` 入队（202），非即时 Session 字段。
+- `WAITING_APPROVAL` Invocation 展示 allow / deny。
+- Thread Usage 显示 token、cache 与 Cost。
+- Tool artifact 在时间线内预览；不在投影时丢弃未知 media type。
 
-前端不维护可恢复的 EventBus、工具状态机或租约；断线、刷新和重连后全部状态由 REST 快照和数据库驱动的 SSE 重建。
+前端不维护可恢复 EventBus 或租约状态机；断线、刷新后由 REST + SSE 重建。
 
 ## 工程结构
 
 ```text
 frontend/src
-├── app
-├── platform
+├── app/router.tsx
+├── platform/
 ├── features/ai
-│   ├── useAgentSessionController.ts
-│   ├── useHarnessRunEventStream.ts
-│   ├── useHarnessRootActivityStream.ts
-│   ├── useHarnessSessionObservability.ts
+│   ├── extensions/ai-extension.tsx
+│   ├── AgentThreadPage.tsx
+│   ├── useAgentThreadController.ts
+│   ├── useAgentThreadQueries.ts
+│   ├── useAgentThreadMessageMutation.ts
+│   ├── useAiConsoleController.ts
+│   ├── useAiConsoleThreadController.ts
+│   ├── useAiConsoleThreadQueries.ts
+│   ├── useAiConsoleThreadMutations.ts
+│   ├── useHarnessThreadEventStream.ts
+│   ├── useHarnessThreadObservability.ts
 │   ├── useHarnessTaskTimeline.ts
-│   ├── useHarnessRunControls.ts
-│   ├── session-timeline-builder.ts
-│   ├── subagent-task-tree.ts
+│   ├── harness-thread-event-stream.ts
+│   ├── thread-events.ts / thread-event-types.ts / thread-event-payload.ts
+│   ├── thread-timeline-builder.ts
+│   ├── thread-panel/          ThreadPanel, Composer, Transcript, ...
+│   ├── AiConsoleThreadCard.tsx / AiConsoleThreadModals.tsx / AiConsolePanels.tsx
 │   ├── ChatObservabilityPanel.tsx
 │   └── TaskTimelinePanel.tsx
 ├── shared/api
@@ -116,6 +130,8 @@ frontend/src
 ├── shared/lib/query-keys.ts
 └── styles.css
 ```
+
+`queryKeys.threads.*` 覆盖 list/detail/entries/inputs/events/toolInvocations；`queryKeys.usage.thread` 覆盖用量。
 
 ## 验证
 
@@ -127,4 +143,4 @@ npm run build
 npm run coverage
 ```
 
-前端覆盖率门禁使用 statements / branches / functions / lines 均不低于 80%。
+前端覆盖率门禁：statements / branches / functions / lines 均不低于 80%。

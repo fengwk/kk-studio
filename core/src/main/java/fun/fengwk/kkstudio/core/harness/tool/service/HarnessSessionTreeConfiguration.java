@@ -7,7 +7,6 @@ import org.springframework.context.annotation.Configuration;
 import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
 import fun.fengwk.kkstudio.core.harness.session.store.SnowflakeSessionIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionTree;
-import fun.fengwk.kkstudio.harness.runtime.session.SessionYoloResolver;
 
 import java.time.Clock;
 
@@ -18,8 +17,7 @@ public class HarnessSessionTreeConfiguration {
   public SessionTree harnessSessionTree(
       MysqlHarnessSessionStore sessionStore,
       SnowflakeSessionIdGenerator idGenerator,
-      SessionYoloResolver yoloResolver,
       Clock harnessRunClock) {
-    return new SessionTree(sessionStore, sessionStore, idGenerator, yoloResolver, harnessRunClock);
+    return new SessionTree(sessionStore, sessionStore, idGenerator, harnessRunClock);
   }
 }

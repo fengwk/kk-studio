@@ -1,30 +1,44 @@
 import type { RootActivityDTO } from '@/shared/api/contracts'
 
+export function normalizeRootActivity(raw: Partial<RootActivityDTO> | null | undefined): RootActivityDTO | null {
+  if (
+    !raw
+    || !raw.rootSessionId
+    || !raw.sessionId
+    || !raw.threadId
+    || !raw.eventType
+    || !isPositiveDecimal(raw.eventId)
+  ) {
+    return null
+  }
+  return {
+    rootSessionId: String(raw.rootSessionId),
+    sessionId: String(raw.sessionId),
+    threadId: String(raw.threadId),
+    eventId: String(raw.eventId),
+    eventType: String(raw.eventType),
+    payloadJson: typeof raw.payloadJson === 'string' ? raw.payloadJson : '',
+    createTime: raw.createTime as RootActivityDTO['createTime'],
+  }
+}
+
 export function parseRootActivity(data: string): RootActivityDTO | null {
   try {
-    const activity = JSON.parse(data) as Partial<RootActivityDTO>
-    if (
-      !activity.rootSessionId
-      || !activity.sessionId
-      || !activity.runId
-      || !activity.type
-      || !isPositiveDecimal(activity.eventId)
-      || !Number.isInteger(activity.sequence)
-      || (activity.sequence ?? -1) < 0
-    ) {
-      return null
-    }
-    return activity as RootActivityDTO
+    return normalizeRootActivity(JSON.parse(data) as Partial<RootActivityDTO>)
   } catch {
     return null
   }
 }
 
 export function mergeRootActivity(activities: RootActivityDTO[], activity: RootActivityDTO): RootActivityDTO[] {
-  if (activities.some((candidate) => candidate.eventId === activity.eventId)) {
+  const normalized = normalizeRootActivity(activity)
+  if (!normalized) {
     return activities
   }
-  return [...activities, activity].sort((left, right) => compareRootActivityIds(left.eventId, right.eventId))
+  if (activities.some((candidate) => candidate.eventId === normalized.eventId)) {
+    return activities
+  }
+  return [...activities, normalized].sort((left, right) => compareRootActivityIds(left.eventId, right.eventId))
 }
 
 export function mergeRootActivityLists(base: RootActivityDTO[], incoming: RootActivityDTO[]): RootActivityDTO[] {

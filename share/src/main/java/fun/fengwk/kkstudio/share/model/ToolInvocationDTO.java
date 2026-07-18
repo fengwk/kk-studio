@@ -4,11 +4,11 @@ import lombok.Data;
 
 import java.time.Instant;
 
-/** T15 ToolInvocation read projection; ids are decimal strings of the underlying bigint values. */
+/** ToolInvocation read projection; ids are decimal strings of the underlying bigint values. */
 @Data
 public class ToolInvocationDTO {
   private String id;
-  private String runId;
+  private String threadId;
   private String assistantEntryId;
   private Integer ordinal;
   private String toolCallId;

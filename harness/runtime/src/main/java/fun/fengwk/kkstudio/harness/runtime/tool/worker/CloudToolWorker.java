@@ -94,15 +94,43 @@ public final class CloudToolWorker {
   }
 
   /**
-   * Coordinates stranded terminal batches then dispatches one due invocation without awaiting it.
+   * Dispatches one due invocation without awaiting it. Prefer {@link #dispatchDueForThread} for
+   * event-triggered ThreadProcessor paths; this global claim remains for recovery/tests.
    */
   public Optional<ClaimedToolInvocation> executeNext(String workerId) {
     requireNonBlank(workerId, "workerId");
     Instant now = clock.instant();
-    transactions.coordinateReadyRuns(now);
     Optional<ClaimedToolInvocation> claimed = store.claimDue(workerId, now, config.leaseDuration());
     claimed.ifPresent(this::dispatch);
     return claimed;
+  }
+
+  /**
+   * Event-triggered path: claim and dispatch all currently due Cloud/Control invocations for one
+   * thread (non-blocking callbacks).
+   */
+  public int dispatchDueForThread(String workerId, long threadId) {
+    requireNonBlank(workerId, "workerId");
+    if (threadId <= 0) {
+      throw new IllegalArgumentException("threadId must be positive");
+    }
+    if (!(store instanceof ThreadScopedToolClaimStore scoped)) {
+      // Fallback: single global claim when store does not support thread scope.
+      return executeNext(workerId).isPresent() ? 1 : 0;
+    }
+    int dispatched = 0;
+    Instant now = clock.instant();
+    while (true) {
+      Optional<ClaimedToolInvocation> claimed =
+          scoped.claimDueForThread(workerId, threadId, now, config.leaseDuration());
+      if (claimed.isEmpty()) {
+        break;
+      }
+      dispatch(claimed.orElseThrow());
+      dispatched++;
+      now = clock.instant();
+    }
+    return dispatched;
   }
 
   /**
@@ -181,7 +209,7 @@ public final class CloudToolWorker {
                   tool.descriptor(),
                   call,
                   Duration.between(clock.instant(), invocation.deadlineAt()),
-                  new ToolExecutionContext(invocation.id(), invocation.runId())),
+                  new ToolExecutionContext(invocation.id(), invocation.threadId())),
               execution);
       execution.setHandle(handle);
     } catch (RuntimeException error) {
@@ -222,8 +250,7 @@ public final class CloudToolWorker {
     // terminal CAS 已落库，先发 lifecycle observation，再尝试 coordinate；coordinate 抛错也不影响已持久观察。
     lifecycleObservers.publish(
         new ToolCompleted(
-            claimed.invocation().id(), claimed.invocation().runId(), status, errorMessage, now));
-    transactions.coordinateReadyRuns(now);
+            claimed.invocation().id(), claimed.invocation().threadId(), status, errorMessage, now));
     return true;
   }
 

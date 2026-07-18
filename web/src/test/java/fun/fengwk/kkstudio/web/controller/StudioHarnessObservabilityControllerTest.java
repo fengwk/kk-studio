@@ -1,16 +1,11 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import static fun.fengwk.kkstudio.web.HarnessUsageFixtures.toolCallsUsageDraft;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,75 +14,53 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
-import fun.fengwk.kkstudio.core.harness.run.service.DatabaseToolPreparationPort;
-import fun.fengwk.kkstudio.core.harness.run.service.HarnessRunTransactionService;
-import fun.fengwk.kkstudio.core.harness.run.store.MysqlHarnessRunStore;
-import fun.fengwk.kkstudio.core.harness.run.store.SnowflakeRunIdGenerator;
-import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
-import fun.fengwk.kkstudio.core.harness.session.store.SnowflakeSessionIdGenerator;
+import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
+import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
+import fun.fengwk.kkstudio.core.harness.task.store.mapper.HarnessSubagentTaskMapper;
+import fun.fengwk.kkstudio.core.harness.task.store.model.HarnessSubagentTaskDO;
+import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadEventMapper;
+import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadMapper;
+import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadDO;
+import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadEventDO;
 import fun.fengwk.kkstudio.core.harness.tool.store.DatabaseArtifactStore;
-import fun.fengwk.kkstudio.harness.model.ModelCost;
-import fun.fengwk.kkstudio.harness.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
-import fun.fengwk.kkstudio.harness.runtime.run.AgentRun;
-import fun.fengwk.kkstudio.harness.runtime.run.RunEventDraft;
-import fun.fengwk.kkstudio.harness.runtime.run.RunEventPayloads;
-import fun.fengwk.kkstudio.harness.runtime.run.RunEventType;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshotEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
-import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.tool.ToolCall;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
-import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
+import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
+import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
+import fun.fengwk.kkstudio.harness.runtime.task.TaskReport;
+import fun.fengwk.kkstudio.harness.runtime.task.TaskResultFormatter;
+import fun.fengwk.kkstudio.harness.runtime.task.TaskState;
+import fun.fengwk.kkstudio.harness.runtime.task.WorkingCopyPolicy;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventType;
 import fun.fengwk.kkstudio.web.WebTestApplication;
 
-import java.math.BigDecimal;
-import java.nio.file.Path;
 import java.sql.Timestamp;
-import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayList;
+import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 /**
- * T15 observability HTTP contract coverage: strict 400/404 semantics, JSON contract for bigint IDs,
- * SSE event names + IDs, query cursor taking precedence over {@code Last-Event-ID}, and raw
- * artifact bytes. SSE tests rely only on events persisted in the H2 store; no in-memory event bus
- * is used.
+ * HTTP contract for {@link StudioHarnessObservabilityController}: current session/thread routes
+ * only, bigint ids as JSON strings, and 400/404 boundaries. Thread event SSE lives on
+ * StudioHarnessThreadController and is intentionally out of scope here.
  */
 @AutoConfigureMockMvc
 @SpringBootTest(classes = WebTestApplication.class)
 class StudioHarnessObservabilityControllerTest {
 
-  private static final Instant NOW = Instant.parse("2026-07-16T00:00:00Z");
+  /** Large Snowflake-range id to prove JSON string (not number) serialization. */
+  private static final long LARGE_ID = 9_007_199_254_740_993L;
+
+  private static final LocalDateTime NOW = LocalDateTime.of(2026, 7, 16, 0, 0);
 
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
-  @Autowired private MysqlHarnessSessionStore sessionStore;
-  @Autowired private SnowflakeSessionIdGenerator sessionIds;
-  @Autowired private MysqlHarnessRunStore runStore;
-  @Autowired private SnowflakeRunIdGenerator runIds;
-  @Autowired private HarnessRunTransactionService transactions;
-  @Autowired private DatabaseToolPreparationPort preparationPort;
+  @Autowired private HarnessSessionMapper sessionMapper;
+  @Autowired private HarnessThreadMapper threadMapper;
+  @Autowired private HarnessThreadEventMapper eventMapper;
+  @Autowired private ToolInvocationMapper invocationMapper;
+  @Autowired private HarnessSubagentTaskMapper taskMapper;
   @Autowired private DatabaseArtifactStore artifactStore;
   @Autowired private JdbcTemplate jdbc;
 
@@ -95,89 +68,87 @@ class StudioHarnessObservabilityControllerTest {
   void clean() {
     jdbc.update("delete from model_usage_record");
     jdbc.update("delete from tool_artifact");
-    jdbc.update("delete from harness_run_control_message");
     jdbc.update("delete from harness_subagent_task");
     jdbc.update("delete from tool_invocation");
-    jdbc.update("delete from harness_run_event");
-    jdbc.update("delete from harness_run");
+    jdbc.update("delete from harness_thread_event");
+    jdbc.update("delete from harness_thread_input");
+    jdbc.update("delete from harness_thread");
     jdbc.update("delete from harness_session_entry");
     jdbc.update("delete from harness_session");
   }
 
-  /** Run event / activity JSON contracts use string ids; cursor / limit validation hits 400. */
+  /** Activities expose string Snowflake ids and reject bad cursors / unknown sessions. */
   @Test
-  void readsRunEventsAndActivitiesAsJsonWithStringIds() throws Exception {
-    Seed seed = seedRun("run-events");
+  void readsRootActivitiesAsJsonWithStringIds() throws Exception {
+    long rootSessionId = LARGE_ID;
+    long threadId = LARGE_ID + 1;
+    long eventId = LARGE_ID + 2;
+    insertRootSession(rootSessionId, "activities");
+    insertThread(threadId, rootSessionId);
+    insertEvent(eventId, threadId, ThreadEventType.TURN_STARTED);
 
     mockMvc
-        .perform(get("/api/runs/{id}/events", seed.run.id()))
+        .perform(get("/api/sessions/{id}/activities", Long.toString(rootSessionId)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[0].runId").value(Long.toString(seed.run.id())))
-        .andExpect(jsonPath("$.data[0].sequence").value(1))
-        .andExpect(jsonPath("$.data[0].eventId").exists())
-        .andExpect(jsonPath("$.data[0].type").value("turn_started"));
+        .andExpect(jsonPath("$.data[0].rootSessionId").value(Long.toString(rootSessionId)))
+        .andExpect(jsonPath("$.data[0].sessionId").value(Long.toString(rootSessionId)))
+        .andExpect(jsonPath("$.data[0].threadId").value(Long.toString(threadId)))
+        .andExpect(jsonPath("$.data[0].eventId").value(Long.toString(eventId)))
+        .andExpect(jsonPath("$.data[0].eventType").value("turn_started"));
 
     mockMvc
         .perform(
-            get("/api/runs/{id}/events", seed.run.id())
-                .param("afterSequence", "1")
+            get("/api/sessions/{id}/activities", Long.toString(rootSessionId))
+                .param("afterEventId", Long.toString(eventId))
                 .param("limit", "1"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.length()").value(1))
-        .andExpect(jsonPath("$.data[0].sequence").value(2));
+        .andExpect(jsonPath("$.data.length()").value(0));
 
     mockMvc
-        .perform(get("/api/runs/{id}/events", seed.run.id()).param("afterSequence", "-1"))
+        .perform(
+            get("/api/sessions/{id}/activities", Long.toString(rootSessionId))
+                .param("afterEventId", "-1"))
         .andExpect(status().isBadRequest());
 
     mockMvc
-        .perform(get("/api/runs/{id}/events", seed.run.id()).param("limit", "9999"))
+        .perform(
+            get("/api/sessions/{id}/activities", Long.toString(rootSessionId))
+                .param("limit", "9999"))
         .andExpect(status().isBadRequest());
-
-    mockMvc.perform(get("/api/runs/{id}/events", "abc")).andExpect(status().isBadRequest());
-
-    mockMvc.perform(get("/api/runs/{id}/events", "9999999999")).andExpect(status().isNotFound());
-
-    // Root activity list resolves the rootSessionId and paginates by eventId.
-    mockMvc
-        .perform(get("/api/sessions/{id}/activities", seed.rootSessionId))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[0].rootSessionId").value(Long.toString(seed.rootSessionId)))
-        .andExpect(jsonPath("$.data[0].runId").value(Long.toString(seed.run.id())))
-        .andExpect(jsonPath("$.data[0].type").value("turn_started"));
-
-    mockMvc
-        .perform(get("/api/sessions/{id}/activities", seed.rootSessionId).param("limit", "1"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.length()").value(1));
 
     mockMvc.perform(get("/api/sessions/{id}/activities", "abc")).andExpect(status().isBadRequest());
-
     mockMvc
         .perform(get("/api/sessions/{id}/activities", "9999999999"))
         .andExpect(status().isNotFound());
   }
 
-  /** Tool invocation + session task projections must surface all persistent fields. */
+  /** Thread tool-invocation list + get project persistent fields with string ids. */
   @Test
-  void readsToolInvocationAndSessionTasksAsJson() throws Exception {
-    Seed seed = seedToolRun();
+  void readsToolInvocationsAsJsonWithStringIds() throws Exception {
+    long threadId = LARGE_ID + 10;
+    long assistantEntryId = LARGE_ID + 11;
+    long invocationId = LARGE_ID + 12;
+    insertThread(threadId, LARGE_ID + 13);
+    insertInvocation(invocationId, threadId, assistantEntryId, 0, "call-1", "write", "QUEUED");
 
     mockMvc
-        .perform(get("/api/runs/{id}/tool-invocations", seed.run.id()))
+        .perform(get("/api/threads/{id}/tool-invocations", Long.toString(threadId)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.length()").value(1))
+        .andExpect(jsonPath("$.data[0].id").value(Long.toString(invocationId)))
+        .andExpect(jsonPath("$.data[0].threadId").value(Long.toString(threadId)))
+        .andExpect(jsonPath("$.data[0].assistantEntryId").value(Long.toString(assistantEntryId)))
+        .andExpect(jsonPath("$.data[0].ordinal").value(0))
         .andExpect(jsonPath("$.data[0].toolName").value("write"))
         .andExpect(jsonPath("$.data[0].targetType").value("CLOUD"))
         .andExpect(jsonPath("$.data[0].status").value("QUEUED"))
-        .andExpect(jsonPath("$.data[0].argumentsJson").value("{\"path\":\"notes.txt\"}"))
-        .andExpect(jsonPath("$.data[0].runId").value(Long.toString(seed.run.id())));
+        .andExpect(jsonPath("$.data[0].argumentsJson").value("{\"path\":\"notes.txt\"}"));
 
     String firstInvocationId =
         objectMapper
             .readTree(
                 mockMvc
-                    .perform(get("/api/runs/{id}/tool-invocations", seed.run.id()))
+                    .perform(get("/api/threads/{id}/tool-invocations", Long.toString(threadId)))
                     .andReturn()
                     .getResponse()
                     .getContentAsString())
@@ -186,6 +157,7 @@ class StudioHarnessObservabilityControllerTest {
             .path("id")
             .asText();
     assertTrue(firstInvocationId.matches("\\d+"));
+    assertTrue(firstInvocationId.equals(Long.toString(invocationId)));
 
     mockMvc
         .perform(get("/api/tool-invocations/{id}", firstInvocationId))
@@ -194,45 +166,67 @@ class StudioHarnessObservabilityControllerTest {
         .andExpect(jsonPath("$.data.toolName").value("write"))
         .andExpect(jsonPath("$.data.deadlineAt").exists());
 
+    mockMvc
+        .perform(get("/api/threads/{id}/tool-invocations", "abc"))
+        .andExpect(status().isBadRequest());
     mockMvc.perform(get("/api/tool-invocations/{id}", "abc")).andExpect(status().isBadRequest());
     mockMvc
         .perform(get("/api/tool-invocations/{id}", "9999999999"))
         .andExpect(status().isNotFound());
+  }
 
-    long parentInvocation = runIds.newRunEventId();
-    long childSession = sessionIds.newSessionId();
-    long childRun = runIds.newRunId();
-    jdbc.update(
-        "insert into harness_subagent_task"
-            + " (parent_invocation_id, parent_session_id, child_session_id, child_run_id,"
-            + " target_agent, working_copy_policy, working_copy_revision, max_turns,"
-            + " idle_timeout_millis, status, report_json, gmt_create, gmt_modified) values"
-            + " (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        parentInvocation,
-        seed.rootSessionId,
-        childSession,
-        childRun,
-        "Child",
-        "FORK",
-        "rev-1",
-        3,
-        15000L,
-        "SUCCEEDED",
-        "{\"finalReport\":\"done\",\"turnCount\":2}",
-        Timestamp.from(NOW),
-        Timestamp.from(NOW.plusSeconds(1)));
+  /** Session tasks project parent/child Thread ids and nested report payload. */
+  @Test
+  void readsSessionTasksAsJson() throws Exception {
+    long parentSessionId = LARGE_ID + 20;
+    long parentThreadId = LARGE_ID + 21;
+    long childSessionId = LARGE_ID + 22;
+    long childThreadId = LARGE_ID + 23;
+    long parentInvocationId = LARGE_ID + 24;
+    insertRootSession(parentSessionId, "tasks");
+
+    String reportJson =
+        TaskResultFormatter.json(
+            new TaskReport(
+                childSessionId,
+                childThreadId,
+                TaskState.SUCCEEDED,
+                "done",
+                List.of(),
+                2,
+                1,
+                WorkingCopyPolicy.FORK,
+                "rev-1"));
+    HarnessSubagentTaskDO task = new HarnessSubagentTaskDO();
+    task.setParentInvocationId(parentInvocationId);
+    task.setParentSessionId(parentSessionId);
+    task.setParentThreadId(parentThreadId);
+    task.setChildSessionId(childSessionId);
+    task.setChildThreadId(childThreadId);
+    task.setTargetAgent("Child");
+    task.setWorkingCopyPolicy(WorkingCopyPolicy.FORK.name());
+    task.setWorkingCopyRevision("rev-1");
+    task.setMaxTurns(3);
+    task.setStatus(TaskState.SUCCEEDED.name());
+    task.setReportJson(reportJson);
+    task.setCreateTime(NOW);
+    task.setUpdateTime(NOW.plusSeconds(1));
+    taskMapper.insert(task);
 
     mockMvc
-        .perform(get("/api/sessions/{id}/tasks", seed.rootSessionId))
+        .perform(get("/api/sessions/{id}/tasks", Long.toString(parentSessionId)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.length()").value(1))
-        .andExpect(jsonPath("$.data[0].parentInvocationId").value(Long.toString(parentInvocation)))
+        .andExpect(
+            jsonPath("$.data[0].parentInvocationId").value(Long.toString(parentInvocationId)))
+        .andExpect(jsonPath("$.data[0].parentThreadId").value(Long.toString(parentThreadId)))
+        .andExpect(jsonPath("$.data[0].childThreadId").value(Long.toString(childThreadId)))
         .andExpect(jsonPath("$.data[0].targetAgent").value("Child"))
         .andExpect(jsonPath("$.data[0].maxTurns").value(3))
         .andExpect(jsonPath("$.data[0].report.finalReport").value("done"))
-        .andExpect(jsonPath("$.data[0].report.turnCount").value(2));
+        .andExpect(jsonPath("$.data[0].report.turnCount").value(2))
+        .andExpect(jsonPath("$.data[0].report.childThreadId").value(Long.toString(childThreadId)));
 
-    mockMvc.perform(get("/api/sessions/{id}/tasks", "9999999999")).andExpect(status().isNotFound());
     mockMvc.perform(get("/api/sessions/{id}/tasks", "abc")).andExpect(status().isBadRequest());
   }
 
@@ -254,14 +248,13 @@ class StudioHarnessObservabilityControllerTest {
     mockMvc.perform(get("/api/artifacts/{id}", "0")).andExpect(status().isBadRequest());
     mockMvc.perform(get("/api/artifacts/{id}", "-1")).andExpect(status().isBadRequest());
     mockMvc.perform(get("/api/artifacts/{id}", "abc")).andExpect(status().isBadRequest());
-
     mockMvc.perform(get("/api/artifacts/{id}", "9999999999")).andExpect(status().isNotFound());
   }
 
   /** Invalid legacy media metadata must not make raw artifact retrieval a server error. */
   @Test
   void fallsBackToOctetStreamForMalformedPersistedArtifactMediaType() throws Exception {
-    long artifactId = runIds.newRunEventId();
+    long artifactId = LARGE_ID + 30;
     jdbc.update(
         "insert into tool_artifact (id, media_type, encoding, content, size_bytes, sha256,"
             + " gmt_create) values (?, ?, ?, ?, ?, ?, ?)",
@@ -271,7 +264,7 @@ class StudioHarnessObservabilityControllerTest {
         new byte[] {1},
         1L,
         "digest",
-        Timestamp.from(NOW));
+        Timestamp.valueOf(NOW));
 
     mockMvc
         .perform(get("/api/artifacts/{id}", artifactId))
@@ -282,296 +275,70 @@ class StudioHarnessObservabilityControllerTest {
         .andExpect(content().bytes(new byte[] {1}));
   }
 
-  /** SSE delivers persisted run events with name=run_event and id=sequence decimal. */
-  @Test
-  void runEventStreamEmitsPersistedEventsWithSequenceDecimalId() throws Exception {
-    Seed seed = seedRun("sse-run");
-    // The run is still QUEUED — terminal check requires the run to be terminal AND idle to elapse.
-    // To deterministically close the stream we seed the run as terminal.
-    forceRunTerminal(seed.run.id());
-
-    MvcResult streamResult =
-        mockMvc
-            .perform(
-                get("/api/runs/{id}/events/stream", seed.run.id())
-                    .accept(MediaType.TEXT_EVENT_STREAM)
-                    .param("idleTimeoutMillis", "60"))
-            .andExpect(request().asyncStarted())
-            .andReturn();
-
-    MvcResult dispatched =
-        mockMvc
-            .perform(asyncDispatch(streamResult))
-            .andExpect(status().isOk())
-            .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
-            .andReturn();
-
-    String body = dispatched.getResponse().getContentAsString();
-    // Two persisted events are emitted with name=run_event and id=sequence decimal.
-    assertTrue(body.contains("event:run_event"), body);
-    assertTrue(body.contains("id:1"), body);
-    assertTrue(body.contains("id:2"), body);
-    // The SSE event id is the sequence decimal, while the DTO eventId (inside data) is the
-    // Snowflake id — they are different. Assert both exist in the SSE body.
-    assertTrue(body.contains("\"eventId\":"), body);
-    assertTrue(body.matches("(?s).*\"sequence\":\"?1\"?.*"), body);
-    assertTrue(body.matches("(?s).*\"sequence\":\"?2\"?.*"), body);
-    // Run is terminal and idle — heartbeat still permitted but close should follow.
-    // The exact body does not need to assert heartbeat because the close happens before the second
-    // tick.
-    assertNotNull(body);
-  }
-
-  /** Activity SSE emits persisted root activity with name=root_activity and id=eventId decimal. */
-  @Test
-  void rootActivityStreamEmitsPersistedEventsWithEventIdId() throws Exception {
-    Seed seed = seedRun("sse-activity");
-    forceRootInactive(seed.rootSessionId);
-
-    MvcResult streamResult =
-        mockMvc
-            .perform(
-                get("/api/sessions/{id}/activities/stream", seed.rootSessionId)
-                    .accept(MediaType.TEXT_EVENT_STREAM)
-                    .param("idleTimeoutMillis", "60"))
-            .andExpect(request().asyncStarted())
-            .andReturn();
-
-    MvcResult dispatched =
-        mockMvc
-            .perform(asyncDispatch(streamResult))
-            .andExpect(status().isOk())
-            .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
-            .andReturn();
-
-    String body = dispatched.getResponse().getContentAsString();
-    assertTrue(body.contains("event:root_activity"), body);
-    // Each persisted event id is the global harness_run_event.id (Snowflake), echoed as decimal.
-    assertTrue(body.matches("(?s).*id:\\d+.*"), body);
-    // Run-tree activity uses rootSessionId, not sessionId.
-    assertTrue(body.contains("\"rootSessionId\":\"" + seed.rootSessionId + "\""), body);
-  }
-
-  /**
-   * Resume cursor is the maximum of the query value and Last-Event-ID so native EventSource
-   * reconnects never rewind to the original query cursor.
-   */
-  @Test
-  void resumeCursorUsesMaximumOfQueryAndLastEventId() throws Exception {
-    Seed seed = seedRun("sse-cursor");
-    forceRootInactive(seed.rootSessionId);
-
-    // Root activity SSE ids are global harness_run_event Snowflake ids kept as decimal strings
-    // until Java long parsing.
-    long firstEventId =
-        jdbc.queryForObject(
-            "select id from harness_run_event where run_id = ? order by sequence asc limit 1",
-            Long.class,
-            seed.run.id());
-    long secondEventId =
-        jdbc.queryForObject(
-            "select id from harness_run_event where run_id = ? and sequence = ("
-                + "select min(sequence) from harness_run_event where run_id = ? and sequence > 1)",
-            Long.class,
-            seed.run.id(),
-            seed.run.id());
-    assertTrue(secondEventId > firstEventId);
-
-    // Query cursor wins when it is larger than Last-Event-ID.
-    MvcResult streamResult =
-        mockMvc
-            .perform(
-                get("/api/sessions/{id}/activities/stream", seed.rootSessionId)
-                    .accept(MediaType.TEXT_EVENT_STREAM)
-                    .header("Last-Event-ID", "0")
-                    .param("afterEventId", Long.toString(firstEventId))
-                    .param("idleTimeoutMillis", "60"))
-            .andExpect(request().asyncStarted())
-            .andReturn();
-    MvcResult dispatched =
-        mockMvc.perform(asyncDispatch(streamResult)).andExpect(status().isOk()).andReturn();
-    String afterFirst = dispatched.getResponse().getContentAsString();
-    assertTrue(afterFirst.contains("event:root_activity"), afterFirst);
-    assertEquals(0, countSubstring(afterFirst, "id:" + firstEventId));
-    assertTrue(afterFirst.contains("id:" + secondEventId), afterFirst);
-
-    // Automatic reconnect supplies Last-Event-ID while the original query cursor stays 0; the
-    // larger header must win so progress is not reset.
-    MvcResult streamResult2 =
-        mockMvc
-            .perform(
-                get("/api/sessions/{id}/activities/stream", seed.rootSessionId)
-                    .accept(MediaType.TEXT_EVENT_STREAM)
-                    .header("Last-Event-ID", Long.toString(firstEventId))
-                    .param("afterEventId", "0")
-                    .param("idleTimeoutMillis", "60"))
-            .andExpect(request().asyncStarted())
-            .andReturn();
-    MvcResult dispatched2 =
-        mockMvc.perform(asyncDispatch(streamResult2)).andExpect(status().isOk()).andReturn();
-    String fromHeader = dispatched2.getResponse().getContentAsString();
-    assertEquals(0, countSubstring(fromHeader, "id:" + firstEventId));
-    assertTrue(fromHeader.contains("id:" + secondEventId), fromHeader);
-  }
-
-  /**
-   * {@code Last-Event-ID} alone (no query param) must resume the Run SSE cursor: header=1 emits
-   * only sequence 2.
-   */
-  @Test
-  void lastEventIdAloneResumesRunStreamFromCursor() throws Exception {
-    Seed seed = seedRun("sse-last-event");
-    forceRunTerminal(seed.run.id());
-
-    MvcResult streamResult =
-        mockMvc
-            .perform(
-                get("/api/runs/{id}/events/stream", seed.run.id())
-                    .accept(MediaType.TEXT_EVENT_STREAM)
-                    .header("Last-Event-ID", "1")
-                    .param("idleTimeoutMillis", "60"))
-            .andExpect(request().asyncStarted())
-            .andReturn();
-    MvcResult dispatched =
-        mockMvc.perform(asyncDispatch(streamResult)).andExpect(status().isOk()).andReturn();
-    String body = dispatched.getResponse().getContentAsString();
-    // Sequence 1 must NOT be re-emitted because Last-Event-ID = 1 advances past it.
-    assertEquals(0, countSubstring(body, "id:1"));
-    // Sequence 2 must be emitted.
-    assertTrue(body.contains("id:2"), body);
-  }
-
   // ---------------- helpers ----------------
 
-  private static int countSubstring(String haystack, String needle) {
-    int count = 0;
-    int idx = 0;
-    while ((idx = haystack.indexOf(needle, idx)) != -1) {
-      count++;
-      idx += needle.length();
-    }
-    return count;
+  private void insertRootSession(long sessionId, String title) {
+    HarnessSessionDO session = new HarnessSessionDO();
+    session.setId(sessionId);
+    session.setAgentDefinitionId(1L);
+    session.setTitle(title);
+    session.setRootSessionId(sessionId);
+    session.setDepth(0);
+    session.setVersion(0L);
+    session.setCreateTime(NOW);
+    session.setUpdateTime(NOW);
+    sessionMapper.insert(session);
   }
 
-  private Seed seedRun(String title) {
-    long rootSessionId = sessionIds.newSessionId();
-    sessionStore.create(Session.root(rootSessionId, null, title, false, NOW));
-    long snapshotId = sessionIds.newEntryId();
-    AgentSnapshotEntryPayload snapshot =
-        new AgentSnapshotEntryPayload(
-            new AgentSnapshot("system", "model", "default", List.of(), List.of(), List.of(), "{}"));
-    sessionStore.append(
-        new SessionEntry(snapshotId, rootSessionId, null, null, snapshot.type(), snapshot, NOW),
-        null,
-        0L);
-    AgentRun queued =
-        transactions.submitUserMessage(rootSessionId, snapshotId, user("hi"), NOW.plusMillis(1));
-    AgentRun claimed =
-        runStore
-            .claimDue("worker-" + rootSessionId, NOW.plusMillis(1), Duration.ofMinutes(1))
-            .orElseThrow();
-    runStore.append(
-        claimed.id(),
-        RunEventType.TURN_STARTED,
-        "{\"schemaVersion\":1,\"ordinal\":1}",
-        NOW.plusSeconds(2));
-    runStore.append(
-        claimed.id(),
-        RunEventType.TURN_STARTED,
-        "{\"schemaVersion\":1,\"ordinal\":2}",
-        NOW.plusSeconds(3));
-    return new Seed(rootSessionId, claimed);
+  private void insertThread(long threadId, long sessionId) {
+    HarnessThreadDO thread = new HarnessThreadDO();
+    thread.setId(threadId);
+    thread.setSessionId(sessionId);
+    thread.setHeadEntryId(1L);
+    thread.setAgentDefinitionId(1L);
+    thread.setRuntimeConfigJson("{}");
+    thread.setYoloEnabled(false);
+    thread.setInputSequence(0L);
+    thread.setVersion(0L);
+    thread.setCreateTime(NOW);
+    thread.setUpdateTime(NOW);
+    threadMapper.insert(thread);
   }
 
-  private Seed seedToolRun() {
-    long rootSessionId = sessionIds.newSessionId();
-    sessionStore.create(Session.root(rootSessionId, null, "tool-run", false, NOW));
-    long snapshotId = sessionIds.newEntryId();
-    AgentSnapshotEntryPayload snapshot =
-        new AgentSnapshotEntryPayload(
-            new AgentSnapshot("system", "model", "default", List.of(), List.of(), List.of(), "{}"));
-    sessionStore.append(
-        new SessionEntry(snapshotId, rootSessionId, null, null, snapshot.type(), snapshot, NOW),
-        null,
-        0L);
-    AgentRun queued =
-        transactions.submitUserMessage(rootSessionId, snapshotId, user("go"), NOW.plusMillis(1));
-    AgentRun claimed =
-        runStore
-            .claimDue("worker-tool-" + rootSessionId, NOW.plusMillis(1), Duration.ofMinutes(1))
-            .orElseThrow();
-    ToolCall call = new ToolCall("call-1", "write", "{\"path\":\"notes.txt\"}");
-    preparationPort.prepare(
-        claimed,
-        assistant(List.of(call)),
-        toolCallsUsageDraft(),
-        List.of(call),
-        List.of(binding()),
-        Path.of("/tmp/environment"),
-        Path.of("/tmp/environment"),
-        List.of(
-            new RunEventDraft(
-                RunEventType.ASSISTANT_COMPLETED, RunEventPayloads.forAttempt(claimed))),
-        NOW.plusSeconds(1));
-    return new Seed(rootSessionId, claimed);
+  private void insertEvent(long eventId, long threadId, ThreadEventType type) {
+    HarnessThreadEventDO event = new HarnessThreadEventDO();
+    event.setId(eventId);
+    event.setThreadId(threadId);
+    event.setEventType(type.value());
+    event.setPayloadJson("{\"schemaVersion\":1}");
+    event.setCreateTime(NOW);
+    eventMapper.insert(event);
   }
 
-  private void forceRunTerminal(long runId) {
-    // Force the run into a terminal state and clear its lease so the SSE can close after idle and
-    // MysqlHarnessRunStore#find can deserialize the snapshot without violating the AgentRun
-    // invariants.
-    jdbc.update(
-        "update harness_run set status = 'SUCCEEDED', finished_at = ?, lease_owner = null,"
-            + " lease_until = null where id = ?",
-        Timestamp.from(NOW.plusSeconds(10)),
-        runId);
+  private void insertInvocation(
+      long id,
+      long threadId,
+      long assistantEntryId,
+      int ordinal,
+      String toolCallId,
+      String toolName,
+      String status) {
+    ToolInvocationDO row = new ToolInvocationDO();
+    row.setId(id);
+    row.setThreadId(threadId);
+    row.setAssistantEntryId(assistantEntryId);
+    row.setOrdinal(ordinal);
+    row.setToolCallId(toolCallId);
+    row.setToolName(toolName);
+    row.setToolVersion("1");
+    row.setTargetType("CLOUD");
+    row.setArgumentsJson("{\"path\":\"notes.txt\"}");
+    row.setStatus(status);
+    row.setPermissionAction("ALLOW");
+    row.setSideEffect("IDEMPOTENT");
+    row.setDeadlineAt(NOW.plusHours(1));
+    row.setCreateTime(NOW);
+    row.setUpdateTime(NOW);
+    invocationMapper.insert(row);
   }
-
-  private void forceRootInactive(long rootSessionId) {
-    jdbc.update(
-        "update harness_session set active_run_id = null where root_session_id = ?", rootSessionId);
-  }
-
-  private static AgentMessage user(String text) {
-    return new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)));
-  }
-
-  private static MessageEntryPayload assistant(List<ToolCall> calls) {
-    List<AgentMessageContent> contents = new ArrayList<>();
-    contents.add(new TextMessageContent("calling"));
-    calls.forEach(
-        call ->
-            contents.add(
-                new ToolCallMessageContent(call.id(), call.toolName(), call.argumentsJson())));
-    return new MessageEntryPayload(
-        new AgentMessage(AgentMessageRole.ASSISTANT, contents),
-        new AssistantMessageMetadata(
-            ProviderStopReason.TOOL_CALLS,
-            new ModelUsage(1, 1, 0, 0, 0, 0, 2),
-            new ModelCost(
-                "USD",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO)));
-  }
-
-  private static ToolBinding binding() {
-    return ToolBinding.of(
-        new ToolDescriptor(
-            "write",
-            "1",
-            "write",
-            null,
-            new ToolParamsSchema(
-                "", Map.of("path", new ToolStringSchema("path")), Set.of("path"), false),
-            ToolExecutionMode.CLOUD,
-            ToolSideEffect.IDEMPOTENT,
-            Duration.ofSeconds(30)));
-  }
-
-  private record Seed(long rootSessionId, AgentRun run) {}
 }

@@ -6,8 +6,8 @@
 
 | 域 | 代码位置 | 职责 | 当前成熟度 |
 | --- | --- | --- | --- |
-| **Harness / AI** | `harness/*` + `core.harness` + `features/ai` | 会话、Run、Tool、Agent 对话执行 | 已落地 |
-| **Studio / Canvas** | `studio` + `core.studio` + `features/canvas` | 画布资源工作台、Function、Workflow | 领域清晰；持久化/执行多为 stub |
+| **Harness / AI** | `harness/*` + `core.harness` + `features/ai` | Session Entry Tree、AgentThread、Tool、Agent 对话执行 | 已落地 |
+| **Studio / Canvas** | `studio` + `core.studio` + `features/canvas` | 画布资源工作台、Function、Workflow | Canvas 最小持久化已落地；其余 Runtime 待补 |
 
 依赖：
 
@@ -59,7 +59,7 @@ Link ≠ Reference。演示层若只做连线，必须标注为 visibility。
 | `frame` | `GROUP` | GroupNode |
 | `web` / `image` / `file` / `text` / `matrix` / `result` | `RESOURCE` | ResourceNode |
 | `generator` | `FUNCTION` | FunctionNode（`system.generate-*`） |
-| `run` | `FUNCTION` | FunctionNode 运行实例视图（演示；对应 `system.agent.execute` 的 Run 呈现） |
+| `run` | `FUNCTION` | FunctionNode 运行实例视图（演示；对应 `system.agent.execute` 的 FunctionRun 呈现） |
 
 | 前端对象 | 后端对象 |
 | --- | --- |
@@ -75,10 +75,13 @@ Link ≠ Reference。演示层若只做连线，必须标注为 visibility。
 | API | 状态 |
 | --- | --- |
 | `GET /api/functions?workspaceId=1` | 可用（内存 Catalog） |
-| `GET /api/canvases?workspaceId=1` | 空列表 |
-| Canvas/Workflow/Function 写路径 | `501 Studio feature not ready` |
-| Harness `/api/sessions` 等 | 完整 |
+| `GET /api/canvases?workspaceId=1`、`GET /api/canvases/{canvasId}` | 可用（持久 Canvas 列表与 snapshot） |
+| `POST /api/canvases` | 可用（创建 Canvas） |
+| `POST /api/canvases/{canvasId}/commands` | 可用（create text/generate-text/link、move、delete node） |
+| Workflow / FunctionRun 写路径 | `501 Studio feature not ready` |
+| Harness `/api/threads` | 完整 Thread 创建、mailbox、Entries、Events 与 SSE |
+| Harness `/api/sessions` | 只读 Session Tree、activities 与 tasks |
 
 ## 6. 实现进度一句话
 
-Harness 是完整可恢复执行链；Studio 是清晰的领域骨架 + stub 适配；前端 AI 已接 Harness，前端 Canvas 是带 domainKind 的高保真演示，尚未接 Studio 持久化。
+Harness 是完整可恢复的 AgentThread 执行链；Studio 已具备 Canvas 最小持久化，Resource、FunctionRun 与 Workflow Runtime 仍是领域契约或 stub；前端 AI 已接 Harness，Canvas Library/Create 已接持久 API，Editor snapshot/command 闭环待接。

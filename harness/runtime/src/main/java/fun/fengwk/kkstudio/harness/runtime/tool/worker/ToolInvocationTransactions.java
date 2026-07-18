@@ -6,7 +6,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import java.time.Instant;
 import java.util.List;
 
-/** Durable result journal and source-order coordinator boundary. */
+/** Durable tool result journal；终态后 kick 所属 Thread，不再 coordinate Run。 */
 public interface ToolInvocationTransactions {
   boolean start(ClaimedToolInvocation claimed, Instant now);
 
@@ -18,7 +18,4 @@ public interface ToolInvocationTransactions {
       ToolResult result,
       String errorMessage,
       Instant now);
-
-  /** Coordinates already terminal invocations after a crash or preparation-only failure. */
-  int coordinateReadyRuns(Instant now);
 }

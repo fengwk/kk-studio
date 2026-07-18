@@ -1,4 +1,4 @@
-import type { BackendLong, ModelUsageSummaryDTO, SessionYoloDTO, ToolInvocationDTO } from '@/shared/api/contracts'
+import type { BackendLong, ModelUsageSummaryDTO, ToolInvocationDTO } from '@/shared/api/contracts'
 
 export function ChatObservabilityPanel({
   yolo,
@@ -12,7 +12,7 @@ export function ChatObservabilityPanel({
   compact = false,
   permissionsOnly = false,
 }: {
-  yolo?: SessionYoloDTO
+  yolo?: { enabled: boolean }
   usage?: ModelUsageSummaryDTO
   toolInvocations: ToolInvocationDTO[]
   error: unknown
@@ -30,7 +30,7 @@ export function ChatObservabilityPanel({
       return null
     }
     return (
-      <section className="chat-observability session-permission-banner" aria-label="工具授权">
+      <section className="chat-observability thread-permission-banner" aria-label="工具授权">
         {pendingDecisions.map((invocation) => (
           <PermissionRequest
             key={invocation.id}

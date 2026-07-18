@@ -30,10 +30,10 @@ insert into agent_definition (
 ) values (
     1, 'default-assistant', 'Acceptance stub agent for local studio pages.',
     'You are the local acceptance stub assistant for kk-studio.', 1, 'default',
-    '{"tools":[],"skills":[],"allowedSubagents":[],"executionPolicy":{"maxTurns":null,"maxDepth":null,"maxDirectSubagents":null,"maxTotalSubagents":null,"idleTimeoutMillis":null,"runTimeoutMillis":null}}',
+    '{"tools":[],"skills":[],"allowedSubagents":[],"executionPolicy":{"maxTurns":null,"maxDepth":null,"maxDirectSubagents":null,"maxTotalSubagents":null}}',
     current_timestamp(3), current_timestamp(3), 0
 ) on duplicate key update
     name = 'default-assistant', description = 'Acceptance stub agent for local studio pages.',
     system_prompt = 'You are the local acceptance stub assistant for kk-studio.', model_id = 1, variant = 'default',
-    config_json = '{"tools":[],"skills":[],"allowedSubagents":[],"executionPolicy":{"maxTurns":null,"maxDepth":null,"maxDirectSubagents":null,"maxTotalSubagents":null,"idleTimeoutMillis":null,"runTimeoutMillis":null}}',
+    config_json = '{"tools":[],"skills":[],"allowedSubagents":[],"executionPolicy":{"maxTurns":null,"maxDepth":null,"maxDirectSubagents":null,"maxTotalSubagents":null}}',
     gmt_modified = current_timestamp(3);

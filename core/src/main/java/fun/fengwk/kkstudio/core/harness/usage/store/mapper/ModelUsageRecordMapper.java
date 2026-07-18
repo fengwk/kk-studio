@@ -14,14 +14,14 @@ import fun.fengwk.kkstudio.core.harness.usage.store.model.ModelUsageRecordDO;
 import java.util.List;
 
 /**
- * model_usage_record 行级 MyBatis 映射；幂等由 unique(assistant_entry_id) 与 unique(run_id, attempt,
+ * model_usage_record 行级 MyBatis 映射；幂等由 unique(assistant_entry_id) 与 unique(thread_id, attempt,
  * turn_index) 兜底。
  */
 @Mapper
 public interface ModelUsageRecordMapper extends BaseMapper {
 
   String COLUMNS =
-      "id, session_id, run_id, assistant_entry_id, attempt, turn_index,"
+      "id, session_id, thread_id, assistant_entry_id,"
           + " provider_resource_id, model_resource_id, provider_type, provider_model_id,"
           + " prompt_cache_mode, prompt_cache_retention, cache_eligible, cache_affinity_key,"
           + " stop_reason,"
@@ -41,7 +41,7 @@ public interface ModelUsageRecordMapper extends BaseMapper {
   @Insert(
       """
       insert into model_usage_record (
-          id, session_id, run_id, assistant_entry_id, attempt, turn_index,
+          id, session_id, thread_id, assistant_entry_id,
           provider_resource_id, model_resource_id, provider_type, provider_model_id,
           prompt_cache_mode, prompt_cache_retention, cache_eligible, cache_affinity_key,
           stop_reason,
@@ -58,7 +58,7 @@ public interface ModelUsageRecordMapper extends BaseMapper {
           request_id, reported_service_tier, raw_usage_json,
           gmt_create
       ) values (
-          #{id}, #{sessionId}, #{runId}, #{assistantEntryId}, #{attempt}, #{turnIndex},
+          #{id}, #{sessionId}, #{threadId}, #{assistantEntryId},
           #{providerResourceId}, #{modelResourceId}, #{providerType}, #{providerModelId},
           #{promptCacheMode}, #{promptCacheRetention}, #{cacheEligible}, #{cacheAffinityKey},
           #{stopReason},
@@ -87,10 +87,8 @@ public interface ModelUsageRecordMapper extends BaseMapper {
       value = {
         @Result(column = "id", property = "id"),
         @Result(column = "session_id", property = "sessionId"),
-        @Result(column = "run_id", property = "runId"),
+        @Result(column = "thread_id", property = "threadId"),
         @Result(column = "assistant_entry_id", property = "assistantEntryId"),
-        @Result(column = "attempt", property = "attempt"),
-        @Result(column = "turn_index", property = "turnIndex"),
         @Result(column = "provider_resource_id", property = "providerResourceId"),
         @Result(column = "model_resource_id", property = "modelResourceId"),
         @Result(column = "provider_type", property = "providerType"),
@@ -147,9 +145,12 @@ public interface ModelUsageRecordMapper extends BaseMapper {
       })
   ModelUsageRecordDO findByAssistantEntryId(@Param("assistantEntryId") long assistantEntryId);
 
-  @Select("select " + COLUMNS + " from model_usage_record where run_id = #{runId} order by id asc")
+  @Select(
+      "select "
+          + COLUMNS
+          + " from model_usage_record where thread_id = #{threadId} order by id asc")
   @ResultMap("modelUsageRecordResultMap")
-  List<ModelUsageRecordDO> listByRunId(@Param("runId") long runId);
+  List<ModelUsageRecordDO> listByThreadId(@Param("threadId") long threadId);
 
   @Select(
       "select "

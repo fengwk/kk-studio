@@ -23,45 +23,32 @@ class ModelUsageRecordTest {
   @Test
   void acceptsValidRecord() {
     ModelUsageDraft draft = draft();
-    ModelUsageRecord record = new ModelUsageRecord(1L, 11L, 21L, 31L, 1, 0, draft, NOW);
+    ModelUsageRecord record = new ModelUsageRecord(1L, 11L, 21L, 31L, draft, NOW);
 
     assertEquals(1L, record.id());
     assertEquals(11L, record.sessionId());
-    assertEquals(21L, record.runId());
+    assertEquals(21L, record.threadId());
     assertEquals(31L, record.assistantEntryId());
-    assertEquals(1, record.attempt());
-    assertEquals(0, record.turnIndex());
     assertEquals(draft, record.draft());
     assertEquals(NOW, record.createdAt());
   }
 
-  /** turnIndex 必须 >=0；attempt 必须 >0；其它 id 必须 >0；draft/createdAt 非空。 */
+  /** id 必须 >0；draft/createdAt 非空。 */
   @Test
   void rejectsInvalidIdentifiersAndReferences() {
     ModelUsageDraft draft = draft();
-    assertThrows(IllegalArgumentException.class, () -> record(0L, 11L, 21L, 31L, 1, 0, draft));
-    assertThrows(IllegalArgumentException.class, () -> record(1L, 0L, 21L, 31L, 1, 0, draft));
-    assertThrows(IllegalArgumentException.class, () -> record(1L, 11L, 0L, 31L, 1, 0, draft));
-    assertThrows(IllegalArgumentException.class, () -> record(1L, 11L, 21L, 0L, 1, 0, draft));
-    assertThrows(IllegalArgumentException.class, () -> record(1L, 11L, 21L, 31L, 0, 0, draft));
-    assertThrows(IllegalArgumentException.class, () -> record(1L, 11L, 21L, 31L, -1, 0, draft));
-    assertThrows(IllegalArgumentException.class, () -> record(1L, 11L, 21L, 31L, 1, -1, draft));
-    assertThrows(NullPointerException.class, () -> record(1L, 11L, 21L, 31L, 1, 0, null));
+    assertThrows(IllegalArgumentException.class, () -> record(0L, 11L, 21L, 31L, draft));
+    assertThrows(IllegalArgumentException.class, () -> record(1L, 0L, 21L, 31L, draft));
+    assertThrows(IllegalArgumentException.class, () -> record(1L, 11L, 0L, 31L, draft));
+    assertThrows(IllegalArgumentException.class, () -> record(1L, 11L, 21L, 0L, draft));
+    assertThrows(NullPointerException.class, () -> record(1L, 11L, 21L, 31L, null));
     assertThrows(
-        NullPointerException.class,
-        () -> new ModelUsageRecord(1L, 11L, 21L, 31L, 1, 0, draft, null));
+        NullPointerException.class, () -> new ModelUsageRecord(1L, 11L, 21L, 31L, draft, null));
   }
 
   private static ModelUsageRecord record(
-      long id,
-      long sessionId,
-      long runId,
-      long assistantEntryId,
-      int attempt,
-      int turnIndex,
-      ModelUsageDraft draft) {
-    return new ModelUsageRecord(
-        id, sessionId, runId, assistantEntryId, attempt, turnIndex, draft, NOW);
+      long id, long sessionId, long threadId, long assistantEntryId, ModelUsageDraft draft) {
+    return new ModelUsageRecord(id, sessionId, threadId, assistantEntryId, draft, NOW);
   }
 
   private static ModelUsageDraft draft() {

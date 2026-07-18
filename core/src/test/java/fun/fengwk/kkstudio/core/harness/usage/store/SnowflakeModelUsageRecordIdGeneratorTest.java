@@ -21,13 +21,12 @@ class SnowflakeModelUsageRecordIdGeneratorTest {
     assertNotEquals(a, b);
   }
 
-  /** {@link AgentIdGenerator#MODEL_USAGE_RECORD} 必须独立于 Run/Run Event/Control namespace，避免主键空间冲突。 */
+  /** {@link AgentIdGenerator#MODEL_USAGE_RECORD} 必须独立于 Thread/Input/Event namespace。 */
   @Test
   void modelUsageRecordNamespaceIsDistinctFromExistingNamespaces() {
-    assertNotEquals(AgentIdGenerator.HARNESS_RUN, AgentIdGenerator.MODEL_USAGE_RECORD);
-    assertNotEquals(AgentIdGenerator.HARNESS_RUN_EVENT, AgentIdGenerator.MODEL_USAGE_RECORD);
-    assertNotEquals(
-        AgentIdGenerator.HARNESS_RUN_CONTROL_MESSAGE, AgentIdGenerator.MODEL_USAGE_RECORD);
+    assertNotEquals(AgentIdGenerator.HARNESS_THREAD, AgentIdGenerator.MODEL_USAGE_RECORD);
+    assertNotEquals(AgentIdGenerator.HARNESS_THREAD_INPUT, AgentIdGenerator.MODEL_USAGE_RECORD);
+    assertNotEquals(AgentIdGenerator.HARNESS_THREAD_EVENT, AgentIdGenerator.MODEL_USAGE_RECORD);
     assertEquals("model_usage_record", AgentIdGenerator.MODEL_USAGE_RECORD);
   }
 }
