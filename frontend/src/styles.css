@@ -1034,12 +1034,12 @@ textarea::placeholder {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 16px 20px 8px;
+  padding: 16px 16px 8px;
 }
 
 .session-blocks {
-  width: min(880px, 100%);
-  margin: 0 auto;
+  width: 100%;
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -1227,16 +1227,16 @@ textarea::placeholder {
 }
 
 .session-widget-stack {
-  width: min(880px, 100%);
-  margin: 0 auto;
+  width: 100%;
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
 .session-working {
-  width: min(880px, 100%);
-  margin: 0 auto 6px;
+  width: 100%;
+  margin: 0 0 6px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1376,8 +1376,8 @@ textarea::placeholder {
 }
 
 .session-dock {
-  width: min(880px, 100%);
-  margin: 0 auto;
+  width: 100%;
+  margin: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1445,8 +1445,8 @@ textarea::placeholder {
 }
 
 .session-composer-extra {
-  width: min(880px, 100%);
-  margin: 8px auto 0;
+  width: 100%;
+  margin: 8px 0 0;
   display: flex;
   align-items: center;
   gap: 8px;
