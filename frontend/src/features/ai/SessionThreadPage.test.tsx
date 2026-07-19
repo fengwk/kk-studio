@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { AgentThreadPage, SessionThreadPage } from '@/features/ai/AgentThreadPage'
+import { AgentThreadPage, SessionThreadPage, ThreadDeepLinkPage } from '@/features/ai/AgentThreadPage'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
 
@@ -52,6 +52,13 @@ describe('Session thread navigation', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/sessions/s1/threads/secondary')
   })
 
+  it('resolves an explicit legacy Thread deep link to its owning Session route', async () => {
+    vi.mocked(harnessService.getThread).mockResolvedValue(thread('secondary'))
+    renderPage('/threads/secondary', <ThreadDeepLinkPage />)
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/sessions/s1/threads/secondary'))
+    expect(harnessService.getThread).toHaveBeenCalledWith('secondary')
+  })
+
   it('creates a Session-local branch and carries editable USER text into its new Thread route', async () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.listSessionEntries).mockResolvedValue([
@@ -68,7 +75,7 @@ describe('Session thread navigation', () => {
 
 function renderPage(path: string, element: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}><Routes><Route path="/sessions/:sessionId" element={element} /><Route path="/sessions/:sessionId/threads/:threadId" element={element} /></Routes><Location /></MemoryRouter></QueryClientProvider>)
+  return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}><Routes><Route path="/threads/:threadId" element={element} /><Route path="/sessions/:sessionId" element={element} /><Route path="/sessions/:sessionId/threads/:threadId" element={element} /></Routes><Location /></MemoryRouter></QueryClientProvider>)
 }
 
 function Location() { return <output data-testid="location">{useLocation().pathname}</output> }

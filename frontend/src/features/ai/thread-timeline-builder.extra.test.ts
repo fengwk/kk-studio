@@ -96,6 +96,27 @@ describe('thread timeline edge branches', () => {
     expect(timeline.messages).toMatchObject([{ role: 'user', text: '可见' }])
     expect(timeline.hasPendingInputs).toBe(true)
   })
+
+  it('keeps durable and queued custom SYSTEM and USER messages in transcript order', () => {
+    const timeline = buildThreadTimeline(
+      [
+        entry('custom-system', 'custom_message', messagePayload('SYSTEM', [{ type: 'text', text: 'durable system' }])),
+        entry('custom-user', 'custom_message', messagePayload('USER', [{ type: 'text', text: 'durable user' }])),
+      ],
+      [
+        input('queued-system', 'CUSTOM_MESSAGE', messagePayload('SYSTEM', [{ type: 'text', text: 'queued system' }]), null),
+        input('queued-user', 'CUSTOM_MESSAGE', messagePayload('USER', [{ type: 'text', text: 'queued user' }]), null),
+      ],
+      [],
+    )
+
+    expect(timeline.messages).toMatchObject([
+      { role: 'system', text: 'durable system' },
+      { role: 'user', text: 'durable user' },
+      { role: 'system', text: 'queued system' },
+      { role: 'user', text: 'queued user' },
+    ])
+  })
 })
 
 function entry(entryId: string, entryType: string, payload: Record<string, unknown>): HarnessSessionEntryDTO {
@@ -121,9 +142,11 @@ function input(
     sequence: 1,
     inputType,
     payloadJson: JSON.stringify(payload),
-    clientMessageId: null,
+    clientMessageId: `cid-${inputId}`,
+    status: 'QUEUED',
     appliedEntryId,
-    appliedAt: null,
+    resolvedAt: null,
+    cancelledByStopId: null,
     createTime: '2026-01-01T00:00:00',
   }
 }

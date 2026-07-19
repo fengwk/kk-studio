@@ -423,11 +423,13 @@ function input(
     inputId,
     threadId: '1',
     sequence: Number(inputId.replace(/\D/g, '') || 1),
-    inputType,
+    inputType: inputType.toUpperCase() as HarnessThreadInputDTO['inputType'],
     payloadJson: JSON.stringify(payload),
     clientMessageId: `cid-${inputId}`,
+    status: appliedEntryId ? 'APPLIED' : 'QUEUED',
     appliedEntryId,
-    appliedAt: appliedEntryId ? '2026-01-01T00:00:01' : null,
+    resolvedAt: appliedEntryId ? '2026-01-01T00:00:01' : null,
+    cancelledByStopId: null,
     createTime: '2026-01-01T00:00:00',
   }
 }

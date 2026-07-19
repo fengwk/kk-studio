@@ -31,6 +31,30 @@ export function SessionThreadPage() {
   return <div className="thread-state">正在打开主线程…</div>
 }
 
+export function ThreadDeepLinkPage() {
+  const { threadId = '' } = useParams()
+  const navigate = useNavigate()
+  const threadQuery = useQuery({
+    queryKey: queryKeys.threads.detail(threadId),
+    queryFn: () => harnessService.getThread(threadId),
+    enabled: Boolean(threadId),
+  })
+
+  useEffect(() => {
+    if (threadQuery.data) {
+      navigate(
+        `/sessions/${encodeURIComponent(threadQuery.data.sessionId)}/threads/${encodeURIComponent(threadId)}`,
+        { replace: true },
+      )
+    }
+  }, [navigate, threadId, threadQuery.data])
+
+  if (threadQuery.error) {
+    return <div className="thread-state danger">线程加载失败</div>
+  }
+  return <div className="thread-state">正在打开线程…</div>
+}
+
 export function AgentThreadPage() {
   const { sessionId = '', threadId = '' } = useParams()
   const navigate = useNavigate()

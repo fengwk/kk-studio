@@ -152,7 +152,7 @@ describe('useAgentThreadController', () => {
       sequence: 2,
       inputType: 'set_yolo',
       payloadJson: '{}',
-      clientMessageId: null,
+      clientMessageId: 'cid-yolo',
       appliedEntryId: null,
       appliedAt: null,
       createTime: null,
@@ -179,7 +179,10 @@ describe('useAgentThreadController', () => {
     expect(result.current.draft).toBe('')
 
     act(() => result.current.runCommand({ id: 'yolo', label: 'yolo', description: '' }))
-    await waitFor(() => expect(harnessService.setThreadYolo).toHaveBeenCalledWith('1', { yoloEnabled: true }))
+    await waitFor(() => expect(harnessService.setThreadYolo).toHaveBeenCalledWith(
+      '1',
+      expect.objectContaining({ yoloEnabled: true, clientMessageId: expect.any(String) }),
+    ))
 
     act(() => result.current.setDraft('keep'))
     act(() => result.current.runCommand({ id: 'clear-draft', label: 'clear', description: '' }))
@@ -530,17 +533,25 @@ describe('useAgentThreadController', () => {
     expect(result.current.draft).toBe('already-typing')
   })
 
-  it('restores a Stop receipt once with a stable request id and does not retry a running Thread', async () => {
+  it('keeps a failed Stop id for retry, then starts a new idempotency attempt after success', async () => {
     vi.mocked(harnessService.getThread).mockResolvedValue({ ...thread, status: 'RUNNING' } as never)
+    vi.mocked(harnessService.stopThread)
+      .mockRejectedValueOnce(new Error('network unavailable'))
+      .mockResolvedValueOnce({ stopId: 'stop-1', cancelledInputs: [], restoredMessages: ['queued A', 'queued B'] })
+      .mockResolvedValueOnce({ stopId: 'stop-2', cancelledInputs: [], restoredMessages: ['queued C'] })
     const { result } = renderHook(() => useAgentThreadController('1', 's1'), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
     act(() => result.current.setDraft('current draft'))
     await act(async () => { await result.current.stopThread() })
-    expect(result.current.draft).toBe('current draft\n\nqueued A\n\nqueued B')
-    const requestId = vi.mocked(harnessService.stopThread).mock.calls[0][1].clientRequestId
+    expect(result.current.actionError).toContain('network unavailable')
+    const failedRequestId = vi.mocked(harnessService.stopThread).mock.calls[0][1].clientRequestId
     await act(async () => { await result.current.stopThread() })
-    expect(vi.mocked(harnessService.stopThread).mock.calls[1][1].clientRequestId).toBe(requestId)
-    expect(result.current.draft).toBe('current draft\n\nqueued A\n\nqueued B')
+    expect(vi.mocked(harnessService.stopThread).mock.calls[1][1].clientRequestId).toBe(failedRequestId)
+    expect(result.current.draft).toBe('queued A\n\nqueued B\n\ncurrent draft')
+    act(() => result.current.setDraft('new message'))
+    await act(async () => { await result.current.stopThread() })
+    expect(vi.mocked(harnessService.stopThread).mock.calls[2][1].clientRequestId).not.toBe(failedRequestId)
+    expect(result.current.draft).toBe('queued C\n\nnew message')
     await act(async () => { await result.current.retryThread() })
     expect(harnessService.retryThread).not.toHaveBeenCalled()
   })

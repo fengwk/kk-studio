@@ -6,7 +6,7 @@ import { AgentsPanel, ChatSessionsPanel, ModelsPanel, ProvidersPanel } from '@/f
 import { ComfyuiWorkflowEditorModal } from '@/features/ai/ComfyuiWorkflowEditorModal'
 import { ComfyuiWorkflowsPanel } from '@/features/ai/ComfyuiWorkflowsPanel'
 import { ComfyuiRunModal } from '@/features/ai/ComfyuiRunModal'
-import { AgentThreadPage, SessionThreadPage } from '@/features/ai/AgentThreadPage'
+import { AgentThreadPage, SessionThreadPage, ThreadDeepLinkPage } from '@/features/ai/AgentThreadPage'
 import { useAiConsoleController } from '@/features/ai/useAiConsoleController'
 import { useComfyuiPageController } from '@/features/ai/useComfyuiPageController'
 import type { ExtensionComponentProps, TrustedReactExtension } from '@/platform/extensions/types'
@@ -222,6 +222,7 @@ export const aiExtension: TrustedReactExtension = {
     { id: 'ai.comfyui', path: 'comfyui', component: ComfyuiPage, priority: 100 },
     { id: 'ai.session', path: 'sessions/:sessionId', component: SessionThreadPage, priority: 100 },
     { id: 'ai.thread', path: 'sessions/:sessionId/threads/:threadId', component: AgentThreadPage, priority: 100 },
+    { id: 'ai.thread-deep-link', path: 'threads/:threadId', component: ThreadDeepLinkPage, priority: 100 },
   ],
   navigation: [
     { id: 'ai.nav.sessions', label: 'Chat', path: 'sessions', priority: 100 },
