@@ -29,8 +29,8 @@ flowchart LR
 ## Prompt 构建
 
 1. 用户或自定义消息通过 `POST /api/threads/{threadId}/messages` 写入 `ThreadInput`（202，`clientMessageId` 幂等）。`ThreadProcessor` 在安全边界 Harvest cutoff 内全部 queued Input，按 sequence 物化相应 Entry 并连续推进 head；同批任意数量的消息只形成一次新的 Assistant Turn。
-2. Thread 保存当前 agent/model/yolo。Context 消息路径从 Thread `headEntryId` 投影 transcript 与有效 Compaction；运行时配置由 Thread 状态与当前 AgentDefinition 组合，不从 Entry path fold 完整 snapshot。
-3. `TurnResourceResolver` 按冻结配置解析 Model、Variant、Provider 和 Tool binding；`ProviderMessageProjector` 把语义消息投影为 Provider 无关内容块。
+2. Thread 保存当前 agent/model/yolo。Context 消息路径从 Thread `headEntryId` 投影 transcript 与有效 Compaction；运行时配置由 Thread 状态与当前 AgentDefinition 组合（含可选 `environmentName` 与已解析 Skill 元数据），不从 Entry path fold 完整 snapshot。`SessionContextBuilder` 仅在选中 Skill 时追加 pi-base 风格 `<available_skills>`（name/description，不含 body/path）。
+3. `TurnResourceResolver` 按当前运行时配置解析 Model、Variant、Provider；Tool 短名 platform-first（已注册非 ENVIRONMENT）再回退到所选 READY Environment。所选 Environment 离线则明确失败，不静默回退。
 4. `PromptCacheRequestFinalizer` 绑定 `sessionId`，是 Provider Cache Control 的唯一派生点。
 
 Provider 流式 delta 写入 **ThreadEvent**。Assistant 完成时，完整 Assistant Entry、`model_usage_record`（`sessionId`/`threadId`/`assistantEntryId`）与 terminal ThreadEvent 在同一稳定事务中提交。

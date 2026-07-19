@@ -24,6 +24,9 @@ import java.util.Optional;
 @Component
 public class LiveEnvironmentRegistry {
 
+  /** Reserved Environment name for the built-in platform Skills provider. */
+  public static final String PLATFORM_ENVIRONMENT_NAME = "platform";
+
   private final DaemonToolCapabilitiesCodec capabilitiesCodec;
   private final Map<String, LiveEnvironment> byName = new LinkedHashMap<>();
 

@@ -79,6 +79,8 @@ GET /api/environments
 
 返回紧凑列表：`name` / `status` / `lastSeen` / `tools` / `skills`。无 create/update/delete API。
 
+保留名 `platform` 表示内置 Skills Provider：Agent 保存与 Turn 解析时，Skill 候选 = READY `platform` + 可选所选 Environment，platform 同名优先。Agent 可选 `environmentName`；保存时非空名必须对应 READY live Environment。Tool/Skill 配置仅允许短名。
+
 Gateway 可按需通过 `LOAD_SKILL` 请求完整 skill 正文（core 端口，尚未暴露为 model Tool）：
 
 ```text
