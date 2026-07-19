@@ -19,7 +19,7 @@ flowchart LR
 
 1. `DefaultAgentTurnEngine` 先构造 `cacheControl = NONE` 的标准请求。
 2. Extension Host 提供的 `BeforeProviderRequestInterceptor` 按注册顺序串行修改请求。
-3. `ThreadProcessor` 为当前 AgentThread 在全部 hooks 之后追加绑定 `thread.sessionId()` 的 `PromptCacheRequestFinalizer`。
+3. `ThreadProcessor` 为当前 Thread 的 Session 在全部 hooks 之后追加绑定 `sessionId` 的 `PromptCacheRequestFinalizer`。
 4. Finalizer 覆盖请求中已有的 cache control，Provider Adapter 只接收最终控制结果。
 5. Provider 完成后，Turn handler 保留实际发送的最终请求；`ModelUsageDraft.from(...)` 从该请求和响应冻结缓存、模型、用量、成本与 Provider metadata。
 6. `HarnessThreadTransactionService` 在 processor token fencing 下将 Assistant Entry、`model_usage_record`、Thread head 与对应 ThreadEvents 原子提交；工具调用路径还在同一事务中写 Tool Invocations。
@@ -232,7 +232,7 @@ lock Thread and verify processor token
 -> append Assistant Entry
 -> insert model_usage_record with the same assistantEntryId
 -> optional: insert Tool Invocations
--> advance AgentThread head with processor fencing
+-> advance Thread head with processor fencing
 -> append terminal ThreadEvents
 ```
 
@@ -441,7 +441,7 @@ tokenReadRatio =
 - Processor 从数据库获取 `processor_token` / `processor_until`；Provider 调用期间按 lease 的三分之一续租，丢租后先标记 ownership lost，再取消本地 handle 并拒绝后续 delta/callback 提交。
 - Provider 完成后由 `commitFinalAssistant` 或 `prepareTools` 在同一事务中写 Assistant Entry 与账本；token fencing 失败时整笔提交回滚。
 - `ThreadRecoveryLifecycle` 只低频 kick expired token、pending input、due/expired Tool 或 head 上待应用 terminal Tool Result；它不是 Usage、Turn 或 Tool 的主轮询器。
-- Cloud/Control Tool 由 ThreadProcessor 对当前 Thread 调用 `dispatchDueForThread`；Environment Tool 由 daemon gateway 基于 durable Invocation 推进。
+- 非 Environment Tool 由 ThreadProcessor 对当前 Thread 调用 `dispatchDueForThread`；Environment Tool 由 daemon gateway 基于 durable Invocation 推进。
 
 ## Validation
 
@@ -481,6 +481,6 @@ tokenReadRatio =
 | Provider capability 与 HTTP cache 字段映射 | [`CoreHarnessExtensionTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/extension/CoreHarnessExtensionTest.java)、[`ProviderAdapterContractTest.java`](../../harness/model/src/test/java/fun/fengwk/kkstudio/harness/model/ProviderAdapterContractTest.java) |
 | 七类 usage、provider total、raw usage 正文隔离 | [`ProviderUsageNormalizerTest.java`](../../harness/model/src/test/java/fun/fengwk/kkstudio/harness/model/provider/adapter/ProviderUsageNormalizerTest.java) |
 | 六分项成本、multiplier、scale 与公共不变量 | [`ModelContractTest.java`](../../harness/model/src/test/java/fun/fengwk/kkstudio/harness/model/ModelContractTest.java)、[`ModelUsageDraftTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageDraftTest.java) |
-| Assistant/账本提交、processor fencing、两条 USER 的有序 Provider Turn | [`ThreadProcessorIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/ThreadProcessorIntegrationTest.java) |
+| Assistant/账本提交、processor fencing、steer-all 消息批次的单次 Provider Turn | [`ThreadProcessorIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/ThreadProcessorIntegrationTest.java) |
 | Record 的 Thread 归属、不变量与正 ID | [`ModelUsageRecordTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageRecordTest.java) |
 | 前端 Thread Usage API 路径与十进制字符串 ID | [`harness-service.test.ts`](../../frontend/src/shared/api/harness-service.test.ts)、[`agent-service.test.ts`](../../frontend/src/shared/api/agent-service.test.ts) |

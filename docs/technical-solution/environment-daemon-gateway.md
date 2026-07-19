@@ -13,7 +13,7 @@ Environment 是全局持久资源。它保存可编辑的名称、描述，以�
 | `harness/daemon` | 独立 Daemon 连接、重连、本地工具执行与 invocation journal |
 | `web` | `/api/environments/daemon/v1` WebSocket 文本帧适配与容器消息大小配置 |
 
-数据库是以下事实的唯一来源：Environment capability、heartbeat、Tool Invocation 状态、lease、partial event、终态结果、Run 收敛和全局 Artifact。Gateway 的连接表只将已绑定 Environment 映射到当前可用的 WebSocket session。
+数据库是以下事实的唯一来源：Environment capability、heartbeat、Tool Invocation 状态、lease、partial event、终态结果、所属 Thread 的可恢复推进条件和全局 Artifact。Gateway 的连接表只将已绑定 Environment 映射到当前可用的 WebSocket session。
 
 ## 配置与连接
 
@@ -71,7 +71,7 @@ HELLO -> CAPABILITIES -> READY {"pull":true}
 
 ## Invocation 分发与恢复
 
-`DatabaseEnvironmentToolInvocationWorkerStore` 仅查询 `target_type = ENVIRONMENT`、目标 `environment_id` 相同且所属 Run 为 `WAITING_TOOLS` 的记录。它使用 Environment 约束的 compare-and-set claim 和 heartbeat SQL，避免 Cloud/Control worker 取得该调用。
+`DatabaseEnvironmentToolInvocationWorkerStore` 仅查询 `target_type = ENVIRONMENT`、目标 `environment_id` 相同且所属 Thread 正在等待当前 Tool batch 的记录。它使用 Environment 约束的 compare-and-set claim 和 heartbeat SQL，避免其他 Tool worker 取得该调用。
 
 ```mermaid
 sequenceDiagram
@@ -85,7 +85,7 @@ sequenceDiagram
     G->>DB: canonical capabilities, heartbeat, claim invocation lease
     G->>D: WELCOME / INVOKE
     D->>G: ACK / STARTED / PARTIAL / COMPLETED
-    G->>DB: partial event or terminal result and Run coordination
+    G->>DB: partial event or terminal result and Thread wakeup condition
 ```
 
 Gateway 以每个 Environment 至多一个 active invocation 的方式执行 READY/PULL。Wire `invocationId` 始终是持久 Invocation Snowflake ID 的十进制字符串；发给 Daemon 的 `INVOKE` 包含冻结的 tool name、version、JSON object arguments 和剩余 timeout。
@@ -115,7 +115,7 @@ Daemon 回调严格使用连续 sequence。相同 sequence 的完全相同 envel
 
 `DaemonToolResultCodec` 使用严格 JSON shape。artifact payload 包含 `mediaType`、`sizeBytes` 和 canonical Base64 `contentBase64`。Gateway 在保存 artifact bytes 前验证 result 的 wire `toolCallId` 等于当前 Invocation ID，随后将 ref 重写为全局 ArtifactStore ref，并把 result 的 tool call ID 恢复为冻结的 provider tool call ID。
 
-terminal CAS 成功后才发布 `ToolCompleted` lifecycle observation 并协调可恢复的 Run。CAS 失败表示 lease 或终态已被其他持久化执行者取得，Gateway 仅丢弃本地 active handle。
+terminal CAS 成功后才发布 `ToolCompleted` lifecycle observation，并使所属 Thread 可在当前 Tool batch 收敛后继续推进。CAS 失败表示 lease 或终态已被其他持久化执行者取得，Gateway 仅丢弃本地 active handle。
 
 ## Daemon 本地执行
 

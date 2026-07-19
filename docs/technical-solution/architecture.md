@@ -60,15 +60,16 @@ core → share
 frontend → web APIs (via shared/api)
 ```
 
-## 3. Harness 所有权模型（已落地）
+## 3. Harness 所有权模型
 
 | 事实 | 职责 |
 | --- | --- |
-| **Session** | 共享 append-only Entry Tree 容器；无 leaf / active 执行指针 / YOLO |
+| **Session** | 共享 append-only Entry Tree 容器、稳定 `mainThreadId` 与父子 Session 关系；不保存 Branch 或配置副本 |
 | **Entry** | 语义持久真源：消息、Agent Snapshot、Tool Result、Compaction |
-| **AgentThread** | 用户面板 / actor 状态：`sessionId`、`headEntryId` 游标、冻结 Agent 定义与 runtime config、Thread YOLO、input sequence、processor token/until/version |
+| **AgentThread** | durable Branch actor：`sessionId`、`headEntryId`、input sequence、状态、processor token/until/version；Agent、Model、Toolset 与 YOLO 由 Entry path fold 得出 |
 | **Branch(thread)** | 由 root→`headEntryId` 路径派生，不独立持久化；多 Thread 可共享 head 后自然分叉 |
-| **ThreadInput** | 有序 mailbox：`USER_MESSAGE` / `SET_YOLO` / `SET_AGENT`；`clientMessageId` 幂等；HTTP 202 |
+| **ThreadInput** | 多生产者有序 mailbox：消息与 `SET_AGENT` / `SET_MODEL` / `SET_TOOLSET` / `SET_YOLO`；`clientMessageId` 幂等；一次 Harvest 可应用多个 Input |
+| **ThreadStop** | Stop 网络幂等回执，以及被取消 mailbox Input 的关联 |
 | **ThreadEvent** | Thread 级 journal / 可观测覆盖层；全局十进制 `eventId` 作 SSE cursor |
 | **ToolInvocation** | 工具权限、lease、结果与终态；ID 是副作用幂等边界 |
 | **SubagentTask** | parent invocation → child Session + child Thread 关系、maxTurns、report |
@@ -76,9 +77,9 @@ frontend → web APIs (via shared/api)
 | **Usage / Cost** | 每 Assistant Entry 一条不可变账本 |
 | **Tool Environment** | daemon 元数据与 heartbeat |
 
-前端 AI 以 Thread 路径 Entries 为历史基线，未物化的 `USER_MESSAGE` inputs 与 active ThreadEvents 作覆盖层；SSE 以全局 `eventId` 字符串 cursor 恢复。
+前端 AI 以 Thread 路径 Entries 为历史基线，未物化的 `USER_MESSAGE` / `CUSTOM_MESSAGE` inputs 与 active ThreadEvents 作覆盖层；SSE 以全局 `eventId` 字符串 cursor 恢复。Session 入口始终打开稳定 Main Thread；Tree filter 只改变投影，不改变 Branch 或 Provider Context。
 
-执行由事件触发的 `ThreadProcessor` 推进：提交 / 权限 / tool / subagent 完成后 `kick`；低频 `ThreadRecoveryLifecycle` 仅扫描丢失的 durable work。
+执行由事件触发的 `ThreadProcessor` 推进：提交、Stop/Retry、权限决定、Tool 或 Subagent 完成后 `kick`；低频 `ThreadRecoveryLifecycle` 仅扫描丢失的 durable work。Child Session 的 Tool ASK 仍归属 Child Thread，并向 delegation root Thread 写 relay event，根 UI 以同一 Invocation ID 决策。
 
 ComfyUI Run 与 Studio `FunctionRun` 是独立概念，不纳入 Harness Thread 模型。
 
@@ -124,13 +125,14 @@ Canvas 表现模型与 Studio 词汇映射：`features/canvas/domain-map.ts`。
 3. **Link 与 Reference 不混称**：演示连线 = visibility；依赖另建。
 4. **stub 必须诚实**：未实现走 not-ready，不伪造成功路径。
 5. **文档进度与代码一致**：见各文档落地描述。
-6. **独立 Run 概念不跨域混用**：Harness 无 Run 实体；Studio `FunctionRun`、Canvas `AgentRunNode`、ComfyUI job 各自独立。
+6. **独立 Run 概念不跨域混用**：Studio `FunctionRun`、Canvas `AgentRunNode`、ComfyUI job 各自独立。
 
 ## 8. 入口文档
 
 | 文档 | 用途 |
 | --- | --- |
 | [domain-map.md](domain-map.md) | 词汇与前后端映射 |
+| [harness-thread-actor.md](harness-thread-actor.md) | Harness Session/Thread 架构事实源 |
 | [infinite-canvas-implementation-design.md](infinite-canvas-implementation-design.md) | Studio 目标契约 |
 | [cloud-embedded-agent-runtime.md](cloud-embedded-agent-runtime.md) | Harness Thread 执行链 |
 | [frontend-implementation-design.md](frontend-implementation-design.md) | 前端落地 |
