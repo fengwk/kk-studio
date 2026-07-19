@@ -54,7 +54,7 @@
 
 ### 空 Pane 与首发
 
-每个 Pane 初始为会话 composer：
+每个 Pane 初始为会话 composer；空 Pane 仅暴露 `/session` 以复用本 Chat 成员 Session（选中后替换该 Pane target 为 Main Thread）：
 
 1. Footer/chip 显示 Agent：空 Pane 用 Chat default；已绑定 Pane 用 Thread DTO 的 active agent。
 2. 无可用 Agent 时提交会打开 Agent 选择器；选中后更新 Chat.defaultAgentId，并继续 pending 首发。
@@ -69,7 +69,7 @@
 
 | 命令 | 行为 |
 | --- | --- |
-| `/session` | 仅列出当前 Chat 成员 Session；running 优先，再按用户 sort；选中后替换 focused Pane 为该 Session Main Thread |
+| `/session` | 空 Pane 与已绑定 Pane 均可用；列出当前 Chat **全部**成员 Session；按各 Session 的 Threads 判断 running 后优先，再按用户 sort；选中后替换 **该** Pane target 为 Main Thread |
 | `/thread` | 当前 Session Threads；同样 running 优先 + sort；选中后替换 pane target |
 | `/agent` | Agent 选择器；对当前 Thread `setThreadAgent`；不手工同步其它 Pane，依赖 query invalidate + SSE |
 | `/tree` `/stop` `/retry` `/yolo` `/clear` | 保留既有语义 |
