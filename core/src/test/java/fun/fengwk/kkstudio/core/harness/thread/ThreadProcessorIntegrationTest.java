@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.harness.thread;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,6 +15,9 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 
+import fun.fengwk.kkstudio.core.harness.session.service.HarnessSessionCommandService;
+import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionEntryMapper;
+import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionEntryDO;
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.harness.task.store.mapper.HarnessSubagentTaskMapper;
 import fun.fengwk.kkstudio.core.harness.task.store.model.HarnessSubagentTaskDO;
@@ -21,8 +25,10 @@ import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadCommandServi
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadQueryService;
 import fun.fengwk.kkstudio.core.harness.thread.store.MysqlHarnessThreadStore;
 import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadEventMapper;
+import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadMapper;
 import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadEventDO;
 import fun.fengwk.kkstudio.core.harness.thread.tool.DatabaseThreadToolPort;
+import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProvider;
 import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
 import fun.fengwk.kkstudio.core.harness.usage.store.mapper.ModelUsageRecordMapper;
@@ -43,6 +49,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtension;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionRegistry;
@@ -51,6 +58,9 @@ import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.CompactionCompleted;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.ThreadIdle;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.TurnStarted;
+import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
+import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
@@ -61,13 +71,20 @@ import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskState;
 import fun.fengwk.kkstudio.harness.runtime.thread.CompactionService;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnResourceResolver;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnResources;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.share.model.HarnessSessionCreateDTO;
+import fun.fengwk.kkstudio.share.model.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
-import fun.fengwk.kkstudio.share.model.HarnessThreadCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadMessageCreateDTO;
@@ -81,6 +98,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -94,14 +112,25 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Deterministic ThreadProcessor integration with a controlled Fake ModelProvider.
  *
- * <p>Proves final assistant materialization, releaseIfIdle race, concurrent queue boundary, and
- * sibling-thread tool-result pending independence.
+ * <p>Proves durable main-loop boundaries, fencing, Tool convergence, and recovery-safe state
+ * transitions.
  */
 @SpringBootTest
 class ThreadProcessorIntegrationTest {
   private static final SessionEntryJsonCodec SESSION_ENTRY_CODEC = new SessionEntryJsonCodec();
+  private static final ToolDescriptor RETRY_TEST_TOOL =
+      new ToolDescriptor(
+          "retry_tool",
+          "1",
+          "retry tool",
+          null,
+          new ToolParamsSchema("", Map.of(), Set.of(), false),
+          ToolExecutionMode.CONTROL,
+          ToolSideEffect.READ_ONLY,
+          Duration.ofMinutes(1));
 
   @Autowired private HarnessThreadCommandService commandService;
+  @Autowired private HarnessSessionCommandService sessionCommandService;
   @Autowired private HarnessThreadQueryService queryService;
   @Autowired private ThreadProcessor threadProcessor;
   @Autowired private ThreadTransactions transactions;
@@ -112,6 +141,9 @@ class ThreadProcessorIntegrationTest {
   @Autowired private ToolInvocationMapper invocationMapper;
   @Autowired private HarnessSubagentTaskMapper taskMapper;
   @Autowired private HarnessThreadEventMapper threadEventMapper;
+  @Autowired private HarnessThreadMapper threadMapper;
+  @Autowired private HarnessSessionEntryMapper entryMapper;
+  @Autowired private ThreadIdGenerator idGenerator;
   @Autowired private LifecycleProbe lifecycleProbe;
 
   @BeforeEach
@@ -137,6 +169,7 @@ class ThreadProcessorIntegrationTest {
     task.setParentInvocationId(7_700_001L + (threadId % 100_000));
     task.setParentSessionId(1L);
     task.setParentThreadId(2L);
+    task.setRootThreadId(threadId);
     task.setChildSessionId(sessionId);
     task.setChildThreadId(threadId);
     task.setTargetAgent("sub");
@@ -188,6 +221,7 @@ class ThreadProcessorIntegrationTest {
     task.setParentInvocationId(7_700_011L + (threadId % 100_000));
     task.setParentSessionId(1L);
     task.setParentThreadId(2L);
+    task.setRootThreadId(threadId);
     task.setChildSessionId(sessionId);
     task.setChildThreadId(threadId);
     task.setTargetAgent("sub");
@@ -217,11 +251,8 @@ class ThreadProcessorIntegrationTest {
     assertNull(threadStore.find(threadId).orElseThrow().processorToken());
     List<HarnessThreadInputDTO> inputs = queryService.listInputs(thread.getThreadId());
     assertEquals(2, inputs.size());
-    // First input may be applied before model boundary; second remains for a later explicit trigger
-    // and must not have retained the token into a policy-rejection spin.
-    assertTrue(
-        inputs.stream().anyMatch(i -> i.getAppliedEntryId() == null),
-        "at least one pending input must remain after policy rejection release");
+    // Steer-all 可在 admission 前应用完整 cutoff；无论输入是否已应用，FAILED 均不得保留 token 自旋。
+    assertTrue(inputs.stream().allMatch(i -> i.getAppliedEntryId() != null));
 
     // A second activation must still not call Provider or hang with a retained token.
     threadProcessor.process(threadId);
@@ -257,6 +288,25 @@ class ThreadProcessorIntegrationTest {
     assertTrue(lifecycleProbe.contains(threadId, ThreadIdle.class));
   }
 
+  /** 配置-only harvest 只推进 Entry path，不得制造无来源的 assistant response debt。 */
+  @Test
+  void configOnlyBatchAppliesWithoutCallingProvider() throws Exception {
+    HarnessThreadDTO thread = createRoot("proc-config-only");
+    long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
+    awaitIdle(threadId);
+
+    transactions.submitSetYolo(threadId, true, "cid-yolo-" + threadId, Instant.now());
+    threadProcessor.process(threadId);
+    awaitIdle(threadId);
+
+    assertEquals(0, fakeProvider.requestsSinceReset());
+    List<HarnessThreadInputDTO> inputs = queryService.listInputs(thread.getThreadId());
+    assertEquals(1, inputs.size());
+    assertNotNull(inputs.get(0).getAppliedEntryId());
+    List<HarnessSessionEntryDTO> path = queryService.listPathEntries(thread.getThreadId());
+    assertEquals("yolo_change", path.get(path.size() - 1).getEntryType());
+  }
+
   @Test
   void overflowRunsCompactionExtensionAndPublishesDurableObservation() throws Exception {
     HarnessThreadDTO thread = createRoot("proc-compaction-extension");
@@ -278,9 +328,14 @@ class ThreadProcessorIntegrationTest {
     HarnessThreadDTO thread = createRoot("proc-boundary");
     long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
 
+    CountDownLatch entered = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    fakeProvider.blockNext(entered, release, Duration.ofSeconds(5));
     submit(thread.getThreadId(), "first", "cid-1-" + threadId);
-    // Submit second quickly so it may land while first turn is still active or at boundary.
+    assertTrue(entered.await(3, TimeUnit.SECONDS));
+    // 第二条在 Provider in-flight 时入队，只能由完成后的下一个安全边界处理。
     submit(thread.getThreadId(), "second", "cid-2-" + threadId);
+    release.countDown();
     awaitIdle(threadId);
 
     List<HarnessThreadInputDTO> inputs = queryService.listInputs(thread.getThreadId());
@@ -303,19 +358,24 @@ class ThreadProcessorIntegrationTest {
   }
 
   @Test
-  void releaseIfIdleLosesToConcurrentEnqueueAndKeepsOwnershipForContinuation() throws Exception {
+  void quiescenceLosesToConcurrentEnqueueAndKeepsOwnershipForContinuation() throws Exception {
     HarnessThreadDTO thread = createRoot("proc-race");
     long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
     awaitIdle(threadId);
     Instant now = Instant.now();
+    markRunnable(threadId, now);
 
     assertTrue(
         threadStore.tryAcquire(threadId, "owner-a", now, Duration.ofSeconds(30)).isPresent());
 
     submit(thread.getThreadId(), "late-msg", "cid-late-" + threadId);
 
-    boolean released = transactions.releaseIfIdle(threadId, "owner-a", now.plusSeconds(1));
-    assertFalse(released, "pending input must prevent idle release");
+    ThreadTransactions.QuiescenceResult quiescence =
+        transactions.quiesce(threadId, "owner-a", now.plusSeconds(1));
+    assertEquals(
+        ThreadTransactions.QuiescenceResult.WORK_REMAINS,
+        quiescence,
+        "pending input must prevent idle release");
     assertEquals("owner-a", threadStore.find(threadId).orElseThrow().processorToken());
 
     threadStore.release(threadId, "owner-a", now.plusSeconds(2));
@@ -339,12 +399,47 @@ class ThreadProcessorIntegrationTest {
     assertFalse(toolPort.hasTerminalResultsPendingApply(threadB, headAssistantId));
   }
 
+  /** 共享 Entry tree 的其他 branch child 不能阻止源 Thread 以自身 head fencing 写入 Tool result。 */
   @Test
-  void releaseIfIdleKeepsTokenWhenTerminalToolResultsPendingApply() throws Exception {
+  void siblingBranchChildDoesNotBlockApplyingThisThreadsTerminalToolResult() throws Exception {
+    HarnessThreadDTO thread = createRoot("proc-shared-tree-tool-result");
+    long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
+    awaitIdle(threadId);
+    Instant now = Instant.now();
+    markRunnable(threadId, now);
+    assertTrue(
+        threadStore.tryAcquire(threadId, "owner-shared", now, Duration.ofSeconds(30)).isPresent());
+    var owned = threadStore.find(threadId).orElseThrow();
+
+    HarnessSessionEntryDO siblingChild = new HarnessSessionEntryDO();
+    siblingChild.setId(idGenerator.newSessionEntryId());
+    siblingChild.setSessionId(owned.sessionId());
+    siblingChild.setParentEntryId(owned.headEntryId());
+    siblingChild.setEntryType("message");
+    siblingChild.setPayloadJson(
+        SESSION_ENTRY_CODEC.encode(
+            new MessageEntryPayload(
+                new AgentMessage(
+                    AgentMessageRole.USER, List.of(new TextMessageContent("sibling"))))));
+    siblingChild.setCreateTime(LocalDateTime.ofInstant(now, ZoneOffset.UTC));
+    entryMapper.insert(siblingChild);
+    insertTerminalInvocation(8_003L + threadId % 1000, threadId, owned.headEntryId());
+
+    assertTrue(transactions.applyTerminalToolResults(threadId, "owner-shared", now.plusSeconds(1)));
+    assertNotEquals(
+        owned.headEntryId(),
+        threadStore.find(threadId).orElseThrow().headEntryId(),
+        "own head advances");
+    threadStore.release(threadId, "owner-shared", now.plusSeconds(2));
+  }
+
+  @Test
+  void quiescenceKeepsTokenWhenTerminalToolResultsPendingApply() throws Exception {
     HarnessThreadDTO thread = createRoot("proc-tool-race");
     long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
     awaitIdle(threadId);
     Instant now = Instant.now();
+    markRunnable(threadId, now);
 
     assertTrue(
         threadStore.tryAcquire(threadId, "owner-tool", now, Duration.ofSeconds(30)).isPresent());
@@ -353,15 +448,19 @@ class ThreadProcessorIntegrationTest {
     // release: durable work must block idle release so kick's failed acquire is not stranded.
     insertTerminalInvocation(8002L + threadId % 1000, threadId, head);
 
-    boolean released = transactions.releaseIfIdle(threadId, "owner-tool", now.plusSeconds(1));
-    assertFalse(released, "terminal tool results pending apply must prevent idle release");
+    ThreadTransactions.QuiescenceResult quiescence =
+        transactions.quiesce(threadId, "owner-tool", now.plusSeconds(1));
+    assertEquals(
+        ThreadTransactions.QuiescenceResult.WORK_REMAINS,
+        quiescence,
+        "terminal tool results pending apply must prevent idle release");
     assertEquals("owner-tool", threadStore.find(threadId).orElseThrow().processorToken());
 
     threadStore.release(threadId, "owner-tool", now.plusSeconds(2));
   }
 
   @Test
-  void prequeuedTwoUserInputsProduceTwoOrderedProviderRequests() throws Exception {
+  void steerAllPrequeuedUserInputsProduceOneProviderRequest() throws Exception {
     HarnessThreadDTO thread = createRoot("proc-prequeue");
     long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
     awaitIdle(threadId);
@@ -371,14 +470,14 @@ class ThreadProcessorIntegrationTest {
     AgentMessage u2 =
         new AgentMessage(
             AgentMessageRole.USER, List.of(new TextMessageContent("second-prequeued")));
-    // 直接入队、不 kick，验证 process 一次 activation 按边界产生两次 Provider 请求。
+    // 直接入队、不 kick，验证首次安全边界 harvest 全部消息并只偿还一次 response debt。
     transactions.submitUserMessage(threadId, u1, "pre-1-" + threadId, now);
     transactions.submitUserMessage(threadId, u2, "pre-2-" + threadId, now);
     threadProcessor.process(threadId);
     awaitIdle(threadId);
 
-    assertEquals(2, fakeProvider.requestsSinceReset());
-    assertEquals(List.of(1, 2), fakeProvider.completionOrder());
+    assertEquals(1, fakeProvider.requestsSinceReset());
+    assertEquals(List.of(1), fakeProvider.completionOrder());
     List<HarnessSessionEntryDTO> path = queryService.listPathEntries(thread.getThreadId());
     List<AgentMessageRole> roles = new ArrayList<>();
     for (HarnessSessionEntryDTO entry : path) {
@@ -391,12 +490,7 @@ class ThreadProcessorIntegrationTest {
       roles.add(((MessageEntryPayload) payload).message().role());
     }
     assertEquals(
-        List.of(
-            AgentMessageRole.USER,
-            AgentMessageRole.ASSISTANT,
-            AgentMessageRole.USER,
-            AgentMessageRole.ASSISTANT),
-        roles);
+        List.of(AgentMessageRole.USER, AgentMessageRole.USER, AgentMessageRole.ASSISTANT), roles);
   }
 
   @Test
@@ -421,32 +515,30 @@ class ThreadProcessorIntegrationTest {
   }
 
   @Test
-  void failedTurnWithConcurrentSecondUserIsProcessedWithoutRecovery() throws Exception {
+  void failedTurnKeepsConcurrentSecondUserQueuedUntilExplicitRetry() throws Exception {
     HarnessThreadDTO thread = createRoot("proc-fail-concurrent");
     long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
     CountDownLatch entered = new CountDownLatch(1);
     CountDownLatch releaseFail = new CountDownLatch(1);
-    // 第一次模型阻塞，期间提交第二条 USER；随后第一次失败，releaseIfIdle 应 retain 并处理第二条。
+    // 第一次模型阻塞，期间提交第二条 USER；失败后必须保留而不能自动 harvest。
     fakeProvider.blockThenFail(
         entered, releaseFail, ProviderErrorKind.INVALID_REQUEST, "fail-first");
     submit(thread.getThreadId(), "first-will-fail", "cid-f1-" + threadId);
     assertTrue(entered.await(3, TimeUnit.SECONDS));
     submit(thread.getThreadId(), "second-while-failing", "cid-f2-" + threadId);
     releaseFail.countDown();
-    awaitIdle(threadId);
+    awaitFailed(threadId);
 
     List<HarnessThreadInputDTO> inputs = queryService.listInputs(thread.getThreadId());
     assertEquals(2, inputs.size());
     assertNotNull(inputs.get(0).getAppliedEntryId());
-    assertNotNull(inputs.get(1).getAppliedEntryId());
-    assertTrue(
-        fakeProvider.requestsSinceReset() >= 2,
-        "second durable user must be processed in same activation after failure");
+    assertNull(inputs.get(1).getAppliedEntryId());
+    assertEquals(1, fakeProvider.requestsSinceReset());
     assertNull(threadStore.find(threadId).orElseThrow().processorToken());
   }
 
   @Test
-  void failedTurnKeepsPendingKickForLaterExplicitInput() throws Exception {
+  void failedTurnRequiresRetryBeforeLaterInputCanRun() throws Exception {
     HarnessThreadDTO thread = createRoot("proc-fail-later");
     long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
     fakeProvider.failNext(ProviderErrorKind.INVALID_REQUEST, "first-fail");
@@ -454,21 +546,67 @@ class ThreadProcessorIntegrationTest {
     awaitFailed(threadId);
     assertEquals(1, fakeProvider.requestsSinceReset());
 
-    // 显式后续输入必须能再次触发模型。
+    // FAILED 期间后续输入仅入队，不能触发模型。
     fakeProvider.reset();
     submit(thread.getThreadId(), "retry-after-fail", "cid-retry-" + threadId);
+    Thread.sleep(100);
+    assertEquals(0, fakeProvider.requestsSinceReset());
+    transactions.retry(threadId, Instant.now());
+    threadProcessor.process(threadId);
     awaitIdle(threadId);
-    assertTrue(
-        fakeProvider.requestsSinceReset() >= 1,
-        "later durable input must retry after permanent failure");
+    assertTrue(fakeProvider.requestsSinceReset() >= 2, "retry repays debt before harvesting input");
+  }
+
+  /** RETRYING Tool chain 释放 token 但保留 debt，直到 follow-up assistant 完成前不得 harvest 新输入。 */
+  @Test
+  void retryToolWaitRetainsDebtUntilFollowUpAssistantBeforeHarvestingLaterInput() throws Exception {
+    HarnessThreadDTO thread = createRoot("proc-retry-tool-wait");
+    long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
+    fakeProvider.failNext(ProviderErrorKind.INVALID_REQUEST, "first-fail");
+    submit(thread.getThreadId(), "will-fail", "cid-retry-tool-fail-" + threadId);
+    awaitFailed(threadId);
+
+    submit(thread.getThreadId(), "queued-behind-retry-debt", "cid-retry-tool-later-" + threadId);
+    fakeProvider.completeNextWithToolCall();
+    transactions.retry(threadId, Instant.now());
+    threadProcessor.process(threadId);
+    awaitRetryingToolWait(threadId);
+
+    List<HarnessThreadInputDTO> inputs = queryService.listInputs(thread.getThreadId());
+    assertEquals(2, inputs.size());
+    assertNotNull(inputs.get(0).getAppliedEntryId());
+    assertNull(inputs.get(1).getAppliedEntryId(), "retry debt must block later mailbox harvest");
+    ToolInvocationDO invocation = invocationMapper.listByThread(threadId).get(0);
+    assertEquals("WAITING_APPROVAL", invocation.getStatus());
+
+    LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+    assertEquals(
+        1,
+        invocationMapper.resolvePermission(
+            invocation.getId(),
+            "WAITING_APPROVAL",
+            "DENY",
+            "FAILED",
+            now,
+            "{\"toolCallId\":\"retry-tool-call\",\"contents\":[{\"type\":\"text\",\"text\":\"denied\"}],\"error\":true,\"details\":{}}",
+            "denied",
+            now,
+            now));
+
+    threadProcessor.process(threadId);
+    awaitIdle(threadId);
+    assertNotNull(
+        queryService.listInputs(thread.getThreadId()).get(1).getAppliedEntryId(),
+        "only the final retry assistant may clear retry debt and harvest later input");
   }
 
   @Test
-  void releaseForExternalWaitReleasesDespitePendingInputWhenToolWaiting() throws Exception {
+  void waitingReleasesDespitePendingInputWhenToolWaiting() throws Exception {
     HarnessThreadDTO thread = createRoot("proc-wait-input");
     long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
     awaitIdle(threadId);
     Instant now = Instant.now();
+    markRunnable(threadId, now);
     assertTrue(
         threadStore.tryAcquire(threadId, "owner-wait", now, Duration.ofSeconds(30)).isPresent());
     long head = threadStore.find(threadId).orElseThrow().headEntryId();
@@ -480,7 +618,8 @@ class ThreadProcessorIntegrationTest {
         "behind-" + threadId,
         now);
     boolean released =
-        transactions.releaseForExternalWait(threadId, "owner-wait", now.plusSeconds(1));
+        transactions.waitForExternal(
+            threadId, "owner-wait", "tools_or_permission", now.plusSeconds(1));
     assertTrue(released, "pending user input must not retain token while tool is nonterminal");
     assertNull(threadStore.find(threadId).orElseThrow().processorToken());
   }
@@ -502,19 +641,23 @@ class ThreadProcessorIntegrationTest {
   }
 
   @Test
-  void releaseForExternalWaitRetainsTokenWhenTerminalToolResultsApplicable() throws Exception {
+  void quiescenceRetainsTokenWhenTerminalToolResultsApplicable() throws Exception {
     HarnessThreadDTO thread = createRoot("proc-external-release");
     long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
     awaitIdle(threadId);
     Instant now = Instant.now();
+    markRunnable(threadId, now);
     assertTrue(
         threadStore.tryAcquire(threadId, "owner-ext", now, Duration.ofSeconds(30)).isPresent());
     long head = threadStore.find(threadId).orElseThrow().headEntryId();
     insertTerminalInvocation(8100L + threadId % 1000, threadId, head);
 
-    boolean released =
-        transactions.releaseForExternalWait(threadId, "owner-ext", now.plusSeconds(1));
-    assertFalse(released, "terminal results pending apply must retain processor token");
+    ThreadTransactions.QuiescenceResult quiescence =
+        transactions.quiesce(threadId, "owner-ext", now.plusSeconds(1));
+    assertEquals(
+        ThreadTransactions.QuiescenceResult.WORK_REMAINS,
+        quiescence,
+        "terminal results pending apply must retain processor token");
     assertEquals("owner-ext", threadStore.find(threadId).orElseThrow().processorToken());
     threadStore.release(threadId, "owner-ext", now.plusSeconds(2));
   }
@@ -572,7 +715,9 @@ class ThreadProcessorIntegrationTest {
     inv.setSideEffect("READ_ONLY");
     inv.setDeadlineAt(LocalDateTime.now(ZoneOffset.UTC).plusHours(1));
     inv.setResultJson(
-        "{\"toolCallId\":\"call-" + id + "\",\"contents\":[{\"type\":\"text\",\"text\":\"ok\"}]}");
+        "{\"toolCallId\":\"call-"
+            + id
+            + "\",\"contents\":[{\"type\":\"text\",\"text\":\"ok\"}],\"error\":false,\"details\":{}}");
     inv.setCreateTime(LocalDateTime.now(ZoneOffset.UTC));
     inv.setUpdateTime(LocalDateTime.now(ZoneOffset.UTC));
     inv.setFinishedAt(LocalDateTime.now(ZoneOffset.UTC));
@@ -611,6 +756,22 @@ class ThreadProcessorIntegrationTest {
     throw new AssertionError("thread did not fail: " + threadId);
   }
 
+  private void awaitRetryingToolWait(long threadId) throws InterruptedException {
+    Instant deadline = Instant.now().plusSeconds(10);
+    while (Instant.now().isBefore(deadline)) {
+      var thread = threadStore.find(threadId).orElseThrow();
+      List<ToolInvocationDO> invocations = invocationMapper.listByThread(threadId);
+      if (thread.status().name().equals("RETRYING")
+          && thread.processorToken() == null
+          && invocations.size() == 1
+          && "WAITING_APPROVAL".equals(invocations.get(0).getStatus())) {
+        return;
+      }
+      Thread.sleep(25);
+    }
+    throw new AssertionError("retrying tool chain did not release token: " + threadId);
+  }
+
   private void awaitIdle(long threadId) throws InterruptedException {
     Instant deadline = Instant.now().plusSeconds(15);
     while (Instant.now().isBefore(deadline)) {
@@ -642,10 +803,18 @@ class ThreadProcessorIntegrationTest {
   }
 
   private HarnessThreadDTO createRoot(String title) {
-    HarnessThreadCreateDTO create = new HarnessThreadCreateDTO();
+    HarnessSessionCreateDTO create = new HarnessSessionCreateDTO();
     create.setAgentDefinitionId("1");
     create.setTitle(title);
-    return commandService.createThread(create);
+    HarnessSessionDTO session = sessionCommandService.createSession(create);
+    return queryService.getThread(session.getMainThreadId());
+  }
+
+  private void markRunnable(long threadId, Instant now) {
+    assertEquals(
+        1,
+        threadMapper.updateStatusDirect(
+            threadId, "RUNNING", LocalDateTime.ofInstant(now, ZoneOffset.UTC)));
   }
 
   private void submit(String threadId, String content, String clientMessageId) {
@@ -662,6 +831,14 @@ class ThreadProcessorIntegrationTest {
 
   @TestConfiguration
   static class FakeProviderConfig {
+    @Bean
+    @Primary
+    ToolSettingsProvider retryToolSettingsProvider() {
+      return () ->
+          new ToolSettings(
+              Map.of("retry_tool", List.of(new PermissionRule("*", PermissionAction.ASK))), false);
+    }
+
     @Bean
     LifecycleProbe lifecycleProbe() {
       return new LifecycleProbe();
@@ -752,8 +929,8 @@ class ThreadProcessorIntegrationTest {
             provider,
             model,
             model.variants().get(0),
-            List.of(),
-            List.of(),
+            List.of(RETRY_TEST_TOOL),
+            List.of(ToolBinding.of(RETRY_TEST_TOOL)),
             Path.of("."),
             Path.of("."));
       };
@@ -823,6 +1000,7 @@ class ThreadProcessorIntegrationTest {
     private volatile CountDownLatch blockRelease;
     private volatile Duration blockDuration = Duration.ZERO;
     private volatile ProviderException failAfterBlock;
+    private volatile List<ProviderToolCall> nextToolCalls = List.of();
 
     void reset() {
       resetAt.set(requests.get());
@@ -832,6 +1010,7 @@ class ThreadProcessorIntegrationTest {
       blockRelease = null;
       blockDuration = Duration.ZERO;
       failAfterBlock = null;
+      nextToolCalls = List.of();
     }
 
     void failNext(ProviderErrorKind kind, String message) {
@@ -851,6 +1030,10 @@ class ThreadProcessorIntegrationTest {
       this.blockRelease = release;
       this.blockDuration = Duration.ofSeconds(5);
       this.failAfterBlock = new ProviderException(kind, message);
+    }
+
+    void completeNextWithToolCall() {
+      nextToolCalls = List.of(new ProviderToolCall("retry-tool-call", "retry_tool", "{}"));
     }
 
     int requestsSinceReset() {
@@ -888,10 +1071,12 @@ class ThreadProcessorIntegrationTest {
       CountDownLatch release = blockRelease;
       Duration duration = blockDuration;
       ProviderException afterBlockFail = failAfterBlock;
+      List<ProviderToolCall> toolCalls = nextToolCalls;
       blockEntered = null;
       blockRelease = null;
       blockDuration = Duration.ZERO;
       failAfterBlock = null;
+      nextToolCalls = List.of();
       if (entered != null) {
         entered.countDown();
       }
@@ -920,8 +1105,8 @@ class ThreadProcessorIntegrationTest {
           new ProviderResponse(
               "reply-" + n,
               "",
-              List.of(),
-              ProviderStopReason.COMPLETED,
+              toolCalls,
+              toolCalls.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS,
               usage,
               cost,
               "req-" + n,
