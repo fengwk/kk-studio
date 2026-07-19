@@ -63,27 +63,33 @@ AI extension 注册 Session 列表、Session 入口与显式 Thread 详情；显
 ```text
 transcript =
   path Entries（语义基线）
-  + 尚未物化的 USER_MESSAGE / CUSTOM_MESSAGE inputs
+  + 已 INPUT_APPLIED、但 Entry 查询尚未刷新的短暂 journal 覆盖
   + active ThreadEvents（流式 / 工具覆盖层）
+
+decoration queue =
+  QUEUED USER_MESSAGE / CUSTOM_MESSAGE inputs（保持后端 mailbox 顺序）
 ```
 
 | 来源 | 前端行为 |
 | --- | --- |
 | `message` / `agent_snapshot` / `compaction` Entry | 稳定气泡、冻结摘要与路径配置基线 |
-| unapplied `user_message` / `custom_message` input | 立即显示待发送气泡（`pendingInput`），Entry 出现后抑制 |
+| QUEUED `user_message` / `custom_message` input | 不进入 transcript；显示在 Working 装饰栏下，Harvest 后移除 |
+| `input_applied` 且 Entry 查询暂时落后 | 以 subject Entry ID 在 transcript 短暂补位，Entry 出现后抑制 |
 | `assistant_started` / `assistant_delta_batch` | 流式 assistant / thinking；以 `subjectEntryId` 关联 |
 | `assistant_completed` / Entry 物化 | 抑制对应 stream 覆盖层 |
 | `assistant_failed` | 标记流式 assistant 错误 |
 | `tool_*` / `permission_*` | 工具与权限覆盖；Entry 物化后抑制 |
 | Tool Result artifact | 映射 `/api/artifacts/{artifactId}` 原生预览或文件链 |
 
-连续重叠提交：composer 使用 `clientMessageId` 与 202 入队，不等待前一轮处理结束；pending inputs 与 processing 状态可同时可见。
+连续重叠提交：composer 使用 `clientMessageId` 与 202 入队，不等待前一轮处理结束；QUEUED inputs 在 Working 下可见，滚动历史区只承载 Entry 与 durable live event 事实。
+
+Thread 主区纵向固定为三段：可滚动 transcript；Working/queue/widgets 装饰栏与 Composer；最底部 Agent/Model/Usage footer。`Working...` 统一投影 `RUNNING`、`WAITING`、`RETRYING`、processor processing、queued input 与 live projection，Composer 不重复展示原始 `IDLE/RUNNING` 文本。
 
 ### Session、Tree 与 Stop
 
 - 打开 `/sessions/:sessionId` 后使用服务端 `mainThreadId` 进入 Main Thread；Session 面板将 Main 固定置顶，Secondary Threads 继续独立运行。
 - Tree 以共享 Entry Tree 投影当前 Branch。`default`、`no-tools`、`user-only`、`assistant-only`、`labeled-only`、`all` 只影响可见条目；从 USER/CUSTOM_MESSAGE 分支时以父 Entry 为新 Thread head 并回填可编辑文本，其他 Entry 从所选 Entry 继续。
-- Stop 调用返回的 `restoredMessages` 以空行合并回 Composer，并生成新的 `clientMessageId`；配置 Input 被取消但不回填。FAILED Thread 只通过 Retry 恢复。
+- Composer 不提供加号、独立 Stop/Retry 按钮；命令统一通过 `/` 打开。`/stop` 的 `restoredMessages` 以空行合并回 Composer，并生成新的 `clientMessageId`；配置 Input 被取消但不回填。FAILED Thread 通过 `/retry` 显式恢复。
 
 ### SSE cursor 恢复
 
@@ -115,7 +121,7 @@ frontend/src
 ├── features/ai
 │   ├── extensions/            Session/Thread 页面注册
 │   ├── session/               Session 列表、Main/Secondary Thread 面板
-│   ├── thread/                Composer、Tree、Transcript、Stop/Retry
+│   ├── thread-panel/          Composer、Transcript、Working/queue、slash commands、footer
 │   ├── timeline/              Entry/Input/Event 投影与 SSE
 │   └── task/                  Root Activity、permission relay、Subagent Timeline
 ├── shared/api

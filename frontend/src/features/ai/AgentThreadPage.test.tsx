@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -35,6 +35,8 @@ vi.mock('@/shared/api/harness-service', () => ({
     listRootActivities: vi.fn(),
     listSessionTasks: vi.fn(),
     setThreadYolo: vi.fn(),
+    stopThread: vi.fn(),
+    retryThread: vi.fn(),
     getThreadUsage: vi.fn(),
     listThreadToolInvocations: vi.fn(),
     decideToolInvocation: vi.fn(),
@@ -93,6 +95,12 @@ describe('AgentThreadPage', () => {
     vi.mocked(harnessService.listRootActivities).mockResolvedValue([])
     vi.mocked(harnessService.listSessionTasks).mockResolvedValue([])
     vi.mocked(harnessService.setThreadYolo).mockResolvedValue(input('yolo-1', 'set_yolo', { yoloEnabled: true }))
+    vi.mocked(harnessService.stopThread).mockResolvedValue({
+      stopId: 'stop-1',
+      cancelledInputs: [],
+      restoredMessages: [],
+    })
+    vi.mocked(harnessService.retryThread).mockResolvedValue({ ...thread, status: 'RETRYING' })
     vi.mocked(harnessService.getThreadUsage).mockResolvedValue({
       scopeType: 'thread',
       scopeId: '1',
@@ -156,7 +164,7 @@ describe('AgentThreadPage', () => {
     })
   })
 
-  it('shows pending input before it is applied and keeps composer open for a second submit', async () => {
+  it('shows queued input below Working instead of in transcript and keeps composer open', async () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.getThread).mockResolvedValue({ ...thread, processing: true })
     vi.mocked(harnessService.listThreadInputs).mockResolvedValue([
@@ -164,7 +172,13 @@ describe('AgentThreadPage', () => {
     ])
     renderThread()
 
-    expect(await screen.findByText('排队消息')).toBeInTheDocument()
+    const queuedMessage = await screen.findByText('排队消息')
+    expect(queuedMessage).toBeInTheDocument()
+    expect(within(screen.getByRole('log', { name: '会话消息' })).queryByText('排队消息')).not.toBeInTheDocument()
+    expect(within(screen.getByLabelText('等待处理的消息')).getByText('排队消息')).toBeInTheDocument()
+    expect(screen.getByText('Working...')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+    expect(screen.queryByText('IDLE')).not.toBeInTheDocument()
     const composer = screen.getByPlaceholderText(/告诉 Agent/)
     expect(composer).toBeEnabled()
     await user.type(composer, '第二条')
@@ -199,16 +213,19 @@ describe('AgentThreadPage', () => {
     expect(await screen.findByText('实时回答')).toBeInTheDocument()
   })
 
-  it('exposes exact command ids yolo and clear-draft', async () => {
+  it('exposes slash-only commands and executes /stop without standalone controls', async () => {
     const user = userEvent.setup()
     renderThread()
     await screen.findByText('检查第一集大纲')
 
-    await user.click(screen.getByRole('button', { name: '打开命令表' }))
+    const composer = screen.getByLabelText('给 AI 发送消息')
+    expect(screen.queryByRole('button', { name: '打开命令表' })).not.toBeInTheDocument()
+    await user.type(composer, '/')
     expect(await screen.findByText('yolo')).toBeInTheDocument()
+    expect(screen.getByText('stop')).toBeInTheDocument()
+    expect(screen.getByText('retry')).toBeInTheDocument()
     expect(screen.getByText('clear')).toBeInTheDocument()
-    // Exact remaining command ids: yolo + clear-draft.
-    expect(THREAD_COMMANDS.map((command) => command.id)).toEqual(['yolo', 'clear-draft'])
+    expect(THREAD_COMMANDS.map((command) => command.id)).toEqual(['yolo', 'stop', 'retry', 'clear-draft'])
 
     await user.click(screen.getByText('yolo'))
     await waitFor(() => {
@@ -217,6 +234,16 @@ describe('AgentThreadPage', () => {
         expect.objectContaining({ yoloEnabled: true, clientMessageId: expect.any(String) }),
       )
     })
+
+    await user.type(composer, '/stop')
+    await user.keyboard('{Enter}')
+    await waitFor(() => {
+      expect(harnessService.stopThread).toHaveBeenCalledWith(
+        '1',
+        expect.objectContaining({ clientRequestId: expect.any(String) }),
+      )
+    })
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
   })
 
   it('reloads the same thread id on refresh without creating a new thread', async () => {

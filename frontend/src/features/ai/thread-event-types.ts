@@ -41,6 +41,13 @@ export interface ToolDialogueMessage extends BaseDialogueMessage {
 
 export type DialogueMessage = TextDialogueMessage | ToolDialogueMessage
 
+export interface QueuedThreadMessage {
+  inputId: string
+  role: 'user' | 'system'
+  text: string
+  sequence: number
+}
+
 export interface RuntimeContext {
   provider?: string
   model?: string
@@ -51,8 +58,10 @@ export interface RuntimeContext {
 
 export interface ThreadTimeline {
   messages: DialogueMessage[]
+  /** QUEUED mailbox messages shown outside the durable transcript. */
+  queuedMessages: QueuedThreadMessage[]
   runtimeContext: RuntimeContext
-  /** True when a queued user-visible input is not yet represented by the current Entry snapshot. */
+  /** True when the mailbox contains a queued user-visible input. */
   hasPendingInputs: boolean
   /** True only for active open stream work (open assistant or streaming tool). */
   hasLiveProjection: boolean
