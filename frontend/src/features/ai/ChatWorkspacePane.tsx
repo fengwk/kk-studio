@@ -10,22 +10,25 @@ import {
   type PaneSortPreference,
   type PaneTarget,
 } from '@/features/ai/chat-pane-state'
+import { isRunningThread } from '@/features/ai/chat-session-picker'
 import { performBlankPaneFirstSend } from '@/features/ai/chat-first-send'
 import { branchTarget } from '@/features/ai/session-entry-tree'
 import { THREAD_COMMANDS, type ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
 import { ThreadComposer } from '@/features/ai/thread-panel/ThreadComposer'
 import { ThreadStatusFooter } from '@/features/ai/thread-panel/ThreadStatusFooter'
 import { useAgentThreadController } from '@/features/ai/useAgentThreadController'
+import { useChatSessionPicker } from '@/features/ai/useChatSessionPicker'
 import type {
   AgentDefinitionDTO,
   ChatDTO,
-  HarnessSessionDTO,
   HarnessSessionEntryDTO,
   HarnessThreadDTO,
 } from '@/shared/api/contracts'
-import { chatService } from '@/shared/api/chat-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
+
+/** Blank panes only expose explicit Session reuse; first-send stays on plain submit. */
+export const BLANK_PANE_COMMANDS: ThreadCommand[] = THREAD_COMMANDS.filter((command) => command.id === 'session')
 
 function resolveDefaultAgent(
   chat: ChatDTO | undefined,
@@ -37,11 +40,14 @@ function resolveDefaultAgent(
   return agents.find((agent) => String(agent.id) === String(chat.defaultAgentId))
 }
 
-function boundCommands(includeSession: boolean): ThreadCommand[] {
-  if (includeSession) {
-    return THREAD_COMMANDS
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
   }
-  return THREAD_COMMANDS.filter((command) => command.id !== 'session' && command.id !== 'thread' && command.id !== 'agent')
+  if (typeof error === 'string' && error.trim()) {
+    return error
+  }
+  return fallback
 }
 
 export function ChatWorkspacePane({
@@ -96,8 +102,10 @@ export function ChatWorkspacePane({
       chat={chat}
       agents={agents}
       focused={focused}
+      sessionSort={sessionSort}
       onFocus={onFocus}
       onTargetChange={onTargetChange}
+      onSessionSortChange={onSessionSortChange}
       onDefaultAgentChange={onDefaultAgentChange}
     />
   )
@@ -108,24 +116,30 @@ function BlankComposerPane({
   chat,
   agents,
   focused,
+  sessionSort,
   onFocus,
   onTargetChange,
+  onSessionSortChange,
   onDefaultAgentChange,
 }: {
   chatId: string
   chat: ChatDTO | undefined
   agents: AgentDefinitionDTO[]
   focused: boolean
+  sessionSort: PaneSortPreference
   onFocus: () => void
   onTargetChange: (target: PaneTarget) => void
+  onSessionSortChange: (sort: PaneSortPreference) => void
   onDefaultAgentChange: (agentId: string) => Promise<void>
 }) {
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
+  const [sessionModalOpen, setSessionModalOpen] = useState(false)
   const [pendingContent, setPendingContent] = useState<string | null>(null)
   const queryClient = useQueryClient()
+  const sessionPicker = useChatSessionPicker(chatId, sessionModalOpen, sessionSort)
   const defaultAgent = resolveDefaultAgent(chat, agents)
   const agentLabel = defaultAgent?.name || (chat?.defaultAgentId ? '（Agent 已删除/缺失）' : '（无 Agent）')
 
@@ -147,7 +161,7 @@ function BlankComposerPane({
       setPendingContent(null)
       onTargetChange({ sessionId: result.sessionId, threadId: result.threadId })
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : '首发失败')
+      setActionError(errorMessage(error, '首发失败'))
       setDraft(content)
     } finally {
       setPending(false)
@@ -168,12 +182,38 @@ function BlankComposerPane({
     await runFirstSend(String(defaultAgent.id), content)
   }
 
+  function handleCommand(command: ThreadCommand) {
+    onFocus()
+    if (command.id === 'session') {
+      setSessionModalOpen(true)
+      return
+    }
+    setActionError(`未知命令：${command.id}`)
+  }
+
+  async function handleAgentSelected(agentId: string) {
+    setAgentModalOpen(false)
+    const content = pendingContent?.trim()
+    setActionError(null)
+    try {
+      await onDefaultAgentChange(agentId)
+      if (content) {
+        await runFirstSend(agentId, content)
+      }
+    } catch (error) {
+      setActionError(errorMessage(error, '更新默认 Agent 失败'))
+      if (content) {
+        setDraft(content)
+      }
+    }
+  }
+
   return (
     <section className={`chat-pane ${focused ? 'focused' : ''}`} onMouseDown={onFocus}>
       <div className="chat-pane-main blank-pane">
         <div className="blank-pane-body">
           <h2>新对话</h2>
-          <p>输入消息后将创建独立 Session / Main Thread。</p>
+          <p>输入消息后将创建独立 Session / Main Thread；也可 /session 复用本 Chat 已有 Session。</p>
           {actionError ? <div className="thread-error-panel">{actionError}</div> : null}
         </div>
         <ThreadComposer
@@ -184,8 +224,8 @@ function BlankComposerPane({
           onSubmit={() => {
             void handleSubmit()
           }}
-          onCommand={() => undefined}
-          commands={[]}
+          onCommand={handleCommand}
+          commands={BLANK_PANE_COMMANDS}
         />
         <ThreadStatusFooter agentName={agentLabel} yoloEnabled={false} />
       </div>
@@ -201,14 +241,24 @@ function BlankComposerPane({
           setPendingContent(null)
         }}
         onSelect={(agentId) => {
-          setAgentModalOpen(false)
-          const content = pendingContent?.trim()
-          void onDefaultAgentChange(agentId).then(() => {
-            if (content) {
-              return runFirstSend(agentId, content)
-            }
-            return undefined
-          })
+          void handleAgentSelected(agentId)
+        }}
+      />
+      <SelectionListModal
+        open={sessionModalOpen}
+        title="选择 Session"
+        items={sessionPicker.sessionItems}
+        sort={sessionSort}
+        onSortChange={onSessionSortChange}
+        emptyText="当前 Chat 暂无 Session"
+        onClose={() => setSessionModalOpen(false)}
+        onSelect={(selectedSessionId) => {
+          const session = sessionPicker.findSession(selectedSessionId)
+          if (!session) {
+            return
+          }
+          setSessionModalOpen(false)
+          onTargetChange({ sessionId: session.sessionId, threadId: session.mainThreadId })
         }}
       />
     </section>
@@ -249,6 +299,7 @@ function BoundThreadPane({
   const [threadModalOpen, setThreadModalOpen] = useState(false)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [branchDraft, setBranchDraft] = useState('')
+  const sessionPicker = useChatSessionPicker(chatId, sessionModalOpen, sessionSort)
 
   useEffect(() => {
     if (branchDraft) {
@@ -259,11 +310,6 @@ function BoundThreadPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchDraft])
 
-  const sessionsQuery = useQuery({
-    queryKey: queryKeys.chats.sessions(chatId),
-    queryFn: () => chatService.listChatSessions(chatId),
-    enabled: sessionModalOpen,
-  })
   const threadsQuery = useQuery({
     queryKey: queryKeys.sessions.threads(sessionId),
     queryFn: () => harnessService.listSessionThreads(sessionId),
@@ -289,13 +335,6 @@ function BoundThreadPane({
       onTargetChange({ sessionId, threadId: nextThread.threadId })
     },
   })
-
-  const sessionItems = useMemo(() => {
-    const sessions = sortWithRunningFirst(sessionsQuery.data ?? [], sessionSort, (session) =>
-      Boolean((threadsQuery.data ?? []).some((thread) => thread.sessionId === session.sessionId && isRunningThread(thread))),
-    )
-    return sessions.map((session) => toSessionItem(session))
-  }, [sessionSort, sessionsQuery.data, threadsQuery.data])
 
   const threadItems = useMemo(() => {
     const threads = sortWithRunningFirst(threadsQuery.data ?? [], threadSort, isRunningThread)
@@ -343,7 +382,7 @@ function BoundThreadPane({
           void controller.submitMessage()
         }}
         onCommand={handleCommand}
-        commands={boundCommands(true)}
+        commands={THREAD_COMMANDS}
       />
       {historyBranchOpen ? (
         <HistoryBranchPanel
@@ -363,13 +402,13 @@ function BoundThreadPane({
       <SelectionListModal
         open={sessionModalOpen}
         title="选择 Session"
-        items={sessionItems}
+        items={sessionPicker.sessionItems}
         sort={sessionSort}
         onSortChange={onSessionSortChange}
         emptyText="当前 Chat 暂无 Session"
         onClose={() => setSessionModalOpen(false)}
         onSelect={(selectedSessionId) => {
-          const session = (sessionsQuery.data ?? []).find((item) => item.sessionId === selectedSessionId)
+          const session = sessionPicker.findSession(selectedSessionId)
           if (!session) {
             return
           }
@@ -407,18 +446,6 @@ function BoundThreadPane({
       />
     </section>
   )
-}
-
-function isRunningThread(thread: HarnessThreadDTO): boolean {
-  return thread.status === 'RUNNING' || thread.status === 'WAITING' || thread.status === 'RETRYING' || Boolean(thread.processing)
-}
-
-function toSessionItem(session: HarnessSessionDTO) {
-  return {
-    id: session.sessionId,
-    title: session.title || session.sessionId,
-    subtitle: `Main ${session.mainThreadId}`,
-  }
 }
 
 function toThreadItem(thread: HarnessThreadDTO, mainSessionId: string) {
