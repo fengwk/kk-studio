@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.CustomMessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryStore;
@@ -60,15 +61,14 @@ import java.util.concurrent.atomic.AtomicReference;
  * 事件触发的 Thread 处理器。
  *
  * <p>{@link #kick(long)} 在有界 executor 上调度一次 activation；同一 Thread 通过 DB {@code
- * processorToken}/{@code processorUntil} 跨节点单飞。主循环从 durable 事实恢复：先收敛 tool，再在 turn 边界先偿还模型再应用
- * input，直到 final assistant 且 queue 为空后释放 token。
+ * processorToken}/{@code processorUntil} 跨节点单飞。主循环从 durable 事实恢复：先收敛 tool，普通边界先 harvest input
+ * 再偿还一次模型 response debt；RETRYING 例外地先偿还失败 Turn，直到 quiescent 后释放 token。
  */
-public final class ThreadProcessor implements ThreadKick {
+public final class ThreadProcessor implements ThreadKick, ThreadProviderCancellation {
   private static final System.Logger LOGGER = System.getLogger(ThreadProcessor.class.getName());
   private static final Duration REJECTED_RETRY_DELAY = Duration.ofMillis(50);
 
   private final ThreadStore threadStore;
-  private final ThreadInputStore inputStore;
   private final ThreadTransactions transactions;
   private final SessionEntryStore entryStore;
   private final ThreadToolPort toolPort;
@@ -86,10 +86,10 @@ public final class ThreadProcessor implements ThreadKick {
   private final ScheduledExecutorService workerScheduler;
   private final ConcurrentHashMap<Long, Boolean> inflight = new ConcurrentHashMap<>();
   private final ConcurrentHashMap<Long, AtomicInteger> pendingKicks = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<Long, ActiveProvider> activeProviders = new ConcurrentHashMap<>();
 
   public ThreadProcessor(
       ThreadStore threadStore,
-      ThreadInputStore inputStore,
       ThreadTransactions transactions,
       SessionEntryStore entryStore,
       ThreadToolPort toolPort,
@@ -106,7 +106,6 @@ public final class ThreadProcessor implements ThreadKick {
       Executor executor,
       ScheduledExecutorService workerScheduler) {
     this.threadStore = Objects.requireNonNull(threadStore, "threadStore");
-    this.inputStore = Objects.requireNonNull(inputStore, "inputStore");
     this.transactions = Objects.requireNonNull(transactions, "transactions");
     this.entryStore = Objects.requireNonNull(entryStore, "entryStore");
     this.toolPort = Objects.requireNonNull(toolPort, "toolPort");
@@ -138,6 +137,14 @@ public final class ThreadProcessor implements ThreadKick {
           return next;
         });
     schedule(threadId);
+  }
+
+  @Override
+  public void cancelLocalProvider(long threadId) {
+    ActiveProvider active = activeProviders.get(threadId);
+    if (active != null) {
+      active.cancel();
+    }
   }
 
   private void schedule(long threadId) {
@@ -208,32 +215,32 @@ public final class ThreadProcessor implements ThreadKick {
         LoopExit exit = runLoop(threadId, token);
         switch (exit) {
           case WAITING_EXTERNAL -> {
-            if (transactions.releaseForExternalWait(threadId, token, clock.instant())) {
-              return;
-            }
-            // 终态 tool results 已适用或外部等待消失：继续持有 token。
+            return;
           }
           case LOST_OWNERSHIP -> {
             return;
           }
           case POLICY_REJECTED -> {
-            // Admission rejection is terminal policy failure: release even with pending inputs so
-            // the same rejection cannot spin/retain across unapplied queue items. Provider/setup
-            // failures keep releaseIfIdle retry-on-pending-input semantics.
-            threadStore.release(threadId, token, clock.instant());
             return;
           }
           case FAILED -> {
-            // 失败期间若已有 pending input 入队：原子 retain token 继续，避免跨节点 lost-wakeup。
-            if (transactions.releaseIfIdle(threadId, token, clock.instant())) {
-              return;
-            }
+            return;
           }
           case IDLE -> {
-            if (transactions.releaseIfIdle(threadId, token, clock.instant())) {
+            ThreadTransactions.QuiescenceResult quiescence =
+                transactions.quiesce(threadId, token, clock.instant());
+            if (quiescence == ThreadTransactions.QuiescenceResult.IDLE) {
+              threadStore
+                  .find(threadId)
+                  .ifPresent(
+                      thread ->
+                          lifecycleObservers.publish(
+                              new ThreadIdle(thread.id(), thread.sessionId(), clock.instant())));
               return;
             }
-            // releaseIfIdle=false：出现新的 durable work，继续持有 token 处理。
+            if (quiescence == ThreadTransactions.QuiescenceResult.LOST_OWNERSHIP) {
+              return;
+            }
           }
         }
       }
@@ -254,6 +261,7 @@ public final class ThreadProcessor implements ThreadKick {
 
   private enum TurnOutcome {
     CONTINUE,
+    COMPLETED,
     WAITING_EXTERNAL,
     LOST_OWNERSHIP,
     FAILED,
@@ -277,15 +285,14 @@ public final class ThreadProcessor implements ThreadKick {
 
       ToolProgress toolProgress = progressTools(thread, token, now);
       if (toolProgress == ToolProgress.WAITING) {
-        transactions.appendEvents(
-            threadId,
-            token,
-            List.of(
-                new ThreadEventDraft(
-                    ThreadEventType.THREAD_WAITING,
-                    ThreadEventPayloads.of("reason", "tools_or_permission"))),
-            clock.instant());
-        return LoopExit.WAITING_EXTERNAL;
+        if (transactions.waitForExternal(threadId, token, "tools_or_permission", clock.instant())) {
+          return LoopExit.WAITING_EXTERNAL;
+        }
+        AgentThread refreshed = threadStore.find(threadId).orElse(thread);
+        if (!token.equals(refreshed.processorToken())) {
+          return LoopExit.LOST_OWNERSHIP;
+        }
+        continue;
       }
       if (toolProgress == ToolProgress.PROGRESSED) {
         continue;
@@ -294,14 +301,23 @@ public final class ThreadProcessor implements ThreadKick {
         return LoopExit.LOST_OWNERSHIP;
       }
 
-      // Turn boundary: USER/TOOL/compaction head 先偿还模型，再应用后续 input。
+      // RETRYING 是唯一禁止 harvest 的状态：先用失败时 durable head 偿还同一 Turn。
       thread =
           threadStore
               .find(threadId)
               .orElseThrow(() -> new IllegalStateException("thread disappeared: " + threadId));
-      if (headRequiresModel(thread)) {
+      if (!token.equals(thread.processorToken())) {
+        return LoopExit.LOST_OWNERSHIP;
+      }
+      if (thread.status() == ThreadStatus.RETRYING) {
         TurnOutcome outcome = executeModelTurn(thread, token);
         switch (outcome) {
+          case COMPLETED -> {
+            if (!transactions.completeRetriedTurn(threadId, token, clock.instant())) {
+              return LoopExit.LOST_OWNERSHIP;
+            }
+            continue;
+          }
           case CONTINUE -> {
             continue;
           }
@@ -320,33 +336,41 @@ public final class ThreadProcessor implements ThreadKick {
         }
       }
 
+      // Safe boundary: harvest the complete cutoff before deciding whether one response is owed.
       ThreadTransactions.HarvestResult harvested =
           transactions.harvestQueuedInputs(threadId, token, clock.instant());
       if (harvested.harvested()) {
         continue;
       }
 
-      if (inputStore.listQueued(threadId).isEmpty()) {
-        thread =
-            threadStore
-                .find(threadId)
-                .orElseThrow(() -> new IllegalStateException("thread disappeared: " + threadId));
-        if (headRequiresModel(thread)) {
-          continue;
-        }
-        Instant idleAt = clock.instant();
-        if (!transactions.appendEvents(
-            threadId,
-            token,
-            List.of(
-                new ThreadEventDraft(
-                    ThreadEventType.THREAD_IDLE, ThreadEventPayloads.of("reason", "queue_empty"))),
-            idleAt)) {
-          return LoopExit.LOST_OWNERSHIP;
-        }
-        lifecycleObservers.publish(new ThreadIdle(thread.id(), thread.sessionId(), idleAt));
-        return LoopExit.IDLE;
+      thread =
+          threadStore
+              .find(threadId)
+              .orElseThrow(() -> new IllegalStateException("thread disappeared: " + threadId));
+      if (!token.equals(thread.processorToken())) {
+        return LoopExit.LOST_OWNERSHIP;
       }
+      if (headRequiresModel(thread)) {
+        TurnOutcome outcome = executeModelTurn(thread, token);
+        switch (outcome) {
+          case CONTINUE, COMPLETED -> {
+            continue;
+          }
+          case WAITING_EXTERNAL -> {
+            return LoopExit.WAITING_EXTERNAL;
+          }
+          case LOST_OWNERSHIP -> {
+            return LoopExit.LOST_OWNERSHIP;
+          }
+          case POLICY_REJECTED -> {
+            return LoopExit.POLICY_REJECTED;
+          }
+          case FAILED -> {
+            return LoopExit.FAILED;
+          }
+        }
+      }
+      return LoopExit.IDLE;
     }
     throw new IllegalStateException("thread processor safety limit exceeded for " + threadId);
   }
@@ -354,7 +378,7 @@ public final class ThreadProcessor implements ThreadKick {
   private ToolProgress progressTools(AgentThread thread, String token, Instant now) {
     // 始终尝试派发 due tools，以便 WAITING_APPROVAL 旁的 QUEUED 兄弟可被推进。
     toolPort.dispatchDue(thread.id(), now);
-    List<ToolInvocation> open = toolPort.listNonTerminal(thread.id());
+    List<ToolInvocation> open = toolPort.listNonTerminal(thread.id(), thread.headEntryId());
     if (!open.isEmpty()) {
       // 任意非终态（含 WAITING_APPROVAL / CANCEL_REQUESTED）都进入外部等待。
       return ToolProgress.WAITING;
@@ -373,20 +397,45 @@ public final class ThreadProcessor implements ThreadKick {
   }
 
   private boolean headRequiresModel(AgentThread thread) {
-    SessionEntry head =
-        entryStore
-            .find(thread.sessionId(), thread.headEntryId())
-            .orElseThrow(
-                () -> new IllegalStateException("missing head entry: " + thread.headEntryId()));
-    if (head.payload() instanceof CompactionEntryPayload) {
-      // 成功 compaction 后必须用压缩上下文重试模型，不可 idle。
-      return true;
+    List<SessionEntry> path = entryStore.loadPath(thread.sessionId(), thread.headEntryId());
+    for (int i = path.size() - 1; i >= 0; i--) {
+      SessionEntryPayloadRole payloadRole = payloadRole(path.get(i));
+      if (payloadRole == SessionEntryPayloadRole.COMPACTION
+          || payloadRole == SessionEntryPayloadRole.USER_OR_TOOL) {
+        return true;
+      }
+      if (payloadRole == SessionEntryPayloadRole.ASSISTANT) {
+        return false;
+      }
     }
-    if (!(head.payload() instanceof MessageEntryPayload message)) {
-      return false;
+    return false;
+  }
+
+  private static SessionEntryPayloadRole payloadRole(SessionEntry entry) {
+    if (entry.payload() instanceof CompactionEntryPayload) {
+      return SessionEntryPayloadRole.COMPACTION;
     }
-    AgentMessageRole role = message.message().role();
-    return role == AgentMessageRole.USER || role == AgentMessageRole.TOOL;
+    AgentMessage message = null;
+    if (entry.payload() instanceof MessageEntryPayload value) {
+      message = value.message();
+    } else if (entry.payload() instanceof CustomMessageEntryPayload value) {
+      message = value.message();
+    }
+    if (message == null) {
+      return SessionEntryPayloadRole.OTHER;
+    }
+    return switch (message.role()) {
+      case USER, TOOL -> SessionEntryPayloadRole.USER_OR_TOOL;
+      case ASSISTANT -> SessionEntryPayloadRole.ASSISTANT;
+      default -> SessionEntryPayloadRole.OTHER;
+    };
+  }
+
+  private enum SessionEntryPayloadRole {
+    USER_OR_TOOL,
+    ASSISTANT,
+    COMPACTION,
+    OTHER
   }
 
   private TurnOutcome executeModelTurn(AgentThread thread, String token) {
@@ -437,7 +486,8 @@ public final class ThreadProcessor implements ThreadKick {
 
     CompletableFuture<Void> done = new CompletableFuture<>();
     handler.completion = done;
-    AtomicReference<AgentTurnHandle> handleRef = new AtomicReference<>();
+    ActiveProvider active = new ActiveProvider(handler);
+    activeProviders.put(thread.id(), active);
     // heartbeat 必须严格小于 lease/2，使用 lease/3。
     Duration renewEvery = config.processorLease().dividedBy(3);
     if (renewEvery.isZero() || renewEvery.isNegative()) {
@@ -452,11 +502,7 @@ public final class ThreadProcessor implements ThreadKick {
               if (!threadStore.renew(
                   thread.id(), token, clock.instant(), config.processorLease())) {
                 // 先原子标记丢租并 complete 本地 wait，再 cancel；后续 callback/delta 必须 no-op。
-                handler.markLostOwnership();
-                AgentTurnHandle handle = handleRef.get();
-                if (handle != null) {
-                  handle.cancel();
-                }
+                active.cancel();
               }
             },
             renewEvery.toMillis(),
@@ -471,7 +517,7 @@ public final class ThreadProcessor implements ThreadKick {
                   messageProjector.project(context.messages()),
                   resources.toolDescriptors()),
               handler);
-      handleRef.set(turnHandle);
+      active.set(turnHandle);
       if (handler.lostOwnership) {
         turnHandle.cancel();
         return TurnOutcome.LOST_OWNERSHIP;
@@ -496,6 +542,7 @@ public final class ThreadProcessor implements ThreadKick {
       }
     } finally {
       renewFuture.cancel(false);
+      activeProviders.remove(thread.id(), active);
     }
     if (handler.lostOwnership) {
       return TurnOutcome.LOST_OWNERSHIP;
@@ -506,7 +553,7 @@ public final class ThreadProcessor implements ThreadKick {
     if (handler.waitingExternal) {
       return TurnOutcome.WAITING_EXTERNAL;
     }
-    return TurnOutcome.CONTINUE;
+    return handler.completedTurn ? TurnOutcome.COMPLETED : TurnOutcome.CONTINUE;
   }
 
   private boolean failTurn(AgentThread thread, String token, RuntimeException error) {
@@ -547,6 +594,7 @@ public final class ThreadProcessor implements ThreadKick {
     private volatile boolean waitingExternal;
     private volatile boolean failed;
     private volatile boolean lostOwnership;
+    private volatile boolean completedTurn;
     private volatile CompletableFuture<Void> completion = new CompletableFuture<>();
 
     private TurnHandler(
@@ -647,6 +695,7 @@ public final class ThreadProcessor implements ThreadKick {
               markLostOwnership();
               return;
             }
+            completedTurn = true;
             publishAssistantCompleted(response, toolCalls.size(), now);
           } catch (ConcurrentModificationException concurrency) {
             markLostOwnership();
@@ -670,9 +719,11 @@ public final class ThreadProcessor implements ThreadKick {
             markLostOwnership();
             return;
           }
+          completedTurn = true;
           publishAssistantCompleted(response, toolCalls.size(), now);
           toolPort.dispatchDue(thread.id(), now);
-          waitingExternal = !toolPort.listNonTerminal(thread.id()).isEmpty();
+          waitingExternal =
+              !toolPort.listNonTerminal(thread.id(), plannedAssistantEntryId).isEmpty();
         } catch (ConcurrentModificationException concurrency) {
           markLostOwnership();
         } catch (IllegalArgumentException | ToolInterceptorException error) {
@@ -823,10 +874,34 @@ public final class ThreadProcessor implements ThreadKick {
 
   /** Thread 工具收敛端口：查询/派发/判断是否待 apply tool results。 */
   public interface ThreadToolPort {
-    List<ToolInvocation> listNonTerminal(long threadId);
+    List<ToolInvocation> listNonTerminal(long threadId, long assistantEntryId);
 
     int dispatchDue(long threadId, Instant now);
 
     boolean hasTerminalResultsPendingApply(long threadId, long headEntryId);
+  }
+
+  private final class ActiveProvider {
+    private final TurnHandler handler;
+    private final AtomicReference<AgentTurnHandle> handle = new AtomicReference<>();
+
+    private ActiveProvider(TurnHandler handler) {
+      this.handler = handler;
+    }
+
+    private void set(AgentTurnHandle value) {
+      handle.set(value);
+      if (handler.lostOwnership) {
+        value.cancel();
+      }
+    }
+
+    private void cancel() {
+      handler.markLostOwnership();
+      AgentTurnHandle current = handle.get();
+      if (current != null) {
+        current.cancel();
+      }
+    }
   }
 }
