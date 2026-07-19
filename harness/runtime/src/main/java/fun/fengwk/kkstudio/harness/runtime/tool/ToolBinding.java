@@ -6,7 +6,7 @@ import java.util.Objects;
 
 /** 单 Turn 冻结的工具描述与执行目标绑定；模型只接收其中的 descriptor。 */
 public record ToolBinding(
-    ToolDescriptor descriptor, ToolTargetType targetType, Long environmentId) {
+    ToolDescriptor descriptor, ToolTargetType targetType, String environmentName) {
 
   public ToolBinding {
     descriptor = Objects.requireNonNull(descriptor, "descriptor");
@@ -19,14 +19,17 @@ public record ToolBinding(
       throw new IllegalArgumentException(
           "binding targetType does not match descriptor executionMode");
     }
-    if (environmentId != null && environmentId <= 0) {
-      throw new IllegalArgumentException("environmentId must be positive");
+    if (environmentName != null && environmentName.isBlank()) {
+      throw new IllegalArgumentException("environmentName must not be blank when present");
     }
-    if (targetType == ToolTargetType.ENVIRONMENT && environmentId == null) {
-      throw new IllegalArgumentException("ENVIRONMENT tools require environmentId");
+    if (environmentName != null && environmentName.length() > 128) {
+      throw new IllegalArgumentException("environmentName must fit persistent column bounds");
     }
-    if (targetType != ToolTargetType.ENVIRONMENT && environmentId != null) {
-      throw new IllegalArgumentException("environmentId is only valid for ENVIRONMENT tools");
+    if (targetType == ToolTargetType.ENVIRONMENT && environmentName == null) {
+      throw new IllegalArgumentException("ENVIRONMENT tools require environmentName");
+    }
+    if (targetType != ToolTargetType.ENVIRONMENT && environmentName != null) {
+      throw new IllegalArgumentException("environmentName is only valid for ENVIRONMENT tools");
     }
   }
 

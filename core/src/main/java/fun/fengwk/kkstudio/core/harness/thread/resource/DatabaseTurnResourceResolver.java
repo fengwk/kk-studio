@@ -9,9 +9,8 @@ import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.agent.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
-import fun.fengwk.kkstudio.core.environment.service.ToolEnvironmentIds;
-import fun.fengwk.kkstudio.core.environment.service.model.ToolEnvironment;
+import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironment;
+import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
@@ -31,7 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 
 import java.util.ArrayList;
@@ -55,8 +53,7 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
   private final AgentModelRuntimeConfigParser modelConfigParser;
   private final HarnessExtensionHost extensionHost;
   private final HarnessRuntimeProperties properties;
-  private final ToolEnvironmentRepository environmentRepository;
-  private final DaemonToolCapabilitiesCodec capabilitiesCodec;
+  private final LiveEnvironmentRegistry environmentRegistry;
 
   public DatabaseTurnResourceResolver(
       SessionStore sessionStore,
@@ -66,8 +63,7 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
       AgentModelRuntimeConfigParser modelConfigParser,
       HarnessExtensionHost extensionHost,
       HarnessRuntimeProperties properties,
-      ToolEnvironmentRepository environmentRepository,
-      DaemonToolCapabilitiesCodec capabilitiesCodec) {
+      LiveEnvironmentRegistry environmentRegistry) {
     this.sessionStore = Objects.requireNonNull(sessionStore, "sessionStore");
     this.modelRepository = Objects.requireNonNull(modelRepository, "modelRepository");
     this.providerRepository = Objects.requireNonNull(providerRepository, "providerRepository");
@@ -76,9 +72,7 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
     this.extensionHost = Objects.requireNonNull(extensionHost, "extensionHost");
     this.properties = Objects.requireNonNull(properties, "properties");
-    this.environmentRepository =
-        Objects.requireNonNull(environmentRepository, "environmentRepository");
-    this.capabilitiesCodec = Objects.requireNonNull(capabilitiesCodec, "capabilitiesCodec");
+    this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
   }
 
   @Override
@@ -213,17 +207,14 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
     int slash = body.indexOf('/');
     if (slash <= 0 || slash == body.length() - 1) {
       throw new IllegalArgumentException(
-          "frozen Environment reference must use environment:<id>/<tool>@<version>: " + reference);
+          "frozen Environment reference must use environment:<name>/<tool>@<version>: "
+              + reference);
     }
-    String idPart = body.substring(0, slash);
+    String environmentName = body.substring(0, slash);
     String toolPart = body.substring(slash + 1);
-    long environmentId;
-    try {
-      environmentId = ToolEnvironmentIds.parsePositive(idPart, "environmentId");
-    } catch (IllegalArgumentException error) {
+    if (environmentName.isBlank()) {
       throw new IllegalArgumentException(
-          "frozen Environment reference id must be an unsigned positive decimal: " + reference,
-          error);
+          "frozen Environment reference name must not be blank: " + reference);
     }
     int at = toolPart.lastIndexOf('@');
     if (at <= 0 || at == toolPart.length() - 1) {
@@ -236,21 +227,16 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
       throw new IllegalArgumentException(
           "frozen Environment tool name and version must not be blank: " + reference);
     }
-    ToolEnvironment environment = environmentRepository.getById(environmentId);
-    if (environment == null) {
-      throw new IllegalArgumentException("frozen Environment not found: " + reference);
-    }
-    DaemonToolCapabilitiesCodec.DaemonToolCapabilities capabilities;
-    try {
-      capabilities = capabilitiesCodec.decode(environment.getCapabilitiesJson());
-    } catch (RuntimeException error) {
-      throw new IllegalArgumentException(
-          "persisted Environment capabilitiesJson is not a canonical Daemon CAPABILITIES payload: "
-              + reference,
-          error);
-    }
+    LiveEnvironment environment =
+        environmentRegistry
+            .find(environmentName)
+            .filter(LiveEnvironment::isReady)
+            .orElseThrow(
+                () ->
+                    new IllegalArgumentException(
+                        "frozen Environment is offline or missing: " + reference));
     Map<String, ToolDescriptor> byKey = new LinkedHashMap<>();
-    for (ToolDescriptor descriptor : capabilities.tools()) {
+    for (ToolDescriptor descriptor : environment.tools()) {
       byKey.put(descriptor.name() + "@" + descriptor.version(), descriptor);
     }
     ToolDescriptor descriptor = byKey.get(toolName + "@" + toolVersion);
@@ -261,7 +247,7 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
       throw new IllegalArgumentException(
           "frozen Environment tool must use ENVIRONMENT execution mode: " + reference);
     }
-    return new ToolBinding(descriptor, ToolTargetType.ENVIRONMENT, environmentId);
+    return new ToolBinding(descriptor, ToolTargetType.ENVIRONMENT, environmentName);
   }
 
   private Tool resolveTool(String reference) {

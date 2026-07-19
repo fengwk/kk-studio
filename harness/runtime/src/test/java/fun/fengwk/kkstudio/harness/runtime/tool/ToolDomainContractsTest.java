@@ -44,9 +44,10 @@ class ToolDomainContractsTest {
     assertThrows(
         IllegalArgumentException.class, () -> invocation(1L, 2L, 3L, 0, "call", "tool", " ", null));
     assertThrows(
-        IllegalArgumentException.class, () -> invocation(1L, 2L, 3L, 0, "call", "tool", "1", 0L));
+        IllegalArgumentException.class, () -> invocation(1L, 2L, 3L, 0, "call", "tool", "1", " "));
     assertThrows(
-        IllegalArgumentException.class, () -> invocation(1L, 2L, 3L, 0, "call", "tool", "1", 9L));
+        IllegalArgumentException.class,
+        () -> invocation(1L, 2L, 3L, 0, "call", "tool", "1", "env-9"));
     assertThrows(
         IllegalArgumentException.class,
         () -> invocation(1L, 2L, 3L, 0, "call", "tool", "1", ToolTargetType.ENVIRONMENT, null));
@@ -55,7 +56,7 @@ class ToolDomainContractsTest {
         () -> invocation(1L, 2L, 3L, 0, "x".repeat(257), "tool", "1", null));
   }
 
-  /** Binding 目标必须来自 descriptor execution mode，environmentId 只属于 ENVIRONMENT。 */
+  /** Binding 目标必须来自 descriptor execution mode，environmentName 只属于 ENVIRONMENT。 */
   @Test
   void validatesFrozenToolBinding() {
     ToolBinding cloud = ToolBinding.of(descriptor("tool", ToolExecutionMode.CLOUD));
@@ -64,8 +65,8 @@ class ToolDomainContractsTest {
         new ToolBinding(
             descriptor("environment", ToolExecutionMode.ENVIRONMENT),
             ToolTargetType.ENVIRONMENT,
-            9L);
-    assertEquals(9L, environment.environmentId());
+            "env-9");
+    assertEquals("env-9", environment.environmentName());
 
     assertThrows(
         IllegalArgumentException.class,
@@ -75,14 +76,15 @@ class ToolDomainContractsTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new ToolBinding(descriptor("tool", ToolExecutionMode.CLOUD), ToolTargetType.CLOUD, 1L));
+            new ToolBinding(
+                descriptor("tool", ToolExecutionMode.CLOUD), ToolTargetType.CLOUD, "env-1"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolBinding(
                 descriptor("environment", ToolExecutionMode.ENVIRONMENT),
                 ToolTargetType.ENVIRONMENT,
-                0L));
+                " "));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -208,7 +210,7 @@ class ToolDomainContractsTest {
       String toolCallId,
       String toolName,
       String toolVersion,
-      Long environmentId) {
+      String environmentName) {
     return invocation(
         id,
         runId,
@@ -218,7 +220,7 @@ class ToolDomainContractsTest {
         toolName,
         toolVersion,
         ToolTargetType.CLOUD,
-        environmentId);
+        environmentName);
   }
 
   private static ToolInvocation invocation(
@@ -230,7 +232,7 @@ class ToolDomainContractsTest {
       String toolName,
       String toolVersion,
       ToolTargetType targetType,
-      Long environmentId) {
+      String environmentName) {
     return new ToolInvocation(
         id,
         runId,
@@ -240,7 +242,7 @@ class ToolDomainContractsTest {
         toolName,
         toolVersion,
         targetType,
-        environmentId,
+        environmentName,
         "{}",
         ToolInvocationStatus.QUEUED,
         PermissionAction.ALLOW,

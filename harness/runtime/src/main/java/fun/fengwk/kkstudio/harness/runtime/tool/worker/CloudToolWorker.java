@@ -194,7 +194,7 @@ public final class CloudToolWorker {
       return;
     }
     ToolBinding binding =
-        new ToolBinding(tool.descriptor(), invocation.targetType(), invocation.environmentId());
+        new ToolBinding(tool.descriptor(), invocation.targetType(), invocation.environmentName());
     ToolCall call =
         new ToolCall(invocation.toolCallId(), invocation.toolName(), invocation.argumentsJson());
     Execution execution = new Execution(claimed, binding, call);

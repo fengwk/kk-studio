@@ -20,7 +20,7 @@ public interface ToolInvocationMapper extends BaseMapper {
   String COLUMNS =
       """
       ti.id, ti.thread_id, ti.assistant_entry_id, ti.ordinal, ti.tool_call_id, ti.tool_name,
-      ti.tool_version, ti.target_type, ti.environment_id, ti.arguments_json, ti.status,
+      ti.tool_version, ti.target_type, ti.environment_name, ti.arguments_json, ti.status,
       ti.permission_action, ti.permission_decision, ti.side_effect, ti.deadline_at, ti.lease_owner,
       ti.lease_until, ti.cancel_requested_at, ti.result_json, ti.error_message,
       ti.gmt_create as create_time, ti.started_at, ti.finished_at,
@@ -31,13 +31,13 @@ public interface ToolInvocationMapper extends BaseMapper {
       """
       insert into tool_invocation (
           id, thread_id, assistant_entry_id, ordinal, tool_call_id, tool_name, tool_version,
-          target_type, environment_id, arguments_json, status, permission_action,
+          target_type, environment_name, arguments_json, status, permission_action,
           permission_decision, side_effect, deadline_at, lease_owner, lease_until,
           cancel_requested_at, result_json, error_message, gmt_create, started_at, finished_at,
           gmt_modified
       ) values (
           #{id}, #{threadId}, #{assistantEntryId}, #{ordinal}, #{toolCallId}, #{toolName},
-          #{toolVersion}, #{targetType}, #{environmentId}, #{argumentsJson}, #{status},
+          #{toolVersion}, #{targetType}, #{environmentName}, #{argumentsJson}, #{status},
           #{permissionAction}, #{permissionDecision}, #{sideEffect}, #{deadlineAt}, #{leaseOwner},
           #{leaseUntil}, #{cancelRequestedAt}, #{resultJson}, #{errorMessage}, #{createTime},
           #{startedAt}, #{finishedAt}, #{updateTime}
@@ -57,7 +57,7 @@ public interface ToolInvocationMapper extends BaseMapper {
         @Result(column = "tool_name", property = "toolName"),
         @Result(column = "tool_version", property = "toolVersion"),
         @Result(column = "target_type", property = "targetType"),
-        @Result(column = "environment_id", property = "environmentId"),
+        @Result(column = "environment_name", property = "environmentName"),
         @Result(column = "arguments_json", property = "argumentsJson"),
         @Result(column = "status", property = "status"),
         @Result(column = "permission_action", property = "permissionAction"),
@@ -139,7 +139,7 @@ public interface ToolInvocationMapper extends BaseMapper {
           + """
       from tool_invocation ti
       where ti.target_type = 'ENVIRONMENT'
-        and ti.environment_id = #{environmentId}
+        and ti.environment_name = #{environmentName}
         and (ti.status = 'QUEUED'
           or (ti.status = 'CANCEL_REQUESTED'
             and (ti.lease_owner is null or ti.lease_until is null or ti.lease_until <= #{now}))
@@ -149,7 +149,26 @@ public interface ToolInvocationMapper extends BaseMapper {
       """)
   @ResultMap("toolInvocationResultMap")
   ToolInvocationDO findEnvironmentClaimCandidate(
-      @Param("environmentId") long environmentId, @Param("now") LocalDateTime now);
+      @Param("environmentName") String environmentName, @Param("now") LocalDateTime now);
+
+  @Select(
+      """
+      select
+      """
+          + COLUMNS
+          + """
+      from tool_invocation ti
+      where ti.target_type = 'ENVIRONMENT'
+        and (ti.status = 'QUEUED'
+          or (ti.status = 'CANCEL_REQUESTED'
+            and (ti.lease_owner is null or ti.lease_until is null or ti.lease_until <= #{now}))
+          or (ti.status = 'RUNNING' and ti.lease_until <= #{now}))
+      order by ti.deadline_at asc, ti.id asc
+      limit #{limit}
+      """)
+  @ResultMap("toolInvocationResultMap")
+  List<ToolInvocationDO> findDueEnvironmentCandidates(
+      @Param("now") LocalDateTime now, @Param("limit") int limit);
 
   @Update(
       """
@@ -177,7 +196,7 @@ public interface ToolInvocationMapper extends BaseMapper {
           started_at = coalesce(started_at, #{now}), gmt_modified = #{now}
       where id = #{id}
         and target_type = 'ENVIRONMENT'
-        and environment_id = #{environmentId}
+        and environment_name = #{environmentName}
         and (status = 'QUEUED'
           or (status = 'CANCEL_REQUESTED'
             and (lease_owner is null or lease_until is null or lease_until <= #{now}))
@@ -185,7 +204,7 @@ public interface ToolInvocationMapper extends BaseMapper {
       """)
   int claimEnvironment(
       @Param("id") long id,
-      @Param("environmentId") long environmentId,
+      @Param("environmentName") String environmentName,
       @Param("owner") String owner,
       @Param("now") LocalDateTime now,
       @Param("leaseUntil") LocalDateTime leaseUntil);
@@ -208,14 +227,14 @@ public interface ToolInvocationMapper extends BaseMapper {
       set lease_until = #{leaseUntil}, gmt_modified = #{now}
       where id = #{id}
         and target_type = 'ENVIRONMENT'
-        and environment_id = #{environmentId}
+        and environment_name = #{environmentName}
         and status in ('RUNNING', 'CANCEL_REQUESTED')
         and lease_owner = #{owner}
         and lease_until > #{now}
       """)
   int heartbeatEnvironment(
       @Param("id") long id,
-      @Param("environmentId") long environmentId,
+      @Param("environmentName") String environmentName,
       @Param("owner") String owner,
       @Param("now") LocalDateTime now,
       @Param("leaseUntil") LocalDateTime leaseUntil);

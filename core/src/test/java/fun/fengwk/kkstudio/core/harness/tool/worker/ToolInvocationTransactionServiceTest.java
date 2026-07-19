@@ -267,7 +267,7 @@ class ToolInvocationTransactionServiceTest {
         base.toolName(),
         base.toolVersion(),
         base.targetType(),
-        base.environmentId(),
+        base.environmentName(),
         base.argumentsJson(),
         base.status(),
         base.permissionAction(),
