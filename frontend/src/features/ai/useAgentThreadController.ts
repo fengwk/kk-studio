@@ -45,7 +45,6 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
     entries,
     inputs,
     events,
-    sessionEntries,
     session,
     threadQuery,
     entriesQuery,
@@ -209,7 +208,6 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
   return {
     threads,
     session,
-    sessionEntries,
     agentsById,
     thread,
     title: session?.title || thread?.sessionTitle || thread?.threadId || 'Chat',

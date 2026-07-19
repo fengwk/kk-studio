@@ -1,28 +1,21 @@
 import { ArrowLeft, MessageSquare, Plus } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { ThreadTreeSelector } from '@/features/ai/ThreadTreeSelector'
-import type { HarnessSessionEntryDTO, HarnessThreadDTO } from '@/shared/api/contracts'
+import type { HarnessThreadDTO } from '@/shared/api/contracts'
 
 export function ChatSidebar({
   threads,
-  sessionEntries,
   activeThreadId,
   sessionId,
   mainThreadId,
   title,
   onBack,
-  onBranch,
-  branchPending,
 }: {
   threads: HarnessThreadDTO[]
-  sessionEntries: HarnessSessionEntryDTO[]
   activeThreadId: string
   sessionId: string
   mainThreadId?: string
   title: string
   onBack: () => void
-  onBranch: (entry: HarnessSessionEntryDTO) => void
-  branchPending: boolean
 }) {
   return (
     <aside className="chat-sidebar">
@@ -52,7 +45,6 @@ export function ChatSidebar({
           )
           })}
       </div>
-      <ThreadTreeSelector entries={sessionEntries} onBranch={onBranch} pending={branchPending} />
     </aside>
   )
 }
