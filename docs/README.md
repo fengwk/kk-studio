@@ -39,7 +39,7 @@ flowchart TD
 | [product-design/infinite-canvas-product-logic.md](product-design/infinite-canvas-product-logic.md) | 产品逻辑 | 定义 Node、Resource、Link、ResourceReference、Function、Workflow、传播、运行和 MVP 闭环标准 |
 | [product-design/frontend-design-system.md](product-design/frontend-design-system.md) | 前端设计规范 | 定义全局 token、AppShell、组件与 Agent 面板模块化约定；明确视觉统一进度与迁移清单 |
 | [technical-solution/infinite-canvas-implementation-design.md](technical-solution/infinite-canvas-implementation-design.md) | 无限画布技术方案 | 定义领域模块、存储、Command、Function/Workflow Runtime、Web API、前端状态和低耦合 Agent Port |
-| [technical-solution/harness-thread-actor.md](technical-solution/harness-thread-actor.md) | Harness 重构实施方案 | 定义 Session Tree、Main Thread、durable Thread actor、Stop、Tool permission、Subagent 和前后端验收契约 |
+| [technical-solution/harness-thread-actor.md](technical-solution/harness-thread-actor.md) | Harness 架构事实源 | 定义 Session Tree、Main Thread、durable Thread actor、mailbox、Stop/Retry、Tool permission、Subagent 和前后端契约 |
 
 ## 维护规则
 
@@ -47,4 +47,4 @@ flowchart TD
 | --- | --- |
 | 单一事实来源 | 同一主题只维护一份当前有效文档，不维护历史版本分叉 |
 | 上下文无关 | 文档应让新接手的 Agent 不依赖会话历史即可理解 |
-| 状态边界明确 | 已落地方案必须与代码一致；目标落地设计必须明确其实施边界，不能把尚不存在的类、表或 API 写成现状 |
+| 状态边界明确 | 每份文档只陈述当前生效的职责、协议与约束；Harness 以其架构事实源统一术语 |

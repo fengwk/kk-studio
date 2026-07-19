@@ -56,7 +56,7 @@ Extension 可通过 `registry.onDispose(...)` 注册清理动作。Host 关闭�
 | `BeforeCompactionInterceptor` | `BeforeCompactionContext -> SessionContext` | Compaction delegate 调用前 |
 | `HarnessLifecycleObserver` | typed lifecycle observation | 对应数据库 transition 成功后 |
 | `ProviderFactory` | credential/config -> `ProviderAdapter` | Provider adapter 解析 |
-| `ToolFactory` | frozen descriptor -> `Tool` | Cloud / Control Tool registry lookup |
+| `ToolFactory` | frozen descriptor -> `Tool` | 非 Environment Tool registry lookup |
 
 修改型 hook 严格按 Host 给出的顺序串行执行，后一项接收前一项的完整结果。Hook 返回空值或抛出异常时，当前操作进入对应的确定性失败路径。
 
@@ -76,7 +76,7 @@ ordinary before hooks
 - 普通修改器的 permission action 与 prompt preview 保持为空。
 - Tool name 在整个 before chain 中保持不变。
 - 每个修改结果立即通过当前 descriptor schema 校验。
-- Permission boundary 读取最终 binding、arguments、Tool settings、**Thread YOLO** 和路径上下文。
+- Permission boundary 读取最终 binding、arguments、Tool settings、由 Entry path fold 得出的 YOLO 和路径上下文。
 - Permission boundary 产生最终 permission，并原样返回最终 binding 与 arguments。
 
 Permission 结果由原生 prepare 路径转换为 `QUEUED`、`WAITING_APPROVAL` 或 deterministic `FAILED` Invocation。Invocation 状态迁移由原生 Runtime 独占执行。
@@ -91,7 +91,7 @@ Tool 执行完成后，after chain 在 terminal CAS 前串行变换最终 `ToolR
 
 ### Provider request
 
-`DefaultAgentTurnEngine` 完成 model、variant、messages 和 tools 的标准 request 构建后执行 Provider interceptor chain。`ThreadProcessor` 再为当前 `sessionId` 追加 `PromptCacheRequestFinalizer`。最终 request 交给 `ModelProvider.stream(...)`。Interceptor 或 Provider 永久失败进入 Thread 失败路径并写 ThreadEvent；需新的 durable 触发才恢复处理。
+`DefaultAgentTurnEngine` 完成 model、variant、messages 和 tools 的标准 request 构建后执行 Provider interceptor chain。`ThreadProcessor` 再为当前 `sessionId` 追加 `PromptCacheRequestFinalizer`。最终 request 交给 `ModelProvider.stream(...)`。Interceptor 或 Provider 永久失败进入 Thread FAILED 路径并写 ThreadEvent；显式 Retry 在保留的失败 head 上恢复执行。
 
 ### Compaction
 
@@ -120,7 +120,7 @@ Observer 按 Host 顺序调用。单个 observer 的 `RuntimeException` 会在�
 - OpenAI Responses Provider factory
 - Anthropic Provider factory
 - Google Provider factory
-- Spring 提供的 Cloud / Control Tool factories
+- Spring 提供的非 Environment Tool factories
 
 Spring Tool 列表在 contribution 前按 descriptor `name`、`version` 排序。Tool registry 只从 Host factory lookup 创建工具实例。
 
