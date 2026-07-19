@@ -8,7 +8,7 @@ function UnknownContributionFallback() {
   return (
     <section className="screen active">
       <div className="screen-body"><h1>页面不可用</h1><p>该页面扩展不存在或已卸载。</p></div>
-      <Link to="/sessions">返回 Chat</Link>
+      <Link to="/chats">返回 Chat</Link>
     </section>
   )
 }

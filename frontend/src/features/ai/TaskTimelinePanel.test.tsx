@@ -33,7 +33,7 @@ describe('TaskTimelinePanel', () => {
     expect(screen.getByText('完成报告')).toBeInTheDocument()
     expect(screen.getByText('ISOLATED / revision-7')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'image/png · artifact-1' })).toHaveAttribute('href', '/api/artifacts/artifact-1')
-    expect(screen.getByTitle('打开子对话')).toHaveAttribute('href', '/sessions/child-1/threads/child-thread-1')
+    expect(screen.getByTitle('子 Thread child-thread-1')).toBeInTheDocument()
 
     await user.click(screen.getAllByRole('button', { name: '允许' })[0]!)
     await user.click(screen.getAllByRole('button', { name: '拒绝' })[0]!)
@@ -142,7 +142,7 @@ describe('TaskTimelinePanel', () => {
       </MemoryRouter>,
     )
     await user.click(screen.getByRole('button', { name: /nested-agent/i }))
-    expect(screen.getByTitle('打开子对话')).toHaveAttribute('href', '/sessions/child-2/threads/child-thread-2')
+    expect(screen.getByTitle('子 Thread child-thread-2')).toBeInTheDocument()
     expect(screen.getAllByText('RUNNING').length).toBeGreaterThan(0)
   })
 })

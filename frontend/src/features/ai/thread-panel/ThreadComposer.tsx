@@ -19,6 +19,7 @@ export function ThreadComposer({
   onDraftChange,
   onSubmit,
   onCommand,
+  commands,
 }: {
   draft: string
   pending: boolean
@@ -26,6 +27,7 @@ export function ThreadComposer({
   onDraftChange: (draft: string) => void
   onSubmit: () => void
   onCommand: (command: ThreadCommand) => void
+  commands?: ThreadCommand[]
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const wasPendingRef = useRef(false)
@@ -97,7 +99,7 @@ export function ThreadComposer({
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       if (slashMode) {
         event.preventDefault()
-        const command = filterThreadCommands(query)[0]
+        const command = filterThreadCommands(query, commands)[0]
         if (command) {
           handleSelect(command)
         }
@@ -114,6 +116,7 @@ export function ThreadComposer({
       <ThreadCommandPalette
         open={slashMode}
         query={query}
+        commands={commands}
         onSelect={handleSelect}
       />
       <div className="thread-dock">

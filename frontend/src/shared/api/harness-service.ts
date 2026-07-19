@@ -11,7 +11,6 @@ import type {
   HarnessThreadModelSetDTO,
   HarnessThreadStopDTO,
   HarnessThreadStopResultDTO,
-  HarnessThreadToolsetSetDTO,
   HarnessThreadYoloSetDTO,
   ModelUsageSummaryDTO,
   RootActivityDTO,
@@ -34,8 +33,6 @@ export function createHarnessService(client: HttpClient = apiClient) {
       client.put(`/threads/${encodeURIComponent(threadId)}/agent`, data),
     setThreadModel: (threadId: string, data: HarnessThreadModelSetDTO): Promise<HarnessThreadInputDTO> =>
       client.put(`/threads/${encodeURIComponent(threadId)}/model`, data),
-    setThreadToolset: (threadId: string, data: HarnessThreadToolsetSetDTO): Promise<HarnessThreadInputDTO> =>
-      client.put(`/threads/${encodeURIComponent(threadId)}/toolset`, data),
     stopThread: (threadId: string, data: HarnessThreadStopDTO): Promise<HarnessThreadStopResultDTO> =>
       client.post(`/threads/${encodeURIComponent(threadId)}/stop`, data),
     retryThread: (threadId: string): Promise<HarnessThreadDTO> =>
@@ -53,7 +50,8 @@ export function createHarnessService(client: HttpClient = apiClient) {
     getThreadUsage: (threadId: string): Promise<ModelUsageSummaryDTO> =>
       client.get(`/usage/threads/${encodeURIComponent(threadId)}`),
     listSessions: (): Promise<HarnessSessionDTO[]> => client.get('/sessions'),
-    createSession: (data: HarnessSessionCreateDTO): Promise<HarnessSessionDTO> => client.post('/sessions', data),
+    createSession: (data: HarnessSessionCreateDTO = {}): Promise<HarnessSessionDTO> =>
+      client.post('/sessions', data),
     getSession: (sessionId: string): Promise<HarnessSessionDTO> =>
       client.get(`/sessions/${encodeURIComponent(sessionId)}`),
     listSessionEntries: (sessionId: string): Promise<HarnessSessionEntryDTO[]> =>

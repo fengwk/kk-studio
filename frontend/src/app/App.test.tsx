@@ -3,11 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '@/app/App'
 import { AppProviders } from '@/app/providers'
 import { agentService } from '@/shared/api/agent-service'
+import { chatService } from '@/shared/api/chat-service'
 import { comfyuiService } from '@/shared/api/comfyui-service'
-import { harnessService } from '@/shared/api/harness-service'
+import { environmentService } from '@/shared/api/environment-service'
 
-vi.mock('@/shared/api/agent-service', () => ({ agentService: { listProviders: vi.fn(), listModels: vi.fn(), listAgents: vi.fn() } }))
-vi.mock('@/shared/api/harness-service', () => ({ harnessService: { listSessions: vi.fn() } }))
+vi.mock('@/shared/api/agent-service', () => ({
+  agentService: { listProviders: vi.fn(), listModels: vi.fn(), listAgents: vi.fn() },
+}))
+vi.mock('@/shared/api/chat-service', () => ({ chatService: { listChats: vi.fn() } }))
+vi.mock('@/shared/api/environment-service', () => ({ environmentService: { listEnvironments: vi.fn() } }))
 vi.mock('@/shared/api/comfyui-service', () => ({ comfyuiService: { listWorkflows: vi.fn() } }))
 
 const page = <T,>(results: T[]) => ({ pageNumber: 1, pageSize: 50, totalCount: results.length, results })
@@ -19,14 +23,15 @@ describe('App routes', () => {
     vi.mocked(agentService.listProviders).mockResolvedValue(page([]))
     vi.mocked(agentService.listModels).mockResolvedValue(page([]))
     vi.mocked(agentService.listAgents).mockResolvedValue(page([]))
-    vi.mocked(harnessService.listSessions).mockResolvedValue([])
+    vi.mocked(chatService.listChats).mockResolvedValue([])
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
     vi.mocked(comfyuiService.listWorkflows).mockResolvedValue(page([]))
   })
 
-  it('redirects root to Session console', async () => {
+  it('redirects root to Chat console', async () => {
     render(<AppProviders><App /></AppProviders>)
-    await waitFor(() => expect(window.location.pathname).toBe('/sessions'))
+    await waitFor(() => expect(window.location.pathname).toBe('/chats'))
     expect(await screen.findByRole('button', { name: '新建 Chat' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'KK Studio' })).toHaveAttribute('href', '/sessions')
+    expect(screen.getByRole('link', { name: 'KK Studio' })).toHaveAttribute('href', '/chats')
   })
 })

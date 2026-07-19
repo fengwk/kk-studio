@@ -25,6 +25,9 @@ const INVALIDATE_ALL_EVENTS = new Set([
   'thread_failed',
   'thread_waiting',
   'permission_resolved',
+  'agent_changed',
+  'model_changed',
+  'yolo_changed',
 ])
 
 export function useHarnessThreadEventStream(threadId: string, enabled: boolean) {

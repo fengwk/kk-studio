@@ -42,14 +42,24 @@ export interface ModelDraft {
   variants: VariantDraft[]
 }
 
+export interface AgentExecutionPolicyDraft {
+  maxTurns: string
+  maxDepth: string
+  maxDirectSubagents: string
+  maxTotalSubagents: string
+}
+
 export interface AgentDraft {
   name: string
   description: string
   systemPrompt: string
-  defaultProvider: string
-  defaultModel: string
-  defaultVariant: string
+  modelId: string
+  variant: string
+  environmentName: string
   tools: string[]
+  skills: string[]
+  allowedSubagents: string[]
+  executionPolicy: AgentExecutionPolicyDraft
 }
 
 export interface ConfirmModalState {

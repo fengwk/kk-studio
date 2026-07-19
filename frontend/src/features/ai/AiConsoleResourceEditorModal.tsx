@@ -3,12 +3,19 @@ import { ModalBackdrop, ModalHeader } from '@/features/ai/AiConsoleModalLayout'
 import { AgentForm, ModelForm, ProviderForm } from '@/features/ai/AiResourceForms'
 import type { AgentDraft, ModelDraft, ProviderDraft, ResourceModal } from '@/features/ai/ai-console-types'
 import { resourceTitle } from '@/features/ai/ai-console-utils'
-import type { AgentModelDTO, AgentProviderDTO } from '@/shared/api/contracts'
+import type {
+  AgentDefinitionDTO,
+  AgentModelDTO,
+  AgentProviderDTO,
+  LiveEnvironmentDTO,
+} from '@/shared/api/contracts'
 
 export function ResourceEditorModal({
   modal,
   providers,
   models,
+  agents = [],
+  environments = [],
   providerDraft,
   modelDraft,
   agentDraft,
@@ -22,6 +29,8 @@ export function ResourceEditorModal({
   modal: ResourceModal | null
   providers: AgentProviderDTO[]
   models: AgentModelDTO[]
+  agents?: AgentDefinitionDTO[]
+  environments?: LiveEnvironmentDTO[]
   providerDraft: ProviderDraft
   modelDraft: ModelDraft
   agentDraft: AgentDraft
@@ -44,7 +53,15 @@ export function ResourceEditorModal({
         <div className="modal-body">
           {modal.kind === 'provider' && <ProviderForm draft={providerDraft} onChange={onProviderDraftChange} />}
           {modal.kind === 'model' && <ModelForm draft={modelDraft} mode={modal.mode} providers={providers} onChange={onModelDraftChange} />}
-          {modal.kind === 'agent' && <AgentForm draft={agentDraft} models={models} onChange={onAgentDraftChange} />}
+          {modal.kind === 'agent' && (
+            <AgentForm
+              draft={agentDraft}
+              models={models}
+              agents={agents}
+              environments={environments}
+              onChange={onAgentDraftChange}
+            />
+          )}
         </div>
         <div className="modal-footer">
           <button type="submit" className="btn-primary" disabled={pending}>
