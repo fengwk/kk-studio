@@ -1,9 +1,12 @@
 package fun.fengwk.kkstudio.core.agent.definition.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
@@ -21,8 +24,12 @@ public class AgentDefinitionServiceImplTest {
     AgentDefinitionConverter converter = mock(AgentDefinitionConverter.class);
     AgentDefinitionMutationFactory factory = mock(AgentDefinitionMutationFactory.class);
     AgentDefinitionReferenceResolver resolver = mock(AgentDefinitionReferenceResolver.class);
+    AgentDefinitionLiveCapabilityValidator validator =
+        mock(AgentDefinitionLiveCapabilityValidator.class);
+    doNothing().when(validator).validate(any());
     AgentDefinitionServiceImpl service =
-        new AgentDefinitionServiceImpl(repository, converter, factory, resolver);
+        new AgentDefinitionServiceImpl(
+            repository, converter, factory, resolver, validator, new ObjectMapper());
 
     assertThrows(IllegalArgumentException.class, () -> service.createAgent(null));
 
@@ -30,6 +37,8 @@ public class AgentDefinitionServiceImplTest {
     definition.setId(3L);
     definition.setModelId(2L);
     definition.setName("agent");
+    definition.setConfigJson(
+        "{\"tools\":[],\"skills\":[],\"allowedSubagents\":[],\"executionPolicy\":{}}");
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setModelId("2");
     when(factory.newAgent(2L, create)).thenReturn(definition);
