@@ -2,19 +2,29 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
-import { SessionCard } from '@/features/ai/AiConsoleCards'
+import { ChatCard } from '@/features/ai/AiConsoleCards'
 
-describe('SessionCard', () => {
-  it('opens the Session default route rather than a root Thread route', async () => {
+describe('ChatCard', () => {
+  it('opens the Chat workspace route', async () => {
     const user = userEvent.setup()
-    render(<MemoryRouter><SessionCard session={session()} /><Location /></MemoryRouter>)
-    await user.click(screen.getByRole('button', { name: '进入会话 Draft' }))
-    expect(screen.getByTestId('location')).toHaveTextContent('/sessions/session-1')
+    render(
+      <MemoryRouter>
+        <ChatCard chat={chat()} agents={[]} />
+        <Location />
+      </MemoryRouter>,
+    )
+    await user.click(screen.getByRole('button', { name: '进入 Chat Draft' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('/chats/chat-1')
   })
 
-  it('uses the Session id when the title is absent', () => {
-    render(<MemoryRouter><SessionCard session={{ ...session(), title: null }} /></MemoryRouter>)
-    expect(screen.getByRole('button', { name: '进入会话 session-1' })).toBeInTheDocument()
+  it('uses the Chat id when the title is absent and marks missing default agent', () => {
+    render(
+      <MemoryRouter>
+        <ChatCard chat={{ ...chat(), title: null, defaultAgentId: 'missing' }} agents={[]} />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('button', { name: '进入 Chat chat-1' })).toBeInTheDocument()
+    expect(screen.getByText('（已删除/缺失）')).toBeInTheDocument()
   })
 })
 
@@ -22,9 +32,13 @@ function Location() {
   return <output data-testid="location">{useLocation().pathname}</output>
 }
 
-function session() {
+function chat() {
   return {
-    sessionId: 'session-1', title: 'Draft', mainThreadId: 'thread-1', rootSessionId: 'session-1',
-    parentSessionId: null, parentInvocationId: null, depth: 0, createTime: null, updateTime: null,
+    id: 'chat-1',
+    title: 'Draft',
+    defaultAgentId: null,
+    version: 1,
+    createTime: null,
+    updateTime: null,
   }
 }

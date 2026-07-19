@@ -58,10 +58,9 @@ describe('agentService', () => {
     }
     const agentBody = {
       name: 'default-assistant',
-      defaultProvider: 'minimax',
-      defaultModel: 'MiniMax-M2.7',
-      defaultVariant: 'default',
-      toolsJson: '[]',
+      modelId: 'model-1',
+      variant: 'default',
+      config: { tools: [], skills: [], allowedSubagents: [] },
     }
     const updateProviderBody = { description: 'updated' }
     const updateModelBody = { defaultVariant: 'fast' }

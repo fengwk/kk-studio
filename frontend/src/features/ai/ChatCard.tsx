@@ -1,15 +1,26 @@
 import { ChevronRight, MessageSquare } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { formatBackendDate } from '@/features/ai/ai-console-utils'
-import type { HarnessSessionDTO } from '@/shared/api/contracts'
+import type { AgentDefinitionDTO, ChatDTO } from '@/shared/api/contracts'
 
-export function SessionCard({
-  session,
+export function ChatCard({
+  chat,
+  agents,
 }: {
-  session: HarnessSessionDTO
+  chat: ChatDTO
+  agents: AgentDefinitionDTO[]
 }) {
   const navigate = useNavigate()
-  const label = session.title || session.sessionId
+  const label = chat.title || chat.id
+  const defaultAgent = chat.defaultAgentId
+    ? agents.find((agent) => String(agent.id) === String(chat.defaultAgentId))
+    : undefined
+  const agentLabel = !chat.defaultAgentId
+    ? '（无）'
+    : defaultAgent
+      ? defaultAgent.name
+      : '（已删除/缺失）'
+
   return (
     <article className="info-card">
       <div className="head">
@@ -18,21 +29,21 @@ export function SessionCard({
             <MessageSquare aria-hidden="true" />
           </div>
           <div className="text-content">
-            <h3>{session.title || 'Untitled Chat'}</h3>
-            <p>Session</p>
+            <h3>{chat.title || 'Untitled Chat'}</h3>
+            <p>Chat</p>
           </div>
         </div>
       </div>
       <div className="meta-block">
-        <MetaRow label="Main Thread" value={session.mainThreadId} />
-        <MetaRow label="Updated" value={formatBackendDate(session.updateTime)} />
+        <MetaRow label="Default Agent" value={agentLabel} />
+        <MetaRow label="Updated" value={formatBackendDate(chat.updateTime)} />
       </div>
       <div className="chat-card-foot split">
         <button
           className="action-enter-btn green"
           type="button"
-          aria-label={`进入会话 ${label}`}
-          onClick={() => navigate(`/sessions/${encodeURIComponent(session.sessionId)}`)}
+          aria-label={`进入 Chat ${label}`}
+          onClick={() => navigate(`/chats/${encodeURIComponent(chat.id)}`)}
         >
           <ChevronRight aria-hidden="true" />
           进入对话
