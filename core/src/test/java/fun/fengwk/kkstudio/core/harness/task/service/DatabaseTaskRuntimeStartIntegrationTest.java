@@ -59,7 +59,9 @@ class DatabaseTaskRuntimeStartIntegrationTest {
   private static final long ROOT_ENTRY_ID = 9_710_201L;
   private static final long ROOT_INVOCATION_ID = 9_710_301L;
   private static final long NESTED_INVOCATION_ID = 9_710_302L;
-  private static final long AGENT_ID = 9_710_401L;
+  private static final long PARENT_AGENT_ID = 9_710_401L;
+  private static final long TARGET_AGENT_ID = 9_710_402L;
+  private static final String PARENT_AGENT = "parent-agent";
   private static final String SUBAGENT = "test-subagent";
 
   @MockitoBean private ThreadKick threadKick;
@@ -83,7 +85,8 @@ class DatabaseTaskRuntimeStartIntegrationTest {
     jdbc.update("delete from harness_thread");
     jdbc.update("delete from harness_session_entry");
     jdbc.update("delete from harness_session");
-    jdbc.update("delete from agent_definition where id = ?", AGENT_ID);
+    jdbc.update(
+        "delete from agent_definition where id in (?, ?)", PARENT_AGENT_ID, TARGET_AGENT_ID);
     reset(threadKick);
   }
 
@@ -94,6 +97,7 @@ class DatabaseTaskRuntimeStartIntegrationTest {
   void createsIndependentChildMainThreadQueuedPromptAndInheritedRootThread() {
     LocalDateTime timestamp = LocalDateTime.now(ZoneOffset.UTC);
     Instant now = timestamp.toInstant(ZoneOffset.UTC);
+    insertParentAgent(List.of(SUBAGENT), "{\"maxTurns\":3}");
     insertTargetAgent();
     insertRootSession(timestamp);
     insertThread(ROOT_THREAD_ID, ROOT_SESSION_ID, ROOT_ENTRY_ID, timestamp);
@@ -162,12 +166,12 @@ class DatabaseTaskRuntimeStartIntegrationTest {
     verify(threadKick).kick(nested.task().childThreadId());
   }
 
-  /** Parent snapshot 是权限和上限的唯一入口；拒绝时不创建 child session 或发送 kick。 */
+  /** Parent 当前 Agent 的 allowedSubagents 是权限入口；拒绝时不创建 child session 或发送 kick。 */
   @Test
-  void rejectsSubagentThatIsNotAllowedByParentSnapshot() {
+  void rejectsSubagentThatIsNotAllowedByParentAgent() {
     LocalDateTime timestamp = LocalDateTime.now(ZoneOffset.UTC);
-    insertTargetAgent();
-    insertRootSession(timestamp, List.of("another-agent"), "{}", 0);
+    insertParentAgent(List.of("another-agent"), "{}");
+    insertRootSession(timestamp, 0);
     insertThread(ROOT_THREAD_ID, ROOT_SESSION_ID, ROOT_ENTRY_ID, timestamp);
     invocationMapper.insert(
         invocation(ROOT_INVOCATION_ID, ROOT_THREAD_ID, ROOT_ENTRY_ID, timestamp));
@@ -186,11 +190,16 @@ class DatabaseTaskRuntimeStartIntegrationTest {
     verifyNoInteractions(threadKick);
   }
 
-  /** 允许清单命中但 definition 被删除时，任务创建必须失败且没有半成品 child。 */
+  /**
+   * 允许清单命中但目标 Agent definition 缺失时，任务创建必须失败且没有半成品 child。
+   *
+   * <p>Parent Thread 绑定 parent Agent；allowlist 允许 {@link #SUBAGENT}，但库中没有同名 definition。
+   */
   @Test
   void rejectsUnknownSubagentDefinition() {
     LocalDateTime timestamp = LocalDateTime.now(ZoneOffset.UTC);
-    insertRootSession(timestamp, List.of(SUBAGENT), "{}", 0);
+    insertParentAgent(List.of(SUBAGENT), "{}");
+    insertRootSession(timestamp, 0);
     insertThread(ROOT_THREAD_ID, ROOT_SESSION_ID, ROOT_ENTRY_ID, timestamp);
     invocationMapper.insert(
         invocation(ROOT_INVOCATION_ID, ROOT_THREAD_ID, ROOT_ENTRY_ID, timestamp));
@@ -212,8 +221,9 @@ class DatabaseTaskRuntimeStartIntegrationTest {
   @Test
   void rejectsTaskAtMaximumDepth() {
     LocalDateTime timestamp = LocalDateTime.now(ZoneOffset.UTC);
+    insertParentAgent(List.of(SUBAGENT), "{\"maxDepth\":1}");
     insertTargetAgent();
-    insertRootSession(timestamp, List.of(SUBAGENT), "{\"maxDepth\":1}", 1);
+    insertRootSession(timestamp, 1);
     insertThread(ROOT_THREAD_ID, ROOT_SESSION_ID, ROOT_ENTRY_ID, timestamp);
     invocationMapper.insert(
         invocation(ROOT_INVOCATION_ID, ROOT_THREAD_ID, ROOT_ENTRY_ID, timestamp));
@@ -234,8 +244,9 @@ class DatabaseTaskRuntimeStartIntegrationTest {
   @Test
   void rejectsTaskWhenDirectOrRootConcurrencyLimitIsReached() {
     LocalDateTime timestamp = LocalDateTime.now(ZoneOffset.UTC);
+    insertParentAgent(List.of(SUBAGENT), "{\"maxDirectSubagents\":1}");
     insertTargetAgent();
-    insertRootSession(timestamp, List.of(SUBAGENT), "{\"maxDirectSubagents\":1}", 0);
+    insertRootSession(timestamp, 0);
     insertThread(ROOT_THREAD_ID, ROOT_SESSION_ID, ROOT_ENTRY_ID, timestamp);
     invocationMapper.insert(
         invocation(ROOT_INVOCATION_ID, ROOT_THREAD_ID, ROOT_ENTRY_ID, timestamp));
@@ -258,9 +269,9 @@ class DatabaseTaskRuntimeStartIntegrationTest {
     assertTrue(directError.getMessage().contains("direct concurrency"));
 
     clean();
+    insertParentAgent(List.of(SUBAGENT), "{\"maxDirectSubagents\":2,\"maxTotalSubagents\":1}");
     insertTargetAgent();
-    insertRootSession(
-        timestamp, List.of(SUBAGENT), "{\"maxDirectSubagents\":2,\"maxTotalSubagents\":1}", 0);
+    insertRootSession(timestamp, 0);
     insertThread(ROOT_THREAD_ID, ROOT_SESSION_ID, ROOT_ENTRY_ID, timestamp);
     invocationMapper.insert(
         invocation(ROOT_INVOCATION_ID, ROOT_THREAD_ID, ROOT_ENTRY_ID, timestamp));
@@ -289,9 +300,26 @@ class DatabaseTaskRuntimeStartIntegrationTest {
     return new TaskCommand(SUBAGENT, prompt, WorkingCopyPolicy.NONE);
   }
 
+  private void insertParentAgent(List<String> allowedSubagents, String executionPolicyJson) {
+    String allowlist =
+        allowedSubagents.stream()
+            .map(name -> "\"" + name + "\"")
+            .collect(Collectors.joining(",", "[", "]"));
+    AgentDefinitionDO parent = new AgentDefinitionDO();
+    parent.setId(PARENT_AGENT_ID);
+    parent.setName(PARENT_AGENT);
+    parent.setDescription("parent");
+    parent.setSystemPrompt("parent system");
+    parent.setModelId(1L);
+    parent.setVariant("default");
+    parent.setConfigJson(
+        "{\"allowedSubagents\":" + allowlist + ",\"executionPolicy\":" + executionPolicyJson + "}");
+    agentMapper.insert(parent);
+  }
+
   private void insertTargetAgent() {
     AgentDefinitionDO agent = new AgentDefinitionDO();
-    agent.setId(AGENT_ID);
+    agent.setId(TARGET_AGENT_ID);
     agent.setName(SUBAGENT);
     agent.setDescription("test");
     agent.setSystemPrompt("test system");
@@ -303,28 +331,10 @@ class DatabaseTaskRuntimeStartIntegrationTest {
   }
 
   private void insertRootSession(LocalDateTime timestamp) {
-    insertRootSession(timestamp, List.of(SUBAGENT), "{\"maxTurns\":3}", 0);
+    insertRootSession(timestamp, 0);
   }
 
-  private void insertRootSession(
-      LocalDateTime timestamp,
-      List<String> allowedSubagents,
-      String executionPolicyJson,
-      int depth) {
-    // Parent Thread 运行时配置来自当前 AgentDefinition；用入参覆盖 allowlist/policy。
-    AgentDefinitionDO parent = agentMapper.getById(AGENT_ID);
-    if (parent == null) {
-      insertTargetAgent();
-      parent = agentMapper.getById(AGENT_ID);
-    }
-    String allowlist =
-        allowedSubagents.stream()
-            .map(name -> "\"" + name + "\"")
-            .collect(Collectors.joining(",", "[", "]"));
-    parent.setConfigJson(
-        "{\"allowedSubagents\":" + allowlist + ",\"executionPolicy\":" + executionPolicyJson + "}");
-    agentMapper.updateById(parent);
-
+  private void insertRootSession(LocalDateTime timestamp, int depth) {
     HarnessSessionDO session = new HarnessSessionDO();
     session.setId(ROOT_SESSION_ID);
     session.setTitle("root");
@@ -386,8 +396,8 @@ class DatabaseTaskRuntimeStartIntegrationTest {
     HarnessThreadDO thread = new HarnessThreadDO();
     thread.setId(id);
     thread.setSessionId(sessionId);
-    thread.setActiveAgentDefinitionId(AGENT_ID);
-    thread.setActiveAgentName("parent");
+    thread.setActiveAgentDefinitionId(PARENT_AGENT_ID);
+    thread.setActiveAgentName(PARENT_AGENT);
     thread.setModelId("1");
     thread.setVariant("default");
     thread.setYoloEnabled(false);
