@@ -320,13 +320,13 @@ public final class ThreadProcessor implements ThreadKick {
         }
       }
 
-      ThreadTransactions.ApplyInputResult applied =
-          transactions.applyNextInput(threadId, token, clock.instant());
-      if (applied.applied()) {
+      ThreadTransactions.HarvestResult harvested =
+          transactions.harvestQueuedInputs(threadId, token, clock.instant());
+      if (harvested.harvested()) {
         continue;
       }
 
-      if (inputStore.findNextPending(threadId).isEmpty()) {
+      if (inputStore.listQueued(threadId).isEmpty()) {
         thread =
             threadStore
                 .find(threadId)
@@ -664,6 +664,7 @@ public final class ThreadProcessor implements ThreadKick {
               resources.toolBindings(),
               resources.workdir(),
               resources.environmentRoot(),
+              context.config().yoloEnabled(),
               List.of(assistantCompleted),
               now)) {
             markLostOwnership();

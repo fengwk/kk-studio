@@ -6,6 +6,7 @@ public enum SessionEntryType {
   AGENT_SNAPSHOT("agent_snapshot"),
   MODEL_CHANGE("model_change"),
   TOOLSET_CHANGE("toolset_change"),
+  YOLO_CHANGE("yolo_change"),
   COMPACTION("compaction"),
   BRANCH_SUMMARY("branch_summary"),
   CUSTOM("custom"),

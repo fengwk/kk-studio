@@ -14,11 +14,16 @@ public interface ThreadInputStore {
 
   List<ThreadInput> listByThread(long threadId);
 
-  List<ThreadInput> listPending(long threadId);
+  List<ThreadInput> listQueued(long threadId);
 
-  /** 按 sequence 升序返回下一条未应用输入。 */
-  Optional<ThreadInput> findNextPending(long threadId);
+  /** 按 sequence 升序返回 cutoff 内全部 QUEUED 输入。 */
+  List<ThreadInput> listQueuedUpTo(long threadId, long cutoffSequence);
 
-  /** Exactly-once 标记 applied；已 applied 或缺失返回 false。 */
-  boolean markApplied(long inputId, long appliedEntryId, Instant appliedAt);
+  /** Exactly-once 标记 APPLIED；非 QUEUED 返回 false。 */
+  boolean markApplied(long inputId, long appliedEntryId, Instant resolvedAt);
+
+  /** Exactly-once 标记 CANCELLED；非 QUEUED 返回 false。 */
+  boolean markCancelled(long inputId, long stopId, Instant resolvedAt);
+
+  List<ThreadInput> listCancelledByStop(long threadId, long stopId);
 }

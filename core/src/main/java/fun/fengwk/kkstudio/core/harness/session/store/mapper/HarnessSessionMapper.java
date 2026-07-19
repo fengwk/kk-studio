@@ -18,11 +18,11 @@ public interface HarnessSessionMapper extends BaseMapper {
   @Insert(
       """
       insert into harness_session (
-          id, agent_definition_id, title,
+          id, title, main_thread_id,
           parent_session_id, root_session_id, parent_invocation_id, depth,
           gmt_create, gmt_modified, version
       ) values (
-          #{id}, #{agentDefinitionId}, #{title},
+          #{id}, #{title}, #{mainThreadId},
           #{parentSessionId}, #{rootSessionId}, #{parentInvocationId}, #{depth},
           #{createTime}, #{updateTime}, #{version}
       )
@@ -31,7 +31,7 @@ public interface HarnessSessionMapper extends BaseMapper {
 
   @Select(
       """
-      select id, agent_definition_id, title,
+      select id, title, main_thread_id,
              parent_session_id, root_session_id, parent_invocation_id, depth,
              version, gmt_create as create_time, gmt_modified as update_time
       from harness_session
@@ -41,8 +41,8 @@ public interface HarnessSessionMapper extends BaseMapper {
       id = "harnessSessionResultMap",
       value = {
         @Result(column = "id", property = "id"),
-        @Result(column = "agent_definition_id", property = "agentDefinitionId"),
         @Result(column = "title", property = "title"),
+        @Result(column = "main_thread_id", property = "mainThreadId"),
         @Result(column = "parent_session_id", property = "parentSessionId"),
         @Result(column = "root_session_id", property = "rootSessionId"),
         @Result(column = "parent_invocation_id", property = "parentInvocationId"),
@@ -55,7 +55,7 @@ public interface HarnessSessionMapper extends BaseMapper {
 
   @Select(
       """
-      select id, agent_definition_id, title,
+      select id, title, main_thread_id,
              parent_session_id, root_session_id, parent_invocation_id, depth,
              version, gmt_create as create_time, gmt_modified as update_time
       from harness_session
@@ -67,7 +67,7 @@ public interface HarnessSessionMapper extends BaseMapper {
 
   @Select(
       """
-      select id, agent_definition_id, title,
+      select id, title, main_thread_id,
              parent_session_id, root_session_id, parent_invocation_id, depth,
              version, gmt_create as create_time, gmt_modified as update_time
       from harness_session
@@ -79,7 +79,7 @@ public interface HarnessSessionMapper extends BaseMapper {
 
   @Select(
       """
-      select id, agent_definition_id, title,
+      select id, title, main_thread_id,
              parent_session_id, root_session_id, parent_invocation_id, depth,
              version, gmt_create as create_time, gmt_modified as update_time
       from harness_session

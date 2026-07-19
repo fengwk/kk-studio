@@ -8,10 +8,11 @@ import java.time.LocalDateTime;
 @Data
 public class HarnessSessionDTO {
   private String sessionId;
-  private String agentDefinitionId;
   private String title;
+  private String mainThreadId;
   private String rootSessionId;
   private String parentSessionId;
+  private String parentInvocationId;
   private Integer depth;
   private LocalDateTime createTime;
   private LocalDateTime updateTime;

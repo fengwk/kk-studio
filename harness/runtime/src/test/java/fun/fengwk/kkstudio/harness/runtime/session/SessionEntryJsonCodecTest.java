@@ -37,7 +37,7 @@ class SessionEntryJsonCodecTest {
     List<SessionEntryPayload> payloads =
         List.of(
             new MessageEntryPayload(userMessage),
-            new AgentSnapshotEntryPayload(snapshot),
+            new AgentSnapshotEntryPayload(1L, snapshot),
             new ModelChangeEntryPayload("model-2", "fast"),
             new ToolsetChangeEntryPayload(List.of("read")),
             new CompactionEntryPayload("summary", 42L, 0, "{\"reason\":\"budget\"}"),

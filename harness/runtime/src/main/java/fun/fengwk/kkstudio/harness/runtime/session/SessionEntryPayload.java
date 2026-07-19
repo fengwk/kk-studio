@@ -6,6 +6,7 @@ public sealed interface SessionEntryPayload
         AgentSnapshotEntryPayload,
         ModelChangeEntryPayload,
         ToolsetChangeEntryPayload,
+        YoloChangeEntryPayload,
         CompactionEntryPayload,
         BranchSummaryEntryPayload,
         CustomEntryPayload,

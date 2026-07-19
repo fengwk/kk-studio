@@ -7,4 +7,7 @@ import lombok.Data;
 public class HarnessThreadAgentSetDTO {
   /** 目标 AgentDefinition id（decimal string）。 */
   private String agentDefinitionId;
+
+  /** 外部请求幂等键。 */
+  private String clientMessageId;
 }

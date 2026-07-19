@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.core.harness.thread.service.impl;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +26,10 @@ import fun.fengwk.kkstudio.share.model.HarnessThreadCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadMessageCreateDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadModelSetDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadStopDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadStopResultDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadToolsetSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadYoloSetDTO;
 
 import java.time.Instant;
@@ -63,45 +66,13 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
 
   @Override
   @Transactional
-  public HarnessThreadDTO createThread(HarnessThreadCreateDTO createDTO) {
+  public HarnessThreadDTO createThread(String sessionId, HarnessThreadCreateDTO createDTO) {
     Objects.requireNonNull(createDTO, "createDTO");
-    Instant now = Instant.now();
-    if (createDTO.getSessionId() != null || createDTO.getFromEntryId() != null) {
-      long sessionId = HarnessIds.parsePositive(createDTO.getSessionId(), "sessionId");
-      long fromEntryId = HarnessIds.parsePositive(createDTO.getFromEntryId(), "fromEntryId");
-      Long agentDefinitionId =
-          createDTO.getAgentDefinitionId() == null
-              ? null
-              : HarnessIds.parsePositive(createDTO.getAgentDefinitionId(), "agentDefinitionId");
-      String runtimeConfigJson = "{}";
-      if (agentDefinitionId != null) {
-        AgentDefinitionDO definition = requireDefinition(agentDefinitionId);
-        AgentSnapshot snapshot = snapshotResolver.snapshotForDefinition(definition);
-        runtimeConfigJson = encodeSnapshot(snapshot);
-      }
-      boolean yolo = resolveYolo(createDTO.getYoloEnabled());
-      AgentThread thread =
-          transactions.createThreadFromEntry(
-              sessionId, fromEntryId, agentDefinitionId, runtimeConfigJson, yolo, now);
-      return converter.convert(thread);
-    }
-    long agentDefinitionId =
-        HarnessIds.parsePositive(createDTO.getAgentDefinitionId(), "agentDefinitionId");
-    AgentDefinitionDO definition = requireDefinition(agentDefinitionId);
-    AgentSnapshot snapshot = snapshotResolver.snapshotForDefinition(definition);
-    String runtimeConfigJson = encodeSnapshot(snapshot);
-    boolean yolo = resolveYolo(createDTO.getYoloEnabled());
+    long parsedSessionId = HarnessIds.parsePositive(sessionId, "sessionId");
+    long fromEntryId = HarnessIds.parsePositive(createDTO.getFromEntryId(), "fromEntryId");
     AgentThread thread =
-        transactions.createRootThread(
-            agentDefinitionId, createDTO.getTitle(), snapshot, runtimeConfigJson, yolo, now);
+        transactions.createThreadFromEntry(parsedSessionId, fromEntryId, Instant.now());
     return converter.convert(thread);
-  }
-
-  private boolean resolveYolo(Boolean requestValue) {
-    if (requestValue != null) {
-      return requestValue;
-    }
-    return toolSettingsProvider.get().defaultYolo();
   }
 
   @Override
@@ -133,7 +104,10 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     long id = HarnessIds.parsePositive(threadId, "threadId");
     ThreadInput input =
         transactions.submitSetYolo(
-            id, Boolean.TRUE.equals(request.getYoloEnabled()), Instant.now());
+            id,
+            Boolean.TRUE.equals(request.getYoloEnabled()),
+            request.getClientMessageId(),
+            Instant.now());
     afterCommitKick(id);
     return converter.convert(input);
   }
@@ -147,12 +121,62 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
         HarnessIds.parsePositive(request.getAgentDefinitionId(), "agentDefinitionId");
     AgentDefinitionDO definition = requireDefinition(agentDefinitionId);
     AgentSnapshot snapshot = snapshotResolver.snapshotForDefinition(definition);
-    String runtimeConfigJson = encodeSnapshot(snapshot);
     ThreadInput input =
         transactions.submitSetAgent(
-            id, agentDefinitionId, snapshot, runtimeConfigJson, Instant.now());
+            id, agentDefinitionId, snapshot, request.getClientMessageId(), Instant.now());
     afterCommitKick(id);
     return converter.convert(input);
+  }
+
+  @Override
+  @Transactional
+  public HarnessThreadInputDTO queueModel(String threadId, HarnessThreadModelSetDTO request) {
+    Objects.requireNonNull(request, "request");
+    long id = HarnessIds.parsePositive(threadId, "threadId");
+    ThreadInput input =
+        transactions.submitSetModel(
+            id,
+            request.getModelId(),
+            request.getVariant(),
+            request.getClientMessageId(),
+            Instant.now());
+    afterCommitKick(id);
+    return converter.convert(input);
+  }
+
+  @Override
+  @Transactional
+  public HarnessThreadInputDTO queueToolset(String threadId, HarnessThreadToolsetSetDTO request) {
+    Objects.requireNonNull(request, "request");
+    long id = HarnessIds.parsePositive(threadId, "threadId");
+    ThreadInput input =
+        transactions.submitSetToolset(
+            id, request.getTools(), request.getClientMessageId(), Instant.now());
+    afterCommitKick(id);
+    return converter.convert(input);
+  }
+
+  @Override
+  @Transactional
+  public HarnessThreadStopResultDTO stop(String threadId, HarnessThreadStopDTO request) {
+    Objects.requireNonNull(request, "request");
+    long id = HarnessIds.parsePositive(threadId, "threadId");
+    ThreadTransactions.StopResult result =
+        transactions.stop(id, request.getClientRequestId(), Instant.now());
+    HarnessThreadStopResultDTO dto = new HarnessThreadStopResultDTO();
+    dto.setStopId(Long.toString(result.stop().id()));
+    dto.setCancelledInputs(result.cancelledInputs().stream().map(converter::convert).toList());
+    dto.setRestoredMessages(result.restoredMessages());
+    return dto;
+  }
+
+  @Override
+  @Transactional
+  public HarnessThreadDTO retry(String threadId) {
+    long id = HarnessIds.parsePositive(threadId, "threadId");
+    HarnessThreadDTO dto = converter.convert(transactions.retry(id, Instant.now()));
+    afterCommitKick(id);
+    return dto;
   }
 
   private AgentDefinitionDO requireDefinition(long agentDefinitionId) {
@@ -161,14 +185,6 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
       throw new IllegalArgumentException("unknown agent definition: " + agentDefinitionId);
     }
     return definition;
-  }
-
-  private static String encodeSnapshot(AgentSnapshot snapshot) {
-    try {
-      return OBJECT_MAPPER.writeValueAsString(snapshot);
-    } catch (JsonProcessingException error) {
-      throw new IllegalStateException("cannot encode runtime config", error);
-    }
   }
 
   private void afterCommitKick(long threadId) {
