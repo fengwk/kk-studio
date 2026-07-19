@@ -355,3 +355,24 @@ create table if not exists canvas_command (
     primary key (id),
     unique (workspace_id, command_id)
 );
+
+create table if not exists chat (
+    id                  bigint not null,
+    title               varchar(256),
+    default_agent_id    bigint,
+    gmt_create          timestamp(3) not null default current_timestamp(),
+    gmt_modified        timestamp(3) not null default current_timestamp(),
+    version             bigint not null default 0,
+    primary key (id)
+);
+create index if not exists idx_chat_modified on chat (gmt_modified, id);
+
+create table if not exists chat_session (
+    id                  bigint not null,
+    chat_id             bigint not null,
+    session_id          bigint not null,
+    gmt_create          timestamp(3) not null default current_timestamp(),
+    primary key (id),
+    unique (chat_id, session_id)
+);
+create index if not exists idx_chat_session_session on chat_session (session_id);
