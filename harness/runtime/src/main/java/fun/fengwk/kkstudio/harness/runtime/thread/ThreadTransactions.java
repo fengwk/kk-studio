@@ -18,7 +18,14 @@ public interface ThreadTransactions {
   /** 原子创建 agentless Session + 语义根 Entry + Main Thread。 */
   SessionCreateResult createSession(String title, boolean yoloEnabled, Instant now);
 
-  /** 在同一 Session tree 上从任意 durable Entry 新建 Thread cursor（不克隆 Entry）。 */
+  /**
+   * 在同一 Session tree 上从任意 durable Entry 新建 Thread cursor（不克隆 Entry）。
+   *
+   * <p>按 root→fromEntryId 路径上最后一次 {@code AGENT_CHANGE} 初始化 Thread 独立字段： agent 身份取该 Entry 的
+   * id/name；model/variant 取该 id 的<strong>当前</strong> AgentDefinition。无 Agent 历史则 agent/model
+   * 为空；yolo 恒为 false。不写合成 Entry，也不复用父 Thread model override。历史 AgentDefinition 已删除时抛 {@link
+   * IllegalArgumentException}，事务回滚。
+   */
   AgentThread createThreadFromEntry(long sessionId, long fromEntryId, Instant now);
 
   /** 排队用户消息；clientMessageId 幂等。 */
