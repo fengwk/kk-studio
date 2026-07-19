@@ -205,6 +205,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
               "status",
               completion.state().name()),
           now);
+      threadMapper.promoteWaitingToRunning(task.getParentThreadId(), timestamp);
       afterCommitKick(task.getParentThreadId());
     }
     return inspection(taskMapper.find(parentInvocationId));
@@ -246,6 +247,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       // Request cancel on nonterminal child tools. Already-admitted in-flight LLM work is not
       // interrupted; subsequent beginTurn rejects on CANCELLED.
       invocationMapper.requestCancelByThread(task.getChildThreadId(), timestamp);
+      threadMapper.promoteWaitingToRunning(task.getParentThreadId(), timestamp);
+      threadMapper.promoteWaitingToRunning(task.getChildThreadId(), timestamp);
       eventStore.append(
           task.getParentThreadId(),
           null,
