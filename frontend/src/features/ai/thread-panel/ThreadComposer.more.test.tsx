@@ -23,7 +23,6 @@ function ControlledComposer({
       draft={draft}
       pending={false}
       disabled={false}
-      controlsPending={false}
       onDraftChange={setDraft}
       onSubmit={onSubmit}
       onCommand={onCommand}
@@ -43,10 +42,11 @@ describe('ThreadComposer interactions', () => {
     expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'yolo' }))
   })
 
-  it('opens plus palette, filters, and closes with Escape', async () => {
+  it('opens only from slash mode and closes with Escape', async () => {
     const user = userEvent.setup()
     render(<ControlledComposer onSubmit={vi.fn()} onCommand={vi.fn()} />)
-    await user.click(screen.getByRole('button', { name: '打开命令表' }))
+    expect(screen.queryByRole('button', { name: '打开命令表' })).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('给 AI 发送消息'), '/stop')
     const palette = await screen.findByLabelText('命令表')
     expect(palette).toBeInTheDocument()
     await user.keyboard('{Escape}')
@@ -59,7 +59,6 @@ describe('ThreadComposer interactions', () => {
         draft="hello"
         pending
         disabled={false}
-        controlsPending={false}
         onDraftChange={vi.fn()}
         onSubmit={vi.fn()}
         onCommand={vi.fn()}
@@ -68,87 +67,22 @@ describe('ThreadComposer interactions', () => {
     expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
   })
 
-  it('renders Stop only for active durable statuses and Retry only for FAILED', async () => {
-    const user = userEvent.setup()
-    const onStop = vi.fn()
-    const onRetry = vi.fn()
-    const { rerender } = render(
+  it('does not render standalone actor-state, Stop, Retry, or add controls', () => {
+    render(
       <ThreadComposer
         draft=""
         pending={false}
         disabled={false}
-        controlsPending={false}
         onDraftChange={vi.fn()}
         onSubmit={vi.fn()}
         onCommand={vi.fn()}
-        threadStatus="RUNNING"
-        onStop={onStop}
-        onRetry={onRetry}
-        stopPending={false}
-        retryPending={false}
       />,
     )
-    await user.click(screen.getByRole('button', { name: 'Stop' }))
-    expect(onStop).toHaveBeenCalledOnce()
-    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
-    rerender(
-      <ThreadComposer
-        draft=""
-        pending={false}
-        disabled={false}
-        controlsPending={false}
-        onDraftChange={vi.fn()}
-        onSubmit={vi.fn()}
-        onCommand={vi.fn()}
-        threadStatus="FAILED"
-        onStop={onStop}
-        onRetry={onRetry}
-        stopPending={false}
-        retryPending
-      />,
-    )
+    expect(screen.queryByRole('button', { name: '打开命令表' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Retrying…' })).toBeDisabled()
-  })
-
-  it('disables command controls only while the control mailbox mutation is pending', () => {
-    render(
-      <ThreadComposer
-        draft="message"
-        pending={false}
-        disabled={false}
-        controlsPending
-        onDraftChange={vi.fn()}
-        onSubmit={vi.fn()}
-        onCommand={vi.fn()}
-        onStop={vi.fn()}
-        onRetry={vi.fn()}
-        stopPending={false}
-        retryPending={false}
-      />,
-    )
-    expect(screen.getByRole('button', { name: '打开命令表' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
-  })
-
-  it.each(['WAITING', 'RETRYING'] as const)('offers Stop for %s actor status', (threadStatus) => {
-    render(
-      <ThreadComposer
-        draft=""
-        pending={false}
-        disabled={false}
-        controlsPending={false}
-        onDraftChange={vi.fn()}
-        onSubmit={vi.fn()}
-        onCommand={vi.fn()}
-        threadStatus={threadStatus}
-        onStop={vi.fn()}
-        onRetry={vi.fn()}
-        stopPending={false}
-        retryPending={false}
-      />,
-    )
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    expect(screen.queryByText('RUNNING')).not.toBeInTheDocument()
+    expect(screen.queryByText('IDLE')).not.toBeInTheDocument()
   })
 
   it('disables the complete composer while no Thread projection is available', () => {
@@ -157,14 +91,9 @@ describe('ThreadComposer interactions', () => {
         draft="message"
         pending={false}
         disabled
-        controlsPending={false}
         onDraftChange={vi.fn()}
         onSubmit={vi.fn()}
         onCommand={vi.fn()}
-        onStop={vi.fn()}
-        onRetry={vi.fn()}
-        stopPending={false}
-        retryPending={false}
       />,
     )
     expect(screen.getByLabelText('给 AI 发送消息')).toBeDisabled()
@@ -172,32 +101,31 @@ describe('ThreadComposer interactions', () => {
   })
 })
 
-describe('ThreadCommandPalette keyboard', () => {
-  it('navigates and selects commands with keyboard', async () => {
+describe('ThreadCommandPalette', () => {
+  it('filters and selects a slash command', async () => {
     const user = userEvent.setup()
     const onSelect = vi.fn()
-    const onClose = vi.fn()
     render(
       <ThreadCommandPalette
         open
-        query=""
-        onQueryChange={vi.fn()}
+        query="stop"
         onSelect={onSelect}
-        onClose={onClose}
       />,
     )
-    const input = screen.getByPlaceholderText('搜索命令…')
-    await user.type(input, '{ArrowDown}{ArrowUp}{Enter}')
-    expect(onSelect).toHaveBeenCalled()
-    await user.type(input, '{Escape}')
-    expect(onClose).toHaveBeenCalled()
+    await user.click(screen.getByRole('option', { name: /^stop/ }))
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'stop' }))
   })
 })
 
 describe('ThreadWidgetStack and SubagentWidget', () => {
   it('renders working status and nested running/queued/waiting subagents', () => {
     render(
-      <ThreadWidgetStack working>
+      <ThreadWidgetStack
+        working
+        queuedMessages={[
+          { inputId: 'queued-1', role: 'user', text: '稍后处理这条', sequence: 1 },
+        ]}
+      >
         <ThreadSubagentWidget
           taskTree={[
             {
@@ -279,6 +207,9 @@ describe('ThreadWidgetStack and SubagentWidget', () => {
       </ThreadWidgetStack>,
     )
     expect(screen.getByText('Working...')).toBeInTheDocument()
+    expect(screen.getByText('稍后处理这条')).toBeInTheDocument()
+    const zoneText = screen.getByLabelText('会话组件区').textContent ?? ''
+    expect(zoneText.indexOf('Working...')).toBeLessThan(zoneText.indexOf('稍后处理这条'))
     expect(screen.getByText(/worker/)).toBeInTheDocument()
     expect(screen.getByText(/detail-text-here/)).toBeInTheDocument()
     expect(screen.queryByText('done-agent')).not.toBeInTheDocument()

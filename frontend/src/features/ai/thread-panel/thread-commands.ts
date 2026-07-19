@@ -5,13 +5,25 @@ export interface ThreadCommand {
   keywords?: string[]
 }
 
-/** Slash/plus command table for the thread composer (pi-style). */
+/** Slash command table for the thread composer (pi-style). */
 export const THREAD_COMMANDS: ThreadCommand[] = [
   {
     id: 'yolo',
     label: 'yolo',
     description: '切换 YOLO 自动批准工具调用',
     keywords: ['auto', 'approve', 'tool'],
+  },
+  {
+    id: 'stop',
+    label: 'stop',
+    description: '停止当前 Thread 并恢复尚未处理的消息',
+    keywords: ['cancel', 'interrupt', 'thread'],
+  },
+  {
+    id: 'retry',
+    label: 'retry',
+    description: '重试当前失败的 Thread',
+    keywords: ['failed', 'resume', 'thread'],
   },
   {
     id: 'clear-draft',
