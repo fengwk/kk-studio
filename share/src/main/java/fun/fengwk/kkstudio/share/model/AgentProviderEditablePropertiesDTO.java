@@ -13,5 +13,6 @@ public class AgentProviderEditablePropertiesDTO {
   private String providerType;
   private String baseUrl;
   private String credential;
-  private String configJson;
+  private Long modelCallTimeoutMillis;
+  private Long modelCallIdleTimeoutMillis;
 }

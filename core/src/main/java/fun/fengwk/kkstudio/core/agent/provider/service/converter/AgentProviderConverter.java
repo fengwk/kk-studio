@@ -2,12 +2,19 @@ package fun.fengwk.kkstudio.core.agent.provider.service.converter;
 
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.core.agent.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
 
 /** Converts providers to credential-free public DTOs. */
 @Component
 public class AgentProviderConverter {
+
+  private final AgentProviderConfigurationCodec configurationCodec;
+
+  public AgentProviderConverter(AgentProviderConfigurationCodec configurationCodec) {
+    this.configurationCodec = configurationCodec;
+  }
 
   public AgentProviderDTO convert(AgentProvider provider) {
     if (provider == null) {
@@ -20,7 +27,9 @@ public class AgentProviderConverter {
     dto.setProviderType(provider.getProviderType().name());
     dto.setBaseUrl(provider.getBaseUrl());
     dto.setConfigured(provider.getCredential() != null && !provider.getCredential().isBlank());
-    dto.setConfigJson(provider.getConfigJson());
+    var timeoutPolicy = configurationCodec.readTimeoutPolicy(provider.getConfigJson());
+    dto.setModelCallTimeoutMillis(timeoutPolicy.modelCallTimeout().toMillis());
+    dto.setModelCallIdleTimeoutMillis(timeoutPolicy.modelCallIdleTimeout().toMillis());
     dto.setVersion(provider.getVersion());
     dto.setCreateTime(provider.getCreateTime());
     dto.setUpdateTime(provider.getUpdateTime());

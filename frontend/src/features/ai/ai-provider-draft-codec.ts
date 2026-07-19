@@ -8,8 +8,9 @@ export function emptyProviderDraft(): ProviderDraft {
     description: '',
     providerType: 'openai',
     baseUrl: '',
-    apiKey: '',
-    timeoutMillis: '60000',
+    credential: '',
+    modelCallTimeoutMillis: '1800000',
+    modelCallIdleTimeoutMillis: '120000',
   }
 }
 
@@ -19,8 +20,9 @@ export function toProviderDraft(provider: AgentProviderDTO): ProviderDraft {
     description: provider.description || '',
     providerType: provider.providerType || 'openai',
     baseUrl: provider.baseUrl || '',
-    apiKey: provider.apiKey || '',
-    timeoutMillis: provider.timeoutMillis ? String(provider.timeoutMillis) : '',
+    credential: '',
+    modelCallTimeoutMillis: String(provider.modelCallTimeoutMillis),
+    modelCallIdleTimeoutMillis: String(provider.modelCallIdleTimeoutMillis),
   }
 }
 
@@ -30,8 +32,9 @@ export function toEditableProvider(draft: ProviderDraft): AgentProviderCreateDTO
     description: trimToNull(draft.description),
     providerType: draft.providerType.trim(),
     baseUrl: trimToNull(draft.baseUrl),
-    apiKey: trimToNull(draft.apiKey),
-    timeoutMillis: numberToNull(draft.timeoutMillis),
+    credential: trimToNull(draft.credential),
+    modelCallTimeoutMillis: numberToNull(draft.modelCallTimeoutMillis),
+    modelCallIdleTimeoutMillis: numberToNull(draft.modelCallIdleTimeoutMillis),
   }
 }
 

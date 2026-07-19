@@ -14,7 +14,8 @@ public class AgentProviderDTO {
   private String providerType;
   private String baseUrl;
   private boolean configured;
-  private String configJson;
+  private Long modelCallTimeoutMillis;
+  private Long modelCallIdleTimeoutMillis;
   private Long version;
   private LocalDateTime createTime;
   private LocalDateTime updateTime;
