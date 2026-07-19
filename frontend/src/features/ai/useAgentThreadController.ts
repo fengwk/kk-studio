@@ -73,7 +73,7 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
   useChatTranscriptAutoScroll(
     bodyRef,
     timeline.messages.length,
-    entries.length + inputs.length + events.length,
+    entries.length + events.length,
   )
   useHarnessThreadEventStream(threadId, Boolean(threadId) && eventsQuery.isSuccess)
 
@@ -154,6 +154,12 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
       case 'clear-draft':
         setDraft('')
         return
+      case 'stop':
+        void stopThread()
+        return
+      case 'retry':
+        void retryThread()
+        return
       default:
         setActionError(`未知命令：${command.id}`)
     }
@@ -223,9 +229,6 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
       yolo: { enabled: Boolean(timeline.runtimeContext.yoloEnabled) },
     },
     taskTimeline,
-    controlsPending: observability.yoloPending,
-    stopPending: stopMutation.isPending,
-    retryPending: retryMutation.isPending,
     actionError,
     dismissActionError: () => setActionError(null),
     setDraft,

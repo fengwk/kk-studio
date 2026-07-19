@@ -85,7 +85,6 @@ export function AgentThreadPage() {
       sessionId={sessionId}
       mainThreadId={controller.session?.mainThreadId}
       title={controller.title}
-      threadStatus={controller.thread?.status}
       onBack={() => navigate('/sessions')}
       agent={controller.agent}
       timeline={controller.timeline}
@@ -99,7 +98,6 @@ export function AgentThreadPage() {
       disabled={controller.disabled}
       observability={controller.observability}
       taskTimeline={controller.taskTimeline}
-      controlsPending={controller.controlsPending}
       actionError={controller.actionError}
       onDismissActionError={controller.dismissActionError}
       onDraftChange={controller.setDraft}
@@ -107,10 +105,6 @@ export function AgentThreadPage() {
       onCommand={controller.runCommand}
       onBranch={(entry) => branchMutation.mutate(entry)}
       branchPending={branchMutation.isPending}
-      onStop={controller.stopThread}
-      onRetry={controller.retryThread}
-      stopPending={controller.stopPending}
-      retryPending={controller.retryPending}
     />
   )
 }

@@ -82,6 +82,7 @@ describe('thread timeline edge branches', () => {
     expect(timeline.messages.some((m) => m.role === 'tool' && m.attachments.length > 0)).toBe(true)
     expect(timeline.hasLiveProjection).toBe(false)
     expect(timeline.hasPendingInputs).toBe(false)
+    expect(timeline.queuedMessages).toEqual([])
   })
 
   it('keeps pending input after applied marker is absent and ignores blank input text', () => {
@@ -93,11 +94,12 @@ describe('thread timeline edge branches', () => {
       ],
       [],
     )
-    expect(timeline.messages).toMatchObject([{ role: 'user', text: '可见' }])
+    expect(timeline.messages).toEqual([])
+    expect(timeline.queuedMessages).toMatchObject([{ role: 'user', text: '可见' }])
     expect(timeline.hasPendingInputs).toBe(true)
   })
 
-  it('keeps durable and queued custom SYSTEM and USER messages in transcript order', () => {
+  it('keeps durable custom messages in transcript and queued messages in decoration order', () => {
     const timeline = buildThreadTimeline(
       [
         entry('custom-system', 'custom_message', messagePayload('SYSTEM', [{ type: 'text', text: 'durable system' }])),
@@ -113,6 +115,8 @@ describe('thread timeline edge branches', () => {
     expect(timeline.messages).toMatchObject([
       { role: 'system', text: 'durable system' },
       { role: 'user', text: 'durable user' },
+    ])
+    expect(timeline.queuedMessages).toMatchObject([
       { role: 'system', text: 'queued system' },
       { role: 'user', text: 'queued user' },
     ])
