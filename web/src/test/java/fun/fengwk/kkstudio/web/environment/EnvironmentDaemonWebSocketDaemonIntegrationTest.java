@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -20,14 +21,12 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonGateway;
-import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
-import fun.fengwk.kkstudio.core.environment.service.ToolEnvironmentCapabilityApplicationService;
-import fun.fengwk.kkstudio.core.environment.service.model.ToolEnvironment;
 import fun.fengwk.kkstudio.core.harness.tool.worker.DatabaseEnvironmentToolInvocationWorkerStore;
 import fun.fengwk.kkstudio.harness.daemon.DaemonConfig;
 import fun.fengwk.kkstudio.harness.daemon.DaemonRuntime;
 import fun.fengwk.kkstudio.harness.daemon.DaemonToolRegistry;
 import fun.fengwk.kkstudio.harness.daemon.coding.ArtifactSource;
+import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
@@ -42,7 +41,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
@@ -65,15 +63,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, classes = WebTestApplication.class)
 class EnvironmentDaemonWebSocketDaemonIntegrationTest {
 
-  private static final long ENVIRONMENT_ID = 42L;
+  private static final String ENVIRONMENT_NAME = "env-42";
   private static final long INVOCATION_ID = 99L;
 
   @LocalServerPort private int port;
 
   @Autowired private EnvironmentDaemonGateway gateway;
 
-  @MockitoBean private ToolEnvironmentRepository environmentRepository;
-  @MockitoBean private ToolEnvironmentCapabilityApplicationService capabilityService;
   @MockitoBean private DatabaseEnvironmentToolInvocationWorkerStore invocationStore;
   @MockitoBean private ToolInvocationTransactions transactions;
   @MockitoBean private ArtifactStore artifactStore;
@@ -86,13 +82,11 @@ class EnvironmentDaemonWebSocketDaemonIntegrationTest {
 
     DaemonToolRegistry registry = new DaemonToolRegistry();
     registry.register(new CompletingTool(descriptor));
-    DaemonRuntime runtime = new DaemonRuntime(daemonConfig(), registry);
+    DaemonRuntime runtime =
+        new DaemonRuntime(daemonConfig(), registry, DaemonSkillRegistry.empty());
     try {
       runtime.start();
 
-      verify(capabilityService, timeout(10_000)).heartbeat(Long.toString(ENVIRONMENT_ID));
-      verify(capabilityService, timeout(10_000))
-          .updateCapabilities(eq(Long.toString(ENVIRONMENT_ID)), anyString());
       verify(transactions, timeout(10_000)).start(eq(claimed), any());
       ArgumentCaptor<ToolResult> resultCaptor = ArgumentCaptor.forClass(ToolResult.class);
       verify(transactions, timeout(10_000))
@@ -122,7 +116,8 @@ class EnvironmentDaemonWebSocketDaemonIntegrationTest {
     DaemonToolRegistry registry = new DaemonToolRegistry();
     registry.register(new ArtifactCompletingTool(descriptor, local));
     ArtifactSource source = ignored -> bytes;
-    DaemonRuntime runtime = new DaemonRuntime(daemonConfig(), registry, source);
+    DaemonRuntime runtime =
+        new DaemonRuntime(daemonConfig(), registry, DaemonSkillRegistry.empty(), source);
     try {
       runtime.start();
 
@@ -154,7 +149,8 @@ class EnvironmentDaemonWebSocketDaemonIntegrationTest {
     BlockingTool tool = new BlockingTool(descriptor);
     DaemonToolRegistry registry = new DaemonToolRegistry();
     registry.register(tool);
-    DaemonRuntime runtime = new DaemonRuntime(daemonConfig(), registry);
+    DaemonRuntime runtime =
+        new DaemonRuntime(daemonConfig(), registry, DaemonSkillRegistry.empty());
     try {
       runtime.start();
       assertTrue(tool.started.await(10, TimeUnit.SECONDS));
@@ -180,14 +176,9 @@ class EnvironmentDaemonWebSocketDaemonIntegrationTest {
   private ClaimedToolInvocation configureClaimedInvocation(ToolDescriptor descriptor) {
     ToolInvocation invocation = invocation();
     ClaimedToolInvocation claimed = new ClaimedToolInvocation(invocation, false);
-    ToolEnvironment environment = new ToolEnvironment();
-    environment.setId(ENVIRONMENT_ID);
-    environment.setCapabilitiesJson(
-        new DaemonToolCapabilitiesCodec()
-            .encode(new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(descriptor))));
-    when(environmentRepository.getById(ENVIRONMENT_ID)).thenReturn(environment);
-    when(invocationStore.claimDue(eq(ENVIRONMENT_ID), anyString(), any(), any()))
+    when(invocationStore.claimDue(eq(ENVIRONMENT_NAME), anyString(), any(), any()))
         .thenReturn(Optional.of(claimed), Optional.empty());
+    when(invocationStore.listDueEnvironmentCandidates(any(), anyInt())).thenReturn(List.of());
     when(transactions.start(eq(claimed), any())).thenReturn(true);
     when(transactions.terminate(eq(claimed), any(), any(), any(), any())).thenReturn(true);
     return claimed;
@@ -196,13 +187,14 @@ class EnvironmentDaemonWebSocketDaemonIntegrationTest {
   private DaemonConfig daemonConfig() {
     return new DaemonConfig(
         URI.create("ws://localhost:" + port + EnvironmentDaemonWebSocketHandler.PATH),
-        Long.toString(ENVIRONMENT_ID),
+        ENVIRONMENT_NAME,
         "websocket-integration-daemon",
         Duration.ofSeconds(30),
         Duration.ofMillis(50),
         Duration.ofSeconds(1),
         Duration.ofSeconds(10),
-        "test-daemon-token");
+        "test-daemon-token",
+        List.of());
   }
 
   private static ToolDescriptor descriptor() {
@@ -232,7 +224,7 @@ class EnvironmentDaemonWebSocketDaemonIntegrationTest {
         "echo",
         "1",
         ToolTargetType.ENVIRONMENT,
-        ENVIRONMENT_ID,
+        ENVIRONMENT_NAME,
         "{}",
         status,
         PermissionAction.ALLOW,

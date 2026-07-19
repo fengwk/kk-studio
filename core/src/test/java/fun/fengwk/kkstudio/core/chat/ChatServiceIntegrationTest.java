@@ -158,7 +158,6 @@ class ChatServiceIntegrationTest {
 
   private static HarnessSessionCreateDTO sessionCreate(String agentId, String title) {
     HarnessSessionCreateDTO create = new HarnessSessionCreateDTO();
-    create.setAgentDefinitionId(agentId);
     create.setTitle(title);
     create.setYoloEnabled(false);
     return create;

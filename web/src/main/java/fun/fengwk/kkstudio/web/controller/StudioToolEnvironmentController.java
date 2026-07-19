@@ -1,79 +1,67 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.page.Page;
-import fun.fengwk.convention4j.api.page.PageQuery;
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
 import lombok.AllArgsConstructor;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
-import fun.fengwk.kkstudio.core.environment.service.ToolEnvironmentService;
-import fun.fengwk.kkstudio.share.model.ToolEnvironmentCreateDTO;
-import fun.fengwk.kkstudio.share.model.ToolEnvironmentDTO;
-import fun.fengwk.kkstudio.share.model.ToolEnvironmentUpdateDTO;
+import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironment;
+import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.share.model.LiveEnvironmentDTO;
+import fun.fengwk.kkstudio.share.model.LiveEnvironmentSkillDTO;
+import fun.fengwk.kkstudio.share.model.LiveEnvironmentToolDTO;
 
-import java.util.NoSuchElementException;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * Global Environment CRUD API.
+ * Read-only live Environment registry API.
  *
- * <p>所有路径 / DTO 边界上的 id 都是十进制字符串形式的 snowflake id，与项目内其它 snowflake 资源保持一致；服务层在内部严格解析为 {@code long}
- * 后再访问数据库。
- *
- * <p>错误映射：malformed / non-positive id → 400；id 解析通过但找不到记录 → 404；存在 {@code tool_invocation} 引用 →
- * 409；其它业务校验（name 重复、description / name 非法等）→ 400。
- *
- * <p>capabilities 和 last-seen 仅由 daemon-facing application service 写入，本控制器不接受这两个字段。
+ * <p>Environments are server-memory only; there is no create/update/delete surface. Daemon
+ * connections populate the registry through the WebSocket gateway.
  */
 @AllArgsConstructor
 @RequestMapping("/api/environments")
 @RestController
 public class StudioToolEnvironmentController {
 
-  private final ToolEnvironmentService toolEnvironmentService;
+  private final LiveEnvironmentRegistry environmentRegistry;
 
   @GetMapping
-  public Result<Page<ToolEnvironmentDTO>> pageEnvironments(
-      @RequestParam(value = "pageNumber", defaultValue = "1") int pageNumber,
-      @RequestParam(value = "pageSize", defaultValue = "50") int pageSize) {
-    return Results.ok(toolEnvironmentService.pageEnvironments(new PageQuery(pageNumber, pageSize)));
-  }
-
-  @PostMapping
-  public Result<ToolEnvironmentDTO> createEnvironment(
-      @RequestBody ToolEnvironmentCreateDTO createDTO) {
-    return Results.created(toolEnvironmentService.createEnvironment(createDTO));
-  }
-
-  @PutMapping("/{id}")
-  public Result<ToolEnvironmentDTO> updateEnvironment(
-      @PathVariable("id") String id, @RequestBody ToolEnvironmentUpdateDTO updateDTO) {
-    try {
-      return Results.ok(toolEnvironmentService.updateEnvironment(id, updateDTO));
-    } catch (NoSuchElementException error) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
+  public Result<List<LiveEnvironmentDTO>> listEnvironments() {
+    List<LiveEnvironmentDTO> result = new ArrayList<>();
+    for (LiveEnvironment environment : environmentRegistry.list()) {
+      result.add(toDto(environment));
     }
+    return Results.ok(List.copyOf(result));
   }
 
-  @DeleteMapping("/{id}")
-  public Result<Void> deleteEnvironment(@PathVariable("id") String id) {
-    try {
-      toolEnvironmentService.deleteEnvironment(id);
-      return Results.noContent();
-    } catch (NoSuchElementException error) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
-    } catch (IllegalStateException error) {
-      throw new ResponseStatusException(HttpStatus.CONFLICT, error.getMessage(), error);
+  private static LiveEnvironmentDTO toDto(LiveEnvironment environment) {
+    LiveEnvironmentDTO dto = new LiveEnvironmentDTO();
+    dto.setName(environment.environmentName());
+    dto.setStatus(environment.status().name());
+    dto.setLastSeen(environment.lastSeenAt());
+    List<LiveEnvironmentToolDTO> tools = new ArrayList<>();
+    for (ToolDescriptor tool : environment.tools()) {
+      LiveEnvironmentToolDTO toolDto = new LiveEnvironmentToolDTO();
+      toolDto.setName(tool.name());
+      toolDto.setVersion(tool.version());
+      toolDto.setDescription(tool.description());
+      tools.add(toolDto);
     }
+    dto.setTools(List.copyOf(tools));
+    List<LiveEnvironmentSkillDTO> skills = new ArrayList<>();
+    for (DaemonSkillDescriptor skill : environment.skills()) {
+      LiveEnvironmentSkillDTO skillDto = new LiveEnvironmentSkillDTO();
+      skillDto.setName(skill.name());
+      skillDto.setDescription(skill.description());
+      skills.add(skillDto);
+    }
+    dto.setSkills(List.copyOf(skills));
+    return dto;
   }
 }

@@ -1196,7 +1196,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     row.setToolName(prepared.binding().descriptor().name());
     row.setToolVersion(prepared.binding().descriptor().version());
     row.setTargetType(prepared.binding().targetType().name());
-    row.setEnvironmentId(prepared.binding().environmentId());
+    row.setEnvironmentName(prepared.binding().environmentName());
     row.setArgumentsJson(prepared.call().argumentsJson());
     row.setStatus(prepared.initialStatus().name());
     row.setPermissionAction(prepared.permissionAction().name());

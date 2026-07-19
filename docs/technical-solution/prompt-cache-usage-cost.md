@@ -431,7 +431,7 @@ tokenReadRatio =
 
 ### Tool Binding 解析
 
-`tools` 字段可以是 `name@version` 或单独 `name`。单独 `name` 仅在 registered tool factory 中恰好匹配一个版本时成功；多版本同名 tool 抛错；任何 `ENVIRONMENT` tool 必须在调用端额外提供 `environmentId`，单独出现的 `ENVIRONMENT` 引用同样抛错。
+`tools` 字段可以是 `name@version` 或单独 `name`。单独 `name` 仅在 registered tool factory 中恰好匹配一个版本时成功；多版本同名 tool 抛错；任何 `ENVIRONMENT` tool 必须在调用端额外提供 `environmentName`，单独出现的 `ENVIRONMENT` 引用同样抛错。
 
 ### 进程生命周期
 

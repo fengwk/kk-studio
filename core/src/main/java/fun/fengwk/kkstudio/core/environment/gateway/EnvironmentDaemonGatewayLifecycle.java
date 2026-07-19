@@ -18,7 +18,7 @@ public final class EnvironmentDaemonGatewayLifecycle implements SmartLifecycle {
   private static final System.Logger LOGGER =
       System.getLogger(EnvironmentDaemonGatewayLifecycle.class.getName());
 
-  private final EnvironmentDaemonGateway gateway;
+  private final Runnable pollAction;
   private final Duration pollInterval;
   private final ScheduledExecutorService scheduler;
   private final boolean autoStartup;
@@ -29,7 +29,14 @@ public final class EnvironmentDaemonGatewayLifecycle implements SmartLifecycle {
       EnvironmentDaemonGateway gateway,
       HarnessRuntimeProperties runtimeProperties,
       ScheduledExecutorService scheduler) {
-    this.gateway = Objects.requireNonNull(gateway, "gateway");
+    this(Objects.requireNonNull(gateway, "gateway")::pollOnce, runtimeProperties, scheduler);
+  }
+
+  EnvironmentDaemonGatewayLifecycle(
+      Runnable pollAction,
+      HarnessRuntimeProperties runtimeProperties,
+      ScheduledExecutorService scheduler) {
+    this.pollAction = Objects.requireNonNull(pollAction, "pollAction");
     runtimeProperties = Objects.requireNonNull(runtimeProperties, "runtimeProperties");
     this.pollInterval = runtimeProperties.requirePollInterval();
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
@@ -88,7 +95,7 @@ public final class EnvironmentDaemonGatewayLifecycle implements SmartLifecycle {
 
   private void pollSafely() {
     try {
-      gateway.pollOnce();
+      pollAction.run();
     } catch (RuntimeException error) {
       LOGGER.log(Level.WARNING, "Environment daemon gateway poll failed", error);
     }

@@ -19,7 +19,7 @@
 | `agent_provider` | Provider 连接和配置 | `name` 唯一 |
 | `agent_model` | 模型能力和配置 | `name` 唯一 |
 | `agent_definition` | Agent 定义、默认模型和 config | `name` 唯一 |
-| `tool_environment` | 全局 Environment daemon registry | `name` 唯一；capability/last-seen 由 daemon 更新 |
+| `live Environment registry` | 全局 Environment daemon registry | `name` 唯一；capability/last-seen 由 daemon 更新 |
 | `comfyui_workflow_api` | ComfyUI 工作流卡片 | `api_name` 唯一 |
 
 这些资源不带 Tenant、Workspace membership 或 ACL。资源 `version` 支持并发修改检测；一次 Turn 使用当前 Entry path fold 得到的冻结 Agent Snapshot、配置与解析后的 binding，不回看可变资源配置。
@@ -56,11 +56,11 @@ Session **不**保存 Branch 或配置副本；`main_thread_id` 是创建时原�
 
 | 表 | 职责 | 关键约束 |
 | --- | --- | --- |
-| `tool_invocation` | Tool 权限、目标、lease、结果与终态 | 唯一 `(thread_id, tool_call_id)`、`(assistant_entry_id, ordinal)`；索引 `(thread_id, status, ordinal)`、`(target_type, status, deadline_at, id)`、`(environment_id, status, deadline_at, id)` |
+| `tool_invocation` | Tool 权限、目标、lease、结果与终态 | 唯一 `(thread_id, tool_call_id)`、`(assistant_entry_id, ordinal)`；索引 `(thread_id, status, ordinal)`、`(target_type, status, deadline_at, id)`、`(environment_name, status, deadline_at, id)` |
 | `tool_artifact` | 全局不可变 Tool 输出 bytes | content、media type、size、SHA-256 |
 | `harness_subagent_task` | parent invocation → child Session/Thread | 主键 `parent_invocation_id`；唯一 `child_thread_id`；索引 `(parent_session_id, status)` |
 
-`tool_invocation` 冻结 tool name/version、target、environment_id、arguments、permission、`side_effect`、deadline。Lease recovery 使用冻结 `side_effect`。Artifact bytes 不进入 Session payload；Tool Result 只保存 artifact reference。
+`tool_invocation` 冻结 tool name/version、target、environment_name、arguments、permission、`side_effect`、deadline。Lease recovery 使用冻结 `side_effect`。Artifact bytes 不进入 Session payload；Tool Result 只保存 artifact reference。
 
 Subagent task 字段：`parent_session_id`、`parent_thread_id`、`root_thread_id`、`child_session_id`、`child_thread_id`、`target_agent`、`working_copy_policy` / `working_copy_revision`、`max_turns`、`status`、`report_json`。`root_thread_id` 是 Child Tool ASK relay 的根 UI 投影目标。
 
@@ -92,7 +92,7 @@ H2：`numeric(32,12)` / `clob` / `timestamp(3)`；MySQL：`decimal(32,12)` / `lo
 
 ## 兼容资源表
 
-Harness 运行时与前端 Timeline 使用 `harness_*`、`tool_*`、`model_usage_record` 和 `tool_environment`。Provider / Model / AgentDefinition 使用 `agent_provider`、`agent_model`、`agent_definition`。
+Harness 运行时与前端 Timeline 使用 `harness_*`、`tool_*`、`model_usage_record` 和 `live Environment registry`。Provider / Model / AgentDefinition 使用 `agent_provider`、`agent_model`、`agent_definition`。
 
 ## 事务与删除
 

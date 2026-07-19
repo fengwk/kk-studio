@@ -31,8 +31,8 @@ public class ToolInvocationDO {
   /** 目标类型：CONTROL / CLOUD / ENVIRONMENT。 */
   private String targetType;
 
-  /** ENVIRONMENT 目标 id；其他类型为空。 */
-  private Long environmentId;
+  /** ENVIRONMENT 目标实时名称；其他类型为空。 */
+  private String environmentName;
 
   /** interceptor 处理后的参数 JSON。 */
   private String argumentsJson;
