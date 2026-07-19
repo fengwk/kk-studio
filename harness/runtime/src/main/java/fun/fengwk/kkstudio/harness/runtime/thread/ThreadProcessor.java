@@ -262,7 +262,6 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
   private enum TurnOutcome {
     CONTINUE,
     COMPLETED,
-    WAITING_EXTERNAL,
     LOST_OWNERSHIP,
     FAILED,
     POLICY_REJECTED
@@ -322,9 +321,6 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
           case CONTINUE -> {
             continue;
           }
-          case WAITING_EXTERNAL -> {
-            return LoopExit.WAITING_EXTERNAL;
-          }
           case LOST_OWNERSHIP -> {
             return LoopExit.LOST_OWNERSHIP;
           }
@@ -356,9 +352,6 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
         switch (outcome) {
           case CONTINUE, COMPLETED -> {
             continue;
-          }
-          case WAITING_EXTERNAL -> {
-            return LoopExit.WAITING_EXTERNAL;
           }
           case LOST_OWNERSHIP -> {
             return LoopExit.LOST_OWNERSHIP;

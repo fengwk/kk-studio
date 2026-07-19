@@ -31,8 +31,10 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventType;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStatus;
@@ -114,6 +116,7 @@ class HarnessThreadPermissionRelayIntegrationTest {
             null);
     when(toolPreparationService.prepare(any(), any(), any(), anyBoolean(), any(), any(), any()))
         .thenReturn(List.of(asked));
+    ModelUsageDraft usageDraft = usageDraft();
 
     boolean prepared =
         transactions.prepareTools(
@@ -122,8 +125,13 @@ class HarnessThreadPermissionRelayIntegrationTest {
             ASSISTANT_ENTRY_ID,
             new MessageEntryPayload(
                 new AgentMessage(
-                    AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("calling tool")))),
-            usageDraft(),
+                    AgentMessageRole.ASSISTANT,
+                    List.of(
+                        new TextMessageContent("calling tool"),
+                        new ToolCallMessageContent("call-ask", "write", "{}"))),
+                new AssistantMessageMetadata(
+                    ProviderStopReason.TOOL_CALLS, usageDraft.usage(), usageDraft.cost())),
+            usageDraft,
             List.of(call),
             List.of(binding),
             null,

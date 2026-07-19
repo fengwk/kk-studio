@@ -92,6 +92,8 @@ class DatabaseTaskRuntimeLifecycleTest {
     pending.setSequence(1L);
     pending.setInputType("user_message");
     pending.setPayloadJson("{\"type\":\"message\"}");
+    pending.setClientMessageId("pending-retry");
+    pending.setStatus("queued");
     pending.setCreateTime(now);
     inputMapper.insert(pending);
 

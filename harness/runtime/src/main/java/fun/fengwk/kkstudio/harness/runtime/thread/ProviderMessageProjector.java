@@ -27,7 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 将语义 Context 与 Provider SDK 绑定地投影为 ProviderMessage。
+ * 将语义 Context 投影为与 Provider SDK 无关的 ProviderMessage。
  *
  * <p>对当前连续 Tool chain 中未配对的 ToolCall，在角色切换或 Context 结束前合成 error ToolResult：{@code No result
  * provided}。Synthetic result 只存在于本次 Provider request，不写 Session Entry；后续重新出现相同 toolCallId 仍按新的

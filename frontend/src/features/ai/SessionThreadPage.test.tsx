@@ -52,7 +52,7 @@ describe('Session thread navigation', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/sessions/s1/threads/secondary')
   })
 
-  it('resolves an explicit legacy Thread deep link to its owning Session route', async () => {
+  it('resolves an explicit Thread deep link to its owning Session route', async () => {
     vi.mocked(harnessService.getThread).mockResolvedValue(thread('secondary'))
     renderPage('/threads/secondary', <ThreadDeepLinkPage />)
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/sessions/s1/threads/secondary'))

@@ -201,6 +201,7 @@ class StudioHarnessObservabilityControllerTest {
     task.setParentInvocationId(parentInvocationId);
     task.setParentSessionId(parentSessionId);
     task.setParentThreadId(parentThreadId);
+    task.setRootThreadId(parentThreadId);
     task.setChildSessionId(childSessionId);
     task.setChildThreadId(childThreadId);
     task.setTargetAgent("Child");
