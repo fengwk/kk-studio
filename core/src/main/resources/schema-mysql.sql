@@ -335,3 +335,24 @@ create table if not exists canvas_command (
     primary key (id),
     unique key uk_canvas_command (workspace_id, command_id)
 ) engine=InnoDB default charset=utf8mb4 comment='canvas 幂等命令';
+
+create table if not exists chat (
+    id                  bigint not null comment 'Snowflake 主键',
+    title               varchar(256) null comment '可选标题',
+    default_agent_id    bigint null comment '可选默认 Agent definition id；无外键，Agent 删除后可保留陈旧值',
+    gmt_create          datetime(3) not null default current_timestamp(3) comment '创建时间',
+    gmt_modified        datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
+    version             bigint not null default '0' comment '数据版本号',
+    primary key (id),
+    key idx_chat_modified (gmt_modified, id)
+) engine=InnoDB default charset=utf8mb4 comment='Chat 会话集合';
+
+create table if not exists chat_session (
+    id                  bigint not null comment 'Snowflake 主键',
+    chat_id             bigint not null comment '所属 Chat',
+    session_id          bigint not null comment '关联 HarnessSession',
+    gmt_create          datetime(3) not null default current_timestamp(3) comment '关联创建时间',
+    primary key (id),
+    unique key uk_chat_session (chat_id, session_id),
+    key idx_chat_session_session (session_id)
+) engine=InnoDB default charset=utf8mb4 comment='Chat 与 HarnessSession 多对多成员关系';

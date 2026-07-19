@@ -27,6 +27,8 @@ public final class AgentIdGenerator {
   public static final String CANVAS_NODE = "canvas_node";
   public static final String CANVAS_LINK = "canvas_link";
   public static final String CANVAS_COMMAND = "canvas_command";
+  public static final String CHAT = "chat";
+  public static final String CHAT_SESSION = "chat_session";
 
   private AgentIdGenerator() {}
 
@@ -100,5 +102,13 @@ public final class AgentIdGenerator {
 
   public static long nextCanvasCommandId() {
     return GlobalSnowflakeIdGenerator.next(CANVAS_COMMAND);
+  }
+
+  public static long nextChatId() {
+    return GlobalSnowflakeIdGenerator.next(CHAT);
+  }
+
+  public static long nextChatSessionId() {
+    return GlobalSnowflakeIdGenerator.next(CHAT_SESSION);
   }
 }
