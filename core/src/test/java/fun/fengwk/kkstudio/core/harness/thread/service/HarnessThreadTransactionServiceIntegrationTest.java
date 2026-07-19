@@ -13,6 +13,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.core.agent.definition.repo.impl.mapper.AgentDefinitionMapper;
+import fun.fengwk.kkstudio.core.agent.definition.repo.impl.model.AgentDefinitionDO;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionEntryMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionEntryDO;
 import fun.fengwk.kkstudio.core.harness.thread.store.MysqlHarnessThreadStore;
@@ -32,6 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.AgentThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventDraft;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventType;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
@@ -60,6 +63,7 @@ class HarnessThreadTransactionServiceIntegrationTest {
   @Autowired private HarnessSessionEntryMapper entryMapper;
   @Autowired private HarnessThreadEventMapper eventMapper;
   @Autowired private ToolInvocationMapper invocationMapper;
+  @Autowired private AgentDefinitionMapper agentDefinitionMapper;
 
   @Test
   void createsAgentlessRootAndRejectsUnknownBranchOrigins() {
@@ -93,6 +97,118 @@ class HarnessThreadTransactionServiceIntegrationTest {
         IllegalStateException.class,
         () ->
             transactions.createThreadFromEntry(plain.sessionId(), yoloEntries.get(0).getId(), now));
+  }
+
+  /**
+   * 分支创建语义：无 Agent 路径保持空；路径取最后一次 AGENT_CHANGE；model/variant 用当前 Definition 而非父 Thread override；缺失
+   * Definition 原子失败且不落 Thread；不追加合成 AGENT_CHANGE。
+   */
+  @Test
+  void initializesBranchThreadFromLastAgentOnPathWithCurrentDefinitionModel() {
+    Instant now = Instant.parse("2026-02-08T00:00:00Z");
+    ThreadTransactions.SessionCreateResult created =
+        transactions.createSession("branch-agent", false, now);
+    long sessionId = created.sessionId();
+    long mainThreadId = created.mainThread().id();
+    long rootEntryId = created.mainThread().headEntryId();
+
+    // 无 AGENT_CHANGE 时 Secondary Thread 仍为空 Agent / 空 model / yolo=false。
+    AgentThread agentlessBranch =
+        transactions.createThreadFromEntry(sessionId, rootEntryId, now.plusSeconds(1));
+    assertEquals(rootEntryId, agentlessBranch.headEntryId());
+    assertNull(agentlessBranch.activeAgentDefinitionId());
+    assertNull(agentlessBranch.activeAgentName());
+    assertNull(agentlessBranch.modelId());
+    assertNull(agentlessBranch.variant());
+    assertFalse(agentlessBranch.yoloEnabled());
+    assertEquals(
+        1, eventMapper.countByType(agentlessBranch.id(), ThreadEventType.THREAD_STARTED.value()));
+    assertEquals(
+        0, eventMapper.countByType(agentlessBranch.id(), ThreadEventType.AGENT_CHANGED.value()));
+
+    long secondAgentId = 9_100_001L;
+    AgentDefinitionDO secondAgent = new AgentDefinitionDO();
+    secondAgent.setId(secondAgentId);
+    secondAgent.setName("branch-second-agent");
+    secondAgent.setDescription("second agent for path selection");
+    secondAgent.setSystemPrompt("second");
+    secondAgent.setModelId(1L);
+    secondAgent.setVariant("second-variant");
+    secondAgent.setConfigJson(
+        "{\"tools\":[],\"skills\":[],\"allowedSubagents\":[],\"executionPolicy\":{}}");
+    assertEquals(1, agentDefinitionMapper.insert(secondAgent));
+
+    // enqueue 会把 IDLE 推到 RUNNING，之后才能 tryAcquire。
+    transactions.submitSetAgent(
+        mainThreadId, SEED_AGENT_ID, "captured-seed-name", "set-seed", now.plusSeconds(3));
+    transactions.submitSetAgent(
+        mainThreadId, secondAgentId, "captured-second-name", "set-second", now.plusSeconds(4));
+    // 父 Thread 显式 model override 不得被分支复用。
+    transactions.submitSetModel(
+        mainThreadId,
+        "parent-override-model",
+        "parent-override-variant",
+        "set-model",
+        now.plusSeconds(5));
+    assertTrue(
+        threadStore
+            .tryAcquire(mainThreadId, "branch-owner", now.plusSeconds(2), Duration.ofMinutes(1))
+            .isPresent());
+    ThreadTransactions.HarvestResult harvest =
+        transactions.harvestQueuedInputs(mainThreadId, "branch-owner", now.plusSeconds(6));
+    assertTrue(harvest.harvested());
+    HarnessThreadDO mainAfter = threadMapper.find(mainThreadId);
+    assertEquals(secondAgentId, mainAfter.getActiveAgentDefinitionId());
+    assertEquals("parent-override-model", mainAfter.getModelId());
+    assertEquals("parent-override-variant", mainAfter.getVariant());
+
+    List<HarnessSessionEntryDO> entriesBeforeBranch = entryMapper.listBySession(sessionId);
+    assertEquals(
+        List.of("root", "agent_change", "agent_change"),
+        entriesBeforeBranch.stream().map(HarnessSessionEntryDO::getEntryType).toList());
+    long headAfterAgents = mainAfter.getHeadEntryId();
+    assertEquals(entriesBeforeBranch.get(2).getId(), headAfterAgents);
+
+    // 更新当前 Definition model/variant：分支必须读到更新后的值，而非历史 apply 时快照。
+    secondAgent.setModelId(1L);
+    secondAgent.setVariant("current-definition-variant");
+    assertEquals(1, agentDefinitionMapper.updateById(secondAgent));
+
+    int threadCountBefore = threadMapper.listBySession(sessionId).size();
+    int entryCountBefore = entryMapper.listBySession(sessionId).size();
+    AgentThread branch =
+        transactions.createThreadFromEntry(sessionId, headAfterAgents, now.plusSeconds(7));
+    assertEquals(threadCountBefore + 1, threadMapper.listBySession(sessionId).size());
+    assertEquals(entryCountBefore, entryMapper.listBySession(sessionId).size());
+    assertEquals(headAfterAgents, branch.headEntryId());
+    assertEquals(secondAgentId, branch.activeAgentDefinitionId());
+    assertEquals("captured-second-name", branch.activeAgentName());
+    assertEquals("1", branch.modelId());
+    assertEquals("current-definition-variant", branch.variant());
+    assertFalse(branch.yoloEnabled());
+    assertEquals(1, eventMapper.countByType(branch.id(), ThreadEventType.THREAD_STARTED.value()));
+    assertEquals(0, eventMapper.countByType(branch.id(), ThreadEventType.AGENT_CHANGED.value()));
+
+    // 从较早 seed AGENT_CHANGE 分支应取 seed 身份与 seed 当前 Definition model，而非路径上更晚的 second。
+    long seedAgentChangeId = entriesBeforeBranch.get(1).getId();
+    AgentThread olderBranch =
+        transactions.createThreadFromEntry(sessionId, seedAgentChangeId, now.plusSeconds(8));
+    assertEquals(SEED_AGENT_ID, olderBranch.activeAgentDefinitionId());
+    assertEquals("captured-seed-name", olderBranch.activeAgentName());
+    assertEquals("1", olderBranch.modelId());
+    assertEquals("default", olderBranch.variant());
+
+    // 历史 Definition 删除后分支创建必须原子失败，不落 Thread。
+    assertEquals(1, agentDefinitionMapper.deleteById(secondAgentId));
+    int threadCountBeforeMissing = threadMapper.listBySession(sessionId).size();
+    IllegalArgumentException missing =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                transactions.createThreadFromEntry(sessionId, headAfterAgents, now.plusSeconds(9)));
+    assertTrue(missing.getMessage().startsWith("unknown agent definition:"));
+    assertEquals(threadCountBeforeMissing, threadMapper.listBySession(sessionId).size());
+    assertEquals(entryCountBefore, entryMapper.listBySession(sessionId).size());
   }
 
   @Test

@@ -253,9 +253,20 @@ headEntryId = fromEntryId
 status = IDLE
 inputSequence = 0
 processorToken = null
+yoloEnabled = false
 ```
 
-不复制 Entry、ToolInvocation、Event。新 Thread 的 agent/model/yolo 初始为空/false，需通过有序 Input 设置。
+不复制 Entry、ToolInvocation、Event，也不为分支创建追加合成 `AGENT_CHANGE` Entry（head 保持 `fromEntryId`，Entry Tree 仍 append-only）。
+
+Agent / Model 初始化：
+
+1. 加载 Session Entry Tree 上 root → `fromEntryId` 的路径。
+2. 在路径中取最后一次 `AGENT_CHANGE`（仅读其 `agentDefinitionId` 与捕获时的 `agentName`）。
+3. 若无 `AGENT_CHANGE`：Thread 的 agent/model/variant 为空（与无 Agent Session 一致）。
+4. 若存在：用该 Entry 的 Agent 身份写入 Thread 独立字段，并用该 `agentDefinitionId` 的**当前** AgentDefinition 解析 `modelId`/`variant`。不复用父 Thread 的 model override，也不把 prompt/tools/skills/subagents/policy 写入 Entry 或 Thread。
+5. 历史 AgentDefinition 已不存在时整事务失败（`IllegalArgumentException` / HTTP 404：`unknown agent definition:`），不落半残 Thread。
+
+新 Thread 仅写 `THREAD_STARTED` Event；Pane 状态以 Thread DTO/SSE 为准。后续仍可通过有序 Input（`SET_AGENT` / `SET_MODEL` / `SET_YOLO`）变更。
 
 Tree UI 对齐 pi：
 
