@@ -8,11 +8,19 @@ export function ModalBackdrop({ onClose, children }: { onClose: () => void; chil
   )
 }
 
-export function ModalHeader({ title, onClose }: { title: string; onClose: () => void }) {
+export function ModalHeader({
+  title,
+  onClose,
+  closeDisabled = false,
+}: {
+  title: string
+  onClose: () => void
+  closeDisabled?: boolean
+}) {
   return (
     <div className="modal-header">
       <h2>{title}</h2>
-      <button type="button" className="ghost-btn" onClick={onClose}>
+      <button type="button" className="ghost-btn" onClick={onClose} disabled={closeDisabled}>
         关闭
       </button>
     </div>
