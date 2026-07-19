@@ -19,8 +19,8 @@ describe('EnvironmentsPage', () => {
         skills: [{ name: 'dev', description: 'dev skill' }],
       },
       {
-        name: 'offline-box',
-        status: 'DISCONNECTED',
+        name: 'connecting-box',
+        status: 'CONNECTING',
         lastSeen: null,
         tools: [],
         skills: [],
@@ -36,7 +36,7 @@ describe('EnvironmentsPage', () => {
     expect(screen.getByText('READY')).toBeInTheDocument()
     expect(screen.getByText('bash')).toBeInTheDocument()
     expect(screen.getByText('dev')).toBeInTheDocument()
-    expect(screen.getByText('DISCONNECTED')).toBeInTheDocument()
+    expect(screen.getByText('CONNECTING')).toBeInTheDocument()
   })
 
   it('shows empty registry state', async () => {

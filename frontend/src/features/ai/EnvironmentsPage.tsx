@@ -43,14 +43,15 @@ export function EnvironmentsPage() {
               <StateBlock title="当前没有 live Environment" />
             ) : (
               environments.map((environment) => {
-                const ready = String(environment.status).toUpperCase() === 'READY'
+                const status = String(environment.status).toUpperCase()
+                const ready = status === 'READY'
                 return (
                   <article key={environment.name} className="info-card environment-card">
                     <div className="head">
                       <div className="text-content">
                         <h3>{environment.name}</h3>
                         <p className={ready ? 'status-ready' : 'status-offline'}>
-                          {String(environment.status).toUpperCase() === 'READY' ? 'READY' : 'DISCONNECTED'}
+                          {status}
                         </p>
                       </div>
                     </div>

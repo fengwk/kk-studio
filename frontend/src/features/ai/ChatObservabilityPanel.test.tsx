@@ -82,7 +82,7 @@ describe('ChatObservabilityPanel', () => {
     expect(onYoloChange).toHaveBeenCalled()
   })
 
-  it('shows loading usage and disables yolo without snapshot', () => {
+  it('shows loading usage and disables yolo without Thread state', () => {
     render(
       <ChatObservabilityPanel
         toolInvocations={[]}
@@ -109,7 +109,7 @@ function invocation(status: string): ToolInvocationDTO {
     toolName: 'bash',
     toolVersion: '1',
     targetType: 'environment',
-    environmentId: 'env-1',
+    environmentName: 'env-1',
     argumentsJson: '{"cmd":"ls"}',
     status,
     permissionAction: 'ask',

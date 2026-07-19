@@ -15,26 +15,26 @@ import {
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts'
 
 const entries: HarnessSessionEntryDTO[] = [
-  entry('snapshot', null, 'agent_snapshot', {}),
-  entry('user', 'snapshot', 'message', message('USER', 'original prompt')),
+  entry('root', null, 'root', {}),
+  entry('user', 'root', 'message', message('USER', 'original prompt')),
   entry('assistant', 'user', 'message', message('ASSISTANT', 'answer')),
   entry('tool', 'assistant', 'message', message('TOOL', 'tool result')),
   entry('custom', 'assistant', 'custom_message', message('SYSTEM', 'custom text')),
   entry('label', 'assistant', 'label', { label: 'checkpoint' }),
-  entry('config', 'snapshot', 'model_change', { modelId: 'm1', variant: 'v1' }),
+  entry('config', 'root', 'agent_change', { agentDefinitionId: '1', agentName: 'assistant' }),
 ]
 
 describe('Session Entry Tree', () => {
   it('walks the full parent tree in server child order and applies the two KISS views', () => {
     expect(buildSessionEntryTree(entries, 'conversation').map((item) => item.entry.entryId)).toEqual(['user', 'assistant', 'custom'])
-    expect(buildSessionEntryTree(entries, 'all').map((item) => item.entry.entryId)).toEqual(['snapshot', 'user', 'assistant', 'tool', 'custom', 'label', 'config'])
+    expect(buildSessionEntryTree(entries, 'all').map((item) => item.entry.entryId)).toEqual(['root', 'user', 'assistant', 'tool', 'custom', 'label', 'config'])
   })
 
   it('treats an omitted root parentEntryId as null at the HTTP boundary', () => {
     const rootWithoutParent = {
       entryId: 'root-without-parent',
       sessionId: 's1',
-      entryType: 'agent_snapshot',
+      entryType: 'root',
       payloadJson: '{}',
       createTime: null,
     } as HarnessSessionEntryDTO
@@ -59,15 +59,15 @@ describe('Session Entry Tree', () => {
   it('emits branch connectors only when a row has multiple visible children', () => {
     const rows = buildSessionEntryTree(entries, 'all')
     const byEntryId = new Map(rows.map((row) => [row.entry.entryId, row]))
-    expect(byEntryId.get('snapshot')?.depth).toBe(0)
-    expect(byEntryId.get('snapshot')?.ancestorConnectors).toEqual([])
-    expect(byEntryId.get('snapshot')?.isLastSibling).toBe(true)
+    expect(byEntryId.get('root')?.depth).toBe(0)
+    expect(byEntryId.get('root')?.ancestorConnectors).toEqual([])
+    expect(byEntryId.get('root')?.isLastSibling).toBe(true)
     expect(byEntryId.get('user')?.depth).toBe(1)
     expect(byEntryId.get('user')?.hasBranchConnector).toBe(true)
     expect(byEntryId.get('user')?.isBranchPoint).toBe(false)
     expect(byEntryId.get('user')?.ancestorConnectors).toEqual([{ continues: false }])
     // The first linear response after a split stays one level deeper, so it reads as part of
-    // the first branch rather than as a third sibling of the snapshot.
+    // the first branch rather than as a third sibling of the root.
     expect(byEntryId.get('assistant')?.depth).toBe(2)
     expect(byEntryId.get('assistant')?.hasBranchConnector).toBe(false)
     expect(byEntryId.get('assistant')?.isBranchPoint).toBe(true)
@@ -91,14 +91,14 @@ describe('Session Entry Tree', () => {
 
   it('keeps system and tool Entries out of the conversation view while re-attaching visible descendants', () => {
     const tree: HarnessSessionEntryDTO[] = [
-      entry('snapshot', null, 'agent_snapshot', {}),
-      entry('user', 'snapshot', 'message', message('USER', 'a user prompt')),
+      entry('root', null, 'root', {}),
+      entry('user', 'root', 'message', message('USER', 'a user prompt')),
       entry('tool', 'user', 'message', message('TOOL', 'a tool result')),
       entry('assistant', 'tool', 'message', message('ASSISTANT', 'final answer')),
     ]
     const rows = buildSessionEntryTree(tree, 'conversation')
     expect(rows.map((row) => row.entry.entryId)).toEqual(['user', 'assistant'])
-    // `snapshot` and `tool` are hidden; `assistant` re-attaches to `user` without indentation.
+    // `root` and `tool` are hidden; `assistant` re-attaches to `user` without indentation.
     expect(rows[1]?.parentId).toBe('user')
     expect(rows[1]?.depth).toBe(0)
     expect(rows[1]?.ancestorConnectors).toEqual([])
@@ -106,12 +106,12 @@ describe('Session Entry Tree', () => {
 
   it('keeps depth shallow when filtered intermediates hide a branch point', () => {
     const tree: HarnessSessionEntryDTO[] = [
-      entry('snapshot', null, 'agent_snapshot', {}),
-      entry('user1', 'snapshot', 'message', message('USER', 'first user')),
+      entry('root', null, 'root', {}),
+      entry('user1', 'root', 'message', message('USER', 'first user')),
       entry('tool', 'user1', 'message', message('TOOL', 'a tool result')),
       entry('assistant', 'tool', 'message', message('ASSISTANT', 'second reply')),
       entry('custom', 'tool', 'custom_message', message('SYSTEM', 'second branch')),
-      entry('user2', 'snapshot', 'message', message('USER', 'second user')),
+      entry('user2', 'root', 'message', message('USER', 'second user')),
       entry('response', 'user2', 'message', message('ASSISTANT', 'reply')),
     ]
     const rows = buildSessionEntryTree(tree, 'conversation')
@@ -128,7 +128,7 @@ describe('Session Entry Tree', () => {
 
   it('preserves server pre-order when hidden intermediates expose visible siblings', () => {
     const tree: HarnessSessionEntryDTO[] = [
-      entry('root', null, 'agent_snapshot', {}),
+      entry('root', null, 'root', {}),
       entry('left', 'root', 'message', message('USER', 'left')),
       entry('hidden', 'root', 'message', message('TOOL', 'hidden tool')),
       entry('middle', 'hidden', 'message', message('ASSISTANT', 'middle')),
@@ -142,10 +142,10 @@ describe('Session Entry Tree', () => {
   })
 
   it('branches editable USER/CUSTOM entries from their parent and all other entries from themselves', () => {
-    expect(branchTarget(entries[1])).toEqual({ fromEntryId: 'snapshot', draft: 'original prompt' })
+    expect(branchTarget(entries[1])).toEqual({ fromEntryId: 'root', draft: 'original prompt' })
     expect(branchTarget(entries[4])).toEqual({ fromEntryId: 'assistant', draft: 'custom text' })
     expect(branchTarget(entries[2])).toEqual({ fromEntryId: 'assistant', draft: '' })
-    expect(branchTarget(entries[0])).toEqual({ fromEntryId: 'snapshot', draft: '' })
+    expect(branchTarget(entries[0])).toEqual({ fromEntryId: 'root', draft: '' })
   })
 
   it('classifies unknown and malformed Entries while keeping the conversation view free of system records', () => {
@@ -161,7 +161,7 @@ describe('Session Entry Tree', () => {
   it('strips <think>…</think> from assistant previews while keeping the full text in branching drafts', () => {
     const assistant = entry(
       'assistant-thinking',
-      'snapshot',
+      'root',
       'message',
       message('ASSISTANT', '先内部思考。\n\n<think>secret plan</think>'),
     )
@@ -197,7 +197,7 @@ describe('Session Entry Tree', () => {
   })
 
   it('returns the active ancestry chain from a target back to the root in raw parent order', () => {
-    expect(activeAncestry(entries, 'custom')).toEqual(['custom', 'assistant', 'user', 'snapshot'])
+    expect(activeAncestry(entries, 'custom')).toEqual(['custom', 'assistant', 'user', 'root'])
     expect(activeAncestry(entries, null)).toEqual([])
     expect(isOnActivePath(activeAncestry(entries, 'tool'), 'assistant')).toBe(true)
     expect(isOnActivePath(activeAncestry(entries, 'tool'), 'user')).toBe(true)
@@ -209,7 +209,7 @@ describe('Session Entry Tree', () => {
     const resolved = resolveSelection(rows, entries, 'tool')
     expect(resolved?.entryId).toBe('assistant')
     // Root entry with no ancestors resolves to the last visible row.
-    expect(resolveSelection(rows, entries, 'snapshot')?.entryId).toBe('custom')
+    expect(resolveSelection(rows, entries, 'root')?.entryId).toBe('custom')
     expect(resolveSelection(rows, entries, 'missing')?.entryId).toBe('custom')
     expect(resolveSelection([], entries, 'assistant')).toBeNull()
   })

@@ -10,7 +10,6 @@ describe('ChatPanel', () => {
         timeline={{
           messages: [{ id: 'm1', role: 'user', text: 'hello', subjectEntryId: 'e1', createdAt: null }],
           queuedMessages: [],
-          runtimeContext: {},
           hasPendingInputs: false,
           hasLiveProjection: false,
         }}
@@ -40,7 +39,7 @@ describe('ChatPanel', () => {
               toolName: 'bash',
               toolVersion: '1',
               targetType: 'PLATFORM',
-              environmentId: null,
+              environmentName: null,
               argumentsJson: '{}',
               status: 'WAITING_APPROVAL',
               permissionAction: 'ASK',
