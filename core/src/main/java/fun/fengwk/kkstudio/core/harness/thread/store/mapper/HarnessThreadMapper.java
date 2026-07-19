@@ -247,6 +247,13 @@ public interface HarnessThreadMapper extends BaseMapper {
       @Param("status") String status,
       @Param("updateTime") LocalDateTime updateTime);
 
+  /** 外部 durable 结果到达后仅唤醒等待中的 Thread，不能覆盖并发的 stop/failed 终态。 */
+  @Update(
+      "update harness_thread set status = 'RUNNING', gmt_modified = #{updateTime}, version = "
+          + "version + 1 where id = #{threadId} and status = 'WAITING'")
+  int promoteWaitingToRunning(
+      @Param("threadId") long threadId, @Param("updateTime") LocalDateTime updateTime);
+
   @Update(
       """
       update harness_thread

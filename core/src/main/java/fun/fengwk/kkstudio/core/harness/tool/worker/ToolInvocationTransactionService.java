@@ -107,6 +107,7 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
     }
     if (ToolInvocationStatus.valueOf(row.getStatus()).isTerminal()) {
       // 已终态：幂等观察，kick 以便 processor 收敛。
+      threadMapper.promoteWaitingToRunning(row.getThreadId(), utc(now));
       afterCommitKick(row.getThreadId());
       return true;
     }
@@ -123,6 +124,7 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
         invocationMapper.terminateOwned(
             row.getId(), claimedOwner, terminalStatus.name(), resultJson, errorMessage, utc(now));
     if (updated != 1) {
+      threadMapper.promoteWaitingToRunning(row.getThreadId(), utc(now));
       afterCommitKick(row.getThreadId());
       return false;
     }
@@ -156,6 +158,7 @@ public class ToolInvocationTransactionService implements ToolInvocationTransacti
             "errorMessage",
             errorMessage),
         now);
+    threadMapper.promoteWaitingToRunning(row.getThreadId(), utc(now));
     afterCommitKick(row.getThreadId());
     return true;
   }
