@@ -288,7 +288,10 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
   @Transactional
   public ThreadInput submitSetToolset(
       long threadId, List<String> tools, String clientMessageId, Instant now) {
-    ArrayList<String> copy = new ArrayList<>(Objects.requireNonNull(tools, "tools"));
+    if (tools == null) {
+      throw new IllegalArgumentException("tools must not be null");
+    }
+    ArrayList<String> copy = new ArrayList<>(tools);
     if (copy.stream().anyMatch(tool -> tool == null || tool.isBlank())) {
       throw new IllegalArgumentException("tools must only contain non-blank values");
     }

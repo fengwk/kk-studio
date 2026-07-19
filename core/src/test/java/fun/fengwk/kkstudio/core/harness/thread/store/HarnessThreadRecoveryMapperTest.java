@@ -82,6 +82,7 @@ class HarnessThreadRecoveryMapperTest {
     input.setSequence(sequence);
     input.setInputType("user_message");
     input.setPayloadJson("{\"type\":\"message\",\"role\":\"user\",\"contents\":[]}");
+    input.setClientMessageId("recovery-" + id);
     input.setStatus("QUEUED");
     input.setCreateTime(now);
     inputMapper.insert(input);

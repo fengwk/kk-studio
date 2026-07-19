@@ -25,7 +25,7 @@ import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import java.util.List;
 import java.util.function.Supplier;
 
-/** Session tree 只读查询；创建与消息提交走 Thread API。 */
+/** Session 创建、查询及 Session 内 branch Thread 创建 API。 */
 @AllArgsConstructor
 @RestController
 @RequestMapping("/api/sessions")
@@ -87,7 +87,10 @@ public class StudioHarnessSessionController {
   private static RuntimeException translateHttpError(RuntimeException error) {
     String message = error.getMessage();
     if (message != null
-        && (message.startsWith("unknown session:") || message.startsWith("session not found:"))) {
+        && (message.startsWith("unknown session:")
+            || message.startsWith("session not found:")
+            || message.startsWith("unknown entry:")
+            || message.startsWith("unknown agent definition:"))) {
       return new ResponseStatusException(HttpStatus.NOT_FOUND, message, error);
     }
     if (error instanceof IllegalStateException) {

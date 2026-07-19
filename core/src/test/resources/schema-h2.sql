@@ -95,7 +95,7 @@ create table if not exists harness_thread_input (
     sequence              bigint not null,
     input_type            varchar(32) not null,
     payload_json          text not null,
-    client_message_id     varchar(128),
+    client_message_id     varchar(128) not null,            -- 客户端幂等键
     status                varchar(32) not null,
     applied_entry_id      bigint,
     resolved_at           timestamp(3),

@@ -124,7 +124,7 @@ class HarnessSessionThreadContractIntegrationTest {
     List<HarnessThreadInputDTO> queued = threadQueryService.listInputs(firstThreadId);
     assertEquals(List.of(1L, 2L), queued.stream().map(HarnessThreadInputDTO::getSequence).toList());
     assertEquals(
-        List.of("user_message", "custom_message"),
+        List.of("USER_MESSAGE", "CUSTOM_MESSAGE"),
         queued.stream().map(HarnessThreadInputDTO::getInputType).toList());
     assertEquals(custom.getInputId(), queued.get(1).getInputId());
 

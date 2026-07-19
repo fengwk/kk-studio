@@ -22,7 +22,7 @@ public class HarnessThreadInputDO {
   /** Payload JSON。 */
   private String payloadJson;
 
-  /** 客户端幂等键；可空。 */
+  /** 客户端幂等键。 */
   private String clientMessageId;
 
   /** 状态：queued / applied / cancelled。 */
