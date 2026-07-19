@@ -101,6 +101,30 @@ final class DeltaBatcher {
   }
 
   private static ObjectNode encode(ProviderStreamEvent event) {
-    return OBJECT_MAPPER.valueToTree(event);
+    ObjectNode encoded = OBJECT_MAPPER.createObjectNode();
+    if (event instanceof ProviderStreamEvent.TextDelta textDelta) {
+      encoded.put("kind", "text");
+      encoded.put("text", textDelta.text());
+    } else if (event instanceof ProviderStreamEvent.ThinkingDelta thinkingDelta) {
+      encoded.put("kind", "thinking");
+      encoded.put("text", thinkingDelta.text());
+    } else if (event instanceof ProviderStreamEvent.ToolCallDelta toolCallDelta) {
+      encoded.put("kind", "tool_call");
+      encoded.put("index", toolCallDelta.index());
+      putNullable(encoded, "id", toolCallDelta.id());
+      putNullable(encoded, "name", toolCallDelta.name());
+      putNullable(encoded, "argumentsJson", toolCallDelta.argumentsJson());
+    } else {
+      throw new IllegalArgumentException("unsupported provider stream event: " + event.getClass());
+    }
+    return encoded;
+  }
+
+  private static void putNullable(ObjectNode node, String field, String value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value);
+    }
   }
 }
