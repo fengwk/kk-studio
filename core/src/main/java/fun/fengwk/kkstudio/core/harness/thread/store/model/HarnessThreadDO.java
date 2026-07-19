@@ -34,8 +34,8 @@ public class HarnessThreadDO {
   /** Thread 级 model variant。 */
   private String variant;
 
-  /** Thread 级 YOLO。 */
-  private Boolean yoloEnabled;
+  /** Thread 级 YOLO；与 schema 非空默认 false 对齐。 */
+  private Boolean yoloEnabled = false;
 
   /** 当前 processor fencing token；空表示空闲。 */
   private String processorToken;
