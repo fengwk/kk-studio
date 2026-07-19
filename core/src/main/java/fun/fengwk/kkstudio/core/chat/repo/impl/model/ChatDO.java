@@ -1,0 +1,28 @@
+package fun.fengwk.kkstudio.core.chat.repo.impl.model;
+
+import lombok.Data;
+
+import java.time.LocalDateTime;
+
+/** {@code chat} 行映射：持久化的多 Session 集合。 */
+@Data
+public class ChatDO {
+
+  /** 业务主键（Snowflake）。 */
+  private Long id;
+
+  /** 可选标题。 */
+  private String title;
+
+  /** 可选默认 Agent definition id；不建立外键，Agent 删除后可保留陈旧值。 */
+  private Long defaultAgentId;
+
+  /** 乐观锁行版本。 */
+  private Long version;
+
+  /** 创建时间（映射 {@code gmt_create}）。 */
+  private LocalDateTime createTime;
+
+  /** 更新时间（映射 {@code gmt_modified}）。 */
+  private LocalDateTime updateTime;
+}
