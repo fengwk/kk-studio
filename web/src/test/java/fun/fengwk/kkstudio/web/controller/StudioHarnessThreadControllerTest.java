@@ -237,12 +237,6 @@ class StudioHarnessThreadControllerTest {
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/threads/{id}/toolset", threadId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"tools\":null,\"clientMessageId\":\"invalid-toolset\"}"))
-        .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(
             post("/api/threads/{id}/stop", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}"))
@@ -250,15 +244,6 @@ class StudioHarnessThreadControllerTest {
     mockMvc.perform(post("/api/threads/{id}/retry", threadId)).andExpect(status().isConflict());
     mockMvc.perform(get("/api/threads/{id}", "abc")).andExpect(status().isBadRequest());
     mockMvc.perform(get("/api/threads/{id}", "999999999999")).andExpect(status().isNotFound());
-    mockMvc
-        .perform(post("/api/sessions").contentType(MediaType.APPLICATION_JSON).content("{}"))
-        .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(
-            post("/api/sessions")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"agentDefinitionId\":\"999999999999\"}"))
-        .andExpect(status().isNotFound());
   }
 
   /** All typed mailbox commands require a non-blank client id and preserve payload-safe replay. */
@@ -306,15 +291,6 @@ class StudioHarnessThreadControllerTest {
         put("/api/threads/{id}/model", threadId)
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"modelId\":\"model\",\"variant\":\"default\",\"clientMessageId\":\"\"}"));
-    assertBadRequest(
-        put("/api/threads/{id}/toolset", threadId)
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"tools\":[\"read\"]}"));
-    assertBadRequest(
-        put("/api/threads/{id}/toolset", threadId)
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"tools\":[\"read\"],\"clientMessageId\":\"\"}"));
-
     mockMvc
         .perform(
             put("/api/threads/{id}/yolo", threadId)

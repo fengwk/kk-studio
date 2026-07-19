@@ -100,7 +100,7 @@ function PermissionRequest({
         <strong>需要工具授权：{invocation.toolName}</strong>
         <span>
           {invocation.targetType}
-          {invocation.environmentId ? ` / environment:${invocation.environmentId}` : ''}
+          {invocation.environmentName ? ` / environment:${invocation.environmentName}` : ''}
         </span>
       </div>
       <div className="permission-actions">

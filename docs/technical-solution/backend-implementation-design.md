@@ -21,7 +21,7 @@ flowchart LR
 | `share` | DTO、JSON 字段和 HTTP 数据边界 |
 | `web` | 路由、参数解析、SSE emitter、WebSocket adapter、HTTP 状态映射 |
 | `core.harness` | Session、Thread、Task、Tool、Usage、Artifact 的应用服务与持久化 |
-| `core.environment` | 全局 Environment CRUD、capability/heartbeat 应用和 daemon gateway |
+| `core.environment` | 内存 Live Environment Registry、capability/heartbeat 应用和 daemon gateway |
 | `harness/*` | Provider、Thread、Session、Tool、Task 和协议领域合约 |
 
 ## API 边界
@@ -31,16 +31,17 @@ flowchart LR
 | 域 | 接口 | 用途 |
 | --- | --- | --- |
 | Provider / Model / Agent | `/api/providers`、`/api/models`、`/api/agents` | 全局 Agent 资源 CRUD |
+| Chat | `/api/chats`、`/api/chats/{chatId}/sessions` | 持久 Chat CRUD 与 Session 成员关系 |
 | Session | `POST /api/sessions`、`GET /api/sessions`、`GET /api/sessions/{sessionId}`、`/entries` | 原子创建 Session/Main Thread；Session Tree 与完整 Entries 查询 |
 | Session Threads | `GET` / `POST /api/sessions/{sessionId}/threads` | 列出 Thread；从 durable `fromEntryId` 创建 Secondary Thread |
 | Thread | `GET /api/threads/{threadId}` | 读取 durable Branch actor |
-| Thread 输入（202） | `POST /api/threads/{id}/messages`、`PUT .../agent`、`/model`、`/toolset`、`/yolo` | 按 mailbox 顺序入队消息或配置命令 |
+| Thread 输入（202） | `POST /api/threads/{id}/messages`、`PUT .../agent`、`/model`、`/yolo` | 按 mailbox 顺序入队消息或配置命令 |
 | Thread 投影 | `GET /api/threads/{id}/entries`、`/inputs`、`/events`、`/events/stream` | 路径 Entries、inputs、events 与 SSE |
 | Thread 控制 | `POST /api/threads/{id}/stop`、`POST /api/threads/{id}/retry` | 幂等取消 queued Input / Tool work；显式恢复 FAILED Thread |
 | Root Activity / Task | `GET /api/sessions/{id}/activities`、`GET /api/sessions/{id}/tasks` | 根活动投影与子代理任务 |
 | Tool | `GET /api/threads/{id}/tool-invocations`、`GET /api/tool-invocations/{id}`、`POST /api/tool-invocations/{id}/decision` | Tool 状态与权限决策 |
 | Artifact / Usage | `/api/artifacts/{id}`、`/api/usage/threads/{id}`、`/api/usage/sessions/{id}`、`/api/usage/models/{id}` | artifact bytes 与用量汇总 |
-| Environment | `/api/environments`、`/api/environments/daemon/v1` | 全局 Environment CRUD 与 daemon WebSocket |
+| Environment | `GET /api/environments`、`/api/environments/daemon/v1` | 只读实时 Registry 与 daemon WebSocket |
 
 ComfyUI 和 S3 接口边界见 [ComfyUI 工作流 API](comfyui-workflow-api.md) 与 [S3 预签名](s3-presign.md)。
 
@@ -50,10 +51,11 @@ ComfyUI 和 S3 接口边界见 [ComfyUI 工作流 API](comfyui-workflow-api.md) 
 | --- | --- | --- |
 | `StudioHarnessThreadController` | `/api/threads` | Thread 读取、入队 202、Stop/Retry、entries/inputs/events/SSE |
 | `StudioHarnessSessionController` | `/api/sessions` | Session/Main Thread 创建、Session 查询与 Secondary Thread 创建 |
+| `StudioChatController` | `/api/chats` | Chat CRUD 与 Chat-Session 成员关系 |
 | `StudioHarnessObservabilityController` | `/api` | activities、tool-invocations、tasks、artifacts |
 | `StudioToolInvocationController` | `/api` | permission decision |
 | `StudioModelUsageController` | `/api/usage` | Thread / Session / Model 聚合 |
-| `StudioToolEnvironmentController` | `/api/environments` | Environment CRUD |
+| `StudioToolEnvironmentController` | `/api/environments` | 只读实时 Environment Registry |
 
 ## Thread 与 Session
 
@@ -70,7 +72,7 @@ Java 领域类型使用 `AgentThread`，避免与 `java.lang.Thread` 冲突。
 | 服务 | 职责 |
 | --- | --- |
 | `HarnessSessionCommandService` | create Session/Main Thread / create Secondary Thread |
-| `HarnessThreadCommandService` | submit message / queue Agent、Model、Toolset、YOLO / Stop / Retry |
+| `HarnessThreadCommandService` | submit message / queue Agent、Model、YOLO / Stop / Retry |
 | `HarnessThreadQueryService` | thread 查询、路径 entries、inputs、events |
 | `HarnessThreadTransactionService` | Thread/Input/Entry/Tool/Usage 原子事务（实现 `ThreadTransactions`） |
 | `HarnessSessionQueryService` | Session 只读 |
@@ -100,7 +102,7 @@ Thread Event SSE 先重放 durable events，再监听未来轮询结果；事件
 
 ## Tool、Environment 与 Artifact
 
-Tool Invocation 在数据库中经历权限、lease、partial 与 terminal 状态。Cloud Tool 由 ThreadProcessor `dispatchDue` 事件触发执行；Environment Tool 由 gateway 分发给 daemon。Environment REST CRUD 不接受 capability / last-seen；二者仅由 daemon 协议更新。协议细节见 [Environment Daemon Gateway](environment-daemon-gateway.md)。
+Tool Invocation 在数据库中经历权限、lease、partial 与 terminal 状态。Cloud Tool 由 ThreadProcessor `dispatchDue` 事件触发执行；Environment Tool 由 gateway 分发给 daemon。Environment 不提供 REST CRUD；`GET /api/environments` 只投影当前连接 Daemon 发现的内存 Registry，capability / last-seen 仅由 daemon 协议更新。协议细节见 [Environment Daemon Gateway](environment-daemon-gateway.md)。
 
 `GET /api/artifacts/{id}` 返回原始 bytes 与有效 media type；异常 media 降级为 `application/octet-stream`，并附加 `X-Content-Type-Options: nosniff` 与 `Content-Security-Policy: sandbox`。
 

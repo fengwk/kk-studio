@@ -129,7 +129,8 @@ decoration queue =
 
 | 来源 | 前端行为 |
 | --- | --- |
-| `message` / `agent_snapshot` / `compaction` Entry | 稳定气泡与路径配置基线 |
+| `message` / `compaction` Entry | 稳定对话气泡与路径语义基线 |
+| `agent_change` Entry | 只记录分支 Agent identity；不渲染气泡或完整配置 |
 | QUEUED `user_message` / `custom_message` input | 不进入 transcript；显示在 Working 装饰栏 |
 | `input_applied` 且 Entry 查询暂时落后 | 以 subject Entry ID 短暂补位 |
 | `assistant_*` / `tool_*` / `permission_*` | 流式与工具覆盖；物化后抑制 |

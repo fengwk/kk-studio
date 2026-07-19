@@ -48,19 +48,10 @@ export interface QueuedThreadMessage {
   sequence: number
 }
 
-export interface RuntimeContext {
-  provider?: string
-  model?: string
-  variant?: string
-  agentDefinitionId?: string
-  yoloEnabled?: boolean
-}
-
 export interface ThreadTimeline {
   messages: DialogueMessage[]
   /** QUEUED mailbox messages shown outside the durable transcript. */
   queuedMessages: QueuedThreadMessage[]
-  runtimeContext: RuntimeContext
   /** True when the mailbox contains a queued user-visible input. */
   hasPendingInputs: boolean
   /** True only for active open stream work (open assistant or streaming tool). */

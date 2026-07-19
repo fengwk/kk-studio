@@ -5,7 +5,6 @@ import { ThinkTagTextFilter } from '@/features/ai/thread-event-think-filter'
 import type {
   DialogueMessage,
   QueuedThreadMessage,
-  RuntimeContext,
   TextDialogueMessage,
   ThreadTimeline,
   ToolAttachment,
@@ -39,7 +38,6 @@ export function buildThreadTimeline(
 ): ThreadTimeline {
   const messages: DialogueMessage[] = []
   const queuedMessages: QueuedThreadMessage[] = []
-  const runtimeContext: RuntimeContext = {}
   const activeTools = new Map<string, ToolDialogueMessage>()
   const activeAssistants = new Map<string, StreamingAssistant>()
   const durableToolArguments = new Map<string, string[]>()
@@ -56,7 +54,7 @@ export function buildThreadTimeline(
   // The backend returns the root-to-head Entry path. Its parent-chain order is authoritative;
   // wall-clock createTime may regress and must never reorder durable dialogue.
   for (const entry of entries) {
-    projectDurableEntry(entry, messages, runtimeContext, durableToolArguments)
+    projectDurableEntry(entry, messages, durableToolArguments)
   }
 
   // The backend returns mailbox inputs by sequence. QUEUED messages stay outside the transcript;
@@ -218,7 +216,6 @@ export function buildThreadTimeline(
   return {
     messages,
     queuedMessages,
-    runtimeContext,
     hasPendingInputs,
     hasLiveProjection,
   }
@@ -307,26 +304,9 @@ function isAssistantEvent(eventType: string): boolean {
 function projectDurableEntry(
   entry: HarnessSessionEntryDTO,
   messages: DialogueMessage[],
-  runtimeContext: RuntimeContext,
   durableToolArguments: Map<string, string[]>,
 ) {
   const payload = parsePayload(entry.payloadJson)
-  if (entry.entryType === 'agent_snapshot') {
-    const snapshot = asRecord(payload.snapshot)
-    runtimeContext.agentDefinitionId = getString(payload.agentDefinitionId) || runtimeContext.agentDefinitionId
-    runtimeContext.model = getString(snapshot.modelId) || runtimeContext.model
-    runtimeContext.variant = getString(snapshot.variant) || runtimeContext.variant
-    return
-  }
-  if (entry.entryType === 'model_change') {
-    runtimeContext.model = getString(payload.modelId) || runtimeContext.model
-    runtimeContext.variant = getString(payload.variant) || runtimeContext.variant
-    return
-  }
-  if (entry.entryType === 'yolo_change') {
-    runtimeContext.yoloEnabled = payload.yoloEnabled === true
-    return
-  }
   if (entry.entryType === 'compaction') {
     const summary = getString(payload.summary)
     if (summary) {

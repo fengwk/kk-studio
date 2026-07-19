@@ -41,7 +41,7 @@ Session 不拥有唯一当前 Branch。`mainThreadId` 只是稳定的默认主�
 
 ## 3. 核心不变量
 
-1. Session 创建、初始配置 Entries 和 Main Thread 必须原子提交。
+1. Session 创建、语义根 `ROOT` Entry 和 Main Thread 必须原子提交。
 2. `Session.mainThreadId` 必须指向本 Session 的 Thread，创建后不可更换。
 3. Thread head 必须属于同一个 Session，并且只能沿新 Entry 单向推进。
 4. 既有 Thread 不 rewind；从历史节点继续必须创建新 Thread。
@@ -525,6 +525,9 @@ tool_completed
 tool_results_applied
 permission_requested
 permission_resolved
+agent_changed
+model_changed
+yolo_changed
 subagent_started
 subagent_completed
 ```
@@ -565,7 +568,6 @@ GET  /api/threads/{threadId}/events/stream
 POST /api/threads/{threadId}/messages
 PUT  /api/threads/{threadId}/agent
 PUT  /api/threads/{threadId}/model
-PUT  /api/threads/{threadId}/toolset
 PUT  /api/threads/{threadId}/yolo
 POST /api/threads/{threadId}/stop
 POST /api/threads/{threadId}/retry
@@ -575,18 +577,16 @@ POST /api/threads/{threadId}/retry
 
 ## 21. 前端
 
-路由：
+浏览器入口：
 
 ```text
-/sessions
-/sessions/:sessionId
-/sessions/:sessionId/threads/:threadId
+/chats
+/chats/:chatId
 ```
 
-- `/sessions/:sessionId` 加载 Session 后打开稳定 `mainThreadId`。
-- 显式 Thread URL 优先，不使用全局 last-active Thread。
-- Session 面板显示 Main Thread 与 Secondary Threads，Main 固定置顶。
-- 切换 Thread 只切换 REST/SSE 投影；其他 Thread 继续后台运行。
+- `/chats` 管理持久 Chat；`/chats/:chatId` 是按 Chat ID 保存 localStorage Pane 状态的 1/2/3/6 格工作区。
+- Pane 不引入 Window，也没有常驻 Session/Thread 侧栏；空 Pane 首发创建独立 Session/Main Thread，或以 `/session` 明确复用 Chat 成员 Session 的 Main Thread。
+- `/thread` 只在当前 Session 选择 Thread；`/agent` 以有序 `SET_AGENT` 入队。多个 Pane 打开同一 Thread 时仅依赖 Thread DTO/SSE 更新，不做 Pane 间手工同步。
 
 Thread 页面事实：
 

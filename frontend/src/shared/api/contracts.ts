@@ -338,7 +338,7 @@ export interface ToolInvocationDTO {
   toolName: string
   toolVersion: string
   targetType: string
-  environmentId: string | null
+  environmentName: string | null
   argumentsJson: string
   status: string
   permissionAction: string
