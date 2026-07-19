@@ -212,6 +212,17 @@ create table if not exists harness_subagent_task (
 create index if not exists idx_harness_subagent_task_parent
     on harness_subagent_task (parent_session_id, status);
 
+create table if not exists harness_thread_goal (
+    thread_id             bigint not null,
+    objective             text not null,
+    token_budget          bigint,
+    status                varchar(32) not null,
+    reason                text,
+    gmt_create            timestamp(3) not null default current_timestamp(),
+    gmt_modified          timestamp(3) not null default current_timestamp(),
+    primary key (thread_id)
+);
+
 create table if not exists model_usage_record (
     id                                 bigint not null,
     session_id                         bigint not null,

@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.adapter.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.context.AgentRuntimeConfig;
+import fun.fengwk.kkstudio.harness.runtime.context.SelectedSkillMetadata;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtension;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionRegistry;
@@ -285,6 +286,52 @@ class DatabaseTurnResourceResolverTest {
     }
   }
 
+  /** Goal tools are auto-injected; load_skill only when selected skills exist. */
+  @Test
+  void autoInjectsGoalToolsAndConditionalLoadSkill() {
+    CapturingProviderFactory factory =
+        new CapturingProviderFactory(
+            ProviderType.OPENAI,
+            PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
+    Tool createGoal = tool("create_goal", "1", ToolExecutionMode.CONTROL);
+    Tool getGoal = tool("get_goal", "1", ToolExecutionMode.CONTROL);
+    Tool updateGoal = tool("update_goal", "1", ToolExecutionMode.CONTROL);
+    Tool loadSkill = tool("load_skill", "1", ToolExecutionMode.CONTROL);
+    Tool read = tool("read", "1");
+
+    try (Fixture fixture =
+        new Fixture(factory, List.of(createGoal, getGoal, updateGoal, loadSkill, read))) {
+      fixture.session();
+      fixture.model(model(11L, 22L, MODEL_CONFIG));
+      fixture.provider(provider(22L, AgentProviderType.openai));
+
+      TurnResources withoutSkills =
+          fixture.resolver.resolve(
+              SESSION_ID, THREAD_ID, runtimeConfig("11", "quality", null, List.of("read")));
+      assertEquals(
+          List.of("read", "create_goal", "get_goal", "update_goal"),
+          withoutSkills.toolBindings().stream().map(b -> b.descriptor().name()).toList());
+
+      TurnResources withSkills =
+          fixture.resolver.resolve(
+              SESSION_ID,
+              THREAD_ID,
+              runtimeConfig(
+                  "11",
+                  "quality",
+                  null,
+                  List.of(),
+                  List.of("dev"),
+                  List.of(new SelectedSkillMetadata("dev", "Developer rules", "platform"))));
+      assertEquals(
+          List.of("create_goal", "get_goal", "update_goal", "load_skill"),
+          withSkills.toolBindings().stream().map(b -> b.descriptor().name()).toList());
+      assertTrue(
+          withSkills.toolBindings().stream()
+              .allMatch(binding -> binding.targetType() == ToolTargetType.CONTROL));
+    }
+  }
+
   /** Short names resolve platform-first, then selected Environment fallback. */
   @Test
   void resolvesShortNamesPlatformFirstThenEnvironmentFallback() {
@@ -419,6 +466,16 @@ class DatabaseTurnResourceResolverTest {
 
   private static AgentRuntimeConfig runtimeConfig(
       String modelId, String variant, String environmentName, List<String> tools) {
+    return runtimeConfig(modelId, variant, environmentName, tools, List.of(), List.of());
+  }
+
+  private static AgentRuntimeConfig runtimeConfig(
+      String modelId,
+      String variant,
+      String environmentName,
+      List<String> tools,
+      List<String> skills,
+      List<SelectedSkillMetadata> selectedSkills) {
     return new AgentRuntimeConfig(
         1L,
         "system",
@@ -426,8 +483,8 @@ class DatabaseTurnResourceResolverTest {
         variant,
         environmentName,
         tools,
-        List.of(),
-        List.of(),
+        skills,
+        selectedSkills,
         List.of(),
         "{}",
         false);

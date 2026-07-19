@@ -45,6 +45,9 @@ import java.util.Set;
  *
  * <p>Tool short names resolve platform-first (registered non-ENVIRONMENT tools) then selected
  * Environment capability. A selected Environment that is offline or missing fails clearly.
+ *
+ * <p>Platform CONTROL tools {@code create_goal}/{@code get_goal}/{@code update_goal} are always
+ * injected when registered. {@code load_skill} is injected only when the Agent has selected skills.
  */
 @Component
 public final class DatabaseTurnResourceResolver implements TurnResourceResolver {
@@ -191,7 +194,27 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
       }
       result.add(binding);
     }
+    // Platform CONTROL tools auto-exposed without requiring Agent config listing.
+    injectPlatformToolIfRegistered(result, descriptorNames, "create_goal");
+    injectPlatformToolIfRegistered(result, descriptorNames, "get_goal");
+    injectPlatformToolIfRegistered(result, descriptorNames, "update_goal");
+    if (!config.selectedSkills().isEmpty()) {
+      injectPlatformToolIfRegistered(result, descriptorNames, "load_skill");
+    }
     return List.copyOf(result);
+  }
+
+  private void injectPlatformToolIfRegistered(
+      List<ToolBinding> result, Set<String> descriptorNames, String shortName) {
+    if (!descriptorNames.add(shortName)) {
+      return;
+    }
+    Tool platformTool = resolvePlatformTool(shortName);
+    if (platformTool == null) {
+      descriptorNames.remove(shortName);
+      return;
+    }
+    result.add(ToolBinding.of(platformTool.descriptor()));
   }
 
   private ToolBinding resolveShortNameTool(String shortName, LiveEnvironment selectedEnvironment) {
