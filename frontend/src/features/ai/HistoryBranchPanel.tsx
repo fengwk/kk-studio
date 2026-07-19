@@ -14,12 +14,8 @@ import {
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts'
 
 const FILTERS: Array<{ value: SessionTreeFilter; label: string }> = [
-  { value: 'default', label: '对话消息' },
-  { value: 'no-tools', label: '不含工具' },
-  { value: 'user-only', label: '仅用户消息' },
-  { value: 'assistant-only', label: '仅助手消息' },
-  { value: 'labeled-only', label: '仅标签' },
-  { value: 'all', label: '全部条目' },
+  { value: 'conversation', label: '对话' },
+  { value: 'all', label: '全部记录' },
 ]
 
 const ENTRY_KIND_LABELS: Record<SessionEntryKind, string> = {
@@ -50,7 +46,7 @@ export function HistoryBranchPanel({
   onClose: () => void
   onCreate: (entry: HarnessSessionEntryDTO) => void
 }) {
-  const [filter, setFilter] = useState<SessionTreeFilter>('default')
+  const [filter, setFilter] = useState<SessionTreeFilter>('conversation')
   const [searchQuery, setSearchQuery] = useState('')
   const searchTokens = useMemo(() => parseHistorySearchTokens(searchQuery), [searchQuery])
   const rows = useMemo(
@@ -99,35 +95,27 @@ export function HistoryBranchPanel({
       >
         <ModalHeader title="历史分支" onClose={effectiveClose} closeDisabled={pending} />
         <div className="modal-body history-branch-body">
-          <p className="history-branch-description">
-            选择历史位置后开启新的 Thread，当前 Thread 不会改变。
-          </p>
-          <p className="history-branch-head">
-            当前分支 head：{currentHeadEntryId ? resolveEntryLabel(currentHeadEntryId, rows, entries) : '暂无'}
-          </p>
           <div className="history-branch-controls">
-            <label className="history-branch-filter">
-              <span>显示范围</span>
-              <select
-                value={filter}
-                aria-label="显示范围"
-                disabled={pending}
-                onChange={(event) => changeFilter(event.target.value as SessionTreeFilter)}
-              >
-                {FILTERS.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <select
+              className="history-branch-filter"
+              value={filter}
+              aria-label="显示记录"
+              disabled={pending}
+              onChange={(event) => changeFilter(event.target.value as SessionTreeFilter)}
+            >
+              {FILTERS.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
             <label className="history-branch-search">
-              <span className="sr-only">搜索历史消息</span>
+              <span className="sr-only">搜索记录</span>
               <input
                 type="search"
                 value={searchQuery}
-                placeholder="搜索历史消息"
-                aria-label="搜索历史消息"
+                placeholder="搜索记录"
+                aria-label="搜索记录"
                 disabled={pending}
                 onChange={(event) => changeSearch(event.target.value)}
               />
@@ -138,10 +126,10 @@ export function HistoryBranchPanel({
             <div className="state-block danger" role="alert">历史分支加载失败</div>
           ) : null}
           {!loading && !queryError && searchTokens.length > 0 && rows.length === 0 ? (
-            <div className="state-block">没有匹配 “{searchQuery.trim()}” 的历史条目</div>
+            <div className="state-block">没有匹配 “{searchQuery.trim()}” 的记录</div>
           ) : null}
           {!loading && !queryError && searchTokens.length === 0 && rows.length === 0 ? (
-            <div className="state-block">没有可显示的历史条目</div>
+            <div className="state-block">没有可显示的记录</div>
           ) : null}
           {!loading && !queryError && rows.length > 0 ? (
             <div
@@ -182,19 +170,6 @@ export function HistoryBranchPanel({
       </section>
     </ModalBackdrop>
   )
-}
-
-function resolveEntryLabel(
-  entryId: string,
-  rows: SessionTreeEntry[],
-  entries: HarnessSessionEntryDTO[],
-): string {
-  const row = rows.find((candidate) => candidate.entry.entryId === entryId)
-  if (row) {
-    return row.preview || row.entry.entryId
-  }
-  const entry = entries.find((candidate) => candidate.entryId === entryId)
-  return entry?.entryId ?? entryId
 }
 
 function HistoryBranchRow({
