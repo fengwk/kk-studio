@@ -16,7 +16,7 @@ vi.mock('@/shared/api/agent-service', () => ({
 
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
-    listThreads: vi.fn(),
+    getSession: vi.fn(),
     listSessionThreads: vi.fn(),
     listSessionEntries: vi.fn(),
     getThread: vi.fn(),
@@ -106,7 +106,17 @@ describe('useAgentThreadController', () => {
         },
       ],
     })
-    vi.mocked(harnessService.listThreads).mockResolvedValue([thread])
+    vi.mocked(harnessService.getSession).mockResolvedValue({
+      sessionId: 's1',
+      title: 'title',
+      mainThreadId: '1',
+      rootSessionId: 's1',
+      parentSessionId: null,
+      parentInvocationId: null,
+      depth: 0,
+      createTime: null,
+      updateTime: null,
+    })
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([thread])
     vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
     vi.mocked(harnessService.getThread).mockResolvedValue(thread)
@@ -570,9 +580,7 @@ const thread = {
   sessionId: 's1',
   sessionTitle: 'title',
   headEntryId: 'h1',
-  agentDefinitionId: 'agent-1',
-  runtimeConfigJson: null,
-  yoloEnabled: false,
+  status: 'IDLE' as const,
   inputSequence: 0,
   processing: false,
   createTime: null,

@@ -227,6 +227,7 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     task.setParentInvocationId(parentInvocationId);
     task.setParentSessionId(parentSessionId);
     task.setParentThreadId(parentThreadId);
+    task.setRootThreadId(parentThreadId);
     task.setChildSessionId(childSessionId);
     task.setChildThreadId(childThreadId);
     task.setTargetAgent("Child");
@@ -274,6 +275,7 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     bad.setParentInvocationId(7_400_311L);
     bad.setParentSessionId(badSessionId);
     bad.setParentThreadId(7_400_111L);
+    bad.setRootThreadId(7_400_111L);
     bad.setChildSessionId(7_400_012L);
     bad.setChildThreadId(7_400_112L);
     bad.setTargetAgent("Child");

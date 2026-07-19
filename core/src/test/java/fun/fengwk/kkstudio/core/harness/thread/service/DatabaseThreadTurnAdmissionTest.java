@@ -66,6 +66,7 @@ class DatabaseThreadTurnAdmissionTest {
     task.setParentInvocationId(childThreadId + 1_000);
     task.setParentSessionId(1L);
     task.setParentThreadId(2L);
+    task.setRootThreadId(2L);
     task.setChildSessionId(childThreadId + 100);
     task.setChildThreadId(childThreadId);
     task.setTargetAgent("sub");

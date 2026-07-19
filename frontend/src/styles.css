@@ -1519,7 +1519,7 @@ textarea::placeholder {
   border: 0;
   outline: 0;
   background: transparent;
-  color: #ffffff;
+  color: var(--fg);
   font-size: 13px;
   line-height: 19px;
   padding: 8px 2px;
@@ -1621,7 +1621,7 @@ textarea::placeholder {
   border: 0;
   outline: 0;
   background: transparent;
-  color: #fff;
+  color: var(--fg);
   font-size: 13px;
 }
 

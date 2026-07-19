@@ -21,6 +21,7 @@
 | `/` | redirect | 跳转至 `/sessions` |
 | `/sessions` | Session 列表 | 创建 Session，列出可恢复的会话 |
 | `/sessions/:sessionId` | Session 入口 | 打开稳定 `mainThreadId`，显示 Main/Secondary Threads |
+| `/threads/:threadId` | Thread 深链接 | 查询 Thread 所属 Session 后 replace 到规范化 Session/Thread URL |
 | `/sessions/:sessionId/threads/:threadId` | Thread 详情 | Branch transcript、处理状态、Tree、Task Timeline、工具权限、Usage |
 | `/agents` | Agent 管理 | Agent CRUD |
 | `/models` | Model 管理 | Model CRUD |

@@ -937,14 +937,6 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     }
   }
 
-  private HarnessThreadDO requireThread(long threadId) {
-    HarnessThreadDO thread = threadMapper.find(threadId);
-    if (thread == null) {
-      throw new IllegalArgumentException("unknown thread: " + threadId);
-    }
-    return thread;
-  }
-
   private HarnessThreadDO requireOwnedThread(long threadId, String processorToken) {
     HarnessThreadDO thread = findOwnedThread(threadId, processorToken);
     if (thread == null) {
@@ -1021,21 +1013,6 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     }
   }
 
-  private static AgentSetPayload readAgentSet(String payloadJson) {
-    try {
-      var node = OBJECT_MAPPER.readTree(payloadJson);
-      long agentDefinitionId = node.path("agentDefinitionId").asLong();
-      String runtimeConfigJson = node.path("runtimeConfigJson").asText();
-      AgentSnapshot snapshot = OBJECT_MAPPER.treeToValue(node.get("snapshot"), AgentSnapshot.class);
-      return new AgentSetPayload(agentDefinitionId, runtimeConfigJson, snapshot);
-    } catch (JsonProcessingException error) {
-      throw new IllegalArgumentException("cannot decode set_agent payload", error);
-    }
-  }
-
-  private record AgentSetPayload(
-      long agentDefinitionId, String runtimeConfigJson, AgentSnapshot snapshot) {}
-
   private static AgentMessageContent toMessageContent(ToolContent content) {
     if (content instanceof TextToolContent text) {
       return new TextMessageContent(text.text());
@@ -1052,14 +1029,6 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
 
   private String encodeUserMessage(AgentMessage message) {
     return payloadCodec.encode(new MessageEntryPayload(message));
-  }
-
-  private AgentMessage decodeUserMessage(String json) {
-    SessionEntryPayload payload = payloadCodec.decode(SessionEntryType.MESSAGE, json);
-    if (!(payload instanceof MessageEntryPayload message)) {
-      throw new IllegalArgumentException("user message payload must be MESSAGE type");
-    }
-    return message.message();
   }
 
   private static String encodeSimple(String key, boolean value) {
