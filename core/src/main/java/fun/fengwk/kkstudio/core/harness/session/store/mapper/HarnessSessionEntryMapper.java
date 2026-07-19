@@ -47,6 +47,15 @@ public interface HarnessSessionEntryMapper extends BaseMapper {
       """
       select id, session_id, parent_entry_id, entry_type, payload_json, gmt_create as create_time
       from harness_session_entry
+      where id = #{entryId}
+      """)
+  @ResultMap("harnessSessionEntryResultMap")
+  HarnessSessionEntryDO findById(@Param("entryId") long entryId);
+
+  @Select(
+      """
+      select id, session_id, parent_entry_id, entry_type, payload_json, gmt_create as create_time
+      from harness_session_entry
       where session_id = #{sessionId}
         and ((#{parentEntryId} is null and parent_entry_id is null)
              or parent_entry_id = #{parentEntryId})

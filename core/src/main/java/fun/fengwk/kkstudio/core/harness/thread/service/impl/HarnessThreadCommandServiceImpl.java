@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.core.harness.thread.service.impl;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,7 +11,6 @@ import fun.fengwk.kkstudio.core.agent.definition.repo.impl.model.AgentDefinition
 import fun.fengwk.kkstudio.core.harness.session.HarnessAgentSnapshotResolver;
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadCommandService;
-import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -25,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProviderCancellation;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadTransactions;
 import fun.fengwk.kkstudio.share.model.HarnessThreadAgentSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadCreateDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadCustomMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadMessageCreateDTO;
@@ -36,16 +35,14 @@ import fun.fengwk.kkstudio.share.model.HarnessThreadYoloSetDTO;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 
 @Service
 public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandService {
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-
   private final ThreadTransactions transactions;
   private final AgentDefinitionMapper agentDefinitionMapper;
   private final HarnessAgentSnapshotResolver snapshotResolver;
-  private final ToolSettingsProvider toolSettingsProvider;
   private final ThreadKick threadKick;
   private final ThreadProviderCancellation providerCancellation;
   private final HarnessThreadDtoConverter converter;
@@ -54,7 +51,6 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
       ThreadTransactions transactions,
       AgentDefinitionMapper agentDefinitionMapper,
       HarnessAgentSnapshotResolver snapshotResolver,
-      ToolSettingsProvider toolSettingsProvider,
       ThreadKick threadKick,
       @Qualifier("threadProviderCancellation") ThreadProviderCancellation providerCancellation,
       HarnessThreadDtoConverter converter) {
@@ -62,8 +58,6 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     this.agentDefinitionMapper =
         Objects.requireNonNull(agentDefinitionMapper, "agentDefinitionMapper");
     this.snapshotResolver = Objects.requireNonNull(snapshotResolver, "snapshotResolver");
-    this.toolSettingsProvider =
-        Objects.requireNonNull(toolSettingsProvider, "toolSettingsProvider");
     this.threadKick = Objects.requireNonNull(threadKick, "threadKick");
     this.providerCancellation =
         Objects.requireNonNull(providerCancellation, "providerCancellation");
@@ -96,6 +90,27 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
             AgentMessageRole.USER, List.<AgentMessageContent>of(new TextMessageContent(content)));
     ThreadInput input =
         transactions.submitUserMessage(id, message, createDTO.getClientMessageId(), Instant.now());
+    afterCommitKick(id);
+    return converter.convert(input);
+  }
+
+  @Override
+  @Transactional
+  public HarnessThreadInputDTO submitCustomMessage(
+      String threadId, HarnessThreadCustomMessageCreateDTO createDTO) {
+    Objects.requireNonNull(createDTO, "createDTO");
+    long id = HarnessIds.parsePositive(threadId, "threadId");
+    String content = createDTO.getContent();
+    if (content == null || content.isBlank()) {
+      throw new IllegalArgumentException("content must not be blank");
+    }
+    AgentMessage message =
+        new AgentMessage(
+            parseCustomRole(createDTO.getRole()),
+            List.<AgentMessageContent>of(new TextMessageContent(content)));
+    ThreadInput input =
+        transactions.submitCustomMessage(
+            id, message, createDTO.getClientMessageId(), Instant.now());
     afterCommitKick(id);
     return converter.convert(input);
   }
@@ -192,6 +207,22 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
       throw new IllegalArgumentException("unknown agent definition: " + agentDefinitionId);
     }
     return definition;
+  }
+
+  private static AgentMessageRole parseCustomRole(String value) {
+    if (value == null || value.isBlank()) {
+      throw new IllegalArgumentException("role must not be blank");
+    }
+    AgentMessageRole role;
+    try {
+      role = AgentMessageRole.valueOf(value.toUpperCase(Locale.ROOT));
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException("unsupported custom message role: " + value, error);
+    }
+    if (role != AgentMessageRole.SYSTEM && role != AgentMessageRole.USER) {
+      throw new IllegalArgumentException("custom message role must be system or user");
+    }
+    return role;
   }
 
   private void afterCommitKick(long threadId) {
