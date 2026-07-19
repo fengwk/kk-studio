@@ -9,7 +9,7 @@ import java.util.Set;
 public record DaemonEnvelope(
     int protocolVersion,
     DaemonMessageType messageType,
-    String environmentId,
+    String environmentName,
     String invocationId,
     long sequence,
     String payloadJson) {
@@ -22,14 +22,17 @@ public record DaemonEnvelope(
           DaemonMessageType.PARTIAL,
           DaemonMessageType.COMPLETED,
           DaemonMessageType.FAILED,
-          DaemonMessageType.CANCELLED);
+          DaemonMessageType.CANCELLED,
+          DaemonMessageType.LOAD_SKILL,
+          DaemonMessageType.SKILL_LOADED,
+          DaemonMessageType.SKILL_LOAD_FAILED);
 
   public DaemonEnvelope {
     if (protocolVersion <= 0) {
       throw new IllegalArgumentException("protocolVersion must be positive");
     }
     messageType = Objects.requireNonNull(messageType, "messageType");
-    environmentId = requireNonBlank(environmentId, "environmentId");
+    environmentName = requireNonBlank(environmentName, "environmentName");
     if (sequence < 0) {
       throw new IllegalArgumentException("sequence must not be negative");
     }

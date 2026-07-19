@@ -107,11 +107,15 @@ class ToolContractTest {
         () -> new DaemonEnvelope(1, DaemonMessageType.INVOKE, "environment", null, 1, "{}"));
     assertThrows(
         IllegalArgumentException.class,
+        () -> new DaemonEnvelope(1, DaemonMessageType.LOAD_SKILL, "environment", null, 1, "{}"));
+    assertThrows(
+        IllegalArgumentException.class,
         () -> new DaemonEnvelope(1, DaemonMessageType.HELLO, "environment", null, 0, "not-json"));
 
     DaemonEnvelope hello =
         new DaemonEnvelope(1, DaemonMessageType.HELLO, "environment", null, 0, "{}");
     assertEquals(DaemonMessageType.HELLO, hello.messageType());
+    assertEquals("environment", hello.environmentName());
   }
 
   private ToolDescriptor descriptor() {

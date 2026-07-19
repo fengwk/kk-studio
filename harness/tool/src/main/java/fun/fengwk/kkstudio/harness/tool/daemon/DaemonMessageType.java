@@ -14,6 +14,9 @@ public enum DaemonMessageType {
   WELCOME,
   INVOKE,
   CANCEL,
+  LOAD_SKILL,
+  SKILL_LOADED,
+  SKILL_LOAD_FAILED,
   ACK,
   ERROR
 }
