@@ -27,7 +27,7 @@ interface PendingUserProjection {
 
 /**
  * Thread transcript projection:
- * committed path Entries + unapplied USER_MESSAGE inputs + live ThreadEvents.
+ * committed path Entries + queued USER/CUSTOM_MESSAGE inputs + live ThreadEvents.
  * Correlate stream events by subjectEntryId; suppress once that assistant Entry materializes.
  */
 export function buildThreadTimeline(
@@ -59,15 +59,18 @@ export function buildThreadTimeline(
   // The backend returns mailbox inputs by sequence. Prepare overlays now, then place applied
   // overlays at their INPUT_APPLIED journal position and leave queued overlays after live work.
   for (const input of inputs) {
-    if (input.inputType !== 'user_message') {
+    const inputType = input.inputType.toUpperCase()
+    // Missing status only occurs in stale browser cache fixtures; durable API responses are typed.
+    const visible = input.status === 'QUEUED' || input.status === 'APPLIED' || !input.status
+    if (!visible || (inputType !== 'USER_MESSAGE' && inputType !== 'CUSTOM_MESSAGE')) {
       continue
     }
     const appliedEntryId = input.appliedEntryId || appliedEntryByInputId.get(input.inputId) || null
     if (appliedEntryId && entryIds.has(appliedEntryId)) {
       continue
     }
-    const text = extractUserMessageText(input.payloadJson)
-    if (!text) {
+    const queuedMessage = extractQueuedMessage(input.payloadJson, inputType)
+    if (!queuedMessage) {
       continue
     }
     hasPendingInputs = true
@@ -75,9 +78,9 @@ export function buildThreadTimeline(
       input,
       message: {
         id: `input:${input.inputId}`,
-        role: 'user',
+        role: queuedMessage.role,
         subjectEntryId: null,
-        text,
+        text: queuedMessage.text,
         createdAt: input.createTime,
         status: 'done',
         metadata: { pendingInput: true, clientMessageId: input.clientMessageId },
@@ -230,11 +233,22 @@ function findAppliedEntryIdsFromEvents(threadEvents: ThreadEventDTO[]): Map<stri
   return applied
 }
 
-function extractUserMessageText(payloadJson: string): string {
+function extractQueuedMessage(
+  payloadJson: string,
+  inputType: string,
+): { role: 'user' | 'system'; text: string } | null {
   const payload = parsePayload(payloadJson)
   const message = asRecord(payload.message)
   const contents = getRecordList(message.contents)
-  return contents.map(contentText).filter(Boolean).join('\n')
+  const text = contents.map(contentText).filter(Boolean).join('\n')
+  if (!text) {
+    return null
+  }
+  const role = getString(message.role)
+  if (inputType === 'CUSTOM_MESSAGE' && role === 'SYSTEM') {
+    return { role: 'system', text }
+  }
+  return { role: 'user', text }
 }
 
 function findMaterializedAssistantEntryIds(entries: HarnessSessionEntryDTO[]): Set<string> {
@@ -292,8 +306,18 @@ function projectDurableEntry(
   const payload = parsePayload(entry.payloadJson)
   if (entry.entryType === 'agent_snapshot') {
     const snapshot = asRecord(payload.snapshot)
+    runtimeContext.agentDefinitionId = getString(payload.agentDefinitionId) || runtimeContext.agentDefinitionId
     runtimeContext.model = getString(snapshot.modelId) || runtimeContext.model
     runtimeContext.variant = getString(snapshot.variant) || runtimeContext.variant
+    return
+  }
+  if (entry.entryType === 'model_change') {
+    runtimeContext.model = getString(payload.modelId) || runtimeContext.model
+    runtimeContext.variant = getString(payload.variant) || runtimeContext.variant
+    return
+  }
+  if (entry.entryType === 'yolo_change') {
+    runtimeContext.yoloEnabled = payload.yoloEnabled === true
     return
   }
   if (entry.entryType === 'compaction') {
@@ -310,7 +334,7 @@ function projectDurableEntry(
     }
     return
   }
-  if (entry.entryType !== 'message') {
+  if (entry.entryType !== 'message' && entry.entryType !== 'custom_message') {
     return
   }
 

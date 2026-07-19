@@ -2,55 +2,55 @@ import { useState, type FormEventHandler } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { resolveThreadAgentId } from '@/features/ai/ai-console-page-helpers'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts'
-import { useAiConsoleThreadMutations } from '@/features/ai/useAiConsoleThreadMutations'
-import { useAiConsoleThreadQueries } from '@/features/ai/useAiConsoleThreadQueries'
+import { useAiConsoleSessionMutations } from '@/features/ai/useAiConsoleSessionMutations'
+import { useAiConsoleSessionQueries } from '@/features/ai/useAiConsoleSessionQueries'
 
-export function useAiConsoleThreadController(agents: AgentDefinitionDTO[]) {
+export function useAiConsoleSessionController(agents: AgentDefinitionDTO[]) {
   const navigate = useNavigate()
   const [chatModalOpen, setChatModalOpen] = useState(false)
   const [selectedAgentId, setSelectedAgentId] = useState('')
   const [title, setTitle] = useState('')
 
-  const { threadsQuery, threads } = useAiConsoleThreadQueries()
-  const threadMutations = useAiConsoleThreadMutations({
+  const { sessionsQuery, sessions } = useAiConsoleSessionQueries()
+  const sessionMutations = useAiConsoleSessionMutations({
     selectedAgentId,
     title,
-    onThreadCreated: async (thread) => {
+    onSessionCreated: async (session) => {
       setChatModalOpen(false)
       setTitle('')
-      navigate(`/threads/${encodeURIComponent(thread.threadId)}`)
+      navigate(`/sessions/${encodeURIComponent(session.sessionId)}`)
     },
   })
 
-  function openCreateThread(agentId?: string) {
+  function openCreateSession(agentId?: string) {
     const resolvedAgentId = resolveThreadAgentId(agentId, selectedAgentId, agents)
     setSelectedAgentId(resolvedAgentId)
     setTitle('')
     setChatModalOpen(true)
   }
 
-  const submitCreateThread: FormEventHandler<HTMLFormElement> = (event) => {
+  const submitCreateSession: FormEventHandler<HTMLFormElement> = (event) => {
     event.preventDefault()
     if (selectedAgentId) {
-      threadMutations.createThread()
+      sessionMutations.createSession()
     }
   }
 
   return {
-    threadsQuery,
-    threads,
-    threadMutationError: threadMutations.threadMutationError,
-    openCreateThread,
-    createThreadModal: {
+    sessionsQuery,
+    sessions,
+    sessionMutationError: sessionMutations.sessionMutationError,
+    openCreateSession,
+    createSessionModal: {
       open: chatModalOpen,
       agents,
       selectedAgentId,
       title,
-      pending: threadMutations.createThreadPending,
+      pending: sessionMutations.createSessionPending,
       onClose: () => setChatModalOpen(false),
       onSelectAgent: setSelectedAgentId,
       onTitleChange: setTitle,
-      onSubmit: submitCreateThread,
+      onSubmit: submitCreateSession,
     },
   }
 }

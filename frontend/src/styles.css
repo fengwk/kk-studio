@@ -2859,3 +2859,71 @@ textarea::placeholder {
     min-height: 38px;
   }
 }
+
+.thread-tree {
+  border-top: 1px solid var(--border);
+  padding: 10px;
+}
+
+.thread-tree label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.thread-tree select {
+  min-width: 92px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  padding: 3px 6px;
+}
+
+.thread-tree-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  margin-top: 8px;
+  overflow-y: auto;
+}
+
+.thread-tree-entry {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: left;
+}
+
+.thread-tree-entry:hover:not(:disabled),
+.thread-tree-entry:focus-visible:not(:disabled) {
+  background: var(--surface-active);
+  color: var(--fg);
+}
+
+.thread-tree-entry:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.thread-tree-entry span {
+  flex: 0 0 auto;
+  color: var(--fg-dim);
+}
+
+.thread-tree-entry strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -82,14 +82,16 @@ function input(inputId: string, text: string): HarnessThreadInputDTO {
     inputId,
     threadId: 't1',
     sequence: 1,
-    inputType: 'user_message',
+    inputType: 'USER_MESSAGE',
     payloadJson: JSON.stringify({
       message: { role: 'USER', contents: [{ type: 'text', text }] },
       assistantMetadata: null,
     }),
     clientMessageId: 'cid',
+    status: 'QUEUED',
     appliedEntryId: null,
-    appliedAt: null,
+    resolvedAt: null,
+    cancelledByStopId: null,
     createTime: null,
   }
 }

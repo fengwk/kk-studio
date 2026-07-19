@@ -198,7 +198,10 @@ describe('AgentThreadPage', () => {
 
     await user.click(screen.getByText('yolo'))
     await waitFor(() => {
-      expect(harnessService.setThreadYolo).toHaveBeenCalledWith('1', { yoloEnabled: true })
+      expect(harnessService.setThreadYolo).toHaveBeenCalledWith(
+        '1',
+        expect.objectContaining({ yoloEnabled: true, clientMessageId: expect.any(String) }),
+      )
     })
   })
 
@@ -206,9 +209,8 @@ describe('AgentThreadPage', () => {
     renderThread()
     await screen.findByText('检查第一集大纲')
     expect(harnessService.getThread).toHaveBeenCalledWith('1')
-    expect(harnessService.listThreads).toHaveBeenCalled()
-    // createThread is not part of page load path
-    expect('createThread' in harnessService).toBe(false)
+    // Reloading only projects the durable Thread; it never creates a replacement Thread.
+    expect('createSessionThread' in harnessService).toBe(false)
   })
 })
 
@@ -277,11 +279,13 @@ function input(inputId: string, inputType: string, payload: Record<string, unkno
     inputId,
     threadId: '1',
     sequence: 1,
-    inputType,
+    inputType: inputType.toUpperCase() as HarnessThreadInputDTO['inputType'],
     payloadJson: JSON.stringify(payload),
     clientMessageId: `cid-${inputId}`,
+    status: 'QUEUED',
     appliedEntryId: null,
-    appliedAt: null,
+    resolvedAt: null,
+    cancelledByStopId: null,
     createTime: '2026-01-01T00:00:00',
   }
 }
