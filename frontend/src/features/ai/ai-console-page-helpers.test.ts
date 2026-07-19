@@ -28,7 +28,11 @@ describe('ai-console-page-helpers', () => {
     expect(createProviderEditorPlan()).toMatchObject({
       kind: 'provider',
       modal: { kind: 'provider', mode: 'create' },
-      providerDraft: { providerType: 'openai', timeoutMillis: '60000' },
+      providerDraft: {
+        providerType: 'openai',
+        modelCallTimeoutMillis: '1800000',
+        modelCallIdleTimeoutMillis: '120000',
+      },
     })
     expect(editProviderEditorPlan(providers, 'provider-1')).toMatchObject({
       kind: 'provider',
@@ -71,8 +75,9 @@ describe('ai-console-page-helpers', () => {
           description: ' provider desc ',
           providerType: ' openai ',
           baseUrl: ' https://api.minimax.io/v1 ',
-          apiKey: ' secret ',
-          timeoutMillis: '120000',
+          credential: ' secret ',
+          modelCallTimeoutMillis: '120000',
+          modelCallIdleTimeoutMillis: '3000',
         },
         modelDraft: emptyModelDraft(),
         agentDraft: emptyAgentDraft(),
@@ -86,8 +91,9 @@ describe('ai-console-page-helpers', () => {
         description: 'provider desc',
         providerType: 'openai',
         baseUrl: 'https://api.minimax.io/v1',
-        apiKey: 'secret',
-        timeoutMillis: 120000,
+        credential: 'secret',
+        modelCallTimeoutMillis: 120000,
+        modelCallIdleTimeoutMillis: 3000,
       },
     })
 
@@ -157,8 +163,9 @@ describe('ai-console-page-helpers', () => {
           description: ' updated ',
           providerType: ' openai ',
           baseUrl: '',
-          apiKey: '',
-          timeoutMillis: '60000',
+          credential: '',
+          modelCallTimeoutMillis: '1800000',
+          modelCallIdleTimeoutMillis: '120000',
         },
         modelDraft: emptyModelDraft(),
         agentDraft: emptyAgentDraft(),
@@ -173,8 +180,9 @@ describe('ai-console-page-helpers', () => {
         description: 'updated',
         providerType: 'openai',
         baseUrl: null,
-        apiKey: null,
-        timeoutMillis: 60000,
+        credential: null,
+        modelCallTimeoutMillis: 1800000,
+        modelCallIdleTimeoutMillis: 120000,
       },
     })
 
@@ -243,8 +251,9 @@ function emptyProviderDraft() {
     description: '',
     providerType: 'openai',
     baseUrl: '',
-    apiKey: '',
-    timeoutMillis: '60000',
+    credential: '',
+    modelCallTimeoutMillis: '1800000',
+    modelCallIdleTimeoutMillis: '120000',
   }
 }
 
@@ -277,8 +286,9 @@ function provider() {
     description: 'MiniMax endpoint',
     providerType: 'openai',
     baseUrl: 'https://api.minimax.chat/v1',
-    apiKey: 'test-key',
-    timeoutMillis: 60000,
+    configured: true,
+    modelCallTimeoutMillis: 1800000,
+    modelCallIdleTimeoutMillis: 120000,
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
   }

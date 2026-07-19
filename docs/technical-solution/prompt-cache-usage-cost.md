@@ -427,7 +427,7 @@ tokenReadRatio =
 - `ProviderFactory.create(credential, configJson)` 构造 `ProviderAdapter`；
 - 工厂暴露的 `PromptCacheCapability` 决定 `PromptCachePolicy`，按 ProviderType 固定映射为 OpenAI/Responses 的 `affinityShort`、Anthropic 的 `breakpointsShort`、Google 的 `automatic`。本仓库不向 Google 提交任何 cached-content resource，cache 事实完全由 `ProviderResponse` usage 归一化读取。
 
-注册的 `ProviderFactory` 返回的 `ProviderAdapter` 必须与请求的 `ProviderType` 匹配，否则立即失败；持久 `configJson` 必须包含正整数 `timeoutMillis`、持久 `baseUrl` 必须非空。
+注册的 `ProviderFactory` 返回的 `ProviderAdapter` 必须与请求的 `ProviderType` 匹配，否则立即失败；持久 Provider 配置中的 `modelCallTimeoutMillis` 与 `modelCallIdleTimeoutMillis` 必须为正整数，缺失时分别回退为 30 分钟与 120 秒；持久 `baseUrl` 必须非空。
 
 ### Tool Binding 解析
 
@@ -439,6 +439,7 @@ tokenReadRatio =
 
 - input、权限决定、Tool terminal 与 Subagent completion 都在事务提交后 kick 所属 Thread。
 - Processor 从数据库获取 `processor_token` / `processor_until`；Provider 调用期间按 lease 的三分之一续租，丢租后先标记 ownership lost，再取消本地 handle 并拒绝后续 delta/callback 提交。
+- 每个 Turn 冻结 Provider 的 `modelCallTimeoutMillis` / `modelCallIdleTimeoutMillis`：前者同时作为 SDK 调用 deadline 和 Processor 总时长 watchdog，后者从 Turn 创建开始计时，并由 `onStarted` 与每个 Provider delta 重置。任一 watchdog 到期会先持久化失败，再 best-effort 取消本地 handle。
 - Provider 完成后由 `commitFinalAssistant` 或 `prepareTools` 在同一事务中写 Assistant Entry 与账本；token fencing 失败时整笔提交回滚。
 - `ThreadRecoveryLifecycle` 只低频 kick expired token、pending input、due/expired Tool 或 head 上待应用 terminal Tool Result；它不是 Usage、Turn 或 Tool 的主轮询器。
 - 非 Environment Tool 由 ThreadProcessor 对当前 Thread 调用 `dispatchDueForThread`；Environment Tool 由 daemon gateway 基于 durable Invocation 推进。
@@ -449,6 +450,7 @@ tokenReadRatio =
 | --- | --- |
 | 配置解析、缺字段、类型错误、enum 未知、变体重复 | [`AgentModelRuntimeConfigParserTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/agent/model/runtime/AgentModelRuntimeConfigParserTest.java) |
 | Mutation 拒绝不可执行 JSON、保留/重新校验部分更新 | [`AgentModelMutationFactoryTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/agent/model/service/impl/AgentModelMutationFactoryTest.java) |
+| Provider timeout 默认、规范化、CRUD、Turn 资源解析与总/idle watchdog | [`AgentProviderConfigurationCodecTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/agent/provider/configuration/AgentProviderConfigurationCodecTest.java)、[`AgentProviderMutationFactoryTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/agent/provider/service/impl/AgentProviderMutationFactoryTest.java)、[`DatabaseTurnResourceResolverTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/resource/DatabaseTurnResourceResolverTest.java)、[`ThreadProcessorIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/ThreadProcessorIntegrationTest.java) |
 | workdir 不能逃逸 environmentRoot、properties 边界 | [`HarnessRuntimePropertiesTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/configuration/HarnessRuntimePropertiesTest.java) |
 | Thread Turn、lease heartbeat、并发 enqueue、Usage 原子提交与失败语义 | [`ThreadProcessorIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/ThreadProcessorIntegrationTest.java) |
 | Recovery 只选择可恢复 durable work | [`HarnessThreadRecoveryMapperTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/store/HarnessThreadRecoveryMapperTest.java)、[`ThreadRecoveryLifecycleTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/worker/ThreadRecoveryLifecycleTest.java) |

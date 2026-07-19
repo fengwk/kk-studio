@@ -15,8 +15,9 @@ export interface ProviderDraft {
   description: string
   providerType: string
   baseUrl: string
-  apiKey: string
-  timeoutMillis: string
+  credential: string
+  modelCallTimeoutMillis: string
+  modelCallIdleTimeoutMillis: string
 }
 
 export interface KeyValueDraft {

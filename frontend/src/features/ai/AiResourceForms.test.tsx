@@ -15,16 +15,20 @@ describe('AiResourceForms', () => {
     await user.selectOptions(screen.getByLabelText('Provider Type'), 'anthropic')
     await user.type(screen.getByPlaceholderText('https://api.example.com/v1'), 'https://proxy.example/v1')
     await user.type(screen.getByPlaceholderText('sk-...'), 'secret')
-    const timeoutInput = screen.getByPlaceholderText('60000')
-    await user.clear(timeoutInput)
-    await user.type(timeoutInput, '120000')
+    const totalTimeoutInput = screen.getByPlaceholderText('1800000')
+    await user.clear(totalTimeoutInput)
+    await user.type(totalTimeoutInput, '240000')
+    const idleTimeoutInput = screen.getByPlaceholderText('120000')
+    await user.clear(idleTimeoutInput)
+    await user.type(idleTimeoutInput, '3000')
 
     expect(screen.getByDisplayValue('provider-a')).toBeInTheDocument()
     expect(screen.getByDisplayValue('provider desc')).toBeInTheDocument()
     expect(screen.getByDisplayValue('anthropic')).toBeInTheDocument()
     expect(screen.getByDisplayValue('https://proxy.example/v1')).toBeInTheDocument()
     expect(screen.getByDisplayValue('secret')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('120000')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('240000')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('3000')).toBeInTheDocument()
   })
 
   it('edits model variants without raw json', async () => {
@@ -120,8 +124,9 @@ function ProviderFormHarness() {
     description: '',
     providerType: 'openai',
     baseUrl: '',
-    apiKey: '',
-    timeoutMillis: '60000',
+    credential: '',
+    modelCallTimeoutMillis: '1800000',
+    modelCallIdleTimeoutMillis: '120000',
   })
   return <ProviderForm draft={draft} onChange={setDraft} />
 }
@@ -145,8 +150,9 @@ function ModelFormHarness() {
           description: null,
           providerType: 'openai',
           baseUrl: null,
-          apiKey: null,
-          timeoutMillis: null,
+          configured: true,
+          modelCallTimeoutMillis: 1800000,
+          modelCallIdleTimeoutMillis: 120000,
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:00:00',
         },

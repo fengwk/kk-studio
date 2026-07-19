@@ -40,6 +40,7 @@ import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCachePolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
@@ -515,6 +516,61 @@ class ThreadProcessorIntegrationTest {
     releaseProvider.countDown();
     awaitIdle(threadId);
     assertNull(threadStore.find(threadId).orElseThrow().processorToken());
+  }
+
+  @Test
+  void providerConfiguredTotalTimeoutCancelsAStalledTurn() throws Exception {
+    HarnessThreadDTO thread = createRoot("proc-provider-total-timeout");
+    long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
+    fakeProvider.setModelCallTimeoutPolicy(
+        new ModelCallTimeoutPolicy(Duration.ofMillis(80), Duration.ofSeconds(5)));
+    fakeProvider.stallNext();
+
+    submit(thread.getThreadId(), "timeout", "cid-total-timeout-" + threadId);
+
+    awaitFailed(threadId);
+    assertTrue(fakeProvider.latestStreamCancelled());
+    assertTrue(
+        threadEventMapper
+            .findLatestFailure(threadId)
+            .getPayloadJson()
+            .contains("model call timed out"));
+  }
+
+  @Test
+  void providerConfiguredIdleTimeoutCancelsAStalledTurn() throws Exception {
+    HarnessThreadDTO thread = createRoot("proc-provider-idle-timeout");
+    long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
+    fakeProvider.setModelCallTimeoutPolicy(
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofMillis(80)));
+    fakeProvider.stallNext();
+
+    submit(thread.getThreadId(), "idle timeout", "cid-idle-timeout-" + threadId);
+
+    awaitFailed(threadId);
+    assertTrue(fakeProvider.latestStreamCancelled());
+    assertTrue(
+        threadEventMapper
+            .findLatestFailure(threadId)
+            .getPayloadJson()
+            .contains("model call idle timed out"));
+  }
+
+  @Test
+  void providerDeltasResetTheConfiguredIdleTimeout() throws Exception {
+    HarnessThreadDTO thread = createRoot("proc-provider-idle-activity");
+    long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
+    fakeProvider.setModelCallTimeoutPolicy(
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(1)));
+    fakeProvider.emitTextDeltas(Duration.ofMillis(200), "a", "b", "c", "d", "e", "f", "g");
+
+    submit(thread.getThreadId(), "stay active", "cid-idle-activity-" + threadId);
+
+    awaitIdle(threadId);
+    assertFalse(fakeProvider.latestStreamCancelled());
+    HarnessThreadEventDO failure = threadEventMapper.findLatestFailure(threadId);
+    assertNull(failure, () -> failure.getPayloadJson());
+    assertEquals(1, fakeProvider.requestsSinceReset());
   }
 
   @Test
@@ -1086,8 +1142,7 @@ class ThreadProcessorIntegrationTest {
     @Bean
     @Primary
     ThreadProcessorConfig shortLeaseProcessorConfig() {
-      return new ThreadProcessorConfig(
-          Duration.ofMillis(150), Duration.ofMillis(50), 16 * 1024, Duration.ofMinutes(5), 8);
+      return new ThreadProcessorConfig(Duration.ofMillis(150), Duration.ofMillis(50), 16 * 1024, 8);
     }
 
     @Bean
@@ -1127,6 +1182,7 @@ class ThreadProcessorIntegrationTest {
                 PromptCachePolicy.disabled());
         return new TurnResources(
             provider,
+            provider.modelCallTimeoutPolicy(),
             model,
             model.variants().get(0),
             List.of(RETRY_TEST_TOOL),
@@ -1208,7 +1264,11 @@ class ThreadProcessorIntegrationTest {
     private volatile boolean nextEmptyCompaction;
     private volatile boolean nextEmptyResponse;
     private volatile boolean nextThinkingResponse;
+    private volatile boolean nextStalled;
+    private volatile List<String> nextTextDeltas = List.of();
+    private volatile Duration textDeltaInterval = Duration.ZERO;
     private volatile AtomicBoolean latestStreamCancellation;
+    private volatile ModelCallTimeoutPolicy modelCallTimeoutPolicy = ModelCallTimeoutPolicy.DEFAULT;
 
     void reset() {
       resetAt.set(requests.get());
@@ -1226,7 +1286,11 @@ class ThreadProcessorIntegrationTest {
       nextEmptyCompaction = false;
       nextEmptyResponse = false;
       nextThinkingResponse = false;
+      nextStalled = false;
+      nextTextDeltas = List.of();
+      textDeltaInterval = Duration.ZERO;
       latestStreamCancellation = null;
+      modelCallTimeoutPolicy = ModelCallTimeoutPolicy.DEFAULT;
     }
 
     void failNext(ProviderErrorKind kind, String message) {
@@ -1278,6 +1342,23 @@ class ThreadProcessorIntegrationTest {
 
     void completeNextWithThinking() {
       nextThinkingResponse = true;
+    }
+
+    void stallNext() {
+      nextStalled = true;
+    }
+
+    void emitTextDeltas(Duration interval, String... deltas) {
+      textDeltaInterval = interval;
+      nextTextDeltas = List.of(deltas);
+    }
+
+    void setModelCallTimeoutPolicy(ModelCallTimeoutPolicy value) {
+      modelCallTimeoutPolicy = value;
+    }
+
+    ModelCallTimeoutPolicy modelCallTimeoutPolicy() {
+      return modelCallTimeoutPolicy;
     }
 
     RuntimeException takeResourceResolutionFailure() {
@@ -1352,6 +1433,9 @@ class ThreadProcessorIntegrationTest {
       List<ProviderToolCall> toolCalls = nextToolCalls;
       boolean emptyResponse = nextEmptyResponse;
       boolean thinkingResponse = nextThinkingResponse;
+      boolean stalled = nextStalled;
+      List<String> textDeltas = nextTextDeltas;
+      Duration deltaInterval = textDeltaInterval;
       blockEntered = null;
       blockRelease = null;
       blockDuration = Duration.ZERO;
@@ -1359,6 +1443,9 @@ class ThreadProcessorIntegrationTest {
       nextToolCalls = List.of();
       nextEmptyResponse = false;
       nextThinkingResponse = false;
+      nextStalled = false;
+      nextTextDeltas = List.of();
+      textDeltaInterval = Duration.ZERO;
       if (entered != null) {
         entered.countDown();
       }
@@ -1379,9 +1466,27 @@ class ThreadProcessorIntegrationTest {
         handler.onError(afterBlockFail, stream);
         return stream;
       }
-      String text = emptyResponse || thinkingResponse ? "" : "reply-" + n;
+      if (stalled) {
+        return stream;
+      }
+      StringBuilder streamedText = new StringBuilder();
+      for (String delta : textDeltas) {
+        handler.onEvent(new ProviderStreamEvent.TextDelta(delta), stream);
+        streamedText.append(delta);
+        if (!deltaInterval.isZero() && !deltaInterval.isNegative()) {
+          try {
+            Thread.sleep(deltaInterval.toMillis());
+          } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+          }
+        }
+      }
+      String text =
+          emptyResponse || thinkingResponse
+              ? ""
+              : streamedText.isEmpty() ? "reply-" + n : streamedText.toString();
       String thinking = thinkingResponse ? "reasoning" : "";
-      if (!text.isEmpty()) {
+      if (!text.isEmpty() && textDeltas.isEmpty()) {
         handler.onEvent(new ProviderStreamEvent.TextDelta(text), stream);
       }
       if (!thinking.isEmpty()) {

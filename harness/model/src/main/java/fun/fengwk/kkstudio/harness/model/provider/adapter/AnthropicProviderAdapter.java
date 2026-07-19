@@ -35,7 +35,7 @@ public final class AnthropicProviderAdapter implements ProviderAdapter {
         return AnthropicStreamingChatModel.builder()
             .baseUrl(descriptor.endpoint())
             .apiKey(apiKey)
-            .timeout(descriptor.timeout())
+            .timeout(descriptor.modelCallTimeoutPolicy().modelCallTimeout())
             .returnThinking(true)
             .cacheSystemMessages(flags.cacheSystemMessages())
             .cacheTools(flags.cacheTools())

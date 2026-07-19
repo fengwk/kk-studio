@@ -6,10 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.core.agent.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
+import fun.fengwk.kkstudio.share.model.AgentProviderType;
 import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
+
+import java.time.Duration;
 
 /** Provider mutation validation and credential patch behavior. */
 public class AgentProviderMutationFactoryTest {
@@ -17,8 +21,7 @@ public class AgentProviderMutationFactoryTest {
   @Test
   public void shouldRetainCredentialWhenUpdateDoesNotProvideOne() {
     AgentProviderMutationFactory factory = factory();
-    AgentProviderCreateDTO create = provider("provider", " initial-secret ");
-    AgentProvider provider = factory.newProvider(create);
+    AgentProvider provider = existingProvider("initial-secret", "{}");
 
     AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
     update.setProviderType("openai");
@@ -26,7 +29,30 @@ public class AgentProviderMutationFactoryTest {
     factory.update(provider, update);
 
     assertEquals("initial-secret", provider.getCredential());
-    assertEquals("{}", provider.getConfigJson());
+    assertEquals(
+        "{\"modelCallTimeoutMillis\":1800000,\"modelCallIdleTimeoutMillis\":120000}",
+        provider.getConfigJson());
+  }
+
+  @Test
+  public void shouldPersistConfiguredTimeoutsAndRetainExistingValuesOnPartialUpdate() {
+    AgentProviderMutationFactory factory = factory();
+    AgentProvider persisted = existingProvider(null, "{}");
+
+    AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
+    update.setProviderType("openai");
+    update.setModelCallTimeoutMillis(Duration.ofMinutes(2).toMillis());
+    update.setModelCallIdleTimeoutMillis(Duration.ofSeconds(3).toMillis());
+    factory.update(persisted, update);
+
+    AgentProviderUpdateDTO partialUpdate = new AgentProviderUpdateDTO();
+    partialUpdate.setProviderType("openai");
+    partialUpdate.setModelCallIdleTimeoutMillis(Duration.ofSeconds(5).toMillis());
+    factory.update(persisted, partialUpdate);
+
+    assertEquals(
+        "{\"modelCallTimeoutMillis\":120000,\"modelCallIdleTimeoutMillis\":5000}",
+        persisted.getConfigJson());
   }
 
   @Test
@@ -41,9 +67,9 @@ public class AgentProviderMutationFactoryTest {
     unsupported.setProviderType("missing");
     assertThrows(IllegalArgumentException.class, () -> factory.newProvider(unsupported));
 
-    AgentProviderCreateDTO invalidJson = provider("provider", null);
-    invalidJson.setConfigJson("[]");
-    assertThrows(IllegalArgumentException.class, () -> factory.newProvider(invalidJson));
+    AgentProviderCreateDTO invalidTimeout = provider("provider", null);
+    invalidTimeout.setModelCallIdleTimeoutMillis(0L);
+    assertThrows(IllegalArgumentException.class, () -> factory.newProvider(invalidTimeout));
   }
 
   private AgentProviderCreateDTO provider(String name, String credential) {
@@ -54,7 +80,19 @@ public class AgentProviderMutationFactoryTest {
     return dto;
   }
 
+  private AgentProvider existingProvider(String credential, String configJson) {
+    AgentProvider provider = new AgentProvider();
+    provider.setId(1L);
+    provider.setName("provider");
+    provider.setProviderType(AgentProviderType.openai);
+    provider.setCredential(credential);
+    provider.setConfigJson(configJson);
+    return provider;
+  }
+
   private AgentProviderMutationFactory factory() {
-    return new AgentProviderMutationFactory(new AgentEditableSupport(new ObjectMapper()));
+    ObjectMapper objectMapper = new ObjectMapper();
+    return new AgentProviderMutationFactory(
+        new AgentEditableSupport(objectMapper), new AgentProviderConfigurationCodec(objectMapper));
   }
 }

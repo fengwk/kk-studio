@@ -34,7 +34,7 @@ public final class GoogleProviderAdapter implements ProviderAdapter {
         return GoogleAiGeminiStreamingChatModel.builder()
             .baseUrl(descriptor.endpoint())
             .apiKey(apiKey)
-            .timeout(descriptor.timeout())
+            .timeout(descriptor.modelCallTimeoutPolicy().modelCallTimeout())
             .returnThinking(true)
             .build();
       }

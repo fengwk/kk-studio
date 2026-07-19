@@ -205,14 +205,16 @@ sync_seeded_minimax_provider() {
     --arg providerType "openai" \
     --arg baseUrl "$minimax_base_url" \
     --arg credential "$MINIMAX_API_KEY" \
-    --arg configJson '{"timeoutMillis":120000}' \
+    --argjson modelCallTimeoutMillis 1800000 \
+    --argjson modelCallIdleTimeoutMillis 120000 \
     '{
       name: $name,
       description: $description,
       providerType: $providerType,
       baseUrl: $baseUrl,
       credential: $credential,
-      configJson: $configJson
+      modelCallTimeoutMillis: $modelCallTimeoutMillis,
+      modelCallIdleTimeoutMillis: $modelCallIdleTimeoutMillis
     }')
   step "Syncing seeded MiniMax provider"
   curl -fsS -X PUT "$BACKEND_URL/api/providers/1" \

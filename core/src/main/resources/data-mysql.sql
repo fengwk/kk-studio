@@ -3,12 +3,12 @@ insert into agent_provider (
     gmt_create, gmt_modified, version
 ) values (
     1, 'stub', 'Local deterministic provider for development and acceptance tests.',
-    'openai', 'http://stub.local/v1', 'stub-key', '{"timeoutMillis":60000}',
+    'openai', 'http://stub.local/v1', 'stub-key', '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000}',
     current_timestamp(3), current_timestamp(3), 0
 ) on duplicate key update
     name = 'stub', description = 'Local deterministic provider for development and acceptance tests.',
     provider_type = 'openai', base_url = 'http://stub.local/v1', credential = 'stub-key',
-    config_json = '{"timeoutMillis":60000}', gmt_modified = current_timestamp(3);
+    config_json = '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000}', gmt_modified = current_timestamp(3);
 
 insert into agent_model (
     id, provider_id, name, description, capabilities_json, config_json,

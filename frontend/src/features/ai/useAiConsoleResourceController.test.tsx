@@ -230,8 +230,9 @@ function provider() {
     description: 'Local deterministic provider',
     providerType: 'openai',
     baseUrl: 'http://stub.local/v1',
-    apiKey: 'stub-key',
-    timeoutMillis: 60000,
+    configured: true,
+    modelCallTimeoutMillis: 1800000,
+    modelCallIdleTimeoutMillis: 120000,
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
   }

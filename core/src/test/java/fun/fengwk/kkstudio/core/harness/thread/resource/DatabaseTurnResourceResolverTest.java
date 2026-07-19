@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.core.agent.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
+import fun.fengwk.kkstudio.core.agent.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
@@ -23,6 +24,7 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheMode;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
@@ -112,9 +114,16 @@ class DatabaseTurnResourceResolverTest {
       assertEquals(Path.of("/tmp/harness-root/repository"), resources.workdir());
       assertEquals(Path.of("/tmp/harness-root"), resources.environmentRoot());
       assertEquals("secret", factory.credential);
-      assertEquals("{\"timeoutMillis\":45000}", factory.configJson);
+      assertEquals(
+          "{\"modelCallTimeoutMillis\":45000,\"modelCallIdleTimeoutMillis\":3000}",
+          factory.configJson);
       assertEquals("22", factory.descriptor.providerId());
-      assertEquals(Duration.ofSeconds(45), factory.descriptor.timeout());
+      assertEquals(
+          Duration.ofSeconds(45), factory.descriptor.modelCallTimeoutPolicy().modelCallTimeout());
+      assertEquals(
+          Duration.ofSeconds(3),
+          factory.descriptor.modelCallTimeoutPolicy().modelCallIdleTimeout());
+      assertEquals(factory.descriptor.modelCallTimeoutPolicy(), resources.modelCallTimeoutPolicy());
       assertSame(factory.provider, resources.provider());
       verify(fixture.models).getById(11L);
     }
@@ -239,13 +248,21 @@ class DatabaseTurnResourceResolverTest {
           IllegalArgumentException.class,
           () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot)));
 
+      AgentProvider defaulted = provider(22L, AgentProviderType.openai);
+      defaulted.setConfigJson("{}");
+      fixture.provider(defaulted);
+      TurnResources defaultedResources =
+          fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot));
+      assertEquals(ModelCallTimeoutPolicy.DEFAULT, defaultedResources.modelCallTimeoutPolicy());
+
       AgentProvider invalid = provider(22L, AgentProviderType.openai);
-      invalid.setConfigJson("{}");
+      invalid.setConfigJson("{\"modelCallTimeoutMillis\":0}");
       fixture.provider(invalid);
       assertThrows(
           IllegalArgumentException.class,
           () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot)));
-      invalid.setConfigJson("{\"timeoutMillis\":45000}");
+      invalid.setConfigJson(
+          "{\"modelCallTimeoutMillis\":45000,\"modelCallIdleTimeoutMillis\":3000}");
       invalid.setBaseUrl(" ");
       assertThrows(
           IllegalArgumentException.class,
@@ -526,7 +543,8 @@ class DatabaseTurnResourceResolverTest {
     provider.setProviderType(type);
     provider.setBaseUrl("https://provider.test/v1");
     provider.setCredential("secret");
-    provider.setConfigJson("{\"timeoutMillis\":45000}");
+    provider.setConfigJson(
+        "{\"modelCallTimeoutMillis\":45000,\"modelCallIdleTimeoutMillis\":3000}");
     return provider;
   }
 
@@ -626,12 +644,12 @@ class DatabaseTurnResourceResolverTest {
               sessions,
               models,
               providers,
+              new AgentProviderConfigurationCodec(objectMapper),
               new AgentModelRuntimeConfigParser(objectMapper),
               host,
               properties,
               environments,
-              new DaemonToolCapabilitiesCodec(),
-              objectMapper);
+              new DaemonToolCapabilitiesCodec());
     }
 
     /** requireFrozenSnapshot only checks session existence; path snapshot is ThreadProcessor. */
