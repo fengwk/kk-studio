@@ -14,6 +14,12 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
     keywords: ['auto', 'approve', 'tool'],
   },
   {
+    id: 'tree',
+    label: 'tree',
+    description: '打开历史分支面板',
+    keywords: ['history', 'branch', 'fork', 'thread'],
+  },
+  {
     id: 'stop',
     label: 'stop',
     description: '停止当前 Thread 并恢复尚未处理的消息',
@@ -39,9 +45,10 @@ export function filterThreadCommands(query: string): ThreadCommand[] {
     return THREAD_COMMANDS
   }
   return THREAD_COMMANDS.filter((command) => {
-    const haystack = [command.id, command.label, command.description, ...(command.keywords ?? [])]
+    const haystack = [command.id, command.label, command.description]
       .join(' ')
       .toLowerCase()
-    return haystack.includes(q)
+    const keywordMatch = command.keywords?.some((keyword) => keyword.toLowerCase().startsWith(q)) ?? false
+    return haystack.includes(q) || keywordMatch
   })
 }

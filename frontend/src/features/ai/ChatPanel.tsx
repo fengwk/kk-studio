@@ -11,7 +11,6 @@ import type { RelayPermission } from '@/features/ai/useHarnessTaskTimeline'
 import type { ThreadTimeline } from '@/features/ai/thread-events'
 import type {
   AgentDefinitionDTO,
-  HarnessSessionEntryDTO,
   HarnessThreadDTO,
   ModelUsageSummaryDTO,
   RootActivityDTO,
@@ -24,7 +23,6 @@ import type {
  */
 export function ChatPanel({
   threads,
-  sessionEntries,
   activeThreadId,
   sessionId,
   mainThreadId,
@@ -47,11 +45,8 @@ export function ChatPanel({
   onDraftChange,
   onSubmit,
   onCommand,
-  onBranch,
-  branchPending,
 }: {
   threads: HarnessThreadDTO[]
-  sessionEntries: HarnessSessionEntryDTO[]
   activeThreadId: string
   sessionId: string
   mainThreadId?: string
@@ -97,8 +92,6 @@ export function ChatPanel({
   onDraftChange: (draft: string) => void
   onSubmit: () => void
   onCommand: (command: ThreadCommand) => void
-  onBranch: (entry: HarnessSessionEntryDTO) => void
-  branchPending: boolean
 }) {
   const pendingPermissions = observability.toolInvocations.filter(
     (invocation) => invocation.status === 'WAITING_APPROVAL',
@@ -109,14 +102,11 @@ export function ChatPanel({
       sidebar={
         <ChatSidebar
           threads={threads}
-          sessionEntries={sessionEntries}
           activeThreadId={activeThreadId}
           sessionId={sessionId}
           mainThreadId={mainThreadId}
           title={title}
           onBack={onBack}
-          onBranch={onBranch}
-          branchPending={branchPending}
         />
       }
       messages={timeline.messages}

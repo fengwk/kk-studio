@@ -1,8 +1,10 @@
-import { useEffect } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ChatPanel } from '@/features/ai/ChatPanel'
+import { HistoryBranchPanel } from '@/features/ai/HistoryBranchPanel'
 import { branchTarget } from '@/features/ai/session-entry-tree'
+import type { ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
 import { useAgentThreadController } from '@/features/ai/useAgentThreadController'
 import { harnessService } from '@/shared/api/harness-service'
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts'
@@ -59,8 +61,15 @@ export function AgentThreadPage() {
   const { sessionId = '', threadId = '' } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
+  const queryClient = useQueryClient()
+  const [historyBranchOpen, setHistoryBranchOpen] = useState(false)
   const initialDraft = (location.state as { draft?: string } | null)?.draft ?? ''
   const controller = useAgentThreadController(threadId, sessionId, initialDraft)
+  const sessionEntriesQuery = useQuery({
+    queryKey: queryKeys.sessions.entries(sessionId),
+    queryFn: () => harnessService.listSessionEntries(sessionId),
+    enabled: historyBranchOpen && Boolean(sessionId),
+  })
   const branchMutation = useMutation({
     mutationFn: (entry: HarnessSessionEntryDTO) => {
       const target = branchTarget(entry)
@@ -69,7 +78,9 @@ export function AgentThreadPage() {
       }
       return harnessService.createSessionThread(sessionId, { fromEntryId: target.fromEntryId })
     },
-    onSuccess: (nextThread, entry) => {
+    onSuccess: async (nextThread, entry) => {
+      setHistoryBranchOpen(false)
+      await queryClient.invalidateQueries({ queryKey: queryKeys.sessions.threads(sessionId) })
       navigate(
         `/sessions/${encodeURIComponent(sessionId)}/threads/${encodeURIComponent(nextThread.threadId)}`,
         { state: { draft: branchTarget(entry).draft } },
@@ -77,34 +88,58 @@ export function AgentThreadPage() {
     },
   })
 
+  function closeHistoryBranchPanel() {
+    setHistoryBranchOpen(false)
+    branchMutation.reset()
+  }
+
+  function handleCommand(command: ThreadCommand) {
+    if (command.id === 'tree') {
+      setHistoryBranchOpen(true)
+      return
+    }
+    controller.runCommand(command)
+  }
+
   return (
-    <ChatPanel
-      threads={controller.threads}
-      sessionEntries={controller.sessionEntries}
-      activeThreadId={threadId}
-      sessionId={sessionId}
-      mainThreadId={controller.session?.mainThreadId}
-      title={controller.title}
-      onBack={() => navigate('/sessions')}
-      agent={controller.agent}
-      timeline={controller.timeline}
-      runtimeLabels={controller.runtimeLabels}
-      working={controller.working}
-      messagesLoading={controller.messagesLoading}
-      messagesError={controller.messagesError}
-      bodyRef={controller.bodyRef}
-      draft={controller.draft}
-      pending={controller.pending}
-      disabled={controller.disabled}
-      observability={controller.observability}
-      taskTimeline={controller.taskTimeline}
-      actionError={controller.actionError}
-      onDismissActionError={controller.dismissActionError}
-      onDraftChange={controller.setDraft}
-      onSubmit={controller.submitMessage}
-      onCommand={controller.runCommand}
-      onBranch={(entry) => branchMutation.mutate(entry)}
-      branchPending={branchMutation.isPending}
-    />
+    <>
+      <ChatPanel
+        threads={controller.threads}
+        activeThreadId={threadId}
+        sessionId={sessionId}
+        mainThreadId={controller.session?.mainThreadId}
+        title={controller.title}
+        onBack={() => navigate('/sessions')}
+        agent={controller.agent}
+        timeline={controller.timeline}
+        runtimeLabels={controller.runtimeLabels}
+        working={controller.working}
+        messagesLoading={controller.messagesLoading}
+        messagesError={controller.messagesError}
+        bodyRef={controller.bodyRef}
+        draft={controller.draft}
+        pending={controller.pending}
+        disabled={controller.disabled}
+        observability={controller.observability}
+        taskTimeline={controller.taskTimeline}
+        actionError={controller.actionError}
+        onDismissActionError={controller.dismissActionError}
+        onDraftChange={controller.setDraft}
+        onSubmit={controller.submitMessage}
+        onCommand={handleCommand}
+      />
+      {historyBranchOpen ? (
+        <HistoryBranchPanel
+          entries={sessionEntriesQuery.data ?? []}
+          currentHeadEntryId={controller.thread?.headEntryId}
+          loading={sessionEntriesQuery.isLoading}
+          queryError={sessionEntriesQuery.error}
+          pending={branchMutation.isPending}
+          creationError={branchMutation.error}
+          onClose={closeHistoryBranchPanel}
+          onCreate={(entry) => branchMutation.mutate(entry)}
+        />
+      ) : null}
+    </>
   )
 }
