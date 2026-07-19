@@ -10,11 +10,11 @@ public class HarnessSessionDO {
   /** 业务主键。 */
   private Long id;
 
-  /** 创建时解析的 agent definition id（冻结引用，可变资源不回看）。 */
-  private Long agentDefinitionId;
-
   /** 会话标题。 */
   private String title;
+
+  /** 创建时原子生成且稳定不变的 Main Thread id。 */
+  private Long mainThreadId;
 
   /** 父 Session（子代理 child 时有值；根 Session 为空）。 */
   private Long parentSessionId;

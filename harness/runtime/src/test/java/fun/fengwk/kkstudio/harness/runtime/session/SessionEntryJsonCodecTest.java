@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
 class SessionEntryJsonCodecTest {
   private final SessionEntryJsonCodec codec = new SessionEntryJsonCodec();
 
-  /** 九种持久化 payload 必须逐一无损往返，包括可空的 systemPrompt。 */
+  /** 全部持久化 payload 必须逐一无损往返，包括可空的 systemPrompt。 */
   @Test
   void shouldRoundTripEveryPayloadType() {
     AgentMessage userMessage =
@@ -37,9 +37,10 @@ class SessionEntryJsonCodecTest {
     List<SessionEntryPayload> payloads =
         List.of(
             new MessageEntryPayload(userMessage),
-            new AgentSnapshotEntryPayload(snapshot),
+            new AgentSnapshotEntryPayload(1L, snapshot),
             new ModelChangeEntryPayload("model-2", "fast"),
             new ToolsetChangeEntryPayload(List.of("read")),
+            new YoloChangeEntryPayload(true),
             new CompactionEntryPayload("summary", 42L, 0, "{\"reason\":\"budget\"}"),
             new BranchSummaryEntryPayload("branch summary"),
             new CustomEntryPayload("trace", "{\"enabled\":true}"),

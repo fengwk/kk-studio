@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ArtifactMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AudioMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ImageMessageContent;
@@ -25,16 +26,78 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import java.util.ArrayList;
 import java.util.List;
 
-/** 将语义 Context 无 Provider SDK 绑定地投影为 ProviderMessage。 */
+/**
+ * 将语义 Context 投影为与 Provider SDK 无关的 ProviderMessage。
+ *
+ * <p>对当前连续 Tool chain 中未配对的 ToolCall，在角色切换或 Context 结束前合成 error ToolResult：{@code No result
+ * provided}。Synthetic result 只存在于本次 Provider request，不写 Session Entry；后续重新出现相同 toolCallId 仍按新的
+ * ToolCall 处理。
+ */
 public final class ProviderMessageProjector {
+  private static final String ORPHAN_RESULT_TEXT = "No result provided";
 
   public List<ProviderMessage> project(List<AgentMessage> messages) {
-    return messages.stream().map(this::project).toList();
+    List<ProviderMessage> result = new ArrayList<>();
+    List<ProviderContentBlock> openToolCalls = new ArrayList<>();
+
+    for (AgentMessage message : messages) {
+      if (message.role() != AgentMessageRole.TOOL && !openToolCalls.isEmpty()) {
+        flushOrphanToolResults(result, openToolCalls);
+      }
+      if (message.role() == AgentMessageRole.ASSISTANT) {
+        List<ProviderContentBlock> contents = projectContents(message.contents());
+        for (ProviderContentBlock block : contents) {
+          if (block instanceof ProviderToolCallBlock toolCall) {
+            openToolCalls.add(toolCall);
+          }
+        }
+        result.add(new ProviderMessage(ProviderMessageRole.ASSISTANT, contents));
+        continue;
+      }
+      if (message.role() == AgentMessageRole.TOOL) {
+        List<ProviderContentBlock> contents = projectContents(message.contents());
+        for (ProviderContentBlock block : contents) {
+          if (block instanceof ProviderToolResultBlock toolResult) {
+            openToolCalls.removeIf(
+                open ->
+                    open instanceof ProviderToolCallBlock call
+                        && call.toolCall().id().equals(toolResult.toolCallId()));
+          }
+        }
+        result.add(new ProviderMessage(ProviderMessageRole.TOOL, contents));
+        continue;
+      }
+      result.add(
+          new ProviderMessage(
+              ProviderMessageRole.valueOf(message.role().name()),
+              projectContents(message.contents())));
+    }
+    if (!openToolCalls.isEmpty()) {
+      flushOrphanToolResults(result, openToolCalls);
+    }
+    return List.copyOf(result);
   }
 
-  private ProviderMessage project(AgentMessage message) {
-    return new ProviderMessage(
-        ProviderMessageRole.valueOf(message.role().name()), projectContents(message.contents()));
+  private void flushOrphanToolResults(
+      List<ProviderMessage> result, List<ProviderContentBlock> openToolCalls) {
+    List<ProviderContentBlock> synthetic = new ArrayList<>();
+    for (ProviderContentBlock block : openToolCalls) {
+      if (!(block instanceof ProviderToolCallBlock toolCall)) {
+        continue;
+      }
+      String id = toolCall.toolCall().id();
+      synthetic.add(
+          new ProviderToolResultBlock(
+              id,
+              toolCall.toolCall().name(),
+              List.of(new ProviderTextBlock(ORPHAN_RESULT_TEXT)),
+              true,
+              null));
+    }
+    openToolCalls.clear();
+    if (!synthetic.isEmpty()) {
+      result.add(new ProviderMessage(ProviderMessageRole.TOOL, List.copyOf(synthetic)));
+    }
   }
 
   private List<ProviderContentBlock> projectContents(List<AgentMessageContent> contents) {

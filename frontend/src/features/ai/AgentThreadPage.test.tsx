@@ -23,7 +23,9 @@ vi.mock('@/shared/api/agent-service', () => ({
 
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
-    listThreads: vi.fn(),
+    getSession: vi.fn(),
+    listSessionThreads: vi.fn(),
+    listSessionEntries: vi.fn(),
     getThread: vi.fn(),
     listThreadEntries: vi.fn(),
     listThreadInputs: vi.fn(),
@@ -67,7 +69,19 @@ describe('AgentThreadPage', () => {
     vi.mocked(agentService.listAgents).mockResolvedValue(page([agent]))
     vi.mocked(agentService.listModels).mockResolvedValue(page([]))
     vi.mocked(agentService.listProviders).mockResolvedValue(page([]))
-    vi.mocked(harnessService.listThreads).mockResolvedValue([thread])
+    vi.mocked(harnessService.getSession).mockResolvedValue({
+      sessionId: 's1',
+      title: 'Outline review',
+      mainThreadId: '1',
+      rootSessionId: 's1',
+      parentSessionId: null,
+      parentInvocationId: null,
+      depth: 0,
+      createTime: null,
+      updateTime: null,
+    })
+    vi.mocked(harnessService.listSessionThreads).mockResolvedValue([thread])
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
     vi.mocked(harnessService.getThread).mockResolvedValue(thread)
     vi.mocked(harnessService.listThreadEntries).mockResolvedValue([
       entry('snapshot', 'agent_snapshot', { snapshot: { modelId: 'MiniMax-M2.7', variant: 'default' } }),
@@ -198,7 +212,10 @@ describe('AgentThreadPage', () => {
 
     await user.click(screen.getByText('yolo'))
     await waitFor(() => {
-      expect(harnessService.setThreadYolo).toHaveBeenCalledWith('1', { yoloEnabled: true })
+      expect(harnessService.setThreadYolo).toHaveBeenCalledWith(
+        '1',
+        expect.objectContaining({ yoloEnabled: true, clientMessageId: expect.any(String) }),
+      )
     })
   })
 
@@ -206,9 +223,8 @@ describe('AgentThreadPage', () => {
     renderThread()
     await screen.findByText('检查第一集大纲')
     expect(harnessService.getThread).toHaveBeenCalledWith('1')
-    expect(harnessService.listThreads).toHaveBeenCalled()
-    // createThread is not part of page load path
-    expect('createThread' in harnessService).toBe(false)
+    // Reloading only projects the durable Thread; it never creates a replacement Thread.
+    expect('createSessionThread' in harnessService).toBe(false)
   })
 })
 
@@ -218,9 +234,9 @@ function renderThread() {
   })
   render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/threads/1']}>
+      <MemoryRouter initialEntries={['/sessions/s1/threads/1']}>
         <Routes>
-          <Route path="/threads/:threadId" element={<AgentThreadPage />} />
+          <Route path="/sessions/:sessionId/threads/:threadId" element={<AgentThreadPage />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -252,9 +268,7 @@ const thread: HarnessThreadDTO = {
   sessionId: 's1',
   sessionTitle: 'Outline review',
   headEntryId: 'assistant-1',
-  agentDefinitionId: 'agent-1',
-  runtimeConfigJson: null,
-  yoloEnabled: false,
+  status: 'IDLE',
   inputSequence: 1,
   processing: false,
   createTime: null,
@@ -277,11 +291,13 @@ function input(inputId: string, inputType: string, payload: Record<string, unkno
     inputId,
     threadId: '1',
     sequence: 1,
-    inputType,
+    inputType: inputType.toUpperCase() as HarnessThreadInputDTO['inputType'],
     payloadJson: JSON.stringify(payload),
     clientMessageId: `cid-${inputId}`,
+    status: 'QUEUED',
     appliedEntryId: null,
-    appliedAt: null,
+    resolvedAt: null,
+    cancelledByStopId: null,
     createTime: '2026-01-01T00:00:00',
   }
 }

@@ -31,11 +31,12 @@ flowchart LR
 | 域 | 接口 | 用途 |
 | --- | --- | --- |
 | Provider / Model / Agent | `/api/providers`、`/api/models`、`/api/agents` | 全局 Agent 资源 CRUD |
-| Thread | `GET` / `POST /api/threads`、`GET /api/threads/{threadId}` | Thread 列表、创建、读取 |
-| Session Threads | `GET /api/sessions/{sessionId}/threads` | 某 Session 上的 Thread 列表 |
-| Thread 输入（202） | `POST /api/threads/{id}/messages`、`PUT .../yolo`、`PUT .../agent` | 入队 USER_MESSAGE / SET_YOLO / SET_AGENT |
+| Session | `POST /api/sessions`、`GET /api/sessions`、`GET /api/sessions/{sessionId}`、`/entries` | 原子创建 Session/Main Thread；Session Tree 与完整 Entries 查询 |
+| Session Threads | `GET` / `POST /api/sessions/{sessionId}/threads` | 列出 Thread；从 durable `fromEntryId` 创建 Secondary Thread |
+| Thread | `GET /api/threads/{threadId}` | 读取 durable Branch actor |
+| Thread 输入（202） | `POST /api/threads/{id}/messages`、`PUT .../agent`、`/model`、`/toolset`、`/yolo` | 按 mailbox 顺序入队消息或配置命令 |
 | Thread 投影 | `GET /api/threads/{id}/entries`、`/inputs`、`/events`、`/events/stream` | 路径 Entries、inputs、events 与 SSE |
-| Session 只读 | `GET /api/sessions`、`GET /api/sessions/{id}`、`GET /api/sessions/{id}/entries` | 根 Session 列表与整树 Entries |
+| Thread 控制 | `POST /api/threads/{id}/stop`、`POST /api/threads/{id}/retry` | 幂等取消 queued Input / Tool work；显式恢复 FAILED Thread |
 | Root Activity / Task | `GET /api/sessions/{id}/activities`、`GET /api/sessions/{id}/tasks` | 根活动投影与子代理任务 |
 | Tool | `GET /api/threads/{id}/tool-invocations`、`GET /api/tool-invocations/{id}`、`POST /api/tool-invocations/{id}/decision` | Tool 状态与权限决策 |
 | Artifact / Usage | `/api/artifacts/{id}`、`/api/usage/threads/{id}`、`/api/usage/sessions/{id}`、`/api/usage/models/{id}` | artifact bytes 与用量汇总 |
@@ -47,8 +48,8 @@ ComfyUI 和 S3 接口边界见 [ComfyUI 工作流 API](comfyui-workflow-api.md) 
 
 | Controller | 路径前缀 | 职责 |
 | --- | --- | --- |
-| `StudioHarnessThreadController` | `/api` | Thread CRUD、入队 202、entries/inputs/events/SSE |
-| `StudioHarnessSessionController` | `/api/sessions` | Session 只读列表与 entries |
+| `StudioHarnessThreadController` | `/api/threads` | Thread 读取、入队 202、Stop/Retry、entries/inputs/events/SSE |
+| `StudioHarnessSessionController` | `/api/sessions` | Session/Main Thread 创建、Session 查询与 Secondary Thread 创建 |
 | `StudioHarnessObservabilityController` | `/api` | activities、tool-invocations、tasks、artifacts |
 | `StudioToolInvocationController` | `/api` | permission decision |
 | `StudioModelUsageController` | `/api/usage` | Thread / Session / Model 聚合 |
@@ -56,9 +57,9 @@ ComfyUI 和 S3 接口边界见 [ComfyUI 工作流 API](comfyui-workflow-api.md) 
 
 ## Thread 与 Session
 
-创建根 Thread（`POST /api/threads`，带 `agentDefinitionId`）在同一事务内创建 Session、初始 Agent Snapshot Entry 与 Thread（`head_entry_id` 指向 snapshot）。在既有 tree 上可带 `sessionId` + `fromEntryId` 新建独立 cursor。
+`POST /api/sessions` 在一个事务内解析并冻结初始 Agent Snapshot，写入 Session、初始配置 Entries 与 Main Thread，并写回稳定的 `main_thread_id`。Main Thread 的 head 指向最后一条初始配置 Entry。`POST /api/sessions/{sessionId}/threads` 必须提供属于该 Session 的 `fromEntryId`，只创建新的 Thread cursor，不复制 Entry、ToolInvocation 或 Event。
 
-用户消息与设置变更只进入 `ThreadInput` mailbox，**不**同步写 Entry。`ThreadProcessor` 在 Turn 边界 `applyNextInput`：exactly-once `markApplied`、append 对应 Entry、推进 head（并可能更新 Thread YOLO/agent 冻结配置）。
+用户消息与设置变更只进入 `ThreadInput` mailbox，**不**同步写 Entry。Processor 仅在 Provider 调用前、无 Tool Turn 完成后、当前 Tool batch 全部终态并应用后或 Compaction 后 Harvest：锁定 Thread 与 token、读取 cutoff、按 sequence 应用 cutoff 内全部 queued Input、逐条 CAS 为 `APPLIED`，再原子推进 head。一个含消息的批次只触发一次 Assistant Turn；配置-only 批次只更新路径配置投影。
 
 查询顺序由后端定义：Thread Entries 按 root→`headEntryId` 父链返回，inputs 按 `sequence ASC` 返回，events 按 `id ASC` 返回。`createTime` 只用于展示与审计；墙钟回拨不能改变 Entry 因果顺序或 mailbox/journal 顺序，前端不得二次重排。
 
@@ -68,7 +69,8 @@ Java 领域类型使用 `AgentThread`，避免与 `java.lang.Thread` 冲突。
 
 | 服务 | 职责 |
 | --- | --- |
-| `HarnessThreadCommandService` | create / submit message / queue yolo / queue agent |
+| `HarnessSessionCommandService` | create Session/Main Thread / create Secondary Thread |
+| `HarnessThreadCommandService` | submit message / queue Agent、Model、Toolset、YOLO / Stop / Retry |
 | `HarnessThreadQueryService` | thread 查询、路径 entries、inputs、events |
 | `HarnessThreadTransactionService` | Thread/Input/Entry/Tool/Usage 原子事务（实现 `ThreadTransactions`） |
 | `HarnessSessionQueryService` | Session 只读 |
@@ -87,14 +89,14 @@ Java 领域类型使用 `AgentThread`，避免与 `java.lang.Thread` 冲突。
 
 规则：
 
-- 入队、apply input、beginTurn、commit assistant、prepare tools、release 均校验 `processorToken`（入队除外，入队只锁 Thread 分配 sequence）。
+- 入队、Stop 与 Retry 锁 Thread；Harvest、beginTurn、commit assistant、prepare tools、release 额外校验 `processorToken`。
 - Tool decision / terminal 与 processor 同序：先 Thread 后 invocation。
 - Assistant Entry 与 `model_usage_record` 同事务；`assistant_entry_id` 唯一。
 - Tool 副作用以 `tool_invocation.id` 为幂等键。
 
 ## SSE 与可恢复投影
 
-Thread Event SSE 定时轮询 `listThreadEvents`，`send` 成功后推进 cursor；事件名 `thread_event`，SSE id 为 `eventId` 十进制字符串。恢复 cursor 取 query `afterEventId` 与 `Last-Event-ID` 中合法非负十进制的较大者。Root Activity 为 REST 快照合成（由 root 下 ThreadEvent 等事实查询），不以内存 EventBus 为真源。
+Thread Event SSE 先重放 durable events，再监听未来轮询结果；事件名 `thread_event`，SSE id 为全局 `eventId` 十进制字符串。恢复 cursor 取 query `afterEventId` 与 `Last-Event-ID` 中合法非负十进制的较大者。Root Activity 为 REST 快照合成（由 root 下 ThreadEvent 等事实查询），不以内存 EventBus 为真源。Child Tool ASK 仍归属 Child Thread，并以同一 Invocation ID 向 root Thread 镜像 permission relay event。
 
 ## Tool、Environment 与 Artifact
 

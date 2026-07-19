@@ -227,6 +227,7 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     task.setParentInvocationId(parentInvocationId);
     task.setParentSessionId(parentSessionId);
     task.setParentThreadId(parentThreadId);
+    task.setRootThreadId(parentThreadId);
     task.setChildSessionId(childSessionId);
     task.setChildThreadId(childThreadId);
     task.setTargetAgent("Child");
@@ -274,6 +275,7 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     bad.setParentInvocationId(7_400_311L);
     bad.setParentSessionId(badSessionId);
     bad.setParentThreadId(7_400_111L);
+    bad.setRootThreadId(7_400_111L);
     bad.setChildSessionId(7_400_012L);
     bad.setChildThreadId(7_400_112L);
     bad.setTargetAgent("Child");
@@ -317,8 +319,8 @@ class HarnessObservabilityQueryServiceIntegrationTest {
   private void insertRootSession(long sessionId, String title) {
     HarnessSessionDO session = new HarnessSessionDO();
     session.setId(sessionId);
-    session.setAgentDefinitionId(1L);
     session.setTitle(title);
+    session.setMainThreadId(sessionId);
     session.setRootSessionId(sessionId);
     session.setDepth(0);
     session.setVersion(0L);
@@ -330,8 +332,8 @@ class HarnessObservabilityQueryServiceIntegrationTest {
   private void insertChildSession(long sessionId, long rootSessionId, String title) {
     HarnessSessionDO session = new HarnessSessionDO();
     session.setId(sessionId);
-    session.setAgentDefinitionId(1L);
     session.setTitle(title);
+    session.setMainThreadId(sessionId);
     session.setParentSessionId(rootSessionId);
     session.setRootSessionId(rootSessionId);
     session.setDepth(1);
@@ -346,9 +348,7 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     thread.setId(threadId);
     thread.setSessionId(sessionId);
     thread.setHeadEntryId(1L);
-    thread.setAgentDefinitionId(1L);
-    thread.setRuntimeConfigJson("{}");
-    thread.setYoloEnabled(false);
+    thread.setStatus("IDLE");
     thread.setInputSequence(0L);
     thread.setVersion(0L);
     thread.setCreateTime(NOW);

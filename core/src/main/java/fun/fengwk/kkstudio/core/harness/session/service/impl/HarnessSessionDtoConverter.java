@@ -18,16 +18,17 @@ public class HarnessSessionDtoConverter {
     }
     HarnessSessionDTO target = new HarnessSessionDTO();
     target.setSessionId(HarnessIds.format(source.getId()));
-    target.setAgentDefinitionId(
-        source.getAgentDefinitionId() == null
-            ? null
-            : HarnessIds.format(source.getAgentDefinitionId()));
     target.setTitle(source.getTitle());
+    target.setMainThreadId(HarnessIds.format(source.getMainThreadId()));
     target.setRootSessionId(HarnessIds.format(source.getRootSessionId()));
     target.setParentSessionId(
         source.getParentSessionId() == null
             ? null
             : HarnessIds.format(source.getParentSessionId()));
+    target.setParentInvocationId(
+        source.getParentInvocationId() == null
+            ? null
+            : HarnessIds.format(source.getParentInvocationId()));
     target.setDepth(source.getDepth());
     target.setCreateTime(source.getCreateTime());
     target.setUpdateTime(source.getUpdateTime());

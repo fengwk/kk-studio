@@ -1,20 +1,19 @@
 import { useDeferredValue, useMemo, useState } from 'react'
-import { filterAgents, filterModels, filterProviders, filterThreads } from '@/features/ai/ai-console-utils'
+import { filterAgents, filterModels, filterProviders } from '@/features/ai/ai-console-utils'
 import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO } from '@/shared/api/contracts'
 import { useAiConsoleResourceController } from '@/features/ai/useAiConsoleResourceController'
-import { useAiConsoleThreadController } from '@/features/ai/useAiConsoleThreadController'
+import { useAiConsoleSessionController } from '@/features/ai/useAiConsoleSessionController'
 
 export function useAiConsoleController() {
   const [search, setSearch] = useState('')
   const deferredSearch = useDeferredValue(search.trim().toLowerCase())
 
   const resourceController = useAiConsoleResourceController()
-  const threadController = useAiConsoleThreadController(resourceController.agents)
+  const sessionController = useAiConsoleSessionController(resourceController.agents)
 
-  const agentsById = useMemo(() => new Map(resourceController.agents.map((agent) => [String(agent.id), agent])), [resourceController.agents])
-  const filteredThreads = useMemo(
-    () => filterThreads(threadController.threads, agentsById, deferredSearch),
-    [agentsById, deferredSearch, threadController.threads],
+  const filteredSessions = useMemo(
+    () => sessionController.sessions.filter((session) => !deferredSearch || (session.title ?? '').toLowerCase().includes(deferredSearch)),
+    [deferredSearch, sessionController.sessions],
   )
   const filteredAgents = useMemo(() => filterAgents(resourceController.agents, deferredSearch), [deferredSearch, resourceController.agents])
   const filteredModels = useMemo(() => filterModels(resourceController.models, deferredSearch), [deferredSearch, resourceController.models])
@@ -24,9 +23,9 @@ export function useAiConsoleController() {
     resourceController.providersQuery,
     resourceController.modelsQuery,
     resourceController.agentsQuery,
-    threadController.threadsQuery,
+    sessionController.sessionsQuery,
   ]
-  const mutationErrors = [resourceController.resourceMutationError, threadController.threadMutationError]
+  const mutationErrors = [resourceController.resourceMutationError, sessionController.sessionMutationError]
 
   const busy = queryResults.some((query) => query.isLoading)
   const error = queryResults.find((query) => query.error)?.error ?? null
@@ -39,15 +38,14 @@ export function useAiConsoleController() {
     error,
     mutationError,
     chatPanelProps: {
-      threads: filteredThreads,
-      agentsById,
-      onCreate: () => threadController.openCreateThread(),
+      sessions: filteredSessions,
+      onCreate: () => sessionController.openCreateSession(),
     },
     agentPanelProps: {
       agents: filteredAgents,
       deletePending: resourceController.agentDeletePending,
       onCreate: resourceController.openCreateAgent,
-      onStart: (agent: AgentDefinitionDTO) => threadController.openCreateThread(String(agent.id)),
+      onStart: (agent: AgentDefinitionDTO) => sessionController.openCreateSession(String(agent.id)),
       onEdit: (agent: AgentDefinitionDTO) => resourceController.openEditAgent(agent.id),
       onDelete: (agent: AgentDefinitionDTO) => resourceController.deleteAgent(agent.name, agent.id),
     },
@@ -65,7 +63,7 @@ export function useAiConsoleController() {
       onEdit: (provider: AgentProviderDTO) => resourceController.openEditProvider(provider.id),
       onDelete: (provider: AgentProviderDTO) => resourceController.deleteProvider(provider.name, provider.id),
     },
-    createThreadModal: threadController.createThreadModal,
+    createSessionModal: sessionController.createSessionModal,
     resourceEditorModal: resourceController.resourceEditorModal,
     resourceDeleteConfirmModal: resourceController.deleteConfirmModal,
   }

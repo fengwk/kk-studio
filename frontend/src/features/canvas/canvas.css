@@ -1021,7 +1021,7 @@ Color tokens come from global product design tokens in styles.css. */
   overflow-y:auto;
   border:0;
   outline:0;
-  color:#ffffff;
+  color:var(--fg);
   background:transparent;
   font-size:13px;
   line-height:19px;

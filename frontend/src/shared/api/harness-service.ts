@@ -1,12 +1,17 @@
 import { apiBaseUrl, apiClient, type HttpClient } from '@/shared/api/client'
 import type {
   HarnessSessionDTO,
+  HarnessSessionCreateDTO,
   HarnessSessionEntryDTO,
   HarnessThreadAgentSetDTO,
   HarnessThreadCreateDTO,
   HarnessThreadDTO,
   HarnessThreadInputDTO,
   HarnessThreadMessageCreateDTO,
+  HarnessThreadModelSetDTO,
+  HarnessThreadStopDTO,
+  HarnessThreadStopResultDTO,
+  HarnessThreadToolsetSetDTO,
   HarnessThreadYoloSetDTO,
   ModelUsageSummaryDTO,
   RootActivityDTO,
@@ -17,8 +22,6 @@ import type {
 
 export function createHarnessService(client: HttpClient = apiClient) {
   return {
-    listThreads: (): Promise<HarnessThreadDTO[]> => client.get('/threads'),
-    createThread: (data: HarnessThreadCreateDTO): Promise<HarnessThreadDTO> => client.post('/threads', data),
     getThread: (threadId: string): Promise<HarnessThreadDTO> =>
       client.get(`/threads/${encodeURIComponent(threadId)}`),
     listSessionThreads: (sessionId: string): Promise<HarnessThreadDTO[]> =>
@@ -29,6 +32,14 @@ export function createHarnessService(client: HttpClient = apiClient) {
       client.put(`/threads/${encodeURIComponent(threadId)}/yolo`, data),
     setThreadAgent: (threadId: string, data: HarnessThreadAgentSetDTO): Promise<HarnessThreadInputDTO> =>
       client.put(`/threads/${encodeURIComponent(threadId)}/agent`, data),
+    setThreadModel: (threadId: string, data: HarnessThreadModelSetDTO): Promise<HarnessThreadInputDTO> =>
+      client.put(`/threads/${encodeURIComponent(threadId)}/model`, data),
+    setThreadToolset: (threadId: string, data: HarnessThreadToolsetSetDTO): Promise<HarnessThreadInputDTO> =>
+      client.put(`/threads/${encodeURIComponent(threadId)}/toolset`, data),
+    stopThread: (threadId: string, data: HarnessThreadStopDTO): Promise<HarnessThreadStopResultDTO> =>
+      client.post(`/threads/${encodeURIComponent(threadId)}/stop`, data),
+    retryThread: (threadId: string): Promise<HarnessThreadDTO> =>
+      client.post(`/threads/${encodeURIComponent(threadId)}/retry`),
     listThreadEntries: (threadId: string): Promise<HarnessSessionEntryDTO[]> =>
       client.get(`/threads/${encodeURIComponent(threadId)}/entries`),
     listThreadInputs: (threadId: string): Promise<HarnessThreadInputDTO[]> =>
@@ -42,10 +53,13 @@ export function createHarnessService(client: HttpClient = apiClient) {
     getThreadUsage: (threadId: string): Promise<ModelUsageSummaryDTO> =>
       client.get(`/usage/threads/${encodeURIComponent(threadId)}`),
     listSessions: (): Promise<HarnessSessionDTO[]> => client.get('/sessions'),
+    createSession: (data: HarnessSessionCreateDTO): Promise<HarnessSessionDTO> => client.post('/sessions', data),
     getSession: (sessionId: string): Promise<HarnessSessionDTO> =>
       client.get(`/sessions/${encodeURIComponent(sessionId)}`),
     listSessionEntries: (sessionId: string): Promise<HarnessSessionEntryDTO[]> =>
       client.get(`/sessions/${encodeURIComponent(sessionId)}/entries`),
+    createSessionThread: (sessionId: string, data: HarnessThreadCreateDTO): Promise<HarnessThreadDTO> =>
+      client.post(`/sessions/${encodeURIComponent(sessionId)}/threads`, data),
     listRootActivities: (sessionId: string, afterEventId = '0'): Promise<RootActivityDTO[]> =>
       client.get(`/sessions/${encodeURIComponent(sessionId)}/activities`, { params: { afterEventId } }),
     listSessionTasks: (sessionId: string): Promise<SubagentTaskDTO[]> =>

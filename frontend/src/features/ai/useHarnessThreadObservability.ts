@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { createClientMessageId } from '@/features/ai/useAgentThreadMessageMutation'
 import { harnessService } from '@/shared/api/harness-service'
+import type { HarnessThreadYoloSetDTO } from '@/shared/api/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 export function useHarnessThreadObservability(threadId: string, working: boolean) {
@@ -17,7 +19,9 @@ export function useHarnessThreadObservability(threadId: string, working: boolean
     refetchInterval: working ? 1200 : false,
   })
   const setYoloMutation = useMutation({
-    mutationFn: (yoloEnabled: boolean) => harnessService.setThreadYolo(threadId, { yoloEnabled }),
+    mutationFn: (data: HarnessThreadYoloSetDTO) => harnessService.setThreadYolo(threadId, data),
+    retry: 2,
+    retryDelay: 0,
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) }),
@@ -43,7 +47,8 @@ export function useHarnessThreadObservability(threadId: string, working: boolean
     observabilityError: usageQuery.error || toolInvocationsQuery.error,
     yoloPending: setYoloMutation.isPending,
     decisionPending: decideToolMutation.isPending,
-    setYolo: (enabled: boolean) => setYoloMutation.mutate(enabled),
+    setYolo: (enabled: boolean) =>
+      setYoloMutation.mutate({ yoloEnabled: enabled, clientMessageId: createClientMessageId() }),
     decideTool: (invocationId: string, decision: 'allow' | 'deny') =>
       decideToolMutation.mutate({ invocationId, decision }),
   }

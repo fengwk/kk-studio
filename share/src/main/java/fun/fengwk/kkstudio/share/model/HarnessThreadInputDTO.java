@@ -13,7 +13,9 @@ public class HarnessThreadInputDTO {
   private String inputType;
   private String payloadJson;
   private String clientMessageId;
+  private String status;
   private String appliedEntryId;
-  private LocalDateTime appliedAt;
+  private LocalDateTime resolvedAt;
+  private String cancelledByStopId;
   private LocalDateTime createTime;
 }

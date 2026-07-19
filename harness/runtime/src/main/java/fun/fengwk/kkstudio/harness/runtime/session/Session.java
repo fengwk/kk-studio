@@ -3,10 +3,10 @@ package fun.fengwk.kkstudio.harness.runtime.session;
 import java.time.Instant;
 import java.util.Objects;
 
-/** Session 聚合快照：共享 append-only Entry Tree 容器。 */
+/** Session 聚合快照：共享 append-only Entry Tree 与稳定 Main Thread。 */
 public record Session(
     long id,
-    Long agentDefinitionId,
+    long mainThreadId,
     String title,
     Long parentSessionId,
     long rootSessionId,
@@ -16,11 +16,8 @@ public record Session(
     Instant createdAt,
     Instant updatedAt) {
   public Session {
-    if (id <= 0 || rootSessionId <= 0) {
-      throw new IllegalArgumentException("session and root ids must be positive");
-    }
-    if (agentDefinitionId != null && agentDefinitionId <= 0) {
-      throw new IllegalArgumentException("agentDefinitionId must be positive when present");
+    if (id <= 0 || rootSessionId <= 0 || mainThreadId <= 0) {
+      throw new IllegalArgumentException("session, root and mainThread ids must be positive");
     }
     if (parentSessionId != null && parentSessionId <= 0) {
       throw new IllegalArgumentException("parentSessionId must be positive when present");
@@ -43,7 +40,29 @@ public record Session(
     }
   }
 
-  public static Session root(long id, Long agentDefinitionId, String title, Instant now) {
-    return new Session(id, agentDefinitionId, title, null, id, null, 0, 0, now, now);
+  public static Session root(long id, long mainThreadId, String title, Instant now) {
+    return new Session(id, mainThreadId, title, null, id, null, 0, 0, now, now);
+  }
+
+  public static Session child(
+      long id,
+      long mainThreadId,
+      String title,
+      long parentSessionId,
+      long rootSessionId,
+      long parentInvocationId,
+      int depth,
+      Instant now) {
+    return new Session(
+        id,
+        mainThreadId,
+        title,
+        parentSessionId,
+        rootSessionId,
+        parentInvocationId,
+        depth,
+        0,
+        now,
+        now);
   }
 }

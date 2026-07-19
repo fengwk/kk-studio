@@ -6,17 +6,23 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadEventMapper;
 import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadInputMapper;
 import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadMapper;
+import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadStopMapper;
 import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadDO;
 import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadEventDO;
 import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadInputDO;
+import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadStopDO;
 import fun.fengwk.kkstudio.harness.runtime.thread.AgentThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEvent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventType;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStop;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStopStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStore;
 
 import java.time.Duration;
@@ -27,21 +33,25 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/** MySQL/H2 Thread / Input / Event 端口实现。 */
+/** MySQL/H2 Thread / Input / Stop / Event 端口实现。 */
 @Repository
-public class MysqlHarnessThreadStore implements ThreadStore, ThreadInputStore, ThreadEventStore {
+public class MysqlHarnessThreadStore
+    implements ThreadStore, ThreadInputStore, ThreadStopStore, ThreadEventStore {
   private final HarnessThreadMapper threadMapper;
   private final HarnessThreadInputMapper inputMapper;
+  private final HarnessThreadStopMapper stopMapper;
   private final HarnessThreadEventMapper eventMapper;
   private final ThreadIdGenerator idGenerator;
 
   public MysqlHarnessThreadStore(
       HarnessThreadMapper threadMapper,
       HarnessThreadInputMapper inputMapper,
+      HarnessThreadStopMapper stopMapper,
       HarnessThreadEventMapper eventMapper,
       ThreadIdGenerator idGenerator) {
     this.threadMapper = Objects.requireNonNull(threadMapper, "threadMapper");
     this.inputMapper = Objects.requireNonNull(inputMapper, "inputMapper");
+    this.stopMapper = Objects.requireNonNull(stopMapper, "stopMapper");
     this.eventMapper = Objects.requireNonNull(eventMapper, "eventMapper");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
   }
@@ -96,27 +106,19 @@ public class MysqlHarnessThreadStore implements ThreadStore, ThreadInputStore, T
   }
 
   @Override
-  public boolean updateYolo(
-      long threadId, String processorToken, boolean yoloEnabled, Instant now) {
-    return threadMapper.updateYolo(threadId, processorToken, yoloEnabled, utc(now)) == 1;
+  public boolean updateStatus(
+      long threadId, String processorToken, ThreadStatus status, Instant now) {
+    return threadMapper.updateStatus(threadId, processorToken, status.name(), utc(now)) == 1;
   }
 
   @Override
-  public boolean updateAgent(
-      long threadId,
-      String processorToken,
-      Long agentDefinitionId,
-      String runtimeConfigJson,
-      Instant now) {
-    return threadMapper.updateAgent(
-            threadId, processorToken, agentDefinitionId, runtimeConfigJson, utc(now))
-        == 1;
+  public boolean forceStatusAndClearProcessor(long threadId, ThreadStatus status, Instant now) {
+    return threadMapper.forceStatusAndClearProcessor(threadId, status.name(), utc(now)) == 1;
   }
 
   @Override
   @Transactional
   public long allocateInputSequence(long threadId, Instant now) {
-    // FOR UPDATE 与 ThreadTransactions.releaseIfIdle 串行同一 thread 行。
     HarnessThreadDO locked = threadMapper.findForUpdate(threadId);
     if (locked == null) {
       throw new IllegalStateException("thread disappeared: " + threadId);
@@ -153,18 +155,41 @@ public class MysqlHarnessThreadStore implements ThreadStore, ThreadInputStore, T
   }
 
   @Override
-  public List<ThreadInput> listPending(long threadId) {
-    return inputMapper.listPending(threadId).stream().map(this::toInput).toList();
+  public List<ThreadInput> listQueued(long threadId) {
+    return inputMapper.listQueued(threadId).stream().map(this::toInput).toList();
   }
 
   @Override
-  public Optional<ThreadInput> findNextPending(long threadId) {
-    return Optional.ofNullable(inputMapper.findNextPending(threadId)).map(this::toInput);
+  public List<ThreadInput> listQueuedUpTo(long threadId, long cutoffSequence) {
+    return inputMapper.listQueuedUpTo(threadId, cutoffSequence).stream()
+        .map(this::toInput)
+        .toList();
   }
 
   @Override
-  public boolean markApplied(long inputId, long appliedEntryId, Instant appliedAt) {
-    return inputMapper.markApplied(inputId, appliedEntryId, utc(appliedAt)) == 1;
+  public boolean markApplied(long inputId, long appliedEntryId, Instant resolvedAt) {
+    return inputMapper.markApplied(inputId, appliedEntryId, utc(resolvedAt)) == 1;
+  }
+
+  @Override
+  public boolean markCancelled(long inputId, long stopId, Instant resolvedAt) {
+    return inputMapper.markCancelled(inputId, stopId, utc(resolvedAt)) == 1;
+  }
+
+  @Override
+  public List<ThreadInput> listCancelledByStop(long threadId, long stopId) {
+    return inputMapper.listCancelledByStop(threadId, stopId).stream().map(this::toInput).toList();
+  }
+
+  @Override
+  public void insert(ThreadStop stop) {
+    stopMapper.insert(toDO(stop));
+  }
+
+  @Override
+  public Optional<ThreadStop> findByClientRequestId(long threadId, String clientRequestId) {
+    return Optional.ofNullable(stopMapper.findByClientRequestId(threadId, clientRequestId))
+        .map(this::toStop);
   }
 
   @Override
@@ -194,9 +219,7 @@ public class MysqlHarnessThreadStore implements ThreadStore, ThreadInputStore, T
         row.getId(),
         row.getSessionId(),
         row.getHeadEntryId(),
-        row.getAgentDefinitionId(),
-        row.getRuntimeConfigJson(),
-        Boolean.TRUE.equals(row.getYoloEnabled()),
+        ThreadStatus.fromValue(row.getStatus()),
         row.getInputSequence(),
         row.getProcessorToken(),
         row.getProcessorUntil() == null ? null : row.getProcessorUntil().toInstant(ZoneOffset.UTC),
@@ -210,9 +233,7 @@ public class MysqlHarnessThreadStore implements ThreadStore, ThreadInputStore, T
     row.setId(thread.id());
     row.setSessionId(thread.sessionId());
     row.setHeadEntryId(thread.headEntryId());
-    row.setAgentDefinitionId(thread.agentDefinitionId());
-    row.setRuntimeConfigJson(thread.runtimeConfigJson());
-    row.setYoloEnabled(thread.yoloEnabled());
+    row.setStatus(thread.status().name());
     row.setInputSequence(thread.inputSequence());
     row.setProcessorToken(thread.processorToken());
     row.setProcessorUntil(thread.processorUntil() == null ? null : utc(thread.processorUntil()));
@@ -230,8 +251,10 @@ public class MysqlHarnessThreadStore implements ThreadStore, ThreadInputStore, T
         ThreadInputType.fromValue(row.getInputType()),
         row.getPayloadJson(),
         row.getClientMessageId(),
+        ThreadInputStatus.fromValue(row.getStatus()),
         row.getAppliedEntryId(),
-        row.getAppliedAt() == null ? null : row.getAppliedAt().toInstant(ZoneOffset.UTC),
+        row.getResolvedAt() == null ? null : row.getResolvedAt().toInstant(ZoneOffset.UTC),
+        row.getCancelledByStopId(),
         row.getCreateTime().toInstant(ZoneOffset.UTC));
   }
 
@@ -243,9 +266,28 @@ public class MysqlHarnessThreadStore implements ThreadStore, ThreadInputStore, T
     row.setInputType(input.inputType().value());
     row.setPayloadJson(input.payloadJson());
     row.setClientMessageId(input.clientMessageId());
+    row.setStatus(input.status().value());
     row.setAppliedEntryId(input.appliedEntryId());
-    row.setAppliedAt(input.appliedAt() == null ? null : utc(input.appliedAt()));
+    row.setResolvedAt(input.resolvedAt() == null ? null : utc(input.resolvedAt()));
+    row.setCancelledByStopId(input.cancelledByStopId());
     row.setCreateTime(utc(input.createdAt()));
+    return row;
+  }
+
+  private ThreadStop toStop(HarnessThreadStopDO row) {
+    return new ThreadStop(
+        row.getId(),
+        row.getThreadId(),
+        row.getClientRequestId(),
+        row.getCreateTime().toInstant(ZoneOffset.UTC));
+  }
+
+  private HarnessThreadStopDO toDO(ThreadStop stop) {
+    HarnessThreadStopDO row = new HarnessThreadStopDO();
+    row.setId(stop.id());
+    row.setThreadId(stop.threadId());
+    row.setClientRequestId(stop.clientRequestId());
+    row.setCreateTime(utc(stop.createdAt()));
     return row;
   }
 

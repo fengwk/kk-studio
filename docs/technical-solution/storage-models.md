@@ -22,7 +22,7 @@
 | `tool_environment` | 全局 Environment daemon registry | `name` 唯一；capability/last-seen 由 daemon 更新 |
 | `comfyui_workflow_api` | ComfyUI 工作流卡片 | `api_name` 唯一 |
 
-这些资源不带 Tenant、Workspace membership 或 ACL。资源 `version` 支持并发修改检测；一次 Turn 使用 Thread 冻结 runtime config 与解析后的 binding，不回看可变资源配置。
+这些资源不带 Tenant、Workspace membership 或 ACL。资源 `version` 支持并发修改检测；一次 Turn 使用当前 Entry path fold 得到的冻结 Agent Snapshot、配置与解析后的 binding，不回看可变资源配置。
 
 ## Canvas 最小持久化
 
@@ -41,13 +41,14 @@
 
 | 表 | 职责 | 关键字段 / 索引 |
 | --- | --- | --- |
-| `harness_session` | Session tree 容器（根/子） | `root_session_id`、`parent_session_id`、`parent_invocation_id`、`depth`；索引 `idx_harness_session_root (root_session_id)` |
+| `harness_session` | Session tree 容器（根/子） | `main_thread_id`、`root_session_id`、`parent_session_id`、`parent_invocation_id`、`depth`；索引 `idx_harness_session_root (root_session_id)` |
 | `harness_session_entry` | append-only 语义历史 | `session_id`、`parent_entry_id`、`entry_type`、`payload_json`；索引 `(session_id, id)`、`parent_entry_id` |
-| `harness_thread` | durable 用户面板 / tree cursor | `session_id`、`head_entry_id`、`agent_definition_id`、`runtime_config_json`、`yolo_enabled`、`input_sequence`、`processor_token`、`processor_until`、`version`；索引 `(session_id, id)` |
-| `harness_thread_input` | 有序 mailbox | `thread_id`、`sequence`、`input_type`、`payload_json`、`client_message_id`、`applied_entry_id`、`applied_at`；唯一 `(thread_id, sequence)`、`(thread_id, client_message_id)`；索引 `(thread_id, applied_entry_id, sequence)` |
+| `harness_thread` | durable Branch actor | `session_id`、`head_entry_id`、`status`、`input_sequence`、`processor_token`、`processor_until`、`version`；索引 `(session_id, id)` |
+| `harness_thread_input` | 有序 mailbox | `thread_id`、`sequence`、`input_type`、`payload_json`、`client_message_id`、`status`、`applied_entry_id`、`resolved_at`、`cancelled_by_stop_id`；唯一 `(thread_id, sequence)`、`(thread_id, client_message_id)`；索引 `(thread_id, status, sequence)` |
+| `harness_thread_stop` | Stop 幂等回执 | `thread_id`、`client_request_id`；唯一 `(thread_id, client_request_id)` |
 | `harness_thread_event` | Thread event journal | `id`（全局 SSE cursor）、`thread_id`、`subject_entry_id`、`event_type`、`payload_json`；索引 `(thread_id, id)` |
 
-Session **不**保存 leaf、active 执行指针或 YOLO。Branch 不单独建表。`payload_json` 是严格 Session Entry JSON 边界。ThreadEvent `payload_json` 含 schema version 的实时进度；Entry 是完整语义基线，Event 是可观测覆盖层。
+Session **不**保存 Branch 或配置副本；`main_thread_id` 是创建时原子生成、之后稳定不变的默认入口。Branch 不单独建表。Agent、Model、Toolset 与 YOLO 仅由 Entry path fold 得出。`payload_json` 是严格 Session Entry JSON 边界。ThreadEvent `payload_json` 含 schema version 的实时进度；Entry 是完整语义基线，Event 是可观测覆盖层。
 
 `processor_token` / `processor_until` 是跨节点单飞租约；`version` 为乐观版本。
 
@@ -61,7 +62,7 @@ Session **不**保存 leaf、active 执行指针或 YOLO。Branch 不单独建�
 
 `tool_invocation` 冻结 tool name/version、target、environment_id、arguments、permission、`side_effect`、deadline。Lease recovery 使用冻结 `side_effect`。Artifact bytes 不进入 Session payload；Tool Result 只保存 artifact reference。
 
-Subagent task 字段：`parent_session_id`、`parent_thread_id`、`child_session_id`、`child_thread_id`、`target_agent`、`working_copy_policy` / `working_copy_revision`、`max_turns`、`status`、`report_json`。
+Subagent task 字段：`parent_session_id`、`parent_thread_id`、`root_thread_id`、`child_session_id`、`child_thread_id`、`target_agent`、`working_copy_policy` / `working_copy_revision`、`max_turns`、`status`、`report_json`。`root_thread_id` 是 Child Tool ASK relay 的根 UI 投影目标。
 
 Root Activity 由持久 ThreadEvent 等事实查询构建，无独立 activity 表。
 
@@ -98,6 +99,6 @@ Harness 运行时与前端 Timeline 使用 `harness_*`、`tool_*`、`model_usage
 - 锁序：非锁 peek → **Thread** → Invocation / Task。
 - ThreadEvent `id` 为全局 Snowflake cursor；分配与插入在写路径中完成。
 - Assistant Entry 与 Usage Record 原子写入；`assistant_entry_id` 唯一冲突回滚整事务。
-- Input `markApplied` 仅成功一次。
+- Harvest 仅在安全边界按 sequence 应用 cutoff 内全部 Input；每条 Input 仅能从 `QUEUED` 成功迁移一次。
 - Environment 删除在存在 Tool Invocation 引用时由服务层拒绝。
 - ComfyUI job 是远端系统事实；数据库只保存工作流定义；对象走固定 bucket 预签名边界。

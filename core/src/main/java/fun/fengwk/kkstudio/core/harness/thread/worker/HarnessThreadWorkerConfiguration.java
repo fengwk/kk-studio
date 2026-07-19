@@ -20,10 +20,10 @@ import fun.fengwk.kkstudio.harness.runtime.thread.DeltaFlushScheduler;
 import fun.fengwk.kkstudio.harness.runtime.thread.InterceptingCompactionService;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadIdGenerator;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessorConfig;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProviderCancellation;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnResourceResolver;
@@ -119,7 +119,6 @@ public class HarnessThreadWorkerConfiguration {
   @Bean
   public ThreadProcessor threadProcessor(
       ThreadStore threadStore,
-      ThreadInputStore inputStore,
       ThreadTransactions transactions,
       SessionEntryStore entryStore,
       ThreadProcessor.ThreadToolPort threadToolPort,
@@ -144,7 +143,6 @@ public class HarnessThreadWorkerConfiguration {
             compactionService, host == null ? List.of() : host.beforeCompactionInterceptors());
     return new ThreadProcessor(
         threadStore,
-        inputStore,
         transactions,
         entryStore,
         threadToolPort,
@@ -164,6 +162,11 @@ public class HarnessThreadWorkerConfiguration {
 
   @Bean
   public ThreadKick threadKick(ThreadProcessor threadProcessor) {
+    return threadProcessor;
+  }
+
+  @Bean
+  public ThreadProviderCancellation threadProviderCancellation(ThreadProcessor threadProcessor) {
     return threadProcessor;
   }
 
