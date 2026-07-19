@@ -38,17 +38,11 @@ export function useAiConsoleResourceEditorState({
     }
 
     if (resourceModal.kind === 'agent') {
-      const preferredSelection =
+      const preferredModelId =
         resourceModal.mode === 'edit'
-          ? agents.find((agent) => agent.id === resourceModal.id)
+          ? agents.find((agent) => agent.id === resourceModal.id)?.modelId
           : undefined
-      setAgentDraft((currentDraft) =>
-        normalizeAgentDraftSelection(currentDraft, models, preferredSelection && {
-          defaultProvider: preferredSelection.defaultProviderName,
-          defaultModel: preferredSelection.defaultModelName,
-          defaultVariant: preferredSelection.defaultVariant,
-        }),
-      )
+      setAgentDraft((currentDraft) => normalizeAgentDraftSelection(currentDraft, models, preferredModelId))
     }
   }, [agents, models, providers, resourceModal])
 
