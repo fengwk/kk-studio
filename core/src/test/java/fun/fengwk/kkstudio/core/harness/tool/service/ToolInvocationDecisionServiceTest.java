@@ -5,11 +5,17 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,6 +33,7 @@ import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadEventDO;
 import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventType;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStatus;
@@ -287,6 +294,52 @@ class ToolInvocationDecisionServiceTest {
     } finally {
       pool.shutdownNow();
     }
+  }
+
+  /** 直接调用（没有 Spring transaction synchronization）仍同步 kick，避免嵌入式调用丢失恢复信号。 */
+  @Test
+  void directServiceInvocationKicksSynchronouslyWithoutTransactionSynchronization() {
+    ToolInvocationMapper directInvocationMapper = mock(ToolInvocationMapper.class);
+    HarnessThreadMapper directThreadMapper = mock(HarnessThreadMapper.class);
+    HarnessSubagentTaskMapper directTaskMapper = mock(HarnessSubagentTaskMapper.class);
+    ThreadEventStore directEventStore = mock(ThreadEventStore.class);
+    ThreadKick directThreadKick = mock(ThreadKick.class);
+    ToolInvocationDecisionService directService =
+        new ToolInvocationDecisionService(
+            directInvocationMapper,
+            directThreadMapper,
+            directTaskMapper,
+            directEventStore,
+            directThreadKick);
+    LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+    ToolInvocationDO invocation = baseInvocation(INVOCATION_ID, THREAD_ID, ASSISTANT_ENTRY_ID, now);
+    HarnessThreadDO thread = new HarnessThreadDO();
+    thread.setId(THREAD_ID);
+    when(directInvocationMapper.find(INVOCATION_ID)).thenReturn(invocation);
+    when(directThreadMapper.findForUpdate(THREAD_ID)).thenReturn(thread);
+    when(directInvocationMapper.findForUpdate(INVOCATION_ID)).thenReturn(invocation);
+    when(directInvocationMapper.resolvePermission(
+            eq(INVOCATION_ID),
+            anyString(),
+            anyString(),
+            anyString(),
+            any(),
+            isNull(),
+            isNull(),
+            isNull(),
+            any()))
+        .thenAnswer(
+            ignored -> {
+              invocation.setStatus(ToolInvocationStatus.QUEUED.name());
+              invocation.setPermissionDecision("ALLOW");
+              return 1;
+            });
+
+    ToolInvocationDTO dto = directService.decide(INVOCATION_ID, decision("allow"));
+
+    assertEquals(ToolInvocationStatus.QUEUED.name(), dto.getStatus());
+    verify(directThreadKick).kick(THREAD_ID);
+    verifyNoMoreInteractions(directThreadKick);
   }
 
   private static ToolInvocationDecisionDTO decision(String value) {
