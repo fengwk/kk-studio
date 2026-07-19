@@ -57,7 +57,7 @@ ComfyUI 和 S3 接口边界见 [ComfyUI 工作流 API](comfyui-workflow-api.md) 
 
 ## Thread 与 Session
 
-`POST /api/sessions` 在一个事务内解析并冻结初始 Agent Snapshot，写入 Session、初始配置 Entries 与 Main Thread，并写回稳定的 `main_thread_id`。Main Thread 的 head 指向最后一条初始配置 Entry。`POST /api/sessions/{sessionId}/threads` 必须提供属于该 Session 的 `fromEntryId`，只创建新的 Thread cursor，不复制 Entry、ToolInvocation 或 Event。
+`POST /api/sessions` 在一个事务内写入 Session、语义根 `ROOT` Entry 与 Main Thread（agent/model 为空，yolo 取请求或默认），并回写稳定的 `main_thread_id`。`POST /api/sessions/{sessionId}/threads` 必须提供属于该 Session 的 `fromEntryId`，只创建新的 Thread cursor，不复制 Entry、ToolInvocation 或 Event，也不追加合成 `AGENT_CHANGE`。新 Thread 的 head 保持 `fromEntryId`；若路径上存在 `AGENT_CHANGE`，则按路径最后一次 Agent 身份与**当前** AgentDefinition 的 model/variant 初始化 Thread 独立字段（yolo=false）；无 Agent 历史则 agent/model 为空；历史 Definition 缺失时整事务失败。
 
 用户消息与设置变更只进入 `ThreadInput` mailbox，**不**同步写 Entry。Processor 仅在 Provider 调用前、无 Tool Turn 完成后、当前 Tool batch 全部终态并应用后或 Compaction 后 Harvest：锁定 Thread 与 token、读取 cutoff、按 sequence 应用 cutoff 内全部 queued Input、逐条 CAS 为 `APPLIED`，再原子推进 head。一个含消息的批次只触发一次 Assistant Turn；配置-only 批次只更新路径配置投影。
 
