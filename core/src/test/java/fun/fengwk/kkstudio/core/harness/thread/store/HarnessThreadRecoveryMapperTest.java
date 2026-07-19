@@ -63,9 +63,7 @@ class HarnessThreadRecoveryMapperTest {
     row.setId(id);
     row.setSessionId(id + 1000);
     row.setHeadEntryId(id + 2000);
-    row.setAgentDefinitionId(1L);
-    row.setRuntimeConfigJson("{}");
-    row.setYoloEnabled(false);
+    row.setStatus("WAITING");
     row.setInputSequence(0L);
     row.setProcessorToken(token);
     row.setProcessorUntil(processorUntil);
@@ -84,6 +82,7 @@ class HarnessThreadRecoveryMapperTest {
     input.setSequence(sequence);
     input.setInputType("user_message");
     input.setPayloadJson("{\"type\":\"message\",\"role\":\"user\",\"contents\":[]}");
+    input.setStatus("QUEUED");
     input.setCreateTime(now);
     inputMapper.insert(input);
   }

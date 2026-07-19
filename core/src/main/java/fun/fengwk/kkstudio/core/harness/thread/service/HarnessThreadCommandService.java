@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.harness.thread.service;
 
 import fun.fengwk.kkstudio.share.model.HarnessThreadAgentSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadCreateDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadCustomMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadMessageCreateDTO;
@@ -16,6 +17,9 @@ public interface HarnessThreadCommandService {
   HarnessThreadDTO createThread(String sessionId, HarnessThreadCreateDTO createDTO);
 
   HarnessThreadInputDTO submitUserMessage(String threadId, HarnessThreadMessageCreateDTO createDTO);
+
+  HarnessThreadInputDTO submitCustomMessage(
+      String threadId, HarnessThreadCustomMessageCreateDTO createDTO);
 
   /** 排队 SET_YOLO；Processor 在 turn 边界应用。 */
   HarnessThreadInputDTO queueYolo(String threadId, HarnessThreadYoloSetDTO request);

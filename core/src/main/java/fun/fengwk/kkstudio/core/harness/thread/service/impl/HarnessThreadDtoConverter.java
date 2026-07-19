@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadInputDO;
 import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadViewDO;
 import fun.fengwk.kkstudio.harness.runtime.thread.AgentThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputStatus;
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
@@ -26,7 +27,7 @@ public class HarnessThreadDtoConverter {
     dto.setThreadId(Long.toString(thread.id()));
     dto.setSessionId(Long.toString(thread.sessionId()));
     dto.setHeadEntryId(Long.toString(thread.headEntryId()));
-    dto.setStatus(thread.status().value());
+    dto.setStatus(thread.status().name());
     dto.setInputSequence(thread.inputSequence());
     dto.setProcessing(thread.isProcessing(Instant.now()));
     dto.setCreateTime(LocalDateTime.ofInstant(thread.createdAt(), ZoneOffset.UTC));
@@ -74,7 +75,7 @@ public class HarnessThreadDtoConverter {
     if (input.resolvedAt() != null) {
       dto.setResolvedAt(LocalDateTime.ofInstant(input.resolvedAt(), ZoneOffset.UTC));
     }
-    dto.setStatus(input.status().value());
+    dto.setStatus(input.status().name());
     if (input.cancelledByStopId() != null) {
       dto.setCancelledByStopId(Long.toString(input.cancelledByStopId()));
     }
@@ -93,7 +94,7 @@ public class HarnessThreadDtoConverter {
     if (row.getAppliedEntryId() != null) {
       dto.setAppliedEntryId(Long.toString(row.getAppliedEntryId()));
     }
-    dto.setStatus(row.getStatus());
+    dto.setStatus(ThreadInputStatus.fromValue(row.getStatus()).name());
     dto.setResolvedAt(row.getResolvedAt());
     if (row.getCancelledByStopId() != null) {
       dto.setCancelledByStopId(Long.toString(row.getCancelledByStopId()));

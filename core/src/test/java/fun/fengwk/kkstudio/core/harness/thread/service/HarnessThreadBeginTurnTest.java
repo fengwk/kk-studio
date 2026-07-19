@@ -107,9 +107,7 @@ class HarnessThreadBeginTurnTest {
     row.setId(threadId);
     row.setSessionId(threadId + 10);
     row.setHeadEntryId(threadId + 20);
-    row.setAgentDefinitionId(1L);
-    row.setRuntimeConfigJson("{}");
-    row.setYoloEnabled(false);
+    row.setStatus("RUNNING");
     row.setInputSequence(0L);
     row.setProcessorToken(token);
     row.setProcessorUntil(now.plusMinutes(5));
