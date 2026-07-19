@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.share.model.HarnessThreadCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 
 import java.util.List;
+import java.util.function.Supplier;
 
 /** Session tree 只读查询；创建与消息提交走 Thread API。 */
 @AllArgsConstructor
@@ -38,7 +39,7 @@ public class StudioHarnessSessionController {
   public ResponseEntity<Result<HarnessSessionDTO>> createSession(
       @RequestBody HarnessSessionCreateDTO request) {
     return ResponseEntity.status(HttpStatus.CREATED)
-        .body(Results.ok(commandService.createSession(request)));
+        .body(Results.ok(withHttpTranslation(() -> commandService.createSession(request))));
   }
 
   @GetMapping
@@ -50,8 +51,8 @@ public class StudioHarnessSessionController {
   public Result<HarnessSessionDTO> getSession(@PathVariable("id") String id) {
     try {
       return Results.ok(queryService.getSession(id));
-    } catch (IllegalArgumentException error) {
-      throw translateMissingResource(error);
+    } catch (IllegalArgumentException | IllegalStateException error) {
+      throw translateHttpError(error);
     }
   }
 
@@ -59,8 +60,8 @@ public class StudioHarnessSessionController {
   public Result<List<HarnessSessionEntryDTO>> listEntries(@PathVariable("id") String id) {
     try {
       return Results.ok(queryService.listEntries(id));
-    } catch (IllegalArgumentException error) {
-      throw translateMissingResource(error);
+    } catch (IllegalArgumentException | IllegalStateException error) {
+      throw translateHttpError(error);
     }
   }
 
@@ -70,17 +71,28 @@ public class StudioHarnessSessionController {
     try {
       return ResponseEntity.status(HttpStatus.CREATED)
           .body(Results.ok(threadCommandService.createThread(id, request)));
-    } catch (IllegalArgumentException error) {
-      throw translateMissingResource(error);
+    } catch (IllegalArgumentException | IllegalStateException error) {
+      throw translateHttpError(error);
     }
   }
 
-  private static RuntimeException translateMissingResource(IllegalArgumentException error) {
+  private static <T> T withHttpTranslation(Supplier<T> operation) {
+    try {
+      return operation.get();
+    } catch (IllegalArgumentException | IllegalStateException error) {
+      throw translateHttpError(error);
+    }
+  }
+
+  private static RuntimeException translateHttpError(RuntimeException error) {
     String message = error.getMessage();
     if (message != null
         && (message.startsWith("unknown session:") || message.startsWith("session not found:"))) {
       return new ResponseStatusException(HttpStatus.NOT_FOUND, message, error);
     }
-    return error;
+    if (error instanceof IllegalStateException) {
+      return new ResponseStatusException(HttpStatus.CONFLICT, message, error);
+    }
+    return new ResponseStatusException(HttpStatus.BAD_REQUEST, message, error);
   }
 }
