@@ -48,7 +48,7 @@ Session 不拥有唯一当前 Branch。`mainThreadId` 只是稳定的默认主�
 5. ThreadInput 只按 `(threadId, sequence)` 排序；时间戳和 Snowflake 数值大小不表达 mailbox 因果。
 6. 一个 Thread 同时最多一个有效 processor token；所有 Processor 写入都必须校验 token。
 7. Entry 是 transcript 与配置的唯一语义事实；ThreadEvent 只提供实时覆盖层。
-8. Thread 行保存当前 agent id/name、model/variant、yolo；完整 prompt/tools/skills/policy 在 Turn 时从当前 AgentDefinition 动态装载，不进 Entry Tree。
+8. Thread 行保存当前 agent id/name、model/variant、yolo；完整 prompt/tools/skills/policy/environmentName 在 Turn 时从当前 AgentDefinition 动态装载，不进 Entry Tree。选中的 Skill 仅以 name/description 注入 `available_skills`；tools/skills 均为短名，platform-first 再 Environment fallback。
 9. Tool 副作用以 `tool_invocation.id` 幂等，Stop 或 lease 过期不能让旧执行者提交越权结果。
 10. 所有 durable trigger 只在事务提交后执行 `kick(threadId)`。
 11. Snowflake ID 在 HTTP、SSE、URL 和 TypeScript 中始终使用正十进制字符串。
