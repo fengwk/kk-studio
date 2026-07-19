@@ -67,6 +67,109 @@ describe('ThreadComposer interactions', () => {
     )
     expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
   })
+
+  it('renders Stop only for active durable statuses and Retry only for FAILED', async () => {
+    const user = userEvent.setup()
+    const onStop = vi.fn()
+    const onRetry = vi.fn()
+    const { rerender } = render(
+      <ThreadComposer
+        draft=""
+        pending={false}
+        disabled={false}
+        controlsPending={false}
+        onDraftChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onCommand={vi.fn()}
+        threadStatus="RUNNING"
+        onStop={onStop}
+        onRetry={onRetry}
+        stopPending={false}
+        retryPending={false}
+      />,
+    )
+    await user.click(screen.getByRole('button', { name: 'Stop' }))
+    expect(onStop).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    rerender(
+      <ThreadComposer
+        draft=""
+        pending={false}
+        disabled={false}
+        controlsPending={false}
+        onDraftChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onCommand={vi.fn()}
+        threadStatus="FAILED"
+        onStop={onStop}
+        onRetry={onRetry}
+        stopPending={false}
+        retryPending
+      />,
+    )
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retrying…' })).toBeDisabled()
+  })
+
+  it('disables command controls only while the control mailbox mutation is pending', () => {
+    render(
+      <ThreadComposer
+        draft="message"
+        pending={false}
+        disabled={false}
+        controlsPending
+        onDraftChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onCommand={vi.fn()}
+        onStop={vi.fn()}
+        onRetry={vi.fn()}
+        stopPending={false}
+        retryPending={false}
+      />,
+    )
+    expect(screen.getByRole('button', { name: '打开命令表' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
+  })
+
+  it.each(['WAITING', 'RETRYING'] as const)('offers Stop for %s actor status', (threadStatus) => {
+    render(
+      <ThreadComposer
+        draft=""
+        pending={false}
+        disabled={false}
+        controlsPending={false}
+        onDraftChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onCommand={vi.fn()}
+        threadStatus={threadStatus}
+        onStop={vi.fn()}
+        onRetry={vi.fn()}
+        stopPending={false}
+        retryPending={false}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled()
+  })
+
+  it('disables the complete composer while no Thread projection is available', () => {
+    render(
+      <ThreadComposer
+        draft="message"
+        pending={false}
+        disabled
+        controlsPending={false}
+        onDraftChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onCommand={vi.fn()}
+        onStop={vi.fn()}
+        onRetry={vi.fn()}
+        stopPending={false}
+        retryPending={false}
+      />,
+    )
+    expect(screen.getByLabelText('给 AI 发送消息')).toBeDisabled()
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+  })
 })
 
 describe('ThreadCommandPalette keyboard', () => {

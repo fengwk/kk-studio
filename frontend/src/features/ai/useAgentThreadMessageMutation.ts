@@ -24,7 +24,7 @@ export function useAgentThreadMessageMutation(threadId: string) {
         queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.threads.entries(threadId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.threads.inputs(threadId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.list }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all }),
       ])
     },
   })

@@ -17,6 +17,8 @@ vi.mock('@/shared/api/agent-service', () => ({
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     listThreads: vi.fn(),
+    listSessionThreads: vi.fn(),
+    listSessionEntries: vi.fn(),
     getThread: vi.fn(),
     listThreadEntries: vi.fn(),
     listThreadInputs: vi.fn(),
@@ -29,6 +31,8 @@ vi.mock('@/shared/api/harness-service', () => ({
     getThreadUsage: vi.fn(),
     listThreadToolInvocations: vi.fn(),
     decideToolInvocation: vi.fn(),
+    stopThread: vi.fn(),
+    retryThread: vi.fn(),
   },
 }))
 
@@ -103,6 +107,8 @@ describe('useAgentThreadController', () => {
       ],
     })
     vi.mocked(harnessService.listThreads).mockResolvedValue([thread])
+    vi.mocked(harnessService.listSessionThreads).mockResolvedValue([thread])
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
     vi.mocked(harnessService.getThread).mockResolvedValue(thread)
     vi.mocked(harnessService.listThreadEntries).mockResolvedValue([])
     vi.mocked(harnessService.listThreadInputs).mockResolvedValue([])
@@ -146,11 +152,13 @@ describe('useAgentThreadController', () => {
       sequence: 2,
       inputType: 'set_yolo',
       payloadJson: '{}',
-      clientMessageId: null,
+      clientMessageId: 'cid-yolo',
       appliedEntryId: null,
       appliedAt: null,
       createTime: null,
     })
+    vi.mocked(harnessService.stopThread).mockResolvedValue({ stopId: 'stop-1', cancelledInputs: [], restoredMessages: ['queued A', 'queued B'] })
+    vi.mocked(harnessService.retryThread).mockResolvedValue({ ...thread, status: 'RETRYING' } as never)
   })
 
   it('submits messages, runs yolo/clear commands, and rejects unknown commands', async () => {
@@ -171,7 +179,10 @@ describe('useAgentThreadController', () => {
     expect(result.current.draft).toBe('')
 
     act(() => result.current.runCommand({ id: 'yolo', label: 'yolo', description: '' }))
-    await waitFor(() => expect(harnessService.setThreadYolo).toHaveBeenCalledWith('1', { yoloEnabled: true }))
+    await waitFor(() => expect(harnessService.setThreadYolo).toHaveBeenCalledWith(
+      '1',
+      expect.objectContaining({ yoloEnabled: true, clientMessageId: expect.any(String) }),
+    ))
 
     act(() => result.current.setDraft('keep'))
     act(() => result.current.runCommand({ id: 'clear-draft', label: 'clear', description: '' }))
@@ -520,6 +531,37 @@ describe('useAgentThreadController', () => {
     })
     expect(result.current.actionError).toBe('请求失败')
     expect(result.current.draft).toBe('already-typing')
+  })
+
+  it('keeps a failed Stop id for retry, then starts a new idempotency attempt after success', async () => {
+    vi.mocked(harnessService.getThread).mockResolvedValue({ ...thread, status: 'RUNNING' } as never)
+    vi.mocked(harnessService.stopThread)
+      .mockRejectedValueOnce(new Error('network unavailable'))
+      .mockResolvedValueOnce({ stopId: 'stop-1', cancelledInputs: [], restoredMessages: ['queued A', 'queued B'] })
+      .mockResolvedValueOnce({ stopId: 'stop-2', cancelledInputs: [], restoredMessages: ['queued C'] })
+    const { result } = renderHook(() => useAgentThreadController('1', 's1'), { wrapper })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    act(() => result.current.setDraft('current draft'))
+    await act(async () => { await result.current.stopThread() })
+    expect(result.current.actionError).toContain('network unavailable')
+    const failedRequestId = vi.mocked(harnessService.stopThread).mock.calls[0][1].clientRequestId
+    await act(async () => { await result.current.stopThread() })
+    expect(vi.mocked(harnessService.stopThread).mock.calls[1][1].clientRequestId).toBe(failedRequestId)
+    expect(result.current.draft).toBe('queued A\n\nqueued B\n\ncurrent draft')
+    act(() => result.current.setDraft('new message'))
+    await act(async () => { await result.current.stopThread() })
+    expect(vi.mocked(harnessService.stopThread).mock.calls[2][1].clientRequestId).not.toBe(failedRequestId)
+    expect(result.current.draft).toBe('queued C\n\nnew message')
+    await act(async () => { await result.current.retryThread() })
+    expect(harnessService.retryThread).not.toHaveBeenCalled()
+  })
+
+  it('submits Retry only for a FAILED Thread', async () => {
+    vi.mocked(harnessService.getThread).mockResolvedValue({ ...thread, status: 'FAILED' } as never)
+    const { result } = renderHook(() => useAgentThreadController('1', 's1'), { wrapper })
+    await waitFor(() => expect(result.current.thread?.status).toBe('FAILED'))
+    await act(async () => { await result.current.retryThread() })
+    expect(harnessService.retryThread).toHaveBeenCalledWith('1')
   })
 })
 

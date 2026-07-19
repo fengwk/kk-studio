@@ -9,7 +9,7 @@ import { harnessService } from '@/shared/api/harness-service'
 import type { ThreadEventDTO } from '@/shared/api/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
 
-export function useAgentThreadQueries(threadId: string) {
+export function useAgentThreadQueries(threadId: string, sessionId: string) {
   const queryClient = useQueryClient()
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents.list,
@@ -23,9 +23,15 @@ export function useAgentThreadQueries(threadId: string) {
     queryKey: queryKeys.providers.list,
     queryFn: () => agentService.listProviders(),
   })
-  const threadsQuery = useQuery({
-    queryKey: queryKeys.threads.list,
-    queryFn: () => harnessService.listThreads(),
+  const sessionThreadsQuery = useQuery({
+    queryKey: queryKeys.sessions.threads(sessionId),
+    queryFn: () => harnessService.listSessionThreads(sessionId),
+    enabled: Boolean(sessionId),
+  })
+  const sessionQuery = useQuery({
+    queryKey: queryKeys.sessions.detail(sessionId),
+    queryFn: () => harnessService.getSession(sessionId),
+    enabled: Boolean(sessionId),
   })
   const threadQuery = useQuery({
     queryKey: queryKeys.threads.detail(threadId),
@@ -33,7 +39,7 @@ export function useAgentThreadQueries(threadId: string) {
     enabled: Boolean(threadId),
     refetchInterval: (query) => {
       const thread = query.state.data
-      return thread?.processing ? 1200 : false
+      return isThreadActive(thread?.status) ? 1200 : false
     },
   })
   const thread = threadQuery.data
@@ -43,13 +49,11 @@ export function useAgentThreadQueries(threadId: string) {
     enabled: Boolean(threadId),
     refetchInterval: (query) => {
       const inputs = query.state.data ?? []
-      // Raw input DTO null appliedEntryId remains an internal polling hint only.
-      return inputs.some((input) => !input.appliedEntryId) || thread?.processing ? 1000 : false
+      return inputs.some((input) => input.status === 'QUEUED') || isThreadActive(thread?.status) ? 1000 : false
     },
   })
   const inputs = inputsQuery.data ?? []
-  // Poll entries while processor is active or raw inputs look unapplied.
-  const workingHint = Boolean(thread?.processing) || inputs.some((input) => !input.appliedEntryId)
+  const workingHint = isThreadActive(thread?.status) || inputs.some((input) => input.status === 'QUEUED')
 
   const entriesQuery = useQuery({
     queryKey: queryKeys.threads.entries(threadId),
@@ -76,12 +80,18 @@ export function useAgentThreadQueries(threadId: string) {
     },
     enabled: Boolean(threadId),
   })
+  const sessionEntriesQuery = useQuery({
+    queryKey: queryKeys.sessions.entries(sessionId),
+    queryFn: () => harnessService.listSessionEntries(sessionId),
+    enabled: Boolean(sessionId),
+  })
 
   return {
     agentsQuery,
     modelsQuery,
     providersQuery,
-    threadsQuery,
+    sessionThreadsQuery,
+    sessionQuery,
     threadQuery,
     entriesQuery,
     inputsQuery,
@@ -89,10 +99,17 @@ export function useAgentThreadQueries(threadId: string) {
     agents: agentsQuery.data?.results ?? [],
     models: modelsQuery.data?.results ?? [],
     providers: providersQuery.data?.results ?? [],
-    threads: threadsQuery.data ?? [],
+    sessionEntriesQuery,
+    session: sessionQuery.data,
+    threads: sessionThreadsQuery.data ?? [],
+    sessionEntries: sessionEntriesQuery.data ?? [],
     thread,
     entries: entriesQuery.data ?? [],
     inputs,
     events: eventsQuery.data ?? [],
   }
+}
+
+function isThreadActive(status: string | undefined): boolean {
+  return status === 'RUNNING' || status === 'WAITING' || status === 'RETRYING'
 }

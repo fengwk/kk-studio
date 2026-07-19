@@ -3,7 +3,6 @@ import {
   filterAgents,
   filterModels,
   filterProviders,
-  filterThreads,
   formatBackendDate,
   formatJsonSummary,
   includesSearch,
@@ -222,21 +221,6 @@ describe('ai-console-utils', () => {
   })
 
   it('filters resources and formats helper values', () => {
-    const sessions = [
-      {
-        threadId: 'thread-1',
-        sessionId: 'session-1',
-        sessionTitle: 'Script Review',
-        headEntryId: 'entry-1',
-        agentDefinitionId: 'agent-1',
-        runtimeConfigJson: null,
-        yoloEnabled: false,
-        inputSequence: 0,
-        processing: false,
-        createTime: '2026-06-20T02:00:00',
-        updateTime: '2026-06-20T02:01:00',
-      },
-    ]
     const agents = [
       {
         id: 'agent-1',
@@ -280,7 +264,6 @@ describe('ai-console-utils', () => {
       },
     ]
 
-    expect(filterThreads(sessions, new Map([['agent-1', agents[0]]]), 'script')).toHaveLength(1)
     expect(filterAgents(agents, 'cloud')).toHaveLength(1)
     expect(filterModels(models, 'm2.7')).toHaveLength(1)
     expect(filterProviders(providers, 'endpoint')).toHaveLength(1)

@@ -137,7 +137,7 @@ function ChildTaskViewer({ node }: { node: SubagentTaskNode }) {
           <span>{report?.status ?? task.status}</span>
         </div>
         {task.childThreadId ? (
-          <Link to={`/threads/${encodeURIComponent(task.childThreadId)}`} title="打开子对话">
+          <Link to={`/sessions/${encodeURIComponent(task.childSessionId)}/threads/${encodeURIComponent(task.childThreadId)}`} title="打开子对话">
             <ExternalLink aria-hidden="true" />
           </Link>
         ) : null}
