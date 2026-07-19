@@ -6,10 +6,12 @@ import { filterThreadCommands, THREAD_COMMANDS } from '@/features/ai/thread-pane
 
 describe('ThreadComposer and commands', () => {
   it('filters slash commands to the exact remaining command ids', () => {
-    expect(THREAD_COMMANDS.map((c) => c.id)).toEqual(['yolo', 'stop', 'retry', 'clear-draft'])
+    expect(THREAD_COMMANDS.map((c) => c.id)).toEqual(['yolo', 'tree', 'stop', 'retry', 'clear-draft'])
     expect(filterThreadCommands('yo').map((c) => c.id)).toEqual(['yolo'])
     expect(filterThreadCommands('sto').map((c) => c.id)).toEqual(['stop'])
-    expect(filterThreadCommands('').map((c) => c.id)).toEqual(['yolo', 'stop', 'retry', 'clear-draft'])
+    expect(filterThreadCommands('tree')[0]?.id).toBe('tree')
+    expect(['history', 'branch', 'fork', 'thread'].every((keyword) => filterThreadCommands(keyword).some((command) => command.id === 'tree'))).toBe(true)
+    expect(filterThreadCommands('').map((c) => c.id)).toEqual(['yolo', 'tree', 'stop', 'retry', 'clear-draft'])
     expect(filterThreadCommands('missing')).toEqual([])
   })
 
@@ -45,6 +47,21 @@ describe('ThreadComposer and commands', () => {
     expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
     await user.click(screen.getByRole('option', { name: /^stop/ }))
     expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'stop' }))
+
+    onCommand.mockClear()
+    rerender(
+      <ThreadComposer
+        draft="/tree"
+        pending={false}
+        disabled={false}
+        onDraftChange={onDraftChange}
+        onSubmit={onSubmit}
+        onCommand={onCommand}
+      />,
+    )
+    await user.click(screen.getByLabelText('给 AI 发送消息'))
+    await user.keyboard('{Enter}')
+    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'tree' }))
   })
 
   it('blocks send when draft is blank or pending', () => {

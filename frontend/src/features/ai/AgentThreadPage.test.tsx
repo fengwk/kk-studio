@@ -40,6 +40,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     getThreadUsage: vi.fn(),
     listThreadToolInvocations: vi.fn(),
     decideToolInvocation: vi.fn(),
+    createSessionThread: vi.fn(),
   },
 }))
 
@@ -132,6 +133,7 @@ describe('AgentThreadPage', () => {
     })
     vi.mocked(harnessService.listThreadToolInvocations).mockResolvedValue([])
     vi.mocked(harnessService.decideToolInvocation).mockResolvedValue({} as never)
+    vi.mocked(harnessService.createSessionThread).mockResolvedValue({ ...thread, threadId: 'fork' })
     vi.mocked(harnessService.createThreadEventStream).mockImplementation(() => {
       const stream = new FakeEventSource()
       streams.push(stream)
@@ -224,8 +226,9 @@ describe('AgentThreadPage', () => {
     expect(await screen.findByText('yolo')).toBeInTheDocument()
     expect(screen.getByText('stop')).toBeInTheDocument()
     expect(screen.getByText('retry')).toBeInTheDocument()
+    expect(screen.getByText('tree')).toBeInTheDocument()
     expect(screen.getByText('clear')).toBeInTheDocument()
-    expect(THREAD_COMMANDS.map((command) => command.id)).toEqual(['yolo', 'stop', 'retry', 'clear-draft'])
+    expect(THREAD_COMMANDS.map((command) => command.id)).toEqual(['yolo', 'tree', 'stop', 'retry', 'clear-draft'])
 
     await user.click(screen.getByText('yolo'))
     await waitFor(() => {
@@ -246,12 +249,42 @@ describe('AgentThreadPage', () => {
     expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
   })
 
+  it('loads history only for /tree, creates a user branch after confirmation, and restores the full draft', async () => {
+    const user = userEvent.setup()
+    const sourceText = '保留这段原始草稿，不要截断。'.repeat(20)
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([
+      entry('snapshot', 'agent_snapshot', { snapshot: {} }),
+      entry('user-1', 'message', messagePayload('USER', [{ type: 'text', text: sourceText }]), 'snapshot'),
+      entry('assistant-1', 'message', messagePayload('ASSISTANT', [{ type: 'text', text: '结构完整' }]), 'user-1'),
+    ])
+    renderThread()
+
+    await screen.findByText('检查第一集大纲')
+    expect(harnessService.listSessionEntries).not.toHaveBeenCalled()
+
+    const composer = screen.getByLabelText('给 AI 发送消息')
+    await user.type(composer, '/tree')
+    await user.click(await screen.findByRole('option', { name: /tree/ }))
+
+    expect(await screen.findByRole('dialog', { name: '历史分支' })).toBeInTheDocument()
+    await waitFor(() => expect(harnessService.listSessionEntries).toHaveBeenCalledWith('s1'))
+    await user.click(await screen.findByRole('button', { name: /保留这段原始草稿/ }))
+    expect(harnessService.createSessionThread).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: '从这里开启新 Thread' }))
+    await waitFor(() => {
+      expect(harnessService.createSessionThread).toHaveBeenCalledWith('s1', { fromEntryId: 'snapshot' })
+    })
+    await waitFor(() => expect(screen.getByLabelText('给 AI 发送消息')).toHaveValue(sourceText))
+  })
+
   it('reloads the same thread id on refresh without creating a new thread', async () => {
     renderThread()
     await screen.findByText('检查第一集大纲')
     expect(harnessService.getThread).toHaveBeenCalledWith('1')
+    expect(harnessService.listSessionEntries).not.toHaveBeenCalled()
     // Reloading only projects the durable Thread; it never creates a replacement Thread.
-    expect('createSessionThread' in harnessService).toBe(false)
+    expect(harnessService.createSessionThread).not.toHaveBeenCalled()
   })
 })
 
@@ -302,11 +335,16 @@ const thread: HarnessThreadDTO = {
   updateTime: null,
 }
 
-function entry(entryId: string, entryType: string, payload: Record<string, unknown>): HarnessSessionEntryDTO {
+function entry(
+  entryId: string,
+  entryType: string,
+  payload: Record<string, unknown>,
+  parentEntryId: string | null = null,
+): HarnessSessionEntryDTO {
   return {
     entryId,
     sessionId: 's1',
-    parentEntryId: null,
+    parentEntryId,
     entryType,
     payloadJson: JSON.stringify(payload),
     createTime: '2026-01-01T00:00:00',

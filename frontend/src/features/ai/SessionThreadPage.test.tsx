@@ -59,7 +59,7 @@ describe('Session thread navigation', () => {
     expect(harnessService.getThread).toHaveBeenCalledWith('secondary')
   })
 
-  it('creates a Session-local branch and carries editable USER text into its new Thread route', async () => {
+  it('opens history branching on /tree and creates a Session-local branch only after confirmation', async () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.listSessionEntries).mockResolvedValue([
       { entryId: 'root', sessionId: 's1', parentEntryId: null, entryType: 'agent_snapshot', payloadJson: '{}', createTime: null },
@@ -67,9 +67,24 @@ describe('Session thread navigation', () => {
     ])
     vi.mocked(harnessService.createSessionThread).mockResolvedValue(thread('fork'))
     renderPage('/sessions/s1/threads/main', <AgentThreadPage />)
-    await user.click(await screen.findByText('edit me'))
+    await screen.findByRole('log', { name: '会话消息' })
+    await waitFor(() => expect(harnessService.listThreadEntries).toHaveBeenCalledWith('main'))
+    expect(harnessService.listSessionEntries).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: '历史分支' })).not.toBeInTheDocument()
+
+    const composer = screen.getByLabelText('给 AI 发送消息')
+    await user.type(composer, '/tree')
+    await user.click(await screen.findByRole('option', { name: /^tree/ }))
+
+    expect(await screen.findByRole('dialog', { name: '历史分支' })).toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: /edit me/ }))
+    expect(harnessService.createSessionThread).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '从这里开启新 Thread' }))
     await waitFor(() => expect(harnessService.createSessionThread).toHaveBeenCalledWith('s1', { fromEntryId: 'root' }))
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/sessions/s1/threads/fork'))
+    expect(screen.queryByRole('dialog', { name: '历史分支' })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByLabelText('给 AI 发送消息')).toHaveValue('edit me'))
+    await waitFor(() => expect(harnessService.listSessionThreads).toHaveBeenCalledTimes(2))
   })
 })
 

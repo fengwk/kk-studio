@@ -80,12 +80,6 @@ export function useAgentThreadQueries(threadId: string, sessionId: string) {
     },
     enabled: Boolean(threadId),
   })
-  const sessionEntriesQuery = useQuery({
-    queryKey: queryKeys.sessions.entries(sessionId),
-    queryFn: () => harnessService.listSessionEntries(sessionId),
-    enabled: Boolean(sessionId),
-  })
-
   return {
     agentsQuery,
     modelsQuery,
@@ -99,10 +93,8 @@ export function useAgentThreadQueries(threadId: string, sessionId: string) {
     agents: agentsQuery.data?.results ?? [],
     models: modelsQuery.data?.results ?? [],
     providers: providersQuery.data?.results ?? [],
-    sessionEntriesQuery,
     session: sessionQuery.data,
     threads: sessionThreadsQuery.data ?? [],
-    sessionEntries: sessionEntriesQuery.data ?? [],
     thread,
     entries: entriesQuery.data ?? [],
     inputs,
