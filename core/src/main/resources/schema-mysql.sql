@@ -193,6 +193,17 @@ create table if not exists harness_subagent_task (
     key idx_harness_subagent_task_parent (parent_session_id, status)
 ) engine=InnoDB default charset=utf8mb4 comment='durable task invocation to child thread relation';
 
+create table if not exists harness_thread_goal (
+    thread_id             bigint not null comment 'Thread id; one current goal per Thread',
+    objective             text not null comment 'Durable evidence-checkable objective',
+    token_budget          bigint null comment 'Optional positive token budget',
+    status                varchar(32) not null comment 'active / complete / blocked',
+    reason                text null comment 'Terminal reason when complete/blocked',
+    gmt_create            datetime(3) not null default current_timestamp(3),
+    gmt_modified          datetime(3) not null default current_timestamp(3),
+    primary key (thread_id)
+) engine=InnoDB default charset=utf8mb4 comment='durable Thread goal';
+
 create table if not exists model_usage_record (
     id                                 bigint not null comment 'Snowflake ledger id',
     session_id                         bigint not null comment '所属 session',

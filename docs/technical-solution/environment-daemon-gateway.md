@@ -81,7 +81,7 @@ GET /api/environments
 
 保留名 `platform` 表示内置 Skills Provider：Agent 保存与 Turn 解析时，Skill 候选 = READY `platform` + 可选所选 Environment，platform 同名优先。Agent 可选 `environmentName`；保存时非空名必须对应 READY live Environment。Tool/Skill 配置仅允许短名。
 
-Gateway 可按需通过 `LOAD_SKILL` 请求完整 skill 正文（core 端口，尚未暴露为 model Tool）：
+Gateway 可按需通过 `LOAD_SKILL` 请求完整 skill 正文。平台 CONTROL 工具 `load_skill` 将其暴露给已选择 Skills 的 Agent：
 
 ```text
 LOAD_SKILL {"name":"dev"}  --invocationId 必填-->
@@ -89,7 +89,7 @@ LOAD_SKILL {"name":"dev"}  --invocationId 必填-->
   或 SKILL_LOAD_FAILED {"name":"dev","message":"..."}
 ```
 
-`EnvironmentSkillLoader.loadSkill(environmentName, skillName, timeout)` 返回有界异步结果；离线、超时或断线得到失败结果。
+`EnvironmentSkillLoader.loadSkill(environmentName, skillName, timeout)` 返回有界异步结果；离线、超时或断线得到失败结果。`load_skill` 只允许加载当前 Thread Agent 已选中的 skill，source 取自 runtime `SelectedSkillMetadata`（platform-first），成功时返回完整 SKILL.md 正文，不暴露本地路径。
 
 ## Invocation 分发与恢复
 

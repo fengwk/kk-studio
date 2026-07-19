@@ -6,7 +6,7 @@ import java.util.concurrent.CompletableFuture;
 /**
  * Core port that requests a complete skill body from a READY live Environment by name.
  *
- * <p>Not exposed as a model Tool in this slice; later slices may wrap this port.
+ * <p>Wrapped by the platform {@code load_skill} CONTROL tool for Agents with selected skills.
  */
 public interface EnvironmentSkillLoader {
 
