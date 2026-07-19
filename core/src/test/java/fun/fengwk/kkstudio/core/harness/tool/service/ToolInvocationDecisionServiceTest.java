@@ -18,14 +18,18 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import fun.fengwk.kkstudio.core.harness.task.store.mapper.HarnessSubagentTaskMapper;
+import fun.fengwk.kkstudio.core.harness.task.store.model.HarnessSubagentTaskDO;
 import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadEventMapper;
 import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadMapper;
 import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadDO;
 import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadEventDO;
 import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
+import fun.fengwk.kkstudio.harness.runtime.task.TaskState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventType;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -35,6 +39,10 @@ import fun.fengwk.kkstudio.share.model.ToolInvocationDecisionDTO;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
  * Tool permission decision integration: Thread→Invocation lock path, durable events, terminal
@@ -54,11 +62,13 @@ class ToolInvocationDecisionServiceTest {
   @Autowired private ToolInvocationMapper invocationMapper;
   @Autowired private HarnessThreadMapper threadMapper;
   @Autowired private HarnessThreadEventMapper eventMapper;
+  @Autowired private HarnessSubagentTaskMapper taskMapper;
   @Autowired private JdbcTemplate jdbc;
 
   @BeforeEach
   void clean() {
     jdbc.update("delete from harness_thread_event");
+    jdbc.update("delete from harness_subagent_task");
     jdbc.update("delete from tool_invocation");
     jdbc.update("delete from harness_thread");
     reset(threadKick);
@@ -207,6 +217,78 @@ class ToolInvocationDecisionServiceTest {
     verifyNoInteractions(threadKick);
   }
 
+  /** Child Thread 的根 UI 决策仍更新源 Invocation，并将 resolved 事件镜像到 delegation root。 */
+  @Test
+  void childDecisionRelaysResolvedEventToRootAndResumesChildThread() {
+    long rootThreadId = THREAD_ID + 10;
+    long childThreadId = THREAD_ID + 11;
+    long childInvocationId = INVOCATION_ID + 11;
+    LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+    insertThread(rootThreadId, now);
+    insertThread(childThreadId, now);
+    insertWaitingApproval(childInvocationId, childThreadId, ASSISTANT_ENTRY_ID, now);
+    insertChildTask(childThreadId, rootThreadId, now);
+
+    decisionService.decide(childInvocationId, decision("allow"));
+
+    List<HarnessThreadEventDO> childEvents = eventMapper.listAfter(childThreadId, 0L, 10);
+    List<HarnessThreadEventDO> rootEvents = eventMapper.listAfter(rootThreadId, 0L, 10);
+    assertEquals(1, childEvents.size());
+    assertEquals(1, rootEvents.size());
+    assertEquals(ThreadEventType.PERMISSION_RESOLVED.value(), childEvents.get(0).getEventType());
+    assertEquals(ThreadEventType.PERMISSION_RESOLVED.value(), rootEvents.get(0).getEventType());
+    assertEquals(ASSISTANT_ENTRY_ID, childEvents.get(0).getSubjectEntryId());
+    assertNull(rootEvents.get(0).getSubjectEntryId());
+    assertEquals(childEvents.get(0).getPayloadJson(), rootEvents.get(0).getPayloadJson());
+    assertTrue(
+        rootEvents.get(0).getPayloadJson().contains("\"invocationId\":\"" + childInvocationId));
+    assertEquals(
+        ToolInvocationStatus.QUEUED.name(), invocationMapper.find(childInvocationId).getStatus());
+    assertEquals(ThreadStatus.RUNNING.name(), threadMapper.find(childThreadId).getStatus());
+    verify(threadKick).kick(childThreadId);
+    verifyNoMoreInteractions(threadKick);
+  }
+
+  /** 并发的 allow/deny 通过 Thread→Invocation 锁和 CAS 线性化，只有首个持久决定生效。 */
+  @Test
+  void concurrentDecisionsAreFirstWriterWins() throws Exception {
+    LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+    insertThread(THREAD_ID, now);
+    insertWaitingApproval(INVOCATION_ID, THREAD_ID, ASSISTANT_ENTRY_ID, now);
+    CountDownLatch start = new CountDownLatch(1);
+    ExecutorService pool = Executors.newFixedThreadPool(2);
+    try {
+      Future<Object> allow =
+          pool.submit(
+              () -> {
+                start.await();
+                return decideOrCapture(INVOCATION_ID, "allow");
+              });
+      Future<Object> deny =
+          pool.submit(
+              () -> {
+                start.await();
+                return decideOrCapture(INVOCATION_ID, "deny");
+              });
+      start.countDown();
+
+      List<Object> outcomes = List.of(allow.get(), deny.get());
+      assertEquals(1, outcomes.stream().filter(ToolInvocationDTO.class::isInstance).count());
+      assertEquals(1, outcomes.stream().filter(IllegalStateException.class::isInstance).count());
+      ToolInvocationDO invocation = invocationMapper.find(INVOCATION_ID);
+      assertTrue(List.of("ALLOW", "DENY").contains(invocation.getPermissionDecision()));
+      assertEquals(
+          "ALLOW".equals(invocation.getPermissionDecision())
+              ? ToolInvocationStatus.QUEUED.name()
+              : ToolInvocationStatus.FAILED.name(),
+          invocation.getStatus());
+      verify(threadKick).kick(THREAD_ID);
+      verifyNoMoreInteractions(threadKick);
+    } finally {
+      pool.shutdownNow();
+    }
+  }
+
   private static ToolInvocationDecisionDTO decision(String value) {
     ToolInvocationDecisionDTO dto = new ToolInvocationDecisionDTO();
     dto.setDecision(value);
@@ -218,14 +300,37 @@ class ToolInvocationDecisionServiceTest {
     row.setId(id);
     row.setSessionId(id + 10);
     row.setHeadEntryId(id + 20);
-    row.setAgentDefinitionId(1L);
-    row.setRuntimeConfigJson("{}");
-    row.setYoloEnabled(false);
+    row.setStatus(ThreadStatus.WAITING.name());
     row.setInputSequence(0L);
     row.setVersion(0L);
     row.setCreateTime(now);
     row.setUpdateTime(now);
     threadMapper.insert(row);
+  }
+
+  private void insertChildTask(long childThreadId, long rootThreadId, LocalDateTime now) {
+    HarnessSubagentTaskDO task = new HarnessSubagentTaskDO();
+    task.setParentInvocationId(childThreadId + 1000);
+    task.setParentSessionId(childThreadId + 1001);
+    task.setParentThreadId(rootThreadId);
+    task.setRootThreadId(rootThreadId);
+    task.setChildSessionId(childThreadId + 1002);
+    task.setChildThreadId(childThreadId);
+    task.setTargetAgent("child");
+    task.setWorkingCopyPolicy("NONE");
+    task.setMaxTurns(5);
+    task.setStatus(TaskState.RUNNING.name());
+    task.setCreateTime(now);
+    task.setUpdateTime(now);
+    taskMapper.insert(task);
+  }
+
+  private Object decideOrCapture(long invocationId, String value) {
+    try {
+      return decisionService.decide(invocationId, decision(value));
+    } catch (RuntimeException error) {
+      return error;
+    }
   }
 
   private void insertWaitingApproval(
