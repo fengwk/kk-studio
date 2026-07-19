@@ -62,7 +62,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * <p>{@link #kick(long)} 在有界 executor 上调度一次 activation；同一 Thread 通过 DB {@code
  * processorToken}/{@code processorUntil} 跨节点单飞。主循环从 durable 事实恢复：先收敛 tool，普通边界先 harvest input
- * 再偿还一次模型 response debt；RETRYING 例外地先偿还失败 Turn，直到 quiescent 后释放 token。
+ * 再偿还一次模型 response debt；RETRYING 例外地先偿还失败 Turn，跨 Tool chain 保留 debt，直到最终 assistant 完成后才恢复 RUNNING。
  */
 public final class ThreadProcessor implements ThreadKick, ThreadProviderCancellation {
   private static final System.Logger LOGGER = System.getLogger(ThreadProcessor.class.getName());
@@ -301,7 +301,8 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
         return LoopExit.LOST_OWNERSHIP;
       }
 
-      // RETRYING 是唯一禁止 harvest 的状态：先用失败时 durable head 偿还同一 Turn。
+      // RETRYING 是唯一禁止 harvest 的状态：先用失败时 durable head 偿还同一 Turn，并跨 Tool
+      // chain 保留该 debt，直到最终无-tool assistant 成功。
       thread =
           threadStore
               .find(threadId)
@@ -550,9 +551,6 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
     if (handler.failed) {
       return TurnOutcome.FAILED;
     }
-    if (handler.waitingExternal) {
-      return TurnOutcome.WAITING_EXTERNAL;
-    }
     return handler.completedTurn ? TurnOutcome.COMPLETED : TurnOutcome.CONTINUE;
   }
 
@@ -591,7 +589,6 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
     private final TurnResources resources;
     private final DeltaBatcher batcher;
     private final AtomicBoolean terminal = new AtomicBoolean();
-    private volatile boolean waitingExternal;
     private volatile boolean failed;
     private volatile boolean lostOwnership;
     private volatile boolean completedTurn;
@@ -719,11 +716,8 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
             markLostOwnership();
             return;
           }
-          completedTurn = true;
           publishAssistantCompleted(response, toolCalls.size(), now);
           toolPort.dispatchDue(thread.id(), now);
-          waitingExternal =
-              !toolPort.listNonTerminal(thread.id(), plannedAssistantEntryId).isEmpty();
         } catch (ConcurrentModificationException concurrency) {
           markLostOwnership();
         } catch (IllegalArgumentException | ToolInterceptorException error) {
