@@ -10,6 +10,7 @@ flowchart TD
     A --> B[architecture.md<br/>总体架构]
     A --> O[domain-map.md<br/>领域词汇与映射]
     A --> N[infinite-canvas-implementation-design.md<br/>无限画布与 Workflow]
+    A --> R[harness-thread-actor.md<br/>Harness 最终实施架构]
     A --> C[cloud-embedded-agent-runtime.md<br/>Harness 运行时]
     A --> D[backend-implementation-design.md<br/>后端实现]
     A --> E[storage-models.md<br/>存储模型]
@@ -29,16 +30,17 @@ flowchart TD
 | 1 | [architecture.md](architecture.md) | 双域拓扑、模块边界、落地进度 | 先建立全局认知 |
 | 2 | [domain-map.md](domain-map.md) | Harness/Studio 词汇与前后端映射 | 统一命名与对接 |
 | 3 | [infinite-canvas-implementation-design.md](infinite-canvas-implementation-design.md) | Canvas、Resource、Function、Workflow 和 Agent Port | 实现无限画布与 Workflow |
-| 4 | [cloud-embedded-agent-runtime.md](cloud-embedded-agent-runtime.md) | Session Tree、AgentThread、Tool、Task 与 Daemon 执行链路 | 理解输入入队后如何按 Turn 推进 |
-| 5 | [backend-implementation-design.md](backend-implementation-design.md) | `share` / `core` / `web` 的 HTTP、SSE 和 WebSocket 边界 | 修改后端控制面 |
-| 6 | [storage-models.md](storage-models.md) | 表结构、资源文件、seed 语义 | 调整存储或初始化脚本 |
-| 7 | [frontend-implementation-design.md](frontend-implementation-design.md) | 路由、状态管理、测试边界；视觉约定见 [前端设计规范](../product-design/frontend-design-system.md) | 修改前端页面或 API 适配 |
-| 8 | [harness-extensions.md](harness-extensions.md) | typed registry、hook 顺序、factory 与 lifecycle | 扩展 Harness 执行链 |
-| 9 | [prompt-cache-usage-cost.md](prompt-cache-usage-cost.md) | cache control、usage、pricing、ledger 与聚合 API | 修改模型调用计量与缓存链路 |
-| 10 | [s3-presign.md](s3-presign.md) | 固定 bucket、path-style 的 S3 预签名直传 / 直下载 | 接入浏览器到对象存储的直传链路 |
-| 11 | [comfyui-workflow-api.md](comfyui-workflow-api.md) | ComfyUI 工作流卡片 CRUD + 无状态提交 / 查询 / 取消 + S3 输入桥 + job-scoped 输出下载 | 接入 ComfyUI 控制台与 S3 直传后端 |
-| 12 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Environment 注册、Daemon v1 WebSocket、持久 ToolInvocation 分发与回调 | 接入远端 Environment Tool |
-| 13 | [prompt-to-artifact.md](prompt-to-artifact.md) | Prompt、Provider、Tool、Artifact 和浏览器读取的端到端事实链 | 修改跨边界执行或 artifact 呈现 |
+| 4 | [harness-thread-actor.md](harness-thread-actor.md) | Session Tree、Main Thread、durable Thread actor、Stop、Tool permission 与前后端契约 | Harness 重构实施与验收 |
+| 5 | [cloud-embedded-agent-runtime.md](cloud-embedded-agent-runtime.md) | 当前 Session Tree、AgentThread、Tool、Task 与 Daemon 执行链路 | 对照重构前代码事实 |
+| 6 | [backend-implementation-design.md](backend-implementation-design.md) | `share` / `core` / `web` 的 HTTP、SSE 和 WebSocket 边界 | 修改后端控制面 |
+| 7 | [storage-models.md](storage-models.md) | 表结构、资源文件、seed 语义 | 调整存储或初始化脚本 |
+| 8 | [frontend-implementation-design.md](frontend-implementation-design.md) | 路由、状态管理、测试边界；视觉约定见 [前端设计规范](../product-design/frontend-design-system.md) | 修改前端页面或 API 适配 |
+| 9 | [harness-extensions.md](harness-extensions.md) | typed registry、hook 顺序、factory 与 lifecycle | 扩展 Harness 执行链 |
+| 10 | [prompt-cache-usage-cost.md](prompt-cache-usage-cost.md) | cache control、usage、pricing、ledger 与聚合 API | 修改模型调用计量与缓存链路 |
+| 11 | [s3-presign.md](s3-presign.md) | 固定 bucket、path-style 的 S3 预签名直传 / 直下载 | 接入浏览器到对象存储的直传链路 |
+| 12 | [comfyui-workflow-api.md](comfyui-workflow-api.md) | ComfyUI 工作流卡片 CRUD + 无状态提交 / 查询 / 取消 + S3 输入桥 + job-scoped 输出下载 | 接入 ComfyUI 控制台与 S3 直传后端 |
+| 13 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Environment 注册、Daemon v1 WebSocket、持久 ToolInvocation 分发与回调 | 接入远端 Environment Tool |
+| 14 | [prompt-to-artifact.md](prompt-to-artifact.md) | Prompt、Provider、Tool、Artifact 和浏览器读取的端到端事实链 | 修改跨边界执行或 artifact 呈现 |
 
 ## 按主题索引
 
@@ -47,6 +49,7 @@ flowchart TD
 | 总体架构 | [architecture.md](architecture.md) |
 | 领域词汇与映射 | [domain-map.md](domain-map.md) |
 | 无限画布与 Workflow | [infinite-canvas-implementation-design.md](infinite-canvas-implementation-design.md) |
+| Harness 最终实施架构 | [harness-thread-actor.md](harness-thread-actor.md) |
 | Harness 运行时 | [cloud-embedded-agent-runtime.md](cloud-embedded-agent-runtime.md) |
 | 后端实现 | [backend-implementation-design.md](backend-implementation-design.md) |
 | 存储模型 | [storage-models.md](storage-models.md) |
