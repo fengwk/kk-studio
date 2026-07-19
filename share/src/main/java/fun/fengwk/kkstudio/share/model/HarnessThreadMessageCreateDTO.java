@@ -7,6 +7,6 @@ import lombok.Data;
 public class HarnessThreadMessageCreateDTO {
   private String content;
 
-  /** 客户端幂等键；可选。 */
+  /** 客户端幂等键。 */
   private String clientMessageId;
 }

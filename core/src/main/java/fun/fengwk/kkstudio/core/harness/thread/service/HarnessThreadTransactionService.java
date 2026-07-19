@@ -199,6 +199,9 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
       throw new IllegalArgumentException("unknown session: " + sessionId);
     }
     if (entryMapper.find(sessionId, fromEntryId) == null) {
+      if (entryMapper.findById(fromEntryId) != null) {
+        throw new IllegalStateException("entry does not belong to session: " + fromEntryId);
+      }
       throw new IllegalArgumentException("unknown entry: " + fromEntryId);
     }
     long threadId = idGenerator.newThreadId();
@@ -290,7 +293,10 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
   @Transactional
   public ThreadInput submitSetToolset(
       long threadId, List<String> tools, String clientMessageId, Instant now) {
-    ArrayList<String> copy = new ArrayList<>(Objects.requireNonNull(tools, "tools"));
+    if (tools == null) {
+      throw new IllegalArgumentException("tools must not be null");
+    }
+    ArrayList<String> copy = new ArrayList<>(tools);
     if (copy.stream().anyMatch(tool -> tool == null || tool.isBlank())) {
       throw new IllegalArgumentException("tools must only contain non-blank values");
     }
@@ -804,7 +810,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     requireText(clientMessageId, "clientMessageId");
     ThreadInput existing = inputStore.findByClientMessageId(threadId, clientMessageId).orElse(null);
     if (existing != null) {
-      return existing;
+      return requireSameInput(existing, inputType, payloadJson);
     }
     HarnessThreadDO thread = threadMapper.findForUpdate(threadId);
     if (thread == null) {
@@ -812,7 +818,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     }
     existing = inputStore.findByClientMessageId(threadId, clientMessageId).orElse(null);
     if (existing != null) {
-      return existing;
+      return requireSameInput(existing, inputType, payloadJson);
     }
     if (threadMapper.allocateInputSequence(threadId, utc(now)) != 1) {
       throw new IllegalStateException("cannot allocate input sequence");
@@ -833,9 +839,9 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     try {
       inputStore.insert(input);
     } catch (DataIntegrityViolationException duplicate) {
-      return inputStore
-          .findByClientMessageId(threadId, clientMessageId)
-          .orElseThrow(() -> duplicate);
+      ThreadInput replay =
+          inputStore.findByClientMessageId(threadId, clientMessageId).orElseThrow(() -> duplicate);
+      return requireSameInput(replay, inputType, payloadJson);
     }
     if (ThreadStatus.IDLE.name().equals(thread.getStatus())) {
       threadMapper.updateStatusDirect(threadId, ThreadStatus.RUNNING.name(), utc(now));
@@ -847,6 +853,14 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
           now);
     }
     return input;
+  }
+
+  private static ThreadInput requireSameInput(
+      ThreadInput existing, ThreadInputType inputType, String payloadJson) {
+    if (existing.inputType() != inputType || !existing.payloadJson().equals(payloadJson)) {
+      throw new IllegalStateException("clientMessageId is already bound to a different input");
+    }
+    return existing;
   }
 
   private SessionEntryPayload decodeInput(ThreadInput input) {
