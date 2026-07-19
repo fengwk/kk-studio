@@ -207,6 +207,32 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
       }
       throw new IllegalArgumentException("unknown entry: " + fromEntryId);
     }
+
+    // 从 root→fromEntryId 路径取最后一次 AGENT_CHANGE 身份；model/variant 取当前 Definition。
+    // 不写合成 AGENT_CHANGE Entry，不复用父 Thread 的 model override，yolo 恒为 false。
+    Long agentDefinitionId = null;
+    String agentName = null;
+    String modelId = null;
+    String variant = null;
+    HarnessSessionEntryDO agentChangeRow =
+        entryMapper.findLatestOnPathByType(
+            sessionId, fromEntryId, SessionEntryType.AGENT_CHANGE.value());
+    if (agentChangeRow != null) {
+      AgentChangeEntryPayload agentChange =
+          (AgentChangeEntryPayload)
+              payloadCodec.decode(SessionEntryType.AGENT_CHANGE, agentChangeRow.getPayloadJson());
+      AgentDefinitionDO definition = agentDefinitionMapper.getById(agentChange.agentDefinitionId());
+      if (definition == null) {
+        // 与 requireDefinition 一致：未知 Definition 直接 4xx，整事务回滚，不落半残 Thread。
+        throw new IllegalArgumentException(
+            "unknown agent definition: " + agentChange.agentDefinitionId());
+      }
+      agentDefinitionId = agentChange.agentDefinitionId();
+      agentName = agentChange.agentName();
+      modelId = String.valueOf(definition.getModelId());
+      variant = definition.getVariant();
+    }
+
     long threadId = idGenerator.newThreadId();
     AgentThread thread =
         new AgentThread(
@@ -215,10 +241,10 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
             fromEntryId,
             ThreadStatus.IDLE,
             0L,
-            null,
-            null,
-            null,
-            null,
+            agentDefinitionId,
+            agentName,
+            modelId,
+            variant,
             false,
             null,
             null,
