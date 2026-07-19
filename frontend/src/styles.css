@@ -1343,7 +1343,7 @@ textarea::placeholder {
   min-width: 0;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
+  align-items: baseline;
   gap: 8px;
   color: var(--fg-muted);
   font-size: 12px;
