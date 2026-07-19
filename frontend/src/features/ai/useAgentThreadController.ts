@@ -168,11 +168,13 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
     stopRequestIdRef.current = clientRequestId
     return stopMutation.mutateAsync(clientRequestId)
       .then(async (result) => {
+        // A completed Stop receipt closes this idempotency attempt. A later Stop is a new request.
+        stopRequestIdRef.current = null
         if (!handledStopIdsRef.current.has(result.stopId)) {
           handledStopIdsRef.current.add(result.stopId)
           const restored = result.restoredMessages.filter((message) => message.trim())
           if (restored.length > 0) {
-            setDraftState((current) => [current.trim(), ...restored].filter(Boolean).join('\n\n'))
+            setDraftState((current) => [...restored, current.trim()].filter(Boolean).join('\n\n'))
           }
           clientMessageIdRef.current = null
           retryContentRef.current = null

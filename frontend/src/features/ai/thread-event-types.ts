@@ -52,7 +52,7 @@ export interface RuntimeContext {
 export interface ThreadTimeline {
   messages: DialogueMessage[]
   runtimeContext: RuntimeContext
-  /** True when a USER_MESSAGE input is not yet represented by the current Entry snapshot. */
+  /** True when a queued user-visible input is not yet represented by the current Entry snapshot. */
   hasPendingInputs: boolean
   /** True only for active open stream work (open assistant or streaming tool). */
   hasLiveProjection: boolean

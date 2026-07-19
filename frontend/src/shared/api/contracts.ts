@@ -185,24 +185,34 @@ export interface HarnessThreadCreateDTO {
 
 export interface HarnessThreadMessageCreateDTO {
   content: string
-  clientMessageId?: string
+  clientMessageId: string
+}
+
+export interface HarnessThreadCustomMessageCreateDTO {
+  role: 'SYSTEM' | 'USER'
+  content: string
+  clientMessageId: string
 }
 
 export interface HarnessThreadYoloSetDTO {
   yoloEnabled: boolean
+  clientMessageId: string
 }
 
 export interface HarnessThreadAgentSetDTO {
   agentDefinitionId: string
+  clientMessageId: string
 }
 
 export interface HarnessThreadModelSetDTO {
   modelId: string
   variant: string
+  clientMessageId: string
 }
 
 export interface HarnessThreadToolsetSetDTO {
   tools: string[]
+  clientMessageId: string
 }
 
 export type ThreadStatus = 'IDLE' | 'RUNNING' | 'WAITING' | 'FAILED' | 'RETRYING'
@@ -223,7 +233,7 @@ export interface HarnessThreadInputDTO {
   sequence: number
   inputType: ThreadInputType
   payloadJson: string
-  clientMessageId: string | null
+  clientMessageId: string
   status: ThreadInputStatus
   appliedEntryId: string | null
   resolvedAt: BackendDateTime
