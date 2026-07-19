@@ -1,7 +1,7 @@
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts'
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/thread-event-payload'
 
-export type SessionTreeFilter = 'default' | 'no-tools' | 'user-only' | 'assistant-only' | 'labeled-only' | 'all'
+export type SessionTreeFilter = 'conversation' | 'all'
 
 export type SessionEntryKind = 'user' | 'assistant' | 'tool' | 'custom' | 'label' | 'other'
 
@@ -211,16 +211,8 @@ export function sessionEntryKind(entry: HarnessSessionEntryDTO): SessionEntryKin
 
 export function matchesSessionTreeFilter(kind: SessionEntryKind, filter: SessionTreeFilter): boolean {
   switch (filter) {
-    case 'default':
+    case 'conversation':
       return kind === 'user' || kind === 'assistant' || kind === 'custom'
-    case 'no-tools':
-      return kind !== 'tool'
-    case 'user-only':
-      return kind === 'user' || kind === 'custom'
-    case 'assistant-only':
-      return kind === 'assistant'
-    case 'labeled-only':
-      return kind === 'label'
     case 'all':
       return true
   }
