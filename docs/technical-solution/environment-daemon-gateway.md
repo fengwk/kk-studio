@@ -154,3 +154,21 @@ terminal CAS 成功后才发布 `ToolCompleted` lifecycle observation，并使�
 Daemon 的 invocation journal 记录本地 invocation ID 的 RUNNING/terminal 状态。重连后重新发送 HELLO、CAPABILITIES 和 READY；Gateway 可安全重新分发可重试调用。重复 `INVOKE` 在 journal 中命中 RUNNING 时返回 `STARTED {"replayed":true}`，命中终态时重放该终态。Daemon 对 `CANCEL` 取消本地 handle 并发送 `CANCELLED`。
 
 Daemon 仅注册 `ENVIRONMENT` execution mode 的工具。其 `PARTIAL` 和 `COMPLETED` result 使用同一 codec 读取本地 artifact bytes，因此 Cloud 不依赖 Daemon 本地文件路径。
+
+### Coding tools
+
+独立 Daemon 进程通过 `CodingTools.registerAll` 注册稳定 coding capability 集合（顺序固定）：
+
+```text
+read, write, edit, apply_patch, bash, grep, find,
+lsp_goto_definition, lsp_workspace_symbols, lsp_java_decompile
+```
+
+| 工具 | 作用 | 配置/约束 |
+| --- | --- | --- |
+| `apply_patch` | OpenCode 风格 `*** Begin Patch` 多文件 Add/Update/Delete；全量 preflight 后提交；不支持 Move | 路径受 environment root 边界约束；Update 保留 BOM/编码/换行 |
+| `lsp_goto_definition` | `path` + 1-based `line` + optional 0-based `character` | 需 `kkstudio.daemon.lsp-bridge` 命令桥；否则确定性 unavailable |
+| `lsp_workspace_symbols` | `path` + `query` + optional `limit`（默认 50） | 同上 |
+| `lsp_java_decompile` | `path` + `target`（`jdt://` / 符号行 / class 路径） | 优先 bridge；否则对可解析类名/class 文件使用 `kkstudio.daemon.javap`（默认 `javap`）回退 |
+
+静态 MIT prompt 资源位于 `harness/daemon/src/main/resources/.../coding/prompts/`，许可说明见 `harness/daemon/THIRD_PARTY_NOTICES`。LSP bridge 协议为 JSON stdin/stdout：`{"op":"...","ok":true,"text":"..."}` / `{"ok":false,"error":"..."}`；未配置 bridge 时不得伪造成功结果。
