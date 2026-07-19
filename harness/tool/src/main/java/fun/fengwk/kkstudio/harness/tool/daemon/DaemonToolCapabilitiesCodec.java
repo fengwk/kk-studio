@@ -34,15 +34,15 @@ import java.util.TreeSet;
 /**
  * Daemon v1 {@code CAPABILITIES} payload 的共享严格 codec。
  *
- * <p>Cloud 与 Daemon 必须使用同一个 codec 把 {@link ToolDescriptor} 编码为 canonical wire JSON，并在收到该 JSON
- * 时还原为相同的 descriptor，避免 Cloud 侧的 capability 解析与 Daemon 侧的发序列化在结构上产生漂移。
+ * <p>Cloud 与 Daemon 必须使用同一个 codec 把 tools 与 skills 编码为 canonical wire JSON，并在收到该 JSON 时还原为相同结构，避免
+ * Cloud 侧的 capability 解析与 Daemon 侧的发序列化在结构上产生漂移。
  *
  * <p>codec 在边界拒绝：
  *
  * <ul>
- *   <li>未知顶层字段、未知 descriptor / schema 字段、未知 schema {@code type}；
+ *   <li>未知顶层字段、未知 descriptor / schema / skill 字段、未知 schema {@code type}；
  *   <li>{@link ToolExecutionMode} 不是 {@code ENVIRONMENT} 的 descriptor（cloud 只能寻址 Environment）；
- *   <li>重复的 {@code name@version} capability；
+ *   <li>重复的 {@code name@version} tool capability 或重复 skill {@code name}；
  *   <li>错误的 JSON 类型（如非 string 的 enum / required 元素，非 array 的 enum / required，非 object 的 properties
  *       / items）；
  *   <li>object schema 缺失 {@code type=object} / {@code properties} / {@code required} / {@code
@@ -50,21 +50,25 @@ import java.util.TreeSet;
  *   <li>duplicate required property names；
  *   <li>required 属性不在 {@code properties} 中声明；
  *   <li>{@link ToolDescriptor} / {@link ToolParamsSchema} / {@link ToolObjectSchema} / {@link
- *       ToolEnumSchema} 的构造器校验失败（如 blank tool name）会被包装为 {@link DaemonProtocolException}。
+ *       ToolEnumSchema} / {@link DaemonSkillDescriptor} 的构造器校验失败（如 blank tool name）会被包装为 {@link
+ *       DaemonProtocolException}。
  * </ul>
  *
- * <p>空 capabilities ({@code {"tools":[]}}) 是合法 payload：新注册的 Environment 与尚未暴露工具的 daemon 都可以 表示这种状态。
+ * <p>空 capabilities ({@code {"tools":[],"skills":[]}}) 是合法 payload：新注册的 Environment 与尚未暴露工具/技能的
+ * daemon 都可以表示这种状态。
  *
  * <p>{@link #encode(DaemonToolCapabilities)} 是 deterministic 的：object 属性按字典序排序，{@code required}
- * 数组按字典序排序；descriptor 列表保留输入顺序（即 daemon 声明的 capability 顺序）。
+ * 数组按字典序排序；tools / skills 列表保留输入顺序（即 daemon 声明的 capability 顺序）。
  */
 public final class DaemonToolCapabilitiesCodec {
 
-  /** 顶层 JSON 容器：{@code {"tools":[...]}}。 */
-  public record DaemonToolCapabilities(List<ToolDescriptor> tools) {
+  /** 顶层 JSON 容器：{@code {"tools":[...],"skills":[...]}}。 */
+  public record DaemonToolCapabilities(
+      List<ToolDescriptor> tools, List<DaemonSkillDescriptor> skills) {
     public DaemonToolCapabilities {
       tools = List.copyOf(Objects.requireNonNull(tools, "tools"));
-      Map<String, ToolDescriptor> seen = new LinkedHashMap<>();
+      skills = List.copyOf(Objects.requireNonNull(skills, "skills"));
+      Map<String, ToolDescriptor> seenTools = new LinkedHashMap<>();
       for (ToolDescriptor descriptor : tools) {
         if (descriptor == null) {
           throw new DaemonProtocolException("CAPABILITIES descriptor must not be null");
@@ -77,8 +81,17 @@ public final class DaemonToolCapabilitiesCodec {
                   + descriptor.version());
         }
         String key = descriptor.name() + "@" + descriptor.version();
-        if (seen.putIfAbsent(key, descriptor) != null) {
+        if (seenTools.putIfAbsent(key, descriptor) != null) {
           throw new DaemonProtocolException("duplicate CAPABILITIES descriptor: " + key);
+        }
+      }
+      Map<String, DaemonSkillDescriptor> seenSkills = new LinkedHashMap<>();
+      for (DaemonSkillDescriptor skill : skills) {
+        if (skill == null) {
+          throw new DaemonProtocolException("CAPABILITIES skill must not be null");
+        }
+        if (seenSkills.putIfAbsent(skill.name(), skill) != null) {
+          throw new DaemonProtocolException("duplicate CAPABILITIES skill: " + skill.name());
         }
       }
     }
@@ -94,6 +107,10 @@ public final class DaemonToolCapabilitiesCodec {
     for (ToolDescriptor descriptor : capabilities.tools()) {
       writeDescriptor(tools.addObject(), descriptor);
     }
+    ArrayNode skills = root.putArray("skills");
+    for (DaemonSkillDescriptor skill : capabilities.skills()) {
+      writeSkill(skills.addObject(), skill);
+    }
     try {
       return OBJECT_MAPPER.writeValueAsString(root);
     } catch (JsonProcessingException error) {
@@ -104,7 +121,7 @@ public final class DaemonToolCapabilitiesCodec {
   /** 解码单个 canonical CAPABILITIES JSON 文本。 */
   public DaemonToolCapabilities decode(String json) {
     ObjectNode root = requiredObject(readRoot(json), "CAPABILITIES");
-    Set<String> allowedTop = Set.of("tools");
+    Set<String> allowedTop = Set.of("tools", "skills");
     rejectUnknownFields(root, allowedTop, "CAPABILITIES");
     JsonNode toolsNode = root.get("tools");
     if (toolsNode == null) {
@@ -113,18 +130,35 @@ public final class DaemonToolCapabilitiesCodec {
     if (!toolsNode.isArray()) {
       throw new DaemonProtocolException("CAPABILITIES payload 'tools' must be an array");
     }
-    Map<String, ToolDescriptor> seen = new LinkedHashMap<>();
-    List<ToolDescriptor> result = new ArrayList<>();
-    int index = 0;
+    JsonNode skillsNode = root.get("skills");
+    if (skillsNode == null) {
+      throw new DaemonProtocolException("CAPABILITIES payload must declare 'skills'");
+    }
+    if (!skillsNode.isArray()) {
+      throw new DaemonProtocolException("CAPABILITIES payload 'skills' must be an array");
+    }
+    Map<String, ToolDescriptor> seenTools = new LinkedHashMap<>();
+    List<ToolDescriptor> tools = new ArrayList<>();
+    int toolIndex = 0;
     for (JsonNode element : toolsNode) {
-      ToolDescriptor descriptor = readDescriptor(element, index++);
+      ToolDescriptor descriptor = readDescriptor(element, toolIndex++);
       String key = descriptor.name() + "@" + descriptor.version();
-      if (seen.putIfAbsent(key, descriptor) != null) {
+      if (seenTools.putIfAbsent(key, descriptor) != null) {
         throw new DaemonProtocolException("duplicate CAPABILITIES descriptor: " + key);
       }
-      result.add(descriptor);
+      tools.add(descriptor);
     }
-    return new DaemonToolCapabilities(List.copyOf(result));
+    Map<String, DaemonSkillDescriptor> seenSkills = new LinkedHashMap<>();
+    List<DaemonSkillDescriptor> skills = new ArrayList<>();
+    int skillIndex = 0;
+    for (JsonNode element : skillsNode) {
+      DaemonSkillDescriptor skill = readSkill(element, skillIndex++);
+      if (seenSkills.putIfAbsent(skill.name(), skill) != null) {
+        throw new DaemonProtocolException("duplicate CAPABILITIES skill: " + skill.name());
+      }
+      skills.add(skill);
+    }
+    return new DaemonToolCapabilities(List.copyOf(tools), List.copyOf(skills));
   }
 
   private static void writeDescriptor(ObjectNode target, ToolDescriptor descriptor) {
@@ -136,6 +170,25 @@ public final class DaemonToolCapabilitiesCodec {
     target.put("sideEffect", descriptor.sideEffect().name());
     target.put("timeoutMillis", descriptor.timeout().toMillis());
     target.set("inputSchema", writeParamsSchema(descriptor.inputSchema()));
+  }
+
+  private static void writeSkill(ObjectNode target, DaemonSkillDescriptor skill) {
+    target.put("name", skill.name());
+    target.put("description", skill.description());
+  }
+
+  private static DaemonSkillDescriptor readSkill(JsonNode node, int index) {
+    String context = "CAPABILITIES skill[" + index + "]";
+    ObjectNode obj = requiredObject(node, context);
+    rejectUnknownFields(obj, Set.of("name", "description"), context);
+    String name = requiredText(obj, "name", context);
+    String description = requiredText(obj, "description", context);
+    try {
+      return new DaemonSkillDescriptor(name, description);
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException(
+          "CAPABILITIES skill validation failed for " + name + ": " + error.getMessage(), error);
+    }
   }
 
   private static ObjectNode writeParamsSchema(ToolParamsSchema schema) {

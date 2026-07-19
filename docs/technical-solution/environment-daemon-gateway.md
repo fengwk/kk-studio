@@ -30,16 +30,20 @@ kk-studio:
 
 `daemon-token` 是部署范围的共享连接密钥。Gateway 在 HELLO 中以常量时间比较它；缺失、空白或不匹配的密钥会关闭连接，且不会写入 Environment heartbeat 或 capabilities。生产部署使用 TLS 终止后的 `wss://` URI 保护握手密钥。
 
-Daemon 通过 JVM properties 启动：
+Daemon 以 CLI 参数为权威配置启动（连接项可回退系统属性）：
 
 ```text
--Dkkstudio.daemon.gateway-uri=wss://studio.example/api/environments/daemon/v1
--Dkkstudio.daemon.environment-id=123456789012345678
--Dkkstudio.daemon.gateway-token=${KK_STUDIO_DAEMON_TOKEN}
--Dkkstudio.daemon.id=optional-stable-daemon-name
+java ... DaemonMain \
+  --environment-name local-dev \
+  --gateway-uri wss://studio.example/api/environments/daemon/v1 \
+  --gateway-token ${KK_STUDIO_DAEMON_TOKEN} \
+  --skill-dir ~/.agents/skills \
+  --daemon-id optional-stable-daemon-name
 ```
 
-`gateway-uri` 使用 `ws` 或 `wss`，`environment-id` 和 `gateway-token` 均为必填。`max-artifact-bytes` 限制单个 result artifact 的原始字节数；`max-message-bytes` 同时配置 servlet WebSocket text buffer，默认值可容纳一个默认大小 artifact 的 Base64 result payload。
+`gateway-uri` 使用 `ws` 或 `wss`。`environment-name` 与 `gateway-token` 必填。`--skill-dir` 可重复；未提供时若存在则默认 `~/.agents/skills`。skill 路径仅本地 CLI 配置，不接受服务端下发。`max-artifact-bytes` 限制单个 result artifact 的原始字节数；`max-message-bytes` 同时配置 servlet WebSocket text buffer，默认值可容纳一个默认大小 artifact 的 Base64 result payload。
+
+> 说明：core Gateway 仍可能按既有数值 Environment ID 绑定；本协议切片已将 harness envelope scope 改为实时唯一 `environmentName`，Gateway 适配属于后续切片。
 
 ## 认证、绑定与能力
 
@@ -49,7 +53,7 @@ Daemon 连接后的首帧必须是 HELLO：
 {
   "protocolVersion": 1,
   "messageType": "HELLO",
-  "environmentId": "123456789012345678",
+  "environmentName": "local-dev",
   "sequence": 0,
   "payload": {
     "daemonId": "host-a",
@@ -59,7 +63,7 @@ Daemon 连接后的首帧必须是 HELLO：
 }
 ```
 
-Gateway 验证 envelope、HELLO payload、共享密钥和正十进制 Environment ID，然后通过 Environment heartbeat 写入确认该 ID 存在。认证成功后连接绑定该 Environment；同一 Environment 的新 HELLO 会关闭旧连接。Gateway 返回 `WELCOME`。
+Gateway 验证 envelope、HELLO payload、共享密钥与非空 `environmentName`，并将连接绑定到该实时环境名。认证成功后同一 name 的新 HELLO 会关闭旧连接。Gateway 返回 `WELCOME`。
 
 Daemon 随后按序发送：
 
@@ -67,7 +71,15 @@ Daemon 随后按序发送：
 HELLO -> CAPABILITIES -> READY {"pull":true}
 ```
 
-`CAPABILITIES` 使用共享 `DaemonToolCapabilitiesCodec` 严格解码，并以 canonical JSON 替换 Environment capability 事实。每个 descriptor 必须使用 `ENVIRONMENT` execution mode，`name@version` 必须唯一。`READY` 仅在 capabilities 写入后生效；`HEARTBEAT` 仅在 READY 后接受，并仅刷新 `last_seen_at`。
+`CAPABILITIES` 使用共享 `DaemonToolCapabilitiesCodec` 严格解码，形状为 `{"tools":[...],"skills":[{"name","description"}]}`。每个 tool descriptor 必须使用 `ENVIRONMENT` execution mode，`name@version` 必须唯一；skills 仅上报短 `name`/`description`，不含本地路径或正文。`READY` 仅在 capabilities 写入后生效；`HEARTBEAT` 仅在 READY 后接受，并仅刷新 `last_seen_at`。
+
+Gateway 可按需通过 `LOAD_SKILL` 请求完整 skill 正文：
+
+```text
+LOAD_SKILL {"name":"dev"}  --invocationId 必填-->
+  SKILL_LOADED {"name":"dev","content":"<full SKILL.md>"}
+  或 SKILL_LOAD_FAILED {"name":"dev","message":"..."}
+```
 
 ## Invocation 分发与恢复
 
