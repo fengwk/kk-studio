@@ -14,10 +14,13 @@ public record CodingToolsConfig(
     String bashExecutable,
     String rgExecutable,
     String fdExecutable,
-    ArtifactSink artifactSink) {
+    ArtifactSink artifactSink,
+    String lspBridgeCommand,
+    String javapExecutable) {
 
   public static final int DEFAULT_PREVIEW_MAX_LINES = 2000;
   public static final int DEFAULT_PREVIEW_MAX_BYTES = 50 * 1024;
+  public static final String DEFAULT_JAVAP_EXECUTABLE = "javap";
 
   public CodingToolsConfig {
     environmentRoot = canonicalDirectory(environmentRoot, "environmentRoot");
@@ -37,6 +40,36 @@ public record CodingToolsConfig(
     rgExecutable = requireNonBlank(rgExecutable, "rgExecutable");
     fdExecutable = requireNonBlank(fdExecutable, "fdExecutable");
     artifactSink = Objects.requireNonNull(artifactSink, "artifactSink");
+    lspBridgeCommand = blankToNull(lspBridgeCommand);
+    javapExecutable =
+        requireNonBlank(
+            javapExecutable == null || javapExecutable.isBlank()
+                ? DEFAULT_JAVAP_EXECUTABLE
+                : javapExecutable,
+            "javapExecutable");
+  }
+
+  /** Convenience constructor that leaves the optional LSP bridge disabled. */
+  public CodingToolsConfig(
+      Path environmentRoot,
+      Path defaultWorkdir,
+      int previewMaxLines,
+      int previewMaxBytes,
+      String bashExecutable,
+      String rgExecutable,
+      String fdExecutable,
+      ArtifactSink artifactSink) {
+    this(
+        environmentRoot,
+        defaultWorkdir,
+        previewMaxLines,
+        previewMaxBytes,
+        bashExecutable,
+        rgExecutable,
+        fdExecutable,
+        artifactSink,
+        null,
+        DEFAULT_JAVAP_EXECUTABLE);
   }
 
   /** Builds the standalone configuration from stable Daemon system properties. */
@@ -59,7 +92,9 @@ public record CodingToolsConfig(
         System.getProperty("kkstudio.daemon.bash", "bash"),
         System.getProperty("kkstudio.daemon.rg", "rg"),
         System.getProperty("kkstudio.daemon.fd", "fd"),
-        new LocalFileArtifactSink(artifactDirectory));
+        new LocalFileArtifactSink(artifactDirectory),
+        System.getProperty("kkstudio.daemon.lsp-bridge"),
+        System.getProperty("kkstudio.daemon.javap", DEFAULT_JAVAP_EXECUTABLE));
   }
 
   private static Path canonicalDirectory(Path value, String name) {
@@ -79,5 +114,9 @@ public record CodingToolsConfig(
       throw new IllegalArgumentException(name + " must not be blank");
     }
     return value;
+  }
+
+  private static String blankToNull(String value) {
+    return value == null || value.isBlank() ? null : value;
   }
 }
