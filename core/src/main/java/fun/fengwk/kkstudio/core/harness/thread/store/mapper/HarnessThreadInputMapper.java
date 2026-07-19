@@ -21,10 +21,10 @@ public interface HarnessThreadInputMapper extends BaseMapper {
       """
       insert into harness_thread_input (
           id, thread_id, sequence, input_type, payload_json, client_message_id,
-          applied_entry_id, applied_at, gmt_create
+          status, applied_entry_id, resolved_at, cancelled_by_stop_id, gmt_create
       ) values (
           #{id}, #{threadId}, #{sequence}, #{inputType}, #{payloadJson}, #{clientMessageId},
-          #{appliedEntryId}, #{appliedAt}, #{createTime}
+          #{status}, #{appliedEntryId}, #{resolvedAt}, #{cancelledByStopId}, #{createTime}
       )
       """)
   int insert(HarnessThreadInputDO input);
@@ -32,7 +32,8 @@ public interface HarnessThreadInputMapper extends BaseMapper {
   @Select(
       """
       select id, thread_id, sequence, input_type, payload_json, client_message_id,
-             applied_entry_id, applied_at, gmt_create as create_time
+             status, applied_entry_id, resolved_at, cancelled_by_stop_id,
+             gmt_create as create_time
       from harness_thread_input
       where id = #{inputId}
       """)
@@ -45,8 +46,10 @@ public interface HarnessThreadInputMapper extends BaseMapper {
         @Result(column = "input_type", property = "inputType"),
         @Result(column = "payload_json", property = "payloadJson"),
         @Result(column = "client_message_id", property = "clientMessageId"),
+        @Result(column = "status", property = "status"),
         @Result(column = "applied_entry_id", property = "appliedEntryId"),
-        @Result(column = "applied_at", property = "appliedAt"),
+        @Result(column = "resolved_at", property = "resolvedAt"),
+        @Result(column = "cancelled_by_stop_id", property = "cancelledByStopId"),
         @Result(column = "create_time", property = "createTime")
       })
   HarnessThreadInputDO find(@Param("inputId") long inputId);
@@ -54,7 +57,8 @@ public interface HarnessThreadInputMapper extends BaseMapper {
   @Select(
       """
       select id, thread_id, sequence, input_type, payload_json, client_message_id,
-             applied_entry_id, applied_at, gmt_create as create_time
+             status, applied_entry_id, resolved_at, cancelled_by_stop_id,
+             gmt_create as create_time
       from harness_thread_input
       where thread_id = #{threadId} and client_message_id = #{clientMessageId}
       """)
@@ -65,7 +69,8 @@ public interface HarnessThreadInputMapper extends BaseMapper {
   @Select(
       """
       select id, thread_id, sequence, input_type, payload_json, client_message_id,
-             applied_entry_id, applied_at, gmt_create as create_time
+             status, applied_entry_id, resolved_at, cancelled_by_stop_id,
+             gmt_create as create_time
       from harness_thread_input
       where thread_id = #{threadId}
       order by sequence asc
@@ -76,30 +81,50 @@ public interface HarnessThreadInputMapper extends BaseMapper {
   @Select(
       """
       select id, thread_id, sequence, input_type, payload_json, client_message_id,
-             applied_entry_id, applied_at, gmt_create as create_time
+             status, applied_entry_id, resolved_at, cancelled_by_stop_id,
+             gmt_create as create_time
       from harness_thread_input
-      where thread_id = #{threadId} and applied_entry_id is null
+      where thread_id = #{threadId} and status = 'queued'
       order by sequence asc
       """)
   @ResultMap("harnessThreadInputResultMap")
-  List<HarnessThreadInputDO> listPending(@Param("threadId") long threadId);
+  List<HarnessThreadInputDO> listQueued(@Param("threadId") long threadId);
 
   @Select(
       """
       select id, thread_id, sequence, input_type, payload_json, client_message_id,
-             applied_entry_id, applied_at, gmt_create as create_time
+             status, applied_entry_id, resolved_at, cancelled_by_stop_id,
+             gmt_create as create_time
       from harness_thread_input
-      where thread_id = #{threadId} and applied_entry_id is null
+      where thread_id = #{threadId}
+        and status = 'queued'
+        and sequence <= #{cutoffSequence}
       order by sequence asc
-      limit 1
       """)
   @ResultMap("harnessThreadInputResultMap")
-  HarnessThreadInputDO findNextPending(@Param("threadId") long threadId);
+  List<HarnessThreadInputDO> listQueuedUpTo(
+      @Param("threadId") long threadId, @Param("cutoffSequence") long cutoffSequence);
 
   @Select(
       """
       select id, thread_id, sequence, input_type, payload_json, client_message_id,
-             applied_entry_id, applied_at, gmt_create as create_time
+             status, applied_entry_id, resolved_at, cancelled_by_stop_id,
+             gmt_create as create_time
+      from harness_thread_input
+      where thread_id = #{threadId}
+        and status = 'cancelled'
+        and cancelled_by_stop_id = #{stopId}
+      order by sequence asc
+      """)
+  @ResultMap("harnessThreadInputResultMap")
+  List<HarnessThreadInputDO> listCancelledByStop(
+      @Param("threadId") long threadId, @Param("stopId") long stopId);
+
+  @Select(
+      """
+      select id, thread_id, sequence, input_type, payload_json, client_message_id,
+             status, applied_entry_id, resolved_at, cancelled_by_stop_id,
+             gmt_create as create_time
       from harness_thread_input
       where id = #{inputId}
       for update
@@ -110,11 +135,26 @@ public interface HarnessThreadInputMapper extends BaseMapper {
   @Update(
       """
       update harness_thread_input
-      set applied_entry_id = #{appliedEntryId}, applied_at = #{appliedAt}
-      where id = #{inputId} and applied_entry_id is null
+      set status = 'applied',
+          applied_entry_id = #{appliedEntryId},
+          resolved_at = #{resolvedAt}
+      where id = #{inputId} and status = 'queued'
       """)
   int markApplied(
       @Param("inputId") long inputId,
       @Param("appliedEntryId") long appliedEntryId,
-      @Param("appliedAt") LocalDateTime appliedAt);
+      @Param("resolvedAt") LocalDateTime resolvedAt);
+
+  @Update(
+      """
+      update harness_thread_input
+      set status = 'cancelled',
+          cancelled_by_stop_id = #{stopId},
+          resolved_at = #{resolvedAt}
+      where id = #{inputId} and status = 'queued'
+      """)
+  int markCancelled(
+      @Param("inputId") long inputId,
+      @Param("stopId") long stopId,
+      @Param("resolvedAt") LocalDateTime resolvedAt);
 }

@@ -381,6 +381,7 @@ class TaskToolTest {
               invocationId,
               2,
               20,
+              20,
               3,
               4,
               "Coder",

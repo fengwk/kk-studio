@@ -44,8 +44,8 @@ create table if not exists agent_definition (
 
 create table if not exists harness_session (
     id                    bigint not null,
-    agent_definition_id   bigint,
     title                 varchar(256),
+    main_thread_id        bigint not null,
     parent_session_id     bigint,
     root_session_id       bigint not null,
     parent_invocation_id  bigint,
@@ -77,9 +77,7 @@ create table if not exists harness_thread (
     id                    bigint not null,                 -- 业务主键
     session_id            bigint not null,                 -- 所属 session tree
     head_entry_id         bigint not null,                 -- 当前 tree cursor
-    agent_definition_id   bigint,                          -- 冻结 agent definition 引用
-    runtime_config_json   text not null,                   -- 冻结 runtime config JSON
-    yolo_enabled          boolean not null,                -- thread 级 YOLO
+    status                varchar(32) not null,            -- IDLE/RUNNING/WAITING/FAILED/RETRYING
     input_sequence        bigint not null,                 -- 已分配 input sequence 最大值
     processor_token       varchar(128),                    -- 当前 processor fencing token
     processor_until       timestamp(3),                    -- token 租约截止
@@ -92,15 +90,17 @@ create table if not exists harness_thread (
 create index if not exists idx_harness_thread_session on harness_thread (session_id, id);
 
 create table if not exists harness_thread_input (
-    id                 bigint not null,
-    thread_id          bigint not null,
-    sequence           bigint not null,
-    input_type         varchar(32) not null,
-    payload_json       text not null,
-    client_message_id  varchar(128),
-    applied_entry_id   bigint,
-    applied_at         timestamp(3),
-    gmt_create         timestamp(3) not null default current_timestamp(),
+    id                    bigint not null,
+    thread_id             bigint not null,
+    sequence              bigint not null,
+    input_type            varchar(32) not null,
+    payload_json          text not null,
+    client_message_id     varchar(128),
+    status                varchar(32) not null,
+    applied_entry_id      bigint,
+    resolved_at           timestamp(3),
+    cancelled_by_stop_id  bigint,
+    gmt_create            timestamp(3) not null default current_timestamp(),
     primary key (id),
     unique (thread_id, sequence)
 );
@@ -108,7 +108,19 @@ create table if not exists harness_thread_input (
 create unique index if not exists uk_harness_thread_input_client
     on harness_thread_input (thread_id, client_message_id);
 create index if not exists idx_harness_thread_input_pending
-    on harness_thread_input (thread_id, applied_entry_id, sequence);
+    on harness_thread_input (thread_id, status, sequence);
+
+create table if not exists harness_thread_stop (
+    id                 bigint not null,
+    thread_id          bigint not null,
+    client_request_id  varchar(128) not null,
+    gmt_create         timestamp(3) not null default current_timestamp(),
+    primary key (id),
+    unique (thread_id, client_request_id)
+);
+
+create index if not exists idx_harness_thread_stop_thread
+    on harness_thread_stop (thread_id, id);
 
 create table if not exists harness_thread_event (
     id                 bigint not null,
@@ -177,6 +189,7 @@ create table if not exists harness_subagent_task (
     parent_invocation_id  bigint not null,
     parent_session_id     bigint not null,
     parent_thread_id      bigint not null,
+    root_thread_id        bigint not null,
     child_session_id      bigint not null,
     child_thread_id       bigint not null,
     target_agent          varchar(128) not null,

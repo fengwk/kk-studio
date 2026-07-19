@@ -25,9 +25,9 @@ public final class SessionTree {
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
-  public Session create(Long agentDefinitionId, String title) {
+  public Session create(long mainThreadId, String title) {
     long sessionId = idGenerator.newSessionId();
-    Session session = Session.root(sessionId, agentDefinitionId, title, clock.instant());
+    Session session = Session.root(sessionId, mainThreadId, title, clock.instant());
     sessionStore.create(session);
     return session;
   }
@@ -54,7 +54,7 @@ public final class SessionTree {
    * 复制源 Session 从根到 fromEntryId 的路径为 child Session；Entry id 不跨 Session 复用。 leaf 不再写在 Session
    * 上——调用方用返回路径的末节点创建 child Thread。
    */
-  public ForkResult fork(long sourceSessionId, long fromEntryId) {
+  public ForkResult fork(long sourceSessionId, long fromEntryId, long mainThreadId) {
     Session source = requireSession(sourceSessionId);
     List<SessionEntry> sourcePath = entryStore.loadPath(sourceSessionId, fromEntryId);
     long targetSessionId = idGenerator.newSessionId();
@@ -62,7 +62,7 @@ public final class SessionTree {
     Session fork =
         new Session(
             targetSessionId,
-            source.agentDefinitionId(),
+            mainThreadId,
             source.title(),
             source.id(),
             source.rootSessionId(),

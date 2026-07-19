@@ -21,21 +21,19 @@ public interface HarnessThreadMapper extends BaseMapper {
   @Insert(
       """
       insert into harness_thread (
-          id, session_id, head_entry_id, agent_definition_id, runtime_config_json,
-          yolo_enabled, input_sequence, processor_token, processor_until,
-          gmt_create, gmt_modified, version
+          id, session_id, head_entry_id, status, input_sequence,
+          processor_token, processor_until, gmt_create, gmt_modified, version
       ) values (
-          #{id}, #{sessionId}, #{headEntryId}, #{agentDefinitionId}, #{runtimeConfigJson},
-          #{yoloEnabled}, #{inputSequence}, #{processorToken}, #{processorUntil},
-          #{createTime}, #{updateTime}, #{version}
+          #{id}, #{sessionId}, #{headEntryId}, #{status}, #{inputSequence},
+          #{processorToken}, #{processorUntil}, #{createTime}, #{updateTime}, #{version}
       )
       """)
   int insert(HarnessThreadDO thread);
 
   @Select(
       """
-      select id, session_id, head_entry_id, agent_definition_id, runtime_config_json,
-             yolo_enabled, input_sequence, processor_token, processor_until, version,
+      select id, session_id, head_entry_id, status, input_sequence,
+             processor_token, processor_until, version,
              gmt_create as create_time, gmt_modified as update_time
       from harness_thread
       where id = #{threadId}
@@ -46,9 +44,7 @@ public interface HarnessThreadMapper extends BaseMapper {
         @Result(column = "id", property = "id"),
         @Result(column = "session_id", property = "sessionId"),
         @Result(column = "head_entry_id", property = "headEntryId"),
-        @Result(column = "agent_definition_id", property = "agentDefinitionId"),
-        @Result(column = "runtime_config_json", property = "runtimeConfigJson"),
-        @Result(column = "yolo_enabled", property = "yoloEnabled"),
+        @Result(column = "status", property = "status"),
         @Result(column = "input_sequence", property = "inputSequence"),
         @Result(column = "processor_token", property = "processorToken"),
         @Result(column = "processor_until", property = "processorUntil"),
@@ -60,8 +56,8 @@ public interface HarnessThreadMapper extends BaseMapper {
 
   @Select(
       """
-      select id, session_id, head_entry_id, agent_definition_id, runtime_config_json,
-             yolo_enabled, input_sequence, processor_token, processor_until, version,
+      select id, session_id, head_entry_id, status, input_sequence,
+             processor_token, processor_until, version,
              gmt_create as create_time, gmt_modified as update_time
       from harness_thread
       where id = #{threadId}
@@ -72,8 +68,8 @@ public interface HarnessThreadMapper extends BaseMapper {
 
   @Select(
       """
-      select id, session_id, head_entry_id, agent_definition_id, runtime_config_json,
-             yolo_enabled, input_sequence, processor_token, processor_until, version,
+      select id, session_id, head_entry_id, status, input_sequence,
+             processor_token, processor_until, version,
              gmt_create as create_time, gmt_modified as update_time
       from harness_thread
       where session_id = #{sessionId}
@@ -84,8 +80,8 @@ public interface HarnessThreadMapper extends BaseMapper {
 
   String VIEW_COLUMNS =
       """
-      t.id, t.session_id, t.head_entry_id, t.agent_definition_id, t.runtime_config_json,
-      t.yolo_enabled, t.input_sequence, t.processor_token, t.processor_until, t.version,
+      t.id, t.session_id, t.head_entry_id, t.status, t.input_sequence,
+      t.processor_token, t.processor_until, t.version,
       t.gmt_create as create_time, t.gmt_modified as update_time,
       s.title as session_title
       """;
@@ -106,9 +102,7 @@ public interface HarnessThreadMapper extends BaseMapper {
         @Result(column = "id", property = "id"),
         @Result(column = "session_id", property = "sessionId"),
         @Result(column = "head_entry_id", property = "headEntryId"),
-        @Result(column = "agent_definition_id", property = "agentDefinitionId"),
-        @Result(column = "runtime_config_json", property = "runtimeConfigJson"),
-        @Result(column = "yolo_enabled", property = "yoloEnabled"),
+        @Result(column = "status", property = "status"),
         @Result(column = "input_sequence", property = "inputSequence"),
         @Result(column = "processor_token", property = "processorToken"),
         @Result(column = "processor_until", property = "processorUntil"),
@@ -154,6 +148,7 @@ public interface HarnessThreadMapper extends BaseMapper {
           gmt_modified = #{updateTime},
           version = version + 1
       where id = #{threadId}
+        and status in ('RUNNING', 'WAITING', 'RETRYING')
         and (processor_token is null
              or processor_until is null
              or processor_until <= #{now})
@@ -213,31 +208,43 @@ public interface HarnessThreadMapper extends BaseMapper {
   @Update(
       """
       update harness_thread
-      set yolo_enabled = #{yoloEnabled},
+      set status = #{status},
           gmt_modified = #{updateTime},
           version = version + 1
       where id = #{threadId} and processor_token = #{processorToken}
       """)
-  int updateYolo(
+  int updateStatus(
       @Param("threadId") long threadId,
       @Param("processorToken") String processorToken,
-      @Param("yoloEnabled") boolean yoloEnabled,
+      @Param("status") String status,
       @Param("updateTime") LocalDateTime updateTime);
 
   @Update(
       """
       update harness_thread
-      set agent_definition_id = #{agentDefinitionId},
-          runtime_config_json = #{runtimeConfigJson},
+      set status = #{status},
+          processor_token = null,
+          processor_until = null,
           gmt_modified = #{updateTime},
           version = version + 1
-      where id = #{threadId} and processor_token = #{processorToken}
+      where id = #{threadId}
       """)
-  int updateAgent(
+  int forceStatusAndClearProcessor(
       @Param("threadId") long threadId,
-      @Param("processorToken") String processorToken,
-      @Param("agentDefinitionId") Long agentDefinitionId,
-      @Param("runtimeConfigJson") String runtimeConfigJson,
+      @Param("status") String status,
+      @Param("updateTime") LocalDateTime updateTime);
+
+  @Update(
+      """
+      update harness_thread
+      set status = #{status},
+          gmt_modified = #{updateTime},
+          version = version + 1
+      where id = #{threadId}
+      """)
+  int updateStatusDirect(
+      @Param("threadId") long threadId,
+      @Param("status") String status,
       @Param("updateTime") LocalDateTime updateTime);
 
   @Update(
@@ -251,34 +258,23 @@ public interface HarnessThreadMapper extends BaseMapper {
   int allocateInputSequence(
       @Param("threadId") long threadId, @Param("updateTime") LocalDateTime updateTime);
 
-  @Update(
-      """
-      update harness_thread
-      set yolo_enabled = #{yoloEnabled},
-          gmt_modified = #{updateTime},
-          version = version + 1
-      where id = #{threadId}
-      """)
-  int updateYoloDirect(
-      @Param("threadId") long threadId,
-      @Param("yoloEnabled") boolean yoloEnabled,
-      @Param("updateTime") LocalDateTime updateTime);
-
   /**
    * 低频恢复选择：
    *
    * <ul>
-   *   <li>任意非空 processor token 且 processor_until 为空或已过期（覆盖模型调用中途崩溃）；
-   *   <li>pending input / due tool / head 终态 tool 仅在 processor 空闲或已过期时选择，避免占用活跃 lease 饿死恢复。
+   *   <li>RUNNING/RETRYING 且无有效 token；
+   *   <li>token 已过期；
+   *   <li>WAITING 下存在 due/cancelled/terminal Tool work；
    * </ul>
    *
-   * <p>不选择纯 WAITING_APPROVAL 或无 work 的 idle Thread。
+   * <p>不选择 IDLE、FAILED、纯 WAITING_APPROVAL 且没有新 durable work。
    */
   @Select(
       """
       select distinct t.id
       from harness_thread t
-      where (
+      where t.status in ('RUNNING', 'WAITING', 'RETRYING')
+        and (
           (
             t.processor_token is not null
             and (t.processor_until is null or t.processor_until <= #{now})
@@ -288,9 +284,10 @@ public interface HarnessThreadMapper extends BaseMapper {
               or t.processor_until is null
               or t.processor_until <= #{now})
             and (
-              exists (
+              t.status in ('RUNNING', 'RETRYING')
+              or exists (
                 select 1 from harness_thread_input i
-                where i.thread_id = t.id and i.applied_entry_id is null
+                where i.thread_id = t.id and i.status = 'queued'
               )
               or exists (
                 select 1 from tool_invocation ti

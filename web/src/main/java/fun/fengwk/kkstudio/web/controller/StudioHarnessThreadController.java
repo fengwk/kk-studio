@@ -23,10 +23,13 @@ import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadCommandServi
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadQueryService;
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadAgentSetDTO;
-import fun.fengwk.kkstudio.share.model.HarnessThreadCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadMessageCreateDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadModelSetDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadStopDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadStopResultDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadToolsetSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadYoloSetDTO;
 import fun.fengwk.kkstudio.share.model.ThreadEventDTO;
 
@@ -55,11 +58,6 @@ public class StudioHarnessThreadController {
   @GetMapping("/threads")
   public Result<List<HarnessThreadDTO>> listAllThreads() {
     return Results.ok(queryService.listAll());
-  }
-
-  @PostMapping("/threads")
-  public Result<HarnessThreadDTO> createThread(@RequestBody HarnessThreadCreateDTO createDTO) {
-    return Results.ok(withMissingResourceTranslation(() -> commandService.createThread(createDTO)));
   }
 
   @GetMapping("/threads/{threadId}")
@@ -94,6 +92,38 @@ public class StudioHarnessThreadController {
     HarnessThreadInputDTO input =
         withMissingResourceTranslation(() -> commandService.queueAgent(threadId, request));
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(Results.ok(input));
+  }
+
+  @PutMapping("/threads/{threadId}/model")
+  public ResponseEntity<Result<HarnessThreadInputDTO>> queueModel(
+      @PathVariable String threadId, @RequestBody HarnessThreadModelSetDTO request) {
+    return ResponseEntity.status(HttpStatus.ACCEPTED)
+        .body(
+            Results.ok(
+                withMissingResourceTranslation(
+                    () -> commandService.queueModel(threadId, request))));
+  }
+
+  @PutMapping("/threads/{threadId}/toolset")
+  public ResponseEntity<Result<HarnessThreadInputDTO>> queueToolset(
+      @PathVariable String threadId, @RequestBody HarnessThreadToolsetSetDTO request) {
+    return ResponseEntity.status(HttpStatus.ACCEPTED)
+        .body(
+            Results.ok(
+                withMissingResourceTranslation(
+                    () -> commandService.queueToolset(threadId, request))));
+  }
+
+  @PostMapping("/threads/{threadId}/stop")
+  public Result<HarnessThreadStopResultDTO> stop(
+      @PathVariable String threadId, @RequestBody HarnessThreadStopDTO request) {
+    return Results.ok(withMissingResourceTranslation(() -> commandService.stop(threadId, request)));
+  }
+
+  @PostMapping("/threads/{threadId}/retry")
+  public ResponseEntity<Result<HarnessThreadDTO>> retry(@PathVariable String threadId) {
+    return ResponseEntity.status(HttpStatus.ACCEPTED)
+        .body(Results.ok(withMissingResourceTranslation(() -> commandService.retry(threadId))));
   }
 
   @GetMapping("/threads/{threadId}/entries")

@@ -4,7 +4,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** {@code harness_thread} 行映射：持久执行面板 / tree cursor。 */
+/** {@code harness_thread} 行映射：持久 Branch 运行单元。 */
 @Data
 public class HarnessThreadDO {
   /** 业务主键。 */
@@ -16,14 +16,8 @@ public class HarnessThreadDO {
   /** 当前 head entry cursor。 */
   private Long headEntryId;
 
-  /** 冻结 agent definition id。 */
-  private Long agentDefinitionId;
-
-  /** 冻结 runtime config JSON。 */
-  private String runtimeConfigJson;
-
-  /** Thread 级 YOLO 开关。 */
-  private Boolean yoloEnabled;
+  /** 持久状态：IDLE/RUNNING/WAITING/FAILED/RETRYING。 */
+  private String status;
 
   /** 已分配 input sequence 最大值。 */
   private Long inputSequence;

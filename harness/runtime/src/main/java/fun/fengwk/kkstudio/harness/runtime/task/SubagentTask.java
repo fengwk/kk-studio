@@ -3,11 +3,12 @@ package fun.fengwk.kkstudio.harness.runtime.task;
 import java.time.Instant;
 import java.util.Objects;
 
-/** 父子 Agent 任务关系；child 以 durable Thread 表达。 */
+/** 父子 Agent 任务关系；child 以 durable Thread 表达，ASK 路由到 rootThreadId。 */
 public record SubagentTask(
     long parentInvocationId,
     long parentSessionId,
     long parentThreadId,
+    long rootThreadId,
     long childSessionId,
     long childThreadId,
     String targetAgent,
@@ -23,6 +24,7 @@ public record SubagentTask(
     if (parentInvocationId <= 0
         || parentSessionId <= 0
         || parentThreadId <= 0
+        || rootThreadId <= 0
         || childSessionId <= 0
         || childThreadId <= 0) {
       throw new IllegalArgumentException("task identity ids must be positive");

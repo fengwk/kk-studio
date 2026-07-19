@@ -14,9 +14,9 @@ public interface ThreadStore {
   void create(AgentThread thread);
 
   /**
-   * 尝试获取 thread 执行权。成功返回带新 token 的快照；失败表示另一节点仍持有有效 lease。
+   * 尝试获取 thread 执行权。成功返回带新 token 的快照；失败表示另一节点仍持有有效 lease 或状态不可运行。
    *
-   * <p>规则：processorToken 为空，或 processorUntil 已过期，才可 acquire。
+   * <p>规则：status in (RUNNING, WAITING, RETRYING) 且 processorToken 为空或 processorUntil 已过期。
    */
   Optional<AgentThread> tryAcquire(
       long threadId, String processorToken, Instant now, Duration leaseDuration);
@@ -35,17 +35,12 @@ public interface ThreadStore {
       long newHeadEntryId,
       Instant now);
 
-  /** 仅当当前 processorToken 匹配时更新 YOLO。 */
-  boolean updateYolo(long threadId, String processorToken, boolean yoloEnabled, Instant now);
+  /** 仅当当前 processorToken 匹配时更新 status。 */
+  boolean updateStatus(long threadId, String processorToken, ThreadStatus status, Instant now);
 
-  /** 仅当当前 processorToken 匹配时更新 agent 与冻结配置。 */
-  boolean updateAgent(
-      long threadId,
-      String processorToken,
-      Long agentDefinitionId,
-      String runtimeConfigJson,
-      Instant now);
+  /** 强制更新 status 并清除 processor token（Stop / fail 路径）。 */
+  boolean forceStatusAndClearProcessor(long threadId, ThreadStatus status, Instant now);
 
-  /** 分配下一个 input sequence（在提交事务内调用）。 */
+  /** 分配下一个 input sequence（在提交事务内调用，调用方已锁 Thread）。 */
   long allocateInputSequence(long threadId, Instant now);
 }

@@ -51,12 +51,19 @@ public final class SessionEntryJsonCodec {
         node.set("assistantMetadata", encodeAssistantMetadata(value.assistantMetadata()));
       }
     } else if (payload instanceof AgentSnapshotEntryPayload value) {
+      if (value.agentDefinitionId() == null) {
+        node.putNull("agentDefinitionId");
+      } else {
+        node.put("agentDefinitionId", value.agentDefinitionId());
+      }
       node.set("snapshot", encodeSnapshot(value.snapshot()));
     } else if (payload instanceof ModelChangeEntryPayload value) {
       node.put("modelId", value.modelId());
       node.put("variant", value.variant());
     } else if (payload instanceof ToolsetChangeEntryPayload value) {
       node.set("tools", encodeStrings(value.tools()));
+    } else if (payload instanceof YoloChangeEntryPayload value) {
+      node.put("yoloEnabled", value.yoloEnabled());
     } else if (payload instanceof CompactionEntryPayload value) {
       node.put("summary", value.summary());
       node.put("firstKeptEntryId", value.firstKeptEntryId());
@@ -90,8 +97,14 @@ public final class SessionEntryJsonCodec {
             metadata.isNull() ? null : decodeAssistantMetadata(metadata));
       }
       case AGENT_SNAPSHOT -> {
-        fields(node, "snapshot");
-        yield new AgentSnapshotEntryPayload(decodeSnapshot(node.get("snapshot")));
+        fields(node, "agentDefinitionId", "snapshot");
+        JsonNode agentDefinitionId = node.get("agentDefinitionId");
+        if (agentDefinitionId == null) {
+          throw new IllegalArgumentException("agentDefinitionId must be present");
+        }
+        yield new AgentSnapshotEntryPayload(
+            agentDefinitionId.isNull() ? null : positiveLong(node, "agentDefinitionId"),
+            decodeSnapshot(node.get("snapshot")));
       }
       case MODEL_CHANGE -> {
         fields(node, "modelId", "variant");
@@ -100,6 +113,10 @@ public final class SessionEntryJsonCodec {
       case TOOLSET_CHANGE -> {
         fields(node, "tools");
         yield new ToolsetChangeEntryPayload(strings(node.get("tools"), "tools"));
+      }
+      case YOLO_CHANGE -> {
+        fields(node, "yoloEnabled");
+        yield new YoloChangeEntryPayload(bool(node, "yoloEnabled"));
       }
       case COMPACTION -> {
         fields(node, "summary", "firstKeptEntryId", "tokensBefore", "detailsJson");

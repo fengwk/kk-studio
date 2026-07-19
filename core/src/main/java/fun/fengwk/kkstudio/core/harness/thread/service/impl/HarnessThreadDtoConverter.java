@@ -26,11 +26,7 @@ public class HarnessThreadDtoConverter {
     dto.setThreadId(Long.toString(thread.id()));
     dto.setSessionId(Long.toString(thread.sessionId()));
     dto.setHeadEntryId(Long.toString(thread.headEntryId()));
-    if (thread.agentDefinitionId() != null) {
-      dto.setAgentDefinitionId(Long.toString(thread.agentDefinitionId()));
-    }
-    dto.setRuntimeConfigJson(thread.runtimeConfigJson());
-    dto.setYoloEnabled(thread.yoloEnabled());
+    dto.setStatus(thread.status().value());
     dto.setInputSequence(thread.inputSequence());
     dto.setProcessing(thread.isProcessing(Instant.now()));
     dto.setCreateTime(LocalDateTime.ofInstant(thread.createdAt(), ZoneOffset.UTC));
@@ -52,11 +48,7 @@ public class HarnessThreadDtoConverter {
     dto.setSessionId(Long.toString(row.getSessionId()));
     dto.setSessionTitle(sessionTitle);
     dto.setHeadEntryId(Long.toString(row.getHeadEntryId()));
-    if (row.getAgentDefinitionId() != null) {
-      dto.setAgentDefinitionId(Long.toString(row.getAgentDefinitionId()));
-    }
-    dto.setRuntimeConfigJson(row.getRuntimeConfigJson());
-    dto.setYoloEnabled(Boolean.TRUE.equals(row.getYoloEnabled()));
+    dto.setStatus(row.getStatus());
     dto.setInputSequence(row.getInputSequence());
     boolean processing =
         row.getProcessorToken() != null
@@ -79,8 +71,12 @@ public class HarnessThreadDtoConverter {
     if (input.appliedEntryId() != null) {
       dto.setAppliedEntryId(Long.toString(input.appliedEntryId()));
     }
-    if (input.appliedAt() != null) {
-      dto.setAppliedAt(LocalDateTime.ofInstant(input.appliedAt(), ZoneOffset.UTC));
+    if (input.resolvedAt() != null) {
+      dto.setResolvedAt(LocalDateTime.ofInstant(input.resolvedAt(), ZoneOffset.UTC));
+    }
+    dto.setStatus(input.status().value());
+    if (input.cancelledByStopId() != null) {
+      dto.setCancelledByStopId(Long.toString(input.cancelledByStopId()));
     }
     dto.setCreateTime(LocalDateTime.ofInstant(input.createdAt(), ZoneOffset.UTC));
     return dto;
@@ -97,7 +93,11 @@ public class HarnessThreadDtoConverter {
     if (row.getAppliedEntryId() != null) {
       dto.setAppliedEntryId(Long.toString(row.getAppliedEntryId()));
     }
-    dto.setAppliedAt(row.getAppliedAt());
+    dto.setStatus(row.getStatus());
+    dto.setResolvedAt(row.getResolvedAt());
+    if (row.getCancelledByStopId() != null) {
+      dto.setCancelledByStopId(Long.toString(row.getCancelledByStopId()));
+    }
     dto.setCreateTime(row.getCreateTime());
     return dto;
   }

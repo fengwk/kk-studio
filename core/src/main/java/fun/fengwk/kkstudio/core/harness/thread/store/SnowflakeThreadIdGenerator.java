@@ -23,6 +23,11 @@ public class SnowflakeThreadIdGenerator implements ThreadIdGenerator {
   }
 
   @Override
+  public long newThreadStopId() {
+    return AgentIdGenerator.nextHarnessThreadStopId();
+  }
+
+  @Override
   public long newSessionEntryId() {
     return AgentIdGenerator.nextHarnessSessionEntryId();
   }
