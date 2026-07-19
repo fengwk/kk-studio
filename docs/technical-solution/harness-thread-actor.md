@@ -23,8 +23,6 @@ Branch
 
 客户端通过 Thread ID 无状态提交。多个客户端可以并发向同一个 Thread 入队，但只有持有数据库 fencing token 的 Processor 可以推进 Thread head。
 
-本模型不包含 Harness Run、Control、SessionInput predecessor graph、共享 Session runtime cursor、用户到 Thread 的连接所有权或全局持续 poller。
-
 ## 2. 领域所有权
 
 | 概念 | 职责 | 持久化 |

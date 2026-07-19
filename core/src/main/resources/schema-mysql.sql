@@ -132,7 +132,7 @@ create table if not exists tool_invocation (
     tool_call_id          varchar(256) not null comment 'Provider tool call id',
     tool_name             varchar(128) not null comment '冻结工具名称',
     tool_version          varchar(128) not null comment '冻结工具版本',
-    target_type           varchar(32) not null comment 'CONTROL/CLOUD/ENVIRONMENT',
+    target_type           varchar(32) not null comment '工具执行目标类型',
     environment_id        bigint null comment 'ENVIRONMENT 目标 id；其他类型为空',
     arguments_json        longtext not null comment 'interceptor 后参数 JSON',
     status                varchar(32) not null comment '持久状态',

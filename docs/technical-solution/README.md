@@ -30,8 +30,8 @@ flowchart TD
 | 1 | [architecture.md](architecture.md) | 双域拓扑、模块边界、落地进度 | 先建立全局认知 |
 | 2 | [domain-map.md](domain-map.md) | Harness/Studio 词汇与前后端映射 | 统一命名与对接 |
 | 3 | [infinite-canvas-implementation-design.md](infinite-canvas-implementation-design.md) | Canvas、Resource、Function、Workflow 和 Agent Port | 实现无限画布与 Workflow |
-| 4 | [harness-thread-actor.md](harness-thread-actor.md) | Session Tree、Main Thread、durable Thread actor、Stop、Tool permission 与前后端契约 | Harness 重构实施与验收 |
-| 5 | [cloud-embedded-agent-runtime.md](cloud-embedded-agent-runtime.md) | 当前 Session Tree、AgentThread、Tool、Task 与 Daemon 执行链路 | 对照重构前代码事实 |
+| 4 | [harness-thread-actor.md](harness-thread-actor.md) | Session Tree、Main Thread、durable Thread actor、mailbox、Stop/Retry、Tool permission 与前后端契约 | Harness 架构事实源 |
+| 5 | [cloud-embedded-agent-runtime.md](cloud-embedded-agent-runtime.md) | Session Tree、AgentThread、Tool、Task 与 Daemon 执行链路 | 实现运行时 |
 | 6 | [backend-implementation-design.md](backend-implementation-design.md) | `share` / `core` / `web` 的 HTTP、SSE 和 WebSocket 边界 | 修改后端控制面 |
 | 7 | [storage-models.md](storage-models.md) | 表结构、资源文件、seed 语义 | 调整存储或初始化脚本 |
 | 8 | [frontend-implementation-design.md](frontend-implementation-design.md) | 路由、状态管理、测试边界；视觉约定见 [前端设计规范](../product-design/frontend-design-system.md) | 修改前端页面或 API 适配 |
@@ -66,6 +66,6 @@ flowchart TD
 
 | 规则 | 说明 |
 | --- | --- |
-| 状态准确 | 已落地文档与当前代码一致；目标落地设计明确标注为实施契约，不声称对应类、表或 API 已存在 |
-| 不写历史依赖 | 不要求读者了解旧版本、讨论过程或废弃方案 |
+| 状态准确 | Harness 文档以 [harness-thread-actor.md](harness-thread-actor.md) 为最终架构事实源；其他文档描述同一职责边界与契约 |
+| 上下文无关 | 不要求读者了解讨论过程或其他文档的隐含前提 |
 | 分层清晰 | 架构、运行时、存储、前后端实现分别维护，避免交叉重复 |
