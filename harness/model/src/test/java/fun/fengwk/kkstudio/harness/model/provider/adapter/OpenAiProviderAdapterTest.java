@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
@@ -30,7 +31,10 @@ class OpenAiProviderAdapterTest {
   void rejectsMismatchedProviderDescriptor() {
     ProviderDescriptor descriptor =
         new ProviderDescriptor(
-            "provider", ProviderType.GOOGLE, "https://example.invalid", Duration.ofSeconds(1));
+            "provider",
+            ProviderType.GOOGLE,
+            "https://example.invalid",
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(1), Duration.ofSeconds(1)));
 
     assertThrows(
         IllegalArgumentException.class, () -> new OpenAiProviderAdapter("key").create(descriptor));

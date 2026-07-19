@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
@@ -117,7 +118,7 @@ class ProviderAdapterContractTest {
                       "provider",
                       ProviderType.OPENAI,
                       server.endpoint("/v1"),
-                      Duration.ofSeconds(5)));
+                      timeoutPolicy(Duration.ofSeconds(5))));
       assertPromptCacheKeyForControl(
           ProviderType.OPENAI, provider, ProviderCacheControl.none(), null, server);
       assertPromptCacheKeyForControl(
@@ -153,7 +154,7 @@ class ProviderAdapterContractTest {
                       "provider",
                       ProviderType.OPENAI_RESPONSES,
                       server.endpoint("/v1"),
-                      Duration.ofSeconds(5)));
+                      timeoutPolicy(Duration.ofSeconds(5))));
       assertPromptCacheKeyForControl(
           ProviderType.OPENAI_RESPONSES, provider, ProviderCacheControl.none(), null, server);
       assertPromptCacheKeyForControl(
@@ -189,7 +190,7 @@ class ProviderAdapterContractTest {
                       "provider",
                       ProviderType.ANTHROPIC,
                       server.endpoint("/v1"),
-                      Duration.ofSeconds(5)));
+                      timeoutPolicy(Duration.ofSeconds(5))));
       assertAnthropicBreakpointsFor(provider, ProviderCacheControl.none(), false, false, server);
       assertAnthropicBreakpointsFor(
           provider,
@@ -251,7 +252,7 @@ class ProviderAdapterContractTest {
                       "provider",
                       ProviderType.GOOGLE,
                       server.endpoint("/v1beta"),
-                      Duration.ofSeconds(5)));
+                      timeoutPolicy(Duration.ofSeconds(5))));
       RecordedRequest none =
           runAndAwait(
               provider,
@@ -284,7 +285,7 @@ class ProviderAdapterContractTest {
                       "provider",
                       ProviderType.OPENAI,
                       server.endpoint("/v1"),
-                      Duration.ofSeconds(5)));
+                      timeoutPolicy(Duration.ofSeconds(5))));
       // descriptor 与 adapter 一致，但 model.providerType=GOOGLE 必须被拒绝。
       CountDownLatch done = new CountDownLatch(1);
       AtomicReference<ProviderException> error = new AtomicReference<>();
@@ -328,7 +329,10 @@ class ProviderAdapterContractTest {
       ModelProvider provider =
           adapter.create(
               new ProviderDescriptor(
-                  "provider", type, server.endpoint(endpointPath), Duration.ofSeconds(5)));
+                  "provider",
+                  type,
+                  server.endpoint(endpointPath),
+                  timeoutPolicy(Duration.ofSeconds(5))));
       CountDownLatch done = new CountDownLatch(1);
       AtomicReference<ProviderException> error = new AtomicReference<>();
       provider.stream(
@@ -364,6 +368,10 @@ class ProviderAdapterContractTest {
         assertTrue(recorded.headers().containsKey("anthropic-version"));
       }
     }
+  }
+
+  private static ModelCallTimeoutPolicy timeoutPolicy(Duration totalTimeout) {
+    return new ModelCallTimeoutPolicy(totalTimeout, Duration.ofSeconds(1));
   }
 
   private static void assertPromptCacheKeyForControl(

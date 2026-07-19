@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.thread;
 
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -13,6 +14,7 @@ import java.util.Objects;
 /** 一次 Turn 解析出的不可变资源快照。 */
 public record TurnResources(
     ModelProvider provider,
+    ModelCallTimeoutPolicy modelCallTimeoutPolicy,
     ModelDescriptor model,
     ModelVariant variant,
     List<ToolDescriptor> toolDescriptors,
@@ -22,6 +24,8 @@ public record TurnResources(
 
   public TurnResources {
     provider = Objects.requireNonNull(provider, "provider");
+    modelCallTimeoutPolicy =
+        Objects.requireNonNull(modelCallTimeoutPolicy, "modelCallTimeoutPolicy");
     model = Objects.requireNonNull(model, "model");
     variant = Objects.requireNonNull(variant, "variant");
     toolDescriptors = List.copyOf(Objects.requireNonNull(toolDescriptors, "toolDescriptors"));

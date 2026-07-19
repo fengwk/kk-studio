@@ -46,7 +46,7 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
             .baseUrl(descriptor.endpoint())
             .apiKey(apiKey)
             .modelName(request.model().modelId())
-            .timeout(descriptor.timeout())
+            .timeout(descriptor.modelCallTimeoutPolicy().modelCallTimeout())
             .returnThinking(true)
             .customParameters(customParameters(control, minimax))
             .build();

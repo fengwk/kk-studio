@@ -88,6 +88,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class ThreadProcessor implements ThreadKick, ThreadProviderCancellation {
   private static final System.Logger LOGGER = System.getLogger(ThreadProcessor.class.getName());
   private static final Duration REJECTED_RETRY_DELAY = Duration.ofMillis(50);
+  private static final long MAX_IDLE_TIMEOUT_CHECK_MILLIS = 1_000L;
 
   private final ThreadStore threadStore;
   private final ThreadTransactions transactions;
@@ -631,6 +632,38 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
             renewEvery.toMillis(),
             renewEvery.toMillis(),
             TimeUnit.MILLISECONDS);
+    // 两类 Provider timeout 属于本次冻结资源，而不是部署级 ThreadProcessor 参数。总超时从请求启动
+    // 时开始；idle timeout 只在没有 Provider 生命周期活动（started/delta/terminal）时触发。
+    ScheduledFuture<?> totalTimeoutFuture =
+        workerScheduler.schedule(
+            () -> {
+              if (handler.fail(
+                  new ProviderException(ProviderErrorKind.TRANSIENT, "model call timed out"))) {
+                active.cancelHandle();
+              }
+            },
+            resources.modelCallTimeoutPolicy().modelCallTimeout().toMillis(),
+            TimeUnit.MILLISECONDS);
+    long idleCheckMillis =
+        Math.max(
+            1L,
+            Math.min(
+                resources.modelCallTimeoutPolicy().modelCallIdleTimeout().toMillis(),
+                MAX_IDLE_TIMEOUT_CHECK_MILLIS));
+    ScheduledFuture<?> idleTimeoutFuture =
+        workerScheduler.scheduleAtFixedRate(
+            () -> {
+              if (handler.isIdleFor(
+                      resources.modelCallTimeoutPolicy().modelCallIdleTimeout(), clock.instant())
+                  && handler.fail(
+                      new ProviderException(
+                          ProviderErrorKind.TRANSIENT, "model call idle timed out"))) {
+                active.cancelHandle();
+              }
+            },
+            idleCheckMillis,
+            idleCheckMillis,
+            TimeUnit.MILLISECONDS);
     try {
       // execute 可以同步抛错，也可以在返回前同步发回调；因此 set() 会处理“handle 到手前已失去所有权”。
       AgentTurnHandle turnHandle =
@@ -646,20 +679,9 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
         turnHandle.cancel();
         return TurnOutcome.LOST_OWNERSHIP;
       }
-      // completion 由 onCompleted/onFailed/markLostOwnership 完成。超时先取消底层调用，再写普通失败；
-      // 若已经丢租则绝不由旧 owner 再写失败事件。
-      done.orTimeout(config.modelCallTimeout().toMillis(), TimeUnit.MILLISECONDS)
-          .exceptionally(
-              error -> {
-                if (!handler.lostOwnership) {
-                  turnHandle.cancel();
-                  handler.onFailed(
-                      new ProviderException(
-                          ProviderErrorKind.TRANSIENT, "model call timed out", error));
-                }
-                return null;
-              })
-          .join();
+      // completion 由 onCompleted/onFailed/markLostOwnership/timeout 终结；timeout 先持久化失败，
+      // 再取消底层调用，避免取消 callback 抢先把原因降级为 CANCELLED。
+      done.join();
     } catch (RuntimeException error) {
       if (!handler.lostOwnership) {
         handler.onFailed(
@@ -669,6 +691,8 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
     } finally {
       // 只清理进程内资源；已落库的 Entry/Event/status 不在此处回滚或二次修改。
       renewFuture.cancel(false);
+      totalTimeoutFuture.cancel(false);
+      idleTimeoutFuture.cancel(false);
       activeProviders.remove(thread.id(), active);
     }
     if (handler.lostOwnership) {
@@ -742,6 +766,9 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
     /** 让 activation 线程等待 Provider 回调终结，而不是轮询 Provider handle。 */
     private volatile CompletableFuture<Void> completion = new CompletableFuture<>();
 
+    /** 最近一次 Provider lifecycle activity；idle timeout 从 Turn 创建时开始计时。 */
+    private volatile Instant lastActivityAt;
+
     private TurnHandler(
         AgentThread thread,
         String token,
@@ -755,6 +782,7 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
       this.context = context;
       this.resources = resources;
       this.batcher = batcher;
+      this.lastActivityAt = clock.instant();
     }
 
     /**
@@ -771,9 +799,10 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
 
     @Override
     public void onStarted() {
-      if (lostOwnership) {
+      if (terminal.get() || lostOwnership) {
         return;
       }
+      markActivity();
       try {
         // plannedAssistantEntryId 尚未 materialize；started event 让前端可提前建立同一 ID 的流式投影。
         if (!transactions.appendEvents(
@@ -796,6 +825,7 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
     @Override
     public void onDelta(ProviderStreamEvent event) {
       if (!terminal.get() && !lostOwnership) {
+        markActivity();
         // Delta 只进入有界 batch；最终 Entry 仍以 onCompleted 的完整 Provider response 为准。
         batcher.add(event);
       }
@@ -888,8 +918,12 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
 
     @Override
     public void onFailed(ProviderException error) {
+      fail(error);
+    }
+
+    private boolean fail(ProviderException error) {
       if (lostOwnership || !terminal.compareAndSet(false, true)) {
-        return;
+        return false;
       }
       try {
         // 已送达的部分 delta 仍是流式观测事实；flush 后再写失败，前端可以完整地呈现中断过程。
@@ -902,6 +936,18 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
       } finally {
         completion.complete(null);
       }
+      return true;
+    }
+
+    private boolean isIdleFor(Duration idleTimeout, Instant now) {
+      if (terminal.get() || lostOwnership) {
+        return false;
+      }
+      return !now.isBefore(lastActivityAt.plus(idleTimeout));
+    }
+
+    private void markActivity() {
+      lastActivityAt = clock.instant();
     }
 
     /**
@@ -1068,6 +1114,7 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
   private final class ActiveProvider {
     private final TurnHandler handler;
     private final AtomicReference<AgentTurnHandle> handle = new AtomicReference<>();
+    private final AtomicBoolean cancellationRequested = new AtomicBoolean();
 
     private ActiveProvider(TurnHandler handler) {
       this.handler = handler;
@@ -1075,8 +1122,8 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
 
     private void set(AgentTurnHandle value) {
       handle.set(value);
-      if (handler.lostOwnership) {
-        // Stop/heartbeat 可能发生在 Provider engine 返回 handle 之前。
+      if (handler.lostOwnership || cancellationRequested.get()) {
+        // Stop、丢租或本地 timeout 可能发生在 Provider engine 返回 handle 之前。
         value.cancel();
       }
     }
@@ -1084,6 +1131,12 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
     private void cancel() {
       // 先 fence 回调再请求底层取消；Provider 即使忽略或延迟取消，也无法用旧 token 提交结果。
       handler.markLostOwnership();
+      cancelHandle();
+    }
+
+    /** 请求取消本地 handle，但保留当前 token 的失败写权限。 */
+    private void cancelHandle() {
+      cancellationRequested.set(true);
       AgentTurnHandle current = handle.get();
       if (current != null) {
         current.cancel();

@@ -420,8 +420,7 @@ class ThreadProcessorControlFlowTest {
             new ProviderMessageProjector(),
             resourceResolver,
             mock(CompactionService.class),
-            new ThreadProcessorConfig(
-                Duration.ofSeconds(3), Duration.ofSeconds(1), 1_024, Duration.ofSeconds(10), 2),
+            new ThreadProcessorConfig(Duration.ofSeconds(3), Duration.ofSeconds(1), 1_024, 2),
             Clock.systemUTC(),
             (delay, task) -> {},
             new ProviderRequestInterceptorChain(List.of()),

@@ -33,18 +33,32 @@ export function ProviderForm({
         <input value={draft.baseUrl} onChange={(event) => onChange({ ...draft, baseUrl: event.target.value })} placeholder="https://api.example.com/v1" />
       </label>
       <label className="form-group">
-        <span>API Key</span>
+        <span>Credential</span>
         <input
           type="password"
           autoComplete="off"
-          value={draft.apiKey}
-          onChange={(event) => onChange({ ...draft, apiKey: event.target.value })}
+          value={draft.credential}
+          onChange={(event) => onChange({ ...draft, credential: event.target.value })}
           placeholder="sk-..."
         />
       </label>
       <label className="form-group">
-        <span>Timeout Millis</span>
-        <input value={draft.timeoutMillis} onChange={(event) => onChange({ ...draft, timeoutMillis: event.target.value })} placeholder="60000" inputMode="numeric" />
+        <span>Model Call Timeout (ms)</span>
+        <input
+          value={draft.modelCallTimeoutMillis}
+          onChange={(event) => onChange({ ...draft, modelCallTimeoutMillis: event.target.value })}
+          placeholder="1800000"
+          inputMode="numeric"
+        />
+      </label>
+      <label className="form-group">
+        <span>Model Call Idle Timeout (ms)</span>
+        <input
+          value={draft.modelCallIdleTimeoutMillis}
+          onChange={(event) => onChange({ ...draft, modelCallIdleTimeoutMillis: event.target.value })}
+          placeholder="120000"
+          inputMode="numeric"
+        />
       </label>
     </>
   )

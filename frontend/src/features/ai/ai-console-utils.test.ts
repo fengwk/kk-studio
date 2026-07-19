@@ -25,7 +25,11 @@ import {
 
 describe('ai-console-utils', () => {
   it('builds editable drafts from DTOs and default factories', () => {
-    expect(emptyProviderDraft()).toMatchObject({ providerType: 'openai', timeoutMillis: '60000' })
+    expect(emptyProviderDraft()).toMatchObject({
+      providerType: 'openai',
+      modelCallTimeoutMillis: '1800000',
+      modelCallIdleTimeoutMillis: '120000',
+    })
     expect(emptyModelDraft(undefined, { name: 'minimax' } as never)).toMatchObject({ provider: 'minimax', defaultVariant: 'default' })
     expect(emptyAgentDraft({ providerName: 'minimax', name: 'MiniMax-M2.7', defaultVariant: 'default' } as never)).toMatchObject({
       defaultProvider: 'minimax',
@@ -40,8 +44,9 @@ describe('ai-console-utils', () => {
         description: 'provider desc',
         providerType: 'openai_response',
         baseUrl: 'https://api.minimax.io/v1',
-        apiKey: 'secret',
-        timeoutMillis: 120000,
+        configured: true,
+        modelCallTimeoutMillis: 120000,
+        modelCallIdleTimeoutMillis: 3000,
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       }),
@@ -50,8 +55,9 @@ describe('ai-console-utils', () => {
       description: 'provider desc',
       providerType: 'openai_response',
       baseUrl: 'https://api.minimax.io/v1',
-      apiKey: 'secret',
-      timeoutMillis: '120000',
+      credential: '',
+      modelCallTimeoutMillis: '120000',
+      modelCallIdleTimeoutMillis: '3000',
     })
 
     expect(
@@ -102,16 +108,18 @@ describe('ai-console-utils', () => {
         description: ' provider desc ',
         providerType: ' openai ',
         baseUrl: ' https://api.minimax.io/v1 ',
-        apiKey: ' secret ',
-        timeoutMillis: '120000',
+        credential: ' secret ',
+        modelCallTimeoutMillis: '120000',
+        modelCallIdleTimeoutMillis: '3000',
       }),
     ).toEqual({
       name: 'minimax',
       description: 'provider desc',
       providerType: 'openai',
       baseUrl: 'https://api.minimax.io/v1',
-      apiKey: 'secret',
-      timeoutMillis: 120000,
+      credential: 'secret',
+      modelCallTimeoutMillis: 120000,
+      modelCallIdleTimeoutMillis: 3000,
     })
     expect(
       toEditableProviderUpdate({
@@ -119,16 +127,18 @@ describe('ai-console-utils', () => {
         description: ' provider desc ',
         providerType: ' openai ',
         baseUrl: ' https://api.minimax.io/v1 ',
-        apiKey: ' secret ',
-        timeoutMillis: '120000',
+        credential: ' secret ',
+        modelCallTimeoutMillis: '120000',
+        modelCallIdleTimeoutMillis: '3000',
       }),
     ).toEqual({
       name: 'minimax',
       description: 'provider desc',
       providerType: 'openai',
       baseUrl: 'https://api.minimax.io/v1',
-      apiKey: 'secret',
-      timeoutMillis: 120000,
+      credential: 'secret',
+      modelCallTimeoutMillis: 120000,
+      modelCallIdleTimeoutMillis: 3000,
     })
 
     expect(
@@ -257,8 +267,9 @@ describe('ai-console-utils', () => {
         description: 'MiniMax endpoint',
         providerType: 'openai',
         baseUrl: 'https://api.minimax.io/v1',
-        apiKey: null,
-        timeoutMillis: null,
+        configured: true,
+        modelCallTimeoutMillis: 1800000,
+        modelCallIdleTimeoutMillis: 120000,
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       },
@@ -290,8 +301,9 @@ describe('ai-console-utils', () => {
         description: null,
         providerType: null,
         baseUrl: null,
-        apiKey: null,
-        timeoutMillis: null,
+        configured: false,
+        modelCallTimeoutMillis: 1800000,
+        modelCallIdleTimeoutMillis: 120000,
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       }),
@@ -300,8 +312,9 @@ describe('ai-console-utils', () => {
       description: '',
       providerType: 'openai',
       baseUrl: '',
-      apiKey: '',
-      timeoutMillis: '',
+      credential: '',
+      modelCallTimeoutMillis: '1800000',
+      modelCallIdleTimeoutMillis: '120000',
     })
 
     expect(
@@ -367,16 +380,18 @@ describe('ai-console-utils', () => {
         description: '   ',
         providerType: ' openai ',
         baseUrl: '   ',
-        apiKey: '   ',
-        timeoutMillis: '   ',
+        credential: '   ',
+        modelCallTimeoutMillis: '   ',
+        modelCallIdleTimeoutMillis: '   ',
       }),
     ).toEqual({
       name: 'stub',
       description: null,
       providerType: 'openai',
       baseUrl: null,
-      apiKey: null,
-      timeoutMillis: null,
+      credential: null,
+      modelCallTimeoutMillis: null,
+      modelCallIdleTimeoutMillis: null,
     })
 
     expect(
