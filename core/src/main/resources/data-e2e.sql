@@ -4,7 +4,7 @@ merge into agent_provider (
     gmt_create, gmt_modified, version
 ) key (id) values (
     1, 'minimax', 'Default e2e provider seed (MiniMax; replaceable).',
-    'openai', 'https://api.minimaxi.com/v1', null, '{"timeoutMillis":60000}',
+    'openai', 'https://api.minimaxi.com/v1', null, '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000}',
     current_timestamp(), current_timestamp(), 0
 );
 

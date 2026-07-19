@@ -44,6 +44,8 @@ public class StudioAgentResourceControllerTest {
     provider.setName("provider-" + suffix);
     provider.setProviderType("openai");
     provider.setCredential("secret-value");
+    provider.setModelCallTimeoutMillis(120_000L);
+    provider.setModelCallIdleTimeoutMillis(3_000L);
     String providerId =
         id(
             mockMvc
@@ -56,6 +58,8 @@ public class StudioAgentResourceControllerTest {
                 .andExpect(jsonPath("$.data.workspaceId").doesNotExist())
                 .andExpect(jsonPath("$.data.configured").value(true))
                 .andExpect(jsonPath("$.data.credential").doesNotExist())
+                .andExpect(jsonPath("$.data.modelCallTimeoutMillis").value(120000))
+                .andExpect(jsonPath("$.data.modelCallIdleTimeoutMillis").value(3000))
                 .andReturn()
                 .getResponse()
                 .getContentAsString());

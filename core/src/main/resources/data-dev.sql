@@ -3,7 +3,7 @@ merge into agent_provider (
     gmt_create, gmt_modified, version
 ) key (id) values (
     1, 'stub', 'Deterministic stub provider for offline dev profile.',
-    'openai', 'http://stub.local/v1', 'stub-key', '{"timeoutMillis":60000}',
+    'openai', 'http://stub.local/v1', 'stub-key', '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000}',
     current_timestamp(), current_timestamp(), 0
 );
 

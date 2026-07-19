@@ -1,14 +1,12 @@
 package fun.fengwk.kkstudio.core.harness.thread.resource;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
+import fun.fengwk.kkstudio.core.agent.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
@@ -36,7 +34,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -54,33 +51,34 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
   private final SessionStore sessionStore;
   private final AgentModelRepository modelRepository;
   private final AgentProviderRepository providerRepository;
+  private final AgentProviderConfigurationCodec providerConfigurationCodec;
   private final AgentModelRuntimeConfigParser modelConfigParser;
   private final HarnessExtensionHost extensionHost;
   private final HarnessRuntimeProperties properties;
   private final ToolEnvironmentRepository environmentRepository;
   private final DaemonToolCapabilitiesCodec capabilitiesCodec;
-  private final ObjectMapper objectMapper;
 
   public DatabaseTurnResourceResolver(
       SessionStore sessionStore,
       AgentModelRepository modelRepository,
       AgentProviderRepository providerRepository,
+      AgentProviderConfigurationCodec providerConfigurationCodec,
       AgentModelRuntimeConfigParser modelConfigParser,
       HarnessExtensionHost extensionHost,
       HarnessRuntimeProperties properties,
       ToolEnvironmentRepository environmentRepository,
-      DaemonToolCapabilitiesCodec capabilitiesCodec,
-      ObjectMapper objectMapper) {
+      DaemonToolCapabilitiesCodec capabilitiesCodec) {
     this.sessionStore = Objects.requireNonNull(sessionStore, "sessionStore");
     this.modelRepository = Objects.requireNonNull(modelRepository, "modelRepository");
     this.providerRepository = Objects.requireNonNull(providerRepository, "providerRepository");
+    this.providerConfigurationCodec =
+        Objects.requireNonNull(providerConfigurationCodec, "providerConfigurationCodec");
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
     this.extensionHost = Objects.requireNonNull(extensionHost, "extensionHost");
     this.properties = Objects.requireNonNull(properties, "properties");
     this.environmentRepository =
         Objects.requireNonNull(environmentRepository, "environmentRepository");
     this.capabilitiesCodec = Objects.requireNonNull(capabilitiesCodec, "capabilitiesCodec");
-    this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
   }
 
   @Override
@@ -116,9 +114,9 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
       throw new IllegalStateException(
           "Harness ProviderFactory returned adapter for " + adapter.providerType());
     }
+    ProviderDescriptor providerDescriptor = providerDescriptor(persistedProvider, providerType);
     ModelProvider provider =
-        Objects.requireNonNull(
-            adapter.create(providerDescriptor(persistedProvider, providerType)), "model provider");
+        Objects.requireNonNull(adapter.create(providerDescriptor), "model provider");
 
     ParsedAgentModelConfig parsed =
         modelConfigParser.parse(
@@ -152,6 +150,7 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
         toolBindings.stream().map(ToolBinding::descriptor).toList();
     return new TurnResources(
         provider,
+        providerDescriptor.modelCallTimeoutPolicy(),
         model,
         variant,
         toolDescriptors,
@@ -176,30 +175,7 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
         String.valueOf(provider.getId()),
         providerType,
         endpoint,
-        Duration.ofMillis(timeoutMillis(provider.getConfigJson())));
-  }
-
-  private long timeoutMillis(String configJson) {
-    JsonNode config;
-    try {
-      config = objectMapper.readTree(configJson);
-    } catch (JsonProcessingException error) {
-      throw new IllegalArgumentException("persisted provider configJson must be valid JSON", error);
-    }
-    if (config == null || !config.isObject()) {
-      throw new IllegalArgumentException("persisted provider configJson must be an object");
-    }
-    JsonNode timeout = config.get("timeoutMillis");
-    if (timeout == null || !timeout.isIntegralNumber() || !timeout.canConvertToLong()) {
-      throw new IllegalArgumentException(
-          "persisted provider configJson.timeoutMillis must be an integer");
-    }
-    long value = timeout.longValue();
-    if (value <= 0) {
-      throw new IllegalArgumentException(
-          "persisted provider configJson.timeoutMillis must be positive");
-    }
-    return value;
+        providerConfigurationCodec.readTimeoutPolicy(provider.getConfigJson()));
   }
 
   private List<ToolBinding> toolBindings(List<String> frozenTools) {

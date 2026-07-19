@@ -56,8 +56,9 @@ export interface AgentProviderDTO {
   description: string | null
   providerType: string
   baseUrl: string | null
-  apiKey: string | null
-  timeoutMillis: number | null
+  configured: boolean
+  modelCallTimeoutMillis: number
+  modelCallIdleTimeoutMillis: number
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
@@ -67,8 +68,9 @@ export interface AgentProviderEditablePropertiesDTO {
   description?: string | null
   providerType: string
   baseUrl?: string | null
-  apiKey?: string | null
-  timeoutMillis?: number | null
+  credential?: string | null
+  modelCallTimeoutMillis?: number | null
+  modelCallIdleTimeoutMillis?: number | null
 }
 
 export interface AgentProviderCreateDTO extends AgentProviderEditablePropertiesDTO {

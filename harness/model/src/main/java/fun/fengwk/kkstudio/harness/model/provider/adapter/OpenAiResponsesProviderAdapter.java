@@ -36,7 +36,7 @@ public final class OpenAiResponsesProviderAdapter implements ProviderAdapter {
                 .baseUrl(descriptor.endpoint())
                 .apiKey(apiKey)
                 .modelName(request.model().modelId())
-                .timeout(descriptor.timeout());
+                .timeout(descriptor.modelCallTimeoutPolicy().modelCallTimeout());
         // SDK builder 不接受 null promptCacheKey，因此仅在非 NONE 时显式设置。
         if (key != null) {
           builder.promptCacheKey(key);

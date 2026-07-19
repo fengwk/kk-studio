@@ -20,7 +20,8 @@ export function ProviderResourceCard({
       rows={[
         ['Type', provider.providerType],
         ['Base URL', provider.baseUrl || '-'],
-        ['Timeout', provider.timeoutMillis ? `${provider.timeoutMillis} ms` : '-'],
+        ['Model timeout', `${provider.modelCallTimeoutMillis} ms`],
+        ['Idle timeout', `${provider.modelCallIdleTimeoutMillis} ms`],
       ]}
       onEdit={onEdit}
       onDelete={onDelete}
