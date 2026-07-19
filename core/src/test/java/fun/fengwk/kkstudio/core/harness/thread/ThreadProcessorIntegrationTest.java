@@ -69,6 +69,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskState;
 import fun.fengwk.kkstudio.harness.runtime.thread.CompactionService;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadIdGenerator;
@@ -88,6 +89,7 @@ import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadMessageCreateDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.model.ThreadEventDTO;
 
 import java.math.BigDecimal;
@@ -107,6 +109,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -640,6 +643,180 @@ class ThreadProcessorIntegrationTest {
     assertNull(threadStore.find(threadId).orElseThrow().processorToken());
   }
 
+  /** Turn 资源解析失败必须在 Provider 调用前持久化失败，避免把配置故障伪装成可重试流错误。 */
+  @Test
+  void turnResourceSetupFailureFailsWithoutCallingProvider() throws Exception {
+    HarnessThreadDTO thread = createRoot("proc-resource-setup-fail");
+    long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
+    fakeProvider.failResourceResolution("resource lookup failed");
+
+    submit(thread.getThreadId(), "requires resources", "cid-resource-fail-" + threadId);
+    awaitFailed(threadId);
+
+    assertEquals(0, fakeProvider.requestsSinceReset());
+    List<ThreadEventDTO> events = queryService.listEvents(thread.getThreadId(), 0, 100);
+    assertTrue(
+        events.stream()
+            .filter(event -> "thread_failed".equals(event.getEventType()))
+            .anyMatch(
+                event ->
+                    event.getPayloadJson() != null
+                        && event.getPayloadJson().contains("turn_setup_failed")));
+    assertNull(threadStore.find(threadId).orElseThrow().processorToken());
+  }
+
+  /** Provider 无法建立流时，TurnHandler 必须将引擎边界异常落为持久化失败。 */
+  @Test
+  void providerStreamSetupFailurePersistsProviderFailure() throws Exception {
+    HarnessThreadDTO thread = createRoot("proc-stream-setup-fail");
+    long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
+    fakeProvider.failStreamSetup("stream setup failed");
+
+    submit(thread.getThreadId(), "requires stream", "cid-stream-fail-" + threadId);
+    awaitFailed(threadId);
+
+    assertEquals(1, fakeProvider.requestsSinceReset());
+    List<ThreadEventDTO> events = queryService.listEvents(thread.getThreadId(), 0, 100);
+    assertTrue(
+        events.stream()
+            .filter(event -> "assistant_failed".equals(event.getEventType()))
+            .anyMatch(
+                event ->
+                    event.getPayloadJson() != null
+                        && event.getPayloadJson().contains("provider stream failed")));
+    assertNull(threadStore.find(threadId).orElseThrow().processorToken());
+  }
+
+  /** 已验证的 Provider Tool call 若缺少冻结 binding，必须失败而不能留下半提交 assistant/tool。 */
+  @Test
+  void missingFrozenToolBindingFailsToolPreparation() throws Exception {
+    HarnessThreadDTO thread = createRoot("proc-tool-preparation-fail");
+    long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
+    fakeProvider.omitToolBindingNext();
+    fakeProvider.completeNextWithToolCall();
+
+    submit(thread.getThreadId(), "requires tool", "cid-tool-prepare-fail-" + threadId);
+    awaitFailed(threadId);
+
+    assertEquals(1, fakeProvider.requestsSinceReset());
+    assertTrue(invocationMapper.listByThread(threadId).isEmpty());
+    List<ThreadEventDTO> events = queryService.listEvents(thread.getThreadId(), 0, 100);
+    assertTrue(
+        events.stream()
+            .filter(event -> "thread_failed".equals(event.getEventType()))
+            .anyMatch(
+                event ->
+                    event.getPayloadJson() != null
+                        && event.getPayloadJson().contains("tool_preparation_failed")));
+  }
+
+  /** Stop 在流进行中必须撤销本地 handle，并 fence 掉稍后到达的 assistant 回调。 */
+  @Test
+  void stopCancelsInFlightProviderAndFencesLateAssistantCallback() throws Exception {
+    HarnessThreadDTO thread = createRoot("proc-stop-fence");
+    long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
+    CountDownLatch entered = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    fakeProvider.blockNext(entered, release, Duration.ofSeconds(5));
+    submit(thread.getThreadId(), "cancel in flight", "cid-stop-fence-" + threadId);
+    assertTrue(entered.await(3, TimeUnit.SECONDS));
+
+    HarnessThreadStopDTO stop = new HarnessThreadStopDTO();
+    stop.setClientRequestId("stop-in-flight-" + threadId);
+    commandService.stop(thread.getThreadId(), stop);
+    release.countDown();
+    awaitProviderStreamCancelled();
+
+    assertEquals(1, fakeProvider.requestsSinceReset());
+    assertEquals("IDLE", threadStore.find(threadId).orElseThrow().status().name());
+    List<ThreadEventDTO> events = queryService.listEvents(thread.getThreadId(), 0, 100);
+    assertTrue(events.stream().anyMatch(event -> "thread_stopped".equals(event.getEventType())));
+    assertFalse(
+        events.stream().anyMatch(event -> "assistant_completed".equals(event.getEventType())),
+        "late provider completion must not commit through the stop fencing boundary");
+  }
+
+  /** Compaction service failure follows the permanent Provider failure path and does not retry. */
+  @Test
+  void overflowWithCompactionFailurePersistsTerminalFailure() throws Exception {
+    HarnessThreadDTO thread = createRoot("proc-compaction-fail");
+    long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
+    fakeProvider.failNext(ProviderErrorKind.OVERFLOW, "context overflow");
+    fakeProvider.failCompaction("compaction unavailable");
+
+    submit(thread.getThreadId(), "overflow context", "cid-compaction-fail-" + threadId);
+    awaitFailed(threadId);
+
+    assertEquals(1, fakeProvider.requestsSinceReset());
+    assertFalse(lifecycleProbe.contains(threadId, CompactionCompleted.class));
+    List<ThreadEventDTO> events = queryService.listEvents(thread.getThreadId(), 0, 100);
+    assertTrue(
+        events.stream()
+            .filter(event -> "assistant_failed".equals(event.getEventType()))
+            .anyMatch(
+                event ->
+                    event.getPayloadJson() != null
+                        && event.getPayloadJson().contains("compaction failed")));
+  }
+
+  @Test
+  void overflowWithoutCompactableContextPersistsOriginalProviderFailure() throws Exception {
+    HarnessThreadDTO thread = createRoot("proc-compaction-empty");
+    long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
+    fakeProvider.failNext(ProviderErrorKind.OVERFLOW, "context overflow");
+    fakeProvider.returnEmptyCompaction();
+
+    submit(thread.getThreadId(), "uncompactable context", "cid-compaction-empty-" + threadId);
+    awaitFailed(threadId);
+
+    assertEquals(1, fakeProvider.requestsSinceReset());
+    assertFalse(lifecycleProbe.contains(threadId, CompactionCompleted.class));
+    assertTrue(
+        queryService.listEvents(thread.getThreadId(), 0, 100).stream()
+            .filter(event -> "assistant_failed".equals(event.getEventType()))
+            .anyMatch(
+                event ->
+                    event.getPayloadJson() != null
+                        && event.getPayloadJson().contains("context overflow")));
+  }
+
+  @Test
+  void emptyAssistantResponsePersistsExplicitEmptyTextContent() throws Exception {
+    HarnessThreadDTO thread = createRoot("proc-empty-assistant");
+    long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
+    fakeProvider.completeNextEmpty();
+
+    submit(thread.getThreadId(), "empty reply", "cid-empty-assistant-" + threadId);
+    awaitIdle(threadId);
+
+    List<HarnessSessionEntryDTO> path = queryService.listPathEntries(thread.getThreadId());
+    SessionEntryPayload payload =
+        SESSION_ENTRY_CODEC.decode(
+            SessionEntryType.MESSAGE, path.get(path.size() - 1).getPayloadJson());
+    assertTrue(payload instanceof MessageEntryPayload);
+    assertEquals(
+        List.of(new TextMessageContent("")), ((MessageEntryPayload) payload).message().contents());
+  }
+
+  @Test
+  void thinkingOnlyAssistantResponsePersistsThinkingContent() throws Exception {
+    HarnessThreadDTO thread = createRoot("proc-thinking-assistant");
+    long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
+    fakeProvider.completeNextWithThinking();
+
+    submit(thread.getThreadId(), "thinking reply", "cid-thinking-assistant-" + threadId);
+    awaitIdle(threadId);
+
+    List<HarnessSessionEntryDTO> path = queryService.listPathEntries(thread.getThreadId());
+    SessionEntryPayload payload =
+        SESSION_ENTRY_CODEC.decode(
+            SessionEntryType.MESSAGE, path.get(path.size() - 1).getPayloadJson());
+    assertTrue(payload instanceof MessageEntryPayload);
+    assertEquals(
+        List.of(new ThinkingMessageContent("reasoning")),
+        ((MessageEntryPayload) payload).message().contents());
+  }
+
   @Test
   void quiescenceRetainsTokenWhenTerminalToolResultsApplicable() throws Exception {
     HarnessThreadDTO thread = createRoot("proc-external-release");
@@ -772,6 +949,17 @@ class ThreadProcessorIntegrationTest {
     throw new AssertionError("retrying tool chain did not release token: " + threadId);
   }
 
+  private void awaitProviderStreamCancelled() throws InterruptedException {
+    Instant deadline = Instant.now().plusSeconds(5);
+    while (Instant.now().isBefore(deadline)) {
+      if (fakeProvider.latestStreamCancelled()) {
+        return;
+      }
+      Thread.sleep(10);
+    }
+    throw new AssertionError("provider stream was not cancelled");
+  }
+
   private void awaitIdle(long threadId) throws InterruptedException {
     Instant deadline = Instant.now().plusSeconds(15);
     while (Instant.now().isBefore(deadline)) {
@@ -876,9 +1064,17 @@ class ThreadProcessorIntegrationTest {
 
     @Bean
     @Primary
-    CompactionService controlledCompactionService() {
-      return (sessionId, headEntryId, context) ->
-          Optional.of(new CompactionEntryPayload("compacted", headEntryId, 1, "{}"));
+    CompactionService controlledCompactionService(ControlledFakeProvider provider) {
+      return (sessionId, headEntryId, context) -> {
+        RuntimeException failure = provider.takeCompactionFailure();
+        if (failure != null) {
+          throw failure;
+        }
+        if (provider.takeEmptyCompaction()) {
+          return Optional.empty();
+        }
+        return Optional.of(new CompactionEntryPayload("compacted", headEntryId, 1, "{}"));
+      };
     }
 
     @Bean
@@ -898,6 +1094,10 @@ class ThreadProcessorIntegrationTest {
     @Primary
     TurnResourceResolver controlledTurnResourceResolver(ControlledFakeProvider provider) {
       return (sessionId, threadId, config) -> {
+        RuntimeException failure = provider.takeResourceResolutionFailure();
+        if (failure != null) {
+          throw failure;
+        }
         ModelPricing pricing =
             new ModelPricing(
                 "USD",
@@ -930,7 +1130,7 @@ class ThreadProcessorIntegrationTest {
             model,
             model.variants().get(0),
             List.of(RETRY_TEST_TOOL),
-            List.of(ToolBinding.of(RETRY_TEST_TOOL)),
+            provider.takeOmitToolBinding() ? List.of() : List.of(ToolBinding.of(RETRY_TEST_TOOL)),
             Path.of("."),
             Path.of("."));
       };
@@ -1001,6 +1201,14 @@ class ThreadProcessorIntegrationTest {
     private volatile Duration blockDuration = Duration.ZERO;
     private volatile ProviderException failAfterBlock;
     private volatile List<ProviderToolCall> nextToolCalls = List.of();
+    private volatile RuntimeException nextResourceResolutionFailure;
+    private volatile RuntimeException nextStreamSetupFailure;
+    private volatile RuntimeException nextCompactionFailure;
+    private volatile boolean omitToolBinding;
+    private volatile boolean nextEmptyCompaction;
+    private volatile boolean nextEmptyResponse;
+    private volatile boolean nextThinkingResponse;
+    private volatile AtomicBoolean latestStreamCancellation;
 
     void reset() {
       resetAt.set(requests.get());
@@ -1011,10 +1219,38 @@ class ThreadProcessorIntegrationTest {
       blockDuration = Duration.ZERO;
       failAfterBlock = null;
       nextToolCalls = List.of();
+      nextResourceResolutionFailure = null;
+      nextStreamSetupFailure = null;
+      nextCompactionFailure = null;
+      omitToolBinding = false;
+      nextEmptyCompaction = false;
+      nextEmptyResponse = false;
+      nextThinkingResponse = false;
+      latestStreamCancellation = null;
     }
 
     void failNext(ProviderErrorKind kind, String message) {
       nextFailure = new ProviderException(kind, message);
+    }
+
+    void failResourceResolution(String message) {
+      nextResourceResolutionFailure = new IllegalStateException(message);
+    }
+
+    void failStreamSetup(String message) {
+      nextStreamSetupFailure = new IllegalStateException(message);
+    }
+
+    void omitToolBindingNext() {
+      omitToolBinding = true;
+    }
+
+    void failCompaction(String message) {
+      nextCompactionFailure = new IllegalStateException(message);
+    }
+
+    void returnEmptyCompaction() {
+      nextEmptyCompaction = true;
     }
 
     void blockNext(CountDownLatch entered, CountDownLatch release, Duration duration) {
@@ -1036,6 +1272,43 @@ class ThreadProcessorIntegrationTest {
       nextToolCalls = List.of(new ProviderToolCall("retry-tool-call", "retry_tool", "{}"));
     }
 
+    void completeNextEmpty() {
+      nextEmptyResponse = true;
+    }
+
+    void completeNextWithThinking() {
+      nextThinkingResponse = true;
+    }
+
+    RuntimeException takeResourceResolutionFailure() {
+      RuntimeException failure = nextResourceResolutionFailure;
+      nextResourceResolutionFailure = null;
+      return failure;
+    }
+
+    boolean takeOmitToolBinding() {
+      boolean result = omitToolBinding;
+      omitToolBinding = false;
+      return result;
+    }
+
+    RuntimeException takeCompactionFailure() {
+      RuntimeException failure = nextCompactionFailure;
+      nextCompactionFailure = null;
+      return failure;
+    }
+
+    boolean takeEmptyCompaction() {
+      boolean result = nextEmptyCompaction;
+      nextEmptyCompaction = false;
+      return result;
+    }
+
+    boolean latestStreamCancelled() {
+      AtomicBoolean cancellation = latestStreamCancellation;
+      return cancellation != null && cancellation.get();
+    }
+
     int requestsSinceReset() {
       return requests.get() - resetAt.get();
     }
@@ -1047,18 +1320,23 @@ class ThreadProcessorIntegrationTest {
     @Override
     public ProviderStream stream(ProviderRequest request, ProviderStreamHandler handler) {
       int n = requests.incrementAndGet() - resetAt.get();
+      RuntimeException setupFailure = nextStreamSetupFailure;
+      nextStreamSetupFailure = null;
+      if (setupFailure != null) {
+        throw setupFailure;
+      }
+      AtomicBoolean cancellation = new AtomicBoolean();
+      latestStreamCancellation = cancellation;
       ProviderStream stream =
           new ProviderStream() {
-            private boolean cancelled;
-
             @Override
             public void cancel() {
-              cancelled = true;
+              cancellation.set(true);
             }
 
             @Override
             public boolean isCancelled() {
-              return cancelled;
+              return cancellation.get();
             }
           };
       ProviderException failure = nextFailure;
@@ -1072,11 +1350,15 @@ class ThreadProcessorIntegrationTest {
       Duration duration = blockDuration;
       ProviderException afterBlockFail = failAfterBlock;
       List<ProviderToolCall> toolCalls = nextToolCalls;
+      boolean emptyResponse = nextEmptyResponse;
+      boolean thinkingResponse = nextThinkingResponse;
       blockEntered = null;
       blockRelease = null;
       blockDuration = Duration.ZERO;
       failAfterBlock = null;
       nextToolCalls = List.of();
+      nextEmptyResponse = false;
+      nextThinkingResponse = false;
       if (entered != null) {
         entered.countDown();
       }
@@ -1097,14 +1379,21 @@ class ThreadProcessorIntegrationTest {
         handler.onError(afterBlockFail, stream);
         return stream;
       }
-      handler.onEvent(new ProviderStreamEvent.TextDelta("reply-" + n), stream);
+      String text = emptyResponse || thinkingResponse ? "" : "reply-" + n;
+      String thinking = thinkingResponse ? "reasoning" : "";
+      if (!text.isEmpty()) {
+        handler.onEvent(new ProviderStreamEvent.TextDelta(text), stream);
+      }
+      if (!thinking.isEmpty()) {
+        handler.onEvent(new ProviderStreamEvent.ThinkingDelta(thinking), stream);
+      }
       ModelUsage usage = new ModelUsage(1, 1, 0, 0, 0, 0, 2);
       ModelCost cost = ModelCost.calculate(request.model().pricing(), usage);
       completionOrder.add(n);
       handler.onComplete(
           new ProviderResponse(
-              "reply-" + n,
-              "",
+              text,
+              thinking,
               toolCalls,
               toolCalls.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS,
               usage,
