@@ -681,7 +681,7 @@ textarea::placeholder {
 
 .history-branch-modal {
   width: min(720px, 100%);
-  height: min(680px, calc(100vh - 48px));
+  height: min(640px, calc(100vh - 48px));
   display: flex;
   flex-direction: column;
 }
@@ -689,43 +689,18 @@ textarea::placeholder {
 .history-branch-body {
   flex: 1;
   min-height: 0;
+  gap: 12px;
   overflow: hidden;
-}
-
-.history-branch-description {
-  margin: 0;
-  color: var(--fg-muted);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.history-branch-head {
-  margin: 0;
-  color: var(--fg-dim);
-  font-size: 12px;
-  line-height: 1.5;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .history-branch-controls {
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .history-branch-filter {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--fg-muted);
-  font-size: 13px;
-}
-
-.history-branch-filter select {
-  min-width: 128px;
+  min-width: 112px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);

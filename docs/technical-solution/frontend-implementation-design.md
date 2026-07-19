@@ -88,7 +88,7 @@ Thread 主区纵向固定为三段：可滚动 transcript；Working/queue/widget
 ### Session、历史分支与 Stop
 
 - 打开 `/sessions/:sessionId` 后使用服务端 `mainThreadId` 进入 Main Thread；侧栏只展示 Main/Secondary Threads，Main 固定置顶，Secondary Threads 继续独立运行。
-- `/tree` 按需查询完整 Session Entry Tree 并打开独立历史分支面板。显示范围与空白分词 AND 搜索仅影响可见投影，不改变 Entry Tree 或分支目标；隐藏的中间 Entry 会让后代挂到最近可见祖先，线性链不增加缩进，实际分叉才显示 `├─` / `└─` / `│`。面板以当前 Thread head 为默认选择并标记完整 active path；当筛选或搜索隐藏选择时，回退到最近可见祖先。选择节点后必须确认才创建新 Thread。USER/CUSTOM_MESSAGE 以父 Entry 为新 Thread head 并通过路由 state 回填完整可编辑文本，其他 Entry 从所选 Entry 继续且 Composer 为空；行内预览排除 thinking、压平换行并截断。成功后关闭面板、刷新 Session Thread 列表并进入新 Thread，原 Thread 保持不变。
+- `/tree` 按需查询完整 Session Entry Tree 并打开独立历史分支面板。面板仅提供“对话”与“全部记录”两种显示范围，以及空白分词 AND 搜索；对话视图只显示 USER、ASSISTANT 与 CUSTOM_MESSAGE，不显示工具、标签、配置或其他系统 Entry。显示范围与搜索仅影响可见投影，不改变 Entry Tree 或分支目标；隐藏的中间 Entry 会让后代挂到最近可见祖先，线性链不增加缩进，实际分叉才显示 `├─` / `└─` / `│`。面板以当前 Thread head 为默认选择并标记完整 active path；当筛选或搜索隐藏选择时，回退到最近可见祖先。选择节点后必须确认才创建新 Thread。USER/CUSTOM_MESSAGE 以父 Entry 为新 Thread head 并通过路由 state 回填完整可编辑文本，其他 Entry 从所选 Entry 继续且 Composer 为空；行内预览排除 thinking、压平换行并截断。成功后关闭面板、刷新 Session Thread 列表并进入新 Thread，原 Thread 保持不变。
 - Composer 不提供加号、独立 Stop/Retry 按钮；命令统一通过 `/` 打开。`/stop` 的 `restoredMessages` 以空行合并回 Composer，并生成新的 `clientMessageId`；配置 Input 被取消但不回填。FAILED Thread 通过 `/retry` 显式恢复。
 
 ### SSE cursor 恢复

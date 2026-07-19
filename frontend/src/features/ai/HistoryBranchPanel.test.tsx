@@ -21,7 +21,13 @@ describe('HistoryBranchPanel', () => {
     renderPanel({ onCreate, currentHeadEntryId: 'follow-up' })
 
     expect(screen.getByRole('dialog', { name: '历史分支' })).toBeInTheDocument()
-    expect(screen.getByText(/当前分支 head/)).toBeInTheDocument()
+    expect(screen.queryByText('选择历史位置后开启新的 Thread，当前 Thread 不会改变。')).not.toBeInTheDocument()
+    expect(screen.queryByText(/当前分支 head/)).not.toBeInTheDocument()
+    expect(within(screen.getByLabelText('显示记录')).getAllByRole('option').map((option) => option.textContent)).toEqual([
+      '对话',
+      '全部记录',
+    ])
+    expect(screen.queryByRole('button', { name: /系统/ })).not.toBeInTheDocument()
     const headButton = screen.getByRole('button', { name: '助手 · follow up · 当前路径 · 当前线程位置' })
     expect(within(headButton).getByText('当前线程位置')).toBeInTheDocument()
     expect(headButton).toHaveAttribute('aria-pressed', 'true')
@@ -37,12 +43,12 @@ describe('HistoryBranchPanel', () => {
     const onCreate = vi.fn()
     renderPanel({ onCreate, currentHeadEntryId: 'follow-up' })
 
-    await user.selectOptions(screen.getByLabelText('显示范围'), 'all')
+    await user.selectOptions(screen.getByLabelText('显示记录'), 'all')
     await user.click(screen.getByRole('button', { name: /工具 · tool result/ }))
     expect(screen.getByRole('button', { name: '从这里开启新 Thread' })).toBeEnabled()
 
-    // The default filter hides tools. The selected tool's closest visible raw ancestor is assistant.
-    await user.selectOptions(screen.getByLabelText('显示范围'), 'default')
+    // The conversation view hides tools. The selected tool's closest visible raw ancestor is assistant.
+    await user.selectOptions(screen.getByLabelText('显示记录'), 'conversation')
     expect(screen.queryByText('tool result')).not.toBeInTheDocument()
     const confirm = screen.getByRole('button', { name: '从这里开启新 Thread' })
     expect(confirm).toBeEnabled()
@@ -55,7 +61,7 @@ describe('HistoryBranchPanel', () => {
     const user = userEvent.setup()
     renderPanel({ currentHeadEntryId: 'follow-up' })
 
-    await user.type(screen.getByLabelText('搜索历史消息'), 'follow two')
+    await user.type(screen.getByLabelText('搜索记录'), 'follow two')
     expect(screen.queryByText('user prompt')).not.toBeInTheDocument()
     const rows = screen.getAllByRole('listitem')
     expect(rows).toHaveLength(1)
@@ -104,13 +110,21 @@ describe('HistoryBranchPanel', () => {
     expect(longButton.getAttribute('aria-label')).not.toContain(longText)
   })
 
+  it('uses the compact empty state when no record matches the search', async () => {
+    const user = userEvent.setup()
+    renderPanel()
+
+    await user.type(screen.getByLabelText('搜索记录'), 'missing')
+    expect(screen.getByText('没有匹配 “missing” 的记录')).toBeInTheDocument()
+  })
+
   it('disables creation while pending and shows loading, empty, error, and creation-failure states', () => {
     const { rerender } = renderPanel({ loading: true })
     expect(screen.getByText('正在加载历史分支…')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '从这里开启新 Thread' })).toBeDisabled()
 
     rerender(<HistoryBranchPanel entries={[]} currentHeadEntryId={null} loading={false} queryError={null} pending={false} creationError={null} onClose={vi.fn()} onCreate={vi.fn()} />)
-    expect(screen.getByText('没有可显示的历史条目')).toBeInTheDocument()
+    expect(screen.getByText('没有可显示的记录')).toBeInTheDocument()
 
     rerender(<HistoryBranchPanel entries={[]} currentHeadEntryId={null} loading={false} queryError={new Error('failed')} pending={false} creationError={new Error('failed')} onClose={vi.fn()} onCreate={vi.fn()} />)
     expect(screen.getByText('历史分支加载失败')).toBeInTheDocument()
@@ -124,8 +138,8 @@ describe('HistoryBranchPanel', () => {
     expect(screen.getByRole('button', { name: /user prompt/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: '从这里开启新 Thread' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '关闭' })).toBeDisabled()
-    expect(screen.getByLabelText('显示范围')).toBeDisabled()
-    expect(screen.getByLabelText('搜索历史消息')).toBeDisabled()
+    expect(screen.getByLabelText('显示记录')).toBeDisabled()
+    expect(screen.getByLabelText('搜索记录')).toBeDisabled()
     await user.click(screen.getByRole('button', { name: '关闭' }))
     fireEvent.mouseDown(screen.getByRole('presentation'))
     expect(onClose).not.toHaveBeenCalled()
