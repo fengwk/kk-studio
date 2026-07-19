@@ -262,7 +262,7 @@ public interface HarnessThreadMapper extends BaseMapper {
    * 低频恢复选择：
    *
    * <ul>
-   *   <li>RUNNING/RETRYING 且无有效 token；
+   *   <li>RUNNING 或未被当前 head Tool 阻塞的 RETRYING 且无有效 token；
    *   <li>token 已过期；
    *   <li>WAITING 下存在 due/cancelled/terminal Tool work；
    * </ul>
@@ -284,10 +284,21 @@ public interface HarnessThreadMapper extends BaseMapper {
               or t.processor_until is null
               or t.processor_until <= #{now})
             and (
-              t.status in ('RUNNING', 'RETRYING')
+              t.status = 'RUNNING'
+              or (
+                t.status = 'RETRYING'
+                and not exists (
+                  select 1 from tool_invocation ti
+                  where ti.thread_id = t.id
+                    and ti.assistant_entry_id = t.head_entry_id
+                    and ti.status not in ('SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN')
+                )
+              )
               or exists (
                 select 1 from harness_thread_input i
-                where i.thread_id = t.id and i.status = 'queued'
+                where i.thread_id = t.id
+                  and i.status = 'queued'
+                  and t.status <> 'RETRYING'
               )
               or exists (
                 select 1 from tool_invocation ti

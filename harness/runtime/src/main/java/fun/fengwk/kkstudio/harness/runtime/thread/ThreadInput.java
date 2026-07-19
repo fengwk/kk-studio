@@ -29,8 +29,9 @@ public record ThreadInput(
     if (payloadJson.isBlank()) {
       throw new IllegalArgumentException("payloadJson must not be blank");
     }
-    if (clientMessageId != null && clientMessageId.isBlank()) {
-      throw new IllegalArgumentException("clientMessageId must not be blank when present");
+    clientMessageId = Objects.requireNonNull(clientMessageId, "clientMessageId");
+    if (clientMessageId.isBlank()) {
+      throw new IllegalArgumentException("clientMessageId must not be blank");
     }
     status = Objects.requireNonNull(status, "status");
     if (appliedEntryId != null && appliedEntryId <= 0) {

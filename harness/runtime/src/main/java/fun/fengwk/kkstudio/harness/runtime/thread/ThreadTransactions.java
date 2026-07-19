@@ -114,20 +114,22 @@ public interface ThreadTransactions {
    */
   BeginTurnResult beginTurn(long threadId, String processorToken, Instant now);
 
-  /** RETRYING 偿还失败 Turn 成功后切回 RUNNING。 */
-  boolean markRunning(long threadId, String processorToken, Instant now);
-
-  boolean markWaiting(long threadId, String processorToken, Instant now);
+  /** 仅在已成功偿还失败 Turn 且仍为 RETRYING 时切换为 RUNNING。 */
+  boolean completeRetriedTurn(long threadId, String processorToken, Instant now);
 
   /**
-   * 在持有 processor token 时尝试空闲释放。
-   *
-   * <p>无 durable work 时 status=IDLE 并清除 token。
+   * 原子写入 WAITING 事件并释放 token；普通 Tool chain 切至 WAITING，RETRYING Tool chain 保留 RETRYING debt。返回 false
+   * 表示失去 fencing。
    */
-  boolean releaseIfIdle(long threadId, String processorToken, Instant now);
+  boolean waitForExternal(long threadId, String processorToken, String reason, Instant now);
 
-  /** WAITING 路径的原子释放：status=WAITING 并清除 token。 */
-  boolean releaseForExternalWait(long threadId, String processorToken, Instant now);
+  /**
+   * 原子确认 Thread 没有可推进 durable work 后写入 IDLE 事件、状态并释放 token。
+   *
+   * <p>{@link QuiescenceResult#WORK_REMAINS} 表示调用方必须继续持有 token 推进， {@link
+   * QuiescenceResult#LOST_OWNERSHIP} 表示任何终态写入均不可提交。
+   */
+  QuiescenceResult quiesce(long threadId, String processorToken, Instant now);
 
   /** Session 创建结果。 */
   record SessionCreateResult(long sessionId, AgentThread mainThread) {
@@ -194,5 +196,12 @@ public interface ThreadTransactions {
     public boolean isLostOwnership() {
       return status == BeginTurnStatus.LOST_OWNERSHIP;
     }
+  }
+
+  /** 原子 quiescence 结果。 */
+  enum QuiescenceResult {
+    IDLE,
+    WORK_REMAINS,
+    LOST_OWNERSHIP
   }
 }

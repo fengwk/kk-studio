@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.harness.thread.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -20,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.AgentThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProviderCancellation;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadTransactions;
 import fun.fengwk.kkstudio.share.model.HarnessThreadAgentSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadCreateDTO;
@@ -45,6 +47,7 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
   private final HarnessAgentSnapshotResolver snapshotResolver;
   private final ToolSettingsProvider toolSettingsProvider;
   private final ThreadKick threadKick;
+  private final ThreadProviderCancellation providerCancellation;
   private final HarnessThreadDtoConverter converter;
 
   public HarnessThreadCommandServiceImpl(
@@ -53,6 +56,7 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
       HarnessAgentSnapshotResolver snapshotResolver,
       ToolSettingsProvider toolSettingsProvider,
       ThreadKick threadKick,
+      @Qualifier("threadProviderCancellation") ThreadProviderCancellation providerCancellation,
       HarnessThreadDtoConverter converter) {
     this.transactions = Objects.requireNonNull(transactions, "transactions");
     this.agentDefinitionMapper =
@@ -61,6 +65,8 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     this.toolSettingsProvider =
         Objects.requireNonNull(toolSettingsProvider, "toolSettingsProvider");
     this.threadKick = Objects.requireNonNull(threadKick, "threadKick");
+    this.providerCancellation =
+        Objects.requireNonNull(providerCancellation, "providerCancellation");
     this.converter = Objects.requireNonNull(converter, "converter");
   }
 
@@ -163,6 +169,7 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     long id = HarnessIds.parsePositive(threadId, "threadId");
     ThreadTransactions.StopResult result =
         transactions.stop(id, request.getClientRequestId(), Instant.now());
+    afterCommitCancelProvider(id);
     HarnessThreadStopResultDTO dto = new HarnessThreadStopResultDTO();
     dto.setStopId(Long.toString(result.stop().id()));
     dto.setCancelledInputs(result.cancelledInputs().stream().map(converter::convert).toList());
@@ -197,6 +204,20 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
           @Override
           public void afterCommit() {
             threadKick.kick(threadId);
+          }
+        });
+  }
+
+  private void afterCommitCancelProvider(long threadId) {
+    if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+      providerCancellation.cancelLocalProvider(threadId);
+      return;
+    }
+    TransactionSynchronizationManager.registerSynchronization(
+        new TransactionSynchronization() {
+          @Override
+          public void afterCommit() {
+            providerCancellation.cancelLocalProvider(threadId);
           }
         });
   }

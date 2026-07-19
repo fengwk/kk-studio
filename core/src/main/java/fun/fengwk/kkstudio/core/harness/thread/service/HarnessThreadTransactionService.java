@@ -435,9 +435,6 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
         threadId, processorToken, thread.getHeadEntryId(), plannedAssistantEntryId, now)) {
       throw new ConcurrentModificationException("cannot advance head for tool preparation");
     }
-    if (!threadStore.updateStatus(threadId, processorToken, ThreadStatus.WAITING, now)) {
-      throw new ConcurrentModificationException("cannot mark thread waiting for tools");
-    }
     List<ThreadEventDraft> all = new ArrayList<>(events);
     for (PreparedToolInvocation item : prepared) {
       all.add(
@@ -501,7 +498,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     if (thread == null) {
       return false;
     }
-    if (invocationMapper.countNonTerminalByThread(threadId) != 0) {
+    if (hasNonTerminalInvocationsForHead(thread)) {
       return false;
     }
     List<ToolInvocationDO> invocations = invocationMapper.listByThread(threadId);
@@ -512,11 +509,6 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
             .sorted((a, b) -> Integer.compare(a.getOrdinal(), b.getOrdinal()))
             .toList();
     if (forHead.isEmpty()) {
-      return false;
-    }
-    // If tool result entries already exist as children of head, skip.
-    if (!entryMapper.listChildren(thread.getSessionId(), thread.getHeadEntryId()).isEmpty()) {
-      // may already applied; treat as progressed if head advanced externally
       return false;
     }
     long parent = thread.getHeadEntryId();
@@ -702,47 +694,56 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
 
   @Override
   @Transactional
-  public boolean markRunning(long threadId, String processorToken, Instant now) {
+  public boolean completeRetriedTurn(long threadId, String processorToken, Instant now) {
+    HarnessThreadDO thread = findOwnedThread(threadId, processorToken);
+    if (thread == null || !ThreadStatus.RETRYING.name().equals(thread.getStatus())) {
+      return false;
+    }
     return threadStore.updateStatus(threadId, processorToken, ThreadStatus.RUNNING, now);
   }
 
   @Override
   @Transactional
-  public boolean markWaiting(long threadId, String processorToken, Instant now) {
-    return threadStore.updateStatus(threadId, processorToken, ThreadStatus.WAITING, now);
-  }
-
-  @Override
-  @Transactional
-  public boolean releaseIfIdle(long threadId, String processorToken, Instant now) {
+  public boolean waitForExternal(long threadId, String processorToken, String reason, Instant now) {
     HarnessThreadDO thread = findOwnedThread(threadId, processorToken);
     if (thread == null) {
-      return true;
-    }
-    if (hasImmediateDurableWork(thread)) {
       return false;
     }
-    threadMapper.forceStatusAndClearProcessor(threadId, ThreadStatus.IDLE.name(), utc(now));
+    if (!hasNonTerminalInvocationsForHead(thread)) {
+      return false;
+    }
+    appendEventsInternal(
+        threadId,
+        List.of(
+            new ThreadEventDraft(
+                ThreadEventType.THREAD_WAITING, ThreadEventPayloads.of("reason", reason))),
+        now);
+    ThreadStatus waitingStatus =
+        ThreadStatus.RETRYING.name().equals(thread.getStatus())
+            ? ThreadStatus.RETRYING
+            : ThreadStatus.WAITING;
+    threadMapper.forceStatusAndClearProcessor(threadId, waitingStatus.name(), utc(now));
     return true;
   }
 
   @Override
   @Transactional
-  public boolean releaseForExternalWait(long threadId, String processorToken, Instant now) {
+  public QuiescenceResult quiesce(long threadId, String processorToken, Instant now) {
     HarnessThreadDO thread = findOwnedThread(threadId, processorToken);
     if (thread == null) {
-      return true;
+      return QuiescenceResult.LOST_OWNERSHIP;
     }
-    // 任意非终态 tool（含 WAITING_APPROVAL）仍需外部推进：释放 token。pending input 不阻止释放。
-    if (invocationMapper.countNonTerminalByThread(threadId) != 0) {
-      threadMapper.forceStatusAndClearProcessor(threadId, ThreadStatus.WAITING.name(), utc(now));
-      return true;
+    if (hasImmediateDurableWork(thread)) {
+      return QuiescenceResult.WORK_REMAINS;
     }
-    // 无非终态 tool，但当前 head 有可 apply 的终态结果：保留 token 继续。
-    if (hasTerminalResultsPendingApply(thread)) {
-      return false;
-    }
-    return false;
+    appendEventsInternal(
+        threadId,
+        List.of(
+            new ThreadEventDraft(
+                ThreadEventType.THREAD_IDLE, ThreadEventPayloads.of("reason", "queue_empty"))),
+        now);
+    threadMapper.forceStatusAndClearProcessor(threadId, ThreadStatus.IDLE.name(), utc(now));
+    return QuiescenceResult.IDLE;
   }
 
   /**
@@ -754,7 +755,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     if (!inputStore.listQueued(threadId).isEmpty()) {
       return true;
     }
-    if (invocationMapper.countNonTerminalByThread(threadId) != 0) {
+    if (hasNonTerminalInvocationsForHead(thread)) {
       return true;
     }
     return hasTerminalResultsPendingApply(thread);
@@ -767,6 +768,15 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
             inv ->
                 Objects.equals(inv.getAssistantEntryId(), headEntryId)
                     && isTerminalStatus(inv.getStatus()));
+  }
+
+  private boolean hasNonTerminalInvocationsForHead(HarnessThreadDO thread) {
+    long headEntryId = thread.getHeadEntryId();
+    return invocationMapper.listByThread(thread.getId()).stream()
+        .anyMatch(
+            invocation ->
+                Objects.equals(invocation.getAssistantEntryId(), headEntryId)
+                    && !isTerminalStatus(invocation.getStatus()));
   }
 
   private static boolean isTerminalStatus(String status) {
