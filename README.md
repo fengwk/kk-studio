@@ -11,10 +11,11 @@
 
 - [docs/technical-solution/architecture.md](docs/technical-solution/architecture.md)
 - [docs/technical-solution/domain-map.md](docs/technical-solution/domain-map.md)
+- [docs/technical-solution/harness-thread-actor.md](docs/technical-solution/harness-thread-actor.md)（Harness 架构事实源）
 
 ## 能力摘要
 
-- Harness：Session Entry Tree 基线 + ThreadEvent journal + SSE cursor 恢复
+- Harness：Session Main Thread、Entry Tree Branch、ordered mailbox、ThreadEvent journal 与 SSE cursor 恢复
 - Studio：Canvas 文档、节点、Link、Command 已最小持久化；Resource、FunctionRun、Workflow Runtime 待补
 - 前端：AI 接真实 Thread API；Canvas Library/Create 接真实 API，Editor 仍使用本地交互投影
 

@@ -31,11 +31,12 @@ flowchart LR
 
 | 概念 | 职责 | 持久化 |
 | --- | --- | --- |
-| Session | 共享 append-only Entry Tree | `harness_session` |
+| Session | 共享 append-only Entry Tree、稳定 Main Thread 与父子关系 | `harness_session` |
 | Entry | 语义 durable 真源 | `harness_session_entry` |
-| AgentThread | 用户面板/actor：head 游标、冻结配置、YOLO、input sequence、processor fencing | `harness_thread` |
+| AgentThread | Branch actor：head 游标、mailbox sequence、状态、processor fencing | `harness_thread` |
 | Branch(thread) | root→head 路径 | **不持久化**，查询时派生 |
 | ThreadInput | 有序输入队列与幂等键 | `harness_thread_input` |
+| ThreadStop | Stop 幂等回执与被取消 Input 的关联 | `harness_thread_stop` |
 | ThreadEvent | 流式/状态可观测覆盖层；全局 eventId cursor | `harness_thread_event` |
 | ToolInvocation | 工具执行与副作用幂等边界 | `tool_invocation` |
 | SubagentTask | parent invocation → child Session + child Thread | `harness_subagent_task` |
@@ -51,7 +52,7 @@ sequenceDiagram
     participant P as ThreadProcessor
     participant DB as Database
 
-    C->>API: POST /threads/{id}/messages
+    C->>API: POST /api/threads/{id}/messages
     API->>DB: lock Thread row; allocate sequence; insert input
     API-->>C: 202 ThreadInputDTO
     API->>P: kick(threadId)
@@ -59,6 +60,7 @@ sequenceDiagram
     alt acquire 成功
         loop until idle
             P->>DB: 收敛 tool / apply terminal results
+            P->>DB: harvest cutoff 内全部 queued input
             alt current head requires model
                 P->>DB: beginTurn
                 P->>P: model stream + deltas
@@ -68,8 +70,6 @@ sequenceDiagram
                     P->>DB: prepareTools + invocations
                     P->>DB: append THREAD_WAITING; releaseForExternalWait
                 end
-            else pending input exists
-                P->>DB: applyNextInput (exactly-once)
             end
         end
         P->>DB: releaseIfIdle
@@ -80,30 +80,30 @@ sequenceDiagram
 
 文字步骤：
 
-1. `POST /api/threads/{threadId}/messages`（或 `PUT .../yolo` / `PUT .../agent`）在 Thread 行锁下分配 `sequence`、写入 `ThreadInput`，`clientMessageId` 幂等；HTTP **202**。
+1. `POST /api/threads/{threadId}/messages` 或配置命令在 Thread 行锁下分配 `sequence`、写入 `ThreadInput`，`clientMessageId` 幂等；HTTP **202**。
 2. 提交事务后 `ThreadKick.kick(threadId)` 激活有界 `ThreadProcessor`。
 3. Processor `tryAcquire`：仅当 `processor_token` 为空或 `processor_until` 已过期时写入新 token 与租约；持有期间按 `lease/3` 心跳 `renew`。
-4. 主循环从 durable 事实恢复：先收敛非终态 Tool / 应用已终态 Tool Result，再在 **Turn 边界** 优先偿还模型侧工作，然后 `applyNextInput`。
+4. 主循环从 durable 事实恢复：先收敛非终态 Tool / 应用已终态 Tool Result；在 Provider 调用前、无 Tool Turn 完成后、当前 Tool batch 全部终态并应用后或 Compaction 后，Harvest cutoff 内全部 queued Input。
 5. `beginTurn` 原子录取并写 `TURN_STARTED`；通过后发起 **一次** Provider 请求。Delta 批量写入 ThreadEvent；终态时写 Assistant Entry + `model_usage_record`（同一事务），或 `prepareTools` 创建 Invocation。
 6. 需要外部等待（权限、工具执行、subagent）时，Processor 先写 `THREAD_WAITING`，再由 `releaseForExternalWait` 在 Thread 行锁下确认并释放 token；完成后再 kick。
-7. final assistant 且 queue 空且无待处理 tool 时写 `THREAD_IDLE` 并 `releaseIfIdle`。
+7. 同批包含消息时只发起一次 Provider 请求；配置-only 批次不调用 Provider。无 response debt、queue 为空且无待处理 Tool 时写 `THREAD_IDLE` 并 `releaseIfIdle`。
 
 ## Turn 边界与幂等
 
 - **Turn**：一次 LLM 请求及其工具处理；不落库。Assistant Entry ID 关联流式事件与 Usage。
-- **Input → Entry**：`markApplied` exactly-once；在 Thread 行锁与 processor token 校验下推进 `head_entry_id`。
+- **Input → Entry**：Harvest 按 sequence 应用 cutoff 内全部 Input；每条 Input 仅能 CAS 一次为 `APPLIED`，并在 Thread 行锁与 processor token 校验下推进 `head_entry_id`。
 - **LLM**：at-least-once。崩溃后可再次请求；已成功提交的 Assistant Entry / Usage 由唯一键保护。
 - **Tool**：`tool_invocation.id` 是副作用幂等边界；decision 与 terminal 锁序为 **非锁 peek → 锁 Thread → 锁 invocation**，commit 后 kick。
 
-## 权限与 YOLO
+## 权限与路径配置
 
-YOLO 是 **Thread** 字段（`yolo_enabled`）。`SET_YOLO` / `SET_AGENT` 作为有序 input 在 Turn 边界生效，不即时改写进行中的模型请求。
+Agent、Model、Toolset 与 YOLO 由当前 Entry path fold 得出。`SET_YOLO` / `SET_AGENT` 等配置命令作为有序 Input 在 Harvest 后生效，不即时改写进行中的模型请求。
 
 `POST /api/tool-invocations/{id}/decision` 原子写入 allow/deny，并 kick 所属 Thread。子代理权限请求投影到 Root Activity，根 UI 可作 relay。
 
 ## 子代理
 
-Subagent Task 创建 **child Session + child Thread**，记录 `parent_invocation_id`、`parent_thread_id`、`max_turns`、working-copy 与终态 report。子 Thread 独立 Processor；完成后 report 回父 invocation 并 kick 父 Thread。任务取消树与 `maxTurns` 由 runtime 和 `ThreadTurnAdmission` 在 `beginTurn` 边界线性化评估。
+Subagent Task 创建独立 **Child Session + Child Main Thread**，记录 parent/child、`root_thread_id`、`max_turns`、working-copy 与终态 report。子 Thread 独立 Processor；完成后 report 回父 Invocation 并 kick 父 Thread。Child Tool ASK 的事实保留在 Child Thread，并向 `root_thread_id` 镜像 relay event，根 UI 使用同一 Invocation ID 决策。任务取消树与 `maxTurns` 在 `beginTurn` 与 Task 创建事务中线性化评估。
 
 ## ThreadEvent 与 Entry
 
@@ -133,7 +133,7 @@ Environment binding 在 Turn 资源解析时冻结。gateway 在 dispatch 前校
 | 节点 A 持有 token，节点 B kick | B `tryAcquire` 失败；A 继续 |
 | lease 过期 / 持有者崩溃 | 其他节点可 acquire；以 DB token 为准 |
 | 模型流中途崩溃 | 未提交 Assistant 可重试；已提交 Entry/Usage 不重复 |
-| Provider 永久失败 | 写 `THREAD_FAILED` 类事件并停止；需新的 durable 触发（如新 input）才继续 |
+| Provider 永久失败 | 写 `THREAD_FAILED` 类事件并停止；仅显式 Retry 进入 `RETRYING`，先偿还失败 Turn 后再 Harvest 后续 mailbox |
 | Tool terminal / permission | 锁 Thread 后锁 invocation；after-commit kick |
 | external wait 释放 | `releaseForExternalWait` 原子释放 token |
 | SSE 断线 | 仅丢可观测增量；以 Entry + 重放 events 恢复 |

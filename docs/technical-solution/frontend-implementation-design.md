@@ -1,32 +1,33 @@
 # 前端落地设计
 
-本文描述当前 `frontend/` 工程的页面结构、Harness Thread API 契约、transcript 投影和验证边界。
+本文描述 `frontend/` 的 Harness Session/Thread 页面结构、API 契约、transcript 投影和验证边界。Session 与 Thread 的运行事实以 [Harness Session Tree 与 Thread Actor](harness-thread-actor.md) 为准。
 
 ## 前端摘要
 
-| 主题 | 当前实现 |
+| 主题 | 最终前端契约 |
 | --- | --- |
 | 工程目录 | `frontend/` 独立 Vite 工程 |
 | 页面范围 | Chat（Thread）、Provider/Model/Agent 资源管理、ComfyUI 工作流 |
 | 服务端状态 | React Query |
 | 资源 API | `/api/providers`、`/api/models`、`/api/agents` |
-| Harness API | `/api/threads`、`/api/sessions`（只读树/activities/tasks）、`/api/tool-invocations`、`/api/usage` |
+| Harness API | `/api/sessions`、`/api/threads/{threadId}`、`/api/tool-invocations`、`/api/usage` |
 | 实时通道 | 数据库 cursor 驱动的 Thread Event SSE |
-| 视觉实现 | 全局 token 以 Canvas 设计为事实源，见 [前端设计规范](../product-design/frontend-design-system.md)；组件层仍在迁移 |
+| 视觉实现 | 全局 token 以 Canvas 设计为事实源，见 [前端设计规范](../product-design/frontend-design-system.md) |
 
 ## 路由
 
 | 路由 | 页面 | 说明 |
 | --- | --- | --- |
-| `/` | redirect | 跳转至 `/threads` |
-| `/threads` | Chat 列表 | 全局 Thread 列表、新建 Thread |
-| `/threads/:threadId` | Chat 详情 | Thread transcript、处理状态、Task Timeline、工具权限、Usage |
+| `/` | redirect | 跳转至 `/sessions` |
+| `/sessions` | Session 列表 | 创建 Session，列出可恢复的会话 |
+| `/sessions/:sessionId` | Session 入口 | 打开稳定 `mainThreadId`，显示 Main/Secondary Threads |
+| `/sessions/:sessionId/threads/:threadId` | Thread 详情 | Branch transcript、处理状态、Tree、Task Timeline、工具权限、Usage |
 | `/agents` | Agent 管理 | Agent CRUD |
 | `/models` | Model 管理 | Model CRUD |
 | `/providers` | Provider 管理 | Provider CRUD |
 | `/comfyui` | ComfyUI 工作流 | 独立工作流运行时 |
 
-扩展注册：`frontend/src/features/ai/extensions/ai-extension.tsx`（`ai.threads`、`ai.thread` 等）。
+AI extension 注册 Session 列表、Session 入口与显式 Thread 详情；显式 Thread URL 优先于任何本地最近访问记录。
 
 ## API 边界
 
@@ -34,20 +35,21 @@
 
 | Harness service | HTTP 接口 | 用途 |
 | --- | --- | --- |
-| `listThreads` / `createThread` / `getThread` | `GET` / `POST /api/threads`、`GET /api/threads/{id}` | Thread 列表、创建与读取 |
-| `listSessionThreads` | `GET /api/sessions/{id}/threads` | Session 上的 Thread |
+| `listSessions` / `createSession` / `getSession` / `listSessionEntries` | `GET` / `POST /api/sessions`、`GET /api/sessions/{id}`、`/entries` | Session 创建、查询与 Tree 读取 |
+| `listSessionThreads` / `createSessionThread` | `GET` / `POST /api/sessions/{id}/threads` | 列出 Thread；以 `fromEntryId` 创建 Secondary Thread |
+| `getThread` | `GET /api/threads/{id}` | 读取 Thread actor |
 | `submitThreadMessage` | `POST /api/threads/{id}/messages` | 入队用户消息（202；`clientMessageId` 幂等） |
-| `setThreadYolo` / `setThreadAgent` | `PUT /api/threads/{id}/yolo`、`/agent` | 入队设置变更（202） |
+| `queueThreadAgent` / `queueThreadModel` / `queueThreadToolset` / `queueThreadYolo` | `PUT /api/threads/{id}/agent`、`/model`、`/toolset`、`/yolo` | 入队路径配置变更（202） |
 | `listThreadEntries` | `GET /api/threads/{id}/entries` | root→head 路径 Entries |
 | `listThreadInputs` | `GET /api/threads/{id}/inputs` | 有序 inputs（含 pending） |
 | `listThreadEvents` | `GET /api/threads/{id}/events?afterEventId=` | ThreadEvent 快照 |
 | `createThreadEventStream` | `GET /api/threads/{id}/events/stream?afterEventId=` | SSE；event name `thread_event`，id = `eventId` |
 | `listThreadToolInvocations` | `GET /api/threads/{id}/tool-invocations` | Thread 工具投影 |
 | `getThreadUsage` | `GET /api/usage/threads/{id}` | Thread Usage/Cost |
-| `listSessions` / `getSession` / `listSessionEntries` | `GET /api/sessions`、`/{id}`、`/{id}/entries` | Session 只读 |
 | `listRootActivities` | `GET /api/sessions/{id}/activities` | Root Activity 快照 |
 | `listSessionTasks` | `GET /api/sessions/{id}/tasks` | 直接子 SubagentTask |
 | `decideToolInvocation` | `POST /api/tool-invocations/{id}/decision` | allow / deny |
+| `stopThread` / `retryThread` | `POST /api/threads/{id}/stop`、`/retry` | 取消 queued Input 并恢复草稿；显式重试 FAILED Thread |
 
 所有 Snowflake ID 在 TypeScript 契约中保持十进制字符串；前端不将 ID 作为 JavaScript number 使用。
 
@@ -60,14 +62,14 @@
 ```text
 transcript =
   path Entries（语义基线）
-  + 尚未物化的 USER_MESSAGE inputs
+  + 尚未物化的 USER_MESSAGE / CUSTOM_MESSAGE inputs
   + active ThreadEvents（流式 / 工具覆盖层）
 ```
 
 | 来源 | 前端行为 |
 | --- | --- |
-| `message` / `agent_snapshot` / `compaction` Entry | 稳定气泡与冻结摘要 |
-| unapplied `user_message` input | 立即显示用户气泡（`pendingInput`），Entry 出现后抑制 |
+| `message` / `agent_snapshot` / `compaction` Entry | 稳定气泡、冻结摘要与路径配置基线 |
+| unapplied `user_message` / `custom_message` input | 立即显示待发送气泡（`pendingInput`），Entry 出现后抑制 |
 | `assistant_started` / `assistant_delta_batch` | 流式 assistant / thinking；以 `subjectEntryId` 关联 |
 | `assistant_completed` / Entry 物化 | 抑制对应 stream 覆盖层 |
 | `assistant_failed` | 标记流式 assistant 错误 |
@@ -75,6 +77,12 @@ transcript =
 | Tool Result artifact | 映射 `/api/artifacts/{artifactId}` 原生预览或文件链 |
 
 连续重叠提交：composer 使用 `clientMessageId` 与 202 入队，不等待前一轮处理结束；pending inputs 与 processing 状态可同时可见。
+
+### Session、Tree 与 Stop
+
+- 打开 `/sessions/:sessionId` 后使用服务端 `mainThreadId` 进入 Main Thread；Session 面板将 Main 固定置顶，Secondary Threads 继续独立运行。
+- Tree 以共享 Entry Tree 投影当前 Branch。`default`、`no-tools`、`user-only`、`assistant-only`、`labeled-only`、`all` 只影响可见条目；从 USER/CUSTOM_MESSAGE 分支时以父 Entry 为新 Thread head 并回填可编辑文本，其他 Entry 从所选 Entry 继续。
+- Stop 调用返回的 `restoredMessages` 以空行合并回 Composer，并生成新的 `clientMessageId`；配置 Input 被取消但不回填。FAILED Thread 只通过 Retry 恢复。
 
 ### SSE cursor 恢复
 
@@ -84,13 +92,13 @@ transcript =
 
 ## Root Activity 与 Subagent Task
 
-详情页使用 `RootActivityDTO` 与 `listSessionTasks` 构建任务时间线（`useHarnessTaskTimeline`、`subagent-task-tree.ts`、`TaskTimelinePanel.tsx`）。从 Thread 所属 root Session 递归拉取直接任务；路径集合阻断循环。权限 relay 调用同一 Tool decision API；刷新后由 REST 快照重建。
+详情页使用 `RootActivityDTO` 与 `listSessionTasks` 构建任务时间线。从 Thread 所属 root Session 递归拉取直接任务；路径集合阻断循环。Child Thread 的 ASK 在 root Thread 收到 relay event，根 UI 仍以同一 Tool Invocation ID 调用 decision API；刷新后由 REST 快照重建。
 
 ## 运行观测与交互
 
-`useHarnessThreadObservability`：
+运行观测：
 
-- YOLO 通过 `setThreadYolo` 入队（202），非即时 Session 字段。
+- YOLO 通过 `queueThreadYolo` 入队（202），由路径配置 fold 决定，不即时改写进行中的 Provider 请求。
 - `WAITING_APPROVAL` Invocation 展示 allow / deny。
 - Thread Usage 显示 token、cache 与 Cost。
 - Tool artifact 在时间线内预览；不在投影时丢弃未知 media type。
@@ -101,28 +109,14 @@ transcript =
 
 ```text
 frontend/src
-├── app/router.tsx
+├── app/                 路由与启动
 ├── platform/
 ├── features/ai
-│   ├── extensions/ai-extension.tsx
-│   ├── AgentThreadPage.tsx
-│   ├── useAgentThreadController.ts
-│   ├── useAgentThreadQueries.ts
-│   ├── useAgentThreadMessageMutation.ts
-│   ├── useAiConsoleController.ts
-│   ├── useAiConsoleThreadController.ts
-│   ├── useAiConsoleThreadQueries.ts
-│   ├── useAiConsoleThreadMutations.ts
-│   ├── useHarnessThreadEventStream.ts
-│   ├── useHarnessThreadObservability.ts
-│   ├── useHarnessTaskTimeline.ts
-│   ├── harness-thread-event-stream.ts
-│   ├── thread-events.ts / thread-event-types.ts / thread-event-payload.ts
-│   ├── thread-timeline-builder.ts
-│   ├── thread-panel/          ThreadPanel, Composer, Transcript, ...
-│   ├── AiConsoleThreadCard.tsx / AiConsoleThreadModals.tsx / AiConsolePanels.tsx
-│   ├── ChatObservabilityPanel.tsx
-│   └── TaskTimelinePanel.tsx
+│   ├── extensions/            Session/Thread 页面注册
+│   ├── session/               Session 列表、Main/Secondary Thread 面板
+│   ├── thread/                Composer、Tree、Transcript、Stop/Retry
+│   ├── timeline/              Entry/Input/Event 投影与 SSE
+│   └── task/                  Root Activity、permission relay、Subagent Timeline
 ├── shared/api
 │   ├── agent-service.ts
 │   ├── harness-service.ts
@@ -131,7 +125,7 @@ frontend/src
 └── styles.css
 ```
 
-`queryKeys.threads.*` 覆盖 list/detail/entries/inputs/events/toolInvocations；`queryKeys.usage.thread` 覆盖用量。
+`queryKeys.sessions.*` 覆盖 Session/Entries/Threads；`queryKeys.threads.*` 覆盖 detail/entries/inputs/events/toolInvocations；`queryKeys.usage.thread` 覆盖用量。
 
 ## 验证
 
