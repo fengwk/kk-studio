@@ -59,6 +59,7 @@ Session **不**保存 Branch 或配置副本；`main_thread_id` 是创建时原�
 | `tool_invocation` | Tool 权限、目标、lease、结果与终态 | 唯一 `(thread_id, tool_call_id)`、`(assistant_entry_id, ordinal)`；索引 `(thread_id, status, ordinal)`、`(target_type, status, deadline_at, id)`、`(environment_name, status, deadline_at, id)` |
 | `tool_artifact` | 全局不可变 Tool 输出 bytes | content、media type、size、SHA-256 |
 | `harness_subagent_task` | parent invocation → child Session/Thread | 主键 `parent_invocation_id`；唯一 `child_thread_id`；索引 `(parent_session_id, status)` |
+| `harness_thread_goal` | Thread 当前 durable Goal | 主键 `thread_id`；字段 `objective` / 可选 `token_budget` / `status(active\|complete\|blocked)` / 可选 `reason` / 时间戳 |
 
 `tool_invocation` 冻结 tool name/version、target、environment_name、arguments、permission、`side_effect`、deadline。Lease recovery 使用冻结 `side_effect`。Artifact bytes 不进入 Session payload；Tool Result 只保存 artifact reference。
 

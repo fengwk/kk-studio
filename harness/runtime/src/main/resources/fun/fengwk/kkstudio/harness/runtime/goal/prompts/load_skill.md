@@ -1,0 +1,1 @@
+Load the full SKILL.md text for one skill selected by the current Agent. Use the exact short skill name from <available_skills>. Only selected skills are available; unselected or unknown names fail. Source content is resolved platform-first from the Agent's selected skill metadata.
