@@ -1,27 +1,37 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Daemon 独立进程的连接与执行配置。 */
+/**
+ * Daemon 独立进程的连接与执行配置。
+ *
+ * <p>CLI 参数是权威来源：{@code --environment-name} 与可重复 {@code --skill-dir}。gateway 连接类参数也支持 CLI；若 CLI
+ * 未给出，再回退到系统属性以便现有独立启动方式继续工作。skill 路径不使用服务端托管配置，仅 CLI 与默认本地目录。
+ */
 public record DaemonConfig(
     URI gatewayUri,
-    String environmentId,
+    String environmentName,
     String daemonId,
     Duration heartbeatInterval,
     Duration initialReconnectDelay,
     Duration maxReconnectDelay,
     Duration defaultToolTimeout,
-    String gatewayToken) {
+    String gatewayToken,
+    List<Path> skillDirs) {
 
   public DaemonConfig {
     gatewayUri = Objects.requireNonNull(gatewayUri, "gatewayUri");
     if (!"ws".equals(gatewayUri.getScheme()) && !"wss".equals(gatewayUri.getScheme())) {
       throw new IllegalArgumentException("gatewayUri must use ws or wss");
     }
-    environmentId = requireNonBlank(environmentId, "environmentId");
+    environmentName = requireNonBlank(environmentName, "environmentName");
     daemonId = requireNonBlank(daemonId, "daemonId");
     heartbeatInterval = requirePositive(heartbeatInterval, "heartbeatInterval");
     initialReconnectDelay = requireNonNegative(initialReconnectDelay, "initialReconnectDelay");
@@ -31,32 +41,122 @@ public record DaemonConfig(
     }
     defaultToolTimeout = requirePositive(defaultToolTimeout, "defaultToolTimeout");
     gatewayToken = requireNonBlank(gatewayToken, "gatewayToken");
+    skillDirs =
+        List.copyOf(Objects.requireNonNull(skillDirs, "skillDirs")).stream()
+            .map(
+                path ->
+                    Objects.requireNonNull(path, "skillDirs element").toAbsolutePath().normalize())
+            .toList();
   }
 
-  /** 从 JVM system properties 读取可直接启动的最小配置。 */
-  public static DaemonConfig fromSystemProperties() {
+  /**
+   * 解析 CLI 参数；未给出的 gateway 连接项可回退系统属性。未给出 {@code --skill-dir} 时默认 {@code
+   * ~/.agents/skills}（仅当该目录存在时纳入）。
+   */
+  public static DaemonConfig fromArgs(String[] args) {
+    Objects.requireNonNull(args, "args");
+    String environmentName = null;
+    String gatewayUri = null;
+    String daemonId = null;
+    String gatewayToken = null;
+    String heartbeat = null;
+    String reconnectInitial = null;
+    String reconnectMax = null;
+    String toolTimeout = null;
+    List<Path> skillDirs = new ArrayList<>();
+    boolean skillDirExplicit = false;
+
+    for (int index = 0; index < args.length; index++) {
+      String arg = args[index];
+      switch (arg) {
+        case "--environment-name" -> environmentName = requireArgValue(args, ++index, arg);
+        case "--gateway-uri" -> gatewayUri = requireArgValue(args, ++index, arg);
+        case "--daemon-id" -> daemonId = requireArgValue(args, ++index, arg);
+        case "--gateway-token" -> gatewayToken = requireArgValue(args, ++index, arg);
+        case "--heartbeat" -> heartbeat = requireArgValue(args, ++index, arg);
+        case "--reconnect-initial" -> reconnectInitial = requireArgValue(args, ++index, arg);
+        case "--reconnect-max" -> reconnectMax = requireArgValue(args, ++index, arg);
+        case "--tool-timeout" -> toolTimeout = requireArgValue(args, ++index, arg);
+        case "--skill-dir" -> {
+          skillDirExplicit = true;
+          skillDirs.add(Path.of(requireArgValue(args, ++index, arg)));
+        }
+        default -> throw new IllegalArgumentException("unknown argument: " + arg);
+      }
+    }
+
+    if (environmentName == null || environmentName.isBlank()) {
+      environmentName = System.getProperty("kkstudio.daemon.environment-name");
+    }
+    if (gatewayUri == null || gatewayUri.isBlank()) {
+      gatewayUri = System.getProperty("kkstudio.daemon.gateway-uri");
+    }
+    if (daemonId == null || daemonId.isBlank()) {
+      daemonId = System.getProperty("kkstudio.daemon.id", UUID.randomUUID().toString());
+    }
+    if (gatewayToken == null || gatewayToken.isBlank()) {
+      gatewayToken = System.getProperty("kkstudio.daemon.gateway-token");
+    }
+    if (heartbeat == null || heartbeat.isBlank()) {
+      heartbeat = System.getProperty("kkstudio.daemon.heartbeat");
+    }
+    if (reconnectInitial == null || reconnectInitial.isBlank()) {
+      reconnectInitial = System.getProperty("kkstudio.daemon.reconnect-initial");
+    }
+    if (reconnectMax == null || reconnectMax.isBlank()) {
+      reconnectMax = System.getProperty("kkstudio.daemon.reconnect-max");
+    }
+    if (toolTimeout == null || toolTimeout.isBlank()) {
+      toolTimeout = System.getProperty("kkstudio.daemon.tool-timeout");
+    }
+
+    if (!skillDirExplicit) {
+      Path defaultSkillDir = defaultSkillDir();
+      if (Files.isDirectory(defaultSkillDir)) {
+        skillDirs.add(defaultSkillDir);
+      }
+    }
+
     return new DaemonConfig(
-        URI.create(requiredProperty("kkstudio.daemon.gateway-uri")),
-        requiredProperty("kkstudio.daemon.environment-id"),
-        System.getProperty("kkstudio.daemon.id", UUID.randomUUID().toString()),
-        durationProperty("kkstudio.daemon.heartbeat", Duration.ofSeconds(15)),
-        durationProperty("kkstudio.daemon.reconnect-initial", Duration.ofSeconds(1)),
-        durationProperty("kkstudio.daemon.reconnect-max", Duration.ofSeconds(30)),
-        durationProperty("kkstudio.daemon.tool-timeout", Duration.ofMinutes(5)),
-        requiredProperty("kkstudio.daemon.gateway-token"));
+        URI.create(requirePresent(gatewayUri, "gateway-uri / kkstudio.daemon.gateway-uri")),
+        requirePresent(environmentName, "environment-name / kkstudio.daemon.environment-name"),
+        requirePresent(daemonId, "daemon-id"),
+        parseDuration(heartbeat, Duration.ofSeconds(15)),
+        parseDuration(reconnectInitial, Duration.ofSeconds(1)),
+        parseDuration(reconnectMax, Duration.ofSeconds(30)),
+        parseDuration(toolTimeout, Duration.ofMinutes(5)),
+        requirePresent(gatewayToken, "gateway-token / kkstudio.daemon.gateway-token"),
+        skillDirs);
   }
 
-  private static Duration durationProperty(String name, Duration defaultValue) {
-    String value = System.getProperty(name);
-    return value == null || value.isBlank() ? defaultValue : Duration.parse(value);
+  /** 默认本地 skill 根目录：{@code ~/.agents/skills}。 */
+  public static Path defaultSkillDir() {
+    return Path.of(System.getProperty("user.home"), ".agents", "skills");
   }
 
-  private static String requiredProperty(String name) {
-    String value = System.getProperty(name);
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException("missing required system property: " + name);
+  private static String requireArgValue(String[] args, int index, String flag) {
+    if (index >= args.length) {
+      throw new IllegalArgumentException("missing value for " + flag);
+    }
+    String value = args[index];
+    if (value == null || value.isBlank() || value.startsWith("--")) {
+      throw new IllegalArgumentException("missing value for " + flag);
     }
     return value;
+  }
+
+  private static String requirePresent(String value, String name) {
+    if (value == null || value.isBlank()) {
+      throw new IllegalArgumentException("missing required configuration: " + name);
+    }
+    return value;
+  }
+
+  private static Duration parseDuration(String value, Duration defaultValue) {
+    if (value == null || value.isBlank()) {
+      return defaultValue;
+    }
+    return Duration.parse(value);
   }
 
   private static String requireNonBlank(String value, String name) {

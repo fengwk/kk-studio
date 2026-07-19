@@ -40,7 +40,8 @@ class DaemonToolCapabilitiesCodecTest {
     ToolDescriptor original = sampleDescriptor();
 
     String json =
-        codec.encode(new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(original)));
+        codec.encode(
+            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(original), List.of()));
     DaemonToolCapabilitiesCodec.DaemonToolCapabilities decoded = codec.decode(json);
 
     assertEquals(1, decoded.tools().size());
@@ -57,8 +58,9 @@ class DaemonToolCapabilitiesCodecTest {
 
   @Test
   void emptyCapabilitiesAreCanonicalAndAccepted() {
-    String json = codec.encode(new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of()));
-    assertEquals("{\"tools\":[]}", json);
+    String json =
+        codec.encode(new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(), List.of()));
+    assertEquals("{\"tools\":[],\"skills\":[]}", json);
     DaemonToolCapabilitiesCodec.DaemonToolCapabilities decoded = codec.decode(json);
     assertTrue(decoded.tools().isEmpty());
   }
@@ -120,13 +122,16 @@ class DaemonToolCapabilitiesCodecTest {
 
     String hashJson =
         codec.encode(
-            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(hashDescriptor)));
+            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(
+                List.of(hashDescriptor), List.of()));
     String treeJson =
         codec.encode(
-            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(treeDescriptor)));
+            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(
+                List.of(treeDescriptor), List.of()));
     String linkedJson =
         codec.encode(
-            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(linkedDescriptor)));
+            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(
+                List.of(linkedDescriptor), List.of()));
 
     assertEquals(treeJson, hashJson);
     assertEquals(treeJson, linkedJson);
@@ -144,7 +149,8 @@ class DaemonToolCapabilitiesCodecTest {
     ToolDescriptor third = tool("charlie", "1");
     String json =
         codec.encode(
-            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(first, second, third)));
+            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(
+                List.of(first, second, third), List.of()));
     int aIdx = json.indexOf("\"name\":\"alpha\"");
     int bIdx = json.indexOf("\"name\":\"bravo\"");
     int cIdx = json.indexOf("\"name\":\"charlie\"");
@@ -166,7 +172,9 @@ class DaemonToolCapabilitiesCodecTest {
     DaemonProtocolException error =
         assertThrows(
             DaemonProtocolException.class,
-            () -> new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(cloudDescriptor)));
+            () ->
+                new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(
+                    List.of(cloudDescriptor), List.of()));
     assertTrue(error.getMessage().contains("executionMode must be ENVIRONMENT"));
   }
 
@@ -186,7 +194,7 @@ class DaemonToolCapabilitiesCodecTest {
     DaemonProtocolException error =
         assertThrows(
             DaemonProtocolException.class,
-            () -> new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(a, b)));
+            () -> new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(a, b), List.of()));
     assertTrue(error.getMessage().contains("duplicate CAPABILITIES descriptor"));
   }
 
@@ -196,7 +204,7 @@ class DaemonToolCapabilitiesCodecTest {
         "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
             + "\"rendererKey\":\"r\",\"executionMode\":\"CLOUD\",\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{},"
-            + "\"required\":[],\"additionalProperties\":false}}]}";
+            + "\"required\":[],\"additionalProperties\":false}}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("executionMode must be ENVIRONMENT"));
@@ -210,7 +218,7 @@ class DaemonToolCapabilitiesCodecTest {
             + "\"sideEffect\":\"READ_ONLY\",\"timeoutMillis\":3000,"
             + "\"inputSchema\":{\"type\":\"object\",\"properties\":{},"
             + "\"required\":[],\"additionalProperties\":false}}";
-    String json = "{\"tools\":[" + descriptorJson + "," + descriptorJson + "]}";
+    String json = "{\"tools\":[" + descriptorJson + "," + descriptorJson + "],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("duplicate CAPABILITIES descriptor"));
@@ -222,7 +230,7 @@ class DaemonToolCapabilitiesCodecTest {
         "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{\"x\":"
-            + "{\"type\":\"weird\"}},\"required\":[],\"additionalProperties\":false}}]}";
+            + "{\"type\":\"weird\"}},\"required\":[],\"additionalProperties\":false}}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("unknown schema type"));
@@ -230,7 +238,7 @@ class DaemonToolCapabilitiesCodecTest {
 
   @Test
   void decodeRejectsUnknownTopLevelField() {
-    String json = "{\"tools\":[],\"extra\":1}";
+    String json = "{\"tools\":[],\"extra\":1,\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("unknown field"));
@@ -242,7 +250,7 @@ class DaemonToolCapabilitiesCodecTest {
         "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{},"
-            + "\"required\":[],\"additionalProperties\":false},\"extra\":\"v\"}]}";
+            + "\"required\":[],\"additionalProperties\":false},\"extra\":\"v\"}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("unknown field"));
@@ -254,7 +262,7 @@ class DaemonToolCapabilitiesCodecTest {
         "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{\"x\":"
-            + "{\"type\":\"string\",\"minimum\":1}},\"required\":[],\"additionalProperties\":false}}]}";
+            + "{\"type\":\"string\",\"minimum\":1}},\"required\":[],\"additionalProperties\":false}}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("unknown field"));
@@ -267,7 +275,7 @@ class DaemonToolCapabilitiesCodecTest {
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{\"x\":"
             + "{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":1}},"
-            + "\"required\":[],\"additionalProperties\":false}}]}";
+            + "\"required\":[],\"additionalProperties\":false}}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("unknown field"));
@@ -279,7 +287,7 @@ class DaemonToolCapabilitiesCodecTest {
         "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{},"
-            + "\"required\":[],\"additionalProperties\":false,\"minProperties\":0}}]}";
+            + "\"required\":[],\"additionalProperties\":false,\"minProperties\":0}}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("unknown field"));
@@ -292,7 +300,7 @@ class DaemonToolCapabilitiesCodecTest {
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{\"x\":"
             + "{\"type\":\"string\",\"enum\":[\"ok\",7]}},\"required\":[],"
-            + "\"additionalProperties\":false}}]}";
+            + "\"additionalProperties\":false}}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("'enum'[1]"));
@@ -304,7 +312,7 @@ class DaemonToolCapabilitiesCodecTest {
         "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\",\"enum\":[\"ok\",\""
-            + "   \"]}},\"required\":[],\"additionalProperties\":false}}]}";
+            + "   \"]}},\"required\":[],\"additionalProperties\":false}}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("'enum'[1]"));
@@ -316,7 +324,7 @@ class DaemonToolCapabilitiesCodecTest {
         "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{\"x\":"
-            + "{\"type\":\"string\"}},\"required\":[\"x\",\"x\"],\"additionalProperties\":false}}]}";
+            + "{\"type\":\"string\"}},\"required\":[\"x\",\"x\"],\"additionalProperties\":false}}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("duplicate"));
@@ -328,7 +336,7 @@ class DaemonToolCapabilitiesCodecTest {
         "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{\"x\":"
-            + "{\"type\":\"string\"}},\"required\":[7],\"additionalProperties\":false}}]}";
+            + "{\"type\":\"string\"}},\"required\":[7],\"additionalProperties\":false}}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("'required'[0]"));
@@ -339,7 +347,7 @@ class DaemonToolCapabilitiesCodecTest {
     String json =
         "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}]}";
+            + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("'required'"));
@@ -351,7 +359,7 @@ class DaemonToolCapabilitiesCodecTest {
         "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{},"
-            + "\"required\":[]}}]}";
+            + "\"required\":[]}}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("'additionalProperties'"));
@@ -363,7 +371,7 @@ class DaemonToolCapabilitiesCodecTest {
         "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":"
-            + "{\"x\":\"string\"},\"required\":[],\"additionalProperties\":false}}]}";
+            + "{\"x\":\"string\"},\"required\":[],\"additionalProperties\":false}}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("property 'x'"));
@@ -377,7 +385,7 @@ class DaemonToolCapabilitiesCodecTest {
         "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":"
-            + "[\"x\",\"y\"],\"required\":[],\"additionalProperties\":false}}]}";
+            + "[\"x\",\"y\"],\"required\":[],\"additionalProperties\":false}}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(
@@ -393,7 +401,7 @@ class DaemonToolCapabilitiesCodecTest {
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{\"x\":"
             + "{\"type\":\"object\",\"properties\":42,\"required\":[],"
-            + "\"additionalProperties\":false}},\"required\":[],\"additionalProperties\":false}}]}";
+            + "\"additionalProperties\":false}},\"required\":[],\"additionalProperties\":false}}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("JSON object"));
@@ -406,7 +414,7 @@ class DaemonToolCapabilitiesCodecTest {
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{\"x\":"
             + "{\"type\":\"array\",\"items\":\"string\"}},\"required\":[],"
-            + "\"additionalProperties\":false}}]}";
+            + "\"additionalProperties\":false}}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("items"));
@@ -419,7 +427,7 @@ class DaemonToolCapabilitiesCodecTest {
         "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{\"x\":"
-            + "{\"type\":\"string\"}},\"required\":[\"y\"],\"additionalProperties\":false}}]}";
+            + "{\"type\":\"string\"}},\"required\":[\"y\"],\"additionalProperties\":false}}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("not declared in 'properties'"));
@@ -434,7 +442,7 @@ class DaemonToolCapabilitiesCodecTest {
         "{\"tools\":[{\"name\":\"1bad\",\"version\":\"1\",\"description\":\"d\","
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":{\"type\":\"object\",\"properties\":{},"
-            + "\"required\":[],\"additionalProperties\":false}}]}";
+            + "\"required\":[],\"additionalProperties\":false}}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("descriptor validation failed"));
@@ -447,7 +455,7 @@ class DaemonToolCapabilitiesCodecTest {
         "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":-1,\"inputSchema\":{\"type\":\"object\",\"properties\":{},"
-            + "\"required\":[],\"additionalProperties\":false}}]}";
+            + "\"required\":[],\"additionalProperties\":false}}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("timeoutMillis"));
@@ -463,13 +471,14 @@ class DaemonToolCapabilitiesCodecTest {
   @Test
   void decodeRejectsNonArrayTools() {
     DaemonProtocolException error =
-        assertThrows(DaemonProtocolException.class, () -> codec.decode("{\"tools\":{}}"));
+        assertThrows(
+            DaemonProtocolException.class, () -> codec.decode("{\"tools\":{},\"skills\":[]}"));
     assertTrue(error.getMessage().contains("'tools' must be an array"));
   }
 
   @Test
   void rejectsMissingDescriptorFields() {
-    String json = "{\"tools\":[{\"name\":\"a\",\"version\":\"1\"}]}";
+    String json = "{\"tools\":[{\"name\":\"a\",\"version\":\"1\"}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("description"));
@@ -480,7 +489,7 @@ class DaemonToolCapabilitiesCodecTest {
     String json =
         "{\"tools\":[{\"name\":\"a\",\"version\":\"1\",\"description\":\"d\","
             + "\"rendererKey\":\"r\",\"executionMode\":\"ENVIRONMENT\",\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0}]}";
+            + "\"timeoutMillis\":0}],\"skills\":[]}";
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
     assertTrue(error.getMessage().contains("inputSchema"));
@@ -488,10 +497,45 @@ class DaemonToolCapabilitiesCodecTest {
 
   @Test
   void roundTripPreservesEmptyCapabilitiesAsCanonicalText() {
-    String first = codec.encode(new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of()));
+    String first =
+        codec.encode(new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(), List.of()));
     DaemonToolCapabilitiesCodec.DaemonToolCapabilities decoded = codec.decode(first);
     String second = codec.encode(decoded);
     assertEquals(first, second);
+  }
+
+  @Test
+  void roundTripsSkillsAlongsideTools() {
+    ToolDescriptor tool = tool("shell", "1");
+    DaemonSkillDescriptor skill = new DaemonSkillDescriptor("dev", "Developer rules");
+    String json =
+        codec.encode(
+            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(tool), List.of(skill)));
+    DaemonToolCapabilitiesCodec.DaemonToolCapabilities decoded = codec.decode(json);
+    assertEquals(1, decoded.tools().size());
+    assertEquals(1, decoded.skills().size());
+    assertEquals("dev", decoded.skills().get(0).name());
+    assertEquals("Developer rules", decoded.skills().get(0).description());
+    assertTrue(
+        json.contains("\"skills\":[{\"name\":\"dev\",\"description\":\"Developer rules\"}]"));
+  }
+
+  @Test
+  void constructorRejectsDuplicateSkillNames() {
+    DaemonSkillDescriptor a = new DaemonSkillDescriptor("dev", "one");
+    DaemonSkillDescriptor b = new DaemonSkillDescriptor("dev", "two");
+    DaemonProtocolException error =
+        assertThrows(
+            DaemonProtocolException.class,
+            () -> new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(), List.of(a, b)));
+    assertTrue(error.getMessage().contains("duplicate CAPABILITIES skill"));
+  }
+
+  @Test
+  void decodeRejectsMissingSkillsField() {
+    DaemonProtocolException error =
+        assertThrows(DaemonProtocolException.class, () -> codec.decode("{\"tools\":[]}"));
+    assertTrue(error.getMessage().contains("skills"));
   }
 
   private static ToolDescriptor sampleDescriptor() {
