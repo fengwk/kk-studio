@@ -1,7 +1,23 @@
 /**
  * Cloud 与 Environment Daemon 共享的 WebSocket JSON wire 协议。
  *
- * <p>Envelope 只描述传输顺序和关联标识；具体 payload 在协议版本内按 message type 解释。
+ * <p>Envelope 只描述传输顺序和关联标识；具体 payload 在协议版本内按 message type 解释。scope 字段为实时唯一 {@code
+ * environmentName}，不再使用持久数值 environment id。
+ *
+ * <p>v1 {@code CAPABILITIES} payload 由 {@link
+ * fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec} 编解码，形状为 {@code
+ * {"tools":[...],"skills":[{"name","description"}]}}。skills 只暴露短摘要，不包含本地路径或正文。
+ *
+ * <p>v1 Skill 加载消息：
+ *
+ * <ul>
+ *   <li>{@code LOAD_SKILL}：gateway → daemon，payload {@code {"name":string}}，必须带 {@code
+ *       invocationId}；
+ *   <li>{@code SKILL_LOADED}：daemon → gateway，payload {@code
+ *       {"name":string,"content":string}}，content 为完整 SKILL.md 正文；
+ *   <li>{@code SKILL_LOAD_FAILED}：daemon → gateway，payload {@code
+ *       {"name":string,"message":string}}。
+ * </ul>
  *
  * <p>v1 result payload（{@code PARTIAL} / {@code COMPLETED}）由 {@link
  * fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec} 编解码。{@code contents} 数组中每个元素为单一对象：

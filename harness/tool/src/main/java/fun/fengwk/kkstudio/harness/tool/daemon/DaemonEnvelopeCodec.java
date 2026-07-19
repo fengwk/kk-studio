@@ -18,14 +18,19 @@ public final class DaemonEnvelopeCodec {
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final Set<String> ENVELOPE_FIELDS =
       Set.of(
-          "protocolVersion", "messageType", "environmentId", "invocationId", "sequence", "payload");
+          "protocolVersion",
+          "messageType",
+          "environmentName",
+          "invocationId",
+          "sequence",
+          "payload");
 
   /** 将 envelope 编码为协议规定的 JSON 字段。 */
   public String encode(DaemonEnvelope envelope) {
     ObjectNode root = OBJECT_MAPPER.createObjectNode();
     root.put("protocolVersion", envelope.protocolVersion());
     root.put("messageType", envelope.messageType().name());
-    root.put("environmentId", envelope.environmentId());
+    root.put("environmentName", envelope.environmentName());
     if (envelope.invocationId() != null) {
       root.put("invocationId", envelope.invocationId());
     }
@@ -65,7 +70,7 @@ public final class DaemonEnvelopeCodec {
     return new DaemonEnvelope(
         protocolVersion,
         messageType,
-        requiredText(root, "environmentId"),
+        requiredText(root, "environmentName"),
         invocationId,
         sequence,
         writeJson(payload));
