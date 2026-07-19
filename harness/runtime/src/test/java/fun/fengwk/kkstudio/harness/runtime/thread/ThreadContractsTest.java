@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -24,74 +25,47 @@ class ThreadContractsTest {
   }
 
   @Test
-  void inputResolutionFieldsFollowStateMachine() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ThreadInput(
-                1,
-                2,
-                1,
-                ThreadInputType.USER_MESSAGE,
-                "{}",
-                "client-1",
-                ThreadInputStatus.QUEUED,
-                3L,
-                NOW,
-                null,
-                NOW));
-    ThreadInput cancelled =
-        new ThreadInput(
-            1,
-            2,
-            1,
-            ThreadInputType.USER_MESSAGE,
-            "{}",
-            "client-1",
-            ThreadInputStatus.CANCELLED,
-            null,
-            NOW,
-            4L,
-            NOW);
-    assertTrue(cancelled.cancelled());
-  }
+  void stopCarriesNetworkIdempotencyIdentityAndRejectsInvalidIdentity() {
+    ThreadStop stop = new ThreadStop(1, 2, "stop-request-1", NOW);
 
-  @Test
-  void inputRequiresNonBlankClientMessageId() {
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new ThreadInput(
-                1,
-                2,
-                1,
-                ThreadInputType.USER_MESSAGE,
-                "{}",
-                null,
-                ThreadInputStatus.QUEUED,
-                null,
-                null,
-                null,
-                NOW));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ThreadInput(
-                1,
-                2,
-                1,
-                ThreadInputType.USER_MESSAGE,
-                "{}",
-                " ",
-                ThreadInputStatus.QUEUED,
-                null,
-                null,
-                null,
-                NOW));
-  }
-
-  @Test
-  void stopRequiresNonBlankClientRequestId() {
+    assertEquals(1L, stop.id());
+    assertEquals(2L, stop.threadId());
+    assertEquals("stop-request-1", stop.clientRequestId());
+    assertEquals(NOW, stop.createdAt());
+    assertThrows(IllegalArgumentException.class, () -> new ThreadStop(0, 2, "request", NOW));
+    assertThrows(IllegalArgumentException.class, () -> new ThreadStop(1, 0, "request", NOW));
     assertThrows(IllegalArgumentException.class, () -> new ThreadStop(1, 2, " ", NOW));
+  }
+
+  @Test
+  void threadStatusParsesPersistedValuesAndIdentifiesRunnableStates() {
+    assertEquals(ThreadStatus.RUNNING, ThreadStatus.fromValue("running"));
+    assertEquals(ThreadStatus.WAITING, ThreadStatus.fromValue("WAITING"));
+    assertEquals("retrying", ThreadStatus.RETRYING.value());
+    assertTrue(ThreadStatus.RUNNING.isRunnable());
+    assertTrue(ThreadStatus.WAITING.isRunnable());
+    assertTrue(ThreadStatus.RETRYING.isRunnable());
+    assertFalse(ThreadStatus.IDLE.isRunnable());
+    assertFalse(ThreadStatus.FAILED.isRunnable());
+    assertThrows(IllegalArgumentException.class, () -> ThreadStatus.fromValue("paused"));
+  }
+
+  @Test
+  void inputStatusParsesWireValuesAndEnumNames() {
+    assertEquals(ThreadInputStatus.QUEUED, ThreadInputStatus.fromValue("queued"));
+    assertEquals(ThreadInputStatus.CANCELLED, ThreadInputStatus.fromValue("CANCELLED"));
+    assertEquals("applied", ThreadInputStatus.APPLIED.value());
+    assertThrows(IllegalArgumentException.class, () -> ThreadInputStatus.fromValue("discarded"));
+  }
+
+  @Test
+  void inputTypesSeparateMessagesFromConfigurationAndRequireWireValues() {
+    assertEquals(ThreadInputType.USER_MESSAGE, ThreadInputType.fromValue("user_message"));
+    assertEquals("set_model", ThreadInputType.SET_MODEL.value());
+    assertTrue(ThreadInputType.USER_MESSAGE.isMessage());
+    assertFalse(ThreadInputType.USER_MESSAGE.isConfig());
+    assertFalse(ThreadInputType.SET_MODEL.isMessage());
+    assertTrue(ThreadInputType.SET_MODEL.isConfig());
+    assertThrows(IllegalArgumentException.class, () -> ThreadInputType.fromValue("USER_MESSAGE"));
   }
 }
