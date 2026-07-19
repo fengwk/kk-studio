@@ -88,7 +88,6 @@ public class StudioChatControllerTest {
           .andExpect(jsonPath("$.data.defaultAgentId").value("1"));
 
       HarnessSessionCreateDTO sessionCreate = new HarnessSessionCreateDTO();
-      sessionCreate.setAgentDefinitionId("1");
       sessionCreate.setTitle("web-session");
       sessionCreate.setYoloEnabled(false);
       MvcResult sessionResult =

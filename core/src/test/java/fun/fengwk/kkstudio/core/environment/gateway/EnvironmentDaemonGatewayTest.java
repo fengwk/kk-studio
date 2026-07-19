@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -17,9 +17,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
-import fun.fengwk.kkstudio.core.environment.service.ToolEnvironmentCapabilityApplicationService;
-import fun.fengwk.kkstudio.core.environment.service.model.ToolEnvironment;
+import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.core.harness.tool.worker.DatabaseEnvironmentToolInvocationWorkerStore;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
@@ -60,7 +58,7 @@ import java.util.Set;
 /** Unit contracts for the transport-neutral durable Environment Daemon gateway. */
 class EnvironmentDaemonGatewayTest {
 
-  private static final long ENVIRONMENT_ID = 42L;
+  private static final String ENVIRONMENT_NAME = "env-42";
   private static final long INVOCATION_ID = 9001L;
   private static final Instant NOW = Instant.parse("2026-07-17T00:00:00Z");
   private static final String GATEWAY_TOKEN = "gateway-test-token";
@@ -87,9 +85,6 @@ class EnvironmentDaemonGatewayTest {
     assertEquals(Long.toString(INVOCATION_ID), invoke.invocationId());
     assertTrue(invoke.payloadJson().contains("\"toolName\":\"read\""));
     assertTrue(invoke.payloadJson().contains("\"timeoutMillis\":"));
-    verify(fixture.capabilityService).heartbeat(Long.toString(ENVIRONMENT_ID));
-    verify(fixture.capabilityService)
-        .updateCapabilities(Long.toString(ENVIRONMENT_ID), fixture.capabilitiesJson);
     verify(fixture.transactions).start(eq(fixture.claimed), eq(NOW));
 
     fixture.gateway.receive(connection.connectionId(), started(3));
@@ -145,7 +140,7 @@ class EnvironmentDaemonGatewayTest {
   @Test
   void dropsActiveHandleWhenPartialCannotBePersisted() {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY, false);
-    when(fixture.invocationStore.claimDue(eq(ENVIRONMENT_ID), anyString(), eq(NOW), any()))
+    when(fixture.invocationStore.claimDue(eq(ENVIRONMENT_NAME), anyString(), eq(NOW), any()))
         .thenReturn(Optional.of(fixture.claimed), Optional.empty());
     when(fixture.transactions.appendPartial(eq(fixture.claimed), any(), eq(NOW))).thenReturn(false);
     FakeConnection connection = new FakeConnection("connection-lost-partial-lease");
@@ -167,7 +162,7 @@ class EnvironmentDaemonGatewayTest {
 
     verify(fixture.transactions).appendPartial(eq(fixture.claimed), any(), eq(NOW));
     verify(fixture.invocationStore, times(2))
-        .claimDue(eq(ENVIRONMENT_ID), anyString(), eq(NOW), any());
+        .claimDue(eq(ENVIRONMENT_NAME), anyString(), eq(NOW), any());
     verify(fixture.transactions, never())
         .terminate(eq(fixture.claimed), any(), any(), any(), any());
   }
@@ -187,7 +182,6 @@ class EnvironmentDaemonGatewayTest {
     assertTrue(first.closed);
     fixture.gateway.receive(replacement.connectionId(), hello(0));
     assertFalse(replacement.closed);
-    verify(fixture.capabilityService).heartbeat(Long.toString(ENVIRONMENT_ID));
   }
 
   /**
@@ -267,7 +261,7 @@ class EnvironmentDaemonGatewayTest {
     Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT, true);
     ToolInvocation cancelled = withStatus(fixture.invocation, ToolInvocationStatus.RUNNING);
     ClaimedToolInvocation claimed = new ClaimedToolInvocation(cancelled, true);
-    when(fixture.invocationStore.claimDue(eq(ENVIRONMENT_ID), anyString(), eq(NOW), any()))
+    when(fixture.invocationStore.claimDue(eq(ENVIRONMENT_NAME), anyString(), eq(NOW), any()))
         .thenReturn(Optional.of(claimed));
     FakeConnection connection = new FakeConnection("connection-recovered-cancelled");
     fixture.gateway.open(connection);
@@ -291,7 +285,7 @@ class EnvironmentDaemonGatewayTest {
     Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT, true);
     ToolInvocation expired = withDeadline(fixture.invocation, NOW.minusMillis(1));
     ClaimedToolInvocation claimed = new ClaimedToolInvocation(expired, true);
-    when(fixture.invocationStore.claimDue(eq(ENVIRONMENT_ID), anyString(), eq(NOW), any()))
+    when(fixture.invocationStore.claimDue(eq(ENVIRONMENT_NAME), anyString(), eq(NOW), any()))
         .thenReturn(Optional.of(claimed));
     FakeConnection connection = new FakeConnection("connection-recovered-expired");
     fixture.gateway.open(connection);
@@ -313,7 +307,6 @@ class EnvironmentDaemonGatewayTest {
   @Test
   void prioritizesRecoveredNonIdempotentOverDescriptorAvailability() {
     Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT, true);
-    when(fixture.environmentRepository.getById(ENVIRONMENT_ID)).thenReturn(null);
     FakeConnection connection = new FakeConnection("connection-recovered-unavailable");
     fixture.gateway.open(connection);
     fixture.gateway.receive(connection.connectionId(), hello(0));
@@ -327,7 +320,6 @@ class EnvironmentDaemonGatewayTest {
             any(ToolResult.class),
             eq("non-idempotent invocation lease expired"),
             eq(NOW));
-    verify(fixture.environmentRepository, never()).getById(ENVIRONMENT_ID);
     assertFalse(messageTypes(connection.envelopes()).contains(DaemonMessageType.INVOKE));
   }
 
@@ -347,7 +339,6 @@ class EnvironmentDaemonGatewayTest {
     fixture.gateway.receive(connection.connectionId(), heartbeat(4));
     fixture.gateway.receive(connection.connectionId(), failed(5, "remote tool failed"));
 
-    verify(fixture.capabilityService, times(2)).heartbeat(Long.toString(ENVIRONMENT_ID));
     verify(fixture.transactions)
         .terminate(
             eq(fixture.claimed),
@@ -358,20 +349,20 @@ class EnvironmentDaemonGatewayTest {
   }
 
   /**
-   * A second HELLO for one Environment replaces the old connection, while invalid phase ordering
-   * closes only the offender.
+   * First connected name wins: a later same-name HELLO is rejected without displacing the original,
+   * while invalid phase ordering closes only the offender.
    */
   @Test
-  void replacesEnvironmentConnectionAndRejectsInvalidPhaseOrder() {
+  void rejectsLaterSameNameHelloAndInvalidPhaseOrder() {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY, false);
     FakeConnection first = new FakeConnection("connection-first");
-    FakeConnection replacement = new FakeConnection("connection-replacement");
+    FakeConnection later = new FakeConnection("connection-later");
     fixture.gateway.open(first);
     fixture.gateway.receive(first.connectionId(), hello(0));
-    fixture.gateway.open(replacement);
-    fixture.gateway.receive(replacement.connectionId(), hello(0));
-    assertTrue(first.closed);
-    assertFalse(replacement.closed);
+    fixture.gateway.open(later);
+    fixture.gateway.receive(later.connectionId(), hello(0));
+    assertFalse(first.closed);
+    assertTrue(later.closed);
 
     FakeConnection invalid = new FakeConnection("connection-invalid-phase");
     fixture.gateway.open(invalid);
@@ -395,7 +386,6 @@ class EnvironmentDaemonGatewayTest {
             "{\"daemonId\":\"daemon-a\",\"protocolVersion\":1,\"gatewayToken\":\"wrong\"}"));
 
     assertTrue(connection.closed);
-    verify(fixture.capabilityService, never()).heartbeat(anyString());
   }
 
   /**
@@ -407,7 +397,7 @@ class EnvironmentDaemonGatewayTest {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY, false);
     ToolInvocation expired = withDeadline(fixture.invocation, NOW);
     ClaimedToolInvocation expiredClaimed = new ClaimedToolInvocation(expired, false);
-    when(fixture.invocationStore.claimDue(eq(ENVIRONMENT_ID), anyString(), eq(NOW), any()))
+    when(fixture.invocationStore.claimDue(eq(ENVIRONMENT_NAME), anyString(), eq(NOW), any()))
         .thenReturn(Optional.of(expiredClaimed));
     when(fixture.transactions.terminate(eq(expiredClaimed), any(), any(), any(), eq(NOW)))
         .thenReturn(true);
@@ -435,7 +425,7 @@ class EnvironmentDaemonGatewayTest {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY, false);
     ClaimedToolInvocation malformedClaimed =
         new ClaimedToolInvocation(withArguments(fixture.invocation, "[]"), false);
-    when(fixture.invocationStore.claimDue(eq(ENVIRONMENT_ID), anyString(), eq(NOW), any()))
+    when(fixture.invocationStore.claimDue(eq(ENVIRONMENT_NAME), anyString(), eq(NOW), any()))
         .thenReturn(Optional.of(malformedClaimed));
     when(fixture.transactions.terminate(eq(malformedClaimed), any(), any(), any(), eq(NOW)))
         .thenReturn(true);
@@ -483,7 +473,7 @@ class EnvironmentDaemonGatewayTest {
     ClaimedToolInvocation cancelledClaimed =
         new ClaimedToolInvocation(
             withStatus(fixture.invocation, ToolInvocationStatus.CANCEL_REQUESTED), false);
-    when(fixture.invocationStore.claimDue(eq(ENVIRONMENT_ID), anyString(), eq(NOW), any()))
+    when(fixture.invocationStore.claimDue(eq(ENVIRONMENT_NAME), anyString(), eq(NOW), any()))
         .thenReturn(Optional.of(cancelledClaimed));
     when(fixture.transactions.terminate(eq(cancelledClaimed), any(), any(), any(), eq(NOW)))
         .thenReturn(true);
@@ -510,14 +500,13 @@ class EnvironmentDaemonGatewayTest {
   @Test
   void failsWhenEnvironmentNoLongerAdvertisesFrozenCapability() {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY, false);
-    ToolEnvironment emptyCapabilities = new ToolEnvironment();
-    emptyCapabilities.setId(ENVIRONMENT_ID);
-    emptyCapabilities.setCapabilitiesJson("{\"tools\":[]}");
-    when(fixture.environmentRepository.getById(ENVIRONMENT_ID)).thenReturn(emptyCapabilities);
+    String emptyCapabilitiesJson =
+        capabilitiesCodec.encode(
+            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(), List.of()));
     FakeConnection connection = new FakeConnection("connection-capability-lost");
     fixture.gateway.open(connection);
     fixture.gateway.receive(connection.connectionId(), hello(0));
-    fixture.gateway.receive(connection.connectionId(), capabilities(1, fixture.capabilitiesJson));
+    fixture.gateway.receive(connection.connectionId(), capabilities(1, emptyCapabilitiesJson));
     fixture.gateway.receive(connection.connectionId(), ready(2));
 
     verify(fixture.transactions)
@@ -597,12 +586,12 @@ class EnvironmentDaemonGatewayTest {
         mismatch.connectionId(),
         envelopeForEnvironment(
             DaemonMessageType.CAPABILITIES,
-            Long.toString(ENVIRONMENT_ID + 1),
+            ENVIRONMENT_NAME + "-other",
             null,
             1,
             fixture.capabilitiesJson));
     assertTrue(mismatch.closed);
-    verify(fixture.invocationStore, never()).claimDue(anyLong(), anyString(), any(), any());
+    verify(fixture.invocationStore, never()).claimDue(anyString(), anyString(), any(), any());
   }
 
   /** READY and STARTED payload shapes are strict even after a valid handshake. */
@@ -669,16 +658,13 @@ class EnvironmentDaemonGatewayTest {
         wrongDirection.connectionId(),
         envelope(DaemonMessageType.INVOKE, Long.toString(INVOCATION_ID), 0, "{}"));
     assertTrue(wrongDirection.closed);
-    verify(fixture.capabilityService, never()).heartbeat(anyString());
-    verify(fixture.invocationStore, never()).claimDue(anyLong(), anyString(), any(), any());
+    verify(fixture.invocationStore, never()).claimDue(anyString(), anyString(), any(), any());
 
     FakeConnection sequence = new FakeConnection("connection-sequence");
     fixture.gateway.open(sequence);
     fixture.gateway.receive(sequence.connectionId(), hello(0));
     fixture.gateway.receive(sequence.connectionId(), capabilities(2, fixture.capabilitiesJson));
     assertTrue(sequence.closed);
-    verify(fixture.capabilityService, never())
-        .updateCapabilities(Long.toString(ENVIRONMENT_ID), fixture.capabilitiesJson);
   }
 
   private Fixture fixture(ToolSideEffect sideEffect, boolean recovered) {
@@ -687,9 +673,7 @@ class EnvironmentDaemonGatewayTest {
 
   private Fixture fixture(
       ToolSideEffect sideEffect, boolean recovered, ToolInterceptorChain interceptorChain) {
-    ToolEnvironmentRepository environmentRepository = mock(ToolEnvironmentRepository.class);
-    ToolEnvironmentCapabilityApplicationService capabilityService =
-        mock(ToolEnvironmentCapabilityApplicationService.class);
+    LiveEnvironmentRegistry environmentRegistry = new LiveEnvironmentRegistry(capabilitiesCodec);
     DatabaseEnvironmentToolInvocationWorkerStore invocationStore =
         mock(DatabaseEnvironmentToolInvocationWorkerStore.class);
     ToolInvocationTransactions transactions = mock(ToolInvocationTransactions.class);
@@ -697,15 +681,12 @@ class EnvironmentDaemonGatewayTest {
     ToolDescriptor descriptor = descriptor(sideEffect);
     String capabilitiesJson =
         capabilitiesCodec.encode(
-            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(descriptor)));
-    ToolEnvironment environment = new ToolEnvironment();
-    environment.setId(ENVIRONMENT_ID);
-    environment.setCapabilitiesJson(capabilitiesJson);
-    when(environmentRepository.getById(ENVIRONMENT_ID)).thenReturn(environment);
+            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(descriptor), List.of()));
     ToolInvocation invocation = invocation(sideEffect);
     ClaimedToolInvocation claimed = new ClaimedToolInvocation(invocation, recovered);
-    when(invocationStore.claimDue(eq(ENVIRONMENT_ID), anyString(), eq(NOW), any()))
+    when(invocationStore.claimDue(eq(ENVIRONMENT_NAME), anyString(), eq(NOW), any()))
         .thenReturn(Optional.of(claimed));
+    when(invocationStore.listDueEnvironmentCandidates(eq(NOW), anyInt())).thenReturn(List.of());
     when(transactions.start(eq(claimed), eq(NOW))).thenReturn(true);
     when(transactions.appendPartial(eq(claimed), any(), eq(NOW))).thenReturn(true);
     when(transactions.terminate(eq(claimed), any(), any(), any(), eq(NOW))).thenReturn(true);
@@ -718,8 +699,7 @@ class EnvironmentDaemonGatewayTest {
     gatewayProperties.setDaemonToken(GATEWAY_TOKEN);
     EnvironmentDaemonGateway gateway =
         new EnvironmentDaemonGateway(
-            environmentRepository,
-            capabilityService,
+            environmentRegistry,
             invocationStore,
             transactions,
             interceptorChain,
@@ -732,8 +712,7 @@ class EnvironmentDaemonGatewayTest {
             Clock.fixed(NOW, ZoneOffset.UTC));
     return new Fixture(
         gateway,
-        environmentRepository,
-        capabilityService,
+        environmentRegistry,
         invocationStore,
         transactions,
         artifactStore,
@@ -752,14 +731,14 @@ class EnvironmentDaemonGatewayTest {
         "read",
         "1",
         ToolTargetType.ENVIRONMENT,
-        ENVIRONMENT_ID,
+        ENVIRONMENT_NAME,
         "{}",
         ToolInvocationStatus.RUNNING,
         PermissionAction.ALLOW,
         null,
         sideEffect,
         NOW.plusSeconds(60),
-        "gateway-test-environment-42",
+        "gateway-test-environment-env-42",
         NOW.plusSeconds(30),
         null,
         null,
@@ -780,7 +759,7 @@ class EnvironmentDaemonGatewayTest {
         source.toolName(),
         source.toolVersion(),
         source.targetType(),
-        source.environmentId(),
+        source.environmentName(),
         source.argumentsJson(),
         status,
         source.permissionAction(),
@@ -808,7 +787,7 @@ class EnvironmentDaemonGatewayTest {
         source.toolName(),
         source.toolVersion(),
         source.targetType(),
-        source.environmentId(),
+        source.environmentName(),
         source.argumentsJson(),
         source.status(),
         source.permissionAction(),
@@ -836,7 +815,7 @@ class EnvironmentDaemonGatewayTest {
         source.toolName(),
         source.toolVersion(),
         source.targetType(),
-        source.environmentId(),
+        source.environmentName(),
         argumentsJson,
         source.status(),
         source.permissionAction(),
@@ -923,19 +902,23 @@ class EnvironmentDaemonGatewayTest {
 
   private String envelope(
       DaemonMessageType messageType, String invocationId, long sequence, String payload) {
-    return envelopeForEnvironment(
-        messageType, Long.toString(ENVIRONMENT_ID), invocationId, sequence, payload);
+    return envelopeForEnvironment(messageType, ENVIRONMENT_NAME, invocationId, sequence, payload);
   }
 
   private String envelopeForEnvironment(
       DaemonMessageType messageType,
-      String environmentId,
+      String environmentName,
       String invocationId,
       long sequence,
       String payload) {
     return envelopeCodec.encode(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_1, messageType, environmentId, invocationId, sequence, payload));
+            DaemonProtocol.VERSION_1,
+            messageType,
+            environmentName,
+            invocationId,
+            sequence,
+            payload));
   }
 
   private List<DaemonMessageType> messageTypes(List<DaemonEnvelope> envelopes) {
@@ -988,8 +971,7 @@ class EnvironmentDaemonGatewayTest {
 
   private record Fixture(
       EnvironmentDaemonGateway gateway,
-      ToolEnvironmentRepository environmentRepository,
-      ToolEnvironmentCapabilityApplicationService capabilityService,
+      LiveEnvironmentRegistry environmentRegistry,
       DatabaseEnvironmentToolInvocationWorkerStore invocationStore,
       ToolInvocationTransactions transactions,
       ArtifactStore artifactStore,
