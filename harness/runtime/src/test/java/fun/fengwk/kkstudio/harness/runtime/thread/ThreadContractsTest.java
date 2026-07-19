@@ -57,6 +57,40 @@ class ThreadContractsTest {
   }
 
   @Test
+  void inputRequiresNonBlankClientMessageId() {
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ThreadInput(
+                1,
+                2,
+                1,
+                ThreadInputType.USER_MESSAGE,
+                "{}",
+                null,
+                ThreadInputStatus.QUEUED,
+                null,
+                null,
+                null,
+                NOW));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadInput(
+                1,
+                2,
+                1,
+                ThreadInputType.USER_MESSAGE,
+                "{}",
+                " ",
+                ThreadInputStatus.QUEUED,
+                null,
+                null,
+                null,
+                NOW));
+  }
+
+  @Test
   void stopRequiresNonBlankClientRequestId() {
     assertThrows(IllegalArgumentException.class, () -> new ThreadStop(1, 2, " ", NOW));
   }

@@ -435,9 +435,6 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
         threadId, processorToken, thread.getHeadEntryId(), plannedAssistantEntryId, now)) {
       throw new ConcurrentModificationException("cannot advance head for tool preparation");
     }
-    if (!threadStore.updateStatus(threadId, processorToken, ThreadStatus.WAITING, now)) {
-      throw new ConcurrentModificationException("cannot mark thread waiting for tools");
-    }
     List<ThreadEventDraft> all = new ArrayList<>(events);
     for (PreparedToolInvocation item : prepared) {
       all.add(
@@ -512,11 +509,6 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
             .sorted((a, b) -> Integer.compare(a.getOrdinal(), b.getOrdinal()))
             .toList();
     if (forHead.isEmpty()) {
-      return false;
-    }
-    // If tool result entries already exist as children of head, skip.
-    if (!entryMapper.listChildren(thread.getSessionId(), thread.getHeadEntryId()).isEmpty()) {
-      // may already applied; treat as progressed if head advanced externally
       return false;
     }
     long parent = thread.getHeadEntryId();
@@ -726,7 +718,11 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
             new ThreadEventDraft(
                 ThreadEventType.THREAD_WAITING, ThreadEventPayloads.of("reason", reason))),
         now);
-    threadMapper.forceStatusAndClearProcessor(threadId, ThreadStatus.WAITING.name(), utc(now));
+    ThreadStatus waitingStatus =
+        ThreadStatus.RETRYING.name().equals(thread.getStatus())
+            ? ThreadStatus.RETRYING
+            : ThreadStatus.WAITING;
+    threadMapper.forceStatusAndClearProcessor(threadId, waitingStatus.name(), utc(now));
     return true;
   }
 

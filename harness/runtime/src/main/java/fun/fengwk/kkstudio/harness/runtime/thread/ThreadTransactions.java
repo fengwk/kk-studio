@@ -117,7 +117,10 @@ public interface ThreadTransactions {
   /** 仅在已成功偿还失败 Turn 且仍为 RETRYING 时切换为 RUNNING。 */
   boolean completeRetriedTurn(long threadId, String processorToken, Instant now);
 
-  /** 原子写入 WAITING 事件、状态并释放 token；返回 false 表示失去 fencing。 */
+  /**
+   * 原子写入 WAITING 事件并释放 token；普通 Tool chain 切至 WAITING，RETRYING Tool chain 保留 RETRYING debt。返回 false
+   * 表示失去 fencing。
+   */
   boolean waitForExternal(long threadId, String processorToken, String reason, Instant now);
 
   /**

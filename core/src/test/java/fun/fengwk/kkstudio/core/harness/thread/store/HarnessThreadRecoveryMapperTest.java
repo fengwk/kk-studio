@@ -57,7 +57,7 @@ class HarnessThreadRecoveryMapperTest {
     assertTrue(ids.contains(pendingNoToken), "pending input without token must be selected");
   }
 
-  /** RETRYING 必须由 recovery 再次 kick，FAILED 则只能等待显式 retry。 */
+  /** RETRYING debt 必须由 recovery 再次 kick，FAILED 则只能等待显式 retry。 */
   @Test
   void selectsRetryingWithoutTokenAndExcludesFailed() {
     LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
@@ -70,6 +70,22 @@ class HarnessThreadRecoveryMapperTest {
 
     assertTrue(ids.contains(retryingId), "retrying debt must be recoverable");
     assertFalse(ids.contains(failedId), "failed thread must await an explicit retry");
+  }
+
+  /** RETRYING Tool chain 等待审批时没有可推进工作，不能被 recovery 周期性自旋。 */
+  @Test
+  void excludesRetryingWaitingApprovalUntilToolBecomesDueOrTerminal() {
+    LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+    long retryingWaitingId = 7_106L;
+    insertThread(retryingWaitingId, "RETRYING", null, null, now);
+    insertWaitingApproval(9_002L, retryingWaitingId, retryingWaitingId + 2000, now);
+    insertPendingInput(8_003L, retryingWaitingId, 1L, now);
+
+    List<Long> ids = threadMapper.listRecoverableThreadIds(now, 100);
+
+    assertFalse(
+        ids.contains(retryingWaitingId),
+        "retrying waiting approval must ignore queued input until the Tool chain progresses");
   }
 
   private void insertThread(
