@@ -221,6 +221,11 @@ public class MysqlHarnessThreadStore
         row.getHeadEntryId(),
         ThreadStatus.fromValue(row.getStatus()),
         row.getInputSequence(),
+        row.getActiveAgentDefinitionId(),
+        row.getActiveAgentName(),
+        row.getModelId(),
+        row.getVariant(),
+        Boolean.TRUE.equals(row.getYoloEnabled()),
         row.getProcessorToken(),
         row.getProcessorUntil() == null ? null : row.getProcessorUntil().toInstant(ZoneOffset.UTC),
         row.getVersion(),
@@ -235,6 +240,11 @@ public class MysqlHarnessThreadStore
     row.setHeadEntryId(thread.headEntryId());
     row.setStatus(thread.status().name());
     row.setInputSequence(thread.inputSequence());
+    row.setActiveAgentDefinitionId(thread.activeAgentDefinitionId());
+    row.setActiveAgentName(thread.activeAgentName());
+    row.setModelId(thread.modelId());
+    row.setVariant(thread.variant());
+    row.setYoloEnabled(thread.yoloEnabled());
     row.setProcessorToken(thread.processorToken());
     row.setProcessorUntil(thread.processorUntil() == null ? null : utc(thread.processorUntil()));
     row.setVersion(thread.version());

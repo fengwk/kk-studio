@@ -9,7 +9,6 @@ import fun.fengwk.kkstudio.share.model.HarnessThreadMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadModelSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadStopResultDTO;
-import fun.fengwk.kkstudio.share.model.HarnessThreadToolsetSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadYoloSetDTO;
 
 /** Session 内 branch Thread 创建和 typed mailbox 命令。 */
@@ -21,15 +20,13 @@ public interface HarnessThreadCommandService {
   HarnessThreadInputDTO submitCustomMessage(
       String threadId, HarnessThreadCustomMessageCreateDTO createDTO);
 
-  /** 排队 SET_YOLO；Processor 在 turn 边界应用。 */
+  /** 排队 SET_YOLO；Processor 在消息边界有序应用。 */
   HarnessThreadInputDTO queueYolo(String threadId, HarnessThreadYoloSetDTO request);
 
-  /** 排队 SET_AGENT（解析冻结 snapshot）；Processor 在 turn 边界应用。 */
+  /** 排队 SET_AGENT（仅 id/name）；Processor 应用时加载当前 AgentDefinition。 */
   HarnessThreadInputDTO queueAgent(String threadId, HarnessThreadAgentSetDTO request);
 
   HarnessThreadInputDTO queueModel(String threadId, HarnessThreadModelSetDTO request);
-
-  HarnessThreadInputDTO queueToolset(String threadId, HarnessThreadToolsetSetDTO request);
 
   HarnessThreadStopResultDTO stop(String threadId, HarnessThreadStopDTO request);
 

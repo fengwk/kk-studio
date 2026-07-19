@@ -25,6 +25,21 @@ public class HarnessThreadDTO {
   /** 已分配 input sequence 高水位。 */
   private Long inputSequence;
 
+  /** 当前 AgentDefinition id（可空）。 */
+  private String activeAgentDefinitionId;
+
+  /** 当前 Agent 名称（可空）。 */
+  private String activeAgentName;
+
+  /** Thread 级 model id（可空）。 */
+  private String modelId;
+
+  /** Thread 级 model variant（可空）。 */
+  private String variant;
+
+  /** Thread 级 YOLO。 */
+  private Boolean yoloEnabled;
+
   /** 是否正在被 Processor 持有（token 未过期）。 */
   private Boolean processing;
 

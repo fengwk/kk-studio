@@ -95,6 +95,7 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
   private final SessionEntryStore entryStore;
   private final ThreadToolPort toolPort;
   private final SessionContextBuilder contextBuilder;
+  private final ThreadRuntimeConfigResolver runtimeConfigResolver;
   private final ProviderMessageProjector messageProjector;
   private final TurnResourceResolver resourceResolver;
   private final CompactionService compactionService;
@@ -136,6 +137,7 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
       SessionEntryStore entryStore,
       ThreadToolPort toolPort,
       SessionContextBuilder contextBuilder,
+      ThreadRuntimeConfigResolver runtimeConfigResolver,
       ProviderMessageProjector messageProjector,
       TurnResourceResolver resourceResolver,
       CompactionService compactionService,
@@ -152,6 +154,8 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
     this.entryStore = Objects.requireNonNull(entryStore, "entryStore");
     this.toolPort = Objects.requireNonNull(toolPort, "toolPort");
     this.contextBuilder = Objects.requireNonNull(contextBuilder, "contextBuilder");
+    this.runtimeConfigResolver =
+        Objects.requireNonNull(runtimeConfigResolver, "runtimeConfigResolver");
     this.messageProjector = Objects.requireNonNull(messageProjector, "messageProjector");
     this.resourceResolver = Objects.requireNonNull(resourceResolver, "resourceResolver");
     this.compactionService = Objects.requireNonNull(compactionService, "compactionService");
@@ -575,8 +579,10 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
     SessionContext context;
     TurnResources resources;
     try {
-      // Context 是当前 root->head Entry path 经默认与 extension transform 后的语义快照。
-      context = contextBuilder.build(thread.sessionId(), thread.headEntryId());
+      // 运行时配置来自 Thread 状态 + 当前 AgentDefinition；消息路径只负责 transcript/compaction 投影。
+      context =
+          contextBuilder.build(
+              thread.sessionId(), thread.headEntryId(), runtimeConfigResolver.resolve(thread));
       // 将配置解析为本 Turn 不可变的 provider/model/tool/environment snapshot，避免流中途读到新配置。
       resources = resourceResolver.resolve(thread.sessionId(), thread.id(), context.config());
     } catch (RuntimeException error) {

@@ -68,7 +68,7 @@ frontend → web APIs (via shared/api)
 | **Entry** | 语义持久真源：消息、Agent Snapshot、Tool Result、Compaction |
 | **AgentThread** | durable Branch actor：`sessionId`、`headEntryId`、input sequence、状态、processor token/until/version；Agent、Model、Toolset 与 YOLO 由 Entry path fold 得出 |
 | **Branch(thread)** | 由 root→`headEntryId` 路径派生，不独立持久化；多 Thread 可共享 head 后自然分叉 |
-| **ThreadInput** | 多生产者有序 mailbox：消息与 `SET_AGENT` / `SET_MODEL` / `SET_TOOLSET` / `SET_YOLO`；`clientMessageId` 幂等；一次 Harvest 可应用多个 Input |
+| **ThreadInput** | 多生产者有序 mailbox：消息与 `SET_AGENT` / `SET_MODEL` / `SET_YOLO`；`clientMessageId` 幂等；一次 Harvest 可应用多个 Input |
 | **ThreadStop** | Stop 网络幂等回执，以及被取消 mailbox Input 的关联 |
 | **ThreadEvent** | Thread 级 journal / 可观测覆盖层；全局十进制 `eventId` 作 SSE cursor |
 | **ToolInvocation** | 工具权限、lease、结果与终态；ID 是副作用幂等边界 |

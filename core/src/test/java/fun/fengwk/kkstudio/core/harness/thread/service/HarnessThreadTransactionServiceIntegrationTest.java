@@ -19,23 +19,19 @@ import fun.fengwk.kkstudio.core.harness.thread.store.MysqlHarnessThreadStore;
 import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadEventMapper;
 import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadInputMapper;
 import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadMapper;
+import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadDO;
+import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadEventDO;
 import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadInputDO;
 import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentChangeEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshotEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.CustomMessageEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.ModelChangeEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolsetChangeEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.YoloChangeEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventDraft;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventType;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
@@ -54,6 +50,8 @@ import java.util.List;
 @Transactional
 class HarnessThreadTransactionServiceIntegrationTest {
   private static final SessionEntryJsonCodec ENTRY_CODEC = new SessionEntryJsonCodec();
+  private static final long SEED_AGENT_ID = 1L;
+  private static final String SEED_AGENT_NAME = "default-assistant";
 
   @Autowired private ThreadTransactions transactions;
   @Autowired private MysqlHarnessThreadStore threadStore;
@@ -63,29 +61,27 @@ class HarnessThreadTransactionServiceIntegrationTest {
   @Autowired private HarnessThreadEventMapper eventMapper;
   @Autowired private ToolInvocationMapper invocationMapper;
 
-  /** Creation persists both root shapes and rejects unknown Session/Entry branch origins. */
   @Test
-  void createsBothRootShapesAndRejectsUnknownBranchOrigins() {
+  void createsAgentlessRootAndRejectsUnknownBranchOrigins() {
     Instant now = Instant.parse("2026-02-01T00:00:00Z");
-    ThreadTransactions.SessionCreateResult plain =
-        transactions.createSession(101L, "plain", snapshot("plain"), false, now);
+    ThreadTransactions.SessionCreateResult plain = transactions.createSession("plain", false, now);
     ThreadTransactions.SessionCreateResult yolo =
-        transactions.createSession(102L, "yolo", snapshot("yolo"), true, now.plusSeconds(1));
+        transactions.createSession("yolo", true, now.plusSeconds(1));
 
     List<HarnessSessionEntryDO> plainEntries = entryMapper.listBySession(plain.sessionId());
     assertEquals(
-        List.of("agent_snapshot"),
-        plainEntries.stream().map(HarnessSessionEntryDO::getEntryType).toList());
-    assertEquals(
-        plainEntries.get(0).getId(), threadMapper.find(plain.mainThread().id()).getHeadEntryId());
+        List.of("root"), plainEntries.stream().map(HarnessSessionEntryDO::getEntryType).toList());
+    HarnessThreadDO plainThread = threadMapper.find(plain.mainThread().id());
+    assertEquals(plainEntries.get(0).getId(), plainThread.getHeadEntryId());
+    assertNull(plainThread.getActiveAgentDefinitionId());
+    assertFalse(Boolean.TRUE.equals(plainThread.getYoloEnabled()));
 
     List<HarnessSessionEntryDO> yoloEntries = entryMapper.listBySession(yolo.sessionId());
     assertEquals(
-        List.of("agent_snapshot", "yolo_change"),
-        yoloEntries.stream().map(HarnessSessionEntryDO::getEntryType).toList());
-    assertEquals(yoloEntries.get(0).getId(), yoloEntries.get(1).getParentEntryId());
-    assertEquals(
-        yoloEntries.get(1).getId(), threadMapper.find(yolo.mainThread().id()).getHeadEntryId());
+        List.of("root"), yoloEntries.stream().map(HarnessSessionEntryDO::getEntryType).toList());
+    HarnessThreadDO yoloThread = threadMapper.find(yolo.mainThread().id());
+    assertEquals(yoloEntries.get(0).getId(), yoloThread.getHeadEntryId());
+    assertTrue(Boolean.TRUE.equals(yoloThread.getYoloEnabled()));
 
     assertThrows(
         IllegalArgumentException.class,
@@ -99,23 +95,25 @@ class HarnessThreadTransactionServiceIntegrationTest {
             transactions.createThreadFromEntry(plain.sessionId(), yoloEntries.get(0).getId(), now));
   }
 
-  /** Typed config inputs fold into a single durable cutoff with no synthetic message debt. */
   @Test
-  void harvestsTypedConfigInputsIdempotentlyAndPersistsTheirFold() {
+  void harvestsConfigInputsOntoThreadStateWithoutFullAgentSecrets() {
     Instant now = Instant.parse("2026-02-02T00:00:00Z");
     ThreadTransactions.SessionCreateResult created =
-        transactions.createSession(201L, "config", snapshot("root"), false, now);
+        transactions.createSession("config", false, now);
     long threadId = created.mainThread().id();
-    AgentSnapshot replacement = snapshot("replacement");
 
-    ThreadInput agent = transactions.submitSetAgent(threadId, 202L, replacement, "agent", now);
+    ThreadInput agent =
+        transactions.submitSetAgent(threadId, SEED_AGENT_ID, SEED_AGENT_NAME, "agent", now);
     assertEquals(
         agent.id(),
-        transactions.submitSetAgent(threadId, 202L, replacement, "agent", now.plusSeconds(1)).id());
+        transactions
+            .submitSetAgent(threadId, SEED_AGENT_ID, SEED_AGENT_NAME, "agent", now.plusSeconds(1))
+            .id());
     assertThrows(
         IllegalStateException.class,
         () ->
-            transactions.submitSetAgent(threadId, 203L, replacement, "agent", now.plusSeconds(2)));
+            transactions.submitSetAgent(
+                threadId, SEED_AGENT_ID, "other-name", "agent", now.plusSeconds(2)));
 
     ThreadInput model = transactions.submitSetModel(threadId, "model-2", "variant-2", "model", now);
     assertEquals(
@@ -123,31 +121,10 @@ class HarnessThreadTransactionServiceIntegrationTest {
         transactions
             .submitSetModel(threadId, "model-2", "variant-2", "model", now.plusSeconds(1))
             .id());
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            transactions.submitSetModel(
-                threadId, "model-3", "variant-2", "model", now.plusSeconds(2)));
-    ThreadInput toolset =
-        transactions.submitSetToolset(threadId, List.of("read", "write"), "toolset", now);
-    assertEquals(
-        toolset.id(),
-        transactions
-            .submitSetToolset(threadId, List.of("read", "write"), "toolset", now.plusSeconds(1))
-            .id());
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            transactions.submitSetToolset(
-                threadId, List.of("read"), "toolset", now.plusSeconds(2)));
     ThreadInput yolo = transactions.submitSetYolo(threadId, true, "yolo", now);
     assertEquals(
         yolo.id(), transactions.submitSetYolo(threadId, true, "yolo", now.plusSeconds(1)).id());
-    assertThrows(
-        IllegalStateException.class,
-        () -> transactions.submitSetYolo(threadId, false, "yolo", now.plusSeconds(2)));
 
-    assertEquals("RUNNING", threadMapper.find(threadId).getStatus());
     assertTrue(
         threadStore.tryAcquire(threadId, "config-owner", now, Duration.ofMinutes(1)).isPresent());
     ThreadTransactions.HarvestResult harvest =
@@ -156,48 +133,38 @@ class HarnessThreadTransactionServiceIntegrationTest {
     assertTrue(harvest.harvested());
     assertFalse(harvest.hasMessage());
     assertEquals(
-        List.of(agent.id(), model.id(), toolset.id(), yolo.id()),
+        List.of(agent.id(), model.id(), yolo.id()),
         harvest.applied().stream().map(ThreadInput::id).toList());
-    assertEquals(harvest.newHeadEntryId(), threadMapper.find(threadId).getHeadEntryId());
 
-    List<HarnessThreadInputDO> inputs = inputMapper.listByThread(threadId);
-    assertEquals(
-        List.of("set_agent", "set_model", "set_toolset", "set_yolo"),
-        inputs.stream().map(HarnessThreadInputDO::getInputType).toList());
-    assertTrue(
-        inputs.stream()
-            .allMatch(
-                input ->
-                    "applied".equals(input.getStatus())
-                        && input.getAppliedEntryId() != null
-                        && input.getResolvedAt() != null));
+    HarnessThreadDO thread = threadMapper.find(threadId);
+    assertEquals(SEED_AGENT_ID, thread.getActiveAgentDefinitionId());
+    assertEquals(SEED_AGENT_NAME, thread.getActiveAgentName());
+    assertEquals("model-2", thread.getModelId());
+    assertEquals("variant-2", thread.getVariant());
+    assertTrue(Boolean.TRUE.equals(thread.getYoloEnabled()));
 
     List<HarnessSessionEntryDO> entries = entryMapper.listBySession(created.sessionId());
-    List<HarnessSessionEntryDO> folded = entries.subList(entries.size() - 4, entries.size());
     assertEquals(
-        List.of("agent_snapshot", "model_change", "toolset_change", "yolo_change"),
-        folded.stream().map(HarnessSessionEntryDO::getEntryType).toList());
-    assertEquals(created.mainThread().headEntryId(), folded.get(0).getParentEntryId());
-    assertEquals(folded.get(0).getId(), folded.get(1).getParentEntryId());
-    assertEquals(folded.get(1).getId(), folded.get(2).getParentEntryId());
-    assertEquals(folded.get(2).getId(), folded.get(3).getParentEntryId());
-    assertEquals(replacement, payload(folded.get(0), AgentSnapshotEntryPayload.class).snapshot());
-    assertEquals("model-2", payload(folded.get(1), ModelChangeEntryPayload.class).modelId());
-    assertEquals(
-        List.of("read", "write"), payload(folded.get(2), ToolsetChangeEntryPayload.class).tools());
-    assertTrue(payload(folded.get(3), YoloChangeEntryPayload.class).yoloEnabled());
-    assertFalse(entries.stream().anyMatch(entry -> "message".equals(entry.getEntryType())));
+        List.of("root", "agent_change"),
+        entries.stream().map(HarnessSessionEntryDO::getEntryType).toList());
+    AgentChangeEntryPayload change = payload(entries.get(1), AgentChangeEntryPayload.class);
+    assertEquals(SEED_AGENT_ID, change.agentDefinitionId());
+    assertEquals(SEED_AGENT_NAME, change.agentName());
+    assertFalse(entries.get(1).getPayloadJson().contains("systemPrompt"));
+    assertFalse(entries.get(1).getPayloadJson().contains("snapshot"));
+    assertFalse(entries.get(1).getPayloadJson().contains("tools"));
+    assertFalse(entries.get(1).getPayloadJson().contains("executionPolicy"));
+
+    assertEquals(1, eventMapper.countByType(threadId, ThreadEventType.AGENT_CHANGED.value()));
+    assertEquals(1, eventMapper.countByType(threadId, ThreadEventType.MODEL_CHANGED.value()));
+    assertEquals(1, eventMapper.countByType(threadId, ThreadEventType.YOLO_CHANGED.value()));
   }
 
-  /**
-   * A user/custom batch advances one continuous cursor, while later in-flight input waits for next
-   * harvest.
-   */
   @Test
-  void harvestsMessageBatchAndDefersInputSubmittedAfterTheCutoff() {
+  void harvestsOneMessagePerBatchAndDefersLaterConfigAfterMessage() {
     Instant now = Instant.parse("2026-02-03T00:00:00Z");
     ThreadTransactions.SessionCreateResult created =
-        transactions.createSession(301L, "messages", snapshot("messages"), false, now);
+        transactions.createSession("messages", false, now);
     long threadId = created.mainThread().id();
     long rootHead = created.mainThread().headEntryId();
     ThreadInput user = transactions.submitUserMessage(threadId, userMessage("user"), "user", now);
@@ -212,44 +179,65 @@ class HarnessThreadTransactionServiceIntegrationTest {
         transactions.submitUserMessage(threadId, userMessage("later"), "later", now.plusSeconds(2));
 
     assertTrue(first.hasMessage());
-    assertEquals(
-        List.of(user.id(), custom.id()), first.applied().stream().map(ThreadInput::id).toList());
-    assertEquals(first.newHeadEntryId(), threadMapper.find(threadId).getHeadEntryId());
+    assertEquals(List.of(user.id()), first.applied().stream().map(ThreadInput::id).toList());
+    assertEquals("queued", inputMapper.find(custom.id()).getStatus());
     assertEquals("queued", inputMapper.find(later.id()).getStatus());
 
-    List<HarnessSessionEntryDO> entries = entryMapper.listBySession(created.sessionId());
     HarnessSessionEntryDO userEntry =
         entryMapper.find(created.sessionId(), first.applied().get(0).appliedEntryId());
-    HarnessSessionEntryDO customEntry =
-        entryMapper.find(created.sessionId(), first.applied().get(1).appliedEntryId());
     assertEquals(rootHead, userEntry.getParentEntryId());
-    assertEquals(userEntry.getId(), customEntry.getParentEntryId());
-    assertEquals(
-        AgentMessageRole.USER, payload(userEntry, MessageEntryPayload.class).message().role());
-    assertEquals(
-        AgentMessageRole.SYSTEM,
-        payload(customEntry, CustomMessageEntryPayload.class).message().role());
-    assertEquals(3, entries.size());
 
     ThreadTransactions.HarvestResult second =
         transactions.harvestQueuedInputs(threadId, "message-owner", now.plusSeconds(3));
     assertTrue(second.hasMessage());
-    assertEquals(List.of(later.id()), second.applied().stream().map(ThreadInput::id).toList());
-    HarnessSessionEntryDO laterEntry =
-        entryMapper.find(created.sessionId(), second.newHeadEntryId());
-    assertEquals(customEntry.getId(), laterEntry.getParentEntryId());
-    assertEquals("applied", inputMapper.find(later.id()).getStatus());
-    assertEquals(second.newHeadEntryId(), threadMapper.find(threadId).getHeadEntryId());
+    assertEquals(List.of(custom.id()), second.applied().stream().map(ThreadInput::id).toList());
+    assertEquals("queued", inputMapper.find(later.id()).getStatus());
   }
 
-  /**
-   * Stop is replay-safe, cancels all input kinds, and Retry is legal only after a durable failure.
-   */
+  /** M1 -> SET_AGENT(B) -> M2：M1 使用旧状态，SET_AGENT 与 M2 在后续安全边界应用。 */
+  @Test
+  void messageBoundaryKeepsLaterAgentChangeOffEarlierTurn() {
+    Instant now = Instant.parse("2026-02-07T00:00:00Z");
+    ThreadTransactions.SessionCreateResult created =
+        transactions.createSession("order", false, now);
+    long threadId = created.mainThread().id();
+    ThreadInput m1 = transactions.submitUserMessage(threadId, userMessage("m1"), "m1", now);
+    ThreadInput setAgent =
+        transactions.submitSetAgent(
+            threadId, SEED_AGENT_ID, SEED_AGENT_NAME, "set-agent", now.plusSeconds(1));
+    ThreadInput m2 =
+        transactions.submitUserMessage(threadId, userMessage("m2"), "m2", now.plusSeconds(2));
+
+    assertTrue(
+        threadStore.tryAcquire(threadId, "order-owner", now, Duration.ofMinutes(1)).isPresent());
+    ThreadTransactions.HarvestResult first =
+        transactions.harvestQueuedInputs(threadId, "order-owner", now.plusSeconds(3));
+    assertEquals(List.of(m1.id()), first.applied().stream().map(ThreadInput::id).toList());
+    assertNull(threadMapper.find(threadId).getActiveAgentDefinitionId());
+    assertEquals("queued", inputMapper.find(setAgent.id()).getStatus());
+    assertEquals("queued", inputMapper.find(m2.id()).getStatus());
+
+    ThreadTransactions.HarvestResult second =
+        transactions.harvestQueuedInputs(threadId, "order-owner", now.plusSeconds(4));
+    assertEquals(
+        List.of(setAgent.id(), m2.id()), second.applied().stream().map(ThreadInput::id).toList());
+    HarnessThreadDO after = threadMapper.find(threadId);
+    assertEquals(SEED_AGENT_ID, after.getActiveAgentDefinitionId());
+    assertEquals(SEED_AGENT_NAME, after.getActiveAgentName());
+    assertEquals("1", after.getModelId());
+    assertEquals("default", after.getVariant());
+    assertEquals(1, eventMapper.countByType(threadId, ThreadEventType.AGENT_CHANGED.value()));
+    List<HarnessThreadEventDO> agentEvents =
+        eventMapper.listAfter(threadId, 0L, 100).stream()
+            .filter(e -> ThreadEventType.AGENT_CHANGED.value().equals(e.getEventType()))
+            .toList();
+    assertEquals(1, agentEvents.size());
+  }
+
   @Test
   void stopsInInputOrderAndRetriesOnlyFailedThreads() {
     Instant now = Instant.parse("2026-02-04T00:00:00Z");
-    ThreadTransactions.SessionCreateResult created =
-        transactions.createSession(401L, "stop", snapshot("stop"), false, now);
+    ThreadTransactions.SessionCreateResult created = transactions.createSession("stop", false, now);
     long threadId = created.mainThread().id();
     transactions.submitUserMessage(threadId, userMessage("first"), "first", now);
     transactions.submitSetModel(threadId, "stop-model", "stop-variant", "config", now);
@@ -288,15 +276,11 @@ class HarnessThreadTransactionServiceIntegrationTest {
         IllegalStateException.class, () -> transactions.retry(threadId, now.plusSeconds(6)));
   }
 
-  /**
-   * Fencing protects durable writes; wait, compaction, failure, and quiescence preserve lifecycle
-   * facts.
-   */
   @Test
   void fencesLostOwnersAndPersistsWaitFailureCompactionAndQuiescenceStates() {
     Instant now = Instant.parse("2026-02-05T00:00:00Z");
     ThreadTransactions.SessionCreateResult created =
-        transactions.createSession(501L, "lifecycle", snapshot("lifecycle"), false, now);
+        transactions.createSession("lifecycle", false, now);
     long threadId = created.mainThread().id();
     long originalHead = created.mainThread().headEntryId();
 
@@ -335,8 +319,7 @@ class HarnessThreadTransactionServiceIntegrationTest {
     assertEquals("owner-b", threadMapper.find(threadId).getProcessorToken());
     assertTrue(threadStore.release(threadId, "owner-b", now.plusSeconds(5)));
 
-    ThreadTransactions.SessionCreateResult work =
-        transactions.createSession(502L, "work", snapshot("work"), false, now);
+    ThreadTransactions.SessionCreateResult work = transactions.createSession("work", false, now);
     long workThreadId = work.mainThread().id();
     threadMapper.updateStatusDirect(workThreadId, "RUNNING", utc(now));
     assertTrue(
@@ -377,12 +360,11 @@ class HarnessThreadTransactionServiceIntegrationTest {
     assertNull(threadMapper.find(workThreadId).getProcessorToken());
   }
 
-  /** Invalid mailbox operations and stale processors leave durable thread rows unchanged. */
   @Test
   void rejectsInvalidInputsAndDoesNotLetLostOwnersWrite() {
     Instant now = Instant.parse("2026-02-06T00:00:00Z");
     ThreadTransactions.SessionCreateResult created =
-        transactions.createSession(601L, "validation", snapshot("validation"), false, now);
+        transactions.createSession("validation", false, now);
     long threadId = created.mainThread().id();
     long initialHead = created.mainThread().headEntryId();
 
@@ -397,10 +379,7 @@ class HarnessThreadTransactionServiceIntegrationTest {
                 now));
     assertThrows(
         IllegalArgumentException.class,
-        () -> transactions.submitSetToolset(threadId, null, "null-tools", now));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> transactions.submitSetToolset(threadId, List.of(""), "blank-tool", now));
+        () -> transactions.submitSetModel(threadId, " ", "v", "blank-model", now));
     assertThrows(
         IllegalArgumentException.class,
         () -> transactions.harvestQueuedInputs(9_999_997L, "missing", now));
@@ -419,17 +398,6 @@ class HarnessThreadTransactionServiceIntegrationTest {
     assertEquals(initialHead, threadMapper.find(threadId).getHeadEntryId());
     assertTrue(inputMapper.listByThread(threadId).isEmpty());
     assertEquals(0, eventMapper.countByType(threadId, ThreadEventType.INPUT_APPLIED.value()));
-  }
-
-  private static AgentSnapshot snapshot(String value) {
-    return new AgentSnapshot(
-        "system-" + value,
-        "model-" + value,
-        "variant-" + value,
-        List.of("tool-" + value),
-        List.of(),
-        List.of(),
-        "{}");
   }
 
   private static AgentMessage userMessage(String text) {

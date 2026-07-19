@@ -97,7 +97,7 @@ sequenceDiagram
 
 ## 权限与路径配置
 
-Agent、Model、Toolset 与 YOLO 由当前 Entry path fold 得出。`SET_YOLO` / `SET_AGENT` 等配置命令作为有序 Input 在 Harvest 后生效，不即时改写进行中的模型请求。
+Thread 保存 agent/model/yolo；完整 Agent 配置在 Turn 时从当前 AgentDefinition 动态装载。`SET_AGENT` / `SET_MODEL` / `SET_YOLO` 作为有序 Input 在消息边界 Harvest 后生效，不即时改写进行中的模型请求。
 
 `POST /api/tool-invocations/{id}/decision` 原子写入 allow/deny，并 kick 所属 Thread。子代理权限请求投影到 Root Activity，根 UI 可作 relay。
 
