@@ -7,4 +7,7 @@ import lombok.Data;
 public class HarnessThreadYoloSetDTO {
   /** 是否启用 YOLO（自动批准工具）。 */
   private Boolean yoloEnabled;
+
+  /** 外部请求幂等键。 */
+  private String clientMessageId;
 }

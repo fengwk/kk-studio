@@ -3,6 +3,12 @@ package fun.fengwk.kkstudio.harness.runtime.thread;
 /** Thread 事件 journal 类型；事件 id 即 SSE cursor。 */
 public enum ThreadEventType {
   THREAD_STARTED("thread_started"),
+  THREAD_RUNNING("thread_running"),
+  THREAD_WAITING("thread_waiting"),
+  THREAD_IDLE("thread_idle"),
+  THREAD_FAILED("thread_failed"),
+  THREAD_RETRYING("thread_retrying"),
+  THREAD_STOPPED("thread_stopped"),
   TURN_STARTED("turn_started"),
   ASSISTANT_STARTED("assistant_started"),
   ASSISTANT_DELTA_BATCH("assistant_delta_batch"),
@@ -11,6 +17,7 @@ public enum ThreadEventType {
   COMPACTION_STARTED("compaction_started"),
   COMPACTION_COMPLETED("compaction_completed"),
   INPUT_APPLIED("input_applied"),
+  INPUT_CANCELLED("input_cancelled"),
   TOOL_PREPARED("tool_prepared"),
   PERMISSION_REQUESTED("permission_requested"),
   PERMISSION_RESOLVED("permission_resolved"),
@@ -20,10 +27,7 @@ public enum ThreadEventType {
   TOOL_RESULTS_APPLIED("tool_results_applied"),
   SUBAGENT_STARTED("subagent_started"),
   SUBAGENT_COMPLETED("subagent_completed"),
-  SUBAGENT_CANCEL_REQUESTED("subagent_cancel_requested"),
-  THREAD_WAITING("thread_waiting"),
-  THREAD_IDLE("thread_idle"),
-  THREAD_FAILED("thread_failed");
+  SUBAGENT_CANCEL_REQUESTED("subagent_cancel_requested");
 
   private final String value;
 

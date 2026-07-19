@@ -1,19 +1,28 @@
 import { ArrowLeft, MessageSquare, Plus } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import type { AgentDefinitionDTO, HarnessThreadDTO } from '@/shared/api/contracts'
+import { ThreadTreeSelector } from '@/features/ai/ThreadTreeSelector'
+import type { HarnessSessionEntryDTO, HarnessThreadDTO } from '@/shared/api/contracts'
 
 export function ChatSidebar({
   threads,
-  agentsById,
+  sessionEntries,
   activeThreadId,
+  sessionId,
+  mainThreadId,
   title,
   onBack,
+  onBranch,
+  branchPending,
 }: {
   threads: HarnessThreadDTO[]
-  agentsById: Map<string, AgentDefinitionDTO>
+  sessionEntries: HarnessSessionEntryDTO[]
   activeThreadId: string
+  sessionId: string
+  mainThreadId?: string
   title: string
   onBack: () => void
+  onBranch: (entry: HarnessSessionEntryDTO) => void
+  branchPending: boolean
 }) {
   return (
     <aside className="chat-sidebar">
@@ -22,26 +31,28 @@ export function ChatSidebar({
           <ArrowLeft aria-hidden="true" />
         </button>
         <h1>{title}</h1>
-        <Link className="sidebar-icon-btn" to="/threads" title="新建对话">
+        <Link className="sidebar-icon-btn" to="/sessions" title="新建对话">
           <Plus aria-hidden="true" />
         </Link>
       </div>
       <div className="chat-list">
-        {threads.map((item) => {
-          const agent = item.agentDefinitionId ? agentsById.get(item.agentDefinitionId) : undefined
-          const label = item.sessionTitle || agent?.name || item.threadId
+        {[...threads]
+          .sort((left, right) => Number(right.threadId === mainThreadId) - Number(left.threadId === mainThreadId))
+          .map((item) => {
+          const label = item.threadId === activeThreadId ? title : item.threadId
           return (
             <Link
               key={item.threadId}
               className={`chat-item ${item.threadId === activeThreadId ? 'active' : ''}`}
-              to={`/threads/${encodeURIComponent(item.threadId)}`}
+              to={`/sessions/${encodeURIComponent(sessionId)}/threads/${encodeURIComponent(item.threadId)}`}
             >
               <MessageSquare aria-hidden="true" />
               <span>{label}</span>
             </Link>
           )
-        })}
+          })}
       </div>
+      <ThreadTreeSelector entries={sessionEntries} onBranch={onBranch} pending={branchPending} />
     </aside>
   )
 }

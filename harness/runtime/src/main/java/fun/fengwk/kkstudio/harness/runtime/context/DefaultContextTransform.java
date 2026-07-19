@@ -6,12 +6,13 @@ import fun.fengwk.kkstudio.harness.runtime.session.ModelChangeEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolsetChangeEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.YoloChangeEntryPayload;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/** 选择最后一个有效 compaction、保留其摘要和 retained entries，并解析最后生效配置。 */
+/** 选择最后一个有效 compaction、保留其摘要和 retained entries，并解析最后生效配置（含 YOLO）。 */
 public final class DefaultContextTransform {
   public ContextState transform(List<SessionEntry> path) {
     path = List.copyOf(Objects.requireNonNull(path, "path"));
@@ -29,7 +30,7 @@ public final class DefaultContextTransform {
     for (SessionEntry entry : path) {
       SessionEntryPayload payload = entry.payload();
       if (payload instanceof AgentSnapshotEntryPayload snapshot) {
-        config = AgentRuntimeConfig.from(snapshot.snapshot());
+        config = AgentRuntimeConfig.from(snapshot.agentDefinitionId(), snapshot.snapshot());
       } else if (payload instanceof ModelChangeEntryPayload modelChange) {
         if (config == null) {
           throw new ContextProjectionException("model change requires a preceding agent snapshot");
@@ -41,6 +42,11 @@ public final class DefaultContextTransform {
               "toolset change requires a preceding agent snapshot");
         }
         config = config.withTools(toolsetChange.tools());
+      } else if (payload instanceof YoloChangeEntryPayload yoloChange) {
+        if (config == null) {
+          throw new ContextProjectionException("yolo change requires a preceding agent snapshot");
+        }
+        config = config.withYolo(yoloChange.yoloEnabled());
       }
     }
     if (config == null) {

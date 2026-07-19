@@ -36,9 +36,12 @@ public class DatabaseThreadToolPort implements ThreadProcessor.ThreadToolPort {
   }
 
   @Override
-  public List<ToolInvocation> listNonTerminal(long threadId) {
+  public List<ToolInvocation> listNonTerminal(long threadId, long assistantEntryId) {
     return invocationStore.listByThread(threadId).stream()
-        .filter(inv -> !inv.status().isTerminal())
+        .filter(
+            invocation ->
+                invocation.assistantEntryId() == assistantEntryId
+                    && !invocation.status().isTerminal())
         .toList();
   }
 
@@ -54,12 +57,11 @@ public class DatabaseThreadToolPort implements ThreadProcessor.ThreadToolPort {
     if (threadId <= 0 || headEntryId <= 0) {
       return false;
     }
-    if (invocationMapper.countNonTerminalByThread(threadId) != 0) {
-      return false;
-    }
     // Head is still the assistant entry that owns these invocations: applyTerminalToolResults will
     // advance this thread's head after writing tool-result entries.
     return invocationStore.listByThread(threadId).stream()
-        .anyMatch(inv -> inv.assistantEntryId() == headEntryId && inv.status().isTerminal());
+        .anyMatch(
+            invocation ->
+                invocation.assistantEntryId() == headEntryId && invocation.status().isTerminal());
   }
 }

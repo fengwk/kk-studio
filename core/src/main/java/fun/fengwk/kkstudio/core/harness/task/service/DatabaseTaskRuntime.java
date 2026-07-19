@@ -49,8 +49,12 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventPayloads;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventType;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadIdGenerator;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStore;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
 
@@ -201,6 +205,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
               "status",
               completion.state().name()),
           now);
+      threadMapper.promoteWaitingToRunning(task.getParentThreadId(), timestamp);
       afterCommitKick(task.getParentThreadId());
     }
     return inspection(taskMapper.find(parentInvocationId));
@@ -242,6 +247,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       // Request cancel on nonterminal child tools. Already-admitted in-flight LLM work is not
       // interrupted; subsequent beginTurn rejects on CANCELLED.
       invocationMapper.requestCancelByThread(task.getChildThreadId(), timestamp);
+      threadMapper.promoteWaitingToRunning(task.getParentThreadId(), timestamp);
+      threadMapper.promoteWaitingToRunning(task.getChildThreadId(), timestamp);
       eventStore.append(
           task.getParentThreadId(),
           null,
@@ -264,15 +271,12 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       Instant now) {
     long childSessionId = AgentIdGenerator.nextHarnessSessionId();
     long snapshotEntryId = threadIds.newSessionEntryId();
-    long promptEntryId = threadIds.newSessionEntryId();
     long childThreadId = threadIds.newThreadId();
     AgentSnapshot targetSnapshot = snapshotResolver.snapshotForDefinition(target);
-    String runtimeConfigJson = encodeSnapshotJson(targetSnapshot);
-
     HarnessSessionDO child = new HarnessSessionDO();
     child.setId(childSessionId);
-    child.setAgentDefinitionId(target.getId());
     child.setTitle(target.getName());
+    child.setMainThreadId(childThreadId);
     child.setParentSessionId(parent.getId());
     child.setRootSessionId(root.getId());
     child.setParentInvocationId(context.invocationId());
@@ -287,33 +291,37 @@ public class DatabaseTaskRuntime implements TaskRuntime {
         childSessionId,
         null,
         SessionEntryType.AGENT_SNAPSHOT,
-        new AgentSnapshotEntryPayload(targetSnapshot),
+        new AgentSnapshotEntryPayload(target.getId(), targetSnapshot),
         timestamp);
-    insertEntry(
-        promptEntryId,
-        childSessionId,
-        snapshotEntryId,
-        SessionEntryType.MESSAGE,
-        new MessageEntryPayload(
-            new AgentMessage(
-                AgentMessageRole.USER, List.of(new TextMessageContent(command.prompt())))),
-        timestamp);
-
     AgentThread childThread =
         new AgentThread(
             childThreadId,
             childSessionId,
-            promptEntryId,
-            target.getId(),
-            runtimeConfigJson,
-            false,
-            0L,
+            snapshotEntryId,
+            ThreadStatus.RUNNING,
+            1L,
             null,
             null,
             0L,
             now,
             now);
     threadStore.create(childThread);
+    inputStore.insert(
+        new ThreadInput(
+            threadIds.newThreadInputId(),
+            childThreadId,
+            1L,
+            ThreadInputType.USER_MESSAGE,
+            entryCodec.encode(
+                new MessageEntryPayload(
+                    new AgentMessage(
+                        AgentMessageRole.USER, List.of(new TextMessageContent(command.prompt()))))),
+            "subagent:" + context.invocationId(),
+            ThreadInputStatus.QUEUED,
+            null,
+            null,
+            null,
+            now));
 
     TaskPolicy targetPolicy = TaskPolicyCodec.decode(targetSnapshot.executionPolicyJson());
     String workingCopyRevision =
@@ -324,6 +332,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     task.setParentInvocationId(context.invocationId());
     task.setParentSessionId(parent.getId());
     task.setParentThreadId(parentThread.getId());
+    HarnessSubagentTaskDO parentTask = taskMapper.findByChildThreadId(parentThread.getId());
+    task.setRootThreadId(parentTask == null ? parentThread.getId() : parentTask.getRootThreadId());
     task.setChildSessionId(childSessionId);
     task.setChildThreadId(childThreadId);
     task.setTargetAgent(target.getName());
@@ -349,7 +359,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
         now);
     eventStore.append(
         childThreadId,
-        promptEntryId,
+        snapshotEntryId,
         ThreadEventType.THREAD_STARTED,
         ThreadEventPayloads.of("parentInvocationId", Long.toString(context.invocationId())),
         now);
@@ -367,7 +377,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     if (invocationMapper.countNonTerminalByThread(child.getId()) != 0) {
       return false;
     }
-    return inputStore.findNextPending(child.getId()).isEmpty();
+    return inputStore.listQueued(child.getId()).isEmpty();
   }
 
   private ChildCompletion evaluateChildCompletion(
@@ -471,6 +481,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
             task.getParentInvocationId(),
             task.getParentSessionId(),
             task.getParentThreadId(),
+            task.getRootThreadId(),
             task.getChildSessionId(),
             task.getChildThreadId(),
             task.getTargetAgent(),

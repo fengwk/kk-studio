@@ -44,8 +44,8 @@ create table if not exists agent_definition (
 
 create table if not exists harness_session (
     id                    bigint not null comment '唯一业务与主键',
-    agent_definition_id   bigint null comment '创建时 agent definition',
     title                 varchar(256) null comment '标题',
+    main_thread_id        bigint not null comment '稳定 Main Thread id',
     parent_session_id     bigint null comment '父 session',
     root_session_id       bigint not null comment '根 session',
     parent_invocation_id  bigint null comment '创建此 child 的 invocation',
@@ -73,9 +73,7 @@ create table if not exists harness_thread (
     id                    bigint not null comment '业务主键',
     session_id            bigint not null comment '所属 session tree',
     head_entry_id         bigint not null comment '当前 tree cursor',
-    agent_definition_id   bigint null comment '冻结 agent definition 引用',
-    runtime_config_json   longtext not null comment '冻结 runtime config JSON',
-    yolo_enabled          bit not null comment 'thread 级 YOLO',
+    status                varchar(32) not null comment 'IDLE/RUNNING/WAITING/FAILED/RETRYING',
     input_sequence        bigint not null comment '已分配 input sequence 最大值',
     processor_token       varchar(128) null comment '当前 processor fencing token',
     processor_until       datetime(3) null comment 'token 租约截止',
@@ -83,24 +81,37 @@ create table if not exists harness_thread (
     gmt_modified          datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
     version               bigint not null default '0' comment '乐观锁版本',
     primary key (id),
-    key idx_harness_thread_session (session_id, id)
+    key idx_harness_thread_session (session_id, id),
+    key idx_harness_thread_status (status, id)
 ) engine=InnoDB default charset=utf8mb4 comment='durable agent thread cursor';
 
 create table if not exists harness_thread_input (
-    id                 bigint not null comment '主键',
-    thread_id          bigint not null comment '所属 thread',
-    sequence           bigint not null comment 'thread 内有序序号',
-    input_type         varchar(32) not null comment 'USER_MESSAGE/SET_AGENT/SET_YOLO',
-    payload_json       longtext not null comment '输入 payload JSON',
-    client_message_id  varchar(128) null comment '客户端幂等键',
-    applied_entry_id   bigint null comment '应用后产生的 entry',
-    applied_at         datetime(3) null comment '应用时间',
-    gmt_create         datetime(3) not null default current_timestamp(3) comment '创建时间',
+    id                    bigint not null comment '主键',
+    thread_id             bigint not null comment '所属 thread',
+    sequence              bigint not null comment 'thread 内有序序号',
+    input_type            varchar(32) not null comment 'USER_MESSAGE/CUSTOM_MESSAGE/SET_*',
+    payload_json          longtext not null comment '输入 payload JSON',
+    client_message_id     varchar(128) not null comment '客户端幂等键',
+    status                varchar(32) not null comment 'QUEUED/APPLIED/CANCELLED',
+    applied_entry_id      bigint null comment '应用后产生的 entry',
+    resolved_at           datetime(3) null comment '应用或取消时间',
+    cancelled_by_stop_id  bigint null comment '取消该 input 的 stop id',
+    gmt_create            datetime(3) not null default current_timestamp(3) comment '创建时间',
     primary key (id),
     unique key uk_harness_thread_input_sequence (thread_id, sequence),
     unique key uk_harness_thread_input_client (thread_id, client_message_id),
-    key idx_harness_thread_input_pending (thread_id, applied_entry_id, sequence)
+    key idx_harness_thread_input_pending (thread_id, status, sequence)
 ) engine=InnoDB default charset=utf8mb4 comment='ordered thread input queue';
+
+create table if not exists harness_thread_stop (
+    id                 bigint not null comment '主键',
+    thread_id          bigint not null comment '所属 thread',
+    client_request_id  varchar(128) not null comment 'Stop 幂等键',
+    gmt_create         datetime(3) not null default current_timestamp(3) comment '创建时间',
+    primary key (id),
+    unique key uk_harness_thread_stop_client (thread_id, client_request_id),
+    key idx_harness_thread_stop_thread (thread_id, id)
+) engine=InnoDB default charset=utf8mb4 comment='thread stop receipt';
 
 create table if not exists harness_thread_event (
     id                 bigint not null comment '全局事件 id / SSE cursor',
@@ -121,7 +132,7 @@ create table if not exists tool_invocation (
     tool_call_id          varchar(256) not null comment 'Provider tool call id',
     tool_name             varchar(128) not null comment '冻结工具名称',
     tool_version          varchar(128) not null comment '冻结工具版本',
-    target_type           varchar(32) not null comment 'CONTROL/CLOUD/ENVIRONMENT',
+    target_type           varchar(32) not null comment '工具执行目标类型',
     environment_id        bigint null comment 'ENVIRONMENT 目标 id；其他类型为空',
     arguments_json        longtext not null comment 'interceptor 后参数 JSON',
     status                varchar(32) not null comment '持久状态',
@@ -161,6 +172,7 @@ create table if not exists harness_subagent_task (
     parent_invocation_id  bigint not null comment 'task ToolInvocation idempotency key',
     parent_session_id     bigint not null,
     parent_thread_id      bigint not null,
+    root_thread_id        bigint not null comment 'delegation tree root user thread',
     child_session_id      bigint not null,
     child_thread_id       bigint not null,
     target_agent          varchar(128) not null,

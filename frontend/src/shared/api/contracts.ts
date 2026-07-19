@@ -141,13 +141,20 @@ export interface AgentDefinitionUpdateDTO extends AgentDefinitionEditablePropert
 /** Session tree container; shared Entry root for Threads/tasks/activities. */
 export interface HarnessSessionDTO {
   sessionId: string
-  agentDefinitionId: string
   title: string | null
+  mainThreadId: string
   rootSessionId: string
   parentSessionId: string | null
+  parentInvocationId: string | null
   depth: number
   createTime: BackendDateTime
   updateTime: BackendDateTime
+}
+
+export interface HarnessSessionCreateDTO {
+  agentDefinitionId: string
+  title?: string
+  yoloEnabled?: boolean
 }
 
 export interface HarnessSessionEntryDTO {
@@ -165,47 +172,83 @@ export interface HarnessThreadDTO {
   sessionId: string
   sessionTitle: string | null
   headEntryId: string | null
-  /** May be null for fork threads that have not pinned an agent definition. */
-  agentDefinitionId: string | null
-  runtimeConfigJson: string | null
-  yoloEnabled: boolean
-  inputSequence: number
+  status: ThreadStatus
+  inputSequence: BackendLong
   processing: boolean
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
 
 export interface HarnessThreadCreateDTO {
-  agentDefinitionId?: string
-  title?: string
-  sessionId?: string
-  fromEntryId?: string
-  yoloEnabled?: boolean
+  fromEntryId: string
 }
 
 export interface HarnessThreadMessageCreateDTO {
   content: string
-  clientMessageId?: string
+  clientMessageId: string
+}
+
+export interface HarnessThreadCustomMessageCreateDTO {
+  role: 'SYSTEM' | 'USER'
+  content: string
+  clientMessageId: string
 }
 
 export interface HarnessThreadYoloSetDTO {
   yoloEnabled: boolean
+  clientMessageId: string
 }
 
 export interface HarnessThreadAgentSetDTO {
   agentDefinitionId: string
+  clientMessageId: string
 }
+
+export interface HarnessThreadModelSetDTO {
+  modelId: string
+  variant: string
+  clientMessageId: string
+}
+
+export interface HarnessThreadToolsetSetDTO {
+  tools: string[]
+  clientMessageId: string
+}
+
+export type ThreadStatus = 'IDLE' | 'RUNNING' | 'WAITING' | 'FAILED' | 'RETRYING'
+
+export type ThreadInputType =
+  | 'USER_MESSAGE'
+  | 'CUSTOM_MESSAGE'
+  | 'SET_AGENT'
+  | 'SET_MODEL'
+  | 'SET_TOOLSET'
+  | 'SET_YOLO'
+
+export type ThreadInputStatus = 'QUEUED' | 'APPLIED' | 'CANCELLED'
 
 export interface HarnessThreadInputDTO {
   inputId: string
   threadId: string
   sequence: number
-  inputType: string
+  inputType: ThreadInputType
   payloadJson: string
-  clientMessageId: string | null
+  clientMessageId: string
+  status: ThreadInputStatus
   appliedEntryId: string | null
-  appliedAt: BackendDateTime
+  resolvedAt: BackendDateTime
+  cancelledByStopId: string | null
   createTime: BackendDateTime
+}
+
+export interface HarnessThreadStopDTO {
+  clientRequestId: string
+}
+
+export interface HarnessThreadStopResultDTO {
+  stopId: string
+  cancelledInputs: HarnessThreadInputDTO[]
+  restoredMessages: string[]
 }
 
 /** Thread event journal; eventId is the SSE cursor. */

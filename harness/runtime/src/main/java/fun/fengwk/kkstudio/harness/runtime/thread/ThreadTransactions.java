@@ -16,42 +16,46 @@ import java.util.Objects;
 /** 跨 Thread/Input/Entry/Tool/Usage 的原子提交边界；所有 mutation 校验 processor token。 */
 public interface ThreadTransactions {
 
-  /** 创建根 Thread：Session + 初始 agent snapshot entry + Thread。 */
-  AgentThread createRootThread(
+  /** 原子创建 Session + 初始配置 Entries + Main Thread。 */
+  SessionCreateResult createSession(
       long agentDefinitionId,
       String title,
       AgentSnapshot snapshot,
-      String runtimeConfigJson,
       boolean yoloEnabled,
       Instant now);
 
-  /**
-   * 在同一 Session tree 上新建 Thread cursor（不克隆 Entry）。{@code fromEntryId} 为 head；为空则使用 session 最新根路径
-   * tip 不成立——必须显式给出 fromEntryId 或仅从已有 head 分叉。
-   */
-  AgentThread createThreadFromEntry(
-      long sessionId,
-      long fromEntryId,
-      Long agentDefinitionId,
-      String runtimeConfigJson,
-      boolean yoloEnabled,
-      Instant now);
+  /** 在同一 Session tree 上从任意 durable Entry 新建 Thread cursor（不克隆 Entry）。 */
+  AgentThread createThreadFromEntry(long sessionId, long fromEntryId, Instant now);
 
   /** 排队用户消息；clientMessageId 幂等。 */
   ThreadInput submitUserMessage(
       long threadId, AgentMessage userMessage, String clientMessageId, Instant now);
 
-  ThreadInput submitSetYolo(long threadId, boolean yoloEnabled, Instant now);
+  ThreadInput submitCustomMessage(
+      long threadId, AgentMessage customMessage, String clientMessageId, Instant now);
+
+  ThreadInput submitSetYolo(
+      long threadId, boolean yoloEnabled, String clientMessageId, Instant now);
 
   ThreadInput submitSetAgent(
       long threadId,
       long agentDefinitionId,
       AgentSnapshot snapshot,
-      String runtimeConfigJson,
+      String clientMessageId,
       Instant now);
 
-  /** 在 turn 边界 exactly-once 应用下一条 pending input 并推进 head。 */
-  ApplyInputResult applyNextInput(long threadId, String processorToken, Instant now);
+  ThreadInput submitSetModel(
+      long threadId, String modelId, String variant, String clientMessageId, Instant now);
+
+  ThreadInput submitSetToolset(
+      long threadId, List<String> tools, String clientMessageId, Instant now);
+
+  /**
+   * Steer-all Harvest：在安全边界原子应用 cutoff 内全部 QUEUED inputs。
+   *
+   * @return 本批是否包含 USER/CUSTOM 消息（配置-only 批为 false）
+   */
+  HarvestResult harvestQueuedInputs(long threadId, String processorToken, Instant now);
 
   /** 提交 final assistant（无 tool call），推进 head。 */
   boolean commitFinalAssistant(
@@ -63,7 +67,7 @@ public interface ThreadTransactions {
       List<ThreadEventDraft> events,
       Instant now);
 
-  /** 提交 assistant + tool invocations；不推进到 tool results，head 停在 assistant。 */
+  /** 提交 assistant + tool invocations；head 停在 assistant。 */
   boolean prepareTools(
       long threadId,
       String processorToken,
@@ -74,6 +78,7 @@ public interface ThreadTransactions {
       List<ToolBinding> bindings,
       Path workdir,
       Path environmentRoot,
+      boolean yoloEnabled,
       List<ThreadEventDraft> events,
       Instant now);
 
@@ -90,40 +95,71 @@ public interface ThreadTransactions {
   boolean appendEvents(
       long threadId, String processorToken, List<ThreadEventDraft> events, Instant now);
 
+  /** Provider/setup/tool prepare 失败：写 events，status=FAILED，释放 token。 */
   boolean fail(long threadId, String processorToken, List<ThreadEventDraft> events, Instant now);
+
+  /** FAILED -> RETRYING，写 THREAD_RETRYING。 */
+  AgentThread retry(long threadId, Instant now);
+
+  /**
+   * 幂等 Stop：取消全部 QUEUED、撤销 processor、status=IDLE、request-cancel open tools。
+   *
+   * @return 含被取消消息文本的回执；重复 clientRequestId 返回同一批
+   */
+  StopResult stop(long threadId, String clientRequestId, Instant now);
 
   /**
    * Atomically admit a model Turn and append {@code TURN_STARTED}, or reject with policy failure
    * events.
-   *
-   * <p>One transaction: lock/verify owning Thread, evaluate admission, then either append {@code
-   * TURN_STARTED} ({@link BeginTurnStatus#ADMITTED}) or append ASSISTANT_FAILED + THREAD_FAILED
-   * ({@link BeginTurnStatus#REJECTED}). Caller must not invoke Provider unless status is ADMITTED.
-   * Token mismatch yields {@link BeginTurnStatus#LOST_OWNERSHIP}.
    */
   BeginTurnResult beginTurn(long threadId, String processorToken, Instant now);
 
-  /**
-   * 在持有 processor token 时尝试空闲释放。
-   *
-   * <p>事务内锁定 thread 行并校验 token 后，检查是否存在仍需本节点立即推进的 durable work（未应用 input、未终态 tool、当前 head 下已终态但尚未
-   * apply 的 tool results）。若无则清除 token 并返回 {@code true}；若 token 已丢失也返回 {@code true}。若仍有 work 则保留
-   * token 并返回 {@code false}， 调用方必须继续处理循环。
-   */
-  boolean releaseIfIdle(long threadId, String processorToken, Instant now);
+  /** 仅在已成功偿还失败 Turn 且仍为 RETRYING 时切换为 RUNNING。 */
+  boolean completeRetriedTurn(long threadId, String processorToken, Instant now);
 
   /**
-   * WAITING_EXTERNAL 路径的原子释放。
-   *
-   * <p>锁定 Thread 行后仅在 durable 状态仍表明存在外部非终态 tool/permission 工作时释放 token；若 tool 终态结果已可 apply
-   * 或不再需要外部等待，则保留 token 并返回 {@code false} 让 processor 继续。
+   * 原子写入 WAITING 事件并释放 token；普通 Tool chain 切至 WAITING，RETRYING Tool chain 保留 RETRYING debt。返回 false
+   * 表示失去 fencing。
    */
-  boolean releaseForExternalWait(long threadId, String processorToken, Instant now);
+  boolean waitForExternal(long threadId, String processorToken, String reason, Instant now);
 
-  /** applyNextInput 的结果。 */
-  record ApplyInputResult(boolean applied, ThreadInput input, Long newHeadEntryId) {
-    public static ApplyInputResult none() {
-      return new ApplyInputResult(false, null, null);
+  /**
+   * 原子确认 Thread 没有可推进 durable work 后写入 IDLE 事件、状态并释放 token。
+   *
+   * <p>{@link QuiescenceResult#WORK_REMAINS} 表示调用方必须继续持有 token 推进， {@link
+   * QuiescenceResult#LOST_OWNERSHIP} 表示任何终态写入均不可提交。
+   */
+  QuiescenceResult quiesce(long threadId, String processorToken, Instant now);
+
+  /** Session 创建结果。 */
+  record SessionCreateResult(long sessionId, AgentThread mainThread) {
+    public SessionCreateResult {
+      if (sessionId <= 0) {
+        throw new IllegalArgumentException("sessionId must be positive");
+      }
+      mainThread = Objects.requireNonNull(mainThread, "mainThread");
+    }
+  }
+
+  /** Harvest 结果。 */
+  record HarvestResult(
+      boolean harvested, boolean hasMessage, List<ThreadInput> applied, Long newHeadEntryId) {
+    public static HarvestResult none() {
+      return new HarvestResult(false, false, List.of(), null);
+    }
+
+    public HarvestResult {
+      applied = List.copyOf(Objects.requireNonNull(applied, "applied"));
+    }
+  }
+
+  /** Stop 结果。 */
+  record StopResult(
+      ThreadStop stop, List<ThreadInput> cancelledInputs, List<String> restoredMessages) {
+    public StopResult {
+      stop = Objects.requireNonNull(stop, "stop");
+      cancelledInputs = List.copyOf(Objects.requireNonNull(cancelledInputs, "cancelledInputs"));
+      restoredMessages = List.copyOf(Objects.requireNonNull(restoredMessages, "restoredMessages"));
     }
   }
 
@@ -160,5 +196,12 @@ public interface ThreadTransactions {
     public boolean isLostOwnership() {
       return status == BeginTurnStatus.LOST_OWNERSHIP;
     }
+  }
+
+  /** 原子 quiescence 结果。 */
+  enum QuiescenceResult {
+    IDLE,
+    WORK_REMAINS,
+    LOST_OWNERSHIP
   }
 }

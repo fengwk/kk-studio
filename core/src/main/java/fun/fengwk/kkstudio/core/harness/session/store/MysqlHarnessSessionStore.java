@@ -137,8 +137,8 @@ public class MysqlHarnessSessionStore implements SessionStore, SessionEntryStore
   private HarnessSessionDO toDO(Session session) {
     HarnessSessionDO target = new HarnessSessionDO();
     target.setId(session.id());
-    target.setAgentDefinitionId(session.agentDefinitionId());
     target.setTitle(session.title());
+    target.setMainThreadId(session.mainThreadId());
     target.setParentSessionId(session.parentSessionId());
     target.setRootSessionId(session.rootSessionId());
     target.setParentInvocationId(session.parentInvocationId());
@@ -163,7 +163,7 @@ public class MysqlHarnessSessionStore implements SessionStore, SessionEntryStore
   private Session toSession(HarnessSessionDO row) {
     return new Session(
         row.getId(),
-        row.getAgentDefinitionId(),
+        row.getMainThreadId(),
         row.getTitle(),
         row.getParentSessionId(),
         row.getRootSessionId(),

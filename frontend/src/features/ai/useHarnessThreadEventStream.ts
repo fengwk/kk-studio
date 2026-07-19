@@ -55,7 +55,7 @@ export function useHarnessThreadEventStream(threadId: string, enabled: boolean) 
           queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) }),
           queryClient.invalidateQueries({ queryKey: queryKeys.threads.toolInvocations(threadId) }),
           queryClient.invalidateQueries({ queryKey: queryKeys.usage.thread(threadId) }),
-          queryClient.invalidateQueries({ queryKey: queryKeys.threads.list }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all }),
         ])
       }
     }

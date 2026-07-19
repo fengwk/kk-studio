@@ -114,7 +114,7 @@ class DefaultContextTransformTest {
   private static AgentSnapshotEntryPayload snapshot(
       String prompt, String modelId, List<String> tools) {
     return new AgentSnapshotEntryPayload(
-        new AgentSnapshot(prompt, modelId, "default", tools, List.of(), List.of(), "{}"));
+        1L, new AgentSnapshot(prompt, modelId, "default", tools, List.of(), List.of(), "{}"));
   }
 
   private static MessageEntryPayload message(String text) {

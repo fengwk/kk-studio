@@ -19,14 +19,8 @@ public class HarnessThreadDTO {
   /** 当前 head Entry。 */
   private String headEntryId;
 
-  /** 当前冻结 AgentDefinition id。 */
-  private String agentDefinitionId;
-
-  /** 冻结 runtime 配置 JSON。 */
-  private String runtimeConfigJson;
-
-  /** Thread 级 YOLO 开关。 */
-  private Boolean yoloEnabled;
+  /** durable actor 状态。 */
+  private String status;
 
   /** 已分配 input sequence 高水位。 */
   private Long inputSequence;

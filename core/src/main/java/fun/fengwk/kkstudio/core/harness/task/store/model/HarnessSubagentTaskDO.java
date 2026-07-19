@@ -16,6 +16,9 @@ public class HarnessSubagentTaskDO {
   /** 父 Thread id。 */
   private Long parentThreadId;
 
+  /** 委托树根用户 Thread id（ASK relay 目标）。 */
+  private Long rootThreadId;
+
   /** 子 Session id。 */
   private Long childSessionId;
 

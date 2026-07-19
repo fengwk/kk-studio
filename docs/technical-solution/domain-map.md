@@ -6,7 +6,7 @@
 
 | 域 | 代码位置 | 职责 | 当前成熟度 |
 | --- | --- | --- | --- |
-| **Harness / AI** | `harness/*` + `core.harness` + `features/ai` | Session Entry Tree、AgentThread、Tool、Agent 对话执行 | 已落地 |
+| **Harness / AI** | `harness/*` + `core.harness` + `features/ai` | Session Entry Tree、Main Thread、AgentThread、Tool、Agent 对话执行 | 最终契约 |
 | **Studio / Canvas** | `studio` + `core.studio` + `features/canvas` | 画布资源工作台、Function、Workflow | Canvas 最小持久化已落地；其余 Runtime 待补 |
 
 依赖：
@@ -79,9 +79,9 @@ Link ≠ Reference。演示层若只做连线，必须标注为 visibility。
 | `POST /api/canvases` | 可用（创建 Canvas） |
 | `POST /api/canvases/{canvasId}/commands` | 可用（create text/generate-text/link、move、delete node） |
 | Workflow / FunctionRun 写路径 | `501 Studio feature not ready` |
-| Harness `/api/threads` | 完整 Thread 创建、mailbox、Entries、Events 与 SSE |
-| Harness `/api/sessions` | 只读 Session Tree、activities 与 tasks |
+| Harness `/api/sessions` | 创建 Session 与 Main Thread、Session Tree/Entries/Threads 查询、从 Entry 创建 Secondary Thread |
+| Harness `/api/threads/{threadId}` | Thread 读取、mailbox 提交、Entries/Inputs/Events/SSE、Stop/Retry |
 
 ## 6. 实现进度一句话
 
-Harness 是完整可恢复的 AgentThread 执行链；Studio 已具备 Canvas 最小持久化，Resource、FunctionRun 与 Workflow Runtime 仍是领域契约或 stub；前端 AI 已接 Harness，Canvas Library/Create 已接持久 API，Editor snapshot/command 闭环待接。
+Harness 是以 Session Main Thread、Entry Tree、Thread mailbox 与 Event journal 为基础的可恢复 AgentThread 执行链；Studio 的 Canvas、Resource、FunctionRun 与 Workflow 保持独立领域边界。

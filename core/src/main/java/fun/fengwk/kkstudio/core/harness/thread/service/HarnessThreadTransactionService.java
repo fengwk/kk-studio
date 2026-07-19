@@ -12,10 +12,11 @@ import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionEntry
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionEntryDO;
+import fun.fengwk.kkstudio.core.harness.task.store.mapper.HarnessSubagentTaskMapper;
+import fun.fengwk.kkstudio.core.harness.task.store.model.HarnessSubagentTaskDO;
 import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadInputMapper;
 import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadMapper;
 import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadDO;
-import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadInputDO;
 import fun.fengwk.kkstudio.core.harness.tool.service.ToolPolicyResolver;
 import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
@@ -28,14 +29,17 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshotEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.ArtifactMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.CustomMessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.session.ModelChangeEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolsetChangeEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.YoloChangeEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.AgentThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventDraft;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventPayloads;
@@ -43,8 +47,12 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventType;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStop;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStopStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadTurnAdmission;
@@ -82,9 +90,11 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
   private final HarnessThreadInputMapper inputMapper;
   private final HarnessSessionMapper sessionMapper;
   private final HarnessSessionEntryMapper entryMapper;
+  private final HarnessSubagentTaskMapper taskMapper;
   private final ToolInvocationMapper invocationMapper;
   private final ThreadStore threadStore;
   private final ThreadInputStore inputStore;
+  private final ThreadStopStore stopStore;
   private final ThreadEventStore eventStore;
   private final ThreadIdGenerator idGenerator;
   private final ModelUsageRecordStore usageRecordStore;
@@ -99,9 +109,11 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
       HarnessThreadInputMapper inputMapper,
       HarnessSessionMapper sessionMapper,
       HarnessSessionEntryMapper entryMapper,
+      HarnessSubagentTaskMapper taskMapper,
       ToolInvocationMapper invocationMapper,
       ThreadStore threadStore,
       ThreadInputStore inputStore,
+      ThreadStopStore stopStore,
       ThreadEventStore eventStore,
       ThreadIdGenerator idGenerator,
       ModelUsageRecordStore usageRecordStore,
@@ -113,9 +125,11 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     this.inputMapper = Objects.requireNonNull(inputMapper, "inputMapper");
     this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
     this.entryMapper = Objects.requireNonNull(entryMapper, "entryMapper");
+    this.taskMapper = Objects.requireNonNull(taskMapper, "taskMapper");
     this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
     this.threadStore = Objects.requireNonNull(threadStore, "threadStore");
     this.inputStore = Objects.requireNonNull(inputStore, "inputStore");
+    this.stopStore = Objects.requireNonNull(stopStore, "stopStore");
     this.eventStore = Objects.requireNonNull(eventStore, "eventStore");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
     this.usageRecordStore = Objects.requireNonNull(usageRecordStore, "usageRecordStore");
@@ -129,27 +143,24 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
 
   @Override
   @Transactional
-  public AgentThread createRootThread(
+  public SessionCreateResult createSession(
       long agentDefinitionId,
       String title,
       AgentSnapshot snapshot,
-      String runtimeConfigJson,
       boolean yoloEnabled,
       Instant now) {
     Objects.requireNonNull(snapshot, "snapshot");
-    Objects.requireNonNull(runtimeConfigJson, "runtimeConfigJson");
     long sessionId = AgentIdGenerator.nextHarnessSessionId();
     long snapshotEntryId = idGenerator.newSessionEntryId();
     long threadId = idGenerator.newThreadId();
     LocalDateTime timestamp = utc(now);
 
-    Session session = Session.root(sessionId, agentDefinitionId, title, now);
     HarnessSessionDO sessionRow = new HarnessSessionDO();
-    sessionRow.setId(session.id());
-    sessionRow.setAgentDefinitionId(session.agentDefinitionId());
-    sessionRow.setTitle(session.title());
+    sessionRow.setId(sessionId);
+    sessionRow.setTitle(title);
+    sessionRow.setMainThreadId(threadId);
     sessionRow.setParentSessionId(null);
-    sessionRow.setRootSessionId(session.rootSessionId());
+    sessionRow.setRootSessionId(sessionId);
     sessionRow.setParentInvocationId(null);
     sessionRow.setDepth(0);
     sessionRow.setVersion(0L);
@@ -157,65 +168,46 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     sessionRow.setUpdateTime(timestamp);
     sessionMapper.insert(sessionRow);
 
-    AgentSnapshotEntryPayload payload = new AgentSnapshotEntryPayload(snapshot);
+    AgentSnapshotEntryPayload payload = new AgentSnapshotEntryPayload(agentDefinitionId, snapshot);
     insertEntry(snapshotEntryId, sessionId, null, payload, timestamp);
+
+    long headEntryId = snapshotEntryId;
+    if (yoloEnabled) {
+      headEntryId = idGenerator.newSessionEntryId();
+      insertEntry(
+          headEntryId, sessionId, snapshotEntryId, new YoloChangeEntryPayload(true), timestamp);
+    }
 
     AgentThread thread =
         new AgentThread(
-            threadId,
-            sessionId,
-            snapshotEntryId,
-            agentDefinitionId,
-            runtimeConfigJson,
-            yoloEnabled,
-            0L,
-            null,
-            null,
-            0L,
-            now,
-            now);
+            threadId, sessionId, headEntryId, ThreadStatus.IDLE, 0L, null, null, 0L, now, now);
     threadStore.create(thread);
     eventStore.append(
         threadId,
-        snapshotEntryId,
+        headEntryId,
         ThreadEventType.THREAD_STARTED,
         ThreadEventPayloads.of(
-            "sessionId", Long.toString(sessionId), "headEntryId", Long.toString(snapshotEntryId)),
+            "sessionId", Long.toString(sessionId), "headEntryId", Long.toString(headEntryId)),
         now);
-    return thread;
+    return new SessionCreateResult(sessionId, thread);
   }
 
   @Override
   @Transactional
-  public AgentThread createThreadFromEntry(
-      long sessionId,
-      long fromEntryId,
-      Long agentDefinitionId,
-      String runtimeConfigJson,
-      boolean yoloEnabled,
-      Instant now) {
-    Objects.requireNonNull(runtimeConfigJson, "runtimeConfigJson");
+  public AgentThread createThreadFromEntry(long sessionId, long fromEntryId, Instant now) {
     if (sessionMapper.find(sessionId) == null) {
       throw new IllegalArgumentException("unknown session: " + sessionId);
     }
     if (entryMapper.find(sessionId, fromEntryId) == null) {
+      if (entryMapper.findById(fromEntryId) != null) {
+        throw new IllegalStateException("entry does not belong to session: " + fromEntryId);
+      }
       throw new IllegalArgumentException("unknown entry: " + fromEntryId);
     }
     long threadId = idGenerator.newThreadId();
     AgentThread thread =
         new AgentThread(
-            threadId,
-            sessionId,
-            fromEntryId,
-            agentDefinitionId,
-            runtimeConfigJson,
-            yoloEnabled,
-            0L,
-            null,
-            null,
-            0L,
-            now,
-            now);
+            threadId, sessionId, fromEntryId, ThreadStatus.IDLE, 0L, null, null, 0L, now, now);
     threadStore.create(thread);
     eventStore.append(
         threadId,
@@ -240,52 +232,36 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     if (userMessage.role() != AgentMessageRole.USER) {
       throw new IllegalArgumentException("submitted message must have USER role");
     }
-    if (clientMessageId != null) {
-      ThreadInput existing =
-          inputStore.findByClientMessageId(threadId, clientMessageId).orElse(null);
-      if (existing != null) {
-        return existing;
-      }
-    }
-    requireThread(threadId);
-    long sequence = threadStore.allocateInputSequence(threadId, now);
-    long inputId = idGenerator.newThreadInputId();
-    String payload = encodeUserMessage(userMessage);
-    ThreadInput input =
-        new ThreadInput(
-            inputId,
-            threadId,
-            sequence,
-            ThreadInputType.USER_MESSAGE,
-            payload,
-            clientMessageId,
-            null,
-            null,
-            now);
-    try {
-      inputStore.insert(input);
-      return input;
-    } catch (DataIntegrityViolationException race) {
-      // 并发双 miss findByClientMessageId 后唯一键冲突：返回已存在行，不分配第二条语义输入。
-      if (clientMessageId == null) {
-        throw race;
-      }
-      return inputStore.findByClientMessageId(threadId, clientMessageId).orElseThrow(() -> race);
-    }
+    return enqueue(
+        threadId,
+        ThreadInputType.USER_MESSAGE,
+        encodeUserMessage(userMessage),
+        clientMessageId,
+        now);
   }
 
   @Override
   @Transactional
-  public ThreadInput submitSetYolo(long threadId, boolean yoloEnabled, Instant now) {
-    requireThread(threadId);
-    long sequence = threadStore.allocateInputSequence(threadId, now);
-    long inputId = idGenerator.newThreadInputId();
-    String payload = encodeSimple("yoloEnabled", yoloEnabled);
-    ThreadInput input =
-        new ThreadInput(
-            inputId, threadId, sequence, ThreadInputType.SET_YOLO, payload, null, null, null, now);
-    inputStore.insert(input);
-    return input;
+  public ThreadInput submitCustomMessage(
+      long threadId, AgentMessage customMessage, String clientMessageId, Instant now) {
+    return enqueue(
+        threadId,
+        ThreadInputType.CUSTOM_MESSAGE,
+        payloadCodec.encode(new CustomMessageEntryPayload(Objects.requireNonNull(customMessage))),
+        clientMessageId,
+        now);
+  }
+
+  @Override
+  @Transactional
+  public ThreadInput submitSetYolo(
+      long threadId, boolean yoloEnabled, String clientMessageId, Instant now) {
+    return enqueue(
+        threadId,
+        ThreadInputType.SET_YOLO,
+        encodeSimple("yoloEnabled", yoloEnabled),
+        clientMessageId,
+        now);
   }
 
   @Override
@@ -294,100 +270,91 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
       long threadId,
       long agentDefinitionId,
       AgentSnapshot snapshot,
-      String runtimeConfigJson,
+      String clientMessageId,
       Instant now) {
     Objects.requireNonNull(snapshot, "snapshot");
-    Objects.requireNonNull(runtimeConfigJson, "runtimeConfigJson");
-    requireThread(threadId);
-    long sequence = threadStore.allocateInputSequence(threadId, now);
-    long inputId = idGenerator.newThreadInputId();
     ObjectNode node = OBJECT_MAPPER.createObjectNode();
     node.put("agentDefinitionId", agentDefinitionId);
-    node.put("runtimeConfigJson", runtimeConfigJson);
     node.set("snapshot", OBJECT_MAPPER.valueToTree(snapshot));
-    ThreadInput input =
-        new ThreadInput(
-            inputId,
-            threadId,
-            sequence,
-            ThreadInputType.SET_AGENT,
-            write(node),
-            null,
-            null,
-            null,
-            now);
-    inputStore.insert(input);
-    return input;
+    return enqueue(threadId, ThreadInputType.SET_AGENT, write(node), clientMessageId, now);
   }
 
   @Override
   @Transactional
-  public ApplyInputResult applyNextInput(long threadId, String processorToken, Instant now) {
+  public ThreadInput submitSetModel(
+      long threadId, String modelId, String variant, String clientMessageId, Instant now) {
+    ObjectNode node = OBJECT_MAPPER.createObjectNode();
+    node.put("modelId", requireText(modelId, "modelId"));
+    node.put("variant", requireText(variant, "variant"));
+    return enqueue(threadId, ThreadInputType.SET_MODEL, write(node), clientMessageId, now);
+  }
+
+  @Override
+  @Transactional
+  public ThreadInput submitSetToolset(
+      long threadId, List<String> tools, String clientMessageId, Instant now) {
+    if (tools == null) {
+      throw new IllegalArgumentException("tools must not be null");
+    }
+    ArrayList<String> copy = new ArrayList<>(tools);
+    if (copy.stream().anyMatch(tool -> tool == null || tool.isBlank())) {
+      throw new IllegalArgumentException("tools must only contain non-blank values");
+    }
+    ObjectNode node = OBJECT_MAPPER.createObjectNode();
+    node.set("tools", OBJECT_MAPPER.valueToTree(copy));
+    return enqueue(threadId, ThreadInputType.SET_TOOLSET, write(node), clientMessageId, now);
+  }
+
+  @Override
+  @Transactional
+  public HarvestResult harvestQueuedInputs(long threadId, String processorToken, Instant now) {
     HarnessThreadDO thread = requireOwnedThread(threadId, processorToken);
-    HarnessThreadInputDO pending = inputMapper.findNextPending(threadId);
-    if (pending == null) {
-      return ApplyInputResult.none();
+    List<ThreadInput> queued = inputStore.listQueuedUpTo(threadId, thread.getInputSequence());
+    if (queued.isEmpty()) {
+      return HarvestResult.none();
     }
-    HarnessThreadInputDO locked = inputMapper.findForUpdate(pending.getId());
-    if (locked == null || locked.getAppliedEntryId() != null) {
-      return ApplyInputResult.none();
-    }
-    long entryId = idGenerator.newSessionEntryId();
     LocalDateTime timestamp = utc(now);
-    ThreadInputType type = ThreadInputType.fromValue(locked.getInputType());
-    switch (type) {
-      case USER_MESSAGE -> {
-        AgentMessage message = decodeUserMessage(locked.getPayloadJson());
-        MessageEntryPayload payload = new MessageEntryPayload(message);
-        insertEntry(entryId, thread.getSessionId(), thread.getHeadEntryId(), payload, timestamp);
+    long parent = thread.getHeadEntryId();
+    boolean hasMessage = false;
+    List<ThreadInput> applied = new ArrayList<>();
+    for (ThreadInput input : queued) {
+      long entryId = idGenerator.newSessionEntryId();
+      insertEntry(entryId, thread.getSessionId(), parent, decodeInput(input), timestamp);
+      if (!inputStore.markApplied(input.id(), entryId, now)) {
+        throw new ConcurrentModificationException("input already resolved");
       }
-      case SET_YOLO -> {
-        boolean yolo = readYolo(locked.getPayloadJson());
-        if (!threadStore.updateYolo(threadId, processorToken, yolo, now)) {
-          throw new ConcurrentModificationException("lost processor ownership");
-        }
-        // no entry; mark applied to head itself
-        entryId = thread.getHeadEntryId();
-      }
-      case SET_AGENT -> {
-        AgentSetPayload agentSet = readAgentSet(locked.getPayloadJson());
-        AgentSnapshotEntryPayload payload = new AgentSnapshotEntryPayload(agentSet.snapshot());
-        insertEntry(entryId, thread.getSessionId(), thread.getHeadEntryId(), payload, timestamp);
-        if (!threadStore.updateAgent(
-            threadId,
-            processorToken,
-            agentSet.agentDefinitionId(),
-            agentSet.runtimeConfigJson(),
-            now)) {
-          throw new ConcurrentModificationException("lost processor ownership");
-        }
-      }
+      eventStore.append(
+          threadId,
+          entryId,
+          ThreadEventType.INPUT_APPLIED,
+          ThreadEventPayloads.of(
+              "inputId",
+              Long.toString(input.id()),
+              "sequence",
+              input.sequence(),
+              "type",
+              input.inputType().value()),
+          now);
+      applied.add(
+          new ThreadInput(
+              input.id(),
+              input.threadId(),
+              input.sequence(),
+              input.inputType(),
+              input.payloadJson(),
+              input.clientMessageId(),
+              ThreadInputStatus.APPLIED,
+              entryId,
+              now,
+              null,
+              input.createdAt()));
+      hasMessage |= input.inputType().isMessage();
+      parent = entryId;
     }
-    if (inputMapper.markApplied(locked.getId(), entryId, timestamp) != 1) {
-      throw new ConcurrentModificationException("input already applied");
-    }
-    if (type != ThreadInputType.SET_YOLO
-        && !threadStore.advanceHead(
-            threadId, processorToken, thread.getHeadEntryId(), entryId, now)) {
+    if (!threadStore.advanceHead(threadId, processorToken, thread.getHeadEntryId(), parent, now)) {
       throw new ConcurrentModificationException("cannot advance head");
     }
-    eventStore.append(
-        threadId,
-        entryId,
-        ThreadEventType.INPUT_APPLIED,
-        ThreadEventPayloads.of(
-            "inputId",
-            Long.toString(locked.getId()),
-            "sequence",
-            locked.getSequence(),
-            "type",
-            type.value()),
-        now);
-    ThreadInput applied =
-        inputStore
-            .findById(locked.getId())
-            .orElseThrow(() -> new IllegalStateException("applied input missing"));
-    return new ApplyInputResult(true, applied, entryId);
+    return new HarvestResult(true, hasMessage, applied, parent);
   }
 
   @Override
@@ -440,6 +407,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
       List<ToolBinding> bindings,
       Path workdir,
       Path environmentRoot,
+      boolean yoloEnabled,
       List<ThreadEventDraft> events,
       Instant now) {
     HarnessThreadDO thread = findOwnedThread(threadId, processorToken);
@@ -461,8 +429,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
             plannedAssistantEntryId,
             usageDraft,
             now));
-    ToolPolicyResolver.ResolvedPolicy policy =
-        policyResolver.resolve(Boolean.TRUE.equals(thread.getYoloEnabled()));
+    ToolPolicyResolver.ResolvedPolicy policy = policyResolver.resolve(yoloEnabled);
     List<PreparedToolInvocation> prepared =
         toolPreparationService.prepare(
             toolCalls,
@@ -532,6 +499,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
       }
     }
     appendEventsInternal(threadId, all, now);
+    relayChildPermissionRequests(threadId, all, now);
     return true;
   }
 
@@ -542,7 +510,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     if (thread == null) {
       return false;
     }
-    if (invocationMapper.countNonTerminalByThread(threadId) != 0) {
+    if (hasNonTerminalInvocationsForHead(thread)) {
       return false;
     }
     List<ToolInvocationDO> invocations = invocationMapper.listByThread(threadId);
@@ -553,11 +521,6 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
             .sorted((a, b) -> Integer.compare(a.getOrdinal(), b.getOrdinal()))
             .toList();
     if (forHead.isEmpty()) {
-      return false;
-    }
-    // If tool result entries already exist as children of head, skip.
-    if (!entryMapper.listChildren(thread.getSessionId(), thread.getHeadEntryId()).isEmpty()) {
-      // may already applied; treat as progressed if head advanced externally
       return false;
     }
     long parent = thread.getHeadEntryId();
@@ -636,7 +599,76 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
       return false;
     }
     appendEventsInternal(threadId, events, now);
+    threadMapper.forceStatusAndClearProcessor(threadId, ThreadStatus.FAILED.name(), utc(now));
     return true;
+  }
+
+  @Override
+  @Transactional
+  public AgentThread retry(long threadId, Instant now) {
+    HarnessThreadDO thread = threadMapper.findForUpdate(threadId);
+    if (thread == null) {
+      throw new IllegalArgumentException("unknown thread: " + threadId);
+    }
+    if (!ThreadStatus.FAILED.name().equals(thread.getStatus())) {
+      throw new IllegalStateException("thread is not failed");
+    }
+    threadMapper.updateStatusDirect(threadId, ThreadStatus.RETRYING.name(), utc(now));
+    eventStore.append(
+        threadId,
+        thread.getHeadEntryId(),
+        ThreadEventType.THREAD_RETRYING,
+        ThreadEventPayloads.of("at", now),
+        now);
+    return threadStore
+        .find(threadId)
+        .orElseThrow(() -> new IllegalStateException("thread disappeared"));
+  }
+
+  @Override
+  @Transactional
+  public StopResult stop(long threadId, String clientRequestId, Instant now) {
+    requireText(clientRequestId, "clientRequestId");
+    ThreadStop replay = stopStore.findByClientRequestId(threadId, clientRequestId).orElse(null);
+    if (replay != null) {
+      return stopResult(replay);
+    }
+    HarnessThreadDO thread = threadMapper.findForUpdate(threadId);
+    if (thread == null) {
+      throw new IllegalArgumentException("unknown thread: " + threadId);
+    }
+    replay = stopStore.findByClientRequestId(threadId, clientRequestId).orElse(null);
+    if (replay != null) {
+      return stopResult(replay);
+    }
+    ThreadStop stop = new ThreadStop(idGenerator.newThreadStopId(), threadId, clientRequestId, now);
+    try {
+      stopStore.insert(stop);
+    } catch (DataIntegrityViolationException duplicate) {
+      return stopResult(
+          stopStore.findByClientRequestId(threadId, clientRequestId).orElseThrow(() -> duplicate));
+    }
+    for (ThreadInput input : inputStore.listQueued(threadId)) {
+      if (!inputStore.markCancelled(input.id(), stop.id(), now)) {
+        throw new ConcurrentModificationException("input was resolved while stopping");
+      }
+      eventStore.append(
+          threadId,
+          null,
+          ThreadEventType.INPUT_CANCELLED,
+          ThreadEventPayloads.of(
+              "inputId", Long.toString(input.id()), "sequence", input.sequence()),
+          now);
+    }
+    invocationMapper.requestCancelByThread(threadId, utc(now));
+    threadMapper.forceStatusAndClearProcessor(threadId, ThreadStatus.IDLE.name(), utc(now));
+    eventStore.append(
+        threadId,
+        thread.getHeadEntryId(),
+        ThreadEventType.THREAD_STOPPED,
+        ThreadEventPayloads.of("stopId", Long.toString(stop.id())),
+        now);
+    return stopResult(stop);
   }
 
   @Override
@@ -661,6 +693,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
                   ThreadEventType.THREAD_FAILED,
                   ThreadEventPayloads.of("reason", "turn_admission_rejected", "message", reason))),
           now);
+      threadMapper.forceStatusAndClearProcessor(threadId, ThreadStatus.FAILED.name(), utc(now));
       return BeginTurnResult.rejected(reason);
     }
     appendEventsInternal(
@@ -673,33 +706,56 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
 
   @Override
   @Transactional
-  public boolean releaseIfIdle(long threadId, String processorToken, Instant now) {
-    HarnessThreadDO thread = threadMapper.findForUpdate(threadId);
-    if (thread == null || !Objects.equals(thread.getProcessorToken(), processorToken)) {
-      return true;
-    }
-    if (hasImmediateDurableWork(thread)) {
+  public boolean completeRetriedTurn(long threadId, String processorToken, Instant now) {
+    HarnessThreadDO thread = findOwnedThread(threadId, processorToken);
+    if (thread == null || !ThreadStatus.RETRYING.name().equals(thread.getStatus())) {
       return false;
     }
-    return threadMapper.release(threadId, processorToken, utc(now)) == 1;
+    return threadStore.updateStatus(threadId, processorToken, ThreadStatus.RUNNING, now);
   }
 
   @Override
   @Transactional
-  public boolean releaseForExternalWait(long threadId, String processorToken, Instant now) {
-    HarnessThreadDO thread = threadMapper.findForUpdate(threadId);
-    if (thread == null || !Objects.equals(thread.getProcessorToken(), processorToken)) {
-      return true;
-    }
-    // 任意非终态 tool（含 WAITING_APPROVAL）仍需外部推进：释放 token。pending input 不阻止释放。
-    if (invocationMapper.countNonTerminalByThread(threadId) != 0) {
-      return threadMapper.release(threadId, processorToken, utc(now)) == 1;
-    }
-    // 无非终态 tool，但当前 head 有可 apply 的终态结果：保留 token 继续。
-    if (hasTerminalResultsPendingApply(thread)) {
+  public boolean waitForExternal(long threadId, String processorToken, String reason, Instant now) {
+    HarnessThreadDO thread = findOwnedThread(threadId, processorToken);
+    if (thread == null) {
       return false;
     }
-    return false;
+    if (!hasNonTerminalInvocationsForHead(thread)) {
+      return false;
+    }
+    appendEventsInternal(
+        threadId,
+        List.of(
+            new ThreadEventDraft(
+                ThreadEventType.THREAD_WAITING, ThreadEventPayloads.of("reason", reason))),
+        now);
+    ThreadStatus waitingStatus =
+        ThreadStatus.RETRYING.name().equals(thread.getStatus())
+            ? ThreadStatus.RETRYING
+            : ThreadStatus.WAITING;
+    threadMapper.forceStatusAndClearProcessor(threadId, waitingStatus.name(), utc(now));
+    return true;
+  }
+
+  @Override
+  @Transactional
+  public QuiescenceResult quiesce(long threadId, String processorToken, Instant now) {
+    HarnessThreadDO thread = findOwnedThread(threadId, processorToken);
+    if (thread == null) {
+      return QuiescenceResult.LOST_OWNERSHIP;
+    }
+    if (hasImmediateDurableWork(thread)) {
+      return QuiescenceResult.WORK_REMAINS;
+    }
+    appendEventsInternal(
+        threadId,
+        List.of(
+            new ThreadEventDraft(
+                ThreadEventType.THREAD_IDLE, ThreadEventPayloads.of("reason", "queue_empty"))),
+        now);
+    threadMapper.forceStatusAndClearProcessor(threadId, ThreadStatus.IDLE.name(), utc(now));
+    return QuiescenceResult.IDLE;
   }
 
   /**
@@ -708,10 +764,10 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
    */
   private boolean hasImmediateDurableWork(HarnessThreadDO thread) {
     long threadId = thread.getId();
-    if (inputMapper.findNextPending(threadId) != null) {
+    if (!inputStore.listQueued(threadId).isEmpty()) {
       return true;
     }
-    if (invocationMapper.countNonTerminalByThread(threadId) != 0) {
+    if (hasNonTerminalInvocationsForHead(thread)) {
       return true;
     }
     return hasTerminalResultsPendingApply(thread);
@@ -726,6 +782,15 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
                     && isTerminalStatus(inv.getStatus()));
   }
 
+  private boolean hasNonTerminalInvocationsForHead(HarnessThreadDO thread) {
+    long headEntryId = thread.getHeadEntryId();
+    return invocationMapper.listByThread(thread.getId()).stream()
+        .anyMatch(
+            invocation ->
+                Objects.equals(invocation.getAssistantEntryId(), headEntryId)
+                    && !isTerminalStatus(invocation.getStatus()));
+  }
+
   private static boolean isTerminalStatus(String status) {
     if (status == null) {
       return false;
@@ -736,18 +801,140 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     };
   }
 
+  private ThreadInput enqueue(
+      long threadId,
+      ThreadInputType inputType,
+      String payloadJson,
+      String clientMessageId,
+      Instant now) {
+    requireText(clientMessageId, "clientMessageId");
+    ThreadInput existing = inputStore.findByClientMessageId(threadId, clientMessageId).orElse(null);
+    if (existing != null) {
+      return requireSameInput(existing, inputType, payloadJson);
+    }
+    HarnessThreadDO thread = threadMapper.findForUpdate(threadId);
+    if (thread == null) {
+      throw new IllegalArgumentException("unknown thread: " + threadId);
+    }
+    existing = inputStore.findByClientMessageId(threadId, clientMessageId).orElse(null);
+    if (existing != null) {
+      return requireSameInput(existing, inputType, payloadJson);
+    }
+    if (threadMapper.allocateInputSequence(threadId, utc(now)) != 1) {
+      throw new IllegalStateException("cannot allocate input sequence");
+    }
+    ThreadInput input =
+        new ThreadInput(
+            idGenerator.newThreadInputId(),
+            threadId,
+            thread.getInputSequence() + 1,
+            inputType,
+            payloadJson,
+            clientMessageId,
+            ThreadInputStatus.QUEUED,
+            null,
+            null,
+            null,
+            now);
+    try {
+      inputStore.insert(input);
+    } catch (DataIntegrityViolationException duplicate) {
+      ThreadInput replay =
+          inputStore.findByClientMessageId(threadId, clientMessageId).orElseThrow(() -> duplicate);
+      return requireSameInput(replay, inputType, payloadJson);
+    }
+    if (ThreadStatus.IDLE.name().equals(thread.getStatus())) {
+      threadMapper.updateStatusDirect(threadId, ThreadStatus.RUNNING.name(), utc(now));
+      eventStore.append(
+          threadId,
+          null,
+          ThreadEventType.THREAD_RUNNING,
+          ThreadEventPayloads.of("reason", "input_queued"),
+          now);
+    }
+    return input;
+  }
+
+  private static ThreadInput requireSameInput(
+      ThreadInput existing, ThreadInputType inputType, String payloadJson) {
+    if (existing.inputType() != inputType || !existing.payloadJson().equals(payloadJson)) {
+      throw new IllegalStateException("clientMessageId is already bound to a different input");
+    }
+    return existing;
+  }
+
+  private SessionEntryPayload decodeInput(ThreadInput input) {
+    try {
+      return switch (input.inputType()) {
+        case USER_MESSAGE -> payloadCodec.decode(SessionEntryType.MESSAGE, input.payloadJson());
+        case CUSTOM_MESSAGE -> payloadCodec.decode(
+            SessionEntryType.CUSTOM_MESSAGE, input.payloadJson());
+        case SET_YOLO -> new YoloChangeEntryPayload(readYolo(input.payloadJson()));
+        case SET_AGENT -> {
+          var node = OBJECT_MAPPER.readTree(input.payloadJson());
+          yield new AgentSnapshotEntryPayload(
+              node.path("agentDefinitionId").asLong(),
+              OBJECT_MAPPER.treeToValue(node.get("snapshot"), AgentSnapshot.class));
+        }
+        case SET_MODEL -> {
+          var node = OBJECT_MAPPER.readTree(input.payloadJson());
+          yield new ModelChangeEntryPayload(
+              node.path("modelId").asText(), node.path("variant").asText());
+        }
+        case SET_TOOLSET -> {
+          var node = OBJECT_MAPPER.readTree(input.payloadJson());
+          List<String> tools = new ArrayList<>();
+          node.path("tools").forEach(value -> tools.add(value.asText()));
+          yield new ToolsetChangeEntryPayload(tools);
+        }
+      };
+    } catch (JsonProcessingException error) {
+      throw new IllegalArgumentException(
+          "cannot decode " + input.inputType().value() + " payload", error);
+    }
+  }
+
+  private StopResult stopResult(ThreadStop stop) {
+    List<ThreadInput> cancelled = inputStore.listCancelledByStop(stop.threadId(), stop.id());
+    List<String> restored =
+        cancelled.stream()
+            .filter(input -> input.inputType().isMessage())
+            .map(this::messageText)
+            .toList();
+    return new StopResult(stop, cancelled, restored);
+  }
+
+  private String messageText(ThreadInput input) {
+    SessionEntryPayload payload = decodeInput(input);
+    AgentMessage message =
+        payload instanceof MessageEntryPayload value
+            ? value.message()
+            : ((CustomMessageEntryPayload) payload).message();
+    return message.contents().stream()
+        .filter(TextMessageContent.class::isInstance)
+        .map(TextMessageContent.class::cast)
+        .map(TextMessageContent::text)
+        .reduce("", String::concat);
+  }
+
   private void appendEventsInternal(long threadId, List<ThreadEventDraft> events, Instant now) {
     for (ThreadEventDraft draft : events) {
       eventStore.append(threadId, draft.subjectEntryId(), draft.type(), draft.payloadJson(), now);
     }
   }
 
-  private HarnessThreadDO requireThread(long threadId) {
-    HarnessThreadDO thread = threadMapper.find(threadId);
-    if (thread == null) {
-      throw new IllegalArgumentException("unknown thread: " + threadId);
+  /** Child ASK 保留源 Thread 事件，并投影到 delegation root 供根 UI 决策。 */
+  private void relayChildPermissionRequests(
+      long childThreadId, List<ThreadEventDraft> events, Instant now) {
+    HarnessSubagentTaskDO task = taskMapper.findByChildThreadId(childThreadId);
+    if (task == null || Objects.equals(task.getRootThreadId(), childThreadId)) {
+      return;
     }
-    return thread;
+    for (ThreadEventDraft event : events) {
+      if (event.type() == ThreadEventType.PERMISSION_REQUESTED) {
+        eventStore.append(task.getRootThreadId(), null, event.type(), event.payloadJson(), now);
+      }
+    }
   }
 
   private HarnessThreadDO requireOwnedThread(long threadId, String processorToken) {
@@ -826,21 +1013,6 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     }
   }
 
-  private static AgentSetPayload readAgentSet(String payloadJson) {
-    try {
-      var node = OBJECT_MAPPER.readTree(payloadJson);
-      long agentDefinitionId = node.path("agentDefinitionId").asLong();
-      String runtimeConfigJson = node.path("runtimeConfigJson").asText();
-      AgentSnapshot snapshot = OBJECT_MAPPER.treeToValue(node.get("snapshot"), AgentSnapshot.class);
-      return new AgentSetPayload(agentDefinitionId, runtimeConfigJson, snapshot);
-    } catch (JsonProcessingException error) {
-      throw new IllegalArgumentException("cannot decode set_agent payload", error);
-    }
-  }
-
-  private record AgentSetPayload(
-      long agentDefinitionId, String runtimeConfigJson, AgentSnapshot snapshot) {}
-
   private static AgentMessageContent toMessageContent(ToolContent content) {
     if (content instanceof TextToolContent text) {
       return new TextMessageContent(text.text());
@@ -859,14 +1031,6 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     return payloadCodec.encode(new MessageEntryPayload(message));
   }
 
-  private AgentMessage decodeUserMessage(String json) {
-    SessionEntryPayload payload = payloadCodec.decode(SessionEntryType.MESSAGE, json);
-    if (!(payload instanceof MessageEntryPayload message)) {
-      throw new IllegalArgumentException("user message payload must be MESSAGE type");
-    }
-    return message.message();
-  }
-
   private static String encodeSimple(String key, boolean value) {
     ObjectNode node = OBJECT_MAPPER.createObjectNode();
     node.put(key, value);
@@ -879,6 +1043,13 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     } catch (JsonProcessingException error) {
       throw new IllegalArgumentException("cannot encode payload", error);
     }
+  }
+
+  private static String requireText(String value, String name) {
+    if (value == null || value.isBlank()) {
+      throw new IllegalArgumentException(name + " must not be blank");
+    }
+    return value;
   }
 
   private static LocalDateTime utc(Instant value) {

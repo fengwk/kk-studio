@@ -33,8 +33,8 @@ class HarnessThreadRecoveryMapperTest {
     LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
     long expiredId = 7_100L;
     long activeId = 7_101L;
-    insertThread(expiredId, "tok-expired", now.minusSeconds(10), now);
-    insertThread(activeId, "tok-active", now.plusMinutes(5), now);
+    insertThread(expiredId, "RUNNING", "tok-expired", now.minusSeconds(10), now);
+    insertThread(activeId, "RUNNING", "tok-active", now.plusMinutes(5), now);
     insertPendingInput(8_001L, activeId, 1L, now);
 
     List<Long> ids = threadMapper.listRecoverableThreadIds(now, 100);
@@ -47,8 +47,8 @@ class HarnessThreadRecoveryMapperTest {
     LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
     long waitingOnly = 7_102L;
     long pendingNoToken = 7_103L;
-    insertThread(waitingOnly, null, null, now);
-    insertThread(pendingNoToken, null, null, now);
+    insertThread(waitingOnly, "WAITING", null, null, now);
+    insertThread(pendingNoToken, "WAITING", null, null, now);
     insertWaitingApproval(9_001L, waitingOnly, 200L, now);
     insertPendingInput(8_002L, pendingNoToken, 1L, now);
 
@@ -57,15 +57,44 @@ class HarnessThreadRecoveryMapperTest {
     assertTrue(ids.contains(pendingNoToken), "pending input without token must be selected");
   }
 
+  /** RETRYING debt 必须由 recovery 再次 kick，FAILED 则只能等待显式 retry。 */
+  @Test
+  void selectsRetryingWithoutTokenAndExcludesFailed() {
+    LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+    long retryingId = 7_104L;
+    long failedId = 7_105L;
+    insertThread(retryingId, "RETRYING", null, null, now);
+    insertThread(failedId, "FAILED", null, null, now);
+
+    List<Long> ids = threadMapper.listRecoverableThreadIds(now, 100);
+
+    assertTrue(ids.contains(retryingId), "retrying debt must be recoverable");
+    assertFalse(ids.contains(failedId), "failed thread must await an explicit retry");
+  }
+
+  /** RETRYING Tool chain 等待审批时没有可推进工作，不能被 recovery 周期性自旋。 */
+  @Test
+  void excludesRetryingWaitingApprovalUntilToolBecomesDueOrTerminal() {
+    LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+    long retryingWaitingId = 7_106L;
+    insertThread(retryingWaitingId, "RETRYING", null, null, now);
+    insertWaitingApproval(9_002L, retryingWaitingId, retryingWaitingId + 2000, now);
+    insertPendingInput(8_003L, retryingWaitingId, 1L, now);
+
+    List<Long> ids = threadMapper.listRecoverableThreadIds(now, 100);
+
+    assertFalse(
+        ids.contains(retryingWaitingId),
+        "retrying waiting approval must ignore queued input until the Tool chain progresses");
+  }
+
   private void insertThread(
-      long id, String token, LocalDateTime processorUntil, LocalDateTime now) {
+      long id, String status, String token, LocalDateTime processorUntil, LocalDateTime now) {
     HarnessThreadDO row = new HarnessThreadDO();
     row.setId(id);
     row.setSessionId(id + 1000);
     row.setHeadEntryId(id + 2000);
-    row.setAgentDefinitionId(1L);
-    row.setRuntimeConfigJson("{}");
-    row.setYoloEnabled(false);
+    row.setStatus(status);
     row.setInputSequence(0L);
     row.setProcessorToken(token);
     row.setProcessorUntil(processorUntil);
@@ -84,6 +113,8 @@ class HarnessThreadRecoveryMapperTest {
     input.setSequence(sequence);
     input.setInputType("user_message");
     input.setPayloadJson("{\"type\":\"message\",\"role\":\"user\",\"contents\":[]}");
+    input.setClientMessageId("cid-" + id);
+    input.setStatus("queued");
     input.setCreateTime(now);
     inputMapper.insert(input);
   }

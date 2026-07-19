@@ -4,17 +4,15 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * 持久化的用户执行面板 / Tree cursor。
+ * 持久化的 Branch 运行单元。
  *
- * <p>Branch 由 {@code headEntryId} 路径派生，不独立建模。{@code processorToken}/{@code processorUntil} 实现跨节点单飞。
+ * <p>仅持有 head、mailbox sequence、执行状态与 processor lease；Agent/Model/Toolset/YOLO 由 Entry path fold。
  */
 public record AgentThread(
     long id,
     long sessionId,
     long headEntryId,
-    Long agentDefinitionId,
-    String runtimeConfigJson,
-    boolean yoloEnabled,
+    ThreadStatus status,
     long inputSequence,
     String processorToken,
     Instant processorUntil,
@@ -26,13 +24,10 @@ public record AgentThread(
     if (id <= 0 || sessionId <= 0 || headEntryId <= 0) {
       throw new IllegalArgumentException("thread/session/head ids must be positive");
     }
-    if (agentDefinitionId != null && agentDefinitionId <= 0) {
-      throw new IllegalArgumentException("agentDefinitionId must be positive when present");
-    }
+    status = Objects.requireNonNull(status, "status");
     if (inputSequence < 0 || version < 0) {
       throw new IllegalArgumentException("inputSequence and version must not be negative");
     }
-    runtimeConfigJson = Objects.requireNonNull(runtimeConfigJson, "runtimeConfigJson");
     if (processorToken != null && processorToken.isBlank()) {
       throw new IllegalArgumentException("processorToken must not be blank when present");
     }

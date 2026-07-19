@@ -23,10 +23,14 @@ import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadCommandServi
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadQueryService;
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadAgentSetDTO;
-import fun.fengwk.kkstudio.share.model.HarnessThreadCreateDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadCustomMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadMessageCreateDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadModelSetDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadStopDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadStopResultDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadToolsetSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadYoloSetDTO;
 import fun.fengwk.kkstudio.share.model.ThreadEventDTO;
 
@@ -34,7 +38,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
 
-/** Thread API：全局列表/创建/查询、消息与设置入队（SET_YOLO / SET_AGENT）、路径 entries、inputs、events 与 SSE。 */
+/** Thread API：查询、typed mailbox 输入、路径 entries、inputs、events 与 SSE。 */
 @RestController
 @RequestMapping("/api")
 public class StudioHarnessThreadController {
@@ -57,11 +61,6 @@ public class StudioHarnessThreadController {
     return Results.ok(queryService.listAll());
   }
 
-  @PostMapping("/threads")
-  public Result<HarnessThreadDTO> createThread(@RequestBody HarnessThreadCreateDTO createDTO) {
-    return Results.ok(withMissingResourceTranslation(() -> commandService.createThread(createDTO)));
-  }
-
   @GetMapping("/threads/{threadId}")
   public Result<HarnessThreadDTO> getThread(@PathVariable String threadId) {
     return Results.ok(withMissingResourceTranslation(() -> queryService.getThread(threadId)));
@@ -80,6 +79,15 @@ public class StudioHarnessThreadController {
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(Results.ok(input));
   }
 
+  @PostMapping("/threads/{threadId}/messages/custom")
+  public ResponseEntity<Result<HarnessThreadInputDTO>> submitCustomMessage(
+      @PathVariable String threadId, @RequestBody HarnessThreadCustomMessageCreateDTO createDTO) {
+    HarnessThreadInputDTO input =
+        withMissingResourceTranslation(
+            () -> commandService.submitCustomMessage(threadId, createDTO));
+    return ResponseEntity.status(HttpStatus.ACCEPTED).body(Results.ok(input));
+  }
+
   @PutMapping("/threads/{threadId}/yolo")
   public ResponseEntity<Result<HarnessThreadInputDTO>> queueYolo(
       @PathVariable String threadId, @RequestBody HarnessThreadYoloSetDTO request) {
@@ -94,6 +102,38 @@ public class StudioHarnessThreadController {
     HarnessThreadInputDTO input =
         withMissingResourceTranslation(() -> commandService.queueAgent(threadId, request));
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(Results.ok(input));
+  }
+
+  @PutMapping("/threads/{threadId}/model")
+  public ResponseEntity<Result<HarnessThreadInputDTO>> queueModel(
+      @PathVariable String threadId, @RequestBody HarnessThreadModelSetDTO request) {
+    return ResponseEntity.status(HttpStatus.ACCEPTED)
+        .body(
+            Results.ok(
+                withMissingResourceTranslation(
+                    () -> commandService.queueModel(threadId, request))));
+  }
+
+  @PutMapping("/threads/{threadId}/toolset")
+  public ResponseEntity<Result<HarnessThreadInputDTO>> queueToolset(
+      @PathVariable String threadId, @RequestBody HarnessThreadToolsetSetDTO request) {
+    return ResponseEntity.status(HttpStatus.ACCEPTED)
+        .body(
+            Results.ok(
+                withMissingResourceTranslation(
+                    () -> commandService.queueToolset(threadId, request))));
+  }
+
+  @PostMapping("/threads/{threadId}/stop")
+  public Result<HarnessThreadStopResultDTO> stop(
+      @PathVariable String threadId, @RequestBody HarnessThreadStopDTO request) {
+    return Results.ok(withMissingResourceTranslation(() -> commandService.stop(threadId, request)));
+  }
+
+  @PostMapping("/threads/{threadId}/retry")
+  public ResponseEntity<Result<HarnessThreadDTO>> retry(@PathVariable String threadId) {
+    return ResponseEntity.status(HttpStatus.ACCEPTED)
+        .body(Results.ok(withMissingResourceTranslation(() -> commandService.retry(threadId))));
   }
 
   @GetMapping("/threads/{threadId}/entries")
@@ -133,6 +173,8 @@ public class StudioHarnessThreadController {
   private static <T> T withMissingResourceTranslation(Supplier<T> operation) {
     try {
       return operation.get();
+    } catch (IllegalStateException error) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, error.getMessage(), error);
     } catch (IllegalArgumentException error) {
       String message = error.getMessage();
       if (message != null
@@ -142,7 +184,7 @@ public class StudioHarnessThreadController {
               || message.startsWith("unknown agent definition:"))) {
         throw new ResponseStatusException(HttpStatus.NOT_FOUND, message, error);
       }
-      throw error;
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message, error);
     }
   }
 }

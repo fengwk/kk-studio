@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { PlusIcon, SendIcon } from '@/features/canvas/icons'
 import { ThreadCommandPalette } from '@/features/ai/thread-panel/ThreadCommandPalette'
 import { filterThreadCommands, type ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
+import type { ThreadStatus } from '@/shared/api/contracts'
 
 const TEXTAREA_MIN_HEIGHT = 37
 const TEXTAREA_LINE_HEIGHT = 19
@@ -20,6 +21,11 @@ export function ThreadComposer({
   onDraftChange,
   onSubmit,
   onCommand,
+  threadStatus,
+  onStop,
+  onRetry,
+  stopPending,
+  retryPending,
 }: {
   draft: string
   pending: boolean
@@ -28,6 +34,11 @@ export function ThreadComposer({
   onDraftChange: (draft: string) => void
   onSubmit: () => void
   onCommand: (command: ThreadCommand) => void
+  threadStatus?: ThreadStatus
+  onStop: () => void
+  onRetry: () => void
+  stopPending: boolean
+  retryPending: boolean
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [menuQuery, setMenuQuery] = useState('')
@@ -189,6 +200,19 @@ export function ThreadComposer({
         >
           <SendIcon />
         </button>
+      </div>
+      <div className="thread-composer-extra">
+        {(threadStatus === 'RUNNING' || threadStatus === 'WAITING' || threadStatus === 'RETRYING') ? (
+          <button className="thread-extra-btn" type="button" onClick={onStop} disabled={stopPending}>
+            {stopPending ? 'Stopping…' : 'Stop'}
+          </button>
+        ) : null}
+        {threadStatus === 'FAILED' ? (
+          <button className="thread-extra-btn" type="button" onClick={onRetry} disabled={retryPending}>
+            {retryPending ? 'Retrying…' : 'Retry'}
+          </button>
+        ) : null}
+        {threadStatus ? <span className="thread-extra-hint">{threadStatus}</span> : null}
       </div>
     </div>
   )

@@ -18,18 +18,20 @@ import java.util.List;
 @Mapper
 public interface HarnessSubagentTaskMapper extends BaseMapper {
   String COLUMNS =
-      "parent_invocation_id, parent_session_id, parent_thread_id, child_session_id,"
-          + " child_thread_id, target_agent, working_copy_policy, working_copy_revision, max_turns,"
-          + " status, report_json, gmt_create as create_time, gmt_modified as update_time";
+      "parent_invocation_id, parent_session_id, parent_thread_id, root_thread_id,"
+          + " child_session_id, child_thread_id, target_agent, working_copy_policy,"
+          + " working_copy_revision, max_turns, status, report_json,"
+          + " gmt_create as create_time, gmt_modified as update_time";
 
   @Insert(
       "insert into harness_subagent_task (parent_invocation_id, parent_session_id,"
-          + " parent_thread_id, child_session_id, child_thread_id, target_agent, working_copy_policy,"
-          + " working_copy_revision, max_turns, status, report_json, gmt_create, gmt_modified)"
+          + " parent_thread_id, root_thread_id, child_session_id, child_thread_id, target_agent,"
+          + " working_copy_policy, working_copy_revision, max_turns, status, report_json,"
+          + " gmt_create, gmt_modified)"
           + " values (#{parentInvocationId}, #{parentSessionId}, #{parentThreadId},"
-          + " #{childSessionId}, #{childThreadId}, #{targetAgent}, #{workingCopyPolicy},"
-          + " #{workingCopyRevision}, #{maxTurns}, #{status}, #{reportJson}, #{createTime},"
-          + " #{updateTime})")
+          + " #{rootThreadId}, #{childSessionId}, #{childThreadId}, #{targetAgent},"
+          + " #{workingCopyPolicy}, #{workingCopyRevision}, #{maxTurns}, #{status},"
+          + " #{reportJson}, #{createTime}, #{updateTime})")
   int insert(HarnessSubagentTaskDO task);
 
   @Select("select " + COLUMNS + " from harness_subagent_task where parent_invocation_id = #{id}")
@@ -39,6 +41,7 @@ public interface HarnessSubagentTaskMapper extends BaseMapper {
         @Result(column = "parent_invocation_id", property = "parentInvocationId"),
         @Result(column = "parent_session_id", property = "parentSessionId"),
         @Result(column = "parent_thread_id", property = "parentThreadId"),
+        @Result(column = "root_thread_id", property = "rootThreadId"),
         @Result(column = "child_session_id", property = "childSessionId"),
         @Result(column = "child_thread_id", property = "childThreadId"),
         @Result(column = "target_agent", property = "targetAgent"),

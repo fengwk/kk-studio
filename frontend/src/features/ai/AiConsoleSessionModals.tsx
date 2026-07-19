@@ -2,7 +2,7 @@ import type { FormEventHandler } from 'react'
 import { ModalBackdrop, ModalHeader } from '@/features/ai/AiConsoleModalLayout'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts'
 
-export function CreateThreadModal({
+export function CreateSessionModal({
   open,
   agents,
   selectedAgentId,
