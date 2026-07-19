@@ -1,58 +1,24 @@
 package fun.fengwk.kkstudio.harness.runtime.context;
 
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshotEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.ModelChangeEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
-import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolsetChangeEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.YoloChangeEntryPayload;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/** 选择最后一个有效 compaction、保留其摘要和 retained entries，并解析最后生效配置（含 YOLO）。 */
+/**
+ * 消息路径投影：选择最后一个有效 compaction、保留其摘要与 retained entries。
+ *
+ * <p>不再从 Entry path fold Agent/Model/YOLO；运行时配置由 Thread 状态在 Context 构建时注入。
+ */
 public final class DefaultContextTransform {
-  public ContextState transform(List<SessionEntry> path) {
+  public List<SessionEntry> transform(List<SessionEntry> path) {
     path = List.copyOf(Objects.requireNonNull(path, "path"));
-    AgentRuntimeConfig config = resolveConfig(path);
     int compactionIndex = lastEffectiveCompaction(path);
-    List<SessionEntry> entries =
-        compactionIndex < 0
-            ? withoutInvalidCompactions(path, path)
-            : compactedEntries(path, compactionIndex);
-    return new ContextState(config, entries);
-  }
-
-  private AgentRuntimeConfig resolveConfig(List<SessionEntry> path) {
-    AgentRuntimeConfig config = null;
-    for (SessionEntry entry : path) {
-      SessionEntryPayload payload = entry.payload();
-      if (payload instanceof AgentSnapshotEntryPayload snapshot) {
-        config = AgentRuntimeConfig.from(snapshot.agentDefinitionId(), snapshot.snapshot());
-      } else if (payload instanceof ModelChangeEntryPayload modelChange) {
-        if (config == null) {
-          throw new ContextProjectionException("model change requires a preceding agent snapshot");
-        }
-        config = config.withModel(modelChange.modelId(), modelChange.variant());
-      } else if (payload instanceof ToolsetChangeEntryPayload toolsetChange) {
-        if (config == null) {
-          throw new ContextProjectionException(
-              "toolset change requires a preceding agent snapshot");
-        }
-        config = config.withTools(toolsetChange.tools());
-      } else if (payload instanceof YoloChangeEntryPayload yoloChange) {
-        if (config == null) {
-          throw new ContextProjectionException("yolo change requires a preceding agent snapshot");
-        }
-        config = config.withYolo(yoloChange.yoloEnabled());
-      }
-    }
-    if (config == null) {
-      throw new ContextProjectionException("active path has no agent snapshot");
-    }
-    return config;
+    return compactionIndex < 0
+        ? withoutInvalidCompactions(path, path)
+        : compactedEntries(path, compactionIndex);
   }
 
   private List<SessionEntry> compactedEntries(List<SessionEntry> path, int compactionIndex) {

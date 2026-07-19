@@ -30,6 +30,13 @@ public class HarnessThreadDtoConverter {
     dto.setHeadEntryId(Long.toString(thread.headEntryId()));
     dto.setStatus(thread.status().name());
     dto.setInputSequence(thread.inputSequence());
+    if (thread.activeAgentDefinitionId() != null) {
+      dto.setActiveAgentDefinitionId(Long.toString(thread.activeAgentDefinitionId()));
+    }
+    dto.setActiveAgentName(thread.activeAgentName());
+    dto.setModelId(thread.modelId());
+    dto.setVariant(thread.variant());
+    dto.setYoloEnabled(thread.yoloEnabled());
     dto.setProcessing(thread.isProcessing(Instant.now()));
     dto.setCreateTime(LocalDateTime.ofInstant(thread.createdAt(), ZoneOffset.UTC));
     dto.setUpdateTime(LocalDateTime.ofInstant(thread.updatedAt(), ZoneOffset.UTC));
@@ -48,6 +55,13 @@ public class HarnessThreadDtoConverter {
     dto.setHeadEntryId(Long.toString(row.getHeadEntryId()));
     dto.setStatus(row.getStatus());
     dto.setInputSequence(row.getInputSequence());
+    if (row.getActiveAgentDefinitionId() != null) {
+      dto.setActiveAgentDefinitionId(Long.toString(row.getActiveAgentDefinitionId()));
+    }
+    dto.setActiveAgentName(row.getActiveAgentName());
+    dto.setModelId(row.getModelId());
+    dto.setVariant(row.getVariant());
+    dto.setYoloEnabled(Boolean.TRUE.equals(row.getYoloEnabled()));
     boolean processing =
         row.getProcessorToken() != null
             && row.getProcessorUntil() != null

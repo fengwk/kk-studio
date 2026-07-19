@@ -6,7 +6,6 @@ public enum ThreadInputType {
   CUSTOM_MESSAGE("custom_message"),
   SET_AGENT("set_agent"),
   SET_MODEL("set_model"),
-  SET_TOOLSET("set_toolset"),
   SET_YOLO("set_yolo");
 
   private final String value;
@@ -24,7 +23,7 @@ public enum ThreadInputType {
   }
 
   public boolean isConfig() {
-    return this == SET_AGENT || this == SET_MODEL || this == SET_TOOLSET || this == SET_YOLO;
+    return this == SET_AGENT || this == SET_MODEL || this == SET_YOLO;
   }
 
   public static ThreadInputType fromValue(String value) {

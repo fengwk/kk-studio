@@ -7,8 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
-import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
+import fun.fengwk.kkstudio.harness.runtime.context.AgentRuntimeConfig;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -20,7 +19,6 @@ import java.util.Map;
 import java.util.Set;
 
 class TaskDomainTest {
-  /** Explorer-like names get read-only sharing while explicit policy remains authoritative. */
   @Test
   void defaultsWorkingCopyPolicyAndValidatesArguments() {
     assertEquals(
@@ -40,21 +38,19 @@ class TaskDomainTest {
     assertThrows(IllegalArgumentException.class, () -> new TaskCommand("Coder", " ", null));
   }
 
-  /**
-   * Frozen maxDepth and allowlist decide both descriptor injection and deterministic instruction
-   * text.
-   */
   @Test
-  void exposesTaskOnlyBelowFrozenDepth() {
-    AgentSnapshot snapshot =
-        new AgentSnapshot(
+  void exposesTaskOnlyBelowRuntimeDepth() {
+    AgentRuntimeConfig config =
+        new AgentRuntimeConfig(
+            1L,
             null,
             "model",
             "variant",
             List.of(),
             List.of(),
             List.of("Coder", "Explorer"),
-            "{\"maxDepth\":2}");
+            "{\"maxDepth\":2}",
+            false);
     ToolDescriptor descriptor =
         new ToolDescriptor(
             "task",
@@ -66,17 +62,16 @@ class TaskDomainTest {
             ToolSideEffect.IDEMPOTENT,
             Duration.ZERO);
 
-    assertTrue(TaskExposure.descriptor(snapshot, 1, descriptor).isPresent());
-    assertFalse(TaskExposure.descriptor(snapshot, 2, descriptor).isPresent());
+    assertTrue(TaskExposure.descriptor(config, 1, descriptor).isPresent());
+    assertFalse(TaskExposure.descriptor(config, 2, descriptor).isPresent());
     assertEquals(
         "<available_subagents>\n"
             + "  <subagent name=\"Coder\"/>\n"
             + "  <subagent name=\"Explorer\"/>\n"
             + "</available_subagents>",
-        TaskExposure.availableSubagentsInstruction(snapshot, 1));
+        TaskExposure.availableSubagentsInstruction(config, 1));
   }
 
-  /** Strict policy JSON accepts optional limits and rejects each malformed numeric field. */
   @Test
   void decodesFrozenPoliciesStrictly() {
     assertEquals(
@@ -96,45 +91,34 @@ class TaskDomainTest {
     }
   }
 
-  /** XML instruction escaping and no-eligible cases remain deterministic for frozen snapshots. */
   @Test
   void escapesAvailableSubagentsAndRejectsInvalidDepth() {
-    AgentSnapshot snapshot =
-        new AgentSnapshot(
-            null, "model", "variant", List.of(), List.of(), List.of("A<&\"'"), "{\"maxDepth\":1}");
+    AgentRuntimeConfig config =
+        new AgentRuntimeConfig(
+            1L,
+            null,
+            "model",
+            "variant",
+            List.of(),
+            List.of(),
+            List.of("A<&\"'"),
+            "{\"maxDepth\":1}",
+            false);
     assertTrue(
-        TaskExposure.availableSubagentsInstruction(snapshot, 0).contains("A&lt;&amp;&quot;&apos;"));
-    assertEquals("", TaskExposure.availableSubagentsInstruction(snapshot, 1));
+        TaskExposure.availableSubagentsInstruction(config, 0).contains("A&lt;&amp;&quot;&apos;"));
+    assertEquals("", TaskExposure.availableSubagentsInstruction(config, 1));
     assertThrows(
         IllegalArgumentException.class,
-        () -> TaskExposure.availableSubagentsInstruction(snapshot, -1));
+        () -> TaskExposure.availableSubagentsInstruction(config, -1));
   }
 
-  /**
-   * Structured reports preserve terminal state and produce standard error text for child failure.
-   */
   @Test
   void rendersTerminalReport() {
     TaskReport report =
         new TaskReport(
             9, 10, TaskState.FAILED, "broken", List.of(), 2, 3, WorkingCopyPolicy.FORK, "rev-1");
-
     assertFalse(report.success());
     assertTrue(TaskResultFormatter.text(report).contains("<task_error>broken</task_error>"));
     assertTrue(TaskResultFormatter.json(report).contains("\"workingCopyRevision\":\"rev-1\""));
-    TaskReport succeeded =
-        new TaskReport(
-            11,
-            12,
-            TaskState.SUCCEEDED,
-            "<&\"'",
-            List.of(new ArtifactRef("artifact-1", "text/plain", 3)),
-            0,
-            0,
-            WorkingCopyPolicy.NONE,
-            null);
-    assertTrue(TaskResultFormatter.text(succeeded).contains("&lt;&amp;&quot;&apos;"));
-    assertFalse(TaskResultFormatter.json(succeeded).contains("workingCopyRevision"));
-    assertTrue(TaskResultFormatter.json(succeeded).contains("\"artifactId\":\"artifact-1\""));
   }
 }

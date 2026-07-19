@@ -8,13 +8,11 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.mapper.AgentDefinitionMapper;
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.model.AgentDefinitionDO;
-import fun.fengwk.kkstudio.core.harness.session.HarnessAgentSnapshotResolver;
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadCommandService;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.AgentThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
@@ -30,7 +28,6 @@ import fun.fengwk.kkstudio.share.model.HarnessThreadMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadModelSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadStopResultDTO;
-import fun.fengwk.kkstudio.share.model.HarnessThreadToolsetSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadYoloSetDTO;
 
 import java.time.Instant;
@@ -42,7 +39,6 @@ import java.util.Objects;
 public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandService {
   private final ThreadTransactions transactions;
   private final AgentDefinitionMapper agentDefinitionMapper;
-  private final HarnessAgentSnapshotResolver snapshotResolver;
   private final ThreadKick threadKick;
   private final ThreadProviderCancellation providerCancellation;
   private final HarnessThreadDtoConverter converter;
@@ -50,14 +46,12 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
   public HarnessThreadCommandServiceImpl(
       ThreadTransactions transactions,
       AgentDefinitionMapper agentDefinitionMapper,
-      HarnessAgentSnapshotResolver snapshotResolver,
       ThreadKick threadKick,
       @Qualifier("threadProviderCancellation") ThreadProviderCancellation providerCancellation,
       HarnessThreadDtoConverter converter) {
     this.transactions = Objects.requireNonNull(transactions, "transactions");
     this.agentDefinitionMapper =
         Objects.requireNonNull(agentDefinitionMapper, "agentDefinitionMapper");
-    this.snapshotResolver = Objects.requireNonNull(snapshotResolver, "snapshotResolver");
     this.threadKick = Objects.requireNonNull(threadKick, "threadKick");
     this.providerCancellation =
         Objects.requireNonNull(providerCancellation, "providerCancellation");
@@ -141,10 +135,13 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     long agentDefinitionId =
         HarnessIds.parsePositive(request.getAgentDefinitionId(), "agentDefinitionId");
     AgentDefinitionDO definition = requireDefinition(agentDefinitionId);
-    AgentSnapshot snapshot = snapshotResolver.snapshotForDefinition(definition);
     ThreadInput input =
         transactions.submitSetAgent(
-            id, agentDefinitionId, snapshot, request.getClientMessageId(), Instant.now());
+            id,
+            agentDefinitionId,
+            definition.getName(),
+            request.getClientMessageId(),
+            Instant.now());
     afterCommitKick(id);
     return converter.convert(input);
   }
@@ -161,18 +158,6 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
             request.getVariant(),
             request.getClientMessageId(),
             Instant.now());
-    afterCommitKick(id);
-    return converter.convert(input);
-  }
-
-  @Override
-  @Transactional
-  public HarnessThreadInputDTO queueToolset(String threadId, HarnessThreadToolsetSetDTO request) {
-    Objects.requireNonNull(request, "request");
-    long id = HarnessIds.parsePositive(threadId, "threadId");
-    ThreadInput input =
-        transactions.submitSetToolset(
-            id, request.getTools(), request.getClientMessageId(), Instant.now());
     afterCommitKick(id);
     return converter.convert(input);
   }

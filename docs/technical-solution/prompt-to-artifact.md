@@ -29,7 +29,7 @@ flowchart LR
 ## Prompt 构建
 
 1. 用户或自定义消息通过 `POST /api/threads/{threadId}/messages` 写入 `ThreadInput`（202，`clientMessageId` 幂等）。`ThreadProcessor` 在安全边界 Harvest cutoff 内全部 queued Input，按 sequence 物化相应 Entry 并连续推进 head；同批任意数量的消息只形成一次新的 Assistant Turn。
-2. Session 路径上的 `AGENT_SNAPSHOT` Entry 保存 Agent Snapshot。Context 从当前 Thread `headEntryId` 路径加载 Entry，fold Snapshot、Model/Toolset/YOLO 变更与有效 Compaction，得到 `AgentRuntimeConfig` 与消息列表。
+2. Thread 保存当前 agent/model/yolo。Context 消息路径从 Thread `headEntryId` 投影 transcript 与有效 Compaction；运行时配置由 Thread 状态与当前 AgentDefinition 组合，不从 Entry path fold 完整 snapshot。
 3. `TurnResourceResolver` 按冻结配置解析 Model、Variant、Provider 和 Tool binding；`ProviderMessageProjector` 把语义消息投影为 Provider 无关内容块。
 4. `PromptCacheRequestFinalizer` 绑定 `sessionId`，是 Provider Cache Control 的唯一派生点。
 

@@ -12,7 +12,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/** head entry path -> default transform -> extension transform -> AgentMessage projection。 */
+/**
+ * head entry path 消息投影 + 外部注入的 Thread 运行时配置。
+ *
+ * <p>配置与消息路径分离：config 来自 Thread 状态与当前 AgentDefinition，不从 Entry path fold。
+ */
 public final class SessionContextBuilder {
   private final SessionEntryStore entryStore;
   private final DefaultContextTransform defaultTransform;
@@ -27,11 +31,14 @@ public final class SessionContextBuilder {
     this.extensions = List.copyOf(Objects.requireNonNull(extensions, "extensions"));
   }
 
-  public SessionContext build(long sessionId, long headEntryId) {
+  public SessionContext build(long sessionId, long headEntryId, AgentRuntimeConfig config) {
     if (sessionId <= 0 || headEntryId <= 0) {
       throw new IllegalArgumentException("sessionId and headEntryId must be positive");
     }
-    ContextState state = defaultTransform.transform(entryStore.loadPath(sessionId, headEntryId));
+    Objects.requireNonNull(config, "config");
+    List<SessionEntry> entries =
+        defaultTransform.transform(entryStore.loadPath(sessionId, headEntryId));
+    ContextState state = new ContextState(config, entries);
     for (ContextTransform extension : extensions) {
       state = Objects.requireNonNull(extension.transform(state), "context transform result");
     }

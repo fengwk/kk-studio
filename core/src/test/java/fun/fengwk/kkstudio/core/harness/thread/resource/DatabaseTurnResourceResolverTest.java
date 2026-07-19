@@ -35,7 +35,6 @@ import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionRegistry;
 import fun.fengwk.kkstudio.harness.runtime.extension.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.extension.ToolFactory;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnResources;
@@ -92,13 +91,12 @@ class DatabaseTurnResourceResolverTest {
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
     Tool read = tool("read", "1");
     try (Fixture fixture = new Fixture(factory, List.of(read))) {
-      AgentSnapshot snapshot = snapshot("11", "quality", List.of("read"));
+      AgentRuntimeConfig config = runtimeConfig("11", "quality", List.of("read"));
       fixture.session();
       fixture.model(model(11L, 22L, MODEL_CONFIG));
       fixture.provider(provider(22L, AgentProviderType.openai));
 
-      TurnResources resources =
-          fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot));
+      TurnResources resources = fixture.resolver.resolve(SESSION_ID, THREAD_ID, config);
 
       assertEquals(22L, resources.model().providerResourceId());
       assertEquals(11L, resources.model().modelResourceId());
@@ -170,28 +168,25 @@ class DatabaseTurnResourceResolverTest {
         new CapturingProviderFactory(
             ProviderType.OPENAI,
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
-    AgentSnapshot snapshot = snapshot("11", "quality", List.of());
+    AgentRuntimeConfig config = runtimeConfig("11", "quality", List.of());
     try (Fixture fixture = new Fixture(factory, List.of())) {
       fixture.model(model(11L, 22L, MODEL_CONFIG));
       fixture.provider(provider(22L, AgentProviderType.openai));
       assertThrows(
           IllegalArgumentException.class,
-          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot)));
+          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, config));
 
       fixture.session();
-      AgentRuntimeConfig missingVariant =
-          AgentRuntimeConfig.from(snapshot).withModel("11", "missing");
+      AgentRuntimeConfig missingVariant = config.withModel("11", "missing");
       assertThrows(
           IllegalArgumentException.class,
           () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, missingVariant));
 
-      AgentRuntimeConfig malformedTool =
-          AgentRuntimeConfig.from(snapshot).withTools(List.of("read@"));
+      AgentRuntimeConfig malformedTool = config.withTools(List.of("read@"));
       assertThrows(
           IllegalArgumentException.class,
           () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, malformedTool));
-      AgentRuntimeConfig missingTool =
-          AgentRuntimeConfig.from(snapshot).withTools(List.of("missing@1"));
+      AgentRuntimeConfig missingTool = config.withTools(List.of("missing@1"));
       assertThrows(
           IllegalArgumentException.class,
           () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, missingTool));
@@ -199,7 +194,7 @@ class DatabaseTurnResourceResolverTest {
       fixture.model(model(11L, 22L, "{\"variants\":[]}"));
       assertThrows(
           IllegalArgumentException.class,
-          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot)));
+          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, config));
     }
 
     try (Fixture fixture = new Fixture(null, List.of())) {
@@ -209,9 +204,7 @@ class DatabaseTurnResourceResolverTest {
       IllegalArgumentException error =
           assertThrows(
               IllegalArgumentException.class,
-              () ->
-                  fixture.resolver.resolve(
-                      SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot)));
+              () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, config));
       assertTrue(error.getMessage().contains("ProviderFactory"));
     }
 
@@ -223,7 +216,7 @@ class DatabaseTurnResourceResolverTest {
       fixture.provider(provider(22L, AgentProviderType.openai));
       assertThrows(
           IllegalArgumentException.class,
-          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot)));
+          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, config));
     }
   }
 
@@ -237,22 +230,21 @@ class DatabaseTurnResourceResolverTest {
         new CapturingProviderFactory(
             ProviderType.OPENAI,
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
-    AgentSnapshot snapshot = snapshot("11", "quality", List.of());
+    AgentRuntimeConfig config = runtimeConfig("11", "quality", List.of());
     try (Fixture fixture = new Fixture(factory, List.of())) {
       fixture.session();
       assertThrows(
           IllegalArgumentException.class,
-          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot)));
+          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, config));
       fixture.model(model(11L, 22L, MODEL_CONFIG));
       assertThrows(
           IllegalArgumentException.class,
-          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot)));
+          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, config));
 
       AgentProvider defaulted = provider(22L, AgentProviderType.openai);
       defaulted.setConfigJson("{}");
       fixture.provider(defaulted);
-      TurnResources defaultedResources =
-          fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot));
+      TurnResources defaultedResources = fixture.resolver.resolve(SESSION_ID, THREAD_ID, config);
       assertEquals(ModelCallTimeoutPolicy.DEFAULT, defaultedResources.modelCallTimeoutPolicy());
 
       AgentProvider invalid = provider(22L, AgentProviderType.openai);
@@ -260,16 +252,16 @@ class DatabaseTurnResourceResolverTest {
       fixture.provider(invalid);
       assertThrows(
           IllegalArgumentException.class,
-          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot)));
+          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, config));
       invalid.setConfigJson(
           "{\"modelCallTimeoutMillis\":45000,\"modelCallIdleTimeoutMillis\":3000}");
       invalid.setBaseUrl(" ");
       assertThrows(
           IllegalArgumentException.class,
-          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot)));
+          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, config));
     }
 
-    AgentRuntimeConfig namedTool = AgentRuntimeConfig.from(snapshot).withTools(List.of("read"));
+    AgentRuntimeConfig namedTool = config.withTools(List.of("read"));
     try (Fixture fixture = new Fixture(factory, List.of(tool("read", "1"), tool("read", "2")))) {
       fixture.session();
       fixture.model(model(11L, 22L, MODEL_CONFIG));
@@ -279,8 +271,7 @@ class DatabaseTurnResourceResolverTest {
           () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, namedTool));
     }
 
-    AgentRuntimeConfig environmentTool =
-        AgentRuntimeConfig.from(snapshot).withTools(List.of("shell@1"));
+    AgentRuntimeConfig environmentTool = config.withTools(List.of("shell@1"));
     try (Fixture fixture =
         new Fixture(factory, List.of(tool("shell", "1", ToolExecutionMode.ENVIRONMENT)))) {
       fixture.session();
@@ -302,7 +293,7 @@ class DatabaseTurnResourceResolverTest {
         new CapturingProviderFactory(
             ProviderType.OPENAI,
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
-    AgentSnapshot snapshot = snapshot("11", "quality", List.of());
+    AgentRuntimeConfig config = runtimeConfig("11", "quality", List.of());
     DaemonToolCapabilitiesCodec codec = new DaemonToolCapabilitiesCodec();
     String capabilitiesJson =
         codec.encode(
@@ -330,9 +321,7 @@ class DatabaseTurnResourceResolverTest {
 
       TurnResources resources =
           fixture.resolver.resolve(
-              SESSION_ID,
-              THREAD_ID,
-              AgentRuntimeConfig.from(snapshot).withTools(List.of("environment:123/shell@1")));
+              SESSION_ID, THREAD_ID, config.withTools(List.of("environment:123/shell@1")));
 
       assertEquals(1, resources.toolBindings().size());
       assertEquals(ToolTargetType.ENVIRONMENT, resources.toolBindings().get(0).targetType());
@@ -354,7 +343,7 @@ class DatabaseTurnResourceResolverTest {
         new CapturingProviderFactory(
             ProviderType.OPENAI,
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
-    AgentSnapshot snapshot = snapshot("11", "quality", List.of());
+    AgentRuntimeConfig config = runtimeConfig("11", "quality", List.of());
     // Encode a CLOUD descriptor manually to test that the resolver rejects it without
     // triggering the codec's own non-ENVIRONMENT guard.
     String cloudDescriptorJson =
@@ -396,9 +385,31 @@ class DatabaseTurnResourceResolverTest {
           IllegalArgumentException.class,
           () ->
               fixture.resolver.resolve(
-                  SESSION_ID,
-                  THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot).withTools(List.of("environment:123"))));
+                  SESSION_ID, THREAD_ID, config.withTools(List.of("environment:123"))));
+
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              fixture.resolver.resolve(
+                  SESSION_ID, THREAD_ID, config.withTools(List.of("environment:123/shell"))));
+
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              fixture.resolver.resolve(
+                  SESSION_ID, THREAD_ID, config.withTools(List.of("environment:abc/shell@1"))));
+
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              fixture.resolver.resolve(
+                  SESSION_ID, THREAD_ID, config.withTools(List.of("environment:+123/shell@1"))));
+
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              fixture.resolver.resolve(
+                  SESSION_ID, THREAD_ID, config.withTools(List.of("environment:-123/shell@1"))));
 
       assertThrows(
           IllegalArgumentException.class,
@@ -406,50 +417,25 @@ class DatabaseTurnResourceResolverTest {
               fixture.resolver.resolve(
                   SESSION_ID,
                   THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot).withTools(List.of("environment:123/shell"))));
+                  config.withTools(List.of("environment:99999999999999999999/shell@1"))));
 
       assertThrows(
           IllegalArgumentException.class,
           () ->
               fixture.resolver.resolve(
-                  SESSION_ID,
-                  THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot).withTools(List.of("environment:abc/shell@1"))));
+                  SESSION_ID, THREAD_ID, config.withTools(List.of("environment:999/shell@1"))));
+    }
 
+    try (Fixture fixture = new Fixture(factory, List.of())) {
+      fixture.session();
+      fixture.model(model(11L, 22L, MODEL_CONFIG));
+      fixture.provider(provider(22L, AgentProviderType.openai));
+      fixture.environment(environment);
       assertThrows(
           IllegalArgumentException.class,
           () ->
               fixture.resolver.resolve(
-                  SESSION_ID,
-                  THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot)
-                      .withTools(List.of("environment:+123/shell@1"))));
-
-      assertThrows(
-          IllegalArgumentException.class,
-          () ->
-              fixture.resolver.resolve(
-                  SESSION_ID,
-                  THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot)
-                      .withTools(List.of("environment:-123/shell@1"))));
-
-      assertThrows(
-          IllegalArgumentException.class,
-          () ->
-              fixture.resolver.resolve(
-                  SESSION_ID,
-                  THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot)
-                      .withTools(List.of("environment:99999999999999999999/shell@1"))));
-
-      assertThrows(
-          IllegalArgumentException.class,
-          () ->
-              fixture.resolver.resolve(
-                  SESSION_ID,
-                  THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot).withTools(List.of("environment:999/shell@1"))));
+                  SESSION_ID, THREAD_ID, config.withTools(List.of("environment:123/missing@1"))));
     }
 
     try (Fixture fixture = new Fixture(factory, List.of())) {
@@ -463,23 +449,7 @@ class DatabaseTurnResourceResolverTest {
               fixture.resolver.resolve(
                   SESSION_ID,
                   THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot)
-                      .withTools(List.of("environment:123/missing@1"))));
-    }
-
-    try (Fixture fixture = new Fixture(factory, List.of())) {
-      fixture.session();
-      fixture.model(model(11L, 22L, MODEL_CONFIG));
-      fixture.provider(provider(22L, AgentProviderType.openai));
-      fixture.environment(environment);
-      assertThrows(
-          IllegalArgumentException.class,
-          () ->
-              fixture.resolver.resolve(
-                  SESSION_ID,
-                  THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot)
-                      .withTools(List.of("environment:123/cloud-tool@1"))));
+                  config.withTools(List.of("environment:123/cloud-tool@1"))));
     }
 
     try (Fixture fixture =
@@ -494,8 +464,7 @@ class DatabaseTurnResourceResolverTest {
               fixture.resolver.resolve(
                   SESSION_ID,
                   THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot)
-                      .withTools(List.of("shell@1", "environment:123/shell@1"))));
+                  config.withTools(List.of("shell@1", "environment:123/shell@1"))));
     }
   }
 
@@ -506,14 +475,13 @@ class DatabaseTurnResourceResolverTest {
       PromptCacheMode expectedMode,
       PromptCacheRetention expectedRetention) {
     CapturingProviderFactory factory = new CapturingProviderFactory(type, capability);
-    AgentSnapshot snapshot = snapshot("11", "quality", List.of());
+    AgentRuntimeConfig config = runtimeConfig("11", "quality", List.of());
     try (Fixture fixture = new Fixture(factory, List.of())) {
       fixture.session();
       fixture.model(model(11L, 22L, MODEL_CONFIG));
       fixture.provider(provider(22L, persistedType));
 
-      TurnResources resources =
-          fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot));
+      TurnResources resources = fixture.resolver.resolve(SESSION_ID, THREAD_ID, config);
 
       assertEquals(type, resources.model().providerType());
       assertEquals(expectedMode, resources.model().promptCachePolicy().capability().mode());
@@ -521,8 +489,10 @@ class DatabaseTurnResourceResolverTest {
     }
   }
 
-  private static AgentSnapshot snapshot(String modelId, String variant, List<String> tools) {
-    return new AgentSnapshot("system", modelId, variant, tools, List.of(), List.of(), "{}");
+  private static AgentRuntimeConfig runtimeConfig(
+      String modelId, String variant, List<String> tools) {
+    return new AgentRuntimeConfig(
+        1L, "system", modelId, variant, tools, List.of(), List.of(), "{}", false);
   }
 
   private static AgentModel model(long id, long providerId, String config) {
