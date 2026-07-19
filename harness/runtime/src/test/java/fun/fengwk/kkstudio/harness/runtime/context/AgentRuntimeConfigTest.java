@@ -17,13 +17,17 @@ class AgentRuntimeConfigTest {
             "system",
             "model-1",
             "default",
+            "local-dev",
             List.of("read"),
             List.of("skill"),
+            List.of(new SelectedSkillMetadata("skill", "desc", "platform")),
             List.of("Coder"),
             "{}",
             false);
 
     assertEquals(List.of("read"), config.tools());
+    assertEquals("local-dev", config.environmentName());
+    assertEquals(1, config.selectedSkills().size());
     assertFalse(config.yoloEnabled());
     assertEquals("model-2", config.withModel("model-2", "fast").modelId());
     assertEquals("fast", config.withModel("model-2", "fast").variant());
