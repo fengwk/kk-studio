@@ -10,20 +10,18 @@ export function ThreadTranscript({
   loading,
   error,
   bodyRef,
-  pending,
 }: {
   messages: DialogueMessage[]
   loading: boolean
   error: unknown
   bodyRef: RefObject<HTMLDivElement | null>
-  pending?: boolean
 }) {
   const hasError = Boolean(error)
   const visibleMessages = messages.filter(isVisibleDialogueMessage)
   const empty = !loading && !hasError && visibleMessages.length === 0
 
   return (
-    <div className="thread-dialogue" ref={bodyRef} role="log" aria-label="会话消息" aria-busy={loading || pending}>
+    <div className="thread-dialogue" ref={bodyRef} role="log" aria-label="会话消息" aria-busy={loading}>
       {loading && <div className="thread-state">正在加载会话…</div>}
       {hasError && <div className="thread-state danger">会话加载失败</div>}
       {empty && (
@@ -35,12 +33,6 @@ export function ThreadTranscript({
       )}
       <div className="thread-blocks">
         <MessageList messages={visibleMessages} />
-        {pending ? (
-          <section className="thread-block thread-block-pending">
-            <div className="thread-block-label">sending</div>
-            <div className="thread-block-body">消息发送中…</div>
-          </section>
-        ) : null}
       </div>
     </div>
   )

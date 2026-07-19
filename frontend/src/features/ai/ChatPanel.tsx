@@ -13,7 +13,6 @@ import type {
   AgentDefinitionDTO,
   HarnessSessionEntryDTO,
   HarnessThreadDTO,
-  ThreadStatus,
   ModelUsageSummaryDTO,
   RootActivityDTO,
   ToolInvocationDTO,
@@ -21,7 +20,7 @@ import type {
 
 /**
  * Harness adapter over ThreadPanel for AgentThread.
- * Commands live in +// palette; footer is a pi-style status line.
+ * Commands live in the slash palette; footer is a pi-style status line.
  */
 export function ChatPanel({
   threads,
@@ -30,7 +29,6 @@ export function ChatPanel({
   sessionId,
   mainThreadId,
   title,
-  threadStatus,
   onBack,
   agent,
   timeline,
@@ -44,7 +42,6 @@ export function ChatPanel({
   disabled,
   observability,
   taskTimeline,
-  controlsPending,
   actionError,
   onDismissActionError,
   onDraftChange,
@@ -52,10 +49,6 @@ export function ChatPanel({
   onCommand,
   onBranch,
   branchPending,
-  onStop,
-  onRetry,
-  stopPending,
-  retryPending,
 }: {
   threads: HarnessThreadDTO[]
   sessionEntries: HarnessSessionEntryDTO[]
@@ -63,7 +56,6 @@ export function ChatPanel({
   sessionId: string
   mainThreadId?: string
   title: string
-  threadStatus?: ThreadStatus
   onBack: () => void
   agent?: AgentDefinitionDTO
   timeline: ThreadTimeline
@@ -100,7 +92,6 @@ export function ChatPanel({
     permissionDecisionPending: boolean
     decidePermission: (invocationId: string, decision: 'allow' | 'deny') => void
   }
-  controlsPending: boolean
   actionError?: string | null
   onDismissActionError?: () => void
   onDraftChange: (draft: string) => void
@@ -108,10 +99,6 @@ export function ChatPanel({
   onCommand: (command: ThreadCommand) => void
   onBranch: (entry: HarnessSessionEntryDTO) => void
   branchPending: boolean
-  onStop: () => void
-  onRetry: () => void
-  stopPending: boolean
-  retryPending: boolean
 }) {
   const pendingPermissions = observability.toolInvocations.filter(
     (invocation) => invocation.status === 'WAITING_APPROVAL',
@@ -133,6 +120,7 @@ export function ChatPanel({
         />
       }
       messages={timeline.messages}
+      queuedMessages={timeline.queuedMessages}
       messagesLoading={messagesLoading}
       messagesError={messagesError}
       bodyRef={bodyRef}
@@ -140,17 +128,11 @@ export function ChatPanel({
       composerDisabled={disabled}
       composerPending={pending}
       working={working}
-      controlsPending={controlsPending}
       actionError={actionError}
       onDismissActionError={onDismissActionError}
       onDraftChange={onDraftChange}
       onSubmit={onSubmit}
       onCommand={onCommand}
-      threadStatus={threadStatus}
-      onStop={onStop}
-      onRetry={onRetry}
-      stopPending={stopPending}
-      retryPending={retryPending}
       widgets={
         <>
           <ThreadActivityWidget activities={taskTimeline.activities} />

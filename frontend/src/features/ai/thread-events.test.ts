@@ -22,18 +22,19 @@ describe('thread timeline', () => {
       { role: 'user', text: '检查大纲', status: 'done' },
       { role: 'assistant', text: '结构完整。', thinking: '先梳理结构。', status: 'done' },
     ])
+    expect(timeline.queuedMessages).toEqual([])
     expect(timeline.hasPendingInputs).toBe(false)
   })
 
-  it('renders unapplied USER_MESSAGE inputs immediately', () => {
+  it('keeps QUEUED USER_MESSAGE inputs out of the transcript', () => {
     const timeline = buildThreadTimeline(
       [entry('2', 'message', messagePayload('USER', [{ type: 'text', text: '第一句' }]))],
       [input('in-2', 'user_message', messagePayload('USER', [{ type: 'text', text: '排队中' }]), null)],
       [],
     )
-    expect(timeline.messages).toMatchObject([
-      { role: 'user', text: '第一句' },
-      { role: 'user', text: '排队中', id: 'input:in-2' },
+    expect(timeline.messages).toMatchObject([{ role: 'user', text: '第一句' }])
+    expect(timeline.queuedMessages).toMatchObject([
+      { inputId: 'in-2', role: 'user', text: '排队中' },
     ])
     expect(timeline.hasPendingInputs).toBe(true)
   })
@@ -46,17 +47,19 @@ describe('thread timeline', () => {
 
     const timeline = buildThreadTimeline([], [first, second], [])
 
-    expect(timeline.messages.map((message) => message.text)).toEqual(['后端第一条', '后端第二条'])
+    expect(timeline.messages).toEqual([])
+    expect(timeline.queuedMessages.map((message) => message.text)).toEqual(['后端第一条', '后端第二条'])
   })
 
-  it('keeps pending USER input when appliedEntryId is set but Entry snapshot is stale', () => {
+  it('projects an APPLIED USER input when its Entry snapshot is stale', () => {
     const timeline = buildThreadTimeline(
       [],
       [input('in-1', 'user_message', messagePayload('USER', [{ type: 'text', text: '仍可见' }]), '11')],
       [],
     )
     expect(timeline.messages).toMatchObject([{ role: 'user', text: '仍可见', id: 'input:in-1' }])
-    expect(timeline.hasPendingInputs).toBe(true)
+    expect(timeline.queuedMessages).toEqual([])
+    expect(timeline.hasPendingInputs).toBe(false)
   })
 
   it('places a stale applied USER overlay at its INPUT_APPLIED journal position', () => {
@@ -74,6 +77,7 @@ describe('thread timeline', () => {
       { role: 'user', text: '先提问' },
       { role: 'assistant', text: '再回答' },
     ])
+    expect(timeline.queuedMessages).toEqual([])
   })
 
   it('suppresses pending USER when input DTO is stale-null but INPUT_APPLIED points to present Entry', () => {
@@ -262,7 +266,7 @@ describe('thread timeline', () => {
     expect(timeline.messages).toHaveLength(1)
   })
 
-  it('places backend journal projection before later queued mailbox input without time sorting', () => {
+  it('separates backend journal projection from a later queued mailbox input', () => {
     const timeline = buildThreadTimeline(
       [],
       [
@@ -282,11 +286,8 @@ describe('thread timeline', () => {
         },
       ],
     )
-    expect(timeline.messages.map((message) => message.role)).toEqual(['assistant', 'user'])
-    expect(timeline.messages).toMatchObject([
-      { role: 'assistant', text: '先回答' },
-      { role: 'user', text: '第二句' },
-    ])
+    expect(timeline.messages).toMatchObject([{ role: 'assistant', text: '先回答' }])
+    expect(timeline.queuedMessages).toMatchObject([{ role: 'user', text: '第二句' }])
   })
 
   it('preserves backend Entry path order when wall-clock timestamps regress', () => {
@@ -369,26 +370,26 @@ describe('thread timeline', () => {
     expect(
       isThreadWorking(
         { processing: true } as never,
-        { messages: [], runtimeContext: {}, hasPendingInputs: false, hasLiveProjection: false },
+        { messages: [], queuedMessages: [], runtimeContext: {}, hasPendingInputs: false, hasLiveProjection: false },
       ),
     ).toBe(true)
     expect(
       isThreadWorking(
         { processing: false } as never,
-        { messages: [], runtimeContext: {}, hasPendingInputs: true, hasLiveProjection: false },
+        { messages: [], queuedMessages: [], runtimeContext: {}, hasPendingInputs: true, hasLiveProjection: false },
       ),
     ).toBe(true)
     expect(
       isThreadWorking(
         { processing: false } as never,
-        { messages: [], runtimeContext: {}, hasPendingInputs: false, hasLiveProjection: true },
+        { messages: [], queuedMessages: [], runtimeContext: {}, hasPendingInputs: false, hasLiveProjection: true },
       ),
     ).toBe(true)
     // Stale raw input DTO with null appliedEntryId must not keep working once overlay is suppressed.
     expect(
       isThreadWorking(
         { processing: false } as never,
-        { messages: [], runtimeContext: {}, hasPendingInputs: false, hasLiveProjection: false },
+        { messages: [], queuedMessages: [], runtimeContext: {}, hasPendingInputs: false, hasLiveProjection: false },
       ),
     ).toBe(false)
 
@@ -398,6 +399,7 @@ describe('thread timeline', () => {
       [threadEvent('1', 'input_applied', '11', { inputId: 'in-1', sequence: 1, type: 'user_message' })],
     )
     expect(suppressed.hasPendingInputs).toBe(false)
+    expect(suppressed.queuedMessages).toEqual([])
     expect(isThreadWorking({ processing: false } as never, suppressed)).toBe(false)
   })
 })

@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { PlusIcon, SendIcon } from '@/features/canvas/icons'
+import { useEffect, useMemo, useRef, type KeyboardEvent } from 'react'
+import { SendIcon } from '@/features/canvas/icons'
 import { ThreadCommandPalette } from '@/features/ai/thread-panel/ThreadCommandPalette'
 import { filterThreadCommands, type ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
-import type { ThreadStatus } from '@/shared/api/contracts'
 
 const TEXTAREA_MIN_HEIGHT = 37
 const TEXTAREA_LINE_HEIGHT = 19
@@ -10,44 +9,29 @@ const TEXTAREA_MAX_LINES = 10
 const TEXTAREA_MAX_HEIGHT = TEXTAREA_MIN_HEIGHT + TEXTAREA_LINE_HEIGHT * (TEXTAREA_MAX_LINES - 1)
 
 /**
- * Canvas-style dock: + opens command table; typing `/` also opens it with search.
+ * Canvas-style dock: typing `/` opens the command table with search.
  * Composer stays enabled while Thread is working or a prior HTTP mutation is in flight.
  */
 export function ThreadComposer({
   draft,
   pending,
   disabled,
-  controlsPending,
   onDraftChange,
   onSubmit,
   onCommand,
-  threadStatus,
-  onStop,
-  onRetry,
-  stopPending,
-  retryPending,
 }: {
   draft: string
   pending: boolean
   disabled: boolean
-  controlsPending: boolean
   onDraftChange: (draft: string) => void
   onSubmit: () => void
   onCommand: (command: ThreadCommand) => void
-  threadStatus?: ThreadStatus
-  onStop: () => void
-  onRetry: () => void
-  stopPending: boolean
-  retryPending: boolean
 }) {
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [menuQuery, setMenuQuery] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const wasPendingRef = useRef(false)
 
   const slashMode = draft.startsWith('/')
-  const open = menuOpen || slashMode
-  const query = slashMode ? draft.slice(1) : menuQuery
+  const query = slashMode ? draft.slice(1) : ''
 
   // Pending HTTP mutation must not block continuous submissions.
   const canSend = useMemo(
@@ -93,48 +77,29 @@ export function ThreadComposer({
     window.setTimeout(() => tryFocus(0), 0)
   }
 
-  function openMenu() {
-    setMenuOpen(true)
-    setMenuQuery('')
-  }
-
-  function closeMenu(options?: { restoreFocus?: boolean }) {
-    setMenuOpen(false)
-    setMenuQuery('')
-    if (draft.startsWith('/')) {
-      onDraftChange('')
-    }
-    if (options?.restoreFocus !== false) {
-      focusComposer()
-    }
+  function closeSlashMode() {
+    onDraftChange('')
+    focusComposer()
   }
 
   function handleSelect(command: ThreadCommand) {
-    closeMenu({ restoreFocus: true })
-    if (draft.startsWith('/')) {
-      onDraftChange('')
-    }
+    closeSlashMode()
     onCommand(command)
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === 'Escape' && open) {
+    if (event.key === 'Escape' && slashMode) {
       event.preventDefault()
       event.stopPropagation()
-      closeMenu({ restoreFocus: true })
-      return
-    }
-    if (open && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+      closeSlashMode()
       return
     }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-      if (open) {
-        if (slashMode) {
-          event.preventDefault()
-          const command = filterThreadCommands(query)[0]
-          if (command) {
-            handleSelect(command)
-          }
+      if (slashMode) {
+        event.preventDefault()
+        const command = filterThreadCommands(query)[0]
+        if (command) {
+          handleSelect(command)
         }
         return
       }
@@ -144,44 +109,18 @@ export function ThreadComposer({
     }
   }
 
-  function handleChange(value: string) {
-    onDraftChange(value)
-    if (value.startsWith('/')) {
-      setMenuOpen(false)
-    }
-  }
-
   return (
     <div className="thread-composer">
       <ThreadCommandPalette
-        open={open}
+        open={slashMode}
         query={query}
-        captureFocus={!slashMode}
-        onQueryChange={(value) => {
-          if (slashMode) {
-            onDraftChange(`/${value}`)
-          } else {
-            setMenuQuery(value)
-          }
-        }}
         onSelect={handleSelect}
-        onClose={() => closeMenu({ restoreFocus: true })}
       />
       <div className="thread-dock">
-        <button
-          className="thread-dock-add"
-          type="button"
-          aria-label="打开命令表"
-          aria-expanded={open}
-          onClick={() => (open ? closeMenu({ restoreFocus: true }) : openMenu())}
-          disabled={disabled || controlsPending}
-        >
-          <PlusIcon />
-        </button>
         <textarea
           ref={textareaRef}
           value={draft}
-          onChange={(event) => handleChange(event.target.value)}
+          onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="告诉 Agent 下一步要完成什么…（/ 打开命令）"
           disabled={disabled}
@@ -200,19 +139,6 @@ export function ThreadComposer({
         >
           <SendIcon />
         </button>
-      </div>
-      <div className="thread-composer-extra">
-        {(threadStatus === 'RUNNING' || threadStatus === 'WAITING' || threadStatus === 'RETRYING') ? (
-          <button className="thread-extra-btn" type="button" onClick={onStop} disabled={stopPending}>
-            {stopPending ? 'Stopping…' : 'Stop'}
-          </button>
-        ) : null}
-        {threadStatus === 'FAILED' ? (
-          <button className="thread-extra-btn" type="button" onClick={onRetry} disabled={retryPending}>
-            {retryPending ? 'Retrying…' : 'Retry'}
-          </button>
-        ) : null}
-        {threadStatus ? <span className="thread-extra-hint">{threadStatus}</span> : null}
       </div>
     </div>
   )

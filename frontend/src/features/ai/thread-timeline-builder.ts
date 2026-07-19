@@ -4,6 +4,7 @@ import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/
 import { ThinkTagTextFilter } from '@/features/ai/thread-event-think-filter'
 import type {
   DialogueMessage,
+  QueuedThreadMessage,
   RuntimeContext,
   TextDialogueMessage,
   ThreadTimeline,
@@ -20,14 +21,15 @@ interface StreamingAssistant {
   pendingThinking: string
 }
 
-interface PendingUserProjection {
+interface AppliedUserProjection {
   input: HarnessThreadInputDTO
   message: TextDialogueMessage
 }
 
 /**
  * Thread transcript projection:
- * committed path Entries + queued USER/CUSTOM_MESSAGE inputs + live ThreadEvents.
+ * committed path Entries + applied-input journal overlays + live ThreadEvents.
+ * QUEUED USER/CUSTOM_MESSAGE inputs are projected separately for the decoration zone.
  * Correlate stream events by subjectEntryId; suppress once that assistant Entry materializes.
  */
 export function buildThreadTimeline(
@@ -36,6 +38,7 @@ export function buildThreadTimeline(
   threadEvents: ThreadEventDTO[],
 ): ThreadTimeline {
   const messages: DialogueMessage[] = []
+  const queuedMessages: QueuedThreadMessage[] = []
   const runtimeContext: RuntimeContext = {}
   const activeTools = new Map<string, ToolDialogueMessage>()
   const activeAssistants = new Map<string, StreamingAssistant>()
@@ -45,9 +48,9 @@ export function buildThreadTimeline(
   const suppressedTools = new Set<string>()
   const entryIds = new Set(entries.map((entry) => entry.entryId))
   const appliedEntryByInputId = findAppliedEntryIdsFromEvents(threadEvents)
-  const pendingUsers: PendingUserProjection[] = []
-  const pendingUserByInputId = new Map<string, PendingUserProjection>()
-  const emittedPendingInputs = new Set<string>()
+  const appliedUsers: AppliedUserProjection[] = []
+  const appliedUserByInputId = new Map<string, AppliedUserProjection>()
+  const emittedAppliedInputs = new Set<string>()
   let hasPendingInputs = false
 
   // The backend returns the root-to-head Entry path. Its parent-chain order is authoritative;
@@ -56,12 +59,13 @@ export function buildThreadTimeline(
     projectDurableEntry(entry, messages, runtimeContext, durableToolArguments)
   }
 
-  // The backend returns mailbox inputs by sequence. Prepare overlays now, then place applied
-  // overlays at their INPUT_APPLIED journal position and leave queued overlays after live work.
+  // The backend returns mailbox inputs by sequence. QUEUED messages stay outside the transcript;
+  // APPLIED messages may temporarily bridge a stale Entry query at their durable journal position.
   for (const input of inputs) {
     const inputType = input.inputType.toUpperCase()
+    const inputStatus = input.status?.toUpperCase()
     // Missing status only occurs in stale browser cache fixtures; durable API responses are typed.
-    const visible = input.status === 'QUEUED' || input.status === 'APPLIED' || !input.status
+    const visible = inputStatus === 'QUEUED' || inputStatus === 'APPLIED' || !inputStatus
     if (!visible || (inputType !== 'USER_MESSAGE' && inputType !== 'CUSTOM_MESSAGE')) {
       continue
     }
@@ -73,8 +77,19 @@ export function buildThreadTimeline(
     if (!queuedMessage) {
       continue
     }
-    hasPendingInputs = true
-    const projection: PendingUserProjection = {
+    if (!appliedEntryId) {
+      if (inputStatus === 'QUEUED' || !inputStatus) {
+        queuedMessages.push({
+          inputId: input.inputId,
+          role: queuedMessage.role,
+          text: queuedMessage.text,
+          sequence: input.sequence,
+        })
+        hasPendingInputs = true
+      }
+      continue
+    }
+    const projection: AppliedUserProjection = {
       input,
       message: {
         id: `input:${input.inputId}`,
@@ -83,19 +98,18 @@ export function buildThreadTimeline(
         text: queuedMessage.text,
         createdAt: input.createTime,
         status: 'done',
-        metadata: { pendingInput: true, clientMessageId: input.clientMessageId },
       },
     }
-    pendingUsers.push(projection)
-    pendingUserByInputId.set(input.inputId, projection)
+    appliedUsers.push(projection)
+    appliedUserByInputId.set(input.inputId, projection)
   }
 
   // An applied input can outlive the retained event window while the Entry query is stale.
   // In that case it still precedes all currently visible live journal projections.
-  for (const projection of pendingUsers) {
+  for (const projection of appliedUsers) {
     if (projection.input.appliedEntryId && !appliedEntryByInputId.has(projection.input.inputId)) {
       messages.push(projection.message)
-      emittedPendingInputs.add(projection.input.inputId)
+      emittedAppliedInputs.add(projection.input.inputId)
     }
   }
 
@@ -114,10 +128,10 @@ export function buildThreadTimeline(
     switch (event.eventType) {
       case 'input_applied': {
         const inputId = getString(payload.inputId)
-        const projection = pendingUserByInputId.get(inputId)
-        if (projection && !emittedPendingInputs.has(inputId)) {
+        const projection = appliedUserByInputId.get(inputId)
+        if (projection && !emittedAppliedInputs.has(inputId)) {
           messages.push(projection.message)
-          emittedPendingInputs.add(inputId)
+          emittedAppliedInputs.add(inputId)
         }
         break
       }
@@ -196,14 +210,6 @@ export function buildThreadTimeline(
     }
   }
 
-  // Remaining USER inputs are still queued. The backend mailbox sequence is already ascending,
-  // so append without any frontend time or numeric-ID sort.
-  for (const projection of pendingUsers) {
-    if (!emittedPendingInputs.has(projection.input.inputId)) {
-      messages.push(projection.message)
-    }
-  }
-
   // Live projection only for open stream work: open assistant or streaming tool.
   const hasLiveProjection =
     activeAssistants.size > 0
@@ -211,6 +217,7 @@ export function buildThreadTimeline(
 
   return {
     messages,
+    queuedMessages,
     runtimeContext,
     hasPendingInputs,
     hasLiveProjection,

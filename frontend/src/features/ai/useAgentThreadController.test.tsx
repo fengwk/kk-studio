@@ -171,7 +171,7 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.retryThread).mockResolvedValue({ ...thread, status: 'RETRYING' } as never)
   })
 
-  it('submits messages, runs yolo/clear commands, and rejects unknown commands', async () => {
+  it('submits messages, runs slash commands, and rejects unknown commands', async () => {
     const { result } = renderHook(() => useAgentThreadController('1'), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
@@ -197,6 +197,9 @@ describe('useAgentThreadController', () => {
     act(() => result.current.setDraft('keep'))
     act(() => result.current.runCommand({ id: 'clear-draft', label: 'clear', description: '' }))
     expect(result.current.draft).toBe('')
+
+    act(() => result.current.runCommand({ id: 'stop', label: 'stop', description: '' }))
+    await waitFor(() => expect(harnessService.stopThread).toHaveBeenCalled())
 
     act(() => result.current.runCommand({ id: 'unknown', label: 'x', description: '' }))
     expect(result.current.actionError).toContain('未知命令')
@@ -570,8 +573,8 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.getThread).mockResolvedValue({ ...thread, status: 'FAILED' } as never)
     const { result } = renderHook(() => useAgentThreadController('1', 's1'), { wrapper })
     await waitFor(() => expect(result.current.thread?.status).toBe('FAILED'))
-    await act(async () => { await result.current.retryThread() })
-    expect(harnessService.retryThread).toHaveBeenCalledWith('1')
+    act(() => result.current.runCommand({ id: 'retry', label: 'retry', description: '' }))
+    await waitFor(() => expect(harnessService.retryThread).toHaveBeenCalledWith('1'))
   })
 })
 
