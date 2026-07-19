@@ -4,13 +4,15 @@ import { filterThreadCommands, type ThreadCommand } from '@/features/ai/thread-p
 export function ThreadCommandPalette({
   open,
   query,
+  commands: commandSource,
   onSelect,
 }: {
   open: boolean
   query: string
+  commands?: ThreadCommand[]
   onSelect: (command: ThreadCommand) => void
 }) {
-  const commands = useMemo(() => filterThreadCommands(query), [query])
+  const commands = useMemo(() => filterThreadCommands(query, commandSource), [commandSource, query])
   const [index, setIndex] = useState(0)
 
   useEffect(() => {

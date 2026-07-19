@@ -152,7 +152,7 @@ describe('Canvas feature vertical slice', () => {
 
   it('uses a unified AppShell visual language on both AI and Canvas routes', () => {
     const ai = render(
-      <MemoryRouter initialEntries={['/sessions']}>
+      <MemoryRouter initialEntries={['/chats']}>
         <AppShell>
           <div>ai</div>
         </AppShell>

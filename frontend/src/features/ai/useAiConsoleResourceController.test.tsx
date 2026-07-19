@@ -6,6 +6,7 @@ import { useAiConsoleResourceController } from '@/features/ai/useAiConsoleResour
 import { agentService } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 
+vi.mock('@/shared/api/environment-service', () => ({ environmentService: { listEnvironments: vi.fn(async () => []) } }))
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
     listProviders: vi.fn(),
@@ -46,12 +47,12 @@ describe('useAiConsoleResourceController', () => {
     vi.mocked(agentService.updateProvider).mockImplementation(async (_id, data) => {
       currentProvider = { ...currentProvider, ...data, name: data.name ?? currentProvider.name }
       currentModel = { ...currentModel, providerName: currentProvider.name }
-      currentAgent = { ...currentAgent, defaultProviderName: currentProvider.name }
+      currentAgent = { ...currentAgent, modelId: currentModel.id }
       return currentProvider
     })
     vi.mocked(agentService.updateModel).mockImplementation(async (_id, data) => {
       currentModel = { ...currentModel, ...data, name: data.name ?? currentModel.name }
-      currentAgent = { ...currentAgent, defaultModelName: currentModel.name }
+      currentAgent = { ...currentAgent, modelId: String(currentModel.id) }
       return currentModel
     })
     vi.mocked(agentService.updateAgent).mockImplementation(async (_id, data) => {
@@ -59,9 +60,9 @@ describe('useAiConsoleResourceController', () => {
         ...currentAgent,
         ...data,
         name: data.name ?? currentAgent.name,
-        defaultProviderName: data.defaultProvider ?? currentAgent.defaultProviderName,
-        defaultModelName: data.defaultModel ?? currentAgent.defaultModelName,
-        defaultVariant: data.defaultVariant ?? currentAgent.defaultVariant,
+        modelId: data.modelId ?? currentAgent.modelId,
+        variant: data.variant ?? currentAgent.variant,
+        config: data.config ?? currentAgent.config,
       }
       return currentAgent
     })
@@ -98,7 +99,7 @@ describe('useAiConsoleResourceController', () => {
     })
 
     await user.click(screen.getByRole('button', { name: 'open-agent' }))
-    expect(screen.getByTestId('agent-model')).toHaveValue('stub-renamed/acceptance-stub-renamed')
+    expect(screen.getByTestId('agent-model')).toHaveValue('model-1')
   })
 
   it('keeps unsaved agent fields while synchronizing a stale model binding', async () => {
@@ -117,12 +118,12 @@ describe('useAiConsoleResourceController', () => {
       queryClient.setQueryData(queryKeys.models.list, page([{ ...currentModel, providerName: 'stub-v2', name: 'acceptance-stub-v2' }]))
       queryClient.setQueryData(
         queryKeys.agents.list,
-        page([{ ...currentAgent, defaultProviderName: 'stub-v2', defaultModelName: 'acceptance-stub-v2' }]),
+        page([{ ...currentAgent, modelId: 'model-1' }]),
       )
     })
 
     await waitFor(() => {
-      expect(screen.getByTestId('agent-model')).toHaveValue('stub-v2/acceptance-stub-v2')
+      expect(screen.getByTestId('agent-model')).toHaveValue('model-1')
     })
     expect(screen.getByTestId('agent-description')).toHaveValue('edited description')
   })
@@ -180,7 +181,7 @@ function ResourceControllerHarness() {
 
       {modal?.kind === 'agent' && (
         <>
-          <input data-testid="agent-model" value={`${controller.resourceEditorModal.agentDraft.defaultProvider}/${controller.resourceEditorModal.agentDraft.defaultModel}`} readOnly />
+          <input data-testid="agent-model" value={controller.resourceEditorModal.agentDraft.modelId} readOnly />
           <input
             data-testid="agent-description"
             value={controller.resourceEditorModal.agentDraft.description}
@@ -258,12 +259,9 @@ function agent() {
     name: 'default-assistant',
     description: 'Cloud agent',
     systemPrompt: 'You are helpful',
-    defaultProviderId: 'provider-1',
-    defaultProviderName: 'stub',
-    defaultModelId: 'model-1',
-    defaultModelName: 'acceptance-stub',
-    defaultVariant: 'default',
-    toolsJson: '[]',
+    modelId: 'model-1',
+    variant: 'default',
+    config: { tools: [], skills: [], allowedSubagents: [] },
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
   }

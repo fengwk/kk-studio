@@ -12,6 +12,7 @@ import { useHarnessThreadEventStream } from '@/features/ai/useHarnessThreadEvent
 import { useHarnessThreadObservability } from '@/features/ai/useHarnessThreadObservability'
 import { useHarnessTaskTimeline } from '@/features/ai/useHarnessTaskTimeline'
 import { harnessService } from '@/shared/api/harness-service'
+import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, HarnessThreadDTO } from '@/shared/api/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 function errorMessage(error: unknown): string {
@@ -54,19 +55,14 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
   const timeline = buildThreadTimeline(entries, inputs, events)
   const working = isThreadWorking(thread, timeline)
   const agentsById = new Map(agents.map((agent) => [String(agent.id), agent]))
-  const currentAgent = timeline.runtimeContext.agentDefinitionId
-    ? agentsById.get(timeline.runtimeContext.agentDefinitionId)
-    : agents[0]
-  const runtimeLabels = resolveRuntimeLabels(
-    currentAgent,
-    timeline,
-    models as unknown as Array<Record<string, unknown>>,
-    providers as unknown as Array<Record<string, unknown>>,
-  )
+  const currentAgent = thread?.activeAgentDefinitionId
+    ? agentsById.get(String(thread.activeAgentDefinitionId))
+    : undefined
+  const runtimeLabels = resolveRuntimeLabels(thread, currentAgent, models, providers)
   const observability = useHarnessThreadObservability(threadId, working)
   const taskTimeline = useHarnessTaskTimeline(
-    thread?.sessionId ?? '',
-    threadQuery.isSuccess && Boolean(thread?.sessionId),
+    thread?.sessionId ?? sessionId,
+    threadQuery.isSuccess && Boolean(thread?.sessionId || sessionId),
   )
 
   useChatTranscriptAutoScroll(
@@ -87,6 +83,17 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
   })
   const retryMutation = useMutation({
     mutationFn: () => harnessService.retryThread(threadId),
+  })
+  const setAgentMutation = useMutation({
+    mutationFn: (agentDefinitionId: string) =>
+      harnessService.setThreadAgent(threadId, {
+        agentDefinitionId,
+        clientMessageId: createClientMessageId(),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) })
+      await queryClient.invalidateQueries({ queryKey: queryKeys.threads.inputs(threadId) })
+    },
   })
 
   function setDraft(next: string) {
@@ -146,7 +153,7 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
     setActionError(null)
     switch (command.id) {
       case 'yolo': {
-        const enabled = !timeline.runtimeContext.yoloEnabled
+        const enabled = !(thread?.yoloEnabled ?? false)
         observability.setYolo(enabled)
         return
       }
@@ -205,10 +212,23 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
       .catch((error: unknown) => setActionError(errorMessage(error)))
   }
 
+  function setThreadAgent(agentDefinitionId: string): Promise<void> {
+    setActionError(null)
+    return setAgentMutation
+      .mutateAsync(agentDefinitionId)
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        setActionError(errorMessage(error))
+      })
+  }
+
   return {
     threads,
     session,
+    agents,
     agentsById,
+    models,
+    providers,
     thread,
     title: session?.title || thread?.sessionTitle || thread?.threadId || 'Chat',
     agent: currentAgent,
@@ -224,7 +244,7 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
     disabled: !thread,
     observability: {
       ...observability,
-      yolo: { enabled: Boolean(timeline.runtimeContext.yoloEnabled) },
+      yolo: { enabled: Boolean(thread?.yoloEnabled) },
     },
     taskTimeline,
     actionError,
@@ -233,55 +253,47 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
     submitMessage,
     stopThread,
     retryThread,
+    setThreadAgent,
     runCommand,
   }
 }
 
 function resolveRuntimeLabels(
-  agent: unknown,
-  timeline: ReturnType<typeof buildThreadTimeline>,
-  models: Array<Record<string, unknown>>,
-  providers: Array<Record<string, unknown>>,
+  thread: HarnessThreadDTO | undefined,
+  agent: AgentDefinitionDTO | undefined,
+  models: AgentModelDTO[],
+  providers: AgentProviderDTO[],
 ) {
-  const agentRecord = asRecord(agent)
-  const snapshotModel = timeline.runtimeContext.model
-  const modelId = firstNonEmpty(snapshotModel, agentRecord.defaultModelId, agentRecord.modelId)
-  const model =
-    models.find((item) => String(item.id) === modelId)
-    ?? models.find((item) => String(item.name) === modelId)
-    ?? {}
-  const providerId = firstNonEmpty(model.providerId, agentRecord.defaultProviderId)
-  const provider = providers.find((item) => String(item.id) === providerId) ?? {}
+  const modelId = firstNonEmpty(thread?.modelId, agent?.modelId)
+  const model = models.find((item) => String(item.id) === modelId) ?? models.find((item) => item.name === modelId)
+  const provider = model
+    ? providers.find((item) => String(item.id) === String(model.providerId))
+    : undefined
   const contextWindow = parseContextWindow(model)
 
   return {
-    agentName: firstNonEmpty(agentRecord.name, timeline.runtimeContext.agentDefinitionId, 'agent'),
-    providerName: firstNonEmpty(provider.name, model.providerName, agentRecord.defaultProviderName),
-    modelName: firstNonEmpty(model.name, snapshotModel, agentRecord.defaultModelName),
-    variantName: firstNonEmpty(
-      timeline.runtimeContext.variant,
-      'default',
-    ),
+    agentName: firstNonEmpty(thread?.activeAgentName, agent?.name, thread?.activeAgentDefinitionId, '（无 Agent）'),
+    providerName: firstNonEmpty(provider?.name, model?.providerName),
+    modelName: firstNonEmpty(model?.name, modelId),
+    variantName: firstNonEmpty(thread?.variant, agent?.variant, 'default'),
     contextWindow,
   }
 }
 
-function parseContextWindow(model: Record<string, unknown>): number | undefined {
-  const raw = model.configJson ?? model.config
-  if (!raw) {
+function parseContextWindow(model: AgentModelDTO | undefined): number | undefined {
+  if (!model?.variantsJson) {
     return undefined
   }
   try {
-    const config = typeof raw === 'string' ? JSON.parse(raw) : raw
-    const value = Number((config as { contextWindow?: number }).contextWindow)
-    return Number.isFinite(value) && value > 0 ? value : undefined
+    const config = JSON.parse(model.variantsJson) as unknown
+    if (config && typeof config === 'object' && !Array.isArray(config)) {
+      const value = Number((config as { contextWindow?: number }).contextWindow)
+      return Number.isFinite(value) && value > 0 ? value : undefined
+    }
   } catch {
     return undefined
   }
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  return undefined
 }
 
 function firstNonEmpty(...values: unknown[]): string {
