@@ -8,9 +8,9 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
 
 import java.time.Clock;
 
-/** Wires the shared Daemon capabilities codec for the Environment application service. */
+/** Wires shared Environment gateway codecs and clocks. */
 @Configuration(proxyBeanMethods = false)
-public class ToolEnvironmentAutoConfiguration {
+public class EnvironmentAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
@@ -20,7 +20,7 @@ public class ToolEnvironmentAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public Clock toolEnvironmentClock() {
+  public Clock environmentClock() {
     return Clock.systemUTC();
   }
 }

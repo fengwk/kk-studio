@@ -16,7 +16,7 @@ public record ToolInvocation(
     String toolName,
     String toolVersion,
     ToolTargetType targetType,
-    Long environmentId,
+    String environmentName,
     String argumentsJson,
     ToolInvocationStatus status,
     PermissionAction permissionAction,
@@ -47,14 +47,17 @@ public record ToolInvocation(
       throw new IllegalArgumentException("tool identity exceeds persistent column bounds");
     }
     targetType = Objects.requireNonNull(targetType, "targetType");
-    if (environmentId != null && environmentId <= 0) {
-      throw new IllegalArgumentException("environmentId must be positive");
+    if (environmentName != null && environmentName.isBlank()) {
+      throw new IllegalArgumentException("environmentName must not be blank when present");
     }
-    if (targetType == ToolTargetType.ENVIRONMENT && environmentId == null) {
-      throw new IllegalArgumentException("ENVIRONMENT invocations require environmentId");
+    if (environmentName != null && environmentName.length() > 128) {
+      throw new IllegalArgumentException("environmentName must fit persistent column bounds");
     }
-    if (targetType != ToolTargetType.ENVIRONMENT && environmentId != null) {
-      throw new IllegalArgumentException("environmentId is only valid for ENVIRONMENT tools");
+    if (targetType == ToolTargetType.ENVIRONMENT && environmentName == null) {
+      throw new IllegalArgumentException("ENVIRONMENT invocations require environmentName");
+    }
+    if (targetType != ToolTargetType.ENVIRONMENT && environmentName != null) {
+      throw new IllegalArgumentException("environmentName is only valid for ENVIRONMENT tools");
     }
     argumentsJson = requireNonBlank(argumentsJson, "argumentsJson");
     status = Objects.requireNonNull(status, "status");

@@ -149,7 +149,7 @@ create table if not exists tool_invocation (
     tool_name             varchar(128) not null,
     tool_version          varchar(128) not null,
     target_type           varchar(32) not null,
-    environment_id        bigint,
+    environment_name      varchar(128),
     arguments_json        text not null,
     status                varchar(32) not null,
     permission_action     varchar(16) not null,
@@ -177,7 +177,7 @@ create index if not exists idx_tool_invocation_claim
     on tool_invocation (target_type, status, deadline_at, id);
 
 create index if not exists idx_tool_invocation_environment_claim
-    on tool_invocation (environment_id, status, deadline_at, id);
+    on tool_invocation (environment_name, status, deadline_at, id);
 
 create table if not exists tool_artifact (
     id bigint not null,
@@ -280,18 +280,7 @@ create table if not exists comfyui_workflow_api (
     unique (api_name)
 );
 
-create table if not exists tool_environment (
-    id                    bigint not null,
-    name                  varchar(128) not null,
-    description           varchar(512),
-    capabilities_json     text not null,
-    last_seen_at          timestamp(3),
-    gmt_create            timestamp(3) not null default current_timestamp(),
-    gmt_modified          timestamp(3) not null default current_timestamp(),
-    version               bigint not null default 0,
-    primary key (id),
-    unique (name)
-);
+
 
 create table if not exists canvas_document (
     id                  bigint not null,

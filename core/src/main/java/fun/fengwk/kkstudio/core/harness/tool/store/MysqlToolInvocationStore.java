@@ -45,7 +45,7 @@ public class MysqlToolInvocationStore {
         source.getToolName(),
         source.getToolVersion(),
         ToolTargetType.valueOf(source.getTargetType()),
-        source.getEnvironmentId(),
+        source.getEnvironmentName(),
         source.getArgumentsJson(),
         ToolInvocationStatus.valueOf(source.getStatus()),
         PermissionAction.valueOf(source.getPermissionAction()),

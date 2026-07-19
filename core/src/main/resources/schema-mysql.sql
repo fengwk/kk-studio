@@ -138,7 +138,7 @@ create table if not exists tool_invocation (
     tool_name             varchar(128) not null comment '冻结工具名称',
     tool_version          varchar(128) not null comment '冻结工具版本',
     target_type           varchar(32) not null comment '工具执行目标类型',
-    environment_id        bigint null comment 'ENVIRONMENT 目标 id；其他类型为空',
+    environment_name      varchar(128) null comment 'ENVIRONMENT 目标实时名称；其他类型为空',
     arguments_json        longtext not null comment 'interceptor 后参数 JSON',
     status                varchar(32) not null comment '持久状态',
     permission_action     varchar(16) not null comment 'ALLOW/ASK/DENY',
@@ -159,7 +159,7 @@ create table if not exists tool_invocation (
     unique key uk_tool_invocation_assistant_ordinal (assistant_entry_id, ordinal),
     key idx_tool_invocation_thread_status (thread_id, status, ordinal),
     key idx_tool_invocation_claim (target_type, status, deadline_at, id),
-    key idx_tool_invocation_environment_claim (environment_id, status, deadline_at, id)
+    key idx_tool_invocation_environment_claim (environment_name, status, deadline_at, id)
 ) engine=InnoDB default charset=utf8mb4 comment='durable tool invocation';
 
 create table if not exists tool_artifact (
@@ -260,18 +260,7 @@ create table if not exists comfyui_workflow_api (
     unique key uk_comfyui_workflow_api_api_name (api_name)
 ) engine=InnoDB default charset=utf8mb4 comment='comfyui workflow api card';
 
-create table if not exists tool_environment (
-    id                    bigint not null comment 'Snowflake 主键；Environment 全局资源，不属于 Workspace/Tenant',
-    name                  varchar(128) not null comment 'Environment 唯一名',
-    description           varchar(512) null comment '描述',
-    capabilities_json     longtext not null comment 'canonical Daemon CAPABILITIES payload',
-    last_seen_at          datetime(3) null comment '最近一次 daemon 主动上报时间',
-    gmt_create            datetime(3) not null default current_timestamp(3) comment '创建时间',
-    gmt_modified          datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
-    version               bigint not null default '0' comment '数据版本号',
-    primary key (id),
-    unique key uk_tool_environment_name (name)
-) engine=InnoDB default charset=utf8mb4 comment='global environment daemon registry';
+
 
 create table if not exists canvas_document (
     id                  bigint not null comment '主键',

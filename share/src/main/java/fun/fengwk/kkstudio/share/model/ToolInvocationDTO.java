@@ -15,7 +15,7 @@ public class ToolInvocationDTO {
   private String toolName;
   private String toolVersion;
   private String targetType;
-  private String environmentId;
+  private String environmentName;
   private String argumentsJson;
   private String status;
   private String permissionAction;
