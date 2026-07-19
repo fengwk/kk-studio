@@ -7,6 +7,7 @@ import {
   normalizeThreadEvent,
   parseThreadEvent,
 } from '@/features/ai/harness-thread-event-stream'
+import { buildThreadTimeline } from '@/features/ai/thread-events'
 import type { ThreadEventDTO } from '@/shared/api/contracts'
 
 const SNOWFLAKE_A = '9007199254740993' // Number.MAX_SAFE_INTEGER + 2
@@ -47,6 +48,29 @@ describe('harness-thread-event-stream', () => {
     }))).toMatchObject({ eventId: '3', eventType: 'thread_idle' })
     expect(parseThreadEvent('{')).toBeNull()
     expect(normalizeThreadEvent({ eventId: '0', threadId: '1', eventType: 'x' })).toBeNull()
+  })
+
+  it('projects the backend delta batch wire contract from SSE through the timeline', () => {
+    const started = parseThreadEvent(JSON.stringify({
+      eventId: '1',
+      threadId: '7',
+      subjectEntryId: '9',
+      eventType: 'assistant_started',
+      payloadJson: '{"assistantEntryId":"9","schemaVersion":1}',
+    }))
+    const delta = parseThreadEvent(JSON.stringify({
+      eventId: '2',
+      threadId: '7',
+      subjectEntryId: '9',
+      eventType: 'assistant_delta_batch',
+      payloadJson: '{"deltas":[{"kind":"thinking","text":"plan "},{"kind":"text","text":"answer"}],"schemaVersion":1}',
+    }))
+
+    // This covers both JSON layers used by a real SSE frame before timeline projection.
+    const timeline = buildThreadTimeline([], [], [started!, delta!])
+    expect(timeline.messages).toMatchObject([
+      { role: 'assistant', thinking: 'plan ', text: 'answer', status: 'streaming' },
+    ])
   })
 
   it('requires threadId and non-null subjectEntryId to be positive decimal strings', () => {
