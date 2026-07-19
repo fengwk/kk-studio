@@ -6,6 +6,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import fun.fengwk.kkstudio.core.harness.task.store.mapper.HarnessSubagentTaskMapper;
+import fun.fengwk.kkstudio.core.harness.task.store.model.HarnessSubagentTaskDO;
 import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
@@ -31,16 +33,19 @@ import java.util.Objects;
 public class ToolInvocationDecisionService {
   private final ToolInvocationMapper invocationMapper;
   private final HarnessThreadMapper threadMapper;
+  private final HarnessSubagentTaskMapper taskMapper;
   private final ThreadEventStore eventStore;
   private final ThreadKick threadKick;
 
   public ToolInvocationDecisionService(
       ToolInvocationMapper invocationMapper,
       HarnessThreadMapper threadMapper,
+      HarnessSubagentTaskMapper taskMapper,
       ThreadEventStore eventStore,
       @Lazy ThreadKick threadKick) {
     this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
     this.threadMapper = Objects.requireNonNull(threadMapper, "threadMapper");
+    this.taskMapper = Objects.requireNonNull(taskMapper, "taskMapper");
     this.eventStore = Objects.requireNonNull(eventStore, "eventStore");
     this.threadKick = Objects.requireNonNull(threadKick, "threadKick");
   }
@@ -83,18 +88,7 @@ public class ToolInvocationDecisionService {
         throw new ConcurrentModificationException(
             "permission decision lost race for invocation " + invocationId);
       }
-      eventStore.append(
-          row.getThreadId(),
-          row.getAssistantEntryId(),
-          ThreadEventType.PERMISSION_RESOLVED,
-          ThreadEventPayloads.of(
-              "invocationId",
-              Long.toString(row.getId()),
-              "decision",
-              decision.name(),
-              "status",
-              ToolInvocationStatus.QUEUED.name()),
-          instant);
+      appendPermissionResolved(row, decision, ToolInvocationStatus.QUEUED, instant);
     } else {
       ToolResult denied = ToolResult.error(row.getToolCallId(), "Permission denied by user.");
       int updated =
@@ -112,18 +106,7 @@ public class ToolInvocationDecisionService {
         throw new ConcurrentModificationException(
             "permission decision lost race for invocation " + invocationId);
       }
-      eventStore.append(
-          row.getThreadId(),
-          row.getAssistantEntryId(),
-          ThreadEventType.PERMISSION_RESOLVED,
-          ThreadEventPayloads.of(
-              "invocationId",
-              Long.toString(row.getId()),
-              "decision",
-              decision.name(),
-              "status",
-              ToolInvocationStatus.FAILED.name()),
-          instant);
+      appendPermissionResolved(row, decision, ToolInvocationStatus.FAILED, instant);
       eventStore.append(
           row.getThreadId(),
           row.getAssistantEntryId(),
@@ -141,6 +124,7 @@ public class ToolInvocationDecisionService {
               "Permission denied by user."),
           instant);
     }
+    threadMapper.promoteWaitingToRunning(row.getThreadId(), now);
     afterCommitKick(row.getThreadId());
     ToolInvocationDO refreshed = invocationMapper.find(invocationId);
     ToolInvocationDTO dto = new ToolInvocationDTO();
@@ -149,6 +133,32 @@ public class ToolInvocationDecisionService {
     dto.setStatus(refreshed.getStatus());
     dto.setPermissionDecision(refreshed.getPermissionDecision());
     return dto;
+  }
+
+  private void appendPermissionResolved(
+      ToolInvocationDO invocation,
+      ToolPermissionDecision decision,
+      ToolInvocationStatus status,
+      Instant now) {
+    String payload =
+        ThreadEventPayloads.of(
+            "invocationId",
+            Long.toString(invocation.getId()),
+            "decision",
+            decision.name(),
+            "status",
+            status.name());
+    eventStore.append(
+        invocation.getThreadId(),
+        invocation.getAssistantEntryId(),
+        ThreadEventType.PERMISSION_RESOLVED,
+        payload,
+        now);
+    HarnessSubagentTaskDO task = taskMapper.findByChildThreadId(invocation.getThreadId());
+    if (task != null && !Objects.equals(task.getRootThreadId(), invocation.getThreadId())) {
+      eventStore.append(
+          task.getRootThreadId(), null, ThreadEventType.PERMISSION_RESOLVED, payload, now);
+    }
   }
 
   private void afterCommitKick(long threadId) {

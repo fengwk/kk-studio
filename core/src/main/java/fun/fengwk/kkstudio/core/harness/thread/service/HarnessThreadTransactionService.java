@@ -12,6 +12,8 @@ import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionEntry
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionEntryDO;
+import fun.fengwk.kkstudio.core.harness.task.store.mapper.HarnessSubagentTaskMapper;
+import fun.fengwk.kkstudio.core.harness.task.store.model.HarnessSubagentTaskDO;
 import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadInputMapper;
 import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadMapper;
 import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadDO;
@@ -88,6 +90,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
   private final HarnessThreadInputMapper inputMapper;
   private final HarnessSessionMapper sessionMapper;
   private final HarnessSessionEntryMapper entryMapper;
+  private final HarnessSubagentTaskMapper taskMapper;
   private final ToolInvocationMapper invocationMapper;
   private final ThreadStore threadStore;
   private final ThreadInputStore inputStore;
@@ -106,6 +109,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
       HarnessThreadInputMapper inputMapper,
       HarnessSessionMapper sessionMapper,
       HarnessSessionEntryMapper entryMapper,
+      HarnessSubagentTaskMapper taskMapper,
       ToolInvocationMapper invocationMapper,
       ThreadStore threadStore,
       ThreadInputStore inputStore,
@@ -121,6 +125,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     this.inputMapper = Objects.requireNonNull(inputMapper, "inputMapper");
     this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
     this.entryMapper = Objects.requireNonNull(entryMapper, "entryMapper");
+    this.taskMapper = Objects.requireNonNull(taskMapper, "taskMapper");
     this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
     this.threadStore = Objects.requireNonNull(threadStore, "threadStore");
     this.inputStore = Objects.requireNonNull(inputStore, "inputStore");
@@ -491,6 +496,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
       }
     }
     appendEventsInternal(threadId, all, now);
+    relayChildPermissionRequests(threadId, all, now);
     return true;
   }
 
@@ -890,6 +896,20 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
   private void appendEventsInternal(long threadId, List<ThreadEventDraft> events, Instant now) {
     for (ThreadEventDraft draft : events) {
       eventStore.append(threadId, draft.subjectEntryId(), draft.type(), draft.payloadJson(), now);
+    }
+  }
+
+  /** Child ASK 保留源 Thread 事件，并投影到 delegation root 供根 UI 决策。 */
+  private void relayChildPermissionRequests(
+      long childThreadId, List<ThreadEventDraft> events, Instant now) {
+    HarnessSubagentTaskDO task = taskMapper.findByChildThreadId(childThreadId);
+    if (task == null || Objects.equals(task.getRootThreadId(), childThreadId)) {
+      return;
+    }
+    for (ThreadEventDraft event : events) {
+      if (event.type() == ThreadEventType.PERMISSION_REQUESTED) {
+        eventStore.append(task.getRootThreadId(), null, event.type(), event.payloadJson(), now);
+      }
     }
   }
 
