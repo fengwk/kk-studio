@@ -23,8 +23,8 @@ class HarnessThreadDtoConverterTest {
             1L,
             2L,
             1L,
-            ThreadInputType.SET_TOOLSET,
-            "{\"tools\":[\"read\"]}",
+            ThreadInputType.SET_AGENT,
+            "{\"agentDefinitionId\":1,\"agentName\":\"default-assistant\"}",
             "runtime-key",
             ThreadInputStatus.QUEUED,
             null,
@@ -41,7 +41,7 @@ class HarnessThreadDtoConverterTest {
     persistedInput.setStatus("queued");
     persistedInput.setCreateTime(LocalDateTime.of(2026, 1, 1, 0, 0));
 
-    assertEquals("SET_TOOLSET", converter.convert(runtimeInput).getInputType());
+    assertEquals("SET_AGENT", converter.convert(runtimeInput).getInputType());
     assertEquals("SET_YOLO", converter.convert(persistedInput).getInputType());
   }
 }

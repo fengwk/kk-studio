@@ -393,6 +393,11 @@ class DatabaseTaskRuntimeLifecycleTest {
     HarnessThreadDO thread = new HarnessThreadDO();
     thread.setId(id);
     thread.setSessionId(sessionId);
+    thread.setActiveAgentDefinitionId(1L);
+    thread.setActiveAgentName("parent");
+    thread.setModelId("1");
+    thread.setVariant("default");
+    thread.setYoloEnabled(false);
     thread.setHeadEntryId(1L);
     thread.setStatus(ThreadStatus.WAITING.name());
     thread.setInputSequence(0L);
@@ -438,7 +443,7 @@ class DatabaseTaskRuntimeLifecycleTest {
     HarnessSessionEntryDO entry = new HarnessSessionEntryDO();
     entry.setId(entryId);
     entry.setSessionId(sessionId);
-    entry.setEntryType(SessionEntryType.AGENT_SNAPSHOT.value());
+    entry.setEntryType(SessionEntryType.ROOT.value());
     entry.setPayloadJson("{}");
     entry.setCreateTime(timestamp);
     entryMapper.insert(entry);

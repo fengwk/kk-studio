@@ -134,21 +134,14 @@ class StudioHarnessThreadControllerTest {
                     "{\"modelId\":\"model-1\",\"variant\":\"default\",\"clientMessageId\":\"model-1\"}"))
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.data.inputType").value("SET_MODEL"));
-    mockMvc
-        .perform(
-            put("/api/threads/{id}/toolset", threadId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"tools\":[\"read\"],\"clientMessageId\":\"toolset-1\"}"))
-        .andExpect(status().isAccepted())
-        .andExpect(jsonPath("$.data.inputType").value("SET_TOOLSET"));
 
     mockMvc
         .perform(get("/api/threads/{id}/inputs", threadId))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.length()").value(6))
+        .andExpect(jsonPath("$.data.length()").value(5))
         .andExpect(jsonPath("$.data[0].inputId").value(inputId))
         .andExpect(jsonPath("$.data[0].sequence").value(1))
-        .andExpect(jsonPath("$.data[5].sequence").value(6));
+        .andExpect(jsonPath("$.data[4].sequence").value(5));
 
     MvcResult stop =
         mockMvc
@@ -158,7 +151,7 @@ class StudioHarnessThreadControllerTest {
                     .content("{\"clientRequestId\":\"stop-1\"}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.stopId").isString())
-            .andExpect(jsonPath("$.data.cancelledInputs.length()").value(6))
+            .andExpect(jsonPath("$.data.cancelledInputs.length()").value(5))
             .andExpect(jsonPath("$.data.restoredMessages[0]").value("hello"))
             .andExpect(jsonPath("$.data.restoredMessages[1]").value("context"))
             .andReturn();
@@ -343,12 +336,7 @@ class StudioHarnessThreadControllerTest {
             .perform(
                 post("/api/sessions")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(
-                        "{\"agentDefinitionId\":\"1\",\"title\":\""
-                            + title
-                            + "\",\"yoloEnabled\":"
-                            + yoloEnabled
-                            + "}"))
+                    .content("{\"title\":\"" + title + "\",\"yoloEnabled\":" + yoloEnabled + "}"))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.data.sessionId").isString())
             .andExpect(jsonPath("$.data.mainThreadId").isString())

@@ -48,7 +48,7 @@ Session 不拥有唯一当前 Branch。`mainThreadId` 只是稳定的默认主�
 5. ThreadInput 只按 `(threadId, sequence)` 排序；时间戳和 Snowflake 数值大小不表达 mailbox 因果。
 6. 一个 Thread 同时最多一个有效 processor token；所有 Processor 写入都必须校验 token。
 7. Entry 是 transcript 与配置的唯一语义事实；ThreadEvent 只提供实时覆盖层。
-8. Agent、Model、Toolset、YOLO 均由 Entry path fold 得出，Thread 与 Session 行不保存配置副本。
+8. Thread 行保存当前 agent id/name、model/variant、yolo；完整 prompt/tools/skills/policy 在 Turn 时从当前 AgentDefinition 动态装载，不进 Entry Tree。
 9. Tool 副作用以 `tool_invocation.id` 幂等，Stop 或 lease 过期不能让旧执行者提交越权结果。
 10. 所有 durable trigger 只在事务提交后执行 `kick(threadId)`。
 11. Snowflake ID 在 HTTP、SSE、URL 和 TypeScript 中始终使用正十进制字符串。
@@ -72,7 +72,7 @@ gmt_modified
 
 - Root Session：`parent_session_id = null`、`root_session_id = id`、`depth = 0`。
 - Child Session：记录父 Session、根 Session、父 Task ToolInvocation 和递增 depth。
-- `agent_definition_id` 不保留；当前 Agent 身份与冻结配置来自 `AGENT_SNAPSHOT` Entry。
+- Session 可无 Agent 创建；当前 Agent 身份与 model/yolo 保存在 `harness_thread`。
 
 ### 4.2 `harness_session_entry`
 
@@ -95,6 +95,11 @@ session_id
 head_entry_id
 status
 input_sequence
+active_agent_definition_id
+active_agent_name
+model_id
+variant
+yolo_enabled
 processor_token
 processor_until
 version
@@ -102,7 +107,7 @@ gmt_create
 gmt_modified
 ```
 
-Thread 不保存 Agent、runtime config 或 YOLO。
+Thread 保存当前 Agent 身份与 model/variant/yolo；完整 Agent 配置不落 Thread 行。
 
 `status`：
 
@@ -188,11 +193,9 @@ root_thread_id
 ### 5.1 SessionEntryType
 
 ```text
+ROOT
 MESSAGE
-AGENT_SNAPSHOT
-MODEL_CHANGE
-TOOLSET_CHANGE
-YOLO_CHANGE
+AGENT_CHANGE
 COMPACTION
 BRANCH_SUMMARY
 CUSTOM
@@ -200,7 +203,7 @@ CUSTOM_MESSAGE
 LABEL
 ```
 
-`AgentSnapshotEntryPayload` 同时记录源 `agentDefinitionId` 与完整冻结 `AgentSnapshot`。Agent Snapshot 重置 Agent、Model、Toolset、Skill、Subagent allowlist 和 execution policy；YOLO 独立 fold，不因切换 Agent 隐式改变。
+`ROOT` 是 Session 语义根 Entry，不携带运行时配置。`AGENT_CHANGE` 只记录 `agentDefinitionId` 与捕获时的 `agentName`，禁止写入 prompt/tools/skills/subagents/policy 或完整 snapshot。Model/variant 与 YOLO 是 Thread 状态，不作为 Entry payload。
 
 ### 5.2 ThreadInputType
 
@@ -209,7 +212,6 @@ USER_MESSAGE
 CUSTOM_MESSAGE
 SET_AGENT
 SET_MODEL
-SET_TOOLSET
 SET_YOLO
 ```
 
@@ -217,24 +219,21 @@ HTTP 边界使用 typed DTO，禁止客户端构造 Assistant、Tool Result、Co
 
 ## 6. Session 与 Main Thread 创建
 
-`POST /api/sessions` 接收 Agent、title 与初始 YOLO。服务端预分配：
+`POST /api/sessions` 接收 title 与初始 YOLO（可选），Session 可无 Agent。服务端预分配：
 
 ```text
 sessionId
-snapshotEntryId
-optionalYoloEntryId
+rootEntryId
 mainThreadId
 ```
 
 一个事务内：
 
-1. 解析并冻结 Agent Snapshot。
-2. 插入 Session。
-3. 插入根 `AGENT_SNAPSHOT` Entry。
-4. 初始 YOLO 非默认值时追加 `YOLO_CHANGE` Entry。
-5. 创建 Main Thread，head 指向最后一个初始配置 Entry，status=`IDLE`。
-6. 回写/校验 `Session.mainThreadId`。
-7. 写 Main Thread `THREAD_STARTED` Event。
+1. 插入 Session。
+2. 插入语义根 `ROOT` Entry。
+3. 创建 Main Thread：head 指向 ROOT，agent/model 为空，yolo 取请求或默认值，status=`IDLE`。
+4. 回写/校验 `Session.mainThreadId`。
+5. 写 Main Thread `THREAD_STARTED` Event。
 
 任一步失败整体回滚。Main Thread 不允许删除或归档。
 
@@ -256,7 +255,7 @@ inputSequence = 0
 processorToken = null
 ```
 
-不复制 Entry、ToolInvocation、Event 或配置。配置由共享祖先路径自动继承。
+不复制 Entry、ToolInvocation、Event。新 Thread 的 agent/model/yolo 初始为空/false，需通过有序 Input 设置。
 
 Tree UI 对齐 pi：
 
@@ -309,15 +308,16 @@ Harvest 只发生在安全边界：
 
 1. 锁定并校验 Thread processor token。
 2. 读取 Thread 当前 `input_sequence` 作为 cutoff。
-3. 按 sequence 查询 `QUEUED AND sequence <= cutoff` 的全部 Input。
-4. 按顺序 decode、校验并逐条 append Entry，父节点从原 head 连续推进。
-5. 每条 Input CAS 为 `APPLIED` 并记录 `applied_entry_id`。
-6. Thread head 更新为批次最后 Entry。
-7. 写 `INPUT_APPLIED` / batch 事件。
+3. 按 sequence 查询 `QUEUED AND sequence <= cutoff` 的 Input。
+4. 在消息边界选择本批：连续配置 Input 先于下一条消息应用；每批最多一条 USER/CUSTOM 消息；该消息之后的配置不得进入本批。
+5. 应用配置：SET_AGENT 写入 `AGENT_CHANGE` Entry 并更新 Thread agent/model/variant（apply 时加载当前 AgentDefinition）；SET_MODEL / SET_YOLO 只更新 Thread 状态；三者均写 durable 配置事件（`AGENT_CHANGED` / `MODEL_CHANGED` / `YOLO_CHANGED`）。
+6. 应用消息：append Message/Custom Entry。
+7. 每条 Input CAS 为 `APPLIED` 并记录 `applied_entry_id`（无新 Entry 时指向当前 head）。
+8. 若 head 推进则更新 Thread head。
 
 与 Harvest 并发、在 Thread 行锁释放后分配的新 sequence 自动进入下一批。
 
-同批包含一个或多个 USER/CUSTOM 消息时，只触发一次新的 Assistant Turn。配置-only 批次只更新 Branch 配置投影，不调用 Provider。
+因此 `M1 -> SET_AGENT(B) -> M2`：先执行 M1（旧状态），下一批应用 B 并发出 `AGENT_CHANGED`，再执行 M2（新状态）。配置-only 批次不调用 Provider。
 
 ## 10. Thread Main Loop
 

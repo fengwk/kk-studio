@@ -74,16 +74,21 @@ create index if not exists idx_harness_session_entry_parent on harness_session_e
 
 -- durable user execution panel / tree cursor
 create table if not exists harness_thread (
-    id                    bigint not null,                 -- 业务主键
-    session_id            bigint not null,                 -- 所属 session tree
-    head_entry_id         bigint not null,                 -- 当前 tree cursor
-    status                varchar(32) not null,            -- IDLE/RUNNING/WAITING/FAILED/RETRYING
-    input_sequence        bigint not null,                 -- 已分配 input sequence 最大值
-    processor_token       varchar(128),                    -- 当前 processor fencing token
-    processor_until       timestamp(3),                    -- token 租约截止
-    gmt_create            timestamp(3) not null default current_timestamp(),
-    gmt_modified          timestamp(3) not null default current_timestamp(),
-    version               bigint not null default 0,
+    id                           bigint not null,                 -- 业务主键
+    session_id                   bigint not null,                 -- 所属 session tree
+    head_entry_id                bigint not null,                 -- 当前 tree cursor
+    status                       varchar(32) not null,            -- IDLE/RUNNING/WAITING/FAILED/RETRYING
+    input_sequence               bigint not null,                 -- 已分配 input sequence 最大值
+    active_agent_definition_id   bigint,                          -- 当前 AgentDefinition id
+    active_agent_name            varchar(256),                    -- 捕获的 Agent 名称
+    model_id                     varchar(128),                    -- Thread 级 model id
+    variant                      varchar(128),                    -- Thread 级 model variant
+    yolo_enabled                 boolean not null default false,  -- Thread 级 YOLO
+    processor_token              varchar(128),                    -- 当前 processor fencing token
+    processor_until              timestamp(3),                    -- token 租约截止
+    gmt_create                   timestamp(3) not null default current_timestamp(),
+    gmt_modified                 timestamp(3) not null default current_timestamp(),
+    version                      bigint not null default 0,
     primary key (id)
 );
 

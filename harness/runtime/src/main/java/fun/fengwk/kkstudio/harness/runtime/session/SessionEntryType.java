@@ -2,11 +2,11 @@ package fun.fengwk.kkstudio.harness.runtime.session;
 
 /** 永久 Session Entry 的语义类型。 */
 public enum SessionEntryType {
+  /** Session 语义根；不承载运行时配置。 */
+  ROOT("root"),
   MESSAGE("message"),
-  AGENT_SNAPSHOT("agent_snapshot"),
-  MODEL_CHANGE("model_change"),
-  TOOLSET_CHANGE("toolset_change"),
-  YOLO_CHANGE("yolo_change"),
+  /** Thread 级 Agent 切换审计；仅 id/name，不含完整 Agent 配置。 */
+  AGENT_CHANGE("agent_change"),
   COMPACTION("compaction"),
   BRANCH_SUMMARY("branch_summary"),
   CUSTOM("custom"),

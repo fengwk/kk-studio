@@ -1,11 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime.context;
 
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
-
 import java.util.List;
 import java.util.Objects;
 
-/** Context 路径末端生效的 Agent 配置；含派生 agent id 与 YOLO。 */
+/**
+ * 一次 Turn 生效的 Agent 运行时配置。
+ *
+ * <p>由 Thread 当前状态（agent/model/variant/yolo）与当前 AgentDefinition 动态装载的
+ * prompt/tools/skills/subagents/policy 组合而成，不从 Session Entry path fold。
+ */
 public record AgentRuntimeConfig(
     Long agentDefinitionId,
     String systemPrompt,
@@ -23,24 +26,6 @@ public record AgentRuntimeConfig(
     tools = List.copyOf(Objects.requireNonNull(tools, "tools"));
     skills = List.copyOf(Objects.requireNonNull(skills, "skills"));
     allowedSubagents = List.copyOf(Objects.requireNonNull(allowedSubagents, "allowedSubagents"));
-  }
-
-  public static AgentRuntimeConfig from(Long agentDefinitionId, AgentSnapshot snapshot) {
-    Objects.requireNonNull(snapshot, "snapshot");
-    return new AgentRuntimeConfig(
-        agentDefinitionId,
-        snapshot.systemPrompt(),
-        snapshot.modelId(),
-        snapshot.variant(),
-        snapshot.tools(),
-        snapshot.skills(),
-        snapshot.allowedSubagents(),
-        snapshot.executionPolicyJson(),
-        false);
-  }
-
-  public static AgentRuntimeConfig from(AgentSnapshot snapshot) {
-    return from(null, snapshot);
   }
 
   public AgentRuntimeConfig withModel(String modelId, String variant) {
@@ -70,19 +55,6 @@ public record AgentRuntimeConfig(
   }
 
   public AgentRuntimeConfig withYolo(boolean yoloEnabled) {
-    return new AgentRuntimeConfig(
-        agentDefinitionId,
-        systemPrompt,
-        modelId,
-        variant,
-        tools,
-        skills,
-        allowedSubagents,
-        executionPolicyJson,
-        yoloEnabled);
-  }
-
-  public AgentRuntimeConfig withAgentDefinitionId(Long agentDefinitionId) {
     return new AgentRuntimeConfig(
         agentDefinitionId,
         systemPrompt,
