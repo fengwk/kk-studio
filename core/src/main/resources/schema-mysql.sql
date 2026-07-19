@@ -91,7 +91,7 @@ create table if not exists harness_thread_input (
     sequence              bigint not null comment 'thread 内有序序号',
     input_type            varchar(32) not null comment 'USER_MESSAGE/CUSTOM_MESSAGE/SET_*',
     payload_json          longtext not null comment '输入 payload JSON',
-    client_message_id     varchar(128) null comment '客户端幂等键',
+    client_message_id     varchar(128) not null comment '客户端幂等键',
     status                varchar(32) not null comment 'QUEUED/APPLIED/CANCELLED',
     applied_entry_id      bigint null comment '应用后产生的 entry',
     resolved_at           datetime(3) null comment '应用或取消时间',

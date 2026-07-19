@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.share.model.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadToolsetSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadYoloSetDTO;
 
-/** Thread 创建、消息与设置入队（SET_YOLO / SET_AGENT）。 */
+/** Session 内 branch Thread 创建和 typed mailbox 命令。 */
 public interface HarnessThreadCommandService {
   HarnessThreadDTO createThread(String sessionId, HarnessThreadCreateDTO createDTO);
 

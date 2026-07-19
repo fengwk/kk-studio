@@ -33,7 +33,8 @@ class StudioHarnessThreadControllerTest {
   /**
    * Disables asynchronous processing so the mailbox and Stop receipt assertions are deterministic.
    */
-  @MockBean private ThreadKick threadKick;
+  @MockBean(name = "threadKick")
+  private ThreadKick threadKick;
 
   @Test
   void createsSessionsBranchesAndTypedInputsWithHttpBoundaries() throws Exception {
@@ -74,7 +75,7 @@ class StudioHarnessThreadControllerTest {
             .andExpect(status().isAccepted())
             .andExpect(jsonPath("$.data.inputId").isString())
             .andExpect(jsonPath("$.data.threadId").value(threadId))
-            .andExpect(jsonPath("$.data.inputType").value("user_message"))
+            .andExpect(jsonPath("$.data.inputType").value("USER_MESSAGE"))
             .andExpect(jsonPath("$.data.status").value("QUEUED"))
             .andExpect(jsonPath("$.data.resolvedAt").doesNotExist())
             .andReturn();
@@ -101,7 +102,7 @@ class StudioHarnessThreadControllerTest {
                 .content(
                     "{\"role\":\"system\",\"content\":\"context\",\"clientMessageId\":\"custom-1\"}"))
         .andExpect(status().isAccepted())
-        .andExpect(jsonPath("$.data.inputType").value("custom_message"))
+        .andExpect(jsonPath("$.data.inputType").value("CUSTOM_MESSAGE"))
         .andExpect(jsonPath("$.data.status").value("QUEUED"));
     mockMvc
         .perform(
@@ -117,14 +118,14 @@ class StudioHarnessThreadControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"yoloEnabled\":true,\"clientMessageId\":\"yolo-1\"}"))
         .andExpect(status().isAccepted())
-        .andExpect(jsonPath("$.data.inputType").value("set_yolo"));
+        .andExpect(jsonPath("$.data.inputType").value("SET_YOLO"));
     mockMvc
         .perform(
             put("/api/threads/{id}/agent", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"agentDefinitionId\":\"1\",\"clientMessageId\":\"agent-1\"}"))
         .andExpect(status().isAccepted())
-        .andExpect(jsonPath("$.data.inputType").value("set_agent"));
+        .andExpect(jsonPath("$.data.inputType").value("SET_AGENT"));
     mockMvc
         .perform(
             put("/api/threads/{id}/model", threadId)
@@ -132,14 +133,14 @@ class StudioHarnessThreadControllerTest {
                 .content(
                     "{\"modelId\":\"model-1\",\"variant\":\"default\",\"clientMessageId\":\"model-1\"}"))
         .andExpect(status().isAccepted())
-        .andExpect(jsonPath("$.data.inputType").value("set_model"));
+        .andExpect(jsonPath("$.data.inputType").value("SET_MODEL"));
     mockMvc
         .perform(
             put("/api/threads/{id}/toolset", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"tools\":[\"read\"],\"clientMessageId\":\"toolset-1\"}"))
         .andExpect(status().isAccepted())
-        .andExpect(jsonPath("$.data.inputType").value("set_toolset"));
+        .andExpect(jsonPath("$.data.inputType").value("SET_TOOLSET"));
 
     mockMvc
         .perform(get("/api/threads/{id}/inputs", threadId))
@@ -267,6 +268,75 @@ class StudioHarnessThreadControllerTest {
         .andExpect(status().isNotFound());
   }
 
+  /** All typed mailbox commands require a non-blank client id and preserve payload-safe replay. */
+  @Test
+  void rejectsMissingOrBlankClientMessageIdsAndConflictingReplays() throws Exception {
+    String threadId = createSession("idempotency", false).path("mainThreadId").asText();
+
+    assertBadRequest(
+        post("/api/threads/{id}/messages", threadId)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"content\":\"message\"}"));
+    assertBadRequest(
+        post("/api/threads/{id}/messages", threadId)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"content\":\"message\",\"clientMessageId\":\"\"}"));
+    assertBadRequest(
+        post("/api/threads/{id}/messages/custom", threadId)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"role\":\"system\",\"content\":\"context\"}"));
+    assertBadRequest(
+        post("/api/threads/{id}/messages/custom", threadId)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"role\":\"system\",\"content\":\"context\",\"clientMessageId\":\"\"}"));
+    assertBadRequest(
+        put("/api/threads/{id}/yolo", threadId)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"yoloEnabled\":true}"));
+    assertBadRequest(
+        put("/api/threads/{id}/yolo", threadId)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"yoloEnabled\":true,\"clientMessageId\":\"\"}"));
+    assertBadRequest(
+        put("/api/threads/{id}/agent", threadId)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"agentDefinitionId\":\"1\"}"));
+    assertBadRequest(
+        put("/api/threads/{id}/agent", threadId)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"agentDefinitionId\":\"1\",\"clientMessageId\":\"\"}"));
+    assertBadRequest(
+        put("/api/threads/{id}/model", threadId)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"modelId\":\"model\",\"variant\":\"default\"}"));
+    assertBadRequest(
+        put("/api/threads/{id}/model", threadId)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"modelId\":\"model\",\"variant\":\"default\",\"clientMessageId\":\"\"}"));
+    assertBadRequest(
+        put("/api/threads/{id}/toolset", threadId)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"tools\":[\"read\"]}"));
+    assertBadRequest(
+        put("/api/threads/{id}/toolset", threadId)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"tools\":[\"read\"],\"clientMessageId\":\"\"}"));
+
+    mockMvc
+        .perform(
+            put("/api/threads/{id}/yolo", threadId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"yoloEnabled\":true,\"clientMessageId\":\"replay\"}"))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.data.inputType").value("SET_YOLO"));
+    mockMvc
+        .perform(
+            put("/api/threads/{id}/yolo", threadId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"yoloEnabled\":false,\"clientMessageId\":\"replay\"}"))
+        .andExpect(status().isConflict());
+  }
+
   private JsonNode createSession(String title, boolean yoloEnabled) throws Exception {
     MvcResult result =
         mockMvc
@@ -284,6 +354,10 @@ class StudioHarnessThreadControllerTest {
             .andExpect(jsonPath("$.data.mainThreadId").isString())
             .andReturn();
     return data(result);
+  }
+
+  private void assertBadRequest(MockHttpServletRequestBuilder request) throws Exception {
+    mockMvc.perform(request).andExpect(status().isBadRequest());
   }
 
   private JsonNode readData(MockHttpServletRequestBuilder request) throws Exception {

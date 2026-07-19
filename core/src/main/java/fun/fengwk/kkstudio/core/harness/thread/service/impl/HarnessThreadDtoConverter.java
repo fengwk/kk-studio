@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadViewDO;
 import fun.fengwk.kkstudio.harness.runtime.thread.AgentThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
@@ -35,15 +36,11 @@ public class HarnessThreadDtoConverter {
     return dto;
   }
 
-  public HarnessThreadDTO convert(HarnessThreadDO row) {
-    return convert(row, null);
-  }
-
   public HarnessThreadDTO convert(HarnessThreadViewDO row) {
     return convert(row, row.getSessionTitle());
   }
 
-  public HarnessThreadDTO convert(HarnessThreadDO row, String sessionTitle) {
+  private HarnessThreadDTO convert(HarnessThreadDO row, String sessionTitle) {
     HarnessThreadDTO dto = new HarnessThreadDTO();
     dto.setThreadId(Long.toString(row.getId()));
     dto.setSessionId(Long.toString(row.getSessionId()));
@@ -66,7 +63,7 @@ public class HarnessThreadDtoConverter {
     dto.setInputId(Long.toString(input.id()));
     dto.setThreadId(Long.toString(input.threadId()));
     dto.setSequence(input.sequence());
-    dto.setInputType(input.inputType().value());
+    dto.setInputType(input.inputType().name());
     dto.setPayloadJson(input.payloadJson());
     dto.setClientMessageId(input.clientMessageId());
     if (input.appliedEntryId() != null) {
@@ -88,7 +85,7 @@ public class HarnessThreadDtoConverter {
     dto.setInputId(Long.toString(row.getId()));
     dto.setThreadId(Long.toString(row.getThreadId()));
     dto.setSequence(row.getSequence());
-    dto.setInputType(row.getInputType());
+    dto.setInputType(ThreadInputType.fromValue(row.getInputType()).name());
     dto.setPayloadJson(row.getPayloadJson());
     dto.setClientMessageId(row.getClientMessageId());
     if (row.getAppliedEntryId() != null) {
