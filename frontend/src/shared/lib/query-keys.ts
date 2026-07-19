@@ -15,7 +15,6 @@ export const queryKeys = {
   },
   threads: {
     all: ['threads'] as const,
-    list: ['threads', 'list'] as const,
     detail: (threadId: string) => ['threads', 'detail', threadId] as const,
     entries: (threadId: string) => ['threads', 'detail', threadId, 'entries'] as const,
     inputs: (threadId: string) => ['threads', 'detail', threadId, 'inputs'] as const,
@@ -26,6 +25,7 @@ export const queryKeys = {
     all: ['sessions'] as const,
     list: ['sessions', 'list'] as const,
     detail: (sessionId: string) => ['sessions', 'detail', sessionId] as const,
+    threads: (sessionId: string) => ['sessions', 'detail', sessionId, 'threads'] as const,
     entries: (sessionId: string) => ['sessions', 'detail', sessionId, 'entries'] as const,
     activities: (sessionId: string) => ['sessions', 'detail', sessionId, 'activities'] as const,
     taskTree: (sessionId: string) => ['sessions', 'detail', sessionId, 'task-tree'] as const,

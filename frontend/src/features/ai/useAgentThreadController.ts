@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { buildThreadTimeline, isThreadWorking } from '@/features/ai/thread-events'
 import type { ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
 import {
@@ -10,6 +11,8 @@ import { useChatTranscriptAutoScroll } from '@/features/ai/useChatTranscriptAuto
 import { useHarnessThreadEventStream } from '@/features/ai/useHarnessThreadEventStream'
 import { useHarnessThreadObservability } from '@/features/ai/useHarnessThreadObservability'
 import { useHarnessTaskTimeline } from '@/features/ai/useHarnessTaskTimeline'
+import { harnessService } from '@/shared/api/harness-service'
+import { queryKeys } from '@/shared/lib/query-keys'
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -21,14 +24,17 @@ function errorMessage(error: unknown): string {
   return '请求失败'
 }
 
-export function useAgentThreadController(threadId: string) {
-  const [draft, setDraftState] = useState('')
+export function useAgentThreadController(threadId: string, sessionId: string, initialDraft = '') {
+  const [draft, setDraftState] = useState(initialDraft)
   const [actionError, setActionError] = useState<string | null>(null)
   // Local in-flight count keeps pending accurate across overlapping mutateAsync calls.
   const [inFlightSubmissions, setInFlightSubmissions] = useState(0)
   const clientMessageIdRef = useRef<string | null>(null)
   const retryContentRef = useRef<string | null>(null)
+  const stopRequestIdRef = useRef<string | null>(null)
+  const handledStopIdsRef = useRef(new Set<string>())
   const bodyRef = useRef<HTMLDivElement>(null)
+  const queryClient = useQueryClient()
 
   const {
     threads,
@@ -39,15 +45,19 @@ export function useAgentThreadController(threadId: string) {
     entries,
     inputs,
     events,
+    sessionEntries,
+    session,
     threadQuery,
     entriesQuery,
     eventsQuery,
-  } = useAgentThreadQueries(threadId)
+  } = useAgentThreadQueries(threadId, sessionId)
   const createMessageMutation = useAgentThreadMessageMutation(threadId)
-  const agentsById = new Map(agents.map((agent) => [String(agent.id), agent]))
   const timeline = buildThreadTimeline(entries, inputs, events)
   const working = isThreadWorking(thread, timeline)
-  const currentAgent = thread?.agentDefinitionId ? agentsById.get(thread.agentDefinitionId) : undefined
+  const agentsById = new Map(agents.map((agent) => [String(agent.id), agent]))
+  const currentAgent = timeline.runtimeContext.agentDefinitionId
+    ? agentsById.get(timeline.runtimeContext.agentDefinitionId)
+    : agents[0]
   const runtimeLabels = resolveRuntimeLabels(
     currentAgent,
     timeline,
@@ -66,6 +76,19 @@ export function useAgentThreadController(threadId: string) {
     entries.length + inputs.length + events.length,
   )
   useHarnessThreadEventStream(threadId, Boolean(threadId) && eventsQuery.isSuccess)
+
+  useEffect(() => {
+    setDraftState(initialDraft)
+    clientMessageIdRef.current = null
+    retryContentRef.current = null
+  }, [initialDraft, threadId])
+
+  const stopMutation = useMutation({
+    mutationFn: (clientRequestId: string) => harnessService.stopThread(threadId, { clientRequestId }),
+  })
+  const retryMutation = useMutation({
+    mutationFn: () => harnessService.retryThread(threadId),
+  })
 
   function setDraft(next: string) {
     // Editing restored draft to different content resets retry identity.
@@ -124,7 +147,7 @@ export function useAgentThreadController(threadId: string) {
     setActionError(null)
     switch (command.id) {
       case 'yolo': {
-        const enabled = !(thread?.yoloEnabled ?? false)
+        const enabled = !timeline.runtimeContext.yoloEnabled
         observability.setYolo(enabled)
         return
       }
@@ -136,11 +159,52 @@ export function useAgentThreadController(threadId: string) {
     }
   }
 
+  function stopThread(): Promise<void> {
+    if (!thread) {
+      return Promise.resolve()
+    }
+    setActionError(null)
+    const clientRequestId = stopRequestIdRef.current ?? createClientMessageId()
+    stopRequestIdRef.current = clientRequestId
+    return stopMutation.mutateAsync(clientRequestId)
+      .then(async (result) => {
+        if (!handledStopIdsRef.current.has(result.stopId)) {
+          handledStopIdsRef.current.add(result.stopId)
+          const restored = result.restoredMessages.filter((message) => message.trim())
+          if (restored.length > 0) {
+            setDraftState((current) => [current.trim(), ...restored].filter(Boolean).join('\n\n'))
+          }
+          clientMessageIdRef.current = null
+          retryContentRef.current = null
+        }
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.threads.entries(threadId) }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.threads.inputs(threadId) }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.threads.events(threadId) }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.sessions.threads(thread.sessionId) }),
+        ])
+      })
+      .catch((error: unknown) => setActionError(errorMessage(error)))
+  }
+
+  function retryThread(): Promise<void> {
+    if (thread?.status !== 'FAILED') {
+      return Promise.resolve()
+    }
+    setActionError(null)
+    return retryMutation.mutateAsync()
+      .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) }))
+      .catch((error: unknown) => setActionError(errorMessage(error)))
+  }
+
   return {
     threads,
+    session,
+    sessionEntries,
     agentsById,
     thread,
-    title: thread?.sessionTitle || thread?.threadId || 'Chat',
+    title: session?.title || thread?.sessionTitle || thread?.threadId || 'Chat',
     agent: currentAgent,
     timeline,
     runtimeLabels,
@@ -154,14 +218,18 @@ export function useAgentThreadController(threadId: string) {
     disabled: !thread,
     observability: {
       ...observability,
-      yolo: { enabled: Boolean(thread?.yoloEnabled) },
+      yolo: { enabled: Boolean(timeline.runtimeContext.yoloEnabled) },
     },
     taskTimeline,
     controlsPending: observability.yoloPending,
+    stopPending: stopMutation.isPending,
+    retryPending: retryMutation.isPending,
     actionError,
     dismissActionError: () => setActionError(null),
     setDraft,
     submitMessage,
+    stopThread,
+    retryThread,
     runCommand,
   }
 }
@@ -174,7 +242,7 @@ function resolveRuntimeLabels(
 ) {
   const agentRecord = asRecord(agent)
   const snapshotModel = timeline.runtimeContext.model
-  const modelId = firstNonEmpty(agentRecord.defaultModelId, agentRecord.modelId, snapshotModel)
+  const modelId = firstNonEmpty(snapshotModel, agentRecord.defaultModelId, agentRecord.modelId)
   const model =
     models.find((item) => String(item.id) === modelId)
     ?? models.find((item) => String(item.name) === modelId)
@@ -184,14 +252,11 @@ function resolveRuntimeLabels(
   const contextWindow = parseContextWindow(model)
 
   return {
-    agentName: firstNonEmpty(agentRecord.name, 'agent'),
-    providerName: firstNonEmpty(provider.name, agentRecord.defaultProviderName, model.providerName),
-    // Prefer catalog model name, then agent defaults, then snapshot model string.
-    modelName: firstNonEmpty(model.name, agentRecord.defaultModelName, snapshotModel),
+    agentName: firstNonEmpty(agentRecord.name, timeline.runtimeContext.agentDefinitionId, 'agent'),
+    providerName: firstNonEmpty(provider.name, model.providerName, agentRecord.defaultProviderName),
+    modelName: firstNonEmpty(model.name, snapshotModel, agentRecord.defaultModelName),
     variantName: firstNonEmpty(
       timeline.runtimeContext.variant,
-      agentRecord.variant,
-      agentRecord.defaultVariant,
       'default',
     ),
     contextWindow,

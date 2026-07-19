@@ -1,18 +1,15 @@
 import { ChevronRight, MessageSquare } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { formatBackendDate } from '@/features/ai/ai-console-utils'
-import type { AgentDefinitionDTO, HarnessThreadDTO } from '@/shared/api/contracts'
+import type { HarnessSessionDTO } from '@/shared/api/contracts'
 
-export function ThreadCard({
-  thread,
-  agent,
+export function SessionCard({
+  session,
 }: {
-  thread: HarnessThreadDTO
-  agent?: AgentDefinitionDTO
+  session: HarnessSessionDTO
 }) {
   const navigate = useNavigate()
-  const label = thread.sessionTitle || thread.threadId
-  const agentLabel = agent?.name || thread.agentDefinitionId || 'agent'
+  const label = session.title || session.sessionId
   return (
     <article className="info-card">
       <div className="head">
@@ -21,21 +18,21 @@ export function ThreadCard({
             <MessageSquare aria-hidden="true" />
           </div>
           <div className="text-content">
-            <h3>{thread.sessionTitle || 'Untitled Chat'}</h3>
-            <p>{agentLabel}</p>
+            <h3>{session.title || 'Untitled Chat'}</h3>
+            <p>Session</p>
           </div>
         </div>
       </div>
       <div className="meta-block">
-        <MetaRow label="Agent" value={agentLabel} />
-        <MetaRow label="Updated" value={formatBackendDate(thread.updateTime)} />
+        <MetaRow label="Main Thread" value={session.mainThreadId} />
+        <MetaRow label="Updated" value={formatBackendDate(session.updateTime)} />
       </div>
       <div className="chat-card-foot split">
         <button
           className="action-enter-btn green"
           type="button"
-          aria-label={`进入对话 ${label}`}
-          onClick={() => navigate(`/threads/${encodeURIComponent(thread.threadId)}`)}
+          aria-label={`进入会话 ${label}`}
+          onClick={() => navigate(`/sessions/${encodeURIComponent(session.sessionId)}`)}
         >
           <ChevronRight aria-hidden="true" />
           进入对话
