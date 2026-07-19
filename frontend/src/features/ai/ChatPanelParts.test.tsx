@@ -8,7 +8,7 @@ describe('ChatSidebar', () => {
     render(<MemoryRouter><ChatSidebar threads={[thread('other'), thread('main')]} activeThreadId="main" sessionId="s1" mainThreadId="main" title="Main" onBack={vi.fn()} /></MemoryRouter>)
     expect(screen.getByRole('link', { name: 'Main' })).toHaveAttribute('href', '/sessions/s1/threads/main')
     expect(screen.getByRole('link', { name: 'other' })).toHaveAttribute('href', '/sessions/s1/threads/other')
-    expect(screen.queryByText('显示范围')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('显示记录')).not.toBeInTheDocument()
   })
 })
 

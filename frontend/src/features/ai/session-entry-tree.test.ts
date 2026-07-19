@@ -25,12 +25,8 @@ const entries: HarnessSessionEntryDTO[] = [
 ]
 
 describe('Session Entry Tree', () => {
-  it('walks the full parent tree in server child order and applies every UI filter', () => {
-    expect(buildSessionEntryTree(entries, 'default').map((item) => item.entry.entryId)).toEqual(['user', 'assistant', 'custom'])
-    expect(buildSessionEntryTree(entries, 'no-tools').map((item) => item.entry.entryId)).toEqual(['snapshot', 'user', 'assistant', 'custom', 'label', 'config'])
-    expect(buildSessionEntryTree(entries, 'user-only').map((item) => item.entry.entryId)).toEqual(['user', 'custom'])
-    expect(buildSessionEntryTree(entries, 'assistant-only').map((item) => item.entry.entryId)).toEqual(['assistant'])
-    expect(buildSessionEntryTree(entries, 'labeled-only').map((item) => item.entry.entryId)).toEqual(['label'])
+  it('walks the full parent tree in server child order and applies the two KISS views', () => {
+    expect(buildSessionEntryTree(entries, 'conversation').map((item) => item.entry.entryId)).toEqual(['user', 'assistant', 'custom'])
     expect(buildSessionEntryTree(entries, 'all').map((item) => item.entry.entryId)).toEqual(['snapshot', 'user', 'assistant', 'tool', 'custom', 'label', 'config'])
   })
 
@@ -44,7 +40,7 @@ describe('Session Entry Tree', () => {
     } as HarnessSessionEntryDTO
     const user = entry('child', 'root-without-parent', 'message', message('USER', 'child prompt'))
 
-    expect(buildSessionEntryTree([rootWithoutParent, user], 'default').map((item) => item.entry.entryId)).toEqual(['child'])
+    expect(buildSessionEntryTree([rootWithoutParent, user], 'conversation').map((item) => item.entry.entryId)).toEqual(['child'])
   })
 
   it('keeps linear chains compact: depth advances only on visible sibling splits', () => {
@@ -93,18 +89,19 @@ describe('Session Entry Tree', () => {
     expect(byEntryId.get('config')?.isLastSibling).toBe(true)
   })
 
-  it('re-attaches visible descendants to the nearest visible ancestor when intermediate entries are filtered out', () => {
+  it('keeps system and tool Entries out of the conversation view while re-attaching visible descendants', () => {
     const tree: HarnessSessionEntryDTO[] = [
       entry('snapshot', null, 'agent_snapshot', {}),
       entry('user', 'snapshot', 'message', message('USER', 'a user prompt')),
       entry('tool', 'user', 'message', message('TOOL', 'a tool result')),
       entry('assistant', 'tool', 'message', message('ASSISTANT', 'final answer')),
     ]
-    const rows = buildSessionEntryTree(tree, 'no-tools')
-    expect(rows.map((row) => row.entry.entryId)).toEqual(['snapshot', 'user', 'assistant'])
-    // `tool` is filtered out; `assistant` re-attaches to `user` and does not advance depth.
-    expect(rows[2]?.depth).toBe(0)
-    expect(rows[2]?.ancestorConnectors).toEqual([])
+    const rows = buildSessionEntryTree(tree, 'conversation')
+    expect(rows.map((row) => row.entry.entryId)).toEqual(['user', 'assistant'])
+    // `snapshot` and `tool` are hidden; `assistant` re-attaches to `user` without indentation.
+    expect(rows[1]?.parentId).toBe('user')
+    expect(rows[1]?.depth).toBe(0)
+    expect(rows[1]?.ancestorConnectors).toEqual([])
   })
 
   it('keeps depth shallow when filtered intermediates hide a branch point', () => {
@@ -117,9 +114,9 @@ describe('Session Entry Tree', () => {
       entry('user2', 'snapshot', 'message', message('USER', 'second user')),
       entry('response', 'user2', 'message', message('ASSISTANT', 'reply')),
     ]
-    const rows = buildSessionEntryTree(tree, 'no-tools')
+    const rows = buildSessionEntryTree(tree, 'conversation')
     const byEntryId = new Map(rows.map((row) => [row.entry.entryId, row]))
-    expect(rows.map((row) => row.entry.entryId)).toEqual(['snapshot', 'user1', 'assistant', 'custom', 'user2', 'response'])
+    expect(rows.map((row) => row.entry.entryId)).toEqual(['user1', 'assistant', 'custom', 'user2', 'response'])
     // With `tool` hidden, `assistant` and `custom` re-attach as immediate children of `user1`.
     expect(byEntryId.get('user1')?.depth).toBe(1)
     expect(byEntryId.get('user1')?.isBranchPoint).toBe(true)
@@ -138,7 +135,7 @@ describe('Session Entry Tree', () => {
       entry('right', 'root', 'message', message('USER', 'right')),
     ]
 
-    const rows = buildSessionEntryTree(tree, 'default')
+    const rows = buildSessionEntryTree(tree, 'conversation')
     expect(rows.map((row) => row.entry.entryId)).toEqual(['left', 'middle', 'right'])
     expect(rows.map((row) => row.parentId)).toEqual([null, null, null])
     expect(rows.map((row) => row.hasBranchConnector)).toEqual([true, true, true])
@@ -151,14 +148,13 @@ describe('Session Entry Tree', () => {
     expect(branchTarget(entries[0])).toEqual({ fromEntryId: 'snapshot', draft: '' })
   })
 
-  it('classifies unknown, malformed and all supported filter variants deterministically', () => {
+  it('classifies unknown and malformed Entries while keeping the conversation view free of system records', () => {
     expect(sessionEntryKind(entry('unknown', null, 'MESSAGE', { message: { role: 'OTHER' } }))).toBe('other')
     expect(sessionEntryKind(entry('custom', null, 'CUSTOM_MESSAGE', {}))).toBe('custom')
-    expect(matchesSessionTreeFilter('tool', 'default')).toBe(false)
-    expect(matchesSessionTreeFilter('tool', 'no-tools')).toBe(false)
-    expect(matchesSessionTreeFilter('user', 'user-only')).toBe(true)
-    expect(matchesSessionTreeFilter('assistant', 'assistant-only')).toBe(true)
-    expect(matchesSessionTreeFilter('label', 'labeled-only')).toBe(true)
+    expect(matchesSessionTreeFilter('user', 'conversation')).toBe(true)
+    expect(matchesSessionTreeFilter('tool', 'conversation')).toBe(false)
+    expect(matchesSessionTreeFilter('label', 'conversation')).toBe(false)
+    expect(matchesSessionTreeFilter('other', 'conversation')).toBe(false)
     expect(matchesSessionTreeFilter('other', 'all')).toBe(true)
   })
 
@@ -209,7 +205,7 @@ describe('Session Entry Tree', () => {
   })
 
   it('resolves a hidden selection to the nearest visible ancestor and falls back to the last row', () => {
-    const rows = buildSessionEntryTree(entries, 'default')
+    const rows = buildSessionEntryTree(entries, 'conversation')
     const resolved = resolveSelection(rows, entries, 'tool')
     expect(resolved?.entryId).toBe('assistant')
     // Root entry with no ancestors resolves to the last visible row.

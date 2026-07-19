@@ -268,15 +268,11 @@ Tree UI 对齐 pi：
 Filter 是纯 UI 投影：
 
 ```text
-default
-no-tools
-user-only
-assistant-only
-labeled-only
+conversation
 all
 ```
 
-`assistant-only` 是产品扩展。Filter 不改变 Entry Tree、Thread head 或 Provider Context。
+`conversation` 只显示 USER、ASSISTANT 与 CUSTOM_MESSAGE；工具、标签、配置和其他系统 Entry 仅在 `all` 中显示。Filter 不改变 Entry Tree、Thread head 或 Provider Context。
 
 ## 8. 无状态提交与 Mailbox
 
