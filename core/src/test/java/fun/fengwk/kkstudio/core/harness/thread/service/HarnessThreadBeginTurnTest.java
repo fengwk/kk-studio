@@ -107,9 +107,7 @@ class HarnessThreadBeginTurnTest {
     row.setId(threadId);
     row.setSessionId(threadId + 10);
     row.setHeadEntryId(threadId + 20);
-    row.setAgentDefinitionId(1L);
-    row.setRuntimeConfigJson("{}");
-    row.setYoloEnabled(false);
+    row.setStatus("RUNNING");
     row.setInputSequence(0L);
     row.setProcessorToken(token);
     row.setProcessorUntil(now.plusMinutes(5));
@@ -124,6 +122,7 @@ class HarnessThreadBeginTurnTest {
     task.setParentInvocationId(childThreadId + 1_000);
     task.setParentSessionId(1L);
     task.setParentThreadId(2L);
+    task.setRootThreadId(childThreadId);
     task.setChildSessionId(childThreadId + 100);
     task.setChildThreadId(childThreadId);
     task.setTargetAgent("sub");
