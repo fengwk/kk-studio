@@ -206,9 +206,8 @@ describe('AgentThreadPage', () => {
     renderThread()
     await screen.findByText('检查第一集大纲')
     expect(harnessService.getThread).toHaveBeenCalledWith('1')
-    expect(harnessService.listThreads).toHaveBeenCalled()
-    // createThread is not part of page load path
-    expect('createThread' in harnessService).toBe(false)
+    // Reloading only projects the durable Thread; it never creates a replacement Thread.
+    expect('createSessionThread' in harnessService).toBe(false)
   })
 })
 

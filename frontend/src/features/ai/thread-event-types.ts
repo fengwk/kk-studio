@@ -45,7 +45,8 @@ export interface RuntimeContext {
   provider?: string
   model?: string
   variant?: string
-  agentName?: string
+  agentDefinitionId?: string
+  yoloEnabled?: boolean
 }
 
 export interface ThreadTimeline {

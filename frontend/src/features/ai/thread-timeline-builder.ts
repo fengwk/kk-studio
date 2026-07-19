@@ -27,7 +27,7 @@ interface PendingUserProjection {
 
 /**
  * Thread transcript projection:
- * committed path Entries + unapplied USER_MESSAGE inputs + live ThreadEvents.
+ * committed path Entries + queued USER/CUSTOM_MESSAGE inputs + live ThreadEvents.
  * Correlate stream events by subjectEntryId; suppress once that assistant Entry materializes.
  */
 export function buildThreadTimeline(
@@ -59,7 +59,10 @@ export function buildThreadTimeline(
   // The backend returns mailbox inputs by sequence. Prepare overlays now, then place applied
   // overlays at their INPUT_APPLIED journal position and leave queued overlays after live work.
   for (const input of inputs) {
-    if (input.inputType !== 'user_message') {
+    const inputType = input.inputType.toUpperCase()
+    // Missing status only occurs in stale browser cache fixtures; durable API responses are typed.
+    const queued = input.status === 'QUEUED' || !input.status
+    if (!queued || (inputType !== 'USER_MESSAGE' && inputType !== 'CUSTOM_MESSAGE')) {
       continue
     }
     const appliedEntryId = input.appliedEntryId || appliedEntryByInputId.get(input.inputId) || null
@@ -292,8 +295,18 @@ function projectDurableEntry(
   const payload = parsePayload(entry.payloadJson)
   if (entry.entryType === 'agent_snapshot') {
     const snapshot = asRecord(payload.snapshot)
+    runtimeContext.agentDefinitionId = getString(payload.agentDefinitionId) || runtimeContext.agentDefinitionId
     runtimeContext.model = getString(snapshot.modelId) || runtimeContext.model
     runtimeContext.variant = getString(snapshot.variant) || runtimeContext.variant
+    return
+  }
+  if (entry.entryType === 'model_change') {
+    runtimeContext.model = getString(payload.modelId) || runtimeContext.model
+    runtimeContext.variant = getString(payload.variant) || runtimeContext.variant
+    return
+  }
+  if (entry.entryType === 'yolo_change') {
+    runtimeContext.yoloEnabled = payload.yoloEnabled === true
     return
   }
   if (entry.entryType === 'compaction') {

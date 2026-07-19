@@ -15,13 +15,13 @@ import type { ThreadTimeline } from '@/features/ai/thread-event-types'
 
 /**
  * Working status uses rendered projection, not raw input DTO appliedEntryId nulls:
- * active processor, pending input overlays, or live stream projection.
+ * durable actor status, pending input overlays, or live stream projection.
  */
 export function isThreadWorking(
   thread: HarnessThreadDTO | undefined,
   timeline?: ThreadTimeline,
 ): boolean {
-  if (thread?.processing) {
+  if (thread?.status === 'RUNNING' || thread?.status === 'WAITING' || thread?.status === 'RETRYING' || thread?.processing) {
     return true
   }
   return Boolean(timeline?.hasPendingInputs || timeline?.hasLiveProjection)

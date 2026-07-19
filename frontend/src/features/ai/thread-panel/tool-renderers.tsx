@@ -1,10 +1,6 @@
 import type { ReactNode } from 'react'
 import type { DialogueStatus, ToolAttachment } from '@/features/ai/thread-events'
 
-/**
- * Pi-aligned tool rendering extension surface.
- * Features/tools register custom call/result renderers without touching the panel shell.
- */
 export interface ToolRenderContext {
   toolName: string
   toolCallId: string
@@ -16,9 +12,7 @@ export interface ToolRenderContext {
 }
 
 export interface ToolRenderer {
-  /** Custom presentation for the tool invocation / arguments phase. */
   renderCall?: (context: ToolRenderContext) => ReactNode
-  /** Custom presentation for tool output / artifacts. */
   renderResult?: (context: ToolRenderContext) => ReactNode
 }
 
@@ -26,10 +20,9 @@ const registry = new Map<string, ToolRenderer>()
 
 export function registerToolRenderer(toolName: string, renderer: ToolRenderer): void {
   const key = toolName.trim()
-  if (!key) {
-    return
+  if (key) {
+    registry.set(key, renderer)
   }
-  registry.set(key, renderer)
 }
 
 export function unregisterToolRenderer(toolName: string): void {

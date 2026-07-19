@@ -5,7 +5,7 @@ import { Link, useLocation } from 'react-router-dom'
 function isAiRoute(pathname: string) {
   return (
     pathname === '/'
-    || pathname.startsWith('/threads')
+    || pathname.startsWith('/sessions')
     || pathname.startsWith('/agents')
     || pathname.startsWith('/models')
     || pathname.startsWith('/providers')
@@ -23,7 +23,7 @@ export function AppShell({ children }: PropsWithChildren) {
       <header className="topbar">
         <div className="topbar-left">
           <Link
-            to={canvasMode ? '/canvas' : comfyuiMode ? '/comfyui' : '/threads'}
+            to={canvasMode ? '/canvas' : comfyuiMode ? '/comfyui' : '/sessions'}
             className="brand"
             aria-label="KK Studio"
           >
@@ -33,7 +33,7 @@ export function AppShell({ children }: PropsWithChildren) {
         </div>
         <div className="topbar-center">
           <nav className="topnav" aria-label="Primary">
-            <Link className={aiActive ? 'active' : undefined} to="/threads">
+            <Link className={aiActive ? 'active' : undefined} to="/sessions">
               <Bot aria-hidden="true" />
               <span>AI</span>
             </Link>

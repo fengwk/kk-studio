@@ -1,24 +1,18 @@
-import { AgentResourceCard, CreateCard, ModelResourceCard, ProviderResourceCard, ThreadCard } from '@/features/ai/AiConsoleCards'
-import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, HarnessThreadDTO } from '@/shared/api/contracts'
+import { AgentResourceCard, CreateCard, ModelResourceCard, ProviderResourceCard, SessionCard } from '@/features/ai/AiConsoleCards'
+import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, HarnessSessionDTO } from '@/shared/api/contracts'
 
-export function ChatThreadsPanel({
-  threads,
-  agentsById,
+export function ChatSessionsPanel({
+  sessions,
   onCreate,
 }: {
-  threads: HarnessThreadDTO[]
-  agentsById: Map<string, AgentDefinitionDTO>
+  sessions: HarnessSessionDTO[]
   onCreate: () => void
 }) {
   return (
     <div className="cards-grid">
       <CreateCard title="新建 Chat" subtitle="选择一个 Agent 创建云端对话" onClick={onCreate} />
-      {threads.map((thread) => (
-        <ThreadCard
-          key={thread.threadId}
-          thread={thread}
-          agent={thread.agentDefinitionId ? agentsById.get(thread.agentDefinitionId) : undefined}
-        />
+      {sessions.map((session) => (
+        <SessionCard key={session.sessionId} session={session} />
       ))}
     </div>
   )

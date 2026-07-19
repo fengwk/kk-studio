@@ -1,8 +1,6 @@
 export { ThreadPanel } from '@/features/ai/thread-panel/ThreadPanel'
-export { ThreadHeader } from '@/features/ai/thread-panel/ThreadHeader'
 export { ThreadTranscript } from '@/features/ai/thread-panel/ThreadTranscript'
 export { ThreadComposer } from '@/features/ai/thread-panel/ThreadComposer'
-export { ThreadFooter } from '@/features/ai/thread-panel/ThreadFooter'
 export { ThreadErrorPanel } from '@/features/ai/thread-panel/ThreadErrorPanel'
 export { ThreadWorkingStatus } from '@/features/ai/thread-panel/ThreadWorkingStatus'
 export { ThreadWidgetStack } from '@/features/ai/thread-panel/ThreadWidgetStack'
@@ -18,11 +16,3 @@ export { SystemMessageBlock } from '@/features/ai/thread-panel/messages/SystemMe
 export { ToolMessageBlock } from '@/features/ai/thread-panel/messages/ToolMessageBlock'
 export { ThinkingBlock } from '@/features/ai/thread-panel/messages/ThinkingBlock'
 export { isVisibleDialogueMessage } from '@/features/ai/thread-panel/visibility'
-export {
-  registerToolRenderer,
-  unregisterToolRenderer,
-  getToolRenderer,
-  clearToolRenderers,
-  type ToolRenderer,
-  type ToolRenderContext,
-} from '@/features/ai/thread-panel/tool-renderers'

@@ -11,7 +11,9 @@ import type { RelayPermission } from '@/features/ai/useHarnessTaskTimeline'
 import type { ThreadTimeline } from '@/features/ai/thread-events'
 import type {
   AgentDefinitionDTO,
+  HarnessSessionEntryDTO,
   HarnessThreadDTO,
+  ThreadStatus,
   ModelUsageSummaryDTO,
   RootActivityDTO,
   ToolInvocationDTO,
@@ -23,9 +25,12 @@ import type {
  */
 export function ChatPanel({
   threads,
-  agentsById,
+  sessionEntries,
   activeThreadId,
+  sessionId,
+  mainThreadId,
   title,
+  threadStatus,
   onBack,
   agent,
   timeline,
@@ -45,11 +50,20 @@ export function ChatPanel({
   onDraftChange,
   onSubmit,
   onCommand,
+  onBranch,
+  branchPending,
+  onStop,
+  onRetry,
+  stopPending,
+  retryPending,
 }: {
   threads: HarnessThreadDTO[]
-  agentsById: Map<string, AgentDefinitionDTO>
+  sessionEntries: HarnessSessionEntryDTO[]
   activeThreadId: string
+  sessionId: string
+  mainThreadId?: string
   title: string
+  threadStatus?: ThreadStatus
   onBack: () => void
   agent?: AgentDefinitionDTO
   timeline: ThreadTimeline
@@ -92,6 +106,12 @@ export function ChatPanel({
   onDraftChange: (draft: string) => void
   onSubmit: () => void
   onCommand: (command: ThreadCommand) => void
+  onBranch: (entry: HarnessSessionEntryDTO) => void
+  branchPending: boolean
+  onStop: () => void
+  onRetry: () => void
+  stopPending: boolean
+  retryPending: boolean
 }) {
   const pendingPermissions = observability.toolInvocations.filter(
     (invocation) => invocation.status === 'WAITING_APPROVAL',
@@ -102,10 +122,14 @@ export function ChatPanel({
       sidebar={
         <ChatSidebar
           threads={threads}
-          agentsById={agentsById}
+          sessionEntries={sessionEntries}
           activeThreadId={activeThreadId}
+          sessionId={sessionId}
+          mainThreadId={mainThreadId}
           title={title}
           onBack={onBack}
+          onBranch={onBranch}
+          branchPending={branchPending}
         />
       }
       messages={timeline.messages}
@@ -122,6 +146,11 @@ export function ChatPanel({
       onDraftChange={onDraftChange}
       onSubmit={onSubmit}
       onCommand={onCommand}
+      threadStatus={threadStatus}
+      onStop={onStop}
+      onRetry={onRetry}
+      stopPending={stopPending}
+      retryPending={retryPending}
       widgets={
         <>
           <ThreadActivityWidget activities={taskTimeline.activities} />
