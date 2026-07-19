@@ -20,27 +20,19 @@ import java.util.stream.Collectors;
 class SessionEntryJsonCodecTest {
   private final SessionEntryJsonCodec codec = new SessionEntryJsonCodec();
 
-  /** 全部持久化 payload 必须逐一无损往返，包括可空的 systemPrompt。 */
+  /**
+   * 全部持久化 payload
+   * 必须逐一无损往返：ROOT/MESSAGE/AGENT_CHANGE/COMPACTION/BRANCH_SUMMARY/CUSTOM/CUSTOM_MESSAGE/LABEL。
+   */
   @Test
   void shouldRoundTripEveryPayloadType() {
     AgentMessage userMessage =
         new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello")));
-    AgentSnapshot snapshot =
-        new AgentSnapshot(
-            null,
-            "model-1",
-            "balanced",
-            List.of("read", "write"),
-            List.of("java"),
-            List.of("explorer"),
-            "{\"sandbox\":true}");
     List<SessionEntryPayload> payloads =
         List.of(
+            new RootEntryPayload(),
             new MessageEntryPayload(userMessage),
-            new AgentSnapshotEntryPayload(1L, snapshot),
-            new ModelChangeEntryPayload("model-2", "fast"),
-            new ToolsetChangeEntryPayload(List.of("read")),
-            new YoloChangeEntryPayload(true),
+            new AgentChangeEntryPayload(7L, "replacement"),
             new CompactionEntryPayload("summary", 42L, 0, "{\"reason\":\"budget\"}"),
             new BranchSummaryEntryPayload("branch summary"),
             new CustomEntryPayload("trace", "{\"enabled\":true}"),
@@ -123,7 +115,6 @@ class SessionEntryJsonCodecTest {
     assertEquals(payload, decoded);
     assertEquals(321L, decoded.assistantMetadata().usage().inputTokens());
     assertEquals(new BigDecimal("0.000004200000"), decoded.assistantMetadata().cost().total());
-    assertEquals(new BigDecimal("0.000004200000"), decoded.assistantMetadata().cost().amount());
   }
 
   /** Payload 根节点必须是完整且字段精确的 JSON object。 */
@@ -133,7 +124,9 @@ class SessionEntryJsonCodecTest {
     assertMalformed(SessionEntryType.LABEL, "[]");
     assertMalformed(SessionEntryType.LABEL, "{}");
     assertMalformed(SessionEntryType.LABEL, "{\"label\":\"x\",\"extra\":1}");
-    assertMalformed(SessionEntryType.MODEL_CHANGE, "{\"modelId\":\"m\"}");
+    assertMalformed(
+        SessionEntryType.AGENT_CHANGE, "{\"agentDefinitionId\":1,\"agentName\":\"x\",\"extra\":1}");
+    assertMalformed(SessionEntryType.ROOT, "{\"x\":1}");
     assertMalformed(SessionEntryType.MESSAGE, "{\"message\":[],\"assistantMetadata\":null}");
   }
 
@@ -168,27 +161,20 @@ class SessionEntryJsonCodecTest {
             "{\"role\":\"USER\",\"contents\":[{\"type\":\"json\",\"json\":\"not-json\"}]}"));
   }
 
-  /** Snapshot/list/JSON object 字段必须保持声明的 JSON 类型。 */
+  /** AGENT_CHANGE 必须是严格正长整型 + 非空字符串 name；CUSTOM dataJson 必须是 object JSON。 */
   @Test
-  void shouldRejectMalformedSnapshotAndJsonFields() {
-    String snapshotPrefix =
-        "{\"snapshot\":{\"systemPrompt\":null,\"modelId\":\"m\",\"variant\":\"v\",";
-    String snapshotSuffix =
-        "\"skills\":[],\"allowedSubagents\":[],\"executionPolicyJson\":\"{}\"}}";
+  void shouldRejectMalformedAgentChangeAndJsonFields() {
+    assertMalformed(SessionEntryType.AGENT_CHANGE, "{\"agentDefinitionId\":0,\"agentName\":\"x\"}");
     assertMalformed(
-        SessionEntryType.AGENT_SNAPSHOT, snapshotPrefix + "\"tools\":{}," + snapshotSuffix);
+        SessionEntryType.AGENT_CHANGE, "{\"agentDefinitionId\":1.5,\"agentName\":\"x\"}");
+    assertMalformed(SessionEntryType.AGENT_CHANGE, "{\"agentDefinitionId\":1,\"agentName\":\" \"}");
+    assertMalformed(SessionEntryType.AGENT_CHANGE, "{\"agentDefinitionId\":1,\"agentName\":\"\"}");
     assertMalformed(
-        SessionEntryType.AGENT_SNAPSHOT, snapshotPrefix + "\"tools\":[1]," + snapshotSuffix);
-    assertMalformed(
-        SessionEntryType.AGENT_SNAPSHOT,
-        "{\"snapshot\":{\"systemPrompt\":1,\"modelId\":\"m\",\"variant\":\"v\","
-            + "\"tools\":[],\"skills\":[],\"allowedSubagents\":[],\"executionPolicyJson\":\"{}\"}}");
-    assertMalformed(
-        SessionEntryType.AGENT_SNAPSHOT,
-        "{\"snapshot\":{\"systemPrompt\":null,\"modelId\":\"m\",\"variant\":\"v\","
-            + "\"tools\":[],\"skills\":[],\"allowedSubagents\":[],\"executionPolicyJson\":\"[]\"}}");
+        SessionEntryType.AGENT_CHANGE, "{\"agentDefinitionId\":\"1\",\"agentName\":\"x\"}");
+    assertThrows(
+        IllegalArgumentException.class, () -> new AgentChangeEntryPayload(0L, "replacement"));
+    assertThrows(IllegalArgumentException.class, () -> new AgentChangeEntryPayload(7L, " "));
     assertMalformed(SessionEntryType.CUSTOM, "{\"name\":\"x\",\"dataJson\":\"[]\"}");
-    assertMalformed(SessionEntryType.MODEL_CHANGE, "{\"modelId\":1,\"variant\":\"fast\"}");
   }
 
   /** 数字、布尔值和 nullable 字段必须使用严格类型及合法范围。 */

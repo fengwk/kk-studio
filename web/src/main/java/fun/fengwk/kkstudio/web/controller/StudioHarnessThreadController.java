@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.share.model.HarnessThreadMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadModelSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadStopResultDTO;
-import fun.fengwk.kkstudio.share.model.HarnessThreadToolsetSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadYoloSetDTO;
 import fun.fengwk.kkstudio.share.model.ThreadEventDTO;
 
@@ -112,16 +111,6 @@ public class StudioHarnessThreadController {
             Results.ok(
                 withMissingResourceTranslation(
                     () -> commandService.queueModel(threadId, request))));
-  }
-
-  @PutMapping("/threads/{threadId}/toolset")
-  public ResponseEntity<Result<HarnessThreadInputDTO>> queueToolset(
-      @PathVariable String threadId, @RequestBody HarnessThreadToolsetSetDTO request) {
-    return ResponseEntity.status(HttpStatus.ACCEPTED)
-        .body(
-            Results.ok(
-                withMissingResourceTranslation(
-                    () -> commandService.queueToolset(threadId, request))));
   }
 
   @PostMapping("/threads/{threadId}/stop")

@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
@@ -16,13 +15,8 @@ import java.util.Objects;
 /** 跨 Thread/Input/Entry/Tool/Usage 的原子提交边界；所有 mutation 校验 processor token。 */
 public interface ThreadTransactions {
 
-  /** 原子创建 Session + 初始配置 Entries + Main Thread。 */
-  SessionCreateResult createSession(
-      long agentDefinitionId,
-      String title,
-      AgentSnapshot snapshot,
-      boolean yoloEnabled,
-      Instant now);
+  /** 原子创建 agentless Session + 语义根 Entry + Main Thread。 */
+  SessionCreateResult createSession(String title, boolean yoloEnabled, Instant now);
 
   /** 在同一 Session tree 上从任意 durable Entry 新建 Thread cursor（不克隆 Entry）。 */
   AgentThread createThreadFromEntry(long sessionId, long fromEntryId, Instant now);
@@ -37,24 +31,16 @@ public interface ThreadTransactions {
   ThreadInput submitSetYolo(
       long threadId, boolean yoloEnabled, String clientMessageId, Instant now);
 
+  /**
+   * 排队 SET_AGENT。payload 只记录 id 与捕获时的 name；apply 时再加载当前 AgentDefinition 写入 Thread model/variant。
+   */
   ThreadInput submitSetAgent(
-      long threadId,
-      long agentDefinitionId,
-      AgentSnapshot snapshot,
-      String clientMessageId,
-      Instant now);
+      long threadId, long agentDefinitionId, String agentName, String clientMessageId, Instant now);
 
   ThreadInput submitSetModel(
       long threadId, String modelId, String variant, String clientMessageId, Instant now);
 
-  ThreadInput submitSetToolset(
-      long threadId, List<String> tools, String clientMessageId, Instant now);
-
-  /**
-   * Steer-all Harvest：在安全边界原子应用 cutoff 内全部 QUEUED inputs。
-   *
-   * @return 本批是否包含 USER/CUSTOM 消息（配置-only 批为 false）
-   */
+  /** 消息边界有序 Harvest：连续配置 Input 先于下一条消息应用；每批最多一条 USER/CUSTOM 消息；该消息之后的配置不得进入本批。 */
   HarvestResult harvestQueuedInputs(long threadId, String processorToken, Instant now);
 
   /** 提交 final assistant（无 tool call），推进 head。 */

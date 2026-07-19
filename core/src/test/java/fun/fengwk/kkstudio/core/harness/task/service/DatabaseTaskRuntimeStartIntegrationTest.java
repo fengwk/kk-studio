@@ -29,8 +29,7 @@ import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadDO;
 import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadInputDO;
 import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshotEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.RootEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskCommand;
@@ -48,6 +47,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Child task creation persists its own Session/Main Thread/input and preserves the delegation root.
@@ -311,6 +311,20 @@ class DatabaseTaskRuntimeStartIntegrationTest {
       List<String> allowedSubagents,
       String executionPolicyJson,
       int depth) {
+    // Parent Thread 运行时配置来自当前 AgentDefinition；用入参覆盖 allowlist/policy。
+    AgentDefinitionDO parent = agentMapper.getById(AGENT_ID);
+    if (parent == null) {
+      insertTargetAgent();
+      parent = agentMapper.getById(AGENT_ID);
+    }
+    String allowlist =
+        allowedSubagents.stream()
+            .map(name -> "\"" + name + "\"")
+            .collect(Collectors.joining(",", "[", "]"));
+    parent.setConfigJson(
+        "{\"allowedSubagents\":" + allowlist + ",\"executionPolicy\":" + executionPolicyJson + "}");
+    agentMapper.updateById(parent);
+
     HarnessSessionDO session = new HarnessSessionDO();
     session.setId(ROOT_SESSION_ID);
     session.setTitle("root");
@@ -322,21 +336,11 @@ class DatabaseTaskRuntimeStartIntegrationTest {
     session.setUpdateTime(timestamp);
     sessionMapper.insert(session);
 
-    AgentSnapshot snapshot =
-        new AgentSnapshot(
-            "root system",
-            "1",
-            "default",
-            List.of(),
-            List.of(),
-            allowedSubagents,
-            executionPolicyJson);
     HarnessSessionEntryDO entry = new HarnessSessionEntryDO();
     entry.setId(ROOT_ENTRY_ID);
     entry.setSessionId(ROOT_SESSION_ID);
-    entry.setEntryType(SessionEntryType.AGENT_SNAPSHOT.value());
-    entry.setPayloadJson(
-        new SessionEntryJsonCodec().encode(new AgentSnapshotEntryPayload(AGENT_ID, snapshot)));
+    entry.setEntryType(SessionEntryType.ROOT.value());
+    entry.setPayloadJson(new SessionEntryJsonCodec().encode(new RootEntryPayload()));
     entry.setCreateTime(timestamp);
     entryMapper.insert(entry);
   }
@@ -382,6 +386,11 @@ class DatabaseTaskRuntimeStartIntegrationTest {
     HarnessThreadDO thread = new HarnessThreadDO();
     thread.setId(id);
     thread.setSessionId(sessionId);
+    thread.setActiveAgentDefinitionId(AGENT_ID);
+    thread.setActiveAgentName("parent");
+    thread.setModelId("1");
+    thread.setVariant("default");
+    thread.setYoloEnabled(false);
     thread.setHeadEntryId(headEntryId);
     thread.setStatus(ThreadStatus.WAITING.name());
     thread.setInputSequence(0L);

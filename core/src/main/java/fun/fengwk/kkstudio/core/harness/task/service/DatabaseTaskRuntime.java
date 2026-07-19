@@ -11,7 +11,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.mapper.AgentDefinitionMapper;
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.model.AgentDefinitionDO;
 import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
-import fun.fengwk.kkstudio.core.harness.session.HarnessAgentSnapshotResolver;
+import fun.fengwk.kkstudio.core.harness.session.HarnessAgentDefinitionSupport;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionEntryMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
@@ -24,11 +24,11 @@ import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadDO;
 import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadEventDO;
 import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
+import fun.fengwk.kkstudio.harness.runtime.context.AgentRuntimeConfig;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshotEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.RootEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
@@ -82,7 +82,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
   private final ThreadIdGenerator threadIds;
   private final AgentDefinitionMapper agentMapper;
   private final WorkingCopyRevisionResolver workingCopyRevisionResolver;
-  private final HarnessAgentSnapshotResolver snapshotResolver;
+  private final HarnessAgentDefinitionSupport agentDefinitionSupport;
   private final ThreadKick threadKick;
   private final SessionEntryJsonCodec entryCodec = new SessionEntryJsonCodec();
   private final ObjectMapper objectMapper = new ObjectMapper();
@@ -100,7 +100,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       ThreadIdGenerator threadIds,
       AgentDefinitionMapper agentMapper,
       WorkingCopyRevisionResolver workingCopyRevisionResolver,
-      HarnessAgentSnapshotResolver snapshotResolver,
+      HarnessAgentDefinitionSupport agentDefinitionSupport,
       @Lazy ThreadKick threadKick) {
     this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
     this.entryMapper = Objects.requireNonNull(entryMapper, "entryMapper");
@@ -115,7 +115,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     this.agentMapper = Objects.requireNonNull(agentMapper, "agentMapper");
     this.workingCopyRevisionResolver =
         Objects.requireNonNull(workingCopyRevisionResolver, "workingCopyRevisionResolver");
-    this.snapshotResolver = Objects.requireNonNull(snapshotResolver, "snapshotResolver");
+    this.agentDefinitionSupport =
+        Objects.requireNonNull(agentDefinitionSupport, "agentDefinitionSupport");
     this.threadKick = Objects.requireNonNull(threadKick, "threadKick");
   }
 
@@ -137,12 +138,19 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       return inspection(replay);
     }
 
-    AgentSnapshot parentSnapshot =
-        snapshotResolver.snapshotOnPath(parent.getId(), parentThread.getHeadEntryId());
-    if (!parentSnapshot.allowedSubagents().contains(command.subagentType())) {
+    if (parentThread.getActiveAgentDefinitionId() == null) {
+      throw new IllegalStateException("parent thread has no active agent");
+    }
+    AgentRuntimeConfig parentConfig =
+        agentDefinitionSupport.runtimeConfig(
+            agentDefinitionSupport.requireDefinition(parentThread.getActiveAgentDefinitionId()),
+            parentThread.getModelId(),
+            parentThread.getVariant(),
+            Boolean.TRUE.equals(parentThread.getYoloEnabled()));
+    if (!parentConfig.allowedSubagents().contains(command.subagentType())) {
       throw new IllegalArgumentException("subagent is not allowed: " + command.subagentType());
     }
-    TaskPolicy parentPolicy = TaskPolicyCodec.decode(parentSnapshot.executionPolicyJson());
+    TaskPolicy parentPolicy = TaskPolicyCodec.decode(parentConfig.executionPolicyJson());
     if (parent.getDepth() >= parentPolicy.maxDepth()) {
       throw new IllegalStateException("subagent maximum depth exceeded");
     }
@@ -270,9 +278,10 @@ public class DatabaseTaskRuntime implements TaskRuntime {
       LocalDateTime timestamp,
       Instant now) {
     long childSessionId = AgentIdGenerator.nextHarnessSessionId();
-    long snapshotEntryId = threadIds.newSessionEntryId();
+    long rootEntryId = threadIds.newSessionEntryId();
     long childThreadId = threadIds.newThreadId();
-    AgentSnapshot targetSnapshot = snapshotResolver.snapshotForDefinition(target);
+    AgentRuntimeConfig targetConfig =
+        agentDefinitionSupport.runtimeConfig(target, null, null, false);
     HarnessSessionDO child = new HarnessSessionDO();
     child.setId(childSessionId);
     child.setTitle(target.getName());
@@ -287,19 +296,24 @@ public class DatabaseTaskRuntime implements TaskRuntime {
     sessionMapper.insert(child);
 
     insertEntry(
-        snapshotEntryId,
+        rootEntryId,
         childSessionId,
         null,
-        SessionEntryType.AGENT_SNAPSHOT,
-        new AgentSnapshotEntryPayload(target.getId(), targetSnapshot),
+        SessionEntryType.ROOT,
+        new RootEntryPayload(),
         timestamp);
     AgentThread childThread =
         new AgentThread(
             childThreadId,
             childSessionId,
-            snapshotEntryId,
+            rootEntryId,
             ThreadStatus.RUNNING,
             1L,
+            target.getId(),
+            target.getName(),
+            String.valueOf(target.getModelId()),
+            target.getVariant(),
+            false,
             null,
             null,
             0L,
@@ -323,7 +337,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
             null,
             now));
 
-    TaskPolicy targetPolicy = TaskPolicyCodec.decode(targetSnapshot.executionPolicyJson());
+    TaskPolicy targetPolicy = TaskPolicyCodec.decode(targetConfig.executionPolicyJson());
     String workingCopyRevision =
         workingCopyRevisionResolver
             .resolve(command.workingCopyPolicy(), childSessionId)
@@ -359,7 +373,7 @@ public class DatabaseTaskRuntime implements TaskRuntime {
         now);
     eventStore.append(
         childThreadId,
-        snapshotEntryId,
+        rootEntryId,
         ThreadEventType.THREAD_STARTED,
         ThreadEventPayloads.of("parentInvocationId", Long.toString(context.invocationId())),
         now);
@@ -565,14 +579,6 @@ public class DatabaseTaskRuntime implements TaskRuntime {
             threadKick.kick(threadId);
           }
         });
-  }
-
-  private String encodeSnapshotJson(AgentSnapshot snapshot) {
-    try {
-      return objectMapper.writeValueAsString(snapshot);
-    } catch (JsonProcessingException error) {
-      throw new IllegalStateException("cannot encode agent snapshot", error);
-    }
   }
 
   private static String encodeReport(TaskReport report) {

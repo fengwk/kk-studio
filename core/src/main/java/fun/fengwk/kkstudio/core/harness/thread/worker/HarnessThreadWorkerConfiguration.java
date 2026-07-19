@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProviderCancellation;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeConfigResolver;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnResourceResolver;
@@ -123,6 +124,7 @@ public class HarnessThreadWorkerConfiguration {
       SessionEntryStore entryStore,
       ThreadProcessor.ThreadToolPort threadToolPort,
       SessionContextBuilder sessionContextBuilder,
+      ThreadRuntimeConfigResolver threadRuntimeConfigResolver,
       ProviderMessageProjector providerMessageProjector,
       TurnResourceResolver turnResourceResolver,
       CompactionService compactionService,
@@ -147,6 +149,7 @@ public class HarnessThreadWorkerConfiguration {
         entryStore,
         threadToolPort,
         sessionContextBuilder,
+        threadRuntimeConfigResolver,
         providerMessageProjector,
         turnResourceResolver,
         interceptingCompactionService,

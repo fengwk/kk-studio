@@ -87,6 +87,7 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.share.model.HarnessSessionCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadAgentSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadMessageCreateDTO;
@@ -1048,10 +1049,20 @@ class ThreadProcessorIntegrationTest {
 
   private HarnessThreadDTO createRoot(String title) {
     HarnessSessionCreateDTO create = new HarnessSessionCreateDTO();
-    create.setAgentDefinitionId("1");
     create.setTitle(title);
     HarnessSessionDTO session = sessionCommandService.createSession(create);
-    return queryService.getThread(session.getMainThreadId());
+    String threadId = session.getMainThreadId();
+    HarnessThreadAgentSetDTO agent = new HarnessThreadAgentSetDTO();
+    agent.setAgentDefinitionId("1");
+    agent.setClientMessageId("bootstrap-agent-" + title);
+    commandService.queueAgent(threadId, agent);
+    try {
+      awaitIdle(Long.parseLong(threadId));
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new AssertionError(e);
+    }
+    return queryService.getThread(threadId);
   }
 
   private void markRunnable(long threadId, Instant now) {
