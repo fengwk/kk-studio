@@ -10,8 +10,11 @@ export function NavigationSlot() {
     <nav className="subnav" aria-label="AI resources">
       {host.navigation.list().map((item) => {
         const href = `/${item.path}`
+        const active =
+          location.pathname === href
+          || (href !== '/' && location.pathname.startsWith(`${href}/`))
         return (
-          <Link key={item.id} className={location.pathname === href ? 'active' : undefined} to={href}>
+          <Link key={item.id} className={active ? 'active' : undefined} to={href}>
             {item.label}
           </Link>
         )

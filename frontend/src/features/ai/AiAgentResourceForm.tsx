@@ -3,6 +3,7 @@ import {
   buildCapabilityCandidates,
   markInvalidSelections,
   PLATFORM_ENVIRONMENT_NAME,
+  type CapabilityOption,
 } from '@/features/ai/agent-capability-candidates'
 import type { AgentDraft } from '@/features/ai/ai-console-types'
 import { applyAgentModelSelection, variantOptionsFromModel } from '@/features/ai/ai-draft-normalizers'
@@ -105,6 +106,9 @@ export function AgentForm({
           ) : null}
         </select>
       </label>
+      <div className="inline-hint" role="note">
+        切换 Environment 只会刷新可选 Tools/Skills 列表；已勾选的短名会尽量保留，不会自动清空。
+      </div>
       {(environmentMissing || environmentOffline) && (
         <div className="inline-hint danger" role="status">
           {environmentMissing
@@ -115,25 +119,12 @@ export function AgentForm({
 
       <fieldset className="form-group capability-picker">
         <legend>Tools（短名）</legend>
-        <div className="capability-options">
-          {toolCandidates.map((option) => (
-            <label key={option.name} className="capability-option">
-              <input
-                type="checkbox"
-                checked={draft.tools.includes(option.name)}
-                onChange={() => onChange({ ...draft, tools: toggleName(draft.tools, option.name) })}
-              />
-              <span>
-                {option.name}
-                <small>
-                  {option.source}
-                  {option.offline ? ' · offline' : ''}
-                </small>
-              </span>
-            </label>
-          ))}
-          {toolCandidates.length === 0 && <div className="inline-hint">暂无候选 Tools</div>}
-        </div>
+        <CapabilityChecklist
+          options={toolCandidates}
+          selected={draft.tools}
+          emptyText="暂无候选 Tools"
+          onToggle={(name) => onChange({ ...draft, tools: toggleName(draft.tools, name) })}
+        />
         {toolSelections.some((item) => item.invalid || item.offline) && (
           <div className="inline-hint danger" role="status">
             无效/离线 Tools：
@@ -147,25 +138,12 @@ export function AgentForm({
 
       <fieldset className="form-group capability-picker">
         <legend>Skills（短名）</legend>
-        <div className="capability-options">
-          {skillCandidates.map((option) => (
-            <label key={option.name} className="capability-option">
-              <input
-                type="checkbox"
-                checked={draft.skills.includes(option.name)}
-                onChange={() => onChange({ ...draft, skills: toggleName(draft.skills, option.name) })}
-              />
-              <span>
-                {option.name}
-                <small>
-                  {option.source}
-                  {option.offline ? ' · offline' : ''}
-                </small>
-              </span>
-            </label>
-          ))}
-          {skillCandidates.length === 0 && <div className="inline-hint">暂无候选 Skills</div>}
-        </div>
+        <CapabilityChecklist
+          options={skillCandidates}
+          selected={draft.skills}
+          emptyText="暂无候选 Skills"
+          onToggle={(name) => onChange({ ...draft, skills: toggleName(draft.skills, name) })}
+        />
         {skillSelections.some((item) => item.invalid || item.offline) && (
           <div className="inline-hint danger" role="status">
             无效/离线 Skills：
@@ -180,16 +158,19 @@ export function AgentForm({
       <fieldset className="form-group capability-picker">
         <legend>Allowed Subagents</legend>
         <div className="capability-options">
-          {subagentNames.map((name) => (
-            <label key={name} className="capability-option">
-              <input
-                type="checkbox"
-                checked={draft.allowedSubagents.includes(name)}
-                onChange={() => onChange({ ...draft, allowedSubagents: toggleName(draft.allowedSubagents, name) })}
-              />
-              <span>{name}</span>
-            </label>
-          ))}
+          {subagentNames.map((name) => {
+            const checked = draft.allowedSubagents.includes(name)
+            return (
+              <label key={name} className={`capability-option${checked ? ' is-selected' : ''}`}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => onChange({ ...draft, allowedSubagents: toggleName(draft.allowedSubagents, name) })}
+                />
+                <span>{name}</span>
+              </label>
+            )
+          })}
           {subagentNames.length === 0 && <div className="inline-hint">暂无其它 Agent 可选</div>}
         </div>
         <StringListEditor
@@ -274,5 +255,53 @@ export function AgentForm({
         </button>
       )}
     </>
+  )
+}
+
+function CapabilityChecklist({
+  options,
+  selected,
+  emptyText,
+  onToggle,
+}: {
+  options: CapabilityOption[]
+  selected: string[]
+  emptyText: string
+  onToggle: (name: string) => void
+}) {
+  if (options.length === 0) {
+    return <div className="capability-options"><div className="inline-hint">{emptyText}</div></div>
+  }
+
+  const groups = new Map<string, CapabilityOption[]>()
+  for (const option of options) {
+    const bucket = groups.get(option.source) ?? []
+    bucket.push(option)
+    groups.set(option.source, bucket)
+  }
+
+  return (
+    <div className="capability-options">
+      {[...groups.entries()].map(([source, items]) => (
+        <div key={source} className="capability-group">
+          <div className="capability-group-title">{source}</div>
+          {items.map((option) => {
+            const checked = selected.includes(option.name)
+            return (
+              <label
+                key={option.name}
+                className={`capability-option${checked ? ' is-selected' : ''}${option.offline ? ' is-offline' : ''}`}
+              >
+                <input type="checkbox" checked={checked} onChange={() => onToggle(option.name)} />
+                <span>
+                  {option.name}
+                  {option.offline ? <small>offline</small> : null}
+                </span>
+              </label>
+            )
+          })}
+        </div>
+      ))}
+    </div>
   )
 }
