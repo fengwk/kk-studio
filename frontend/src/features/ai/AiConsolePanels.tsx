@@ -31,7 +31,6 @@ export function AgentsPanel({
   models = [],
   deletePending,
   onCreate,
-  onStart,
   onEdit,
   onDelete,
 }: {
@@ -39,19 +38,17 @@ export function AgentsPanel({
   models?: AgentModelDTO[]
   deletePending: boolean
   onCreate: () => void
-  onStart: (agent: AgentDefinitionDTO) => void
   onEdit: (agent: AgentDefinitionDTO) => void
   onDelete: (agent: AgentDefinitionDTO) => void
 }) {
   return (
     <div className="cards-grid">
-      <CreateCard title="新建 Agent" subtitle="绑定 Model、Environment 与 system prompt" onClick={onCreate} />
+      <CreateCard title="新建 Agent" subtitle="配置聚合：Model / Environment / tools / skills / policy" onClick={onCreate} />
       {agents.map((agent) => (
         <AgentResourceCard
           key={agent.id}
           agent={agent}
           models={models}
-          onStart={() => onStart(agent)}
           onEdit={() => onEdit(agent)}
           onDelete={() => onDelete(agent)}
           deletePending={deletePending}
