@@ -23,7 +23,10 @@ import {
   toModelDraft,
   toProviderDraft,
 } from '@/features/ai/ai-resource-draft-codecs'
-import type { AgentModelDTO } from '@/shared/api/contracts'
+import type {
+  AgentModelDTO,
+  AgentModelConfigDTO,
+} from '@/shared/api/contracts'
 
 function modelDraft(overrides: Partial<ModelDraft> = {}): ModelDraft {
   return {
@@ -34,14 +37,10 @@ function modelDraft(overrides: Partial<ModelDraft> = {}): ModelDraft {
   }
 }
 
-function modelConfig(overrides: Record<string, unknown> = {}) {
+function fullConfig(): AgentModelConfigDTO {
   return {
     limit: { context: 128000, output: 8192 },
-    abilities: {
-      tools: true,
-      reasoning: false,
-      modalities: { input: ['TEXT'], output: ['TEXT'] },
-    },
+    abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
     pricing: {
       currency: 'USD',
       pricingTier: 'default',
@@ -57,7 +56,6 @@ function modelConfig(overrides: Record<string, unknown> = {}) {
     },
     defaultVariant: 'default',
     variants: [{ id: 'default' }],
-    ...overrides,
   }
 }
 
@@ -65,11 +63,9 @@ function model(overrides: Partial<AgentModelDTO> = {}): AgentModelDTO {
   return {
     id: 'model-1',
     providerId: 'provider-1',
-    providerName: 'minimax',
     name: 'MiniMax-M2.7',
     description: 'Chat model',
-    capabilitiesJson: '["TEXT","TOOLS"]',
-    configJson: JSON.stringify(modelConfig()),
+    config: fullConfig(),
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
     ...overrides,
@@ -93,8 +89,10 @@ describe('ai-console-utils', () => {
       providerId: 'provider-1',
       defaultVariant: 'medium',
       tools: true,
-      inputModalities: ['TEXT'],
     })
+    expect(emptyModelDraft().inputModalities).toEqual(
+      new Set(['TEXT', 'IMAGE', 'AUDIO', 'VIDEO', 'DOCUMENT']),
+    )
     expect(emptyAgentDraft(model())).toMatchObject({
       modelId: 'model-1',
       variant: 'default',
@@ -126,19 +124,27 @@ describe('ai-console-utils', () => {
     expect(
       toModelDraft(
         model({
-          configJson: JSON.stringify(
-            modelConfig({
-              defaultVariant: 'quality',
-              variants: [{ id: 'quality', temperature: 0.2, maxOutputTokens: 256, topK: 32 }],
-            }),
-          ),
+          config: {
+            ...fullConfig(),
+            defaultVariant: 'quality',
+            variants: [
+              {
+                id: 'quality',
+                temperature: 0.2,
+                maxOutputTokens: 256,
+                topK: 32,
+              },
+            ],
+          },
         }),
       ),
     ).toMatchObject({
       providerId: 'provider-1',
       name: 'MiniMax-M2.7',
       defaultVariant: 'quality',
-      variants: [{ name: 'quality', temperature: '0.2', maxOutputTokens: '256', topK: '32' }],
+      variants: [
+        { name: 'quality', temperature: '0.2', maxOutputTokens: '256', topK: '32' },
+      ],
     })
 
     expect(
@@ -214,25 +220,15 @@ describe('ai-console-utils', () => {
       providerId: 'provider-1',
       name: 'MiniMax-M2.7',
       description: 'chat model',
-      capabilitiesJson: '["TEXT","TOOLS","THINKING"]',
     })
-    expect(JSON.parse(editableModel.configJson)).toMatchObject({
+    expect(editableModel.config).toMatchObject({
       limit: { context: 128000, output: 8192 },
       abilities: {
         tools: true,
         reasoning: true,
-        modalities: { input: ['TEXT'], output: ['TEXT'] },
+        inputModalities: ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO', 'DOCUMENT'],
       },
       defaultVariant: 'quality',
-      variants: [
-        {
-          id: 'quality',
-          reasoningEffort: 'high',
-          temperature: 0.1,
-          maxOutputTokens: 256,
-          topK: 32,
-        },
-      ],
     })
     expect(toEditableModelUpdate(modelDraft())).not.toHaveProperty('providerId')
 
@@ -271,7 +267,7 @@ describe('ai-console-utils', () => {
     expect(toEditableAgentUpdate(agentInput)).toEqual(expectedAgent)
   })
 
-  /** Search and presentation helpers cover model defaults now stored inside configJson. */
+  /** Search and presentation helpers cover structured model defaults. */
   it('filters resources and formats helper values', () => {
     const agents = [
       {
@@ -320,7 +316,7 @@ describe('ai-console-utils', () => {
     expect(formatBackendDate([Number.NaN])).toBe('-')
   })
 
-  /** Malformed persisted model JSON falls back to a complete editable draft without reviving legacy fields. */
+  /** Malformed persisted model config falls back to a complete editable draft without reviving legacy fields. */
   it('handles malformed backend drafts and nullable serialization fields', () => {
     expect(
       toProviderDraft({
@@ -342,7 +338,7 @@ describe('ai-console-utils', () => {
       baseUrl: '',
     })
 
-    expect(toModelDraft(model({ configJson: '{broken', description: null }))).toMatchObject({
+    expect(toModelDraft(model({ config: null, description: null }))).toMatchObject({
       providerId: 'provider-1',
       description: '',
       contextWindow: '128000',

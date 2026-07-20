@@ -18,7 +18,6 @@ create table if not exists agent_model (
     provider_id         bigint not null,
     name                varchar(128) not null,
     description         varchar(512),
-    capabilities_json   text not null,
     config_json         text not null,
     gmt_create          timestamp(3) not null default current_timestamp(),
     gmt_modified        timestamp(3) not null default current_timestamp(),

@@ -1,5 +1,10 @@
 import { extractDefaultVariantFromModel } from '@/features/ai/ai-model-draft-codec'
-import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, BackendDateTime } from '@/shared/api/contracts'
+import type {
+  AgentDefinitionDTO,
+  AgentModelWithProviderDTO,
+  AgentProviderDTO,
+  BackendDateTime,
+} from '@/shared/api/contracts'
 import type { ResourceModal } from '@/features/ai/ai-console-types'
 
 export function resourceTitle(modal: ResourceModal): string {
@@ -22,10 +27,10 @@ export function filterAgents(agents: AgentDefinitionDTO[], search: string): Agen
   )
 }
 
-export function filterModels(models: AgentModelDTO[], search: string): AgentModelDTO[] {
+export function filterModels(models: AgentModelWithProviderDTO[], search: string): AgentModelWithProviderDTO[] {
   return models.filter((model) =>
     includesSearch(
-      `${model.providerName} ${model.name} ${model.description ?? ''} ${extractDefaultVariantFromModel(model)}`,
+      `${model.providerName ?? ''} ${model.name} ${model.description ?? ''} ${extractDefaultVariantFromModel(model)}`,
       search,
     ),
   )

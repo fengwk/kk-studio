@@ -5,55 +5,70 @@ import { describe, expect, it } from 'vitest'
 import { AgentForm } from '@/features/ai/AiAgentResourceForm'
 import type { AgentDraft } from '@/features/ai/ai-console-types'
 import { emptyAgentDraft } from '@/features/ai/ai-agent-draft-codec'
+import type {
+  AgentModelConfigDTO,
+  AgentModelWithProviderDTO,
+} from '@/shared/api/contracts'
+
+const baseConfig: AgentModelConfigDTO = {
+  limit: { context: 128000, output: 8192 },
+  abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+  pricing: {
+    currency: 'USD',
+    pricingTier: 'default',
+    serviceTier: 'default',
+    serviceTierMultiplier: 1,
+    version: 'v1',
+    inputPerMillionTokens: 0,
+    outputPerMillionTokens: 0,
+    cacheReadPerMillionTokens: 0,
+    cacheWritePerMillionTokens: 0,
+    cacheWriteLongPerMillionTokens: 0,
+    reasoningPerMillionTokens: 0,
+  },
+  defaultVariant: 'default',
+  variants: [{ id: 'default' }, { id: 'fast' }],
+}
+
+function modelWithVariants(): AgentModelWithProviderDTO {
+  return {
+    id: 'm1',
+    providerId: 'p1',
+    providerName: 'minimax',
+    name: 'MiniMax',
+    description: null,
+    config: baseConfig,
+    createTime: null,
+    updateTime: null,
+  } as AgentModelWithProviderDTO
+}
 
 describe('AgentForm current contracts', () => {
   it('selects model/variant/environment and marks invalid tools', async () => {
     const user = userEvent.setup()
     function Harness() {
       const [draft, setDraft] = useState<AgentDraft>({
-        ...emptyAgentDraft({
-          id: 'm1',
-          providerId: 'p1',
-          providerName: 'minimax',
-          name: 'MiniMax',
-          description: null,
-          capabilitiesJson: '["TEXT","TOOLS"]',
-          configJson:
-            '{"defaultVariant":"default","variants":[{"id":"default"},{"id":"fast"}]}',
-          createTime: null,
-          updateTime: null,
-        }),
+        ...emptyAgentDraft(modelWithVariants()),
         tools: ['missing-tool'],
         environmentName: 'gone',
       })
       return (
         <AgentForm
           draft={draft}
-          models={[
+          models={[modelWithVariants()]}
+          agents={[
             {
-              id: 'm1',
-              providerId: 'p1',
-              providerName: 'minimax',
-              name: 'MiniMax',
+              id: 'a2',
+              name: 'researcher',
               description: null,
-              capabilitiesJson: '["TEXT","TOOLS"]',
-              configJson:
-                '{"defaultVariant":"default","variants":[{"id":"default"},{"id":"fast"}]}',
+              systemPrompt: null,
+              modelId: 'm1',
+              variant: 'default',
+              config: null,
               createTime: null,
               updateTime: null,
             },
           ]}
-          agents={[{
-            id: 'a2',
-            name: 'researcher',
-            description: null,
-            systemPrompt: null,
-            modelId: 'm1',
-            variant: 'default',
-            config: null,
-            createTime: null,
-            updateTime: null,
-          }]}
           environments={[
             {
               name: 'platform',

@@ -1,4 +1,5 @@
 import type { AgentResourceId } from '@/shared/api/contracts'
+import type { AgentModelInputModality } from '@/shared/api/contracts'
 
 export interface ComfyuiWorkflowDraft {
   apiName: string
@@ -26,11 +27,14 @@ export interface KeyValueDraft {
   value: string
 }
 
-/** Variant = a provider runtime profile stored in configJson.variants. */
+/**
+ * One Agent model variant. Form inputs are string-typed so empty fields map cleanly to
+ * {@code null}/{@code undefined} on the wire {@link AgentModelVariantDTO}.
+ */
 export interface VariantDraft {
   /** Client-only React key. */
   id: string
-  /** Persisted as configJson.variants[].id. */
+  /** Persisted as {@code variants[].id}. */
   name: string
   reasoningEffort: string
   maxOutputTokens: string
@@ -39,10 +43,14 @@ export interface VariantDraft {
   topK: string
   frequencyPenalty: string
   presencePenalty: string
-  /** Comma-separated in the form and persisted as a string array. */
+  /** Comma-separated in the form; persisted as a string array. */
   stopSequences: string
 }
 
+/**
+ * Per-million-token prices carried through the form. The shared {@code config.pricing} subshape
+ * owns currency / tier metadata at the wire boundary; the form only edits the per-unit prices.
+ */
 export interface ModelPricingDraft {
   currency: string
   pricingTier: string
@@ -57,6 +65,7 @@ export interface ModelPricingDraft {
   reasoningPerMillionTokens: string
 }
 
+/** Form draft for a model resource. Inputs stay string-typed for predictable editing UX. */
 export interface ModelDraft {
   providerId: string
   name: string
@@ -65,8 +74,8 @@ export interface ModelDraft {
   maxOutputTokens: string
   tools: boolean
   reasoning: boolean
-  inputModalities: string[]
-  outputModalities: string[]
+  /** Required, non-empty on submit. The form treats it as a {@link Set} for toggling. */
+  inputModalities: Set<AgentModelInputModality>
   defaultVariant: string
   variants: VariantDraft[]
   pricing: ModelPricingDraft

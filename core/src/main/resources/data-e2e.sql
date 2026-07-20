@@ -9,11 +9,11 @@ merge into agent_provider (
 );
 
 merge into agent_model (
-    id, provider_id, name, description, capabilities_json, config_json,
+    id, provider_id, name, description, config_json,
     gmt_create, gmt_modified, version
 ) key (id) values (
-    1, 1, 'MiniMax-M2.7', 'MiniMax M2.7 model.', '["TEXT","TOOLS","THINKING"]',
-    '{"limit":{"context":204800,"output":131072},"abilities":{"tools":true,"reasoning":true,"modalities":{"input":["TEXT"],"output":["TEXT"]}},"defaultVariant":"medium","variants":[{"id":"off"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"}],"pricing":{"currency":"USD","pricingTier":"default","serviceTier":"default","serviceTierMultiplier":1,"version":"v1","inputPerMillionTokens":0.3,"outputPerMillionTokens":1.2,"cacheReadPerMillionTokens":0.06,"cacheWritePerMillionTokens":0.375,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0}}',
+    1, 1, 'MiniMax-M2.7', 'MiniMax M2.7 model.',
+    '{"limit":{"context":204800,"output":131072},"abilities":{"tools":true,"reasoning":true,"inputModalities":["TEXT"]},"defaultVariant":"medium","variants":[{"id":"off"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"}],"pricing":{"currency":"USD","pricingTier":"default","serviceTier":"default","serviceTierMultiplier":1,"version":"v1","inputPerMillionTokens":0.3,"outputPerMillionTokens":1.2,"cacheReadPerMillionTokens":0.06,"cacheWritePerMillionTokens":0.375,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0}}',
     current_timestamp(), current_timestamp(), 0
 );
 

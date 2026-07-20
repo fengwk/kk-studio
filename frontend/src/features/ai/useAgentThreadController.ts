@@ -13,7 +13,12 @@ import { useHarnessThreadEventStream } from '@/features/ai/useHarnessThreadEvent
 import { useHarnessThreadObservability } from '@/features/ai/useHarnessThreadObservability'
 import { useHarnessTaskTimeline } from '@/features/ai/useHarnessTaskTimeline'
 import { harnessService } from '@/shared/api/harness-service'
-import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, HarnessThreadDTO } from '@/shared/api/contracts'
+import type {
+  AgentDefinitionDTO,
+  AgentModelWithProviderDTO,
+  AgentProviderDTO,
+  HarnessThreadDTO,
+} from '@/shared/api/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 function errorMessage(error: unknown): string {
@@ -262,7 +267,7 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
 function resolveRuntimeLabels(
   thread: HarnessThreadDTO | undefined,
   agent: AgentDefinitionDTO | undefined,
-  models: AgentModelDTO[],
+  models: AgentModelWithProviderDTO[],
   providers: AgentProviderDTO[],
 ) {
   const modelId = firstNonEmpty(thread?.modelId, agent?.modelId)

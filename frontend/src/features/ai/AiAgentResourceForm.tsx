@@ -9,7 +9,11 @@ import { applyAgentModelSelection, variantOptionsFromModel } from '@/features/ai
 import { emptyAgentDraft } from '@/features/ai/ai-resource-draft-codecs'
 import type { ResourceFieldKey } from '@/features/ai/ai-resource-form-validation'
 import { FormSelect } from '@/features/ai/FormSelect'
-import type { AgentDefinitionDTO, AgentModelDTO, LiveEnvironmentDTO } from '@/shared/api/contracts'
+import type {
+  AgentDefinitionDTO,
+  AgentModelWithProviderDTO,
+  LiveEnvironmentDTO,
+} from '@/shared/api/contracts'
 
 function toggleName(items: string[], name: string): string[] {
   return items.includes(name) ? items.filter((item) => item !== name) : [...items, name]
@@ -24,7 +28,7 @@ export function AgentForm({
   onChange,
 }: {
   draft: AgentDraft
-  models: AgentModelDTO[]
+  models: AgentModelWithProviderDTO[]
   agents?: AgentDefinitionDTO[]
   environments?: LiveEnvironmentDTO[]
   fieldErrors?: Partial<Record<ResourceFieldKey, string>>

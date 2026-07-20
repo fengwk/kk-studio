@@ -19,7 +19,7 @@ import java.util.List;
 public interface AgentModelMapper extends BaseMapper {
 
   String COLUMNS =
-      "id, provider_id, name, description, capabilities_json, config_json, version, "
+      "id, provider_id, name, description, config_json, version, "
           + "gmt_create as create_time, gmt_modified as update_time";
 
   @Select("select count(*) from agent_model")
@@ -33,7 +33,6 @@ public interface AgentModelMapper extends BaseMapper {
         @Result(column = "provider_id", property = "providerId"),
         @Result(column = "name", property = "name"),
         @Result(column = "description", property = "description"),
-        @Result(column = "capabilities_json", property = "capabilitiesJson"),
         @Result(column = "config_json", property = "configJson"),
         @Result(column = "version", property = "version"),
         @Result(column = "create_time", property = "createTime"),
@@ -52,10 +51,10 @@ public interface AgentModelMapper extends BaseMapper {
   @Insert(
       """
       insert into agent_model (
-          id, provider_id, name, description, capabilities_json, config_json,
+          id, provider_id, name, description, config_json,
           gmt_create, gmt_modified, version
       ) values (
-          #{id}, #{providerId}, #{name}, #{description}, #{capabilitiesJson}, #{configJson},
+          #{id}, #{providerId}, #{name}, #{description}, #{configJson},
           current_timestamp(3), current_timestamp(3), 0
       )
       """)
@@ -65,7 +64,7 @@ public interface AgentModelMapper extends BaseMapper {
       """
       update agent_model
       set name = #{model.name}, description = #{model.description},
-          capabilities_json = #{model.capabilitiesJson}, config_json = #{model.configJson},
+          config_json = #{model.configJson},
           gmt_modified = current_timestamp(3), version = version + 1
       where id = #{model.id}
       """)

@@ -246,9 +246,25 @@ function model() {
     providerName: 'stub',
     name: 'acceptance-stub',
     description: 'Acceptance model',
-    capabilitiesJson: '["TEXT","TOOLS"]',
-    configJson:
-      '{"limit":{"context":128000,"output":8192},"abilities":{"tools":true,"reasoning":false,"modalities":{"input":["TEXT"],"output":["TEXT"]}},"pricing":{"currency":"USD","pricingTier":"default","serviceTier":"default","serviceTierMultiplier":1,"version":"v1","inputPerMillionTokens":0,"outputPerMillionTokens":0,"cacheReadPerMillionTokens":0,"cacheWritePerMillionTokens":0,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0},"defaultVariant":"default","variants":[{"id":"default"}]}',
+    config: {
+      limit: { context: 128000, output: 8192 },
+      abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+      pricing: {
+        currency: 'USD',
+        pricingTier: 'default',
+        serviceTier: 'default',
+        serviceTierMultiplier: 1,
+        version: 'v1',
+        inputPerMillionTokens: 0,
+        outputPerMillionTokens: 0,
+        cacheReadPerMillionTokens: 0,
+        cacheWritePerMillionTokens: 0,
+        cacheWriteLongPerMillionTokens: 0,
+        reasoningPerMillionTokens: 0,
+      },
+      defaultVariant: 'default',
+      variants: [{ id: 'default' }],
+    },
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
   }

@@ -395,26 +395,32 @@ tokenReadRatio =
 
 ## Executable Model 配置解析
 
-持久 `agent_model.capabilities_json` 与 `config_json` 必须在 mutation 阶段和 Turn 启动时同时验证，确保模型 ID、变体、缓存策略、价格快照和工具绑定都能被 runtime 实际执行。
+持久 `agent_model.config_json` 必须在 mutation 阶段和 Turn 启动时同时验证，确保模型 ID、变体、缓存策略、价格快照和工具绑定都能被 runtime 实际执行。`agent_model` 不再保留 `capabilities_json` 列；能力由 `config_json.abilities` 直接派生。
 
 ### 必需字段
 
-`configJson` 必须是合法 JSON object，固定包含：
+`config_json` 必须是合法 JSON object，固定包含：
 
-- `contextWindow` / `maxOutputTokens`：正整数，`maxOutputTokens <= contextWindow`。
-- `inputModalities`：非空 `ModelInputModality` 列表，限定为 `TEXT/IMAGE/AUDIO/VIDEO/DOCUMENT`。
-- `variants`：非空列表，每项至少包含非空 `name`，可选 `maxOutputTokens/temperature/topP/topK/frequencyPenalty/presencePenalty/stopSequences`，且 `variant.maxOutputTokens <= model.maxOutputTokens`，名称在 list 内唯一。
-- `pricing`：`currency/pricingTier/serviceTier/serviceTierMultiplier/version` 全部非空且 `serviceTierMultiplier > 0`；六类每百万 token 单价 `inputPerMillionTokens/outputPerMillionTokens/cacheReadPerMillionTokens/cacheWritePerMillionTokens/cacheWriteLongPerMillionTokens/reasoningPerMillionTokens` 均为非负有限数。
+- `limit.context` / `limit.output`：正整数，`limit.output <= limit.context`。
+- `abilities.tools` / `abilities.reasoning`：boolean。
+- `abilities.inputModalities`：非空 `AgentModelInputModality` 列表，限定为 `TEXT/IMAGE/AUDIO/VIDEO/DOCUMENT`。
+- `variants`：非空列表，每项至少包含非空 `id`，可选 `reasoningEffort/maxOutputTokens/temperature/topP/topK/frequencyPenalty/presencePenalty/stopSequences`，且 `variant.maxOutputTokens <= limit.output`，`id` 在 list 内唯一，开启 `reasoning` 时每项 `reasoningEffort` 必须非空（`off` 视为关闭）。
+- `defaultVariant`：字符串，必须命中 `variants[].id`。
+- `pricing.currency/pricingTier/serviceTier/serviceTierMultiplier/version` 全部非空且 `serviceTierMultiplier > 0`；六类每百万 token 单价 `inputPerMillionTokens/outputPerMillionTokens/cacheReadPerMillionTokens/cacheWritePerMillionTokens/cacheWriteLongPerMillionTokens/reasoningPerMillionTokens` 均为非负有限数。
 
-`capabilitiesJson` 是 `ModelCapability` 列表，类型限定为 `TEXT/VISION/AUDIO/TOOLS/THINKING` 并去重。
+数据库层不再持久化 `capabilities_json`；runtime 仅从 `config_json.abilities` 派生 `tools` / `reasoning` 与 `inputModalities`，与 `ModelDescriptor` 中的 `tools` / `reasoning` / `inputModalities` 直接对应。`ModelCapability` 枚举已删除。
+
+### API 契约
+
+公开 `AgentModelDTO` 暴露单一嵌套 `config: AgentModelConfigDTO`（含 `limit / abilities / pricing / defaultVariant / variants`），不再暴露 `capabilitiesJson` 或 `configJson`。模型资源 ID 始终为字符串 `AgentResourceId`，前端 `AgentResourceId = string`。`AgentModelWithProviderDTO` 是客户端把 `providerName` 从 `providers` 列表补上后派生出的视图类型，不属于后端契约。`AgentModelVariantDTO.id` 是唯一必需字段；`AgentModelVariantDTO.name` 旧别名已彻底删除。
 
 ### 解析失败语义
 
-缺失或类型错误的必要字段、`contextWindow` 小于 `maxOutputTokens`、未知 enum 值、重复变体名、未注册工具等任何不合规输入都会在 `AgentModelMutationFactory`（写入阶段）或 `DatabaseTurnResourceResolver`（Turn 启动阶段）抛出 `IllegalArgumentException`，并阻止 Provider Turn。任何可以写库但不能执行的 `agent_model` 记录都被视为非法，立即失败。
+缺失或类型错误的必要字段、`limit.output > limit.context`、未知 enum 值、重复变体 `id`、未匹配 `defaultVariant` 等任何不合规输入都会在 `AgentModelMutationFactory`（写入阶段）或 `DatabaseTurnResourceResolver`（Turn 启动阶段）抛出 `IllegalArgumentException`，并阻止 Provider Turn。任何可以写库但不能执行的 `agent_model` 记录都被视为非法，立即失败。
 
 ### 模型 CRUD 契约
 
-`AgentModelMutationFactory` 在 create 与 update 路径上先 `runtimeConfigParser.parse(...)` 再 `apply(...)`，使任何 `newModel(...)` 或 `update(...)` 都不可能产生一个不可执行的 `agent_model` 记录；`AgentModelServiceImpl` 在 create/update/delete 失败时把状态机异常转换为 `IllegalStateException`，并保留原 `name/version` 唯一性。
+`AgentModelMutationFactory` 在 create 与 update 路径上先 `runtimeConfigParser.parse(...)` 再 `apply(...)`，使任何 `newModel(...)` 或 `update(...)` 都不可能产生一个不可执行的 `agent_model` 记录；`AgentModelServiceImpl` 在 create/update/delete 失败时把状态机异常转换为 `IllegalStateException`，并保留原 `name/version` 唯一性。`AgentModelConverter` 把持久化的 `config_json` 直接解析为结构化 `AgentModelConfigDTO`，解析阶段不再产生 JSON 字符串往返。
 
 ## Resource 解析与进程生命周期
 

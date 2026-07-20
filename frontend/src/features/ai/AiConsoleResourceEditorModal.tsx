@@ -6,7 +6,7 @@ import type { ResourceFieldKey } from '@/features/ai/ai-resource-form-validation
 import { resourceTitle } from '@/features/ai/ai-console-utils'
 import type {
   AgentDefinitionDTO,
-  AgentModelDTO,
+  AgentModelWithProviderDTO,
   AgentProviderDTO,
   LiveEnvironmentDTO,
 } from '@/shared/api/contracts'
@@ -31,7 +31,7 @@ export function ResourceEditorModal({
 }: {
   modal: ResourceModal | null
   providers: AgentProviderDTO[]
-  models: AgentModelDTO[]
+  models: AgentModelWithProviderDTO[]
   agents?: AgentDefinitionDTO[]
   environments?: LiveEnvironmentDTO[]
   providerDraft: ProviderDraft

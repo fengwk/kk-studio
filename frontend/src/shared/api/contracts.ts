@@ -14,7 +14,12 @@ export interface PageResult<T> {
 
 export type BackendDateTime = string | number[] | null
 
-export type AgentResourceId = number | string
+/**
+ * Agent resource ids are decimal strings minted by Snowflake IDs on the backend
+ * (e.g. {@code "1700000000000000000"}). They are not numeric on the wire — always
+ * stringify before URL-encoding.
+ */
+export type AgentResourceId = string
 
 export type BackendLong = number | string
 
@@ -64,7 +69,7 @@ export interface AgentProviderDTO {
 }
 
 export interface AgentProviderEditablePropertiesDTO {
-  name?: string
+  name?: string | null
   description?: string | null
   providerType: string
   baseUrl?: string | null
@@ -79,35 +84,93 @@ export interface AgentProviderCreateDTO extends AgentProviderEditablePropertiesD
 
 export type AgentProviderUpdateDTO = AgentProviderEditablePropertiesDTO
 
+/** Stable enum mirroring the backend {@code AgentModelInputModality}. */
+export type AgentModelInputModality =
+  | 'TEXT'
+  | 'IMAGE'
+  | 'AUDIO'
+  | 'VIDEO'
+  | 'DOCUMENT'
+
+export interface AgentModelLimitDTO {
+  /** Positive integer count of model context window tokens. */
+  context: number | null
+  /** Positive integer {@code <= context}. */
+  output: number | null
+}
+
+export interface AgentModelAbilitiesDTO {
+  tools: boolean
+  reasoning: boolean
+  /** Non-empty subset of {@link AgentModelInputModality}. */
+  inputModalities: AgentModelInputModality[]
+}
+
+export interface AgentModelPricingDTO {
+  currency: string
+  pricingTier: string
+  serviceTier: string
+  serviceTierMultiplier: number | string
+  version: string
+  inputPerMillionTokens: number | string
+  outputPerMillionTokens: number | string
+  cacheReadPerMillionTokens: number | string
+  cacheWritePerMillionTokens: number | string
+  cacheWriteLongPerMillionTokens: number | string
+  reasoningPerMillionTokens: number | string
+}
+
+export interface AgentModelVariantDTO {
+  id: string
+  reasoningEffort?: string | null
+  maxOutputTokens?: number | null
+  temperature?: number | null
+  topP?: number | null
+  topK?: number | null
+  frequencyPenalty?: number | null
+  presencePenalty?: number | null
+  stopSequences?: string[] | null
+}
+
+export interface AgentModelConfigDTO {
+  limit: AgentModelLimitDTO | null
+  abilities: AgentModelAbilitiesDTO | null
+  pricing: AgentModelPricingDTO | null
+  defaultVariant: string | null
+  variants: AgentModelVariantDTO[]
+}
+
+/** Public Agent model resource. No {@code capabilitiesJson} / {@code configJson} on the wire. */
 export interface AgentModelDTO {
   id: AgentResourceId
   providerId: AgentResourceId
-  /** Client-enriched from providers list; API does not return this field. */
-  providerName?: string | null
   name: string
   description: string | null
-  capabilitiesJson: string | null
-  configJson: string | null
+  config: AgentModelConfigDTO | null
   version?: BackendLong | null
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
 
+/** Feature/view projection enriched on the client by joining {@link AgentModelDTO} with providers. */
+export interface AgentModelWithProviderDTO extends AgentModelDTO {
+  providerName: string | null
+}
+
+/** Editable portion of an Agent model. */
 export interface AgentModelEditablePropertiesDTO {
   name?: string | null
   description?: string | null
-  capabilitiesJson?: string | null
-  configJson?: string | null
+  config?: AgentModelConfigDTO | null
 }
 
 export interface AgentModelCreateDTO extends AgentModelEditablePropertiesDTO {
   providerId: string
   name: string
-  capabilitiesJson: string
-  configJson: string
+  config: AgentModelConfigDTO
 }
 
-export interface AgentModelUpdateDTO extends AgentModelEditablePropertiesDTO {}
+export type AgentModelUpdateDTO = AgentModelEditablePropertiesDTO
 
 export interface AgentExecutionPolicyDTO {
   maxTurns?: number | null

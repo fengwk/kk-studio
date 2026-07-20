@@ -23,10 +23,10 @@ export function createAgentService(client: HttpClient = apiClient) {
       client.post('/providers', data),
 
     updateProvider: (id: AgentResourceId, data: AgentProviderUpdateDTO): Promise<AgentProviderDTO> =>
-      client.put(`/providers/${encodeURIComponent(String(id))}`, data),
+      client.put(`/providers/${encodeURIComponent(id)}`, data),
 
     deleteProvider: (id: AgentResourceId): Promise<void> =>
-      client.delete(`/providers/${encodeURIComponent(String(id))}`),
+      client.delete(`/providers/${encodeURIComponent(id)}`),
 
     listModels: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentModelDTO>> =>
       client.get('/models', { params: { pageNumber, pageSize } }),
@@ -35,10 +35,10 @@ export function createAgentService(client: HttpClient = apiClient) {
       client.post('/models', data),
 
     updateModel: (id: AgentResourceId, data: AgentModelUpdateDTO): Promise<AgentModelDTO> =>
-      client.put(`/models/${encodeURIComponent(String(id))}`, data),
+      client.put(`/models/${encodeURIComponent(id)}`, data),
 
     deleteModel: (id: AgentResourceId): Promise<void> =>
-      client.delete(`/models/${encodeURIComponent(String(id))}`),
+      client.delete(`/models/${encodeURIComponent(id)}`),
 
     listAgents: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentDefinitionDTO>> =>
       client.get('/agents', { params: { pageNumber, pageSize } }),
@@ -47,10 +47,10 @@ export function createAgentService(client: HttpClient = apiClient) {
       client.post('/agents', data),
 
     updateAgent: (id: AgentResourceId, data: AgentDefinitionUpdateDTO): Promise<AgentDefinitionDTO> =>
-      client.put(`/agents/${encodeURIComponent(String(id))}`, data),
+      client.put(`/agents/${encodeURIComponent(id)}`, data),
 
     deleteAgent: (id: AgentResourceId): Promise<void> =>
-      client.delete(`/agents/${encodeURIComponent(String(id))}`),
+      client.delete(`/agents/${encodeURIComponent(id)}`),
 
     getThreadUsage: (threadId: string): Promise<ModelUsageSummaryDTO> =>
       client.get(`/usage/threads/${encodeURIComponent(threadId)}`),
@@ -59,7 +59,7 @@ export function createAgentService(client: HttpClient = apiClient) {
       client.get(`/usage/sessions/${encodeURIComponent(sessionId)}`),
 
     getModelUsage: (modelId: AgentResourceId): Promise<ModelUsageSummaryDTO> =>
-      client.get(`/usage/models/${encodeURIComponent(String(modelId))}`),
+      client.get(`/usage/models/${encodeURIComponent(modelId)}`),
 
   }
 }

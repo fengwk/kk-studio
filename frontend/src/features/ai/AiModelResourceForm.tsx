@@ -1,3 +1,6 @@
+import type {
+  AgentModelInputModality,
+} from '@/shared/api/contracts'
 import type { ModelDraft, ModelPricingDraft, VariantDraft } from '@/features/ai/ai-console-types'
 import { variantOptionsFromDraft } from '@/features/ai/ai-draft-normalizers'
 import { sanitizeDecimalInput, sanitizeIntegerInput } from '@/features/ai/ai-number-input'
@@ -6,9 +9,15 @@ import { VariantListEditor } from '@/features/ai/AiResourceFieldEditors'
 import { FormSelect } from '@/features/ai/FormSelect'
 import type { AgentProviderDTO } from '@/shared/api/contracts'
 
-const MODALITIES = ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO', 'DOCUMENT'] as const
+const AGENT_MODEL_INPUT_MODALITIES: AgentModelInputModality[] = [
+  'TEXT',
+  'IMAGE',
+  'AUDIO',
+  'VIDEO',
+  'DOCUMENT',
+]
 
-/** 用户可编辑的单价字段（$/1M tokens）。currency 与 tier 元数据固定默认，不进 UI。 */
+/** User-editable per-million-token prices; currency / tier metadata is fixed by the wire contract. */
 const PRICING_UNIT_FIELDS: ReadonlyArray<{
   field: keyof ModelPricingDraft
   label: string
@@ -49,17 +58,18 @@ export function ModelForm({
     })
   }
 
-  function toggleList(list: string[], value: string): string[] {
-    return list.includes(value) ? list.filter((item) => item !== value) : [...list, value]
-  }
-
-  /** 输入类型至少保留一种；禁止全部取消勾选。 */
-  function toggleInputModality(value: string) {
-    const next = toggleList(draft.inputModalities, value)
-    onChange({
-      ...draft,
-      inputModalities: next.length > 0 ? next : ['TEXT'],
-    })
+  function toggleInputModality(value: AgentModelInputModality) {
+    const next = new Set(draft.inputModalities)
+    if (next.has(value)) {
+      next.delete(value)
+    } else {
+      next.add(value)
+    }
+    // 至少保留一种；禁止全部取消勾选。
+    if (next.size === 0) {
+      next.add('TEXT')
+    }
+    onChange({ ...draft, inputModalities: next })
   }
 
   /** 开启 Reasoning 时，为空的思考强度用 variant 名或 medium 预填。 */
@@ -200,8 +210,8 @@ export function ModelForm({
         <legend>输入类型</legend>
         <p className="inline-hint">模型可接受的输入模态；至少保留一种（不能全部取消）。</p>
         <div className="capability-options">
-          {MODALITIES.map((item) => {
-            const checked = draft.inputModalities.includes(item)
+          {AGENT_MODEL_INPUT_MODALITIES.map((item) => {
+            const checked = draft.inputModalities.has(item)
             return (
               <label key={item} className={`capability-option${checked ? ' is-selected' : ''}`}>
                 <input

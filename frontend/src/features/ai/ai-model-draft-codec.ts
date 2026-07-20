@@ -6,15 +6,26 @@ import {
   trimToNull,
 } from '@/features/ai/ai-resource-draft-primitives'
 import type {
+  AgentModelConfigDTO,
   AgentModelCreateDTO,
   AgentModelDTO,
+  AgentModelInputModality,
+  AgentModelPricingDTO,
   AgentModelUpdateDTO,
-  AgentProviderDTO,
+  AgentModelVariantDTO,
+  AgentResourceId,
 } from '@/shared/api/contracts'
 
-const MODEL_MODALITIES = ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO', 'DOCUMENT'] as const
-const MODEL_MODALITY_SET = new Set<string>(MODEL_MODALITIES)
+const AGENT_MODEL_MODALITIES: AgentModelInputModality[] = [
+  'TEXT',
+  'IMAGE',
+  'AUDIO',
+  'VIDEO',
+  'DOCUMENT',
+]
+const AGENT_MODEL_MODALITY_SET = new Set<string>(AGENT_MODEL_MODALITIES)
 
+/** Default tiers/version for newly created entries; the form does not expose metadata. */
 function defaultPricingDraft(): ModelPricingDraft {
   return {
     currency: 'USD',
@@ -31,21 +42,29 @@ function defaultPricingDraft(): ModelPricingDraft {
   }
 }
 
-export function emptyModelDraft(model?: AgentModelDTO, provider?: AgentProviderDTO): ModelDraft {
-  const providerId = model?.providerId ? String(model.providerId) : provider ? String(provider.id) : ''
+export function emptyModelDraft(
+  model?: AgentModelDTO,
+  provider?: { id: AgentResourceId | string } | null,
+): ModelDraft {
+  const providerId = model?.providerId
+    ? String(model.providerId)
+    : provider
+      ? String(provider.id)
+      : ''
+  const limit = model?.config?.limit
+  const abilities = model?.config?.abilities
   return {
     providerId,
     name: '',
     description: '',
-    contextWindow: '128000',
-    maxOutputTokens: '8192',
-    tools: true,
-    reasoning: false,
-    inputModalities: ['TEXT'],
-    outputModalities: ['TEXT'],
+    contextWindow: limit && limit.context != null ? String(limit.context) : '128000',
+    maxOutputTokens: limit && limit.output != null ? String(limit.output) : '8192',
+    tools: typeof abilities?.tools === 'boolean' ? abilities.tools : true,
+    reasoning: typeof abilities?.reasoning === 'boolean' ? abilities.reasoning : false,
+    inputModalities: new Set(AGENT_MODEL_MODALITIES),
+    pricing: defaultPricingDraft(),
     defaultVariant: 'medium',
     variants: [newVariantDraft({ name: 'medium' })],
-    pricing: defaultPricingDraft(),
   }
 }
 
@@ -55,40 +74,83 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {}
 }
 
-function parseConfigJson(configJson: string | null | undefined): Record<string, unknown> {
-  if (!configJson?.trim()) {
-    return {}
-  }
-  try {
-    return asRecord(JSON.parse(configJson) as unknown)
-  } catch {
-    return {}
-  }
-}
-
-function parseStringArray(value: unknown): string[] {
+function toStringSet(value: unknown): Set<AgentModelInputModality> {
   if (!Array.isArray(value)) {
-    return []
+    return new Set()
   }
-  return value.map((item) => String(item ?? '').trim()).filter(Boolean)
-}
-
-function parseModalities(value: unknown, fallback: string[]): string[] {
-  const modalities = Array.from(
-    new Set(parseStringArray(value).map((item) => item.toUpperCase()).filter((item) => MODEL_MODALITY_SET.has(item))),
+  return new Set(
+    value
+      .map((item) => String(item ?? '').trim().toUpperCase())
+      .filter((item) => AGENT_MODEL_MODALITY_SET.has(item))
+      .map((item) => item as AgentModelInputModality),
   )
-  return modalities.length > 0 ? modalities : fallback
 }
 
-function parseOptionalScalar(value: unknown): string {
-  return value == null ? '' : String(value)
+function modalitiesToList(set: Set<AgentModelInputModality>): AgentModelInputModality[] {
+  return AGENT_MODEL_MODALITIES.filter((m) => set.has(m))
 }
 
-function parseStopSequences(value: unknown): string {
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item ?? '').trim()).filter(Boolean).join(', ')
+function parseVariant(record: Record<string, unknown>): VariantDraft {
+  // New schema uses `id`; tolerate empty `name` so legacy data is shown but flagged.
+  const id = String(record.id ?? record.name ?? '').trim()
+  const stopRaw = record.stopSequences
+  const stopSequences = Array.isArray(stopRaw)
+    ? stopRaw
+        .map((item) => String(item ?? '').trim())
+        .filter(Boolean)
+        .join(', ')
+    : ''
+  return newVariantDraft({
+    name: id,
+    reasoningEffort: record.reasoningEffort == null ? '' : String(record.reasoningEffort),
+    maxOutputTokens: record.maxOutputTokens == null ? '' : String(record.maxOutputTokens),
+    temperature: record.temperature == null ? '' : String(record.temperature),
+    topP: record.topP == null ? '' : String(record.topP),
+    topK: record.topK == null ? '' : String(record.topK),
+    frequencyPenalty:
+      record.frequencyPenalty == null ? '' : String(record.frequencyPenalty),
+    presencePenalty:
+      record.presencePenalty == null ? '' : String(record.presencePenalty),
+    stopSequences,
+  })
+}
+
+function parsePricing(record: Record<string, unknown>): ModelPricingDraft {
+  const base = defaultPricingDraft()
+  return {
+    currency: String(record.currency ?? base.currency),
+    pricingTier: String(record.pricingTier ?? base.pricingTier),
+    serviceTier: String(record.serviceTier ?? base.serviceTier),
+    serviceTierMultiplier:
+      record.serviceTierMultiplier == null
+        ? base.serviceTierMultiplier
+        : String(record.serviceTierMultiplier),
+    version: String(record.version ?? base.version),
+    inputPerMillionTokens:
+      record.inputPerMillionTokens == null
+        ? base.inputPerMillionTokens
+        : String(record.inputPerMillionTokens),
+    outputPerMillionTokens:
+      record.outputPerMillionTokens == null
+        ? base.outputPerMillionTokens
+        : String(record.outputPerMillionTokens),
+    cacheReadPerMillionTokens:
+      record.cacheReadPerMillionTokens == null
+        ? base.cacheReadPerMillionTokens
+        : String(record.cacheReadPerMillionTokens),
+    cacheWritePerMillionTokens:
+      record.cacheWritePerMillionTokens == null
+        ? base.cacheWritePerMillionTokens
+        : String(record.cacheWritePerMillionTokens),
+    cacheWriteLongPerMillionTokens:
+      record.cacheWriteLongPerMillionTokens == null
+        ? base.cacheWriteLongPerMillionTokens
+        : String(record.cacheWriteLongPerMillionTokens),
+    reasoningPerMillionTokens:
+      record.reasoningPerMillionTokens == null
+        ? base.reasoningPerMillionTokens
+        : String(record.reasoningPerMillionTokens),
   }
-  return parseOptionalScalar(value)
 }
 
 function parseVariants(config: Record<string, unknown>): VariantDraft[] {
@@ -97,98 +159,42 @@ function parseVariants(config: Record<string, unknown>): VariantDraft[] {
     return [newVariantDraft({ name: 'medium' })]
   }
   const variants = raw
-    .map((item) => {
-      const record = asRecord(item)
-      // 新 schema 用 id；旧数据可能仍是 name。
-      const name = String(record.id ?? record.name ?? '').trim()
-      if (!name) {
-        return null
-      }
-      return newVariantDraft({
-        name,
-        reasoningEffort: parseOptionalScalar(record.reasoningEffort ?? record.thinkingLevel),
-        maxOutputTokens: parseOptionalScalar(record.maxOutputTokens),
-        temperature: parseOptionalScalar(record.temperature),
-        topP: parseOptionalScalar(record.topP),
-        topK: parseOptionalScalar(record.topK),
-        frequencyPenalty: parseOptionalScalar(record.frequencyPenalty),
-        presencePenalty: parseOptionalScalar(record.presencePenalty),
-        stopSequences: parseStopSequences(record.stopSequences),
-      })
-    })
-    .filter((variant): variant is VariantDraft => variant !== null)
-  return variants.length > 0 ? variants : [newVariantDraft({ name: 'medium' })]
-}
-
-function parsePricing(config: Record<string, unknown>): ModelPricingDraft {
-  const pricing = asRecord(config.pricing)
-  const base = defaultPricingDraft()
-  return {
-    currency: String(pricing.currency ?? base.currency),
-    pricingTier: String(pricing.pricingTier ?? base.pricingTier),
-    serviceTier: String(pricing.serviceTier ?? base.serviceTier),
-    serviceTierMultiplier: String(pricing.serviceTierMultiplier ?? base.serviceTierMultiplier),
-    version: String(pricing.version ?? base.version),
-    inputPerMillionTokens: String(pricing.inputPerMillionTokens ?? base.inputPerMillionTokens),
-    outputPerMillionTokens: String(pricing.outputPerMillionTokens ?? base.outputPerMillionTokens),
-    cacheReadPerMillionTokens: String(pricing.cacheReadPerMillionTokens ?? base.cacheReadPerMillionTokens),
-    cacheWritePerMillionTokens: String(pricing.cacheWritePerMillionTokens ?? base.cacheWritePerMillionTokens),
-    cacheWriteLongPerMillionTokens: String(
-      pricing.cacheWriteLongPerMillionTokens ?? base.cacheWriteLongPerMillionTokens,
-    ),
-    reasoningPerMillionTokens: String(pricing.reasoningPerMillionTokens ?? base.reasoningPerMillionTokens),
-  }
+    .map((item) => parseVariant(asRecord(item)))
+    .filter((variant) => variant.name.trim().length > 0)
+  return variants.length > 0
+    ? variants
+    : [newVariantDraft({ name: 'medium' })]
 }
 
 export function toModelDraft(model: AgentModelDTO): ModelDraft {
-  const config = parseConfigJson(model.configJson)
-  const limit = asRecord(config.limit)
-  const abilities = asRecord(config.abilities)
-  const modalities = asRecord(abilities.modalities)
-  const variants = parseVariants(config)
-  const variantNames = variants.map((variant) => variant.name)
-  const configuredDefaultVariant = String(config.defaultVariant ?? '').trim()
-  const defaultVariant = variantNames.includes(configuredDefaultVariant)
-    ? configuredDefaultVariant
-    : (variantNames[0] ?? 'medium')
   const base = emptyModelDraft(model)
-  // 兼容旧 config：顶层 contextWindow/maxOutputTokens/inputModalities/reasoning。
-  const contextWindow = String(limit.context ?? config.contextWindow ?? base.contextWindow)
-  const maxOutputTokens = String(limit.output ?? config.maxOutputTokens ?? base.maxOutputTokens)
-  const capabilities = parseStringArray(
-    (() => {
-      try {
-        return model.capabilitiesJson ? JSON.parse(model.capabilitiesJson) : []
-      } catch {
-        return []
-      }
-    })(),
-  )
-  const tools =
-    typeof abilities.tools === 'boolean' ? abilities.tools : capabilities.includes('TOOLS')
-  const reasoning =
-    typeof abilities.reasoning === 'boolean'
-      ? abilities.reasoning
-      : Boolean(config.reasoning) || capabilities.includes('THINKING')
-  const inputModalities = parseModalities(
-    modalities.input ?? config.inputModalities,
-    base.inputModalities,
-  )
-  const outputModalities = parseModalities(modalities.output, base.outputModalities)
+  const config = asRecord(model.config as unknown)
+  if (!config || Object.keys(config).length === 0) {
+    return base
+  }
+  const limit = asRecord(config.limit)
+  const contextWindow = trimToNull(stringField(limit, 'context')) ?? base.contextWindow
+  const maxOutputTokens = trimToNull(stringField(limit, 'output')) ?? base.maxOutputTokens
+  const abilities = asRecord(config.abilities)
+  const variantIds = parseVariants(config).map((variant) => variant.name)
+  const configuredDefault = trimToNull(stringField(config, 'defaultVariant')) ?? ''
+  const defaultVariant = variantIds.includes(configuredDefault) ? configuredDefault : variantIds[0] ?? base.defaultVariant
 
+  const tools = abilities.tools
+  const reasoning = abilities.reasoning
+  const inputModalities = toStringSet(abilities.inputModalities)
   return {
-    providerId: String(model.providerId ?? ''),
+    providerId: model.providerId ? String(model.providerId) : base.providerId,
     name: model.name,
     description: model.description || '',
     contextWindow,
     maxOutputTokens,
-    tools,
-    reasoning,
-    inputModalities,
-    outputModalities,
+    tools: typeof tools === 'boolean' ? tools : base.tools,
+    reasoning: typeof reasoning === 'boolean' ? reasoning : base.reasoning,
+    inputModalities: inputModalities.size > 0 ? inputModalities : base.inputModalities,
     defaultVariant,
-    variants,
-    pricing: parsePricing(config),
+    variants: parseVariants(config),
+    pricing: parsePricing(asRecord(config.pricing)),
   }
 }
 
@@ -230,32 +236,51 @@ function optionalPositiveInt(value: string, field: string): number | null {
   return requirePositiveInt(value, field)
 }
 
-type SerializedVariant = Record<string, string | number | string[]>
+function normalizeModalities(
+  values: Set<AgentModelInputModality>,
+  field: string,
+): AgentModelInputModality[] {
+  const allowed = modalitiesToList(values)
+  if (allowed.length === 0) {
+    throw new Error(`${field} must contain at least one input modality`)
+  }
+  return allowed
+}
 
-function serializeVariants(variants: VariantDraft[], reasoning: boolean): SerializedVariant[] {
+function serializeVariants(
+  variants: VariantDraft[],
+  reasoning: boolean,
+): AgentModelVariantDTO[] {
   if (variants.length === 0) {
     throw new Error('at least one variant is required')
   }
-  const names = new Set<string>()
+  const ids = new Set<string>()
   return variants.map((variant, index) => {
     const name = variant.name.trim()
     if (!name) {
       throw new Error(`variant ${index + 1} id is required`)
     }
-    if (names.has(name)) {
+    if (ids.has(name)) {
       throw new Error(`duplicate variant id: ${name}`)
     }
-    names.add(name)
+    ids.add(name)
 
-    const payload: SerializedVariant = { id: name }
+    const payload: AgentModelVariantDTO = { id: name }
     const reasoningEffort = variant.reasoningEffort.trim()
     if (reasoning) {
       if (!reasoningEffort) {
-        throw new Error(`variant ${name} reasoningEffort is required when reasoning is enabled`)
+        throw new Error(
+          `variant ${name} reasoningEffort is required when reasoning is enabled`,
+        )
       }
       if (reasoningEffort.toLowerCase() !== 'off') {
         payload.reasoningEffort = reasoningEffort
       }
+    }
+    // Reasoning disabled: drop any stale hidden reasoning-effort values.
+    else if (reasoningEffort && reasoningEffort.toLowerCase() === 'off') {
+      // Provider explicitly requested "off"; preserve as null but the serializer
+      // already collapses empty strings, so omit it here.
     }
 
     const maxOutputTokens = optionalPositiveInt(
@@ -275,7 +300,7 @@ function serializeVariants(variants: VariantDraft[], reasoning: boolean): Serial
     for (const [field, jsonField] of optionalNumbers) {
       const value = optionalNumber(variant[field], `variant ${name} ${jsonField}`)
       if (value !== null) {
-        payload[jsonField] = value
+        payload[jsonField as keyof AgentModelVariantDTO] = value as never
       }
     }
 
@@ -291,106 +316,88 @@ function serializeVariants(variants: VariantDraft[], reasoning: boolean): Serial
   })
 }
 
-function normalizeModalities(values: string[], field: string, fallback: string[]): string[] {
-  const normalized = Array.from(new Set(values.map((item) => item.trim().toUpperCase()).filter(Boolean)))
-  const unsupported = normalized.filter((item) => !MODEL_MODALITY_SET.has(item))
-  if (unsupported.length > 0) {
-    throw new Error(`${field} contains unsupported modalities: ${unsupported.join(', ')}`)
-  }
-  return normalized.length > 0 ? normalized : fallback
-}
-
-export function buildModelConfigJson(draft: ModelDraft): string {
-  const contextWindow = requirePositiveInt(draft.contextWindow, 'contextWindow')
-  const maxOutputTokens = requirePositiveInt(draft.maxOutputTokens, 'maxOutputTokens')
+export function buildModelConfig(draft: ModelDraft): AgentModelConfigDTO {
+  const contextWindow = requirePositiveInt(draft.contextWindow, 'configJson.limit.context')
+  const maxOutputTokens = requirePositiveInt(
+    draft.maxOutputTokens,
+    'configJson.limit.output',
+  )
   if (maxOutputTokens > contextWindow) {
-    throw new Error('maxOutputTokens must not exceed contextWindow')
+    throw new Error('configJson.limit.output must not exceed limit.context')
   }
+  const modalities = normalizeModalities(draft.inputModalities, 'inputModalities')
 
   const variants = serializeVariants(draft.variants, draft.reasoning)
   for (const variant of variants) {
-    const variantMax = variant.maxOutputTokens
-    if (typeof variantMax === 'number' && variantMax > maxOutputTokens) {
+    if (
+      typeof variant.maxOutputTokens === 'number' &&
+      variant.maxOutputTokens > maxOutputTokens
+    ) {
       throw new Error(`variant ${variant.id} maxOutputTokens exceeds model maxOutputTokens`)
     }
   }
   const defaultVariant = draft.defaultVariant.trim()
   if (!defaultVariant || !variants.some((variant) => variant.id === defaultVariant)) {
-    throw new Error('defaultVariant must match a variant id')
+    throw new Error('configJson.defaultVariant must match a variant id')
   }
 
-  const inputModalities = normalizeModalities(draft.inputModalities, 'inputModalities', ['TEXT'])
-  const outputModalities = normalizeModalities(draft.outputModalities, 'outputModalities', ['TEXT'])
-  const pricing = draft.pricing
-  return JSON.stringify({
-    limit: {
-      context: contextWindow,
-      output: maxOutputTokens,
-    },
+  const pricing = pricingFromDraft(draft.pricing)
+  return {
+    limit: { context: contextWindow, output: maxOutputTokens },
     abilities: {
       tools: draft.tools,
       reasoning: draft.reasoning,
-      modalities: {
-        input: inputModalities,
-        output: outputModalities,
-      },
+      inputModalities: modalities,
     },
-    // 账本元数据固定默认（currency/tier/version 不进 UI）；仅单价由用户配置。
-    pricing: {
-      currency: 'USD',
-      pricingTier: 'default',
-      serviceTier: 'default',
-      serviceTierMultiplier: 1,
-      version: 'v1',
-      inputPerMillionTokens: requireNonNegativeNumber(
-        pricing.inputPerMillionTokens,
-        'inputPerMillionTokens',
-      ),
-      outputPerMillionTokens: requireNonNegativeNumber(
-        pricing.outputPerMillionTokens,
-        'outputPerMillionTokens',
-      ),
-      cacheReadPerMillionTokens: requireNonNegativeNumber(
-        pricing.cacheReadPerMillionTokens,
-        'cacheReadPerMillionTokens',
-      ),
-      cacheWritePerMillionTokens: requireNonNegativeNumber(
-        pricing.cacheWritePerMillionTokens,
-        'cacheWritePerMillionTokens',
-      ),
-      cacheWriteLongPerMillionTokens: requireNonNegativeNumber(
-        pricing.cacheWriteLongPerMillionTokens,
-        'cacheWriteLongPerMillionTokens',
-      ),
-      reasoningPerMillionTokens: requireNonNegativeNumber(
-        pricing.reasoningPerMillionTokens,
-        'reasoningPerMillionTokens',
-      ),
-    },
+    pricing,
     defaultVariant,
     variants,
-  })
+  }
 }
 
-export function buildModelCapabilitiesJson(draft: ModelDraft): string {
-  const inputModalities = normalizeModalities(draft.inputModalities, 'inputModalities', ['TEXT'])
-  const capabilities: string[] = []
-  if (inputModalities.includes('TEXT')) {
-    capabilities.push('TEXT')
+function pricingFromDraft(draft: ModelPricingDraft): AgentModelPricingDTO {
+  return {
+    currency: 'USD',
+    pricingTier: 'default',
+    serviceTier: 'default',
+    serviceTierMultiplier: requirePositiveNumber(
+      draft.serviceTierMultiplier,
+      'pricing.serviceTierMultiplier',
+    ),
+    version: 'v1',
+    inputPerMillionTokens: requireNonNegativeNumber(
+      draft.inputPerMillionTokens,
+      'pricing.inputPerMillionTokens',
+    ),
+    outputPerMillionTokens: requireNonNegativeNumber(
+      draft.outputPerMillionTokens,
+      'pricing.outputPerMillionTokens',
+    ),
+    cacheReadPerMillionTokens: requireNonNegativeNumber(
+      draft.cacheReadPerMillionTokens,
+      'pricing.cacheReadPerMillionTokens',
+    ),
+    cacheWritePerMillionTokens: requireNonNegativeNumber(
+      draft.cacheWritePerMillionTokens,
+      'pricing.cacheWritePerMillionTokens',
+    ),
+    cacheWriteLongPerMillionTokens: requireNonNegativeNumber(
+      draft.cacheWriteLongPerMillionTokens,
+      'pricing.cacheWriteLongPerMillionTokens',
+    ),
+    reasoningPerMillionTokens: requireNonNegativeNumber(
+      draft.reasoningPerMillionTokens,
+      'pricing.reasoningPerMillionTokens',
+    ),
   }
-  if (draft.tools) {
-    capabilities.push('TOOLS')
+}
+
+function requirePositiveNumber(value: string, field: string): number {
+  const parsed = requireNumber(value, field)
+  if (parsed <= 0) {
+    throw new Error(`${field} must be positive`)
   }
-  if (draft.reasoning) {
-    capabilities.push('THINKING')
-  }
-  if (inputModalities.includes('IMAGE')) {
-    capabilities.push('VISION')
-  }
-  if (inputModalities.includes('AUDIO')) {
-    capabilities.push('AUDIO')
-  }
-  return JSON.stringify(capabilities)
+  return parsed
 }
 
 export function toEditableModel(draft: ModelDraft): AgentModelCreateDTO {
@@ -402,53 +409,55 @@ export function toEditableModel(draft: ModelDraft): AgentModelCreateDTO {
     providerId,
     name: draft.name.trim(),
     description: trimToNull(draft.description),
-    capabilitiesJson: buildModelCapabilitiesJson(draft),
-    configJson: buildModelConfigJson(draft),
+    config: buildModelConfig(draft),
   }
 }
 
 export function toEditableModelUpdate(draft: ModelDraft): AgentModelUpdateDTO {
-  const data = toEditableModel(draft)
   return {
-    name: data.name,
-    description: data.description,
-    capabilitiesJson: data.capabilitiesJson,
-    configJson: data.configJson,
+    name: draft.name.trim(),
+    description: trimToNull(draft.description),
+    config: buildModelConfig(draft),
   }
 }
 
 export function extractVariantNamesFromModel(model?: AgentModelDTO | null): string[] {
-  if (!model?.configJson) {
+  if (!model?.config) {
     return ['medium']
   }
-  return parseVariants(parseConfigJson(model.configJson)).map((variant) => variant.name)
+  const raw = (model.config as AgentModelConfigDTO).variants
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return ['medium']
+  }
+  const names = raw
+    .map((variant) => String(variant.id ?? '').trim())
+    .filter(Boolean)
+  return names.length > 0 ? names : ['medium']
 }
 
 export function extractDefaultVariantFromModel(model?: AgentModelDTO | null): string {
   const names = extractVariantNamesFromModel(model)
-  if (!model?.configJson) {
-    return names[0] ?? 'medium'
+  const configured = model?.config?.defaultVariant?.trim() ?? ''
+  return names.includes(configured) ? configured : names[0] ?? 'medium'
+}
+
+function extractLimitNumber(value: number | string | null | undefined): number | undefined {
+  if (value == null) {
+    return undefined
   }
-  const configured = String(parseConfigJson(model.configJson).defaultVariant ?? '').trim()
-  return names.includes(configured) ? configured : (names[0] ?? 'medium')
+  const parsed = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
 }
 
 export function extractContextWindow(model?: AgentModelDTO | null): number | undefined {
-  if (!model?.configJson) {
-    return undefined
-  }
-  const config = parseConfigJson(model.configJson)
-  const limit = asRecord(config.limit)
-  const value = Number(limit.context ?? config.contextWindow)
-  return Number.isFinite(value) && value > 0 ? value : undefined
+  return extractLimitNumber(model?.config?.limit?.context ?? null)
 }
 
 export function extractMaxOutputTokens(model?: AgentModelDTO | null): number | undefined {
-  if (!model?.configJson) {
-    return undefined
-  }
-  const config = parseConfigJson(model.configJson)
-  const limit = asRecord(config.limit)
-  const value = Number(limit.output ?? config.maxOutputTokens)
-  return Number.isFinite(value) && value > 0 ? value : undefined
+  return extractLimitNumber(model?.config?.limit?.output ?? null)
+}
+
+function stringField(record: Record<string, unknown>, key: string): string {
+  const value = record[key]
+  return value == null ? '' : String(value)
 }

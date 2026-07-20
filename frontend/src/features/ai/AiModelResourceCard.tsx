@@ -7,9 +7,9 @@ import {
 } from '@/features/ai/ai-model-draft-codec'
 import { formatCompactList } from '@/features/ai/ai-resource-card-format'
 import { ResourceCardLayout } from '@/features/ai/AiResourceCardLayout'
-import type { AgentModelDTO } from '@/shared/api/contracts'
+import type { AgentModelWithProviderDTO } from '@/shared/api/contracts'
 
-function formatAbilities(model: AgentModelDTO): string {
+function formatAbilities(model: AgentModelWithProviderDTO): string {
   const draft = toModelDraft(model)
   const flags: string[] = []
   if (draft.tools) {
@@ -18,14 +18,14 @@ function formatAbilities(model: AgentModelDTO): string {
   if (draft.reasoning) {
     flags.push('reasoning')
   }
-  const modalityText = formatCompactList(draft.inputModalities, 3, '')
+  const modalityText = formatCompactList(Array.from(draft.inputModalities), 3, '')
   if (modalityText) {
     flags.push(modalityText)
   }
   return flags.length > 0 ? flags.join(' · ') : '—'
 }
 
-function formatLimit(model: AgentModelDTO): string {
+function formatLimit(model: AgentModelWithProviderDTO): string {
   const contextWindow = extractContextWindow(model)
   const output = extractMaxOutputTokens(model)
   const parts: string[] = []
@@ -44,7 +44,7 @@ export function ModelResourceCard({
   onDelete,
   deletePending,
 }: {
-  model: AgentModelDTO
+  model: AgentModelWithProviderDTO
   onEdit: () => void
   onDelete: () => void
   deletePending: boolean

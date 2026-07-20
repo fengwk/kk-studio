@@ -77,8 +77,25 @@ describe('ChatWorkspacePane commands', () => {
     vi.mocked(agentService.listAgents).mockResolvedValue(page(agents))
     vi.mocked(agentService.listModels).mockResolvedValue(page([{
       id: 'm1', providerId: 'p1', providerName: 'minimax', name: 'MiniMax', description: null,
-      capabilitiesJson: '["TEXT","TOOLS"]',
-      configJson: '{"defaultVariant":"default","variants":[{"id":"default"}]}',
+      config: {
+        limit: { context: 128000, output: 8192 },
+        abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+        pricing: {
+          currency: 'USD',
+          pricingTier: 'default',
+          serviceTier: 'default',
+          serviceTierMultiplier: 1,
+          version: 'v1',
+          inputPerMillionTokens: 0,
+          outputPerMillionTokens: 0,
+          cacheReadPerMillionTokens: 0,
+          cacheWritePerMillionTokens: 0,
+          cacheWriteLongPerMillionTokens: 0,
+          reasoningPerMillionTokens: 0,
+        },
+        defaultVariant: 'default',
+        variants: [{ id: 'default' }],
+      },
       createTime: null, updateTime: null,
     }]))
     vi.mocked(agentService.listProviders).mockResolvedValue(page([{

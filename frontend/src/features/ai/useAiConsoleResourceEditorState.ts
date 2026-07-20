@@ -10,7 +10,12 @@ import {
 import type { ResourceEditorPlan } from '@/features/ai/ai-resource-editor-plan-types'
 import type { AgentDraft, ModelDraft, ProviderDraft, ResourceModal } from '@/features/ai/ai-console-types'
 import { normalizeAgentDraftSelection, normalizeModelDraftDefaultVariant, normalizeModelDraftProvider } from '@/features/ai/ai-draft-normalizers'
-import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, AgentResourceId } from '@/shared/api/contracts'
+import type {
+  AgentDefinitionDTO,
+  AgentModelWithProviderDTO,
+  AgentProviderDTO,
+  AgentResourceId,
+} from '@/shared/api/contracts'
 
 export function useAiConsoleResourceEditorState({
   providers,
@@ -18,7 +23,7 @@ export function useAiConsoleResourceEditorState({
   agents,
 }: {
   providers: AgentProviderDTO[]
-  models: AgentModelDTO[]
+  models: AgentModelWithProviderDTO[]
   agents: AgentDefinitionDTO[]
 }) {
   const [resourceModal, setResourceModal] = useState<ResourceModal | null>(null)

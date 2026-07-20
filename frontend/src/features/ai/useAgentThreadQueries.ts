@@ -6,7 +6,7 @@ import {
 } from '@/features/ai/harness-thread-event-stream'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
-import type { ThreadEventDTO } from '@/shared/api/contracts'
+import type { AgentModelWithProviderDTO, ThreadEventDTO } from '@/shared/api/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 export function useAgentThreadQueries(threadId: string, sessionId: string) {
@@ -80,6 +80,13 @@ export function useAgentThreadQueries(threadId: string, sessionId: string) {
     },
     enabled: Boolean(threadId),
   })
+  // Client-side provider-name enrichment mirrors useAiConsoleResourceQueries so the thread
+  // panel can surface the same joined label without a backend contract change.
+  const providers = providersQuery.data?.results ?? []
+  const models: AgentModelWithProviderDTO[] = (modelsQuery.data?.results ?? []).map((model) => {
+    const provider = providers.find((item) => String(item.id) === String(model.providerId))
+    return { ...model, providerName: provider?.name ?? null }
+  })
   return {
     agentsQuery,
     modelsQuery,
@@ -91,8 +98,8 @@ export function useAgentThreadQueries(threadId: string, sessionId: string) {
     inputsQuery,
     eventsQuery,
     agents: agentsQuery.data?.results ?? [],
-    models: modelsQuery.data?.results ?? [],
-    providers: providersQuery.data?.results ?? [],
+    models,
+    providers,
     session: sessionQuery.data,
     threads: sessionThreadsQuery.data ?? [],
     thread,
@@ -103,5 +110,9 @@ export function useAgentThreadQueries(threadId: string, sessionId: string) {
 }
 
 function isThreadActive(status: string | undefined): boolean {
+  return threadIsActive(status)
+}
+
+function threadIsActive(status: string | undefined): boolean {
   return status === 'RUNNING' || status === 'WAITING' || status === 'RETRYING'
 }

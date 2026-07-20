@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.agent.model.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -8,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 
 import java.math.BigDecimal;
@@ -23,20 +23,14 @@ class AgentModelRuntimeConfigParserTest {
   /** Every executable field, including six independent prices, survives strict parsing. */
   @Test
   void parsesCompleteRuntimeModelWithoutTokenBasedPriceInference() {
-    var parsed = parser.parse("[\"TEXT\",\"TOOLS\",\"THINKING\",\"VISION\"]", validConfig());
+    var parsed = parser.parse(validConfig());
 
     assertEquals(128000L, parsed.contextWindow());
     assertEquals(8192L, parsed.maxOutputTokens());
     assertEquals(
         Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE), parsed.inputModalities());
-    // runtime capabilities are derived from abilities, not capabilitiesJson content.
-    assertEquals(
-        Set.of(
-            ModelCapability.TEXT,
-            ModelCapability.TOOLS,
-            ModelCapability.THINKING,
-            ModelCapability.VISION),
-        parsed.capabilities());
+    assertTrue(parsed.tools());
+    assertTrue(parsed.reasoning());
     assertEquals("quality", parsed.defaultVariant());
     assertEquals(1, parsed.variants().size());
     assertEquals("quality", parsed.variants().get(0).name());
@@ -66,43 +60,46 @@ class AgentModelRuntimeConfigParserTest {
   void normalizesOffReasoningEffortToNull() {
     String config =
         validConfig().replace("\"reasoningEffort\":\"high\"", "\"reasoningEffort\":\"off\"");
-    var parsed = parser.parse("[\"TEXT\",\"TOOLS\",\"THINKING\",\"VISION\"]", config);
+    var parsed = parser.parse(config);
     assertNull(parsed.variants().get(0).reasoningEffort());
+  }
+
+  /** Disabled reasoning surface as falsy tools/reasoning booleans on the descriptor. */
+  @Test
+  void exposesReasoningAndToolsAsBooleans() {
+    String config = validConfig().replace("\"reasoning\":true", "\"reasoning\":false");
+    var parsed = parser.parse(config);
+    assertFalse(parsed.reasoning());
+    assertTrue(parsed.tools());
   }
 
   /** Missing fields, wrong JSON types, unknown enums, and invalid variants fail explicitly. */
   @Test
   void rejectsIncompleteOrMistypedExecutableConfiguration() {
-    assertInvalid("[\"TEXT\"]", "{}", "limit");
-    assertInvalid("[\"TEXT\"]", validConfig().replace("128000", "\"128000\""), "limit.context");
-    assertInvalid("[\"UNKNOWN\"]", validConfig(), "unsupported value");
+    assertInvalid("{}", "limit");
+    assertInvalid(validConfig().replace("128000", "\"128000\""), "limit.context");
     assertInvalid(
-        "[\"TEXT\"]",
-        validConfig().replace("[\"TEXT\",\"IMAGE\"]", "[]"),
-        "modalities.input must not be empty");
+        validConfig().replace("[\"TEXT\",\"IMAGE\"]", "[]"), "inputModalities must not be empty");
+    assertInvalid(validConfig().replace("\"topP\":0.8", "\"topP\":2"), "topP must be in");
     assertInvalid(
-        "[\"TEXT\"]", validConfig().replace("\"topP\":0.8", "\"topP\":2"), "topP must be in");
-    assertInvalid(
-        "[\"TEXT\"]",
         validConfig()
             .replace("\"reasoningPerMillionTokens\":3.6", "\"reasoningPerMillionTokens\":null"),
         "reasoningPerMillionTokens");
-    assertInvalid("{}", validConfig(), "capabilitiesJson must be an array");
-    assertInvalid("[]", validConfig(), "capabilitiesJson must not be empty");
+    assertInvalid(
+        validConfig().replace("[\"TEXT\",\"IMAGE\"]", "[\"UNKNOWN\"]"),
+        "contains unsupported value");
   }
 
   /** Structural and numeric boundaries reject every shape that could create an unusable model. */
   @Test
   void rejectsInvalidVariantPricingAndJsonBoundaries() {
-    assertInvalid("", validConfig(), "capabilitiesJson must not be blank");
-    assertInvalid("[\"TEXT\"]", "not-json", "configJson must be valid JSON");
-    assertInvalid("[\"TEXT\"]", "[]", "configJson must be an object");
+    assertInvalid("", "configJson must not be blank");
+    assertInvalid("not-json", "configJson must be valid JSON");
+    assertInvalid("[]", "configJson must be an object");
     assertInvalid(
-        "[\"TEXT\"]",
         validConfig().replace("\"output\":8192", "\"output\":128001"),
         "must not exceed limit.context");
     assertInvalid(
-        "[\"TEXT\"]",
         validConfig()
             .replace(
                 "\"variants\":[{\"id\":\"quality\",\"maxOutputTokens\":4096,"
@@ -112,53 +109,45 @@ class AgentModelRuntimeConfigParserTest {
                 "\"variants\":[]"),
         "variants must not be empty");
     assertInvalid(
-        "[\"TEXT\"]",
         validConfig().replace("\"variants\":[{", "\"variants\":[1,{"),
         "variants[0] must be an object");
     assertInvalid(
-        "[\"TEXT\"]",
         validConfig()
             .replace(
                 "\"stopSequences\":[\"done\"],\"reasoningEffort\":\"high\"}]",
                 "\"stopSequences\":[\"done\"],\"reasoningEffort\":\"high\"},{\"id\":\"quality\"}]"),
         "duplicate id");
     assertInvalid(
-        "[\"TEXT\"]",
         validConfig().replace("\"defaultVariant\":\"quality\"", "\"defaultVariant\":\"missing\""),
         "defaultVariant must match");
     assertInvalid(
-        "[\"TEXT\"]",
         validConfig().replace("\"maxOutputTokens\":4096", "\"maxOutputTokens\":999999"),
         "must not exceed model");
-    assertInvalid("[\"TEXT\"]", validConfig().replace("\"topK\":20", "\"topK\":0"), "topK");
+    assertInvalid(validConfig().replace("\"topK\":20", "\"topK\":0"), "topK");
     assertInvalid(
-        "[\"TEXT\"]",
         validConfig().replace("\"temperature\":0.4", "\"temperature\":\"hot\""),
         "temperature must be a number");
     assertInvalid(
-        "[\"TEXT\"]",
         validConfig().replace("\"stopSequences\":[\"done\"]", "\"stopSequences\":[1]"),
         "stopSequences must contain");
     assertInvalid(
-        "[\"TEXT\"]",
         validConfig().replace("\"serviceTierMultiplier\":1.25", "\"serviceTierMultiplier\":0"),
         "serviceTierMultiplier must be positive");
     assertInvalid(
-        "[\"TEXT\"]",
         validConfig().replace("\"inputPerMillionTokens\":1.1", "\"inputPerMillionTokens\":-1"),
         "inputPerMillionTokens must not be negative");
   }
 
-  private void assertInvalid(String capabilities, String config, String message) {
+  private void assertInvalid(String config, String message) {
     IllegalArgumentException error =
-        assertThrows(IllegalArgumentException.class, () -> parser.parse(capabilities, config));
+        assertThrows(IllegalArgumentException.class, () -> parser.parse(config));
     assertTrue(error.getMessage().contains(message), error.getMessage());
   }
 
   private String validConfig() {
     return "{\"limit\":{\"context\":128000,\"output\":8192},"
         + "\"abilities\":{\"tools\":true,\"reasoning\":true,"
-        + "\"modalities\":{\"input\":[\"TEXT\",\"IMAGE\"],\"output\":[\"TEXT\"]}},"
+        + "\"inputModalities\":[\"TEXT\",\"IMAGE\"]},"
         + "\"defaultVariant\":\"quality\","
         + "\"variants\":[{\"id\":\"quality\",\"maxOutputTokens\":4096,"
         + "\"temperature\":0.4,\"topP\":0.8,\"topK\":20,"

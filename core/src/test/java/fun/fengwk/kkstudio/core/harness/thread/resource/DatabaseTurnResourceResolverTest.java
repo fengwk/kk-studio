@@ -74,7 +74,7 @@ class DatabaseTurnResourceResolverTest {
   private static final String MODEL_CONFIG =
       "{\"limit\":{\"context\":128000,\"output\":8192},"
           + "\"abilities\":{\"tools\":true,\"reasoning\":false,"
-          + "\"modalities\":{\"input\":[\"TEXT\",\"IMAGE\"],\"output\":[\"TEXT\"]}},"
+          + "\"inputModalities\":[\"TEXT\",\"IMAGE\"]},"
           + "\"defaultVariant\":\"quality\","
           + "\"variants\":[{\"id\":\"quality\",\"maxOutputTokens\":4096},"
           + "{\"id\":\"fast\",\"maxOutputTokens\":1024}],"
@@ -498,7 +498,6 @@ class DatabaseTurnResourceResolverTest {
     model.setProviderId(providerId);
     model.setName("provider-api-model");
     model.setDescription("Provider API model");
-    model.setCapabilitiesJson("[\"TEXT\",\"TOOLS\"]");
     model.setConfigJson(config);
     return model;
   }
