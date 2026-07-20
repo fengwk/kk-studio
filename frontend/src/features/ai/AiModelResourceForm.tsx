@@ -139,6 +139,10 @@ export function ModelForm({
 
       <fieldset className="form-group capability-picker">
         <legend>Input Modalities</legend>
+        <p className="inline-hint">
+          按模型实际输入能力勾选（参考 LangChain4j：text / image / audio / video / PDF·document），不限于 pi
+          catalog。
+        </p>
         <div className="capability-options">
           {MODALITIES.map((item) => {
             const checked = draft.inputModalities.includes(item)
