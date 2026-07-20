@@ -72,10 +72,12 @@ class DatabaseTurnResourceResolverTest {
   private static final long SESSION_ID = 7L;
   private static final long THREAD_ID = 9L;
   private static final String MODEL_CONFIG =
-      "{\"contextWindow\":128000,\"maxOutputTokens\":8192,"
-          + "\"inputModalities\":[\"TEXT\",\"IMAGE\"],"
-          + "\"variants\":[{\"name\":\"quality\",\"maxOutputTokens\":4096},"
-          + "{\"name\":\"fast\",\"maxOutputTokens\":1024}],"
+      "{\"limit\":{\"context\":128000,\"output\":8192},"
+          + "\"abilities\":{\"tools\":true,\"reasoning\":false,"
+          + "\"modalities\":{\"input\":[\"TEXT\",\"IMAGE\"],\"output\":[\"TEXT\"]}},"
+          + "\"defaultVariant\":\"quality\","
+          + "\"variants\":[{\"id\":\"quality\",\"maxOutputTokens\":4096},"
+          + "{\"id\":\"fast\",\"maxOutputTokens\":1024}],"
           + "\"pricing\":{\"currency\":\"USD\",\"pricingTier\":\"batch\","
           + "\"serviceTier\":\"priority\",\"serviceTierMultiplier\":1.25,"
           + "\"version\":\"price-v7\",\"inputPerMillionTokens\":1.1,"

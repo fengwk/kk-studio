@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.web.environment;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.web.servlet.server.ServletWebServerFactory;
+import jakarta.servlet.ServletContext;
+import jakarta.websocket.server.ServerContainer;
+import org.springframework.boot.web.servlet.ServletContextInitializer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
@@ -12,7 +12,13 @@ import org.springframework.web.socket.server.standard.ServletServerContainerFact
 
 import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentGatewayProperties;
 
-/** WebSocket transport registration for the Daemon v1 Environment gateway. */
+/**
+ * WebSocket transport registration for the Daemon v1 Environment gateway.
+ *
+ * <p>Daemon {@code CAPABILITIES} frames routinely exceed Tomcat's default 8 KiB text buffer once
+ * coding tools and skills are advertised. Both the Spring {@link ServletServerContainerFactoryBean}
+ * and a late {@link ServletContextInitializer} raise the buffer so HELLO can complete into READY.
+ */
 @Configuration(proxyBeanMethods = false)
 @EnableWebSocket
 public class EnvironmentDaemonWebSocketConfiguration implements WebSocketConfigurer {
@@ -28,14 +34,33 @@ public class EnvironmentDaemonWebSocketConfiguration implements WebSocketConfigu
     registry.addHandler(handler, EnvironmentDaemonWebSocketHandler.PATH);
   }
 
-  /** Raises the servlet container text buffer for bounded Base64 artifact callback payloads. */
+  /** Primary Spring Boot hook for the JSR-356 {@link ServerContainer} buffer limits. */
   @Bean
-  @ConditionalOnBean(ServletWebServerFactory.class)
-  @ConditionalOnMissingBean(ServletServerContainerFactoryBean.class)
   public ServletServerContainerFactoryBean environmentDaemonWebSocketContainer(
       EnvironmentGatewayProperties properties) {
+    int maxMessageBytes = properties.requireMaxMessageBytes();
     ServletServerContainerFactoryBean container = new ServletServerContainerFactoryBean();
-    container.setMaxTextMessageBufferSize(properties.requireMaxMessageBytes());
+    container.setMaxTextMessageBufferSize(maxMessageBytes);
+    container.setMaxBinaryMessageBufferSize(maxMessageBytes);
     return container;
+  }
+
+  /**
+   * Defense in depth: re-apply buffer limits after the servlet context is fully initialized.
+   *
+   * <p>Some container boot orders leave the default 8 KiB limits even when the factory bean is
+   * present; re-asserting here prevents CAPABILITIES close code 1009.
+   */
+  @Bean
+  public ServletContextInitializer environmentDaemonWebSocketBufferInitializer(
+      EnvironmentGatewayProperties properties) {
+    int maxMessageBytes = properties.requireMaxMessageBytes();
+    return (ServletContext servletContext) -> {
+      Object attribute = servletContext.getAttribute(ServerContainer.class.getName());
+      if (attribute instanceof ServerContainer serverContainer) {
+        serverContainer.setDefaultMaxTextMessageBufferSize(maxMessageBytes);
+        serverContainer.setDefaultMaxBinaryMessageBufferSize(maxMessageBytes);
+      }
+    };
   }
 }

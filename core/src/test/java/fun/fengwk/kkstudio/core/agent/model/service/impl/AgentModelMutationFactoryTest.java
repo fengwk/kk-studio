@@ -17,9 +17,11 @@ public class AgentModelMutationFactoryTest {
 
   private static final String CAPABILITIES = "[\"TEXT\",\"TOOLS\"]";
   private static final String CONFIG =
-      "{\"contextWindow\":32768,\"maxOutputTokens\":4096,"
-          + "\"inputModalities\":[\"TEXT\"],"
-          + "\"variants\":[{\"name\":\"default\",\"maxOutputTokens\":4096}],"
+      "{\"limit\":{\"context\":32768,\"output\":4096},"
+          + "\"abilities\":{\"tools\":true,\"reasoning\":false,"
+          + "\"modalities\":{\"input\":[\"TEXT\"],\"output\":[\"TEXT\"]}},"
+          + "\"defaultVariant\":\"default\","
+          + "\"variants\":[{\"id\":\"default\"}],"
           + "\"pricing\":{\"currency\":\"USD\",\"pricingTier\":\"standard\","
           + "\"serviceTier\":\"default\",\"serviceTierMultiplier\":1,"
           + "\"version\":\"v1\",\"inputPerMillionTokens\":1,"

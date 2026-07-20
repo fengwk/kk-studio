@@ -18,7 +18,27 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
-/** Strictly parses the executable portion of persisted Agent model JSON. */
+/**
+ * Strictly parses the executable portion of persisted Agent model JSON.
+ *
+ * <p>config_json 真源：
+ *
+ * <pre>
+ * {
+ *   "limit": { "context", "output" },
+ *   "abilities": {
+ *     "tools", "reasoning",
+ *     "modalities": { "input": [...], "output": [...] }
+ *   },
+ *   "pricing": { ... },
+ *   "defaultVariant": "medium",
+ *   "variants": [{ "id", "reasoningEffort?", sampling... }]
+ * }
+ * </pre>
+ *
+ * <p>capabilities_json 仍校验为合法 {@link ModelCapability} 非空数组（API 投影）；runtime 的 capabilities 由
+ * abilities 派生。
+ */
 @Component
 public final class AgentModelRuntimeConfigParser {
 
@@ -29,32 +49,93 @@ public final class AgentModelRuntimeConfigParser {
   }
 
   public ParsedAgentModelConfig parse(String capabilitiesJson, String configJson) {
-    JsonNode capabilities = parseJson(capabilitiesJson, "capabilitiesJson");
+    JsonNode capabilitiesNode = parseJson(capabilitiesJson, "capabilitiesJson");
     JsonNode config = parseJson(configJson, "configJson");
-    if (!capabilities.isArray()) {
+    if (!capabilitiesNode.isArray()) {
       throw invalid("capabilitiesJson must be an array");
     }
     if (!config.isObject()) {
       throw invalid("configJson must be an object");
     }
 
-    long contextWindow = requiredPositiveLong(config, "contextWindow");
-    long maxOutputTokens = requiredPositiveLong(config, "maxOutputTokens");
-    if (maxOutputTokens > contextWindow) {
-      throw invalid("configJson.maxOutputTokens must not exceed contextWindow");
+    // capabilitiesJson 仍校验合法枚举投影；runtime 以 abilities 派生结果为准。
+    enumSet(capabilitiesNode, ModelCapability.class, "capabilitiesJson");
+    if (capabilitiesNode.isEmpty()) {
+      throw invalid("capabilitiesJson must not be empty");
     }
+
+    JsonNode limit = requiredObject(config, "limit");
+    long contextWindow = requiredPositiveLong(limit, "context", "configJson.limit");
+    long maxOutputTokens = requiredPositiveLong(limit, "output", "configJson.limit");
+    if (maxOutputTokens > contextWindow) {
+      throw invalid("configJson.limit.output must not exceed limit.context");
+    }
+
+    JsonNode abilities = requiredObject(config, "abilities");
+    boolean tools = requiredBoolean(abilities, "tools", "configJson.abilities");
+    boolean reasoning = requiredBoolean(abilities, "reasoning", "configJson.abilities");
+    JsonNode modalities = requiredObject(abilities, "modalities");
     Set<ModelInputModality> inputModalities =
         enumSet(
-            requiredArray(config, "inputModalities"), ModelInputModality.class, "inputModalities");
+            requiredArray(modalities, "input", "configJson.abilities.modalities"),
+            ModelInputModality.class,
+            "configJson.abilities.modalities.input");
     if (inputModalities.isEmpty()) {
-      throw invalid("configJson.inputModalities must not be empty");
+      throw invalid("configJson.abilities.modalities.input must not be empty");
     }
-    Set<ModelCapability> modelCapabilities =
-        enumSet(capabilities, ModelCapability.class, "capabilitiesJson");
+    // output 暂只校验形态（若提供），不进 runtime descriptor。
+    if (modalities.has("output") && !modalities.get("output").isNull()) {
+      enumSet(
+          requiredArray(modalities, "output", "configJson.abilities.modalities"),
+          ModelInputModality.class,
+          "configJson.abilities.modalities.output");
+    }
+
+    Set<ModelCapability> derivedCapabilities =
+        deriveCapabilities(tools, reasoning, inputModalities);
+
     List<ModelVariant> variants = variants(requiredArray(config, "variants"), maxOutputTokens);
+    String defaultVariant = requiredText(config, "defaultVariant", "configJson");
+    boolean defaultFound =
+        variants.stream().anyMatch(variant -> variant.name().equals(defaultVariant));
+    if (!defaultFound) {
+      throw invalid("configJson.defaultVariant must match a variants[].id");
+    }
+
     ModelPricing pricing = pricing(requiredObject(config, "pricing"));
     return new ParsedAgentModelConfig(
-        contextWindow, maxOutputTokens, inputModalities, modelCapabilities, variants, pricing);
+        contextWindow,
+        maxOutputTokens,
+        inputModalities,
+        derivedCapabilities,
+        variants,
+        defaultVariant,
+        pricing);
+  }
+
+  private static Set<ModelCapability> deriveCapabilities(
+      boolean tools, boolean reasoning, Set<ModelInputModality> inputModalities) {
+    EnumSet<ModelCapability> result = EnumSet.noneOf(ModelCapability.class);
+    if (inputModalities.contains(ModelInputModality.TEXT)) {
+      result.add(ModelCapability.TEXT);
+    }
+    if (tools) {
+      result.add(ModelCapability.TOOLS);
+    }
+    if (reasoning) {
+      result.add(ModelCapability.THINKING);
+    }
+    if (inputModalities.contains(ModelInputModality.IMAGE)) {
+      result.add(ModelCapability.VISION);
+    }
+    if (inputModalities.contains(ModelInputModality.AUDIO)) {
+      result.add(ModelCapability.AUDIO);
+    }
+    if (result.isEmpty()) {
+      // 极端：无 TEXT 仅 VIDEO 等——至少保证非空集合给 descriptor 校验。
+      result.add(ModelCapability.TEXT);
+    }
+    return Set.copyOf(result);
   }
 
   private List<ModelVariant> variants(JsonNode values, long modelMaxOutputTokens) {
@@ -62,33 +143,37 @@ public final class AgentModelRuntimeConfigParser {
       throw invalid("configJson.variants must not be empty");
     }
     List<ModelVariant> result = new ArrayList<>();
-    Set<String> names = new HashSet<>();
+    Set<String> ids = new HashSet<>();
     for (int index = 0; index < values.size(); index++) {
       JsonNode value = values.get(index);
       String path = "configJson.variants[" + index + "]";
       if (!value.isObject()) {
         throw invalid(path + " must be an object");
       }
-      String name = requiredText(value, "name", path);
-      if (!names.add(name)) {
-        throw invalid("configJson.variants contains duplicate name: " + name);
+      String id = requiredText(value, "id", path);
+      if (!ids.add(id)) {
+        throw invalid("configJson.variants contains duplicate id: " + id);
       }
       Integer maxOutputTokens = optionalPositiveInt(value, "maxOutputTokens", path);
       if (maxOutputTokens != null && maxOutputTokens > modelMaxOutputTokens) {
-        throw invalid(path + ".maxOutputTokens must not exceed model maxOutputTokens");
+        throw invalid(path + ".maxOutputTokens must not exceed model limit.output");
       }
-      String thinkingLevel = optionalText(value, "thinkingLevel", path);
-      result.add(
-          new ModelVariant(
-              name,
-              maxOutputTokens,
-              optionalDouble(value, "temperature", path),
-              optionalDouble(value, "topP", path),
-              optionalPositiveInt(value, "topK", path),
-              optionalDouble(value, "frequencyPenalty", path),
-              optionalDouble(value, "presencePenalty", path),
-              optionalStrings(value, "stopSequences", path),
-              thinkingLevel));
+      String reasoningEffort = optionalText(value, "reasoningEffort", path);
+      try {
+        result.add(
+            new ModelVariant(
+                id,
+                maxOutputTokens,
+                optionalDouble(value, "temperature", path),
+                optionalDouble(value, "topP", path),
+                optionalPositiveInt(value, "topK", path),
+                optionalDouble(value, "frequencyPenalty", path),
+                optionalDouble(value, "presencePenalty", path),
+                optionalStrings(value, "stopSequences", path),
+                reasoningEffort));
+      } catch (IllegalArgumentException error) {
+        throw invalid(path + " is invalid: " + error.getMessage(), error);
+      }
     }
     return List.copyOf(result);
   }
@@ -125,9 +210,13 @@ public final class AgentModelRuntimeConfigParser {
   }
 
   private static JsonNode requiredArray(JsonNode parent, String field) {
+    return requiredArray(parent, field, "configJson");
+  }
+
+  private static JsonNode requiredArray(JsonNode parent, String field, String parentPath) {
     JsonNode value = parent.get(field);
     if (value == null || !value.isArray()) {
-      throw invalid("configJson." + field + " must be an array");
+      throw invalid(parentPath + "." + field + " must be an array");
     }
     return value;
   }
@@ -140,16 +229,24 @@ public final class AgentModelRuntimeConfigParser {
     return value;
   }
 
-  private static long requiredPositiveLong(JsonNode parent, String field) {
+  private static long requiredPositiveLong(JsonNode parent, String field, String parentPath) {
     JsonNode value = parent.get(field);
     if (value == null || !value.isIntegralNumber() || !value.canConvertToLong()) {
-      throw invalid("configJson." + field + " must be an integer");
+      throw invalid(parentPath + "." + field + " must be an integer");
     }
     long result = value.longValue();
     if (result <= 0) {
-      throw invalid("configJson." + field + " must be positive");
+      throw invalid(parentPath + "." + field + " must be positive");
     }
     return result;
+  }
+
+  private static boolean requiredBoolean(JsonNode parent, String field, String parentPath) {
+    JsonNode value = parent.get(field);
+    if (value == null || !value.isBoolean()) {
+      throw invalid(parentPath + "." + field + " must be a boolean");
+    }
+    return value.booleanValue();
   }
 
   private static String requiredText(JsonNode parent, String field, String path) {
@@ -186,7 +283,7 @@ public final class AgentModelRuntimeConfigParser {
 
   private static Integer optionalPositiveInt(JsonNode parent, String field, String path) {
     JsonNode value = parent.get(field);
-    if (value == null) {
+    if (value == null || value.isNull()) {
       return null;
     }
     if (!value.isIntegralNumber() || !value.canConvertToInt()) {
@@ -201,7 +298,7 @@ public final class AgentModelRuntimeConfigParser {
 
   private static Double optionalDouble(JsonNode parent, String field, String path) {
     JsonNode value = parent.get(field);
-    if (value == null) {
+    if (value == null || value.isNull()) {
       return null;
     }
     if (!value.isNumber()) {
@@ -216,7 +313,7 @@ public final class AgentModelRuntimeConfigParser {
 
   private static List<String> optionalStrings(JsonNode parent, String field, String path) {
     JsonNode value = parent.get(field);
-    if (value == null) {
+    if (value == null || value.isNull()) {
       return List.of();
     }
     if (!value.isArray()) {
@@ -269,12 +366,16 @@ public final class AgentModelRuntimeConfigParser {
       Set<ModelInputModality> inputModalities,
       Set<ModelCapability> capabilities,
       List<ModelVariant> variants,
+      String defaultVariant,
       ModelPricing pricing) {
 
     public ParsedAgentModelConfig {
       inputModalities = Set.copyOf(inputModalities);
       capabilities = Set.copyOf(capabilities);
       variants = List.copyOf(variants);
+      if (defaultVariant == null || defaultVariant.isBlank()) {
+        throw new IllegalArgumentException("defaultVariant must not be blank");
+      }
       pricing = Objects.requireNonNull(pricing, "pricing");
     }
   }

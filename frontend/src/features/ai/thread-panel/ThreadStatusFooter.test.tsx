@@ -32,19 +32,37 @@ describe('ThreadStatusFooter', () => {
         }}
       />,
     )
-    const line = screen.getByLabelText('会话状态').textContent ?? ''
-    expect(line).toContain('agent:assistant')
-    expect(line).toContain('YOLO')
+    const footer = screen.getByLabelText('会话状态')
+    const line = footer.textContent ?? ''
+    expect(line).toContain('agent:assistant · YOLO')
+    expect(line).toContain('minimax/MiniMax · default')
+    expect(line).not.toContain('(minimax)')
     expect(line).toContain('CH50.0%')
-    expect(line).toContain('$0.300')
+    expect(line).toContain(' · ')
+    // 三段都在（布局装箱依赖真实宽度；jsdom 下不一定同行，故不强依赖 sep 数量）
+    expect(footer.querySelectorAll('.thread-status-seg').length).toBe(3)
+    expect(line).toMatch(/4\.0k\/100k · \$0\.300|4k\/100k · \$0\.300/)
   })
 
-  it('falls back when usage is missing and labels are empty', () => {
-    render(<ThreadStatusFooter agentName="-" providerName={null as never} modelName="undefined" />)
+  it('shows zero usage before any conversation turn', () => {
+    render(
+      <ThreadStatusFooter
+        agentName="-"
+        providerName={null as never}
+        modelName="undefined"
+        contextWindow={205000}
+      />,
+    )
     const line = screen.getByLabelText('会话状态').textContent ?? ''
     expect(line).toContain('agent:agent')
     expect(line).toContain('unknown-model')
     expect(line).not.toContain('YOLO')
+    // 未开对话也展示零用量 + 上下文上限
+    expect(line).toContain('↑0')
+    expect(line).toContain('↓0')
+    expect(line).toContain('CH0.0%')
+    expect(line).toMatch(/0\/205k|0\/205\.0k/)
+    expect(line).toContain('$0.000')
   })
 
   it('uses cache token ratio and large token formatting branches', () => {

@@ -205,7 +205,7 @@ public class StudioAgentResourceControllerTest {
     model.setCapabilitiesJson("[\"TEXT\",\"TOOLS\"]");
     model.setConfigJson(
         """
-        {"contextWindow":32768,"maxOutputTokens":4096,"inputModalities":["TEXT"],"variants":[{"name":"default","maxOutputTokens":4096}],"pricing":{"currency":"USD","pricingTier":"test","serviceTier":"default","serviceTierMultiplier":1,"version":"v1","inputPerMillionTokens":0,"outputPerMillionTokens":0,"cacheReadPerMillionTokens":0,"cacheWritePerMillionTokens":0,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0}}
+        {"limit":{"context":32768,"output":4096},"abilities":{"tools":true,"reasoning":false,"modalities":{"input":["TEXT"],"output":["TEXT"]}},"defaultVariant":"default","variants":[{"id":"default"}],"pricing":{"currency":"USD","pricingTier":"test","serviceTier":"default","serviceTierMultiplier":1,"version":"v1","inputPerMillionTokens":0,"outputPerMillionTokens":0,"cacheReadPerMillionTokens":0,"cacheWritePerMillionTokens":0,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0}}
         """);
   }
 }

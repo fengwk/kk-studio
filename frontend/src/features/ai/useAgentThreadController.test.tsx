@@ -78,8 +78,9 @@ describe('useAgentThreadController', () => {
           providerName: 'minimax',
           name: 'MiniMax-M2.7',
           description: null,
-          defaultVariant: 'default',
-          variantsJson: null,
+          capabilitiesJson: '["TEXT","TOOLS"]',
+          configJson:
+            '{"limit":{"context":128000,"output":8192},"defaultVariant":"default","variants":[{"id":"default"}]}',
           createTime: null,
           updateTime: null,
         },
@@ -474,6 +475,7 @@ describe('useAgentThreadController', () => {
     await waitFor(() => expect(result.current.disabled).toBe(false))
     expect(result.current.runtimeLabels.modelName).toBe('MiniMax-M2.7')
     expect(result.current.runtimeLabels.providerName).toBe('minimax')
+    expect(result.current.runtimeLabels.contextWindow).toBe(128000)
     expect(result.current.runtimeLabels.modelName).not.toBe('unknown-model')
   })
 

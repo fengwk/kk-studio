@@ -51,10 +51,10 @@ describe('agentService', () => {
       modelCallIdleTimeoutMillis: 120000,
     }
     const modelBody = {
-      provider: 'minimax',
+      providerId: 'provider-1',
       name: 'MiniMax-M2.7',
-      defaultVariant: 'default',
-      variantsJson: '[{"name":"default"}]',
+      capabilitiesJson: '["TEXT","TOOLS"]',
+      configJson: '{"defaultVariant":"default","variants":[{"id":"default"}]}',
     }
     const agentBody = {
       name: 'default-assistant',
@@ -63,7 +63,9 @@ describe('agentService', () => {
       config: { tools: [], skills: [], allowedSubagents: [] },
     }
     const updateProviderBody = { description: 'updated' }
-    const updateModelBody = { defaultVariant: 'fast' }
+    const updateModelBody = {
+      configJson: '{"defaultVariant":"fast","variants":[{"id":"fast"}]}',
+    }
     const updateAgentBody = { description: 'updated' }
 
     await service.createProvider(providerBody)

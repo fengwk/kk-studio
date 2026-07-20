@@ -15,24 +15,19 @@ export function newKeyValueDraft(key = '', value = ''): KeyValueDraft {
   }
 }
 
-export function newVariantDraft(
-  input?: Partial<Omit<VariantDraft, 'id'>> & { thinkingLevel?: string },
-): VariantDraft {
-  const thinkingLevel = input?.thinkingLevel?.trim() || input?.name?.trim() || 'off'
+export function newVariantDraft(input?: Partial<Omit<VariantDraft, 'id'>>): VariantDraft {
   return {
     id: nextDraftId('variant'),
-    name: input?.name ?? thinkingLevel,
-    thinkingLevel,
-    temperature: input?.temperature ?? '',
+    name: input?.name ?? 'medium',
+    reasoningEffort: input?.reasoningEffort ?? '',
     maxOutputTokens: input?.maxOutputTokens ?? '',
+    temperature: input?.temperature ?? '',
+    topP: input?.topP ?? '',
+    topK: input?.topK ?? '',
+    frequencyPenalty: input?.frequencyPenalty ?? '',
+    presencePenalty: input?.presencePenalty ?? '',
+    stopSequences: input?.stopSequences ?? '',
   }
-}
-
-export function parseScalar(value: unknown): string {
-  if (value == null) {
-    return ''
-  }
-  return String(value)
 }
 
 export function trimToNull(value: string): string | null {
@@ -40,33 +35,19 @@ export function trimToNull(value: string): string | null {
   return trimmed ? trimmed : null
 }
 
-export function numberToNull(value: string): number | null {
-  const trimmed = value.trim()
+export function numberToNull(value: string | number | null | undefined): number | null {
+  if (value == null) {
+    return null
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
+  }
+  const trimmed = String(value).trim().replace(/,/g, '')
   if (!trimmed) {
     return null
   }
   const parsed = Number(trimmed)
   return Number.isFinite(parsed) ? parsed : null
-}
-
-export function coerceScalar(value: string): string | number | boolean | null {
-  const trimmed = value.trim()
-  if (!trimmed) {
-    return ''
-  }
-  if (trimmed === 'true') {
-    return true
-  }
-  if (trimmed === 'false') {
-    return false
-  }
-  if (trimmed === 'null') {
-    return null
-  }
-  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-    return Number(trimmed)
-  }
-  return trimmed
 }
 
 export function splitCommaSeparatedValues(value: string): string[] {

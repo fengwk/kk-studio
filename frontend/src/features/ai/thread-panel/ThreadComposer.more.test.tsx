@@ -6,6 +6,7 @@ import { ThreadComposer } from '@/features/ai/thread-panel/ThreadComposer'
 import { ThreadCommandPalette } from '@/features/ai/thread-panel/ThreadCommandPalette'
 import { ThreadWidgetStack } from '@/features/ai/thread-panel/ThreadWidgetStack'
 import { ThreadSubagentWidget } from '@/features/ai/thread-panel/ThreadSubagentWidget'
+import { ThreadActivityWidget } from '@/features/ai/thread-panel/ThreadActivityWidget'
 import type { ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
 
 function ControlledComposer({
@@ -220,5 +221,17 @@ describe('ThreadWidgetStack and SubagentWidget', () => {
     expect(container).toBeEmptyDOMElement()
     const empty = render(<ThreadSubagentWidget taskTree={[]} />)
     expect(empty.container).toBeEmptyDOMElement()
+  })
+
+  it('collapses zone when children all render null (no residual height/border)', () => {
+    const { container } = render(
+      <ThreadWidgetStack working={false}>
+        <ThreadSubagentWidget taskTree={[]} />
+        <ThreadActivityWidget activities={[]} />
+      </ThreadWidgetStack>,
+    )
+    const zone = container.querySelector('.thread-widget-zone')
+    // 节点可存在，但 :empty → 高度/边框为 0；更常见是完全无可见内容
+    expect(zone == null || zone.childNodes.length === 0).toBe(true)
   })
 })

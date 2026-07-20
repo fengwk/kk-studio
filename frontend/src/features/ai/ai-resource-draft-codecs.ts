@@ -5,9 +5,11 @@ export {
   toProviderDraft,
 } from '@/features/ai/ai-provider-draft-codec'
 export {
-  applyKnownModelDefaults,
+  buildModelCapabilitiesJson,
+  buildModelConfigJson,
   emptyModelDraft,
   extractContextWindow,
+  extractDefaultVariantFromModel,
   extractVariantNamesFromModel,
   toEditableModel,
   toEditableModelUpdate,

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.model.provider.adapter;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 
+import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
@@ -42,13 +43,16 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
       @Override
       protected StreamingChatModel chatModel(ProviderRequest request) {
         ProviderCacheControl control = prepareCacheControl(request);
+        // 未声明 THINKING 时不请求 thinking、不传 reasoning_effort。
+        boolean thinking = request.model().capabilities().contains(ModelCapability.THINKING);
+        String reasoningEffort = thinking ? request.variant().reasoningEffort() : null;
         return OpenAiStreamingChatModel.builder()
             .baseUrl(descriptor.endpoint())
             .apiKey(apiKey)
             .modelName(request.model().modelId())
             .timeout(descriptor.modelCallTimeoutPolicy().modelCallTimeout())
-            .returnThinking(true)
-            .customParameters(customParameters(control, minimax, request.variant().thinkingLevel()))
+            .returnThinking(thinking)
+            .customParameters(customParameters(control, minimax, reasoningEffort))
             .build();
       }
 
@@ -74,7 +78,7 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
   }
 
   static Map<String, Object> customParameters(
-      ProviderCacheControl control, boolean minimax, String thinkingLevel) {
+      ProviderCacheControl control, boolean minimax, String reasoningEffort) {
     Map<String, Object> merged = new LinkedHashMap<>();
     if (control.affinityKey() != null) {
       merged.put(PROMPT_CACHE_KEY, control.affinityKey());
@@ -82,11 +86,9 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
     if (minimax) {
       merged.put(REASONING_SPLIT, true);
     }
-    // pi 风格：thinking profile 映射为 OpenAI-compatible reasoning_effort。
-    if (thinkingLevel != null
-        && !thinkingLevel.isBlank()
-        && !"off".equalsIgnoreCase(thinkingLevel.trim())) {
-      merged.put("reasoning_effort", thinkingLevel.trim().toLowerCase(Locale.ROOT));
+    // variant.reasoningEffort → OpenAI-compatible reasoning_effort（null/off 已在 ModelVariant 归一）。
+    if (reasoningEffort != null && !reasoningEffort.isBlank()) {
+      merged.put("reasoning_effort", reasoningEffort.trim().toLowerCase(Locale.ROOT));
     }
     return merged;
   }

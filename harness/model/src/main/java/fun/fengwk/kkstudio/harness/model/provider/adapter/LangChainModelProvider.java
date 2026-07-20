@@ -39,8 +39,10 @@ import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.chat.response.StreamingHandle;
 import dev.langchain4j.model.output.FinishReason;
 
+import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAudioBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
@@ -204,17 +206,39 @@ abstract class LangChainModelProvider implements ModelProvider {
   }
 
   private static ChatRequestParameters parameters(ProviderRequest request) {
-    return DefaultChatRequestParameters.builder()
-        .modelName(request.model().modelId())
-        .maxOutputTokens(request.variant().maxOutputTokens())
-        .temperature(request.variant().temperature())
-        .topP(request.variant().topP())
-        .topK(request.variant().topK())
-        .frequencyPenalty(request.variant().frequencyPenalty())
-        .presencePenalty(request.variant().presencePenalty())
-        .stopSequences(request.variant().stopSequences())
-        .toolSpecifications(tools(request.tools()))
-        .build();
+    ModelVariant variant = request.variant();
+    DefaultChatRequestParameters.Builder<?> builder =
+        DefaultChatRequestParameters.builder().modelName(request.model().modelId());
+    // Model 未声明 TOOLS 时绝不注入 tool specs，即使 Agent 配了 tools。
+    if (request.model().capabilities().contains(ModelCapability.TOOLS)) {
+      List<ToolSpecification> toolSpecs = tools(request.tools());
+      if (!toolSpecs.isEmpty()) {
+        builder.toolSpecifications(toolSpecs);
+      }
+    }
+    // null 字段不传，走厂商默认；空 stopSequences 同样不传。
+    if (variant.maxOutputTokens() != null) {
+      builder.maxOutputTokens(variant.maxOutputTokens());
+    }
+    if (variant.temperature() != null) {
+      builder.temperature(variant.temperature());
+    }
+    if (variant.topP() != null) {
+      builder.topP(variant.topP());
+    }
+    if (variant.topK() != null) {
+      builder.topK(variant.topK());
+    }
+    if (variant.frequencyPenalty() != null) {
+      builder.frequencyPenalty(variant.frequencyPenalty());
+    }
+    if (variant.presencePenalty() != null) {
+      builder.presencePenalty(variant.presencePenalty());
+    }
+    if (!variant.stopSequences().isEmpty()) {
+      builder.stopSequences(variant.stopSequences());
+    }
+    return builder.build();
   }
 
   private static List<ChatMessage> messages(List<ProviderMessage> messages) {

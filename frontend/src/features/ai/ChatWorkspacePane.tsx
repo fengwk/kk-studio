@@ -20,10 +20,14 @@ import { useAgentThreadController } from '@/features/ai/useAgentThreadController
 import { useChatSessionPicker } from '@/features/ai/useChatSessionPicker'
 import type {
   AgentDefinitionDTO,
+  AgentModelDTO,
+  AgentProviderDTO,
   ChatDTO,
   HarnessSessionEntryDTO,
   HarnessThreadDTO,
 } from '@/shared/api/contracts'
+import { extractContextWindow } from '@/features/ai/ai-model-draft-codec'
+import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 
@@ -38,6 +42,37 @@ function resolveDefaultAgent(
     return undefined
   }
   return agents.find((agent) => String(agent.id) === String(chat.defaultAgentId))
+}
+
+/** 空白 pane 尚无 Thread 时，用 Chat 默认 Agent 的 model/variant 填 footer（与已绑定 pane 一致） */
+function resolveBlankPaneFooterLabels(
+  agent: AgentDefinitionDTO | undefined,
+  models: AgentModelDTO[],
+  providers: AgentProviderDTO[],
+) {
+  if (!agent) {
+    return {
+      agentName: '（无 Agent）',
+      providerName: undefined as string | undefined,
+      modelName: undefined as string | undefined,
+      variantName: undefined as string | undefined,
+      contextWindow: undefined as number | undefined,
+    }
+  }
+  const modelId = agent.modelId ? String(agent.modelId) : ''
+  const model =
+    models.find((item) => String(item.id) === modelId)
+    || models.find((item) => item.name === modelId)
+  const provider = model
+    ? providers.find((item) => String(item.id) === String(model.providerId))
+    : undefined
+  return {
+    agentName: agent.name || '（无 Agent）',
+    providerName: provider?.name || model?.providerName || undefined,
+    modelName: model?.name || modelId || undefined,
+    variantName: agent.variant || 'default',
+    contextWindow: extractContextWindow(model),
+  }
 }
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -140,7 +175,21 @@ function BlankComposerPane({
   const [pendingContent, setPendingContent] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const sessionPicker = useChatSessionPicker(chatId, sessionModalOpen, sessionSort)
+  const modelsQuery = useQuery({
+    queryKey: queryKeys.models.list,
+    queryFn: () => agentService.listModels(),
+  })
+  const providersQuery = useQuery({
+    queryKey: queryKeys.providers.list,
+    queryFn: () => agentService.listProviders(),
+  })
+  const models = modelsQuery.data?.results ?? []
+  const providers = providersQuery.data?.results ?? []
   const defaultAgent = resolveDefaultAgent(chat, agents)
+  const footerLabels = useMemo(
+    () => resolveBlankPaneFooterLabels(defaultAgent, models, providers),
+    [defaultAgent, models, providers],
+  )
   const agentLabel = defaultAgent?.name || (chat?.defaultAgentId ? '（Agent 已删除/缺失）' : '（无 Agent）')
 
   async function runFirstSend(agentId: string, content: string) {
@@ -210,25 +259,35 @@ function BlankComposerPane({
 
   return (
     <section className={`chat-pane ${focused ? 'focused' : ''}`} onMouseDown={onFocus}>
-      <div className="chat-pane-main blank-pane">
-        <div className="blank-pane-body">
-          <h2>新对话</h2>
-          <p>输入消息后将创建独立 Session / Main Thread；也可 /session 复用本 Chat 已有 Session。</p>
-          {actionError ? <div className="thread-error-panel">{actionError}</div> : null}
-        </div>
-        <ThreadComposer
-          draft={draft}
-          pending={pending}
-          disabled={pending}
-          onDraftChange={setDraft}
-          onSubmit={() => {
-            void handleSubmit()
-          }}
-          onCommand={handleCommand}
-          commands={BLANK_PANE_COMMANDS}
-        />
-        <ThreadStatusFooter agentName={agentLabel} yoloEnabled={false} />
-      </div>
+      {/* 与有 Thread 时同一套 shell / composer 结构，避免 blank 与 thread 输入框样式分叉 */}
+      <section className="chat-shell thread-panel blank-pane">
+        <main className="chat-main thread-panel-main">
+          <div className="blank-pane-body">
+            <h2>新对话</h2>
+            <p>输入后创建 Session；也可用 /session 复用。</p>
+            {actionError ? <div className="thread-error-panel">{actionError}</div> : null}
+          </div>
+          <ThreadComposer
+            draft={draft}
+            pending={pending}
+            disabled={pending}
+            onDraftChange={setDraft}
+            onSubmit={() => {
+              void handleSubmit()
+            }}
+            onCommand={handleCommand}
+            commands={BLANK_PANE_COMMANDS}
+          />
+          <ThreadStatusFooter
+            agentName={defaultAgent ? footerLabels.agentName : agentLabel}
+            providerName={defaultAgent ? footerLabels.providerName : undefined}
+            modelName={defaultAgent ? footerLabels.modelName : undefined}
+            variantName={defaultAgent ? footerLabels.variantName : undefined}
+            contextWindow={defaultAgent ? footerLabels.contextWindow : undefined}
+            yoloEnabled={false}
+          />
+        </main>
+      </section>
       <AgentSelectionModal
         open={agentModalOpen}
         agents={agents.map((agent) => ({

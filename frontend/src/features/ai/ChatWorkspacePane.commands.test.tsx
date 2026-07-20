@@ -77,7 +77,9 @@ describe('ChatWorkspacePane commands', () => {
     vi.mocked(agentService.listAgents).mockResolvedValue(page(agents))
     vi.mocked(agentService.listModels).mockResolvedValue(page([{
       id: 'm1', providerId: 'p1', providerName: 'minimax', name: 'MiniMax', description: null,
-      defaultVariant: 'default', variantsJson: '[{"name":"default"}]', createTime: null, updateTime: null,
+      capabilitiesJson: '["TEXT","TOOLS"]',
+      configJson: '{"defaultVariant":"default","variants":[{"id":"default"}]}',
+      createTime: null, updateTime: null,
     }]))
     vi.mocked(agentService.listProviders).mockResolvedValue(page([{
       id: 'p1', name: 'minimax', description: null, providerType: 'openai', baseUrl: null, configured: true,

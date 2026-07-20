@@ -35,8 +35,9 @@ describe('AiConsolePanels', () => {
             providerName: 'minimax',
             name: 'MiniMax',
             description: null,
-            defaultVariant: 'default',
-            variantsJson: null,
+            capabilitiesJson: '["TEXT","TOOLS"]',
+            configJson:
+              '{"limit":{"context":128000,"output":8192},"defaultVariant":"default","variants":[{"id":"default"}]}',
             createTime: null,
             updateTime: null,
           }]}
@@ -52,8 +53,9 @@ describe('AiConsolePanels', () => {
             providerName: 'minimax',
             name: 'MiniMax',
             description: null,
-            defaultVariant: 'default',
-            variantsJson: null,
+            capabilitiesJson: '["TEXT","TOOLS"]',
+            configJson:
+              '{"limit":{"context":128000,"output":8192},"defaultVariant":"default","variants":[{"id":"default"}]}',
             createTime: null,
             updateTime: null,
           }]}
@@ -86,6 +88,7 @@ describe('AiConsolePanels', () => {
     expect(screen.getByText('assistant')).toBeInTheDocument()
     expect(screen.getAllByText('MiniMax').length).toBeGreaterThan(0)
     expect(screen.getAllByText(/minimax/i).length).toBeGreaterThan(0)
+    expect(screen.getByText(/ctx 128000/)).toBeInTheDocument()
     await user.click(screen.getAllByRole('button', { name: '新建 Chat' })[0]!)
     expect(onCreate).toHaveBeenCalled()
   })

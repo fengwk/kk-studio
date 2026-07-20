@@ -1,5 +1,6 @@
 import { useDeferredValue, useMemo, useState } from 'react'
 import { filterAgents, filterModels, filterProviders } from '@/features/ai/ai-console-utils'
+import { toUserFacingErrorMessage } from '@/features/ai/ai-resource-form-validation'
 import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, ChatDTO } from '@/shared/api/contracts'
 import { useAiConsoleResourceController } from '@/features/ai/useAiConsoleResourceController'
 import { useChatListController } from '@/features/ai/useChatListController'
@@ -29,11 +30,21 @@ export function useAiConsoleController() {
     resourceController.environmentsQuery,
     chatController.chatsQuery,
   ]
-  const mutationErrors = [resourceController.resourceMutationError, chatController.chatMutationError]
+  const resourceModalOpen = Boolean(resourceController.resourceEditorModal.modal)
+  // 资源编辑模态打开时：本地校验/API 错误都只在模态内展示，页面外层不重复报错。
+  const mutationErrors = [
+    resourceModalOpen ? null : resourceController.resourceMutationError,
+    chatController.chatMutationError,
+  ]
 
   const busy = queryResults.some((query) => query.isLoading)
   const error = queryResults.find((query) => query.error)?.error ?? null
-  const mutationError = mutationErrors.find((candidate) => candidate != null) ?? null
+  const rawMutationError = resourceModalOpen
+    ? null
+    : (mutationErrors.find((candidate) => candidate != null) ?? null)
+  const mutationError = rawMutationError
+    ? new Error(toUserFacingErrorMessage(rawMutationError))
+    : null
 
   return {
     search,
@@ -59,7 +70,8 @@ export function useAiConsoleController() {
       deletePending: resourceController.modelDeletePending,
       onCreate: resourceController.openCreateModel,
       onEdit: (model: AgentModelDTO) => resourceController.openEditModel(model.id),
-      onDelete: (model: AgentModelDTO) => resourceController.deleteModel(model.providerName, model.name, model.id),
+      onDelete: (model: AgentModelDTO) =>
+        resourceController.deleteModel(model.providerName || String(model.providerId), model.name, model.id),
     },
     providerPanelProps: {
       providers: filteredProviders,

@@ -10,6 +10,7 @@ import {
   editProviderEditorPlan,
 } from '@/features/ai/ai-resource-editor-plans'
 import { emptyAgentDraft as codecEmptyAgentDraft } from '@/features/ai/ai-agent-draft-codec'
+import { emptyModelDraft as codecEmptyModelDraft } from '@/features/ai/ai-model-draft-codec'
 
 describe('ai-console-page-helpers', () => {
   it('resolves the preferred thread agent id', () => {
@@ -45,12 +46,12 @@ describe('ai-console-page-helpers', () => {
     expect(createModelEditorPlan(models, providers)).toMatchObject({
       kind: 'model',
       modal: { kind: 'model', mode: 'create' },
-      modelDraft: { provider: 'minimax', defaultVariant: 'default' },
+      modelDraft: { providerId: 'provider-1', defaultVariant: 'medium' },
     })
     expect(editModelEditorPlan(models, 'model-1')).toMatchObject({
       kind: 'model',
       modal: { kind: 'model', mode: 'edit', id: 'model-1' },
-      modelDraft: { name: 'MiniMax-M2.7', provider: 'minimax' },
+      modelDraft: { name: 'MiniMax-M2.7', providerId: 'provider-1', defaultVariant: 'default' },
     })
     expect(editModelEditorPlan(models, 'missing')).toBeNull()
 
@@ -103,25 +104,45 @@ describe('ai-console-page-helpers', () => {
       {
         providerDraft: emptyProviderDraft(),
         modelDraft: {
-          provider: ' minimax ',
+          ...emptyModelDraft(),
+          providerId: ' provider-1 ',
           name: ' MiniMax-M2.7 ',
           description: ' chat model ',
-          defaultVariant: ' default ',
-          variants: [{ id: 'variant-1', name: ' default ', temperature: '0.1', maxOutputTokens: '256', extras: [] }],
+          defaultVariant: 'default',
+          variants: [
+            {
+              ...emptyModelDraft().variants[0],
+              name: 'default',
+              temperature: '0.1',
+              maxOutputTokens: '256',
+            },
+          ],
         },
         agentDraft: emptyAgentDraft(),
       },
     )
-    expect(modelPlan).toEqual({
+    expect(modelPlan).toMatchObject({
       kind: 'model',
       mode: 'create',
       data: {
-        provider: 'minimax',
+        providerId: 'provider-1',
         name: 'MiniMax-M2.7',
         description: 'chat model',
-        defaultVariant: 'default',
-        variantsJson: '[{"name":"default","temperature":0.1,"maxOutputTokens":256}]',
+        capabilitiesJson: '["TEXT","TOOLS"]',
       },
+    })
+    if (modelPlan.kind !== 'model') {
+      throw new Error('expected model plan')
+    }
+    expect(JSON.parse(modelPlan.data.configJson || '{}')).toMatchObject({
+      limit: { context: 128000, output: 8192 },
+      abilities: {
+        tools: true,
+        reasoning: false,
+        modalities: { input: ['TEXT'], output: ['TEXT'] },
+      },
+      defaultVariant: 'default',
+      variants: [{ id: 'default', temperature: 0.1, maxOutputTokens: 256 }],
     })
 
     const agentPlan = buildResourceSubmitPlan(
@@ -197,25 +218,32 @@ describe('ai-console-page-helpers', () => {
       {
         providerDraft: emptyProviderDraft(),
         modelDraft: {
-          provider: 'minimax',
+          ...emptyModelDraft(),
+          providerId: 'provider-1',
           name: ' MiniMax-M2.7 ',
           description: ' updated ',
-          defaultVariant: ' default ',
-          variants: [{ id: 'variant-1', name: ' default ', temperature: '', maxOutputTokens: '', extras: [] }],
+          defaultVariant: 'default',
+          variants: [{ ...emptyModelDraft().variants[0], name: 'default' }],
         },
         agentDraft: emptyAgentDraft(),
       },
     )
-    expect(modelPlan).toEqual({
+    expect(modelPlan).toMatchObject({
       kind: 'model',
       mode: 'edit',
       id: 'model-1',
       data: {
         description: 'updated',
-        defaultVariant: 'default',
-        variantsJson: '[{"name":"default"}]',
+        capabilitiesJson: '["TEXT","TOOLS"]',
         name: 'MiniMax-M2.7',
       },
+    })
+    if (modelPlan.kind !== 'model') {
+      throw new Error('expected model plan')
+    }
+    expect(JSON.parse(modelPlan.data.configJson || '{}')).toMatchObject({
+      defaultVariant: 'default',
+      variants: [{ id: 'default' }],
     })
 
     const agentPlan = buildResourceSubmitPlan(
@@ -269,13 +297,7 @@ function emptyProviderDraft() {
 }
 
 function emptyModelDraft() {
-  return {
-    provider: '',
-    name: '',
-    description: '',
-    defaultVariant: 'default',
-    variants: [{ id: 'variant-1', name: 'default', temperature: '', maxOutputTokens: '', extras: [] }],
-  }
+  return codecEmptyModelDraft()
 }
 
 function emptyAgentDraft() {
@@ -304,8 +326,9 @@ function model() {
     providerName: 'minimax',
     name: 'MiniMax-M2.7',
     description: 'Chat model',
-    defaultVariant: 'default',
-    variantsJson: '[{"name":"default","temperature":0.2}]',
+    capabilitiesJson: '["TEXT","TOOLS"]',
+    configJson:
+      '{"limit":{"context":128000,"output":8192},"abilities":{"tools":true,"reasoning":false,"modalities":{"input":["TEXT"],"output":["TEXT"]}},"pricing":{"currency":"USD","pricingTier":"default","serviceTier":"default","serviceTierMultiplier":1,"version":"v1","inputPerMillionTokens":0,"outputPerMillionTokens":0,"cacheReadPerMillionTokens":0,"cacheWritePerMillionTokens":0,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0},"defaultVariant":"default","variants":[{"id":"default","temperature":0.2}]}',
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
   }

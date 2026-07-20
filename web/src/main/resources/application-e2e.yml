@@ -32,6 +32,12 @@ convention:
     initial-timestamp: 1702214261706
     worker-id: 0
 
+kk-studio:
+  harness:
+    environment-gateway:
+      daemon-token: e2e-daemon-token
+      max-artifact-bytes: 8388608
+      max-message-bytes: 16777216
 
 logging:
   level:

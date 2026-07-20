@@ -1,19 +1,23 @@
 import { FormSelect } from '@/features/ai/FormSelect'
 import { providerTypes } from '@/features/ai/ai-console-types'
 import type { ProviderDraft } from '@/features/ai/ai-console-types'
+import type { ResourceFieldKey } from '@/features/ai/ai-resource-form-validation'
 
 export function ProviderForm({
   draft,
+  fieldErrors = {},
   onChange,
 }: {
   draft: ProviderDraft
+  fieldErrors?: Partial<Record<ResourceFieldKey, string>>
   onChange: (draft: ProviderDraft) => void
 }) {
   return (
     <>
-      <label className="form-group">
+      <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
         <span>Name</span>
         <input value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} placeholder="minimax" required />
+        {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}
       </label>
       <label className="form-group">
         <span>Description</span>
@@ -29,9 +33,10 @@ export function ProviderForm({
           onChange={(providerType) => onChange({ ...draft, providerType })}
         />
       </label>
-      <label className="form-group">
+      <label className={`form-group${fieldErrors.baseUrl ? ' is-error' : ''}`}>
         <span>Base URL</span>
         <input value={draft.baseUrl} onChange={(event) => onChange({ ...draft, baseUrl: event.target.value })} placeholder="https://api.example.com/v1" />
+        {fieldErrors.baseUrl ? <span className="field-error">{fieldErrors.baseUrl}</span> : null}
       </label>
       <label className="form-group">
         <span>API Key</span>
