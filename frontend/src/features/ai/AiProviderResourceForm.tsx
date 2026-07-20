@@ -1,3 +1,4 @@
+import { FormSelect } from '@/features/ai/FormSelect'
 import { providerTypes } from '@/features/ai/ai-console-types'
 import type { ProviderDraft } from '@/features/ai/ai-console-types'
 
@@ -20,20 +21,20 @@ export function ProviderForm({
       </label>
       <label className="form-group">
         <span>Provider Type</span>
-        <select value={draft.providerType} onChange={(event) => onChange({ ...draft, providerType: event.target.value })} required>
-          {providerTypes.map((providerType) => (
-            <option key={providerType} value={providerType}>
-              {providerType}
-            </option>
-          ))}
-        </select>
+        <FormSelect
+          aria-label="Provider Type"
+          value={draft.providerType}
+          required
+          options={providerTypes.map((providerType) => ({ value: providerType, label: providerType }))}
+          onChange={(providerType) => onChange({ ...draft, providerType })}
+        />
       </label>
       <label className="form-group">
         <span>Base URL</span>
         <input value={draft.baseUrl} onChange={(event) => onChange({ ...draft, baseUrl: event.target.value })} placeholder="https://api.example.com/v1" />
       </label>
       <label className="form-group">
-        <span>Credential</span>
+        <span>API Key</span>
         <input
           type="password"
           autoComplete="off"

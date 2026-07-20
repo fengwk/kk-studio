@@ -15,13 +15,16 @@ export function newKeyValueDraft(key = '', value = ''): KeyValueDraft {
   }
 }
 
-export function newVariantDraft(input?: Partial<Omit<VariantDraft, 'id' | 'extras'>> & { extras?: KeyValueDraft[] }): VariantDraft {
+export function newVariantDraft(
+  input?: Partial<Omit<VariantDraft, 'id'>> & { thinkingLevel?: string },
+): VariantDraft {
+  const thinkingLevel = input?.thinkingLevel?.trim() || input?.name?.trim() || 'off'
   return {
     id: nextDraftId('variant'),
-    name: input?.name ?? '',
+    name: input?.name ?? thinkingLevel,
+    thinkingLevel,
     temperature: input?.temperature ?? '',
     maxOutputTokens: input?.maxOutputTokens ?? '',
-    extras: input?.extras ?? [],
   }
 }
 

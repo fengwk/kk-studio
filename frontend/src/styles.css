@@ -969,14 +969,135 @@ textarea::placeholder {
 .form-group select {
   appearance: none;
   -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%238B8B99' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  color-scheme: dark;
+  background-color: var(--surface-raised);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%2371e79a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 12px center;
   background-size: 12px 12px;
   padding-right: 40px;
 }
 
+.form-group select option {
+  background: var(--surface-raised);
+  color: var(--fg);
+}
+
 .form-group select:disabled {
+  color: var(--fg-dim);
+  cursor: not-allowed;
+}
+
+.form-select {
+  position: relative;
+  width: 100%;
+}
+
+.form-select-native {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.form-select-trigger {
+  width: 100%;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--fg);
+  cursor: pointer;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+
+.form-select-trigger svg {
+  width: 14px;
+  height: 14px;
+  color: var(--green-primary);
+  flex: 0 0 auto;
+  transition: transform 0.12s ease;
+}
+
+.form-select.is-open .form-select-trigger {
+  border-color: var(--green-primary);
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.form-select.is-open .form-select-trigger svg {
+  transform: rotate(180deg);
+}
+
+.form-select.is-disabled .form-select-trigger {
+  color: var(--fg-dim);
+  cursor: not-allowed;
+  opacity: 0.78;
+}
+
+.form-select-value,
+.form-select-placeholder {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.form-select-placeholder {
+  color: var(--fg-muted);
+}
+
+.form-select-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-md);
+  max-height: 240px;
+  overflow: auto;
+}
+
+.form-select-option {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.form-select-option:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.form-select-option.is-active {
+  background: rgba(113, 231, 154, 0.12);
+  color: var(--green-primary);
+}
+
+.form-select-option:disabled {
   color: var(--fg-dim);
   cursor: not-allowed;
 }

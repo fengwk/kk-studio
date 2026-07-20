@@ -281,11 +281,11 @@ function resolveRuntimeLabels(
 }
 
 function parseContextWindow(model: AgentModelDTO | undefined): number | undefined {
-  if (!model?.variantsJson) {
+  if (!model?.configJson) {
     return undefined
   }
   try {
-    const config = JSON.parse(model.variantsJson) as unknown
+    const config = JSON.parse(model.configJson) as unknown
     if (config && typeof config === 'object' && !Array.isArray(config)) {
       const value = Number((config as { contextWindow?: number }).contextWindow)
       return Number.isFinite(value) && value > 0 ? value : undefined

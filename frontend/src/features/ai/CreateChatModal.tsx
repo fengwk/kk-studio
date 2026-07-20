@@ -1,5 +1,6 @@
 import type { FormEventHandler } from 'react'
 import { ModalBackdrop, ModalHeader } from '@/features/ai/AiConsoleModalLayout'
+import { FormSelect } from '@/features/ai/FormSelect'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts'
 
 export function CreateChatModal({
@@ -38,14 +39,16 @@ export function CreateChatModal({
           </label>
           <label className="form-group">
             <span>Default Agent（可选）</span>
-            <select value={selectedAgentId} onChange={(event) => onSelectAgent(event.target.value)}>
-              <option value="">（无）</option>
-              {agents.map((agent) => (
-                <option key={String(agent.id)} value={String(agent.id)}>
-                  {agent.name}
-                </option>
-              ))}
-            </select>
+            <FormSelect
+              aria-label="Default Agent（可选）"
+              value={selectedAgentId}
+              placeholder="（无）"
+              options={[
+                { value: '', label: '（无）' },
+                ...agents.map((agent) => ({ value: String(agent.id), label: agent.name })),
+              ]}
+              onChange={onSelectAgent}
+            />
           </label>
         </div>
         <div className="modal-footer">

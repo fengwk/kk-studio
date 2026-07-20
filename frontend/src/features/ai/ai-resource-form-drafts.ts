@@ -1,26 +1,16 @@
 import type { KeyValueDraft, VariantDraft } from '@/features/ai/ai-console-types'
-
-let editorIdSeed = 0
-
-function nextEditorId(prefix: string): string {
-  editorIdSeed += 1
-  return `${prefix}-${editorIdSeed}`
-}
+import { newKeyValueDraft, newVariantDraft } from '@/features/ai/ai-resource-draft-primitives'
 
 export function createKeyValueDraft(key = '', value = ''): KeyValueDraft {
-  return {
-    id: nextEditorId('kv-row'),
-    key,
-    value,
-  }
+  return newKeyValueDraft(key, value)
 }
 
-export function blankVariant(name = ''): VariantDraft {
-  return {
-    id: nextEditorId('variant-row'),
-    name,
+export function blankVariant(name = 'off'): VariantDraft {
+  const thinkingLevel = name.trim() || 'off'
+  return newVariantDraft({
+    name: thinkingLevel,
+    thinkingLevel,
     temperature: '',
     maxOutputTokens: '',
-    extras: [],
-  }
+  })
 }

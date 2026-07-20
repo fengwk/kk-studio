@@ -7,6 +7,7 @@ import {
 import type { AgentDraft } from '@/features/ai/ai-console-types'
 import { applyAgentModelSelection, variantOptionsFromModel } from '@/features/ai/ai-draft-normalizers'
 import { emptyAgentDraft } from '@/features/ai/ai-resource-draft-codecs'
+import { FormSelect } from '@/features/ai/FormSelect'
 import type { AgentDefinitionDTO, AgentModelDTO, LiveEnvironmentDTO } from '@/shared/api/contracts'
 
 function toggleName(items: string[], name: string): string[] {
@@ -56,30 +57,29 @@ export function AgentForm({
       </label>
       <label className="form-group">
         <span>Model</span>
-        <select value={draft.modelId} onChange={(event) => onChange(applyAgentModelSelection(draft, event.target.value, models))} required>
-          {models.map((model) => {
+        <FormSelect
+          aria-label="Model"
+          value={draft.modelId}
+          required
+          options={models.map((model) => {
             const provider = model.providerName?.trim()
-            return (
-              <option key={String(model.id)} value={String(model.id)}>
-                {provider ? `${model.name} (${provider})` : model.name}
-              </option>
-            )
+            return {
+              value: String(model.id),
+              label: provider ? `${model.name} (${provider})` : model.name,
+            }
           })}
-        </select>
+          onChange={(modelId) => onChange(applyAgentModelSelection(draft, modelId, models))}
+        />
       </label>
       <label className="form-group">
         <span>Variant</span>
-        <select
+        <FormSelect
+          aria-label="Variant"
           value={selectedVariant}
-          onChange={(event) => onChange({ ...draft, variant: event.target.value })}
           disabled={models.length === 0}
-        >
-          {variantOptions.map((variantName) => (
-            <option key={variantName} value={variantName}>
-              {variantName}
-            </option>
-          ))}
-        </select>
+          options={variantOptions.map((variantName) => ({ value: variantName, label: variantName }))}
+          onChange={(variant) => onChange({ ...draft, variant })}
+        />
       </label>
       <label className="form-group">
         <span>System Prompt</span>
@@ -88,23 +88,27 @@ export function AgentForm({
 
       <label className="form-group">
         <span>Environment</span>
-        <select
+        <FormSelect
+          aria-label="Environment"
           value={draft.environmentName}
-          onChange={(event) => onChange({ ...draft, environmentName: event.target.value })}
-        >
-          <option value="">（无）</option>
-          {readyEnvironments.map((environment) => (
-            <option key={environment.name} value={environment.name}>
-              {environment.name}
-            </option>
-          ))}
-          {environmentMissing || environmentOffline ? (
-            <option value={draft.environmentName}>
-              {draft.environmentName}
-              {environmentMissing ? '（缺失）' : '（离线）'}
-            </option>
-          ) : null}
-        </select>
+          placeholder="（无）"
+          options={[
+            { value: '', label: '（无）' },
+            ...readyEnvironments.map((environment) => ({
+              value: environment.name,
+              label: environment.name,
+            })),
+            ...(environmentMissing || environmentOffline
+              ? [
+                  {
+                    value: draft.environmentName,
+                    label: `${draft.environmentName}${environmentMissing ? '（缺失）' : '（离线）'}`,
+                  },
+                ]
+              : []),
+          ]}
+          onChange={(environmentName) => onChange({ ...draft, environmentName })}
+        />
       </label>
       <div className="inline-hint" role="note">
         切换 Environment 只会刷新可选 Tools/Skills 列表；已勾选项会尽量保留，不会自动清空。
