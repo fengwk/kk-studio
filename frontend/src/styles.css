@@ -389,9 +389,10 @@ a {
 
 .subnav a.active,
 .subnav button.active {
-  background: var(--green-primary);
-  color: var(--green-on);
+  background: transparent;
+  color: var(--fg);
   font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--green-primary);
 }
 
 .subnav svg {
