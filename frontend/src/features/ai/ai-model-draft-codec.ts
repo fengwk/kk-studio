@@ -170,7 +170,9 @@ export function toModelDraft(model: AgentModelDTO): ModelDraft {
       ? parseStringArray(config.inputModalities)
       : ['TEXT'],
     capabilities: capabilities.length ? capabilities : ['TEXT', 'TOOLS'],
-    reasoning: Boolean(config.reasoning ?? capabilities.includes('REASONING')),
+    reasoning: Boolean(
+      config.reasoning ?? (capabilities.includes('THINKING') || capabilities.includes('REASONING')),
+    ),
     defaultVariant,
     variants,
     pricing: parsePricing(config),

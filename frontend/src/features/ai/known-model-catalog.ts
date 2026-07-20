@@ -80,7 +80,7 @@ export const KNOWN_MODEL_DEFAULTS: KnownModelDefault[] = [
     maxOutputTokens: 131072,
     reasoning: true,
     inputModalities: ['TEXT'],
-    capabilities: ['TEXT', 'TOOLS'],
+    capabilities: ['TEXT', 'TOOLS', 'THINKING'],
     pricing: freePricing({
       inputPerMillionTokens: 0.3,
       outputPerMillionTokens: 1.2,
@@ -97,7 +97,7 @@ export const KNOWN_MODEL_DEFAULTS: KnownModelDefault[] = [
     maxOutputTokens: 131072,
     reasoning: true,
     inputModalities: ['TEXT'],
-    capabilities: ['TEXT', 'TOOLS'],
+    capabilities: ['TEXT', 'TOOLS', 'THINKING'],
     pricing: freePricing({
       inputPerMillionTokens: 0.6,
       outputPerMillionTokens: 2.4,
@@ -108,13 +108,15 @@ export const KNOWN_MODEL_DEFAULTS: KnownModelDefault[] = [
     defaultVariant: 'medium',
   },
   {
+    // pi catalog only lists text+image; MiniMax-M3 actually accepts video via OpenAI-compatible
+    // multimodal path (LangChain4j OpenAI integration supports video). Prefer actual capability.
     id: 'MiniMax-M3',
     displayName: 'MiniMax-M3',
     contextWindow: 1_000_000,
     maxOutputTokens: 128000,
     reasoning: true,
-    inputModalities: ['TEXT', 'IMAGE'],
-    capabilities: ['TEXT', 'TOOLS', 'VISION'],
+    inputModalities: ['TEXT', 'IMAGE', 'VIDEO'],
+    capabilities: ['TEXT', 'TOOLS', 'VISION', 'THINKING'],
     pricing: freePricing({
       inputPerMillionTokens: 0.3,
       outputPerMillionTokens: 1.2,
@@ -124,13 +126,14 @@ export const KNOWN_MODEL_DEFAULTS: KnownModelDefault[] = [
     defaultVariant: 'medium',
   },
   {
+    // LangChain4j OpenAI: text, image, audio, video, PDF
     id: 'gpt-4o',
     displayName: 'gpt-4o',
     contextWindow: 128000,
     maxOutputTokens: 16384,
     reasoning: false,
-    inputModalities: ['TEXT', 'IMAGE'],
-    capabilities: ['TEXT', 'TOOLS', 'VISION'],
+    inputModalities: ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO', 'DOCUMENT'],
+    capabilities: ['TEXT', 'TOOLS', 'VISION', 'AUDIO'],
     pricing: freePricing({
       inputPerMillionTokens: 2.5,
       outputPerMillionTokens: 10,
@@ -140,13 +143,14 @@ export const KNOWN_MODEL_DEFAULTS: KnownModelDefault[] = [
     defaultVariant: 'default',
   },
   {
+    // LangChain4j Anthropic: text, image
     id: 'claude-sonnet-4',
     displayName: 'claude-sonnet-4',
     contextWindow: 200000,
     maxOutputTokens: 64000,
     reasoning: true,
     inputModalities: ['TEXT', 'IMAGE'],
-    capabilities: ['TEXT', 'TOOLS', 'VISION'],
+    capabilities: ['TEXT', 'TOOLS', 'VISION', 'THINKING'],
     pricing: freePricing({
       inputPerMillionTokens: 3,
       outputPerMillionTokens: 15,
