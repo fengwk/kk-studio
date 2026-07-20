@@ -42,7 +42,6 @@ function AiConsoleFrame({ content, children }: ExtensionComponentProps & { conte
   return (
     <section className="screen active">
       <nav className="subbar">
-        <div className="ai-mark">AI</div>
         <NavigationSlot />
         <SearchField value={controller.search} onChange={controller.setSearch} />
       </nav>

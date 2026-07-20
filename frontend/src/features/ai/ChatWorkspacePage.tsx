@@ -102,13 +102,10 @@ export function ChatWorkspacePage() {
     <section className="chat-workspace screen active">
       <header className="chat-workspace-header">
         <div className="chat-workspace-title">
-          <Link className="sidebar-icon-btn" to="/chats" title="返回 Chat 列表">
+          <Link className="sidebar-icon-btn" to="/chats" title="返回 Chat 列表" aria-label="返回 Chat 列表">
             <ArrowLeft aria-hidden="true" />
           </Link>
-          <div>
-            <h1>{title}</h1>
-            <p>本地 Pane 工作区</p>
-          </div>
+          <h1>{title}</h1>
         </div>
         <div className="chat-layout-switch" role="group" aria-label="布局">
           {LAYOUTS.map((layout) => (
