@@ -1141,10 +1141,47 @@ textarea::placeholder {
   font-weight: 600;
 }
 
-.checkbox-field input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--green-primary);
+.checkbox-field input,
+.capability-option input {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-hover);
+  border-radius: 4px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+
+.checkbox-field input:hover,
+.capability-option input:hover {
+  border-color: var(--green-border);
+}
+
+.checkbox-field input:checked,
+.capability-option input:checked {
+  border-color: var(--green-primary);
+  background:
+    linear-gradient(180deg, rgba(138, 240, 173, 0.22), rgba(113, 231, 154, 0.12)),
+    var(--surface-raised);
+  box-shadow: inset 0 0 0 1px rgba(113, 231, 154, 0.28);
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M3.5 8.2 6.6 11.2 12.5 4.8' stroke='%2371e79a' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, rgba(138, 240, 173, 0.18), rgba(113, 231, 154, 0.08));
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 11px 11px, auto;
+}
+
+.checkbox-field input:focus-visible,
+.capability-option input:focus-visible {
+  outline: none;
+  border-color: var(--green-primary);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .btn-primary,
@@ -3337,13 +3374,6 @@ textarea::placeholder {
 
 .capability-option.is-offline {
   opacity: 0.72;
-}
-
-.capability-option input {
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  accent-color: var(--green-primary);
 }
 
 .capability-option span {
