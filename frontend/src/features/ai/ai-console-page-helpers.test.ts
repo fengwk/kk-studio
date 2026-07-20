@@ -9,6 +9,7 @@ import {
   editModelEditorPlan,
   editProviderEditorPlan,
 } from '@/features/ai/ai-resource-editor-plans'
+import { emptyAgentDraft as codecEmptyAgentDraft } from '@/features/ai/ai-agent-draft-codec'
 
 describe('ai-console-page-helpers', () => {
   it('resolves the preferred thread agent id', () => {
@@ -56,12 +57,12 @@ describe('ai-console-page-helpers', () => {
     expect(createAgentEditorPlan(models)).toMatchObject({
       kind: 'agent',
       modal: { kind: 'agent', mode: 'create' },
-      agentDraft: { defaultProvider: 'minimax', defaultModel: 'MiniMax-M2.7' },
+      agentDraft: { modelId: 'model-1', variant: 'default' },
     })
     expect(editAgentEditorPlan(agents, models, 'agent-1')).toMatchObject({
       kind: 'agent',
       modal: { kind: 'agent', mode: 'edit', id: 'agent-1' },
-      agentDraft: { name: 'default-assistant', defaultProvider: 'minimax' },
+      agentDraft: { name: 'default-assistant', modelId: 'model-1' },
     })
     expect(editAgentEditorPlan(agents, models, 'missing')).toBeNull()
   })
@@ -129,12 +130,12 @@ describe('ai-console-page-helpers', () => {
         providerDraft: emptyProviderDraft(),
         modelDraft: emptyModelDraft(),
         agentDraft: {
+          ...emptyAgentDraft(),
           name: ' assistant ',
           description: ' desc ',
           systemPrompt: ' prompt ',
-          defaultProvider: ' minimax ',
-          defaultModel: ' MiniMax-M2.7 ',
-          defaultVariant: ' default ',
+          modelId: ' model-1 ',
+          variant: ' default ',
           tools: [' search '],
         },
       },
@@ -146,10 +147,15 @@ describe('ai-console-page-helpers', () => {
         name: 'assistant',
         description: 'desc',
         systemPrompt: 'prompt',
-        defaultProvider: 'minimax',
-        defaultModel: 'MiniMax-M2.7',
-        defaultVariant: 'default',
-        toolsJson: '["search"]',
+        modelId: 'model-1',
+        variant: 'default',
+        config: {
+          environmentName: null,
+          tools: ['search'],
+          skills: [],
+          allowedSubagents: [],
+          executionPolicy: null,
+        },
       },
     })
   })
@@ -218,12 +224,12 @@ describe('ai-console-page-helpers', () => {
         providerDraft: emptyProviderDraft(),
         modelDraft: emptyModelDraft(),
         agentDraft: {
+          ...emptyAgentDraft(),
           name: ' assistant ',
           description: ' updated ',
           systemPrompt: ' prompt ',
-          defaultProvider: ' minimax ',
-          defaultModel: ' MiniMax-M2.7 ',
-          defaultVariant: ' default ',
+          modelId: ' model-1 ',
+          variant: ' default ',
           tools: [' search '],
         },
       },
@@ -235,11 +241,16 @@ describe('ai-console-page-helpers', () => {
       data: {
         description: 'updated',
         systemPrompt: 'prompt',
-        defaultVariant: 'default',
-        toolsJson: '["search"]',
+        variant: 'default',
         name: 'assistant',
-        defaultProvider: 'minimax',
-        defaultModel: 'MiniMax-M2.7',
+        modelId: 'model-1',
+        config: {
+          environmentName: null,
+          tools: ['search'],
+          skills: [],
+          allowedSubagents: [],
+          executionPolicy: null,
+        },
       },
     })
   })
@@ -268,15 +279,7 @@ function emptyModelDraft() {
 }
 
 function emptyAgentDraft() {
-  return {
-    name: '',
-    description: '',
-    systemPrompt: '',
-    defaultProvider: '',
-    defaultModel: '',
-    defaultVariant: 'default',
-    tools: [],
-  }
+  return codecEmptyAgentDraft()
 }
 
 function provider() {
@@ -314,12 +317,9 @@ function agent() {
     name: 'default-assistant',
     description: 'Cloud agent',
     systemPrompt: 'You are helpful',
-    defaultProviderId: 'provider-1',
-    defaultProviderName: 'minimax',
-    defaultModelId: 'model-1',
-    defaultModelName: 'MiniMax-M2.7',
-    defaultVariant: 'default',
-    toolsJson: '[]',
+    modelId: 'model-1',
+    variant: 'default',
+    config: { tools: [], skills: [], allowedSubagents: [] },
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
   }

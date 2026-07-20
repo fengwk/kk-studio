@@ -418,7 +418,7 @@ tokenReadRatio =
 
 ## Resource 解析与进程生命周期
 
-`DatabaseTurnResourceResolver` 从当前 Session 路径的 `AGENT_SNAPSHOT` Entry 出发，把冻结的 modelId/variant/tools 解析为 `TurnResources`，并强制 Provider credential/config 来自持久库。
+`DatabaseTurnResourceResolver` 从 Thread 运行时配置（当前 AgentDefinition + Thread model/variant）解析 modelId/variant/tools 为 `TurnResources`，并强制 Provider credential/config 来自持久库。
 
 ### Provider Factory 调用
 
@@ -431,7 +431,7 @@ tokenReadRatio =
 
 ### Tool Binding 解析
 
-`tools` 字段可以是 `name@version` 或单独 `name`。单独 `name` 仅在 registered tool factory 中恰好匹配一个版本时成功；多版本同名 tool 抛错；任何 `ENVIRONMENT` tool 必须在调用端额外提供 `environmentId`，单独出现的 `ENVIRONMENT` 引用同样抛错。
+Agent 配置中的 `tools` 仅为短名。Turn 时 platform-first：先匹配已注册的非 ENVIRONMENT tool（同名须唯一版本），再回退到所选 READY Environment capability 中的同名 tool 并绑定 `environmentName`。所选 Environment 离线或缺失则明确失败；不支持 `environment:<name>/...` 长名字符串。
 
 ### 进程生命周期
 

@@ -8,7 +8,16 @@ import { useAiConsoleResourceQueries } from '@/features/ai/useAiConsoleResourceQ
 
 export function useAiConsoleResourceController() {
   const [deleteConfirm, setDeleteConfirm] = useState<ConfirmModalState | null>(null)
-  const { providersQuery, modelsQuery, agentsQuery, providers, models, agents } = useAiConsoleResourceQueries()
+  const {
+    providersQuery,
+    modelsQuery,
+    agentsQuery,
+    environmentsQuery,
+    providers,
+    models,
+    agents,
+    environments,
+  } = useAiConsoleResourceQueries()
   const editorState = useAiConsoleResourceEditorState({ providers, models, agents })
   const closeDeleteConfirm = () => setDeleteConfirm(null)
   const mutations = useAiConsoleResourceMutations({
@@ -87,9 +96,11 @@ export function useAiConsoleResourceController() {
     providersQuery,
     modelsQuery,
     agentsQuery,
+    environmentsQuery,
     providers,
     models,
     agents,
+    environments,
     resourceMutationError: mutations.resourceMutationError,
     providerDeletePending: mutations.providerDeletePending,
     modelDeletePending: mutations.modelDeletePending,
@@ -98,6 +109,8 @@ export function useAiConsoleResourceController() {
       modal: editorState.resourceModal,
       providers,
       models,
+      agents,
+      environments,
       providerDraft: editorState.providerDraft,
       modelDraft: editorState.modelDraft,
       agentDraft: editorState.agentDraft,

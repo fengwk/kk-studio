@@ -8,6 +8,7 @@ import {
 } from '@/features/ai/ai-draft-normalizers'
 import type { AgentDraft } from '@/features/ai/ai-console-types'
 import type { AgentModelDTO } from '@/shared/api/contracts'
+import { emptyAgentDraft } from '@/features/ai/ai-agent-draft-codec'
 
 describe('ai-draft-normalizers', () => {
   it('builds variant options from drafts and models', () => {
@@ -51,16 +52,14 @@ describe('ai-draft-normalizers', () => {
 
     const normalizedAgent = normalizeAgentDraftDefaultVariant(
       {
+        ...emptyAgentDraft(),
         name: 'assistant',
-        description: '',
-        systemPrompt: '',
-        defaultProvider: 'anthropic',
-        defaultModel: 'Claude-Sonnet-4.5',
-        defaultVariant: 'legacy',
-        tools: [],
+        modelId: 'model-sonnet',
+        variant: 'legacy',
       },
       [
         model({
+          id: 'model-sonnet',
           providerName: 'anthropic',
           name: 'Claude-Sonnet-4.5',
           defaultVariant: 'precise',
@@ -68,42 +67,37 @@ describe('ai-draft-normalizers', () => {
         }),
       ],
     )
-    expect(normalizedAgent.defaultVariant).toBe('precise')
+    expect(normalizedAgent.variant).toBe('precise')
 
     expect(
       normalizeAgentDraftDefaultVariant(
         {
-          name: 'assistant',
-          description: '',
-          systemPrompt: '',
-          defaultProvider: 'missing',
-          defaultModel: 'missing',
-          defaultVariant: '   ',
-          tools: [],
+          ...emptyAgentDraft(),
+          modelId: 'missing',
+          variant: '   ',
         },
         [],
-      ).defaultVariant,
+      ).variant,
     ).toBe('default')
   })
 
-  it('syncs agent default variant when model selection changes', () => {
+  it('syncs agent variant when model selection changes', () => {
     const draft: AgentDraft = {
+      ...emptyAgentDraft(),
       name: 'assistant',
-      description: '',
-      systemPrompt: '',
-      defaultProvider: 'minimax',
-      defaultModel: 'MiniMax-M2.7',
-      defaultVariant: 'default',
-      tools: [],
+      modelId: 'model-minimax',
+      variant: 'default',
     }
     const models = [
       model({
+        id: 'model-minimax',
         providerName: 'minimax',
         name: 'MiniMax-M2.7',
         defaultVariant: 'default',
         variantsJson: '[{"name":"default"}]',
       }),
       model({
+        id: 'model-sonnet',
         providerName: 'anthropic',
         name: 'Claude-Sonnet-4.5',
         defaultVariant: 'creative',
@@ -111,17 +105,13 @@ describe('ai-draft-normalizers', () => {
       }),
     ]
 
-    expect(applyAgentModelSelection(draft, 'anthropic/Claude-Sonnet-4.5', models)).toMatchObject({
-      defaultProvider: 'anthropic',
-      defaultModel: 'Claude-Sonnet-4.5',
-      defaultVariant: 'creative',
+    expect(applyAgentModelSelection(draft, 'model-sonnet', models)).toMatchObject({
+      modelId: 'model-sonnet',
+      variant: 'creative',
     })
-    expect(applyAgentModelSelection(draft, 'anthropic/Unknown', models)).toMatchObject({
-      defaultProvider: 'anthropic',
-      defaultModel: 'Unknown',
-      defaultVariant: 'default',
+    expect(applyAgentModelSelection(draft, 'unknown', models)).toMatchObject({
+      modelId: 'unknown',
     })
-    expect(applyAgentModelSelection(draft, 'invalid', models)).toEqual(draft)
   })
 })
 

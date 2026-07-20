@@ -9,10 +9,10 @@ function createClient(): HttpClient {
 describe('harnessService', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('uses typed Session, branch Thread, mailbox, stop and retry endpoints', async () => {
+  it('uses agentless Session create and Thread actor endpoints without toolset', async () => {
     const client = createClient()
     const service = createHarnessService(client)
-    await service.createSession({ agentDefinitionId: '9', title: 'Draft' })
+    await service.createSession({ title: 'Draft' })
     await service.getSession('session /1')
     await service.listSessionThreads('session /1')
     await service.createSessionThread('session /1', { fromEntryId: '9007199254740993' })
@@ -20,7 +20,6 @@ describe('harnessService', () => {
     await service.stopThread('thread /1', { clientRequestId: 'stop-1' })
     await service.retryThread('thread /1')
     await service.setThreadModel('thread /1', { modelId: 'model-1', variant: 'default', clientMessageId: 'cid-model' })
-    await service.setThreadToolset('thread /1', { tools: ['bash'], clientMessageId: 'cid-toolset' })
     await service.getThread('thread /1')
     await service.listThreadEntries('thread /1')
     await service.listThreadInputs('thread /1')
@@ -35,7 +34,7 @@ describe('harnessService', () => {
     await service.listSessionTasks('session /1')
     await service.decideToolInvocation('tool /1', 'allow')
 
-    expect(client.post).toHaveBeenNthCalledWith(1, '/sessions', { agentDefinitionId: '9', title: 'Draft' })
+    expect(client.post).toHaveBeenNthCalledWith(1, '/sessions', { title: 'Draft' })
     expect(client.get).toHaveBeenNthCalledWith(1, '/sessions/session%20%2F1')
     expect(client.get).toHaveBeenNthCalledWith(2, '/sessions/session%20%2F1/threads')
     expect(client.post).toHaveBeenNthCalledWith(2, '/sessions/session%20%2F1/threads', { fromEntryId: '9007199254740993' })
@@ -43,9 +42,9 @@ describe('harnessService', () => {
     expect(client.post).toHaveBeenNthCalledWith(4, '/threads/thread%20%2F1/stop', { clientRequestId: 'stop-1' })
     expect(client.post).toHaveBeenNthCalledWith(5, '/threads/thread%20%2F1/retry')
     expect(client.put).toHaveBeenNthCalledWith(1, '/threads/thread%20%2F1/model', { modelId: 'model-1', variant: 'default', clientMessageId: 'cid-model' })
-    expect(client.put).toHaveBeenNthCalledWith(2, '/threads/thread%20%2F1/toolset', { tools: ['bash'], clientMessageId: 'cid-toolset' })
-    expect(client.put).toHaveBeenNthCalledWith(3, '/threads/thread%20%2F1/yolo', { yoloEnabled: true, clientMessageId: 'cid-yolo' })
-    expect(client.put).toHaveBeenNthCalledWith(4, '/threads/thread%20%2F1/agent', { agentDefinitionId: 'agent-1', clientMessageId: 'cid-agent' })
+    expect(client.put).toHaveBeenNthCalledWith(2, '/threads/thread%20%2F1/yolo', { yoloEnabled: true, clientMessageId: 'cid-yolo' })
+    expect(client.put).toHaveBeenNthCalledWith(3, '/threads/thread%20%2F1/agent', { agentDefinitionId: 'agent-1', clientMessageId: 'cid-agent' })
+    expect(client.put).not.toHaveBeenCalledWith(expect.stringContaining('/toolset'), expect.anything())
   })
 
   it('keeps Snowflake replay cursors as strings in SSE URLs', () => {

@@ -22,19 +22,30 @@ public interface HarnessThreadMapper extends BaseMapper {
       """
       insert into harness_thread (
           id, session_id, head_entry_id, status, input_sequence,
+          active_agent_definition_id, active_agent_name, model_id, variant, yolo_enabled,
           processor_token, processor_until, gmt_create, gmt_modified, version
       ) values (
           #{id}, #{sessionId}, #{headEntryId}, #{status}, #{inputSequence},
+          #{activeAgentDefinitionId}, #{activeAgentName}, #{modelId}, #{variant}, #{yoloEnabled},
           #{processorToken}, #{processorUntil}, #{createTime}, #{updateTime}, #{version}
       )
       """)
   int insert(HarnessThreadDO thread);
 
+  String THREAD_COLUMNS =
+      """
+      id, session_id, head_entry_id, status, input_sequence,
+      active_agent_definition_id, active_agent_name, model_id, variant, yolo_enabled,
+      processor_token, processor_until, version,
+      gmt_create as create_time, gmt_modified as update_time
+      """;
+
   @Select(
       """
-      select id, session_id, head_entry_id, status, input_sequence,
-             processor_token, processor_until, version,
-             gmt_create as create_time, gmt_modified as update_time
+      select
+      """
+          + THREAD_COLUMNS
+          + """
       from harness_thread
       where id = #{threadId}
       """)
@@ -46,6 +57,11 @@ public interface HarnessThreadMapper extends BaseMapper {
         @Result(column = "head_entry_id", property = "headEntryId"),
         @Result(column = "status", property = "status"),
         @Result(column = "input_sequence", property = "inputSequence"),
+        @Result(column = "active_agent_definition_id", property = "activeAgentDefinitionId"),
+        @Result(column = "active_agent_name", property = "activeAgentName"),
+        @Result(column = "model_id", property = "modelId"),
+        @Result(column = "variant", property = "variant"),
+        @Result(column = "yolo_enabled", property = "yoloEnabled"),
         @Result(column = "processor_token", property = "processorToken"),
         @Result(column = "processor_until", property = "processorUntil"),
         @Result(column = "version", property = "version"),
@@ -56,9 +72,10 @@ public interface HarnessThreadMapper extends BaseMapper {
 
   @Select(
       """
-      select id, session_id, head_entry_id, status, input_sequence,
-             processor_token, processor_until, version,
-             gmt_create as create_time, gmt_modified as update_time
+      select
+      """
+          + THREAD_COLUMNS
+          + """
       from harness_thread
       where id = #{threadId}
       for update
@@ -68,9 +85,10 @@ public interface HarnessThreadMapper extends BaseMapper {
 
   @Select(
       """
-      select id, session_id, head_entry_id, status, input_sequence,
-             processor_token, processor_until, version,
-             gmt_create as create_time, gmt_modified as update_time
+      select
+      """
+          + THREAD_COLUMNS
+          + """
       from harness_thread
       where session_id = #{sessionId}
       order by id desc
@@ -81,6 +99,7 @@ public interface HarnessThreadMapper extends BaseMapper {
   String VIEW_COLUMNS =
       """
       t.id, t.session_id, t.head_entry_id, t.status, t.input_sequence,
+      t.active_agent_definition_id, t.active_agent_name, t.model_id, t.variant, t.yolo_enabled,
       t.processor_token, t.processor_until, t.version,
       t.gmt_create as create_time, t.gmt_modified as update_time,
       s.title as session_title
@@ -104,6 +123,11 @@ public interface HarnessThreadMapper extends BaseMapper {
         @Result(column = "head_entry_id", property = "headEntryId"),
         @Result(column = "status", property = "status"),
         @Result(column = "input_sequence", property = "inputSequence"),
+        @Result(column = "active_agent_definition_id", property = "activeAgentDefinitionId"),
+        @Result(column = "active_agent_name", property = "activeAgentName"),
+        @Result(column = "model_id", property = "modelId"),
+        @Result(column = "variant", property = "variant"),
+        @Result(column = "yolo_enabled", property = "yoloEnabled"),
         @Result(column = "processor_token", property = "processorToken"),
         @Result(column = "processor_until", property = "processorUntil"),
         @Result(column = "version", property = "version"),
@@ -203,6 +227,59 @@ public interface HarnessThreadMapper extends BaseMapper {
       @Param("processorToken") String processorToken,
       @Param("expectedHeadEntryId") long expectedHeadEntryId,
       @Param("newHeadEntryId") long newHeadEntryId,
+      @Param("updateTime") LocalDateTime updateTime);
+
+  @Update(
+      """
+      update harness_thread
+      set active_agent_definition_id = #{activeAgentDefinitionId},
+          active_agent_name = #{activeAgentName},
+          model_id = #{modelId},
+          variant = #{variant},
+          gmt_modified = #{updateTime},
+          version = version + 1
+      where id = #{threadId}
+        and processor_token = #{processorToken}
+      """)
+  int updateAgentSettings(
+      @Param("threadId") long threadId,
+      @Param("processorToken") String processorToken,
+      @Param("activeAgentDefinitionId") Long activeAgentDefinitionId,
+      @Param("activeAgentName") String activeAgentName,
+      @Param("modelId") String modelId,
+      @Param("variant") String variant,
+      @Param("updateTime") LocalDateTime updateTime);
+
+  @Update(
+      """
+      update harness_thread
+      set model_id = #{modelId},
+          variant = #{variant},
+          gmt_modified = #{updateTime},
+          version = version + 1
+      where id = #{threadId}
+        and processor_token = #{processorToken}
+      """)
+  int updateModelSettings(
+      @Param("threadId") long threadId,
+      @Param("processorToken") String processorToken,
+      @Param("modelId") String modelId,
+      @Param("variant") String variant,
+      @Param("updateTime") LocalDateTime updateTime);
+
+  @Update(
+      """
+      update harness_thread
+      set yolo_enabled = #{yoloEnabled},
+          gmt_modified = #{updateTime},
+          version = version + 1
+      where id = #{threadId}
+        and processor_token = #{processorToken}
+      """)
+  int updateYoloSettings(
+      @Param("threadId") long threadId,
+      @Param("processorToken") String processorToken,
+      @Param("yoloEnabled") boolean yoloEnabled,
       @Param("updateTime") LocalDateTime updateTime);
 
   @Update(

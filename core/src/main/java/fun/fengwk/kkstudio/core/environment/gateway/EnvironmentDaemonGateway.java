@@ -4,10 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
 
-import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
-import fun.fengwk.kkstudio.core.environment.service.ToolEnvironmentCapabilityApplicationService;
-import fun.fengwk.kkstudio.core.environment.service.ToolEnvironmentIds;
-import fun.fengwk.kkstudio.core.environment.service.model.ToolEnvironment;
+import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironment;
+import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.core.environment.service.EnvironmentSkillLoadResult;
+import fun.fengwk.kkstudio.core.environment.service.EnvironmentSkillLoader;
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.core.harness.tool.worker.DatabaseEnvironmentToolInvocationWorkerStore;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.ToolCompleted;
@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocolException;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillLoadCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 
@@ -45,22 +46,27 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 /**
  * Connection-local Daemon v1 protocol handling and durable Environment invocation dispatch.
  *
- * <p>The database owns Environment capability facts, invocation leases, partials, and terminal
- * results. This service owns only disposable connection/session handles, so reconnect and process
- * restart recover through durable leases rather than memory.
+ * <p>The live {@link LiveEnvironmentRegistry} owns READY connections and canonical capabilities.
+ * Durable ToolInvocation leases/results remain in the database. Offline environments fail queued
+ * ENVIRONMENT invocations immediately without wait/retry/fallback.
  */
 @Service
-public class EnvironmentDaemonGateway {
+public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
 
-  private final ToolEnvironmentRepository environmentRepository;
-  private final ToolEnvironmentCapabilityApplicationService capabilityService;
+  private static final Pattern UNSIGNED_POSITIVE_DECIMAL = Pattern.compile("^[1-9][0-9]*$");
+  private static final int OFFLINE_FAIL_BATCH = 32;
+
+  private final LiveEnvironmentRegistry environmentRegistry;
   private final DatabaseEnvironmentToolInvocationWorkerStore invocationStore;
   private final ToolInvocationTransactions transactions;
   private final ToolInterceptorChain interceptorChain;
@@ -69,18 +75,19 @@ public class EnvironmentDaemonGateway {
   private final DaemonToolCapabilitiesCodec capabilitiesCodec;
   private final DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
+  private final DaemonSkillLoadCodec skillLoadCodec = new DaemonSkillLoadCodec();
   private final HarnessRuntimeProperties runtimeProperties;
   private final EnvironmentGatewayProperties properties;
   private final ToolWorkerConfig workerConfig;
   private final Clock clock;
   private final Map<String, ConnectionState> connections = new HashMap<>();
-  private final Map<Long, ConnectionState> environmentConnections = new HashMap<>();
-  private final Map<Long, ActiveInvocation> activeInvocations = new HashMap<>();
-  private final Set<Long> dispatchingEnvironments = new HashSet<>();
+  private final Map<String, ConnectionState> environmentConnections = new HashMap<>();
+  private final Map<String, ActiveInvocation> activeInvocations = new HashMap<>();
+  private final Set<String> dispatchingEnvironments = new HashSet<>();
+  private final Map<String, PendingSkillLoad> pendingSkillLoads = new HashMap<>();
 
   public EnvironmentDaemonGateway(
-      ToolEnvironmentRepository environmentRepository,
-      ToolEnvironmentCapabilityApplicationService capabilityService,
+      LiveEnvironmentRegistry environmentRegistry,
       DatabaseEnvironmentToolInvocationWorkerStore invocationStore,
       ToolInvocationTransactions transactions,
       ToolInterceptorChain interceptorChain,
@@ -91,9 +98,7 @@ public class EnvironmentDaemonGateway {
       EnvironmentGatewayProperties properties,
       ToolWorkerConfig workerConfig,
       Clock clock) {
-    this.environmentRepository =
-        Objects.requireNonNull(environmentRepository, "environmentRepository");
-    this.capabilityService = Objects.requireNonNull(capabilityService, "capabilityService");
+    this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.invocationStore = Objects.requireNonNull(invocationStore, "invocationStore");
     this.transactions = Objects.requireNonNull(transactions, "transactions");
     this.interceptorChain = Objects.requireNonNull(interceptorChain, "interceptorChain");
@@ -150,6 +155,7 @@ public class EnvironmentDaemonGateway {
   /** Durable worker tick; exposed for lifecycle scheduling and deterministic integration tests. */
   public void pollOnce() {
     Instant now = clock.instant();
+    failOfflineDueInvocations(now);
     List<ConnectionState> readyConnections;
     synchronized (this) {
       readyConnections =
@@ -160,13 +166,58 @@ public class EnvironmentDaemonGateway {
     }
   }
 
+  @Override
+  public CompletableFuture<EnvironmentSkillLoadResult> loadSkill(
+      String environmentName, String skillName, Duration timeout) {
+    String name = requireNonBlank(environmentName, "environmentName");
+    String skill = requireNonBlank(skillName, "skillName");
+    if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+      throw new IllegalArgumentException("timeout must be positive");
+    }
+    ConnectionState state;
+    synchronized (this) {
+      state = environmentConnections.get(name);
+      if (state == null || !state.isReady()) {
+        return CompletableFuture.completedFuture(
+            new EnvironmentSkillLoadResult.Failed(
+                skill, name + " is offline; " + skill + " is unavailable"));
+      }
+    }
+    String requestId = UUID.randomUUID().toString();
+    CompletableFuture<EnvironmentSkillLoadResult> future = new CompletableFuture<>();
+    PendingSkillLoad pending = new PendingSkillLoad(name, skill, future);
+    synchronized (this) {
+      pendingSkillLoads.put(requestId, pending);
+    }
+    String payload = skillLoadCodec.encodeRequest(new DaemonSkillLoadCodec.LoadSkillRequest(skill));
+    if (!send(state, DaemonMessageType.LOAD_SKILL, requestId, payload)) {
+      synchronized (this) {
+        pendingSkillLoads.remove(requestId, pending);
+      }
+      future.complete(
+          new EnvironmentSkillLoadResult.Failed(
+              skill, name + " is offline; " + skill + " is unavailable"));
+      return future;
+    }
+    return future
+        .orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS)
+        .exceptionally(
+            error -> {
+              synchronized (this) {
+                pendingSkillLoads.remove(requestId, pending);
+              }
+              return new EnvironmentSkillLoadResult.Failed(
+                  skill, name + " is offline; " + skill + " is unavailable");
+            });
+  }
+
   private void handleInbound(ConnectionState state, DaemonEnvelope envelope) {
     if (!state.helloReceived && envelope.messageType() != DaemonMessageType.HELLO) {
       throw new DaemonProtocolException("HELLO must be the first daemon message");
     }
-    if (state.environmentId != null
-        && !ToolEnvironmentIds.format(state.environmentId).equals(envelope.environmentId())) {
-      throw new DaemonProtocolException("envelope environmentId does not match bound connection");
+    if (state.environmentName != null
+        && !state.environmentName.equals(envelope.environmentName())) {
+      throw new DaemonProtocolException("envelope environmentName does not match bound connection");
     }
     switch (envelope.messageType()) {
       case HELLO -> handleHello(state, envelope);
@@ -180,7 +231,9 @@ public class EnvironmentDaemonGateway {
       case CANCELLED -> handleCancelled(state, envelope);
       case ACK -> handleAck(state, envelope);
       case ERROR -> handleError(state, envelope);
-      case WELCOME, INVOKE, CANCEL -> throw new DaemonProtocolException(
+      case SKILL_LOADED -> handleSkillLoaded(state, envelope);
+      case SKILL_LOAD_FAILED -> handleSkillLoadFailed(state, envelope);
+      case WELCOME, INVOKE, CANCEL, LOAD_SKILL -> throw new DaemonProtocolException(
           "daemon must not send " + envelope.messageType() + " to gateway");
     }
   }
@@ -198,17 +251,16 @@ public class EnvironmentDaemonGateway {
       throw new DaemonProtocolException("HELLO payload.protocolVersion must be 1");
     }
     verifyGatewayToken(requiredText(payload, "gatewayToken", "HELLO payload"));
-    long environmentId =
-        ToolEnvironmentIds.parsePositive(envelope.environmentId(), "environmentId");
-    capabilityService.heartbeat(ToolEnvironmentIds.format(environmentId));
-    state.environmentId = environmentId;
-    state.helloReceived = true;
-    ConnectionState replaced;
-    synchronized (this) {
-      replaced = environmentConnections.put(environmentId, state);
+    String environmentName = requireNonBlank(envelope.environmentName(), "environmentName");
+    Instant now = clock.instant();
+    if (!environmentRegistry.tryBind(environmentName, state.connection, now)) {
+      throw new DaemonProtocolException(
+          "environmentName already bound to another active daemon: " + environmentName);
     }
-    if (replaced != null && replaced != state) {
-      close(replaced.connection.connectionId());
+    state.environmentName = environmentName;
+    state.helloReceived = true;
+    synchronized (this) {
+      environmentConnections.put(environmentName, state);
     }
     send(state, DaemonMessageType.WELCOME, null, "{}");
   }
@@ -216,8 +268,9 @@ public class EnvironmentDaemonGateway {
   private void handleCapabilities(ConnectionState state, DaemonEnvelope envelope) {
     requireHello(state);
     requireNoInvocationId(envelope);
-    capabilitiesCodec.decode(envelope.payloadJson());
-    capabilityService.updateCapabilities(envelope.environmentId(), envelope.payloadJson());
+    var capabilities = capabilitiesCodec.decode(envelope.payloadJson());
+    environmentRegistry.updateCapabilities(
+        state.environmentName, state.connection, capabilities, clock.instant());
     state.capabilitiesReceived = true;
   }
 
@@ -233,15 +286,17 @@ public class EnvironmentDaemonGateway {
     if (pull == null || !pull.isBoolean() || !pull.booleanValue()) {
       throw new DaemonProtocolException("READY payload.pull must be true");
     }
+    Instant now = clock.instant();
+    environmentRegistry.markReady(state.environmentName, state.connection, now);
     state.ready = true;
-    pollEnvironment(state, clock.instant());
+    pollEnvironment(state, now);
   }
 
   private void handleHeartbeat(ConnectionState state, DaemonEnvelope envelope) {
     requireReady(state);
     requireNoInvocationId(envelope);
     rejectUnexpectedFields(envelopeCodec.readPayload(envelope), Set.of(), "HEARTBEAT payload");
-    capabilityService.heartbeat(envelope.environmentId());
+    environmentRegistry.heartbeat(state.environmentName, state.connection, clock.instant());
   }
 
   private void handleAck(ConnectionState state, DaemonEnvelope envelope) {
@@ -310,13 +365,77 @@ public class EnvironmentDaemonGateway {
         reason);
   }
 
+  private void handleSkillLoaded(ConnectionState state, DaemonEnvelope envelope) {
+    requireReady(state);
+    PendingSkillLoad pending = takePendingSkillLoad(state, envelope);
+    DaemonSkillLoadCodec.SkillLoaded loaded = skillLoadCodec.decodeLoaded(envelope.payloadJson());
+    if (!pending.skillName.equals(loaded.name())) {
+      throw new DaemonProtocolException(
+          "SKILL_LOADED name does not match request: " + loaded.name());
+    }
+    pending.future.complete(new EnvironmentSkillLoadResult.Loaded(loaded.name(), loaded.content()));
+  }
+
+  private void handleSkillLoadFailed(ConnectionState state, DaemonEnvelope envelope) {
+    requireReady(state);
+    PendingSkillLoad pending = takePendingSkillLoad(state, envelope);
+    DaemonSkillLoadCodec.SkillLoadFailed failed =
+        skillLoadCodec.decodeFailed(envelope.payloadJson());
+    if (!pending.skillName.equals(failed.name())) {
+      throw new DaemonProtocolException(
+          "SKILL_LOAD_FAILED name does not match request: " + failed.name());
+    }
+    pending.future.complete(new EnvironmentSkillLoadResult.Failed(failed.name(), failed.message()));
+  }
+
+  private PendingSkillLoad takePendingSkillLoad(ConnectionState state, DaemonEnvelope envelope) {
+    String requestId = requireNonBlank(envelope.invocationId(), "invocationId");
+    PendingSkillLoad pending;
+    synchronized (this) {
+      pending = pendingSkillLoads.remove(requestId);
+    }
+    if (pending == null
+        || !pending.environmentName.equals(state.environmentName)
+        || !state.connection.connectionId().equals(state.connection.connectionId())) {
+      throw new DaemonProtocolException(
+          "skill load callback does not own invocationId: " + requestId);
+    }
+    return pending;
+  }
+
+  private void failOfflineDueInvocations(Instant now) {
+    List<ToolInvocation> candidates =
+        invocationStore.listDueEnvironmentCandidates(now, OFFLINE_FAIL_BATCH);
+    for (ToolInvocation candidate : candidates) {
+      String environmentName = candidate.environmentName();
+      if (environmentName == null || environmentRegistry.isReady(environmentName)) {
+        continue;
+      }
+      String owner = leaseOwner(environmentName) + "-offline";
+      ClaimedToolInvocation claimed =
+          invocationStore
+              .claimDue(environmentName, owner, now, workerConfig.leaseDuration())
+              .orElse(null);
+      if (claimed == null) {
+        continue;
+      }
+      ToolInvocation invocation = claimed.invocation();
+      String message = offlineUnavailableMessage(environmentName, invocation.toolName());
+      complete(
+          new ActiveInvocation(claimed, null, "offline"),
+          ToolInvocationStatus.FAILED,
+          ToolResult.error(invocation.toolCallId(), message),
+          message);
+    }
+  }
+
   private void pollEnvironment(ConnectionState state, Instant now) {
     if (!state.isReady()) {
       return;
     }
     ActiveInvocation active;
     synchronized (this) {
-      active = activeInvocations.get(state.environmentId);
+      active = activeInvocations.get(state.environmentName);
     }
     if (active != null) {
       pollActive(state, active, now);
@@ -358,26 +477,24 @@ public class EnvironmentDaemonGateway {
   }
 
   private void dispatchNext(ConnectionState state, Instant now) {
-    long environmentId = state.environmentId;
+    String environmentName = state.environmentName;
     synchronized (this) {
-      if (activeInvocations.containsKey(environmentId)
+      if (activeInvocations.containsKey(environmentName)
           || !state.isReady()
-          || !dispatchingEnvironments.add(environmentId)) {
+          || !dispatchingEnvironments.add(environmentName)) {
         return;
       }
     }
     try {
-      String owner = leaseOwner(environmentId);
+      String owner = leaseOwner(environmentName);
       ClaimedToolInvocation claimed =
           invocationStore
-              .claimDue(environmentId, owner, now, workerConfig.leaseDuration())
+              .claimDue(environmentName, owner, now, workerConfig.leaseDuration())
               .orElse(null);
       if (claimed == null) {
         return;
       }
       ToolInvocation invocation = claimed.invocation();
-      // A reclaimed non-idempotent call may already have changed the Environment. UNKNOWN must
-      // win over cancellation, deadline, and current capability/descriptor checks.
       if (claimed.recoveredLease() && invocation.sideEffect() == ToolSideEffect.NON_IDEMPOTENT) {
         String message = "Tool ownership was lost; side effect result is unknown.";
         complete(
@@ -404,6 +521,15 @@ public class EnvironmentDaemonGateway {
             "Tool execution deadline exceeded.");
         return;
       }
+      if (!environmentRegistry.isReady(environmentName)) {
+        String message = offlineUnavailableMessage(environmentName, invocation.toolName());
+        complete(
+            new ActiveInvocation(claimed, null, state.connection.connectionId()),
+            ToolInvocationStatus.FAILED,
+            ToolResult.error(invocation.toolCallId(), message),
+            message);
+        return;
+      }
       ToolBinding binding;
       String invokePayload;
       try {
@@ -424,14 +550,14 @@ public class EnvironmentDaemonGateway {
       ActiveInvocation active =
           new ActiveInvocation(claimed, binding, state.connection.connectionId());
       synchronized (this) {
-        activeInvocations.put(environmentId, active);
+        activeInvocations.put(environmentName, active);
       }
       if (!sendInvoke(state, active, invokePayload)) {
         removeActive(active);
       }
     } finally {
       synchronized (this) {
-        dispatchingEnvironments.remove(environmentId);
+        dispatchingEnvironments.remove(environmentName);
       }
     }
   }
@@ -455,16 +581,20 @@ public class EnvironmentDaemonGateway {
   }
 
   private ToolBinding resolveBinding(ToolInvocation invocation) {
-    Long environmentId = invocation.environmentId();
-    if (environmentId == null) {
-      throw new IllegalArgumentException("Environment invocation has no environmentId");
+    String environmentName = invocation.environmentName();
+    if (environmentName == null || environmentName.isBlank()) {
+      throw new IllegalArgumentException("Environment invocation has no environmentName");
     }
-    ToolEnvironment environment = environmentRepository.getById(environmentId);
-    if (environment == null) {
-      throw new NoSuchElementException("Environment not found: " + environmentId);
-    }
+    LiveEnvironment environment =
+        environmentRegistry
+            .find(environmentName)
+            .filter(LiveEnvironment::isReady)
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        offlineUnavailableMessage(environmentName, invocation.toolName())));
     ToolDescriptor descriptor =
-        capabilitiesCodec.decode(environment.getCapabilitiesJson()).tools().stream()
+        environment.tools().stream()
             .filter(
                 candidate ->
                     candidate.name().equals(invocation.toolName())
@@ -473,10 +603,7 @@ public class EnvironmentDaemonGateway {
             .orElseThrow(
                 () ->
                     new IllegalArgumentException(
-                        "Environment capability not found: "
-                            + invocation.toolName()
-                            + "@"
-                            + invocation.toolVersion()));
+                        offlineUnavailableMessage(environmentName, invocation.toolName())));
     if (descriptor.executionMode() != ToolExecutionMode.ENVIRONMENT) {
       throw new IllegalArgumentException(
           "Environment capability must use ENVIRONMENT execution mode");
@@ -488,7 +615,7 @@ public class EnvironmentDaemonGateway {
               + "@"
               + invocation.toolVersion());
     }
-    return new ToolBinding(descriptor, ToolTargetType.ENVIRONMENT, environmentId);
+    return new ToolBinding(descriptor, ToolTargetType.ENVIRONMENT, environmentName);
   }
 
   private ToolResult decodeResult(ActiveInvocation active, String payloadJson) {
@@ -538,10 +665,10 @@ public class EnvironmentDaemonGateway {
 
   private ActiveInvocation requireActive(ConnectionState state, DaemonEnvelope envelope) {
     requireReady(state);
-    long invocationId = ToolEnvironmentIds.parsePositive(envelope.invocationId(), "invocationId");
+    long invocationId = parsePositive(envelope.invocationId(), "invocationId");
     ActiveInvocation active;
     synchronized (this) {
-      active = activeInvocations.get(state.environmentId);
+      active = activeInvocations.get(state.environmentName);
     }
     if (active == null
         || active.claimed.invocation().id() != invocationId
@@ -553,26 +680,26 @@ public class EnvironmentDaemonGateway {
   }
 
   private void removeActive(ActiveInvocation active) {
-    Long environmentId = active.claimed.invocation().environmentId();
-    if (environmentId == null) {
+    String environmentName = active.claimed.invocation().environmentName();
+    if (environmentName == null) {
       return;
     }
     synchronized (this) {
-      activeInvocations.remove(environmentId, active);
+      activeInvocations.remove(environmentName, active);
     }
   }
 
   private boolean send(
       ConnectionState state, DaemonMessageType type, String invocationId, String payloadJson) {
     synchronized (state) {
-      if (state.closed || !state.connection.isOpen() || state.environmentId == null) {
+      if (state.closed || !state.connection.isOpen() || state.environmentName == null) {
         return false;
       }
       DaemonEnvelope envelope =
           new DaemonEnvelope(
               DaemonProtocol.VERSION_1,
               type,
-              ToolEnvironmentIds.format(state.environmentId),
+              state.environmentName,
               invocationId,
               state.outboundSequence++,
               payloadJson);
@@ -599,12 +726,14 @@ public class EnvironmentDaemonGateway {
       return;
     }
     state.closed = true;
-    if (state.environmentId != null) {
-      environmentConnections.remove(state.environmentId, state);
-      ActiveInvocation active = activeInvocations.get(state.environmentId);
+    if (state.environmentName != null) {
+      environmentRegistry.unregister(state.environmentName, state.connection);
+      environmentConnections.remove(state.environmentName, state);
+      ActiveInvocation active = activeInvocations.get(state.environmentName);
       if (active != null && active.connectionId.equals(state.connection.connectionId())) {
-        activeInvocations.remove(state.environmentId, active);
+        activeInvocations.remove(state.environmentName, active);
       }
+      failPendingSkillLoads(state.environmentName);
     }
     try {
       state.connection.close();
@@ -613,8 +742,30 @@ public class EnvironmentDaemonGateway {
     }
   }
 
-  private String leaseOwner(long environmentId) {
-    return runtimeProperties.requireWorkerId() + "-environment-" + environmentId;
+  private void failPendingSkillLoads(String environmentName) {
+    List<Map.Entry<String, PendingSkillLoad>> doomed = new ArrayList<>();
+    for (Map.Entry<String, PendingSkillLoad> entry : pendingSkillLoads.entrySet()) {
+      if (environmentName.equals(entry.getValue().environmentName)) {
+        doomed.add(entry);
+      }
+    }
+    for (Map.Entry<String, PendingSkillLoad> entry : doomed) {
+      pendingSkillLoads.remove(entry.getKey(), entry.getValue());
+      entry
+          .getValue()
+          .future
+          .complete(
+              new EnvironmentSkillLoadResult.Failed(
+                  entry.getValue().skillName,
+                  environmentName
+                      + " is offline; "
+                      + entry.getValue().skillName
+                      + " is unavailable"));
+    }
+  }
+
+  private String leaseOwner(String environmentName) {
+    return runtimeProperties.requireWorkerId() + "-environment-" + environmentName;
   }
 
   private void verifyGatewayToken(String suppliedToken) {
@@ -627,6 +778,10 @@ public class EnvironmentDaemonGateway {
 
   private static String wireInvocationId(ActiveInvocation active) {
     return Long.toString(active.claimed.invocation().id());
+  }
+
+  private static String offlineUnavailableMessage(String environmentName, String toolName) {
+    return environmentName + " is offline; " + toolName + " is unavailable";
   }
 
   private static void requireHello(ConnectionState state) {
@@ -697,6 +852,21 @@ public class EnvironmentDaemonGateway {
     return value;
   }
 
+  private static long parsePositive(String value, String field) {
+    if (value == null || value.isBlank() || !UNSIGNED_POSITIVE_DECIMAL.matcher(value).matches()) {
+      throw new DaemonProtocolException(field + " must be an unsigned positive decimal: " + value);
+    }
+    try {
+      long parsed = Long.parseLong(value);
+      if (parsed <= 0) {
+        throw new DaemonProtocolException(field + " must be positive: " + value);
+      }
+      return parsed;
+    } catch (NumberFormatException error) {
+      throw new DaemonProtocolException(field + " exceeds long range: " + value, error);
+    }
+  }
+
   private static final class ActiveInvocation {
     private final ClaimedToolInvocation claimed;
     private final ToolBinding binding;
@@ -728,9 +898,24 @@ public class EnvironmentDaemonGateway {
     }
   }
 
+  private static final class PendingSkillLoad {
+    private final String environmentName;
+    private final String skillName;
+    private final CompletableFuture<EnvironmentSkillLoadResult> future;
+
+    private PendingSkillLoad(
+        String environmentName,
+        String skillName,
+        CompletableFuture<EnvironmentSkillLoadResult> future) {
+      this.environmentName = environmentName;
+      this.skillName = skillName;
+      this.future = future;
+    }
+  }
+
   private static final class ConnectionState {
     private final EnvironmentDaemonConnection connection;
-    private volatile Long environmentId;
+    private volatile String environmentName;
     private volatile boolean helloReceived;
     private volatile boolean capabilitiesReceived;
     private volatile boolean ready;
@@ -743,7 +928,7 @@ public class EnvironmentDaemonGateway {
     }
 
     private boolean isReady() {
-      return !closed && ready && connection.isOpen() && environmentId != null;
+      return !closed && ready && connection.isOpen() && environmentName != null;
     }
 
     private boolean acceptInbound(DaemonEnvelope envelope, JsonNode payload) {
@@ -777,7 +962,7 @@ public class EnvironmentDaemonGateway {
   private record InboundEnvelopeIdentity(
       int protocolVersion,
       DaemonMessageType messageType,
-      String environmentId,
+      String environmentName,
       String invocationId,
       long sequence,
       JsonNode payload) {
@@ -786,7 +971,7 @@ public class EnvironmentDaemonGateway {
       return new InboundEnvelopeIdentity(
           envelope.protocolVersion(),
           envelope.messageType(),
-          envelope.environmentId(),
+          envelope.environmentName(),
           envelope.invocationId(),
           envelope.sequence(),
           payload);

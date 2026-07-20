@@ -1,15 +1,17 @@
 # 前端落地设计
 
-本文描述 `frontend/` 的 Harness Session/Thread 页面结构、API 契约、transcript 投影和验证边界。Session 与 Thread 的运行事实以 [Harness Session Tree 与 Thread Actor](harness-thread-actor.md) 为准。
+本文描述 `frontend/` 的 Chat 工作区、Harness Session/Thread 面板、API 契约、transcript 投影和验证边界。Session 与 Thread 的运行事实以 [Harness Session Tree 与 Thread Actor](harness-thread-actor.md) 为准。Live Environment 以 [Environment Daemon Gateway](environment-daemon-gateway.md) 为准。
 
 ## 前端摘要
 
 | 主题 | 最终前端契约 |
 | --- | --- |
 | 工程目录 | `frontend/` 独立 Vite 工程 |
-| 页面范围 | Chat（Thread）、Provider/Model/Agent 资源管理、ComfyUI 工作流 |
+| 页面范围 | Chat 卡片与本地 Pane 工作区、Provider/Model/Agent、只读 Environment Registry、ComfyUI |
 | 服务端状态 | React Query |
-| 资源 API | `/api/providers`、`/api/models`、`/api/agents` |
+| 本地状态 | `localStorage` 的 `ChatPaneState`（按 chatId） |
+| 资源 API | `/api/providers`、`/api/models`、`/api/agents`、`/api/environments` |
+| Chat API | `/api/chats` 与 Chat↔Session 成员关系 |
 | Harness API | `/api/sessions`、`/api/threads/{threadId}`、`/api/tool-invocations`、`/api/usage` |
 | 实时通道 | 数据库 cursor 驱动的 Thread Event SSE |
 | 视觉实现 | 全局 token 以 Canvas 设计为事实源，见 [前端设计规范](../product-design/frontend-design-system.md) |
@@ -18,41 +20,96 @@
 
 | 路由 | 页面 | 说明 |
 | --- | --- | --- |
-| `/` | redirect | 跳转至 `/sessions` |
-| `/sessions` | Session 列表 | 创建 Session，列出可恢复的会话 |
-| `/sessions/:sessionId` | Session 入口 | 打开稳定 `mainThreadId`，显示 Main/Secondary Threads |
-| `/threads/:threadId` | Thread 深链接 | 查询 Thread 所属 Session 后 replace 到规范化 Session/Thread URL |
-| `/sessions/:sessionId/threads/:threadId` | Thread 详情 | Branch transcript、处理状态、历史分支命令、Task Timeline、工具权限、Usage |
-| `/agents` | Agent 管理 | Agent CRUD |
+| `/` | redirect | 跳转至 `/chats` |
+| `/chats` | Chat 卡片列表 | 创建/进入持久 Chat；默认 Agent 可选 |
+| `/chats/:chatId` | Chat 工作区 | 1/2/3/6 Pane 本地布局；无永久 Session/Thread 侧栏 |
+| `/agents` | Agent 管理 | Agent CRUD（model/variant/config） |
 | `/models` | Model 管理 | Model CRUD |
 | `/providers` | Provider 管理 | Provider CRUD |
+| `/environments` | Environment Registry | 只读 live registry |
 | `/comfyui` | ComfyUI 工作流 | 独立工作流运行时 |
 
-AI extension 注册 Session 列表、Session 入口与显式 Thread 详情；显式 Thread URL 优先于任何本地最近访问记录。
+不再注册 Session-as-Chat 路由（`/sessions`、`/sessions/:id`、`/sessions/:id/threads/:threadId`、`/threads/:threadId`）。
+
+## Chat 工作区
+
+### Chat 卡片
+
+- `GET/POST /api/chats` 列表/创建；创建对话框 title 与 defaultAgent 均可空。
+- 进入 Chat 打开 `/chats/:chatId`。
+- Chat.defaultAgentId 在 Agent 查询中缺失/已删除时前端视为 none，并提示重新选择。
+
+### 本地 `ChatPaneState`
+
+按 `chatId` 存于 `localStorage`（键前缀 `kk-studio.chat-pane.`）：
+
+| 字段 | 说明 |
+| --- | --- |
+| `layout` | `single` / `split-2` / `split-3` / `grid-6` |
+| `focusedPaneId` | 当前聚焦 Pane |
+| `panes[]` | 固定 1/2/3/6 个格子；`target={sessionId?,threadId?}` |
+| `sessionSort` / `threadSort` | `recent`（updateTime）或 `created`（createTime） |
+
+布局切换尽可能保留既有 pane target。服务端不存 Pane 状态。无 Window 抽象。
+
+### 空 Pane 与首发
+
+每个 Pane 初始为会话 composer；空 Pane 仅暴露 `/session` 以复用本 Chat 成员 Session（选中后替换该 Pane target 为 Main Thread）：
+
+1. Footer/chip 显示 Agent：空 Pane 用 Chat default；已绑定 Pane 用 Thread DTO 的 active agent。
+2. 无可用 Agent 时提交会打开 Agent 选择器；选中后更新 Chat.defaultAgentId，并继续 pending 首发。
+3. 首发顺序（每个空 Pane 各自一套 Session/Main Thread）：
+   - `POST /sessions`（agentless，title 可选）
+   - `POST /chats/:id/sessions` attach
+   - `PUT /threads/:id/agent`（SET_AGENT，新 clientMessageId）
+   - `POST /threads/:id/messages`（USER_MESSAGE，另一个新 clientMessageId）
+   - 将 pane target 设为该 Main Thread
+
+### Slash 命令（已绑定 Thread Pane）
+
+| 命令 | 行为 |
+| --- | --- |
+| `/session` | 空 Pane 与已绑定 Pane 均可用；列出当前 Chat **全部**成员 Session；按各 Session 的 Threads 判断 running 后优先，再按用户 sort；选中后替换 **该** Pane target 为 Main Thread |
+| `/thread` | 当前 Session Threads；同样 running 优先 + sort；选中后替换 pane target |
+| `/agent` | Agent 选择器；对当前 Thread `setThreadAgent`；不手工同步其它 Pane，依赖 query invalidate + SSE |
+| `/tree` `/stop` `/retry` `/yolo` `/clear` | 保留既有语义 |
+
+同一 Thread 可出现在多个 Pane；React Query 与 SSE 按 threadId 共享。Agent/model/yolo 标签读 Thread DTO 字段（`activeAgentDefinitionId/name`、`modelId`、`variant`、`yoloEnabled`），不依赖旧 snapshot 解析。SSE 对 `agent_changed` / `model_changed` / `yolo_changed` 会使 Thread detail 失效，重复 Pane 响应式更新。
 
 ## API 边界
 
-`shared/api/agent-service.ts` 承载 Provider、Model、Agent 与 Model 级 Usage。`shared/api/harness-service.ts` 是 Harness Thread / Session 观测的唯一前端边界。
+`shared/api/chat-service.ts` 承载 Chat 集合与成员关系。`shared/api/environment-service.ts` 承载只读 Environment registry。`shared/api/agent-service.ts` 承载 Provider、Model、Agent 与 Usage。`shared/api/harness-service.ts` 是 Session/Thread 观测与 mailbox 的唯一前端边界。
 
-| Harness service | HTTP 接口 | 用途 |
+| Service | HTTP 接口 | 用途 |
 | --- | --- | --- |
-| `listSessions` / `createSession` / `getSession` / `listSessionEntries` | `GET` / `POST /api/sessions`、`GET /api/sessions/{id}`、`/entries` | Session 创建、查询；`/tree` 打开历史分支面板时按需读取完整 Entry Tree |
-| `listSessionThreads` / `createSessionThread` | `GET` / `POST /api/sessions/{id}/threads` | 列出 Thread；以 `fromEntryId` 创建 Secondary Thread |
-| `getThread` | `GET /api/threads/{id}` | 读取 Thread actor |
-| `submitThreadMessage` | `POST /api/threads/{id}/messages` | 入队用户消息（202；`clientMessageId` 幂等） |
-| `queueThreadAgent` / `queueThreadModel` / `queueThreadToolset` / `queueThreadYolo` | `PUT /api/threads/{id}/agent`、`/model`、`/toolset`、`/yolo` | 入队路径配置变更（202） |
-| `listThreadEntries` | `GET /api/threads/{id}/entries` | root→head 路径 Entries |
-| `listThreadInputs` | `GET /api/threads/{id}/inputs` | 有序 inputs（含 pending） |
-| `listThreadEvents` | `GET /api/threads/{id}/events?afterEventId=` | ThreadEvent 快照 |
-| `createThreadEventStream` | `GET /api/threads/{id}/events/stream?afterEventId=` | SSE；event name `thread_event`，id = `eventId` |
-| `listThreadToolInvocations` | `GET /api/threads/{id}/tool-invocations` | Thread 工具投影 |
-| `getThreadUsage` | `GET /api/usage/threads/{id}` | Thread Usage/Cost |
-| `listRootActivities` | `GET /api/sessions/{id}/activities` | Root Activity 快照 |
-| `listSessionTasks` | `GET /api/sessions/{id}/tasks` | 直接子 SubagentTask |
-| `decideToolInvocation` | `POST /api/tool-invocations/{id}/decision` | allow / deny |
-| `stopThread` / `retryThread` | `POST /api/threads/{id}/stop`、`/retry` | 取消 queued Input 并恢复草稿；显式重试 FAILED Thread |
+| Chat list/create/get/update/delete | `GET/POST /api/chats`、`GET/PUT/DELETE /api/chats/{id}` | Chat CRUD |
+| Chat sessions | `GET/POST /api/chats/{id}/sessions`、`DELETE .../sessions/{sessionId}` | 成员关系 |
+| Environments | `GET /api/environments` | 只读 live registry |
+| `createSession` | `POST /api/sessions` | **agentless** Session + Main Thread |
+| `listSessionThreads` / `createSessionThread` | `GET` / `POST /api/sessions/{id}/threads` | Thread 列表；以 `fromEntryId` 创建 Secondary Thread |
+| `getThread` | `GET /api/threads/{id}` | Thread actor（含 active agent/model/yolo） |
+| `submitThreadMessage` | `POST /api/threads/{id}/messages` | 入队用户消息（202） |
+| `setThreadAgent` / `setThreadModel` / `setThreadYolo` | `PUT /api/threads/{id}/agent`、`/model`、`/yolo` | 入队路径配置变更（202）；**无 `/toolset`** |
+| `listThreadEntries` / `inputs` / `events` | `GET /api/threads/{id}/...` | 路径 Entries、mailbox、journal |
+| `createThreadEventStream` | `GET /api/threads/{id}/events/stream` | SSE |
+| `stopThread` / `retryThread` | `POST .../stop`、`/retry` | 取消 queued Input / 显式重试 FAILED |
 
-所有 Snowflake ID 在 TypeScript 契约中保持十进制字符串；前端不将 ID 作为 JavaScript number 使用。
+所有 Snowflake ID 在 TypeScript 契约中保持十进制字符串。
+
+### Agent DTO
+
+```text
+AgentDefinitionDTO {
+  id, name, description, systemPrompt,
+  modelId, variant,
+  config: {
+    environmentName?, tools[], skills[], allowedSubagents[],
+    executionPolicy?: { maxTurns?, maxDepth?, maxDirectSubagents?, maxTotalSubagents? }
+  }
+}
+```
+
+Agent 表单：选择 model/variant、system prompt、可选 live Environment、短名 tools/skills、subagents。候选 tools/skills 采用 platform-first（READY `platform` + 可选所选 Environment，platform 同名优先）。对当前选择的 offline/invalid 明确提示；不提供 Environment CRUD。
 
 ## Chat transcript
 
@@ -72,59 +129,42 @@ decoration queue =
 
 | 来源 | 前端行为 |
 | --- | --- |
-| `message` / `agent_snapshot` / `compaction` Entry | 稳定气泡、冻结摘要与路径配置基线 |
-| QUEUED `user_message` / `custom_message` input | 不进入 transcript；显示在 Working 装饰栏下，Harvest 后移除 |
-| `input_applied` 且 Entry 查询暂时落后 | 以 subject Entry ID 在 transcript 短暂补位，Entry 出现后抑制 |
-| `assistant_started` / `assistant_delta_batch` | 流式 assistant / thinking；以 `subjectEntryId` 关联 |
-| `assistant_completed` / Entry 物化 | 抑制对应 stream 覆盖层 |
-| `assistant_failed` | 标记流式 assistant 错误 |
-| `tool_*` / `permission_*` | 工具与权限覆盖；Entry 物化后抑制 |
-| Tool Result artifact | 映射 `/api/artifacts/{artifactId}` 原生预览或文件链 |
+| `message` / `compaction` Entry | 稳定对话气泡与路径语义基线 |
+| `agent_change` Entry | 只记录分支 Agent identity；不渲染气泡或完整配置 |
+| QUEUED `user_message` / `custom_message` input | 不进入 transcript；显示在 Working 装饰栏 |
+| `input_applied` 且 Entry 查询暂时落后 | 以 subject Entry ID 短暂补位 |
+| `assistant_*` / `tool_*` / `permission_*` | 流式与工具覆盖；物化后抑制 |
+| Tool Result artifact | 映射 `/api/artifacts/{artifactId}` |
 
-连续重叠提交：composer 使用 `clientMessageId` 与 202 入队，不等待前一轮处理结束；QUEUED inputs 在 Working 下可见，滚动历史区只承载 Entry 与 durable live event 事实。
+Thread 主区纵向固定：可滚动 transcript；Working/queue/widgets；Composer；底部 Agent/Model/Usage footer。
 
-Thread 主区纵向固定为三段：可滚动 transcript；Working/queue/widgets 装饰栏与 Composer；最底部 Agent/Model/Usage footer。`Working...` 统一投影 `RUNNING`、`WAITING`、`RETRYING`、processor processing、queued input 与 live projection，Composer 不重复展示原始 `IDLE/RUNNING` 文本。
+### 历史分支与 Stop
 
-### Session、历史分支与 Stop
-
-- 打开 `/sessions/:sessionId` 后使用服务端 `mainThreadId` 进入 Main Thread；侧栏只展示 Main/Secondary Threads，Main 固定置顶，Secondary Threads 继续独立运行。
-- `/tree` 按需查询完整 Session Entry Tree 并打开独立历史分支面板。面板仅提供“对话”与“全部记录”两种显示范围，以及空白分词 AND 搜索；对话视图只显示 USER、ASSISTANT 与 CUSTOM_MESSAGE，不显示工具、标签、配置或其他系统 Entry。显示范围与搜索仅影响可见投影，不改变 Entry Tree 或分支目标；隐藏的中间 Entry 会让后代挂到最近可见祖先，线性链不增加缩进，实际分叉才显示 `├─` / `└─` / `│`。面板以当前 Thread head 为默认选择并标记完整 active path；当筛选或搜索隐藏选择时，回退到最近可见祖先。选择节点后必须确认才创建新 Thread。USER/CUSTOM_MESSAGE 以父 Entry 为新 Thread head 并通过路由 state 回填完整可编辑文本，其他 Entry 从所选 Entry 继续且 Composer 为空；行内预览排除 thinking、压平换行并截断。成功后关闭面板、刷新 Session Thread 列表并进入新 Thread，原 Thread 保持不变。
-- Composer 不提供加号、独立 Stop/Retry 按钮；命令统一通过 `/` 打开。`/stop` 的 `restoredMessages` 以空行合并回 Composer，并生成新的 `clientMessageId`；配置 Input 被取消但不回填。FAILED Thread 通过 `/retry` 显式恢复。
+- `/tree` 按需查询 Session Entry Tree，打开独立历史分支面板；确认后创建 Secondary Thread，并把 **当前 Pane** target 切到新 Thread（不改 URL）。
+- `/stop` 的 `restoredMessages` 以空行合并回 Composer，并生成新 `clientMessageId`。
+- FAILED Thread 通过 `/retry` 显式恢复。
 
 ### SSE cursor 恢复
 
-先分页 `listThreadEvents` 拉到末页，再用最后一个后端事件的 `eventId` 打开 EventSource。收到 `thread_event` 后以 `eventId` 字符串去重并按接收顺序追加；浏览器重连携带 `Last-Event-ID`。REST page 与 SSE 均以后端 journal 顺序为准，前端不按时间、sequence 或 ID 重排。分页前进校验使用字符串位数 + 字典序比较 `eventId`，**绝不**转为 JavaScript number。
-
-终态类事件与 idle/failed 触发 entries / inputs / tool / usage query 失效，使 durable 基线重新成为唯一显示结果。
-
-## Root Activity 与 Subagent Task
-
-详情页使用 `RootActivityDTO` 与 `listSessionTasks` 构建任务时间线。从 Thread 所属 root Session 递归拉取直接任务；路径集合阻断循环。Child Thread 的 ASK 在 root Thread 收到 relay event，根 UI 仍以同一 Tool Invocation ID 调用 decision API；刷新后由 REST 快照重建。
-
-## 运行观测与交互
-
-运行观测：
-
-- YOLO 通过 `queueThreadYolo` 入队（202），由路径配置 fold 决定，不即时改写进行中的 Provider 请求。
-- `WAITING_APPROVAL` Invocation 展示 allow / deny。
-- Thread Usage 显示 token、cache 与 Cost。
-- Tool artifact 在时间线内预览；不在投影时丢弃未知 media type。
-
-前端不维护可恢复 EventBus 或租约状态机；断线、刷新后由 REST + SSE 重建。
+先分页 `listThreadEvents` 拉到末页，再用最后一个 `eventId` 打开 EventSource。`eventId` 以字符串位数 + 字典序比较，**绝不**转为 JavaScript number。终态与配置变更事件会使 entries/inputs/tool/usage/thread detail query 失效。
 
 ## 工程结构
 
 ```text
 frontend/src
-├── app/                 路由与启动
+├── app/                 路由与启动（/ → /chats）
 ├── platform/
 ├── features/ai
-│   ├── extensions/            Session/Thread 页面注册
-│   ├── session/               Session 列表、Main/Secondary Thread 面板
-│   ├── thread-panel/          Composer、Transcript、Working/queue、slash commands、footer
-│   ├── timeline/              Entry/Input/Event 投影与 SSE
-│   └── task/                  Root Activity、permission relay、Subagent Timeline
+│   ├── extensions/            Chat/Agent/Environment 页面注册
+│   ├── chat-pane-state.ts     本地布局与 sort
+│   ├── chat-first-send.ts     空 Pane 首发顺序
+│   ├── ChatWorkspacePage.tsx  Pane 网格
+│   ├── ChatWorkspacePane.tsx  空/绑定 Pane
+│   ├── thread-panel/          Composer、Transcript、slash commands、footer
+│   └── ...
 ├── shared/api
+│   ├── chat-service.ts
+│   ├── environment-service.ts
 │   ├── agent-service.ts
 │   ├── harness-service.ts
 │   └── contracts.ts
@@ -132,7 +172,7 @@ frontend/src
 └── styles.css
 ```
 
-`queryKeys.sessions.*` 覆盖 Session/Entries/Threads；`queryKeys.threads.*` 覆盖 detail/entries/inputs/events/toolInvocations；`queryKeys.usage.thread` 覆盖用量。
+`queryKeys.chats.*` 覆盖 Chat/sessions；`queryKeys.environments.list` 覆盖 live registry；`queryKeys.sessions.*` / `queryKeys.threads.*` 覆盖 Session/Thread 观测。
 
 ## 验证
 

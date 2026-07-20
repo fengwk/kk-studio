@@ -15,6 +15,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -33,22 +34,22 @@ public class DatabaseEnvironmentToolInvocationWorkerStore {
     this.invocationStore = Objects.requireNonNull(invocationStore, "invocationStore");
   }
 
-  /** Claims one due invocation only when it belongs to the specified Environment. */
+  /** Claims one due invocation only when it belongs to the specified Environment name. */
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public Optional<ClaimedToolInvocation> claimDue(
-      long environmentId, String leaseOwner, Instant now, Duration leaseDuration) {
-    requireRequest(environmentId, leaseOwner, now, leaseDuration);
+      String environmentName, String leaseOwner, Instant now, Duration leaseDuration) {
+    requireRequest(environmentName, leaseOwner, now, leaseDuration);
     LocalDateTime timestamp = utc(now);
     LocalDateTime leaseUntil = utc(now.plus(leaseDuration));
     for (int retry = 0; retry < MAX_CLAIM_CONTENTION_RETRIES; retry++) {
       ToolInvocationDO candidate =
-          invocationMapper.findEnvironmentClaimCandidate(environmentId, timestamp);
+          invocationMapper.findEnvironmentClaimCandidate(environmentName, timestamp);
       if (candidate == null) {
         return Optional.empty();
       }
       boolean recovered = ToolInvocationStatus.RUNNING.name().equals(candidate.getStatus());
       if (invocationMapper.claimEnvironment(
-              candidate.getId(), environmentId, leaseOwner, timestamp, leaseUntil)
+              candidate.getId(), environmentName, leaseOwner, timestamp, leaseUntil)
           != 1) {
         continue;
       }
@@ -58,17 +59,31 @@ public class DatabaseEnvironmentToolInvocationWorkerStore {
     return Optional.empty();
   }
 
+  /**
+   * Lists due ENVIRONMENT candidates across all names so the gateway can fail offline targets
+   * immediately without waiting for a READY daemon.
+   */
+  public List<ToolInvocation> listDueEnvironmentCandidates(Instant now, int limit) {
+    Objects.requireNonNull(now, "now");
+    if (limit <= 0) {
+      throw new IllegalArgumentException("limit must be positive");
+    }
+    return invocationMapper.findDueEnvironmentCandidates(utc(now), limit).stream()
+        .map(invocationStore::toInvocation)
+        .toList();
+  }
+
   /** Extends a remote lease while its bound daemon connection remains usable. */
   public boolean heartbeat(ClaimedToolInvocation claimed, Instant now, Duration leaseDuration) {
     Objects.requireNonNull(claimed, "claimed");
     ToolInvocation invocation = claimed.invocation();
-    if (invocation.environmentId() == null) {
-      throw new IllegalArgumentException("Environment invocation requires environmentId");
+    if (invocation.environmentName() == null) {
+      throw new IllegalArgumentException("Environment invocation requires environmentName");
     }
-    requireRequest(invocation.environmentId(), invocation.leaseOwner(), now, leaseDuration);
+    requireRequest(invocation.environmentName(), invocation.leaseOwner(), now, leaseDuration);
     return invocationMapper.heartbeatEnvironment(
             invocation.id(),
-            invocation.environmentId(),
+            invocation.environmentName(),
             invocation.leaseOwner(),
             utc(now),
             utc(now.plus(leaseDuration)))
@@ -83,9 +98,9 @@ public class DatabaseEnvironmentToolInvocationWorkerStore {
   }
 
   private static void requireRequest(
-      long environmentId, String leaseOwner, Instant now, Duration leaseDuration) {
-    if (environmentId <= 0) {
-      throw new IllegalArgumentException("environmentId must be positive");
+      String environmentName, String leaseOwner, Instant now, Duration leaseDuration) {
+    if (environmentName == null || environmentName.isBlank()) {
+      throw new IllegalArgumentException("environmentName must not be blank");
     }
     if (leaseOwner == null || leaseOwner.isBlank()) {
       throw new IllegalArgumentException("leaseOwner must not be blank");

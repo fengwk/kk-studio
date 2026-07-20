@@ -9,9 +9,8 @@ import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.agent.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
-import fun.fengwk.kkstudio.core.environment.service.ToolEnvironmentIds;
-import fun.fengwk.kkstudio.core.environment.service.model.ToolEnvironment;
+import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironment;
+import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
@@ -31,7 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 
 import java.util.ArrayList;
@@ -42,11 +40,17 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/** Resolves a frozen Harness context to persisted Provider, model, variant, and tool resources. */
+/**
+ * Resolves a Thread Turn to Provider, model, variant, and short-name tool bindings.
+ *
+ * <p>Tool short names resolve platform-first (registered non-ENVIRONMENT tools) then selected
+ * Environment capability. A selected Environment that is offline or missing fails clearly.
+ *
+ * <p>Platform CONTROL tools {@code create_goal}/{@code get_goal}/{@code update_goal} are always
+ * injected when registered. {@code load_skill} is injected only when the Agent has selected skills.
+ */
 @Component
 public final class DatabaseTurnResourceResolver implements TurnResourceResolver {
-
-  private static final String ENVIRONMENT_REFERENCE_PREFIX = "environment:";
 
   private final SessionStore sessionStore;
   private final AgentModelRepository modelRepository;
@@ -55,8 +59,7 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
   private final AgentModelRuntimeConfigParser modelConfigParser;
   private final HarnessExtensionHost extensionHost;
   private final HarnessRuntimeProperties properties;
-  private final ToolEnvironmentRepository environmentRepository;
-  private final DaemonToolCapabilitiesCodec capabilitiesCodec;
+  private final LiveEnvironmentRegistry environmentRegistry;
 
   public DatabaseTurnResourceResolver(
       SessionStore sessionStore,
@@ -66,8 +69,7 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
       AgentModelRuntimeConfigParser modelConfigParser,
       HarnessExtensionHost extensionHost,
       HarnessRuntimeProperties properties,
-      ToolEnvironmentRepository environmentRepository,
-      DaemonToolCapabilitiesCodec capabilitiesCodec) {
+      LiveEnvironmentRegistry environmentRegistry) {
     this.sessionStore = Objects.requireNonNull(sessionStore, "sessionStore");
     this.modelRepository = Objects.requireNonNull(modelRepository, "modelRepository");
     this.providerRepository = Objects.requireNonNull(providerRepository, "providerRepository");
@@ -76,9 +78,7 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
     this.extensionHost = Objects.requireNonNull(extensionHost, "extensionHost");
     this.properties = Objects.requireNonNull(properties, "properties");
-    this.environmentRepository =
-        Objects.requireNonNull(environmentRepository, "environmentRepository");
-    this.capabilitiesCodec = Objects.requireNonNull(capabilitiesCodec, "capabilitiesCodec");
+    this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
   }
 
   @Override
@@ -145,7 +145,7 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
                 () ->
                     new IllegalArgumentException(
                         "frozen model variant is unavailable: " + config.variant()));
-    List<ToolBinding> toolBindings = toolBindings(config.tools());
+    List<ToolBinding> toolBindings = toolBindings(config);
     List<ToolDescriptor> toolDescriptors =
         toolBindings.stream().map(ToolBinding::descriptor).toList();
     return new TurnResources(
@@ -178,119 +178,133 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
         providerConfigurationCodec.readTimeoutPolicy(provider.getConfigJson()));
   }
 
-  private List<ToolBinding> toolBindings(List<String> frozenTools) {
+  private List<ToolBinding> toolBindings(AgentRuntimeConfig config) {
+    LiveEnvironment selectedEnvironment = null;
+    if (config.environmentName() != null) {
+      selectedEnvironment = requireReadyEnvironment(config.environmentName());
+    }
     List<ToolBinding> result = new ArrayList<>();
     Set<String> descriptorNames = new HashSet<>();
-    for (String reference : List.copyOf(Objects.requireNonNull(frozenTools, "tools"))) {
-      ToolBinding binding;
-      if (isEnvironmentReference(reference)) {
-        binding = resolveEnvironmentTool(reference);
-      } else {
-        Tool tool = resolveTool(reference);
-        if (ToolTargetType.fromExecutionMode(tool.descriptor().executionMode())
-            == ToolTargetType.ENVIRONMENT) {
-          throw new IllegalArgumentException(
-              "frozen ENVIRONMENT tool requires an environment binding: " + reference);
-        }
-        binding = ToolBinding.of(tool.descriptor());
-      }
+    for (String shortName : List.copyOf(Objects.requireNonNull(config.tools(), "tools"))) {
+      ToolBinding binding = resolveShortNameTool(shortName, selectedEnvironment);
       String descriptorName = binding.descriptor().name();
       if (!descriptorNames.add(descriptorName)) {
         throw new IllegalArgumentException(
-            "frozen tool descriptor names must be unique across bindings: " + descriptorName);
+            "tool descriptor names must be unique across bindings: " + descriptorName);
       }
       result.add(binding);
+    }
+    // Platform CONTROL tools auto-exposed without requiring Agent config listing.
+    injectPlatformToolIfRegistered(result, descriptorNames, "create_goal");
+    injectPlatformToolIfRegistered(result, descriptorNames, "get_goal");
+    injectPlatformToolIfRegistered(result, descriptorNames, "update_goal");
+    if (!config.selectedSkills().isEmpty()) {
+      injectPlatformToolIfRegistered(result, descriptorNames, "load_skill");
     }
     return List.copyOf(result);
   }
 
-  private static boolean isEnvironmentReference(String reference) {
-    return reference != null && reference.startsWith(ENVIRONMENT_REFERENCE_PREFIX);
+  private void injectPlatformToolIfRegistered(
+      List<ToolBinding> result, Set<String> descriptorNames, String shortName) {
+    if (!descriptorNames.add(shortName)) {
+      return;
+    }
+    Tool platformTool = resolvePlatformTool(shortName);
+    if (platformTool == null) {
+      descriptorNames.remove(shortName);
+      return;
+    }
+    result.add(ToolBinding.of(platformTool.descriptor()));
   }
 
-  private ToolBinding resolveEnvironmentTool(String reference) {
-    String body = reference.substring(ENVIRONMENT_REFERENCE_PREFIX.length());
-    int slash = body.indexOf('/');
-    if (slash <= 0 || slash == body.length() - 1) {
-      throw new IllegalArgumentException(
-          "frozen Environment reference must use environment:<id>/<tool>@<version>: " + reference);
+  private ToolBinding resolveShortNameTool(String shortName, LiveEnvironment selectedEnvironment) {
+    if (shortName == null || shortName.isBlank()) {
+      throw new IllegalArgumentException("tool short name must not be blank");
     }
-    String idPart = body.substring(0, slash);
-    String toolPart = body.substring(slash + 1);
-    long environmentId;
-    try {
-      environmentId = ToolEnvironmentIds.parsePositive(idPart, "environmentId");
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(
-          "frozen Environment reference id must be an unsigned positive decimal: " + reference,
-          error);
+    if (shortName.indexOf(':') >= 0 || shortName.indexOf('/') >= 0 || shortName.indexOf('@') >= 0) {
+      throw new IllegalArgumentException("tool selection must use short names only: " + shortName);
     }
-    int at = toolPart.lastIndexOf('@');
-    if (at <= 0 || at == toolPart.length() - 1) {
-      throw new IllegalArgumentException(
-          "frozen Environment tool reference must include name@version: " + reference);
+    Tool platformTool = resolvePlatformTool(shortName);
+    if (platformTool != null) {
+      return ToolBinding.of(platformTool.descriptor());
     }
-    String toolName = toolPart.substring(0, at);
-    String toolVersion = toolPart.substring(at + 1);
-    if (toolName.isBlank() || toolVersion.isBlank()) {
-      throw new IllegalArgumentException(
-          "frozen Environment tool name and version must not be blank: " + reference);
+    if (selectedEnvironment == null) {
+      throw new IllegalArgumentException("unknown tool short name: " + shortName);
     }
-    ToolEnvironment environment = environmentRepository.getById(environmentId);
-    if (environment == null) {
-      throw new IllegalArgumentException("frozen Environment not found: " + reference);
-    }
-    DaemonToolCapabilitiesCodec.DaemonToolCapabilities capabilities;
-    try {
-      capabilities = capabilitiesCodec.decode(environment.getCapabilitiesJson());
-    } catch (RuntimeException error) {
-      throw new IllegalArgumentException(
-          "persisted Environment capabilitiesJson is not a canonical Daemon CAPABILITIES payload: "
-              + reference,
-          error);
-    }
-    Map<String, ToolDescriptor> byKey = new LinkedHashMap<>();
-    for (ToolDescriptor descriptor : capabilities.tools()) {
-      byKey.put(descriptor.name() + "@" + descriptor.version(), descriptor);
-    }
-    ToolDescriptor descriptor = byKey.get(toolName + "@" + toolVersion);
+    ToolDescriptor descriptor = uniqueToolByName(selectedEnvironment.tools(), shortName);
     if (descriptor == null) {
-      throw new IllegalArgumentException("frozen Environment capability not found: " + reference);
+      throw new IllegalArgumentException(
+          "unknown tool short name in environment "
+              + selectedEnvironment.environmentName()
+              + ": "
+              + shortName);
     }
     if (descriptor.executionMode() != ToolExecutionMode.ENVIRONMENT) {
       throw new IllegalArgumentException(
-          "frozen Environment tool must use ENVIRONMENT execution mode: " + reference);
+          "environment tool must use ENVIRONMENT execution mode: " + shortName);
     }
-    return new ToolBinding(descriptor, ToolTargetType.ENVIRONMENT, environmentId);
+    return new ToolBinding(
+        descriptor, ToolTargetType.ENVIRONMENT, selectedEnvironment.environmentName());
   }
 
-  private Tool resolveTool(String reference) {
-    int separator = reference.lastIndexOf('@');
-    if (separator < 0) {
-      List<String> versions =
-          extensionHost.toolFactories().stream()
-              .map(factory -> factory.descriptor())
-              .filter(descriptor -> descriptor.name().equals(reference))
-              .map(descriptor -> descriptor.version())
-              .toList();
-      if (versions.size() != 1) {
-        throw new IllegalArgumentException(
-            "frozen tool name must resolve to exactly one registered version: " + reference);
+  private Tool resolvePlatformTool(String shortName) {
+    List<Tool> matches = new ArrayList<>();
+    for (var factory : extensionHost.toolFactories()) {
+      ToolDescriptor descriptor = factory.descriptor();
+      if (!descriptor.name().equals(shortName)) {
+        continue;
       }
-      return extensionHost.createTool(reference, versions.get(0)).orElseThrow();
+      if (descriptor.executionMode() == ToolExecutionMode.ENVIRONMENT) {
+        continue;
+      }
+      matches.add(
+          extensionHost
+              .createTool(descriptor.name(), descriptor.version())
+              .orElseThrow(
+                  () ->
+                      new IllegalStateException(
+                          "registered tool factory failed to create "
+                              + descriptor.name()
+                              + "@"
+                              + descriptor.version())));
     }
-    if (separator == 0 || separator == reference.length() - 1) {
+    if (matches.isEmpty()) {
+      return null;
+    }
+    if (matches.size() > 1) {
       throw new IllegalArgumentException(
-          "frozen tool reference must use name or name@version: " + reference);
+          "tool short name must resolve to exactly one registered non-ENVIRONMENT version: "
+              + shortName);
     }
-    String name = reference.substring(0, separator);
-    String version = reference.substring(separator + 1);
-    return extensionHost
-        .createTool(name, version)
+    return matches.get(0);
+  }
+
+  private static ToolDescriptor uniqueToolByName(List<ToolDescriptor> tools, String shortName) {
+    Map<String, ToolDescriptor> byName = new LinkedHashMap<>();
+    Map<String, Integer> counts = new LinkedHashMap<>();
+    for (ToolDescriptor tool : tools) {
+      counts.merge(tool.name(), 1, Integer::sum);
+      byName.putIfAbsent(tool.name(), tool);
+    }
+    Integer count = counts.get(shortName);
+    if (count == null) {
+      return null;
+    }
+    if (count > 1) {
+      throw new IllegalArgumentException(
+          "environment tool short name is ambiguous across versions: " + shortName);
+    }
+    return byName.get(shortName);
+  }
+
+  private LiveEnvironment requireReadyEnvironment(String environmentName) {
+    return environmentRegistry
+        .find(environmentName)
+        .filter(LiveEnvironment::isReady)
         .orElseThrow(
             () ->
                 new IllegalArgumentException(
-                    "frozen tool is unavailable: " + name + "@" + version));
+                    "agent environment is offline or missing: " + environmentName));
   }
 
   private static PromptCachePolicy cachePolicy(

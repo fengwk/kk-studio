@@ -4,7 +4,6 @@ export type {
   DialogueRole,
   DialogueStatus,
   QueuedThreadMessage,
-  RuntimeContext,
   TextDialogueMessage,
   ThreadTimeline,
   ToolAttachment,

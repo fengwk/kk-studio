@@ -6,7 +6,7 @@ describe('thread timeline', () => {
   it('projects durable entries as the transcript baseline', () => {
     const timeline = buildThreadTimeline(
       [
-        entry('1', 'agent_snapshot', { snapshot: { modelId: 'MiniMax-M2.7', variant: 'default' } }),
+        entry('1', 'root', {}),
         entry('2', 'message', messagePayload('USER', [{ type: 'text', text: '检查大纲' }])),
         entry('3', 'message', messagePayload('ASSISTANT', [
           { type: 'thinking', text: '先梳理结构。' },
@@ -17,7 +17,6 @@ describe('thread timeline', () => {
       [],
     )
 
-    expect(timeline.runtimeContext).toEqual({ model: 'MiniMax-M2.7', variant: 'default' })
     expect(timeline.messages).toMatchObject([
       { role: 'user', text: '检查大纲', status: 'done' },
       { role: 'assistant', text: '结构完整。', thinking: '先梳理结构。', status: 'done' },
@@ -51,7 +50,7 @@ describe('thread timeline', () => {
     expect(timeline.queuedMessages.map((message) => message.text)).toEqual(['后端第一条', '后端第二条'])
   })
 
-  it('projects an APPLIED USER input when its Entry snapshot is stale', () => {
+  it('projects an APPLIED USER input when its Entry query is stale', () => {
     const timeline = buildThreadTimeline(
       [],
       [input('in-1', 'user_message', messagePayload('USER', [{ type: 'text', text: '仍可见' }]), '11')],
@@ -370,26 +369,26 @@ describe('thread timeline', () => {
     expect(
       isThreadWorking(
         { processing: true } as never,
-        { messages: [], queuedMessages: [], runtimeContext: {}, hasPendingInputs: false, hasLiveProjection: false },
+        { messages: [], queuedMessages: [], hasPendingInputs: false, hasLiveProjection: false },
       ),
     ).toBe(true)
     expect(
       isThreadWorking(
         { processing: false } as never,
-        { messages: [], queuedMessages: [], runtimeContext: {}, hasPendingInputs: true, hasLiveProjection: false },
+        { messages: [], queuedMessages: [], hasPendingInputs: true, hasLiveProjection: false },
       ),
     ).toBe(true)
     expect(
       isThreadWorking(
         { processing: false } as never,
-        { messages: [], queuedMessages: [], runtimeContext: {}, hasPendingInputs: false, hasLiveProjection: true },
+        { messages: [], queuedMessages: [], hasPendingInputs: false, hasLiveProjection: true },
       ),
     ).toBe(true)
     // Stale raw input DTO with null appliedEntryId must not keep working once overlay is suppressed.
     expect(
       isThreadWorking(
         { processing: false } as never,
-        { messages: [], queuedMessages: [], runtimeContext: {}, hasPendingInputs: false, hasLiveProjection: false },
+        { messages: [], queuedMessages: [], hasPendingInputs: false, hasLiveProjection: false },
       ),
     ).toBe(false)
 

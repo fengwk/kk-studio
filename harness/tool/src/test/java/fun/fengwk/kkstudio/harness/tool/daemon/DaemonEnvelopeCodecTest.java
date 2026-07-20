@@ -31,19 +31,19 @@ class DaemonEnvelopeCodecTest {
   @Test
   void rejectsUnsupportedOrMalformedWireEnvelope() {
     assertProtocolError(
-        "{\"protocolVersion\":2,\"messageType\":\"READY\",\"environmentId\":\"e\","
+        "{\"protocolVersion\":2,\"messageType\":\"READY\",\"environmentName\":\"e\","
             + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        "{\"protocolVersion\":1,\"messageType\":\"FUTURE\",\"environmentId\":\"e\","
+        "{\"protocolVersion\":1,\"messageType\":\"FUTURE\",\"environmentName\":\"e\","
             + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        "{\"protocolVersion\":1,\"messageType\":\"READY\",\"environmentId\":\"e\","
+        "{\"protocolVersion\":1,\"messageType\":\"READY\",\"environmentName\":\"e\","
             + "\"sequence\":-1,\"payload\":{}}");
     assertProtocolError(
-        "{\"protocolVersion\":1,\"messageType\":\"READY\",\"environmentId\":\"e\","
+        "{\"protocolVersion\":1,\"messageType\":\"READY\",\"environmentName\":\"e\","
             + "\"sequence\":0,\"payload\":[]}");
     assertProtocolError(
-        "{\"protocolVersion\":1,\"messageType\":\"READY\",\"environmentId\":\"e\","
+        "{\"protocolVersion\":1,\"messageType\":\"READY\",\"environmentName\":\"e\","
             + "\"sequence\":0,\"payload\":{},\"unexpected\":true}");
   }
 

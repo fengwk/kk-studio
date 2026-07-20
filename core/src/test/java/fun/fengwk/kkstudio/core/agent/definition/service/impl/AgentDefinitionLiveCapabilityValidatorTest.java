@@ -1,0 +1,219 @@
+package fun.fengwk.kkstudio.core.agent.definition.service.impl;
+
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Test;
+
+import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonConnection;
+import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtension;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
+import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionRegistry;
+import fun.fengwk.kkstudio.harness.runtime.extension.ToolFactory;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec.DaemonToolCapabilities;
+import fun.fengwk.kkstudio.harness.tool.execution.Tool;
+import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
+import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/** Agent create/update live capability validation: READY env, short names, platform priority. */
+class AgentDefinitionLiveCapabilityValidatorTest {
+
+  private static final Instant NOW = Instant.parse("2026-07-20T00:00:00Z");
+
+  @Test
+  void acceptsPlatformToolAndPlatformSkillWithOptionalEnvironment() {
+    try (Fixture fixture = new Fixture(List.of(cloudTool("read", "1")))) {
+      fixture.readyEnvironment(
+          LiveEnvironmentRegistry.PLATFORM_ENVIRONMENT_NAME,
+          List.of(),
+          List.of(new DaemonSkillDescriptor("dev", "Developer rules")));
+      fixture.readyEnvironment(
+          "local-dev",
+          List.of(environmentTool("bash", "1")),
+          List.of(new DaemonSkillDescriptor("project", "Project skill")));
+
+      AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+      config.setEnvironmentName("local-dev");
+      config.setTools(List.of("read", "bash"));
+      config.setSkills(List.of("dev", "project"));
+      assertDoesNotThrow(() -> fixture.validator.validate(config));
+    }
+  }
+
+  @Test
+  void rejectsUnknownToolsSkillsOfflineEnvironmentAndLongNames() {
+    try (Fixture fixture = new Fixture(List.of(cloudTool("read", "1")))) {
+      fixture.readyEnvironment(
+          LiveEnvironmentRegistry.PLATFORM_ENVIRONMENT_NAME,
+          List.of(),
+          List.of(new DaemonSkillDescriptor("dev", "Developer rules")));
+
+      AgentDefinitionConfigDTO unknownTool = new AgentDefinitionConfigDTO();
+      unknownTool.setTools(List.of("missing"));
+      assertTrue(
+          assertThrows(
+                  IllegalArgumentException.class, () -> fixture.validator.validate(unknownTool))
+              .getMessage()
+              .contains("unknown agent tool"));
+
+      AgentDefinitionConfigDTO unknownSkill = new AgentDefinitionConfigDTO();
+      unknownSkill.setSkills(List.of("missing"));
+      assertTrue(
+          assertThrows(
+                  IllegalArgumentException.class, () -> fixture.validator.validate(unknownSkill))
+              .getMessage()
+              .contains("unknown agent skill"));
+
+      AgentDefinitionConfigDTO offline = new AgentDefinitionConfigDTO();
+      offline.setEnvironmentName("gone");
+      assertTrue(
+          assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(offline))
+              .getMessage()
+              .contains("not READY"));
+
+      AgentDefinitionConfigDTO longName = new AgentDefinitionConfigDTO();
+      longName.setTools(List.of("environment:local/bash@1"));
+      assertTrue(
+          assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(longName))
+              .getMessage()
+              .contains("short names"));
+    }
+  }
+
+  @Test
+  void platformSkillNameShadowsEnvironmentSkillAndRejectsEnvironmentOnlyWhenUnknown() {
+    try (Fixture fixture = new Fixture(List.of())) {
+      fixture.readyEnvironment(
+          LiveEnvironmentRegistry.PLATFORM_ENVIRONMENT_NAME,
+          List.of(),
+          List.of(new DaemonSkillDescriptor("shared", "from platform")));
+      fixture.readyEnvironment(
+          "local-dev",
+          List.of(),
+          List.of(
+              new DaemonSkillDescriptor("shared", "from env"),
+              new DaemonSkillDescriptor("only-env", "env only")));
+
+      AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+      config.setEnvironmentName("local-dev");
+      config.setSkills(List.of("shared", "only-env"));
+      assertDoesNotThrow(() -> fixture.validator.validate(config));
+
+      AgentDefinitionConfigDTO noEnv = new AgentDefinitionConfigDTO();
+      noEnv.setSkills(List.of("only-env"));
+      assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(noEnv));
+    }
+  }
+
+  private static Tool cloudTool(String name, String version) {
+    return tool(name, version, ToolExecutionMode.CLOUD);
+  }
+
+  private static ToolDescriptor environmentTool(String name, String version) {
+    return descriptor(name, version, ToolExecutionMode.ENVIRONMENT);
+  }
+
+  private static Tool tool(String name, String version, ToolExecutionMode mode) {
+    ToolDescriptor descriptor = descriptor(name, version, mode);
+    return new Tool() {
+      @Override
+      public ToolDescriptor descriptor() {
+        return descriptor;
+      }
+
+      @Override
+      public ToolExecutionHandle execute(
+          ToolExecutionRequest request, ToolExecutionListener listener) {
+        throw new UnsupportedOperationException();
+      }
+    };
+  }
+
+  private static ToolDescriptor descriptor(String name, String version, ToolExecutionMode mode) {
+    return new ToolDescriptor(
+        name,
+        version,
+        name + " tool",
+        name,
+        new ToolParamsSchema("", Map.of(), Set.of(), false),
+        mode,
+        ToolSideEffect.READ_ONLY,
+        Duration.ofSeconds(5));
+  }
+
+  private static final class Fixture implements AutoCloseable {
+    private final LiveEnvironmentRegistry environments =
+        new LiveEnvironmentRegistry(new DaemonToolCapabilitiesCodec());
+    private final HarnessExtensionHost host;
+    private final AgentDefinitionLiveCapabilityValidator validator;
+
+    private Fixture(List<Tool> tools) {
+      HarnessExtension extension =
+          new HarnessExtension() {
+            @Override
+            public String id() {
+              return "validator.test";
+            }
+
+            @Override
+            public int priority() {
+              return 0;
+            }
+
+            @Override
+            public void contribute(HarnessExtensionRegistry registry) {
+              tools.forEach(tool -> registry.addToolFactory(ToolFactory.singleton(tool)));
+            }
+          };
+      host = new HarnessExtensionHost(List.of(extension));
+      validator = new AgentDefinitionLiveCapabilityValidator(environments, host);
+    }
+
+    private void readyEnvironment(
+        String name, List<ToolDescriptor> tools, List<DaemonSkillDescriptor> skills) {
+      EnvironmentDaemonConnection connection =
+          new EnvironmentDaemonConnection() {
+            @Override
+            public String connectionId() {
+              return "conn-" + name;
+            }
+
+            @Override
+            public boolean isOpen() {
+              return true;
+            }
+
+            @Override
+            public void sendText(String text) {}
+
+            @Override
+            public void close() {}
+          };
+      environments.tryBind(name, connection, NOW);
+      environments.updateCapabilities(
+          name, connection, new DaemonToolCapabilities(tools, skills), NOW);
+      environments.markReady(name, connection, NOW);
+    }
+
+    @Override
+    public void close() {
+      host.close();
+    }
+  }
+}

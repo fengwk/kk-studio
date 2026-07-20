@@ -1,18 +1,26 @@
-import { AgentResourceCard, CreateCard, ModelResourceCard, ProviderResourceCard, SessionCard } from '@/features/ai/AiConsoleCards'
-import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, HarnessSessionDTO } from '@/shared/api/contracts'
+import { AgentResourceCard, CreateCard, ModelResourceCard, ProviderResourceCard } from '@/features/ai/AiConsoleCards'
+import { ChatCard } from '@/features/ai/ChatCard'
+import type {
+  AgentDefinitionDTO,
+  AgentModelDTO,
+  AgentProviderDTO,
+  ChatDTO,
+} from '@/shared/api/contracts'
 
-export function ChatSessionsPanel({
-  sessions,
+export function ChatCardsPanel({
+  chats,
+  agents,
   onCreate,
 }: {
-  sessions: HarnessSessionDTO[]
+  chats: ChatDTO[]
+  agents: AgentDefinitionDTO[]
   onCreate: () => void
 }) {
   return (
     <div className="cards-grid">
-      <CreateCard title="新建 Chat" subtitle="选择一个 Agent 创建云端对话" onClick={onCreate} />
-      {sessions.map((session) => (
-        <SessionCard key={session.sessionId} session={session} />
+      <CreateCard title="新建 Chat" subtitle="创建持久 Chat 工作区（可选默认 Agent）" onClick={onCreate} />
+      {chats.map((chat) => (
+        <ChatCard key={chat.id} chat={chat} agents={agents} />
       ))}
     </div>
   )
@@ -20,6 +28,7 @@ export function ChatSessionsPanel({
 
 export function AgentsPanel({
   agents,
+  models = [],
   deletePending,
   onCreate,
   onStart,
@@ -27,6 +36,7 @@ export function AgentsPanel({
   onDelete,
 }: {
   agents: AgentDefinitionDTO[]
+  models?: AgentModelDTO[]
   deletePending: boolean
   onCreate: () => void
   onStart: (agent: AgentDefinitionDTO) => void
@@ -35,11 +45,12 @@ export function AgentsPanel({
 }) {
   return (
     <div className="cards-grid">
-      <CreateCard title="新建 Agent" subtitle="绑定 Provider、Model 与 system prompt" onClick={onCreate} />
+      <CreateCard title="新建 Agent" subtitle="绑定 Model、Environment 与 system prompt" onClick={onCreate} />
       {agents.map((agent) => (
         <AgentResourceCard
           key={agent.id}
           agent={agent}
+          models={models}
           onStart={() => onStart(agent)}
           onEdit={() => onEdit(agent)}
           onDelete={() => onDelete(agent)}
@@ -94,7 +105,7 @@ export function ProvidersPanel({
 }) {
   return (
     <div className="cards-grid">
-      <CreateCard title="新建 Provider" subtitle="配置连接地址、凭据与超时" onClick={onCreate} />
+      <CreateCard title="新建 Provider" subtitle="配置供应商与凭据" onClick={onCreate} />
       {providers.map((provider) => (
         <ProviderResourceCard
           key={provider.id}

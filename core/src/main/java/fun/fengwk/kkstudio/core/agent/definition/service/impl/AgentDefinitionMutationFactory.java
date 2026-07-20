@@ -12,7 +12,10 @@ import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Normalizes the persisted agent definition and serializes its structured execution configuration.
@@ -83,8 +86,9 @@ final class AgentDefinitionMutationFactory {
 
   private AgentDefinitionConfigDTO normalizeConfig(AgentDefinitionConfigDTO config) {
     AgentDefinitionConfigDTO result = config == null ? new AgentDefinitionConfigDTO() : config;
+    result.setEnvironmentName(editableSupport.trimToNull(result.getEnvironmentName()));
     result.setTools(normalizeStrings(result.getTools()));
-    result.setSkills(normalizeStrings(result.getSkills()));
+    result.setSkills(normalizeSkills(result.getSkills()));
     result.setAllowedSubagents(normalizeStrings(result.getAllowedSubagents()));
     result.setExecutionPolicy(normalizePolicy(result.getExecutionPolicy()));
     return result;
@@ -114,6 +118,29 @@ final class AgentDefinitionMutationFactory {
         .filter(value -> value != null)
         .distinct()
         .toList();
+  }
+
+  /**
+   * Skills keep submission order and reject duplicate short names instead of silently
+   * deduplicating.
+   */
+  private List<String> normalizeSkills(List<String> values) {
+    if (values == null) {
+      return List.of();
+    }
+    List<String> result = new ArrayList<>();
+    Set<String> seen = new LinkedHashSet<>();
+    for (String raw : values) {
+      String value = editableSupport.trimToNull(raw);
+      if (value == null) {
+        continue;
+      }
+      if (!seen.add(value)) {
+        throw new IllegalArgumentException("agent skills must not contain duplicates: " + value);
+      }
+      result.add(value);
+    }
+    return List.copyOf(result);
   }
 
   private String writeConfig(AgentDefinitionConfigDTO config) {

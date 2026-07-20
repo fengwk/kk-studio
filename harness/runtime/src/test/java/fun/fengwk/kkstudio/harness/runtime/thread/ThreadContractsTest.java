@@ -17,9 +17,40 @@ class ThreadContractsTest {
   void agentThreadRequiresDurableStatusAndPositiveIdentity() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new AgentThread(0, 1, 1, ThreadStatus.IDLE, 0, null, null, 0, NOW, NOW));
+        () ->
+            new AgentThread(
+                0,
+                1,
+                1,
+                ThreadStatus.IDLE,
+                0,
+                null,
+                null,
+                null,
+                null,
+                false,
+                null,
+                null,
+                0,
+                NOW,
+                NOW));
     AgentThread thread =
-        new AgentThread(1, 2, 3, ThreadStatus.RUNNING, 0, "token", NOW.plusSeconds(1), 0, NOW, NOW);
+        new AgentThread(
+            1,
+            2,
+            3,
+            ThreadStatus.RUNNING,
+            0,
+            9L,
+            "agent",
+            "model",
+            "default",
+            false,
+            "token",
+            NOW.plusSeconds(1),
+            0,
+            NOW,
+            NOW);
     assertTrue(thread.isProcessing(NOW));
     assertFalse(thread.isProcessing(NOW.plusSeconds(2)));
   }

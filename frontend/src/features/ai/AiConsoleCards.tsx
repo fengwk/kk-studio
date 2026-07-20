@@ -2,4 +2,4 @@ export { CreateCard, SearchField, StateBlock } from '@/features/ai/AiConsoleComm
 export { AgentResourceCard } from '@/features/ai/AiAgentResourceCard'
 export { ModelResourceCard } from '@/features/ai/AiModelResourceCard'
 export { ProviderResourceCard } from '@/features/ai/AiProviderResourceCard'
-export { SessionCard } from '@/features/ai/AiConsoleSessionCard'
+export { ChatCard } from '@/features/ai/ChatCard'

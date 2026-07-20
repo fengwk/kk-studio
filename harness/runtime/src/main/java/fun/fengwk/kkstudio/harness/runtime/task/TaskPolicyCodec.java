@@ -4,7 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-/** Single strict codec for the frozen task execution policy stored in AgentSnapshot. */
+/** Single strict codec for the frozen task execution policy stored in Agent runtime config. */
 public final class TaskPolicyCodec {
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 

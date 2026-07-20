@@ -46,40 +46,34 @@ class HarnessSessionThreadContractIntegrationTest {
   @Test
   void createsSessionRootEntriesAndStableMainThreadAtomically() {
     int rootCount = sessionQueryService.listRootSessions().size();
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> sessionCommandService.createSession(session("999999999999", "missing", false)));
-    assertEquals(rootCount, sessionQueryService.listRootSessions().size());
-
-    HarnessSessionDTO created = sessionCommandService.createSession(session("1", "contract", true));
+    HarnessSessionDTO created = sessionCommandService.createSession(session("contract", true));
     assertTrue(created.getSessionId().matches("\\d+"));
     assertTrue(created.getMainThreadId().matches("\\d+"));
     assertEquals(created.getSessionId(), created.getRootSessionId());
     assertEquals(0, created.getDepth());
+    assertEquals(rootCount + 1, sessionQueryService.listRootSessions().size());
 
     HarnessSessionDTO reloaded = sessionQueryService.getSession(created.getSessionId());
     assertEquals(created.getMainThreadId(), reloaded.getMainThreadId());
     List<HarnessSessionEntryDTO> entries = sessionQueryService.listEntries(created.getSessionId());
     assertEquals(
-        List.of("agent_snapshot", "yolo_change"),
-        entries.stream().map(HarnessSessionEntryDTO::getEntryType).toList());
+        List.of("root"), entries.stream().map(HarnessSessionEntryDTO::getEntryType).toList());
     assertNull(entries.get(0).getParentEntryId());
-    assertEquals(entries.get(0).getEntryId(), entries.get(1).getParentEntryId());
 
     HarnessThreadDTO mainThread = threadQueryService.getThread(created.getMainThreadId());
     assertEquals(created.getSessionId(), mainThread.getSessionId());
-    assertEquals(entries.get(1).getEntryId(), mainThread.getHeadEntryId());
+    assertEquals(entries.get(0).getEntryId(), mainThread.getHeadEntryId());
     assertEquals("IDLE", mainThread.getStatus());
     assertEquals(0L, mainThread.getInputSequence());
+    assertTrue(Boolean.TRUE.equals(mainThread.getYoloEnabled()));
+    assertNull(mainThread.getActiveAgentDefinitionId());
   }
 
   /** Branches may only use an Entry from their own Session and queue replay is payload-safe. */
   @Test
   void validatesBranchMembershipAndPreservesInputAndStopReceipts() {
-    HarnessSessionDTO firstSession =
-        sessionCommandService.createSession(session("1", "first", false));
-    HarnessSessionDTO otherSession =
-        sessionCommandService.createSession(session("1", "other", false));
+    HarnessSessionDTO firstSession = sessionCommandService.createSession(session("first", false));
+    HarnessSessionDTO otherSession = sessionCommandService.createSession(session("other", false));
     String firstThreadId = firstSession.getMainThreadId();
     String firstEntryId =
         sessionQueryService.listEntries(firstSession.getSessionId()).get(0).getEntryId();
@@ -93,6 +87,9 @@ class HarnessSessionThreadContractIntegrationTest {
     assertEquals(firstSession.getSessionId(), branch.getSessionId());
     assertEquals(firstEntryId, branch.getHeadEntryId());
     assertEquals("IDLE", branch.getStatus());
+    assertNull(branch.getActiveAgentDefinitionId());
+    assertNull(branch.getModelId());
+    assertFalse(Boolean.TRUE.equals(branch.getYoloEnabled()));
 
     HarnessThreadCreateDTO crossSessionRequest = new HarnessThreadCreateDTO();
     crossSessionRequest.setFromEntryId(otherEntryId);
@@ -161,10 +158,30 @@ class HarnessSessionThreadContractIntegrationTest {
     assertFalse(threadQueryService.listBySession(firstSession.getSessionId()).isEmpty());
   }
 
-  private static HarnessSessionCreateDTO session(
-      String agentDefinitionId, String title, boolean yolo) {
+  /**
+   * 公共命令服务：分支 Thread 按路径最后 AGENT_CHANGE 初始化身份，并读取当前 Definition model/variant。
+   *
+   * <p>说明：配置 Input 需 Processor harvest 才会落 Entry；此处通过 durable transaction 服务的测试已覆盖 harvest
+   * 路径。本用例仅验证 createThread 在已有 agent_change Entry 链上的投影（由 integration 事务测试构造完整链路后，这里做公共 API 的无
+   * Agent 回归；有 Agent 路径见 HarnessThreadTransactionServiceIntegrationTest）。
+   */
+  @Test
+  void createThreadKeepsAgentlessBranchWhenPathHasNoAgentChange() {
+    HarnessSessionDTO session = sessionCommandService.createSession(session("branch-null", false));
+    String rootEntryId =
+        sessionQueryService.listEntries(session.getSessionId()).get(0).getEntryId();
+    HarnessThreadDTO branch =
+        threadCommandService.createThread(session.getSessionId(), threadRequest(rootEntryId));
+    assertNull(branch.getActiveAgentDefinitionId());
+    assertNull(branch.getActiveAgentName());
+    assertNull(branch.getModelId());
+    assertNull(branch.getVariant());
+    assertFalse(Boolean.TRUE.equals(branch.getYoloEnabled()));
+    assertEquals(rootEntryId, branch.getHeadEntryId());
+  }
+
+  private static HarnessSessionCreateDTO session(String title, boolean yolo) {
     HarnessSessionCreateDTO request = new HarnessSessionCreateDTO();
-    request.setAgentDefinitionId(agentDefinitionId);
     request.setTitle(title);
     request.setYoloEnabled(yolo);
     return request;
