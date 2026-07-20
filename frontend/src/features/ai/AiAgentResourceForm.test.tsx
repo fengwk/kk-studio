@@ -7,7 +7,7 @@ import type { AgentDraft } from '@/features/ai/ai-console-types'
 import { emptyAgentDraft } from '@/features/ai/ai-agent-draft-codec'
 import type {
   AgentModelConfigDTO,
-  AgentModelWithProviderDTO,
+  AgentModelView,
 } from '@/shared/api/contracts'
 
 const baseConfig: AgentModelConfigDTO = {
@@ -30,7 +30,7 @@ const baseConfig: AgentModelConfigDTO = {
   variants: [{ id: 'default' }, { id: 'fast' }],
 }
 
-function modelWithVariants(): AgentModelWithProviderDTO {
+function modelWithVariants(): AgentModelView {
   return {
     id: 'm1',
     providerId: 'p1',
@@ -38,9 +38,10 @@ function modelWithVariants(): AgentModelWithProviderDTO {
     name: 'MiniMax',
     description: null,
     config: baseConfig,
+    version: 1,
     createTime: null,
     updateTime: null,
-  } as AgentModelWithProviderDTO
+  }
 }
 
 describe('AgentForm current contracts', () => {
@@ -65,6 +66,7 @@ describe('AgentForm current contracts', () => {
               modelId: 'm1',
               variant: 'default',
               config: null,
+              version: 1,
               createTime: null,
               updateTime: null,
             },

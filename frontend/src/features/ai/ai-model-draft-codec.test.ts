@@ -11,7 +11,7 @@ import {
   toEditableModelUpdate,
   toModelDraft,
 } from '@/features/ai/ai-model-draft-codec'
-import type { AgentModelDTO } from '@/shared/api/contracts'
+import type { AgentModelConfigDTO, AgentModelDTO } from '@/shared/api/contracts'
 
 function draft(overrides: Partial<ModelDraft> = {}): ModelDraft {
   return {
@@ -22,7 +22,7 @@ function draft(overrides: Partial<ModelDraft> = {}): ModelDraft {
   }
 }
 
-function fullConfig() {
+function fullConfig(): AgentModelConfigDTO {
   return {
     limit: { context: 200000, output: 16000 },
     abilities: {
@@ -60,13 +60,14 @@ function fullConfig() {
   }
 }
 
-function model(configOverrides?: Record<string, unknown>): AgentModelDTO {
+function model(configOverride?: AgentModelConfigDTO): AgentModelDTO {
   return {
     id: 'model-1',
     providerId: 'provider-1',
     name: 'model-a',
     description: 'desc',
-    config: (configOverrides ?? fullConfig()) as AgentModelDTO['config'],
+    config: configOverride ?? fullConfig(),
+    version: 1,
     createTime: null,
     updateTime: null,
   }
@@ -84,7 +85,7 @@ describe('ai-model-draft-codec', () => {
       maxOutputTokens: '16000',
       tools: false,
       reasoning: true,
-      inputModalities: new Set(['TEXT', 'IMAGE', 'AUDIO']),
+      inputModalities: ['TEXT', 'IMAGE', 'AUDIO'],
       defaultVariant: 'quality',
       variants: [
         {
@@ -110,19 +111,9 @@ describe('ai-model-draft-codec', () => {
     expect(extractDefaultVariantFromModel(source)).toBe('quality')
   })
 
-  /** Empty or missing config returns a structured default draft. */
-  it('falls back to defaults when persisted config is null', () => {
-    const draft = toModelDraft({
-      ...model({ config: null }),
-    })
-    expect(draft.contextWindow).toBe('128000')
-    expect(draft.maxOutputTokens).toBe('8192')
-    expect(draft.tools).toBe(true)
-    expect(draft.inputModalities).toEqual(
-      new Set<AgentModelInputModality>(['TEXT', 'IMAGE', 'AUDIO', 'VIDEO', 'DOCUMENT']),
-    )
-    expect(draft.defaultVariant).toBe('medium')
-    expect(draft.variants).toHaveLength(1)
+  /** New model drafts default to TEXT only (not every modality). */
+  it('defaults to TEXT-only input modalities on empty drafts', () => {
+    expect(emptyModelDraft().inputModalities).toEqual<AgentModelInputModality[]>(['TEXT'])
   })
 
   /** Serialization uses the structured config object and omits empty optional variant fields. */
@@ -134,7 +125,7 @@ describe('ai-model-draft-codec', () => {
       maxOutputTokens: '16000',
       tools: true,
       reasoning: true,
-      inputModalities: new Set(['TEXT', 'IMAGE', 'AUDIO', 'VIDEO']),
+      inputModalities: ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO'],
       defaultVariant: 'quality',
       variants: [
         {
@@ -196,8 +187,9 @@ describe('ai-model-draft-codec', () => {
       ],
     })
     expect(editable.config).toEqual(config)
+    expect(editable.name).toBe('model-a')
+    expect(editable.description).toBe('model desc')
   })
-
   /** Disabling reasoning must prevent stale hidden reasoning-effort values from reaching providers. */
   it('omits reasoningEffort when reasoning is disabled', () => {
     const base = emptyModelDraft().variants[0]
@@ -243,5 +235,119 @@ describe('ai-model-draft-codec', () => {
     expect(create.name).toBe('stub')
     expect(create.config).toEqual(config)
     expect(toEditableModelUpdate(input)).not.toHaveProperty('providerId')
+  })
+
+  /** Toggling via immutable arrays never drops the last input modality. */
+  it('keeps at least one input modality when toggling', () => {
+    const base = emptyModelDraft()
+    const onlyText = base.inputModalities.filter((m) => m !== 'TEXT')
+    const toggled = onlyText.length > 0 ? onlyText : ['TEXT']
+    expect(toggled).toEqual<AgentModelInputModality[]>(['TEXT'])
+  })
+
+  /** Edit must preserve every persisted pricing metadata field; new drafts use canonical defaults. */
+  it('round-trips pricing metadata across toModelDraft -> buildModelConfig', () => {
+    const source = model({
+      ...fullConfig(),
+      pricing: {
+        currency: 'EUR',
+        pricingTier: 'enterprise',
+        serviceTier: 'premium',
+        serviceTierMultiplier: 2.5,
+        version: '2026-09',
+        inputPerMillionTokens: 9,
+        outputPerMillionTokens: 11,
+        cacheReadPerMillionTokens: 1.25,
+        cacheWritePerMillionTokens: 2.5,
+        cacheWriteLongPerMillionTokens: 3.5,
+        reasoningPerMillionTokens: 4.5,
+      },
+    })
+    const draftFromModel = toModelDraft(source)
+    const rebuilt = buildModelConfig(draftFromModel)
+    expect(rebuilt.pricing).toEqual({
+      currency: 'EUR',
+      pricingTier: 'enterprise',
+      serviceTier: 'premium',
+      serviceTierMultiplier: 2.5,
+      version: '2026-09',
+      inputPerMillionTokens: 9,
+      outputPerMillionTokens: 11,
+      cacheReadPerMillionTokens: 1.25,
+      cacheWritePerMillionTokens: 2.5,
+      cacheWriteLongPerMillionTokens: 3.5,
+      reasoningPerMillionTokens: 4.5,
+    })
+  })
+
+  /** buildModelConfig rejects non-positive multipliers and negative per-million prices. */
+  it('rejects non-positive multiplier and negative prices', () => {
+    const base = draft()
+    expect(() => buildModelConfig({ ...base, pricing: { ...base.pricing, serviceTierMultiplier: '0' } })).toThrow(
+      /serviceTierMultiplier must be positive/,
+    )
+    expect(() => buildModelConfig({ ...base, pricing: { ...base.pricing, inputPerMillionTokens: '-1' } })).toThrow(
+      /inputPerMillionTokens must not be negative/,
+    )
+    expect(() => buildModelConfig({ ...base, pricing: { ...base.pricing, outputPerMillionTokens: 'NaN' } })).toThrow(
+      /outputPerMillionTokens must be a number/,
+    )
+  })
+
+  /** buildModelConfig rejects blank name + non-blank providerId even before reaching config. */
+  it('rejects blank name in toEditableModel and toEditableModelUpdate', () => {
+    expect(() => toEditableModel(draft({ name: '   ' }))).toThrow(/name/)
+    expect(() => toEditableModelUpdate(draft({ name: '' }))).toThrow(/name/)
+  })
+
+  /** toEditableModel rejects a blank providerId. */
+  it('rejects blank providerId in toEditableModel', () => {
+    expect(() => toEditableModel(draft({ providerId: '' }))).toThrow(/providerId is required/)
+  })
+
+  /** Pricing defaults fall back to USD / default / v1 when inputs are blank. */
+  it('falls back to canonical pricing defaults when inputs are blank', () => {
+    const config = buildModelConfig(
+      draft({
+        pricing: {
+          currency: '',
+          pricingTier: '',
+          serviceTier: '',
+          serviceTierMultiplier: '1',
+          version: '',
+          inputPerMillionTokens: '0',
+          outputPerMillionTokens: '0',
+          cacheReadPerMillionTokens: '0',
+          cacheWritePerMillionTokens: '0',
+          cacheWriteLongPerMillionTokens: '0',
+          reasoningPerMillionTokens: '0',
+        },
+      }),
+    )
+    expect(config.pricing).toMatchObject({
+      currency: 'USD',
+      pricingTier: 'default',
+      serviceTier: 'default',
+      version: 'v1',
+    })
+  })
+
+  /** extractVariantNamesFromModel returns the canonical ['medium'] fallback. */
+  it('extracts fallback variant names and default variant for empty models', () => {
+    expect(extractVariantNamesFromModel(undefined)).toEqual(['medium'])
+    expect(extractDefaultVariantFromModel(undefined)).toBe('medium')
+  })
+
+  /** emptyModelDraft without a model or provider keeps an empty providerId and TEXT only. */
+  it('returns empty providerId when neither model nor provider is supplied', () => {
+    const blank = emptyModelDraft(undefined, null)
+    expect(blank.providerId).toBe('')
+    expect(blank.inputModalities).toEqual(['TEXT'])
+  })
+
+  /** emptyModelDraft respects an explicit provider argument. */
+  it('uses the explicit provider argument when no model is supplied', () => {
+    const seeded = emptyModelDraft(undefined, { id: 'provider-x' })
+    expect(seeded.providerId).toBe('provider-x')
   })
 })

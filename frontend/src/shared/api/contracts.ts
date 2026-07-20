@@ -62,8 +62,9 @@ export interface AgentProviderDTO {
   providerType: string
   baseUrl: string | null
   configured: boolean
-  modelCallTimeoutMillis: number
-  modelCallIdleTimeoutMillis: number
+  modelCallTimeoutMillis: BackendLong
+  modelCallIdleTimeoutMillis: BackendLong
+  version: BackendLong
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
@@ -74,8 +75,8 @@ export interface AgentProviderEditablePropertiesDTO {
   providerType: string
   baseUrl?: string | null
   credential?: string | null
-  modelCallTimeoutMillis?: number | null
-  modelCallIdleTimeoutMillis?: number | null
+  modelCallTimeoutMillis?: BackendLong | null
+  modelCallIdleTimeoutMillis?: BackendLong | null
 }
 
 export interface AgentProviderCreateDTO extends AgentProviderEditablePropertiesDTO {
@@ -94,9 +95,9 @@ export type AgentModelInputModality =
 
 export interface AgentModelLimitDTO {
   /** Positive integer count of model context window tokens. */
-  context: number | null
+  context: number
   /** Positive integer {@code <= context}. */
-  output: number | null
+  output: number
 }
 
 export interface AgentModelAbilitiesDTO {
@@ -132,11 +133,15 @@ export interface AgentModelVariantDTO {
   stopSequences?: string[] | null
 }
 
+/**
+ * Structured Agent model configuration. Every sub-shape is required on the wire; missing or
+ * malformed configs must be rejected by the backend rather than silently repaired.
+ */
 export interface AgentModelConfigDTO {
-  limit: AgentModelLimitDTO | null
-  abilities: AgentModelAbilitiesDTO | null
-  pricing: AgentModelPricingDTO | null
-  defaultVariant: string | null
+  limit: AgentModelLimitDTO
+  abilities: AgentModelAbilitiesDTO
+  pricing: AgentModelPricingDTO
+  defaultVariant: string
   variants: AgentModelVariantDTO[]
 }
 
@@ -146,28 +151,24 @@ export interface AgentModelDTO {
   providerId: AgentResourceId
   name: string
   description: string | null
-  config: AgentModelConfigDTO | null
-  version?: BackendLong | null
+  config: AgentModelConfigDTO
+  version: BackendLong
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
 
-/** Feature/view projection enriched on the client by joining {@link AgentModelDTO} with providers. */
-export interface AgentModelWithProviderDTO extends AgentModelDTO {
-  providerName: string | null
-}
-
-/** Editable portion of an Agent model. */
+/**
+ * Editable portion of an Agent model. The frontend sends full replacements: {@code name},
+ * {@code description}, and {@code config} are all required when a request body is issued.
+ */
 export interface AgentModelEditablePropertiesDTO {
-  name?: string | null
-  description?: string | null
-  config?: AgentModelConfigDTO | null
+  name: string
+  description: string | null
+  config: AgentModelConfigDTO
 }
 
 export interface AgentModelCreateDTO extends AgentModelEditablePropertiesDTO {
   providerId: string
-  name: string
-  config: AgentModelConfigDTO
 }
 
 export type AgentModelUpdateDTO = AgentModelEditablePropertiesDTO
@@ -197,7 +198,7 @@ export interface AgentDefinitionDTO {
   modelId: string
   variant: string
   config: AgentDefinitionConfigDTO | null
-  version?: BackendLong | null
+  version: BackendLong
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }

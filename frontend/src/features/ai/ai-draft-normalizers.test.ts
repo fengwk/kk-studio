@@ -4,15 +4,21 @@ import type { AgentDraft } from '@/features/ai/ai-console-types'
 import {
   applyAgentModelSelection,
   normalizeAgentDraftDefaultVariant,
+  normalizeAgentDraftSelection,
   normalizeModelDraftDefaultVariant,
+  normalizeModelDraftProvider,
   variantOptionsFromDraft,
   variantOptionsFromModel,
 } from '@/features/ai/ai-draft-normalizers'
 import { emptyModelDraft } from '@/features/ai/ai-model-draft-codec'
 import { newVariantDraft } from '@/features/ai/ai-resource-draft-primitives'
-import type { AgentModelDTO } from '@/shared/api/contracts'
+import type {
+  AgentModelConfigDTO,
+  AgentModelDTO,
+  AgentProviderDTO,
+} from '@/shared/api/contracts'
 
-function modelConfig(overrides: Record<string, unknown> = {}) {
+function modelConfig(overrides: Partial<AgentModelConfigDTO> = {}): AgentModelConfigDTO {
   return {
     limit: { context: 128000, output: 8192 },
     abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
@@ -32,6 +38,36 @@ function modelConfig(overrides: Record<string, unknown> = {}) {
     defaultVariant: 'default',
     variants: [{ id: 'default' }],
     ...overrides,
+  }
+}
+
+function model(overrides: Partial<AgentModelDTO>): AgentModelDTO {
+  return {
+    id: 'model-1',
+    providerId: 'provider-1',
+    name: 'MiniMax-M2.7',
+    description: null,
+    config: modelConfig(),
+    version: 1,
+    createTime: '2026-06-20T02:00:00',
+    updateTime: '2026-06-20T02:00:00',
+    ...overrides,
+  }
+}
+
+function provider(id: string, name: string): AgentProviderDTO {
+  return {
+    id,
+    name,
+    description: null,
+    providerType: 'openai',
+    baseUrl: null,
+    configured: true,
+    modelCallTimeoutMillis: 1800000,
+    modelCallIdleTimeoutMillis: 120000,
+    version: 1,
+    createTime: null,
+    updateTime: null,
   }
 }
 
@@ -60,7 +96,7 @@ describe('ai-draft-normalizers', () => {
             defaultVariant: 'creative',
             variants: [{ id: 'creative' }, { id: 'precise' }],
           }),
-        }) as AgentModelDTO,
+        }),
       ),
     ).toEqual(['creative', 'precise'])
     expect(
@@ -69,10 +105,9 @@ describe('ai-draft-normalizers', () => {
           config: modelConfig({
             variants: [{ id: 'creative' }, { id: 'precise' }],
           }),
-        }) as AgentModelDTO,
+        }),
       ),
     ).toEqual(['creative', 'precise'])
-    expect(variantOptionsFromModel(model({ config: null }) as AgentModelDTO)).toEqual(['medium'])
   })
 
   /** Invalid selected variants fall back to each model config's effective default. */
@@ -152,17 +187,47 @@ describe('ai-draft-normalizers', () => {
       modelId: 'unknown',
     })
   })
-})
 
-function model(overrides: Partial<AgentModelDTO>): AgentModelDTO {
-  return {
-    id: 'model-1',
-    providerId: 'provider-1',
-    name: 'MiniMax-M2.7',
-    description: null,
-    config: modelConfig() as AgentModelDTO['config'],
-    createTime: '2026-06-20T02:00:00',
-    updateTime: '2026-06-20T02:00:00',
-    ...overrides,
-  } as AgentModelDTO
-}
+  /** Provider normalization preserves the existing draft's provider when it matches. */
+  it('preserves a valid existing provider on the draft', () => {
+    const draft = { ...emptyModelDraft(), providerId: 'provider-1' }
+    const providers = [provider('provider-1', 'minimax'), provider('provider-2', 'anthropic')]
+    const result = normalizeModelDraftProvider(draft, providers)
+    expect(result).toBe(draft)
+  })
+
+  /** When draft provider is missing, fall back to preferred id then to providers[0]. */
+  it('falls back to preferred provider id, then to first provider', () => {
+    const draft = { ...emptyModelDraft(), providerId: '' }
+    const providers = [provider('provider-1', 'minimax'), provider('provider-2', 'anthropic')]
+
+    const withPreferred = normalizeModelDraftProvider(draft, providers, 'provider-2')
+    expect(withPreferred.providerId).toBe('provider-2')
+
+    const withFallback = normalizeModelDraftProvider(draft, providers, 'missing-id')
+    expect(withFallback.providerId).toBe('provider-1')
+
+    const withNoProviders = normalizeModelDraftProvider(draft, [])
+    expect(withNoProviders.providerId).toBe('')
+  })
+
+  /** normalizeAgentDraftSelection picks preferred, then fallback model[0]. */
+  it('picks preferred model id then first available model', () => {
+    const draft: AgentDraft = { ...emptyAgentDraft(), modelId: 'gone', variant: '' }
+    const models = [
+      model({ id: 'model-minimax', config: modelConfig({ defaultVariant: 'default', variants: [{ id: 'default' }] }) }),
+      model({ id: 'model-sonnet', config: modelConfig({ defaultVariant: 'creative', variants: [{ id: 'creative' }] }) }),
+    ]
+
+    const preferred = normalizeAgentDraftSelection(draft, models, 'model-sonnet')
+    expect(preferred.modelId).toBe('model-sonnet')
+    expect(preferred.variant).toBe('creative')
+
+    const fallback = normalizeAgentDraftSelection(draft, models)
+    expect(fallback.modelId).toBe('model-minimax')
+    expect(fallback.variant).toBe('default')
+
+    const empty = normalizeAgentDraftSelection(draft, [])
+    expect(empty.modelId).toBe('gone')
+  })
+})

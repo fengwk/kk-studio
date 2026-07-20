@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.agent.model.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -10,10 +11,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.share.model.AgentModelConfigDTO;
 
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
 
 class AgentModelRuntimeConfigParserTest {
 
@@ -55,6 +58,18 @@ class AgentModelRuntimeConfigParserTest {
     assertEquals(new BigDecimal("3.6"), parsed.pricing().reasoningPerMillionTokens());
   }
 
+  /** Typed DTO round-trip: decode -> encode -> parse yields the same runtime snapshot. */
+  @Test
+  void decodeThenEncodeRoundTripsEveryTypedConfigField() {
+    AgentModelConfigDTO decoded = parser.decode(validConfig());
+    String encoded = parser.encode(decoded);
+    var parsed = parser.parse(encoded);
+    assertEquals("USD", parsed.pricing().currency());
+    assertEquals("quality", parsed.defaultVariant());
+    assertEquals(1, parsed.variants().size());
+    assertEquals("high", parsed.variants().get(0).reasoningEffort());
+  }
+
   /** off reasoningEffort is normalized to null. */
   @Test
   void normalizesOffReasoningEffortToNull() {
@@ -76,7 +91,7 @@ class AgentModelRuntimeConfigParserTest {
   /** Missing fields, wrong JSON types, unknown enums, and invalid variants fail explicitly. */
   @Test
   void rejectsIncompleteOrMistypedExecutableConfiguration() {
-    assertInvalid("{}", "limit");
+    assertInvalid("{}", "config.limit must be an object");
     assertInvalid(validConfig().replace("128000", "\"128000\""), "limit.context");
     assertInvalid(
         validConfig().replace("[\"TEXT\",\"IMAGE\"]", "[]"), "inputModalities must not be empty");
@@ -93,9 +108,9 @@ class AgentModelRuntimeConfigParserTest {
   /** Structural and numeric boundaries reject every shape that could create an unusable model. */
   @Test
   void rejectsInvalidVariantPricingAndJsonBoundaries() {
-    assertInvalid("", "configJson must not be blank");
-    assertInvalid("not-json", "configJson must be valid JSON");
-    assertInvalid("[]", "configJson must be an object");
+    assertInvalid("", "config must not be blank");
+    assertInvalid("not-json", "config must be valid JSON");
+    assertInvalid("[]", "config must be an object");
     assertInvalid(
         validConfig().replace("\"output\":8192", "\"output\":128001"),
         "must not exceed limit.context");
@@ -136,6 +151,75 @@ class AgentModelRuntimeConfigParserTest {
     assertInvalid(
         validConfig().replace("\"inputPerMillionTokens\":1.1", "\"inputPerMillionTokens\":-1"),
         "inputPerMillionTokens must not be negative");
+  }
+
+  /** Persisted JSON must never be silently repaired: null/blank/malformed shapes throw loudly. */
+  @Test
+  void rejectsInvalidPersistedJsonShapes() {
+    assertInvalid("", "config must not be blank");
+    assertInvalid("   ", "config must not be blank");
+    assertInvalid("not-json", "config must be valid JSON");
+    assertInvalid("null", "config must be an object");
+    assertInvalid("[1,2,3]", "config must be an object");
+    assertInvalid("{\"limit\":{}}", "config.limit.context");
+    assertInvalid(
+        "{\"limit\":{\"context\":1,\"output\":1},\"abilities\":{\"tools\":true,"
+            + "\"reasoning\":true,\"inputModalities\":[\"TEXT\"]},"
+            + "\"defaultVariant\":\"x\",\"variants\":[],\"pricing\":{"
+            + "\"currency\":\"USD\",\"pricingTier\":\"x\",\"serviceTier\":\"x\","
+            + "\"serviceTierMultiplier\":1,\"version\":\"v\",\"inputPerMillionTokens\":0,"
+            + "\"outputPerMillionTokens\":0,\"cacheReadPerMillionTokens\":0,"
+            + "\"cacheWritePerMillionTokens\":0,\"cacheWriteLongPerMillionTokens\":0,"
+            + "\"reasoningPerMillionTokens\":0}}",
+        "config.variants must not be empty");
+  }
+
+  /** The typed DTO form rejects null and broken sub-shapes; partial sub-shapes fail loudly. */
+  @Test
+  void rejectsInvalidTypedConfigDirectly() {
+    AgentModelConfigDTO base = parser.decode(validConfig());
+    assertNotNull(base);
+    AgentModelConfigDTO missingLimit = copy(base, c -> c.setLimit(null));
+    IllegalArgumentException limitError =
+        assertThrows(IllegalArgumentException.class, () -> parser.parse(missingLimit));
+    assertTrue(
+        limitError.getMessage().contains("config.limit is required"), limitError.getMessage());
+
+    AgentModelConfigDTO missingAbilities = copy(base, c -> c.setAbilities(null));
+    IllegalArgumentException abilitiesError =
+        assertThrows(IllegalArgumentException.class, () -> parser.parse(missingAbilities));
+    assertTrue(
+        abilitiesError.getMessage().contains("config.abilities is required"),
+        abilitiesError.getMessage());
+
+    AgentModelConfigDTO missingPricing = copy(base, c -> c.setPricing(null));
+    IllegalArgumentException pricingError =
+        assertThrows(IllegalArgumentException.class, () -> parser.parse(missingPricing));
+    assertTrue(
+        pricingError.getMessage().contains("config.pricing is required"),
+        pricingError.getMessage());
+
+    AgentModelConfigDTO zeroMultiplier =
+        copy(base, c -> c.getPricing().setServiceTierMultiplier(BigDecimal.ZERO));
+    IllegalArgumentException multiplierError =
+        assertThrows(IllegalArgumentException.class, () -> parser.parse(zeroMultiplier));
+    assertTrue(
+        multiplierError
+            .getMessage()
+            .contains("config.pricing.serviceTierMultiplier must be positive"),
+        multiplierError.getMessage());
+  }
+
+  private static AgentModelConfigDTO copy(
+      AgentModelConfigDTO source, Consumer<AgentModelConfigDTO> mutator) {
+    try {
+      String json = new ObjectMapper().writeValueAsString(source);
+      AgentModelConfigDTO clone = new ObjectMapper().readValue(json, AgentModelConfigDTO.class);
+      mutator.accept(clone);
+      return clone;
+    } catch (Exception error) {
+      throw new IllegalStateException(error);
+    }
   }
 
   private void assertInvalid(String config, String message) {

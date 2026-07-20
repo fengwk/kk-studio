@@ -59,17 +59,12 @@ export function ModelForm({
   }
 
   function toggleInputModality(value: AgentModelInputModality) {
-    const next = new Set(draft.inputModalities)
-    if (next.has(value)) {
-      next.delete(value)
-    } else {
-      next.add(value)
-    }
+    const has = draft.inputModalities.includes(value)
+    const next = has
+      ? draft.inputModalities.filter((item) => item !== value)
+      : [...draft.inputModalities, value]
     // 至少保留一种；禁止全部取消勾选。
-    if (next.size === 0) {
-      next.add('TEXT')
-    }
-    onChange({ ...draft, inputModalities: next })
+    onChange({ ...draft, inputModalities: next.length > 0 ? next : ['TEXT'] })
   }
 
   /** 开启 Reasoning 时，为空的思考强度用 variant 名或 medium 预填。 */
@@ -211,7 +206,7 @@ export function ModelForm({
         <p className="inline-hint">模型可接受的输入模态；至少保留一种（不能全部取消）。</p>
         <div className="capability-options">
           {AGENT_MODEL_INPUT_MODALITIES.map((item) => {
-            const checked = draft.inputModalities.has(item)
+            const checked = draft.inputModalities.includes(item)
             return (
               <label key={item} className={`capability-option${checked ? ' is-selected' : ''}`}>
                 <input

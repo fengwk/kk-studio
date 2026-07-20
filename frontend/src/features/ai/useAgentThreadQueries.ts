@@ -6,7 +6,8 @@ import {
 } from '@/features/ai/harness-thread-event-stream'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
-import type { AgentModelWithProviderDTO, ThreadEventDTO } from '@/shared/api/contracts'
+import { toAgentModelViews, type AgentModelView } from '@/features/ai/AgentModelView'
+import type { ThreadEventDTO } from '@/shared/api/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 export function useAgentThreadQueries(threadId: string, sessionId: string) {
@@ -53,7 +54,8 @@ export function useAgentThreadQueries(threadId: string, sessionId: string) {
     },
   })
   const inputs = inputsQuery.data ?? []
-  const workingHint = isThreadActive(thread?.status) || inputs.some((input) => input.status === 'QUEUED')
+  const workingHint =
+    isThreadActive(thread?.status) || inputs.some((input) => input.status === 'QUEUED')
 
   const entriesQuery = useQuery({
     queryKey: queryKeys.threads.entries(threadId),
@@ -80,13 +82,13 @@ export function useAgentThreadQueries(threadId: string, sessionId: string) {
     },
     enabled: Boolean(threadId),
   })
-  // Client-side provider-name enrichment mirrors useAiConsoleResourceQueries so the thread
-  // panel can surface the same joined label without a backend contract change.
+  // Mirror the console join so the thread panel surfaces the same enriched label without leaking
+  // the join field through the wire contract.
   const providers = providersQuery.data?.results ?? []
-  const models: AgentModelWithProviderDTO[] = (modelsQuery.data?.results ?? []).map((model) => {
-    const provider = providers.find((item) => String(item.id) === String(model.providerId))
-    return { ...model, providerName: provider?.name ?? null }
-  })
+  const models: AgentModelView[] = toAgentModelViews(
+    modelsQuery.data?.results ?? [],
+    providers,
+  )
   return {
     agentsQuery,
     modelsQuery,
@@ -110,9 +112,5 @@ export function useAgentThreadQueries(threadId: string, sessionId: string) {
 }
 
 function isThreadActive(status: string | undefined): boolean {
-  return threadIsActive(status)
-}
-
-function threadIsActive(status: string | undefined): boolean {
   return status === 'RUNNING' || status === 'WAITING' || status === 'RETRYING'
 }
