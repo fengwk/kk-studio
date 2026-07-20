@@ -107,7 +107,7 @@ export function AgentForm({
         </select>
       </label>
       <div className="inline-hint" role="note">
-        切换 Environment 只会刷新可选 Tools/Skills 列表；已勾选的短名会尽量保留，不会自动清空。
+        切换 Environment 只会刷新可选 Tools/Skills 列表；已勾选项会尽量保留，不会自动清空。
       </div>
       {(environmentMissing || environmentOffline) && (
         <div className="inline-hint danger" role="status">
@@ -118,7 +118,7 @@ export function AgentForm({
       )}
 
       <fieldset className="form-group capability-picker">
-        <legend>Tools（短名）</legend>
+        <legend>Tools</legend>
         <CapabilityChecklist
           options={toolCandidates}
           selected={draft.tools}
@@ -137,7 +137,7 @@ export function AgentForm({
       </fieldset>
 
       <fieldset className="form-group capability-picker">
-        <legend>Skills（短名）</legend>
+        <legend>Skills</legend>
         <CapabilityChecklist
           options={skillCandidates}
           selected={draft.skills}
@@ -174,7 +174,7 @@ export function AgentForm({
           {subagentNames.length === 0 && <div className="inline-hint">暂无其它 Agent 可选</div>}
         </div>
         <StringListEditor
-          label="额外 Subagent 短名"
+          label="额外 Subagent"
           items={draft.allowedSubagents.filter((name) => !subagentNames.includes(name))}
           onChange={(extras) =>
             onChange({
