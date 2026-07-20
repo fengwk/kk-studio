@@ -7,6 +7,8 @@ export interface CapabilityOption {
   source: string
   description: string | null
   offline?: boolean
+  /** 已配置但不在当前 live 候选中（仍展示，可取消勾选）。 */
+  missing?: boolean
 }
 
 function isReady(environment: LiveEnvironmentDTO | undefined): boolean {
@@ -71,8 +73,36 @@ export function markInvalidSelections(
     const candidate = byName.get(name)
     return {
       name,
-      invalid: !candidate,
+      invalid: !candidate || Boolean(candidate.missing),
       offline: Boolean(candidate?.offline),
     }
   })
+}
+
+/**
+ * 把已勾选但不在候选中的项并入列表（置灰展示），避免「暂无候选」时直接消失。
+ * 不自动清理；用户可取消勾选后保存。
+ */
+export function withSelectedOrphans(
+  candidates: CapabilityOption[],
+  selected: string[],
+): CapabilityOption[] {
+  const byName = new Map(candidates.map((item) => [item.name, item]))
+  const merged = [...candidates]
+  for (const raw of selected) {
+    const name = raw.trim()
+    if (!name || byName.has(name)) {
+      continue
+    }
+    const orphan: CapabilityOption = {
+      name,
+      source: 'unavailable',
+      description: null,
+      offline: true,
+      missing: true,
+    }
+    byName.set(name, orphan)
+    merged.push(orphan)
+  }
+  return merged
 }

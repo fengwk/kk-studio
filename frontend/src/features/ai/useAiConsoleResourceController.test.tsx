@@ -88,7 +88,7 @@ describe('useAiConsoleResourceController', () => {
     })
 
     await user.click(screen.getByRole('button', { name: 'open-model' }))
-    expect(screen.getByTestId('model-provider')).toHaveValue('stub-renamed')
+    expect(screen.getByTestId('model-provider')).toHaveValue('provider-1')
     await user.clear(screen.getByTestId('model-name'))
     await user.type(screen.getByTestId('model-name'), 'acceptance-stub-renamed')
     await user.click(screen.getByRole('button', { name: 'submit' }))
@@ -165,7 +165,7 @@ function ResourceControllerHarness() {
 
       {modal?.kind === 'model' && (
         <>
-          <input data-testid="model-provider" value={controller.resourceEditorModal.modelDraft.provider} readOnly />
+          <input data-testid="model-provider" value={controller.resourceEditorModal.modelDraft.providerId} readOnly />
           <input
             data-testid="model-name"
             value={controller.resourceEditorModal.modelDraft.name}
@@ -246,8 +246,9 @@ function model() {
     providerName: 'stub',
     name: 'acceptance-stub',
     description: 'Acceptance model',
-    defaultVariant: 'default',
-    variantsJson: '[{"name":"default"}]',
+    capabilitiesJson: '["TEXT","TOOLS"]',
+    configJson:
+      '{"limit":{"context":128000,"output":8192},"abilities":{"tools":true,"reasoning":false,"modalities":{"input":["TEXT"],"output":["TEXT"]}},"pricing":{"currency":"USD","pricingTier":"default","serviceTier":"default","serviceTierMultiplier":1,"version":"v1","inputPerMillionTokens":0,"outputPerMillionTokens":0,"cacheReadPerMillionTokens":0,"cacheWritePerMillionTokens":0,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0},"defaultVariant":"default","variants":[{"id":"default"}]}',
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
   }

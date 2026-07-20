@@ -26,6 +26,18 @@ class OpenAiProviderAdapterTest {
     assertEquals(Map.of("prompt_cache_key", "pc-key", "reasoning_split", true), parameters);
   }
 
+  /** 有 reasoningEffort 时写入 reasoning_effort；空/null 不写入。 */
+  @Test
+  void includesReasoningEffortOnlyWhenProvided() {
+    Map<String, Object> withEffort =
+        OpenAiProviderAdapter.customParameters(ProviderCacheControl.none(), false, "high");
+    assertEquals(Map.of("reasoning_effort", "high"), withEffort);
+
+    Map<String, Object> withoutEffort =
+        OpenAiProviderAdapter.customParameters(ProviderCacheControl.none(), false, null);
+    assertEquals(Map.of(), withoutEffort);
+  }
+
   /** Adapter 与连接描述的 Provider 类型不一致时，在创建模型前拒绝。 */
   @Test
   void rejectsMismatchedProviderDescriptor() {

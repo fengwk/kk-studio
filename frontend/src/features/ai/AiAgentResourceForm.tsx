@@ -1,12 +1,13 @@
 import {
   buildCapabilityCandidates,
-  markInvalidSelections,
   PLATFORM_ENVIRONMENT_NAME,
+  withSelectedOrphans,
   type CapabilityOption,
 } from '@/features/ai/agent-capability-candidates'
 import type { AgentDraft } from '@/features/ai/ai-console-types'
 import { applyAgentModelSelection, variantOptionsFromModel } from '@/features/ai/ai-draft-normalizers'
 import { emptyAgentDraft } from '@/features/ai/ai-resource-draft-codecs'
+import type { ResourceFieldKey } from '@/features/ai/ai-resource-form-validation'
 import { FormSelect } from '@/features/ai/FormSelect'
 import type { AgentDefinitionDTO, AgentModelDTO, LiveEnvironmentDTO } from '@/shared/api/contracts'
 
@@ -19,12 +20,14 @@ export function AgentForm({
   models,
   agents = [],
   environments = [],
+  fieldErrors = {},
   onChange,
 }: {
   draft: AgentDraft
   models: AgentModelDTO[]
   agents?: AgentDefinitionDTO[]
   environments?: LiveEnvironmentDTO[]
+  fieldErrors?: Partial<Record<ResourceFieldKey, string>>
   onChange: (draft: AgentDraft) => void
 }) {
   const selectedModel = models.find((model) => String(model.id) === draft.modelId)
@@ -38,24 +41,29 @@ export function AgentForm({
   const environmentMissing = Boolean(draft.environmentName.trim()) && !selectedEnvironment
   const environmentOffline =
     Boolean(selectedEnvironment) && String(selectedEnvironment?.status).toUpperCase() !== 'READY'
-  const toolCandidates = buildCapabilityCandidates(environments, draft.environmentName, 'tools')
-  const skillCandidates = buildCapabilityCandidates(environments, draft.environmentName, 'skills')
-  const toolSelections = markInvalidSelections(draft.tools, toolCandidates)
-  const skillSelections = markInvalidSelections(draft.skills, skillCandidates)
+  const toolCandidates = withSelectedOrphans(
+    buildCapabilityCandidates(environments, draft.environmentName, 'tools'),
+    draft.tools,
+  )
+  const skillCandidates = withSelectedOrphans(
+    buildCapabilityCandidates(environments, draft.environmentName, 'skills'),
+    draft.skills,
+  )
   // Subagents 从当前已配置 Agent 勾选；允许选择自己。
   const subagentNames = agents.map((agent) => agent.name).filter(Boolean)
 
   return (
     <>
-      <label className="form-group">
+      <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
         <span>Name</span>
         <input value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} placeholder="default-assistant" required />
+        {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}
       </label>
       <label className="form-group">
         <span>Description</span>
         <input value={draft.description} onChange={(event) => onChange({ ...draft, description: event.target.value })} placeholder="用途说明" />
       </label>
-      <label className="form-group">
+      <label className={`form-group${fieldErrors.modelId ? ' is-error' : ''}`}>
         <span>Model</span>
         <FormSelect
           aria-label="Model"
@@ -70,6 +78,7 @@ export function AgentForm({
           })}
           onChange={(modelId) => onChange(applyAgentModelSelection(draft, modelId, models))}
         />
+        {fieldErrors.modelId ? <span className="field-error">{fieldErrors.modelId}</span> : null}
       </label>
       <label className="form-group">
         <span>Variant</span>
@@ -111,15 +120,8 @@ export function AgentForm({
         />
       </label>
       <div className="inline-hint" role="note">
-        切换 Environment 只会刷新可选 Tools/Skills 列表；已勾选项会尽量保留，不会自动清空。
+        切换 Environment 只会刷新可选 Tools/Skills 列表；已勾选项会尽量保留，不会自动清空。离线/暂不可用项置灰，仍可取消勾选并保存。
       </div>
-      {(environmentMissing || environmentOffline) && (
-        <div className="inline-hint danger" role="status">
-          {environmentMissing
-            ? `当前 Environment “${draft.environmentName}” 不在 live registry 中。`
-            : `当前 Environment “${draft.environmentName}” 离线。`}
-        </div>
-      )}
 
       <fieldset className="form-group capability-picker">
         <legend>Tools</legend>
@@ -129,15 +131,6 @@ export function AgentForm({
           emptyText="暂无候选 Tools"
           onToggle={(name) => onChange({ ...draft, tools: toggleName(draft.tools, name) })}
         />
-        {toolSelections.some((item) => item.invalid || item.offline) && (
-          <div className="inline-hint danger" role="status">
-            无效/离线 Tools：
-            {toolSelections
-              .filter((item) => item.invalid || item.offline)
-              .map((item) => item.name)
-              .join(', ')}
-          </div>
-        )}
       </fieldset>
 
       <fieldset className="form-group capability-picker">
@@ -148,15 +141,6 @@ export function AgentForm({
           emptyText="暂无候选 Skills"
           onToggle={(name) => onChange({ ...draft, skills: toggleName(draft.skills, name) })}
         />
-        {skillSelections.some((item) => item.invalid || item.offline) && (
-          <div className="inline-hint danger" role="status">
-            无效/离线 Skills：
-            {skillSelections
-              .filter((item) => item.invalid || item.offline)
-              .map((item) => item.name)
-              .join(', ')}
-          </div>
-        )}
       </fieldset>
 
       <fieldset className="form-group capability-picker">
@@ -177,68 +161,92 @@ export function AgentForm({
           })}
           {subagentNames.length === 0 && <div className="inline-hint">暂无其它 Agent 可选</div>}
         </div>
-        {draft.allowedSubagents.some((name) => !subagentNames.includes(name)) ? (
-          <div className="inline-hint danger" role="status">
-            无效 Subagents：
-            {draft.allowedSubagents.filter((name) => !subagentNames.includes(name)).join(', ')}
-          </div>
-        ) : null}
       </fieldset>
 
-      <div className="form-grid-2">
-        <label className="form-group">
-          <span>maxTurns</span>
-          <input
-            value={draft.executionPolicy.maxTurns}
-            onChange={(event) =>
-              onChange({
-                ...draft,
-                executionPolicy: { ...draft.executionPolicy, maxTurns: event.target.value },
-              })
-            }
-            placeholder="可选"
-          />
-        </label>
-        <label className="form-group">
-          <span>maxDepth</span>
-          <input
-            value={draft.executionPolicy.maxDepth}
-            onChange={(event) =>
-              onChange({
-                ...draft,
-                executionPolicy: { ...draft.executionPolicy, maxDepth: event.target.value },
-              })
-            }
-            placeholder="可选"
-          />
-        </label>
-        <label className="form-group">
-          <span>maxDirectSubagents</span>
-          <input
-            value={draft.executionPolicy.maxDirectSubagents}
-            onChange={(event) =>
-              onChange({
-                ...draft,
-                executionPolicy: { ...draft.executionPolicy, maxDirectSubagents: event.target.value },
-              })
-            }
-            placeholder="可选"
-          />
-        </label>
-        <label className="form-group">
-          <span>maxTotalSubagents</span>
-          <input
-            value={draft.executionPolicy.maxTotalSubagents}
-            onChange={(event) =>
-              onChange({
-                ...draft,
-                executionPolicy: { ...draft.executionPolicy, maxTotalSubagents: event.target.value },
-              })
-            }
-            placeholder="可选"
-          />
-        </label>
-      </div>
+      <section className="structured-section" aria-labelledby="agent-policy-heading">
+        <div className="structured-section-head">
+          <h3 id="agent-policy-heading">Policy（执行策略）</h3>
+        </div>
+        <p className="inline-hint">
+          限制 agent / subagent 的运行边界。卡片上的 Policy 即这里的摘要；留空表示不限制。
+        </p>
+        <div className="form-grid-2">
+          <label className="form-group">
+            <span>maxTurns</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              step={1}
+              value={draft.executionPolicy.maxTurns}
+              onChange={(event) =>
+                onChange({
+                  ...draft,
+                  executionPolicy: { ...draft.executionPolicy, maxTurns: event.target.value },
+                })
+              }
+              placeholder="最多对话轮数"
+            />
+          </label>
+          <label className="form-group">
+            <span>maxDepth</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              step={1}
+              value={draft.executionPolicy.maxDepth}
+              onChange={(event) =>
+                onChange({
+                  ...draft,
+                  executionPolicy: { ...draft.executionPolicy, maxDepth: event.target.value },
+                })
+              }
+              placeholder="subagent 最大嵌套深度"
+            />
+          </label>
+          <label className="form-group">
+            <span>maxDirectSubagents</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              step={1}
+              value={draft.executionPolicy.maxDirectSubagents}
+              onChange={(event) =>
+                onChange({
+                  ...draft,
+                  executionPolicy: {
+                    ...draft.executionPolicy,
+                    maxDirectSubagents: event.target.value,
+                  },
+                })
+              }
+              placeholder="直接子 agent 上限"
+            />
+          </label>
+          <label className="form-group">
+            <span>maxTotalSubagents</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              step={1}
+              value={draft.executionPolicy.maxTotalSubagents}
+              onChange={(event) =>
+                onChange({
+                  ...draft,
+                  executionPolicy: {
+                    ...draft.executionPolicy,
+                    maxTotalSubagents: event.target.value,
+                  },
+                })
+              }
+              placeholder="子 agent 总数上限"
+            />
+          </label>
+        </div>
+      </section>
 
       {models.length === 0 && (
         <div className="inline-hint" role="status">
@@ -265,8 +273,13 @@ function CapabilityChecklist({
   emptyText: string
   onToggle: (name: string) => void
 }) {
+  // options 已含 selected orphan；仅当既无候选也无已选时才显示空态。
   if (options.length === 0) {
-    return <div className="capability-options"><div className="inline-hint">{emptyText}</div></div>
+    return (
+      <div className="capability-options">
+        <div className="inline-hint">{emptyText}</div>
+      </div>
+    )
   }
 
   const groups = new Map<string, CapabilityOption[]>()
@@ -282,16 +295,22 @@ function CapabilityChecklist({
         <div key={source} className="capability-group">
           {items.map((option) => {
             const checked = selected.includes(option.name)
-            const label = `${option.source}/${option.name}`
+            const label = option.missing ? option.name : `${option.source}/${option.name}`
+            const stateClass = option.missing
+              ? ' is-offline is-missing'
+              : option.offline
+                ? ' is-offline'
+                : ''
             return (
               <label
                 key={`${option.source}/${option.name}`}
-                className={`capability-option${checked ? ' is-selected' : ''}${option.offline ? ' is-offline' : ''}`}
+                className={`capability-option${checked ? ' is-selected' : ''}${stateClass}`}
               >
                 <input type="checkbox" checked={checked} onChange={() => onToggle(option.name)} />
                 <span>
                   <code className="capability-name">{label}</code>
-                  {option.offline ? <small>offline</small> : null}
+                  {option.missing ? <small>不可用</small> : null}
+                  {!option.missing && option.offline ? <small>offline</small> : null}
                 </span>
               </label>
             )

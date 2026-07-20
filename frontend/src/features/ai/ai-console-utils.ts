@@ -1,3 +1,4 @@
+import { extractDefaultVariantFromModel } from '@/features/ai/ai-model-draft-codec'
 import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, BackendDateTime } from '@/shared/api/contracts'
 import type { ResourceModal } from '@/features/ai/ai-console-types'
 
@@ -22,7 +23,12 @@ export function filterAgents(agents: AgentDefinitionDTO[], search: string): Agen
 }
 
 export function filterModels(models: AgentModelDTO[], search: string): AgentModelDTO[] {
-  return models.filter((model) => includesSearch(`${model.providerName} ${model.name} ${model.description ?? ''} ${model.defaultVariant ?? ''}`, search))
+  return models.filter((model) =>
+    includesSearch(
+      `${model.providerName} ${model.name} ${model.description ?? ''} ${extractDefaultVariantFromModel(model)}`,
+      search,
+    ),
+  )
 }
 
 export function filterProviders(providers: AgentProviderDTO[], search: string): AgentProviderDTO[] {

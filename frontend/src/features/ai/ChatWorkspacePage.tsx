@@ -22,7 +22,9 @@ const LAYOUTS: Array<{ id: ChatLayout; label: string }> = [
   { id: 'single', label: '1' },
   { id: 'split-2', label: '2' },
   { id: 'split-3', label: '3' },
+  { id: 'grid-4', label: '4' },
   { id: 'grid-6', label: '6' },
+  { id: 'grid-8', label: '8' },
 ]
 
 export function ChatWorkspacePage() {

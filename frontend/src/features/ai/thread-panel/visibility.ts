@@ -1,6 +1,9 @@
 import type { DialogueMessage } from '@/features/ai/thread-events'
 
 export function isVisibleDialogueMessage(message: DialogueMessage): boolean {
+  if (message.role === 'meta') {
+    return Boolean(message.text?.trim())
+  }
   if (message.role !== 'assistant') {
     return true
   }

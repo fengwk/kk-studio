@@ -1,4 +1,4 @@
-export type ChatLayout = 'single' | 'split-2' | 'split-3' | 'grid-6'
+export type ChatLayout = 'single' | 'split-2' | 'split-3' | 'grid-4' | 'grid-6' | 'grid-8'
 export type PaneSortPreference = 'recent' | 'created'
 
 export interface PaneTarget {
@@ -23,7 +23,9 @@ export const CHAT_LAYOUT_CAPACITY: Record<ChatLayout, number> = {
   single: 1,
   'split-2': 2,
   'split-3': 3,
+  'grid-4': 4,
   'grid-6': 6,
+  'grid-8': 8,
 }
 
 const STORAGE_PREFIX = 'kk-studio.chat-pane.'
@@ -66,7 +68,14 @@ function parseTarget(value: unknown): PaneTarget {
 }
 
 function parseLayout(value: unknown): ChatLayout {
-  if (value === 'single' || value === 'split-2' || value === 'split-3' || value === 'grid-6') {
+  if (
+    value === 'single'
+    || value === 'split-2'
+    || value === 'split-3'
+    || value === 'grid-4'
+    || value === 'grid-6'
+    || value === 'grid-8'
+  ) {
     return value
   }
   return 'single'

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.harness.usage.service.impl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -10,6 +11,9 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
+import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadMapper;
+import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadViewDO;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
@@ -17,6 +21,9 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheMode;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.session.RootEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
+import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageDraft;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecord;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecordStore;
@@ -32,12 +39,18 @@ class ModelUsageAggregationServiceImplTest {
   private static final Instant NOW = Instant.parse("2026-07-16T00:00:00Z");
 
   private ModelUsageRecordStore recordStore;
+  private HarnessThreadMapper threadMapper;
+  private MysqlHarnessSessionStore sessionStore;
   private ModelUsageAggregationServiceImpl service;
 
   @BeforeEach
   void setUp() {
     recordStore = mock(ModelUsageRecordStore.class);
-    service = new ModelUsageAggregationServiceImpl(recordStore);
+    threadMapper = mock(HarnessThreadMapper.class);
+    sessionStore = mock(MysqlHarnessSessionStore.class);
+    // 默认无 Thread 视图 → 降级 listByThreadId（保持既有用例）
+    when(threadMapper.findView(anyLong())).thenReturn(null);
+    service = new ModelUsageAggregationServiceImpl(recordStore, threadMapper, sessionStore);
   }
 
   @Test
@@ -76,6 +89,38 @@ class ModelUsageAggregationServiceImplTest {
     assertCost(
         add(usdWrite.draft().cost(), usdRead.draft().cost(), nonEligible.draft().cost()),
         summary.getCosts().get(1));
+  }
+
+  @Test
+  void summarizesThreadAlongHeadPathExcludingSiblingBranch() {
+    // path: 10 → 20 → 30；旁枝 entry 40 的 usage 不计入
+    HarnessThreadViewDO view = new HarnessThreadViewDO();
+    view.setId(21L);
+    view.setSessionId(11L);
+    view.setHeadEntryId(30L);
+    when(threadMapper.findView(21L)).thenReturn(view);
+    when(sessionStore.loadPath(11L, 30L))
+        .thenReturn(List.of(pathEntry(10L), pathEntry(20L), pathEntry(30L)));
+
+    ModelUsageRecord prefix =
+        new ModelUsageRecord(
+            1L, 11L, 99L, 20L, eligible("USD", "k", usage(10, 1, 0, 0, 0, 0, 11)), NOW);
+    ModelUsageRecord onBranch =
+        new ModelUsageRecord(
+            2L, 11L, 21L, 30L, eligible("USD", "k", usage(5, 2, 40, 0, 0, 0, 47)), NOW);
+    ModelUsageRecord sibling =
+        new ModelUsageRecord(
+            3L, 11L, 88L, 40L, eligible("USD", "k", usage(100, 9, 0, 0, 0, 0, 109)), NOW);
+    when(recordStore.listBySessionId(11L)).thenReturn(List.of(prefix, onBranch, sibling));
+
+    ModelUsageSummaryDTO summary = service.summarizeThread(21L);
+
+    assertEquals(2L, summary.getRecordCount());
+    assertEquals(15L, summary.getInputTokens());
+    assertEquals(3L, summary.getOutputTokens());
+    assertEquals(40L, summary.getCacheReadTokens());
+    // 旁枝 100 input 不得进入
+    assertTrue(summary.getInputTokens() < 100);
   }
 
   @Test
@@ -132,6 +177,11 @@ class ModelUsageAggregationServiceImplTest {
     assertDecimal("0.000000", summary.getTokenReadRatio());
     assertEquals(0L, summary.getUnamortizedCacheWriteTokens());
     assertTrue(summary.getCosts().isEmpty());
+  }
+
+  private static SessionEntry pathEntry(long id) {
+    // 仅用于 id 集合过滤；payload 类型无关紧要
+    return new SessionEntry(id, 11L, null, SessionEntryType.ROOT, new RootEntryPayload(), NOW);
   }
 
   private static ModelUsageRecord record(long id, ModelUsageDraft draft) {

@@ -17,8 +17,9 @@ describe('AgentForm current contracts', () => {
           providerName: 'minimax',
           name: 'MiniMax',
           description: null,
-          defaultVariant: 'default',
-          variantsJson: '[{"name":"default"},{"name":"fast"}]',
+          capabilitiesJson: '["TEXT","TOOLS"]',
+          configJson:
+            '{"defaultVariant":"default","variants":[{"id":"default"},{"id":"fast"}]}',
           createTime: null,
           updateTime: null,
         }),
@@ -35,8 +36,9 @@ describe('AgentForm current contracts', () => {
               providerName: 'minimax',
               name: 'MiniMax',
               description: null,
-              defaultVariant: 'default',
-              variantsJson: '[{"name":"default"},{"name":"fast"}]',
+              capabilitiesJson: '["TEXT","TOOLS"]',
+              configJson:
+                '{"defaultVariant":"default","variants":[{"id":"default"},{"id":"fast"}]}',
               createTime: null,
               updateTime: null,
             },
@@ -73,9 +75,15 @@ describe('AgentForm current contracts', () => {
       )
     }
     render(<Harness />)
-    expect(screen.getByText(/不在 live registry/)).toBeInTheDocument()
-    expect(screen.getByText(/无效\/离线 Tools：missing-tool/)).toBeInTheDocument()
-    await user.selectOptions(screen.getByLabelText('Environment'), 'local')
+    // 已配置但不在候选中的 tool 仍展示且可取消勾选，不会被自动清掉；无红色阻断提示。
+    expect(screen.queryByText(/不在 live registry/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/无效\/离线 Tools/)).not.toBeInTheDocument()
+    const missingTool = screen.getByLabelText(/missing-tool/)
+    expect(missingTool).toBeChecked()
+    await user.click(missingTool)
+    expect(missingTool).not.toBeChecked()
+    await user.click(screen.getByRole('button', { name: 'Environment' }))
+    await user.click(screen.getByRole('option', { name: 'local' }))
     await user.click(screen.getByLabelText(/bash/))
     await user.click(screen.getByLabelText(/researcher/))
     expect(screen.getByLabelText(/bash/)).toBeChecked()

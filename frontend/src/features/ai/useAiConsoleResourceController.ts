@@ -1,6 +1,11 @@
-import { useState, type FormEventHandler } from 'react'
+import { useEffect, useState, type FormEventHandler } from 'react'
 import { buildResourceSubmitPlan } from '@/features/ai/ai-resource-editor-submit-plans'
 import type { ConfirmModalState } from '@/features/ai/ai-console-types'
+import {
+  toUserFacingErrorMessage,
+  validateResourceDraft,
+  type ResourceFieldKey,
+} from '@/features/ai/ai-resource-form-validation'
 import type { AgentResourceId } from '@/shared/api/contracts'
 import { useAiConsoleResourceEditorState } from '@/features/ai/useAiConsoleResourceEditorState'
 import { useAiConsoleResourceMutations } from '@/features/ai/useAiConsoleResourceMutations'
@@ -8,6 +13,8 @@ import { useAiConsoleResourceQueries } from '@/features/ai/useAiConsoleResourceQ
 
 export function useAiConsoleResourceController() {
   const [deleteConfirm, setDeleteConfirm] = useState<ConfirmModalState | null>(null)
+  const [formError, setFormError] = useState<string>('')
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<ResourceFieldKey, string>>>({})
   const {
     providersQuery,
     modelsQuery,
@@ -55,17 +62,60 @@ export function useAiConsoleResourceController() {
     })
   }
 
+  // 打开/关闭编辑器时清空校验状态
+  useEffect(() => {
+    setFormError('')
+    setFieldErrors({})
+  }, [editorState.resourceModal])
+
+  // API 错误：转成用户可读文案，只显示在模态内
+  useEffect(() => {
+    if (!editorState.resourceModal || !mutations.resourceMutationError) {
+      return
+    }
+    const message = toUserFacingErrorMessage(mutations.resourceMutationError)
+    setFormError(message)
+    setFieldErrors((current) =>
+      Object.keys(current).length > 0 ? current : { general: message },
+    )
+  }, [editorState.resourceModal, mutations.resourceMutationError])
+
   const submitResource: FormEventHandler<HTMLFormElement> = (event) => {
     event.preventDefault()
     if (!editorState.resourceModal) {
       return
     }
 
-    const plan = buildResourceSubmitPlan(editorState.resourceModal, {
+    const drafts = {
       providerDraft: editorState.providerDraft,
       modelDraft: editorState.modelDraft,
       agentDraft: editorState.agentDraft,
-    })
+    }
+    const validation = validateResourceDraft(editorState.resourceModal, drafts)
+    if (!validation.ok) {
+      setFormError(validation.message)
+      setFieldErrors(validation.fields)
+      const form = event.currentTarget as HTMLFormElement
+      const body = form.querySelector('.modal-body')
+      body?.scrollTo({ top: 0, behavior: 'smooth' })
+      // 优先滚到首个标红字段，便于看见「思考强度」等具体项
+      window.requestAnimationFrame(() => {
+        const firstError =
+          form.querySelector('.form-group.is-error') ||
+          form.querySelector('.capability-picker.is-error') ||
+          form.querySelector('.field-error')
+        firstError?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      })
+      return
+    }
+    // 校验阶段可能归一化了 modelDraft（补全思考强度 / 默认 variant），写回 UI 状态
+    if (editorState.resourceModal.kind === 'model') {
+      editorState.onModelDraftChange(drafts.modelDraft)
+    }
+    setFormError('')
+    setFieldErrors({})
+
+    const plan = buildResourceSubmitPlan(editorState.resourceModal, drafts)
 
     if (plan.kind === 'provider') {
       if (plan.mode === 'edit') {
@@ -115,10 +165,24 @@ export function useAiConsoleResourceController() {
       modelDraft: editorState.modelDraft,
       agentDraft: editorState.agentDraft,
       pending: mutations.resourceEditorPending,
+      formError,
+      fieldErrors,
       onClose: editorState.closeResourceModal,
-      onProviderDraftChange: editorState.onProviderDraftChange,
-      onModelDraftChange: editorState.onModelDraftChange,
-      onAgentDraftChange: editorState.onAgentDraftChange,
+      onProviderDraftChange: (draft: typeof editorState.providerDraft) => {
+        setFormError('')
+        setFieldErrors({})
+        editorState.onProviderDraftChange(draft)
+      },
+      onModelDraftChange: (draft: typeof editorState.modelDraft) => {
+        setFormError('')
+        setFieldErrors({})
+        editorState.onModelDraftChange(draft)
+      },
+      onAgentDraftChange: (draft: typeof editorState.agentDraft) => {
+        setFormError('')
+        setFieldErrors({})
+        editorState.onAgentDraftChange(draft)
+      },
       onSubmit: submitResource,
     },
     deleteConfirmModal: {

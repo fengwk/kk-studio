@@ -26,13 +26,21 @@ export interface KeyValueDraft {
   value: string
 }
 
-/** Variant = thinking/runtime profile (pi-style), not a full capacity definition. */
+/** Variant = a provider runtime profile stored in configJson.variants. */
 export interface VariantDraft {
+  /** Client-only React key. */
   id: string
+  /** Persisted as configJson.variants[].id. */
   name: string
-  thinkingLevel: string
-  temperature: string
+  reasoningEffort: string
   maxOutputTokens: string
+  temperature: string
+  topP: string
+  topK: string
+  frequencyPenalty: string
+  presencePenalty: string
+  /** Comma-separated in the form and persisted as a string array. */
+  stopSequences: string
 }
 
 export interface ModelPricingDraft {
@@ -55,9 +63,10 @@ export interface ModelDraft {
   description: string
   contextWindow: string
   maxOutputTokens: string
-  inputModalities: string[]
-  capabilities: string[]
+  tools: boolean
   reasoning: boolean
+  inputModalities: string[]
+  outputModalities: string[]
   defaultVariant: string
   variants: VariantDraft[]
   pricing: ModelPricingDraft

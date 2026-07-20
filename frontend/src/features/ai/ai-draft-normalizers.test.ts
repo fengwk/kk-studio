@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { emptyAgentDraft } from '@/features/ai/ai-agent-draft-codec'
+import type { AgentDraft } from '@/features/ai/ai-console-types'
 import {
   applyAgentModelSelection,
   normalizeAgentDraftDefaultVariant,
@@ -6,47 +8,53 @@ import {
   variantOptionsFromDraft,
   variantOptionsFromModel,
 } from '@/features/ai/ai-draft-normalizers'
-import type { AgentDraft } from '@/features/ai/ai-console-types'
+import { emptyModelDraft } from '@/features/ai/ai-model-draft-codec'
+import { newVariantDraft } from '@/features/ai/ai-resource-draft-primitives'
 import type { AgentModelDTO } from '@/shared/api/contracts'
-import { emptyAgentDraft } from '@/features/ai/ai-agent-draft-codec'
 
 describe('ai-draft-normalizers', () => {
+  /** Variant options must use configJson variants[].id and preserve first-seen ordering. */
   it('builds variant options from drafts and models', () => {
     expect(
       variantOptionsFromDraft(
         [
-          { id: 'variant-1', name: ' default ', temperature: '', maxOutputTokens: '', extras: [] },
-          { id: 'variant-2', name: 'creative', temperature: '', maxOutputTokens: '', extras: [] },
-          { id: 'variant-3', name: 'creative', temperature: '', maxOutputTokens: '', extras: [] },
+          newVariantDraft({ name: ' default ' }),
+          newVariantDraft({ name: 'creative' }),
+          newVariantDraft({ name: 'creative' }),
         ],
         'fallback',
       ),
     ).toEqual(['default', 'creative'])
 
-    expect(variantOptionsFromDraft([{ id: 'variant-4', name: '   ', temperature: '', maxOutputTokens: '', extras: [] }], ' fallback ')).toEqual([
+    expect(variantOptionsFromDraft([newVariantDraft({ name: '   ' })], ' fallback ')).toEqual([
       'fallback',
     ])
 
-    expect(variantOptionsFromModel(model({ defaultVariant: 'creative', variantsJson: '[{"name":"creative"},{"name":"precise"}]' }))).toEqual([
-      'creative',
-      'precise',
-    ])
-    expect(variantOptionsFromModel(model({ defaultVariant: 'fallback', variantsJson: '{"name":"broken"}' }))).toEqual(['fallback'])
-    expect(variantOptionsFromModel(model({ defaultVariant: 'fallback', variantsJson: '[1,{"name":"precise"}]' }))).toEqual(['precise'])
-    expect(variantOptionsFromModel(model({ defaultVariant: ' fallback ', variantsJson: '{broken' }))).toEqual(['fallback'])
-    expect(variantOptionsFromModel(model({ defaultVariant: null, variantsJson: null }))).toEqual(['default'])
+    expect(
+      variantOptionsFromModel(
+        model({
+          configJson: JSON.stringify({
+            defaultVariant: 'creative',
+            variants: [{ id: 'creative' }, { id: 'precise' }],
+          }),
+        }),
+      ),
+    ).toEqual(['creative', 'precise'])
+    expect(variantOptionsFromModel(model({ configJson: '{broken' }))).toEqual(['medium'])
+    expect(
+      variantOptionsFromModel(
+        model({ configJson: JSON.stringify({ variants: [1, { id: 'precise' }] }) }),
+      ),
+    ).toEqual(['precise'])
+    expect(variantOptionsFromModel(model({ configJson: null }))).toEqual(['medium'])
   })
 
+  /** Invalid selected variants fall back to each model config's effective default. */
   it('normalizes model and agent default variants', () => {
     const normalizedModel = normalizeModelDraftDefaultVariant({
-      provider: 'minimax',
-      name: 'MiniMax-M2.7',
-      description: '',
+      ...emptyModelDraft(),
       defaultVariant: 'legacy',
-      variants: [
-        { id: 'variant-1', name: 'default', temperature: '', maxOutputTokens: '', extras: [] },
-        { id: 'variant-2', name: 'creative', temperature: '', maxOutputTokens: '', extras: [] },
-      ],
+      variants: [newVariantDraft({ name: 'default' }), newVariantDraft({ name: 'creative' })],
     })
     expect(normalizedModel.defaultVariant).toBe('default')
 
@@ -62,8 +70,10 @@ describe('ai-draft-normalizers', () => {
           id: 'model-sonnet',
           providerName: 'anthropic',
           name: 'Claude-Sonnet-4.5',
-          defaultVariant: 'precise',
-          variantsJson: '[{"name":"creative"},{"name":"precise"}]',
+          configJson: JSON.stringify({
+            defaultVariant: 'precise',
+            variants: [{ id: 'creative' }, { id: 'precise' }],
+          }),
         }),
       ],
     )
@@ -81,6 +91,7 @@ describe('ai-draft-normalizers', () => {
     ).toBe('default')
   })
 
+  /** Changing models also changes the Agent variant to configJson.defaultVariant. */
   it('syncs agent variant when model selection changes', () => {
     const draft: AgentDraft = {
       ...emptyAgentDraft(),
@@ -93,15 +104,19 @@ describe('ai-draft-normalizers', () => {
         id: 'model-minimax',
         providerName: 'minimax',
         name: 'MiniMax-M2.7',
-        defaultVariant: 'default',
-        variantsJson: '[{"name":"default"}]',
+        configJson: JSON.stringify({
+          defaultVariant: 'default',
+          variants: [{ id: 'default' }],
+        }),
       }),
       model({
         id: 'model-sonnet',
         providerName: 'anthropic',
         name: 'Claude-Sonnet-4.5',
-        defaultVariant: 'creative',
-        variantsJson: '[{"name":"creative"},{"name":"precise"}]',
+        configJson: JSON.stringify({
+          defaultVariant: 'creative',
+          variants: [{ id: 'creative' }, { id: 'precise' }],
+        }),
       }),
     ]
 
@@ -122,8 +137,11 @@ function model(overrides: Partial<AgentModelDTO>): AgentModelDTO {
     providerName: 'minimax',
     name: 'MiniMax-M2.7',
     description: null,
-    defaultVariant: 'default',
-    variantsJson: '[{"name":"default"}]',
+    capabilitiesJson: '["TEXT","TOOLS"]',
+    configJson: JSON.stringify({
+      defaultVariant: 'default',
+      variants: [{ id: 'default' }],
+    }),
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
     ...overrides,

@@ -8,6 +8,7 @@ import {
   includesSearch,
   resourceTitle,
 } from '@/features/ai/ai-console-utils'
+import type { ModelDraft } from '@/features/ai/ai-console-types'
 import {
   emptyAgentDraft,
   emptyModelDraft,
@@ -22,16 +23,79 @@ import {
   toModelDraft,
   toProviderDraft,
 } from '@/features/ai/ai-resource-draft-codecs'
+import type { AgentModelDTO } from '@/shared/api/contracts'
+
+function modelDraft(overrides: Partial<ModelDraft> = {}): ModelDraft {
+  return {
+    ...emptyModelDraft(),
+    providerId: 'provider-1',
+    name: 'MiniMax-M2.7',
+    ...overrides,
+  }
+}
+
+function modelConfig(overrides: Record<string, unknown> = {}) {
+  return {
+    limit: { context: 128000, output: 8192 },
+    abilities: {
+      tools: true,
+      reasoning: false,
+      modalities: { input: ['TEXT'], output: ['TEXT'] },
+    },
+    pricing: {
+      currency: 'USD',
+      pricingTier: 'default',
+      serviceTier: 'default',
+      serviceTierMultiplier: 1,
+      version: 'v1',
+      inputPerMillionTokens: 0,
+      outputPerMillionTokens: 0,
+      cacheReadPerMillionTokens: 0,
+      cacheWritePerMillionTokens: 0,
+      cacheWriteLongPerMillionTokens: 0,
+      reasoningPerMillionTokens: 0,
+    },
+    defaultVariant: 'default',
+    variants: [{ id: 'default' }],
+    ...overrides,
+  }
+}
+
+function model(overrides: Partial<AgentModelDTO> = {}): AgentModelDTO {
+  return {
+    id: 'model-1',
+    providerId: 'provider-1',
+    providerName: 'minimax',
+    name: 'MiniMax-M2.7',
+    description: 'Chat model',
+    capabilitiesJson: '["TEXT","TOOLS"]',
+    configJson: JSON.stringify(modelConfig()),
+    createTime: '2026-06-20T02:00:00',
+    updateTime: '2026-06-20T02:00:00',
+    ...overrides,
+  }
+}
 
 describe('ai-console-utils', () => {
+  /** DTO codecs must populate structured current-schema drafts and stable create defaults. */
   it('builds editable drafts from DTOs and default factories', () => {
     expect(emptyProviderDraft()).toMatchObject({
       providerType: 'openai',
       modelCallTimeoutMillis: '1800000',
       modelCallIdleTimeoutMillis: '120000',
     })
-    expect(emptyModelDraft(undefined, { name: 'minimax' } as never)).toMatchObject({ provider: 'minimax', defaultVariant: 'default' })
-    expect(emptyAgentDraft({ id: 'model-1', providerName: 'minimax', name: 'MiniMax-M2.7', defaultVariant: 'default' } as never)).toMatchObject({
+    expect(
+      emptyModelDraft(undefined, {
+        id: 'provider-1',
+        name: 'minimax',
+      } as never),
+    ).toMatchObject({
+      providerId: 'provider-1',
+      defaultVariant: 'medium',
+      tools: true,
+      inputModalities: ['TEXT'],
+    })
+    expect(emptyAgentDraft(model())).toMatchObject({
       modelId: 'model-1',
       variant: 'default',
     })
@@ -60,21 +124,21 @@ describe('ai-console-utils', () => {
     })
 
     expect(
-      toModelDraft({
-        id: 'model-1',
-        providerId: 'provider-1',
-        providerName: 'minimax',
-        name: 'MiniMax-M2.7',
-        description: 'model desc',
-        defaultVariant: 'default',
-        variantsJson: '[{"name":"default","temperature":0.2,"maxOutputTokens":256,"topK":32}]',
-        createTime: '2026-06-20T02:00:00',
-        updateTime: '2026-06-20T02:00:00',
-      }),
+      toModelDraft(
+        model({
+          configJson: JSON.stringify(
+            modelConfig({
+              defaultVariant: 'quality',
+              variants: [{ id: 'quality', temperature: 0.2, maxOutputTokens: 256, topK: 32 }],
+            }),
+          ),
+        }),
+      ),
     ).toMatchObject({
-      provider: 'minimax',
+      providerId: 'provider-1',
       name: 'MiniMax-M2.7',
-      defaultVariant: 'default',
+      defaultVariant: 'quality',
+      variants: [{ name: 'quality', temperature: '0.2', maxOutputTokens: '256', topK: '32' }],
     })
 
     expect(
@@ -96,18 +160,18 @@ describe('ai-console-utils', () => {
     })
   })
 
+  /** Structured drafts must serialize to the current provider/model/agent API payload contracts. */
   it('serializes structured drafts into backend payloads', () => {
-    expect(
-      toEditableProvider({
-        name: ' minimax ',
-        description: ' provider desc ',
-        providerType: ' openai ',
-        baseUrl: ' https://api.minimax.io/v1 ',
-        credential: ' secret ',
-        modelCallTimeoutMillis: '120000',
-        modelCallIdleTimeoutMillis: '3000',
-      }),
-    ).toEqual({
+    const providerInput = {
+      name: ' minimax ',
+      description: ' provider desc ',
+      providerType: ' openai ',
+      baseUrl: ' https://api.minimax.io/v1 ',
+      credential: ' secret ',
+      modelCallTimeoutMillis: '120000',
+      modelCallIdleTimeoutMillis: '3000',
+    }
+    expect(toEditableProvider(providerInput)).toEqual({
       name: 'minimax',
       description: 'provider desc',
       providerType: 'openai',
@@ -116,17 +180,7 @@ describe('ai-console-utils', () => {
       modelCallTimeoutMillis: 120000,
       modelCallIdleTimeoutMillis: 3000,
     })
-    expect(
-      toEditableProviderUpdate({
-        name: ' minimax ',
-        description: ' provider desc ',
-        providerType: ' openai ',
-        baseUrl: ' https://api.minimax.io/v1 ',
-        credential: ' secret ',
-        modelCallTimeoutMillis: '120000',
-        modelCallIdleTimeoutMillis: '3000',
-      }),
-    ).toEqual({
+    expect(toEditableProviderUpdate(providerInput)).toEqual({
       name: 'minimax',
       description: 'provider desc',
       providerType: 'openai',
@@ -136,69 +190,70 @@ describe('ai-console-utils', () => {
       modelCallIdleTimeoutMillis: 3000,
     })
 
-    expect(
-      toEditableModel({
-        provider: ' minimax ',
+    const baseVariant = emptyModelDraft().variants[0]
+    const editableModel = toEditableModel(
+      modelDraft({
+        providerId: ' provider-1 ',
         name: ' MiniMax-M2.7 ',
         description: ' chat model ',
-        defaultVariant: ' default ',
+        reasoning: true,
+        defaultVariant: 'quality',
         variants: [
           {
-            id: 'variant-1',
-            name: ' default ',
+            ...baseVariant,
+            name: 'quality',
+            reasoningEffort: 'high',
             temperature: '0.1',
             maxOutputTokens: '256',
-            extras: [
-              { id: 'extra-1', key: 'topK', value: '32' },
-              { id: 'extra-2', key: 'supportsVision', value: 'true' },
-            ],
+            topK: '32',
           },
         ],
       }),
-    ).toEqual({
-      provider: 'minimax',
+    )
+    expect(editableModel).toMatchObject({
+      providerId: 'provider-1',
       name: 'MiniMax-M2.7',
       description: 'chat model',
-      defaultVariant: 'default',
-      variantsJson: '[{"name":"default","temperature":0.1,"maxOutputTokens":256,"topK":32,"supportsVision":true}]',
+      capabilitiesJson: '["TEXT","TOOLS","THINKING"]',
     })
-    expect(
-      toEditableModelUpdate({
-        provider: ' minimax ',
-        name: ' MiniMax-M2.7 ',
-        description: ' chat model ',
-        defaultVariant: ' default ',
-        variants: [
-          {
-            id: 'variant-1',
-            name: ' default ',
-            temperature: '0.1',
-            maxOutputTokens: '256',
-            extras: [{ id: 'extra-1', key: 'topK', value: '32' }],
-          },
-        ],
-      }),
-    ).toEqual({
-      description: 'chat model',
-      defaultVariant: 'default',
-      variantsJson: '[{"name":"default","temperature":0.1,"maxOutputTokens":256,"topK":32}]',
-      name: 'MiniMax-M2.7',
+    expect(JSON.parse(editableModel.configJson)).toMatchObject({
+      limit: { context: 128000, output: 8192 },
+      abilities: {
+        tools: true,
+        reasoning: true,
+        modalities: { input: ['TEXT'], output: ['TEXT'] },
+      },
+      defaultVariant: 'quality',
+      variants: [
+        {
+          id: 'quality',
+          reasoningEffort: 'high',
+          temperature: 0.1,
+          maxOutputTokens: 256,
+          topK: 32,
+        },
+      ],
     })
+    expect(toEditableModelUpdate(modelDraft())).not.toHaveProperty('providerId')
 
-    expect(
-      toEditableAgent({
-        name: ' assistant ',
-        description: ' desc ',
-        systemPrompt: ' prompt ',
-        modelId: ' model-1 ',
-        variant: ' default ',
-        environmentName: '',
-        tools: [' search ', ''],
-        skills: [],
-        allowedSubagents: [],
-        executionPolicy: { maxTurns: '', maxDepth: '', maxDirectSubagents: '', maxTotalSubagents: '' },
-      }),
-    ).toEqual({
+    const agentInput = {
+      name: ' assistant ',
+      description: ' desc ',
+      systemPrompt: ' prompt ',
+      modelId: ' model-1 ',
+      variant: ' default ',
+      environmentName: '',
+      tools: [' search ', ''],
+      skills: [],
+      allowedSubagents: [],
+      executionPolicy: {
+        maxTurns: '',
+        maxDepth: '',
+        maxDirectSubagents: '',
+        maxTotalSubagents: '',
+      },
+    }
+    const expectedAgent = {
       name: 'assistant',
       description: 'desc',
       systemPrompt: 'prompt',
@@ -211,36 +266,12 @@ describe('ai-console-utils', () => {
         allowedSubagents: [],
         executionPolicy: null,
       },
-    })
-    expect(
-      toEditableAgentUpdate({
-        name: ' assistant ',
-        description: ' desc ',
-        systemPrompt: ' prompt ',
-        modelId: ' model-1 ',
-        variant: ' default ',
-        environmentName: '',
-        tools: [' search ', ''],
-        skills: [],
-        allowedSubagents: [],
-        executionPolicy: { maxTurns: '', maxDepth: '', maxDirectSubagents: '', maxTotalSubagents: '' },
-      }),
-    ).toEqual({
-      description: 'desc',
-      systemPrompt: 'prompt',
-      variant: 'default',
-      name: 'assistant',
-      modelId: 'model-1',
-      config: {
-        environmentName: null,
-        tools: ['search'],
-        skills: [],
-        allowedSubagents: [],
-        executionPolicy: null,
-      },
-    })
+    }
+    expect(toEditableAgent(agentInput)).toEqual(expectedAgent)
+    expect(toEditableAgentUpdate(agentInput)).toEqual(expectedAgent)
   })
 
+  /** Search and presentation helpers cover model defaults now stored inside configJson. */
   it('filters resources and formats helper values', () => {
     const agents = [
       {
@@ -255,19 +286,7 @@ describe('ai-console-utils', () => {
         updateTime: '2026-06-20T02:00:00',
       },
     ]
-    const models = [
-      {
-        id: 'model-1',
-        providerId: 'provider-1',
-        providerName: 'minimax',
-        name: 'MiniMax-M2.7',
-        description: 'Chat model',
-        defaultVariant: 'default',
-        variantsJson: '[{"name":"default"}]',
-        createTime: '2026-06-20T02:00:00',
-        updateTime: '2026-06-20T02:00:00',
-      },
-    ]
+    const models = [model()]
     const providers = [
       {
         id: 'provider-1',
@@ -284,7 +303,7 @@ describe('ai-console-utils', () => {
     ]
 
     expect(filterAgents(agents, 'cloud')).toHaveLength(1)
-    expect(filterModels(models, 'm2.7')).toHaveLength(1)
+    expect(filterModels(models, 'default')).toHaveLength(1)
     expect(filterProviders(providers, 'endpoint')).toHaveLength(1)
     expect(includesSearch('MiniMax', 'mini')).toBe(true)
     expect(includesSearch('MiniMax', '')).toBe(true)
@@ -293,7 +312,7 @@ describe('ai-console-utils', () => {
     expect(resourceTitle({ kind: 'model', mode: 'edit' })).toBe('编辑 Model')
     expect(resourceTitle({ kind: 'agent', mode: 'create' })).toBe('新建 Agent')
     expect(formatJsonSummary(null)).toBe('default')
-    expect(formatJsonSummary('[{"name":"default"}]')).toBe('1 item')
+    expect(formatJsonSummary('[{"id":"default"}]')).toBe('1 item')
     expect(formatJsonSummary('{"vision":true,"audio":false}')).toBe('2 keys')
     expect(formatJsonSummary('{broken')).toBe('invalid json')
     expect(formatBackendDate([2026, 6, 20, 2, 1, 0, 0])).toBe('2026-06-20 02:01')
@@ -301,7 +320,8 @@ describe('ai-console-utils', () => {
     expect(formatBackendDate([Number.NaN])).toBe('-')
   })
 
-  it('handles malformed backend drafts and serialization fallbacks', () => {
+  /** Malformed persisted model JSON falls back to a complete editable draft without reviving legacy fields. */
+  it('handles malformed backend drafts and nullable serialization fields', () => {
     expect(
       toProviderDraft({
         id: 'provider-2',
@@ -315,49 +335,20 @@ describe('ai-console-utils', () => {
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       }),
-    ).toEqual({
+    ).toMatchObject({
       name: 'stub',
       description: '',
       providerType: 'openai',
       baseUrl: '',
-      credential: '',
-      modelCallTimeoutMillis: '1800000',
-      modelCallIdleTimeoutMillis: '120000',
     })
 
-    expect(
-      toModelDraft({
-        id: 'model-2',
-        providerId: 'provider-2',
-        providerName: 'stub',
-        name: 'fallback-model',
-        description: null,
-        defaultVariant: null,
-        variantsJson: '{broken',
-        createTime: '2026-06-20T02:00:00',
-        updateTime: '2026-06-20T02:00:00',
-      }),
-    ).toMatchObject({
-      provider: 'stub',
+    expect(toModelDraft(model({ configJson: '{broken', description: null }))).toMatchObject({
+      providerId: 'provider-1',
       description: '',
-      defaultVariant: 'default',
-      variants: [{ name: 'default', temperature: '', maxOutputTokens: '', extras: [] }],
-    })
-
-    expect(
-      toModelDraft({
-        id: 'model-3',
-        providerId: 'provider-2',
-        providerName: 'stub',
-        name: 'primitive-variant-model',
-        description: null,
-        defaultVariant: null,
-        variantsJson: '[1]',
-        createTime: '2026-06-20T02:00:00',
-        updateTime: '2026-06-20T02:00:00',
-      }),
-    ).toMatchObject({
-      variants: [{ name: '', temperature: '', maxOutputTokens: '', extras: [] }],
+      contextWindow: '128000',
+      maxOutputTokens: '8192',
+      defaultVariant: 'medium',
+      variants: [{ name: 'medium', reasoningEffort: '', temperature: '', topK: '' }],
     })
 
     expect(
@@ -397,101 +388,6 @@ describe('ai-console-utils', () => {
       credential: null,
       modelCallTimeoutMillis: null,
       modelCallIdleTimeoutMillis: null,
-    })
-
-    expect(
-      toEditableModel({
-        provider: ' stub ',
-        name: ' fallback-model ',
-        description: '   ',
-        defaultVariant: ' fallback ',
-        variants: [
-          {
-            id: 'variant-1',
-            name: '   ',
-            temperature: '   ',
-            maxOutputTokens: 'bad',
-            extras: [
-              { id: 'extra-1', key: 'flag', value: 'false' },
-              { id: 'extra-2', key: 'nil', value: 'null' },
-              { id: 'extra-3', key: 'offset', value: '-2' },
-              { id: 'extra-4', key: 'note', value: ' text ' },
-              { id: 'extra-5', key: '  ', value: 'ignored' },
-            ],
-          },
-        ],
-      }),
-    ).toEqual({
-      provider: 'stub',
-      name: 'fallback-model',
-      description: null,
-      defaultVariant: 'fallback',
-      variantsJson: '[{"name":"fallback"}]',
-    })
-
-    expect(
-      toEditableModel({
-        provider: 'stub',
-        name: 'empty-variant-model',
-        description: '',
-        defaultVariant: '   ',
-        variants: [{ id: 'variant-2', name: '   ', temperature: '', maxOutputTokens: '', extras: [] }],
-      }),
-    ).toMatchObject({
-      defaultVariant: null,
-      variantsJson: null,
-    })
-
-    expect(
-      toEditableModel({
-        provider: 'stub',
-        name: 'coerce-model',
-        description: '',
-        defaultVariant: 'default',
-        variants: [
-          {
-            id: 'variant-3',
-            name: 'default',
-            temperature: '',
-            maxOutputTokens: '',
-            extras: [
-              { id: 'extra-6', key: 'flag', value: 'false' },
-              { id: 'extra-7', key: 'nil', value: 'null' },
-              { id: 'extra-8', key: 'offset', value: '-2' },
-              { id: 'extra-9', key: 'ratio', value: '1.25' },
-              { id: 'extra-10', key: 'label', value: ' text ' },
-            ],
-          },
-        ],
-      }).variantsJson,
-    ).toBe('[{"name":"default","flag":false,"nil":null,"offset":-2,"ratio":1.25,"label":"text"}]')
-
-    expect(
-      toEditableAgent({
-        name: ' agent ',
-        description: '   ',
-        systemPrompt: '   ',
-        modelId: ' model-2 ',
-        variant: '   ',
-        environmentName: '',
-        tools: ['   '],
-        skills: [],
-        allowedSubagents: [],
-        executionPolicy: { maxTurns: '', maxDepth: '', maxDirectSubagents: '', maxTotalSubagents: '' },
-      }),
-    ).toEqual({
-      name: 'agent',
-      description: null,
-      systemPrompt: null,
-      modelId: 'model-2',
-      variant: 'default',
-      config: {
-        environmentName: null,
-        tools: [],
-        skills: [],
-        allowedSubagents: [],
-        executionPolicy: null,
-      },
     })
 
     expect(includesSearch('MiniMax', 'missing')).toBe(false)

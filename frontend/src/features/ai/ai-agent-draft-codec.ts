@@ -7,6 +7,7 @@ import type {
   AgentModelDTO,
 } from '@/shared/api/contracts'
 import type { AgentDraft } from '@/features/ai/ai-console-types'
+import { extractDefaultVariantFromModel } from '@/features/ai/ai-model-draft-codec'
 import { trimToNull } from '@/features/ai/ai-resource-draft-primitives'
 
 function normalizeNames(items: string[] | null | undefined): string[] {
@@ -94,7 +95,7 @@ export function emptyAgentDraft(model?: AgentModelDTO): AgentDraft {
     description: '',
     systemPrompt: '',
     modelId: model ? String(model.id) : '',
-    variant: model?.defaultVariant || 'default',
+    variant: extractDefaultVariantFromModel(model),
     environmentName: '',
     tools: [],
     skills: [],

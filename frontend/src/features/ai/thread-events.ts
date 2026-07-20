@@ -3,6 +3,8 @@ export type {
   DialogueMessage,
   DialogueRole,
   DialogueStatus,
+  MetaDialogueMessage,
+  MetaMessageKind,
   QueuedThreadMessage,
   TextDialogueMessage,
   ThreadTimeline,

@@ -8,6 +8,10 @@ vi.mock('@/shared/api/environment-service', () => ({
   environmentService: { listEnvironments: vi.fn() },
 }))
 
+vi.mock('@/platform/workbench/WorkbenchSlots', () => ({
+  NavigationSlot: () => null,
+}))
+
 describe('EnvironmentsPage', () => {
   it('renders live registry entries with status tools and skills', async () => {
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
@@ -37,6 +41,8 @@ describe('EnvironmentsPage', () => {
     expect(screen.getByText('bash')).toBeInTheDocument()
     expect(screen.getByText('dev')).toBeInTheDocument()
     expect(screen.getByText('CONNECTING')).toBeInTheDocument()
+    expect(screen.getAllByText('Tools').length).toBe(2)
+    expect(screen.getAllByText('Skills').length).toBe(2)
   })
 
   it('shows empty registry state', async () => {

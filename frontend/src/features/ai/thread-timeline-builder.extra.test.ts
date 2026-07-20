@@ -121,6 +121,78 @@ describe('thread timeline edge branches', () => {
       { role: 'user', text: 'queued user' },
     ])
   })
+
+  it('projects turn usage from durable assistantMetadata and dedupes event replay', () => {
+    // Entry 内带 assistantMetadata 时直接投影；同 subject 的 assistant_completed 不应双份
+    const assistantPayload = {
+      message: {
+        role: 'ASSISTANT',
+        contents: [{ type: 'text', text: 'a1' }],
+      },
+      assistantMetadata: {
+        stopReason: 'END_TURN',
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          cacheWriteLongTokens: 0,
+          reasoningTokens: 0,
+          providerTotalTokens: 150,
+        },
+        cost: {
+          currency: 'USD',
+          input: '0.01',
+          output: '0.002',
+          cacheRead: '0',
+          cacheWrite: '0',
+          cacheWriteLong: '0',
+          reasoning: '0',
+          total: '0.012',
+        },
+      },
+    }
+    const timeline = buildThreadTimeline(
+      [
+        entry('10', 'message', messagePayload('USER', [{ type: 'text', text: 'q1' }])),
+        entry('11', 'message', assistantPayload),
+        entry('12', 'message', messagePayload('USER', [{ type: 'text', text: 'q2' }])),
+        entry('13', 'message', messagePayload('ASSISTANT', [{ type: 'text', text: 'a2' }])),
+      ],
+      [],
+      [
+        threadEvent('101', 'assistant_completed', '11', {
+          usage: assistantPayload.assistantMetadata.usage,
+          cost: { total: '0.012', currency: 'USD' },
+        }),
+        threadEvent('102', 'assistant_completed', '13', {
+          usage: {
+            inputTokens: 10,
+            outputTokens: 5,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            cacheWriteLongTokens: 0,
+            reasoningTokens: 0,
+            providerTotalTokens: 15,
+          },
+          cost: { total: '0.001', currency: 'USD' },
+        }),
+      ],
+    )
+    const roles = timeline.messages.map((m) =>
+      m.role === 'meta' ? `meta:${m.kind}` : `${m.role}:${'text' in m ? m.text : ''}`,
+    )
+    expect(roles).toEqual([
+      'user:q1',
+      'assistant:a1',
+      'meta:turn_usage',
+      'user:q2',
+      'assistant:a2',
+      'meta:turn_usage',
+    ])
+    expect(timeline.messages[2]?.text).toContain('$0.012')
+    expect(timeline.messages[5]?.text).toContain('$0.001')
+  })
 })
 
 function entry(entryId: string, entryType: string, payload: Record<string, unknown>): HarnessSessionEntryDTO {

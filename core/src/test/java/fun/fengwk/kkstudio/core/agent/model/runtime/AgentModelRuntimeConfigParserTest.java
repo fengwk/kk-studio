@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.agent.model.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -22,15 +23,21 @@ class AgentModelRuntimeConfigParserTest {
   /** Every executable field, including six independent prices, survives strict parsing. */
   @Test
   void parsesCompleteRuntimeModelWithoutTokenBasedPriceInference() {
-    var parsed = parser.parse("[\"TEXT\",\"TOOLS\",\"THINKING\"]", validConfig());
+    var parsed = parser.parse("[\"TEXT\",\"TOOLS\",\"THINKING\",\"VISION\"]", validConfig());
 
     assertEquals(128000L, parsed.contextWindow());
     assertEquals(8192L, parsed.maxOutputTokens());
     assertEquals(
         Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE), parsed.inputModalities());
+    // runtime capabilities are derived from abilities, not capabilitiesJson content.
     assertEquals(
-        Set.of(ModelCapability.TEXT, ModelCapability.TOOLS, ModelCapability.THINKING),
+        Set.of(
+            ModelCapability.TEXT,
+            ModelCapability.TOOLS,
+            ModelCapability.THINKING,
+            ModelCapability.VISION),
         parsed.capabilities());
+    assertEquals("quality", parsed.defaultVariant());
     assertEquals(1, parsed.variants().size());
     assertEquals("quality", parsed.variants().get(0).name());
     assertEquals(4096, parsed.variants().get(0).maxOutputTokens());
@@ -40,6 +47,7 @@ class AgentModelRuntimeConfigParserTest {
     assertEquals(0.1, parsed.variants().get(0).frequencyPenalty());
     assertEquals(0.2, parsed.variants().get(0).presencePenalty());
     assertEquals(List.of("done"), parsed.variants().get(0).stopSequences());
+    assertEquals("high", parsed.variants().get(0).reasoningEffort());
     assertEquals("USD", parsed.pricing().currency());
     assertEquals("batch", parsed.pricing().pricingTier());
     assertEquals("priority", parsed.pricing().serviceTier());
@@ -53,69 +61,90 @@ class AgentModelRuntimeConfigParserTest {
     assertEquals(new BigDecimal("3.6"), parsed.pricing().reasoningPerMillionTokens());
   }
 
+  /** off reasoningEffort is normalized to null. */
+  @Test
+  void normalizesOffReasoningEffortToNull() {
+    String config =
+        validConfig().replace("\"reasoningEffort\":\"high\"", "\"reasoningEffort\":\"off\"");
+    var parsed = parser.parse("[\"TEXT\",\"TOOLS\",\"THINKING\",\"VISION\"]", config);
+    assertNull(parsed.variants().get(0).reasoningEffort());
+  }
+
   /** Missing fields, wrong JSON types, unknown enums, and invalid variants fail explicitly. */
   @Test
   void rejectsIncompleteOrMistypedExecutableConfiguration() {
-    assertInvalid("[]", "{}", "contextWindow");
-    assertInvalid("[]", validConfig().replace("128000", "\"128000\""), "contextWindow");
+    assertInvalid("[\"TEXT\"]", "{}", "limit");
+    assertInvalid("[\"TEXT\"]", validConfig().replace("128000", "\"128000\""), "limit.context");
     assertInvalid("[\"UNKNOWN\"]", validConfig(), "unsupported value");
     assertInvalid(
-        "[]",
+        "[\"TEXT\"]",
         validConfig().replace("[\"TEXT\",\"IMAGE\"]", "[]"),
-        "inputModalities must not be empty");
-    assertInvalid("[]", validConfig().replace("\"topP\":0.8", "\"topP\":2"), "topP must be in");
+        "modalities.input must not be empty");
     assertInvalid(
-        "[]",
+        "[\"TEXT\"]", validConfig().replace("\"topP\":0.8", "\"topP\":2"), "topP must be in");
+    assertInvalid(
+        "[\"TEXT\"]",
         validConfig()
             .replace("\"reasoningPerMillionTokens\":3.6", "\"reasoningPerMillionTokens\":null"),
         "reasoningPerMillionTokens");
     assertInvalid("{}", validConfig(), "capabilitiesJson must be an array");
+    assertInvalid("[]", validConfig(), "capabilitiesJson must not be empty");
   }
 
   /** Structural and numeric boundaries reject every shape that could create an unusable model. */
   @Test
   void rejectsInvalidVariantPricingAndJsonBoundaries() {
     assertInvalid("", validConfig(), "capabilitiesJson must not be blank");
-    assertInvalid("[]", "not-json", "configJson must be valid JSON");
-    assertInvalid("[]", "[]", "configJson must be an object");
+    assertInvalid("[\"TEXT\"]", "not-json", "configJson must be valid JSON");
+    assertInvalid("[\"TEXT\"]", "[]", "configJson must be an object");
     assertInvalid(
-        "[]",
-        validConfig().replace("\"maxOutputTokens\":8192", "\"maxOutputTokens\":128001"),
-        "must not exceed contextWindow");
+        "[\"TEXT\"]",
+        validConfig().replace("\"output\":8192", "\"output\":128001"),
+        "must not exceed limit.context");
     assertInvalid(
-        "[]",
-        validConfig().replace("\"variants\":[{", "\"variants\":[] ,\"ignored\":[{"),
+        "[\"TEXT\"]",
+        validConfig()
+            .replace(
+                "\"variants\":[{\"id\":\"quality\",\"maxOutputTokens\":4096,"
+                    + "\"temperature\":0.4,\"topP\":0.8,\"topK\":20,"
+                    + "\"frequencyPenalty\":0.1,\"presencePenalty\":0.2,"
+                    + "\"stopSequences\":[\"done\"],\"reasoningEffort\":\"high\"}]",
+                "\"variants\":[]"),
         "variants must not be empty");
     assertInvalid(
-        "[]",
+        "[\"TEXT\"]",
         validConfig().replace("\"variants\":[{", "\"variants\":[1,{"),
         "variants[0] must be an object");
     assertInvalid(
-        "[]",
+        "[\"TEXT\"]",
         validConfig()
             .replace(
-                "\"stopSequences\":[\"done\"]}],",
-                "\"stopSequences\":[\"done\"]},{\"name\":\"quality\"}],"),
-        "duplicate name");
+                "\"stopSequences\":[\"done\"],\"reasoningEffort\":\"high\"}]",
+                "\"stopSequences\":[\"done\"],\"reasoningEffort\":\"high\"},{\"id\":\"quality\"}]"),
+        "duplicate id");
     assertInvalid(
-        "[]",
+        "[\"TEXT\"]",
+        validConfig().replace("\"defaultVariant\":\"quality\"", "\"defaultVariant\":\"missing\""),
+        "defaultVariant must match");
+    assertInvalid(
+        "[\"TEXT\"]",
         validConfig().replace("\"maxOutputTokens\":4096", "\"maxOutputTokens\":999999"),
         "must not exceed model");
-    assertInvalid("[]", validConfig().replace("\"topK\":20", "\"topK\":0"), "topK");
+    assertInvalid("[\"TEXT\"]", validConfig().replace("\"topK\":20", "\"topK\":0"), "topK");
     assertInvalid(
-        "[]",
+        "[\"TEXT\"]",
         validConfig().replace("\"temperature\":0.4", "\"temperature\":\"hot\""),
         "temperature must be a number");
     assertInvalid(
-        "[]",
+        "[\"TEXT\"]",
         validConfig().replace("\"stopSequences\":[\"done\"]", "\"stopSequences\":[1]"),
         "stopSequences must contain");
     assertInvalid(
-        "[]",
+        "[\"TEXT\"]",
         validConfig().replace("\"serviceTierMultiplier\":1.25", "\"serviceTierMultiplier\":0"),
         "serviceTierMultiplier must be positive");
     assertInvalid(
-        "[]",
+        "[\"TEXT\"]",
         validConfig().replace("\"inputPerMillionTokens\":1.1", "\"inputPerMillionTokens\":-1"),
         "inputPerMillionTokens must not be negative");
   }
@@ -127,12 +156,14 @@ class AgentModelRuntimeConfigParserTest {
   }
 
   private String validConfig() {
-    return "{\"contextWindow\":128000,\"maxOutputTokens\":8192,"
-        + "\"inputModalities\":[\"TEXT\",\"IMAGE\"],"
-        + "\"variants\":[{\"name\":\"quality\",\"maxOutputTokens\":4096,"
+    return "{\"limit\":{\"context\":128000,\"output\":8192},"
+        + "\"abilities\":{\"tools\":true,\"reasoning\":true,"
+        + "\"modalities\":{\"input\":[\"TEXT\",\"IMAGE\"],\"output\":[\"TEXT\"]}},"
+        + "\"defaultVariant\":\"quality\","
+        + "\"variants\":[{\"id\":\"quality\",\"maxOutputTokens\":4096,"
         + "\"temperature\":0.4,\"topP\":0.8,\"topK\":20,"
         + "\"frequencyPenalty\":0.1,\"presencePenalty\":0.2,"
-        + "\"stopSequences\":[\"done\"]}],"
+        + "\"stopSequences\":[\"done\"],\"reasoningEffort\":\"high\"}],"
         + "\"pricing\":{\"currency\":\"USD\",\"pricingTier\":\"batch\","
         + "\"serviceTier\":\"priority\",\"serviceTierMultiplier\":1.25,"
         + "\"version\":\"2026-07-16\",\"inputPerMillionTokens\":1.1,"

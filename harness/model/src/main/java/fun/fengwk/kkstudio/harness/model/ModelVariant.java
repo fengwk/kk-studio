@@ -2,9 +2,13 @@ package fun.fengwk.kkstudio.harness.model;
 
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
-/** 模型的一组可命名请求参数（thinking profile / sampling profile）。 */
+/**
+ * 模型的一组可命名请求参数预设（variant）。
+ *
+ * <p>{@code name} 对应 config 中的 variant {@code id}。采样字段与 {@code reasoningEffort} 均为可选；{@code null}
+ * 表示不传，走厂商默认。{@code reasoningEffort} 为 {@code off} 或空白时归一为 {@code null}。
+ */
 public record ModelVariant(
     String name,
     Integer maxOutputTokens,
@@ -14,10 +18,7 @@ public record ModelVariant(
     Double frequencyPenalty,
     Double presencePenalty,
     List<String> stopSequences,
-    String thinkingLevel) {
-
-  private static final Set<String> THINKING_LEVELS =
-      Set.of("off", "minimal", "low", "medium", "high", "xhigh", "max");
+    String reasoningEffort) {
 
   public ModelVariant {
     if (name == null || name.isBlank()) {
@@ -36,14 +37,12 @@ public record ModelVariant(
       throw new IllegalArgumentException("topK must be positive");
     }
     stopSequences = stopSequences == null ? List.of() : List.copyOf(stopSequences);
-    if (thinkingLevel != null) {
-      String normalized = thinkingLevel.trim().toLowerCase(Locale.ROOT);
-      if (normalized.isEmpty()) {
-        thinkingLevel = null;
-      } else if (!THINKING_LEVELS.contains(normalized)) {
-        throw new IllegalArgumentException("unsupported thinkingLevel: " + thinkingLevel);
+    if (reasoningEffort != null) {
+      String normalized = reasoningEffort.trim().toLowerCase(Locale.ROOT);
+      if (normalized.isEmpty() || "off".equals(normalized)) {
+        reasoningEffort = null;
       } else {
-        thinkingLevel = normalized;
+        reasoningEffort = normalized;
       }
     }
   }
@@ -59,7 +58,7 @@ public record ModelVariant(
     this(name, maxOutputTokens, temperature, topP, topK, null, null, stopSequences, null);
   }
 
-  /** 兼容 8 参数构造（无 thinkingLevel）。 */
+  /** 兼容 8 参数构造（无 reasoningEffort）。 */
   public ModelVariant(
       String name,
       Integer maxOutputTokens,

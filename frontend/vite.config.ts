@@ -1,9 +1,10 @@
 import path from 'node:path'
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import { recoverEmptySrcModules } from './vite.recover-empty-plugin'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), recoverEmptySrcModules()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -12,6 +13,13 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     allowedHosts: true,
+    // 等文件写完再触发 HMR，避免读到半截/空文件
+    watch: {
+      awaitWriteFinish: {
+        stabilityThreshold: 300,
+        pollInterval: 100,
+      },
+    },
     proxy: {
       '/api': {
         target: process.env.API_PROXY_TARGET || 'http://127.0.0.1:8080',

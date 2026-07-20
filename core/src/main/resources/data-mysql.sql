@@ -16,12 +16,12 @@ insert into agent_model (
 ) values (
     1, 1, 'acceptance-stub',
     'Local deterministic model for development and acceptance tests.', '["TEXT","TOOLS"]',
-    '{"contextWindow":32768,"maxOutputTokens":4096,"inputModalities":["TEXT"],"variants":[{"name":"default","temperature":0.2,"maxOutputTokens":4096}],"pricing":{"currency":"USD","pricingTier":"acceptance","serviceTier":"default","serviceTierMultiplier":1,"version":"acceptance-v1","inputPerMillionTokens":0,"outputPerMillionTokens":0,"cacheReadPerMillionTokens":0,"cacheWritePerMillionTokens":0,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0}}',
+    '{"limit":{"context":32768,"output":4096},"abilities":{"tools":true,"reasoning":false,"modalities":{"input":["TEXT"],"output":["TEXT"]}},"defaultVariant":"default","variants":[{"id":"default"}],"pricing":{"currency":"USD","pricingTier":"acceptance","serviceTier":"default","serviceTierMultiplier":1,"version":"acceptance-v1","inputPerMillionTokens":0,"outputPerMillionTokens":0,"cacheReadPerMillionTokens":0,"cacheWritePerMillionTokens":0,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0}}',
     current_timestamp(3), current_timestamp(3), 0
 ) on duplicate key update
     provider_id = 1, name = 'acceptance-stub',
     description = 'Local deterministic model for development and acceptance tests.', capabilities_json = '["TEXT","TOOLS"]',
-    config_json = '{"contextWindow":32768,"maxOutputTokens":4096,"inputModalities":["TEXT"],"variants":[{"name":"default","temperature":0.2,"maxOutputTokens":4096}],"pricing":{"currency":"USD","pricingTier":"acceptance","serviceTier":"default","serviceTierMultiplier":1,"version":"acceptance-v1","inputPerMillionTokens":0,"outputPerMillionTokens":0,"cacheReadPerMillionTokens":0,"cacheWritePerMillionTokens":0,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0}}',
+    config_json = '{"limit":{"context":32768,"output":4096},"abilities":{"tools":true,"reasoning":false,"modalities":{"input":["TEXT"],"output":["TEXT"]}},"defaultVariant":"default","variants":[{"id":"default"}],"pricing":{"currency":"USD","pricingTier":"acceptance","serviceTier":"default","serviceTierMultiplier":1,"version":"acceptance-v1","inputPerMillionTokens":0,"outputPerMillionTokens":0,"cacheReadPerMillionTokens":0,"cacheWritePerMillionTokens":0,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0}}',
     gmt_modified = current_timestamp(3);
 
 insert into agent_definition (

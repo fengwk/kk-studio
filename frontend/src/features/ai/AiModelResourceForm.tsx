@@ -1,33 +1,43 @@
-import { useMemo } from 'react'
-import { FormSelect } from '@/features/ai/FormSelect'
-import { VariantListEditor } from '@/features/ai/AiResourceFieldEditors'
-import type { ModelDraft, VariantDraft } from '@/features/ai/ai-console-types'
-import { applyKnownModelDefaults } from '@/features/ai/ai-model-draft-codec'
+import type { ModelDraft, ModelPricingDraft, VariantDraft } from '@/features/ai/ai-console-types'
 import { variantOptionsFromDraft } from '@/features/ai/ai-draft-normalizers'
-import { findKnownModelDefault, knownModelNames } from '@/features/ai/known-model-catalog'
+import { sanitizeDecimalInput, sanitizeIntegerInput } from '@/features/ai/ai-number-input'
+import type { ResourceFieldKey } from '@/features/ai/ai-resource-form-validation'
+import { VariantListEditor } from '@/features/ai/AiResourceFieldEditors'
+import { FormSelect } from '@/features/ai/FormSelect'
 import type { AgentProviderDTO } from '@/shared/api/contracts'
 
-/** Align with harness ModelInputModality + LangChain4j multimodal inputs. */
 const MODALITIES = ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO', 'DOCUMENT'] as const
-/** Align with harness ModelCapability. */
-const CAPABILITIES = ['TEXT', 'VISION', 'AUDIO', 'TOOLS', 'THINKING'] as const
+
+/** 用户可编辑的单价字段（$/1M tokens）。currency 与 tier 元数据固定默认，不进 UI。 */
+const PRICING_UNIT_FIELDS: ReadonlyArray<{
+  field: keyof ModelPricingDraft
+  label: string
+}> = [
+  { field: 'inputPerMillionTokens', label: 'Input' },
+  { field: 'outputPerMillionTokens', label: 'Output' },
+  { field: 'cacheReadPerMillionTokens', label: 'Cache Read' },
+  { field: 'cacheWritePerMillionTokens', label: 'Cache Write' },
+  { field: 'cacheWriteLongPerMillionTokens', label: 'Long Cache Write' },
+  { field: 'reasoningPerMillionTokens', label: 'Reasoning' },
+]
 
 export function ModelForm({
   draft,
   mode,
   providers,
+  fieldErrors = {},
   onChange,
 }: {
   draft: ModelDraft
   mode: 'create' | 'edit'
   providers: AgentProviderDTO[]
+  fieldErrors?: Partial<Record<ResourceFieldKey, string>>
   onChange: (draft: ModelDraft) => void
 }) {
   const variantOptions = variantOptionsFromDraft(draft.variants, draft.defaultVariant)
   const selectedDefaultVariant = variantOptions.includes(draft.defaultVariant.trim())
     ? draft.defaultVariant.trim()
     : variantOptions[0]
-  const known = useMemo(() => findKnownModelDefault(draft.name), [draft.name])
 
   function commitVariants(nextVariants: VariantDraft[], preferredDefaultVariant?: string) {
     const nextOptions = variantOptionsFromDraft(nextVariants, preferredDefaultVariant || draft.defaultVariant)
@@ -43,9 +53,47 @@ export function ModelForm({
     return list.includes(value) ? list.filter((item) => item !== value) : [...list, value]
   }
 
+  /** 输入类型至少保留一种；禁止全部取消勾选。 */
+  function toggleInputModality(value: string) {
+    const next = toggleList(draft.inputModalities, value)
+    onChange({
+      ...draft,
+      inputModalities: next.length > 0 ? next : ['TEXT'],
+    })
+  }
+
+  /** 开启 Reasoning 时，为空的思考强度用 variant 名或 medium 预填。 */
+  function setReasoning(enabled: boolean) {
+    if (!enabled) {
+      onChange({ ...draft, reasoning: false })
+      return
+    }
+    onChange({
+      ...draft,
+      reasoning: true,
+      variants: draft.variants.map((variant) => ({
+        ...variant,
+        reasoningEffort:
+          variant.reasoningEffort.trim() ||
+          variant.name.trim() ||
+          'medium',
+      })),
+    })
+  }
+
+  function updatePricing(field: keyof ModelPricingDraft, value: string) {
+    onChange({
+      ...draft,
+      pricing: {
+        ...draft.pricing,
+        [field]: value,
+      },
+    })
+  }
+
   return (
     <>
-      <label className="form-group">
+      <label className={`form-group${fieldErrors.providerId ? ' is-error' : ''}`}>
         <span>Provider</span>
         <FormSelect
           aria-label="Provider"
@@ -55,46 +103,19 @@ export function ModelForm({
           options={providers.map((provider) => ({ value: String(provider.id), label: provider.name }))}
           onChange={(providerId) => onChange({ ...draft, providerId })}
         />
+        {fieldErrors.providerId ? <span className="field-error">{fieldErrors.providerId}</span> : null}
       </label>
 
-      <label className="form-group">
+      <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
         <span>Name</span>
         <input
-          list="known-model-names"
           value={draft.name}
           onChange={(event) => onChange({ ...draft, name: event.target.value })}
-          onBlur={() => {
-            if (findKnownModelDefault(draft.name)) {
-              onChange(applyKnownModelDefaults(draft))
-            }
-          }}
           placeholder="MiniMax-M2.7"
           required
         />
-        <datalist id="known-model-names">
-          {knownModelNames().map((name) => (
-            <option key={name} value={name} />
-          ))}
-        </datalist>
+        {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}
       </label>
-
-      {known ? (
-        <div className="inline-hint" role="status">
-          已匹配已知模型目录「{known.id}」。可点击下方「恢复目录默认」加载 context / thinking profiles。
-        </div>
-      ) : (
-        <div className="inline-hint">未匹配已知模型时使用通用默认；可手动编辑全部字段。</div>
-      )}
-
-      <div className="structured-section-actions" style={{ marginBottom: 8 }}>
-        <button
-          className="ghost-inline-btn"
-          type="button"
-          onClick={() => onChange(applyKnownModelDefaults(draft))}
-        >
-          恢复目录默认
-        </button>
-      </div>
 
       <label className="form-group">
         <span>Description</span>
@@ -105,44 +126,79 @@ export function ModelForm({
         />
       </label>
 
-      <div className="form-grid-2">
-        <label className="form-group">
-          <span>Context Window</span>
-          <input
-            value={draft.contextWindow}
-            onChange={(event) => onChange({ ...draft, contextWindow: event.target.value })}
-            placeholder="200000"
-            inputMode="numeric"
-            required
-          />
-        </label>
-        <label className="form-group">
-          <span>Max Output Tokens</span>
-          <input
-            value={draft.maxOutputTokens}
-            onChange={(event) => onChange({ ...draft, maxOutputTokens: event.target.value })}
-            placeholder="8192"
-            inputMode="numeric"
-            required
-          />
-        </label>
-      </div>
+      <section className="structured-section" aria-labelledby="model-limit-heading">
+        <div className="structured-section-head">
+          <h3 id="model-limit-heading">Limit</h3>
+        </div>
+        <div className="form-grid-2">
+          <label className={`form-group${fieldErrors.contextWindow ? ' is-error' : ''}`}>
+            <span>Context Window</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              step={1}
+              value={draft.contextWindow}
+              onChange={(event) =>
+                onChange({ ...draft, contextWindow: sanitizeIntegerInput(event.target.value) })
+              }
+              placeholder="128000"
+              required
+            />
+            {fieldErrors.contextWindow ? (
+              <span className="field-error">{fieldErrors.contextWindow}</span>
+            ) : null}
+          </label>
+          <label className={`form-group${fieldErrors.maxOutputTokens ? ' is-error' : ''}`}>
+            <span>Max Output Tokens</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              step={1}
+              value={draft.maxOutputTokens}
+              onChange={(event) =>
+                onChange({ ...draft, maxOutputTokens: sanitizeIntegerInput(event.target.value) })
+              }
+              placeholder="8192"
+              required
+            />
+            {fieldErrors.maxOutputTokens ? (
+              <span className="field-error">{fieldErrors.maxOutputTokens}</span>
+            ) : null}
+          </label>
+        </div>
+      </section>
 
-      <label className="form-group checkbox-field">
-        <input
-          type="checkbox"
-          checked={draft.reasoning}
-          onChange={(event) => onChange({ ...draft, reasoning: event.target.checked })}
-        />
-        <span>支持 Reasoning / Thinking</span>
-      </label>
+      <section className="structured-section" aria-labelledby="model-abilities-heading">
+        <div className="structured-section-head">
+          <h3 id="model-abilities-heading">功能</h3>
+        </div>
+        <div className="ability-toggle-row">
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={draft.tools}
+              onChange={(event) => onChange({ ...draft, tools: event.target.checked })}
+            />
+            <span>Tools</span>
+          </label>
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={draft.reasoning}
+              onChange={(event) => setReasoning(event.target.checked)}
+            />
+            <span>Reasoning</span>
+          </label>
+        </div>
+      </section>
 
-      <fieldset className="form-group capability-picker">
-        <legend>Input Modalities</legend>
-        <p className="inline-hint">
-          按模型实际输入能力勾选（参考 LangChain4j：text / image / audio / video / PDF·document），不限于 pi
-          catalog。
-        </p>
+      <fieldset
+        className={`form-group capability-picker${fieldErrors.inputModalities ? ' is-error' : ''}`}
+      >
+        <legend>输入类型</legend>
+        <p className="inline-hint">模型可接受的输入模态；至少保留一种（不能全部取消）。</p>
         <div className="capability-options">
           {MODALITIES.map((item) => {
             const checked = draft.inputModalities.includes(item)
@@ -151,50 +207,90 @@ export function ModelForm({
                 <input
                   type="checkbox"
                   checked={checked}
-                  onChange={() => onChange({ ...draft, inputModalities: toggleList(draft.inputModalities, item) })}
+                  onChange={() => toggleInputModality(item)}
                 />
                 <span>{item}</span>
               </label>
             )
           })}
         </div>
+        {fieldErrors.inputModalities ? (
+          <span className="field-error">{fieldErrors.inputModalities}</span>
+        ) : null}
       </fieldset>
 
-      <fieldset className="form-group capability-picker">
-        <legend>Capabilities</legend>
-        <div className="capability-options">
-          {CAPABILITIES.map((item) => {
-            const checked = draft.capabilities.includes(item)
-            return (
-              <label key={item} className={`capability-option${checked ? ' is-selected' : ''}`}>
+      <section
+        className={`structured-section${fieldErrors.pricing ? ' is-error' : ''}`}
+        aria-labelledby="model-pricing-heading"
+      >
+        <div className="structured-section-head">
+          <h3 id="model-pricing-heading">Pricing</h3>
+        </div>
+        <p className="inline-hint">单价为 USD / 百万 tokens。币种固定 USD。</p>
+        <div className="form-grid-2">
+          {PRICING_UNIT_FIELDS.map(({ field, label }) => (
+            <label className="form-group" key={field}>
+              <span>{label}</span>
+              <div className="price-input">
+                <span className="price-affix" aria-hidden="true">
+                  $
+                </span>
                 <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => onChange({ ...draft, capabilities: toggleList(draft.capabilities, item) })}
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  step="any"
+                  value={draft.pricing[field]}
+                  onChange={(event) =>
+                    updatePricing(field, sanitizeDecimalInput(event.target.value))
+                  }
+                  placeholder="0"
+                  required
+                  aria-label={`${label} USD per million tokens`}
                 />
-                <span>{item}</span>
-              </label>
-            )
-          })}
+                <span className="price-suffix" aria-hidden="true">
+                  /1M
+                </span>
+              </div>
+            </label>
+          ))}
         </div>
-      </fieldset>
+        {fieldErrors.pricing ? <span className="field-error">{fieldErrors.pricing}</span> : null}
+      </section>
 
-      <label className="form-group">
-        <span>Default Profile</span>
+      <label className={`form-group${fieldErrors.defaultVariant ? ' is-error' : ''}`}>
+        <span>Default Variant</span>
         <FormSelect
-          aria-label="Default Profile"
+          aria-label="Default Variant"
           value={selectedDefaultVariant}
           options={variantOptions.map((name) => ({ value: name, label: name }))}
           onChange={(defaultVariant) => onChange({ ...draft, defaultVariant })}
         />
+        {fieldErrors.defaultVariant ? (
+          <span className="field-error">{fieldErrors.defaultVariant}</span>
+        ) : null}
       </label>
 
-      <VariantListEditor
-        label="Thinking Profiles"
-        variants={draft.variants}
-        defaultVariant={selectedDefaultVariant}
-        onChange={commitVariants}
-      />
+      <div
+        className={
+          fieldErrors.variants || fieldErrors.reasoningEffort ? 'is-error' : undefined
+        }
+      >
+        <VariantListEditor
+          label="Variants"
+          variants={draft.variants}
+          defaultVariant={selectedDefaultVariant}
+          reasoning={draft.reasoning}
+          effortError={Boolean(fieldErrors.reasoningEffort)}
+          onChange={commitVariants}
+        />
+        {/* 只保留一条汇总错误，避免顶部 banner + 字段旁重复堆叠 */}
+        {fieldErrors.reasoningEffort || fieldErrors.variants ? (
+          <span className="field-error">
+            {fieldErrors.reasoningEffort || fieldErrors.variants}
+          </span>
+        ) : null}
+      </div>
     </>
   )
 }

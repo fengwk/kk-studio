@@ -1,9 +1,19 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
-import { AgentForm, ModelForm, ProviderForm } from '@/features/ai/AiResourceForms'
 import type { AgentDraft, ModelDraft, ProviderDraft } from '@/features/ai/ai-console-types'
+import { emptyModelDraft } from '@/features/ai/ai-model-draft-codec'
+import { AgentForm, ModelForm, ProviderForm } from '@/features/ai/AiResourceForms'
+
+async function selectFormOption(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+  option: string,
+) {
+  await user.click(screen.getByRole('button', { name: label }))
+  await user.click(screen.getByRole('option', { name: option }))
+}
 
 describe('AiResourceForms', () => {
   it('edits provider fields with structured inputs', async () => {
@@ -12,8 +22,11 @@ describe('AiResourceForms', () => {
 
     await user.type(screen.getByPlaceholderText('minimax'), 'provider-a')
     await user.type(screen.getByPlaceholderText('用途说明'), 'provider desc')
-    await user.selectOptions(screen.getByLabelText('Provider Type'), 'anthropic')
-    await user.type(screen.getByPlaceholderText('https://api.example.com/v1'), 'https://proxy.example/v1')
+    await selectFormOption(user, 'Provider Type', 'anthropic')
+    await user.type(
+      screen.getByPlaceholderText('https://api.example.com/v1'),
+      'https://proxy.example/v1',
+    )
     await user.type(screen.getByPlaceholderText('sk-...'), 'secret')
     const totalTimeoutInput = screen.getByPlaceholderText('1800000')
     await user.clear(totalTimeoutInput)
@@ -24,57 +37,70 @@ describe('AiResourceForms', () => {
 
     expect(screen.getByDisplayValue('provider-a')).toBeInTheDocument()
     expect(screen.getByDisplayValue('provider desc')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('anthropic')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Provider Type' })).toHaveTextContent('anthropic')
     expect(screen.getByDisplayValue('https://proxy.example/v1')).toBeInTheDocument()
     expect(screen.getByDisplayValue('secret')).toBeInTheDocument()
     expect(screen.getByDisplayValue('240000')).toBeInTheDocument()
     expect(screen.getByDisplayValue('3000')).toBeInTheDocument()
   })
 
-  it('edits model variants without raw json', async () => {
+  it('edits the new model abilities, pricing, variants, and collapsed advanced options', async () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)
 
-    await user.click(screen.getByRole('button', { name: '添加 Variant' }))
-    const nameInputs = screen.getAllByDisplayValue('default')
-    expect(nameInputs).toHaveLength(2)
+    expect(screen.getByRole('heading', { name: 'Limit' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '功能' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Pricing' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Tools')).toBeChecked()
+    expect(screen.getByLabelText('Reasoning')).toBeChecked()
+    expect(screen.getByLabelText('TEXT')).toBeChecked()
+    expect(screen.queryByText('Capabilities')).not.toBeInTheDocument()
+    expect(screen.getByText(/币种固定 USD/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Reasoning Effort 1')).toBeInTheDocument()
+    expect(screen.getByText('思考强度')).toBeInTheDocument()
 
-    const secondNameInput = screen.getAllByPlaceholderText('default')[1]
+    const firstAdvanced = screen.getAllByText('高级选项')[0].closest('details')
+    expect(firstAdvanced).not.toHaveAttribute('open')
+
+    await user.click(screen.getByRole('button', { name: '添加 Variant' }))
+    const secondNameInput = screen.getByLabelText('Variant ID 2')
+    expect(secondNameInput).toHaveValue('variant-2')
     await user.clear(secondNameInput)
     await user.type(secondNameInput, 'creative')
-    await user.type(screen.getByDisplayValue('creative'), '{tab}0.8{tab}512')
-    expect(screen.getByRole('option', { name: 'creative' })).toBeInTheDocument()
+    await user.clear(screen.getByLabelText('Reasoning Effort 2'))
+    await user.type(screen.getByLabelText('Reasoning Effort 2'), 'high')
+    await user.type(screen.getByLabelText('Variant Max Output Tokens 2'), '512')
 
-    const extras = screen.getByRole('region', { name: 'Variant Extras 2' })
-    await user.click(within(extras).getByRole('button', { name: '添加' }))
-    await user.type(screen.getByLabelText('Variant Extras 2 key 1'), 'topK')
-    await user.type(screen.getByLabelText('Variant Extras 2 value 1'), '32')
-    expect(screen.getByDisplayValue('topK')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('32')).toBeInTheDocument()
+    await user.click(screen.getAllByText('高级选项')[1])
+    await user.type(screen.getByLabelText('Temperature 2'), '0.8')
+    await user.type(screen.getByLabelText('Top P 2'), '0.9')
+    await user.type(screen.getByLabelText('Top K 2'), '32')
+    await user.type(screen.getByLabelText('Stop Sequences 2'), 'END,STOP')
+    expect(screen.getByDisplayValue('creative')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '重置默认' }))
-    expect(screen.getByLabelText('Default Variant')).toHaveValue('default')
-    expect(screen.queryByDisplayValue('creative')).not.toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: 'Variant Extras 2' })).not.toBeInTheDocument()
+    await selectFormOption(user, 'Default Variant', 'creative')
+    expect(screen.getByRole('button', { name: 'Default Variant' })).toHaveTextContent('creative')
   })
 
-  it('keeps the default variant selection aligned with variant edits', async () => {
+  it('keeps default variant aligned and hides reasoning effort when reasoning is disabled', async () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)
 
     await user.click(screen.getByRole('button', { name: '添加 Variant' }))
-    const secondNameInput = screen.getAllByPlaceholderText('default')[1]
+    const secondNameInput = screen.getByLabelText('Variant ID 2')
     await user.clear(secondNameInput)
     await user.type(secondNameInput, 'creative')
-
-    await user.selectOptions(screen.getByLabelText('Default Variant'), 'creative')
-    expect(screen.getByLabelText('Default Variant')).toHaveValue('creative')
+    await selectFormOption(user, 'Default Variant', 'creative')
 
     fireEvent.change(secondNameInput, { target: { value: 'creative-2' } })
-    expect(screen.getByLabelText('Default Variant')).toHaveValue('creative-2')
+    expect(screen.getByRole('button', { name: 'Default Variant' })).toHaveTextContent('creative-2')
 
     await user.click(screen.getAllByRole('button', { name: '删除 Variant' })[1])
-    expect(screen.getByLabelText('Default Variant')).toHaveValue('default')
+    expect(screen.getByRole('button', { name: 'Default Variant' })).toHaveTextContent('medium')
+
+    await user.click(screen.getByLabelText('Reasoning'))
+    expect(screen.queryByLabelText('Reasoning Effort 1')).not.toBeInTheDocument()
+    expect(screen.getByText(/请先勾选上方 Reasoning/)).toBeInTheDocument()
   })
 
   it('edits agent model binding and tools without json editing', async () => {
@@ -83,11 +109,11 @@ describe('AiResourceForms', () => {
 
     expect(screen.getByRole('button', { name: '使用第一个 Model 填充默认配置' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '使用第一个 Model 填充默认配置' }))
-    expect(screen.getByLabelText('Model')).toHaveValue('model-1')
-    expect(screen.getByLabelText('Variant')).toHaveValue('default')
+    expect(screen.getByRole('button', { name: 'Model' })).toHaveTextContent('MiniMax-M2.7')
+    expect(screen.getByRole('button', { name: 'Variant' })).toHaveTextContent('default')
 
-    await user.selectOptions(screen.getByLabelText('Model'), 'model-2')
-    expect(screen.getByLabelText('Variant')).toHaveValue('creative')
+    await selectFormOption(user, 'Model', 'Claude-Sonnet-4.5 (anthropic)')
+    expect(screen.getByRole('button', { name: 'Variant' })).toHaveTextContent('creative')
     expect(screen.getByText('暂无候选 Tools')).toBeInTheDocument()
   })
 
@@ -104,7 +130,12 @@ describe('AiResourceForms', () => {
           tools: [],
           skills: [],
           allowedSubagents: [],
-          executionPolicy: { maxTurns: '', maxDepth: '', maxDirectSubagents: '', maxTotalSubagents: '' },
+          executionPolicy: {
+            maxTurns: '',
+            maxDepth: '',
+            maxDirectSubagents: '',
+            maxTotalSubagents: '',
+          },
         }}
         models={[]}
         onChange={() => undefined}
@@ -130,11 +161,9 @@ function ProviderFormHarness() {
 
 function ModelFormHarness() {
   const [draft, setDraft] = useState<ModelDraft>({
-    provider: 'minimax',
-    name: '',
-    description: '',
-    defaultVariant: 'default',
-    variants: [{ id: 'variant-1', name: 'default', temperature: '', maxOutputTokens: '', extras: [] }],
+    ...emptyModelDraft(),
+    providerId: 'provider-1',
+    reasoning: true,
   })
   return (
     <ModelForm
@@ -170,7 +199,12 @@ function AgentFormHarness() {
     tools: [],
     skills: [],
     allowedSubagents: [],
-    executionPolicy: { maxTurns: '', maxDepth: '', maxDirectSubagents: '', maxTotalSubagents: '' },
+    executionPolicy: {
+      maxTurns: '',
+      maxDepth: '',
+      maxDirectSubagents: '',
+      maxTotalSubagents: '',
+    },
   })
   return (
     <AgentForm
@@ -182,8 +216,8 @@ function AgentFormHarness() {
           providerName: 'minimax',
           name: 'MiniMax-M2.7',
           description: null,
-          defaultVariant: 'default',
-          variantsJson: '[{"name":"default"}]',
+          capabilitiesJson: '["TEXT","TOOLS"]',
+          configJson: '{"defaultVariant":"default","variants":[{"id":"default"}]}',
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:00:00',
         },
@@ -193,8 +227,9 @@ function AgentFormHarness() {
           providerName: 'anthropic',
           name: 'Claude-Sonnet-4.5',
           description: null,
-          defaultVariant: 'creative',
-          variantsJson: '[{"name":"creative"},{"name":"precise"}]',
+          capabilitiesJson: '["TEXT","THINKING"]',
+          configJson:
+            '{"defaultVariant":"creative","variants":[{"id":"creative"},{"id":"precise"}]}',
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:00:00',
         },

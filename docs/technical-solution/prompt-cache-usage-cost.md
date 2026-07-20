@@ -326,7 +326,7 @@ H2 使用 `numeric(32,12)`、`clob`、`timestamp(3)`；MySQL 使用 `decimal(32,
 
 | Scope | Endpoint | Store 查询 | `scopeType` |
 | --- | --- | --- | --- |
-| Thread | `GET /api/usage/threads/{threadId}` | `listByThreadId` | `thread` |
+| Thread | `GET /api/usage/threads/{threadId}` | 当前 head 路径 root→head 上的 Assistant 账本（共享前缀计入、旁枝不计；Thread 元数据缺失时降级 `listByThreadId`） | `thread` |
 | Session | `GET /api/usage/sessions/{sessionId}` | `listBySessionId` | `session` |
 | Model | `GET /api/usage/models/{modelId}` | `listByModelResourceId` | `model` |
 

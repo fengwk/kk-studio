@@ -46,6 +46,8 @@ describe('AssistantMessageBlock', () => {
       />,
     )
 
-    expect(screen.getByText(/第一段/).textContent).toBe('第一段\n\n第二段')
+    // Markdown 将空行拆成段落；外层 trim 去掉边界空白，段内内容仍在
+    expect(screen.getByText('第一段')).toBeInTheDocument()
+    expect(screen.getByText('第二段')).toBeInTheDocument()
   })
 })

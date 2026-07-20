@@ -3,8 +3,8 @@ import { SendIcon } from '@/features/canvas/icons'
 import { ThreadCommandPalette } from '@/features/ai/thread-panel/ThreadCommandPalette'
 import { filterThreadCommands, type ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
 
-const TEXTAREA_MIN_HEIGHT = 37
-const TEXTAREA_LINE_HEIGHT = 19
+const TEXTAREA_MIN_HEIGHT = 28
+const TEXTAREA_LINE_HEIGHT = 18
 const TEXTAREA_MAX_LINES = 10
 const TEXTAREA_MAX_HEIGHT = TEXTAREA_MIN_HEIGHT + TEXTAREA_LINE_HEIGHT * (TEXTAREA_MAX_LINES - 1)
 
@@ -125,7 +125,7 @@ export function ThreadComposer({
           value={draft}
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="告诉 Agent 下一步要完成什么…（/ 打开命令）"
+          placeholder="输入任务（/打开命令）"
           disabled={disabled}
           rows={1}
           aria-label="给 AI 发送消息"

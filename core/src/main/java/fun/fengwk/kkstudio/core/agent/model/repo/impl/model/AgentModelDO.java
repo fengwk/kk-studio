@@ -23,7 +23,7 @@ public class AgentModelDO {
   /** 能力 JSON 数组（如 TEXT/TOOLS）。 */
   private String capabilitiesJson;
 
-  /** 模型配置 JSON（contextWindow、variants、pricing 等）。 */
+  /** 模型配置 JSON（limit、abilities、defaultVariant、variants、pricing）。 */
   private String configJson;
 
   /** 乐观锁行版本。 */

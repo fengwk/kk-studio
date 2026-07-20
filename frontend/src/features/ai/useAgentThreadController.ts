@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { extractContextWindow } from '@/features/ai/ai-model-draft-codec'
 import { buildThreadTimeline, isThreadWorking } from '@/features/ai/thread-events'
 import type { ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
 import {
@@ -269,7 +270,7 @@ function resolveRuntimeLabels(
   const provider = model
     ? providers.find((item) => String(item.id) === String(model.providerId))
     : undefined
-  const contextWindow = parseContextWindow(model)
+  const contextWindow = extractContextWindow(model)
 
   return {
     agentName: firstNonEmpty(thread?.activeAgentName, agent?.name, thread?.activeAgentDefinitionId, '（无 Agent）'),
@@ -278,22 +279,6 @@ function resolveRuntimeLabels(
     variantName: firstNonEmpty(thread?.variant, agent?.variant, 'default'),
     contextWindow,
   }
-}
-
-function parseContextWindow(model: AgentModelDTO | undefined): number | undefined {
-  if (!model?.configJson) {
-    return undefined
-  }
-  try {
-    const config = JSON.parse(model.configJson) as unknown
-    if (config && typeof config === 'object' && !Array.isArray(config)) {
-      const value = Number((config as { contextWindow?: number }).contextWindow)
-      return Number.isFinite(value) && value > 0 ? value : undefined
-    }
-  } catch {
-    return undefined
-  }
-  return undefined
 }
 
 function firstNonEmpty(...values: unknown[]): string {

@@ -1,4 +1,6 @@
-/** Full-width thinking content block — no title, muted surface only. */
+/**
+ * 思考块：始终展开的纯文本（暂不做 Markdown / 不做折叠）。
+ */
 export function ThinkingBlock({
   thinking,
   streaming,

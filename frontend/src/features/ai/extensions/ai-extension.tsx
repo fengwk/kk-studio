@@ -1,5 +1,5 @@
-/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, type PropsWithChildren, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { SearchField, StateBlock } from '@/features/ai/AiConsoleCards'
 import { ConfirmActionModal, ResourceEditorModal } from '@/features/ai/AiConsoleModals'
 import { AgentsPanel, ChatCardsPanel, ModelsPanel, ProvidersPanel } from '@/features/ai/AiConsolePanels'
@@ -11,7 +11,7 @@ import { CreateChatModal } from '@/features/ai/CreateChatModal'
 import { EnvironmentsPage } from '@/features/ai/EnvironmentsPage'
 import { useAiConsoleController } from '@/features/ai/useAiConsoleController'
 import { useComfyuiPageController } from '@/features/ai/useComfyuiPageController'
-import type { ExtensionComponentProps, TrustedReactExtension } from '@/platform/extensions/types'
+import type { ExtensionComponentProps } from '@/platform/extensions/types'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 
 type AiConsoleController = ReturnType<typeof useAiConsoleController>
@@ -49,7 +49,15 @@ function AiConsoleFrame({ content, children }: ExtensionComponentProps & { conte
         {controller.busy && <StateBlock title="正在加载资源" />}
         {controller.error && <StateBlock title={controller.error instanceof Error ? controller.error.message : '资源加载失败'} tone="danger" />}
         {controller.mutationError && (
-          <StateBlock title={controller.mutationError instanceof Error ? controller.mutationError.message : '资源操作失败'} tone="danger" />
+          <StateBlock
+            title={
+              controller.mutationError instanceof Error
+                ? // 外层仅展示无模态时的操作错误；文案已在 controller 侧尽量友好
+                  controller.mutationError.message
+                : '操作失败，请稍后重试'
+            }
+            tone="danger"
+          />
         )}
         {!controller.busy && !controller.error && content}
       </div>
@@ -58,7 +66,7 @@ function AiConsoleFrame({ content, children }: ExtensionComponentProps & { conte
   )
 }
 
-function ChatsPage({ children }: ExtensionComponentProps) {
+export function ChatsPage({ children }: ExtensionComponentProps) {
   return (
     <AiConsoleRuntime>
       <AiConsoleFrame content={<ChatsPanel />}>
@@ -73,7 +81,7 @@ function ChatsPanel() {
   return <ChatCardsPanel {...controller.chatPanelProps} />
 }
 
-function AgentsPage({ children }: ExtensionComponentProps) {
+export function AgentsPage({ children }: ExtensionComponentProps) {
   return (
     <AiConsoleRuntime>
       <AiConsoleFrame content={<AgentsResourcePanel />}>
@@ -88,7 +96,7 @@ function AgentsResourcePanel() {
   return <AgentsPanel {...controller.agentPanelProps} />
 }
 
-function ModelsPage({ children }: ExtensionComponentProps) {
+export function ModelsPage({ children }: ExtensionComponentProps) {
   return (
     <AiConsoleRuntime>
       <AiConsoleFrame content={<ModelsResourcePanel />}>
@@ -103,7 +111,7 @@ function ModelsResourcePanel() {
   return <ModelsPanel {...controller.modelPanelProps} />
 }
 
-function ProvidersPage({ children }: ExtensionComponentProps) {
+export function ProvidersPage({ children }: ExtensionComponentProps) {
   return (
     <AiConsoleRuntime>
       <AiConsoleFrame content={<ProvidersResourcePanel />}>
@@ -118,7 +126,7 @@ function ProvidersResourcePanel() {
   return <ProvidersPanel {...controller.providerPanelProps} />
 }
 
-function ComfyuiPage({ children }: ExtensionComponentProps) {
+export function ComfyuiPage({ children }: ExtensionComponentProps) {
   return (
     <ComfyuiRuntime>
       <ComfyuiFrame content={<ComfyuiPanel />}>
@@ -146,7 +154,11 @@ function ComfyuiFrame({ content, children }: ExtensionComponentProps & { content
   return (
     <section className="screen active">
       <nav className="subbar">
-        <div className="ai-mark">ComfyUI</div>
+        <nav className="subnav" aria-label="Tools">
+          <Link className="active" to="/comfyui">
+            ComfyUI
+          </Link>
+        </nav>
         <SearchField value={controller.search} onChange={controller.setSearch} />
       </nav>
       <div className="screen-body">
@@ -188,32 +200,32 @@ function ComfyuiRunModalHost() {
   )
 }
 
-function CreateChatDialog() {
+export function CreateChatDialog() {
   const controller = useOptionalAiConsole()
   return controller ? <CreateChatModal {...controller.createChatModal} /> : null
 }
 
-function ResourceEditorDialog() {
+export function ResourceEditorDialog() {
   const controller = useOptionalAiConsole()
   return controller ? <ResourceEditorModal {...controller.resourceEditorModal} /> : null
 }
 
-function ResourceDeleteDialog() {
+export function ResourceDeleteDialog() {
   const controller = useOptionalAiConsole()
   return controller ? <ConfirmActionModal {...controller.resourceDeleteConfirmModal} /> : null
 }
 
-function ComfyuiWorkflowEditorDialog() {
+export function ComfyuiWorkflowEditorDialog() {
   const controller = useOptionalComfyui()
   return controller ? <ComfyuiWorkflowEditorModal {...controller.comfyuiEditorModal} /> : null
 }
 
-function ComfyuiDeleteDialog() {
+export function ComfyuiDeleteDialog() {
   const controller = useOptionalComfyui()
   return controller ? <ConfirmActionModal {...controller.comfyuiDeleteConfirmModal} /> : null
 }
 
-function EnvironmentsRoute({ children }: ExtensionComponentProps) {
+export function EnvironmentsRoute({ children }: ExtensionComponentProps) {
   return (
     <>
       <EnvironmentsPage />
@@ -222,38 +234,11 @@ function EnvironmentsRoute({ children }: ExtensionComponentProps) {
   )
 }
 
-function ChatWorkspaceRoute({ children }: ExtensionComponentProps) {
+export function ChatWorkspaceRoute({ children }: ExtensionComponentProps) {
   return (
     <>
       <ChatWorkspacePage />
       {children}
     </>
   )
-}
-
-export const aiExtension: TrustedReactExtension = {
-  id: 'builtin.ai',
-  pages: [
-    { id: 'ai.chats', path: 'chats', component: ChatsPage, priority: 100 },
-    { id: 'ai.chat-workspace', path: 'chats/:chatId', component: ChatWorkspaceRoute, priority: 100 },
-    { id: 'ai.agents', path: 'agents', component: AgentsPage, priority: 100 },
-    { id: 'ai.models', path: 'models', component: ModelsPage, priority: 100 },
-    { id: 'ai.providers', path: 'providers', component: ProvidersPage, priority: 100 },
-    { id: 'ai.environments', path: 'environments', component: EnvironmentsRoute, priority: 100 },
-    { id: 'ai.comfyui', path: 'comfyui', component: ComfyuiPage, priority: 100 },
-  ],
-  navigation: [
-    { id: 'ai.nav.chats', label: 'Chat', path: 'chats', priority: 100 },
-    { id: 'ai.nav.agents', label: 'Agent', path: 'agents', priority: 100 },
-    { id: 'ai.nav.models', label: 'Model', path: 'models', priority: 100 },
-    { id: 'ai.nav.providers', label: 'Provider', path: 'providers', priority: 100 },
-    { id: 'ai.nav.environments', label: 'Environment', path: 'environments', priority: 90 },
-  ],
-  dialogs: [
-    { id: 'ai.create-chat', component: CreateChatDialog },
-    { id: 'ai.resource-editor', component: ResourceEditorDialog },
-    { id: 'ai.delete-resource', component: ResourceDeleteDialog },
-    { id: 'ai.comfyui-editor', component: ComfyuiWorkflowEditorDialog },
-    { id: 'ai.comfyui-delete', component: ComfyuiDeleteDialog },
-  ],
 }

@@ -1,4 +1,4 @@
-import { aiExtension } from '@/features/ai/extensions/ai-extension'
+import { aiExtension } from '@/features/ai/extensions/ai-extension.definition'
 import { canvasExtension } from '@/features/canvas/extensions/canvas-extension'
 import { ExtensionHost } from '@/platform/extensions/ExtensionHost'
 

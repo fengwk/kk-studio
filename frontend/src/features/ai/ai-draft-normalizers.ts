@@ -1,4 +1,5 @@
 import type { AgentDraft, ModelDraft } from '@/features/ai/ai-console-types'
+import { extractDefaultVariantFromModel } from '@/features/ai/ai-model-draft-codec'
 import type { AgentModelDTO, AgentProviderDTO } from '@/shared/api/contracts'
 import {
   resolvePreferredVariant,
@@ -48,12 +49,12 @@ export function normalizeAgentDraftDefaultVariant(draft: AgentDraft, models: Age
 
   const options = variantOptionsFromModel(selectedModel)
   const currentVariant = trimValue(draft.variant)
-  const legacyDefault = trimValue((selectedModel as { defaultVariant?: string | null }).defaultVariant)
+  const configuredDefault = extractDefaultVariantFromModel(selectedModel)
   const preferred =
     currentVariant && options.includes(currentVariant)
       ? currentVariant
-      : legacyDefault && options.includes(legacyDefault)
-        ? legacyDefault
+      : options.includes(configuredDefault)
+        ? configuredDefault
         : options[0]
   const variant = resolvePreferredVariant(preferred ?? 'default', options)
   return variant === draft.variant ? draft : { ...draft, variant }
@@ -104,9 +105,9 @@ export function applyAgentModelSelection(draft: AgentDraft, modelId: string, mod
     return { ...draft, modelId }
   }
   const options = variantOptionsFromModel(selectedModel)
-  const legacyDefault = trimValue((selectedModel as { defaultVariant?: string | null }).defaultVariant)
-  const preferred = legacyDefault && options.includes(legacyDefault) ? legacyDefault : options[0]
-  const variant = resolvePreferredVariant(preferred ?? 'default', options)
+  const configuredDefault = extractDefaultVariantFromModel(selectedModel)
+  const preferred = options.includes(configuredDefault) ? configuredDefault : options[0]
+  const variant = resolvePreferredVariant(preferred ?? 'medium', options)
   return {
     ...draft,
     modelId: String(selectedModel.id),

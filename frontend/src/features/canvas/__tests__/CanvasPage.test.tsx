@@ -161,9 +161,10 @@ describe('Canvas feature vertical slice', () => {
     expect(ai.container.querySelector('.app-frame')).toBeTruthy()
     expect(ai.container.querySelector('.app-frame-ai')).toBeNull()
     expect(ai.container.querySelector('.app-frame-canvas')).toBeNull()
-    expect(ai.container.querySelector('.brand-mark')).toHaveTextContent('K')
-    expect(ai.getByRole('link', { name: /AI/ })).toHaveClass('active')
-    expect(ai.getByRole('link', { name: /画布/ })).not.toHaveClass('active')
+    expect(ai.container.querySelector('.brand-mark img')).toBeTruthy()
+    expect(ai.getByRole('link', { name: '智能 AI' })).toHaveClass('active')
+    expect(ai.getByRole('link', { name: '画布 Canvas' })).not.toHaveClass('active')
+    expect(ai.getByRole('link', { name: '工具 Tools' })).not.toHaveClass('active')
     expect(ai.container.querySelector('.avatar svg')).toBeTruthy()
     ai.unmount()
 
@@ -176,9 +177,9 @@ describe('Canvas feature vertical slice', () => {
     )
     expect(canvas.container.querySelector('.app-frame')).toBeTruthy()
     expect(canvas.container.querySelector('.app-frame-canvas')).toBeNull()
-    expect(canvas.container.querySelector('.brand-mark')).toHaveTextContent('K')
-    expect(canvas.getByRole('link', { name: /画布/ })).toHaveClass('active')
-    expect(canvas.getByRole('link', { name: /AI/ })).not.toHaveClass('active')
+    expect(canvas.container.querySelector('.brand-mark img')).toBeTruthy()
+    expect(canvas.getByRole('link', { name: '画布 Canvas' })).toHaveClass('active')
+    expect(canvas.getByRole('link', { name: '智能 AI' })).not.toHaveClass('active')
     expect(canvas.container.querySelector('.avatar svg')).toBeTruthy()
   })
 
@@ -190,8 +191,8 @@ describe('Canvas feature vertical slice', () => {
       </AppProviders>,
     )
     expect(await screen.findByRole('heading', { name: /把想法、资料和结果/ })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /画布/ })).toHaveClass('active')
-    expect(screen.getByRole('link', { name: /AI/ })).not.toHaveClass('active')
+    expect(screen.getByRole('link', { name: '画布 Canvas' })).toHaveClass('active')
+    expect(screen.getByRole('link', { name: '智能 AI' })).not.toHaveClass('active')
   })
 
   it('returns to Canvas Library when brand is clicked while editor is open on /canvas', async () => {
