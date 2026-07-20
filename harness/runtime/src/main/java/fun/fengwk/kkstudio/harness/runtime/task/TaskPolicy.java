@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.task;
 
-/** Frozen subagent limits resolved from the parent or target AgentSnapshot. */
+/** Frozen subagent limits resolved from the parent or target Agent runtime config. */
 public record TaskPolicy(int maxDepth, int maxDirect, Integer maxTotal, int maxTurns) {
   public static final int DEFAULT_MAX_DEPTH = 2;
   public static final int DEFAULT_MAX_DIRECT = 10;

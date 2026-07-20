@@ -87,6 +87,7 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.share.model.HarnessSessionCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadAgentSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadMessageCreateDTO;
@@ -254,7 +255,9 @@ class ThreadProcessorIntegrationTest {
     assertEquals(before, fakeProvider.requestsSinceReset());
     assertNull(threadStore.find(threadId).orElseThrow().processorToken());
     List<HarnessThreadInputDTO> inputs = queryService.listInputs(thread.getThreadId());
-    assertEquals(2, inputs.size());
+    // createRoot 会先应用 bootstrap SET_AGENT；这里断言的是后续两条用户输入都被 apply。
+    List<HarnessThreadInputDTO> userInputs = userMessageInputs(inputs);
+    assertEquals(2, userInputs.size());
     // Steer-all 可在 admission 前应用完整 cutoff；无论输入是否已应用，FAILED 均不得保留 token 自旋。
     assertTrue(inputs.stream().allMatch(i -> i.getAppliedEntryId() != null));
 
@@ -272,11 +275,16 @@ class ThreadProcessorIntegrationTest {
     awaitIdle(threadId);
 
     List<HarnessThreadInputDTO> inputs = queryService.listInputs(thread.getThreadId());
-    assertEquals(1, inputs.size());
-    assertNotNull(inputs.get(0).getAppliedEntryId());
+    List<HarnessThreadInputDTO> userInputs = userMessageInputs(inputs);
+    assertEquals(1, userInputs.size());
+    assertNotNull(userInputs.get(0).getAppliedEntryId());
+    assertTrue(
+        inputs.stream()
+            .filter(i -> "SET_AGENT".equals(i.getInputType()))
+            .allMatch(i -> i.getAppliedEntryId() != null));
 
     List<HarnessSessionEntryDTO> path = queryService.listPathEntries(thread.getThreadId());
-    assertTrue(path.size() >= 3, "snapshot + user + assistant expected, got " + path.size());
+    assertTrue(path.size() >= 3, "agent_change + user + assistant expected, got " + path.size());
     assertEquals("message", path.get(path.size() - 1).getEntryType());
 
     List<ThreadEventDTO> events = queryService.listEvents(thread.getThreadId(), 0, 100);
@@ -292,12 +300,13 @@ class ThreadProcessorIntegrationTest {
     assertTrue(lifecycleProbe.contains(threadId, ThreadIdle.class));
   }
 
-  /** 配置-only harvest 只推进 Entry path，不得制造无来源的 assistant response debt。 */
+  /** 配置-only harvest（SET_YOLO）只更新 Thread 状态与事件，不写 Session Entry，也不得调用 Provider。 */
   @Test
   void configOnlyBatchAppliesWithoutCallingProvider() throws Exception {
     HarnessThreadDTO thread = createRoot("proc-config-only");
     long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
     awaitIdle(threadId);
+    long headBefore = threadStore.find(threadId).orElseThrow().headEntryId();
 
     transactions.submitSetYolo(threadId, true, "cid-yolo-" + threadId, Instant.now());
     threadProcessor.process(threadId);
@@ -305,10 +314,19 @@ class ThreadProcessorIntegrationTest {
 
     assertEquals(0, fakeProvider.requestsSinceReset());
     List<HarnessThreadInputDTO> inputs = queryService.listInputs(thread.getThreadId());
-    assertEquals(1, inputs.size());
-    assertNotNull(inputs.get(0).getAppliedEntryId());
+    List<HarnessThreadInputDTO> yoloInputs =
+        inputs.stream().filter(i -> "SET_YOLO".equals(i.getInputType())).toList();
+    assertEquals(1, yoloInputs.size());
+    assertNotNull(yoloInputs.get(0).getAppliedEntryId());
+    assertTrue(inputs.stream().allMatch(i -> i.getAppliedEntryId() != null));
+    assertTrue(queryService.getThread(thread.getThreadId()).getYoloEnabled());
+    // SET_YOLO 不推进 head Entry；head 仍停在 bootstrap agent_change。
+    assertEquals(headBefore, threadStore.find(threadId).orElseThrow().headEntryId());
     List<HarnessSessionEntryDTO> path = queryService.listPathEntries(thread.getThreadId());
-    assertEquals("yolo_change", path.get(path.size() - 1).getEntryType());
+    assertEquals("agent_change", path.get(path.size() - 1).getEntryType());
+    assertTrue(
+        queryService.listEvents(thread.getThreadId(), 0, 100).stream()
+            .anyMatch(e -> "yolo_changed".equals(e.getEventType())));
   }
 
   @Test
@@ -342,10 +360,11 @@ class ThreadProcessorIntegrationTest {
     release.countDown();
     awaitIdle(threadId);
 
-    List<HarnessThreadInputDTO> inputs = queryService.listInputs(thread.getThreadId());
-    assertEquals(2, inputs.size());
-    assertNotNull(inputs.get(0).getAppliedEntryId());
-    assertNotNull(inputs.get(1).getAppliedEntryId());
+    List<HarnessThreadInputDTO> userInputs =
+        userMessageInputs(queryService.listInputs(thread.getThreadId()));
+    assertEquals(2, userInputs.size());
+    assertNotNull(userInputs.get(0).getAppliedEntryId());
+    assertNotNull(userInputs.get(1).getAppliedEntryId());
     assertEquals(2, fakeProvider.requestsSinceReset());
     assertEquals(List.of(1, 2), fakeProvider.completionOrder());
 
@@ -588,10 +607,11 @@ class ThreadProcessorIntegrationTest {
     releaseFail.countDown();
     awaitFailed(threadId);
 
-    List<HarnessThreadInputDTO> inputs = queryService.listInputs(thread.getThreadId());
-    assertEquals(2, inputs.size());
-    assertNotNull(inputs.get(0).getAppliedEntryId());
-    assertNull(inputs.get(1).getAppliedEntryId());
+    List<HarnessThreadInputDTO> userInputs =
+        userMessageInputs(queryService.listInputs(thread.getThreadId()));
+    assertEquals(2, userInputs.size());
+    assertNotNull(userInputs.get(0).getAppliedEntryId());
+    assertNull(userInputs.get(1).getAppliedEntryId());
     assertEquals(1, fakeProvider.requestsSinceReset());
     assertNull(threadStore.find(threadId).orElseThrow().processorToken());
   }
@@ -631,10 +651,12 @@ class ThreadProcessorIntegrationTest {
     threadProcessor.process(threadId);
     awaitRetryingToolWait(threadId);
 
-    List<HarnessThreadInputDTO> inputs = queryService.listInputs(thread.getThreadId());
-    assertEquals(2, inputs.size());
-    assertNotNull(inputs.get(0).getAppliedEntryId());
-    assertNull(inputs.get(1).getAppliedEntryId(), "retry debt must block later mailbox harvest");
+    List<HarnessThreadInputDTO> userInputs =
+        userMessageInputs(queryService.listInputs(thread.getThreadId()));
+    assertEquals(2, userInputs.size());
+    assertNotNull(userInputs.get(0).getAppliedEntryId());
+    assertNull(
+        userInputs.get(1).getAppliedEntryId(), "retry debt must block later mailbox harvest");
     ToolInvocationDO invocation = invocationMapper.listByThread(threadId).get(0);
     assertEquals("WAITING_APPROVAL", invocation.getStatus());
 
@@ -655,7 +677,7 @@ class ThreadProcessorIntegrationTest {
     threadProcessor.process(threadId);
     awaitIdle(threadId);
     assertNotNull(
-        queryService.listInputs(thread.getThreadId()).get(1).getAppliedEntryId(),
+        userMessageInputs(queryService.listInputs(thread.getThreadId())).get(1).getAppliedEntryId(),
         "only the final retry assistant may clear retry debt and harvest later input");
   }
 
@@ -1046,12 +1068,32 @@ class ThreadProcessorIntegrationTest {
             + fakeProvider.requestsSinceReset());
   }
 
+  /**
+   * agentless Session 创建后显式排队 SET_AGENT，等待 bootstrap 应用完成再返回 Main Thread。
+   *
+   * <p>后续断言若关心用户/配置输入，应通过 {@link #userMessageInputs(List)} 过滤 bootstrap。
+   */
   private HarnessThreadDTO createRoot(String title) {
     HarnessSessionCreateDTO create = new HarnessSessionCreateDTO();
-    create.setAgentDefinitionId("1");
     create.setTitle(title);
     HarnessSessionDTO session = sessionCommandService.createSession(create);
-    return queryService.getThread(session.getMainThreadId());
+    String threadId = session.getMainThreadId();
+    HarnessThreadAgentSetDTO agent = new HarnessThreadAgentSetDTO();
+    agent.setAgentDefinitionId("1");
+    agent.setClientMessageId("bootstrap-agent-" + title);
+    commandService.queueAgent(threadId, agent);
+    try {
+      awaitIdle(Long.parseLong(threadId));
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new AssertionError(e);
+    }
+    return queryService.getThread(threadId);
+  }
+
+  /** DTO 暴露枚举名（如 USER_MESSAGE），不是 wire value。 */
+  private static List<HarnessThreadInputDTO> userMessageInputs(List<HarnessThreadInputDTO> inputs) {
+    return inputs.stream().filter(i -> "USER_MESSAGE".equals(i.getInputType())).toList();
   }
 
   private void markRunnable(long threadId, Instant now) {

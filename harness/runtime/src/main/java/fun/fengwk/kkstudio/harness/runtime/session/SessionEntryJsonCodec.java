@@ -43,27 +43,18 @@ public final class SessionEntryJsonCodec {
 
   private ObjectNode encodePayload(SessionEntryPayload payload) {
     ObjectNode node = NODES.objectNode();
-    if (payload instanceof MessageEntryPayload value) {
+    if (payload instanceof RootEntryPayload) {
+      // 根 Entry 无字段。
+    } else if (payload instanceof MessageEntryPayload value) {
       node.set("message", encodeMessage(value.message()));
       if (value.assistantMetadata() == null) {
         node.putNull("assistantMetadata");
       } else {
         node.set("assistantMetadata", encodeAssistantMetadata(value.assistantMetadata()));
       }
-    } else if (payload instanceof AgentSnapshotEntryPayload value) {
-      if (value.agentDefinitionId() == null) {
-        node.putNull("agentDefinitionId");
-      } else {
-        node.put("agentDefinitionId", value.agentDefinitionId());
-      }
-      node.set("snapshot", encodeSnapshot(value.snapshot()));
-    } else if (payload instanceof ModelChangeEntryPayload value) {
-      node.put("modelId", value.modelId());
-      node.put("variant", value.variant());
-    } else if (payload instanceof ToolsetChangeEntryPayload value) {
-      node.set("tools", encodeStrings(value.tools()));
-    } else if (payload instanceof YoloChangeEntryPayload value) {
-      node.put("yoloEnabled", value.yoloEnabled());
+    } else if (payload instanceof AgentChangeEntryPayload value) {
+      node.put("agentDefinitionId", value.agentDefinitionId());
+      node.put("agentName", value.agentName());
     } else if (payload instanceof CompactionEntryPayload value) {
       node.put("summary", value.summary());
       node.put("firstKeptEntryId", value.firstKeptEntryId());
@@ -86,6 +77,10 @@ public final class SessionEntryJsonCodec {
 
   private SessionEntryPayload decodePayload(SessionEntryType type, ObjectNode node) {
     return switch (type) {
+      case ROOT -> {
+        fields(node);
+        yield new RootEntryPayload();
+      }
       case MESSAGE -> {
         fields(node, "message", "assistantMetadata");
         JsonNode metadata = node.get("assistantMetadata");
@@ -96,27 +91,10 @@ public final class SessionEntryJsonCodec {
             decodeMessage(node.get("message")),
             metadata.isNull() ? null : decodeAssistantMetadata(metadata));
       }
-      case AGENT_SNAPSHOT -> {
-        fields(node, "agentDefinitionId", "snapshot");
-        JsonNode agentDefinitionId = node.get("agentDefinitionId");
-        if (agentDefinitionId == null) {
-          throw new IllegalArgumentException("agentDefinitionId must be present");
-        }
-        yield new AgentSnapshotEntryPayload(
-            agentDefinitionId.isNull() ? null : positiveLong(node, "agentDefinitionId"),
-            decodeSnapshot(node.get("snapshot")));
-      }
-      case MODEL_CHANGE -> {
-        fields(node, "modelId", "variant");
-        yield new ModelChangeEntryPayload(text(node, "modelId"), text(node, "variant"));
-      }
-      case TOOLSET_CHANGE -> {
-        fields(node, "tools");
-        yield new ToolsetChangeEntryPayload(strings(node.get("tools"), "tools"));
-      }
-      case YOLO_CHANGE -> {
-        fields(node, "yoloEnabled");
-        yield new YoloChangeEntryPayload(bool(node, "yoloEnabled"));
+      case AGENT_CHANGE -> {
+        fields(node, "agentDefinitionId", "agentName");
+        yield new AgentChangeEntryPayload(
+            positiveLong(node, "agentDefinitionId"), text(node, "agentName"));
       }
       case COMPACTION -> {
         fields(node, "summary", "firstKeptEntryId", "tokensBefore", "detailsJson");
@@ -143,47 +121,6 @@ public final class SessionEntryJsonCodec {
         yield new LabelEntryPayload(text(node, "label"));
       }
     };
-  }
-
-  private ObjectNode encodeSnapshot(AgentSnapshot value) {
-    ObjectNode node = NODES.objectNode();
-    if (value.systemPrompt() == null) {
-      node.putNull("systemPrompt");
-    } else {
-      node.put("systemPrompt", value.systemPrompt());
-    }
-    node.put("modelId", value.modelId());
-    node.put("variant", value.variant());
-    node.set("tools", encodeStrings(value.tools()));
-    node.set("skills", encodeStrings(value.skills()));
-    node.set("allowedSubagents", encodeStrings(value.allowedSubagents()));
-    node.put("executionPolicyJson", value.executionPolicyJson());
-    return node;
-  }
-
-  private AgentSnapshot decodeSnapshot(JsonNode value) {
-    ObjectNode node = object(value, "snapshot");
-    fields(
-        node,
-        "systemPrompt",
-        "modelId",
-        "variant",
-        "tools",
-        "skills",
-        "allowedSubagents",
-        "executionPolicyJson");
-    JsonNode prompt = node.get("systemPrompt");
-    if (!prompt.isTextual() && !prompt.isNull()) {
-      throw new IllegalArgumentException("systemPrompt must be text or null");
-    }
-    return new AgentSnapshot(
-        prompt.isNull() ? null : prompt.textValue(),
-        text(node, "modelId"),
-        text(node, "variant"),
-        strings(node.get("tools"), "tools"),
-        strings(node.get("skills"), "skills"),
-        strings(node.get("allowedSubagents"), "allowedSubagents"),
-        jsonObjectText(node, "executionPolicyJson"));
   }
 
   private ObjectNode encodeAssistantMetadata(AssistantMessageMetadata metadata) {

@@ -102,6 +102,30 @@ abstract class AbstractCodingTool implements Tool {
     return value.intValue();
   }
 
+  static int requiredPositiveInt(JsonNode args, String name) {
+    JsonNode value = args.get(name);
+    if (value == null
+        || !value.isIntegralNumber()
+        || value.longValue() < 1
+        || value.longValue() > Integer.MAX_VALUE) {
+      throw new IllegalArgumentException(name + " is required and must be a positive integer");
+    }
+    return value.intValue();
+  }
+
+  static int optionalNonNegativeInt(JsonNode args, String name, int defaultValue) {
+    JsonNode value = args.get(name);
+    if (value == null) {
+      return defaultValue;
+    }
+    if (!value.isIntegralNumber()
+        || value.longValue() < 0
+        || value.longValue() > Integer.MAX_VALUE) {
+      throw new IllegalArgumentException(name + " must be a non-negative integer");
+    }
+    return value.intValue();
+  }
+
   static boolean optionalBoolean(JsonNode args, String name) {
     JsonNode value = args.get(name);
     return value != null && value.booleanValue();

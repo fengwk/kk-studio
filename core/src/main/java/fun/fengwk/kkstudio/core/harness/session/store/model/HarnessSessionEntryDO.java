@@ -16,7 +16,7 @@ public class HarnessSessionEntryDO {
   /** 父 Entry；根节点为空。 */
   private Long parentEntryId;
 
-  /** 语义 entry 类型（message/agent_snapshot/...）。 */
+  /** 语义 entry 类型（root/message/agent_change/...）。 */
   private String entryType;
 
   /** 语义 payload JSON。 */

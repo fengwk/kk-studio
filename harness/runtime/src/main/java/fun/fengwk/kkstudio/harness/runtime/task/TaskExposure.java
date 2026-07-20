@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.task;
 
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.context.AgentRuntimeConfig;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 
 import java.util.List;
@@ -8,21 +8,21 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-/** Pure helper for T15 context wiring: task is exposed only for an eligible frozen snapshot. */
+/** Pure helper for task tool exposure based on current runtime config. */
 public final class TaskExposure {
   private TaskExposure() {}
 
   public static Optional<ToolDescriptor> descriptor(
-      AgentSnapshot snapshot, int currentDepth, ToolDescriptor taskDescriptor) {
+      AgentRuntimeConfig config, int currentDepth, ToolDescriptor taskDescriptor) {
     Objects.requireNonNull(taskDescriptor, "taskDescriptor");
-    return eligible(snapshot, currentDepth) ? Optional.of(taskDescriptor) : Optional.empty();
+    return eligible(config, currentDepth) ? Optional.of(taskDescriptor) : Optional.empty();
   }
 
-  public static String availableSubagentsInstruction(AgentSnapshot snapshot, int currentDepth) {
-    if (!eligible(snapshot, currentDepth)) {
+  public static String availableSubagentsInstruction(AgentRuntimeConfig config, int currentDepth) {
+    if (!eligible(config, currentDepth)) {
       return "";
     }
-    List<String> names = snapshot.allowedSubagents().stream().sorted().toList();
+    List<String> names = config.allowedSubagents().stream().sorted().toList();
     return "<available_subagents>\n"
         + names.stream()
             .map(name -> "  <subagent name=\"" + escapeXml(name) + "\"/>")
@@ -30,13 +30,13 @@ public final class TaskExposure {
         + "\n</available_subagents>";
   }
 
-  private static boolean eligible(AgentSnapshot snapshot, int currentDepth) {
-    Objects.requireNonNull(snapshot, "snapshot");
+  private static boolean eligible(AgentRuntimeConfig config, int currentDepth) {
+    Objects.requireNonNull(config, "config");
     if (currentDepth < 0) {
       throw new IllegalArgumentException("currentDepth must not be negative");
     }
-    return !snapshot.allowedSubagents().isEmpty()
-        && currentDepth < TaskPolicyCodec.decode(snapshot.executionPolicyJson()).maxDepth();
+    return !config.allowedSubagents().isEmpty()
+        && currentDepth < TaskPolicyCodec.decode(config.executionPolicyJson()).maxDepth();
   }
 
   private static String escapeXml(String value) {

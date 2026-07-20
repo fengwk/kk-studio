@@ -40,7 +40,17 @@ class CodingToolsTest {
     CodingTools.registerAll(registry, config);
 
     assertEquals(
-        List.of("read", "write", "edit", "bash", "grep", "find"),
+        List.of(
+            "read",
+            "write",
+            "edit",
+            "apply_patch",
+            "bash",
+            "grep",
+            "find",
+            "lsp_goto_definition",
+            "lsp_workspace_symbols",
+            "lsp_java_decompile"),
         registry.descriptors().stream().map(d -> d.name()).toList());
     Tool read = registry.find("read").orElseThrow();
     assertThrows(IllegalArgumentException.class, () -> request(read, "{\"path\":1}"));

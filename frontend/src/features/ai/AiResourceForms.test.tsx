@@ -77,24 +77,18 @@ describe('AiResourceForms', () => {
     expect(screen.getByLabelText('Default Variant')).toHaveValue('default')
   })
 
-  it('edits agent model binding and tools string list without json editing', async () => {
+  it('edits agent model binding and tools without json editing', async () => {
     const user = userEvent.setup()
     render(<AgentFormHarness />)
 
     expect(screen.getByRole('button', { name: '使用第一个 Model 填充默认配置' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '使用第一个 Model 填充默认配置' }))
-    expect(screen.getByLabelText('Model')).toHaveValue('minimax/MiniMax-M2.7')
-    expect(screen.getByLabelText('Default Variant')).toHaveValue('default')
+    expect(screen.getByLabelText('Model')).toHaveValue('model-1')
+    expect(screen.getByLabelText('Variant')).toHaveValue('default')
 
-    await user.selectOptions(screen.getByLabelText('Model'), 'anthropic/Claude-Sonnet-4.5')
-    expect(screen.getByLabelText('Default Variant')).toHaveValue('creative')
-
-    const tools = screen.getByRole('region', { name: 'Tools' })
-    await user.click(within(tools).getByRole('button', { name: '添加' }))
-    await user.type(screen.getByLabelText('Tools 1'), 'search')
-    expect(screen.getByDisplayValue('search')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '删除 Tools 1' }))
-    expect(screen.queryByDisplayValue('search')).not.toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('Model'), 'model-2')
+    expect(screen.getByLabelText('Variant')).toHaveValue('creative')
+    expect(screen.getByText('暂无候选 Tools')).toBeInTheDocument()
   })
 
   it('shows the model prerequisite hint when no model is available', () => {
@@ -104,10 +98,13 @@ describe('AiResourceForms', () => {
           name: '',
           description: '',
           systemPrompt: '',
-          defaultProvider: '',
-          defaultModel: '',
-          defaultVariant: 'default',
+          modelId: '',
+          variant: 'default',
+          environmentName: '',
           tools: [],
+          skills: [],
+          allowedSubagents: [],
+          executionPolicy: { maxTurns: '', maxDepth: '', maxDirectSubagents: '', maxTotalSubagents: '' },
         }}
         models={[]}
         onChange={() => undefined}
@@ -167,10 +164,13 @@ function AgentFormHarness() {
     name: '',
     description: '',
     systemPrompt: '',
-    defaultProvider: '',
-    defaultModel: '',
-    defaultVariant: 'default',
+    modelId: '',
+    variant: 'default',
+    environmentName: '',
     tools: [],
+    skills: [],
+    allowedSubagents: [],
+    executionPolicy: { maxTurns: '', maxDepth: '', maxDirectSubagents: '', maxTotalSubagents: '' },
   })
   return (
     <AgentForm

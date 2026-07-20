@@ -64,20 +64,22 @@ frontend → web APIs (via shared/api)
 
 | 事实 | 职责 |
 | --- | --- |
-| **Session** | 共享 append-only Entry Tree 容器、稳定 `mainThreadId` 与父子 Session 关系；不保存 Branch 或配置副本 |
-| **Entry** | 语义持久真源：消息、Agent Snapshot、Tool Result、Compaction |
-| **AgentThread** | durable Branch actor：`sessionId`、`headEntryId`、input sequence、状态、processor token/until/version；Agent、Model、Toolset 与 YOLO 由 Entry path fold 得出 |
+| **Chat** | 持久会话集合、可选默认 Agent；通过 `ChatSession` 关联 Session；不保存 Pane |
+| **Pane** | 当前浏览器的 Chat 工作区姿势：布局、焦点和 `{sessionId, threadId}` 目标仅存 localStorage |
+| **Session** | 共享 append-only Entry Tree 容器、稳定 `mainThreadId` 与父子 Session 关系；不保存 Branch 或完整 Agent 配置 |
+| **Entry** | 语义持久真源：消息、`AGENT_CHANGE` identity、Tool Result、Compaction |
+| **AgentThread** | durable Branch actor：`sessionId`、`headEntryId`、input sequence、状态、processor token/until/version，以及当前 Agent ID/name、model/variant、YOLO |
 | **Branch(thread)** | 由 root→`headEntryId` 路径派生，不独立持久化；多 Thread 可共享 head 后自然分叉 |
-| **ThreadInput** | 多生产者有序 mailbox：消息与 `SET_AGENT` / `SET_MODEL` / `SET_TOOLSET` / `SET_YOLO`；`clientMessageId` 幂等；一次 Harvest 可应用多个 Input |
+| **ThreadInput** | 多生产者有序 mailbox：消息与 `SET_AGENT` / `SET_MODEL` / `SET_YOLO`；`clientMessageId` 幂等；一次 Harvest 可应用多个 Input |
 | **ThreadStop** | Stop 网络幂等回执，以及被取消 mailbox Input 的关联 |
 | **ThreadEvent** | Thread 级 journal / 可观测覆盖层；全局十进制 `eventId` 作 SSE cursor |
 | **ToolInvocation** | 工具权限、lease、结果与终态；ID 是副作用幂等边界 |
 | **SubagentTask** | parent invocation → child Session + child Thread 关系、maxTurns、report |
 | **Root Activity** | 根 Session 树内事件投影（查询合成，非独立写表） |
 | **Usage / Cost** | 每 Assistant Entry 一条不可变账本 |
-| **Tool Environment** | daemon 元数据与 heartbeat |
+| **Live Environment** | 当前 Daemon 连接发现的内存工具/Skill 元数据；按名称唯一，不持久化 |
 
-前端 AI 以 Thread 路径 Entries 为历史基线，未物化的 `USER_MESSAGE` / `CUSTOM_MESSAGE` inputs 与 active ThreadEvents 作覆盖层；SSE 以全局 `eventId` 字符串 cursor 恢复。Session 入口始终打开稳定 Main Thread；Tree filter 只改变投影，不改变 Branch 或 Provider Context。
+前端 AI 从 Chat 卡片进入本地 Pane 工作区；Pane 可重复打开同一 Thread。空 Pane 首发按 `create Session -> attach Chat -> SET_AGENT -> USER_MESSAGE` 进入 mailbox。前端以 Thread 路径 Entries 为历史基线，未物化的 `USER_MESSAGE` / `CUSTOM_MESSAGE` inputs 与 active ThreadEvents 作覆盖层；SSE 以全局 `eventId` 字符串 cursor 恢复。Session 入口始终打开稳定 Main Thread；Tree filter 只改变投影，不改变 Branch 或 Provider Context。
 
 执行由事件触发的 `ThreadProcessor` 推进：提交、Stop/Retry、权限决定、Tool 或 Subagent 完成后 `kick`；低频 `ThreadRecoveryLifecycle` 仅扫描丢失的 durable work。Child Session 的 Tool ASK 仍归属 Child Thread，并向 delegation root Thread 写 relay event，根 UI 以同一 Invocation ID 决策。
 

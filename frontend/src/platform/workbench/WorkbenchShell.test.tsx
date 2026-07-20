@@ -22,7 +22,7 @@ describe('WorkbenchShell', () => {
     renderWorkbench(host, '/missing')
 
     expect(screen.getByText('页面不可用')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '返回 Chat' })).toHaveAttribute('href', '/sessions')
+    expect(screen.getByRole('link', { name: '返回 Chat' })).toHaveAttribute('href', '/chats')
   })
 
   it('reactively renders registered contributions, restores fallbacks, and clears on host disposal', async () => {

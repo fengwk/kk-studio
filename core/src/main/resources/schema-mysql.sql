@@ -70,16 +70,21 @@ create table if not exists harness_session_entry (
 ) engine=InnoDB default charset=utf8mb4 comment='harness session entry';
 
 create table if not exists harness_thread (
-    id                    bigint not null comment '业务主键',
-    session_id            bigint not null comment '所属 session tree',
-    head_entry_id         bigint not null comment '当前 tree cursor',
-    status                varchar(32) not null comment 'IDLE/RUNNING/WAITING/FAILED/RETRYING',
-    input_sequence        bigint not null comment '已分配 input sequence 最大值',
-    processor_token       varchar(128) null comment '当前 processor fencing token',
-    processor_until       datetime(3) null comment 'token 租约截止',
-    gmt_create            datetime(3) not null default current_timestamp(3) comment '创建时间',
-    gmt_modified          datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
-    version               bigint not null default '0' comment '乐观锁版本',
+    id                           bigint not null comment '业务主键',
+    session_id                   bigint not null comment '所属 session tree',
+    head_entry_id                bigint not null comment '当前 tree cursor',
+    status                       varchar(32) not null comment 'IDLE/RUNNING/WAITING/FAILED/RETRYING',
+    input_sequence               bigint not null comment '已分配 input sequence 最大值',
+    active_agent_definition_id   bigint null comment '当前 AgentDefinition id',
+    active_agent_name            varchar(256) null comment '捕获的 Agent 名称',
+    model_id                     varchar(128) null comment 'Thread 级 model id',
+    variant                      varchar(128) null comment 'Thread 级 model variant',
+    yolo_enabled                 tinyint(1) not null default 0 comment 'Thread 级 YOLO',
+    processor_token              varchar(128) null comment '当前 processor fencing token',
+    processor_until              datetime(3) null comment 'token 租约截止',
+    gmt_create                   datetime(3) not null default current_timestamp(3) comment '创建时间',
+    gmt_modified                 datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
+    version                      bigint not null default '0' comment '乐观锁版本',
     primary key (id),
     key idx_harness_thread_session (session_id, id),
     key idx_harness_thread_status (status, id)
@@ -133,7 +138,7 @@ create table if not exists tool_invocation (
     tool_name             varchar(128) not null comment '冻结工具名称',
     tool_version          varchar(128) not null comment '冻结工具版本',
     target_type           varchar(32) not null comment '工具执行目标类型',
-    environment_id        bigint null comment 'ENVIRONMENT 目标 id；其他类型为空',
+    environment_name      varchar(128) null comment 'ENVIRONMENT 目标实时名称；其他类型为空',
     arguments_json        longtext not null comment 'interceptor 后参数 JSON',
     status                varchar(32) not null comment '持久状态',
     permission_action     varchar(16) not null comment 'ALLOW/ASK/DENY',
@@ -154,7 +159,7 @@ create table if not exists tool_invocation (
     unique key uk_tool_invocation_assistant_ordinal (assistant_entry_id, ordinal),
     key idx_tool_invocation_thread_status (thread_id, status, ordinal),
     key idx_tool_invocation_claim (target_type, status, deadline_at, id),
-    key idx_tool_invocation_environment_claim (environment_id, status, deadline_at, id)
+    key idx_tool_invocation_environment_claim (environment_name, status, deadline_at, id)
 ) engine=InnoDB default charset=utf8mb4 comment='durable tool invocation';
 
 create table if not exists tool_artifact (
@@ -187,6 +192,17 @@ create table if not exists harness_subagent_task (
     unique key uk_harness_subagent_task_child_thread (child_thread_id),
     key idx_harness_subagent_task_parent (parent_session_id, status)
 ) engine=InnoDB default charset=utf8mb4 comment='durable task invocation to child thread relation';
+
+create table if not exists harness_thread_goal (
+    thread_id             bigint not null comment 'Thread id; one current goal per Thread',
+    objective             text not null comment 'Durable evidence-checkable objective',
+    token_budget          bigint null comment 'Optional positive token budget',
+    status                varchar(32) not null comment 'active / complete / blocked',
+    reason                text null comment 'Terminal reason when complete/blocked',
+    gmt_create            datetime(3) not null default current_timestamp(3),
+    gmt_modified          datetime(3) not null default current_timestamp(3),
+    primary key (thread_id)
+) engine=InnoDB default charset=utf8mb4 comment='durable Thread goal';
 
 create table if not exists model_usage_record (
     id                                 bigint not null comment 'Snowflake ledger id',
@@ -255,18 +271,7 @@ create table if not exists comfyui_workflow_api (
     unique key uk_comfyui_workflow_api_api_name (api_name)
 ) engine=InnoDB default charset=utf8mb4 comment='comfyui workflow api card';
 
-create table if not exists tool_environment (
-    id                    bigint not null comment 'Snowflake 主键；Environment 全局资源，不属于 Workspace/Tenant',
-    name                  varchar(128) not null comment 'Environment 唯一名',
-    description           varchar(512) null comment '描述',
-    capabilities_json     longtext not null comment 'canonical Daemon CAPABILITIES payload',
-    last_seen_at          datetime(3) null comment '最近一次 daemon 主动上报时间',
-    gmt_create            datetime(3) not null default current_timestamp(3) comment '创建时间',
-    gmt_modified          datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
-    version               bigint not null default '0' comment '数据版本号',
-    primary key (id),
-    unique key uk_tool_environment_name (name)
-) engine=InnoDB default charset=utf8mb4 comment='global environment daemon registry';
+
 
 create table if not exists canvas_document (
     id                  bigint not null comment '主键',
@@ -335,3 +340,24 @@ create table if not exists canvas_command (
     primary key (id),
     unique key uk_canvas_command (workspace_id, command_id)
 ) engine=InnoDB default charset=utf8mb4 comment='canvas 幂等命令';
+
+create table if not exists chat (
+    id                  bigint not null comment 'Snowflake 主键',
+    title               varchar(256) null comment '可选标题',
+    default_agent_id    bigint null comment '可选默认 Agent definition id；无外键，Agent 删除后可保留陈旧值',
+    gmt_create          datetime(3) not null default current_timestamp(3) comment '创建时间',
+    gmt_modified        datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
+    version             bigint not null default '0' comment '数据版本号',
+    primary key (id),
+    key idx_chat_modified (gmt_modified, id)
+) engine=InnoDB default charset=utf8mb4 comment='Chat 会话集合';
+
+create table if not exists chat_session (
+    id                  bigint not null comment 'Snowflake 主键',
+    chat_id             bigint not null comment '所属 Chat',
+    session_id          bigint not null comment '关联 HarnessSession',
+    gmt_create          datetime(3) not null default current_timestamp(3) comment '关联创建时间',
+    primary key (id),
+    unique key uk_chat_session (chat_id, session_id),
+    key idx_chat_session_session (session_id)
+) engine=InnoDB default charset=utf8mb4 comment='Chat 与 HarnessSession 多对多成员关系';

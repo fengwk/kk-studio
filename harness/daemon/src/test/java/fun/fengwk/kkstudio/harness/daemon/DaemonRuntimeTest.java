@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.daemon.coding.ArtifactSource;
 import fun.fengwk.kkstudio.harness.daemon.coding.InMemoryArtifactSink;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
+import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
@@ -35,6 +36,7 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillLoadCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
@@ -52,10 +54,13 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -267,13 +272,13 @@ class DaemonRuntimeTest {
     transport.takeMessages(3);
     transport.receiveRaw(
         "{\"protocolVersion\":1,\"messageType\":\"INVOKE\","
-            + "\"environmentId\":\"environment\",\"sequence\":1,\"payload\":{\"toolName\":\"test\","
+            + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{\"toolName\":\"test\","
             + "\"toolVersion\":\"1.0.0\",\"arguments\":{}}}");
 
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     transport.receiveRaw(
         "{\"protocolVersion\":1,\"messageType\":\"CANCEL\","
-            + "\"environmentId\":\"environment\",\"sequence\":1,\"payload\":{}}");
+            + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
     transport.receive(invoke("valid-after-missing-id", 1));
@@ -738,6 +743,101 @@ class DaemonRuntimeTest {
     assertFalse(transport.hasMessages());
   }
 
+  /** CAPABILITIES 必须同时携带 tools 与 skills 摘要，且 skills 不含本地路径。 */
+  @Test
+  void announcesSkillsAlongsideToolsInCapabilities() throws Exception {
+    Path skillRoot = Files.createTempDirectory("daemon-skills");
+    Path skillDir = skillRoot.resolve("demo");
+    Files.createDirectories(skillDir);
+    String body = "---\nname: demo\ndescription: Demo skill\n---\n# Demo\n";
+    Files.writeString(skillDir.resolve("SKILL.md"), body);
+    try {
+      FakeTransport transport = new FakeTransport();
+      DaemonSkillRegistry skills = DaemonSkillRegistry.discover(List.of(skillRoot));
+      runtime = runtime(transport, new TestTool(), skills);
+
+      runtime.start();
+      transport.awaitConnections(1);
+      List<DaemonEnvelope> handshake = transport.takeMessages(3);
+      assertMessageTypes(handshake, HELLO, CAPABILITIES, READY);
+
+      JsonNode payload = codec.readPayload(handshake.get(1));
+      assertEquals("test", payload.path("tools").get(0).path("name").asText());
+      assertEquals(1, payload.path("skills").size());
+      assertEquals("demo", payload.path("skills").get(0).path("name").asText());
+      assertEquals("Demo skill", payload.path("skills").get(0).path("description").asText());
+      assertTrue(payload.path("skills").get(0).path("path").isMissingNode());
+      assertTrue(payload.path("skills").get(0).path("content").isMissingNode());
+    } finally {
+      deleteRecursively(skillRoot);
+    }
+  }
+
+  /** LOAD_SKILL 通过 invocationId 关联，成功返回完整 SKILL.md 正文。 */
+  @Test
+  void loadsSkillBodyByName() throws Exception {
+    Path skillRoot = Files.createTempDirectory("daemon-skills-load");
+    Path skillDir = skillRoot.resolve("demo");
+    Files.createDirectories(skillDir);
+    String body = "---\nname: demo\ndescription: Demo skill\n---\n# Demo\nfull body\n";
+    Files.writeString(skillDir.resolve("SKILL.md"), body);
+    try {
+      FakeTransport transport = new FakeTransport();
+      runtime =
+          runtime(transport, new TestTool(), DaemonSkillRegistry.discover(List.of(skillRoot)));
+      runtime.start();
+      transport.awaitConnections(1);
+      transport.takeMessages(3);
+
+      DaemonSkillLoadCodec skillCodec = new DaemonSkillLoadCodec();
+      transport.receive(
+          new DaemonEnvelope(
+              DaemonProtocol.VERSION_1,
+              DaemonMessageType.LOAD_SKILL,
+              "environment",
+              "skill-1",
+              1,
+              skillCodec.encodeRequest(new DaemonSkillLoadCodec.LoadSkillRequest("demo"))));
+
+      List<DaemonEnvelope> messages = transport.takeMessages(2);
+      assertMessageTypes(messages, ACK, DaemonMessageType.SKILL_LOADED);
+      assertEquals("skill-1", messages.get(1).invocationId());
+      DaemonSkillLoadCodec.SkillLoaded loaded =
+          skillCodec.decodeLoaded(messages.get(1).payloadJson());
+      assertEquals("demo", loaded.name());
+      assertEquals(body, loaded.content());
+    } finally {
+      deleteRecursively(skillRoot);
+    }
+  }
+
+  /** 未知 skill 返回确定性 SKILL_LOAD_FAILED，不进入 tool journal。 */
+  @Test
+  void failsUnknownSkillLoadDeterministically() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestTool(), DaemonSkillRegistry.empty());
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+
+    DaemonSkillLoadCodec skillCodec = new DaemonSkillLoadCodec();
+    transport.receive(
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION_1,
+            DaemonMessageType.LOAD_SKILL,
+            "environment",
+            "skill-missing",
+            1,
+            skillCodec.encodeRequest(new DaemonSkillLoadCodec.LoadSkillRequest("nope"))));
+
+    List<DaemonEnvelope> messages = transport.takeMessages(2);
+    assertMessageTypes(messages, ACK, DaemonMessageType.SKILL_LOAD_FAILED);
+    DaemonSkillLoadCodec.SkillLoadFailed failed =
+        skillCodec.decodeFailed(messages.get(1).payloadJson());
+    assertEquals("nope", failed.name());
+    assertTrue(failed.message().contains("unknown skill"));
+  }
+
   private DaemonRuntime runtime(FakeTransport transport, Tool tool) {
     return runtime(transport, tool, Duration.ofMinutes(1));
   }
@@ -761,6 +861,28 @@ class DaemonRuntimeTest {
       Duration heartbeatInterval,
       Duration defaultToolTimeout,
       ArtifactSource artifactSource) {
+    return runtime(
+        transport,
+        tool,
+        DaemonSkillRegistry.empty(),
+        heartbeatInterval,
+        defaultToolTimeout,
+        artifactSource);
+  }
+
+  private DaemonRuntime runtime(
+      FakeTransport transport, Tool tool, DaemonSkillRegistry skillRegistry) {
+    return runtime(
+        transport, tool, skillRegistry, Duration.ofMinutes(1), Duration.ofSeconds(10), null);
+  }
+
+  private DaemonRuntime runtime(
+      FakeTransport transport,
+      Tool tool,
+      DaemonSkillRegistry skillRegistry,
+      Duration heartbeatInterval,
+      Duration defaultToolTimeout,
+      ArtifactSource artifactSource) {
     DaemonToolRegistry registry = new DaemonToolRegistry();
     registry.register(tool);
     return new DaemonRuntime(
@@ -772,12 +894,31 @@ class DaemonRuntimeTest {
             Duration.ZERO,
             Duration.ofSeconds(1),
             defaultToolTimeout,
-            "test-gateway-token"),
+            "test-gateway-token",
+            List.of()),
         transport,
         registry,
+        skillRegistry,
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
         artifactSource);
+  }
+
+  private void deleteRecursively(Path root) throws Exception {
+    if (root == null || !Files.exists(root)) {
+      return;
+    }
+    try (var walk = Files.walk(root)) {
+      walk.sorted(Comparator.reverseOrder())
+          .forEach(
+              path -> {
+                try {
+                  Files.deleteIfExists(path);
+                } catch (Exception ignored) {
+                  // best-effort cleanup for temp skill fixtures
+                }
+              });
+    }
   }
 
   private DaemonEnvelope invoke(String invocationId, long sequence) {

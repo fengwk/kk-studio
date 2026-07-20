@@ -106,39 +106,51 @@ export interface AgentModelUpdateDTO extends AgentModelEditablePropertiesDTO {
   name?: string
 }
 
+export interface AgentExecutionPolicyDTO {
+  maxTurns?: number | null
+  maxDepth?: number | null
+  maxDirectSubagents?: number | null
+  maxTotalSubagents?: number | null
+}
+
+export interface AgentDefinitionConfigDTO {
+  /** Optional live Environment name; blank/null means none. */
+  environmentName?: string | null
+  tools?: string[] | null
+  skills?: string[] | null
+  allowedSubagents?: string[] | null
+  executionPolicy?: AgentExecutionPolicyDTO | null
+}
+
+/** Public global Agent definition; model/variant + config are Thread-runtime inputs. */
 export interface AgentDefinitionDTO {
   id: AgentResourceId
   name: string
   description: string | null
   systemPrompt: string | null
-  defaultProviderId: AgentResourceId
-  defaultProviderName: string
-  defaultModelId: AgentResourceId
-  defaultModelName: string
-  defaultVariant: string
-  toolsJson: string | null
+  modelId: string
+  variant: string
+  config: AgentDefinitionConfigDTO | null
+  version?: BackendLong | null
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
 
 export interface AgentDefinitionEditablePropertiesDTO {
+  name?: string | null
   description?: string | null
   systemPrompt?: string | null
-  defaultVariant?: string | null
-  toolsJson?: string | null
+  modelId?: string | null
+  variant?: string | null
+  config?: AgentDefinitionConfigDTO | null
 }
 
 export interface AgentDefinitionCreateDTO extends AgentDefinitionEditablePropertiesDTO {
   name: string
-  defaultProvider: string
-  defaultModel: string
+  modelId: string
 }
 
-export interface AgentDefinitionUpdateDTO extends AgentDefinitionEditablePropertiesDTO {
-  name?: string
-  defaultProvider?: string
-  defaultModel?: string
-}
+export type AgentDefinitionUpdateDTO = AgentDefinitionEditablePropertiesDTO
 
 /** Session tree container; shared Entry root for Threads/tasks/activities. */
 export interface HarnessSessionDTO {
@@ -153,10 +165,55 @@ export interface HarnessSessionDTO {
   updateTime: BackendDateTime
 }
 
+/** Agentless Session create; Agent is set later via Thread SET_AGENT. */
 export interface HarnessSessionCreateDTO {
-  agentDefinitionId: string
   title?: string
   yoloEnabled?: boolean
+}
+
+/** Persistent Chat collection; defaultAgentId may be stale after Agent deletion. */
+export interface ChatDTO {
+  id: string
+  title: string | null
+  defaultAgentId: string | null
+  version?: BackendLong | null
+  createTime: BackendDateTime
+  updateTime: BackendDateTime
+}
+
+export interface ChatCreateDTO {
+  title?: string
+  defaultAgentId?: string
+}
+
+/** Partial update: null preserves; blank string clears optional fields. */
+export interface ChatUpdateDTO {
+  title?: string | null
+  defaultAgentId?: string | null
+}
+
+export interface ChatSessionAttachDTO {
+  sessionId: string
+}
+
+export interface LiveEnvironmentToolDTO {
+  name: string
+  version: string | null
+  description: string | null
+}
+
+export interface LiveEnvironmentSkillDTO {
+  name: string
+  description: string | null
+}
+
+/** Read-only live Environment registry entry. */
+export interface LiveEnvironmentDTO {
+  name: string
+  status: string
+  lastSeen: string | null
+  tools: LiveEnvironmentToolDTO[]
+  skills: LiveEnvironmentSkillDTO[]
 }
 
 export interface HarnessSessionEntryDTO {
@@ -176,6 +233,11 @@ export interface HarnessThreadDTO {
   headEntryId: string | null
   status: ThreadStatus
   inputSequence: BackendLong
+  activeAgentDefinitionId: string | null
+  activeAgentName: string | null
+  modelId: string | null
+  variant: string | null
+  yoloEnabled: boolean | null
   processing: boolean
   createTime: BackendDateTime
   updateTime: BackendDateTime
@@ -212,11 +274,6 @@ export interface HarnessThreadModelSetDTO {
   clientMessageId: string
 }
 
-export interface HarnessThreadToolsetSetDTO {
-  tools: string[]
-  clientMessageId: string
-}
-
 export type ThreadStatus = 'IDLE' | 'RUNNING' | 'WAITING' | 'FAILED' | 'RETRYING'
 
 export type ThreadInputType =
@@ -224,7 +281,6 @@ export type ThreadInputType =
   | 'CUSTOM_MESSAGE'
   | 'SET_AGENT'
   | 'SET_MODEL'
-  | 'SET_TOOLSET'
   | 'SET_YOLO'
 
 export type ThreadInputStatus = 'QUEUED' | 'APPLIED' | 'CANCELLED'
@@ -282,7 +338,7 @@ export interface ToolInvocationDTO {
   toolName: string
   toolVersion: string
   targetType: string
-  environmentId: string | null
+  environmentName: string | null
   argumentsJson: string
   status: string
   permissionAction: string

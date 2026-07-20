@@ -22,6 +22,21 @@ public class HarnessThreadDO {
   /** 已分配 input sequence 最大值。 */
   private Long inputSequence;
 
+  /** 当前生效 AgentDefinition id。 */
+  private Long activeAgentDefinitionId;
+
+  /** 捕获的 Agent 名称。 */
+  private String activeAgentName;
+
+  /** Thread 级 model id。 */
+  private String modelId;
+
+  /** Thread 级 model variant。 */
+  private String variant;
+
+  /** Thread 级 YOLO；与 schema 非空默认 false 对齐。 */
+  private Boolean yoloEnabled = false;
+
   /** 当前 processor fencing token；空表示空闲。 */
   private String processorToken;
 

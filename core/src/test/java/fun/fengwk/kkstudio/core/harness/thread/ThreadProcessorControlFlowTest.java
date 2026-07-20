@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessor.ThreadToolPort;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessorConfig;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeConfigResolver;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadTransactions;
@@ -347,7 +348,22 @@ class ThreadProcessorControlFlowTest {
 
   private static AgentThread thread(ThreadStatus status, String token) {
     Instant now = Instant.parse("2026-01-01T00:00:00Z");
-    return new AgentThread(1L, 2L, 3L, status, 0L, token, now.plusSeconds(30), 0L, now, now);
+    return new AgentThread(
+        1L,
+        2L,
+        3L,
+        status,
+        0L,
+        1L,
+        "default-assistant",
+        "1",
+        "default",
+        false,
+        token,
+        now.plusSeconds(30),
+        0L,
+        now,
+        now);
   }
 
   private static SessionEntry systemCustomEntry() {
@@ -417,6 +433,7 @@ class ThreadProcessorControlFlowTest {
             entryStore,
             toolPort,
             mock(SessionContextBuilder.class),
+            mock(ThreadRuntimeConfigResolver.class),
             new ProviderMessageProjector(),
             resourceResolver,
             mock(CompactionService.class),

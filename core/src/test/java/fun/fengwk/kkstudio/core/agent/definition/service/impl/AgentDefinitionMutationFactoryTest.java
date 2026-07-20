@@ -28,8 +28,9 @@ public class AgentDefinitionMutationFactoryTest {
     policy.setMaxDepth(3);
     policy.setMaxDirectSubagents(4);
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setEnvironmentName(" local-dev ");
     config.setTools(Arrays.asList(" browser ", "browser", "", null));
-    config.setSkills(Arrays.asList(" java ", "java"));
+    config.setSkills(Arrays.asList(" java ", "dev"));
     config.setAllowedSubagents(Arrays.asList(" reviewer ", "reviewer"));
     config.setExecutionPolicy(policy);
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
@@ -40,12 +41,26 @@ public class AgentDefinitionMutationFactoryTest {
     AgentDefinitionConfigDTO stored =
         objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
 
+    assertEquals("local-dev", stored.getEnvironmentName());
     assertEquals(List.of("browser"), stored.getTools());
-    assertEquals(List.of("java"), stored.getSkills());
+    assertEquals(List.of("java", "dev"), stored.getSkills());
     assertEquals(List.of("reviewer"), stored.getAllowedSubagents());
     assertEquals(8, stored.getExecutionPolicy().getMaxTurns());
     assertEquals(3, stored.getExecutionPolicy().getMaxDepth());
     assertEquals(4, stored.getExecutionPolicy().getMaxDirectSubagents());
+  }
+
+  @Test
+  public void shouldRejectDuplicateSkillsInsteadOfSilentDedup() {
+    AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setSkills(Arrays.asList("java", " java "));
+    AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
+    create.setName("agent");
+    create.setConfig(config);
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
+    assertEquals("agent skills must not contain duplicates: java", error.getMessage());
   }
 
   @Test

@@ -17,8 +17,8 @@ import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.agent.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.core.environment.repo.ToolEnvironmentRepository;
-import fun.fengwk.kkstudio.core.environment.service.model.ToolEnvironment;
+import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonConnection;
+import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapability;
@@ -30,12 +30,12 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.adapter.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.context.AgentRuntimeConfig;
+import fun.fengwk.kkstudio.harness.runtime.context.SelectedSkillMetadata;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtension;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionRegistry;
 import fun.fengwk.kkstudio.harness.runtime.extension.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.extension.ToolFactory;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnResources;
@@ -43,6 +43,7 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
@@ -62,8 +63,8 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Covers {@link DatabaseTurnResourceResolver} against the current AgentThread resolve contract:
- * frozen config IDs + extension factories + Environment references.
+ * Covers {@link DatabaseTurnResourceResolver}: short-name platform-first tool resolution and
+ * offline selected Environment failure.
  */
 class DatabaseTurnResourceResolverTest {
 
@@ -92,13 +93,12 @@ class DatabaseTurnResourceResolverTest {
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
     Tool read = tool("read", "1");
     try (Fixture fixture = new Fixture(factory, List.of(read))) {
-      AgentSnapshot snapshot = snapshot("11", "quality", List.of("read"));
+      AgentRuntimeConfig config = runtimeConfig("11", "quality", null, List.of("read"));
       fixture.session();
       fixture.model(model(11L, 22L, MODEL_CONFIG));
       fixture.provider(provider(22L, AgentProviderType.openai));
 
-      TurnResources resources =
-          fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot));
+      TurnResources resources = fixture.resolver.resolve(SESSION_ID, THREAD_ID, config);
 
       assertEquals(22L, resources.model().providerResourceId());
       assertEquals(11L, resources.model().modelResourceId());
@@ -170,28 +170,25 @@ class DatabaseTurnResourceResolverTest {
         new CapturingProviderFactory(
             ProviderType.OPENAI,
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
-    AgentSnapshot snapshot = snapshot("11", "quality", List.of());
+    AgentRuntimeConfig config = runtimeConfig("11", "quality", null, List.of());
     try (Fixture fixture = new Fixture(factory, List.of())) {
       fixture.model(model(11L, 22L, MODEL_CONFIG));
       fixture.provider(provider(22L, AgentProviderType.openai));
       assertThrows(
           IllegalArgumentException.class,
-          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot)));
+          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, config));
 
       fixture.session();
-      AgentRuntimeConfig missingVariant =
-          AgentRuntimeConfig.from(snapshot).withModel("11", "missing");
+      AgentRuntimeConfig missingVariant = config.withModel("11", "missing");
       assertThrows(
           IllegalArgumentException.class,
           () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, missingVariant));
 
-      AgentRuntimeConfig malformedTool =
-          AgentRuntimeConfig.from(snapshot).withTools(List.of("read@"));
+      AgentRuntimeConfig longName = config.withTools(List.of("read@1"));
       assertThrows(
           IllegalArgumentException.class,
-          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, malformedTool));
-      AgentRuntimeConfig missingTool =
-          AgentRuntimeConfig.from(snapshot).withTools(List.of("missing@1"));
+          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, longName));
+      AgentRuntimeConfig missingTool = config.withTools(List.of("missing"));
       assertThrows(
           IllegalArgumentException.class,
           () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, missingTool));
@@ -199,7 +196,7 @@ class DatabaseTurnResourceResolverTest {
       fixture.model(model(11L, 22L, "{\"variants\":[]}"));
       assertThrows(
           IllegalArgumentException.class,
-          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot)));
+          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, config));
     }
 
     try (Fixture fixture = new Fixture(null, List.of())) {
@@ -209,9 +206,7 @@ class DatabaseTurnResourceResolverTest {
       IllegalArgumentException error =
           assertThrows(
               IllegalArgumentException.class,
-              () ->
-                  fixture.resolver.resolve(
-                      SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot)));
+              () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, config));
       assertTrue(error.getMessage().contains("ProviderFactory"));
     }
 
@@ -223,7 +218,7 @@ class DatabaseTurnResourceResolverTest {
       fixture.provider(provider(22L, AgentProviderType.openai));
       assertThrows(
           IllegalArgumentException.class,
-          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot)));
+          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, config));
     }
   }
 
@@ -232,27 +227,26 @@ class DatabaseTurnResourceResolverTest {
    * deterministically.
    */
   @Test
-  void rejectsInvalidProviderRowsAndAmbiguousOrEnvironmentTools() {
+  void rejectsInvalidProviderRowsAndAmbiguousOrEnvironmentOnlyTools() {
     CapturingProviderFactory factory =
         new CapturingProviderFactory(
             ProviderType.OPENAI,
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
-    AgentSnapshot snapshot = snapshot("11", "quality", List.of());
+    AgentRuntimeConfig config = runtimeConfig("11", "quality", null, List.of());
     try (Fixture fixture = new Fixture(factory, List.of())) {
       fixture.session();
       assertThrows(
           IllegalArgumentException.class,
-          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot)));
+          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, config));
       fixture.model(model(11L, 22L, MODEL_CONFIG));
       assertThrows(
           IllegalArgumentException.class,
-          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot)));
+          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, config));
 
       AgentProvider defaulted = provider(22L, AgentProviderType.openai);
       defaulted.setConfigJson("{}");
       fixture.provider(defaulted);
-      TurnResources defaultedResources =
-          fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot));
+      TurnResources defaultedResources = fixture.resolver.resolve(SESSION_ID, THREAD_ID, config);
       assertEquals(ModelCallTimeoutPolicy.DEFAULT, defaultedResources.modelCallTimeoutPolicy());
 
       AgentProvider invalid = provider(22L, AgentProviderType.openai);
@@ -260,16 +254,16 @@ class DatabaseTurnResourceResolverTest {
       fixture.provider(invalid);
       assertThrows(
           IllegalArgumentException.class,
-          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot)));
+          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, config));
       invalid.setConfigJson(
           "{\"modelCallTimeoutMillis\":45000,\"modelCallIdleTimeoutMillis\":3000}");
       invalid.setBaseUrl(" ");
       assertThrows(
           IllegalArgumentException.class,
-          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot)));
+          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, config));
     }
 
-    AgentRuntimeConfig namedTool = AgentRuntimeConfig.from(snapshot).withTools(List.of("read"));
+    AgentRuntimeConfig namedTool = config.withTools(List.of("read"));
     try (Fixture fixture = new Fixture(factory, List.of(tool("read", "1"), tool("read", "2")))) {
       fixture.session();
       fixture.model(model(11L, 22L, MODEL_CONFIG));
@@ -279,8 +273,8 @@ class DatabaseTurnResourceResolverTest {
           () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, namedTool));
     }
 
-    AgentRuntimeConfig environmentTool =
-        AgentRuntimeConfig.from(snapshot).withTools(List.of("shell@1"));
+    // Registered ENVIRONMENT tools are not platform tools; short name needs selected Environment.
+    AgentRuntimeConfig environmentTool = config.withTools(List.of("shell"));
     try (Fixture fixture =
         new Fixture(factory, List.of(tool("shell", "1", ToolExecutionMode.ENVIRONMENT)))) {
       fixture.session();
@@ -292,210 +286,160 @@ class DatabaseTurnResourceResolverTest {
     }
   }
 
-  /**
-   * {@code environment:<id>/<tool>@<version>} resolves to an ENVIRONMENT ToolBinding with
-   * Environment id.
-   */
+  /** Goal tools are auto-injected; load_skill only when selected skills exist. */
   @Test
-  void resolvesFrozenEnvironmentReferenceToEnvironmentBinding() {
+  void autoInjectsGoalToolsAndConditionalLoadSkill() {
     CapturingProviderFactory factory =
         new CapturingProviderFactory(
             ProviderType.OPENAI,
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
-    AgentSnapshot snapshot = snapshot("11", "quality", List.of());
-    DaemonToolCapabilitiesCodec codec = new DaemonToolCapabilitiesCodec();
-    String capabilitiesJson =
-        codec.encode(
-            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(
-                List.of(
-                    new ToolDescriptor(
-                        "shell",
-                        "1",
-                        "shell tool",
-                        "renderer",
-                        new ToolParamsSchema("", Map.of(), Set.of(), false),
-                        ToolExecutionMode.ENVIRONMENT,
-                        ToolSideEffect.READ_ONLY,
-                        Duration.ofSeconds(5)))));
-    ToolEnvironment environment = new ToolEnvironment();
-    environment.setId(123L);
-    environment.setName("env-123");
-    environment.setCapabilitiesJson(capabilitiesJson);
+    Tool createGoal = tool("create_goal", "1", ToolExecutionMode.CONTROL);
+    Tool getGoal = tool("get_goal", "1", ToolExecutionMode.CONTROL);
+    Tool updateGoal = tool("update_goal", "1", ToolExecutionMode.CONTROL);
+    Tool loadSkill = tool("load_skill", "1", ToolExecutionMode.CONTROL);
+    Tool read = tool("read", "1");
 
-    try (Fixture fixture = new Fixture(factory, List.of())) {
+    try (Fixture fixture =
+        new Fixture(factory, List.of(createGoal, getGoal, updateGoal, loadSkill, read))) {
       fixture.session();
       fixture.model(model(11L, 22L, MODEL_CONFIG));
       fixture.provider(provider(22L, AgentProviderType.openai));
-      fixture.environment(environment);
+
+      TurnResources withoutSkills =
+          fixture.resolver.resolve(
+              SESSION_ID, THREAD_ID, runtimeConfig("11", "quality", null, List.of("read")));
+      assertEquals(
+          List.of("read", "create_goal", "get_goal", "update_goal"),
+          withoutSkills.toolBindings().stream().map(b -> b.descriptor().name()).toList());
+
+      TurnResources withSkills =
+          fixture.resolver.resolve(
+              SESSION_ID,
+              THREAD_ID,
+              runtimeConfig(
+                  "11",
+                  "quality",
+                  null,
+                  List.of(),
+                  List.of("dev"),
+                  List.of(new SelectedSkillMetadata("dev", "Developer rules", "platform"))));
+      assertEquals(
+          List.of("create_goal", "get_goal", "update_goal", "load_skill"),
+          withSkills.toolBindings().stream().map(b -> b.descriptor().name()).toList());
+      assertTrue(
+          withSkills.toolBindings().stream()
+              .allMatch(binding -> binding.targetType() == ToolTargetType.CONTROL));
+    }
+  }
+
+  /** Short names resolve platform-first, then selected Environment fallback. */
+  @Test
+  void resolvesShortNamesPlatformFirstThenEnvironmentFallback() {
+    CapturingProviderFactory factory =
+        new CapturingProviderFactory(
+            ProviderType.OPENAI,
+            PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
+    Tool read = tool("read", "1");
+    ToolDescriptor shell =
+        new ToolDescriptor(
+            "shell",
+            "1",
+            "shell tool",
+            "renderer",
+            new ToolParamsSchema("", Map.of(), Set.of(), false),
+            ToolExecutionMode.ENVIRONMENT,
+            ToolSideEffect.READ_ONLY,
+            Duration.ofSeconds(5));
+    ToolDescriptor envRead =
+        new ToolDescriptor(
+            "read",
+            "9",
+            "env read",
+            "read",
+            new ToolParamsSchema("", Map.of(), Set.of(), false),
+            ToolExecutionMode.ENVIRONMENT,
+            ToolSideEffect.READ_ONLY,
+            Duration.ofSeconds(5));
+
+    try (Fixture fixture = new Fixture(factory, List.of(read))) {
+      fixture.session();
+      fixture.model(model(11L, 22L, MODEL_CONFIG));
+      fixture.provider(provider(22L, AgentProviderType.openai));
+      fixture.readyEnvironment("local-dev", List.of(shell, envRead), List.of());
 
       TurnResources resources =
           fixture.resolver.resolve(
               SESSION_ID,
               THREAD_ID,
-              AgentRuntimeConfig.from(snapshot).withTools(List.of("environment:123/shell@1")));
+              runtimeConfig("11", "quality", "local-dev", List.of("read", "shell")));
 
-      assertEquals(1, resources.toolBindings().size());
-      assertEquals(ToolTargetType.ENVIRONMENT, resources.toolBindings().get(0).targetType());
-      assertEquals(123L, resources.toolBindings().get(0).environmentId());
-      assertEquals("shell", resources.toolBindings().get(0).descriptor().name());
+      assertEquals(2, resources.toolBindings().size());
+      assertEquals(ToolTargetType.CLOUD, resources.toolBindings().get(0).targetType());
+      assertEquals("read", resources.toolBindings().get(0).descriptor().name());
       assertEquals("1", resources.toolBindings().get(0).descriptor().version());
-      assertEquals(
-          ToolExecutionMode.ENVIRONMENT, resources.toolDescriptors().get(0).executionMode());
+      assertEquals(ToolTargetType.ENVIRONMENT, resources.toolBindings().get(1).targetType());
+      assertEquals("local-dev", resources.toolBindings().get(1).environmentName());
+      assertEquals("shell", resources.toolBindings().get(1).descriptor().name());
     }
   }
 
-  /**
-   * Environment reference failures: malformed grammar, unknown id/capability, non-ENVIRONMENT,
-   * collision.
-   */
+  /** Selected Environment offline at turn setup fails clearly without fallback. */
   @Test
-  void rejectsMalformedUnknownOrCollidingEnvironmentReferences() {
+  void rejectsOfflineSelectedEnvironmentWithoutFallback() {
     CapturingProviderFactory factory =
         new CapturingProviderFactory(
             ProviderType.OPENAI,
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
-    AgentSnapshot snapshot = snapshot("11", "quality", List.of());
-    // Encode a CLOUD descriptor manually to test that the resolver rejects it without
-    // triggering the codec's own non-ENVIRONMENT guard.
-    String cloudDescriptorJson =
-        "{\"name\":\"cloud-tool\",\"version\":\"1\",\"description\":\"cloud tool\","
-            + "\"rendererKey\":\"renderer\",\"executionMode\":\"CLOUD\","
-            + "\"sideEffect\":\"READ_ONLY\",\"timeoutMillis\":0,"
-            + "\"inputSchema\":{\"type\":\"object\",\"properties\":{},"
-            + "\"required\":[],\"additionalProperties\":false}}";
-    String environmentDescriptorJson =
-        "{\"name\":\"shell\",\"version\":\"1\",\"description\":\"shell tool\","
-            + "\"rendererKey\":\"renderer\",\"executionMode\":\"ENVIRONMENT\","
-            + "\"sideEffect\":\"READ_ONLY\",\"timeoutMillis\":0,"
-            + "\"inputSchema\":{\"type\":\"object\",\"properties\":{},"
-            + "\"required\":[],\"additionalProperties\":false}}";
-    String capabilitiesJson =
-        "{\"tools\":[" + environmentDescriptorJson + "," + cloudDescriptorJson + "]}";
-    ToolEnvironment environment = new ToolEnvironment();
-    environment.setId(123L);
-    environment.setName("env-123");
-    environment.setCapabilitiesJson(capabilitiesJson);
+    Tool read = tool("read", "1");
+    try (Fixture fixture = new Fixture(factory, List.of(read))) {
+      fixture.session();
+      fixture.model(model(11L, 22L, MODEL_CONFIG));
+      fixture.provider(provider(22L, AgentProviderType.openai));
 
-    ToolDescriptor localCloud =
+      IllegalArgumentException error =
+          assertThrows(
+              IllegalArgumentException.class,
+              () ->
+                  fixture.resolver.resolve(
+                      SESSION_ID,
+                      THREAD_ID,
+                      runtimeConfig("11", "quality", "offline-env", List.of("read"))));
+      assertTrue(error.getMessage().contains("offline or missing"));
+      assertTrue(error.getMessage().contains("offline-env"));
+    }
+  }
+
+  /** Unique model-visible descriptor names are preserved across bindings. */
+  @Test
+  void rejectsDuplicateDescriptorNamesAcrossBindings() {
+    CapturingProviderFactory factory =
+        new CapturingProviderFactory(
+            ProviderType.OPENAI,
+            PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
+    Tool shellCloud = tool("shell", "1", ToolExecutionMode.CLOUD);
+    ToolDescriptor shellEnv =
         new ToolDescriptor(
             "shell",
-            "1",
-            "local cloud shell",
+            "2",
+            "env shell",
             "shell",
             new ToolParamsSchema("", Map.of(), Set.of(), false),
-            ToolExecutionMode.CLOUD,
+            ToolExecutionMode.ENVIRONMENT,
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(5));
-    try (Fixture fixture = new Fixture(factory, List.of())) {
+    try (Fixture fixture = new Fixture(factory, List.of(shellCloud))) {
       fixture.session();
       fixture.model(model(11L, 22L, MODEL_CONFIG));
       fixture.provider(provider(22L, AgentProviderType.openai));
-      fixture.environment(environment);
-
+      fixture.readyEnvironment("local-dev", List.of(shellEnv), List.of());
+      // Platform wins for "shell"; selecting it twice still collides on descriptor name.
       assertThrows(
           IllegalArgumentException.class,
           () ->
               fixture.resolver.resolve(
                   SESSION_ID,
                   THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot).withTools(List.of("environment:123"))));
-
-      assertThrows(
-          IllegalArgumentException.class,
-          () ->
-              fixture.resolver.resolve(
-                  SESSION_ID,
-                  THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot).withTools(List.of("environment:123/shell"))));
-
-      assertThrows(
-          IllegalArgumentException.class,
-          () ->
-              fixture.resolver.resolve(
-                  SESSION_ID,
-                  THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot).withTools(List.of("environment:abc/shell@1"))));
-
-      assertThrows(
-          IllegalArgumentException.class,
-          () ->
-              fixture.resolver.resolve(
-                  SESSION_ID,
-                  THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot)
-                      .withTools(List.of("environment:+123/shell@1"))));
-
-      assertThrows(
-          IllegalArgumentException.class,
-          () ->
-              fixture.resolver.resolve(
-                  SESSION_ID,
-                  THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot)
-                      .withTools(List.of("environment:-123/shell@1"))));
-
-      assertThrows(
-          IllegalArgumentException.class,
-          () ->
-              fixture.resolver.resolve(
-                  SESSION_ID,
-                  THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot)
-                      .withTools(List.of("environment:99999999999999999999/shell@1"))));
-
-      assertThrows(
-          IllegalArgumentException.class,
-          () ->
-              fixture.resolver.resolve(
-                  SESSION_ID,
-                  THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot).withTools(List.of("environment:999/shell@1"))));
-    }
-
-    try (Fixture fixture = new Fixture(factory, List.of())) {
-      fixture.session();
-      fixture.model(model(11L, 22L, MODEL_CONFIG));
-      fixture.provider(provider(22L, AgentProviderType.openai));
-      fixture.environment(environment);
-      assertThrows(
-          IllegalArgumentException.class,
-          () ->
-              fixture.resolver.resolve(
-                  SESSION_ID,
-                  THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot)
-                      .withTools(List.of("environment:123/missing@1"))));
-    }
-
-    try (Fixture fixture = new Fixture(factory, List.of())) {
-      fixture.session();
-      fixture.model(model(11L, 22L, MODEL_CONFIG));
-      fixture.provider(provider(22L, AgentProviderType.openai));
-      fixture.environment(environment);
-      assertThrows(
-          IllegalArgumentException.class,
-          () ->
-              fixture.resolver.resolve(
-                  SESSION_ID,
-                  THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot)
-                      .withTools(List.of("environment:123/cloud-tool@1"))));
-    }
-
-    try (Fixture fixture =
-        new Fixture(factory, List.of(toolFromDescriptor(localCloud, ToolExecutionMode.CLOUD)))) {
-      fixture.session();
-      fixture.model(model(11L, 22L, MODEL_CONFIG));
-      fixture.provider(provider(22L, AgentProviderType.openai));
-      fixture.environment(environment);
-      assertThrows(
-          IllegalArgumentException.class,
-          () ->
-              fixture.resolver.resolve(
-                  SESSION_ID,
-                  THREAD_ID,
-                  AgentRuntimeConfig.from(snapshot)
-                      .withTools(List.of("shell@1", "environment:123/shell@1"))));
+                  runtimeConfig("11", "quality", "local-dev", List.of("shell", "shell"))));
     }
   }
 
@@ -506,14 +450,13 @@ class DatabaseTurnResourceResolverTest {
       PromptCacheMode expectedMode,
       PromptCacheRetention expectedRetention) {
     CapturingProviderFactory factory = new CapturingProviderFactory(type, capability);
-    AgentSnapshot snapshot = snapshot("11", "quality", List.of());
+    AgentRuntimeConfig config = runtimeConfig("11", "quality", null, List.of());
     try (Fixture fixture = new Fixture(factory, List.of())) {
       fixture.session();
       fixture.model(model(11L, 22L, MODEL_CONFIG));
       fixture.provider(provider(22L, persistedType));
 
-      TurnResources resources =
-          fixture.resolver.resolve(SESSION_ID, THREAD_ID, AgentRuntimeConfig.from(snapshot));
+      TurnResources resources = fixture.resolver.resolve(SESSION_ID, THREAD_ID, config);
 
       assertEquals(type, resources.model().providerType());
       assertEquals(expectedMode, resources.model().promptCachePolicy().capability().mode());
@@ -521,8 +464,30 @@ class DatabaseTurnResourceResolverTest {
     }
   }
 
-  private static AgentSnapshot snapshot(String modelId, String variant, List<String> tools) {
-    return new AgentSnapshot("system", modelId, variant, tools, List.of(), List.of(), "{}");
+  private static AgentRuntimeConfig runtimeConfig(
+      String modelId, String variant, String environmentName, List<String> tools) {
+    return runtimeConfig(modelId, variant, environmentName, tools, List.of(), List.of());
+  }
+
+  private static AgentRuntimeConfig runtimeConfig(
+      String modelId,
+      String variant,
+      String environmentName,
+      List<String> tools,
+      List<String> skills,
+      List<SelectedSkillMetadata> selectedSkills) {
+    return new AgentRuntimeConfig(
+        1L,
+        "system",
+        modelId,
+        variant,
+        environmentName,
+        tools,
+        skills,
+        selectedSkills,
+        List.of(),
+        "{}",
+        false);
   }
 
   private static AgentModel model(long id, long providerId, String config) {
@@ -577,39 +542,12 @@ class DatabaseTurnResourceResolverTest {
     };
   }
 
-  private static Tool toolFromDescriptor(
-      ToolDescriptor descriptor, ToolExecutionMode executionMode) {
-    ToolDescriptor effective =
-        descriptor.executionMode() == executionMode
-            ? descriptor
-            : new ToolDescriptor(
-                descriptor.name(),
-                descriptor.version(),
-                descriptor.description(),
-                descriptor.rendererKey(),
-                descriptor.inputSchema(),
-                executionMode,
-                descriptor.sideEffect(),
-                descriptor.timeout());
-    return new Tool() {
-      @Override
-      public ToolDescriptor descriptor() {
-        return effective;
-      }
-
-      @Override
-      public ToolExecutionHandle execute(
-          ToolExecutionRequest request, ToolExecutionListener listener) {
-        throw new UnsupportedOperationException("not executed by resolver test");
-      }
-    };
-  }
-
   private static final class Fixture implements AutoCloseable {
     private final SessionStore sessions = mock(SessionStore.class);
     private final AgentModelRepository models = mock(AgentModelRepository.class);
     private final AgentProviderRepository providers = mock(AgentProviderRepository.class);
-    private final ToolEnvironmentRepository environments = mock(ToolEnvironmentRepository.class);
+    private final LiveEnvironmentRegistry environments =
+        new LiveEnvironmentRegistry(new DaemonToolCapabilitiesCodec());
     private final HarnessExtensionHost host;
     private final DatabaseTurnResourceResolver resolver;
 
@@ -648,8 +586,7 @@ class DatabaseTurnResourceResolverTest {
               new AgentModelRuntimeConfigParser(objectMapper),
               host,
               properties,
-              environments,
-              new DaemonToolCapabilitiesCodec());
+              environments);
     }
 
     /** requireFrozenSnapshot only checks session existence; path snapshot is ThreadProcessor. */
@@ -666,8 +603,34 @@ class DatabaseTurnResourceResolverTest {
       when(providers.getById(provider.getId())).thenReturn(provider);
     }
 
-    private void environment(ToolEnvironment environment) {
-      when(environments.getById(environment.getId())).thenReturn(environment);
+    private void readyEnvironment(
+        String name, List<ToolDescriptor> tools, List<DaemonSkillDescriptor> skills) {
+      EnvironmentDaemonConnection connection =
+          new EnvironmentDaemonConnection() {
+            @Override
+            public String connectionId() {
+              return "test-" + name;
+            }
+
+            @Override
+            public boolean isOpen() {
+              return true;
+            }
+
+            @Override
+            public void sendText(String text) {}
+
+            @Override
+            public void close() {}
+          };
+      Instant now = NOW;
+      environments.tryBind(name, connection, now);
+      environments.updateCapabilities(
+          name,
+          connection,
+          new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(tools, skills),
+          now);
+      environments.markReady(name, connection, now);
     }
 
     @Override

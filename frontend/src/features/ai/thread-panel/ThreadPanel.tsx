@@ -26,6 +26,7 @@ export function ThreadPanel({
   onDraftChange,
   onSubmit,
   onCommand,
+  commands,
   widgets,
   footer,
 }: {
@@ -44,6 +45,7 @@ export function ThreadPanel({
   onDraftChange: (draft: string) => void
   onSubmit: () => void
   onCommand: (command: ThreadCommand) => void
+  commands?: ThreadCommand[]
   widgets?: ReactNode
   footer?: ReactNode
 }) {
@@ -73,6 +75,7 @@ export function ThreadPanel({
           onDraftChange={onDraftChange}
           onSubmit={onSubmit}
           onCommand={onCommand}
+          commands={commands}
         />
         {footer}
       </main>

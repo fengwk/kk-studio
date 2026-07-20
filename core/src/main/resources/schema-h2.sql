@@ -74,16 +74,21 @@ create index if not exists idx_harness_session_entry_parent on harness_session_e
 
 -- durable user execution panel / tree cursor
 create table if not exists harness_thread (
-    id                    bigint not null,                 -- 业务主键
-    session_id            bigint not null,                 -- 所属 session tree
-    head_entry_id         bigint not null,                 -- 当前 tree cursor
-    status                varchar(32) not null,            -- IDLE/RUNNING/WAITING/FAILED/RETRYING
-    input_sequence        bigint not null,                 -- 已分配 input sequence 最大值
-    processor_token       varchar(128),                    -- 当前 processor fencing token
-    processor_until       timestamp(3),                    -- token 租约截止
-    gmt_create            timestamp(3) not null default current_timestamp(),
-    gmt_modified          timestamp(3) not null default current_timestamp(),
-    version               bigint not null default 0,
+    id                           bigint not null,                 -- 业务主键
+    session_id                   bigint not null,                 -- 所属 session tree
+    head_entry_id                bigint not null,                 -- 当前 tree cursor
+    status                       varchar(32) not null,            -- IDLE/RUNNING/WAITING/FAILED/RETRYING
+    input_sequence               bigint not null,                 -- 已分配 input sequence 最大值
+    active_agent_definition_id   bigint,                          -- 当前 AgentDefinition id
+    active_agent_name            varchar(256),                    -- 捕获的 Agent 名称
+    model_id                     varchar(128),                    -- Thread 级 model id
+    variant                      varchar(128),                    -- Thread 级 model variant
+    yolo_enabled                 boolean not null default false,  -- Thread 级 YOLO
+    processor_token              varchar(128),                    -- 当前 processor fencing token
+    processor_until              timestamp(3),                    -- token 租约截止
+    gmt_create                   timestamp(3) not null default current_timestamp(),
+    gmt_modified                 timestamp(3) not null default current_timestamp(),
+    version                      bigint not null default 0,
     primary key (id)
 );
 
@@ -144,7 +149,7 @@ create table if not exists tool_invocation (
     tool_name             varchar(128) not null,
     tool_version          varchar(128) not null,
     target_type           varchar(32) not null,
-    environment_id        bigint,
+    environment_name      varchar(128),
     arguments_json        text not null,
     status                varchar(32) not null,
     permission_action     varchar(16) not null,
@@ -172,7 +177,7 @@ create index if not exists idx_tool_invocation_claim
     on tool_invocation (target_type, status, deadline_at, id);
 
 create index if not exists idx_tool_invocation_environment_claim
-    on tool_invocation (environment_id, status, deadline_at, id);
+    on tool_invocation (environment_name, status, deadline_at, id);
 
 create table if not exists tool_artifact (
     id bigint not null,
@@ -206,6 +211,17 @@ create table if not exists harness_subagent_task (
 
 create index if not exists idx_harness_subagent_task_parent
     on harness_subagent_task (parent_session_id, status);
+
+create table if not exists harness_thread_goal (
+    thread_id             bigint not null,
+    objective             text not null,
+    token_budget          bigint,
+    status                varchar(32) not null,
+    reason                text,
+    gmt_create            timestamp(3) not null default current_timestamp(),
+    gmt_modified          timestamp(3) not null default current_timestamp(),
+    primary key (thread_id)
+);
 
 create table if not exists model_usage_record (
     id                                 bigint not null,
@@ -275,18 +291,7 @@ create table if not exists comfyui_workflow_api (
     unique (api_name)
 );
 
-create table if not exists tool_environment (
-    id                    bigint not null,
-    name                  varchar(128) not null,
-    description           varchar(512),
-    capabilities_json     text not null,
-    last_seen_at          timestamp(3),
-    gmt_create            timestamp(3) not null default current_timestamp(),
-    gmt_modified          timestamp(3) not null default current_timestamp(),
-    version               bigint not null default 0,
-    primary key (id),
-    unique (name)
-);
+
 
 create table if not exists canvas_document (
     id                  bigint not null,
@@ -355,3 +360,24 @@ create table if not exists canvas_command (
     primary key (id),
     unique (workspace_id, command_id)
 );
+
+create table if not exists chat (
+    id                  bigint not null,
+    title               varchar(256),
+    default_agent_id    bigint,
+    gmt_create          timestamp(3) not null default current_timestamp(),
+    gmt_modified        timestamp(3) not null default current_timestamp(),
+    version             bigint not null default 0,
+    primary key (id)
+);
+create index if not exists idx_chat_modified on chat (gmt_modified, id);
+
+create table if not exists chat_session (
+    id                  bigint not null,
+    chat_id             bigint not null,
+    session_id          bigint not null,
+    gmt_create          timestamp(3) not null default current_timestamp(),
+    primary key (id),
+    unique (chat_id, session_id)
+);
+create index if not exists idx_chat_session_session on chat_session (session_id);

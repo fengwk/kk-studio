@@ -1,6 +1,5 @@
 import { ChevronRight, ExternalLink, GitBranch, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
 import { formatBackendDate } from '@/features/ai/ai-console-utils'
 import { getString, parsePayload } from '@/features/ai/thread-event-payload'
 import type { SubagentTaskNode } from '@/features/ai/subagent-task-tree'
@@ -137,9 +136,10 @@ function ChildTaskViewer({ node }: { node: SubagentTaskNode }) {
           <span>{report?.status ?? task.status}</span>
         </div>
         {task.childThreadId ? (
-          <Link to={`/sessions/${encodeURIComponent(task.childSessionId)}/threads/${encodeURIComponent(task.childThreadId)}`} title="打开子对话">
+          <span className="child-task-thread-id" title={`子 Thread ${task.childThreadId}`}>
             <ExternalLink aria-hidden="true" />
-          </Link>
+            <span>{task.childThreadId}</span>
+          </span>
         ) : null}
       </div>
       <div className="child-task-revision">

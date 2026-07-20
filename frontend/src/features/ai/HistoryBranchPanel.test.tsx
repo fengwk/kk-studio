@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { HistoryBranchPanel } from '@/features/ai/HistoryBranchPanel'
 
 const branchEntries = [
-  { entryId: 'root', sessionId: 's', parentEntryId: null, entryType: 'agent_snapshot', payloadJson: '{}', createTime: null },
+  { entryId: 'root', sessionId: 's', parentEntryId: null, entryType: 'root', payloadJson: '{}', createTime: null },
   { entryId: 'user', sessionId: 's', parentEntryId: 'root', entryType: 'message', payloadJson: '{"message":{"role":"USER","contents":[{"text":"user prompt"}]}}', createTime: null },
   { entryId: 'assistant', sessionId: 's', parentEntryId: 'user', entryType: 'message', payloadJson: '{"message":{"role":"ASSISTANT","contents":[{"text":"assistant reply"}]}}', createTime: null },
   { entryId: 'tool', sessionId: 's', parentEntryId: 'assistant', entryType: 'message', payloadJson: '{"message":{"role":"TOOL","contents":[{"text":"tool result"}]}}', createTime: null },

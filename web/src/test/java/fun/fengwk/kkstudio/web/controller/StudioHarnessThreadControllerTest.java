@@ -134,21 +134,14 @@ class StudioHarnessThreadControllerTest {
                     "{\"modelId\":\"model-1\",\"variant\":\"default\",\"clientMessageId\":\"model-1\"}"))
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.data.inputType").value("SET_MODEL"));
-    mockMvc
-        .perform(
-            put("/api/threads/{id}/toolset", threadId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"tools\":[\"read\"],\"clientMessageId\":\"toolset-1\"}"))
-        .andExpect(status().isAccepted())
-        .andExpect(jsonPath("$.data.inputType").value("SET_TOOLSET"));
 
     mockMvc
         .perform(get("/api/threads/{id}/inputs", threadId))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.length()").value(6))
+        .andExpect(jsonPath("$.data.length()").value(5))
         .andExpect(jsonPath("$.data[0].inputId").value(inputId))
         .andExpect(jsonPath("$.data[0].sequence").value(1))
-        .andExpect(jsonPath("$.data[5].sequence").value(6));
+        .andExpect(jsonPath("$.data[4].sequence").value(5));
 
     MvcResult stop =
         mockMvc
@@ -158,7 +151,7 @@ class StudioHarnessThreadControllerTest {
                     .content("{\"clientRequestId\":\"stop-1\"}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.stopId").isString())
-            .andExpect(jsonPath("$.data.cancelledInputs.length()").value(6))
+            .andExpect(jsonPath("$.data.cancelledInputs.length()").value(5))
             .andExpect(jsonPath("$.data.restoredMessages[0]").value("hello"))
             .andExpect(jsonPath("$.data.restoredMessages[1]").value("context"))
             .andReturn();
@@ -244,12 +237,6 @@ class StudioHarnessThreadControllerTest {
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/threads/{id}/toolset", threadId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"tools\":null,\"clientMessageId\":\"invalid-toolset\"}"))
-        .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(
             post("/api/threads/{id}/stop", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}"))
@@ -257,15 +244,6 @@ class StudioHarnessThreadControllerTest {
     mockMvc.perform(post("/api/threads/{id}/retry", threadId)).andExpect(status().isConflict());
     mockMvc.perform(get("/api/threads/{id}", "abc")).andExpect(status().isBadRequest());
     mockMvc.perform(get("/api/threads/{id}", "999999999999")).andExpect(status().isNotFound());
-    mockMvc
-        .perform(post("/api/sessions").contentType(MediaType.APPLICATION_JSON).content("{}"))
-        .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(
-            post("/api/sessions")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"agentDefinitionId\":\"999999999999\"}"))
-        .andExpect(status().isNotFound());
   }
 
   /** All typed mailbox commands require a non-blank client id and preserve payload-safe replay. */
@@ -313,15 +291,6 @@ class StudioHarnessThreadControllerTest {
         put("/api/threads/{id}/model", threadId)
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"modelId\":\"model\",\"variant\":\"default\",\"clientMessageId\":\"\"}"));
-    assertBadRequest(
-        put("/api/threads/{id}/toolset", threadId)
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"tools\":[\"read\"]}"));
-    assertBadRequest(
-        put("/api/threads/{id}/toolset", threadId)
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"tools\":[\"read\"],\"clientMessageId\":\"\"}"));
-
     mockMvc
         .perform(
             put("/api/threads/{id}/yolo", threadId)
@@ -343,12 +312,7 @@ class StudioHarnessThreadControllerTest {
             .perform(
                 post("/api/sessions")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(
-                        "{\"agentDefinitionId\":\"1\",\"title\":\""
-                            + title
-                            + "\",\"yoloEnabled\":"
-                            + yoloEnabled
-                            + "}"))
+                    .content("{\"title\":\"" + title + "\",\"yoloEnabled\":" + yoloEnabled + "}"))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.data.sessionId").isString())
             .andExpect(jsonPath("$.data.mainThreadId").isString())

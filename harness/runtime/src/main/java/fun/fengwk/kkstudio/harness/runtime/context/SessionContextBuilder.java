@@ -12,7 +12,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/** head entry path -> default transform -> extension transform -> AgentMessage projection。 */
+/**
+ * head entry path 消息投影 + 外部注入的 Thread 运行时配置。
+ *
+ * <p>配置与消息路径分离：config 来自 Thread 状态与当前 AgentDefinition，不从 Entry path fold。选中的 Skill 仅以
+ * name/description 注入 {@code available_skills} XML，不写 body 或路径。
+ */
 public final class SessionContextBuilder {
   private final SessionEntryStore entryStore;
   private final DefaultContextTransform defaultTransform;
@@ -27,11 +32,14 @@ public final class SessionContextBuilder {
     this.extensions = List.copyOf(Objects.requireNonNull(extensions, "extensions"));
   }
 
-  public SessionContext build(long sessionId, long headEntryId) {
+  public SessionContext build(long sessionId, long headEntryId, AgentRuntimeConfig config) {
     if (sessionId <= 0 || headEntryId <= 0) {
       throw new IllegalArgumentException("sessionId and headEntryId must be positive");
     }
-    ContextState state = defaultTransform.transform(entryStore.loadPath(sessionId, headEntryId));
+    Objects.requireNonNull(config, "config");
+    List<SessionEntry> entries =
+        defaultTransform.transform(entryStore.loadPath(sessionId, headEntryId));
+    ContextState state = new ContextState(config, entries);
     for (ContextTransform extension : extensions) {
       state = Objects.requireNonNull(extension.transform(state), "context transform result");
     }
@@ -40,8 +48,9 @@ public final class SessionContextBuilder {
 
   private List<AgentMessage> project(ContextState state) {
     List<AgentMessage> messages = new ArrayList<>();
-    if (state.config().systemPrompt() != null && !state.config().systemPrompt().isBlank()) {
-      messages.add(AgentMessage.system(state.config().systemPrompt()));
+    String systemPrompt = composeSystemPrompt(state.config());
+    if (systemPrompt != null && !systemPrompt.isBlank()) {
+      messages.add(AgentMessage.system(systemPrompt));
     }
     for (SessionEntry entry : state.entries()) {
       if (entry.payload() instanceof MessageEntryPayload message) {
@@ -55,5 +64,55 @@ public final class SessionContextBuilder {
       }
     }
     return List.copyOf(messages);
+  }
+
+  /**
+   * Appends a pi-base-style {@code available_skills} section using only selected skill name and
+   * description. Omits the section entirely when no skills are selected.
+   */
+  static String composeSystemPrompt(AgentRuntimeConfig config) {
+    Objects.requireNonNull(config, "config");
+    String base = config.systemPrompt() == null ? "" : config.systemPrompt();
+    String skillsSection = formatAvailableSkills(config.selectedSkills());
+    if (skillsSection.isEmpty()) {
+      return base;
+    }
+    if (base.isBlank()) {
+      return skillsSection.stripLeading();
+    }
+    return base + skillsSection;
+  }
+
+  private static String formatAvailableSkills(List<SelectedSkillMetadata> skills) {
+    if (skills == null || skills.isEmpty()) {
+      return "";
+    }
+    StringBuilder builder = new StringBuilder();
+    builder.append("\n\n");
+    builder.append("The following skills provide specialized instructions for specific tasks.\n");
+    builder.append(
+        "Use a skill by its exact name from <available_skills> when the task matches its description.\n");
+    builder.append("\n");
+    builder.append("<available_skills>\n");
+    for (SelectedSkillMetadata skill : skills) {
+      builder.append("  <skill>\n");
+      builder.append("    <name>").append(escapeXml(skill.name())).append("</name>\n");
+      builder
+          .append("    <description>")
+          .append(escapeXml(skill.description()))
+          .append("</description>\n");
+      builder.append("  </skill>\n");
+    }
+    builder.append("</available_skills>");
+    return builder.toString();
+  }
+
+  private static String escapeXml(String value) {
+    return value
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&apos;");
   }
 }

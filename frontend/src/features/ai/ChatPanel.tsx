@@ -1,5 +1,4 @@
 import type { RefObject } from 'react'
-import { ChatSidebar } from '@/features/ai/ChatPanelParts'
 import { ChatObservabilityPanel } from '@/features/ai/ChatObservabilityPanel'
 import { ThreadPanel } from '@/features/ai/thread-panel'
 import { ThreadActivityWidget } from '@/features/ai/thread-panel/ThreadActivityWidget'
@@ -10,25 +9,16 @@ import type { SubagentTaskNode } from '@/features/ai/subagent-task-tree'
 import type { RelayPermission } from '@/features/ai/useHarnessTaskTimeline'
 import type { ThreadTimeline } from '@/features/ai/thread-events'
 import type {
-  AgentDefinitionDTO,
-  HarnessThreadDTO,
   ModelUsageSummaryDTO,
   RootActivityDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts'
 
 /**
- * Harness adapter over ThreadPanel for AgentThread.
- * Commands live in the slash palette; footer is a pi-style status line.
+ * Pane-scoped Thread adapter over ThreadPanel.
+ * No permanent Session/Thread sidebar; agent/model labels come from Thread DTO.
  */
 export function ChatPanel({
-  threads,
-  activeThreadId,
-  sessionId,
-  mainThreadId,
-  title,
-  onBack,
-  agent,
   timeline,
   runtimeLabels,
   working,
@@ -45,14 +35,8 @@ export function ChatPanel({
   onDraftChange,
   onSubmit,
   onCommand,
+  commands,
 }: {
-  threads: HarnessThreadDTO[]
-  activeThreadId: string
-  sessionId: string
-  mainThreadId?: string
-  title: string
-  onBack: () => void
-  agent?: AgentDefinitionDTO
   timeline: ThreadTimeline
   runtimeLabels?: {
     agentName: string
@@ -92,6 +76,7 @@ export function ChatPanel({
   onDraftChange: (draft: string) => void
   onSubmit: () => void
   onCommand: (command: ThreadCommand) => void
+  commands?: ThreadCommand[]
 }) {
   const pendingPermissions = observability.toolInvocations.filter(
     (invocation) => invocation.status === 'WAITING_APPROVAL',
@@ -99,16 +84,6 @@ export function ChatPanel({
 
   return (
     <ThreadPanel
-      sidebar={
-        <ChatSidebar
-          threads={threads}
-          activeThreadId={activeThreadId}
-          sessionId={sessionId}
-          mainThreadId={mainThreadId}
-          title={title}
-          onBack={onBack}
-        />
-      }
       messages={timeline.messages}
       queuedMessages={timeline.queuedMessages}
       messagesLoading={messagesLoading}
@@ -123,6 +98,7 @@ export function ChatPanel({
       onDraftChange={onDraftChange}
       onSubmit={onSubmit}
       onCommand={onCommand}
+      commands={commands}
       widgets={
         <>
           <ThreadActivityWidget activities={taskTimeline.activities} />
@@ -175,10 +151,10 @@ export function ChatPanel({
       }
       footer={
         <ThreadStatusFooter
-          agentName={runtimeLabels?.agentName || agent?.name}
-          providerName={runtimeLabels?.providerName || agent?.defaultProviderName}
-          modelName={runtimeLabels?.modelName || agent?.defaultModelName}
-          variantName={runtimeLabels?.variantName || agent?.defaultVariant}
+          agentName={runtimeLabels?.agentName}
+          providerName={runtimeLabels?.providerName}
+          modelName={runtimeLabels?.modelName}
+          variantName={runtimeLabels?.variantName}
           contextWindow={runtimeLabels?.contextWindow}
           yoloEnabled={observability.yolo?.enabled}
           usage={observability.usage}
