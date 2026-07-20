@@ -104,8 +104,8 @@ public class StudioAgentResourceControllerTest {
         .andExpect(jsonPath("$.data.description").value("updated model"));
 
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setTools(List.of("browser"));
-    config.setSkills(List.of("java"));
+    config.setTools(List.of());
+    config.setSkills(List.of());
     config.setAllowedSubagents(List.of("reviewer"));
     AgentExecutionPolicyDTO policy = new AgentExecutionPolicyDTO();
     policy.setMaxTurns(8);
@@ -125,6 +125,8 @@ public class StudioAgentResourceControllerTest {
                 .andExpect(jsonPath("$.data.id").isString())
                 .andExpect(jsonPath("$.data.workspaceId").doesNotExist())
                 .andExpect(jsonPath("$.data.modelId").value(modelId))
+                .andExpect(jsonPath("$.data.config.tools").isEmpty())
+                .andExpect(jsonPath("$.data.config.skills").isEmpty())
                 .andExpect(jsonPath("$.data.config.allowedSubagents[0]").value("reviewer"))
                 .andExpect(jsonPath("$.data.config.executionPolicy.maxTurns").value(8))
                 .andReturn()
