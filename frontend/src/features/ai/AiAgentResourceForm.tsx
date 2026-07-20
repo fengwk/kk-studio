@@ -41,10 +41,8 @@ export function AgentForm({
   const skillCandidates = buildCapabilityCandidates(environments, draft.environmentName, 'skills')
   const toolSelections = markInvalidSelections(draft.tools, toolCandidates)
   const skillSelections = markInvalidSelections(draft.skills, skillCandidates)
-  // Subagents 仅从当前已配置 Agent 中勾选；排除自身配置名。
-  const subagentNames = agents
-    .map((agent) => agent.name)
-    .filter((name) => Boolean(name) && name !== draft.name.trim())
+  // Subagents 从当前已配置 Agent 勾选；允许选择自己。
+  const subagentNames = agents.map((agent) => agent.name).filter(Boolean)
 
   return (
     <>
