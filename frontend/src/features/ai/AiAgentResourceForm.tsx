@@ -1,4 +1,3 @@
-import { StringListEditor } from '@/features/ai/AiResourceFieldEditors'
 import {
   buildCapabilityCandidates,
   markInvalidSelections,
@@ -42,7 +41,10 @@ export function AgentForm({
   const skillCandidates = buildCapabilityCandidates(environments, draft.environmentName, 'skills')
   const toolSelections = markInvalidSelections(draft.tools, toolCandidates)
   const skillSelections = markInvalidSelections(draft.skills, skillCandidates)
-  const subagentNames = agents.map((agent) => agent.name).filter(Boolean)
+  // Subagents 仅从当前已配置 Agent 中勾选；排除自身配置名。
+  const subagentNames = agents
+    .map((agent) => agent.name)
+    .filter((name) => Boolean(name) && name !== draft.name.trim())
 
   return (
     <>
@@ -156,7 +158,7 @@ export function AgentForm({
       </fieldset>
 
       <fieldset className="form-group capability-picker">
-        <legend>Allowed Subagents</legend>
+        <legend>Subagents</legend>
         <div className="capability-options">
           {subagentNames.map((name) => {
             const checked = draft.allowedSubagents.includes(name)
@@ -173,20 +175,12 @@ export function AgentForm({
           })}
           {subagentNames.length === 0 && <div className="inline-hint">暂无其它 Agent 可选</div>}
         </div>
-        <StringListEditor
-          label="额外 Subagent"
-          items={draft.allowedSubagents.filter((name) => !subagentNames.includes(name))}
-          onChange={(extras) =>
-            onChange({
-              ...draft,
-              allowedSubagents: [
-                ...draft.allowedSubagents.filter((name) => subagentNames.includes(name)),
-                ...extras,
-              ],
-            })
-          }
-          itemPlaceholder="agent short name"
-        />
+        {draft.allowedSubagents.some((name) => !subagentNames.includes(name)) ? (
+          <div className="inline-hint danger" role="status">
+            无效 Subagents：
+            {draft.allowedSubagents.filter((name) => !subagentNames.includes(name)).join(', ')}
+          </div>
+        ) : null}
       </fieldset>
 
       <div className="form-grid-2">
@@ -284,17 +278,17 @@ function CapabilityChecklist({
     <div className="capability-options">
       {[...groups.entries()].map(([source, items]) => (
         <div key={source} className="capability-group">
-          <div className="capability-group-title">{source}</div>
           {items.map((option) => {
             const checked = selected.includes(option.name)
+            const label = `${option.source}/${option.name}`
             return (
               <label
-                key={option.name}
+                key={`${option.source}/${option.name}`}
                 className={`capability-option${checked ? ' is-selected' : ''}${option.offline ? ' is-offline' : ''}`}
               >
                 <input type="checkbox" checked={checked} onChange={() => onToggle(option.name)} />
                 <span>
-                  {option.name}
+                  <code className="capability-name">{label}</code>
                   {option.offline ? <small>offline</small> : null}
                 </span>
               </label>
