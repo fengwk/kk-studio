@@ -1,4 +1,5 @@
 import type { AgentDraft, ModelDraft, ProviderDraft, ResourceModal } from '@/features/ai/ai-console-types'
+import type { AgentModelInputModality } from '@/shared/api/contracts'
 import {
   toEditableAgent,
   toEditableAgentUpdate,
@@ -145,9 +146,9 @@ export function validateResourceDraft(
       const modelDraft: ModelDraft = {
         ...drafts.modelDraft,
         inputModalities:
-          drafts.modelDraft.inputModalities.length > 0
+          drafts.modelDraft.inputModalities.size > 0
             ? drafts.modelDraft.inputModalities
-            : ['TEXT'],
+            : new Set<AgentModelInputModality>(['TEXT']),
         variants: drafts.modelDraft.variants.map((variant) => {
           const id = variant.name.trim()
           if (!drafts.modelDraft.reasoning) {
@@ -182,7 +183,7 @@ export function validateResourceDraft(
       if (!modelDraft.providerId.trim()) {
         return { ok: false, message: '请选择 Provider', fields: { providerId: '请选择 Provider' } }
       }
-      if (modelDraft.inputModalities.length === 0) {
+      if (modelDraft.inputModalities.size === 0) {
         return {
           ok: false,
           message: '请至少选择一种输入类型（建议保留 TEXT）',

@@ -12,8 +12,31 @@ import { emptyModelDraft } from '@/features/ai/ai-model-draft-codec'
 import { newVariantDraft } from '@/features/ai/ai-resource-draft-primitives'
 import type { AgentModelDTO } from '@/shared/api/contracts'
 
+function modelConfig(overrides: Record<string, unknown> = {}) {
+  return {
+    limit: { context: 128000, output: 8192 },
+    abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+    pricing: {
+      currency: 'USD',
+      pricingTier: 'default',
+      serviceTier: 'default',
+      serviceTierMultiplier: 1,
+      version: 'v1',
+      inputPerMillionTokens: 0,
+      outputPerMillionTokens: 0,
+      cacheReadPerMillionTokens: 0,
+      cacheWritePerMillionTokens: 0,
+      cacheWriteLongPerMillionTokens: 0,
+      reasoningPerMillionTokens: 0,
+    },
+    defaultVariant: 'default',
+    variants: [{ id: 'default' }],
+    ...overrides,
+  }
+}
+
 describe('ai-draft-normalizers', () => {
-  /** Variant options must use configJson variants[].id and preserve first-seen ordering. */
+  /** Variant options must use config.variants[].id and preserve first-seen ordering. */
   it('builds variant options from drafts and models', () => {
     expect(
       variantOptionsFromDraft(
@@ -33,20 +56,23 @@ describe('ai-draft-normalizers', () => {
     expect(
       variantOptionsFromModel(
         model({
-          configJson: JSON.stringify({
+          config: modelConfig({
             defaultVariant: 'creative',
             variants: [{ id: 'creative' }, { id: 'precise' }],
           }),
-        }),
+        }) as AgentModelDTO,
       ),
     ).toEqual(['creative', 'precise'])
-    expect(variantOptionsFromModel(model({ configJson: '{broken' }))).toEqual(['medium'])
     expect(
       variantOptionsFromModel(
-        model({ configJson: JSON.stringify({ variants: [1, { id: 'precise' }] }) }),
+        model({
+          config: modelConfig({
+            variants: [{ id: 'creative' }, { id: 'precise' }],
+          }),
+        }) as AgentModelDTO,
       ),
-    ).toEqual(['precise'])
-    expect(variantOptionsFromModel(model({ configJson: null }))).toEqual(['medium'])
+    ).toEqual(['creative', 'precise'])
+    expect(variantOptionsFromModel(model({ config: null }) as AgentModelDTO)).toEqual(['medium'])
   })
 
   /** Invalid selected variants fall back to each model config's effective default. */
@@ -68,12 +94,12 @@ describe('ai-draft-normalizers', () => {
       [
         model({
           id: 'model-sonnet',
-          providerName: 'anthropic',
           name: 'Claude-Sonnet-4.5',
-          configJson: JSON.stringify({
+          config: {
+            ...modelConfig(),
             defaultVariant: 'precise',
             variants: [{ id: 'creative' }, { id: 'precise' }],
-          }),
+          },
         }),
       ],
     )
@@ -91,7 +117,7 @@ describe('ai-draft-normalizers', () => {
     ).toBe('default')
   })
 
-  /** Changing models also changes the Agent variant to configJson.defaultVariant. */
+  /** Changing models also changes the Agent variant to the new model's defaultVariant. */
   it('syncs agent variant when model selection changes', () => {
     const draft: AgentDraft = {
       ...emptyAgentDraft(),
@@ -102,18 +128,16 @@ describe('ai-draft-normalizers', () => {
     const models = [
       model({
         id: 'model-minimax',
-        providerName: 'minimax',
         name: 'MiniMax-M2.7',
-        configJson: JSON.stringify({
+        config: modelConfig({
           defaultVariant: 'default',
           variants: [{ id: 'default' }],
         }),
       }),
       model({
         id: 'model-sonnet',
-        providerName: 'anthropic',
         name: 'Claude-Sonnet-4.5',
-        configJson: JSON.stringify({
+        config: modelConfig({
           defaultVariant: 'creative',
           variants: [{ id: 'creative' }, { id: 'precise' }],
         }),
@@ -134,16 +158,11 @@ function model(overrides: Partial<AgentModelDTO>): AgentModelDTO {
   return {
     id: 'model-1',
     providerId: 'provider-1',
-    providerName: 'minimax',
     name: 'MiniMax-M2.7',
     description: null,
-    capabilitiesJson: '["TEXT","TOOLS"]',
-    configJson: JSON.stringify({
-      defaultVariant: 'default',
-      variants: [{ id: 'default' }],
-    }),
+    config: modelConfig() as AgentModelDTO['config'],
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
     ...overrides,
-  }
+  } as AgentModelDTO
 }

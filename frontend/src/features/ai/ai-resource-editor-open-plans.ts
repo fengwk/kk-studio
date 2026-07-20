@@ -8,7 +8,12 @@ import {
   toProviderDraft,
 } from '@/features/ai/ai-resource-draft-codecs'
 import type { ResourceEditorPlan } from '@/features/ai/ai-resource-editor-plan-types'
-import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, AgentResourceId } from '@/shared/api/contracts'
+import type {
+  AgentDefinitionDTO,
+  AgentModelWithProviderDTO,
+  AgentProviderDTO,
+  AgentResourceId,
+} from '@/shared/api/contracts'
 
 export function createProviderEditorPlan(): Extract<ResourceEditorPlan, { kind: 'provider' }> {
   return {
@@ -33,7 +38,7 @@ export function editProviderEditorPlan(
   }
 }
 
-export function createModelEditorPlan(models: AgentModelDTO[], providers: AgentProviderDTO[]): Extract<ResourceEditorPlan, { kind: 'model' }> {
+export function createModelEditorPlan(models: AgentModelWithProviderDTO[], providers: AgentProviderDTO[]): Extract<ResourceEditorPlan, { kind: 'model' }> {
   return {
     kind: 'model',
     modal: { kind: 'model', mode: 'create' },
@@ -41,7 +46,7 @@ export function createModelEditorPlan(models: AgentModelDTO[], providers: AgentP
   }
 }
 
-export function editModelEditorPlan(models: AgentModelDTO[], modelId: AgentResourceId): Extract<ResourceEditorPlan, { kind: 'model' }> | null {
+export function editModelEditorPlan(models: AgentModelWithProviderDTO[], modelId: AgentResourceId): Extract<ResourceEditorPlan, { kind: 'model' }> | null {
   const model = models.find((item) => item.id === modelId)
   if (!model) {
     return null
@@ -53,7 +58,7 @@ export function editModelEditorPlan(models: AgentModelDTO[], modelId: AgentResou
   }
 }
 
-export function createAgentEditorPlan(models: AgentModelDTO[]): Extract<ResourceEditorPlan, { kind: 'agent' }> {
+export function createAgentEditorPlan(models: AgentModelWithProviderDTO[]): Extract<ResourceEditorPlan, { kind: 'agent' }> {
   return {
     kind: 'agent',
     modal: { kind: 'agent', mode: 'create' },
@@ -63,7 +68,7 @@ export function createAgentEditorPlan(models: AgentModelDTO[]): Extract<Resource
 
 export function editAgentEditorPlan(
   agents: AgentDefinitionDTO[],
-  models: AgentModelDTO[],
+  models: AgentModelWithProviderDTO[],
   agentId: AgentResourceId,
 ): Extract<ResourceEditorPlan, { kind: 'agent' }> | null {
   const agent = agents.find((item) => item.id === agentId)

@@ -128,18 +128,17 @@ describe('ai-console-page-helpers', () => {
         providerId: 'provider-1',
         name: 'MiniMax-M2.7',
         description: 'chat model',
-        capabilitiesJson: '["TEXT","TOOLS"]',
       },
     })
     if (modelPlan.kind !== 'model') {
       throw new Error('expected model plan')
     }
-    expect(JSON.parse(modelPlan.data.configJson || '{}')).toMatchObject({
+    expect(modelPlan.data.config).toMatchObject({
       limit: { context: 128000, output: 8192 },
       abilities: {
         tools: true,
         reasoning: false,
-        modalities: { input: ['TEXT'], output: ['TEXT'] },
+        inputModalities: ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO', 'DOCUMENT'],
       },
       defaultVariant: 'default',
       variants: [{ id: 'default', temperature: 0.1, maxOutputTokens: 256 }],
@@ -157,7 +156,7 @@ describe('ai-console-page-helpers', () => {
           systemPrompt: ' prompt ',
           modelId: ' model-1 ',
           variant: ' default ',
-          tools: [' search '],
+          tools: [' search ', ''],
         },
       },
     )
@@ -181,7 +180,7 @@ describe('ai-console-page-helpers', () => {
     })
   })
 
-  it('builds edit resource submit plans', () => {
+  it('builds edit resource submit plans and preserves descriptions', () => {
     const providerPlan = buildResourceSubmitPlan(
       { kind: 'provider', mode: 'edit', id: 'provider-1' },
       {
@@ -189,8 +188,8 @@ describe('ai-console-page-helpers', () => {
           name: ' minimax ',
           description: ' updated ',
           providerType: ' openai ',
-          baseUrl: '',
-          credential: '',
+          baseUrl: ' ',
+          credential: ' ',
           modelCallTimeoutMillis: '1800000',
           modelCallIdleTimeoutMillis: '120000',
         },
@@ -234,14 +233,13 @@ describe('ai-console-page-helpers', () => {
       id: 'model-1',
       data: {
         description: 'updated',
-        capabilitiesJson: '["TEXT","TOOLS"]',
         name: 'MiniMax-M2.7',
       },
     })
     if (modelPlan.kind !== 'model') {
       throw new Error('expected model plan')
     }
-    expect(JSON.parse(modelPlan.data.configJson || '{}')).toMatchObject({
+    expect(modelPlan.data.config).toMatchObject({
       defaultVariant: 'default',
       variants: [{ id: 'default' }],
     })
@@ -326,9 +324,25 @@ function model() {
     providerName: 'minimax',
     name: 'MiniMax-M2.7',
     description: 'Chat model',
-    capabilitiesJson: '["TEXT","TOOLS"]',
-    configJson:
-      '{"limit":{"context":128000,"output":8192},"abilities":{"tools":true,"reasoning":false,"modalities":{"input":["TEXT"],"output":["TEXT"]}},"pricing":{"currency":"USD","pricingTier":"default","serviceTier":"default","serviceTierMultiplier":1,"version":"v1","inputPerMillionTokens":0,"outputPerMillionTokens":0,"cacheReadPerMillionTokens":0,"cacheWritePerMillionTokens":0,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0},"defaultVariant":"default","variants":[{"id":"default","temperature":0.2}]}',
+    config: {
+      limit: { context: 128000, output: 8192 },
+      abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+      pricing: {
+        currency: 'USD',
+        pricingTier: 'default',
+        serviceTier: 'default',
+        serviceTierMultiplier: 1,
+        version: 'v1',
+        inputPerMillionTokens: 0,
+        outputPerMillionTokens: 0,
+        cacheReadPerMillionTokens: 0,
+        cacheWritePerMillionTokens: 0,
+        cacheWriteLongPerMillionTokens: 0,
+        reasoningPerMillionTokens: 0,
+      },
+      defaultVariant: 'default',
+      variants: [{ id: 'default', temperature: 0.2 }],
+    },
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
   }

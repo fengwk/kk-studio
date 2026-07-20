@@ -20,12 +20,19 @@ import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
+import fun.fengwk.kkstudio.share.model.AgentModelAbilitiesDTO;
+import fun.fengwk.kkstudio.share.model.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
+import fun.fengwk.kkstudio.share.model.AgentModelInputModality;
+import fun.fengwk.kkstudio.share.model.AgentModelLimitDTO;
+import fun.fengwk.kkstudio.share.model.AgentModelPricingDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelUpdateDTO;
+import fun.fengwk.kkstudio.share.model.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
 import fun.fengwk.kkstudio.web.WebTestApplication;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 /** HTTP contract for global Agent resources, string IDs and credential redaction. */
@@ -202,10 +209,33 @@ public class StudioAgentResourceControllerTest {
   }
 
   private static void configureExecutableModel(AgentModelCreateDTO model) {
-    model.setCapabilitiesJson("[\"TEXT\",\"TOOLS\"]");
-    model.setConfigJson(
-        """
-        {"limit":{"context":32768,"output":4096},"abilities":{"tools":true,"reasoning":false,"modalities":{"input":["TEXT"],"output":["TEXT"]}},"defaultVariant":"default","variants":[{"id":"default"}],"pricing":{"currency":"USD","pricingTier":"test","serviceTier":"default","serviceTierMultiplier":1,"version":"v1","inputPerMillionTokens":0,"outputPerMillionTokens":0,"cacheReadPerMillionTokens":0,"cacheWritePerMillionTokens":0,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0}}
-        """);
+    AgentModelConfigDTO config = new AgentModelConfigDTO();
+    AgentModelLimitDTO limit = new AgentModelLimitDTO();
+    limit.setContext(32768);
+    limit.setOutput(4096);
+    config.setLimit(limit);
+    AgentModelAbilitiesDTO abilities = new AgentModelAbilitiesDTO();
+    abilities.setTools(true);
+    abilities.setReasoning(false);
+    abilities.setInputModalities(List.of(AgentModelInputModality.TEXT));
+    config.setAbilities(abilities);
+    AgentModelPricingDTO pricing = new AgentModelPricingDTO();
+    pricing.setCurrency("USD");
+    pricing.setPricingTier("test");
+    pricing.setServiceTier("default");
+    pricing.setServiceTierMultiplier(BigDecimal.ONE);
+    pricing.setVersion("v1");
+    pricing.setInputPerMillionTokens(BigDecimal.ZERO);
+    pricing.setOutputPerMillionTokens(BigDecimal.ZERO);
+    pricing.setCacheReadPerMillionTokens(BigDecimal.ZERO);
+    pricing.setCacheWritePerMillionTokens(BigDecimal.ZERO);
+    pricing.setCacheWriteLongPerMillionTokens(BigDecimal.ZERO);
+    pricing.setReasoningPerMillionTokens(BigDecimal.ZERO);
+    config.setPricing(pricing);
+    AgentModelVariantDTO variant = new AgentModelVariantDTO();
+    variant.setId("default");
+    config.setVariants(List.of(variant));
+    config.setDefaultVariant("default");
+    model.setConfig(config);
   }
 }

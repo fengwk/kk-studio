@@ -27,8 +27,9 @@ class ModelContractTest {
   void enforcesModelContextAndInputModalityInvariants() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> descriptor(8_192, 8_193, Set.of(ModelInputModality.TEXT)));
-    assertThrows(IllegalArgumentException.class, () -> descriptor(8_192, 2_048, Set.of()));
+        () -> descriptor(8_192, 8_193, Set.of(ModelInputModality.TEXT), true, false));
+    assertThrows(
+        IllegalArgumentException.class, () -> descriptor(8_192, 2_048, Set.of(), true, false));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -41,7 +42,8 @@ class ModelContractTest {
                 8_192,
                 2_048,
                 Set.of(ModelInputModality.TEXT),
-                Set.of(ModelCapability.TEXT),
+                true,
+                false,
                 List.of(new ModelVariant("long", 4_096, null, null, null, null)),
                 pricing(),
                 PromptCachePolicy.disabled()));
@@ -62,7 +64,8 @@ class ModelContractTest {
                 8_192,
                 2_048,
                 Set.of(ModelInputModality.TEXT),
-                Set.of(ModelCapability.TEXT),
+                true,
+                false,
                 List.of(),
                 pricing(),
                 PromptCachePolicy.disabled()));
@@ -78,7 +81,8 @@ class ModelContractTest {
                 8_192,
                 2_048,
                 Set.of(ModelInputModality.TEXT),
-                Set.of(ModelCapability.TEXT),
+                true,
+                false,
                 List.of(),
                 pricing(),
                 PromptCachePolicy.disabled()));
@@ -94,7 +98,8 @@ class ModelContractTest {
                 8_192,
                 2_048,
                 Set.of(ModelInputModality.TEXT),
-                Set.of(ModelCapability.TEXT),
+                true,
+                false,
                 List.of(),
                 pricing(),
                 PromptCachePolicy.disabled()));
@@ -110,7 +115,8 @@ class ModelContractTest {
                 8_192,
                 2_048,
                 Set.of(ModelInputModality.TEXT),
-                Set.of(ModelCapability.TEXT),
+                true,
+                false,
                 List.of(),
                 null,
                 PromptCachePolicy.disabled()));
@@ -126,7 +132,8 @@ class ModelContractTest {
                 8_192,
                 2_048,
                 Set.of(ModelInputModality.TEXT),
-                Set.of(ModelCapability.TEXT),
+                true,
+                false,
                 List.of(),
                 pricing(),
                 null));
@@ -447,21 +454,25 @@ class ModelContractTest {
   @Test
   void copiesDescriptorCollections() {
     ModelDescriptor descriptor =
-        descriptor(128_000, 8_192, Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE));
+        descriptor(
+            128_000, 8_192, Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE), true, true);
 
     assertThrows(
         UnsupportedOperationException.class,
         () -> descriptor.inputModalities().add(ModelInputModality.AUDIO));
     assertThrows(
         UnsupportedOperationException.class,
-        () -> descriptor.capabilities().add(ModelCapability.TOOLS));
-    assertThrows(
-        UnsupportedOperationException.class,
         () -> descriptor.variants().add(new ModelVariant("fast", null, null, null, null, null)));
+    assertTrue(descriptor.tools());
+    assertTrue(descriptor.reasoning());
   }
 
   private ModelDescriptor descriptor(
-      long contextWindow, long maxOutputTokens, Set<ModelInputModality> inputModalities) {
+      long contextWindow,
+      long maxOutputTokens,
+      Set<ModelInputModality> inputModalities,
+      boolean tools,
+      boolean reasoning) {
     return new ModelDescriptor(
         1L,
         2L,
@@ -471,7 +482,8 @@ class ModelContractTest {
         contextWindow,
         maxOutputTokens,
         inputModalities,
-        Set.of(ModelCapability.TEXT),
+        tools,
+        reasoning,
         List.of(new ModelVariant("default", null, null, null, null, null)),
         pricing(),
         PromptCachePolicy.disabled());

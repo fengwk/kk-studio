@@ -43,6 +43,19 @@ public final class AgentEditableSupport {
     return null;
   }
 
+  @SafeVarargs
+  public final <T> T firstNonNull(T... values) {
+    if (values == null) {
+      return null;
+    }
+    for (T value : values) {
+      if (value != null) {
+        return value;
+      }
+    }
+    return null;
+  }
+
   public void validateJsonArray(String json, String fieldName) {
     try {
       if (!objectMapper.readTree(json).isArray()) {

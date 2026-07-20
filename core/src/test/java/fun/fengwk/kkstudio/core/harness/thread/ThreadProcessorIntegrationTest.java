@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProvider;
 import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
 import fun.fengwk.kkstudio.core.harness.usage.store.mapper.ModelUsageRecordMapper;
-import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -1218,7 +1217,8 @@ class ThreadProcessorIntegrationTest {
                 32768,
                 4096,
                 Set.of(ModelInputModality.TEXT),
-                Set.of(ModelCapability.TEXT, ModelCapability.TOOLS),
+                true,
+                true,
                 List.of(new ModelVariant("default", 4096, 0.2, null, null, null, null, List.of())),
                 pricing,
                 PromptCachePolicy.disabled());

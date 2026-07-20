@@ -1,5 +1,5 @@
+import type { AgentModelWithProviderDTO } from '@/shared/api/contracts'
 import type { VariantDraft } from '@/features/ai/ai-console-types'
-import type { AgentModelDTO } from '@/shared/api/contracts'
 import { extractVariantNamesFromModel } from '@/features/ai/ai-model-draft-codec'
 
 export function trimValue(value: string | null | undefined): string {
@@ -27,6 +27,6 @@ export function variantOptionsFromDraft(variants: VariantDraft[], fallbackVarian
   return [fallback]
 }
 
-export function variantOptionsFromModel(model?: AgentModelDTO | null): string[] {
+export function variantOptionsFromModel(model?: AgentModelWithProviderDTO | null): string[] {
   return extractVariantNamesFromModel(model)
 }

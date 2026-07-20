@@ -4,7 +4,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** {@code agent_model} 行映射：模型资源与定价/能力配置。 */
+/** {@code agent_model} 行映射：模型资源与配置 JSON。 */
 @Data
 public class AgentModelDO {
 
@@ -20,10 +20,7 @@ public class AgentModelDO {
   /** 描述。 */
   private String description;
 
-  /** 能力 JSON 数组（如 TEXT/TOOLS）。 */
-  private String capabilitiesJson;
-
-  /** 模型配置 JSON（limit、abilities、defaultVariant、variants、pricing）。 */
+  /** 结构化模型配置 JSON（limit/abilities/pricing/defaultVariant/variants）。 */
   private String configJson;
 
   /** 乐观锁行版本。 */

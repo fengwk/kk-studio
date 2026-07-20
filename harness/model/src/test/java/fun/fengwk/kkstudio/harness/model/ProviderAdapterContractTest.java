@@ -579,7 +579,8 @@ class ProviderAdapterContractTest {
             4096,
             256,
             Set.of(ModelInputModality.TEXT),
-            Set.of(ModelCapability.TEXT, ModelCapability.TOOLS),
+            true,
+            true,
             List.of(variant),
             new ModelPricing(
                 "USD",

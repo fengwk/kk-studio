@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
@@ -21,23 +20,20 @@ import java.util.Set;
 /**
  * Strictly parses the executable portion of persisted Agent model JSON.
  *
- * <p>config_json 真源：
+ * <p>The single {@code config_json} source of truth is shaped as:
  *
  * <pre>
  * {
  *   "limit": { "context", "output" },
- *   "abilities": {
- *     "tools", "reasoning",
- *     "modalities": { "input": [...], "output": [...] }
- *   },
- *   "pricing": { ... },
- *   "defaultVariant": "medium",
+ *   "abilities": { "tools", "reasoning", "inputModalities": [TEXT|IMAGE|AUDIO|VIDEO|DOCUMENT] },
+ *   "pricing": { ... six per-million-token prices plus tier metadata ... },
+ *   "defaultVariant": "...",
  *   "variants": [{ "id", "reasoningEffort?", sampling... }]
  * }
  * </pre>
  *
- * <p>capabilities_json 仍校验为合法 {@link ModelCapability} 非空数组（API 投影）；runtime 的 capabilities 由
- * abilities 派生。
+ * <p>Runtime derives {@code tools} / {@code reasoning} / {@code inputModalities} directly from the
+ * config — no separate {@code capabilities} set is tracked.
  */
 @Component
 public final class AgentModelRuntimeConfigParser {
@@ -48,21 +44,8 @@ public final class AgentModelRuntimeConfigParser {
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
   }
 
-  public ParsedAgentModelConfig parse(String capabilitiesJson, String configJson) {
-    JsonNode capabilitiesNode = parseJson(capabilitiesJson, "capabilitiesJson");
-    JsonNode config = parseJson(configJson, "configJson");
-    if (!capabilitiesNode.isArray()) {
-      throw invalid("capabilitiesJson must be an array");
-    }
-    if (!config.isObject()) {
-      throw invalid("configJson must be an object");
-    }
-
-    // capabilitiesJson 仍校验合法枚举投影；runtime 以 abilities 派生结果为准。
-    enumSet(capabilitiesNode, ModelCapability.class, "capabilitiesJson");
-    if (capabilitiesNode.isEmpty()) {
-      throw invalid("capabilitiesJson must not be empty");
-    }
+  public ParsedAgentModelConfig parse(String configJson) {
+    JsonNode config = parseJson(configJson);
 
     JsonNode limit = requiredObject(config, "limit");
     long contextWindow = requiredPositiveLong(limit, "context", "configJson.limit");
@@ -74,25 +57,14 @@ public final class AgentModelRuntimeConfigParser {
     JsonNode abilities = requiredObject(config, "abilities");
     boolean tools = requiredBoolean(abilities, "tools", "configJson.abilities");
     boolean reasoning = requiredBoolean(abilities, "reasoning", "configJson.abilities");
-    JsonNode modalities = requiredObject(abilities, "modalities");
     Set<ModelInputModality> inputModalities =
         enumSet(
-            requiredArray(modalities, "input", "configJson.abilities.modalities"),
+            requiredArray(abilities, "inputModalities", "configJson.abilities"),
             ModelInputModality.class,
-            "configJson.abilities.modalities.input");
+            "configJson.abilities.inputModalities");
     if (inputModalities.isEmpty()) {
-      throw invalid("configJson.abilities.modalities.input must not be empty");
+      throw invalid("configJson.abilities.inputModalities must not be empty");
     }
-    // output 暂只校验形态（若提供），不进 runtime descriptor。
-    if (modalities.has("output") && !modalities.get("output").isNull()) {
-      enumSet(
-          requiredArray(modalities, "output", "configJson.abilities.modalities"),
-          ModelInputModality.class,
-          "configJson.abilities.modalities.output");
-    }
-
-    Set<ModelCapability> derivedCapabilities =
-        deriveCapabilities(tools, reasoning, inputModalities);
 
     List<ModelVariant> variants = variants(requiredArray(config, "variants"), maxOutputTokens);
     String defaultVariant = requiredText(config, "defaultVariant", "configJson");
@@ -107,35 +79,11 @@ public final class AgentModelRuntimeConfigParser {
         contextWindow,
         maxOutputTokens,
         inputModalities,
-        derivedCapabilities,
+        tools,
+        reasoning,
         variants,
         defaultVariant,
         pricing);
-  }
-
-  private static Set<ModelCapability> deriveCapabilities(
-      boolean tools, boolean reasoning, Set<ModelInputModality> inputModalities) {
-    EnumSet<ModelCapability> result = EnumSet.noneOf(ModelCapability.class);
-    if (inputModalities.contains(ModelInputModality.TEXT)) {
-      result.add(ModelCapability.TEXT);
-    }
-    if (tools) {
-      result.add(ModelCapability.TOOLS);
-    }
-    if (reasoning) {
-      result.add(ModelCapability.THINKING);
-    }
-    if (inputModalities.contains(ModelInputModality.IMAGE)) {
-      result.add(ModelCapability.VISION);
-    }
-    if (inputModalities.contains(ModelInputModality.AUDIO)) {
-      result.add(ModelCapability.AUDIO);
-    }
-    if (result.isEmpty()) {
-      // 极端：无 TEXT 仅 VIDEO 等——至少保证非空集合给 descriptor 校验。
-      result.add(ModelCapability.TEXT);
-    }
-    return Set.copyOf(result);
   }
 
   private List<ModelVariant> variants(JsonNode values, long modelMaxOutputTokens) {
@@ -198,19 +146,27 @@ public final class AgentModelRuntimeConfigParser {
     }
   }
 
-  private JsonNode parseJson(String json, String field) {
+  private JsonNode parseJson(String json) {
     if (json == null || json.isBlank()) {
-      throw invalid(field + " must not be blank");
+      throw invalid("configJson must not be blank");
     }
     try {
-      return objectMapper.readTree(json);
+      JsonNode node = objectMapper.readTree(json);
+      if (!node.isObject()) {
+        throw invalid("configJson must be an object");
+      }
+      return node;
     } catch (JsonProcessingException error) {
-      throw invalid(field + " must be valid JSON", error);
+      throw invalid("configJson must be valid JSON", error);
     }
   }
 
   private static JsonNode requiredArray(JsonNode parent, String field) {
-    return requiredArray(parent, field, "configJson");
+    JsonNode value = parent.get(field);
+    if (value == null || !value.isArray()) {
+      throw invalid("configJson." + field + " must be an array");
+    }
+    return value;
   }
 
   private static JsonNode requiredArray(JsonNode parent, String field, String parentPath) {
@@ -364,14 +320,14 @@ public final class AgentModelRuntimeConfigParser {
       long contextWindow,
       long maxOutputTokens,
       Set<ModelInputModality> inputModalities,
-      Set<ModelCapability> capabilities,
+      boolean tools,
+      boolean reasoning,
       List<ModelVariant> variants,
       String defaultVariant,
       ModelPricing pricing) {
 
     public ParsedAgentModelConfig {
       inputModalities = Set.copyOf(inputModalities);
-      capabilities = Set.copyOf(capabilities);
       variants = List.copyOf(variants);
       if (defaultVariant == null || defaultVariant.isBlank()) {
         throw new IllegalArgumentException("defaultVariant must not be blank");

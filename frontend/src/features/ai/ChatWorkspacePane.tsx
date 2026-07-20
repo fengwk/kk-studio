@@ -20,7 +20,7 @@ import { useAgentThreadController } from '@/features/ai/useAgentThreadController
 import { useChatSessionPicker } from '@/features/ai/useChatSessionPicker'
 import type {
   AgentDefinitionDTO,
-  AgentModelDTO,
+  AgentModelWithProviderDTO,
   AgentProviderDTO,
   ChatDTO,
   HarnessSessionEntryDTO,
@@ -47,7 +47,7 @@ function resolveDefaultAgent(
 /** 空白 pane 尚无 Thread 时，用 Chat 默认 Agent 的 model/variant 填 footer（与已绑定 pane 一致） */
 function resolveBlankPaneFooterLabels(
   agent: AgentDefinitionDTO | undefined,
-  models: AgentModelDTO[],
+  models: AgentModelWithProviderDTO[],
   providers: AgentProviderDTO[],
 ) {
   if (!agent) {
@@ -183,8 +183,12 @@ function BlankComposerPane({
     queryKey: queryKeys.providers.list,
     queryFn: () => agentService.listProviders(),
   })
-  const models = modelsQuery.data?.results ?? []
+  const rawModels = modelsQuery.data?.results ?? []
   const providers = providersQuery.data?.results ?? []
+  const models: AgentModelWithProviderDTO[] = rawModels.map((model) => {
+    const provider = providers.find((item) => String(item.id) === String(model.providerId))
+    return { ...model, providerName: provider?.name ?? null }
+  })
   const defaultAgent = resolveDefaultAgent(chat, agents)
   const footerLabels = useMemo(
     () => resolveBlankPaneFooterLabels(defaultAgent, models, providers),
