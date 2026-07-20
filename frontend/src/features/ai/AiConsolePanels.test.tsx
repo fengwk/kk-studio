@@ -8,7 +8,6 @@ describe('AiConsolePanels', () => {
   it('renders chat/agent/model/provider cards and action hooks', async () => {
     const user = userEvent.setup()
     const onCreate = vi.fn()
-    const onStart = vi.fn()
     const onEdit = vi.fn()
     const onDelete = vi.fn()
     render(
@@ -43,7 +42,6 @@ describe('AiConsolePanels', () => {
           }]}
           deletePending={false}
           onCreate={onCreate}
-          onStart={onStart}
           onEdit={onEdit}
           onDelete={onDelete}
         />
