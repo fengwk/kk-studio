@@ -24,13 +24,22 @@ export function useAiConsoleResourceQueries() {
     queryFn: () => environmentService.listEnvironments(),
   })
 
+  const providers = providersQuery.data?.results ?? []
+  const models = (modelsQuery.data?.results ?? []).map((model) => {
+    const provider = providers.find((item) => String(item.id) === String(model.providerId))
+    return {
+      ...model,
+      providerName: provider?.name ?? model.providerName ?? null,
+    }
+  })
+
   return {
     providersQuery,
     modelsQuery,
     agentsQuery,
     environmentsQuery,
-    providers: providersQuery.data?.results ?? [],
-    models: modelsQuery.data?.results ?? [],
+    providers,
+    models,
     agents: agentsQuery.data?.results ?? [],
     environments: environmentsQuery.data ?? [],
   }

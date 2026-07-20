@@ -77,6 +77,7 @@ public final class AgentModelRuntimeConfigParser {
       if (maxOutputTokens != null && maxOutputTokens > modelMaxOutputTokens) {
         throw invalid(path + ".maxOutputTokens must not exceed model maxOutputTokens");
       }
+      String thinkingLevel = optionalText(value, "thinkingLevel", path);
       result.add(
           new ModelVariant(
               name,
@@ -86,7 +87,8 @@ public final class AgentModelRuntimeConfigParser {
               optionalPositiveInt(value, "topK", path),
               optionalDouble(value, "frequencyPenalty", path),
               optionalDouble(value, "presencePenalty", path),
-              optionalStrings(value, "stopSequences", path)));
+              optionalStrings(value, "stopSequences", path),
+              thinkingLevel));
     }
     return List.copyOf(result);
   }
@@ -156,6 +158,18 @@ public final class AgentModelRuntimeConfigParser {
       throw invalid(path + "." + field + " must be a non-blank string");
     }
     return value.textValue();
+  }
+
+  private static String optionalText(JsonNode parent, String field, String path) {
+    JsonNode value = parent.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isTextual()) {
+      throw invalid(path + "." + field + " must be a string");
+    }
+    String text = value.textValue();
+    return text == null || text.isBlank() ? null : text;
   }
 
   private static BigDecimal requiredDecimal(JsonNode parent, String field, String path) {

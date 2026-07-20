@@ -26,20 +26,41 @@ export interface KeyValueDraft {
   value: string
 }
 
+/** Variant = thinking/runtime profile (pi-style), not a full capacity definition. */
 export interface VariantDraft {
   id: string
   name: string
+  thinkingLevel: string
   temperature: string
   maxOutputTokens: string
-  extras: KeyValueDraft[]
+}
+
+export interface ModelPricingDraft {
+  currency: string
+  pricingTier: string
+  serviceTier: string
+  serviceTierMultiplier: string
+  version: string
+  inputPerMillionTokens: string
+  outputPerMillionTokens: string
+  cacheReadPerMillionTokens: string
+  cacheWritePerMillionTokens: string
+  cacheWriteLongPerMillionTokens: string
+  reasoningPerMillionTokens: string
 }
 
 export interface ModelDraft {
-  provider: string
+  providerId: string
   name: string
   description: string
+  contextWindow: string
+  maxOutputTokens: string
+  inputModalities: string[]
+  capabilities: string[]
+  reasoning: boolean
   defaultVariant: string
   variants: VariantDraft[]
+  pricing: ModelPricingDraft
 }
 
 export interface AgentExecutionPolicyDraft {

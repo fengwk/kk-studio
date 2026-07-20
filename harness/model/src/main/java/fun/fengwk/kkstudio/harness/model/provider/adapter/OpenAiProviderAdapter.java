@@ -48,7 +48,7 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
             .modelName(request.model().modelId())
             .timeout(descriptor.modelCallTimeoutPolicy().modelCallTimeout())
             .returnThinking(true)
-            .customParameters(customParameters(control, minimax))
+            .customParameters(customParameters(control, minimax, request.variant().thinkingLevel()))
             .build();
       }
 
@@ -73,7 +73,8 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
     };
   }
 
-  static Map<String, Object> customParameters(ProviderCacheControl control, boolean minimax) {
+  static Map<String, Object> customParameters(
+      ProviderCacheControl control, boolean minimax, String thinkingLevel) {
     Map<String, Object> merged = new LinkedHashMap<>();
     if (control.affinityKey() != null) {
       merged.put(PROMPT_CACHE_KEY, control.affinityKey());
@@ -81,7 +82,17 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
     if (minimax) {
       merged.put(REASONING_SPLIT, true);
     }
+    // pi 风格：thinking profile 映射为 OpenAI-compatible reasoning_effort。
+    if (thinkingLevel != null
+        && !thinkingLevel.isBlank()
+        && !"off".equalsIgnoreCase(thinkingLevel.trim())) {
+      merged.put("reasoning_effort", thinkingLevel.trim().toLowerCase(Locale.ROOT));
+    }
     return merged;
+  }
+
+  static Map<String, Object> customParameters(ProviderCacheControl control, boolean minimax) {
+    return customParameters(control, minimax, null);
   }
 
   private static boolean isMiniMaxEndpoint(String endpoint) {

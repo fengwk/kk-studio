@@ -82,29 +82,32 @@ export type AgentProviderUpdateDTO = AgentProviderEditablePropertiesDTO
 export interface AgentModelDTO {
   id: AgentResourceId
   providerId: AgentResourceId
-  providerName: string
+  /** Client-enriched from providers list; API does not return this field. */
+  providerName?: string | null
   name: string
   description: string | null
-  defaultVariant: string
-  variantsJson: string | null
+  capabilitiesJson: string | null
+  configJson: string | null
+  version?: BackendLong | null
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
 
 export interface AgentModelEditablePropertiesDTO {
+  name?: string | null
   description?: string | null
-  defaultVariant?: string | null
-  variantsJson?: string | null
+  capabilitiesJson?: string | null
+  configJson?: string | null
 }
 
 export interface AgentModelCreateDTO extends AgentModelEditablePropertiesDTO {
-  provider: string
+  providerId: string
   name: string
+  capabilitiesJson: string
+  configJson: string
 }
 
-export interface AgentModelUpdateDTO extends AgentModelEditablePropertiesDTO {
-  name?: string
-}
+export interface AgentModelUpdateDTO extends AgentModelEditablePropertiesDTO {}
 
 export interface AgentExecutionPolicyDTO {
   maxTurns?: number | null

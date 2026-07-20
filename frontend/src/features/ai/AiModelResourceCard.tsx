@@ -1,4 +1,4 @@
-import { formatJsonSummary } from '@/features/ai/ai-console-utils'
+import { extractContextWindow, extractVariantNamesFromModel } from '@/features/ai/ai-model-draft-codec'
 import type { AgentModelDTO } from '@/shared/api/contracts'
 import { ResourceCardLayout } from '@/features/ai/AiResourceCardLayout'
 
@@ -13,15 +13,17 @@ export function ModelResourceCard({
   onDelete: () => void
   deletePending: boolean
 }) {
+  const profiles = extractVariantNamesFromModel(model)
+  const contextWindow = extractContextWindow(model)
   return (
     <ResourceCardLayout
       icon="model"
       title={model.name}
-      subtitle={model.description || `${model.providerName}/${model.name}`}
+      subtitle={model.description || `${model.providerName || model.providerId}/${model.name}`}
       rows={[
-        ['Provider', model.providerName],
-        ['Variant', model.defaultVariant || '-'],
-        ['Variants', formatJsonSummary(model.variantsJson)],
+        ['Provider', model.providerName || String(model.providerId)],
+        ['Context', contextWindow ? String(contextWindow) : '-'],
+        ['Profiles', profiles.join(', ') || '-'],
       ]}
       onEdit={onEdit}
       onDelete={onDelete}
