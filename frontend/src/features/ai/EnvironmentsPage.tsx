@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { StateBlock } from '@/features/ai/AiConsoleCards'
 import { environmentService } from '@/shared/api/environment-service'
+import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 function formatLastSeen(value: string | null): string {
@@ -26,8 +27,7 @@ export function EnvironmentsPage() {
   return (
     <section className="screen active">
       <nav className="subbar">
-        <div className="ai-mark">AI</div>
-        <div className="subbar-title">Environment Registry</div>
+        <NavigationSlot />
       </nav>
       <div className="screen-body">
         {environmentsQuery.isLoading && <StateBlock title="正在加载 Environments" />}
