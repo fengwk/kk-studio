@@ -7,8 +7,10 @@ import { variantOptionsFromDraft } from '@/features/ai/ai-draft-normalizers'
 import { findKnownModelDefault, knownModelNames } from '@/features/ai/known-model-catalog'
 import type { AgentProviderDTO } from '@/shared/api/contracts'
 
-const MODALITIES = ['TEXT', 'IMAGE'] as const
-const CAPABILITIES = ['TEXT', 'TOOLS', 'VISION'] as const
+/** Align with harness ModelInputModality + LangChain4j multimodal inputs. */
+const MODALITIES = ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO', 'DOCUMENT'] as const
+/** Align with harness ModelCapability. */
+const CAPABILITIES = ['TEXT', 'VISION', 'AUDIO', 'TOOLS', 'THINKING'] as const
 
 export function ModelForm({
   draft,

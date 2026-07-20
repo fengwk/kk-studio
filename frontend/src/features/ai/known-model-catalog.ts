@@ -21,8 +21,8 @@ export interface KnownModelDefault {
   contextWindow: number
   maxOutputTokens: number
   reasoning: boolean
-  inputModalities: Array<'TEXT' | 'IMAGE'>
-  capabilities: Array<'TEXT' | 'TOOLS' | 'VISION'>
+  inputModalities: Array<'TEXT' | 'IMAGE' | 'AUDIO' | 'VIDEO' | 'DOCUMENT'>
+  capabilities: Array<'TEXT' | 'VISION' | 'AUDIO' | 'TOOLS' | 'THINKING'>
   pricing: {
     currency: string
     pricingTier: string
