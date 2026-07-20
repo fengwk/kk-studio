@@ -44,24 +44,6 @@ export function includesSearch(value: string, search: string): boolean {
   return !search || value.toLowerCase().includes(search)
 }
 
-export function formatJsonSummary(json: string | null): string {
-  if (!json) {
-    return 'default'
-  }
-  try {
-    const parsed = JSON.parse(json)
-    if (Array.isArray(parsed)) {
-      return `${parsed.length} item${parsed.length === 1 ? '' : 's'}`
-    }
-    if (parsed && typeof parsed === 'object') {
-      return `${Object.keys(parsed).length} keys`
-    }
-  } catch {
-    return 'invalid json'
-  }
-  return 'default'
-}
-
 export function formatBackendDate(value: BackendDateTime): string {
   if (!value) {
     return '-'

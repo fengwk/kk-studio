@@ -4,7 +4,6 @@ import {
   filterModels,
   filterProviders,
   formatBackendDate,
-  formatJsonSummary,
   includesSearch,
   resourceTitle,
 } from '@/features/ai/ai-console-utils'
@@ -307,10 +306,6 @@ describe('ai-console-utils', () => {
     expect(resourceTitle({ kind: 'provider', mode: 'create' })).toBe('新建 Provider')
     expect(resourceTitle({ kind: 'model', mode: 'edit' })).toBe('编辑 Model')
     expect(resourceTitle({ kind: 'agent', mode: 'create' })).toBe('新建 Agent')
-    expect(formatJsonSummary(null)).toBe('default')
-    expect(formatJsonSummary('[{"id":"default"}]')).toBe('1 item')
-    expect(formatJsonSummary('{"vision":true,"audio":false}')).toBe('2 keys')
-    expect(formatJsonSummary('{broken')).toBe('invalid json')
     expect(formatBackendDate([2026, 6, 20, 2, 1, 0, 0])).toBe('2026-06-20 02:01')
     expect(formatBackendDate('2026-06-20T02:01:00')).toBe('2026-06-20 02:01')
     expect(formatBackendDate([Number.NaN])).toBe('-')
@@ -387,7 +382,6 @@ describe('ai-console-utils', () => {
     })
 
     expect(includesSearch('MiniMax', 'missing')).toBe(false)
-    expect(formatJsonSummary('123')).toBe('default')
     expect(formatBackendDate(null)).toBe('-')
   })
 })
