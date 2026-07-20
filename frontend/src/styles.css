@@ -856,6 +856,20 @@ textarea::placeholder {
 
 .resource-modal-card {
   width: min(680px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+.resource-modal-card .modal-header,
+.resource-modal-card .modal-footer {
+  flex: 0 0 auto;
+}
+
+.resource-modal-card .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .confirm-modal-card {

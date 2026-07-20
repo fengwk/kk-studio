@@ -56,11 +56,14 @@ export function AgentForm({
       <label className="form-group">
         <span>Model</span>
         <select value={draft.modelId} onChange={(event) => onChange(applyAgentModelSelection(draft, event.target.value, models))} required>
-          {models.map((model) => (
-            <option key={String(model.id)} value={String(model.id)}>
-              {model.name} ({model.providerName})
-            </option>
-          ))}
+          {models.map((model) => {
+            const provider = model.providerName?.trim()
+            return (
+              <option key={String(model.id)} value={String(model.id)}>
+                {provider ? `${model.name} (${provider})` : model.name}
+              </option>
+            )
+          })}
         </select>
       </label>
       <label className="form-group">

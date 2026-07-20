@@ -51,7 +51,6 @@ export function useAiConsoleController() {
       models: resourceController.models,
       deletePending: resourceController.agentDeletePending,
       onCreate: resourceController.openCreateAgent,
-      onStart: (agent: AgentDefinitionDTO) => chatController.openCreateChat(String(agent.id)),
       onEdit: (agent: AgentDefinitionDTO) => resourceController.openEditAgent(agent.id),
       onDelete: (agent: AgentDefinitionDTO) => resourceController.deleteAgent(agent.name, agent.id),
     },
