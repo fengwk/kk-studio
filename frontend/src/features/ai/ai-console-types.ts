@@ -74,8 +74,11 @@ export interface ModelDraft {
   maxOutputTokens: string
   tools: boolean
   reasoning: boolean
-  /** Required, non-empty on submit. The form treats it as a {@link Set} for toggling. */
-  inputModalities: Set<AgentModelInputModality>
+  /**
+   * Non-empty on submit. {@code TEXT} is always present for newly created models; toggling
+   * adds/removes items via immutable arrays (no in-place mutation).
+   */
+  inputModalities: AgentModelInputModality[]
   defaultVariant: string
   variants: VariantDraft[]
   pricing: ModelPricingDraft

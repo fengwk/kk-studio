@@ -2,10 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { agentService } from '@/shared/api/agent-service'
 import { environmentService } from '@/shared/api/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
-import type {
-  AgentModelDTO,
-  AgentModelWithProviderDTO,
-} from '@/shared/api/contracts'
+import { toAgentModelViews, type AgentModelView } from '@/features/ai/AgentModelView'
 
 export interface AiConsoleResourceQueries {
   providersQuery: ReturnType<typeof useQuery>
@@ -13,15 +10,12 @@ export interface AiConsoleResourceQueries {
   agentsQuery: ReturnType<typeof useQuery>
   environmentsQuery: ReturnType<typeof useQuery>
   providers: Awaited<ReturnType<typeof agentService.listProviders>>['results']
-  models: AgentModelWithProviderDTO[]
+  models: AgentModelView[]
   agents: Awaited<ReturnType<typeof agentService.listAgents>>['results']
   environments: Awaited<ReturnType<typeof environmentService.listEnvironments>>
 }
 
-export function useAiConsoleResourceQueries(): Omit<AiConsoleResourceQueries, 'models'> & {
-  models: AgentModelWithProviderDTO[]
-  rawModels: AgentModelDTO[]
-} {
+export function useAiConsoleResourceQueries(): AiConsoleResourceQueries {
   const providersQuery = useQuery({
     queryKey: queryKeys.providers.list,
     queryFn: () => agentService.listProviders(),
@@ -42,28 +36,16 @@ export function useAiConsoleResourceQueries(): Omit<AiConsoleResourceQueries, 'm
     queryFn: () => environmentService.listEnvironments(),
   })
 
-  const providers = providersQuery.data?.results ?? []
-  const rawModels = modelsQuery.data?.results ?? []
-  // Client-side enrichment: join model.providerId with providers[].name to surface a
-  // view-only display label without leaking the join field through the backend contract.
-  const models = rawModels.map(
-    (model): AgentModelWithProviderDTO => {
-      const provider = providers.find((item) => String(item.id) === String(model.providerId))
-      return {
-        ...model,
-        providerName: provider?.name ?? null,
-      }
-    },
-  )
-
   return {
     providersQuery,
     modelsQuery,
     agentsQuery,
     environmentsQuery,
-    providers,
-    models,
-    rawModels,
+    providers: providersQuery.data?.results ?? [],
+    models: toAgentModelViews(
+      modelsQuery.data?.results ?? [],
+      providersQuery.data?.results ?? [],
+    ),
     agents: agentsQuery.data?.results ?? [],
     environments: environmentsQuery.data ?? [],
   }

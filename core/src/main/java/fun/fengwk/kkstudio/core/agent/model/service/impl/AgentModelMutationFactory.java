@@ -2,31 +2,21 @@ package fun.fengwk.kkstudio.core.agent.model.service.impl;
 
 import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextModelId;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.share.model.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelEditablePropertiesDTO;
 
-/** Normalizes mutable model configuration. */
+/** Normalizes mutable model configuration through the shared typed config codec. */
 @Component
 final class AgentModelMutationFactory {
 
-  private final AgentEditableSupport editableSupport;
   private final AgentModelRuntimeConfigParser runtimeConfigParser;
-  private final ObjectMapper objectMapper;
 
-  AgentModelMutationFactory(
-      AgentEditableSupport editableSupport,
-      AgentModelRuntimeConfigParser runtimeConfigParser,
-      ObjectMapper objectMapper) {
-    this.editableSupport = editableSupport;
+  AgentModelMutationFactory(AgentModelRuntimeConfigParser runtimeConfigParser) {
     this.runtimeConfigParser = runtimeConfigParser;
-    this.objectMapper = objectMapper;
   }
 
   AgentModel newModel(long providerId, AgentModelEditablePropertiesDTO properties) {
@@ -56,37 +46,37 @@ final class AgentModelMutationFactory {
     if (properties == null) {
       throw new IllegalArgumentException("agent model body must not be null");
     }
-    String name = editableSupport.firstNonBlank(properties.getName(), fallbackName);
+    String name = trimToNull(properties.getName());
+    if (name == null) {
+      name = trimToNull(fallbackName);
+    }
     if (name == null) {
       throw new IllegalArgumentException("agent model name must not be blank");
     }
-    AgentModelConfigDTO config =
-        editableSupport.firstNonNull(properties.getConfig(), previousConfig(fallbackConfigJson));
+    AgentModelConfigDTO config = properties.getConfig();
+    if (config == null) {
+      config = previousConfig(fallbackConfigJson);
+    }
     if (config == null) {
       throw new IllegalArgumentException("agent model config must not be null");
     }
-    String configJson = encode(config);
-    runtimeConfigParser.parse(configJson);
-    return new Mutation(name, editableSupport.trimToNull(properties.getDescription()), configJson);
+    String configJson = runtimeConfigParser.encode(config);
+    return new Mutation(name, trimToNull(properties.getDescription()), configJson);
   }
 
   private AgentModelConfigDTO previousConfig(String configJson) {
     if (configJson == null || configJson.isBlank()) {
       return null;
     }
-    try {
-      return objectMapper.readValue(configJson, AgentModelConfigDTO.class);
-    } catch (JsonProcessingException error) {
-      throw new IllegalArgumentException("persisted config_json is invalid", error);
-    }
+    return runtimeConfigParser.decode(configJson);
   }
 
-  private String encode(AgentModelConfigDTO config) {
-    try {
-      return objectMapper.writeValueAsString(config);
-    } catch (JsonProcessingException error) {
-      throw new IllegalArgumentException("cannot serialize agent model config", error);
+  private static String trimToNull(String value) {
+    if (value == null) {
+      return null;
     }
+    String trimmed = value.trim();
+    return trimmed.isEmpty() ? null : trimmed;
   }
 
   record Mutation(String name, String description, String configJson) {}

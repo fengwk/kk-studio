@@ -1,7 +1,7 @@
 import { extractDefaultVariantFromModel } from '@/features/ai/ai-model-draft-codec'
+import type { AgentModelView } from '@/features/ai/AgentModelView'
 import type {
   AgentDefinitionDTO,
-  AgentModelWithProviderDTO,
   AgentProviderDTO,
   BackendDateTime,
 } from '@/shared/api/contracts'
@@ -27,7 +27,7 @@ export function filterAgents(agents: AgentDefinitionDTO[], search: string): Agen
   )
 }
 
-export function filterModels(models: AgentModelWithProviderDTO[], search: string): AgentModelWithProviderDTO[] {
+export function filterModels(models: AgentModelView[], search: string): AgentModelView[] {
   return models.filter((model) =>
     includesSearch(
       `${model.providerName ?? ''} ${model.name} ${model.description ?? ''} ${extractDefaultVariantFromModel(model)}`,

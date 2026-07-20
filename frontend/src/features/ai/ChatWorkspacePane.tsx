@@ -18,10 +18,9 @@ import { ThreadComposer } from '@/features/ai/thread-panel/ThreadComposer'
 import { ThreadStatusFooter } from '@/features/ai/thread-panel/ThreadStatusFooter'
 import { useAgentThreadController } from '@/features/ai/useAgentThreadController'
 import { useChatSessionPicker } from '@/features/ai/useChatSessionPicker'
+import { toAgentModelViews, type AgentModelView } from '@/features/ai/AgentModelView'
 import type {
   AgentDefinitionDTO,
-  AgentModelWithProviderDTO,
-  AgentProviderDTO,
   ChatDTO,
   HarnessSessionEntryDTO,
   HarnessThreadDTO,
@@ -47,8 +46,7 @@ function resolveDefaultAgent(
 /** 空白 pane 尚无 Thread 时，用 Chat 默认 Agent 的 model/variant 填 footer（与已绑定 pane 一致） */
 function resolveBlankPaneFooterLabels(
   agent: AgentDefinitionDTO | undefined,
-  models: AgentModelWithProviderDTO[],
-  providers: AgentProviderDTO[],
+  models: AgentModelView[],
 ) {
   if (!agent) {
     return {
@@ -60,15 +58,11 @@ function resolveBlankPaneFooterLabels(
     }
   }
   const modelId = agent.modelId ? String(agent.modelId) : ''
-  const model =
-    models.find((item) => String(item.id) === modelId)
-    || models.find((item) => item.name === modelId)
-  const provider = model
-    ? providers.find((item) => String(item.id) === String(model.providerId))
-    : undefined
+  const model = models.find((item) => String(item.id) === modelId)
   return {
     agentName: agent.name || '（无 Agent）',
-    providerName: provider?.name || model?.providerName || undefined,
+    // AgentModelView already carries the enriched providerName so we don't have to re-join here.
+    providerName: model?.providerName || undefined,
     modelName: model?.name || modelId || undefined,
     variantName: agent.variant || 'default',
     contextWindow: extractContextWindow(model),
@@ -183,16 +177,17 @@ function BlankComposerPane({
     queryKey: queryKeys.providers.list,
     queryFn: () => agentService.listProviders(),
   })
-  const rawModels = modelsQuery.data?.results ?? []
   const providers = providersQuery.data?.results ?? []
-  const models: AgentModelWithProviderDTO[] = rawModels.map((model) => {
-    const provider = providers.find((item) => String(item.id) === String(model.providerId))
-    return { ...model, providerName: provider?.name ?? null }
-  })
+  const models: AgentModelView[] = toAgentModelViews(
+    modelsQuery.data?.results ?? [],
+    providers,
+  )
   const defaultAgent = resolveDefaultAgent(chat, agents)
+  // `models` is recomputed when `providers` changes, so it already captures the join refresh;
+  // no explicit `providers` dependency is needed here.
   const footerLabels = useMemo(
-    () => resolveBlankPaneFooterLabels(defaultAgent, models, providers),
-    [defaultAgent, models, providers],
+    () => resolveBlankPaneFooterLabels(defaultAgent, models),
+    [defaultAgent, models],
   )
   const agentLabel = defaultAgent?.name || (chat?.defaultAgentId ? '（Agent 已删除/缺失）' : '（无 Agent）')
 

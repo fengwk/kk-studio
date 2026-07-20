@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentsPanel, ChatCardsPanel, ModelsPanel, ProvidersPanel } from '@/features/ai/AiConsolePanels'
-import type { AgentModelWithProviderDTO } from '@/shared/api/contracts'
+import type { AgentModelView } from '@/features/ai/AgentModelView'
 
 const baseConfig = {
   limit: { context: 128000, output: 8192 },
@@ -25,7 +25,7 @@ const baseConfig = {
   variants: [{ id: 'default' }],
 }
 
-function modelWithProvider(): AgentModelWithProviderDTO {
+function modelWithProvider(): AgentModelView {
   return {
     id: 'm1',
     providerId: 'p1',
@@ -33,9 +33,10 @@ function modelWithProvider(): AgentModelWithProviderDTO {
     name: 'MiniMax',
     description: null,
     config: baseConfig,
+    version: 1,
     createTime: null,
     updateTime: null,
-  } as AgentModelWithProviderDTO
+  }
 }
 
 describe('AiConsolePanels', () => {
@@ -71,6 +72,7 @@ describe('AiConsolePanels', () => {
               modelId: 'm1',
               variant: 'default',
               config: { environmentName: 'local', tools: ['bash'] },
+              version: 1,
               createTime: null,
               updateTime: null,
             },
@@ -99,6 +101,7 @@ describe('AiConsolePanels', () => {
               configured: true,
               modelCallTimeoutMillis: 1,
               modelCallIdleTimeoutMillis: 1,
+              version: 1,
               createTime: null,
               updateTime: null,
             },

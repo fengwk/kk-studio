@@ -65,6 +65,7 @@ function model(overrides: Partial<AgentModelDTO> = {}): AgentModelDTO {
     name: 'MiniMax-M2.7',
     description: 'Chat model',
     config: fullConfig(),
+    version: 1,
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
     ...overrides,
@@ -89,9 +90,7 @@ describe('ai-console-utils', () => {
       defaultVariant: 'medium',
       tools: true,
     })
-    expect(emptyModelDraft().inputModalities).toEqual(
-      new Set(['TEXT', 'IMAGE', 'AUDIO', 'VIDEO', 'DOCUMENT']),
-    )
+    expect(emptyModelDraft().inputModalities).toEqual(['TEXT'])
     expect(emptyAgentDraft(model())).toMatchObject({
       modelId: 'model-1',
       variant: 'default',
@@ -155,6 +154,7 @@ describe('ai-console-utils', () => {
         modelId: 'model-1',
         variant: 'default',
         config: { tools: ['search'], skills: [], allowedSubagents: [] },
+        version: 1,
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       }),
@@ -225,7 +225,7 @@ describe('ai-console-utils', () => {
       abilities: {
         tools: true,
         reasoning: true,
-        inputModalities: ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO', 'DOCUMENT'],
+        inputModalities: ['TEXT'],
       },
       defaultVariant: 'quality',
     })
@@ -277,6 +277,7 @@ describe('ai-console-utils', () => {
         modelId: 'model-1',
         variant: 'default',
         config: { tools: [] },
+        version: 1,
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       },
@@ -333,13 +334,13 @@ describe('ai-console-utils', () => {
       baseUrl: '',
     })
 
-    expect(toModelDraft(model({ config: null, description: null }))).toMatchObject({
+    expect(toModelDraft(model({ description: null }))).toMatchObject({
       providerId: 'provider-1',
       description: '',
       contextWindow: '128000',
       maxOutputTokens: '8192',
-      defaultVariant: 'medium',
-      variants: [{ name: 'medium', reasoningEffort: '', temperature: '', topK: '' }],
+      defaultVariant: 'default',
+      variants: [{ name: 'default', reasoningEffort: '', temperature: '', topK: '' }],
     })
 
     expect(
@@ -351,6 +352,7 @@ describe('ai-console-utils', () => {
         modelId: 'model-2',
         variant: '',
         config: null,
+        version: 1,
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       }),

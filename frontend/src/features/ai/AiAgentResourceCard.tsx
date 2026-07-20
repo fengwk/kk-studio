@@ -1,7 +1,8 @@
 import { ResourceCardLayout } from '@/features/ai/AiResourceCardLayout'
-import type { AgentDefinitionDTO, AgentModelWithProviderDTO } from '@/shared/api/contracts'
+import type { AgentModelView } from '@/features/ai/AgentModelView'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts'
 
-function formatAgentModelLabel(model: AgentModelWithProviderDTO | undefined, modelId: string | null | undefined): string {
+function formatAgentModelLabel(model: AgentModelView | undefined, modelId: string | null | undefined): string {
   if (!model) {
     return modelId?.trim() || ''
   }
@@ -39,7 +40,7 @@ export function AgentResourceCard({
   deletePending,
 }: {
   agent: AgentDefinitionDTO
-  models?: AgentModelWithProviderDTO[]
+  models?: AgentModelView[]
   onEdit: () => void
   onDelete: () => void
   deletePending: boolean

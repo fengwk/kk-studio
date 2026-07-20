@@ -6,12 +6,12 @@ import {
 } from '@/features/ai/agent-capability-candidates'
 import type { AgentDraft } from '@/features/ai/ai-console-types'
 import { applyAgentModelSelection, variantOptionsFromModel } from '@/features/ai/ai-draft-normalizers'
+import type { AgentModelView } from '@/features/ai/AgentModelView'
 import { emptyAgentDraft } from '@/features/ai/ai-resource-draft-codecs'
 import type { ResourceFieldKey } from '@/features/ai/ai-resource-form-validation'
 import { FormSelect } from '@/features/ai/FormSelect'
 import type {
   AgentDefinitionDTO,
-  AgentModelWithProviderDTO,
   LiveEnvironmentDTO,
 } from '@/shared/api/contracts'
 
@@ -28,7 +28,7 @@ export function AgentForm({
   onChange,
 }: {
   draft: AgentDraft
-  models: AgentModelWithProviderDTO[]
+  models: AgentModelView[]
   agents?: AgentDefinitionDTO[]
   environments?: LiveEnvironmentDTO[]
   fieldErrors?: Partial<Record<ResourceFieldKey, string>>

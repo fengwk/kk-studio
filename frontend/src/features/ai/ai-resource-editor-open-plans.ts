@@ -8,9 +8,9 @@ import {
   toProviderDraft,
 } from '@/features/ai/ai-resource-draft-codecs'
 import type { ResourceEditorPlan } from '@/features/ai/ai-resource-editor-plan-types'
+import type { AgentModelView } from '@/features/ai/AgentModelView'
 import type {
   AgentDefinitionDTO,
-  AgentModelWithProviderDTO,
   AgentProviderDTO,
   AgentResourceId,
 } from '@/shared/api/contracts'
@@ -38,15 +38,30 @@ export function editProviderEditorPlan(
   }
 }
 
-export function createModelEditorPlan(models: AgentModelWithProviderDTO[], providers: AgentProviderDTO[]): Extract<ResourceEditorPlan, { kind: 'model' }> {
+/**
+ * New model drafts default from the first available provider (not the first model); the seed
+ * model arg is only used to preserve a provider choice when re-opening the form for an existing
+ * model during edit.
+ */
+export function createModelEditorPlan(
+  models: AgentModelView[],
+  providers: AgentProviderDTO[],
+): Extract<ResourceEditorPlan, { kind: 'model' }> {
+  const seed = models[0]
+  const draft = seed
+    ? emptyModelDraft(undefined, { id: seed.providerId })
+    : emptyModelDraft(undefined, providers[0] ? { id: providers[0].id } : null)
   return {
     kind: 'model',
     modal: { kind: 'model', mode: 'create' },
-    modelDraft: normalizeModelDraftDefaultVariant(emptyModelDraft(models[0], providers[0])),
+    modelDraft: normalizeModelDraftDefaultVariant(draft),
   }
 }
 
-export function editModelEditorPlan(models: AgentModelWithProviderDTO[], modelId: AgentResourceId): Extract<ResourceEditorPlan, { kind: 'model' }> | null {
+export function editModelEditorPlan(
+  models: AgentModelView[],
+  modelId: AgentResourceId,
+): Extract<ResourceEditorPlan, { kind: 'model' }> | null {
   const model = models.find((item) => item.id === modelId)
   if (!model) {
     return null
@@ -58,17 +73,28 @@ export function editModelEditorPlan(models: AgentModelWithProviderDTO[], modelId
   }
 }
 
-export function createAgentEditorPlan(models: AgentModelWithProviderDTO[]): Extract<ResourceEditorPlan, { kind: 'agent' }> {
+export function createAgentEditorPlan(
+  models: AgentModelView[],
+  providers: AgentProviderDTO[],
+): Extract<ResourceEditorPlan, { kind: 'agent' }> {
+  const seed = models[0]
+  const draft = seed
+    ? emptyAgentDraft(seed)
+    : emptyAgentDraft()
+  if (!seed && providers[0]) {
+    // No model yet — surface the first provider for context, but stay agent-shaped.
+    draft.environmentName = ''
+  }
   return {
     kind: 'agent',
     modal: { kind: 'agent', mode: 'create' },
-    agentDraft: normalizeAgentDraftDefaultVariant(emptyAgentDraft(models[0]), models),
+    agentDraft: normalizeAgentDraftDefaultVariant(draft, models),
   }
 }
 
 export function editAgentEditorPlan(
   agents: AgentDefinitionDTO[],
-  models: AgentModelWithProviderDTO[],
+  models: AgentModelView[],
   agentId: AgentResourceId,
 ): Extract<ResourceEditorPlan, { kind: 'agent' }> | null {
   const agent = agents.find((item) => item.id === agentId)
