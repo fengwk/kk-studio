@@ -88,11 +88,17 @@ public interface ThreadTransactions {
   boolean appendEvents(
       long threadId, String processorToken, List<ThreadEventDraft> events, Instant now);
 
-  /** Provider/setup/tool prepare 失败：写 events，status=FAILED，释放 token。 */
+  /** 不可重试的 Provider/setup/tool prepare 失败：写 events，status=FAILED，释放 token。 */
   boolean fail(long threadId, String processorToken, List<ThreadEventDraft> events, Instant now);
 
-  /** FAILED -> RETRYING，写 THREAD_RETRYING。 */
-  AgentThread retry(long threadId, Instant now);
+  /** 原子写入一次自动重试计划，保留当前 response debt 并释放 token。 */
+  boolean scheduleRetry(
+      long threadId,
+      String processorToken,
+      int retryAttempt,
+      Instant retryAt,
+      List<ThreadEventDraft> events,
+      Instant now);
 
   /**
    * 幂等 Stop：取消全部 QUEUED、撤销 processor、status=IDLE、request-cancel open tools。
@@ -107,8 +113,8 @@ public interface ThreadTransactions {
    */
   BeginTurnResult beginTurn(long threadId, String processorToken, Instant now);
 
-  /** 仅在已成功偿还失败 Turn 且仍为 RETRYING 时切换为 RUNNING。 */
-  boolean completeRetriedTurn(long threadId, String processorToken, Instant now);
+  /** 仅在已成功偿还自动重试 debt 且仍为 RETRYING 时清空 retry state 并切换为 RUNNING。 */
+  boolean completeRetryDebt(long threadId, String processorToken, Instant now);
 
   /**
    * 原子写入 WAITING 事件并释放 token；普通 Tool chain 切至 WAITING，RETRYING Tool chain 保留 RETRYING debt。返回 false

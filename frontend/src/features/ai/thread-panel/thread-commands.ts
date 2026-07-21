@@ -44,12 +44,6 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
     keywords: ['cancel', 'interrupt', 'thread'],
   },
   {
-    id: 'retry',
-    label: 'retry',
-    description: '重试当前失败的 Thread',
-    keywords: ['failed', 'resume', 'thread'],
-  },
-  {
     id: 'clear-draft',
     label: 'clear',
     description: '清空当前输入',

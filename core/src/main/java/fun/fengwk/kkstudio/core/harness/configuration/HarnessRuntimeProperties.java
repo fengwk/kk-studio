@@ -16,8 +16,8 @@ public class HarnessRuntimeProperties {
   private String workerId = "kk-studio-harness-" + UUID.randomUUID();
   private Duration pollInterval = Duration.ofMillis(100);
 
-  /** 低频 Thread 恢复扫描间隔；默认约 30s。 */
-  private Duration threadRecoveryInterval = Duration.ofSeconds(30);
+  /** 自动重试到期与进程恢复扫描间隔。 */
+  private Duration threadRecoveryInterval = Duration.ofSeconds(1);
 
   /** 单次恢复扫描最多 kick 的 Thread 数。 */
   private int threadRecoveryBatchSize = 100;

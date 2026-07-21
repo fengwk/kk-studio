@@ -18,7 +18,6 @@ describe('harnessService', () => {
     await service.createSessionThread('session /1', { fromEntryId: '9007199254740993' })
     await service.submitThreadMessage('thread /1', { content: 'hello', clientMessageId: 'cid-1' })
     await service.stopThread('thread /1', { clientRequestId: 'stop-1' })
-    await service.retryThread('thread /1')
     await service.setThreadModel('thread /1', { modelId: 'model-1', variant: 'default', clientMessageId: 'cid-model' })
     await service.getThread('thread /1')
     await service.listThreadEntries('thread /1')
@@ -33,6 +32,13 @@ describe('harnessService', () => {
     await service.listRootActivities('session /1', '9')
     await service.listSessionTasks('session /1')
     await service.decideToolInvocation('tool /1', 'allow')
+    await service.getRetryPolicy()
+    await service.updateRetryPolicy({
+      maxRetries: 3,
+      backoffStrategy: 'EXPONENTIAL',
+      baseDelayMillis: 2_000,
+      maxDelayMillis: 60_000,
+    })
 
     expect(client.post).toHaveBeenNthCalledWith(1, '/sessions', { title: 'Draft' })
     expect(client.get).toHaveBeenNthCalledWith(1, '/sessions/session%20%2F1')
@@ -40,10 +46,16 @@ describe('harnessService', () => {
     expect(client.post).toHaveBeenNthCalledWith(2, '/sessions/session%20%2F1/threads', { fromEntryId: '9007199254740993' })
     expect(client.post).toHaveBeenNthCalledWith(3, '/threads/thread%20%2F1/messages', { content: 'hello', clientMessageId: 'cid-1' })
     expect(client.post).toHaveBeenNthCalledWith(4, '/threads/thread%20%2F1/stop', { clientRequestId: 'stop-1' })
-    expect(client.post).toHaveBeenNthCalledWith(5, '/threads/thread%20%2F1/retry')
     expect(client.put).toHaveBeenNthCalledWith(1, '/threads/thread%20%2F1/model', { modelId: 'model-1', variant: 'default', clientMessageId: 'cid-model' })
     expect(client.put).toHaveBeenNthCalledWith(2, '/threads/thread%20%2F1/yolo', { yoloEnabled: true, clientMessageId: 'cid-yolo' })
     expect(client.put).toHaveBeenNthCalledWith(3, '/threads/thread%20%2F1/agent', { agentDefinitionId: 'agent-1', clientMessageId: 'cid-agent' })
+    expect(client.get).toHaveBeenLastCalledWith('/harness/retry-policy')
+    expect(client.put).toHaveBeenNthCalledWith(4, '/harness/retry-policy', {
+      maxRetries: 3,
+      backoffStrategy: 'EXPONENTIAL',
+      baseDelayMillis: 2_000,
+      maxDelayMillis: 60_000,
+    })
     expect(client.put).not.toHaveBeenCalledWith(expect.stringContaining('/toolset'), expect.anything())
   })
 

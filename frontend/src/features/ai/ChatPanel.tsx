@@ -22,6 +22,7 @@ export function ChatPanel({
   timeline,
   runtimeLabels,
   working,
+  retryPresentation,
   messagesLoading,
   messagesError,
   bodyRef,
@@ -46,6 +47,11 @@ export function ChatPanel({
     contextWindow?: number
   }
   working: boolean
+  retryPresentation?: {
+    workingLabel: string | null
+    stoppedNotice: string | null
+    queueLabel: string
+  }
   messagesLoading: boolean
   messagesError: unknown
   bodyRef: RefObject<HTMLDivElement | null>
@@ -93,6 +99,7 @@ export function ChatPanel({
       composerDisabled={disabled}
       composerPending={pending}
       working={working}
+      retryPresentation={retryPresentation}
       actionError={actionError}
       onDismissActionError={onDismissActionError}
       onDraftChange={onDraftChange}

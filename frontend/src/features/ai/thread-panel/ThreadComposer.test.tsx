@@ -6,12 +6,12 @@ import { filterThreadCommands, THREAD_COMMANDS } from '@/features/ai/thread-pane
 
 describe('ThreadComposer and commands', () => {
   it('filters slash commands to the exact remaining command ids', () => {
-    expect(THREAD_COMMANDS.map((c) => c.id)).toEqual(['session', 'thread', 'agent', 'yolo', 'tree', 'stop', 'retry', 'clear-draft'])
+    expect(THREAD_COMMANDS.map((c) => c.id)).toEqual(['session', 'thread', 'agent', 'yolo', 'tree', 'stop', 'clear-draft'])
     expect(filterThreadCommands('yo').map((c) => c.id)).toEqual(['yolo'])
     expect(filterThreadCommands('sto').map((c) => c.id)).toEqual(['stop'])
     expect(filterThreadCommands('tree')[0]?.id).toBe('tree')
     expect(['history', 'branch', 'fork', 'thread'].every((keyword) => filterThreadCommands(keyword).some((command) => command.id === 'tree'))).toBe(true)
-    expect(filterThreadCommands('').map((c) => c.id)).toEqual(['session', 'thread', 'agent', 'yolo', 'tree', 'stop', 'retry', 'clear-draft'])
+    expect(filterThreadCommands('').map((c) => c.id)).toEqual(['session', 'thread', 'agent', 'yolo', 'tree', 'stop', 'clear-draft'])
     expect(filterThreadCommands('missing')).toEqual([])
   })
 

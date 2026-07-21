@@ -91,7 +91,7 @@ Tool 执行完成后，after chain 在 terminal CAS 前串行变换最终 `ToolR
 
 ### Provider request
 
-`DefaultAgentTurnEngine` 完成 model、variant、messages 和 tools 的标准 request 构建后执行 Provider interceptor chain。`ThreadProcessor` 再为当前 `sessionId` 追加 `PromptCacheRequestFinalizer`。最终 request 交给 `ModelProvider.stream(...)`。Interceptor 或 Provider 永久失败进入 Thread FAILED 路径并写 ThreadEvent；显式 Retry 在保留的失败 head 上恢复执行。
+`DefaultAgentTurnEngine` 完成 model、variant、messages 和 tools 的标准 request 构建后执行 Provider interceptor chain。`ThreadProcessor` 再为当前 `sessionId` 追加 `PromptCacheRequestFinalizer`。最终 request 交给 `ModelProvider.stream(...)`。Provider 瞬态失败按当前持久 retry policy 保留失败 head 并自动重试；Interceptor、不可重试 Provider 或重试耗尽进入 Thread FAILED 路径并写 ThreadEvent。
 
 ### Compaction
 

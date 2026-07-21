@@ -23,6 +23,9 @@ export function isThreadWorking(
   thread: HarnessThreadDTO | undefined,
   timeline?: ThreadTimeline,
 ): boolean {
+  if (thread?.status === 'FAILED') {
+    return false
+  }
   if (thread?.status === 'RUNNING' || thread?.status === 'WAITING' || thread?.status === 'RETRYING' || thread?.processing) {
     return true
   }

@@ -15,6 +15,8 @@ public record AgentThread(
     long headEntryId,
     ThreadStatus status,
     long inputSequence,
+    int retryAttempt,
+    Instant retryAt,
     Long activeAgentDefinitionId,
     String activeAgentName,
     String modelId,
@@ -31,8 +33,15 @@ public record AgentThread(
       throw new IllegalArgumentException("thread/session/head ids must be positive");
     }
     status = Objects.requireNonNull(status, "status");
-    if (inputSequence < 0 || version < 0) {
-      throw new IllegalArgumentException("inputSequence and version must not be negative");
+    if (inputSequence < 0 || retryAttempt < 0 || version < 0) {
+      throw new IllegalArgumentException(
+          "inputSequence, retryAttempt and version must not be negative");
+    }
+    if (status == ThreadStatus.RETRYING && (retryAttempt <= 0 || retryAt == null)) {
+      throw new IllegalArgumentException("retrying thread must have retry attempt and retryAt");
+    }
+    if (status != ThreadStatus.RETRYING && retryAt != null) {
+      throw new IllegalArgumentException("only retrying thread may have retryAt");
     }
     if (activeAgentDefinitionId != null && activeAgentDefinitionId <= 0) {
       throw new IllegalArgumentException("activeAgentDefinitionId must be positive when present");

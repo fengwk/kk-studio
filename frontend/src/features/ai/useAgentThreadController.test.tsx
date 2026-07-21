@@ -32,7 +32,6 @@ vi.mock('@/shared/api/harness-service', () => ({
     listThreadToolInvocations: vi.fn(),
     decideToolInvocation: vi.fn(),
     stopThread: vi.fn(),
-    retryThread: vi.fn(),
   },
 }))
 
@@ -189,7 +188,6 @@ describe('useAgentThreadController', () => {
       createTime: null,
     })
     vi.mocked(harnessService.stopThread).mockResolvedValue({ stopId: 'stop-1', cancelledInputs: [], restoredMessages: ['queued A', 'queued B'] })
-    vi.mocked(harnessService.retryThread).mockResolvedValue({ ...thread, status: 'RETRYING' } as never)
   })
 
   it('submits messages, runs slash commands, and rejects unknown commands', async () => {
@@ -301,7 +299,7 @@ describe('useAgentThreadController', () => {
     expect(result.current.pending).toBe(false)
   })
 
-  it('keeps failed A retry identity when unrelated B succeeds first (out-of-order)', async () => {
+  it('keeps failed A replay identity when unrelated B succeeds first (out-of-order)', async () => {
     let rejectA: (reason?: unknown) => void = () => {}
     let resolveB: (value: unknown) => void = () => {}
     const deferredA = new Promise((_resolve, reject) => {
@@ -362,7 +360,7 @@ describe('useAgentThreadController', () => {
     expect(result.current.actionError).toContain('A failed')
     expect(result.current.draft).toBe('message-A')
 
-    // Retry A reuses the same clientMessageId; B success must not have cleared it.
+    // Replaying A reuses the same clientMessageId; B success must not have cleared it.
     await act(async () => {
       await result.current.submitMessage()
     })
@@ -371,7 +369,7 @@ describe('useAgentThreadController', () => {
     expect(vi.mocked(harnessService.submitThreadMessage).mock.calls[2][1].content).toBe('message-A')
   })
 
-  it('keeps failed A retry identity when A fails before unrelated B succeeds', async () => {
+  it('keeps failed A replay identity when A fails before unrelated B succeeds', async () => {
     let rejectA: (reason?: unknown) => void = () => {}
     let resolveB: (value: unknown) => void = () => {}
     const deferredA = new Promise((_resolve, reject) => {
@@ -441,7 +439,7 @@ describe('useAgentThreadController', () => {
     expect(vi.mocked(harnessService.submitThreadMessage).mock.calls[2][1].clientMessageId).toBe(idA)
   })
 
-  it('restores failed content with the same clientMessageId and resets identity after edit', async () => {
+  it('restores failed content with the same clientMessageId and resets replay identity after edit', async () => {
     vi.mocked(harnessService.submitThreadMessage)
       .mockRejectedValueOnce(new Error('queue full'))
       .mockResolvedValueOnce({
@@ -587,16 +585,6 @@ describe('useAgentThreadController', () => {
     await act(async () => { await result.current.stopThread() })
     expect(vi.mocked(harnessService.stopThread).mock.calls[2][1].clientRequestId).not.toBe(failedRequestId)
     expect(result.current.draft).toBe('queued C\n\nnew message')
-    await act(async () => { await result.current.retryThread() })
-    expect(harnessService.retryThread).not.toHaveBeenCalled()
-  })
-
-  it('submits Retry only for a FAILED Thread', async () => {
-    vi.mocked(harnessService.getThread).mockResolvedValue({ ...thread, status: 'FAILED' } as never)
-    const { result } = renderHook(() => useAgentThreadController('1', 's1'), { wrapper })
-    await waitFor(() => expect(result.current.thread?.status).toBe('FAILED'))
-    act(() => result.current.runCommand({ id: 'retry', label: 'retry', description: '' }))
-    await waitFor(() => expect(harnessService.retryThread).toHaveBeenCalledWith('1'))
   })
 })
 
@@ -607,6 +595,8 @@ const thread = {
   headEntryId: 'h1',
   status: 'IDLE' as const,
   inputSequence: 0,
+  retryAttempt: 0,
+  retryAt: null,
   activeAgentDefinitionId: 'agent-1',
   activeAgentName: 'assistant',
   modelId: 'm1',

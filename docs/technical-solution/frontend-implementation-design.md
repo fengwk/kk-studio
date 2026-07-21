@@ -72,7 +72,7 @@
 | `/session` | 空 Pane 与已绑定 Pane 均可用；列出当前 Chat **全部**成员 Session；按各 Session 的 Threads 判断 running 后优先，再按用户 sort；选中后替换 **该** Pane target 为 Main Thread |
 | `/thread` | 当前 Session Threads；同样 running 优先 + sort；选中后替换 pane target |
 | `/agent` | Agent 选择器；对当前 Thread `setThreadAgent`；不手工同步其它 Pane，依赖 query invalidate + SSE |
-| `/tree` `/stop` `/retry` `/yolo` `/clear` | 保留既有语义 |
+| `/tree` `/stop` `/yolo` `/clear` | 保留既有语义；Provider 瞬态失败由服务端自动重试，不提供 `/retry` |
 
 同一 Thread 可出现在多个 Pane；React Query 与 SSE 按 threadId 共享。Agent/model/yolo 标签读 Thread DTO 字段（`activeAgentDefinitionId/name`、`modelId`、`variant`、`yoloEnabled`），不依赖旧 snapshot 解析。SSE 对 `agent_changed` / `model_changed` / `yolo_changed` 会使 Thread detail 失效，重复 Pane 响应式更新。
 
@@ -92,7 +92,8 @@
 | `setThreadAgent` / `setThreadModel` / `setThreadYolo` | `PUT /api/threads/{id}/agent`、`/model`、`/yolo` | 入队路径配置变更（202）；**无 `/toolset`** |
 | `listThreadEntries` / `inputs` / `events` | `GET /api/threads/{id}/...` | 路径 Entries、mailbox、journal |
 | `createThreadEventStream` | `GET /api/threads/{id}/events/stream` | SSE |
-| `stopThread` / `retryThread` | `POST .../stop`、`/retry` | 取消 queued Input / 显式重试 FAILED |
+| `stopThread` | `POST .../stop` | 取消 queued Input / Tool work |
+| `getRetryPolicy` / `updateRetryPolicy` | `GET` / `PUT /api/harness/retry-policy` | 查询或替换全局自动重试策略；API 间隔单位为毫秒 |
 
 所有 Snowflake ID 在 TypeScript 契约中保持十进制字符串。
 
@@ -143,7 +144,8 @@ Thread 主区纵向固定：可滚动 transcript；Working/queue/widgets；Compo
 
 - `/tree` 按需查询 Session Entry Tree，打开独立历史分支面板；确认后创建 Secondary Thread，并把 **当前 Pane** target 切到新 Thread（不改 URL）。
 - `/stop` 的 `restoredMessages` 以空行合并回 Composer，并生成新 `clientMessageId`。
-- FAILED Thread 通过 `/retry` 显式恢复。
+- `RETRYING` 时显示到期倒计时或自动重试进度，且不把后续 queued Input 误显示为 Working；重试耗尽或不可重试失败进入 `FAILED`，显示停止提示，下一条用户消息会重新启动普通循环。
+- AI 设置页以秒为单位编辑基础/最大间隔（1–60 秒，最多三位小数），无损换算为 API 的毫秒整数；重试次数范围为 0–10。
 
 ### SSE cursor 恢复
 

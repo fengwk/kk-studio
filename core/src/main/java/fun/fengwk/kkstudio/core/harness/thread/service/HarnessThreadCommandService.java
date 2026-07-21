@@ -29,6 +29,4 @@ public interface HarnessThreadCommandService {
   HarnessThreadInputDTO queueModel(String threadId, HarnessThreadModelSetDTO request);
 
   HarnessThreadStopResultDTO stop(String threadId, HarnessThreadStopDTO request);
-
-  HarnessThreadDTO retry(String threadId);
 }

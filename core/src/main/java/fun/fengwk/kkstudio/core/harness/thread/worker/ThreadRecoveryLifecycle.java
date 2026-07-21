@@ -17,7 +17,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** 低频 Thread 恢复：仅根据 durable 可恢复事实 kick，不替代主事件循环；DB processor fencing 仍为权威。 */
+/** Thread 恢复：仅根据 durable 可恢复事实 kick，不替代主事件循环；DB processor fencing 仍为权威。 */
 public final class ThreadRecoveryLifecycle implements SmartLifecycle {
   private static final System.Logger LOGGER =
       System.getLogger(ThreadRecoveryLifecycle.class.getName());

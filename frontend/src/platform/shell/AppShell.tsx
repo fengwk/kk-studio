@@ -10,6 +10,7 @@ function isAiRoute(pathname: string) {
     || pathname.startsWith('/models')
     || pathname.startsWith('/providers')
     || pathname.startsWith('/environments')
+    || pathname.startsWith('/settings')
   )
 }
 

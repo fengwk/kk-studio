@@ -421,6 +421,7 @@ function BoundThreadPane({
         timeline={controller.timeline}
         runtimeLabels={controller.runtimeLabels}
         working={controller.working}
+        retryPresentation={controller.retryPresentation}
         messagesLoading={controller.messagesLoading}
         messagesError={controller.messagesError}
         bodyRef={controller.bodyRef}

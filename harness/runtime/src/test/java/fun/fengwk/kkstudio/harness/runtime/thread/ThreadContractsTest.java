@@ -24,6 +24,8 @@ class ThreadContractsTest {
                 1,
                 ThreadStatus.IDLE,
                 0,
+                0,
+                null,
                 null,
                 null,
                 null,
@@ -41,6 +43,8 @@ class ThreadContractsTest {
             3,
             ThreadStatus.RUNNING,
             0,
+            0,
+            null,
             9L,
             "agent",
             "model",
@@ -53,6 +57,27 @@ class ThreadContractsTest {
             NOW);
     assertTrue(thread.isProcessing(NOW));
     assertFalse(thread.isProcessing(NOW.plusSeconds(2)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new AgentThread(
+                1,
+                2,
+                3,
+                ThreadStatus.RETRYING,
+                0,
+                1,
+                null,
+                9L,
+                "agent",
+                "model",
+                "default",
+                false,
+                null,
+                null,
+                0,
+                NOW,
+                NOW));
   }
 
   @Test

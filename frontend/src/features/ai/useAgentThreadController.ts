@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { extractContextWindow } from '@/features/ai/ai-model-draft-codec'
 import { buildThreadTimeline, isThreadWorking } from '@/features/ai/thread-events'
+import { deriveThreadRetryPresentation } from '@/features/ai/thread-retry-presentation'
 import type { ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
 import {
   createClientMessageId,
@@ -37,7 +38,7 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
   // Local in-flight count keeps pending accurate across overlapping mutateAsync calls.
   const [inFlightSubmissions, setInFlightSubmissions] = useState(0)
   const clientMessageIdRef = useRef<string | null>(null)
-  const retryContentRef = useRef<string | null>(null)
+  const replayContentRef = useRef<string | null>(null)
   const stopRequestIdRef = useRef<string | null>(null)
   const handledStopIdsRef = useRef(new Set<string>())
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -60,6 +61,7 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
   const createMessageMutation = useAgentThreadMessageMutation(threadId)
   const timeline = buildThreadTimeline(entries, inputs, events)
   const working = isThreadWorking(thread, timeline)
+  const retryPresentation = deriveThreadRetryPresentation(thread, events)
   const agentsById = new Map(agents.map((agent) => [String(agent.id), agent]))
   const currentAgent = thread?.activeAgentDefinitionId
     ? agentsById.get(String(thread.activeAgentDefinitionId))
@@ -81,14 +83,11 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
   useEffect(() => {
     setDraftState(initialDraft)
     clientMessageIdRef.current = null
-    retryContentRef.current = null
+    replayContentRef.current = null
   }, [initialDraft, threadId])
 
   const stopMutation = useMutation({
     mutationFn: (clientRequestId: string) => harnessService.stopThread(threadId, { clientRequestId }),
-  })
-  const retryMutation = useMutation({
-    mutationFn: () => harnessService.retryThread(threadId),
   })
   const setAgentMutation = useMutation({
     mutationFn: (agentDefinitionId: string) =>
@@ -103,10 +102,10 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
   })
 
   function setDraft(next: string) {
-    // Editing restored draft to different content resets retry identity.
-    if (retryContentRef.current != null && next !== retryContentRef.current) {
+    // Editing restored draft to different content resets request replay identity.
+    if (replayContentRef.current != null && next !== replayContentRef.current) {
       clientMessageIdRef.current = null
-      retryContentRef.current = null
+      replayContentRef.current = null
     }
     setDraftState(next)
   }
@@ -118,9 +117,9 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
       return Promise.resolve()
     }
     setActionError(null)
-    // Reuse clientMessageId only when retrying the same restored content after a failure.
-    const isRetry = retryContentRef.current === content && Boolean(clientMessageIdRef.current)
-    const clientMessageId = isRetry ? clientMessageIdRef.current! : createClientMessageId()
+    // Reuse clientMessageId only when replaying the same request after its HTTP submission failed.
+    const isReplay = replayContentRef.current === content && Boolean(clientMessageIdRef.current)
+    const clientMessageId = isReplay ? clientMessageIdRef.current! : createClientMessageId()
     clientMessageIdRef.current = clientMessageId
     // Capture content + id then clear draft immediately so the next message can be typed.
     setDraftState('')
@@ -134,8 +133,8 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
         if (clientMessageIdRef.current === clientMessageId) {
           clientMessageIdRef.current = null
         }
-        if (retryContentRef.current === content) {
-          retryContentRef.current = null
+        if (replayContentRef.current === content) {
+          replayContentRef.current = null
         }
       })
       .catch((error: unknown) => {
@@ -143,7 +142,7 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
         // Restore only when the composer is empty so an in-progress next draft is preserved.
         setDraftState((current) => {
           if (current.trim() === '') {
-            retryContentRef.current = content
+            replayContentRef.current = content
             clientMessageIdRef.current = clientMessageId
             return content
           }
@@ -169,9 +168,6 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
       case 'stop':
         void stopThread()
         return
-      case 'retry':
-        void retryThread()
-        return
       default:
         setActionError(`未知命令：${command.id}`)
     }
@@ -195,7 +191,7 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
             setDraftState((current) => [...restored, current.trim()].filter(Boolean).join('\n\n'))
           }
           clientMessageIdRef.current = null
-          retryContentRef.current = null
+          replayContentRef.current = null
         }
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) }),
@@ -205,16 +201,6 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
           queryClient.invalidateQueries({ queryKey: queryKeys.sessions.threads(thread.sessionId) }),
         ])
       })
-      .catch((error: unknown) => setActionError(errorMessage(error)))
-  }
-
-  function retryThread(): Promise<void> {
-    if (thread?.status !== 'FAILED') {
-      return Promise.resolve()
-    }
-    setActionError(null)
-    return retryMutation.mutateAsync()
-      .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) }))
       .catch((error: unknown) => setActionError(errorMessage(error)))
   }
 
@@ -241,6 +227,7 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
     timeline,
     runtimeLabels,
     working,
+    retryPresentation,
     messagesLoading: threadQuery.isLoading || entriesQuery.isLoading,
     messagesError: threadQuery.error || entriesQuery.error || eventsQuery.error,
     bodyRef,
@@ -258,7 +245,6 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
     setDraft,
     submitMessage,
     stopThread,
-    retryThread,
     setThreadAgent,
     runCommand,
   }

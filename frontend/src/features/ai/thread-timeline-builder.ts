@@ -25,6 +25,7 @@ import {
   appendStreamingToolResults,
   assistantKey,
   completeStreamingAssistant,
+  discardStreamingAssistant,
   newStreamingAssistant,
   prepareStreamingTool,
   toolCallMaterialKey,
@@ -189,6 +190,11 @@ export function buildThreadTimeline(
         break
       }
       case 'assistant_failed':
+        if (payload.retryScheduled === true) {
+          discardStreamingAssistant(activeAssistants.get(assistantKey(event)), messages)
+          activeAssistants.delete(assistantKey(event))
+          break
+        }
         completeStreamingAssistant(
           activeAssistants.get(assistantKey(event)),
           messages,

@@ -16,7 +16,7 @@ public interface ThreadStore {
   /**
    * 尝试获取 thread 执行权。成功返回带新 token 的快照；失败表示另一节点仍持有有效 lease 或状态不可运行。
    *
-   * <p>规则：status in (RUNNING, WAITING, RETRYING) 且 processorToken 为空或 processorUntil 已过期。
+   * <p>规则：RUNNING/WAITING，或已到期的 RETRYING，且 processorToken 为空或 processorUntil 已过期。
    */
   Optional<AgentThread> tryAcquire(
       long threadId, String processorToken, Instant now, Duration leaseDuration);
