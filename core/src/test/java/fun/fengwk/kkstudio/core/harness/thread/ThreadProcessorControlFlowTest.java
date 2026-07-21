@@ -287,11 +287,16 @@ class ThreadProcessorControlFlowTest {
         .thenAnswer(invocation -> ownedThread(fixture, ThreadStatus.RETRYING));
     when(fixture.transactions().beginTurn(anyLong(), anyString(), any()))
         .thenReturn(ThreadTransactions.BeginTurnResult.admitted());
-    when(fixture.transactions().fail(anyLong(), anyString(), any(), any())).thenReturn(true);
+    when(fixture
+            .transactions()
+            .recordAssistantError(
+                anyLong(), anyString(), anyLong(), any(), any(), any(), any(), any()))
+        .thenReturn(true);
 
     fixture.processor().process(1L);
 
-    verify(fixture.transactions()).fail(anyLong(), anyString(), any(), any());
+    verify(fixture.transactions())
+        .recordAssistantError(anyLong(), anyString(), anyLong(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -305,11 +310,16 @@ class ThreadProcessorControlFlowTest {
         .thenReturn(ThreadTransactions.HarvestResult.none());
     when(fixture.transactions().beginTurn(anyLong(), anyString(), any()))
         .thenReturn(ThreadTransactions.BeginTurnResult.admitted());
-    when(fixture.transactions().fail(anyLong(), anyString(), any(), any())).thenReturn(false);
+    when(fixture
+            .transactions()
+            .recordAssistantError(
+                anyLong(), anyString(), anyLong(), any(), any(), any(), any(), any()))
+        .thenReturn(false);
 
     fixture.processor().process(1L);
 
-    verify(fixture.transactions()).fail(anyLong(), anyString(), any(), any());
+    verify(fixture.transactions())
+        .recordAssistantError(anyLong(), anyString(), anyLong(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -429,6 +439,11 @@ class ThreadProcessorControlFlowTest {
     SessionEntryStore entryStore = mock(SessionEntryStore.class);
     ThreadToolPort toolPort = mock(ThreadToolPort.class);
     TurnResourceResolver resourceResolver = mock(TurnResourceResolver.class);
+    ThreadIdGenerator idGenerator = mock(ThreadIdGenerator.class);
+    // ThreadProcessor allocates a plannedAssistantEntryId before resolving resources; the failure
+    // path now reuses that id for the durable ASSISTANT_ERROR Entry. Stub a positive id so the
+    // ThreadEventDraft subject is valid.
+    when(idGenerator.newSessionEntryId()).thenReturn(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L, 10L);
     ThreadProcessor processor =
         new ThreadProcessor(
             threadStore,
@@ -446,7 +461,7 @@ class ThreadProcessorControlFlowTest {
             (delay, task) -> {},
             new ProviderRequestInterceptorChain(List.of()),
             new HarnessLifecycleObservers(List.of()),
-            mock(ThreadIdGenerator.class),
+            idGenerator,
             executor,
             scheduler);
     return new ProcessorFixture(

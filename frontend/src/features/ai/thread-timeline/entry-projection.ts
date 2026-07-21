@@ -42,6 +42,17 @@ export function projectDurableEntry(
     })
     return
   }
+  if (entry.entryType === 'assistant_error') {
+    messages.push({
+      id: entry.entryId,
+      role: 'assistant',
+      subjectEntryId: entry.entryId,
+      text: getString(payload.message) || '助手请求失败',
+      createdAt: entry.createTime,
+      status: 'error',
+    })
+    return
+  }
   if (entry.entryType !== 'message' && entry.entryType !== 'custom_message') {
     return
   }
@@ -136,6 +147,10 @@ function projectToolResult(
 export function findMaterializedAssistantEntryIds(entries: HarnessSessionEntryDTO[]): Set<string> {
   const ids = new Set<string>()
   for (const entry of entries) {
+    if (entry.entryType === 'assistant_error') {
+      ids.add(entry.entryId)
+      continue
+    }
     if (entry.entryType !== 'message') {
       continue
     }
