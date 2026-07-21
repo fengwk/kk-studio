@@ -68,6 +68,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderVideoBlock;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -164,7 +165,7 @@ abstract class LangChainModelProvider implements ModelProvider {
                   } catch (RuntimeException error) {
                     handler.onError(
                         new ProviderException(
-                            ProviderErrorKind.INVALID_REQUEST, "invalid SDK response", error),
+                            ProviderErrorKind.INVALID_REQUEST, userFacingMessage(error), error),
                         stream);
                   }
                 }
@@ -172,9 +173,12 @@ abstract class LangChainModelProvider implements ModelProvider {
                 @Override
                 public void onError(Throwable error) {
                   if (stream.terminal.compareAndSet(false, true)) {
+                    // Message is the durable user-facing text written into assistant_error /
+                    // assistant_failed. Keep the full cause-chain detail (not a generic constant)
+                    // while still attaching the original Throwable for diagnostics.
                     handler.onError(
                         new ProviderException(
-                            classify(error, stream), "provider request failed", error),
+                            classify(error, stream), userFacingMessage(error), error),
                         stream);
                   }
                 }
@@ -183,7 +187,7 @@ abstract class LangChainModelProvider implements ModelProvider {
       if (stream.terminal.compareAndSet(false, true)) {
         handler.onError(
             new ProviderException(
-                ProviderErrorKind.INVALID_REQUEST, "cannot start provider request", error),
+                ProviderErrorKind.INVALID_REQUEST, userFacingMessage(error), error),
             stream);
       }
     }
@@ -519,6 +523,45 @@ abstract class LangChainModelProvider implements ModelProvider {
       messages.append(String.valueOf(current.getMessage()));
     }
     return messages.toString();
+  }
+
+  /**
+   * Build the durable, user-visible Provider failure text.
+   *
+   * <p>Walks the cause chain and joins distinct non-blank messages. Stack traces are never
+   * included. Credentials-like substrings are redacted so the text is safe for Entry/SSE/UI.
+   */
+  static String userFacingMessage(Throwable error) {
+    if (error == null) {
+      return "provider request failed";
+    }
+    LinkedHashSet<String> parts = new LinkedHashSet<>();
+    Throwable current = error;
+    for (int depth = 0; current != null && depth < 8; depth++, current = current.getCause()) {
+      String raw = current.getMessage();
+      if (raw == null) {
+        continue;
+      }
+      String trimmed = raw.trim();
+      if (trimmed.isEmpty()) {
+        continue;
+      }
+      parts.add(redactSecrets(trimmed));
+    }
+    if (parts.isEmpty()) {
+      return error.getClass().getSimpleName();
+    }
+    String joined = String.join(" | ", parts);
+    return joined.length() <= 2000 ? joined : joined.substring(0, 2000);
+  }
+
+  private static String redactSecrets(String text) {
+    // Keep the full provider body, but never echo bearer tokens / key-like values.
+    // Order matters: handle Bearer/sk- first so a broad key=value rule cannot erase them.
+    return text.replaceAll("(?i)Bearer\\s+[A-Za-z0-9._\\-]+", "Bearer ***")
+        .replaceAll("(?i)\\bsk-[A-Za-z0-9]{8,}\\b", "sk-***")
+        .replaceAll(
+            "(?i)((?:api[_-]?key|credential|secret|token)\\s*[:=]\\s*)([^\\s,;\"']+)", "$1***");
   }
 
   private static boolean hasValue(String id, String name, String arguments) {
