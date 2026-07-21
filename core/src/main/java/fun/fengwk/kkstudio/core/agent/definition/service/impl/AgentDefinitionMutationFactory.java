@@ -2,17 +2,15 @@ package fun.fengwk.kkstudio.core.agent.definition.service.impl;
 
 import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextAgentId;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.core.agent.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
 
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -25,21 +23,20 @@ import java.util.Set;
 @Component
 final class AgentDefinitionMutationFactory {
 
-  private static final String DEFAULT_VARIANT = "default";
-
   private final AgentEditableSupport editableSupport;
-  private final ObjectMapper objectMapper;
+  private final AgentDefinitionConfigCodec configCodec;
 
-  AgentDefinitionMutationFactory(AgentEditableSupport editableSupport, ObjectMapper objectMapper) {
+  AgentDefinitionMutationFactory(
+      AgentEditableSupport editableSupport, AgentDefinitionConfigCodec configCodec) {
     this.editableSupport = editableSupport;
-    this.objectMapper = objectMapper;
+    this.configCodec = configCodec;
   }
 
   AgentDefinition newAgent(long modelId, AgentDefinitionEditablePropertiesDTO properties) {
     if (modelId <= 0) {
       throw new IllegalArgumentException("modelId must be positive");
     }
-    Mutation mutation = newMutation(properties, null, null, true);
+    Mutation mutation = newMutation(properties);
     AgentDefinition definition = new AgentDefinition();
     definition.setId(nextAgentId());
     definition.setModelId(modelId);
@@ -48,9 +45,7 @@ final class AgentDefinitionMutationFactory {
   }
 
   void update(AgentDefinition definition, AgentDefinitionEditablePropertiesDTO properties) {
-    apply(
-        definition,
-        newMutation(properties, definition.getName(), definition.getConfigJson(), false));
+    apply(definition, newMutation(properties));
   }
 
   private void apply(AgentDefinition definition, Mutation mutation) {
@@ -61,35 +56,37 @@ final class AgentDefinitionMutationFactory {
     definition.setConfigJson(mutation.configJson());
   }
 
-  private Mutation newMutation(
-      AgentDefinitionEditablePropertiesDTO properties,
-      String fallbackName,
-      String existingConfigJson,
-      boolean creating) {
+  private Mutation newMutation(AgentDefinitionEditablePropertiesDTO properties) {
     if (properties == null) {
       throw new IllegalArgumentException("agent definition body must not be null");
     }
-    String name = editableSupport.firstNonBlank(properties.getName(), fallbackName);
+    String name = editableSupport.trimToNull(properties.getName());
     if (name == null) {
       throw new IllegalArgumentException("agent name must not be blank");
     }
     AgentDefinitionConfigDTO config = properties.getConfig();
-    String configJson =
-        config == null && !creating ? existingConfigJson : writeConfig(normalizeConfig(config));
+    if (config == null) {
+      throw new IllegalArgumentException("agent config must not be null");
+    }
+    String configJson = configCodec.encode(normalizeConfig(config));
+    String variant = editableSupport.trimToNull(properties.getVariant());
+    if (variant == null) {
+      throw new IllegalArgumentException("agent variant must not be blank");
+    }
     return new Mutation(
         name,
         editableSupport.trimToNull(properties.getDescription()),
         editableSupport.trimToNull(properties.getSystemPrompt()),
-        editableSupport.firstNonBlank(properties.getVariant(), DEFAULT_VARIANT),
+        variant,
         configJson);
   }
 
   private AgentDefinitionConfigDTO normalizeConfig(AgentDefinitionConfigDTO config) {
-    AgentDefinitionConfigDTO result = config == null ? new AgentDefinitionConfigDTO() : config;
+    AgentDefinitionConfigDTO result = config;
     result.setEnvironmentName(editableSupport.trimToNull(result.getEnvironmentName()));
-    result.setTools(normalizeStrings(result.getTools()));
-    result.setSkills(normalizeSkills(result.getSkills()));
-    result.setAllowedSubagents(normalizeStrings(result.getAllowedSubagents()));
+    result.setTools(normalizeStrings(result.getTools(), "tools"));
+    result.setSkills(normalizeStrings(result.getSkills(), "skills"));
+    result.setAllowedSubagents(normalizeStrings(result.getAllowedSubagents(), "allowedSubagents"));
     result.setExecutionPolicy(normalizePolicy(result.getExecutionPolicy()));
     return result;
   }
@@ -109,46 +106,22 @@ final class AgentDefinitionMutationFactory {
     }
   }
 
-  private List<String> normalizeStrings(List<String> values) {
+  private List<String> normalizeStrings(List<String> values, String field) {
     if (values == null) {
       return List.of();
     }
-    return values.stream()
-        .map(editableSupport::trimToNull)
-        .filter(value -> value != null)
-        .distinct()
-        .toList();
-  }
-
-  /**
-   * Skills keep submission order and reject duplicate short names instead of silently
-   * deduplicating.
-   */
-  private List<String> normalizeSkills(List<String> values) {
-    if (values == null) {
-      return List.of();
-    }
-    List<String> result = new ArrayList<>();
-    Set<String> seen = new LinkedHashSet<>();
+    Set<String> result = new LinkedHashSet<>();
     for (String raw : values) {
       String value = editableSupport.trimToNull(raw);
       if (value == null) {
         continue;
       }
-      if (!seen.add(value)) {
-        throw new IllegalArgumentException("agent skills must not contain duplicates: " + value);
+      if (!result.add(value)) {
+        throw new IllegalArgumentException(
+            "agent " + field + " must not contain duplicates: " + value);
       }
-      result.add(value);
     }
     return List.copyOf(result);
-  }
-
-  private String writeConfig(AgentDefinitionConfigDTO config) {
-    try {
-      return objectMapper.writeValueAsString(config);
-    } catch (JsonProcessingException e) {
-      throw new IllegalArgumentException("agent definition config cannot be serialized", e);
-    }
   }
 
   record Mutation(

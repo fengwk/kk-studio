@@ -113,24 +113,6 @@ class MysqlModelUsageRecordStoreIntegrationTest {
     assertEquals(null, found.draft().cacheAffinityKey());
   }
 
-  /** listByThreadId 按 id asc 排序，且仅返回该 Thread 的记录。 */
-  @Test
-  void listByThreadIdOrdersByIdAscAndIsolatesByThread() {
-    ModelUsageRecord a =
-        insert(idGenerator.newModelUsageRecordId(), 11L, 21L, 31L, draftWithoutCache(), NOW);
-    ModelUsageRecord b =
-        insert(idGenerator.newModelUsageRecordId(), 11L, 21L, 32L, draftWithoutCache(), NOW);
-    ModelUsageRecord otherThread =
-        insert(idGenerator.newModelUsageRecordId(), 11L, 22L, 33L, draftWithoutCache(), NOW);
-
-    List<Long> byThread = store.listByThreadId(21L).stream().map(ModelUsageRecord::id).toList();
-    assertEquals(List.of(a.id(), b.id()), byThread);
-    assertEquals(
-        List.of(otherThread.id()),
-        store.listByThreadId(22L).stream().map(ModelUsageRecord::id).toList());
-    assertTrue(store.listByThreadId(99L).isEmpty());
-  }
-
   /** Session 与 Model scope 查询均按 id asc，并且不会泄漏其它 scope 的记录。 */
   @Test
   void listBySessionAndModelOrdersByIdAscAndIsolatesScopes() {
@@ -181,11 +163,6 @@ class MysqlModelUsageRecordStoreIntegrationTest {
           @Override
           public ModelUsageRecordDO findByAssistantEntryId(long assistantEntryId) {
             return null;
-          }
-
-          @Override
-          public List<ModelUsageRecordDO> listByThreadId(long threadId) {
-            return List.of();
           }
 
           @Override

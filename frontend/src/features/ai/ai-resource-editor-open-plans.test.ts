@@ -73,7 +73,13 @@ function agent(id: string, modelId: string): AgentDefinitionDTO {
     systemPrompt: null,
     modelId,
     variant: 'default',
-    config: null,
+    config: {
+      environmentName: null,
+      tools: [],
+      skills: [],
+      allowedSubagents: [],
+      executionPolicy: {},
+    },
     version: 1,
     createTime: null,
     updateTime: null,
@@ -81,25 +87,16 @@ function agent(id: string, modelId: string): AgentDefinitionDTO {
 }
 
 describe('ai-resource-editor-open-plans', () => {
-  it('seeds a new model plan from existing model provider when models exist', () => {
+  it('seeds a new model plan from the first provider', () => {
     const providers = [provider('p1', 'minimax'), provider('p2', 'anthropic')]
-    const models = [model('m1', 'p2')]
-    const plan = createModelEditorPlan(models, providers)
-    expect(plan.kind).toBe('model')
-    if (plan.kind !== 'model') return
-    expect(plan.modelDraft.providerId).toBe('p2')
-  })
-
-  it('falls back to providers[0] when there are no models yet', () => {
-    const providers = [provider('p1', 'minimax')]
-    const plan = createModelEditorPlan([], providers)
+    const plan = createModelEditorPlan(providers)
     expect(plan.kind).toBe('model')
     if (plan.kind !== 'model') return
     expect(plan.modelDraft.providerId).toBe('p1')
   })
 
-  it('returns empty providerId when no providers and no models', () => {
-    const plan = createModelEditorPlan([], [])
+  it('returns empty providerId when no provider exists', () => {
+    const plan = createModelEditorPlan([])
     expect(plan.kind).toBe('model')
     if (plan.kind !== 'model') return
     expect(plan.modelDraft.providerId).toBe('')
@@ -124,16 +121,15 @@ describe('ai-resource-editor-open-plans', () => {
   })
 
   it('seeds a new agent plan with the first model', () => {
-    const providers = [provider('p1', 'minimax')]
     const models = [model('m1', 'p1')]
-    const plan = createAgentEditorPlan(models, providers)
+    const plan = createAgentEditorPlan(models)
     expect(plan.kind).toBe('agent')
     if (plan.kind !== 'agent') return
     expect(plan.agentDraft.modelId).toBe('m1')
   })
 
   it('builds an empty agent plan when no model or provider exists', () => {
-    const plan = createAgentEditorPlan([], [])
+    const plan = createAgentEditorPlan([])
     expect(plan.kind).toBe('agent')
     if (plan.kind !== 'agent') return
     expect(plan.agentDraft.modelId).toBe('')

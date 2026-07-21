@@ -81,10 +81,7 @@ describe('ai-console-utils', () => {
       modelCallIdleTimeoutMillis: '120000',
     })
     expect(
-      emptyModelDraft(undefined, {
-        id: 'provider-1',
-        name: 'minimax',
-      } as never),
+      emptyModelDraft({ id: 'provider-1' }),
     ).toMatchObject({
       providerId: 'provider-1',
       defaultVariant: 'medium',
@@ -141,7 +138,7 @@ describe('ai-console-utils', () => {
       name: 'MiniMax-M2.7',
       defaultVariant: 'quality',
       variants: [
-        { name: 'quality', temperature: '0.2', maxOutputTokens: '256', topK: '32' },
+        { id: 'quality', temperature: '0.2', maxOutputTokens: '256', topK: '32' },
       ],
     })
 
@@ -153,7 +150,13 @@ describe('ai-console-utils', () => {
         systemPrompt: 'prompt',
         modelId: 'model-1',
         variant: 'default',
-        config: { tools: ['search'], skills: [], allowedSubagents: [] },
+        config: {
+          environmentName: null,
+          tools: ['search'],
+          skills: [],
+          allowedSubagents: [],
+          executionPolicy: {},
+        },
         version: 1,
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
@@ -206,7 +209,7 @@ describe('ai-console-utils', () => {
         variants: [
           {
             ...baseVariant,
-            name: 'quality',
+            id: 'quality',
             reasoningEffort: 'high',
             temperature: '0.1',
             maxOutputTokens: '256',
@@ -259,11 +262,28 @@ describe('ai-console-utils', () => {
         tools: ['search'],
         skills: [],
         allowedSubagents: [],
-        executionPolicy: null,
+        executionPolicy: {
+          maxTurns: null,
+          maxDepth: null,
+          maxDirectSubagents: null,
+          maxTotalSubagents: null,
+        },
       },
     }
     expect(toEditableAgent(agentInput)).toEqual(expectedAgent)
     expect(toEditableAgentUpdate(agentInput)).toEqual(expectedAgent)
+    expect(() =>
+      toEditableAgent({
+        ...agentInput,
+        executionPolicy: { ...agentInput.executionPolicy, maxTurns: '1.5' },
+      }),
+    ).toThrow(/executionPolicy\.maxTurns must be a positive integer/)
+    expect(() => toEditableAgent({ ...agentInput, variant: ' ' })).toThrow(
+      /variant must not be blank/,
+    )
+    expect(() =>
+      toEditableAgent({ ...agentInput, allowedSubagents: ['reviewer', ' reviewer '] }),
+    ).toThrow(/allowedSubagents 不能重复/)
   })
 
   /** Search and presentation helpers cover structured model defaults. */
@@ -276,7 +296,13 @@ describe('ai-console-utils', () => {
         systemPrompt: null,
         modelId: 'model-1',
         variant: 'default',
-        config: { tools: [] },
+        config: {
+          environmentName: null,
+          tools: [],
+          skills: [],
+          allowedSubagents: [],
+          executionPolicy: {},
+        },
         version: 1,
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
@@ -312,8 +338,8 @@ describe('ai-console-utils', () => {
     expect(formatBackendDate([Number.NaN])).toBe('-')
   })
 
-  /** Malformed persisted model config falls back to a complete editable draft without reviving legacy fields. */
-  it('handles malformed backend drafts and nullable serialization fields', () => {
+  /** Nullable optional resource fields map to complete editable drafts. */
+  it('handles nullable resource fields and serialization fields', () => {
     expect(
       toProviderDraft({
         id: 'provider-2',
@@ -340,7 +366,7 @@ describe('ai-console-utils', () => {
       contextWindow: '128000',
       maxOutputTokens: '8192',
       defaultVariant: 'default',
-      variants: [{ name: 'default', reasoningEffort: '', temperature: '', topK: '' }],
+      variants: [{ id: 'default', reasoningEffort: '', temperature: '', topK: '' }],
     })
 
     expect(
@@ -350,8 +376,14 @@ describe('ai-console-utils', () => {
         description: null,
         systemPrompt: null,
         modelId: 'model-2',
-        variant: '',
-        config: null,
+        variant: 'default',
+        config: {
+          environmentName: null,
+          tools: [],
+          skills: [],
+          allowedSubagents: [],
+          executionPolicy: {},
+        },
         version: 1,
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',

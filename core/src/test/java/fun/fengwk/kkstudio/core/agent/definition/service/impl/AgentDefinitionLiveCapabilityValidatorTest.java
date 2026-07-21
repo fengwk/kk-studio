@@ -48,7 +48,7 @@ class AgentDefinitionLiveCapabilityValidatorTest {
           List.of(environmentTool("bash", "1")),
           List.of(new DaemonSkillDescriptor("project", "Project skill")));
 
-      AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+      AgentDefinitionConfigDTO config = config();
       config.setEnvironmentName("local-dev");
       config.setTools(List.of("read", "bash"));
       config.setSkills(List.of("dev", "project"));
@@ -64,7 +64,7 @@ class AgentDefinitionLiveCapabilityValidatorTest {
           List.of(),
           List.of(new DaemonSkillDescriptor("dev", "Developer rules")));
 
-      AgentDefinitionConfigDTO unknownTool = new AgentDefinitionConfigDTO();
+      AgentDefinitionConfigDTO unknownTool = config();
       unknownTool.setTools(List.of("missing"));
       assertTrue(
           assertThrows(
@@ -72,7 +72,7 @@ class AgentDefinitionLiveCapabilityValidatorTest {
               .getMessage()
               .contains("unknown agent tool"));
 
-      AgentDefinitionConfigDTO unknownSkill = new AgentDefinitionConfigDTO();
+      AgentDefinitionConfigDTO unknownSkill = config();
       unknownSkill.setSkills(List.of("missing"));
       assertTrue(
           assertThrows(
@@ -80,14 +80,14 @@ class AgentDefinitionLiveCapabilityValidatorTest {
               .getMessage()
               .contains("unknown agent skill"));
 
-      AgentDefinitionConfigDTO offline = new AgentDefinitionConfigDTO();
+      AgentDefinitionConfigDTO offline = config();
       offline.setEnvironmentName("gone");
       assertTrue(
           assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(offline))
               .getMessage()
               .contains("not READY"));
 
-      AgentDefinitionConfigDTO longName = new AgentDefinitionConfigDTO();
+      AgentDefinitionConfigDTO longName = config();
       longName.setTools(List.of("environment:local/bash@1"));
       assertTrue(
           assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(longName))
@@ -110,12 +110,12 @@ class AgentDefinitionLiveCapabilityValidatorTest {
               new DaemonSkillDescriptor("shared", "from env"),
               new DaemonSkillDescriptor("only-env", "env only")));
 
-      AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+      AgentDefinitionConfigDTO config = config();
       config.setEnvironmentName("local-dev");
       config.setSkills(List.of("shared", "only-env"));
       assertDoesNotThrow(() -> fixture.validator.validate(config));
 
-      AgentDefinitionConfigDTO noEnv = new AgentDefinitionConfigDTO();
+      AgentDefinitionConfigDTO noEnv = config();
       noEnv.setSkills(List.of("only-env"));
       assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(noEnv));
     }
@@ -123,6 +123,13 @@ class AgentDefinitionLiveCapabilityValidatorTest {
 
   private static Tool cloudTool(String name, String version) {
     return tool(name, version, ToolExecutionMode.CLOUD);
+  }
+
+  private static AgentDefinitionConfigDTO config() {
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setTools(List.of());
+    config.setSkills(List.of());
+    return config;
   }
 
   private static ToolDescriptor environmentTool(String name, String version) {

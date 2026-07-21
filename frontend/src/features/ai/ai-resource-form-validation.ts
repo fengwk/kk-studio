@@ -24,6 +24,7 @@ export type ResourceFieldKey =
   | 'environmentName'
   | 'tools'
   | 'skills'
+  | 'allowedSubagents'
   | 'executionPolicy'
   | 'general'
 
@@ -43,19 +44,26 @@ export function toUserFacingErrorMessage(error: unknown): string {
 
   const rules: Array<{ match: RegExp; message: string }> = [
     { match: /reasoningEffort|思考强度/i, message: '已开启 Reasoning，请为每个配置填写思考强度（如 low / medium / high）' },
-    { match: /at least one variant|variant \d+ id is required/i, message: '请至少添加一个 Variant，并填写名称' },
-    { match: /duplicate variant/i, message: 'Variant 名称不能重复' },
+    { match: /^variant must not be blank$/i, message: '请选择有效的 Variant' },
+    { match: /at least one variant|variant \d+ id is required/i, message: '请至少添加一个 Variant，并填写 ID' },
+    { match: /duplicate variant/i, message: 'Variant ID 不能重复' },
     { match: /defaultVariant/i, message: '请选择一个有效的默认 Variant' },
     { match: /maxOutputTokens.*exceed|must not exceed context/i, message: '最大输出长度不能超过上下文窗口' },
     { match: /contextWindow|limit\.context/i, message: '请填写有效的上下文窗口（正整数）' },
     { match: /maxOutputTokens|limit\.output/i, message: '请填写有效的最大输出长度（正整数）' },
     { match: /inputModalit|modality/i, message: '请至少选择一种输入类型（建议保留 TEXT）' },
+    { match: /temperature/i, message: 'Temperature 必须为 0 或正数' },
+    { match: /topP/i, message: 'Top P 必须大于 0 且不超过 1' },
+    { match: /topK/i, message: 'Top K 必须为正整数' },
+    { match: /frequencyPenalty|presencePenalty/i, message: 'Penalty 必须为有效数字' },
     { match: /providerId|请选择 Provider/i, message: '请选择 Provider' },
     { match: /pricing|PerMillion|serviceTier|must not be negative|must be a number/i, message: '请检查价格：填写 0 或正数即可' },
     { match: /modelId|请选择 Model/i, message: '请选择 Model' },
     { match: /baseUrl/i, message: '请填写 Base URL' },
     { match: /tools.*重名|tools/i, message: 'Tools 名称冲突，请检查勾选项' },
     { match: /skills.*重名|skills/i, message: 'Skills 名称冲突，请检查勾选项' },
+    { match: /allowedSubagents/i, message: 'Subagents 不能重复' },
+    { match: /executionPolicy/i, message: '执行策略限制必须为正整数' },
     { match: /Network Error|Failed to fetch|ECONNREFUSED|timeout/i, message: '网络异常，请稍后重试' },
     { match: /401|Unauthorized/i, message: '没有权限执行此操作' },
     { match: /403|Forbidden/i, message: '没有权限执行此操作' },
@@ -88,14 +96,20 @@ function mapError(error: unknown): ResourceFormValidationResult {
       fields: { reasoningEffort: '请填写思考强度', variants: message },
     }
   }
+  if (/^variant must not be blank$/i.test(raw)) {
+    return { ok: false, message, fields: { variant: message } }
+  }
+  if (/temperature|topP|topK|frequencyPenalty|presencePenalty/i.test(raw)) {
+    return { ok: false, message, fields: { variants: message } }
+  }
   if (/variant|defaultVariant/i.test(raw)) {
     return { ok: false, message, fields: { variants: message, defaultVariant: message } }
   }
-  if (/contextWindow|limit\.context/i.test(raw)) {
-    return { ok: false, message, fields: { contextWindow: message } }
-  }
   if (/maxOutputTokens|limit\.output|exceed/i.test(raw)) {
     return { ok: false, message, fields: { maxOutputTokens: message } }
+  }
+  if (/contextWindow|limit\.context/i.test(raw)) {
+    return { ok: false, message, fields: { contextWindow: message } }
   }
   if (/modality/i.test(raw)) {
     return { ok: false, message, fields: { inputModalities: message } }
@@ -111,6 +125,18 @@ function mapError(error: unknown): ResourceFormValidationResult {
   }
   if (/baseUrl/i.test(raw)) {
     return { ok: false, message, fields: { baseUrl: message } }
+  }
+  if (/tools/i.test(raw)) {
+    return { ok: false, message, fields: { tools: message } }
+  }
+  if (/skills/i.test(raw)) {
+    return { ok: false, message, fields: { skills: message } }
+  }
+  if (/allowedSubagents/i.test(raw)) {
+    return { ok: false, message, fields: { allowedSubagents: message } }
+  }
+  if (/executionPolicy/i.test(raw)) {
+    return { ok: false, message, fields: { executionPolicy: message } }
   }
   if (/name/i.test(raw) && !/variant/i.test(raw)) {
     return { ok: false, message, fields: { name: message } }
@@ -141,15 +167,12 @@ export function validateResourceDraft(
     }
 
     if (modal.kind === 'model') {
-      // 归一化：Reasoning 开启时，空思考强度用 Variant 名称 / medium 兜底（用户常只改当前行）
+      // Reasoning 开启时，空思考强度用 Variant ID / medium 补全（用户常只改当前行）。
       const modelDraft: ModelDraft = {
         ...drafts.modelDraft,
-        inputModalities:
-          drafts.modelDraft.inputModalities.length > 0
-            ? drafts.modelDraft.inputModalities
-            : ['TEXT'],
+        inputModalities: [...drafts.modelDraft.inputModalities],
         variants: drafts.modelDraft.variants.map((variant) => {
-          const id = variant.name.trim()
+          const id = variant.id.trim()
           if (!drafts.modelDraft.reasoning) {
             return variant
           }
@@ -163,8 +186,7 @@ export function validateResourceDraft(
           }
         }),
       }
-      // 默认 Variant 必须存在
-      const ids = modelDraft.variants.map((v) => v.name.trim()).filter(Boolean)
+      const ids = modelDraft.variants.map((variant) => variant.id.trim()).filter(Boolean)
       if (ids.length === 0) {
         return {
           ok: false,
@@ -173,7 +195,11 @@ export function validateResourceDraft(
         }
       }
       if (!ids.includes(modelDraft.defaultVariant.trim())) {
-        modelDraft.defaultVariant = ids[0] ?? 'medium'
+        return {
+          ok: false,
+          message: '请选择一个有效的默认 Variant',
+          fields: { defaultVariant: '请选择默认 Variant' },
+        }
       }
 
       if (!modelDraft.name.trim()) {
@@ -189,7 +215,7 @@ export function validateResourceDraft(
           fields: { inputModalities: '请至少选择一种输入类型' },
         }
       }
-      // 写回归一化结果，供后续 submit 使用
+      // 写回 Reasoning effort 补全结果，供后续 submit 使用。
       drafts.modelDraft = modelDraft
 
       if (modal.mode === 'edit') {

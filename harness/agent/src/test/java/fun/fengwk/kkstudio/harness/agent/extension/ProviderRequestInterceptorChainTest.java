@@ -69,7 +69,8 @@ class ProviderRequestInterceptorChainTest {
   }
 
   private static ProviderRequest request() {
-    ModelVariant variant = new ModelVariant("default", null, null, null, null, List.of());
+    ModelVariant variant =
+        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
     ModelDescriptor model =
         new ModelDescriptor(
             1L,

@@ -25,21 +25,21 @@ export function VariantListEditor({
       variantIndex === index ? { ...variant, ...patch } : variant,
     )
     const preferredDefaultVariant =
-      patch.name !== undefined && currentVariant?.name.trim() === defaultVariant.trim()
-        ? patch.name.trim() || undefined
+      patch.id !== undefined && currentVariant?.id.trim() === defaultVariant.trim()
+        ? patch.id.trim() || undefined
         : undefined
     onChange(nextVariants, preferredDefaultVariant)
   }
 
   function addVariant() {
-    const existing = new Set(variants.map((variant) => variant.name.trim()))
+    const existing = new Set(variants.map((variant) => variant.id.trim()))
     let suffix = variants.length + 1
-    let name = `variant-${suffix}`
-    while (existing.has(name)) {
+    let id = `variant-${suffix}`
+    while (existing.has(id)) {
       suffix += 1
-      name = `variant-${suffix}`
+      id = `variant-${suffix}`
     }
-    onChange([...variants, blankVariant(name, reasoning ? 'medium' : '')])
+    onChange([...variants, blankVariant(id, reasoning ? 'medium' : '')])
   }
 
   function removeVariant(index: number) {
@@ -65,14 +65,14 @@ export function VariantListEditor({
       </p>
       <div className="variant-stack">
         {variants.map((variant, index) => (
-          <div className="variant-editor" key={variant.id}>
+          <div className="variant-editor" key={variant.draftId}>
             <div className={`editor-grid${reasoning ? ' editor-grid-3' : ' editor-grid-2'}`}>
               <label className="form-group">
                 <span>Variant ID</span>
                 <input
                   aria-label={`Variant ID ${index + 1}`}
-                  value={variant.name}
-                  onChange={(event) => updateVariant(index, { name: event.target.value })}
+                  value={variant.id}
+                  onChange={(event) => updateVariant(index, { id: event.target.value })}
                   placeholder="medium"
                   required
                 />

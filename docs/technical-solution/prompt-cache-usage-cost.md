@@ -326,7 +326,7 @@ H2 使用 `numeric(32,12)`、`clob`、`timestamp(3)`；MySQL 使用 `decimal(32,
 
 | Scope | Endpoint | Store 查询 | `scopeType` |
 | --- | --- | --- | --- |
-| Thread | `GET /api/usage/threads/{threadId}` | 当前 head 路径 root→head 上的 Assistant 账本（共享前缀计入、旁枝不计；Thread 元数据缺失时降级 `listByThreadId`） | `thread` |
+| Thread | `GET /api/usage/threads/{threadId}` | 当前 head 路径 root→head 上的 Assistant 账本（共享前缀计入、旁枝不计；Thread 不存在时拒绝查询） | `thread` |
 | Session | `GET /api/usage/sessions/{sessionId}` | `listBySessionId` | `session` |
 | Model | `GET /api/usage/models/{modelId}` | `listByModelResourceId` | `model` |
 
@@ -395,7 +395,7 @@ tokenReadRatio =
 
 ## Executable Model 配置解析
 
-持久 `agent_model.config_json` 必须在 mutation 阶段和 Turn 启动时同时验证，确保模型 ID、变体、缓存策略、价格快照和工具绑定都能被 runtime 实际执行。`agent_model` 不再保留 `capabilities_json` 列；能力由 `config_json.abilities` 直接派生。
+持久 `agent_model.config_json` 是结构化 Model 配置的数据库载体，必须在 mutation 阶段和 Turn 启动时同时验证，确保模型 ID、变体、缓存策略、价格快照和工具绑定都能被 runtime 实际执行。能力由 `config_json.abilities` 直接派生。
 
 ### 必需字段
 
@@ -404,23 +404,23 @@ tokenReadRatio =
 - `limit.context` / `limit.output`：正整数，`limit.output <= limit.context`。
 - `abilities.tools` / `abilities.reasoning`：boolean。
 - `abilities.inputModalities`：非空 `AgentModelInputModality` 列表，限定为 `TEXT/IMAGE/AUDIO/VIDEO/DOCUMENT`。
-- `variants`：非空列表，每项至少包含非空 `id`，可选 `reasoningEffort/maxOutputTokens/temperature/topP/topK/frequencyPenalty/presencePenalty/stopSequences`，且 `variant.maxOutputTokens <= limit.output`，`id` 在 list 内唯一，开启 `reasoning` 时每项 `reasoningEffort` 必须非空（`off` 视为关闭）。
+- `variants`：非空列表，每项至少包含无首尾空白的非空 `id`，可选 `reasoningEffort/maxOutputTokens/temperature/topP/topK/frequencyPenalty/presencePenalty/stopSequences`，且 `variant.maxOutputTokens <= limit.output`，`id` 在 list 内唯一。`reasoningEffort` 为空或 `off` 时不下发该参数。
 - `defaultVariant`：字符串，必须命中 `variants[].id`。
 - `pricing.currency/pricingTier/serviceTier/serviceTierMultiplier/version` 全部非空且 `serviceTierMultiplier > 0`；六类每百万 token 单价 `inputPerMillionTokens/outputPerMillionTokens/cacheReadPerMillionTokens/cacheWritePerMillionTokens/cacheWriteLongPerMillionTokens/reasoningPerMillionTokens` 均为非负有限数。
 
-数据库层不再持久化 `capabilities_json`；runtime 仅从 `config_json.abilities` 派生 `tools` / `reasoning` 与 `inputModalities`，与 `ModelDescriptor` 中的 `tools` / `reasoning` / `inputModalities` 直接对应。`ModelCapability` 枚举已删除。
+runtime 仅从 `config_json.abilities` 派生 `tools` / `reasoning` 与 `inputModalities`，并直接投影到 `ModelDescriptor`。
 
 ### API 契约
 
-公开 `AgentModelDTO` 暴露单一嵌套 `config: AgentModelConfigDTO`（含 `limit / abilities / pricing / defaultVariant / variants`），不再暴露 `capabilitiesJson` 或 `configJson`。模型资源 ID 始终为字符串 `AgentResourceId`，前端 `AgentResourceId = string`。`AgentModelWithProviderDTO` 是客户端把 `providerName` 从 `providers` 列表补上后派生出的视图类型，不属于后端契约。`AgentModelVariantDTO.id` 是唯一必需字段；`AgentModelVariantDTO.name` 旧别名已彻底删除。
+公开 `AgentModelDTO` 暴露单一嵌套 `config: AgentModelConfigDTO`（含 `limit / abilities / pricing / defaultVariant / variants`）。模型资源 ID 始终为字符串 `AgentResourceId`。前端 `AgentModelView` 通过 Provider 列表补充 `providerName`，不属于后端契约。`AgentModelVariantDTO.id` 是 Variant 的唯一标识；前端表单同样使用 `id`，仅额外保留客户端 React key `draftId`。
 
 ### 解析失败语义
 
-缺失或类型错误的必要字段、`limit.output > limit.context`、未知 enum 值、重复变体 `id`、未匹配 `defaultVariant` 等任何不合规输入都会在 `AgentModelMutationFactory`（写入阶段）或 `DatabaseTurnResourceResolver`（Turn 启动阶段）抛出 `IllegalArgumentException`，并阻止 Provider Turn。任何可以写库但不能执行的 `agent_model` 记录都被视为非法，立即失败。
+缺失或类型错误的必要字段、未知字段、标量类型强制转换、尾随 JSON、`limit.output > limit.context`、未知 enum 值、重复变体 `id`、未匹配 `defaultVariant` 等任何不合规输入都会在 `AgentModelMutationFactory`（写入阶段）或 `DatabaseTurnResourceResolver`（Turn 启动阶段）抛出 `IllegalArgumentException`，并阻止 Provider Turn。任何可以写库但不能执行的 `agent_model` 记录都被视为非法，立即失败。
 
 ### 模型 CRUD 契约
 
-`AgentModelMutationFactory` 在 create 与 update 路径上先 `runtimeConfigParser.parse(...)` 再 `apply(...)`，使任何 `newModel(...)` 或 `update(...)` 都不可能产生一个不可执行的 `agent_model` 记录；`AgentModelServiceImpl` 在 create/update/delete 失败时把状态机异常转换为 `IllegalStateException`，并保留原 `name/version` 唯一性。`AgentModelConverter` 把持久化的 `config_json` 直接解析为结构化 `AgentModelConfigDTO`，解析阶段不再产生 JSON 字符串往返。
+`AgentModelMutationFactory` 在 create 与 update 路径上通过 `AgentModelRuntimeConfigParser.encode(...)` 完成 typed 校验与持久化编码，使 `newModel(...)` 或 `update(...)` 不会产生不可执行记录。`AgentModelConverter` 通过同一 parser 将 `config_json` 解码为 `AgentModelConfigDTO`；`DatabaseTurnResourceResolver` 再次解析该配置并构造运行时 `ModelDescriptor` 与 `ModelVariant`。
 
 ## Resource 解析与进程生命周期
 

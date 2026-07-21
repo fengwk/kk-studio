@@ -5,7 +5,7 @@ import type { ModelDraft, ModelPricingDraft, VariantDraft } from '@/features/ai/
 import { variantOptionsFromDraft } from '@/features/ai/ai-draft-normalizers'
 import { sanitizeDecimalInput, sanitizeIntegerInput } from '@/features/ai/ai-number-input'
 import type { ResourceFieldKey } from '@/features/ai/ai-resource-form-validation'
-import { VariantListEditor } from '@/features/ai/AiResourceFieldEditors'
+import { VariantListEditor } from '@/features/ai/AiVariantListEditor'
 import { FormSelect } from '@/features/ai/FormSelect'
 import type { AgentProviderDTO } from '@/shared/api/contracts'
 
@@ -43,18 +43,19 @@ export function ModelForm({
   fieldErrors?: Partial<Record<ResourceFieldKey, string>>
   onChange: (draft: ModelDraft) => void
 }) {
-  const variantOptions = variantOptionsFromDraft(draft.variants, draft.defaultVariant)
+  const variantOptions = variantOptionsFromDraft(draft.variants)
   const selectedDefaultVariant = variantOptions.includes(draft.defaultVariant.trim())
     ? draft.defaultVariant.trim()
-    : variantOptions[0]
+    : (variantOptions[0] ?? '')
 
   function commitVariants(nextVariants: VariantDraft[], preferredDefaultVariant?: string) {
-    const nextOptions = variantOptionsFromDraft(nextVariants, preferredDefaultVariant || draft.defaultVariant)
+    const nextOptions = variantOptionsFromDraft(nextVariants)
     const preferred = preferredDefaultVariant?.trim() || draft.defaultVariant.trim()
     onChange({
       ...draft,
       variants: nextVariants,
-      defaultVariant: preferred && nextOptions.includes(preferred) ? preferred : nextOptions[0],
+      defaultVariant:
+        preferred && nextOptions.includes(preferred) ? preferred : (nextOptions[0] ?? ''),
     })
   }
 
@@ -67,7 +68,7 @@ export function ModelForm({
     onChange({ ...draft, inputModalities: next.length > 0 ? next : ['TEXT'] })
   }
 
-  /** 开启 Reasoning 时，为空的思考强度用 variant 名或 medium 预填。 */
+  /** 开启 Reasoning 时，为空的思考强度用 Variant ID 或 medium 预填。 */
   function setReasoning(enabled: boolean) {
     if (!enabled) {
       onChange({ ...draft, reasoning: false })
@@ -80,7 +81,7 @@ export function ModelForm({
         ...variant,
         reasoningEffort:
           variant.reasoningEffort.trim() ||
-          variant.name.trim() ||
+          variant.id.trim() ||
           'medium',
       })),
     })

@@ -15,10 +15,10 @@ export function newKeyValueDraft(key = '', value = ''): KeyValueDraft {
   }
 }
 
-export function newVariantDraft(input?: Partial<Omit<VariantDraft, 'id'>>): VariantDraft {
+export function newVariantDraft(input?: Partial<Omit<VariantDraft, 'draftId'>>): VariantDraft {
   return {
-    id: nextDraftId('variant'),
-    name: input?.name ?? 'medium',
+    draftId: nextDraftId('variant'),
+    id: input?.id ?? 'medium',
     reasoningEffort: input?.reasoningEffort ?? '',
     maxOutputTokens: input?.maxOutputTokens ?? '',
     temperature: input?.temperature ?? '',

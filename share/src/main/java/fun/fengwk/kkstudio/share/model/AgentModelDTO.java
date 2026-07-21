@@ -4,10 +4,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/**
- * Public Agent model representation. The structured {@link #config} is the single source of truth;
- * no {@code capabilitiesJson} or {@code configJson} is ever exposed by the API.
- */
+/** Public Agent model representation with one structured executable {@link #config}. */
 @Data
 public class AgentModelDTO {
 

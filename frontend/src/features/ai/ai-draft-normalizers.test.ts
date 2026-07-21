@@ -77,17 +77,14 @@ describe('ai-draft-normalizers', () => {
     expect(
       variantOptionsFromDraft(
         [
-          newVariantDraft({ name: ' default ' }),
-          newVariantDraft({ name: 'creative' }),
-          newVariantDraft({ name: 'creative' }),
+          newVariantDraft({ id: ' default ' }),
+          newVariantDraft({ id: 'creative' }),
+          newVariantDraft({ id: 'creative' }),
         ],
-        'fallback',
       ),
     ).toEqual(['default', 'creative'])
 
-    expect(variantOptionsFromDraft([newVariantDraft({ name: '   ' })], ' fallback ')).toEqual([
-      'fallback',
-    ])
+    expect(variantOptionsFromDraft([newVariantDraft({ id: '   ' })])).toEqual([])
 
     expect(
       variantOptionsFromModel(
@@ -115,7 +112,7 @@ describe('ai-draft-normalizers', () => {
     const normalizedModel = normalizeModelDraftDefaultVariant({
       ...emptyModelDraft(),
       defaultVariant: 'legacy',
-      variants: [newVariantDraft({ name: 'default' }), newVariantDraft({ name: 'creative' })],
+      variants: [newVariantDraft({ id: 'default' }), newVariantDraft({ id: 'creative' })],
     })
     expect(normalizedModel.defaultVariant).toBe('default')
 
@@ -149,7 +146,7 @@ describe('ai-draft-normalizers', () => {
         },
         [],
       ).variant,
-    ).toBe('default')
+    ).toBe('')
   })
 
   /** Changing models also changes the Agent variant to the new model's defaultVariant. */

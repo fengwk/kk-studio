@@ -65,7 +65,13 @@ describe('AgentForm current contracts', () => {
               systemPrompt: null,
               modelId: 'm1',
               variant: 'default',
-              config: null,
+              config: {
+                environmentName: null,
+                tools: [],
+                skills: [],
+                allowedSubagents: [],
+                executionPolicy: {},
+              },
               version: 1,
               createTime: null,
               updateTime: null,
@@ -104,5 +110,28 @@ describe('AgentForm current contracts', () => {
     await user.click(screen.getByLabelText(/researcher/))
     expect(screen.getByLabelText(/bash/)).toBeChecked()
     expect(screen.getByLabelText(/researcher/)).toBeChecked()
+  })
+
+  it('renders field-level errors for structured Agent settings', () => {
+    render(
+      <AgentForm
+        draft={emptyAgentDraft(modelWithVariants())}
+        models={[modelWithVariants()]}
+        fieldErrors={{
+          variant: '请选择 Variant',
+          tools: 'Tools 冲突',
+          skills: 'Skills 冲突',
+          allowedSubagents: 'Subagents 冲突',
+          executionPolicy: 'Policy 非法',
+        }}
+        onChange={() => undefined}
+      />,
+    )
+
+    expect(screen.getByText('请选择 Variant')).toBeInTheDocument()
+    expect(screen.getByText('Tools 冲突')).toBeInTheDocument()
+    expect(screen.getByText('Skills 冲突')).toBeInTheDocument()
+    expect(screen.getByText('Subagents 冲突')).toBeInTheDocument()
+    expect(screen.getByText('Policy 非法')).toBeInTheDocument()
   })
 })

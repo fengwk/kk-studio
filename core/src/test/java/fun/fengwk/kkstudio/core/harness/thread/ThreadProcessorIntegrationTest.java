@@ -292,7 +292,9 @@ class ThreadProcessorIntegrationTest {
 
     assertNull(threadStore.find(threadId).orElseThrow().processorToken());
     assertEquals(1, fakeProvider.requestsSinceReset());
-    assertFalse(usageMapper.listByThreadId(threadId).isEmpty());
+    long assistantEntryId =
+        HarnessIds.parsePositive(path.get(path.size() - 1).getEntryId(), "assistantEntryId");
+    assertNotNull(usageMapper.findByAssistantEntryId(assistantEntryId));
     assertTrue(lifecycleProbe.contextTransformCount() > 0);
     assertTrue(lifecycleProbe.contains(threadId, TurnStarted.class));
     assertTrue(lifecycleProbe.contains(threadId, AssistantCompleted.class));
@@ -1219,7 +1221,9 @@ class ThreadProcessorIntegrationTest {
                 Set.of(ModelInputModality.TEXT),
                 true,
                 true,
-                List.of(new ModelVariant("default", 4096, 0.2, null, null, null, null, List.of())),
+                List.of(
+                    new ModelVariant(
+                        "default", 4096, 0.2, null, null, null, null, List.of(), null)),
                 pricing,
                 PromptCachePolicy.disabled());
         return new TurnResources(

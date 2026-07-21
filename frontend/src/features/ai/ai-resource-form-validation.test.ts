@@ -42,7 +42,7 @@ describe('ai-resource-form-validation', () => {
     expect(result.fields.name).toBeDefined()
   })
 
-  it('normalizes empty modalities to TEXT-only on submit', () => {
+  it('rejects empty input modalities', () => {
     const result = validateResourceDraft(
       { kind: 'model', mode: 'create' },
       {
@@ -51,12 +51,11 @@ describe('ai-resource-form-validation', () => {
         agentDraft: { name: '', description: '', systemPrompt: '', modelId: '', variant: '', environmentName: '', tools: [], skills: [], allowedSubagents: [], executionPolicy: { maxTurns: '', maxDepth: '', maxDirectSubagents: '', maxTotalSubagents: '' } },
       },
     )
-    expect(result.ok).toBe(true)
-    // The normalized draft is reflected back onto the input so submit can read it.
-    expect(result.fields).toEqual({})
+    expect(result.ok).toBe(false)
+    expect(result.fields.inputModalities).toBeDefined()
   })
 
-  it('normalizes defaultVariant when the persisted value no longer exists', () => {
+  it('rejects a defaultVariant that does not exist', () => {
     const result = validateResourceDraft(
       { kind: 'model', mode: 'create' },
       {
@@ -64,15 +63,15 @@ describe('ai-resource-form-validation', () => {
         modelDraft: draft({
           defaultVariant: 'stale',
           variants: [
-            { id: 'kv-default', name: 'fast', reasoningEffort: '', maxOutputTokens: '', temperature: '', topP: '', topK: '', frequencyPenalty: '', presencePenalty: '', stopSequences: '' },
-            { id: 'kv-2', name: 'creative', reasoningEffort: '', maxOutputTokens: '', temperature: '', topP: '', topK: '', frequencyPenalty: '', presencePenalty: '', stopSequences: '' },
+            { draftId: 'variant-default', id: 'fast', reasoningEffort: '', maxOutputTokens: '', temperature: '', topP: '', topK: '', frequencyPenalty: '', presencePenalty: '', stopSequences: '' },
+            { draftId: 'variant-2', id: 'creative', reasoningEffort: '', maxOutputTokens: '', temperature: '', topP: '', topK: '', frequencyPenalty: '', presencePenalty: '', stopSequences: '' },
           ],
         }),
         agentDraft: { name: '', description: '', systemPrompt: '', modelId: '', variant: '', environmentName: '', tools: [], skills: [], allowedSubagents: [], executionPolicy: { maxTurns: '', maxDepth: '', maxDirectSubagents: '', maxTotalSubagents: '' } },
       },
     )
-    expect(result.ok).toBe(true)
-    expect(result.fields).toEqual({})
+    expect(result.ok).toBe(false)
+    expect(result.fields.defaultVariant).toBeDefined()
   })
 
   it('rejects when reasoning is enabled but every variant lacks effort', () => {
@@ -80,12 +79,12 @@ describe('ai-resource-form-validation', () => {
       { kind: 'model', mode: 'create' },
       {
         providerDraft: { name: 'p', description: '', providerType: 'openai', baseUrl: '', credential: '', modelCallTimeoutMillis: '', modelCallIdleTimeoutMillis: '' },
-        modelDraft: draft({ reasoning: true, variants: [{ id: 'kv-x', name: 'medium', reasoningEffort: '', maxOutputTokens: '', temperature: '', topP: '', topK: '', frequencyPenalty: '', presencePenalty: '', stopSequences: '' }] }),
+        modelDraft: draft({ reasoning: true, variants: [{ draftId: 'variant-x', id: 'medium', reasoningEffort: '', maxOutputTokens: '', temperature: '', topP: '', topK: '', frequencyPenalty: '', presencePenalty: '', stopSequences: '' }] }),
         agentDraft: { name: '', description: '', systemPrompt: '', modelId: '', variant: '', environmentName: '', tools: [], skills: [], allowedSubagents: [], executionPolicy: { maxTurns: '', maxDepth: '', maxDirectSubagents: '', maxTotalSubagents: '' } },
       },
     )
     expect(result.ok).toBe(true)
-    // Reasoning effort must be auto-filled with the variant name; no error expected.
+    // Reasoning effort must be auto-filled with the variant id; no error expected.
   })
 
   it('translates known backend errors into user-facing Chinese', () => {
@@ -101,5 +100,16 @@ describe('ai-resource-form-validation', () => {
 
   it('passes Chinese text through unchanged', () => {
     expect(toUserFacingErrorMessage(new Error('已开启 Reasoning'))).toMatch(/Reasoning/)
+  })
+
+  it('maps sampling, agent variant, policy, and subagent errors to their fields', () => {
+    expect(toUserFacingErrorMessage(new Error('variant medium temperature must not be negative'))).toMatch(
+      /Temperature/,
+    )
+    expect(toUserFacingErrorMessage(new Error('variant must not be blank'))).toMatch(/Variant/)
+    expect(toUserFacingErrorMessage(new Error('executionPolicy.maxTurns must be a positive integer'))).toMatch(
+      /执行策略/,
+    )
+    expect(toUserFacingErrorMessage(new Error('allowedSubagents 不能重复'))).toMatch(/Subagents/)
   })
 })

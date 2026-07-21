@@ -145,7 +145,7 @@ export interface AgentModelConfigDTO {
   variants: AgentModelVariantDTO[]
 }
 
-/** Public Agent model resource. No {@code capabilitiesJson} / {@code configJson} on the wire. */
+/** Public Agent model resource with one structured executable config. */
 export interface AgentModelDTO {
   id: AgentResourceId
   providerId: AgentResourceId
@@ -182,11 +182,11 @@ export interface AgentExecutionPolicyDTO {
 
 export interface AgentDefinitionConfigDTO {
   /** Optional live Environment name; blank/null means none. */
-  environmentName?: string | null
-  tools?: string[] | null
-  skills?: string[] | null
-  allowedSubagents?: string[] | null
-  executionPolicy?: AgentExecutionPolicyDTO | null
+  environmentName: string | null
+  tools: string[]
+  skills: string[]
+  allowedSubagents: string[]
+  executionPolicy: AgentExecutionPolicyDTO
 }
 
 /** Public global Agent definition; model/variant + config are Thread-runtime inputs. */
@@ -197,25 +197,23 @@ export interface AgentDefinitionDTO {
   systemPrompt: string | null
   modelId: string
   variant: string
-  config: AgentDefinitionConfigDTO | null
+  config: AgentDefinitionConfigDTO
   version: BackendLong
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
 
+/** Complete Agent Definition create/PUT body. */
 export interface AgentDefinitionEditablePropertiesDTO {
-  name?: string | null
-  description?: string | null
-  systemPrompt?: string | null
-  modelId?: string | null
-  variant?: string | null
-  config?: AgentDefinitionConfigDTO | null
+  name: string
+  description: string | null
+  systemPrompt: string | null
+  modelId: string
+  variant: string
+  config: AgentDefinitionConfigDTO
 }
 
-export interface AgentDefinitionCreateDTO extends AgentDefinitionEditablePropertiesDTO {
-  name: string
-  modelId: string
-}
+export type AgentDefinitionCreateDTO = AgentDefinitionEditablePropertiesDTO
 
 export type AgentDefinitionUpdateDTO = AgentDefinitionEditablePropertiesDTO
 

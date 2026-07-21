@@ -8,7 +8,7 @@ import java.util.List;
  * Structured Agent model configuration. This is the single source of truth exposed by the public
  * AgentModel API and persisted as a single {@code config_json} column by the repository.
  *
- * <p>Schema (no {@code modalities}, no separate {@code capabilities}, no nested modalities):
+ * <p>Schema:
  *
  * <pre>
  * limit:        { context: positive int, output: positive int &lt;= context }

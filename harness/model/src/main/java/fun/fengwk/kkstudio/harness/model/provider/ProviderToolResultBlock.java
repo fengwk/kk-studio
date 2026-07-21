@@ -22,10 +22,4 @@ public record ProviderToolResultBlock(
     contents = List.copyOf(Objects.requireNonNull(contents, "contents"));
     detailsJson = detailsJson == null || detailsJson.isBlank() ? "{}" : detailsJson;
   }
-
-  /** 兼容仅携带 call id 的早期模型；新消息必须显式携带工具名。 */
-  public ProviderToolResultBlock(
-      String toolCallId, List<ProviderContentBlock> contents, boolean error, String detailsJson) {
-    this(toolCallId, "tool", contents, error, detailsJson);
-  }
 }

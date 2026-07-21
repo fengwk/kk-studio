@@ -6,7 +6,7 @@ import {
   emptyModelDraft,
   extractContextWindow,
   extractDefaultVariantFromModel,
-  extractVariantNamesFromModel,
+  extractVariantIdsFromModel,
   toEditableModel,
   toEditableModelUpdate,
   toModelDraft,
@@ -89,7 +89,7 @@ describe('ai-model-draft-codec', () => {
       defaultVariant: 'quality',
       variants: [
         {
-          name: 'quality',
+          id: 'quality',
           reasoningEffort: 'high',
           maxOutputTokens: '4096',
           temperature: '0.4',
@@ -107,7 +107,7 @@ describe('ai-model-draft-codec', () => {
       },
     })
     expect(extractContextWindow(source)).toBe(200000)
-    expect(extractVariantNamesFromModel(source)).toEqual(['quality'])
+    expect(extractVariantIdsFromModel(source)).toEqual(['quality'])
     expect(extractDefaultVariantFromModel(source)).toBe('quality')
   })
 
@@ -130,7 +130,7 @@ describe('ai-model-draft-codec', () => {
       variants: [
         {
           ...base,
-          name: 'quality',
+          id: 'quality',
           reasoningEffort: 'high',
           maxOutputTokens: '4096',
           temperature: '0.4',
@@ -142,7 +142,7 @@ describe('ai-model-draft-codec', () => {
         },
         {
           ...base,
-          name: 'provider-defaults',
+          id: 'provider-defaults',
           reasoningEffort: 'off',
         },
       ],
@@ -208,7 +208,7 @@ describe('ai-model-draft-codec', () => {
     expect(() => buildModelConfig(draft({ variants: [] }))).toThrow(/at least one variant/i)
     expect(() =>
       buildModelConfig(
-        draft({ variants: [base, { ...base, name: base.name }] }),
+        draft({ variants: [base, { ...base, id: base.id }] }),
       ),
     ).toThrow('duplicate variant id')
     expect(() => buildModelConfig(draft({ defaultVariant: 'missing' }))).toThrow(
@@ -224,6 +224,30 @@ describe('ai-model-draft-codec', () => {
         draft({ variants: [{ ...base, maxOutputTokens: '9000' }] }),
       ),
     ).toThrow('exceeds model maxOutputTokens')
+    expect(() =>
+      buildModelConfig(draft({ variants: [{ ...base, temperature: '-0.1' }] })),
+    ).toThrow('temperature must not be negative')
+    expect(() =>
+      buildModelConfig(draft({ variants: [{ ...base, topP: '0' }] })),
+    ).toThrow('topP must be in (0, 1]')
+    expect(() =>
+      buildModelConfig(draft({ inputModalities: ['TEXT', 'TEXT'] })),
+    ).toThrow('contains duplicate value')
+  })
+
+  /** Generic variants preserve finite negative penalties supported by OpenAI-compatible providers. */
+  it('preserves negative frequency and presence penalties', () => {
+    const base = emptyModelDraft().variants[0]
+    const config = buildModelConfig(
+      draft({
+        variants: [{ ...base, frequencyPenalty: '-0.5', presencePenalty: '-1' }],
+      }),
+    )
+
+    expect(config.variants[0]).toMatchObject({
+      frequencyPenalty: -0.5,
+      presencePenalty: -1,
+    })
   })
 
   /** Create update DTOs are built without string-encoded JSON. */
@@ -305,49 +329,33 @@ describe('ai-model-draft-codec', () => {
     expect(() => toEditableModel(draft({ providerId: '' }))).toThrow(/providerId is required/)
   })
 
-  /** Pricing defaults fall back to USD / default / v1 when inputs are blank. */
-  it('falls back to canonical pricing defaults when inputs are blank', () => {
-    const config = buildModelConfig(
-      draft({
-        pricing: {
-          currency: '',
-          pricingTier: '',
-          serviceTier: '',
-          serviceTierMultiplier: '1',
-          version: '',
-          inputPerMillionTokens: '0',
-          outputPerMillionTokens: '0',
-          cacheReadPerMillionTokens: '0',
-          cacheWritePerMillionTokens: '0',
-          cacheWriteLongPerMillionTokens: '0',
-          reasoningPerMillionTokens: '0',
-        },
-      }),
-    )
-    expect(config.pricing).toMatchObject({
-      currency: 'USD',
-      pricingTier: 'default',
-      serviceTier: 'default',
-      version: 'v1',
-    })
+  /** Pricing metadata is required and must not be silently reconstructed during edit. */
+  it('rejects blank pricing metadata', () => {
+    const base = draft()
+    expect(() =>
+      buildModelConfig({ ...base, pricing: { ...base.pricing, currency: '' } }),
+    ).toThrow(/pricing\.currency must not be blank/)
+    expect(() =>
+      buildModelConfig({ ...base, pricing: { ...base.pricing, version: '' } }),
+    ).toThrow(/pricing\.version must not be blank/)
   })
 
-  /** extractVariantNamesFromModel returns the canonical ['medium'] fallback. */
-  it('extracts fallback variant names and default variant for empty models', () => {
-    expect(extractVariantNamesFromModel(undefined)).toEqual(['medium'])
-    expect(extractDefaultVariantFromModel(undefined)).toBe('medium')
+  /** Missing models do not invent a Variant ID. */
+  it('returns no variant data for missing models', () => {
+    expect(extractVariantIdsFromModel(undefined)).toEqual([])
+    expect(extractDefaultVariantFromModel(undefined)).toBe('')
   })
 
   /** emptyModelDraft without a model or provider keeps an empty providerId and TEXT only. */
   it('returns empty providerId when neither model nor provider is supplied', () => {
-    const blank = emptyModelDraft(undefined, null)
+    const blank = emptyModelDraft(null)
     expect(blank.providerId).toBe('')
     expect(blank.inputModalities).toEqual(['TEXT'])
   })
 
   /** emptyModelDraft respects an explicit provider argument. */
   it('uses the explicit provider argument when no model is supplied', () => {
-    const seeded = emptyModelDraft(undefined, { id: 'provider-x' })
+    const seeded = emptyModelDraft({ id: 'provider-x' })
     expect(seeded.providerId).toBe('provider-x')
   })
 })

@@ -148,13 +148,6 @@ public interface ModelUsageRecordMapper extends BaseMapper {
   @Select(
       "select "
           + COLUMNS
-          + " from model_usage_record where thread_id = #{threadId} order by id asc")
-  @ResultMap("modelUsageRecordResultMap")
-  List<ModelUsageRecordDO> listByThreadId(@Param("threadId") long threadId);
-
-  @Select(
-      "select "
-          + COLUMNS
           + " from model_usage_record where session_id = #{sessionId} order by id asc")
   @ResultMap("modelUsageRecordResultMap")
   List<ModelUsageRecordDO> listBySessionId(@Param("sessionId") long sessionId);

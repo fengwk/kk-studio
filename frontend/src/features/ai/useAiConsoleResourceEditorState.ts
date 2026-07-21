@@ -28,8 +28,8 @@ export function useAiConsoleResourceEditorState({
 }) {
   const [resourceModal, setResourceModal] = useState<ResourceModal | null>(null)
   const [providerDraft, setProviderDraft] = useState<ProviderDraft>(() => createProviderEditorPlan().providerDraft)
-  const [modelDraft, setModelDraft] = useState<ModelDraft>(() => createModelEditorPlan([], []).modelDraft)
-  const [agentDraft, setAgentDraft] = useState<AgentDraft>(() => createAgentEditorPlan([], []).agentDraft)
+  const [modelDraft, setModelDraft] = useState<ModelDraft>(() => createModelEditorPlan([]).modelDraft)
+  const [agentDraft, setAgentDraft] = useState<AgentDraft>(() => createAgentEditorPlan([]).agentDraft)
 
   useEffect(() => {
     if (!resourceModal) {
@@ -91,9 +91,9 @@ export function useAiConsoleResourceEditorState({
     closeResourceModal,
     openCreateProvider: () => applyResourceEditorPlan(createProviderEditorPlan()),
     openEditProvider: (providerId: AgentResourceId) => applyResourceEditorPlan(editProviderEditorPlan(providers, providerId)),
-    openCreateModel: () => applyResourceEditorPlan(createModelEditorPlan(models, providers)),
+    openCreateModel: () => applyResourceEditorPlan(createModelEditorPlan(providers)),
     openEditModel: (modelId: AgentResourceId) => applyResourceEditorPlan(editModelEditorPlan(models, modelId)),
-    openCreateAgent: () => applyResourceEditorPlan(createAgentEditorPlan(models, providers)),
+    openCreateAgent: () => applyResourceEditorPlan(createAgentEditorPlan(models)),
     openEditAgent: (agentId: AgentResourceId) => applyResourceEditorPlan(editAgentEditorPlan(agents, models, agentId)),
   }
 }

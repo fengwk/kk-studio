@@ -279,7 +279,8 @@ class PromptCacheRequestFinalizerTest {
       ProviderCacheControl forged,
       List<ProviderMessage> messages,
       List<ProviderToolDefinition> tools) {
-    ModelVariant variant = new ModelVariant("default", null, null, null, null, List.of());
+    ModelVariant variant =
+        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
     return new ProviderRequest(model, variant, messages, tools, forged);
   }
 }

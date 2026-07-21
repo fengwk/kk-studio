@@ -2,7 +2,7 @@ import {
   extractContextWindow,
   extractDefaultVariantFromModel,
   extractMaxOutputTokens,
-  extractVariantNamesFromModel,
+  extractVariantIdsFromModel,
   toModelDraft,
 } from '@/features/ai/ai-model-draft-codec'
 import { formatCompactList } from '@/features/ai/ai-resource-card-format'
@@ -49,7 +49,7 @@ export function ModelResourceCard({
   onDelete: () => void
   deletePending: boolean
 }) {
-  const variants = extractVariantNamesFromModel(model)
+  const variants = extractVariantIdsFromModel(model)
   const defaultVariant = extractDefaultVariantFromModel(model)
   return (
     <ResourceCardLayout

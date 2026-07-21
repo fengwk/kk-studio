@@ -24,9 +24,6 @@ public interface ModelUsageRecordStore {
   /** 按 Assistant Entry id 查找；每个成功 Assistant Entry 恰有一条记录。 */
   Optional<ModelUsageRecord> findByAssistantEntryId(long assistantEntryId);
 
-  /** 按 thread id 拉取所有账本；按 id asc，便于回放与对账。 */
-  List<ModelUsageRecord> listByThreadId(long threadId);
-
   /** 按 session id 拉取所有账本；按 id asc。 */
   List<ModelUsageRecord> listBySessionId(long sessionId);
 

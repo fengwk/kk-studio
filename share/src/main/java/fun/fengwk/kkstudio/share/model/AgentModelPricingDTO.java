@@ -4,10 +4,7 @@ import lombok.Data;
 
 import java.math.BigDecimal;
 
-/**
- * Pricing snapshot carried with every Agent model. The six per-million-token prices are preserved
- * as-is from the existing runtime semantics so existing billing behaviour is unchanged.
- */
+/** Pricing snapshot carried by an Agent model for deterministic per-call cost calculation. */
 @Data
 public class AgentModelPricingDTO {
 

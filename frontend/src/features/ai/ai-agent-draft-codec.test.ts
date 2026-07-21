@@ -1,0 +1,200 @@
+import { describe, expect, it } from 'vitest'
+import {
+  emptyAgentDraft,
+  normalizeCapabilityShortNames,
+  stripCapabilityPrefix,
+  toAgentDraft,
+  toEditableAgent,
+  toEditableAgentUpdate,
+} from '@/features/ai/ai-agent-draft-codec'
+import type { AgentDraft } from '@/features/ai/ai-console-types'
+import type { AgentDefinitionDTO, AgentModelDTO } from '@/shared/api/contracts'
+
+function model(): AgentModelDTO {
+  return {
+    id: 'model-1',
+    providerId: 'provider-1',
+    name: 'model',
+    description: null,
+    config: {
+      limit: { context: 128000, output: 8192 },
+      abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+      pricing: {
+        currency: 'USD',
+        pricingTier: 'default',
+        serviceTier: 'default',
+        serviceTierMultiplier: 1,
+        version: 'v1',
+        inputPerMillionTokens: 0,
+        outputPerMillionTokens: 0,
+        cacheReadPerMillionTokens: 0,
+        cacheWritePerMillionTokens: 0,
+        cacheWriteLongPerMillionTokens: 0,
+        reasoningPerMillionTokens: 0,
+      },
+      defaultVariant: 'quality',
+      variants: [{ id: 'quality' }],
+    },
+    version: 1,
+    createTime: null,
+    updateTime: null,
+  }
+}
+
+function draft(overrides: Partial<AgentDraft> = {}): AgentDraft {
+  return {
+    ...emptyAgentDraft(model()),
+    name: ' assistant ',
+    description: ' description ',
+    systemPrompt: ' prompt ',
+    environmentName: ' local ',
+    tools: ['platform/read', 'local/bash'],
+    skills: ['platform/dev'],
+    allowedSubagents: [' helper '],
+    executionPolicy: {
+      maxTurns: '10',
+      maxDepth: '2',
+      maxDirectSubagents: '3',
+      maxTotalSubagents: '4',
+    },
+    ...overrides,
+  }
+}
+
+describe('ai-agent-draft-codec', () => {
+  it('creates empty drafts from an optional model without inventing a variant', () => {
+    expect(emptyAgentDraft(model())).toMatchObject({ modelId: 'model-1', variant: 'quality' })
+    expect(emptyAgentDraft()).toMatchObject({ modelId: '', variant: '' })
+  })
+
+  it('normalizes short capability names and rejects collisions', () => {
+    expect(stripCapabilityPrefix('')).toBe('')
+    expect(stripCapabilityPrefix(' read ')).toBe('read')
+    expect(stripCapabilityPrefix('local/bash')).toBe('bash')
+    expect(normalizeCapabilityShortNames(null, 'tools')).toEqual([])
+    expect(normalizeCapabilityShortNames(['platform/read', ' local/bash ', ''], 'tools')).toEqual([
+      'read',
+      'bash',
+    ])
+    expect(() => normalizeCapabilityShortNames(['a/read', 'b/read'], 'tools')).toThrow(/重名/)
+  })
+
+  it('projects persisted definitions and normalizes nullable values', () => {
+    const agent: AgentDefinitionDTO = {
+      id: 'agent-1',
+      name: 'assistant',
+      description: null,
+      systemPrompt: null,
+      modelId: 'model-1',
+      variant: 'quality',
+      config: {
+        environmentName: null,
+        tools: [' read ', ''],
+        skills: [],
+        allowedSubagents: [' helper '],
+        executionPolicy: {
+          maxTurns: 10,
+          maxDepth: null,
+          maxDirectSubagents: 2,
+          maxTotalSubagents: 4,
+        },
+      },
+      version: 1,
+      createTime: null,
+      updateTime: null,
+    }
+
+    expect(toAgentDraft(agent)).toEqual({
+      name: 'assistant',
+      description: '',
+      systemPrompt: '',
+      modelId: 'model-1',
+      variant: 'quality',
+      environmentName: '',
+      tools: ['read'],
+      skills: [],
+      allowedSubagents: ['helper'],
+      executionPolicy: {
+        maxTurns: '10',
+        maxDepth: '',
+        maxDirectSubagents: '2',
+        maxTotalSubagents: '4',
+      },
+    })
+
+    expect(
+      toAgentDraft({
+        ...agent,
+        config: {
+          ...agent.config,
+          executionPolicy: { ...agent.config.executionPolicy, maxDepth: 3 },
+        },
+      }).executionPolicy.maxDepth,
+    ).toBe('3')
+  })
+
+  it('builds complete create and update bodies', () => {
+    const expected = {
+      name: 'assistant',
+      description: 'description',
+      systemPrompt: 'prompt',
+      modelId: 'model-1',
+      variant: 'quality',
+      config: {
+        environmentName: 'local',
+        tools: ['read', 'bash'],
+        skills: ['dev'],
+        allowedSubagents: ['helper'],
+        executionPolicy: {
+          maxTurns: 10,
+          maxDepth: 2,
+          maxDirectSubagents: 3,
+          maxTotalSubagents: 4,
+        },
+      },
+    }
+    expect(toEditableAgent(draft())).toEqual(expected)
+    expect(toEditableAgentUpdate(draft())).toEqual(expected)
+
+    expect(toEditableAgent(draft({ description: '', systemPrompt: '', environmentName: '' }))).toMatchObject({
+      description: null,
+      systemPrompt: null,
+      config: { environmentName: null },
+    })
+  })
+
+  it.each([
+    [{ name: ' ' }, /name/],
+    [{ modelId: ' ' }, /modelId/],
+    [{ variant: ' ' }, /variant/],
+    [{ executionPolicy: { ...draft().executionPolicy, maxTurns: '0' } }, /maxTurns/],
+    [{ executionPolicy: { ...draft().executionPolicy, maxDepth: '1.5' } }, /maxDepth/],
+    [{ executionPolicy: { ...draft().executionPolicy, maxDirectSubagents: '-1' } }, /maxDirectSubagents/],
+    [{ executionPolicy: { ...draft().executionPolicy, maxTotalSubagents: 'NaN' } }, /maxTotalSubagents/],
+    [{ tools: ['one/read', 'two/read'] }, /tools/],
+    [{ skills: ['one/dev', 'two/dev'] }, /skills/],
+    [{ allowedSubagents: ['helper', ' helper '] }, /allowedSubagents/],
+  ] as Array<[Partial<AgentDraft>, RegExp]>)('rejects invalid complete bodies %#', (patch, message) => {
+    expect(() => toEditableAgent(draft(patch))).toThrow(message)
+  })
+
+  it('keeps omitted execution limits null', () => {
+    expect(
+      toEditableAgent(
+        draft({
+          executionPolicy: {
+            maxTurns: '',
+            maxDepth: ' ',
+            maxDirectSubagents: '',
+            maxTotalSubagents: '',
+          },
+        }),
+      ).config.executionPolicy,
+    ).toEqual({
+      maxTurns: null,
+      maxDepth: null,
+      maxDirectSubagents: null,
+      maxTotalSubagents: null,
+    })
+  })
+})

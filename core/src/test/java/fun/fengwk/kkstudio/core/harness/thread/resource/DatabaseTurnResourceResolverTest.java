@@ -105,7 +105,7 @@ class DatabaseTurnResourceResolverTest {
       assertEquals(22L, resources.model().providerResourceId());
       assertEquals(11L, resources.model().modelResourceId());
       assertEquals("provider-api-model", resources.model().modelId());
-      assertEquals("quality", resources.variant().name());
+      assertEquals("quality", resources.variant().id());
       assertEquals(new BigDecimal("1.1"), resources.model().pricing().inputPerMillionTokens());
       assertEquals(new BigDecimal("3.6"), resources.model().pricing().reasoningPerMillionTokens());
       assertEquals("price-v7", resources.model().pricing().version());
