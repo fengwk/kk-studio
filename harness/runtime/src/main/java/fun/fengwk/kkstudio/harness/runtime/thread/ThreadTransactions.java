@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantErrorEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
@@ -101,6 +102,24 @@ public interface ThreadTransactions {
       Instant now);
 
   /**
+   * 原子插入一条 Assistant 错误 Entry 并推进 head，再追加 events、最后切换 Thread 状态（FAILED 或 RETRYING）和释放 token。{@code
+   * plannedAssistantEntryId} 必须与已分配的 id 一致，使前端 SSE 临时投影与 durable Entry 共享同一 id。
+   *
+   * <p>所有插入在同一 transaction 内；任一失败回滚整个 mutation，不留孤儿 entry。完成态由 {@code outcome} 决定：{@link
+   * AssistantErrorOutcome#FAILED} 切到 FAILED，{@link AssistantErrorOutcome#RETRY_SCHEDULED} 切到
+   * RETRYING + 写入 retryAt。
+   */
+  boolean recordAssistantError(
+      long threadId,
+      String processorToken,
+      long plannedAssistantEntryId,
+      AssistantErrorEntryPayload payload,
+      AssistantErrorOutcome outcome,
+      Instant retryAt,
+      List<ThreadEventDraft> events,
+      Instant now);
+
+  /**
    * 幂等 Stop：取消全部 QUEUED、撤销 processor、status=IDLE、request-cancel open tools。
    *
    * @return 含被取消消息文本的回执；重复 clientRequestId 返回同一批
@@ -167,6 +186,12 @@ public interface ThreadTransactions {
     ADMITTED,
     REJECTED,
     LOST_OWNERSHIP
+  }
+
+  /** {@link #recordAssistantError} 的完成态：决定 Thread 最终切换到 FAILED 还是 RETRYING。 */
+  enum AssistantErrorOutcome {
+    FAILED,
+    RETRY_SCHEDULED
   }
 
   /** beginTurn 的原子结果。 */

@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ArtifactMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantErrorEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.CustomMessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
@@ -854,6 +855,81 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
       return false;
     }
     appendEventsInternal(threadId, events, now);
+    return true;
+  }
+
+  @Override
+  @Transactional
+  public boolean recordAssistantError(
+      long threadId,
+      String processorToken,
+      long plannedAssistantEntryId,
+      AssistantErrorEntryPayload payload,
+      ThreadTransactions.AssistantErrorOutcome outcome,
+      Instant retryAt,
+      List<ThreadEventDraft> events,
+      Instant now) {
+    Objects.requireNonNull(payload, "payload");
+    Objects.requireNonNull(outcome, "outcome");
+    Objects.requireNonNull(events, "events");
+    Objects.requireNonNull(now, "now");
+    if (plannedAssistantEntryId <= 0) {
+      throw new IllegalArgumentException("plannedAssistantEntryId must be positive");
+    }
+    if (outcome == ThreadTransactions.AssistantErrorOutcome.RETRY_SCHEDULED) {
+      if (retryAt == null) {
+        throw new IllegalArgumentException(
+            "retryAt must be present when outcome is RETRY_SCHEDULED");
+      }
+      if (payload.retryAttempt() <= 0) {
+        throw new IllegalArgumentException(
+            "retryAttempt must be positive when outcome is RETRY_SCHEDULED");
+      }
+    }
+    HarnessThreadDO thread = findOwnedThread(threadId, processorToken);
+    if (thread == null) {
+      return false;
+    }
+    LocalDateTime timestamp = utc(now);
+    // 1) Insert the durable error Entry as a child of the current head. This is the audit artifact
+    //    the UI/frontend uses to surface the failure; the plannedAssistantEntryId matches the
+    //    live SSE id so the timeline can dedupe the temporary projection.
+    insertEntry(
+        plannedAssistantEntryId,
+        thread.getSessionId(),
+        thread.getHeadEntryId(),
+        payload,
+        timestamp);
+    // 2) Atomically advance the head to the new error entry. If the lease/token has been lost we
+    //    must roll back the entry insertion; the @Transactional boundary ensures that.
+    if (!threadStore.advanceHead(
+        threadId, processorToken, thread.getHeadEntryId(), plannedAssistantEntryId, now)) {
+      throw new ConcurrentModificationException("cannot advance head for assistant error");
+    }
+    // 3) Append events (assistant_failed / thread_failed / thread_retry_scheduled) with the
+    //    planned entry as subject so the SSE stream and the Entry share an id.
+    appendEventsInternal(threadId, events, now);
+    // 4) Switch Thread terminal status and release the processor token. RETRY_SCHEDULED keeps the
+    //    durable debt; FAILED clears the debt so a fresh user input restarts the loop.
+    switch (outcome) {
+      case RETRY_SCHEDULED -> {
+        if (threadMapper.scheduleRetry(
+                threadId, processorToken, payload.retryAttempt(), utc(retryAt), timestamp)
+            != 1) {
+          throw new ConcurrentModificationException("cannot schedule retry after assistant error");
+        }
+      }
+      case FAILED -> {
+        // Use the token-fenced SQL: markFailedAndClearProcessor is intentionally token-free for
+        // Stop flows; here we must abort the mutation if Stop/lease loss happened between
+        // advanceHead and now, so the inserted error Entry is rolled back.
+        if (threadMapper.markFailedAndClearProcessorWithToken(threadId, processorToken, timestamp)
+            != 1) {
+          throw new ConcurrentModificationException(
+              "cannot mark thread failed after assistant error");
+        }
+      }
+    }
     return true;
   }
 

@@ -69,6 +69,16 @@ public final class SessionEntryJsonCodec {
       node.set("message", encodeMessage(value.message()));
     } else if (payload instanceof LabelEntryPayload value) {
       node.put("label", value.label());
+    } else if (payload instanceof AssistantErrorEntryPayload value) {
+      node.put("kind", value.kind());
+      node.put("message", value.message());
+      node.put("retryAttempt", value.retryAttempt());
+      if (value.maxRetries() == null) {
+        node.putNull("maxRetries");
+      } else {
+        node.put("maxRetries", value.maxRetries());
+      }
+      node.put("retryScheduled", value.retryScheduled());
     } else {
       throw new IllegalArgumentException("unknown session entry payload: " + payload.getClass());
     }
@@ -119,6 +129,17 @@ public final class SessionEntryJsonCodec {
       case LABEL -> {
         fields(node, "label");
         yield new LabelEntryPayload(text(node, "label"));
+      }
+      case ASSISTANT_ERROR -> {
+        fields(node, "kind", "message", "retryAttempt", "maxRetries", "retryScheduled");
+        JsonNode maxRetries = node.get("maxRetries");
+        Integer maxRetriesValue = maxRetries.isNull() ? null : nonNegativeInt(node, "maxRetries");
+        yield new AssistantErrorEntryPayload(
+            text(node, "kind"),
+            text(node, "message"),
+            nonNegativeInt(node, "retryAttempt"),
+            maxRetriesValue,
+            bool(node, "retryScheduled"));
       }
     };
   }

@@ -368,6 +368,28 @@ public interface HarnessThreadMapper extends BaseMapper {
   int markFailedAndClearProcessor(
       @Param("threadId") long threadId, @Param("updateTime") LocalDateTime updateTime);
 
+  /**
+   * Token-fenced FAILED transition used by {@code recordAssistantError}. Unlike {@link
+   * #markFailedAndClearProcessor}, this refuses to mutate a thread whose processor token has
+   * already been replaced (Stop, lease loss, or a sibling node); the caller treats a zero return as
+   * a {@link ConcurrentModificationException} and rolls back the inserted error Entry.
+   */
+  @Update(
+      """
+      update harness_thread
+      set status = 'FAILED',
+          retry_at = null,
+          processor_token = null,
+          processor_until = null,
+          gmt_modified = #{updateTime},
+          version = version + 1
+      where id = #{threadId} and processor_token = #{processorToken}
+      """)
+  int markFailedAndClearProcessorWithToken(
+      @Param("threadId") long threadId,
+      @Param("processorToken") String processorToken,
+      @Param("updateTime") LocalDateTime updateTime);
+
   @Update(
       """
       update harness_thread

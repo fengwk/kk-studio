@@ -23,10 +23,16 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
   private static final String PROMPT_CACHE_KEY = "prompt_cache_key";
   private static final String REASONING_SPLIT = "reasoning_split";
 
+  /**
+   * OpenAI-compatible adapter credential. {@code null} or blank means the adapter must call the
+   * endpoint without an {@code Authorization} header (supported by {@code DefaultOpenAiClient} when
+   * its builder {@code apiKey} is unset). Any present value is forwarded verbatim as {@code Bearer
+   * …} by the SDK.
+   */
   private final String apiKey;
 
   public OpenAiProviderAdapter(String apiKey) {
-    this.apiKey = Objects.requireNonNull(apiKey, "apiKey");
+    this.apiKey = (apiKey == null || apiKey.isBlank()) ? null : apiKey;
   }
 
   @Override
@@ -45,14 +51,19 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
         // 未开启 reasoning 时不请求 thinking、不传 reasoning_effort。
         boolean thinking = request.model().reasoning();
         String reasoningEffort = thinking ? request.variant().reasoningEffort() : null;
-        return OpenAiStreamingChatModel.builder()
-            .baseUrl(descriptor.endpoint())
-            .apiKey(apiKey)
-            .modelName(request.model().modelId())
-            .timeout(descriptor.modelCallTimeoutPolicy().modelCallTimeout())
-            .returnThinking(thinking)
-            .customParameters(customParameters(control, minimax, reasoningEffort))
-            .build();
+        OpenAiStreamingChatModel.OpenAiStreamingChatModelBuilder builder =
+            OpenAiStreamingChatModel.builder()
+                .baseUrl(descriptor.endpoint())
+                .modelName(request.model().modelId())
+                .timeout(descriptor.modelCallTimeoutPolicy().modelCallTimeout())
+                .returnThinking(thinking)
+                .customParameters(customParameters(control, minimax, reasoningEffort));
+        // SDK DefaultOpenAiClient only emits Authorization when apiKey != null. Skip the setter
+        // entirely on null/blank so unauthenticated OpenAI-compatible endpoints work.
+        if (apiKey != null) {
+          builder.apiKey(apiKey);
+        }
+        return builder.build();
       }
 
       @Override

@@ -26,7 +26,7 @@ describe('AiResourceForms', () => {
       screen.getByPlaceholderText('https://api.example.com/v1'),
       'https://proxy.example/v1',
     )
-    await user.type(screen.getByPlaceholderText('sk-...'), 'secret')
+    await user.type(screen.getByPlaceholderText('可留空'), 'secret')
     const totalTimeoutInput = screen.getByPlaceholderText('1800000')
     await user.clear(totalTimeoutInput)
     await user.type(totalTimeoutInput, '240000')
@@ -41,6 +41,18 @@ describe('AiResourceForms', () => {
     expect(screen.getByDisplayValue('secret')).toBeInTheDocument()
     expect(screen.getByDisplayValue('240000')).toBeInTheDocument()
     expect(screen.getByDisplayValue('3000')).toBeInTheDocument()
+    expect(screen.getByText('留空会以无 Authorization 方式请求 OpenAI-compatible 端点。')).toBeInTheDocument()
+  })
+
+  it('explains that an empty edit credential preserves the existing secret without echoing it', () => {
+    const { container } = render(<ProviderFormHarness mode="edit" />)
+
+    expect(screen.getByText('留空会保留已配置的 API Key；密钥不会回显。')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('留空保留当前密钥')).toHaveValue('')
+    expect(Array.from(container.querySelectorAll('label > span')).slice(0, 2).map((label) => label.textContent)).toEqual([
+      'Name',
+      'API Key（可选）',
+    ])
   })
 
   it('edits the new model abilities, pricing, variants, and collapsed advanced options', async () => {
@@ -145,7 +157,7 @@ describe('AiResourceForms', () => {
   })
 })
 
-function ProviderFormHarness() {
+function ProviderFormHarness({ mode = 'create' }: { mode?: 'create' | 'edit' }) {
   const [draft, setDraft] = useState<ProviderDraft>({
     name: '',
     description: '',
@@ -155,7 +167,7 @@ function ProviderFormHarness() {
     modelCallTimeoutMillis: '1800000',
     modelCallIdleTimeoutMillis: '120000',
   })
-  return <ProviderForm draft={draft} onChange={setDraft} />
+  return <ProviderForm draft={draft} mode={mode} onChange={setDraft} />
 }
 
 function ModelFormHarness() {

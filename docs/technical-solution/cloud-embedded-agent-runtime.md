@@ -109,7 +109,7 @@ Subagent Task 创建独立 **Child Session + Child Main Thread**，记录 parent
 
 | 层 | 职责 |
 | --- | --- |
-| Entry | 语义 durable 真源；transcript 基线 |
+| Entry | 语义 durable 真源；transcript 与失败审计基线 |
 | ThreadEvent | 流式 delta、权限/工具进度、thread waiting/idle/failed；**可观测覆盖层** |
 
 事件类型包括：`thread_started`、`turn_started`、`assistant_*`、`compaction_*`、`input_applied`、`tool_*`、`permission_*`、`subagent_*`、`thread_waiting`、`thread_idle`、`thread_failed`。
@@ -133,8 +133,8 @@ Environment binding 在 Turn 资源解析时冻结。gateway 在 dispatch 前校
 | 节点 A 持有 token，节点 B kick | B `tryAcquire` 失败；A 继续 |
 | lease 过期 / 持有者崩溃 | 其他节点可 acquire；以 DB token 为准 |
 | 模型流中途崩溃 | 未提交 Assistant 可重试；已提交 Entry/Usage 不重复 |
-| Provider 瞬态失败 | 按持久 retry policy 写 `THREAD_RETRY_SCHEDULED` 并进入 `RETRYING`；到期后先偿还失败 Turn，再 Harvest 后续 mailbox |
-| Provider 不可重试失败或重试耗尽 | 写 `THREAD_FAILED` 类事件并停止；新的 USER/CUSTOM input 才重新启动普通循环 |
+| Provider 瞬态失败 | 写 `ASSISTANT_ERROR` Entry、`ASSISTANT_FAILED` 与 `THREAD_RETRY_SCHEDULED`，进入 `RETRYING`；到期后先偿还失败 Turn，再 Harvest 后续 mailbox。Error Entry 不进入下一次 Provider Context |
+| Provider 不可重试失败或重试耗尽 | 写 `ASSISTANT_ERROR` Entry 与 `THREAD_FAILED` 类事件并停止；新的 USER/CUSTOM input 才重新启动普通循环 |
 | Tool terminal / permission | 锁 Thread 后锁 invocation；after-commit kick |
 | external wait 释放 | `releaseForExternalWait` 原子释放 token |
 | SSE 断线 | 仅丢可观测增量；以 Entry + 重放 events 恢复 |

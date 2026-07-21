@@ -53,34 +53,19 @@ export function appendStreamingAssistantThinking(
 export function completeStreamingAssistant(
   state: StreamingAssistant | undefined,
   messages: DialogueMessage[],
-  event: ThreadEventDTO,
-  failureMessage: string,
 ) {
   if (!state) {
-    if (failureMessage) {
-      messages.push({
-        id: event.eventId,
-        role: 'assistant',
-        subjectEntryId: event.subjectEntryId,
-        text: failureMessage,
-        createdAt: event.createTime,
-        status: 'error',
-      })
-    }
     return
   }
   const tail = state.textFilter.finish()
-  if (tail || state.pendingThinking || failureMessage) {
+  if (tail || state.pendingThinking) {
     const message = ensureStreamingAssistantMessage(state, messages)
     if (tail) {
       message.text += tail
     }
   }
   if (state.message) {
-    state.message.status = failureMessage ? 'error' : 'done'
-    if (failureMessage) {
-      state.message.text = state.message.text ? `${state.message.text}\n${failureMessage}` : failureMessage
-    }
+    state.message.status = 'done'
   }
 }
 
@@ -96,6 +81,32 @@ export function discardStreamingAssistant(
   if (index >= 0) {
     messages.splice(index, 1)
   }
+}
+
+/**
+ * 将尚未完成 Entries 刷新的失败事件暂时投影为独立错误消息。
+ *
+ * <p>后端使用 planned assistant entry id 作为 durable assistant_error Entry id；Entry 到达后由
+ * buildThreadTimeline 的 materialized-entry 去重替换此临时消息。错误绝不能追加到同次 partial
+ * assistant 文本，否则下一次成功响应会继承 error/red 状态。
+ */
+export function projectStreamingAssistantFailure(
+  messages: DialogueMessage[],
+  event: ThreadEventDTO,
+  failureMessage: string,
+) {
+  const id = event.subjectEntryId || `assistant-error:${event.eventId}`
+  if (messages.some((message) => message.id === id)) {
+    return
+  }
+  messages.push({
+    id,
+    role: 'assistant',
+    subjectEntryId: event.subjectEntryId,
+    text: failureMessage || '助手请求失败',
+    createdAt: event.createTime,
+    status: 'error',
+  })
 }
 
 export function ensureStreamingAssistantMessage(
