@@ -75,6 +75,9 @@ import fun.fengwk.kkstudio.harness.runtime.thread.CompactionService;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessorConfig;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRetryBackoffStrategy;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRetryPolicy;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRetryPolicyResolver;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnResourceResolver;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnResources;
@@ -103,7 +106,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -149,11 +154,13 @@ class ThreadProcessorIntegrationTest {
   @Autowired private HarnessSessionEntryMapper entryMapper;
   @Autowired private ThreadIdGenerator idGenerator;
   @Autowired private LifecycleProbe lifecycleProbe;
+  @Autowired private MutableRetryPolicyResolver retryPolicyResolver;
 
   @BeforeEach
   void resetProvider() {
     fakeProvider.reset();
     lifecycleProbe.reset();
+    retryPolicyResolver.reset();
   }
 
   /**
@@ -594,7 +601,7 @@ class ThreadProcessorIntegrationTest {
   }
 
   @Test
-  void failedTurnKeepsConcurrentSecondUserQueuedUntilExplicitRetry() throws Exception {
+  void failedTurnKeepsConcurrentSecondUserQueuedAfterFailure() throws Exception {
     HarnessThreadDTO thread = createRoot("proc-fail-concurrent");
     long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
     CountDownLatch entered = new CountDownLatch(1);
@@ -618,7 +625,7 @@ class ThreadProcessorIntegrationTest {
   }
 
   @Test
-  void failedTurnRequiresRetryBeforeLaterInputCanRun() throws Exception {
+  void failedTurnRestartsWhenNewUserMessageArrives() throws Exception {
     HarnessThreadDTO thread = createRoot("proc-fail-later");
     long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
     fakeProvider.failNext(ProviderErrorKind.INVALID_REQUEST, "first-fail");
@@ -626,30 +633,31 @@ class ThreadProcessorIntegrationTest {
     awaitFailed(threadId);
     assertEquals(1, fakeProvider.requestsSinceReset());
 
-    // FAILED 期间后续输入仅入队，不能触发模型。
+    // 用户消息是重新启动信号；它不直接重放失败 turn，而是恢复普通 mailbox loop。
     fakeProvider.reset();
-    submit(thread.getThreadId(), "retry-after-fail", "cid-retry-" + threadId);
-    Thread.sleep(100);
-    assertEquals(0, fakeProvider.requestsSinceReset());
-    transactions.retry(threadId, Instant.now());
-    threadProcessor.process(threadId);
+    submit(thread.getThreadId(), "after-fail", "cid-after-fail-" + threadId);
     awaitIdle(threadId);
-    assertTrue(fakeProvider.requestsSinceReset() >= 2, "retry repays debt before harvesting input");
+    assertEquals(1, fakeProvider.requestsSinceReset());
+    assertTrue(
+        userMessageInputs(queryService.listInputs(thread.getThreadId())).stream()
+            .allMatch(input -> input.getAppliedEntryId() != null));
   }
 
-  /** RETRYING Tool chain 释放 token 但保留 debt，直到 follow-up assistant 完成前不得 harvest 新输入。 */
+  /** 自动 RETRYING Tool chain 释放 token 但保留 debt，直到 follow-up assistant 完成前不得 harvest 新输入。 */
   @Test
-  void retryToolWaitRetainsDebtUntilFollowUpAssistantBeforeHarvestingLaterInput() throws Exception {
+  void automaticRetryRetainsDebtUntilFollowUpAssistantBeforeHarvestingLaterInput()
+      throws Exception {
     HarnessThreadDTO thread = createRoot("proc-retry-tool-wait");
     long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
-    fakeProvider.failNext(ProviderErrorKind.INVALID_REQUEST, "first-fail");
+    retryPolicyResolver.set(
+        new ThreadRetryPolicy(
+            1, ThreadRetryBackoffStrategy.FIXED, Duration.ofMillis(200), Duration.ofMillis(200)));
+    fakeProvider.failNext(ProviderErrorKind.TRANSIENT, "first-fail");
+    fakeProvider.completeNextWithToolCall();
     submit(thread.getThreadId(), "will-fail", "cid-retry-tool-fail-" + threadId);
-    awaitFailed(threadId);
+    awaitRetryScheduled(threadId);
 
     submit(thread.getThreadId(), "queued-behind-retry-debt", "cid-retry-tool-later-" + threadId);
-    fakeProvider.completeNextWithToolCall();
-    transactions.retry(threadId, Instant.now());
-    threadProcessor.process(threadId);
     awaitRetryingToolWait(threadId);
 
     List<HarnessThreadInputDTO> userInputs =
@@ -683,6 +691,52 @@ class ThreadProcessorIntegrationTest {
   }
 
   @Test
+  void transientFailureExhaustsAutomaticRetriesThenNewInputRestartsTheLoop() throws Exception {
+    HarnessThreadDTO thread = createRoot("proc-retry-exhausted");
+    long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
+    retryPolicyResolver.set(
+        new ThreadRetryPolicy(
+            1, ThreadRetryBackoffStrategy.FIXED, Duration.ofMillis(100), Duration.ofMillis(100)));
+    fakeProvider.failNext(ProviderErrorKind.TRANSIENT, "first-transient");
+    fakeProvider.failNext(ProviderErrorKind.TRANSIENT, "second-transient");
+
+    submit(thread.getThreadId(), "retry me", "cid-retry-exhausted-first-" + threadId);
+    awaitRetryScheduled(threadId);
+    assertFalse(
+        queryService.listPathEntries(thread.getThreadId()).stream()
+            .map(
+                entry ->
+                    SESSION_ENTRY_CODEC.decode(
+                        SessionEntryType.fromValue(entry.getEntryType()), entry.getPayloadJson()))
+            .filter(MessageEntryPayload.class::isInstance)
+            .map(MessageEntryPayload.class::cast)
+            .anyMatch(payload -> payload.message().role() == AgentMessageRole.ASSISTANT),
+        "automatic retry must not materialize a failed assistant entry");
+    awaitFailed(threadId);
+
+    assertEquals(2, fakeProvider.requestsSinceReset());
+    assertEquals("FAILED", threadStore.find(threadId).orElseThrow().status().name());
+    assertEquals(1, threadStore.find(threadId).orElseThrow().retryAttempt());
+    List<ThreadEventDTO> events = queryService.listEvents(thread.getThreadId(), 0, 100);
+    assertEquals(
+        1,
+        events.stream()
+            .filter(event -> "thread_retry_scheduled".equals(event.getEventType()))
+            .count());
+    assertTrue(
+        events.stream()
+            .filter(event -> "thread_failed".equals(event.getEventType()))
+            .anyMatch(event -> event.getPayloadJson().contains("retry_exhausted")));
+
+    fakeProvider.reset();
+    submit(thread.getThreadId(), "start again", "cid-retry-exhausted-restart-" + threadId);
+    awaitIdle(threadId);
+    assertEquals(1, fakeProvider.requestsSinceReset());
+    assertEquals(0, threadStore.find(threadId).orElseThrow().retryAttempt());
+    assertNull(threadStore.find(threadId).orElseThrow().retryAt());
+  }
+
+  @Test
   void waitingReleasesDespitePendingInputWhenToolWaiting() throws Exception {
     HarnessThreadDTO thread = createRoot("proc-wait-input");
     long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
@@ -707,10 +761,16 @@ class ThreadProcessorIntegrationTest {
   }
 
   @Test
-  void permanentProviderFailureStopsWithoutImmediateRetry() throws Exception {
+  void authenticationFailureStopsWithoutAutomaticRetry() throws Exception {
     HarnessThreadDTO thread = createRoot("proc-fail");
     long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
-    fakeProvider.failNext(ProviderErrorKind.INVALID_REQUEST, "boom");
+    retryPolicyResolver.set(
+        new ThreadRetryPolicy(
+            3,
+            ThreadRetryBackoffStrategy.EXPONENTIAL,
+            Duration.ofMillis(10),
+            Duration.ofMillis(100)));
+    fakeProvider.failNext(ProviderErrorKind.AUTHENTICATION, "bad credential");
     submit(thread.getThreadId(), "will-fail", "cid-fail-" + threadId);
     awaitFailed(threadId);
 
@@ -718,7 +778,8 @@ class ThreadProcessorIntegrationTest {
     assertTrue(events.stream().anyMatch(e -> "assistant_failed".equals(e.getEventType())));
     assertTrue(events.stream().anyMatch(e -> "thread_failed".equals(e.getEventType())));
     assertEquals(
-        1, fakeProvider.requestsSinceReset(), "must not immediately retry in same activation");
+        1, fakeProvider.requestsSinceReset(), "authentication failure must not be retried");
+    assertFalse(events.stream().anyMatch(e -> "thread_retry_scheduled".equals(e.getEventType())));
     assertNull(threadStore.find(threadId).orElseThrow().processorToken());
   }
 
@@ -1012,6 +1073,21 @@ class ThreadProcessorIntegrationTest {
     throw new AssertionError("thread did not fail: " + threadId);
   }
 
+  private void awaitRetryScheduled(long threadId) throws InterruptedException {
+    Instant deadline = Instant.now().plusSeconds(5);
+    while (Instant.now().isBefore(deadline)) {
+      var thread = threadStore.find(threadId).orElseThrow();
+      if (thread.status().name().equals("RETRYING")
+          && thread.retryAttempt() == 1
+          && thread.retryAt() != null
+          && thread.processorToken() == null) {
+        return;
+      }
+      Thread.sleep(10);
+    }
+    throw new AssertionError("thread did not schedule automatic retry: " + threadId);
+  }
+
   private void awaitRetryingToolWait(long threadId) throws InterruptedException {
     Instant deadline = Instant.now().plusSeconds(10);
     while (Instant.now().isBefore(deadline)) {
@@ -1025,7 +1101,20 @@ class ThreadProcessorIntegrationTest {
       }
       Thread.sleep(25);
     }
-    throw new AssertionError("retrying tool chain did not release token: " + threadId);
+    var current = threadStore.find(threadId).orElseThrow();
+    throw new AssertionError(
+        "retrying tool chain did not release token: "
+            + threadId
+            + ", status="
+            + current.status()
+            + ", token="
+            + current.processorToken()
+            + ", retryAt="
+            + current.retryAt()
+            + ", invocations="
+            + invocationMapper.listByThread(threadId).stream()
+                .map(invocation -> invocation.getStatus())
+                .toList());
   }
 
   private void awaitProviderStreamCancelled() throws InterruptedException {
@@ -1190,6 +1279,12 @@ class ThreadProcessorIntegrationTest {
 
     @Bean
     @Primary
+    MutableRetryPolicyResolver retryPolicyResolver() {
+      return new MutableRetryPolicyResolver();
+    }
+
+    @Bean
+    @Primary
     TurnResourceResolver controlledTurnResourceResolver(ControlledFakeProvider provider) {
       return (sessionId, threadId, config) -> {
         RuntimeException failure = provider.takeResourceResolutionFailure();
@@ -1236,6 +1331,30 @@ class ThreadProcessorIntegrationTest {
             Path.of("."),
             Path.of("."));
       };
+    }
+  }
+
+  /**
+   * Keeps non-retry tests fast while allowing individual cases to prove durable automatic retry.
+   */
+  static final class MutableRetryPolicyResolver implements ThreadRetryPolicyResolver {
+    private static final ThreadRetryPolicy NO_RETRY =
+        new ThreadRetryPolicy(
+            0, ThreadRetryBackoffStrategy.FIXED, Duration.ofMillis(10), Duration.ofMillis(10));
+
+    private volatile ThreadRetryPolicy policy = NO_RETRY;
+
+    @Override
+    public ThreadRetryPolicy resolve() {
+      return policy;
+    }
+
+    void reset() {
+      policy = NO_RETRY;
+    }
+
+    void set(ThreadRetryPolicy value) {
+      policy = value;
     }
   }
 
@@ -1297,7 +1416,7 @@ class ThreadProcessorIntegrationTest {
     private final AtomicInteger requests = new AtomicInteger();
     private final AtomicInteger resetAt = new AtomicInteger();
     private final List<Integer> completionOrder = new CopyOnWriteArrayList<>();
-    private volatile ProviderException nextFailure;
+    private final Queue<ProviderException> pendingFailures = new ConcurrentLinkedQueue<>();
     private volatile CountDownLatch blockEntered;
     private volatile CountDownLatch blockRelease;
     private volatile Duration blockDuration = Duration.ZERO;
@@ -1319,7 +1438,7 @@ class ThreadProcessorIntegrationTest {
     void reset() {
       resetAt.set(requests.get());
       completionOrder.clear();
-      nextFailure = null;
+      pendingFailures.clear();
       blockEntered = null;
       blockRelease = null;
       blockDuration = Duration.ZERO;
@@ -1340,7 +1459,7 @@ class ThreadProcessorIntegrationTest {
     }
 
     void failNext(ProviderErrorKind kind, String message) {
-      nextFailure = new ProviderException(kind, message);
+      pendingFailures.add(new ProviderException(kind, message));
     }
 
     void failResourceResolution(String message) {
@@ -1466,8 +1585,7 @@ class ThreadProcessorIntegrationTest {
               return cancellation.get();
             }
           };
-      ProviderException failure = nextFailure;
-      nextFailure = null;
+      ProviderException failure = pendingFailures.poll();
       if (failure != null) {
         handler.onError(failure, stream);
         return stream;

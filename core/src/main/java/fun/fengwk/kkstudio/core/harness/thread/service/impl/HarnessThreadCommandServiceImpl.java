@@ -177,15 +177,6 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     return dto;
   }
 
-  @Override
-  @Transactional
-  public HarnessThreadDTO retry(String threadId) {
-    long id = HarnessIds.parsePositive(threadId, "threadId");
-    HarnessThreadDTO dto = converter.convert(transactions.retry(id, Instant.now()));
-    afterCommitKick(id);
-    return dto;
-  }
-
   private AgentDefinitionDO requireDefinition(long agentDefinitionId) {
     AgentDefinitionDO definition = agentDefinitionMapper.getById(agentDefinitionId);
     if (definition == null) {

@@ -174,6 +174,8 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
             rootEntryId,
             ThreadStatus.IDLE,
             0L,
+            0,
+            null,
             null,
             null,
             null,
@@ -241,6 +243,8 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
             fromEntryId,
             ThreadStatus.IDLE,
             0L,
+            0,
+            null,
             agentDefinitionId,
             agentName,
             modelId,
@@ -825,30 +829,32 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
       return false;
     }
     appendEventsInternal(threadId, events, now);
-    threadMapper.forceStatusAndClearProcessor(threadId, ThreadStatus.FAILED.name(), utc(now));
+    threadMapper.markFailedAndClearProcessor(threadId, utc(now));
     return true;
   }
 
   @Override
   @Transactional
-  public AgentThread retry(long threadId, Instant now) {
-    HarnessThreadDO thread = threadMapper.findForUpdate(threadId);
-    if (thread == null) {
-      throw new IllegalArgumentException("unknown thread: " + threadId);
+  public boolean scheduleRetry(
+      long threadId,
+      String processorToken,
+      int retryAttempt,
+      Instant retryAt,
+      List<ThreadEventDraft> events,
+      Instant now) {
+    if (retryAttempt <= 0) {
+      throw new IllegalArgumentException("retryAttempt must be positive");
     }
-    if (!ThreadStatus.FAILED.name().equals(thread.getStatus())) {
-      throw new IllegalStateException("thread is not failed");
+    Objects.requireNonNull(retryAt, "retryAt");
+    if (findOwnedThread(threadId, processorToken) == null) {
+      return false;
     }
-    threadMapper.updateStatusDirect(threadId, ThreadStatus.RETRYING.name(), utc(now));
-    eventStore.append(
-        threadId,
-        thread.getHeadEntryId(),
-        ThreadEventType.THREAD_RETRYING,
-        ThreadEventPayloads.of("at", now),
-        now);
-    return threadStore
-        .find(threadId)
-        .orElseThrow(() -> new IllegalStateException("thread disappeared"));
+    if (threadMapper.scheduleRetry(threadId, processorToken, retryAttempt, utc(retryAt), utc(now))
+        != 1) {
+      return false;
+    }
+    appendEventsInternal(threadId, events, now);
+    return true;
   }
 
   @Override
@@ -888,6 +894,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     }
     invocationMapper.requestCancelByThread(threadId, utc(now));
     threadMapper.forceStatusAndClearProcessor(threadId, ThreadStatus.IDLE.name(), utc(now));
+    threadMapper.clearRetryState(threadId, utc(now));
     eventStore.append(
         threadId,
         thread.getHeadEntryId(),
@@ -919,7 +926,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
                   ThreadEventType.THREAD_FAILED,
                   ThreadEventPayloads.of("reason", "turn_admission_rejected", "message", reason))),
           now);
-      threadMapper.forceStatusAndClearProcessor(threadId, ThreadStatus.FAILED.name(), utc(now));
+      threadMapper.markFailedAndClearProcessor(threadId, utc(now));
       return BeginTurnResult.rejected(reason);
     }
     appendEventsInternal(
@@ -932,12 +939,12 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
 
   @Override
   @Transactional
-  public boolean completeRetriedTurn(long threadId, String processorToken, Instant now) {
+  public boolean completeRetryDebt(long threadId, String processorToken, Instant now) {
     HarnessThreadDO thread = findOwnedThread(threadId, processorToken);
     if (thread == null || !ThreadStatus.RETRYING.name().equals(thread.getStatus())) {
       return false;
     }
-    return threadStore.updateStatus(threadId, processorToken, ThreadStatus.RUNNING, now);
+    return threadMapper.completeRetryDebt(threadId, processorToken, utc(now)) == 1;
   }
 
   @Override
@@ -1076,6 +1083,16 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
           null,
           ThreadEventType.THREAD_RUNNING,
           ThreadEventPayloads.of("reason", "input_queued"),
+          now);
+    } else if (ThreadStatus.FAILED.name().equals(thread.getStatus()) && inputType.isMessage()) {
+      if (threadMapper.restartFailedForUserInput(threadId, utc(now)) != 1) {
+        throw new ConcurrentModificationException("cannot restart failed thread");
+      }
+      eventStore.append(
+          threadId,
+          null,
+          ThreadEventType.THREAD_RUNNING,
+          ThreadEventPayloads.of("reason", "input_queued_after_failure"),
           now);
     }
     return input;

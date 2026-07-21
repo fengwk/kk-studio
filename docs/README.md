@@ -39,7 +39,7 @@ flowchart TD
 | [product-design/infinite-canvas-product-logic.md](product-design/infinite-canvas-product-logic.md) | 产品逻辑 | 定义 Node、Resource、Link、ResourceReference、Function、Workflow、传播、运行和 MVP 闭环标准 |
 | [product-design/frontend-design-system.md](product-design/frontend-design-system.md) | 前端设计规范 | 定义全局 token、AppShell、组件与 Agent 面板模块化约定；明确视觉统一进度与迁移清单 |
 | [technical-solution/infinite-canvas-implementation-design.md](technical-solution/infinite-canvas-implementation-design.md) | 无限画布技术方案 | 定义领域模块、存储、Command、Function/Workflow Runtime、Web API、前端状态和低耦合 Agent Port |
-| [technical-solution/harness-thread-actor.md](technical-solution/harness-thread-actor.md) | Harness 架构事实源 | 定义 Session Tree、Main Thread、durable Thread actor、mailbox、Stop/Retry、Tool permission、Subagent 和前后端契约 |
+| [technical-solution/harness-thread-actor.md](technical-solution/harness-thread-actor.md) | Harness 架构事实源 | 定义 Session Tree、Main Thread、durable Thread actor、mailbox、Stop/自动重试、Tool permission、Subagent 和前后端契约 |
 
 ## 维护规则
 

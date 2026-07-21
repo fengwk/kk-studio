@@ -50,12 +50,13 @@ export function useAgentThreadQueries(threadId: string, sessionId: string) {
     enabled: Boolean(threadId),
     refetchInterval: (query) => {
       const inputs = query.state.data ?? []
-      return inputs.some((input) => input.status === 'QUEUED') || isThreadActive(thread?.status) ? 1000 : false
+      return (thread?.status !== 'FAILED' && inputs.some((input) => input.status === 'QUEUED')) || isThreadActive(thread?.status) ? 1000 : false
     },
   })
   const inputs = inputsQuery.data ?? []
   const workingHint =
-    isThreadActive(thread?.status) || inputs.some((input) => input.status === 'QUEUED')
+    isThreadActive(thread?.status)
+    || (thread?.status !== 'FAILED' && inputs.some((input) => input.status === 'QUEUED'))
 
   const entriesQuery = useQuery({
     queryKey: queryKeys.threads.entries(threadId),

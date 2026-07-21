@@ -82,8 +82,8 @@ import java.util.concurrent.atomic.AtomicReference;
  *   <li>没有可推进事实时，使用原子 quiesce 检查并切到 IDLE；该检查防止与并发 enqueue/Tool 完成竞争而丢 work。
  * </ol>
  *
- * <p>{@link ThreadStatus#RETRYING} 是刻意的例外：它必须先从失败时的 durable head 偿还同一个 Turn，不能先 harvest 后续消息。若该
- * Turn 进入 Tool chain，RETRYING debt 会跨越外部等待，直到最终无 Tool 的 Assistant 成功提交后才恢复 RUNNING。
+ * <p>{@link ThreadStatus#RETRYING} 是自动重试的刻意例外：它必须先从失败时的 durable head 偿还同一个 Turn，不能先 harvest 后续消息。
+ * 若该 Turn 进入 Tool chain，RETRYING debt 会跨越外部等待，直到最终无 Tool 的 Assistant 成功提交后才恢复 RUNNING。
  */
 public final class ThreadProcessor implements ThreadKick, ThreadProviderCancellation {
   private static final System.Logger LOGGER = System.getLogger(ThreadProcessor.class.getName());
@@ -99,6 +99,7 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
   private final ProviderMessageProjector messageProjector;
   private final TurnResourceResolver resourceResolver;
   private final CompactionService compactionService;
+  private final ThreadRetryPolicyResolver retryPolicyResolver;
   private final ThreadProcessorConfig config;
   private final Clock clock;
   private final DeltaFlushScheduler deltaFlushScheduler;
@@ -141,6 +142,7 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
       ProviderMessageProjector messageProjector,
       TurnResourceResolver resourceResolver,
       CompactionService compactionService,
+      ThreadRetryPolicyResolver retryPolicyResolver,
       ThreadProcessorConfig config,
       Clock clock,
       DeltaFlushScheduler deltaFlushScheduler,
@@ -159,6 +161,7 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
     this.messageProjector = Objects.requireNonNull(messageProjector, "messageProjector");
     this.resourceResolver = Objects.requireNonNull(resourceResolver, "resourceResolver");
     this.compactionService = Objects.requireNonNull(compactionService, "compactionService");
+    this.retryPolicyResolver = Objects.requireNonNull(retryPolicyResolver, "retryPolicyResolver");
     this.config = Objects.requireNonNull(config, "config");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.deltaFlushScheduler = Objects.requireNonNull(deltaFlushScheduler, "deltaFlushScheduler");
@@ -263,8 +266,8 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
    * 直接验证同一套状态机。它不绕过数据库单飞：先 {@link ThreadStore#tryAcquire(long, String, Instant, Duration)}，
    * 获取失败即表示当前状态不可运行或其他节点持有有效 lease。
    *
-   * <p>正常出口不在 finally 中盲目 release token：WAITING、FAILED、POLICY_REJECTED 和 IDLE 分别由相应 durable
-   * transaction 原子地写状态并释放/撤销 lease。只有未经预期处理的运行时异常才 best-effort release，避免异常把 lease 无谓地占到过期。
+   * <p>正常出口不在 finally 中盲目 release token：WAITING、RETRY_SCHEDULED、FAILED、POLICY_REJECTED 和 IDLE 分别由相应
+   * durable transaction 原子地写状态并释放/撤销 lease。只有未经预期处理的运行时异常才 best-effort release，避免异常把 lease 无谓地占到过期。
    */
   public void process(long threadId) {
     Instant now = clock.instant();
@@ -291,8 +294,12 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
             // beginTurn 已持久化策略拒绝，不能把它当 Provider 瞬态错误自动重试。
             return;
           }
+          case RETRY_SCHEDULED -> {
+            // scheduleRetry 已写入到期时间并释放 token；本地 timer/recovery 会在到期后重新 kick。
+            return;
+          }
           case FAILED -> {
-            // failure transaction 已写 FAILED 并释放 token；必须等待显式 Retry。
+            // failure transaction 已写 FAILED 并释放 token；后续用户消息会重新启动正常循环。
             return;
           }
           case IDLE -> {
@@ -331,7 +338,9 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
     WAITING_EXTERNAL,
     /** lease 或 fencing token 已失效，当前 activation 必须无条件停止。 */
     LOST_OWNERSHIP,
-    /** Provider/setup/tool prepare 已写 durable FAILED，只有显式 Retry 可以恢复。 */
+    /** 自动重试已写入 durable 到期时间并释放 token。 */
+    RETRY_SCHEDULED,
+    /** Provider/setup/tool prepare 已写 durable FAILED，等待下一条用户消息重新启动。 */
     FAILED,
     /** Policy admission rejection: force-release token; do not treat as provider retry. */
     POLICY_REJECTED
@@ -342,6 +351,7 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
     CONTINUE,
     COMPLETED,
     LOST_OWNERSHIP,
+    RETRY_SCHEDULED,
     FAILED,
     POLICY_REJECTED
   }
@@ -405,7 +415,7 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
         switch (outcome) {
           case COMPLETED -> {
             // 只有最终无 Tool 的 Assistant commit 才返回 COMPLETED；此时才可清除 retry debt 并恢复普通 harvest。
-            if (!transactions.completeRetriedTurn(threadId, token, clock.instant())) {
+            if (!transactions.completeRetryDebt(threadId, token, clock.instant())) {
               return LoopExit.LOST_OWNERSHIP;
             }
             continue;
@@ -418,6 +428,9 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
           }
           case POLICY_REJECTED -> {
             return LoopExit.POLICY_REJECTED;
+          }
+          case RETRY_SCHEDULED -> {
+            return LoopExit.RETRY_SCHEDULED;
           }
           case FAILED -> {
             return LoopExit.FAILED;
@@ -452,6 +465,9 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
           }
           case POLICY_REJECTED -> {
             return LoopExit.POLICY_REJECTED;
+          }
+          case RETRY_SCHEDULED -> {
+            return LoopExit.RETRY_SCHEDULED;
           }
           case FAILED -> {
             return LoopExit.FAILED;
@@ -704,6 +720,9 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
     if (handler.lostOwnership) {
       return TurnOutcome.LOST_OWNERSHIP;
     }
+    if (handler.retryScheduled) {
+      return TurnOutcome.RETRY_SCHEDULED;
+    }
     if (handler.failed) {
       return TurnOutcome.FAILED;
     }
@@ -730,6 +749,20 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
 
   private static String message(Throwable error) {
     return error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
+  }
+
+  private void scheduleRetryWake(long threadId, Instant retryAt) {
+    // Duration#toMillis 向下取整；不留余量可能让本地 wake 比 durable retry_at 早一个子毫秒，
+    // tryAcquire 随即拒绝且本次 wake 被消耗。额外 1ms 使本地 timer 不早于持久到期点。
+    long delayMillis = Math.max(1L, Duration.between(clock.instant(), retryAt).toMillis() + 1L);
+    try {
+      workerScheduler.schedule(() -> kick(threadId), delayMillis, TimeUnit.MILLISECONDS);
+    } catch (RejectedExecutionException rejected) {
+      LOGGER.log(
+          System.Logger.Level.WARNING,
+          "cannot schedule automatic retry for " + threadId + "; durable recovery will pick up",
+          rejected);
+    }
   }
 
   private enum ToolProgress {
@@ -762,6 +795,9 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
 
     /** Provider 已提交 durable failure；executeModelTurn 应以 FAILED 退出。 */
     private volatile boolean failed;
+
+    /** Provider 瞬态失败已经提交自动 retry schedule；当前 activation 必须立即结束。 */
+    private volatile boolean retryScheduled;
 
     /** 当前 token 已不可写；一旦置位，所有后续 Provider callback 都应退化为 no-op。 */
     private volatile boolean lostOwnership;
@@ -936,8 +972,8 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
         batcher.flush();
         switch (error.kind()) {
           case OVERFLOW -> overflowFailure(error);
-          case TRANSIENT, CANCELLED, AUTHENTICATION, BILLING, INVALID_REQUEST -> permanentFailure(
-              error);
+          case TRANSIENT -> scheduleOrFail(error);
+          case CANCELLED, AUTHENTICATION, BILLING, INVALID_REQUEST -> permanentFailure(error);
         }
       } finally {
         completion.complete(null);
@@ -1001,13 +1037,79 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
       }
     }
 
-    /**
-     * 将不可在当前 activation 内恢复的 Provider failure 固化为 FAILED。
-     *
-     * <p>事务会同时写 ASSISTANT_FAILED/THREAD_FAILED、清除 token；后续 queued input 保留不动，必须由显式 Retry 先偿还失败
-     * debt，不能自动越过。
-     */
+    /** 瞬态 Provider failure 按当前策略写入一次 durable automatic retry。 */
+    private void scheduleOrFail(ProviderException error) {
+      ThreadRetryPolicy policy;
+      try {
+        policy = retryPolicyResolver.resolve();
+      } catch (RuntimeException policyError) {
+        permanentFailure(
+            new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST, "cannot resolve retry policy", policyError));
+        return;
+      }
+      int attempt = thread.retryAttempt() + 1;
+      if (!policy.allowsRetry(attempt)) {
+        permanentFailure(error, "retry_exhausted", policy.maxRetries());
+        return;
+      }
+      Instant now = clock.instant();
+      Duration delay = policy.delayBeforeRetry(attempt);
+      Instant retryAt = now.plus(delay);
+      try {
+        if (!transactions.scheduleRetry(
+            thread.id(),
+            token,
+            attempt,
+            retryAt,
+            List.of(
+                new ThreadEventDraft(
+                    ThreadEventType.ASSISTANT_FAILED,
+                    plannedAssistantEntryId,
+                    ThreadEventPayloads.of(
+                        "kind",
+                        error.kind().name(),
+                        "message",
+                        message(error),
+                        "retryScheduled",
+                        true,
+                        "retryAttempt",
+                        attempt,
+                        "maxRetries",
+                        policy.maxRetries())),
+                new ThreadEventDraft(
+                    ThreadEventType.THREAD_RETRY_SCHEDULED,
+                    ThreadEventPayloads.of(
+                        "retryAttempt",
+                        attempt,
+                        "maxRetries",
+                        policy.maxRetries(),
+                        "backoffStrategy",
+                        policy.backoffStrategy().name(),
+                        "delayMillis",
+                        delay.toMillis(),
+                        "retryAt",
+                        retryAt,
+                        "kind",
+                        error.kind().name()))),
+            now)) {
+          markLostOwnership();
+          return;
+        }
+        retryScheduled = true;
+        scheduleRetryWake(thread.id(), retryAt);
+      } catch (ConcurrentModificationException concurrency) {
+        markLostOwnership();
+      }
+    }
+
+    /** 将不可恢复的 Provider failure 固化为 FAILED。 */
     private void permanentFailure(ProviderException error) {
+      permanentFailure(error, "not_retryable", null);
+    }
+
+    private void permanentFailure(
+        ProviderException error, String reason, Integer configuredMaxRetries) {
       Instant now = clock.instant();
       try {
         if (!transactions.fail(
@@ -1017,11 +1119,30 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
                 new ThreadEventDraft(
                     ThreadEventType.ASSISTANT_FAILED,
                     plannedAssistantEntryId,
-                    ThreadEventPayloads.of("kind", error.kind().name(), "message", message(error))),
+                    ThreadEventPayloads.of(
+                        "kind",
+                        error.kind().name(),
+                        "message",
+                        message(error),
+                        "retryScheduled",
+                        false,
+                        "retryAttempt",
+                        thread.retryAttempt(),
+                        "maxRetries",
+                        configuredMaxRetries)),
                 new ThreadEventDraft(
                     ThreadEventType.THREAD_FAILED,
                     ThreadEventPayloads.of(
-                        "kind", error.kind().name(), "message", message(error)))),
+                        "reason",
+                        reason,
+                        "kind",
+                        error.kind().name(),
+                        "message",
+                        message(error),
+                        "retryAttempt",
+                        thread.retryAttempt(),
+                        "maxRetries",
+                        configuredMaxRetries))),
             now)) {
           markLostOwnership();
           return;

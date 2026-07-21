@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessor.ThreadToolPort;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessorConfig;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeConfigResolver;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStore;
@@ -354,6 +355,8 @@ class ThreadProcessorControlFlowTest {
         3L,
         status,
         0L,
+        status == ThreadStatus.RETRYING ? 1 : 0,
+        status == ThreadStatus.RETRYING ? now : null,
         1L,
         "default-assistant",
         "1",
@@ -437,6 +440,7 @@ class ThreadProcessorControlFlowTest {
             new ProviderMessageProjector(),
             resourceResolver,
             mock(CompactionService.class),
+            () -> ThreadRetryPolicy.DEFAULT,
             new ThreadProcessorConfig(Duration.ofSeconds(3), Duration.ofSeconds(1), 1_024, 2),
             Clock.systemUTC(),
             (delay, task) -> {},

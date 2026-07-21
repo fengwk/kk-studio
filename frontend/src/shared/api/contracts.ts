@@ -298,6 +298,8 @@ export interface HarnessThreadDTO {
   headEntryId: string | null
   status: ThreadStatus
   inputSequence: BackendLong
+  retryAttempt: number
+  retryAt: BackendDateTime
   activeAgentDefinitionId: string | null
   activeAgentName: string | null
   modelId: string | null
@@ -340,6 +342,15 @@ export interface HarnessThreadModelSetDTO {
 }
 
 export type ThreadStatus = 'IDLE' | 'RUNNING' | 'WAITING' | 'FAILED' | 'RETRYING'
+
+/** Global automatic retry policy; PUT bodies are complete replacements. */
+export interface HarnessRetryPolicyDTO {
+  /** Extra attempts after the initial provider request. */
+  maxRetries: number
+  backoffStrategy: 'FIXED' | 'EXPONENTIAL'
+  baseDelayMillis: number
+  maxDelayMillis: number
+}
 
 export type ThreadInputType =
   | 'USER_MESSAGE'

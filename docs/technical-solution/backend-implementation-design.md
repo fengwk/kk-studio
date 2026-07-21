@@ -37,7 +37,8 @@ flowchart LR
 | Thread | `GET /api/threads/{threadId}` | 读取 durable Branch actor |
 | Thread 输入（202） | `POST /api/threads/{id}/messages`、`PUT .../agent`、`/model`、`/yolo` | 按 mailbox 顺序入队消息或配置命令 |
 | Thread 投影 | `GET /api/threads/{id}/entries`、`/inputs`、`/events`、`/events/stream` | 路径 Entries、inputs、events 与 SSE |
-| Thread 控制 | `POST /api/threads/{id}/stop`、`POST /api/threads/{id}/retry` | 幂等取消 queued Input / Tool work；显式恢复 FAILED Thread |
+| Thread 控制 | `POST /api/threads/{id}/stop` | 幂等取消 queued Input / Tool work |
+| Retry policy | `GET` / `PUT /api/harness/retry-policy` | 全局持久化自动重试策略 |
 | Root Activity / Task | `GET /api/sessions/{id}/activities`、`GET /api/sessions/{id}/tasks` | 根活动投影与子代理任务 |
 | Tool | `GET /api/threads/{id}/tool-invocations`、`GET /api/tool-invocations/{id}`、`POST /api/tool-invocations/{id}/decision` | Tool 状态与权限决策 |
 | Artifact / Usage | `/api/artifacts/{id}`、`/api/usage/threads/{id}`、`/api/usage/sessions/{id}`、`/api/usage/models/{id}` | artifact bytes 与用量汇总 |
@@ -51,7 +52,8 @@ ComfyUI 和 S3 接口边界见 [ComfyUI 工作流 API](comfyui-workflow-api.md) 
 
 | Controller | 路径前缀 | 职责 |
 | --- | --- | --- |
-| `StudioHarnessThreadController` | `/api/threads` | Thread 读取、入队 202、Stop/Retry、entries/inputs/events/SSE |
+| `StudioHarnessThreadController` | `/api/threads` | Thread 读取、入队 202、Stop、entries/inputs/events/SSE |
+| `StudioHarnessRetryPolicyController` | `/api/harness/retry-policy` | 自动重试策略读取与完整替换 |
 | `StudioHarnessSessionController` | `/api/sessions` | Session/Main Thread 创建、Session 查询与 Secondary Thread 创建 |
 | `StudioChatController` | `/api/chats` | Chat CRUD 与 Chat-Session 成员关系 |
 | `StudioHarnessObservabilityController` | `/api` | activities、tool-invocations、tasks、artifacts |
@@ -74,7 +76,8 @@ Java 领域类型使用 `AgentThread`，避免与 `java.lang.Thread` 冲突。
 | 服务 | 职责 |
 | --- | --- |
 | `HarnessSessionCommandService` | create Session/Main Thread / create Secondary Thread |
-| `HarnessThreadCommandService` | submit message / queue Agent、Model、YOLO / Stop / Retry |
+| `HarnessThreadCommandService` | submit message / queue Agent、Model、YOLO / Stop |
+| `HarnessRetryPolicyService` | 读取/替换全局自动重试策略，并为 Runtime 提供当前策略 |
 | `HarnessThreadQueryService` | thread 查询、路径 entries、inputs、events |
 | `HarnessThreadTransactionService` | Thread/Input/Entry/Tool/Usage 原子事务（实现 `ThreadTransactions`） |
 | `HarnessSessionQueryService` | Session 只读 |
@@ -93,7 +96,7 @@ Java 领域类型使用 `AgentThread`，避免与 `java.lang.Thread` 冲突。
 
 规则：
 
-- 入队、Stop 与 Retry 锁 Thread；Harvest、beginTurn、commit assistant、prepare tools、release 额外校验 `processorToken`。
+- 入队与 Stop 锁 Thread；自动重试计划也校验当前 `processorToken`。Harvest、beginTurn、commit assistant、prepare tools、release 额外校验 `processorToken`。
 - Tool decision / terminal 与 processor 同序：先 Thread 后 invocation。
 - Assistant Entry 与 `model_usage_record` 同事务；`assistant_entry_id` 唯一。
 - Tool 副作用以 `tool_invocation.id` 为幂等键。

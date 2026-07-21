@@ -84,6 +84,20 @@ export function completeStreamingAssistant(
   }
 }
 
+/** 自动重试会重新发起同一 response debt，不把中断的临时流片段留在可读 transcript。 */
+export function discardStreamingAssistant(
+  state: StreamingAssistant | undefined,
+  messages: DialogueMessage[],
+) {
+  if (!state?.message) {
+    return
+  }
+  const index = messages.indexOf(state.message)
+  if (index >= 0) {
+    messages.splice(index, 1)
+  }
+}
+
 export function ensureStreamingAssistantMessage(
   state: StreamingAssistant,
   messages: DialogueMessage[],

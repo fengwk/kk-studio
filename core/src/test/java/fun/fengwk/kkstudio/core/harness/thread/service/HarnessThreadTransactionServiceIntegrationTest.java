@@ -351,7 +351,7 @@ class HarnessThreadTransactionServiceIntegrationTest {
   }
 
   @Test
-  void stopsInInputOrderAndRetriesOnlyFailedThreads() {
+  void stopsInInputOrderAndClearsRetryState() {
     Instant now = Instant.parse("2026-02-04T00:00:00Z");
     ThreadTransactions.SessionCreateResult created = transactions.createSession("stop", false, now);
     long threadId = created.mainThread().id();
@@ -380,16 +380,34 @@ class HarnessThreadTransactionServiceIntegrationTest {
                         && stopped.stop().id() == input.getCancelledByStopId()));
     assertEquals("IDLE", threadMapper.find(threadId).getStatus());
     assertNull(threadMapper.find(threadId).getProcessorToken());
+    assertEquals(0, threadMapper.find(threadId).getRetryAttempt());
+    assertNull(threadMapper.find(threadId).getRetryAt());
     assertEquals(3, eventMapper.countByType(threadId, ThreadEventType.INPUT_CANCELLED.value()));
+  }
 
-    assertThrows(
-        IllegalStateException.class, () -> transactions.retry(threadId, now.plusSeconds(3)));
-    threadMapper.updateStatusDirect(threadId, "FAILED", utc(now.plusSeconds(4)));
-    assertEquals("RETRYING", transactions.retry(threadId, now.plusSeconds(5)).status().name());
-    assertEquals("RETRYING", threadMapper.find(threadId).getStatus());
-    assertEquals(1, eventMapper.countByType(threadId, ThreadEventType.THREAD_RETRYING.value()));
-    assertThrows(
-        IllegalStateException.class, () -> transactions.retry(threadId, now.plusSeconds(6)));
+  /** FAILED 只接受消息类输入重新启动，避免配置命令意外重放失败 turn。 */
+  @Test
+  void failedThreadRestartsOnlyWhenANewMessageIsQueued() {
+    Instant now = Instant.parse("2026-02-04T01:00:00Z");
+    ThreadTransactions.SessionCreateResult created =
+        transactions.createSession("failed-restart", false, now);
+    long threadId = created.mainThread().id();
+    threadMapper.updateStatusDirect(threadId, "FAILED", utc(now));
+
+    ThreadInput configuration =
+        transactions.submitSetYolo(threadId, true, "failed-config", now.plusSeconds(1));
+
+    assertEquals("FAILED", threadMapper.find(threadId).getStatus());
+    assertEquals("queued", inputMapper.find(configuration.id()).getStatus());
+    assertEquals(0, eventMapper.countByType(threadId, ThreadEventType.THREAD_RUNNING.value()));
+
+    ThreadInput message =
+        transactions.submitCustomMessage(
+            threadId, customMessage("resume"), "failed-custom", now.plusSeconds(2));
+
+    assertEquals("RUNNING", threadMapper.find(threadId).getStatus());
+    assertEquals("queued", inputMapper.find(message.id()).getStatus());
+    assertEquals(1, eventMapper.countByType(threadId, ThreadEventType.THREAD_RUNNING.value()));
   }
 
   @Test
@@ -462,18 +480,42 @@ class HarnessThreadTransactionServiceIntegrationTest {
     assertNull(threadMapper.find(workThreadId).getProcessorToken());
     assertFalse(transactions.fail(workThreadId, "owner-c", List.of(), now.plusSeconds(3)));
 
-    transactions.retry(workThreadId, now.plusSeconds(4));
+    ThreadTransactions.SessionCreateResult retry = transactions.createSession("retry", false, now);
+    long retryThreadId = retry.mainThread().id();
+    threadMapper.updateStatusDirect(retryThreadId, "RUNNING", utc(now.plusSeconds(3)));
     assertTrue(
         threadStore
-            .tryAcquire(workThreadId, "owner-d", now.plusSeconds(5), Duration.ofMinutes(1))
+            .tryAcquire(retryThreadId, "owner-d", now.plusSeconds(4), Duration.ofMinutes(1))
             .isPresent());
-    assertTrue(transactions.completeRetriedTurn(workThreadId, "owner-d", now.plusSeconds(6)));
-    assertEquals("RUNNING", threadMapper.find(workThreadId).getStatus());
+    assertTrue(
+        transactions.scheduleRetry(
+            retryThreadId,
+            "owner-d",
+            1,
+            now.plusSeconds(8),
+            List.of(event(ThreadEventType.THREAD_RETRY_SCHEDULED)),
+            now.plusSeconds(5)));
+    assertEquals("RETRYING", threadMapper.find(retryThreadId).getStatus());
+    assertEquals(1, threadMapper.find(retryThreadId).getRetryAttempt());
+    assertEquals(
+        1, eventMapper.countByType(retryThreadId, ThreadEventType.THREAD_RETRY_SCHEDULED.value()));
+    assertTrue(
+        threadStore
+            .tryAcquire(retryThreadId, "too-early", now.plusSeconds(6), Duration.ofMinutes(1))
+            .isEmpty());
+    assertTrue(
+        threadStore
+            .tryAcquire(retryThreadId, "owner-e", now.plusSeconds(8), Duration.ofMinutes(1))
+            .isPresent());
+    assertTrue(transactions.completeRetryDebt(retryThreadId, "owner-e", now.plusSeconds(9)));
+    assertEquals("RUNNING", threadMapper.find(retryThreadId).getStatus());
+    assertEquals(0, threadMapper.find(retryThreadId).getRetryAttempt());
+    assertNull(threadMapper.find(retryThreadId).getRetryAt());
     assertEquals(
         ThreadTransactions.QuiescenceResult.IDLE,
-        transactions.quiesce(workThreadId, "owner-d", now.plusSeconds(7)));
-    assertEquals("IDLE", threadMapper.find(workThreadId).getStatus());
-    assertNull(threadMapper.find(workThreadId).getProcessorToken());
+        transactions.quiesce(retryThreadId, "owner-e", now.plusSeconds(10)));
+    assertEquals("IDLE", threadMapper.find(retryThreadId).getStatus());
+    assertNull(threadMapper.find(retryThreadId).getProcessorToken());
   }
 
   @Test
@@ -501,7 +543,9 @@ class HarnessThreadTransactionServiceIntegrationTest {
         () -> transactions.harvestQueuedInputs(9_999_997L, "missing", now));
     assertThrows(
         IllegalArgumentException.class, () -> transactions.stop(9_999_996L, "missing-stop", now));
-    assertThrows(IllegalArgumentException.class, () -> transactions.retry(9_999_995L, now));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> transactions.scheduleRetry(threadId, "lost", 0, now.plusSeconds(1), List.of(), now));
 
     assertFalse(
         transactions.commitFinalAssistant(

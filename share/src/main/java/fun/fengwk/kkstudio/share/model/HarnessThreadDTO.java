@@ -25,6 +25,12 @@ public class HarnessThreadDTO {
   /** 已分配 input sequence 高水位。 */
   private Long inputSequence;
 
+  /** 当前 response debt 已执行的自动重试次数。 */
+  private Integer retryAttempt;
+
+  /** 自动重试下一次最早可运行的时间；非 RETRYING 时为空。 */
+  private LocalDateTime retryAt;
+
   /** 当前 AgentDefinition id（可空）。 */
   private String activeAgentDefinitionId;
 

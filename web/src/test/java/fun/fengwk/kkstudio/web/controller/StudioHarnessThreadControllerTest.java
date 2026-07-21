@@ -241,9 +241,65 @@ class StudioHarnessThreadControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}"))
         .andExpect(status().isBadRequest());
-    mockMvc.perform(post("/api/threads/{id}/retry", threadId)).andExpect(status().isConflict());
+    mockMvc.perform(post("/api/threads/{id}/retry", threadId)).andExpect(status().isNotFound());
     mockMvc.perform(get("/api/threads/{id}", "abc")).andExpect(status().isBadRequest());
     mockMvc.perform(get("/api/threads/{id}", "999999999999")).andExpect(status().isNotFound());
+  }
+
+  @Test
+  void exposesCompleteAutomaticRetryPolicyAndRejectsInvalidReplacements() throws Exception {
+    mockMvc
+        .perform(get("/api/harness/retry-policy"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.maxRetries").value(3))
+        .andExpect(jsonPath("$.data.backoffStrategy").value("EXPONENTIAL"))
+        .andExpect(jsonPath("$.data.baseDelayMillis").value(2000))
+        .andExpect(jsonPath("$.data.maxDelayMillis").value(60000));
+
+    mockMvc
+        .perform(
+            put("/api/harness/retry-policy")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"maxRetries":2,"backoffStrategy":"FIXED","baseDelayMillis":4000,"maxDelayMillis":8000}
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.maxRetries").value(2))
+        .andExpect(jsonPath("$.data.backoffStrategy").value("FIXED"))
+        .andExpect(jsonPath("$.data.baseDelayMillis").value(4000))
+        .andExpect(jsonPath("$.data.maxDelayMillis").value(8000));
+    mockMvc
+        .perform(get("/api/harness/retry-policy"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.maxRetries").value(2))
+        .andExpect(jsonPath("$.data.backoffStrategy").value("FIXED"))
+        .andExpect(jsonPath("$.data.baseDelayMillis").value(4000))
+        .andExpect(jsonPath("$.data.maxDelayMillis").value(8000));
+    mockMvc
+        .perform(
+            put("/api/harness/retry-policy")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"maxRetries":11,"backoffStrategy":"FIXED","baseDelayMillis":1000,"maxDelayMillis":1000}
+                    """))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(
+            put("/api/harness/retry-policy")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("null"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(
+            put("/api/harness/retry-policy")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"maxRetries":3,"backoffStrategy":"EXPONENTIAL","baseDelayMillis":2000,"maxDelayMillis":60000}
+                    """))
+        .andExpect(status().isOk());
   }
 
   /** All typed mailbox commands require a non-blank client id and preserve payload-safe replay. */
