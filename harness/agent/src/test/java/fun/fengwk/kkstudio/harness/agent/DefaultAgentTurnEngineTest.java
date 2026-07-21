@@ -353,6 +353,45 @@ class DefaultAgentTurnEngineTest {
     assertTrue(handler.failed);
   }
 
+  /**
+   * Streamed thinking must survive when the final snapshot omits thinking (null/empty). The
+   * previous path NPE'd on null thinking or failed gap validation after a brief thinking flash.
+   */
+  @Test
+  void keepsStreamedThinkingWhenFinalSnapshotOmitsThinking() {
+    FakeModelProvider provider =
+        FakeModelProvider.sequence()
+            .delta(new ProviderStreamEvent.ThinkingDelta("plan first"))
+            .delta(new ProviderStreamEvent.TextDelta("hello"))
+            .complete(response("hello", "", List.of(), ProviderStopReason.COMPLETED))
+            .build();
+    RecordingHandler handler = new RecordingHandler();
+
+    new DefaultAgentTurnEngine(provider).execute(request(), handler);
+
+    assertFalse(handler.failed);
+    assertEquals(List.of("started", "delta", "delta", "completed"), handler.events);
+    assertEquals("hello", handler.result.assistantMessage().text());
+    assertEquals("plan first", handler.result.assistantMessage().thinking());
+  }
+
+  /** Completion failures must surface the original exception detail, not a generic label. */
+  @Test
+  void surfacesOriginalFailureDetailInsteadOfGenericLabel() {
+    FakeModelProvider provider =
+        FakeModelProvider.sequence()
+            .delta(new ProviderStreamEvent.TextDelta("partial"))
+            .complete(response("authoritative", "", List.of(), ProviderStopReason.COMPLETED))
+            .build();
+    RecordingHandler handler = new RecordingHandler();
+
+    new DefaultAgentTurnEngine(provider).execute(request(), handler);
+
+    assertTrue(handler.failed);
+    assertNotNull(handler.failure);
+    assertEquals("final response conflicts with streamed text", handler.failure.getMessage());
+  }
+
   /** 没有 reset 事件时，final text snapshot 与已投递 partial 不一致必须 fail fast。 */
   @Test
   void rejectsConflictingFinalTextSnapshot() {

@@ -460,10 +460,17 @@ abstract class LangChainModelProvider implements ModelProvider {
     ModelUsage modelUsage = normalized.modelUsage();
     FinishReason finishReason = metadata == null ? null : metadata.finishReason();
     ProviderStopReason stopReason = toStopReason(finishReason, !calls.isEmpty());
+    // LangChain AiMessage.thinking()/text() may return null even when reasoning was streamed.
+    // Normalize before any isEmpty() checks so completion never NPE into "invalid provider
+    // response".
     String text =
-        response == null || response.aiMessage() == null ? "" : response.aiMessage().text();
+        response == null || response.aiMessage() == null || response.aiMessage().text() == null
+            ? ""
+            : response.aiMessage().text();
     String thinking =
-        response == null || response.aiMessage() == null ? "" : response.aiMessage().thinking();
+        response == null || response.aiMessage() == null || response.aiMessage().thinking() == null
+            ? ""
+            : response.aiMessage().thinking();
     if (splitter != null) {
       ThinkTagSplitter.Split split = ThinkTagSplitter.parse(text);
       text = split.text();
