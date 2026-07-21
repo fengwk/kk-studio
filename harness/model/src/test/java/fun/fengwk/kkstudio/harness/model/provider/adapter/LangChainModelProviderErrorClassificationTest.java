@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.model.provider.adapter;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -44,6 +46,23 @@ class LangChainModelProviderErrorClassificationTest {
     assertEquals(
         ProviderErrorKind.CANCELLED,
         LangChainModelProvider.classify(new RuntimeException("HTTP 401 Unauthorized"), cancelled));
+  }
+
+  /** 用户可见错误必须保留 cause 链详情，而不是硬编码 provider request failed。 */
+  @Test
+  void userFacingMessageKeepsNestedProviderDetailAndRedactsSecrets() {
+    RuntimeException nested =
+        new RuntimeException(
+            "HTTP 401 Unauthorized body={\"error\":\"invalid api key\"} Authorization: Bearer sk-secret-value");
+    IllegalStateException wrapper = new IllegalStateException("stream failed", nested);
+
+    String message = LangChainModelProvider.userFacingMessage(wrapper);
+    assertTrue(message.contains("stream failed"));
+    assertTrue(message.contains("HTTP 401 Unauthorized"));
+    assertTrue(message.contains("invalid api key"));
+    assertFalse(message.contains("sk-secret-value"));
+    assertFalse(message.contains("Bearer sk-secret-value"));
+    assertTrue(message.contains("Bearer ***") || message.contains("sk-***"));
   }
 
   private static ProviderStream activeStream() {
