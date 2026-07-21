@@ -73,8 +73,11 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
       }
 
       @Override
-      protected boolean extractsThinkTags() {
-        return minimax;
+      protected boolean extractsThinkTags(ProviderRequest request) {
+        // OpenAI-compatible proxies often fold reasoning into plain text as <think> blocks.
+        // When the model is marked reasoning-capable, always split tags so thinking does not
+        // leak into assistant text regardless of whether the host is MiniMax.
+        return request.model().reasoning();
       }
 
       private ProviderCacheControl prepareCacheControl(ProviderRequest request) {
