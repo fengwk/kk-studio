@@ -10,7 +10,7 @@ import java.util.Objects;
 public record ToolExecutionRequest(
     ToolDescriptor descriptor, ToolCall call, Duration timeout, ToolExecutionContext context) {
 
-  /** Keeps daemon and existing Tool implementations source-compatible. */
+  /** Environment-local execution request without durable Cloud/Control ownership. */
   public ToolExecutionRequest(ToolDescriptor descriptor, ToolCall call, Duration timeout) {
     this(descriptor, call, timeout, null);
   }

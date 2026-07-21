@@ -14,7 +14,12 @@ export interface PageResult<T> {
 
 export type BackendDateTime = string | number[] | null
 
-export type AgentResourceId = number | string
+/**
+ * Agent resource ids are decimal strings minted by Snowflake IDs on the backend
+ * (e.g. {@code "1700000000000000000"}). They are not numeric on the wire — always
+ * stringify before URL-encoding.
+ */
+export type AgentResourceId = string
 
 export type BackendLong = number | string
 
@@ -57,20 +62,21 @@ export interface AgentProviderDTO {
   providerType: string
   baseUrl: string | null
   configured: boolean
-  modelCallTimeoutMillis: number
-  modelCallIdleTimeoutMillis: number
+  modelCallTimeoutMillis: BackendLong
+  modelCallIdleTimeoutMillis: BackendLong
+  version: BackendLong
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
 
 export interface AgentProviderEditablePropertiesDTO {
-  name?: string
+  name?: string | null
   description?: string | null
   providerType: string
   baseUrl?: string | null
   credential?: string | null
-  modelCallTimeoutMillis?: number | null
-  modelCallIdleTimeoutMillis?: number | null
+  modelCallTimeoutMillis?: BackendLong | null
+  modelCallIdleTimeoutMillis?: BackendLong | null
 }
 
 export interface AgentProviderCreateDTO extends AgentProviderEditablePropertiesDTO {
@@ -79,35 +85,93 @@ export interface AgentProviderCreateDTO extends AgentProviderEditablePropertiesD
 
 export type AgentProviderUpdateDTO = AgentProviderEditablePropertiesDTO
 
+/** Stable enum mirroring the backend {@code AgentModelInputModality}. */
+export type AgentModelInputModality =
+  | 'TEXT'
+  | 'IMAGE'
+  | 'AUDIO'
+  | 'VIDEO'
+  | 'DOCUMENT'
+
+export interface AgentModelLimitDTO {
+  /** Positive integer count of model context window tokens. */
+  context: number
+  /** Positive integer {@code <= context}. */
+  output: number
+}
+
+export interface AgentModelAbilitiesDTO {
+  tools: boolean
+  reasoning: boolean
+  /** Non-empty subset of {@link AgentModelInputModality}. */
+  inputModalities: AgentModelInputModality[]
+}
+
+export interface AgentModelPricingDTO {
+  currency: string
+  pricingTier: string
+  serviceTier: string
+  serviceTierMultiplier: number | string
+  version: string
+  inputPerMillionTokens: number | string
+  outputPerMillionTokens: number | string
+  cacheReadPerMillionTokens: number | string
+  cacheWritePerMillionTokens: number | string
+  cacheWriteLongPerMillionTokens: number | string
+  reasoningPerMillionTokens: number | string
+}
+
+export interface AgentModelVariantDTO {
+  id: string
+  reasoningEffort?: string | null
+  maxOutputTokens?: number | null
+  temperature?: number | null
+  topP?: number | null
+  topK?: number | null
+  frequencyPenalty?: number | null
+  presencePenalty?: number | null
+  stopSequences?: string[] | null
+}
+
+/**
+ * Structured Agent model configuration. Every sub-shape is required on the wire; missing or
+ * malformed configs must be rejected by the backend rather than silently repaired.
+ */
+export interface AgentModelConfigDTO {
+  limit: AgentModelLimitDTO
+  abilities: AgentModelAbilitiesDTO
+  pricing: AgentModelPricingDTO
+  defaultVariant: string
+  variants: AgentModelVariantDTO[]
+}
+
+/** Public Agent model resource with one structured executable config. */
 export interface AgentModelDTO {
   id: AgentResourceId
   providerId: AgentResourceId
-  /** Client-enriched from providers list; API does not return this field. */
-  providerName?: string | null
   name: string
   description: string | null
-  capabilitiesJson: string | null
-  configJson: string | null
-  version?: BackendLong | null
+  config: AgentModelConfigDTO
+  version: BackendLong
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
 
+/**
+ * Editable portion of an Agent model. The frontend sends full replacements: {@code name},
+ * {@code description}, and {@code config} are all required when a request body is issued.
+ */
 export interface AgentModelEditablePropertiesDTO {
-  name?: string | null
-  description?: string | null
-  capabilitiesJson?: string | null
-  configJson?: string | null
+  name: string
+  description: string | null
+  config: AgentModelConfigDTO
 }
 
 export interface AgentModelCreateDTO extends AgentModelEditablePropertiesDTO {
   providerId: string
-  name: string
-  capabilitiesJson: string
-  configJson: string
 }
 
-export interface AgentModelUpdateDTO extends AgentModelEditablePropertiesDTO {}
+export type AgentModelUpdateDTO = AgentModelEditablePropertiesDTO
 
 export interface AgentExecutionPolicyDTO {
   maxTurns?: number | null
@@ -118,11 +182,11 @@ export interface AgentExecutionPolicyDTO {
 
 export interface AgentDefinitionConfigDTO {
   /** Optional live Environment name; blank/null means none. */
-  environmentName?: string | null
-  tools?: string[] | null
-  skills?: string[] | null
-  allowedSubagents?: string[] | null
-  executionPolicy?: AgentExecutionPolicyDTO | null
+  environmentName: string | null
+  tools: string[]
+  skills: string[]
+  allowedSubagents: string[]
+  executionPolicy: AgentExecutionPolicyDTO
 }
 
 /** Public global Agent definition; model/variant + config are Thread-runtime inputs. */
@@ -133,25 +197,23 @@ export interface AgentDefinitionDTO {
   systemPrompt: string | null
   modelId: string
   variant: string
-  config: AgentDefinitionConfigDTO | null
-  version?: BackendLong | null
+  config: AgentDefinitionConfigDTO
+  version: BackendLong
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
 
+/** Complete Agent Definition create/PUT body. */
 export interface AgentDefinitionEditablePropertiesDTO {
-  name?: string | null
-  description?: string | null
-  systemPrompt?: string | null
-  modelId?: string | null
-  variant?: string | null
-  config?: AgentDefinitionConfigDTO | null
+  name: string
+  description: string | null
+  systemPrompt: string | null
+  modelId: string
+  variant: string
+  config: AgentDefinitionConfigDTO
 }
 
-export interface AgentDefinitionCreateDTO extends AgentDefinitionEditablePropertiesDTO {
-  name: string
-  modelId: string
-}
+export type AgentDefinitionCreateDTO = AgentDefinitionEditablePropertiesDTO
 
 export type AgentDefinitionUpdateDTO = AgentDefinitionEditablePropertiesDTO
 

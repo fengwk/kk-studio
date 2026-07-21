@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -262,7 +261,7 @@ class ModelUsageDraftTest {
   private static ProviderRequest request(ModelDescriptor model, ProviderCacheControl control) {
     return new ProviderRequest(
         model,
-        new ModelVariant("default", null, null, null, null, List.of()),
+        new ModelVariant("default", null, null, null, null, null, null, List.of(), null),
         List.of(),
         List.of(),
         control);
@@ -284,7 +283,8 @@ class ModelUsageDraftTest {
         1024,
         256,
         Set.of(ModelInputModality.TEXT),
-        Set.of(ModelCapability.TEXT),
+        true,
+        false,
         List.of(),
         pricing,
         policy);

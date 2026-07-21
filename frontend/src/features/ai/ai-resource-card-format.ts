@@ -13,10 +13,3 @@ export function formatCompactList(
   }
   return `${list.slice(0, limit).join(', ')} +${list.length - limit}`
 }
-
-export function formatCountLabel(count: number, unit: string, empty = '—'): string {
-  if (count <= 0) {
-    return empty
-  }
-  return `${count} ${unit}`
-}

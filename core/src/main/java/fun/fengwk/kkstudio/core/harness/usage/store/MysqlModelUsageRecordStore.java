@@ -51,11 +51,6 @@ public class MysqlModelUsageRecordStore implements ModelUsageRecordStore {
   }
 
   @Override
-  public List<ModelUsageRecord> listByThreadId(long threadId) {
-    return mapper.listByThreadId(threadId).stream().map(this::toRecord).toList();
-  }
-
-  @Override
   public List<ModelUsageRecord> listBySessionId(long sessionId) {
     return mapper.listBySessionId(sessionId).stream().map(this::toRecord).toList();
   }

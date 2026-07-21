@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChatPanel } from '@/features/ai/ChatPanel'
 import { HistoryBranchPanel } from '@/features/ai/HistoryBranchPanel'
@@ -18,10 +18,9 @@ import { ThreadComposer } from '@/features/ai/thread-panel/ThreadComposer'
 import { ThreadStatusFooter } from '@/features/ai/thread-panel/ThreadStatusFooter'
 import { useAgentThreadController } from '@/features/ai/useAgentThreadController'
 import { useChatSessionPicker } from '@/features/ai/useChatSessionPicker'
+import { toAgentModelViews, type AgentModelView } from '@/features/ai/AgentModelView'
 import type {
   AgentDefinitionDTO,
-  AgentModelDTO,
-  AgentProviderDTO,
   ChatDTO,
   HarnessSessionEntryDTO,
   HarnessThreadDTO,
@@ -47,8 +46,7 @@ function resolveDefaultAgent(
 /** 空白 pane 尚无 Thread 时，用 Chat 默认 Agent 的 model/variant 填 footer（与已绑定 pane 一致） */
 function resolveBlankPaneFooterLabels(
   agent: AgentDefinitionDTO | undefined,
-  models: AgentModelDTO[],
-  providers: AgentProviderDTO[],
+  models: AgentModelView[],
 ) {
   if (!agent) {
     return {
@@ -60,17 +58,13 @@ function resolveBlankPaneFooterLabels(
     }
   }
   const modelId = agent.modelId ? String(agent.modelId) : ''
-  const model =
-    models.find((item) => String(item.id) === modelId)
-    || models.find((item) => item.name === modelId)
-  const provider = model
-    ? providers.find((item) => String(item.id) === String(model.providerId))
-    : undefined
+  const model = models.find((item) => String(item.id) === modelId)
   return {
     agentName: agent.name || '（无 Agent）',
-    providerName: provider?.name || model?.providerName || undefined,
+    // AgentModelView already carries the enriched providerName so we don't have to re-join here.
+    providerName: model?.providerName || undefined,
     modelName: model?.name || modelId || undefined,
-    variantName: agent.variant || 'default',
+    variantName: agent.variant || undefined,
     contextWindow: extractContextWindow(model),
   }
 }
@@ -183,13 +177,13 @@ function BlankComposerPane({
     queryKey: queryKeys.providers.list,
     queryFn: () => agentService.listProviders(),
   })
-  const models = modelsQuery.data?.results ?? []
   const providers = providersQuery.data?.results ?? []
-  const defaultAgent = resolveDefaultAgent(chat, agents)
-  const footerLabels = useMemo(
-    () => resolveBlankPaneFooterLabels(defaultAgent, models, providers),
-    [defaultAgent, models, providers],
+  const models: AgentModelView[] = toAgentModelViews(
+    modelsQuery.data?.results ?? [],
+    providers,
   )
+  const defaultAgent = resolveDefaultAgent(chat, agents)
+  const footerLabels = resolveBlankPaneFooterLabels(defaultAgent, models)
   const agentLabel = defaultAgent?.name || (chat?.defaultAgentId ? '（Agent 已删除/缺失）' : '（无 Agent）')
 
   async function runFirstSend(agentId: string, content: string) {
@@ -395,10 +389,11 @@ function BoundThreadPane({
     },
   })
 
-  const threadItems = useMemo(() => {
-    const threads = sortWithRunningFirst(threadsQuery.data ?? [], threadSort, isRunningThread)
-    return threads.map((thread) => toThreadItem(thread, sessionId))
-  }, [sessionId, threadSort, threadsQuery.data])
+  const threadItems = sortWithRunningFirst(
+    threadsQuery.data ?? [],
+    threadSort,
+    isRunningThread,
+  ).map((thread) => toThreadItem(thread, sessionId))
 
   function handleCommand(command: ThreadCommand) {
     onFocus()

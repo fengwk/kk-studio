@@ -74,7 +74,7 @@ class DatabaseTurnResourceResolverTest {
   private static final String MODEL_CONFIG =
       "{\"limit\":{\"context\":128000,\"output\":8192},"
           + "\"abilities\":{\"tools\":true,\"reasoning\":false,"
-          + "\"modalities\":{\"input\":[\"TEXT\",\"IMAGE\"],\"output\":[\"TEXT\"]}},"
+          + "\"inputModalities\":[\"TEXT\",\"IMAGE\"]},"
           + "\"defaultVariant\":\"quality\","
           + "\"variants\":[{\"id\":\"quality\",\"maxOutputTokens\":4096},"
           + "{\"id\":\"fast\",\"maxOutputTokens\":1024}],"
@@ -105,7 +105,7 @@ class DatabaseTurnResourceResolverTest {
       assertEquals(22L, resources.model().providerResourceId());
       assertEquals(11L, resources.model().modelResourceId());
       assertEquals("provider-api-model", resources.model().modelId());
-      assertEquals("quality", resources.variant().name());
+      assertEquals("quality", resources.variant().id());
       assertEquals(new BigDecimal("1.1"), resources.model().pricing().inputPerMillionTokens());
       assertEquals(new BigDecimal("3.6"), resources.model().pricing().reasoningPerMillionTokens());
       assertEquals("price-v7", resources.model().pricing().version());
@@ -498,7 +498,6 @@ class DatabaseTurnResourceResolverTest {
     model.setProviderId(providerId);
     model.setName("provider-api-model");
     model.setDescription("Provider API model");
-    model.setCapabilitiesJson("[\"TEXT\",\"TOOLS\"]");
     model.setConfigJson(config);
     return model;
   }

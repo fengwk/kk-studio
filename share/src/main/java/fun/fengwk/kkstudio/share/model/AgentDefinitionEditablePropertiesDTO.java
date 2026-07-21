@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.share.model;
 import lombok.Data;
 
 /**
- * @author fengwk
+ * Complete Agent Definition create/PUT body; nullable text fields explicitly clear their values.
  */
 @Data
 public class AgentDefinitionEditablePropertiesDTO {

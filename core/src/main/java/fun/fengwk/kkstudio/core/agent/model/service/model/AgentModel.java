@@ -12,8 +12,10 @@ public class AgentModel {
   private Long providerId;
   private String name;
   private String description;
-  private String capabilitiesJson;
+
+  /** Persisted structured configuration, encoded into {@code config_json} on the row. */
   private String configJson;
+
   private Long version;
   private LocalDateTime createTime;
   private LocalDateTime updateTime;

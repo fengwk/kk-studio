@@ -42,7 +42,7 @@ public class ChatMutationFactory {
     Chat chat = new Chat();
     chat.setId(idGenerator.getAsLong());
     chat.setTitle(editableSupport.trimToNull(createDTO.getTitle()));
-    chat.setDefaultAgentId(parseOptionalAgentId(createDTO.getDefaultAgentId(), false));
+    chat.setDefaultAgentId(parseOptionalAgentId(createDTO.getDefaultAgentId()));
     return chat;
   }
 
@@ -57,25 +57,17 @@ public class ChatMutationFactory {
       chat.setTitle(editableSupport.trimToNull(updateDTO.getTitle()));
     }
     if (updateDTO.getDefaultAgentId() != null) {
-      chat.setDefaultAgentId(parseOptionalAgentId(updateDTO.getDefaultAgentId(), true));
+      chat.setDefaultAgentId(parseOptionalAgentId(updateDTO.getDefaultAgentId()));
     }
   }
 
-  /**
-   * Parses optional agent id text.
-   *
-   * @param allowBlankClear when true, blank after trim becomes null (clear); when false, blank is
-   *     treated as absent (null)
-   */
-  private Long parseOptionalAgentId(String raw, boolean allowBlankClear) {
+  /** Parses optional agent id text. {@code null} and blank input both map to {@code null}. */
+  private Long parseOptionalAgentId(String raw) {
     if (raw == null) {
       return null;
     }
     String trimmed = raw.trim();
     if (trimmed.isEmpty()) {
-      if (allowBlankClear) {
-        return null;
-      }
       return null;
     }
     return ChatIds.parsePositive(trimmed, "defaultAgentId");

@@ -37,7 +37,7 @@ export function ThreadStatusFooter({
   const agentLabel = clean(agentName) || 'agent'
   const provider = clean(providerName)
   const model = clean(modelName) || 'unknown-model'
-  const variant = clean(variantName) || 'default'
+  const variant = clean(variantName) || 'unknown-variant'
   const yoloOn = Boolean(yoloEnabled)
 
   const input = asInt(usage?.inputTokens)

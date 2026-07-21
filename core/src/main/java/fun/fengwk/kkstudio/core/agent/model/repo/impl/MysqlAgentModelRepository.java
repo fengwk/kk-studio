@@ -67,7 +67,6 @@ public class MysqlAgentModelRepository implements AgentModelRepository {
     result.setProviderId(model.getProviderId());
     result.setName(model.getName());
     result.setDescription(model.getDescription());
-    result.setCapabilitiesJson(model.getCapabilitiesJson());
     result.setConfigJson(model.getConfigJson());
     return result;
   }
@@ -81,7 +80,6 @@ public class MysqlAgentModelRepository implements AgentModelRepository {
     result.setProviderId(model.getProviderId());
     result.setName(model.getName());
     result.setDescription(model.getDescription());
-    result.setCapabilitiesJson(model.getCapabilitiesJson());
     result.setConfigJson(model.getConfigJson());
     result.setVersion(model.getVersion());
     result.setCreateTime(model.getCreateTime());

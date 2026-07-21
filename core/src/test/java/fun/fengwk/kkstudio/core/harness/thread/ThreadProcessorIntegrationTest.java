@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProvider;
 import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
 import fun.fengwk.kkstudio.core.harness.usage.store.mapper.ModelUsageRecordMapper;
-import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -293,7 +292,9 @@ class ThreadProcessorIntegrationTest {
 
     assertNull(threadStore.find(threadId).orElseThrow().processorToken());
     assertEquals(1, fakeProvider.requestsSinceReset());
-    assertFalse(usageMapper.listByThreadId(threadId).isEmpty());
+    long assistantEntryId =
+        HarnessIds.parsePositive(path.get(path.size() - 1).getEntryId(), "assistantEntryId");
+    assertNotNull(usageMapper.findByAssistantEntryId(assistantEntryId));
     assertTrue(lifecycleProbe.contextTransformCount() > 0);
     assertTrue(lifecycleProbe.contains(threadId, TurnStarted.class));
     assertTrue(lifecycleProbe.contains(threadId, AssistantCompleted.class));
@@ -1218,8 +1219,11 @@ class ThreadProcessorIntegrationTest {
                 32768,
                 4096,
                 Set.of(ModelInputModality.TEXT),
-                Set.of(ModelCapability.TEXT, ModelCapability.TOOLS),
-                List.of(new ModelVariant("default", 4096, 0.2, null, null, null, null, List.of())),
+                true,
+                true,
+                List.of(
+                    new ModelVariant(
+                        "default", 4096, 0.2, null, null, null, null, List.of(), null)),
                 pricing,
                 PromptCachePolicy.disabled());
         return new TurnResources(

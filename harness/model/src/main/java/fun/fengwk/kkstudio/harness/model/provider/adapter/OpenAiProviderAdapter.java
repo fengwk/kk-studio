@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.model.provider.adapter;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 
-import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
@@ -43,8 +42,8 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
       @Override
       protected StreamingChatModel chatModel(ProviderRequest request) {
         ProviderCacheControl control = prepareCacheControl(request);
-        // 未声明 THINKING 时不请求 thinking、不传 reasoning_effort。
-        boolean thinking = request.model().capabilities().contains(ModelCapability.THINKING);
+        // 未开启 reasoning 时不请求 thinking、不传 reasoning_effort。
+        boolean thinking = request.model().reasoning();
         String reasoningEffort = thinking ? request.variant().reasoningEffort() : null;
         return OpenAiStreamingChatModel.builder()
             .baseUrl(descriptor.endpoint())

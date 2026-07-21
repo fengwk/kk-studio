@@ -1,6 +1,6 @@
+import type { AgentModelView } from '@/features/ai/AgentModelView'
 import type { VariantDraft } from '@/features/ai/ai-console-types'
-import type { AgentModelDTO } from '@/shared/api/contracts'
-import { extractVariantNamesFromModel } from '@/features/ai/ai-model-draft-codec'
+import { extractVariantIdsFromModel } from '@/features/ai/ai-model-draft-codec'
 
 export function trimValue(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -15,18 +15,13 @@ export function resolvePreferredVariant(preferred: string, options: string[]): s
   if (normalized && options.includes(normalized)) {
     return normalized
   }
-  return options[0] ?? 'default'
+  return options[0] ?? ''
 }
 
-export function variantOptionsFromDraft(variants: VariantDraft[], fallbackVariant?: string): string[] {
-  const options = uniqueNonEmpty(variants.map((variant) => variant.name))
-  if (options.length > 0) {
-    return options
-  }
-  const fallback = trimValue(fallbackVariant) || 'default'
-  return [fallback]
+export function variantOptionsFromDraft(variants: VariantDraft[]): string[] {
+  return uniqueNonEmpty(variants.map((variant) => variant.id))
 }
 
-export function variantOptionsFromModel(model?: AgentModelDTO | null): string[] {
-  return extractVariantNamesFromModel(model)
+export function variantOptionsFromModel(model?: AgentModelView | null): string[] {
+  return extractVariantIdsFromModel(model)
 }

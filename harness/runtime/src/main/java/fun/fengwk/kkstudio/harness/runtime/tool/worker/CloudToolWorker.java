@@ -114,15 +114,11 @@ public final class CloudToolWorker {
     if (threadId <= 0) {
       throw new IllegalArgumentException("threadId must be positive");
     }
-    if (!(store instanceof ThreadScopedToolClaimStore scoped)) {
-      // Fallback: single global claim when store does not support thread scope.
-      return executeNext(workerId).isPresent() ? 1 : 0;
-    }
     int dispatched = 0;
     Instant now = clock.instant();
     while (true) {
       Optional<ClaimedToolInvocation> claimed =
-          scoped.claimDueForThread(workerId, threadId, now, config.leaseDuration());
+          store.claimDueForThread(workerId, threadId, now, config.leaseDuration());
       if (claimed.isEmpty()) {
         break;
       }

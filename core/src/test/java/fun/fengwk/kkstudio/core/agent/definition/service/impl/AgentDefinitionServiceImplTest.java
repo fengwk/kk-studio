@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.core.agent.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.agent.definition.service.converter.AgentDefinitionConverter;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
@@ -29,7 +30,12 @@ public class AgentDefinitionServiceImplTest {
     doNothing().when(validator).validate(any());
     AgentDefinitionServiceImpl service =
         new AgentDefinitionServiceImpl(
-            repository, converter, factory, resolver, validator, new ObjectMapper());
+            repository,
+            converter,
+            factory,
+            resolver,
+            validator,
+            new AgentDefinitionConfigCodec(new ObjectMapper()));
 
     assertThrows(IllegalArgumentException.class, () -> service.createAgent(null));
 

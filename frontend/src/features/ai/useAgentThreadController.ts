@@ -13,7 +13,12 @@ import { useHarnessThreadEventStream } from '@/features/ai/useHarnessThreadEvent
 import { useHarnessThreadObservability } from '@/features/ai/useHarnessThreadObservability'
 import { useHarnessTaskTimeline } from '@/features/ai/useHarnessTaskTimeline'
 import { harnessService } from '@/shared/api/harness-service'
-import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, HarnessThreadDTO } from '@/shared/api/contracts'
+import type { AgentModelView } from '@/features/ai/AgentModelView'
+import type {
+  AgentDefinitionDTO,
+  AgentProviderDTO,
+  HarnessThreadDTO,
+} from '@/shared/api/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 function errorMessage(error: unknown): string {
@@ -262,7 +267,7 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
 function resolveRuntimeLabels(
   thread: HarnessThreadDTO | undefined,
   agent: AgentDefinitionDTO | undefined,
-  models: AgentModelDTO[],
+  models: AgentModelView[],
   providers: AgentProviderDTO[],
 ) {
   const modelId = firstNonEmpty(thread?.modelId, agent?.modelId)
@@ -276,7 +281,7 @@ function resolveRuntimeLabels(
     agentName: firstNonEmpty(thread?.activeAgentName, agent?.name, thread?.activeAgentDefinitionId, '（无 Agent）'),
     providerName: firstNonEmpty(provider?.name, model?.providerName),
     modelName: firstNonEmpty(model?.name, modelId),
-    variantName: firstNonEmpty(thread?.variant, agent?.variant, 'default'),
+    variantName: firstNonEmpty(thread?.variant, agent?.variant),
     contextWindow,
   }
 }

@@ -1088,14 +1088,15 @@ textarea::placeholder {
 .form-group.is-error input:not([type='checkbox']):not([type='radio']),
 .form-group.is-error select,
 .form-group.is-error textarea,
-.form-group.is-error .form-select-trigger,
+.form-group.is-error .form-select .form-select-control,
 .form-group.is-error .price-input {
   border-color: var(--danger, #ff7b7b) !important;
   box-shadow: 0 0 0 1px rgba(255, 96, 96, 0.35);
 }
 
-.form-group.is-error .form-select-trigger:focus,
 .form-group.is-error input:not([type='checkbox']):not([type='radio']):focus,
+.form-group.is-error select:focus,
+.form-group.is-error textarea:focus,
 .form-group.is-error .price-input:focus-within {
   border-color: var(--danger, #ff7b7b) !important;
   box-shadow: 0 0 0 3px rgba(255, 96, 96, 0.22);
@@ -1245,113 +1246,36 @@ div.is-error {
   width: 100%;
 }
 
-.form-select-native {
+.form-select-control {
+  width: 100%;
+  /* 覆盖 .form-group select 的 background-image 自绘 chevron，由 form-select-chevron 元素统一装饰 */
+  background-image: none;
+}
+
+.form-select-chevron {
   position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
+  right: 12px;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  transform: translateY(-50%);
+  color: var(--green-primary);
   pointer-events: none;
 }
 
-.form-select-trigger {
-  width: 100%;
-  height: 38px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-raised);
-  color: var(--fg);
-  cursor: pointer;
-  transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+.form-select.is-placeholder .form-select-control {
+  color: var(--fg-muted);
 }
 
-.form-select-trigger svg {
-  width: 14px;
-  height: 14px;
-  color: var(--green-primary);
-  flex: 0 0 auto;
-  transition: transform 0.12s ease;
-}
-
-.form-select.is-open .form-select-trigger {
-  border-color: var(--green-primary);
-  box-shadow: 0 0 0 2px var(--focus-ring);
-}
-
-.form-select.is-open .form-select-trigger svg {
-  transform: rotate(180deg);
-}
-
-.form-select.is-disabled .form-select-trigger {
+.form-select.is-disabled .form-select-control {
   color: var(--fg-dim);
   cursor: not-allowed;
   opacity: 0.78;
 }
 
-.form-select-value,
-.form-select-placeholder {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.form-select-placeholder {
-  color: var(--fg-muted);
-}
-
-.form-select-menu {
-  position: absolute;
-  z-index: 40;
-  top: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  margin: 0;
-  padding: 6px;
-  list-style: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-md);
-  max-height: 240px;
-  overflow: auto;
-}
-
-.form-select-option {
-  width: 100%;
-  min-height: 34px;
-  display: flex;
-  align-items: center;
-  padding: 0 10px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--fg);
-  cursor: pointer;
-  text-align: left;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.form-select-option:hover:not(:disabled) {
-  background: var(--surface-hover);
-}
-
-.form-select-option.is-active {
-  background: rgba(113, 231, 154, 0.12);
-  color: var(--green-primary);
-}
-
-.form-select-option:disabled {
+.form-select.is-disabled .form-select-chevron {
   color: var(--fg-dim);
-  cursor: not-allowed;
+  opacity: 0.78;
 }
 
 .form-group textarea {

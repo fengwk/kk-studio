@@ -11,8 +11,7 @@ async function selectFormOption(
   label: string,
   option: string,
 ) {
-  await user.click(screen.getByRole('button', { name: label }))
-  await user.click(screen.getByRole('option', { name: option }))
+  await user.selectOptions(screen.getByLabelText(label), option)
 }
 
 describe('AiResourceForms', () => {
@@ -37,7 +36,7 @@ describe('AiResourceForms', () => {
 
     expect(screen.getByDisplayValue('provider-a')).toBeInTheDocument()
     expect(screen.getByDisplayValue('provider desc')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Provider Type' })).toHaveTextContent('anthropic')
+    expect(screen.getByLabelText('Provider Type')).toHaveValue('anthropic')
     expect(screen.getByDisplayValue('https://proxy.example/v1')).toBeInTheDocument()
     expect(screen.getByDisplayValue('secret')).toBeInTheDocument()
     expect(screen.getByDisplayValue('240000')).toBeInTheDocument()
@@ -79,7 +78,7 @@ describe('AiResourceForms', () => {
     expect(screen.getByDisplayValue('creative')).toBeInTheDocument()
 
     await selectFormOption(user, 'Default Variant', 'creative')
-    expect(screen.getByRole('button', { name: 'Default Variant' })).toHaveTextContent('creative')
+    expect(screen.getByLabelText('Default Variant')).toHaveValue('creative')
   })
 
   it('keeps default variant aligned and hides reasoning effort when reasoning is disabled', async () => {
@@ -93,10 +92,10 @@ describe('AiResourceForms', () => {
     await selectFormOption(user, 'Default Variant', 'creative')
 
     fireEvent.change(secondNameInput, { target: { value: 'creative-2' } })
-    expect(screen.getByRole('button', { name: 'Default Variant' })).toHaveTextContent('creative-2')
+    expect(screen.getByLabelText('Default Variant')).toHaveValue('creative-2')
 
     await user.click(screen.getAllByRole('button', { name: '删除 Variant' })[1])
-    expect(screen.getByRole('button', { name: 'Default Variant' })).toHaveTextContent('medium')
+    expect(screen.getByLabelText('Default Variant')).toHaveValue('medium')
 
     await user.click(screen.getByLabelText('Reasoning'))
     expect(screen.queryByLabelText('Reasoning Effort 1')).not.toBeInTheDocument()
@@ -109,11 +108,11 @@ describe('AiResourceForms', () => {
 
     expect(screen.getByRole('button', { name: '使用第一个 Model 填充默认配置' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '使用第一个 Model 填充默认配置' }))
-    expect(screen.getByRole('button', { name: 'Model' })).toHaveTextContent('MiniMax-M2.7')
-    expect(screen.getByRole('button', { name: 'Variant' })).toHaveTextContent('default')
+    expect(screen.getByLabelText('Model')).toHaveValue('model-1')
+    expect(screen.getByLabelText('Variant')).toHaveValue('default')
 
     await selectFormOption(user, 'Model', 'Claude-Sonnet-4.5 (anthropic)')
-    expect(screen.getByRole('button', { name: 'Variant' })).toHaveTextContent('creative')
+    expect(screen.getByLabelText('Variant')).toHaveValue('creative')
     expect(screen.getByText('暂无候选 Tools')).toBeInTheDocument()
   })
 
@@ -216,8 +215,25 @@ function AgentFormHarness() {
           providerName: 'minimax',
           name: 'MiniMax-M2.7',
           description: null,
-          capabilitiesJson: '["TEXT","TOOLS"]',
-          configJson: '{"defaultVariant":"default","variants":[{"id":"default"}]}',
+          config: {
+            limit: { context: 128000, output: 8192 },
+            abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+            pricing: {
+              currency: 'USD',
+              pricingTier: 'default',
+              serviceTier: 'default',
+              serviceTierMultiplier: 1,
+              version: 'v1',
+              inputPerMillionTokens: 0,
+              outputPerMillionTokens: 0,
+              cacheReadPerMillionTokens: 0,
+              cacheWritePerMillionTokens: 0,
+              cacheWriteLongPerMillionTokens: 0,
+              reasoningPerMillionTokens: 0,
+            },
+            defaultVariant: 'default',
+            variants: [{ id: 'default' }],
+          },
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:00:00',
         },
@@ -227,9 +243,25 @@ function AgentFormHarness() {
           providerName: 'anthropic',
           name: 'Claude-Sonnet-4.5',
           description: null,
-          capabilitiesJson: '["TEXT","THINKING"]',
-          configJson:
-            '{"defaultVariant":"creative","variants":[{"id":"creative"},{"id":"precise"}]}',
+          config: {
+            limit: { context: 200000, output: 16000 },
+            abilities: { tools: false, reasoning: true, inputModalities: ['TEXT'] },
+            pricing: {
+              currency: 'USD',
+              pricingTier: 'default',
+              serviceTier: 'default',
+              serviceTierMultiplier: 1,
+              version: 'v1',
+              inputPerMillionTokens: 0,
+              outputPerMillionTokens: 0,
+              cacheReadPerMillionTokens: 0,
+              cacheWritePerMillionTokens: 0,
+              cacheWriteLongPerMillionTokens: 0,
+              reasoningPerMillionTokens: 0,
+            },
+            defaultVariant: 'creative',
+            variants: [{ id: 'creative' }, { id: 'precise' }],
+          },
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:00:00',
         },

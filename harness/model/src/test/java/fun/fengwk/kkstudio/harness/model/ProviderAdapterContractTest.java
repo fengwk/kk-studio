@@ -568,7 +568,8 @@ class ProviderAdapterContractTest {
   }
 
   private static ProviderRequest request(ProviderCacheControl control, ProviderType modelType) {
-    ModelVariant variant = new ModelVariant("default", 256, 0.0, null, null, List.of());
+    ModelVariant variant =
+        new ModelVariant("default", 256, 0.0, null, null, null, null, List.of(), null);
     ModelDescriptor model =
         new ModelDescriptor(
             1L,
@@ -579,7 +580,8 @@ class ProviderAdapterContractTest {
             4096,
             256,
             Set.of(ModelInputModality.TEXT),
-            Set.of(ModelCapability.TEXT, ModelCapability.TOOLS),
+            true,
+            true,
             List.of(variant),
             new ModelPricing(
                 "USD",

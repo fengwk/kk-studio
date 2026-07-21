@@ -49,7 +49,9 @@ public class AgentModelServiceTest {
         () -> agentProviderService.deleteProvider(id(provider.getId())));
 
     AgentModelUpdateDTO update = new AgentModelUpdateDTO();
+    update.setName(model.getName());
     update.setDescription("updated");
+    update.setConfig(model.getConfig());
     AgentModelDTO updated = agentModelService.updateModel(id(model.getId()), update);
     assertEquals("updated", updated.getDescription());
     assertTrue(

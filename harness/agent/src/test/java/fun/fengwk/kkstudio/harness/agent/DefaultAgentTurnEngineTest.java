@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.agent.extension.BeforeProviderRequestInterceptor;
 import fun.fengwk.kkstudio.harness.agent.extension.ProviderRequestInterceptorChain;
-import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -560,8 +559,10 @@ class DefaultAgentTurnEngineTest {
             1024,
             256,
             Set.of(ModelInputModality.TEXT),
-            Set.of(ModelCapability.TEXT, ModelCapability.TOOLS),
-            List.of(new ModelVariant("default", null, null, null, null, List.of())),
+            true,
+            true,
+            List.of(
+                new ModelVariant("default", null, null, null, null, null, null, List.of(), null)),
             new ModelPricing(
                 "USD",
                 "tier-1",
@@ -575,7 +576,7 @@ class DefaultAgentTurnEngineTest {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO),
             PromptCachePolicy.disabled()),
-        new ModelVariant("default", null, null, null, null, List.of()),
+        new ModelVariant("default", null, null, null, null, null, null, List.of(), null),
         List.of(
             new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("hello")))),
         List.of(

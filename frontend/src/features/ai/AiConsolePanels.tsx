@@ -1,8 +1,8 @@
 import { AgentResourceCard, CreateCard, ModelResourceCard, ProviderResourceCard } from '@/features/ai/AiConsoleCards'
 import { ChatCard } from '@/features/ai/ChatCard'
+import type { AgentModelView } from '@/features/ai/AgentModelView'
 import type {
   AgentDefinitionDTO,
-  AgentModelDTO,
   AgentProviderDTO,
   ChatDTO,
 } from '@/shared/api/contracts'
@@ -35,7 +35,7 @@ export function AgentsPanel({
   onDelete,
 }: {
   agents: AgentDefinitionDTO[]
-  models?: AgentModelDTO[]
+  models?: AgentModelView[]
   deletePending: boolean
   onCreate: () => void
   onEdit: (agent: AgentDefinitionDTO) => void
@@ -65,11 +65,11 @@ export function ModelsPanel({
   onEdit,
   onDelete,
 }: {
-  models: AgentModelDTO[]
+  models: AgentModelView[]
   deletePending: boolean
   onCreate: () => void
-  onEdit: (model: AgentModelDTO) => void
-  onDelete: (model: AgentModelDTO) => void
+  onEdit: (model: AgentModelView) => void
+  onDelete: (model: AgentModelView) => void
 }) {
   return (
     <div className="cards-grid">

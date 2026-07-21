@@ -3,10 +3,12 @@ package fun.fengwk.kkstudio.web.controller;
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
 import lombok.AllArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.core.harness.usage.service.ModelUsageAggregationService;
 import fun.fengwk.kkstudio.share.model.ModelUsageSummaryDTO;
@@ -21,7 +23,15 @@ public class StudioModelUsageController {
 
   @GetMapping("/threads/{threadId}")
   public Result<ModelUsageSummaryDTO> summarizeThread(@PathVariable("threadId") String threadId) {
-    return Results.ok(aggregationService.summarizeThread(parsePositiveLong(threadId, "threadId")));
+    try {
+      return Results.ok(
+          aggregationService.summarizeThread(parsePositiveLong(threadId, "threadId")));
+    } catch (IllegalArgumentException error) {
+      if (error.getMessage() != null && error.getMessage().startsWith("unknown thread:")) {
+        throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
+      }
+      throw error;
+    }
   }
 
   @GetMapping("/sessions/{sessionId}")
