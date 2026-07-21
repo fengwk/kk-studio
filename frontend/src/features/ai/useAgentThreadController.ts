@@ -281,7 +281,7 @@ function resolveRuntimeLabels(
     agentName: firstNonEmpty(thread?.activeAgentName, agent?.name, thread?.activeAgentDefinitionId, '（无 Agent）'),
     providerName: firstNonEmpty(provider?.name, model?.providerName),
     modelName: firstNonEmpty(model?.name, modelId),
-    variantName: firstNonEmpty(thread?.variant, agent?.variant, 'default'),
+    variantName: firstNonEmpty(thread?.variant, agent?.variant),
     contextWindow,
   }
 }

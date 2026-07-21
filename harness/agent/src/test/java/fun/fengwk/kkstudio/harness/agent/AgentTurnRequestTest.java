@@ -34,7 +34,7 @@ class AgentTurnRequestTest {
     AgentTurnRequest request =
         new AgentTurnRequest(
             model(),
-            new ModelVariant("default", null, null, null, null, null),
+            new ModelVariant("default", null, null, null, null, null, null, List.of(), null),
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("hello")))),

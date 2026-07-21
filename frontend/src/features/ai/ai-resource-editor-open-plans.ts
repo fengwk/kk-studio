@@ -38,23 +38,13 @@ export function editProviderEditorPlan(
   }
 }
 
-/**
- * New model drafts default from the first available provider (not the first model); the seed
- * model arg is only used to preserve a provider choice when re-opening the form for an existing
- * model during edit.
- */
 export function createModelEditorPlan(
-  models: AgentModelView[],
   providers: AgentProviderDTO[],
 ): Extract<ResourceEditorPlan, { kind: 'model' }> {
-  const seed = models[0]
-  const draft = seed
-    ? emptyModelDraft(undefined, { id: seed.providerId })
-    : emptyModelDraft(undefined, providers[0] ? { id: providers[0].id } : null)
   return {
     kind: 'model',
     modal: { kind: 'model', mode: 'create' },
-    modelDraft: normalizeModelDraftDefaultVariant(draft),
+    modelDraft: normalizeModelDraftDefaultVariant(emptyModelDraft(providers[0])),
   }
 }
 
@@ -75,20 +65,11 @@ export function editModelEditorPlan(
 
 export function createAgentEditorPlan(
   models: AgentModelView[],
-  providers: AgentProviderDTO[],
 ): Extract<ResourceEditorPlan, { kind: 'agent' }> {
-  const seed = models[0]
-  const draft = seed
-    ? emptyAgentDraft(seed)
-    : emptyAgentDraft()
-  if (!seed && providers[0]) {
-    // No model yet — surface the first provider for context, but stay agent-shaped.
-    draft.environmentName = ''
-  }
   return {
     kind: 'agent',
     modal: { kind: 'agent', mode: 'create' },
-    agentDraft: normalizeAgentDraftDefaultVariant(draft, models),
+    agentDraft: normalizeAgentDraftDefaultVariant(emptyAgentDraft(models[0]), models),
   }
 }
 

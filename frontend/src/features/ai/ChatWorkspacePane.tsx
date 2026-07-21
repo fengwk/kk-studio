@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChatPanel } from '@/features/ai/ChatPanel'
 import { HistoryBranchPanel } from '@/features/ai/HistoryBranchPanel'
@@ -64,7 +64,7 @@ function resolveBlankPaneFooterLabels(
     // AgentModelView already carries the enriched providerName so we don't have to re-join here.
     providerName: model?.providerName || undefined,
     modelName: model?.name || modelId || undefined,
-    variantName: agent.variant || 'default',
+    variantName: agent.variant || undefined,
     contextWindow: extractContextWindow(model),
   }
 }
@@ -183,12 +183,7 @@ function BlankComposerPane({
     providers,
   )
   const defaultAgent = resolveDefaultAgent(chat, agents)
-  // `models` is recomputed when `providers` changes, so it already captures the join refresh;
-  // no explicit `providers` dependency is needed here.
-  const footerLabels = useMemo(
-    () => resolveBlankPaneFooterLabels(defaultAgent, models),
-    [defaultAgent, models],
-  )
+  const footerLabels = resolveBlankPaneFooterLabels(defaultAgent, models)
   const agentLabel = defaultAgent?.name || (chat?.defaultAgentId ? '（Agent 已删除/缺失）' : '（无 Agent）')
 
   async function runFirstSend(agentId: string, content: string) {
@@ -394,10 +389,11 @@ function BoundThreadPane({
     },
   })
 
-  const threadItems = useMemo(() => {
-    const threads = sortWithRunningFirst(threadsQuery.data ?? [], threadSort, isRunningThread)
-    return threads.map((thread) => toThreadItem(thread, sessionId))
-  }, [sessionId, threadSort, threadsQuery.data])
+  const threadItems = sortWithRunningFirst(
+    threadsQuery.data ?? [],
+    threadSort,
+    isRunningThread,
+  ).map((thread) => toThreadItem(thread, sessionId))
 
   function handleCommand(command: ThreadCommand) {
     onFocus()

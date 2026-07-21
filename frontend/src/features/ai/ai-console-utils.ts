@@ -21,7 +21,7 @@ export function resourceTitle(modal: ResourceModal): string {
 export function filterAgents(agents: AgentDefinitionDTO[], search: string): AgentDefinitionDTO[] {
   return agents.filter((agent) =>
     includesSearch(
-      `${agent.name} ${agent.description ?? ''} ${agent.modelId ?? ''} ${agent.variant ?? ''} ${agent.config?.environmentName ?? ''}`,
+      `${agent.name} ${agent.description ?? ''} ${agent.modelId} ${agent.variant} ${agent.config.environmentName ?? ''}`,
       search,
     ),
   )

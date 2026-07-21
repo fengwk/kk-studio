@@ -261,7 +261,7 @@ class ModelUsageDraftTest {
   private static ProviderRequest request(ModelDescriptor model, ProviderCacheControl control) {
     return new ProviderRequest(
         model,
-        new ModelVariant("default", null, null, null, null, List.of()),
+        new ModelVariant("default", null, null, null, null, null, null, List.of(), null),
         List.of(),
         List.of(),
         control);

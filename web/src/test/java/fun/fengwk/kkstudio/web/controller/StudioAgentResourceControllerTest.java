@@ -101,7 +101,9 @@ public class StudioAgentResourceControllerTest {
         .andExpect(jsonPath("$.data.description").value("updated provider"));
 
     AgentModelUpdateDTO modelUpdate = new AgentModelUpdateDTO();
+    modelUpdate.setName(model.getName());
     modelUpdate.setDescription("updated model");
+    modelUpdate.setConfig(model.getConfig());
     mockMvc
         .perform(
             put("/api/models/{id}", modelId)
@@ -120,6 +122,7 @@ public class StudioAgentResourceControllerTest {
     AgentDefinitionCreateDTO agent = new AgentDefinitionCreateDTO();
     agent.setName("agent-" + suffix);
     agent.setModelId(modelId);
+    agent.setVariant("default");
     agent.setConfig(config);
     String agentId =
         id(
@@ -140,7 +143,11 @@ public class StudioAgentResourceControllerTest {
                 .getResponse()
                 .getContentAsString());
     AgentDefinitionUpdateDTO agentUpdate = new AgentDefinitionUpdateDTO();
+    agentUpdate.setName("agent-" + suffix);
     agentUpdate.setDescription("updated agent");
+    agentUpdate.setModelId(modelId);
+    agentUpdate.setVariant("default");
+    agentUpdate.setConfig(config);
     mockMvc
         .perform(
             put("/api/agents/{id}", agentId)

@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.core.harness.usage.service.impl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -48,8 +47,6 @@ class ModelUsageAggregationServiceImplTest {
     recordStore = mock(ModelUsageRecordStore.class);
     threadMapper = mock(HarnessThreadMapper.class);
     sessionStore = mock(MysqlHarnessSessionStore.class);
-    // 默认无 Thread 视图 → 降级 listByThreadId（保持既有用例）
-    when(threadMapper.findView(anyLong())).thenReturn(null);
     service = new ModelUsageAggregationServiceImpl(recordStore, threadMapper, sessionStore);
   }
 
@@ -62,7 +59,15 @@ class ModelUsageAggregationServiceImplTest {
         record(3L, eligible("EUR", "beta", usage(5, 6, 70, 0, 0, 2, 83)));
     ModelUsageRecord nonEligible =
         record(4L, nonEligible("USD", usage(1000, 8, 500, 7, 9, 4, 1528)));
-    when(recordStore.listByThreadId(21L))
+    when(threadMapper.findView(21L)).thenReturn(threadView(21L, 11L, 104L));
+    when(sessionStore.loadPath(11L, 104L))
+        .thenReturn(
+            List.of(
+                pathEntry(11L, 101L),
+                pathEntry(11L, 102L),
+                pathEntry(11L, 103L),
+                pathEntry(11L, 104L)));
+    when(recordStore.listBySessionId(11L))
         .thenReturn(List.of(usdWrite, usdRead, eurOtherKey, nonEligible));
 
     ModelUsageSummaryDTO summary = service.summarizeThread(21L);
@@ -94,13 +99,9 @@ class ModelUsageAggregationServiceImplTest {
   @Test
   void summarizesThreadAlongHeadPathExcludingSiblingBranch() {
     // path: 10 → 20 → 30；旁枝 entry 40 的 usage 不计入
-    HarnessThreadViewDO view = new HarnessThreadViewDO();
-    view.setId(21L);
-    view.setSessionId(11L);
-    view.setHeadEntryId(30L);
-    when(threadMapper.findView(21L)).thenReturn(view);
+    when(threadMapper.findView(21L)).thenReturn(threadView(21L, 11L, 30L));
     when(sessionStore.loadPath(11L, 30L))
-        .thenReturn(List.of(pathEntry(10L), pathEntry(20L), pathEntry(30L)));
+        .thenReturn(List.of(pathEntry(11L, 10L), pathEntry(11L, 20L), pathEntry(11L, 30L)));
 
     ModelUsageRecord prefix =
         new ModelUsageRecord(
@@ -138,16 +139,27 @@ class ModelUsageAggregationServiceImplTest {
 
   @Test
   void returnsZeroSummariesForEmptyScopes() {
-    when(recordStore.listByThreadId(41L)).thenReturn(List.of());
+    when(threadMapper.findView(41L)).thenReturn(threadView(41L, 44L, 410L));
+    when(sessionStore.loadPath(44L, 410L)).thenReturn(List.of(pathEntry(44L, 410L)));
+    when(recordStore.listBySessionId(44L)).thenReturn(List.of());
     when(recordStore.listBySessionId(42L)).thenReturn(List.of());
     when(recordStore.listByModelResourceId(43L)).thenReturn(List.of());
 
     assertEmpty(service.summarizeThread(41L), "thread", "41");
     assertEmpty(service.summarizeSession(42L), "session", "42");
     assertEmpty(service.summarizeModel(43L), "model", "43");
-    verify(recordStore).listByThreadId(41L);
+    verify(recordStore).listBySessionId(44L);
     verify(recordStore).listBySessionId(42L);
     verify(recordStore).listByModelResourceId(43L);
+  }
+
+  /** Thread 用量必须来自真实 head 路径，不接受孤立账本伪装成 Thread 摘要。 */
+  @Test
+  void rejectsUnknownThread() {
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, () -> service.summarizeThread(41L));
+
+    assertEquals("unknown thread: 41", error.getMessage());
   }
 
   @Test
@@ -155,7 +167,10 @@ class ModelUsageAggregationServiceImplTest {
     ModelUsageRecord maximum =
         record(21L, nonEligible("USD", usage(Long.MAX_VALUE, 0, 0, 0, 0, 0, 0)));
     ModelUsageRecord one = record(22L, nonEligible("USD", usage(1, 0, 0, 0, 0, 0, 0)));
-    when(recordStore.listByThreadId(51L)).thenReturn(List.of(maximum, one));
+    when(threadMapper.findView(51L)).thenReturn(threadView(51L, 11L, 122L));
+    when(sessionStore.loadPath(11L, 122L))
+        .thenReturn(List.of(pathEntry(11L, 121L), pathEntry(11L, 122L)));
+    when(recordStore.listBySessionId(11L)).thenReturn(List.of(maximum, one));
 
     assertThrows(ArithmeticException.class, () -> service.summarizeThread(51L));
   }
@@ -179,9 +194,18 @@ class ModelUsageAggregationServiceImplTest {
     assertTrue(summary.getCosts().isEmpty());
   }
 
-  private static SessionEntry pathEntry(long id) {
+  private static HarnessThreadViewDO threadView(long threadId, long sessionId, long headEntryId) {
+    HarnessThreadViewDO view = new HarnessThreadViewDO();
+    view.setId(threadId);
+    view.setSessionId(sessionId);
+    view.setHeadEntryId(headEntryId);
+    return view;
+  }
+
+  private static SessionEntry pathEntry(long sessionId, long id) {
     // 仅用于 id 集合过滤；payload 类型无关紧要
-    return new SessionEntry(id, 11L, null, SessionEntryType.ROOT, new RootEntryPayload(), NOW);
+    return new SessionEntry(
+        id, sessionId, null, SessionEntryType.ROOT, new RootEntryPayload(), NOW);
   }
 
   private static ModelUsageRecord record(long id, ModelUsageDraft draft) {

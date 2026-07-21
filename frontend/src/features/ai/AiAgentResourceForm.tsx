@@ -36,7 +36,7 @@ export function AgentForm({
 }) {
   const selectedModel = models.find((model) => String(model.id) === draft.modelId)
   const variantOptions = variantOptionsFromModel(selectedModel)
-  const selectedVariant = variantOptions.includes(draft.variant.trim()) ? draft.variant.trim() : variantOptions[0]
+  const selectedVariant = draft.variant.trim()
   const readyEnvironments = environments.filter(
     (environment) =>
       environment.name !== PLATFORM_ENVIRONMENT_NAME && String(environment.status).toUpperCase() === 'READY',
@@ -84,7 +84,7 @@ export function AgentForm({
         />
         {fieldErrors.modelId ? <span className="field-error">{fieldErrors.modelId}</span> : null}
       </label>
-      <label className="form-group">
+      <label className={`form-group${fieldErrors.variant ? ' is-error' : ''}`}>
         <span>Variant</span>
         <FormSelect
           aria-label="Variant"
@@ -93,13 +93,14 @@ export function AgentForm({
           options={variantOptions.map((variantName) => ({ value: variantName, label: variantName }))}
           onChange={(variant) => onChange({ ...draft, variant })}
         />
+        {fieldErrors.variant ? <span className="field-error">{fieldErrors.variant}</span> : null}
       </label>
       <label className="form-group">
         <span>System Prompt</span>
         <textarea value={draft.systemPrompt} onChange={(event) => onChange({ ...draft, systemPrompt: event.target.value })} placeholder="系统提示词" rows={4} />
       </label>
 
-      <label className="form-group">
+      <label className={`form-group${fieldErrors.environmentName ? ' is-error' : ''}`}>
         <span>Environment</span>
         <FormSelect
           aria-label="Environment"
@@ -122,12 +123,15 @@ export function AgentForm({
           ]}
           onChange={(environmentName) => onChange({ ...draft, environmentName })}
         />
+        {fieldErrors.environmentName ? (
+          <span className="field-error">{fieldErrors.environmentName}</span>
+        ) : null}
       </label>
       <div className="inline-hint" role="note">
         切换 Environment 只会刷新可选 Tools/Skills 列表；已勾选项会尽量保留，不会自动清空。离线/暂不可用项置灰，仍可取消勾选并保存。
       </div>
 
-      <fieldset className="form-group capability-picker">
+      <fieldset className={`form-group capability-picker${fieldErrors.tools ? ' is-error' : ''}`}>
         <legend>Tools</legend>
         <CapabilityChecklist
           options={toolCandidates}
@@ -135,9 +139,10 @@ export function AgentForm({
           emptyText="暂无候选 Tools"
           onToggle={(name) => onChange({ ...draft, tools: toggleName(draft.tools, name) })}
         />
+        {fieldErrors.tools ? <span className="field-error">{fieldErrors.tools}</span> : null}
       </fieldset>
 
-      <fieldset className="form-group capability-picker">
+      <fieldset className={`form-group capability-picker${fieldErrors.skills ? ' is-error' : ''}`}>
         <legend>Skills</legend>
         <CapabilityChecklist
           options={skillCandidates}
@@ -145,9 +150,12 @@ export function AgentForm({
           emptyText="暂无候选 Skills"
           onToggle={(name) => onChange({ ...draft, skills: toggleName(draft.skills, name) })}
         />
+        {fieldErrors.skills ? <span className="field-error">{fieldErrors.skills}</span> : null}
       </fieldset>
 
-      <fieldset className="form-group capability-picker">
+      <fieldset
+        className={`form-group capability-picker${fieldErrors.allowedSubagents ? ' is-error' : ''}`}
+      >
         <legend>Subagents</legend>
         <div className="capability-options">
           {subagentNames.map((name) => {
@@ -165,15 +173,24 @@ export function AgentForm({
           })}
           {subagentNames.length === 0 && <div className="inline-hint">暂无其它 Agent 可选</div>}
         </div>
+        {fieldErrors.allowedSubagents ? (
+          <span className="field-error">{fieldErrors.allowedSubagents}</span>
+        ) : null}
       </fieldset>
 
-      <section className="structured-section" aria-labelledby="agent-policy-heading">
+      <section
+        className={`structured-section${fieldErrors.executionPolicy ? ' is-error' : ''}`}
+        aria-labelledby="agent-policy-heading"
+      >
         <div className="structured-section-head">
           <h3 id="agent-policy-heading">Policy（执行策略）</h3>
         </div>
         <p className="inline-hint">
           限制 agent / subagent 的运行边界。卡片上的 Policy 即这里的摘要；留空表示不限制。
         </p>
+        {fieldErrors.executionPolicy ? (
+          <span className="field-error">{fieldErrors.executionPolicy}</span>
+        ) : null}
         <div className="form-grid-2">
           <label className="form-group">
             <span>maxTurns</span>

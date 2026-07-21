@@ -36,7 +36,7 @@ class AgentModelRuntimeConfigParserTest {
     assertTrue(parsed.reasoning());
     assertEquals("quality", parsed.defaultVariant());
     assertEquals(1, parsed.variants().size());
-    assertEquals("quality", parsed.variants().get(0).name());
+    assertEquals("quality", parsed.variants().get(0).id());
     assertEquals(4096, parsed.variants().get(0).maxOutputTokens());
     assertEquals(0.4, parsed.variants().get(0).temperature());
     assertEquals(0.8, parsed.variants().get(0).topP());
@@ -91,7 +91,7 @@ class AgentModelRuntimeConfigParserTest {
   /** Missing fields, wrong JSON types, unknown enums, and invalid variants fail explicitly. */
   @Test
   void rejectsIncompleteOrMistypedExecutableConfiguration() {
-    assertInvalid("{}", "config.limit must be an object");
+    assertInvalid("{}", "config.limit is required");
     assertInvalid(validConfig().replace("128000", "\"128000\""), "limit.context");
     assertInvalid(
         validConfig().replace("[\"TEXT\",\"IMAGE\"]", "[]"), "inputModalities must not be empty");
@@ -101,8 +101,7 @@ class AgentModelRuntimeConfigParserTest {
             .replace("\"reasoningPerMillionTokens\":3.6", "\"reasoningPerMillionTokens\":null"),
         "reasoningPerMillionTokens");
     assertInvalid(
-        validConfig().replace("[\"TEXT\",\"IMAGE\"]", "[\"UNKNOWN\"]"),
-        "contains unsupported value");
+        validConfig().replace("[\"TEXT\",\"IMAGE\"]", "[\"UNKNOWN\"]"), "inputModalities[0]");
   }
 
   /** Structural and numeric boundaries reject every shape that could create an unusable model. */
@@ -110,7 +109,7 @@ class AgentModelRuntimeConfigParserTest {
   void rejectsInvalidVariantPricingAndJsonBoundaries() {
     assertInvalid("", "config must not be blank");
     assertInvalid("not-json", "config must be valid JSON");
-    assertInvalid("[]", "config must be an object");
+    assertInvalid("[]", "config is invalid");
     assertInvalid(
         validConfig().replace("\"output\":8192", "\"output\":128001"),
         "must not exceed limit.context");
@@ -123,9 +122,7 @@ class AgentModelRuntimeConfigParserTest {
                     + "\"stopSequences\":[\"done\"],\"reasoningEffort\":\"high\"}]",
                 "\"variants\":[]"),
         "variants must not be empty");
-    assertInvalid(
-        validConfig().replace("\"variants\":[{", "\"variants\":[1,{"),
-        "variants[0] must be an object");
+    assertInvalid(validConfig().replace("\"variants\":[{", "\"variants\":[1,{"), "variants[0]");
     assertInvalid(
         validConfig()
             .replace(
@@ -141,10 +138,10 @@ class AgentModelRuntimeConfigParserTest {
     assertInvalid(validConfig().replace("\"topK\":20", "\"topK\":0"), "topK");
     assertInvalid(
         validConfig().replace("\"temperature\":0.4", "\"temperature\":\"hot\""),
-        "temperature must be a number");
+        "variants[0].temperature");
     assertInvalid(
         validConfig().replace("\"stopSequences\":[\"done\"]", "\"stopSequences\":[1]"),
-        "stopSequences must contain");
+        "stopSequences[0]");
     assertInvalid(
         validConfig().replace("\"serviceTierMultiplier\":1.25", "\"serviceTierMultiplier\":0"),
         "serviceTierMultiplier must be positive");
@@ -159,8 +156,8 @@ class AgentModelRuntimeConfigParserTest {
     assertInvalid("", "config must not be blank");
     assertInvalid("   ", "config must not be blank");
     assertInvalid("not-json", "config must be valid JSON");
-    assertInvalid("null", "config must be an object");
-    assertInvalid("[1,2,3]", "config must be an object");
+    assertInvalid("null", "config is required");
+    assertInvalid("[1,2,3]", "config is invalid");
     assertInvalid("{\"limit\":{}}", "config.limit.context");
     assertInvalid(
         "{\"limit\":{\"context\":1,\"output\":1},\"abilities\":{\"tools\":true,"
@@ -172,6 +169,35 @@ class AgentModelRuntimeConfigParserTest {
             + "\"cacheWritePerMillionTokens\":0,\"cacheWriteLongPerMillionTokens\":0,"
             + "\"reasoningPerMillionTokens\":0}}",
         "config.variants must not be empty");
+  }
+
+  /** Persisted config decoding rejects unknown fields, scalar coercion, and trailing documents. */
+  @Test
+  void rejectsUnknownFieldsCoercionAndTrailingJson() {
+    assertInvalid(
+        validConfig().replace("{\"limit\"", "{\"unknown\":true,\"limit\""), "config.unknown");
+    assertInvalid(
+        validConfig().replace("\"context\":128000", "\"context\":128000.5"), "limit.context");
+    assertInvalid(validConfig() + " {}", "config is invalid");
+    assertInvalid(
+        validConfig().replace("\"id\":\"quality\"", "\"id\":\" quality \""),
+        "surrounding whitespace");
+  }
+
+  /**
+   * Provider-specific penalty ranges may include negatives; the generic contract only requires
+   * finiteness.
+   */
+  @Test
+  void acceptsFiniteNegativePenalties() {
+    var parsed =
+        parser.parse(
+            validConfig()
+                .replace("\"frequencyPenalty\":0.1", "\"frequencyPenalty\":-0.5")
+                .replace("\"presencePenalty\":0.2", "\"presencePenalty\":-1.0"));
+
+    assertEquals(-0.5, parsed.variants().get(0).frequencyPenalty());
+    assertEquals(-1.0, parsed.variants().get(0).presencePenalty());
   }
 
   /** The typed DTO form rejects null and broken sub-shapes; partial sub-shapes fail loudly. */

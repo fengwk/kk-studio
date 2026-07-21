@@ -33,9 +33,8 @@ export interface KeyValueDraft {
  */
 export interface VariantDraft {
   /** Client-only React key. */
+  draftId: string
   id: string
-  /** Persisted as {@code variants[].id}. */
-  name: string
   reasoningEffort: string
   maxOutputTokens: string
   temperature: string

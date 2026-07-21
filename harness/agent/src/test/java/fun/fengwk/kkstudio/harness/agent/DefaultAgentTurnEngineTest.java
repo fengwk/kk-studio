@@ -561,7 +561,8 @@ class DefaultAgentTurnEngineTest {
             Set.of(ModelInputModality.TEXT),
             true,
             true,
-            List.of(new ModelVariant("default", null, null, null, null, List.of())),
+            List.of(
+                new ModelVariant("default", null, null, null, null, null, null, List.of(), null)),
             new ModelPricing(
                 "USD",
                 "tier-1",
@@ -575,7 +576,7 @@ class DefaultAgentTurnEngineTest {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO),
             PromptCachePolicy.disabled()),
-        new ModelVariant("default", null, null, null, null, List.of()),
+        new ModelVariant("default", null, null, null, null, null, null, List.of(), null),
         List.of(
             new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("hello")))),
         List.of(

@@ -43,8 +43,8 @@ final class AgentDefinitionLiveCapabilityValidator {
     }
     validateShortNames(config.getTools(), "tools");
     validateShortNames(config.getSkills(), "skills");
-    validateTools(listOrEmpty(config.getTools()), selectedEnvironment);
-    validateSkills(listOrEmpty(config.getSkills()), selectedEnvironment);
+    validateTools(config.getTools(), selectedEnvironment);
+    validateSkills(config.getSkills(), selectedEnvironment);
   }
 
   private void validateTools(List<String> tools, LiveEnvironment selectedEnvironment) {
@@ -144,7 +144,7 @@ final class AgentDefinitionLiveCapabilityValidator {
 
   private static void validateShortNames(List<String> values, String field) {
     if (values == null) {
-      return;
+      throw new IllegalArgumentException("agent config " + field + " is required");
     }
     Set<String> seen = new LinkedHashSet<>();
     for (String value : values) {
@@ -156,9 +156,9 @@ final class AgentDefinitionLiveCapabilityValidator {
         throw new IllegalArgumentException(
             "agent config " + field + " must use short names only: " + value);
       }
-      if (field.equals("skills") && !seen.add(value)) {
-        // Skills are validated for duplicates by MutationFactory; keep defensive check.
-        throw new IllegalArgumentException("agent skills must not contain duplicates: " + value);
+      if (!seen.add(value)) {
+        throw new IllegalArgumentException(
+            "agent " + field + " must not contain duplicates: " + value);
       }
     }
   }
@@ -168,10 +168,6 @@ final class AgentDefinitionLiveCapabilityValidator {
         && value.indexOf('/') < 0
         && value.indexOf('@') < 0
         && value.indexOf('\\') < 0;
-  }
-
-  private static List<String> listOrEmpty(List<String> values) {
-    return values == null ? List.of() : values;
   }
 
   private static String blankToNull(String value) {

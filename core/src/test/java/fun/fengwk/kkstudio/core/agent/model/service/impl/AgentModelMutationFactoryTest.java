@@ -35,6 +35,10 @@ public class AgentModelMutationFactoryTest {
     create.setName("model");
 
     assertThrows(IllegalArgumentException.class, () -> factory.newModel(2L, create));
+    AgentModel existing = new AgentModel();
+    existing.setName("existing");
+    assertThrows(
+        IllegalArgumentException.class, () -> factory.update(existing, new AgentModelUpdateDTO()));
 
     AgentModelConfigDTO config = validConfig();
     create.setConfig(config);
@@ -51,46 +55,6 @@ public class AgentModelMutationFactoryTest {
     assertThrows(IllegalArgumentException.class, () -> factory.newModel(2L, create));
     assertThrows(IllegalArgumentException.class, () -> factory.newModel(0L, create));
     assertThrows(IllegalArgumentException.class, () -> factory.newModel(2L, null));
-  }
-
-  /** A partial update preserves and revalidates the existing executable config. */
-  @Test
-  public void shouldPreserveExecutableConfigurationOnPartialUpdate() {
-    AgentModelMutationFactory factory = factory();
-    AgentModel model = new AgentModel();
-    model.setName("model");
-    AgentModelConfigDTO baseline = validConfig();
-    // Pre-roundtrip so the baseline matches the canonical encoded form.
-    String canonicalJson =
-        new AgentModelRuntimeConfigParser(new ObjectMapper())
-            .encode(
-                new AgentModelRuntimeConfigParser(new ObjectMapper()).decode(serialize(baseline)));
-    model.setConfigJson(canonicalJson);
-    AgentModelUpdateDTO update = new AgentModelUpdateDTO();
-    update.setDescription("updated");
-
-    factory.update(model, update);
-
-    assertEquals(canonicalJson, model.getConfigJson());
-    assertEquals("updated", model.getDescription());
-  }
-
-  /** Even when persisted JSON has null optional variant fields, encoded output normalizes them. */
-  @Test
-  public void shouldNormalizePersistedConfigOnUpdate() {
-    AgentModelMutationFactory factory = factory();
-    AgentModel model = new AgentModel();
-    model.setName("model");
-    AgentModelConfigDTO baseline = validConfig();
-    // Force persisted JSON to omit optional variant fields (stopSequences null).
-    String withoutStopSequences = serialize(baseline).replace(",\"stopSequences\":null", "");
-    model.setConfigJson(withoutStopSequences);
-
-    factory.update(model, new AgentModelUpdateDTO());
-
-    AgentModelConfigDTO persisted =
-        new AgentModelRuntimeConfigParser(new ObjectMapper()).decode(model.getConfigJson());
-    assertEquals(List.of(), persisted.getVariants().get(0).getStopSequences());
   }
 
   /**
@@ -118,7 +82,9 @@ public class AgentModelMutationFactoryTest {
     model.setConfigJson(serialize(baseline));
 
     AgentModelUpdateDTO update = new AgentModelUpdateDTO();
+    update.setName("model");
     update.setDescription("renamed");
+    update.setConfig(baseline);
     factory.update(model, update);
 
     AgentModelConfigDTO persisted =
@@ -151,7 +117,9 @@ public class AgentModelMutationFactoryTest {
     model.setConfigJson(serialize(baseline));
 
     AgentModelUpdateDTO update = new AgentModelUpdateDTO();
+    update.setName("model");
     update.setDescription("renamed");
+    update.setConfig(baseline);
     factory.update(model, update);
 
     AgentModelConfigDTO persisted =

@@ -46,75 +46,26 @@ function defaultPricingDraft(): ModelPricingDraft {
 }
 
 export function emptyModelDraft(
-  model?: AgentModelDTO,
-  provider?: { id: AgentResourceId | string } | null,
+  provider?: { id: AgentResourceId } | null,
 ): ModelDraft {
-  const providerId = model?.providerId
-    ? String(model.providerId)
-    : provider
-      ? String(provider.id)
-      : ''
-  const limit = model?.config.limit
-  const abilities = model?.config.abilities
   return {
-    providerId,
+    providerId: provider?.id ?? '',
     name: '',
     description: '',
-    contextWindow: limit ? String(limit.context) : '128000',
-    maxOutputTokens: limit ? String(limit.output) : '8192',
-    tools: typeof abilities?.tools === 'boolean' ? abilities.tools : true,
-    reasoning: typeof abilities?.reasoning === 'boolean' ? abilities.reasoning : false,
-    // New models default to TEXT-only; existing models surface whatever the persisted config
-    // claims (preserving operators who intentionally enabled multimodal models).
-    inputModalities: model
-      ? readInputModalities(abilities?.inputModalities ?? ['TEXT'])
-      : ['TEXT'],
+    contextWindow: '128000',
+    maxOutputTokens: '8192',
+    tools: true,
+    reasoning: false,
+    inputModalities: ['TEXT'],
     pricing: defaultPricingDraft(),
     defaultVariant: 'medium',
-    variants: [newVariantDraft({ name: 'medium' })],
+    variants: [newVariantDraft({ id: 'medium' })],
   }
-}
-
-function readInputModalities(raw: readonly AgentModelInputModality[]): AgentModelInputModality[] {
-  const ordered: AgentModelInputModality[] = []
-  const seen = new Set<AgentModelInputModality>()
-  for (const item of raw) {
-    if (AGENT_MODEL_MODALITY_SET.has(item) && !seen.has(item)) {
-      seen.add(item)
-      ordered.push(item)
-    }
-  }
-  // Always keep TEXT; if everything was filtered out the model still accepts text prompts.
-  if (ordered.length === 0) {
-    ordered.push('TEXT')
-  }
-  return ordered
-}
-
-function modalitiesToList(set: ReadonlyArray<AgentModelInputModality>): AgentModelInputModality[] {
-  // Preserve the draft's declared order so toggling UI selections matches persisted selections.
-  const seen = new Set<AgentModelInputModality>()
-  const result: AgentModelInputModality[] = []
-  for (const item of set) {
-    if (AGENT_MODEL_MODALITY_SET.has(item) && !seen.has(item)) {
-      seen.add(item)
-      result.push(item)
-    }
-  }
-  return result
 }
 
 function parseVariant(variant: AgentModelVariantDTO): VariantDraft {
-  const id = (variant.id ?? '').trim()
-  const stopRaw = variant.stopSequences
-  const stopSequences = Array.isArray(stopRaw)
-    ? stopRaw
-        .map((item) => String(item ?? '').trim())
-        .filter(Boolean)
-        .join(', ')
-    : ''
   return newVariantDraft({
-    name: id,
+    id: variant.id,
     reasoningEffort: variant.reasoningEffort == null ? '' : String(variant.reasoningEffort),
     maxOutputTokens: variant.maxOutputTokens == null ? '' : String(variant.maxOutputTokens),
     temperature: variant.temperature == null ? '' : String(variant.temperature),
@@ -124,72 +75,40 @@ function parseVariant(variant: AgentModelVariantDTO): VariantDraft {
       variant.frequencyPenalty == null ? '' : String(variant.frequencyPenalty),
     presencePenalty:
       variant.presencePenalty == null ? '' : String(variant.presencePenalty),
-    stopSequences,
+    stopSequences: (variant.stopSequences ?? []).join(', '),
   })
 }
 
 function parsePricing(pricing: AgentModelPricingDTO): ModelPricingDraft {
-  const base = defaultPricingDraft()
   return {
-    currency: pricing.currency || base.currency,
-    pricingTier: pricing.pricingTier || base.pricingTier,
-    serviceTier: pricing.serviceTier || base.serviceTier,
-    serviceTierMultiplier:
-      pricing.serviceTierMultiplier == null
-        ? base.serviceTierMultiplier
-        : String(pricing.serviceTierMultiplier),
-    version: pricing.version || base.version,
-    inputPerMillionTokens:
-      pricing.inputPerMillionTokens == null
-        ? base.inputPerMillionTokens
-        : String(pricing.inputPerMillionTokens),
-    outputPerMillionTokens:
-      pricing.outputPerMillionTokens == null
-        ? base.outputPerMillionTokens
-        : String(pricing.outputPerMillionTokens),
-    cacheReadPerMillionTokens:
-      pricing.cacheReadPerMillionTokens == null
-        ? base.cacheReadPerMillionTokens
-        : String(pricing.cacheReadPerMillionTokens),
-    cacheWritePerMillionTokens:
-      pricing.cacheWritePerMillionTokens == null
-        ? base.cacheWritePerMillionTokens
-        : String(pricing.cacheWritePerMillionTokens),
-    cacheWriteLongPerMillionTokens:
-      pricing.cacheWriteLongPerMillionTokens == null
-        ? base.cacheWriteLongPerMillionTokens
-        : String(pricing.cacheWriteLongPerMillionTokens),
-    reasoningPerMillionTokens:
-      pricing.reasoningPerMillionTokens == null
-        ? base.reasoningPerMillionTokens
-        : String(pricing.reasoningPerMillionTokens),
+    currency: pricing.currency,
+    pricingTier: pricing.pricingTier,
+    serviceTier: pricing.serviceTier,
+    serviceTierMultiplier: String(pricing.serviceTierMultiplier),
+    version: pricing.version,
+    inputPerMillionTokens: String(pricing.inputPerMillionTokens),
+    outputPerMillionTokens: String(pricing.outputPerMillionTokens),
+    cacheReadPerMillionTokens: String(pricing.cacheReadPerMillionTokens),
+    cacheWritePerMillionTokens: String(pricing.cacheWritePerMillionTokens),
+    cacheWriteLongPerMillionTokens: String(pricing.cacheWriteLongPerMillionTokens),
+    reasoningPerMillionTokens: String(pricing.reasoningPerMillionTokens),
   }
 }
 
 export function toModelDraft(model: AgentModelDTO): ModelDraft {
-  const base = emptyModelDraft(model)
   const config = model.config
-  const variantIds = config.variants.map((variant) => (variant.id ?? '').trim()).filter(Boolean)
-  const configuredDefault = (config.defaultVariant ?? '').trim()
-  const defaultVariant = variantIds.includes(configuredDefault) ? configuredDefault : variantIds[0] ?? base.defaultVariant
-
-  const tools = config.abilities.tools
-  const reasoning = config.abilities.reasoning
-  const inputModalities = readInputModalities(config.abilities.inputModalities)
 
   return {
-    providerId: model.providerId ? String(model.providerId) : base.providerId,
+    providerId: model.providerId,
     name: model.name,
     description: model.description || '',
-    contextWindow: config.limit.context != null ? String(config.limit.context) : base.contextWindow,
-    maxOutputTokens: config.limit.output != null ? String(config.limit.output) : base.maxOutputTokens,
-    tools: typeof tools === 'boolean' ? tools : base.tools,
-    reasoning: typeof reasoning === 'boolean' ? reasoning : base.reasoning,
-    inputModalities: inputModalities.length > 0 ? inputModalities : base.inputModalities,
-    defaultVariant,
-    variants: config.variants
-      .map((variant) => parseVariant(variant))
-      .filter((variant) => variant.name.trim().length > 0),
+    contextWindow: String(config.limit.context),
+    maxOutputTokens: String(config.limit.output),
+    tools: config.abilities.tools,
+    reasoning: config.abilities.reasoning,
+    inputModalities: [...config.abilities.inputModalities],
+    defaultVariant: config.defaultVariant,
+    variants: config.variants.map(parseVariant),
     pricing: parsePricing(config.pricing),
   }
 }
@@ -236,11 +155,20 @@ function normalizeModalities(
   values: ReadonlyArray<AgentModelInputModality>,
   field: string,
 ): AgentModelInputModality[] {
-  const allowed = modalitiesToList(values)
-  if (allowed.length === 0) {
+  if (values.length === 0) {
     throw new Error(`${field} must contain at least one input modality`)
   }
-  return allowed
+  const seen = new Set<AgentModelInputModality>()
+  for (const value of values) {
+    if (!AGENT_MODEL_MODALITY_SET.has(value)) {
+      throw new Error(`${field} contains unsupported value: ${value}`)
+    }
+    if (seen.has(value)) {
+      throw new Error(`${field} contains duplicate value: ${value}`)
+    }
+    seen.add(value)
+  }
+  return [...values]
 }
 
 function serializeVariants(
@@ -252,21 +180,21 @@ function serializeVariants(
   }
   const ids = new Set<string>()
   return variants.map((variant, index) => {
-    const name = variant.name.trim()
-    if (!name) {
+    const id = variant.id.trim()
+    if (!id) {
       throw new Error(`variant ${index + 1} id is required`)
     }
-    if (ids.has(name)) {
-      throw new Error(`duplicate variant id: ${name}`)
+    if (ids.has(id)) {
+      throw new Error(`duplicate variant id: ${id}`)
     }
-    ids.add(name)
+    ids.add(id)
 
-    const payload: AgentModelVariantDTO = { id: name }
+    const payload: AgentModelVariantDTO = { id }
     const reasoningEffort = variant.reasoningEffort.trim()
     if (reasoning) {
       if (!reasoningEffort) {
         throw new Error(
-          `variant ${name} reasoningEffort is required when reasoning is enabled`,
+          `variant ${id} reasoningEffort is required when reasoning is enabled`,
         )
       }
       if (reasoningEffort.toLowerCase() !== 'off') {
@@ -276,34 +204,42 @@ function serializeVariants(
 
     const maxOutputTokens = optionalPositiveInt(
       variant.maxOutputTokens,
-      `variant ${name} maxOutputTokens`,
+      `variant ${id} maxOutputTokens`,
     )
     if (maxOutputTokens !== null) {
       payload.maxOutputTokens = maxOutputTokens
     }
 
-    const optionalNumbers: ReadonlyArray<{
-      draftField: keyof VariantDraft
-      wireField: keyof AgentModelVariantDTO
-    }> = [
-      { draftField: 'temperature', wireField: 'temperature' },
-      { draftField: 'topP', wireField: 'topP' },
-      { draftField: 'frequencyPenalty', wireField: 'frequencyPenalty' },
-      { draftField: 'presencePenalty', wireField: 'presencePenalty' },
-    ]
-    for (const { draftField, wireField } of optionalNumbers) {
-      const value = optionalNumber(
-        variant[draftField] as string,
-        `variant ${name} ${wireField}`,
-      )
-      if (value !== null) {
-        // Cast: wireField is constrained to optional numeric VariantDraftDTO keys by
-        // the optionalNumbers table, so this assignment is well-typed.
-        (payload as unknown as Record<string, number | string | null>)[wireField] = value
+    const temperature = optionalNumber(variant.temperature, `variant ${id} temperature`)
+    if (temperature !== null) {
+      if (temperature < 0) {
+        throw new Error(`variant ${id} temperature must not be negative`)
       }
+      payload.temperature = temperature
+    }
+    const topP = optionalNumber(variant.topP, `variant ${id} topP`)
+    if (topP !== null) {
+      if (topP <= 0 || topP > 1) {
+        throw new Error(`variant ${id} topP must be in (0, 1]`)
+      }
+      payload.topP = topP
+    }
+    const frequencyPenalty = optionalNumber(
+      variant.frequencyPenalty,
+      `variant ${id} frequencyPenalty`,
+    )
+    if (frequencyPenalty !== null) {
+      payload.frequencyPenalty = frequencyPenalty
+    }
+    const presencePenalty = optionalNumber(
+      variant.presencePenalty,
+      `variant ${id} presencePenalty`,
+    )
+    if (presencePenalty !== null) {
+      payload.presencePenalty = presencePenalty
     }
 
-    const topK = optionalPositiveInt(variant.topK, `variant ${name} topK`)
+    const topK = optionalPositiveInt(variant.topK, `variant ${id} topK`)
     if (topK !== null) {
       payload.topK = topK
     }
@@ -359,11 +295,11 @@ function pricingFromDraft(draft: ModelPricingDraft): AgentModelPricingDTO {
     'config.pricing.serviceTierMultiplier',
   )
   return {
-    currency: trimToNull(draft.currency) ?? 'USD',
-    pricingTier: trimToNull(draft.pricingTier) ?? 'default',
-    serviceTier: trimToNull(draft.serviceTier) ?? 'default',
+    currency: requireNonBlank(draft.currency, 'config.pricing.currency'),
+    pricingTier: requireNonBlank(draft.pricingTier, 'config.pricing.pricingTier'),
+    serviceTier: requireNonBlank(draft.serviceTier, 'config.pricing.serviceTier'),
     serviceTierMultiplier: multiplier,
-    version: trimToNull(draft.version) ?? 'v1',
+    version: requireNonBlank(draft.version, 'config.pricing.version'),
     inputPerMillionTokens: requireNonNegativeNumber(
       draft.inputPerMillionTokens,
       'config.pricing.inputPerMillionTokens',
@@ -391,6 +327,14 @@ function pricingFromDraft(draft: ModelPricingDraft): AgentModelPricingDTO {
   }
 }
 
+function requireNonBlank(value: string, field: string): string {
+  const normalized = trimToNull(value)
+  if (!normalized) {
+    throw new Error(`${field} must not be blank`)
+  }
+  return normalized
+}
+
 function requirePositiveNumber(value: string, field: string): number {
   const parsed = requireNumber(value, field)
   if (parsed <= 0) {
@@ -406,7 +350,7 @@ export function toEditableModel(draft: ModelDraft): AgentModelCreateDTO {
   }
   const name = draft.name.trim()
   if (!name) {
-    throw new Error('config.name must not be blank')
+    throw new Error('name must not be blank')
   }
   return {
     providerId,
@@ -419,7 +363,7 @@ export function toEditableModel(draft: ModelDraft): AgentModelCreateDTO {
 export function toEditableModelUpdate(draft: ModelDraft): AgentModelUpdateDTO {
   const name = draft.name.trim()
   if (!name) {
-    throw new Error('config.name must not be blank')
+    throw new Error('name must not be blank')
   }
   return {
     name,
@@ -428,38 +372,18 @@ export function toEditableModelUpdate(draft: ModelDraft): AgentModelUpdateDTO {
   }
 }
 
-export function extractVariantNamesFromModel(model?: AgentModelDTO | null): string[] {
-  if (!model?.config) {
-    return ['medium']
-  }
-  const raw = model.config.variants
-  if (!Array.isArray(raw) || raw.length === 0) {
-    return ['medium']
-  }
-  const names = raw
-    .map((variant) => String(variant.id ?? '').trim())
-    .filter(Boolean)
-  return names.length > 0 ? names : ['medium']
+export function extractVariantIdsFromModel(model?: AgentModelDTO | null): string[] {
+  return model ? model.config.variants.map((variant) => variant.id) : []
 }
 
 export function extractDefaultVariantFromModel(model?: AgentModelDTO | null): string {
-  const names = extractVariantNamesFromModel(model)
-  const configured = (model?.config.defaultVariant ?? '').trim()
-  return names.includes(configured) ? configured : names[0] ?? 'medium'
-}
-
-function extractLimitNumber(value: number | string | null | undefined): number | undefined {
-  if (value == null) {
-    return undefined
-  }
-  const parsed = typeof value === 'number' ? value : Number(value)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+  return model?.config.defaultVariant ?? ''
 }
 
 export function extractContextWindow(model?: AgentModelDTO | null): number | undefined {
-  return extractLimitNumber(model?.config.limit.context)
+  return model?.config.limit.context
 }
 
 export function extractMaxOutputTokens(model?: AgentModelDTO | null): number | undefined {
-  return extractLimitNumber(model?.config.limit.output)
+  return model?.config.limit.output
 }

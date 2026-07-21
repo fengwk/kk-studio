@@ -103,13 +103,14 @@ AgentDefinitionDTO {
   id, name, description, systemPrompt,
   modelId, variant,
   config: {
-    environmentName?, tools[], skills[], allowedSubagents[],
-    executionPolicy?: { maxTurns?, maxDepth?, maxDirectSubagents?, maxTotalSubagents? }
+    environmentName: string | null,
+    tools[], skills[], allowedSubagents[],
+    executionPolicy: { maxTurns?, maxDepth?, maxDirectSubagents?, maxTotalSubagents? }
   }
 }
 ```
 
-Agent 表单：选择 model/variant、system prompt、可选 live Environment、短名 tools/skills、subagents。候选 tools/skills 采用 platform-first（READY `platform` + 可选所选 Environment，platform 同名优先）。对当前选择的 offline/invalid 明确提示；不提供 Environment CRUD。
+Model 与 Agent 的 `PUT` 请求提交完整 editable body；前端不依赖后端 partial-update 补全。Agent 表单选择 model/variant、system prompt、可选 live Environment、短名 tools/skills、subagents。候选 tools/skills 采用 platform-first（READY `platform` + 可选所选 Environment，platform 同名优先）。对当前选择的 offline/invalid 明确提示；不提供 Environment CRUD。
 
 ## Chat transcript
 

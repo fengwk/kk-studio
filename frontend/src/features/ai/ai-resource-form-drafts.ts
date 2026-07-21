@@ -5,9 +5,9 @@ export function createKeyValueDraft(key = '', value = ''): KeyValueDraft {
   return newKeyValueDraft(key, value)
 }
 
-export function blankVariant(name = 'medium', reasoningEffort = ''): VariantDraft {
+export function blankVariant(id = 'medium', reasoningEffort = ''): VariantDraft {
   return newVariantDraft({
-    name: name.trim() || 'medium',
+    id: id.trim() || 'medium',
     reasoningEffort,
   })
 }

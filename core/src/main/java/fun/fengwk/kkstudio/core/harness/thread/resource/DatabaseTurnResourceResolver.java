@@ -138,7 +138,7 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
             cachePolicy);
     ModelVariant variant =
         parsed.variants().stream()
-            .filter(candidate -> candidate.name().equals(config.variant()))
+            .filter(candidate -> candidate.id().equals(config.variant()))
             .findFirst()
             .orElseThrow(
                 () ->

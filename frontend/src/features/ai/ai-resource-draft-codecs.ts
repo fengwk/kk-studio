@@ -9,7 +9,7 @@ export {
   emptyModelDraft,
   extractContextWindow,
   extractDefaultVariantFromModel,
-  extractVariantNamesFromModel,
+  extractVariantIdsFromModel,
   toEditableModel,
   toEditableModelUpdate,
   toModelDraft,

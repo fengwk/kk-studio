@@ -44,9 +44,44 @@ class ModelContractTest {
                 Set.of(ModelInputModality.TEXT),
                 true,
                 false,
-                List.of(new ModelVariant("long", 4_096, null, null, null, null)),
+                List.of(
+                    new ModelVariant("long", 4_096, null, null, null, null, null, List.of(), null)),
                 pricing(),
                 PromptCachePolicy.disabled()));
+  }
+
+  /** Variant 标识与数值必须可稳定下发；惩罚项允许厂商支持的负值，但拒绝非有限数。 */
+  @Test
+  void enforcesVariantIdentityAndFiniteSamplingValues() {
+    ModelVariant variant =
+        new ModelVariant("default", null, 0.2, 0.9, null, -0.5, -1.0, List.of("END"), null);
+    assertEquals("default", variant.id());
+    assertEquals(-0.5, variant.frequencyPenalty());
+    assertEquals(-1.0, variant.presencePenalty());
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ModelVariant(" default ", null, null, null, null, null, null, List.of(), null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ModelVariant("default", null, Double.NaN, null, null, null, null, List.of(), null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ModelVariant(
+                "default",
+                null,
+                null,
+                null,
+                null,
+                Double.POSITIVE_INFINITY,
+                null,
+                List.of(),
+                null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ModelVariant("default", null, null, null, null, null, null, List.of(" "), null));
   }
 
   /** 资源 ID 与 Provider 标识必须为正数，cache policy 与 pricing 不可为空。 */
@@ -462,7 +497,11 @@ class ModelContractTest {
         () -> descriptor.inputModalities().add(ModelInputModality.AUDIO));
     assertThrows(
         UnsupportedOperationException.class,
-        () -> descriptor.variants().add(new ModelVariant("fast", null, null, null, null, null)));
+        () ->
+            descriptor
+                .variants()
+                .add(
+                    new ModelVariant("fast", null, null, null, null, null, null, List.of(), null)));
     assertTrue(descriptor.tools());
     assertTrue(descriptor.reasoning());
   }
@@ -484,7 +523,7 @@ class ModelContractTest {
         inputModalities,
         tools,
         reasoning,
-        List.of(new ModelVariant("default", null, null, null, null, null)),
+        List.of(new ModelVariant("default", null, null, null, null, null, null, List.of(), null)),
         pricing(),
         PromptCachePolicy.disabled());
   }

@@ -23,7 +23,7 @@ final class AgentModelMutationFactory {
     if (providerId <= 0) {
       throw new IllegalArgumentException("providerId must be positive");
     }
-    Mutation mutation = newMutation(properties, null, null);
+    Mutation mutation = newMutation(properties);
     AgentModel model = new AgentModel();
     model.setId(nextModelId());
     model.setProviderId(providerId);
@@ -32,7 +32,7 @@ final class AgentModelMutationFactory {
   }
 
   void update(AgentModel model, AgentModelEditablePropertiesDTO properties) {
-    apply(model, newMutation(properties, model.getName(), model.getConfigJson()));
+    apply(model, newMutation(properties));
   }
 
   private void apply(AgentModel model, Mutation mutation) {
@@ -41,34 +41,20 @@ final class AgentModelMutationFactory {
     model.setConfigJson(mutation.configJson());
   }
 
-  private Mutation newMutation(
-      AgentModelEditablePropertiesDTO properties, String fallbackName, String fallbackConfigJson) {
+  private Mutation newMutation(AgentModelEditablePropertiesDTO properties) {
     if (properties == null) {
       throw new IllegalArgumentException("agent model body must not be null");
     }
     String name = trimToNull(properties.getName());
     if (name == null) {
-      name = trimToNull(fallbackName);
-    }
-    if (name == null) {
       throw new IllegalArgumentException("agent model name must not be blank");
     }
     AgentModelConfigDTO config = properties.getConfig();
-    if (config == null) {
-      config = previousConfig(fallbackConfigJson);
-    }
     if (config == null) {
       throw new IllegalArgumentException("agent model config must not be null");
     }
     String configJson = runtimeConfigParser.encode(config);
     return new Mutation(name, trimToNull(properties.getDescription()), configJson);
-  }
-
-  private AgentModelConfigDTO previousConfig(String configJson) {
-    if (configJson == null || configJson.isBlank()) {
-      return null;
-    }
-    return runtimeConfigParser.decode(configJson);
   }
 
   private static String trimToNull(String value) {
