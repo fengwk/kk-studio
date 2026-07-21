@@ -57,19 +57,25 @@ class HarnessThreadRecoveryMapperTest {
     assertTrue(ids.contains(pendingNoToken), "pending input without token must be selected");
   }
 
-  /** RETRYING debt 必须由 recovery 再次 kick，FAILED 则只能等待显式 retry。 */
+  /** 到期 RETRYING debt 必须由 recovery 再次 kick；FAILED 只等待下一条用户消息重启。 */
   @Test
-  void selectsRetryingWithoutTokenAndExcludesFailed() {
+  void selectsDueRetryingAndExcludesFutureRetryAndFailed() {
     LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
-    long retryingId = 7_104L;
-    long failedId = 7_105L;
-    insertThread(retryingId, "RETRYING", null, null, now);
+    long dueRetryingId = 7_104L;
+    long futureRetryingId = 7_105L;
+    long malformedRetryingId = 7_106L;
+    long failedId = 7_107L;
+    insertThread(dueRetryingId, "RETRYING", null, null, now, now.minusSeconds(1));
+    insertThread(futureRetryingId, "RETRYING", null, null, now, now.plusSeconds(10));
+    insertThread(malformedRetryingId, "RETRYING", null, null, now, null);
     insertThread(failedId, "FAILED", null, null, now);
 
     List<Long> ids = threadMapper.listRecoverableThreadIds(now, 100);
 
-    assertTrue(ids.contains(retryingId), "retrying debt must be recoverable");
-    assertFalse(ids.contains(failedId), "failed thread must await an explicit retry");
+    assertTrue(ids.contains(dueRetryingId), "due retrying debt must be recoverable");
+    assertFalse(ids.contains(futureRetryingId), "future retry must wait for its durable due time");
+    assertFalse(ids.contains(malformedRetryingId), "retrying debt without retryAt must not run");
+    assertFalse(ids.contains(failedId), "failed thread must wait for a new user message");
   }
 
   /** RETRYING Tool chain 等待审批时没有可推进工作，不能被 recovery 周期性自旋。 */
@@ -90,12 +96,24 @@ class HarnessThreadRecoveryMapperTest {
 
   private void insertThread(
       long id, String status, String token, LocalDateTime processorUntil, LocalDateTime now) {
+    insertThread(id, status, token, processorUntil, now, "RETRYING".equals(status) ? now : null);
+  }
+
+  private void insertThread(
+      long id,
+      String status,
+      String token,
+      LocalDateTime processorUntil,
+      LocalDateTime now,
+      LocalDateTime retryAt) {
     HarnessThreadDO row = new HarnessThreadDO();
     row.setId(id);
     row.setSessionId(id + 1000);
     row.setHeadEntryId(id + 2000);
     row.setStatus(status);
     row.setInputSequence(0L);
+    row.setRetryAttempt("RETRYING".equals(status) ? 1 : 0);
+    row.setRetryAt(retryAt);
     row.setProcessorToken(token);
     row.setProcessorUntil(processorUntil);
     row.setVersion(0L);

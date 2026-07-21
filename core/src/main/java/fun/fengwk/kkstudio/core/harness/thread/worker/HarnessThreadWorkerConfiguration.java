@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProviderCancellation;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRetryPolicyResolver;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeConfigResolver;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadTransactions;
@@ -128,6 +129,7 @@ public class HarnessThreadWorkerConfiguration {
       ProviderMessageProjector providerMessageProjector,
       TurnResourceResolver turnResourceResolver,
       CompactionService compactionService,
+      ThreadRetryPolicyResolver retryPolicyResolver,
       ThreadProcessorConfig threadProcessorConfig,
       DeltaFlushScheduler threadDeltaFlushScheduler,
       ThreadIdGenerator threadIdGenerator,
@@ -153,6 +155,7 @@ public class HarnessThreadWorkerConfiguration {
         providerMessageProjector,
         turnResourceResolver,
         interceptingCompactionService,
+        retryPolicyResolver,
         threadProcessorConfig,
         Clock.systemUTC(),
         threadDeltaFlushScheduler,
@@ -181,7 +184,7 @@ public class HarnessThreadWorkerConfiguration {
       @Qualifier("harnessWorkerScheduler") ScheduledExecutorService harnessWorkerScheduler) {
     Duration interval =
         properties.getThreadRecoveryInterval() == null
-            ? Duration.ofSeconds(30)
+            ? Duration.ofSeconds(1)
             : properties.getThreadRecoveryInterval();
     int batchSize =
         properties.getThreadRecoveryBatchSize() <= 0

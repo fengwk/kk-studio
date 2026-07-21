@@ -30,6 +30,11 @@ public class HarnessThreadDtoConverter {
     dto.setHeadEntryId(Long.toString(thread.headEntryId()));
     dto.setStatus(thread.status().name());
     dto.setInputSequence(thread.inputSequence());
+    dto.setRetryAttempt(thread.retryAttempt());
+    dto.setRetryAt(
+        thread.retryAt() == null
+            ? null
+            : LocalDateTime.ofInstant(thread.retryAt(), ZoneOffset.UTC));
     if (thread.activeAgentDefinitionId() != null) {
       dto.setActiveAgentDefinitionId(Long.toString(thread.activeAgentDefinitionId()));
     }
@@ -55,6 +60,8 @@ public class HarnessThreadDtoConverter {
     dto.setHeadEntryId(Long.toString(row.getHeadEntryId()));
     dto.setStatus(row.getStatus());
     dto.setInputSequence(row.getInputSequence());
+    dto.setRetryAttempt(row.getRetryAttempt());
+    dto.setRetryAt(row.getRetryAt());
     if (row.getActiveAgentDefinitionId() != null) {
       dto.setActiveAgentDefinitionId(Long.toString(row.getActiveAgentDefinitionId()));
     }

@@ -95,6 +95,8 @@ session_id
 head_entry_id
 status
 input_sequence
+retry_attempt
+retry_at
 active_agent_definition_id
 active_agent_name
 model_id
@@ -116,8 +118,8 @@ Thread 保存当前 Agent 身份与 model/variant/yolo；完整 Agent 配置不�
 | `IDLE` | 当前无运行 activation；允许新 Input 将其激活 |
 | `RUNNING` | 存在普通可推进工作；可能尚未取得 processor lease |
 | `WAITING` | 等待 Tool、Tool ASK 或 Subagent 等外部 durable 条件 |
-| `FAILED` | Provider/setup/policy 失败，必须显式 Retry |
-| `RETRYING` | 已显式 Retry；必须先偿还失败 Turn，再 Harvest 后续 Queue |
+| `FAILED` | 本轮 Provider/setup/policy 失败已停止；下一条用户或自定义消息会开始新的正常循环 |
+| `RETRYING` | 已按自动重试策略安排且尚未到期或正在偿还的失败 Turn；不能先 Harvest 后续 Queue |
 
 Thread status 与 processor lease 正交。`WAITING` 时通常没有 processor token；`RUNNING` 时 kick 丢失也可能暂时没有 token。
 
@@ -299,7 +301,7 @@ POST /api/threads/{threadId}/messages
 3. 再次检查幂等键，避免并发双 miss。
 4. `input_sequence += 1`。
 5. 插入 `QUEUED` Input。
-6. `IDLE -> RUNNING`；`FAILED` 保持失败，其他状态不变。
+6. `IDLE -> RUNNING`；`FAILED` 遇到 USER/CUSTOM 消息时清除 retry state 并转为 `RUNNING`；其他状态不变。
 7. 提交后仅在 Thread 可运行时 kick。
 
 配置命令走同一 mailbox 与顺序规则。客户端不提交 head、anchor、processor token 或 Activity ID。
@@ -355,7 +357,7 @@ renew lease
 -> 否则原子确认 quiescent：IDLE + release
 ```
 
-`RETRYING` 是唯一例外：先用失败时的 durable head 重新执行 Provider，不 Harvest 后续 Queue；重试成功后回到普通安全边界。
+`RETRYING` 是唯一例外：到期后先用失败时的 durable head 重新执行 Provider，不 Harvest 后续 Queue；重试成功后回到普通安全边界。
 
 ## 11. Response debt 判定
 
@@ -420,21 +422,23 @@ POST /api/threads/{threadId}/stop
 
 ## 15. Provider 失败与 Retry
 
-Provider、Context、Resource、Interceptor 或 Tool prepare 失败：
+每次 `TRANSIENT` Provider 失败读取全局持久策略。策略包含 `maxRetries`、`FIXED|EXPONENTIAL` 退避、基础间隔和最大间隔；默认是首次调用之外最多 3 次、2 秒指数退避、60 秒上限。间隔在 API 和存储层均为毫秒；schema 初始化固定 `id=1` 的单例行，缺失或非法行是配置错误，Runtime 不以 Java 默认值掩盖它。
 
-1. 写 `ASSISTANT_FAILED` 与 `THREAD_FAILED`。
-2. Thread status=`FAILED`。
-3. 释放 processor token。
-4. 保留全部 queued Input。
-5. Recovery 不自动重试 FAILED Thread。
+允许自动重试时，单个事务：
+
+1. 写带 `retryScheduled=true` 的 `ASSISTANT_FAILED` 与 `THREAD_RETRY_SCHEDULED`。
+2. Thread status=`RETRYING`，持久化 `retry_attempt` 与 `retry_at`，并释放 processor token。
+3. 本地到期调度和低频 recovery 都可 kick；只有 `retry_at` 已到期才能 acquire。
+4. RETRYING 必须先偿还失败 Turn；成功后清除 retry state 并回到 `RUNNING`，再 Harvest 后续 Queue。
+
+超出次数、`AUTHENTICATION`、`BILLING`、`INVALID_REQUEST`、`CANCELLED`、setup 或 Tool prepare 失败均写 `ASSISTANT_FAILED` / `THREAD_FAILED`，进入 `FAILED` 并保留 queued Input。Recovery 不选择 FAILED；新的 USER/CUSTOM 消息会清除 retry state、转为 RUNNING，而配置命令不会重启失败 Thread。`OVERFLOW` 仍先走 Compaction。
+
+策略控制面：
 
 ```http
-POST /api/threads/{threadId}/retry
+GET /api/harness/retry-policy
+PUT /api/harness/retry-policy
 ```
-
-事务把 `FAILED -> RETRYING`，写 `THREAD_RETRYING`，提交后 kick。RETRYING 必须先偿还失败 Turn；成功后再 Harvest 后续 Queue。
-
-Policy rejection 与不可恢复配置错误也进入 FAILED，不形成后台自旋。
 
 ## 16. Tool Call permission
 
@@ -495,7 +499,7 @@ Parent Thread
            -> Child Main Thread
 ```
 
-Child Thread 使用同一 Processor、Queue、Tool、Stop、Retry 和 Event 机制。`maxTurns`、`maxDepth`、`maxDirectSubagents`、`maxTotalSubagents` 在 beginTurn 与 Task 创建事务中验证。
+Child Thread 使用同一 Processor、Queue、Tool、Stop、自动重试和 Event 机制。`maxTurns`、`maxDepth`、`maxDirectSubagents`、`maxTotalSubagents` 在 beginTurn 与 Task 创建事务中验证。
 
 Child 成功/失败后写 report，终结父 ToolInvocation，并 kick Parent Thread。取消只阻止后续 Turn admission；已开始的外部副作用按 Tool cancel 语义 best-effort 收敛。
 
@@ -509,7 +513,7 @@ thread_running
 thread_waiting
 thread_idle
 thread_failed
-thread_retrying
+thread_retry_scheduled
 thread_stopped
 input_applied
 input_cancelled
@@ -570,7 +574,8 @@ PUT  /api/threads/{threadId}/agent
 PUT  /api/threads/{threadId}/model
 PUT  /api/threads/{threadId}/yolo
 POST /api/threads/{threadId}/stop
-POST /api/threads/{threadId}/retry
+GET  /api/harness/retry-policy
+PUT  /api/harness/retry-policy
 ```
 
 提交类接口成功返回 `202`；创建 Session/Thread 返回 `201`。Malformed 参数返回 `400`，不存在返回 `404`，状态、幂等 payload 或引用冲突返回 `409`。
@@ -607,9 +612,9 @@ Stop 成功后把 `restoredMessages` 以 `\n\n` 合并到当前 Composer，并�
 
 ## 22. Recovery
 
-主路径只由 durable commit 后 kick。默认每 30 秒、batch 100 的低频 Recovery 查询：
+主路径只由 durable commit 后 kick。默认每 1 秒、batch 100 的 Recovery 查询：
 
-- RUNNING/RETRYING 且无有效 token。
+- RUNNING 且无有效 token，或 `retry_at` 已到期的 RETRYING。
 - token 已过期。
 - WAITING 下存在 due/cancelled/terminal Tool work。
 - 已终态 Tool Result 尚未应用。
@@ -637,7 +642,7 @@ Recovery 不选择：
 - 多客户端 Input sequence、幂等与 cutoff 并发。
 - steer-all 多消息单 Turn、配置-only 无 Turn。
 - Stop 幂等、队列取消、草稿恢复、stale processor fencing。
-- FAILED/RETRYING 不 Harvest 后续 Queue。
+- 固定/指数自动退避、retry exhaustion、FAILED 后新消息重启，以及 RETRYING 不 Harvest 后续 Queue。
 - Tool WAITING/decision/terminal 与锁序。
 - Subagent Child Main Thread、root permission relay。
 - 任意 Tree Message 分支与 orphan ToolCall synthetic result。
@@ -652,4 +657,4 @@ Recovery 不选择：
 - Stop 回填 Composer。
 - Snowflake 字符串 cursor。
 
-全量 coverage statements / branches / functions / lines 均不得低于 80%；Thread 创建、Harvest、Stop、Retry、Tool permission 和 Subagent 核心路径目标行覆盖率不低于 90%。
+全量 coverage statements / branches / functions / lines 均不得低于 80%；Thread 创建、Harvest、Stop、自动重试、Tool permission 和 Subagent 核心路径目标行覆盖率不低于 90%。

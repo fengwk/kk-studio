@@ -309,6 +309,8 @@ public class DatabaseTaskRuntime implements TaskRuntime {
             rootEntryId,
             ThreadStatus.RUNNING,
             1L,
+            0,
+            null,
             target.getId(),
             target.getName(),
             String.valueOf(target.getModelId()),
@@ -382,6 +384,10 @@ public class DatabaseTaskRuntime implements TaskRuntime {
   }
 
   private boolean isChildIdle(HarnessThreadDO child, Instant now) {
+    ThreadStatus status = ThreadStatus.fromValue(child.getStatus());
+    if (status != ThreadStatus.IDLE && status != ThreadStatus.FAILED) {
+      return false;
+    }
     LocalDateTime clock = utc(now);
     if (child.getProcessorToken() != null
         && child.getProcessorUntil() != null

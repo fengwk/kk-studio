@@ -203,6 +203,22 @@ describe('thread timeline', () => {
     expect(timeline.messages).toMatchObject([{ role: 'assistant', text: '尚未落库', status: 'done' }])
   })
 
+  it('removes interrupted stream output when its failure has an automatic retry plan', () => {
+    const timeline = buildThreadTimeline(
+      [],
+      [],
+      [
+        threadEvent('1', 'assistant_started', '99', {}),
+        threadEvent('2', 'assistant_delta_batch', '99', { deltas: [{ kind: 'text', text: '临时片段' }] }),
+        threadEvent('3', 'assistant_failed', '99', { retryScheduled: true }),
+        threadEvent('4', 'thread_retry_scheduled', null, { retryAttempt: 1 }),
+      ],
+    )
+
+    expect(timeline.messages).toEqual([])
+    expect(timeline.hasLiveProjection).toBe(false)
+  })
+
   it('correlates tool events and stringifies json partial/final content', () => {
     const timeline = buildThreadTimeline(
       [],
@@ -400,6 +416,12 @@ describe('thread timeline', () => {
     expect(suppressed.hasPendingInputs).toBe(false)
     expect(suppressed.queuedMessages).toEqual([])
     expect(isThreadWorking({ processing: false } as never, suppressed)).toBe(false)
+    expect(
+      isThreadWorking(
+        { status: 'FAILED', processing: false } as never,
+        { messages: [], queuedMessages: [], hasPendingInputs: true, hasLiveProjection: true },
+      ),
+    ).toBe(false)
   })
 })
 

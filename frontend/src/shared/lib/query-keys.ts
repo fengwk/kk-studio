@@ -17,6 +17,9 @@ export const queryKeys = {
     all: ['environments'] as const,
     list: ['environments', 'list'] as const,
   },
+  harness: {
+    retryPolicy: ['harness', 'retry-policy'] as const,
+  },
   chats: {
     all: ['chats'] as const,
     list: ['chats', 'list'] as const,

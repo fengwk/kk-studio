@@ -7,7 +7,7 @@ public enum ThreadEventType {
   THREAD_WAITING("thread_waiting"),
   THREAD_IDLE("thread_idle"),
   THREAD_FAILED("thread_failed"),
-  THREAD_RETRYING("thread_retrying"),
+  THREAD_RETRY_SCHEDULED("thread_retry_scheduled"),
   THREAD_STOPPED("thread_stopped"),
   TURN_STARTED("turn_started"),
   ASSISTANT_STARTED("assistant_started"),

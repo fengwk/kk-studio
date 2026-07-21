@@ -119,12 +119,6 @@ public class StudioHarnessThreadController {
     return Results.ok(withMissingResourceTranslation(() -> commandService.stop(threadId, request)));
   }
 
-  @PostMapping("/threads/{threadId}/retry")
-  public ResponseEntity<Result<HarnessThreadDTO>> retry(@PathVariable String threadId) {
-    return ResponseEntity.status(HttpStatus.ACCEPTED)
-        .body(Results.ok(withMissingResourceTranslation(() -> commandService.retry(threadId))));
-  }
-
   @GetMapping("/threads/{threadId}/entries")
   public Result<List<HarnessSessionEntryDTO>> listPathEntries(@PathVariable String threadId) {
     return Results.ok(withMissingResourceTranslation(() -> queryService.listPathEntries(threadId)));

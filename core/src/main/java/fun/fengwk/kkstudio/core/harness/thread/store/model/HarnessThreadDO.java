@@ -22,6 +22,12 @@ public class HarnessThreadDO {
   /** 已分配 input sequence 最大值。 */
   private Long inputSequence;
 
+  /** 当前 response debt 已消耗的自动重试次数。 */
+  private Integer retryAttempt = 0;
+
+  /** RETRYING 状态的下一次可执行时间。 */
+  private LocalDateTime retryAt;
+
   /** 当前生效 AgentDefinition id。 */
   private Long activeAgentDefinitionId;
 

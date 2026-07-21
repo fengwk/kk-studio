@@ -21,11 +21,11 @@ public interface HarnessThreadMapper extends BaseMapper {
   @Insert(
       """
       insert into harness_thread (
-          id, session_id, head_entry_id, status, input_sequence,
+          id, session_id, head_entry_id, status, input_sequence, retry_attempt, retry_at,
           active_agent_definition_id, active_agent_name, model_id, variant, yolo_enabled,
           processor_token, processor_until, gmt_create, gmt_modified, version
       ) values (
-          #{id}, #{sessionId}, #{headEntryId}, #{status}, #{inputSequence},
+          #{id}, #{sessionId}, #{headEntryId}, #{status}, #{inputSequence}, #{retryAttempt}, #{retryAt},
           #{activeAgentDefinitionId}, #{activeAgentName}, #{modelId}, #{variant}, #{yoloEnabled},
           #{processorToken}, #{processorUntil}, #{createTime}, #{updateTime}, #{version}
       )
@@ -34,7 +34,7 @@ public interface HarnessThreadMapper extends BaseMapper {
 
   String THREAD_COLUMNS =
       """
-      id, session_id, head_entry_id, status, input_sequence,
+      id, session_id, head_entry_id, status, input_sequence, retry_attempt, retry_at,
       active_agent_definition_id, active_agent_name, model_id, variant, yolo_enabled,
       processor_token, processor_until, version,
       gmt_create as create_time, gmt_modified as update_time
@@ -57,6 +57,8 @@ public interface HarnessThreadMapper extends BaseMapper {
         @Result(column = "head_entry_id", property = "headEntryId"),
         @Result(column = "status", property = "status"),
         @Result(column = "input_sequence", property = "inputSequence"),
+        @Result(column = "retry_attempt", property = "retryAttempt"),
+        @Result(column = "retry_at", property = "retryAt"),
         @Result(column = "active_agent_definition_id", property = "activeAgentDefinitionId"),
         @Result(column = "active_agent_name", property = "activeAgentName"),
         @Result(column = "model_id", property = "modelId"),
@@ -98,7 +100,7 @@ public interface HarnessThreadMapper extends BaseMapper {
 
   String VIEW_COLUMNS =
       """
-      t.id, t.session_id, t.head_entry_id, t.status, t.input_sequence,
+      t.id, t.session_id, t.head_entry_id, t.status, t.input_sequence, t.retry_attempt, t.retry_at,
       t.active_agent_definition_id, t.active_agent_name, t.model_id, t.variant, t.yolo_enabled,
       t.processor_token, t.processor_until, t.version,
       t.gmt_create as create_time, t.gmt_modified as update_time,
@@ -123,6 +125,8 @@ public interface HarnessThreadMapper extends BaseMapper {
         @Result(column = "head_entry_id", property = "headEntryId"),
         @Result(column = "status", property = "status"),
         @Result(column = "input_sequence", property = "inputSequence"),
+        @Result(column = "retry_attempt", property = "retryAttempt"),
+        @Result(column = "retry_at", property = "retryAt"),
         @Result(column = "active_agent_definition_id", property = "activeAgentDefinitionId"),
         @Result(column = "active_agent_name", property = "activeAgentName"),
         @Result(column = "model_id", property = "modelId"),
@@ -172,7 +176,10 @@ public interface HarnessThreadMapper extends BaseMapper {
           gmt_modified = #{updateTime},
           version = version + 1
       where id = #{threadId}
-        and status in ('RUNNING', 'WAITING', 'RETRYING')
+        and (
+          status in ('RUNNING', 'WAITING')
+          or (status = 'RETRYING' and retry_at <= #{now})
+        )
         and (processor_token is null
              or processor_until is null
              or processor_until <= #{now})
@@ -299,6 +306,42 @@ public interface HarnessThreadMapper extends BaseMapper {
   @Update(
       """
       update harness_thread
+      set status = 'RETRYING',
+          retry_attempt = #{retryAttempt},
+          retry_at = #{retryAt},
+          processor_token = null,
+          processor_until = null,
+          gmt_modified = #{updateTime},
+          version = version + 1
+      where id = #{threadId} and processor_token = #{processorToken}
+      """)
+  int scheduleRetry(
+      @Param("threadId") long threadId,
+      @Param("processorToken") String processorToken,
+      @Param("retryAttempt") int retryAttempt,
+      @Param("retryAt") LocalDateTime retryAt,
+      @Param("updateTime") LocalDateTime updateTime);
+
+  @Update(
+      """
+      update harness_thread
+      set status = 'RUNNING',
+          retry_attempt = 0,
+          retry_at = null,
+          gmt_modified = #{updateTime},
+          version = version + 1
+      where id = #{threadId}
+        and processor_token = #{processorToken}
+        and status = 'RETRYING'
+      """)
+  int completeRetryDebt(
+      @Param("threadId") long threadId,
+      @Param("processorToken") String processorToken,
+      @Param("updateTime") LocalDateTime updateTime);
+
+  @Update(
+      """
+      update harness_thread
       set status = #{status},
           processor_token = null,
           processor_until = null,
@@ -314,6 +357,32 @@ public interface HarnessThreadMapper extends BaseMapper {
   @Update(
       """
       update harness_thread
+      set status = 'FAILED',
+          retry_at = null,
+          processor_token = null,
+          processor_until = null,
+          gmt_modified = #{updateTime},
+          version = version + 1
+      where id = #{threadId}
+      """)
+  int markFailedAndClearProcessor(
+      @Param("threadId") long threadId, @Param("updateTime") LocalDateTime updateTime);
+
+  @Update(
+      """
+      update harness_thread
+      set retry_attempt = 0,
+          retry_at = null,
+          gmt_modified = #{updateTime},
+          version = version + 1
+      where id = #{threadId}
+      """)
+  int clearRetryState(
+      @Param("threadId") long threadId, @Param("updateTime") LocalDateTime updateTime);
+
+  @Update(
+      """
+      update harness_thread
       set status = #{status},
           gmt_modified = #{updateTime},
           version = version + 1
@@ -323,6 +392,20 @@ public interface HarnessThreadMapper extends BaseMapper {
       @Param("threadId") long threadId,
       @Param("status") String status,
       @Param("updateTime") LocalDateTime updateTime);
+
+  /** 新用户消息显式重新启动已经停止的 Thread，不重放其失败 turn。 */
+  @Update(
+      """
+      update harness_thread
+      set status = 'RUNNING',
+          retry_attempt = 0,
+          retry_at = null,
+          gmt_modified = #{updateTime},
+          version = version + 1
+      where id = #{threadId} and status = 'FAILED'
+      """)
+  int restartFailedForUserInput(
+      @Param("threadId") long threadId, @Param("updateTime") LocalDateTime updateTime);
 
   /** 外部 durable 结果到达后仅唤醒等待中的 Thread，不能覆盖并发的 stop/failed 终态。 */
   @Update(
@@ -346,7 +429,7 @@ public interface HarnessThreadMapper extends BaseMapper {
    * 低频恢复选择：
    *
    * <ul>
-   *   <li>RUNNING 或未被当前 head Tool 阻塞的 RETRYING 且无有效 token；
+   *   <li>RUNNING 或到期且未被当前 head Tool 阻塞的 RETRYING 且无有效 token；
    *   <li>token 已过期；
    *   <li>WAITING 下存在 due/cancelled/terminal Tool work；
    * </ul>
@@ -371,6 +454,7 @@ public interface HarnessThreadMapper extends BaseMapper {
               t.status = 'RUNNING'
               or (
                 t.status = 'RETRYING'
+                and t.retry_at <= #{now}
                 and not exists (
                   select 1 from tool_invocation ti
                   where ti.thread_id = t.id
