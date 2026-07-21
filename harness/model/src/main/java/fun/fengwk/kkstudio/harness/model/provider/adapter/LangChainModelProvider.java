@@ -93,7 +93,7 @@ abstract class LangChainModelProvider implements ModelProvider {
   public final ProviderStream stream(ProviderRequest request, ProviderStreamHandler handler) {
     BridgeStream stream = new BridgeStream();
     ToolCallNormalizer toolCallNormalizer = new ToolCallNormalizer();
-    ThinkTagSplitter thinkTagSplitter = extractsThinkTags() ? new ThinkTagSplitter() : null;
+    ThinkTagSplitter thinkTagSplitter = extractsThinkTags(request) ? new ThinkTagSplitter() : null;
     try {
       try {
         validateRequest(request);
@@ -203,8 +203,13 @@ abstract class LangChainModelProvider implements ModelProvider {
    */
   protected abstract void validateRequest(ProviderRequest request);
 
-  /** OpenAI 兼容端点仅在 MiniMax 等已知端点启用正文 think-tag 回退。 */
-  protected boolean extractsThinkTags() {
+  /**
+   * Whether plain-text {@code <think>} blocks in assistant content should be split into thinking
+   * deltas / response.thinking. Override per request when a model is known to emit tags inside text
+   * (for example OpenAI-compatible models with reasoning enabled).
+   */
+  protected boolean extractsThinkTags(ProviderRequest request) {
+    Objects.requireNonNull(request, "request");
     return false;
   }
 
@@ -507,9 +512,17 @@ abstract class LangChainModelProvider implements ModelProvider {
         || message.contains("too large")) {
       return ProviderErrorKind.OVERFLOW;
     }
-    if (message.contains("400") || message.contains("invalid")) {
+    // Deterministic client/route errors must not enter automatic retry. 404 HTML from nginx and
+    // 405 method mismatches are permanent for the current request configuration.
+    if (message.contains("404")
+        || message.contains("405")
+        || message.contains("not found")
+        || message.contains("method not allowed")
+        || message.contains("400")
+        || message.contains("invalid")) {
       return ProviderErrorKind.INVALID_REQUEST;
     }
+    // 429 / 5xx / network failures intentionally fall through as TRANSIENT.
     return ProviderErrorKind.TRANSIENT;
   }
 

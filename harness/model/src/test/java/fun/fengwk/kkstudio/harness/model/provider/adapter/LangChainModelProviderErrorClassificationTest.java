@@ -30,6 +30,29 @@ class LangChainModelProviderErrorClassificationTest {
             active));
   }
 
+  /** nginx/HTML 404 与 405 是配置/路由错误，绝不能落入 TRANSIENT 自动重试。 */
+  @Test
+  void classifiesNotFoundAndMethodNotAllowedAsInvalidRequest() {
+    ProviderStream active = activeStream();
+    assertEquals(
+        ProviderErrorKind.INVALID_REQUEST,
+        LangChainModelProvider.classify(
+            new RuntimeException(
+                "<html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>"),
+            active));
+    assertEquals(
+        ProviderErrorKind.INVALID_REQUEST,
+        LangChainModelProvider.classify(
+            new RuntimeException("HTTP 405 Method Not Allowed"), active));
+    assertEquals(
+        ProviderErrorKind.TRANSIENT,
+        LangChainModelProvider.classify(
+            new RuntimeException("HTTP 429 Too Many Requests"), active));
+    assertEquals(
+        ProviderErrorKind.TRANSIENT,
+        LangChainModelProvider.classify(new RuntimeException("HTTP 502 Bad Gateway"), active));
+  }
+
   @Test
   void classifiesCancelledStreamsBeforeInspectingErrors() {
     ProviderStream cancelled =
