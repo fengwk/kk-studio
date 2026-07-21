@@ -80,7 +80,7 @@ Link ≠ Reference。演示层若只做连线，必须标注为 visibility。
 | `POST /api/canvases/{canvasId}/commands` | 可用（create text/generate-text/link、move、delete node） |
 | Workflow / FunctionRun 写路径 | `501 Studio feature not ready` |
 | Harness `/api/sessions` | 创建 Session 与 Main Thread、Session Tree/Entries/Threads 查询、从 Entry 创建 Secondary Thread |
-| Harness `/api/threads/{threadId}` | Thread 读取、mailbox 提交、Entries/Inputs/Events/SSE、Stop/Retry |
+| Harness `/api/threads/{threadId}` | Thread 读取、mailbox 提交、Entries/Inputs/Events/SSE、Stop；自动重试策略位于 `/api/harness/retry-policy` |
 
 ## 6. 实现进度一句话
 

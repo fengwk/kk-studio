@@ -9,6 +9,7 @@ import type {
   HarnessThreadInputDTO,
   HarnessThreadMessageCreateDTO,
   HarnessThreadModelSetDTO,
+  HarnessRetryPolicyDTO,
   HarnessThreadStopDTO,
   HarnessThreadStopResultDTO,
   HarnessThreadYoloSetDTO,
@@ -35,8 +36,9 @@ export function createHarnessService(client: HttpClient = apiClient) {
       client.put(`/threads/${encodeURIComponent(threadId)}/model`, data),
     stopThread: (threadId: string, data: HarnessThreadStopDTO): Promise<HarnessThreadStopResultDTO> =>
       client.post(`/threads/${encodeURIComponent(threadId)}/stop`, data),
-    retryThread: (threadId: string): Promise<HarnessThreadDTO> =>
-      client.post(`/threads/${encodeURIComponent(threadId)}/retry`),
+    getRetryPolicy: (): Promise<HarnessRetryPolicyDTO> => client.get('/harness/retry-policy'),
+    updateRetryPolicy: (data: HarnessRetryPolicyDTO): Promise<HarnessRetryPolicyDTO> =>
+      client.put('/harness/retry-policy', data),
     listThreadEntries: (threadId: string): Promise<HarnessSessionEntryDTO[]> =>
       client.get(`/threads/${encodeURIComponent(threadId)}/entries`),
     listThreadInputs: (threadId: string): Promise<HarnessThreadInputDTO[]> =>

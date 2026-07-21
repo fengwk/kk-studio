@@ -21,6 +21,7 @@ export function ThreadPanel({
   composerDisabled,
   composerPending,
   working,
+  retryPresentation,
   actionError,
   onDismissActionError,
   onDraftChange,
@@ -40,6 +41,11 @@ export function ThreadPanel({
   composerDisabled: boolean
   composerPending: boolean
   working: boolean
+  retryPresentation?: {
+    workingLabel: string | null
+    stoppedNotice: string | null
+    queueLabel: string
+  }
   actionError?: string | null
   onDismissActionError?: () => void
   onDraftChange: (draft: string) => void
@@ -62,6 +68,9 @@ export function ThreadPanel({
         <ThreadWidgetStack
           working={working || composerPending}
           queuedMessages={queuedMessages}
+          workingLabel={retryPresentation?.workingLabel}
+          stoppedNotice={retryPresentation?.stoppedNotice}
+          queueLabel={retryPresentation?.queueLabel}
         >
           {widgets}
         </ThreadWidgetStack>

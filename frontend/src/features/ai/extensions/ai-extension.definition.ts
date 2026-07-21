@@ -9,6 +9,7 @@ import {
   EnvironmentsRoute,
   ModelsPage,
   ProvidersPage,
+  RetryPolicyRoute,
   ResourceDeleteDialog,
   ResourceEditorDialog,
 } from '@/features/ai/extensions/ai-extension'
@@ -24,6 +25,7 @@ export const aiExtension: TrustedReactExtension = {
     { id: 'ai.models', path: 'models', component: ModelsPage, priority: 100 },
     { id: 'ai.providers', path: 'providers', component: ProvidersPage, priority: 100 },
     { id: 'ai.environments', path: 'environments', component: EnvironmentsRoute, priority: 100 },
+    { id: 'ai.settings', path: 'settings', component: RetryPolicyRoute, priority: 100 },
     { id: 'ai.comfyui', path: 'comfyui', component: ComfyuiPage, priority: 100 },
   ],
   navigation: [
@@ -32,6 +34,7 @@ export const aiExtension: TrustedReactExtension = {
     { id: 'ai.nav.models', label: 'Model', path: 'models', priority: 100 },
     { id: 'ai.nav.providers', label: 'Provider', path: 'providers', priority: 100 },
     { id: 'ai.nav.environments', label: 'Environment', path: 'environments', priority: 90 },
+    { id: 'ai.nav.settings', label: '设置', path: 'settings', priority: 80 },
   ],
   dialogs: [
     { id: 'ai.create-chat', component: CreateChatDialog },

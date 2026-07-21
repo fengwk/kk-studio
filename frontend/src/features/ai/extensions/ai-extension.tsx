@@ -9,6 +9,7 @@ import { ComfyuiWorkflowsPanel } from '@/features/ai/ComfyuiWorkflowsPanel'
 import { ComfyuiRunModal } from '@/features/ai/ComfyuiRunModal'
 import { CreateChatModal } from '@/features/ai/CreateChatModal'
 import { EnvironmentsPage } from '@/features/ai/EnvironmentsPage'
+import { RetryPolicyPage } from '@/features/ai/RetryPolicyPage'
 import { useAiConsoleController } from '@/features/ai/useAiConsoleController'
 import { useComfyuiPageController } from '@/features/ai/useComfyuiPageController'
 import type { ExtensionComponentProps } from '@/platform/extensions/types'
@@ -229,6 +230,15 @@ export function EnvironmentsRoute({ children }: ExtensionComponentProps) {
   return (
     <>
       <EnvironmentsPage />
+      {children}
+    </>
+  )
+}
+
+export function RetryPolicyRoute({ children }: ExtensionComponentProps) {
+  return (
+    <>
+      <RetryPolicyPage />
       {children}
     </>
   )

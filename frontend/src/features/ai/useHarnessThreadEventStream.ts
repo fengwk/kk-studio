@@ -13,6 +13,7 @@ const MATERIALIZATION_EVENTS = new Set([
   'tool_completed',
   'thread_idle',
   'thread_failed',
+  'thread_retry_scheduled',
   'thread_waiting',
 ])
 
@@ -23,6 +24,7 @@ const INVALIDATE_ALL_EVENTS = new Set([
   'tool_results_applied',
   'thread_idle',
   'thread_failed',
+  'thread_retry_scheduled',
   'thread_waiting',
   'permission_resolved',
   'agent_changed',

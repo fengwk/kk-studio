@@ -221,6 +221,8 @@ public class MysqlHarnessThreadStore
         row.getHeadEntryId(),
         ThreadStatus.fromValue(row.getStatus()),
         row.getInputSequence(),
+        row.getRetryAttempt() == null ? 0 : row.getRetryAttempt(),
+        row.getRetryAt() == null ? null : row.getRetryAt().toInstant(ZoneOffset.UTC),
         row.getActiveAgentDefinitionId(),
         row.getActiveAgentName(),
         row.getModelId(),
@@ -240,6 +242,8 @@ public class MysqlHarnessThreadStore
     row.setHeadEntryId(thread.headEntryId());
     row.setStatus(thread.status().name());
     row.setInputSequence(thread.inputSequence());
+    row.setRetryAttempt(thread.retryAttempt());
+    row.setRetryAt(thread.retryAt() == null ? null : utc(thread.retryAt()));
     row.setActiveAgentDefinitionId(thread.activeAgentDefinitionId());
     row.setActiveAgentName(thread.activeAgentName());
     row.setModelId(thread.modelId());

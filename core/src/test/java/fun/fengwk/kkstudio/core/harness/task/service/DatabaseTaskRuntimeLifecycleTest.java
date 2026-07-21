@@ -135,6 +135,56 @@ class DatabaseTaskRuntimeLifecycleTest {
     assertNull(taskMapper.find(parentInvocationId).getReportJson());
   }
 
+  /** RETRYING 是未结束的 response debt，不能由旧 THREAD_FAILED 事件终态化子代理。 */
+  @Test
+  void failedLifecycleWithScheduledRetryDoesNotCompleteTask() {
+    LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+    long parentInvocationId = 6_600_002L;
+    long childThreadId = 6_600_102L;
+    long childSessionId = 6_600_202L;
+
+    HarnessThreadDO child = new HarnessThreadDO();
+    child.setId(childThreadId);
+    child.setSessionId(childSessionId);
+    child.setHeadEntryId(1L);
+    child.setStatus(ThreadStatus.RETRYING.name());
+    child.setInputSequence(0L);
+    child.setRetryAttempt(1);
+    child.setRetryAt(now.plusSeconds(30));
+    child.setVersion(0L);
+    child.setCreateTime(now);
+    child.setUpdateTime(now);
+    threadMapper.insert(child);
+
+    HarnessThreadEventDO failed = new HarnessThreadEventDO();
+    failed.setId(6_600_302L);
+    failed.setThreadId(childThreadId);
+    failed.setEventType(ThreadEventType.THREAD_FAILED.value());
+    failed.setPayloadJson("{\"schemaVersion\":1,\"message\":\"old failure\"}");
+    failed.setCreateTime(now.minusSeconds(30));
+    eventMapper.insert(failed);
+
+    HarnessSubagentTaskDO task = new HarnessSubagentTaskDO();
+    task.setParentInvocationId(parentInvocationId);
+    task.setParentSessionId(1L);
+    task.setParentThreadId(2L);
+    task.setRootThreadId(2L);
+    task.setChildSessionId(childSessionId);
+    task.setChildThreadId(childThreadId);
+    task.setTargetAgent("sub");
+    task.setWorkingCopyPolicy("NONE");
+    task.setMaxTurns(4);
+    task.setStatus(TaskState.RUNNING.name());
+    task.setCreateTime(now);
+    task.setUpdateTime(now);
+    taskMapper.insert(task);
+
+    TaskInspection inspection = taskRuntime.inspect(parentInvocationId, Instant.now());
+
+    assertEquals(TaskState.RUNNING, inspection.task().state());
+    assertNull(taskMapper.find(parentInvocationId).getReportJson());
+  }
+
   /**
    * cancelTree marks the task CANCELLED and requests cancel on nonterminal child tools before
    * kicking; later model turns are blocked by turn admission, without interrupting an in-flight
@@ -219,6 +269,7 @@ class DatabaseTaskRuntimeLifecycleTest {
     long childThreadId = 6_600_221L;
     insertThread(parentThreadId, parentThreadId + 10, now);
     insertThread(childThreadId, childThreadId + 10, now);
+    threadMapper.updateStatusDirect(childThreadId, ThreadStatus.FAILED.name(), now);
 
     HarnessThreadEventDO failed = new HarnessThreadEventDO();
     failed.setId(6_600_321L);
@@ -250,6 +301,7 @@ class DatabaseTaskRuntimeLifecycleTest {
     long childHeadEntryId = 6_600_431L;
     insertThread(parentThreadId, parentThreadId + 10, now);
     insertThread(childThreadId, childSessionId, now);
+    threadMapper.updateStatusDirect(childThreadId, ThreadStatus.IDLE.name(), now);
     insertAssistantHead(childSessionId, childHeadEntryId, "completed answer", now);
     updateThreadHead(childThreadId, childHeadEntryId);
     insertEvent(6_600_531L, childThreadId, ThreadEventType.THREAD_IDLE.value(), "{}", now);
@@ -283,6 +335,7 @@ class DatabaseTaskRuntimeLifecycleTest {
     long childHeadEntryId = 6_600_441L;
     insertThread(parentThreadId, parentThreadId + 10, now);
     insertThread(childThreadId, childSessionId, now);
+    threadMapper.updateStatusDirect(childThreadId, ThreadStatus.IDLE.name(), now);
     insertNonMessageHead(childSessionId, childHeadEntryId, now);
     updateThreadHead(childThreadId, childHeadEntryId);
     insertEvent(6_600_541L, childThreadId, ThreadEventType.THREAD_IDLE.value(), "{}", now);
@@ -359,6 +412,7 @@ class DatabaseTaskRuntimeLifecycleTest {
     long reasonChildThread = 6_603_201L;
     insertThread(reasonParentThread, reasonParentThread + 10, now);
     insertThread(reasonChildThread, reasonChildThread + 10, now);
+    threadMapper.updateStatusDirect(reasonChildThread, ThreadStatus.FAILED.name(), now);
     insertEvent(
         6_603_301L,
         reasonChildThread,
@@ -376,6 +430,7 @@ class DatabaseTaskRuntimeLifecycleTest {
     long malformedChildThread = 6_603_202L;
     insertThread(malformedParentThread, malformedParentThread + 10, now);
     insertThread(malformedChildThread, malformedChildThread + 10, now);
+    threadMapper.updateStatusDirect(malformedChildThread, ThreadStatus.FAILED.name(), now);
     insertEvent(
         6_603_302L, malformedChildThread, ThreadEventType.THREAD_FAILED.value(), "not json", now);
     insertRunningTask(

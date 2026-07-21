@@ -74,6 +74,8 @@ create table if not exists harness_thread (
     head_entry_id                bigint not null comment '当前 tree cursor',
     status                       varchar(32) not null comment 'IDLE/RUNNING/WAITING/FAILED/RETRYING',
     input_sequence               bigint not null comment '已分配 input sequence 最大值',
+    retry_attempt                int not null default 0 comment '当前 response debt 已消耗的自动重试次数',
+    retry_at                     datetime(3) null comment 'RETRYING 的下一次可执行时间',
     active_agent_definition_id   bigint null comment '当前 AgentDefinition id',
     active_agent_name            varchar(256) null comment '捕获的 Agent 名称',
     model_id                     varchar(128) null comment 'Thread 级 model id',
@@ -86,8 +88,26 @@ create table if not exists harness_thread (
     version                      bigint not null default '0' comment '乐观锁版本',
     primary key (id),
     key idx_harness_thread_session (session_id, id),
-    key idx_harness_thread_status (status, id)
+    key idx_harness_thread_status (status, id),
+    key idx_harness_thread_recovery (status, retry_at, id)
 ) engine=InnoDB default charset=utf8mb4 comment='durable agent thread cursor';
+
+create table if not exists harness_retry_policy (
+    id                  int not null comment '固定单例主键 1',
+    max_retries         int not null comment '初始调用之外最多自动重试次数',
+    backoff_strategy    varchar(32) not null comment 'FIXED/EXPONENTIAL',
+    base_delay_millis   bigint not null comment '首次自动重试前等待',
+    max_delay_millis    bigint not null comment '等待上限',
+    gmt_create          datetime(3) not null default current_timestamp(3) comment '创建时间',
+    gmt_modified        datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
+    primary key (id)
+) engine=InnoDB default charset=utf8mb4 comment='global harness automatic retry policy';
+
+insert ignore into harness_retry_policy (
+    id, max_retries, backoff_strategy, base_delay_millis, max_delay_millis, gmt_create, gmt_modified
+) values (
+    1, 3, 'EXPONENTIAL', 2000, 60000, current_timestamp(3), current_timestamp(3)
+);
 
 create table if not exists harness_thread_input (
     id                    bigint not null comment '主键',

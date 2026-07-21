@@ -78,6 +78,8 @@ create table if not exists harness_thread (
     head_entry_id                bigint not null,                 -- 当前 tree cursor
     status                       varchar(32) not null,            -- IDLE/RUNNING/WAITING/FAILED/RETRYING
     input_sequence               bigint not null,                 -- 已分配 input sequence 最大值
+    retry_attempt                integer not null default 0,      -- 当前 response debt 已消耗的自动重试次数
+    retry_at                     timestamp(3),                    -- RETRYING 的下一次可执行时间
     active_agent_definition_id   bigint,                          -- 当前 AgentDefinition id
     active_agent_name            varchar(256),                    -- 捕获的 Agent 名称
     model_id                     varchar(128),                    -- Thread 级 model id
@@ -92,6 +94,24 @@ create table if not exists harness_thread (
 );
 
 create index if not exists idx_harness_thread_session on harness_thread (session_id, id);
+create index if not exists idx_harness_thread_recovery on harness_thread (status, retry_at, id);
+
+create table if not exists harness_retry_policy (
+    id                  integer not null,
+    max_retries         integer not null,
+    backoff_strategy    varchar(32) not null,
+    base_delay_millis   bigint not null,
+    max_delay_millis    bigint not null,
+    gmt_create          timestamp(3) not null default current_timestamp(),
+    gmt_modified        timestamp(3) not null default current_timestamp(),
+    primary key (id)
+);
+
+insert into harness_retry_policy (
+    id, max_retries, backoff_strategy, base_delay_millis, max_delay_millis, gmt_create, gmt_modified
+)
+select 1, 3, 'EXPONENTIAL', 2000, 60000, current_timestamp(), current_timestamp()
+where not exists (select 1 from harness_retry_policy where id = 1);
 
 create table if not exists harness_thread_input (
     id                    bigint not null,

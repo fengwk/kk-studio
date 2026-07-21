@@ -149,9 +149,11 @@ class HarnessSessionThreadContractIntegrationTest {
 
     long firstThread = Long.parseLong(firstThreadId);
     threadMapper.updateStatusDirect(firstThread, "FAILED", LocalDateTime.now());
-    HarnessThreadDTO retry = threadCommandService.retry(firstThreadId);
-    assertEquals("RETRYING", retry.getStatus());
-    assertThrows(IllegalStateException.class, () -> threadCommandService.retry(firstThreadId));
+    HarnessThreadInputDTO resumed =
+        threadCommandService.submitUserMessage(
+            firstThreadId, userMessage("message-after-failure", "resume"));
+    assertEquals("QUEUED", resumed.getStatus());
+    assertEquals("RUNNING", threadQueryService.getThread(firstThreadId).getStatus());
 
     assertThrows(
         IllegalArgumentException.class, () -> threadQueryService.getThread("999999999999"));

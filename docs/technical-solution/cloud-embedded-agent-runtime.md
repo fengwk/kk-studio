@@ -133,10 +133,11 @@ Environment binding 在 Turn 资源解析时冻结。gateway 在 dispatch 前校
 | 节点 A 持有 token，节点 B kick | B `tryAcquire` 失败；A 继续 |
 | lease 过期 / 持有者崩溃 | 其他节点可 acquire；以 DB token 为准 |
 | 模型流中途崩溃 | 未提交 Assistant 可重试；已提交 Entry/Usage 不重复 |
-| Provider 永久失败 | 写 `THREAD_FAILED` 类事件并停止；仅显式 Retry 进入 `RETRYING`，先偿还失败 Turn 后再 Harvest 后续 mailbox |
+| Provider 瞬态失败 | 按持久 retry policy 写 `THREAD_RETRY_SCHEDULED` 并进入 `RETRYING`；到期后先偿还失败 Turn，再 Harvest 后续 mailbox |
+| Provider 不可重试失败或重试耗尽 | 写 `THREAD_FAILED` 类事件并停止；新的 USER/CUSTOM input 才重新启动普通循环 |
 | Tool terminal / permission | 锁 Thread 后锁 invocation；after-commit kick |
 | external wait 释放 | `releaseForExternalWait` 原子释放 token |
 | SSE 断线 | 仅丢可观测增量；以 Entry + 重放 events 恢复 |
 | recovery 扫描 | 仅 expired token 或 pending input / due tool / head 终态 tool；**不**选择纯 `WAITING_APPROVAL` 无 work 的 idle Thread |
 
-配置：`kk-studio.harness.runtime.threadRecoveryInterval`（默认 30s）、`threadRecoveryBatchSize`（默认 100）。主路径是事件触发，recovery 不是主轮询。
+配置：`kk-studio.harness.runtime.threadRecoveryInterval`（默认 1s）、`threadRecoveryBatchSize`（默认 100）。主路径是事件触发，recovery 不是主轮询。

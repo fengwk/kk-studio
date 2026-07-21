@@ -487,11 +487,11 @@ abstract class LangChainModelProvider implements ModelProvider {
     };
   }
 
-  private static ProviderErrorKind classify(Throwable error, ProviderStream stream) {
+  static ProviderErrorKind classify(Throwable error, ProviderStream stream) {
     if (stream.isCancelled()) {
       return ProviderErrorKind.CANCELLED;
     }
-    String message = String.valueOf(error.getMessage()).toLowerCase();
+    String message = errorMessages(error).toLowerCase();
     if (message.contains("401") || message.contains("403") || message.contains("auth")) {
       return ProviderErrorKind.AUTHENTICATION;
     }
@@ -507,6 +507,18 @@ abstract class LangChainModelProvider implements ModelProvider {
       return ProviderErrorKind.INVALID_REQUEST;
     }
     return ProviderErrorKind.TRANSIENT;
+  }
+
+  private static String errorMessages(Throwable error) {
+    StringBuilder messages = new StringBuilder();
+    Throwable current = error;
+    for (int depth = 0; current != null && depth < 8; depth++, current = current.getCause()) {
+      if (messages.length() > 0) {
+        messages.append(' ');
+      }
+      messages.append(String.valueOf(current.getMessage()));
+    }
+    return messages.toString();
   }
 
   private static boolean hasValue(String id, String name, String arguments) {
