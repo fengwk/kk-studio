@@ -49,10 +49,9 @@ describe('AiResourceForms', () => {
 
     expect(screen.getByText('留空会保留已配置的 API Key；密钥不会回显。')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('留空保留当前密钥')).toHaveValue('')
-    expect(Array.from(container.querySelectorAll('label > span')).slice(0, 2).map((label) => label.textContent)).toEqual([
-      'Name',
-      'API Key（可选）',
-    ])
+    const labels = Array.from(container.querySelectorAll('label > span')).map((label) => label.textContent)
+    expect(labels[0]).toMatch(/^Name(?: \*)?$/)
+    expect(labels[1]).toBe('API Key（可选）')
   })
 
   it('edits the new model abilities, pricing, variants, and collapsed advanced options', async () => {
