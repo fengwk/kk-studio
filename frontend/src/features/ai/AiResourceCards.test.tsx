@@ -194,12 +194,14 @@ describe('AI resource cards', () => {
     )
     expect(screen.getByText('180s')).toBeInTheDocument()
     expect(screen.getByText('1500ms')).toBeInTheDocument()
+    expect(screen.getByText('已配置')).toBeInTheDocument()
 
     rerender(
       <ProviderResourceCard
         provider={provider({
           description: 'provider description',
           baseUrl: null,
+          configured: false,
           modelCallTimeoutMillis: '',
           modelCallIdleTimeoutMillis: 'not-a-number',
         })}
@@ -210,6 +212,7 @@ describe('AI resource cards', () => {
     )
     expect(screen.getByText('provider description')).toBeInTheDocument()
     expect(screen.getByText('not-a-number')).toBeInTheDocument()
+    expect(screen.getByText('无 API Key（无认证请求）')).toBeInTheDocument()
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
   })
 })

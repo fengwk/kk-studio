@@ -11,7 +11,9 @@ public enum SessionEntryType {
   BRANCH_SUMMARY("branch_summary"),
   CUSTOM("custom"),
   CUSTOM_MESSAGE("custom_message"),
-  LABEL("label");
+  LABEL("label"),
+  /** Assistant-side failure audit entry. UI-only; never projected into Provider Context. */
+  ASSISTANT_ERROR("assistant_error");
 
   private final String value;
 

@@ -203,9 +203,12 @@ BRANCH_SUMMARY
 CUSTOM
 CUSTOM_MESSAGE
 LABEL
+ASSISTANT_ERROR
 ```
 
 `ROOT` 是 Session 语义根 Entry，不携带运行时配置。`AGENT_CHANGE` 只记录 `agentDefinitionId` 与捕获时的 `agentName`，禁止写入 prompt/tools/skills/subagents/policy 或完整 snapshot。Model/variant 与 YOLO 是 Thread 状态，不作为 Entry payload。
+
+`ASSISTANT_ERROR` 是一次 Provider/setup/Tool prepare 失败的不可变审计与 transcript 条目，记录错误类别、面向用户的错误信息、retry attempt 与是否已安排重试。其 ID 复用该次 Turn 预分配的 assistant entry ID，使 durable Entry 与 `assistant_failed` SSE 事件可去重；它会推进 Thread head，但 `SessionContextBuilder` 必须显式跳过它，禁止错误原文进入下一次 Provider Context。
 
 ### 5.2 ThreadInputType
 
@@ -426,12 +429,13 @@ POST /api/threads/{threadId}/stop
 
 允许自动重试时，单个事务：
 
-1. 写带 `retryScheduled=true` 的 `ASSISTANT_FAILED` 与 `THREAD_RETRY_SCHEDULED`。
-2. Thread status=`RETRYING`，持久化 `retry_attempt` 与 `retry_at`，并释放 processor token。
-3. 本地到期调度和低频 recovery 都可 kick；只有 `retry_at` 已到期才能 acquire。
-4. RETRYING 必须先偿还失败 Turn；成功后清除 retry state 并回到 `RUNNING`，再 Harvest 后续 Queue。
+1. 写 `ASSISTANT_ERROR` Entry 并推进 Thread head；Entry 与本次 Turn 的预分配 assistant ID 相同。
+2. 写带 `retryScheduled=true` 的 `ASSISTANT_FAILED` 与 `THREAD_RETRY_SCHEDULED`。
+3. Thread status=`RETRYING`，持久化 `retry_attempt` 与 `retry_at`，并释放 processor token。
+4. 本地到期调度和低频 recovery 都可 kick；只有 `retry_at` 已到期才能 acquire。
+5. RETRYING 必须先偿还失败 Turn；成功后清除 retry state 并回到 `RUNNING`，再 Harvest 后续 Queue。
 
-超出次数、`AUTHENTICATION`、`BILLING`、`INVALID_REQUEST`、`CANCELLED`、setup 或 Tool prepare 失败均写 `ASSISTANT_FAILED` / `THREAD_FAILED`，进入 `FAILED` 并保留 queued Input。Recovery 不选择 FAILED；新的 USER/CUSTOM 消息会清除 retry state、转为 RUNNING，而配置命令不会重启失败 Thread。`OVERFLOW` 仍先走 Compaction。
+超出次数、`AUTHENTICATION`、`BILLING`、`INVALID_REQUEST`、`CANCELLED`、setup 或 Tool prepare 失败同样先写 `ASSISTANT_ERROR`，再写 `ASSISTANT_FAILED` / `THREAD_FAILED`，进入 `FAILED` 并保留 queued Input。Recovery 不选择 FAILED；新的 USER/CUSTOM 消息会清除 retry state、转为 RUNNING，而配置命令不会重启失败 Thread。`OVERFLOW` 仍先走 Compaction。
 
 策略控制面：
 

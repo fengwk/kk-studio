@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantErrorEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.CustomMessageEntryPayload;
@@ -534,6 +535,12 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
     if (entry.payload() instanceof CompactionEntryPayload) {
       return SessionEntryPayloadRole.COMPACTION;
     }
+    // AssistantErrorEntryPayload is a failed-attempt audit. It must not request another model
+    // call when it sits at the head outside of a RETRYING cycle, so map it explicitly to OTHER
+    // rather than relying on fall-through behavior.
+    if (entry.payload() instanceof AssistantErrorEntryPayload) {
+      return SessionEntryPayloadRole.OTHER;
+    }
     AgentMessage message = null;
     if (entry.payload() instanceof MessageEntryPayload value) {
       message = value.message();
@@ -592,6 +599,11 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
     }
     lifecycleObservers.publish(new TurnStarted(thread.id(), thread.sessionId(), turnStartedAt));
 
+    // Assistant Entry 直到 terminal commit 才真正存在；提前分配 ID 仅用于把流式 Event 稳定关联到它。
+    // 必须在 beginTurn 之后、资源解析之前分配，使 resource resolution 失败也能复用该 id 落库 error
+    // entry，UI/审计与 SSE 临时投影始终引用同一个 planned id。
+    long plannedAssistantEntryId = idGenerator.newSessionEntryId();
+
     SessionContext context;
     TurnResources resources;
     try {
@@ -602,14 +614,12 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
       // 将配置解析为本 Turn 不可变的 provider/model/tool/environment snapshot，避免流中途读到新配置。
       resources = resourceResolver.resolve(thread.sessionId(), thread.id(), context.config());
     } catch (RuntimeException error) {
-      if (!failTurn(thread, token, error)) {
+      if (!failTurn(thread, token, plannedAssistantEntryId, error)) {
         return TurnOutcome.LOST_OWNERSHIP;
       }
       return TurnOutcome.FAILED;
     }
 
-    // Assistant Entry 直到 terminal commit 才真正存在；提前分配 ID 仅用于把流式 Event 稳定关联到它。
-    long plannedAssistantEntryId = idGenerator.newSessionEntryId();
     DeltaBatcher batcher =
         new DeltaBatcher(
             thread.id(),
@@ -731,19 +741,50 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
   }
 
   /** 将 Context/资源解析等 Provider 调用前异常落为 durable FAILED，而非让 activation 静默退出。 */
-  private boolean failTurn(AgentThread thread, String token, RuntimeException error) {
+  private boolean failTurn(
+      AgentThread thread, String token, long plannedAssistantEntryId, RuntimeException error) {
     Instant now = clock.instant();
-    return transactions.fail(
+    String reason = "turn_setup_failed";
+    AssistantErrorEntryPayload payload =
+        new AssistantErrorEntryPayload(
+            ProviderErrorKind.INVALID_REQUEST.name(),
+            message(error),
+            thread.retryAttempt(),
+            null,
+            false);
+    return transactions.recordAssistantError(
         thread.id(),
         token,
+        plannedAssistantEntryId,
+        payload,
+        ThreadTransactions.AssistantErrorOutcome.FAILED,
+        null,
         List.of(
             new ThreadEventDraft(
                 ThreadEventType.ASSISTANT_FAILED,
+                plannedAssistantEntryId,
                 ThreadEventPayloads.of(
-                    "kind", ProviderErrorKind.INVALID_REQUEST.name(), "message", message(error))),
+                    "kind",
+                    ProviderErrorKind.INVALID_REQUEST.name(),
+                    "message",
+                    message(error),
+                    "retryScheduled",
+                    false,
+                    "retryAttempt",
+                    thread.retryAttempt(),
+                    "maxRetries",
+                    null)),
             new ThreadEventDraft(
                 ThreadEventType.THREAD_FAILED,
-                ThreadEventPayloads.of("reason", "turn_setup_failed", "message", message(error)))),
+                ThreadEventPayloads.of(
+                    "reason",
+                    reason,
+                    "message",
+                    message(error),
+                    "kind",
+                    ProviderErrorKind.INVALID_REQUEST.name(),
+                    "retryAttempt",
+                    thread.retryAttempt()))),
         now);
   }
 
@@ -1057,10 +1098,15 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
       Duration delay = policy.delayBeforeRetry(attempt);
       Instant retryAt = now.plus(delay);
       try {
-        if (!transactions.scheduleRetry(
+        AssistantErrorEntryPayload payload =
+            new AssistantErrorEntryPayload(
+                error.kind().name(), message(error), attempt, policy.maxRetries(), true);
+        if (!transactions.recordAssistantError(
             thread.id(),
             token,
-            attempt,
+            plannedAssistantEntryId,
+            payload,
+            ThreadTransactions.AssistantErrorOutcome.RETRY_SCHEDULED,
             retryAt,
             List.of(
                 new ThreadEventDraft(
@@ -1112,9 +1158,20 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
         ProviderException error, String reason, Integer configuredMaxRetries) {
       Instant now = clock.instant();
       try {
-        if (!transactions.fail(
+        AssistantErrorEntryPayload payload =
+            new AssistantErrorEntryPayload(
+                error.kind().name(),
+                message(error),
+                thread.retryAttempt(),
+                configuredMaxRetries,
+                false);
+        if (!transactions.recordAssistantError(
             thread.id(),
             token,
+            plannedAssistantEntryId,
+            payload,
+            ThreadTransactions.AssistantErrorOutcome.FAILED,
+            null,
             List.of(
                 new ThreadEventDraft(
                     ThreadEventType.ASSISTANT_FAILED,
@@ -1156,9 +1213,20 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
     /** Assistant 已产生 ToolCall 但无法原子准备 Invocation 时，不能留下半提交 Tool chain。 */
     private void failToolPreparation(RuntimeException error, Instant now) {
       try {
-        if (!transactions.fail(
+        AssistantErrorEntryPayload payload =
+            new AssistantErrorEntryPayload(
+                ProviderErrorKind.INVALID_REQUEST.name(),
+                message(error),
+                thread.retryAttempt(),
+                null,
+                false);
+        if (!transactions.recordAssistantError(
             thread.id(),
             token,
+            plannedAssistantEntryId,
+            payload,
+            ThreadTransactions.AssistantErrorOutcome.FAILED,
+            null,
             List.of(
                 new ThreadEventDraft(
                     ThreadEventType.ASSISTANT_FAILED,
@@ -1167,11 +1235,24 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
                         "kind",
                         ProviderErrorKind.INVALID_REQUEST.name(),
                         "message",
-                        message(error))),
+                        message(error),
+                        "retryScheduled",
+                        false,
+                        "retryAttempt",
+                        thread.retryAttempt(),
+                        "maxRetries",
+                        null)),
                 new ThreadEventDraft(
                     ThreadEventType.THREAD_FAILED,
                     ThreadEventPayloads.of(
-                        "reason", "tool_preparation_failed", "message", message(error)))),
+                        "reason",
+                        "tool_preparation_failed",
+                        "message",
+                        message(error),
+                        "kind",
+                        ProviderErrorKind.INVALID_REQUEST.name(),
+                        "retryAttempt",
+                        thread.retryAttempt()))),
             now)) {
           markLostOwnership();
           return;

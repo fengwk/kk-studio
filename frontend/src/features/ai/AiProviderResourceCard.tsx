@@ -34,6 +34,7 @@ export function ProviderResourceCard({
       rows={[
         ['Type', provider.providerType],
         ['URL', provider.baseUrl || '—'],
+        ['API Key', provider.configured ? '已配置' : '无 API Key（无认证请求）'],
         {
           pairs: [
             { label: 'Timeout', value: formatMs(provider.modelCallTimeoutMillis) },

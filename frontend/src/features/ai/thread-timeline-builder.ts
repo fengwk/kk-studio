@@ -27,6 +27,7 @@ import {
   completeStreamingAssistant,
   discardStreamingAssistant,
   newStreamingAssistant,
+  projectStreamingAssistantFailure,
   prepareStreamingTool,
   toolCallMaterialKey,
   toolEventKey,
@@ -170,7 +171,7 @@ export function buildThreadTimeline(
         break
       }
       case 'assistant_completed': {
-        completeStreamingAssistant(activeAssistants.get(assistantKey(event)), messages, event, '')
+        completeStreamingAssistant(activeAssistants.get(assistantKey(event)), messages)
         activeAssistants.delete(assistantKey(event))
         const turnUsage = projectTurnUsageMeta(event, payload)
         if (turnUsage) {
@@ -190,18 +191,11 @@ export function buildThreadTimeline(
         break
       }
       case 'assistant_failed':
-        if (payload.retryScheduled === true) {
-          discardStreamingAssistant(activeAssistants.get(assistantKey(event)), messages)
-          activeAssistants.delete(assistantKey(event))
-          break
-        }
-        completeStreamingAssistant(
-          activeAssistants.get(assistantKey(event)),
-          messages,
-          event,
-          getString(payload.message),
-        )
+        // 无论是否已安排自动重试，失败本身都必须可见。移除同一次 attempt 的部分流，
+        // 再投影独立错误消息；绝不能把错误拼进 partial assistant，否则后续成功会被染红。
+        discardStreamingAssistant(activeAssistants.get(assistantKey(event)), messages)
         activeAssistants.delete(assistantKey(event))
+        projectStreamingAssistantFailure(messages, event, getString(payload.message))
         break
       case 'tool_prepared': {
         const key = toolEventKey(event, payload)

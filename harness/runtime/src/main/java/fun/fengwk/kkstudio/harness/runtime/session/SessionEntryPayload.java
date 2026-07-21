@@ -9,6 +9,7 @@ public sealed interface SessionEntryPayload
         BranchSummaryEntryPayload,
         CustomEntryPayload,
         CustomMessageEntryPayload,
-        LabelEntryPayload {
+        LabelEntryPayload,
+        AssistantErrorEntryPayload {
   SessionEntryType type();
 }
