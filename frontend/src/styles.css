@@ -2254,6 +2254,18 @@ div.is-error {
 .thread-tool-status.error,
 .thread-turn.error .thread-block-body { color: var(--danger); }
 
+.thread-error-raw {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--danger);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .thread-tool-pre {
   margin: 0;
   padding: 0;
