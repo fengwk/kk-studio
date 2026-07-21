@@ -1,5 +1,10 @@
 import { extractDefaultVariantFromModel } from '@/features/ai/ai-model-draft-codec'
-import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, BackendDateTime } from '@/shared/api/contracts'
+import type { AgentModelView } from '@/features/ai/AgentModelView'
+import type {
+  AgentDefinitionDTO,
+  AgentProviderDTO,
+  BackendDateTime,
+} from '@/shared/api/contracts'
 import type { ResourceModal } from '@/features/ai/ai-console-types'
 
 export function resourceTitle(modal: ResourceModal): string {
@@ -16,16 +21,16 @@ export function resourceTitle(modal: ResourceModal): string {
 export function filterAgents(agents: AgentDefinitionDTO[], search: string): AgentDefinitionDTO[] {
   return agents.filter((agent) =>
     includesSearch(
-      `${agent.name} ${agent.description ?? ''} ${agent.modelId ?? ''} ${agent.variant ?? ''} ${agent.config?.environmentName ?? ''}`,
+      `${agent.name} ${agent.description ?? ''} ${agent.modelId} ${agent.variant} ${agent.config.environmentName ?? ''}`,
       search,
     ),
   )
 }
 
-export function filterModels(models: AgentModelDTO[], search: string): AgentModelDTO[] {
+export function filterModels(models: AgentModelView[], search: string): AgentModelView[] {
   return models.filter((model) =>
     includesSearch(
-      `${model.providerName} ${model.name} ${model.description ?? ''} ${extractDefaultVariantFromModel(model)}`,
+      `${model.providerName ?? ''} ${model.name} ${model.description ?? ''} ${extractDefaultVariantFromModel(model)}`,
       search,
     ),
   )
@@ -37,24 +42,6 @@ export function filterProviders(providers: AgentProviderDTO[], search: string): 
 
 export function includesSearch(value: string, search: string): boolean {
   return !search || value.toLowerCase().includes(search)
-}
-
-export function formatJsonSummary(json: string | null): string {
-  if (!json) {
-    return 'default'
-  }
-  try {
-    const parsed = JSON.parse(json)
-    if (Array.isArray(parsed)) {
-      return `${parsed.length} item${parsed.length === 1 ? '' : 's'}`
-    }
-    if (parsed && typeof parsed === 'object') {
-      return `${Object.keys(parsed).length} keys`
-    }
-  } catch {
-    return 'invalid json'
-  }
-  return 'default'
 }
 
 export function formatBackendDate(value: BackendDateTime): string {

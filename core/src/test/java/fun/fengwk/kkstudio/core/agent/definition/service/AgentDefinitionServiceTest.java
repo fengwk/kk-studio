@@ -52,7 +52,12 @@ public class AgentDefinitionServiceTest {
         IllegalStateException.class, () -> agentModelService.deleteModel(id(model.getId())));
 
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
+    update.setName(definition.getName());
     update.setDescription("updated");
+    update.setSystemPrompt(definition.getSystemPrompt());
+    update.setModelId(definition.getModelId());
+    update.setVariant(definition.getVariant());
+    update.setConfig(definition.getConfig());
     AgentDefinitionDTO updated = agentDefinitionService.updateAgent(id(definition.getId()), update);
     assertEquals("updated", updated.getDescription());
     assertTrue(

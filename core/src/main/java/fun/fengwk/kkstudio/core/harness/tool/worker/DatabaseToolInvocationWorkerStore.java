@@ -10,7 +10,6 @@ import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ClaimedToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.ThreadScopedToolClaimStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationWorkerStore;
 
 import java.time.Duration;
@@ -24,8 +23,7 @@ import java.util.Optional;
  * Database claim port for Cloud/Control leases; all compare-and-set predicates live in the mapper.
  */
 @Repository
-public class DatabaseToolInvocationWorkerStore
-    implements ToolInvocationWorkerStore, ThreadScopedToolClaimStore {
+public class DatabaseToolInvocationWorkerStore implements ToolInvocationWorkerStore {
   private static final int MAX_CLAIM_CONTENTION_RETRIES = 64;
 
   private final ToolInvocationMapper invocationMapper;

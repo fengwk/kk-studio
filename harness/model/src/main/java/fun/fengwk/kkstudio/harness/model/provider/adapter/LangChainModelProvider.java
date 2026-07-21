@@ -39,7 +39,6 @@ import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.chat.response.StreamingHandle;
 import dev.langchain4j.model.output.FinishReason;
 
-import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
@@ -209,8 +208,8 @@ abstract class LangChainModelProvider implements ModelProvider {
     ModelVariant variant = request.variant();
     DefaultChatRequestParameters.Builder<?> builder =
         DefaultChatRequestParameters.builder().modelName(request.model().modelId());
-    // Model 未声明 TOOLS 时绝不注入 tool specs，即使 Agent 配了 tools。
-    if (request.model().capabilities().contains(ModelCapability.TOOLS)) {
+    // Model 未声明 tools 时绝不注入 tool specs，即使 Agent 配了 tools。
+    if (request.model().tools()) {
       List<ToolSpecification> toolSpecs = tools(request.tools());
       if (!toolSpecs.isEmpty()) {
         builder.toolSpecifications(toolSpecs);

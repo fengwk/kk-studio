@@ -53,8 +53,25 @@ describe('agentService', () => {
     const modelBody = {
       providerId: 'provider-1',
       name: 'MiniMax-M2.7',
-      capabilitiesJson: '["TEXT","TOOLS"]',
-      configJson: '{"defaultVariant":"default","variants":[{"id":"default"}]}',
+      config: {
+        limit: { context: 128000, output: 8192 },
+        abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+        pricing: {
+          currency: 'USD',
+          pricingTier: 'default',
+          serviceTier: 'default',
+          serviceTierMultiplier: 1,
+          version: 'v1',
+          inputPerMillionTokens: 0,
+          outputPerMillionTokens: 0,
+          cacheReadPerMillionTokens: 0,
+          cacheWritePerMillionTokens: 0,
+          cacheWriteLongPerMillionTokens: 0,
+          reasoningPerMillionTokens: 0,
+        },
+        defaultVariant: 'default',
+        variants: [{ id: 'default' }],
+      },
     }
     const agentBody = {
       name: 'default-assistant',
@@ -64,7 +81,25 @@ describe('agentService', () => {
     }
     const updateProviderBody = { description: 'updated' }
     const updateModelBody = {
-      configJson: '{"defaultVariant":"fast","variants":[{"id":"fast"}]}',
+      config: {
+        limit: { context: 128000, output: 8192 },
+        abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+        pricing: {
+          currency: 'USD',
+          pricingTier: 'default',
+          serviceTier: 'default',
+          serviceTierMultiplier: 1,
+          version: 'v1',
+          inputPerMillionTokens: 0,
+          outputPerMillionTokens: 0,
+          cacheReadPerMillionTokens: 0,
+          cacheWritePerMillionTokens: 0,
+          cacheWriteLongPerMillionTokens: 0,
+          reasoningPerMillionTokens: 0,
+        },
+        defaultVariant: 'fast',
+        variants: [{ id: 'fast' }],
+      },
     }
     const updateAgentBody = { description: 'updated' }
 

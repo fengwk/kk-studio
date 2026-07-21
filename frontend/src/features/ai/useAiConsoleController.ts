@@ -1,7 +1,12 @@
 import { useDeferredValue, useMemo, useState } from 'react'
 import { filterAgents, filterModels, filterProviders } from '@/features/ai/ai-console-utils'
 import { toUserFacingErrorMessage } from '@/features/ai/ai-resource-form-validation'
-import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, ChatDTO } from '@/shared/api/contracts'
+import type { AgentModelView } from '@/features/ai/AgentModelView'
+import type {
+  AgentDefinitionDTO,
+  AgentProviderDTO,
+  ChatDTO,
+} from '@/shared/api/contracts'
 import { useAiConsoleResourceController } from '@/features/ai/useAiConsoleResourceController'
 import { useChatListController } from '@/features/ai/useChatListController'
 
@@ -69,8 +74,8 @@ export function useAiConsoleController() {
       models: filteredModels,
       deletePending: resourceController.modelDeletePending,
       onCreate: resourceController.openCreateModel,
-      onEdit: (model: AgentModelDTO) => resourceController.openEditModel(model.id),
-      onDelete: (model: AgentModelDTO) =>
+      onEdit: (model: AgentModelView) => resourceController.openEditModel(model.id),
+      onDelete: (model: AgentModelView) =>
         resourceController.deleteModel(model.providerName || String(model.providerId), model.name, model.id),
     },
     providerPanelProps: {

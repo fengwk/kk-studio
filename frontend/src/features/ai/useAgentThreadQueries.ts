@@ -6,6 +6,7 @@ import {
 } from '@/features/ai/harness-thread-event-stream'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
+import { toAgentModelViews, type AgentModelView } from '@/features/ai/AgentModelView'
 import type { ThreadEventDTO } from '@/shared/api/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
 
@@ -53,7 +54,8 @@ export function useAgentThreadQueries(threadId: string, sessionId: string) {
     },
   })
   const inputs = inputsQuery.data ?? []
-  const workingHint = isThreadActive(thread?.status) || inputs.some((input) => input.status === 'QUEUED')
+  const workingHint =
+    isThreadActive(thread?.status) || inputs.some((input) => input.status === 'QUEUED')
 
   const entriesQuery = useQuery({
     queryKey: queryKeys.threads.entries(threadId),
@@ -80,6 +82,13 @@ export function useAgentThreadQueries(threadId: string, sessionId: string) {
     },
     enabled: Boolean(threadId),
   })
+  // Mirror the console join so the thread panel surfaces the same enriched label without leaking
+  // the join field through the wire contract.
+  const providers = providersQuery.data?.results ?? []
+  const models: AgentModelView[] = toAgentModelViews(
+    modelsQuery.data?.results ?? [],
+    providers,
+  )
   return {
     agentsQuery,
     modelsQuery,
@@ -91,8 +100,8 @@ export function useAgentThreadQueries(threadId: string, sessionId: string) {
     inputsQuery,
     eventsQuery,
     agents: agentsQuery.data?.results ?? [],
-    models: modelsQuery.data?.results ?? [],
-    providers: providersQuery.data?.results ?? [],
+    models,
+    providers,
     session: sessionQuery.data,
     threads: sessionThreadsQuery.data ?? [],
     thread,

@@ -10,7 +10,12 @@ import {
 import type { ResourceEditorPlan } from '@/features/ai/ai-resource-editor-plan-types'
 import type { AgentDraft, ModelDraft, ProviderDraft, ResourceModal } from '@/features/ai/ai-console-types'
 import { normalizeAgentDraftSelection, normalizeModelDraftDefaultVariant, normalizeModelDraftProvider } from '@/features/ai/ai-draft-normalizers'
-import type { AgentDefinitionDTO, AgentModelDTO, AgentProviderDTO, AgentResourceId } from '@/shared/api/contracts'
+import type { AgentModelView } from '@/features/ai/AgentModelView'
+import type {
+  AgentDefinitionDTO,
+  AgentProviderDTO,
+  AgentResourceId,
+} from '@/shared/api/contracts'
 
 export function useAiConsoleResourceEditorState({
   providers,
@@ -18,12 +23,12 @@ export function useAiConsoleResourceEditorState({
   agents,
 }: {
   providers: AgentProviderDTO[]
-  models: AgentModelDTO[]
+  models: AgentModelView[]
   agents: AgentDefinitionDTO[]
 }) {
   const [resourceModal, setResourceModal] = useState<ResourceModal | null>(null)
   const [providerDraft, setProviderDraft] = useState<ProviderDraft>(() => createProviderEditorPlan().providerDraft)
-  const [modelDraft, setModelDraft] = useState<ModelDraft>(() => createModelEditorPlan([], []).modelDraft)
+  const [modelDraft, setModelDraft] = useState<ModelDraft>(() => createModelEditorPlan([]).modelDraft)
   const [agentDraft, setAgentDraft] = useState<AgentDraft>(() => createAgentEditorPlan([]).agentDraft)
 
   useEffect(() => {
@@ -32,8 +37,17 @@ export function useAiConsoleResourceEditorState({
     }
 
     if (resourceModal.kind === 'model') {
-      const preferredProviderName = resourceModal.mode === 'edit' ? models.find((model) => model.id === resourceModal.id)?.providerName : undefined
-      setModelDraft((currentDraft) => normalizeModelDraftDefaultVariant(normalizeModelDraftProvider(currentDraft, providers, preferredProviderName)))
+      // Edit mode keeps the persisted providerId so the user never silently rewires a Model
+      // between providers; create mode has no preference and falls back to providers[0].
+      const preferredProviderId =
+        resourceModal.mode === 'edit'
+          ? models.find((model) => model.id === resourceModal.id)?.providerId
+          : undefined
+      setModelDraft((currentDraft) =>
+        normalizeModelDraftDefaultVariant(
+          normalizeModelDraftProvider(currentDraft, providers, preferredProviderId),
+        ),
+      )
       return
     }
 
@@ -77,7 +91,7 @@ export function useAiConsoleResourceEditorState({
     closeResourceModal,
     openCreateProvider: () => applyResourceEditorPlan(createProviderEditorPlan()),
     openEditProvider: (providerId: AgentResourceId) => applyResourceEditorPlan(editProviderEditorPlan(providers, providerId)),
-    openCreateModel: () => applyResourceEditorPlan(createModelEditorPlan(models, providers)),
+    openCreateModel: () => applyResourceEditorPlan(createModelEditorPlan(providers)),
     openEditModel: (modelId: AgentResourceId) => applyResourceEditorPlan(editModelEditorPlan(models, modelId)),
     openCreateAgent: () => applyResourceEditorPlan(createAgentEditorPlan(models)),
     openEditAgent: (agentId: AgentResourceId) => applyResourceEditorPlan(editAgentEditorPlan(agents, models, agentId)),

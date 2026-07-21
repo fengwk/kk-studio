@@ -24,7 +24,7 @@ public final class AgentProviderConfigurationCodec {
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
   }
 
-  /** 读取策略；历史配置缺失字段时回退产品默认值。 */
+  /** 读取策略；未配置的字段使用产品默认值。 */
   public ModelCallTimeoutPolicy readTimeoutPolicy(String configJson) {
     ObjectNode config = readObject(configJson);
     return new ModelCallTimeoutPolicy(

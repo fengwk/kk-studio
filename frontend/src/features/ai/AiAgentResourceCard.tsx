@@ -1,9 +1,10 @@
 import { ResourceCardLayout } from '@/features/ai/AiResourceCardLayout'
-import type { AgentDefinitionDTO, AgentModelDTO } from '@/shared/api/contracts'
+import type { AgentModelView } from '@/features/ai/AgentModelView'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts'
 
-function formatAgentModelLabel(model: AgentModelDTO | undefined, modelId: string | null | undefined): string {
+function formatAgentModelLabel(model: AgentModelView | undefined, modelId: string): string {
   if (!model) {
-    return modelId?.trim() || ''
+    return modelId.trim()
   }
   const provider = model.providerName?.trim()
   return provider ? `${provider}/${model.name}` : model.name
@@ -11,10 +12,7 @@ function formatAgentModelLabel(model: AgentModelDTO | undefined, modelId: string
 
 /** 卡片上的 Policy = 编辑页 executionPolicy（maxTurns/maxDepth/...）的紧凑摘要。 */
 function formatPolicy(agent: AgentDefinitionDTO): string {
-  const policy = agent.config?.executionPolicy
-  if (!policy) {
-    return ''
-  }
+  const policy = agent.config.executionPolicy
   const parts: string[] = []
   if (policy.maxTurns != null) {
     parts.push(`turns ${policy.maxTurns}`)
@@ -39,17 +37,17 @@ export function AgentResourceCard({
   deletePending,
 }: {
   agent: AgentDefinitionDTO
-  models?: AgentModelDTO[]
+  models?: AgentModelView[]
   onEdit: () => void
   onDelete: () => void
   deletePending: boolean
 }) {
   const model = models.find((item) => String(item.id) === String(agent.modelId))
   const modelLabel = formatAgentModelLabel(model, agent.modelId)
-  const environmentName = agent.config?.environmentName?.trim() || ''
-  const tools = agent.config?.tools ?? []
-  const skills = agent.config?.skills ?? []
-  const subagents = agent.config?.allowedSubagents ?? []
+  const environmentName = agent.config.environmentName?.trim() || ''
+  const tools = agent.config.tools
+  const skills = agent.config.skills
+  const subagents = agent.config.allowedSubagents
 
   return (
     <ResourceCardLayout
@@ -58,7 +56,7 @@ export function AgentResourceCard({
       subtitle={agent.description || agent.systemPrompt || agent.name}
       rows={[
         ['Model', modelLabel],
-        ['Variant', agent.variant?.trim() || ''],
+        ['Variant', agent.variant.trim()],
         ['Env', environmentName],
         { label: 'Tools', tags: tools, limit: 2 },
         { label: 'Skills', tags: skills, limit: 2 },

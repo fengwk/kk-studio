@@ -1,0 +1,115 @@
+import { describe, expect, it } from 'vitest'
+import { emptyModelDraft } from '@/features/ai/ai-model-draft-codec'
+import type { ModelDraft } from '@/features/ai/ai-console-types'
+import {
+  toUserFacingErrorMessage,
+  validateResourceDraft,
+} from '@/features/ai/ai-resource-form-validation'
+
+function draft(overrides: Partial<ModelDraft> = {}): ModelDraft {
+  return {
+    ...emptyModelDraft(),
+    providerId: 'provider-1',
+    name: 'model',
+    ...overrides,
+  }
+}
+
+describe('ai-resource-form-validation', () => {
+  it('rejects a model draft with a blank provider', () => {
+    const result = validateResourceDraft(
+      { kind: 'model', mode: 'create' },
+      {
+        providerDraft: { name: '', description: '', providerType: 'openai', baseUrl: '', credential: '', modelCallTimeoutMillis: '', modelCallIdleTimeoutMillis: '' },
+        modelDraft: draft({ providerId: '   ' }),
+        agentDraft: { name: '', description: '', systemPrompt: '', modelId: '', variant: '', environmentName: '', tools: [], skills: [], allowedSubagents: [], executionPolicy: { maxTurns: '', maxDepth: '', maxDirectSubagents: '', maxTotalSubagents: '' } },
+      },
+    )
+    expect(result.ok).toBe(false)
+    expect(result.fields.providerId).toBeDefined()
+  })
+
+  it('rejects a model draft with a blank name', () => {
+    const result = validateResourceDraft(
+      { kind: 'model', mode: 'create' },
+      {
+        providerDraft: { name: 'p', description: '', providerType: 'openai', baseUrl: '', credential: '', modelCallTimeoutMillis: '', modelCallIdleTimeoutMillis: '' },
+        modelDraft: draft({ name: '   ' }),
+        agentDraft: { name: '', description: '', systemPrompt: '', modelId: '', variant: '', environmentName: '', tools: [], skills: [], allowedSubagents: [], executionPolicy: { maxTurns: '', maxDepth: '', maxDirectSubagents: '', maxTotalSubagents: '' } },
+      },
+    )
+    expect(result.ok).toBe(false)
+    expect(result.fields.name).toBeDefined()
+  })
+
+  it('rejects empty input modalities', () => {
+    const result = validateResourceDraft(
+      { kind: 'model', mode: 'create' },
+      {
+        providerDraft: { name: 'p', description: '', providerType: 'openai', baseUrl: '', credential: '', modelCallTimeoutMillis: '', modelCallIdleTimeoutMillis: '' },
+        modelDraft: draft({ inputModalities: [] }),
+        agentDraft: { name: '', description: '', systemPrompt: '', modelId: '', variant: '', environmentName: '', tools: [], skills: [], allowedSubagents: [], executionPolicy: { maxTurns: '', maxDepth: '', maxDirectSubagents: '', maxTotalSubagents: '' } },
+      },
+    )
+    expect(result.ok).toBe(false)
+    expect(result.fields.inputModalities).toBeDefined()
+  })
+
+  it('rejects a defaultVariant that does not exist', () => {
+    const result = validateResourceDraft(
+      { kind: 'model', mode: 'create' },
+      {
+        providerDraft: { name: 'p', description: '', providerType: 'openai', baseUrl: '', credential: '', modelCallTimeoutMillis: '', modelCallIdleTimeoutMillis: '' },
+        modelDraft: draft({
+          defaultVariant: 'stale',
+          variants: [
+            { draftId: 'variant-default', id: 'fast', reasoningEffort: '', maxOutputTokens: '', temperature: '', topP: '', topK: '', frequencyPenalty: '', presencePenalty: '', stopSequences: '' },
+            { draftId: 'variant-2', id: 'creative', reasoningEffort: '', maxOutputTokens: '', temperature: '', topP: '', topK: '', frequencyPenalty: '', presencePenalty: '', stopSequences: '' },
+          ],
+        }),
+        agentDraft: { name: '', description: '', systemPrompt: '', modelId: '', variant: '', environmentName: '', tools: [], skills: [], allowedSubagents: [], executionPolicy: { maxTurns: '', maxDepth: '', maxDirectSubagents: '', maxTotalSubagents: '' } },
+      },
+    )
+    expect(result.ok).toBe(false)
+    expect(result.fields.defaultVariant).toBeDefined()
+  })
+
+  it('rejects when reasoning is enabled but every variant lacks effort', () => {
+    const result = validateResourceDraft(
+      { kind: 'model', mode: 'create' },
+      {
+        providerDraft: { name: 'p', description: '', providerType: 'openai', baseUrl: '', credential: '', modelCallTimeoutMillis: '', modelCallIdleTimeoutMillis: '' },
+        modelDraft: draft({ reasoning: true, variants: [{ draftId: 'variant-x', id: 'medium', reasoningEffort: '', maxOutputTokens: '', temperature: '', topP: '', topK: '', frequencyPenalty: '', presencePenalty: '', stopSequences: '' }] }),
+        agentDraft: { name: '', description: '', systemPrompt: '', modelId: '', variant: '', environmentName: '', tools: [], skills: [], allowedSubagents: [], executionPolicy: { maxTurns: '', maxDepth: '', maxDirectSubagents: '', maxTotalSubagents: '' } },
+      },
+    )
+    expect(result.ok).toBe(true)
+    // Reasoning effort must be auto-filled with the variant id; no error expected.
+  })
+
+  it('translates known backend errors into user-facing Chinese', () => {
+    expect(toUserFacingErrorMessage(new Error('config.limit.context must be a positive integer'))).toMatch(
+      /上下文窗口/,
+    )
+    expect(toUserFacingErrorMessage(new Error('config.defaultVariant must match a variant id'))).toMatch(
+      /默认 Variant/,
+    )
+    expect(toUserFacingErrorMessage(new Error('duplicate variant id: fast'))).toMatch(/不能重复/)
+    expect(toUserFacingErrorMessage(new Error('401 Unauthorized'))).toMatch(/没有权限/)
+  })
+
+  it('passes Chinese text through unchanged', () => {
+    expect(toUserFacingErrorMessage(new Error('已开启 Reasoning'))).toMatch(/Reasoning/)
+  })
+
+  it('maps sampling, agent variant, policy, and subagent errors to their fields', () => {
+    expect(toUserFacingErrorMessage(new Error('variant medium temperature must not be negative'))).toMatch(
+      /Temperature/,
+    )
+    expect(toUserFacingErrorMessage(new Error('variant must not be blank'))).toMatch(/Variant/)
+    expect(toUserFacingErrorMessage(new Error('executionPolicy.maxTurns must be a positive integer'))).toMatch(
+      /执行策略/,
+    )
+    expect(toUserFacingErrorMessage(new Error('allowedSubagents 不能重复'))).toMatch(/Subagents/)
+  })
+})

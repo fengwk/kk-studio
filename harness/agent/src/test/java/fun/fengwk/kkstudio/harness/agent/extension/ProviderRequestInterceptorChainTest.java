@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
@@ -70,7 +69,8 @@ class ProviderRequestInterceptorChainTest {
   }
 
   private static ProviderRequest request() {
-    ModelVariant variant = new ModelVariant("default", null, null, null, null, List.of());
+    ModelVariant variant =
+        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
     ModelDescriptor model =
         new ModelDescriptor(
             1L,
@@ -81,7 +81,8 @@ class ProviderRequestInterceptorChainTest {
             1024,
             256,
             Set.of(ModelInputModality.TEXT),
-            Set.of(ModelCapability.TEXT),
+            true,
+            false,
             List.of(variant),
             new ModelPricing(
                 "USD",

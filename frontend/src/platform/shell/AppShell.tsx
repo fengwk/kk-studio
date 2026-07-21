@@ -18,7 +18,7 @@ function isToolsRoute(pathname: string) {
 }
 
 /** Chat 工作区沉浸页：`/chats/:chatId`，不含列表 `/chats`。 */
-export function isChatWorkspaceRoute(pathname: string) {
+function isChatWorkspaceRoute(pathname: string) {
   return /^\/chats\/[^/]+/.test(pathname)
 }
 

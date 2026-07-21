@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.core.agent.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
@@ -29,12 +30,13 @@ public class AgentDefinitionMutationFactoryTest {
     policy.setMaxDirectSubagents(4);
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setEnvironmentName(" local-dev ");
-    config.setTools(Arrays.asList(" browser ", "browser", "", null));
+    config.setTools(Arrays.asList(" browser ", "", null));
     config.setSkills(Arrays.asList(" java ", "dev"));
-    config.setAllowedSubagents(Arrays.asList(" reviewer ", "reviewer"));
+    config.setAllowedSubagents(List.of(" reviewer "));
     config.setExecutionPolicy(policy);
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setName("agent");
+    create.setVariant("default");
     create.setConfig(config);
 
     AgentDefinition definition = factory.newAgent(2L, create);
@@ -51,33 +53,50 @@ public class AgentDefinitionMutationFactoryTest {
   }
 
   @Test
-  public void shouldRejectDuplicateSkillsInsteadOfSilentDedup() {
+  public void shouldRejectDuplicateCapabilityAndSubagentNames() {
     AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setSkills(Arrays.asList("java", " java "));
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setName("agent");
+    create.setVariant("default");
     create.setConfig(config);
     IllegalArgumentException error =
         assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
     assertEquals("agent skills must not contain duplicates: java", error.getMessage());
+
+    config.setSkills(List.of());
+    config.setTools(Arrays.asList("read", " read "));
+    error = assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
+    assertEquals("agent tools must not contain duplicates: read", error.getMessage());
+
+    config.setTools(List.of());
+    config.setAllowedSubagents(Arrays.asList("reviewer", " reviewer "));
+    error = assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
+    assertEquals(
+        "agent allowedSubagents must not contain duplicates: reviewer", error.getMessage());
   }
 
   @Test
-  public void shouldDefaultAndPatchDefinitionConfiguration() throws Exception {
+  public void shouldRequireAndReplaceCompleteDefinitionConfiguration() throws Exception {
     ObjectMapper objectMapper = new ObjectMapper();
     AgentDefinitionMutationFactory factory = factory(objectMapper);
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setName("agent");
+    create.setVariant("quality");
+    create.setConfig(config);
     AgentDefinition definition = factory.newAgent(2L, create);
-    assertEquals("default", definition.getVariant());
+    assertEquals("quality", definition.getVariant());
 
-    String originalConfig = definition.getConfigJson();
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
+    update.setName("agent");
     update.setDescription("updated");
+    update.setVariant("quality");
+    update.setConfig(config);
     factory.update(definition, update);
     assertEquals("agent", definition.getName());
-    assertEquals(originalConfig, definition.getConfigJson());
+    assertEquals("quality", definition.getVariant());
     assertEquals(
         List.of(),
         objectMapper
@@ -96,12 +115,19 @@ public class AgentDefinitionMutationFactoryTest {
     blank.setName(" ");
     assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, blank));
 
+    AgentDefinitionCreateDTO incomplete = new AgentDefinitionCreateDTO();
+    incomplete.setName("agent");
+    assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, incomplete));
+    incomplete.setConfig(new AgentDefinitionConfigDTO());
+    assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, incomplete));
+
     AgentExecutionPolicyDTO policy = new AgentExecutionPolicyDTO();
     policy.setMaxTurns(0);
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setExecutionPolicy(policy);
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setName("agent");
+    create.setVariant("default");
     create.setConfig(config);
     assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
   }
@@ -120,6 +146,7 @@ public class AgentDefinitionMutationFactoryTest {
     config.setExecutionPolicy(policy);
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setName("agent");
+    create.setVariant("default");
     create.setConfig(config);
     AgentDefinition definition = factory.newAgent(2L, create);
 
@@ -140,6 +167,7 @@ public class AgentDefinitionMutationFactoryTest {
     config.setExecutionPolicy(policy);
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setName("agent");
+    create.setVariant("default");
     create.setConfig(config);
     IllegalArgumentException exception =
         assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
@@ -147,6 +175,7 @@ public class AgentDefinitionMutationFactoryTest {
   }
 
   private AgentDefinitionMutationFactory factory(ObjectMapper objectMapper) {
-    return new AgentDefinitionMutationFactory(new AgentEditableSupport(objectMapper), objectMapper);
+    return new AgentDefinitionMutationFactory(
+        new AgentEditableSupport(objectMapper), new AgentDefinitionConfigCodec(objectMapper));
   }
 }

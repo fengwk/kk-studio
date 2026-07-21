@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
@@ -35,7 +34,7 @@ class AgentTurnRequestTest {
     AgentTurnRequest request =
         new AgentTurnRequest(
             model(),
-            new ModelVariant("default", null, null, null, null, null),
+            new ModelVariant("default", null, null, null, null, null, null, List.of(), null),
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("hello")))),
@@ -55,7 +54,8 @@ class AgentTurnRequestTest {
         8_192,
         1_024,
         Set.of(ModelInputModality.TEXT),
-        Set.of(ModelCapability.TEXT),
+        true,
+        false,
         List.of(),
         new ModelPricing(
             "USD",

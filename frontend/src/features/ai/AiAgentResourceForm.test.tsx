@@ -5,55 +5,78 @@ import { describe, expect, it } from 'vitest'
 import { AgentForm } from '@/features/ai/AiAgentResourceForm'
 import type { AgentDraft } from '@/features/ai/ai-console-types'
 import { emptyAgentDraft } from '@/features/ai/ai-agent-draft-codec'
+import type {
+  AgentModelConfigDTO,
+  AgentModelView,
+} from '@/shared/api/contracts'
+
+const baseConfig: AgentModelConfigDTO = {
+  limit: { context: 128000, output: 8192 },
+  abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+  pricing: {
+    currency: 'USD',
+    pricingTier: 'default',
+    serviceTier: 'default',
+    serviceTierMultiplier: 1,
+    version: 'v1',
+    inputPerMillionTokens: 0,
+    outputPerMillionTokens: 0,
+    cacheReadPerMillionTokens: 0,
+    cacheWritePerMillionTokens: 0,
+    cacheWriteLongPerMillionTokens: 0,
+    reasoningPerMillionTokens: 0,
+  },
+  defaultVariant: 'default',
+  variants: [{ id: 'default' }, { id: 'fast' }],
+}
+
+function modelWithVariants(): AgentModelView {
+  return {
+    id: 'm1',
+    providerId: 'p1',
+    providerName: 'minimax',
+    name: 'MiniMax',
+    description: null,
+    config: baseConfig,
+    version: 1,
+    createTime: null,
+    updateTime: null,
+  }
+}
 
 describe('AgentForm current contracts', () => {
   it('selects model/variant/environment and marks invalid tools', async () => {
     const user = userEvent.setup()
     function Harness() {
       const [draft, setDraft] = useState<AgentDraft>({
-        ...emptyAgentDraft({
-          id: 'm1',
-          providerId: 'p1',
-          providerName: 'minimax',
-          name: 'MiniMax',
-          description: null,
-          capabilitiesJson: '["TEXT","TOOLS"]',
-          configJson:
-            '{"defaultVariant":"default","variants":[{"id":"default"},{"id":"fast"}]}',
-          createTime: null,
-          updateTime: null,
-        }),
+        ...emptyAgentDraft(modelWithVariants()),
         tools: ['missing-tool'],
         environmentName: 'gone',
       })
       return (
         <AgentForm
           draft={draft}
-          models={[
+          models={[modelWithVariants()]}
+          agents={[
             {
-              id: 'm1',
-              providerId: 'p1',
-              providerName: 'minimax',
-              name: 'MiniMax',
+              id: 'a2',
+              name: 'researcher',
               description: null,
-              capabilitiesJson: '["TEXT","TOOLS"]',
-              configJson:
-                '{"defaultVariant":"default","variants":[{"id":"default"},{"id":"fast"}]}',
+              systemPrompt: null,
+              modelId: 'm1',
+              variant: 'default',
+              config: {
+                environmentName: null,
+                tools: [],
+                skills: [],
+                allowedSubagents: [],
+                executionPolicy: {},
+              },
+              version: 1,
               createTime: null,
               updateTime: null,
             },
           ]}
-          agents={[{
-            id: 'a2',
-            name: 'researcher',
-            description: null,
-            systemPrompt: null,
-            modelId: 'm1',
-            variant: 'default',
-            config: null,
-            createTime: null,
-            updateTime: null,
-          }]}
           environments={[
             {
               name: 'platform',
@@ -82,11 +105,33 @@ describe('AgentForm current contracts', () => {
     expect(missingTool).toBeChecked()
     await user.click(missingTool)
     expect(missingTool).not.toBeChecked()
-    await user.click(screen.getByRole('button', { name: 'Environment' }))
-    await user.click(screen.getByRole('option', { name: 'local' }))
+    await user.selectOptions(screen.getByLabelText('Environment'), 'local')
     await user.click(screen.getByLabelText(/bash/))
     await user.click(screen.getByLabelText(/researcher/))
     expect(screen.getByLabelText(/bash/)).toBeChecked()
     expect(screen.getByLabelText(/researcher/)).toBeChecked()
+  })
+
+  it('renders field-level errors for structured Agent settings', () => {
+    render(
+      <AgentForm
+        draft={emptyAgentDraft(modelWithVariants())}
+        models={[modelWithVariants()]}
+        fieldErrors={{
+          variant: '请选择 Variant',
+          tools: 'Tools 冲突',
+          skills: 'Skills 冲突',
+          allowedSubagents: 'Subagents 冲突',
+          executionPolicy: 'Policy 非法',
+        }}
+        onChange={() => undefined}
+      />,
+    )
+
+    expect(screen.getByText('请选择 Variant')).toBeInTheDocument()
+    expect(screen.getByText('Tools 冲突')).toBeInTheDocument()
+    expect(screen.getByText('Skills 冲突')).toBeInTheDocument()
+    expect(screen.getByText('Subagents 冲突')).toBeInTheDocument()
+    expect(screen.getByText('Policy 非法')).toBeInTheDocument()
   })
 })

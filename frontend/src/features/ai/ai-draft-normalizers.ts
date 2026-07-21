@@ -1,6 +1,7 @@
 import type { AgentDraft, ModelDraft } from '@/features/ai/ai-console-types'
 import { extractDefaultVariantFromModel } from '@/features/ai/ai-model-draft-codec'
-import type { AgentModelDTO, AgentProviderDTO } from '@/shared/api/contracts'
+import type { AgentModelView } from '@/features/ai/AgentModelView'
+import type { AgentProviderDTO } from '@/shared/api/contracts'
 import {
   resolvePreferredVariant,
   trimValue,
@@ -13,7 +14,7 @@ export { variantOptionsFromDraft, variantOptionsFromModel } from '@/features/ai/
 export function normalizeModelDraftDefaultVariant(draft: ModelDraft): ModelDraft {
   const defaultVariant = resolvePreferredVariant(
     draft.defaultVariant,
-    variantOptionsFromDraft(draft.variants, draft.defaultVariant),
+    variantOptionsFromDraft(draft.variants),
   )
   return defaultVariant === draft.defaultVariant ? draft : { ...draft, defaultVariant }
 }
@@ -40,10 +41,10 @@ export function normalizeModelDraftProvider(
   return { ...draft, providerId: fallbackProviderId }
 }
 
-export function normalizeAgentDraftDefaultVariant(draft: AgentDraft, models: AgentModelDTO[]): AgentDraft {
+export function normalizeAgentDraftDefaultVariant(draft: AgentDraft, models: AgentModelView[]): AgentDraft {
   const selectedModel = models.find((model) => String(model.id) === draft.modelId)
   if (!selectedModel) {
-    const variant = trimValue(draft.variant) || 'default'
+    const variant = trimValue(draft.variant)
     return variant === draft.variant ? draft : { ...draft, variant }
   }
 
@@ -56,13 +57,13 @@ export function normalizeAgentDraftDefaultVariant(draft: AgentDraft, models: Age
       : options.includes(configuredDefault)
         ? configuredDefault
         : options[0]
-  const variant = resolvePreferredVariant(preferred ?? 'default', options)
+  const variant = resolvePreferredVariant(preferred ?? '', options)
   return variant === draft.variant ? draft : { ...draft, variant }
 }
 
 export function normalizeAgentDraftSelection(
   draft: AgentDraft,
-  models: AgentModelDTO[],
+  models: AgentModelView[],
   preferredModelId?: string | null,
 ): AgentDraft {
   if (models.some((model) => String(model.id) === draft.modelId)) {
@@ -99,7 +100,7 @@ export function normalizeAgentDraftSelection(
   )
 }
 
-export function applyAgentModelSelection(draft: AgentDraft, modelId: string, models: AgentModelDTO[]): AgentDraft {
+export function applyAgentModelSelection(draft: AgentDraft, modelId: string, models: AgentModelView[]): AgentDraft {
   const selectedModel = models.find((model) => String(model.id) === modelId)
   if (!selectedModel) {
     return { ...draft, modelId }
@@ -107,7 +108,7 @@ export function applyAgentModelSelection(draft: AgentDraft, modelId: string, mod
   const options = variantOptionsFromModel(selectedModel)
   const configuredDefault = extractDefaultVariantFromModel(selectedModel)
   const preferred = options.includes(configuredDefault) ? configuredDefault : options[0]
-  const variant = resolvePreferredVariant(preferred ?? 'medium', options)
+  const variant = resolvePreferredVariant(preferred ?? '', options)
   return {
     ...draft,
     modelId: String(selectedModel.id),

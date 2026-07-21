@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
@@ -238,7 +237,8 @@ class PromptCacheRequestFinalizerTest {
         1024,
         256,
         Set.of(ModelInputModality.TEXT),
-        Set.of(ModelCapability.TEXT),
+        true,
+        false,
         List.of(),
         pricing(),
         policy);
@@ -279,7 +279,8 @@ class PromptCacheRequestFinalizerTest {
       ProviderCacheControl forged,
       List<ProviderMessage> messages,
       List<ProviderToolDefinition> tools) {
-    ModelVariant variant = new ModelVariant("default", null, null, null, null, List.of());
+    ModelVariant variant =
+        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
     return new ProviderRequest(model, variant, messages, tools, forged);
   }
 }

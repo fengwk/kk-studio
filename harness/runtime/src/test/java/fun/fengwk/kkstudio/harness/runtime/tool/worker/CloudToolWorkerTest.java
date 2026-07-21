@@ -91,19 +91,6 @@ class CloudToolWorkerTest {
     assertTrue(fixture.worker.hasActiveExecution());
   }
 
-  /** Non-scoped stores retain the recovery fallback of one global claim per dispatch call. */
-  @Test
-  void fallsBackToSingleGlobalClaimForLegacyStoreCapability() {
-    Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
-    ToolInvocationWorkerStore globalOnly = new GlobalOnlyStore(fixture.store);
-    CloudToolWorker worker = fixture.newWorker(globalOnly, ToolWorkerConfig.DEFAULT);
-
-    assertEquals(1, worker.dispatchDueForThread("worker-a", 2L));
-
-    assertEquals(1, fixture.tool.executions);
-    assertTrue(worker.hasActiveExecution());
-  }
-
   /** Dispatch returns before callbacks and batches partials outside the Session result path. */
   @Test
   void dispatchesAsynchronouslyAndFlushesPartialsBeforeTerminal() throws Exception {
@@ -848,8 +835,7 @@ class CloudToolWorkerTest {
         Duration.ofSeconds(30));
   }
 
-  private static final class RecordingStore
-      implements ToolInvocationWorkerStore, ThreadScopedToolClaimStore {
+  private static final class RecordingStore implements ToolInvocationWorkerStore {
     private volatile ToolInvocation current;
     private boolean claimed;
     private boolean recovered;
@@ -900,26 +886,6 @@ class CloudToolWorkerTest {
         terminalRead.countDown();
       }
       return Optional.of(current);
-    }
-  }
-
-  private record GlobalOnlyStore(ToolInvocationWorkerStore delegate)
-      implements ToolInvocationWorkerStore {
-
-    @Override
-    public Optional<ClaimedToolInvocation> claimDue(
-        String owner, Instant now, Duration leaseDuration) {
-      return delegate.claimDue(owner, now, leaseDuration);
-    }
-
-    @Override
-    public boolean heartbeat(ClaimedToolInvocation claimed, Instant now, Duration leaseDuration) {
-      return delegate.heartbeat(claimed, now, leaseDuration);
-    }
-
-    @Override
-    public Optional<ToolInvocation> find(long invocationId) {
-      return delegate.find(invocationId);
     }
   }
 

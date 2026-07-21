@@ -8,10 +8,13 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 模型的稳定描述，不包含 Provider 凭据或单次请求参数。
+ * The runtime-facing description of a model.
  *
- * <p>{@code providerResourceId} / {@code modelResourceId} 是数据库侧的 Snowflake 资源 ID，用于账本聚合； {@code
- * providerType} / {@code modelId} 是 Provider API 侧的标识，Adapter 据此发起请求。
+ * <p>{@code providerResourceId} / {@code modelResourceId} are the database-side Snowflake IDs used
+ * for ledger aggregation; {@code providerType} / {@code modelId} identify the upstream model that
+ * the adapter dispatches to. Functional capabilities are expressed directly as the primitive {@code
+ * tools} / {@code reasoning} booleans alongside {@link ModelInputModality}, removing the previous
+ * redundant derived-capability tracking.
  */
 public record ModelDescriptor(
     long providerResourceId,
@@ -22,7 +25,8 @@ public record ModelDescriptor(
     long contextWindow,
     long maxOutputTokens,
     Set<ModelInputModality> inputModalities,
-    Set<ModelCapability> capabilities,
+    boolean tools,
+    boolean reasoning,
     List<ModelVariant> variants,
     ModelPricing pricing,
     PromptCachePolicy promptCachePolicy) {
@@ -47,7 +51,6 @@ public record ModelDescriptor(
     if (inputModalities.isEmpty()) {
       throw new IllegalArgumentException("inputModalities must not be empty");
     }
-    capabilities = Set.copyOf(Objects.requireNonNull(capabilities, "capabilities"));
     variants = List.copyOf(Objects.requireNonNull(variants, "variants"));
     if (variants.stream()
         .anyMatch(

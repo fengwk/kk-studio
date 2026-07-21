@@ -43,6 +43,8 @@ flowchart LR
 | Artifact / Usage | `/api/artifacts/{id}`、`/api/usage/threads/{id}`、`/api/usage/sessions/{id}`、`/api/usage/models/{id}` | artifact bytes 与用量汇总 |
 | Environment | `GET /api/environments`、`/api/environments/daemon/v1` | 只读实时 Registry 与 daemon WebSocket |
 
+Model 与 Agent 的 `PUT` 接口接收完整 editable body；`name`、结构化 `config`、Agent `modelId/variant` 均为必需字段。Provider credential 不回显，因此 Provider 更新中空 credential 表示保留当前密钥。
+
 ComfyUI 和 S3 接口边界见 [ComfyUI 工作流 API](comfyui-workflow-api.md) 与 [S3 预签名](s3-presign.md)。
 
 ### Controller 映射

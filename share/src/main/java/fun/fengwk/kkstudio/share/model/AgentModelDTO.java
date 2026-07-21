@@ -4,7 +4,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** Public global model representation. */
+/** Public Agent model representation with one structured executable {@link #config}. */
 @Data
 public class AgentModelDTO {
 
@@ -12,8 +12,7 @@ public class AgentModelDTO {
   private String providerId;
   private String name;
   private String description;
-  private String capabilitiesJson;
-  private String configJson;
+  private AgentModelConfigDTO config;
   private Long version;
   private LocalDateTime createTime;
   private LocalDateTime updateTime;

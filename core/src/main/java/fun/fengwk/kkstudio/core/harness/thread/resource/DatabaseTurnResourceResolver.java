@@ -118,9 +118,7 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
     ModelProvider provider =
         Objects.requireNonNull(adapter.create(providerDescriptor), "model provider");
 
-    ParsedAgentModelConfig parsed =
-        modelConfigParser.parse(
-            persistedModel.getCapabilitiesJson(), persistedModel.getConfigJson());
+    ParsedAgentModelConfig parsed = modelConfigParser.parse(persistedModel.getConfigJson());
     PromptCachePolicy cachePolicy =
         cachePolicy(providerType, providerFactory.promptCacheCapability());
     ModelDescriptor model =
@@ -133,13 +131,14 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
             parsed.contextWindow(),
             parsed.maxOutputTokens(),
             parsed.inputModalities(),
-            parsed.capabilities(),
+            parsed.tools(),
+            parsed.reasoning(),
             parsed.variants(),
             parsed.pricing(),
             cachePolicy);
     ModelVariant variant =
         parsed.variants().stream()
-            .filter(candidate -> candidate.name().equals(config.variant()))
+            .filter(candidate -> candidate.id().equals(config.variant()))
             .findFirst()
             .orElseThrow(
                 () ->

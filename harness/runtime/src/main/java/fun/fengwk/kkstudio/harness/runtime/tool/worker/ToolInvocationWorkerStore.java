@@ -10,6 +10,9 @@ import java.util.Optional;
 public interface ToolInvocationWorkerStore {
   Optional<ClaimedToolInvocation> claimDue(String leaseOwner, Instant now, Duration leaseDuration);
 
+  Optional<ClaimedToolInvocation> claimDueForThread(
+      String leaseOwner, long threadId, Instant now, Duration leaseDuration);
+
   boolean heartbeat(ClaimedToolInvocation claimed, Instant now, Duration leaseDuration);
 
   Optional<ToolInvocation> find(long invocationId);

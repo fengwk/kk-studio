@@ -2,14 +2,14 @@ import {
   extractContextWindow,
   extractDefaultVariantFromModel,
   extractMaxOutputTokens,
-  extractVariantNamesFromModel,
+  extractVariantIdsFromModel,
   toModelDraft,
 } from '@/features/ai/ai-model-draft-codec'
 import { formatCompactList } from '@/features/ai/ai-resource-card-format'
 import { ResourceCardLayout } from '@/features/ai/AiResourceCardLayout'
-import type { AgentModelDTO } from '@/shared/api/contracts'
+import type { AgentModelView } from '@/features/ai/AgentModelView'
 
-function formatAbilities(model: AgentModelDTO): string {
+function formatAbilities(model: AgentModelView): string {
   const draft = toModelDraft(model)
   const flags: string[] = []
   if (draft.tools) {
@@ -25,7 +25,7 @@ function formatAbilities(model: AgentModelDTO): string {
   return flags.length > 0 ? flags.join(' · ') : '—'
 }
 
-function formatLimit(model: AgentModelDTO): string {
+function formatLimit(model: AgentModelView): string {
   const contextWindow = extractContextWindow(model)
   const output = extractMaxOutputTokens(model)
   const parts: string[] = []
@@ -44,12 +44,12 @@ export function ModelResourceCard({
   onDelete,
   deletePending,
 }: {
-  model: AgentModelDTO
+  model: AgentModelView
   onEdit: () => void
   onDelete: () => void
   deletePending: boolean
 }) {
-  const variants = extractVariantNamesFromModel(model)
+  const variants = extractVariantIdsFromModel(model)
   const defaultVariant = extractDefaultVariantFromModel(model)
   return (
     <ResourceCardLayout

@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.model.ModelCapability;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
@@ -424,12 +423,14 @@ class PromptCacheAffinityKeyFactoryTest {
 
   private static ProviderRequest baseRequest(ProviderToolDefinition... tools) {
     ModelDescriptor m = model(101L, 202L, ProviderType.OPENAI, "m1");
-    ModelVariant variant = new ModelVariant("default", null, null, null, null, List.of());
+    ModelVariant variant =
+        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
     return new ProviderRequest(m, variant, List.of(), List.of(tools), ProviderCacheControl.none());
   }
 
   private static ProviderRequest baseRequestWithModel(ModelDescriptor descriptor) {
-    ModelVariant variant = new ModelVariant("default", null, null, null, null, List.of());
+    ModelVariant variant =
+        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
     return new ProviderRequest(
         descriptor, variant, List.of(), List.of(), ProviderCacheControl.none());
   }
@@ -506,7 +507,8 @@ class PromptCacheAffinityKeyFactoryTest {
 
   private static ModelDescriptor model(
       long providerId, long modelId, ProviderType type, String apiModelId) {
-    ModelVariant variant = new ModelVariant("default", null, null, null, null, List.of());
+    ModelVariant variant =
+        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
     return new ModelDescriptor(
         providerId,
         modelId,
@@ -516,7 +518,8 @@ class PromptCacheAffinityKeyFactoryTest {
         1024,
         256,
         Set.of(ModelInputModality.TEXT),
-        Set.of(ModelCapability.TEXT),
+        true,
+        false,
         List.of(variant),
         new ModelPricing(
             "USD",

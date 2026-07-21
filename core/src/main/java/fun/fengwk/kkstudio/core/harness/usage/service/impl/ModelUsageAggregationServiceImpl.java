@@ -36,13 +36,9 @@ public class ModelUsageAggregationServiceImpl implements ModelUsageAggregationSe
   public ModelUsageSummaryDTO summarizeThread(long threadId) {
     HarnessThreadViewDO view = threadMapper.findView(threadId);
     if (view == null) {
-      // 无 Thread 元数据时保留 thread_id 账本降级（单测/补算路径）
-      return summarize("thread", threadId, recordStore.listByThreadId(threadId));
+      throw new IllegalArgumentException("unknown thread: " + threadId);
     }
     List<SessionEntry> path = sessionStore.loadPath(view.getSessionId(), view.getHeadEntryId());
-    if (path.isEmpty()) {
-      return summarize("thread", threadId, List.of());
-    }
     Set<Long> pathEntryIds = new HashSet<>(path.size() * 2);
     for (SessionEntry entry : path) {
       pathEntryIds.add(entry.id());
