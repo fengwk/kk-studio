@@ -264,15 +264,19 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
           }
           emitFinalGaps(response);
           List<ToolCall> calls = validateToolCalls(response);
+          // Prefer the stream-aggregated buffers after gap fill. Final ProviderResponse.thinking()
+          // can be empty/null-normalized while streamed ThinkingDelta already delivered content.
           handler.onCompleted(
               new AgentTurnResult(
-                  new AgentAssistantMessage(response.text(), response.thinking(), calls),
+                  new AgentAssistantMessage(text.toString(), thinking.toString(), calls),
                   response,
                   boundRequest));
         } catch (RuntimeException error) {
+          // Keep the original exception detail for Timeline; do not replace it with a generic
+          // label.
           handler.onFailed(
               new ProviderException(
-                  ProviderErrorKind.INVALID_REQUEST, "invalid provider response", error));
+                  ProviderErrorKind.INVALID_REQUEST, failureDetail(error), error));
         } finally {
           done.set(true);
         }
@@ -372,19 +376,40 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
     }
 
     private void emitTextGap(StringBuilder received, String complete, boolean isText) {
+      String finalText = complete == null ? "" : complete;
       String partial = received.toString();
-      if (!complete.startsWith(partial)) {
+      // Streamed thinking may already be authoritative when the final snapshot omits it
+      // (common for OpenAI-compatible proxies that only emit tags mid-stream).
+      if (!isText && finalText.isEmpty()) {
+        return;
+      }
+      if (!finalText.startsWith(partial)) {
         throw new IllegalArgumentException(
             "final response conflicts with streamed " + (isText ? "text" : "thinking"));
       }
-      if (complete.length() > received.length()) {
-        String gap = complete.substring(received.length());
+      if (finalText.length() > received.length()) {
+        String gap = finalText.substring(received.length());
         received.append(gap);
         handler.onDelta(
             isText
                 ? new ProviderStreamEvent.TextDelta(gap)
                 : new ProviderStreamEvent.ThinkingDelta(gap));
       }
+    }
+
+    private static String failureDetail(Throwable error) {
+      if (error == null) {
+        return "invalid provider response";
+      }
+      String message = error.getMessage();
+      if (message != null && !message.isBlank()) {
+        return message;
+      }
+      Throwable cause = error.getCause();
+      if (cause != null && cause.getMessage() != null && !cause.getMessage().isBlank()) {
+        return cause.getMessage();
+      }
+      return error.getClass().getSimpleName();
     }
 
     private List<ToolCall> validateToolCalls(ProviderResponse response) {
