@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentChangeEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantErrorEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryPayload;
@@ -36,6 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.AgentThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventDraft;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventPayloads;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventType;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadTransactions;
@@ -602,5 +604,198 @@ class HarnessThreadTransactionServiceIntegrationTest {
 
   private static LocalDateTime utc(Instant instant) {
     return LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // recordAssistantError
+  // -------------------------------------------------------------------------------------------
+
+  /**
+   * RETRY_SCHEDULED 路径必须原子地插入 ASSISTANT_ERROR Entry、推进 head、保留 RETRYING debt、记录 assistant_failed 与
+   * thread_retry_scheduled 事件；下一次 retry debt 仍能偿清。
+   */
+  @Test
+  void recordAssistantErrorRetryAdvancesHeadAndKeepsRetryDebt() {
+    Instant now = Instant.parse("2026-08-01T00:00:00Z");
+    ThreadTransactions.SessionCreateResult created =
+        transactions.createSession("error-retry", false, now);
+    long threadId = created.mainThread().id();
+    transactions.submitUserMessage(threadId, userMessage("go"), "u", now);
+    assertTrue(threadStore.tryAcquire(threadId, "owner", now, Duration.ofMinutes(1)).isPresent());
+    ThreadTransactions.HarvestResult harvest =
+        transactions.harvestQueuedInputs(threadId, "owner", now.plusSeconds(1));
+    long userEntryId = harvest.applied().get(0).appliedEntryId();
+    long planned = 9_900_000L;
+    Instant retryAt = now.plusSeconds(5);
+    AssistantErrorEntryPayload payload =
+        new AssistantErrorEntryPayload("TRANSIENT", "transient network", 1, 2, true);
+
+    assertTrue(
+        transactions.recordAssistantError(
+            threadId,
+            "owner",
+            planned,
+            payload,
+            ThreadTransactions.AssistantErrorOutcome.RETRY_SCHEDULED,
+            retryAt,
+            List.of(
+                new ThreadEventDraft(
+                    ThreadEventType.ASSISTANT_FAILED,
+                    planned,
+                    ThreadEventPayloads.of(
+                        "kind",
+                        "TRANSIENT",
+                        "message",
+                        "transient network",
+                        "retryScheduled",
+                        true,
+                        "retryAttempt",
+                        1,
+                        "maxRetries",
+                        2)),
+                new ThreadEventDraft(
+                    ThreadEventType.THREAD_RETRY_SCHEDULED,
+                    ThreadEventPayloads.of(
+                        "retryAttempt",
+                        1,
+                        "maxRetries",
+                        2,
+                        "delayMillis",
+                        5000L,
+                        "retryAt",
+                        retryAt,
+                        "kind",
+                        "TRANSIENT"))),
+            now.plusSeconds(2)));
+
+    HarnessThreadDO thread = threadMapper.find(threadId);
+    assertEquals(planned, thread.getHeadEntryId());
+    assertEquals("RETRYING", thread.getStatus());
+    assertNull(thread.getProcessorToken());
+    assertEquals(1, thread.getRetryAttempt());
+    HarnessSessionEntryDO inserted = entryMapper.find(created.sessionId(), planned);
+    assertNotNull(inserted);
+    assertEquals("assistant_error", inserted.getEntryType());
+    assertEquals(userEntryId, inserted.getParentEntryId());
+    SessionEntryPayload decoded =
+        ENTRY_CODEC.decode(SessionEntryType.ASSISTANT_ERROR, inserted.getPayloadJson());
+    AssistantErrorEntryPayload restored = (AssistantErrorEntryPayload) decoded;
+    assertEquals("TRANSIENT", restored.kind());
+    assertEquals(1, restored.retryAttempt());
+    assertEquals(2, restored.maxRetries());
+    assertTrue(restored.retryScheduled());
+    assertEquals(1, eventMapper.countByType(threadId, ThreadEventType.ASSISTANT_FAILED.value()));
+    assertEquals(
+        1, eventMapper.countByType(threadId, ThreadEventType.THREAD_RETRY_SCHEDULED.value()));
+    // RETRYING debt must still be observable: the thread stays in RETRYING with the second
+    // attempt counted. The processor token was released by the first recordAssistantError; a
+    // follow-up re-acquire (after retry_at passes) lets the simulator run another Turn that
+    // completes the debt.
+    assertEquals("RETRYING", threadMapper.find(threadId).getStatus());
+    assertEquals(1, threadMapper.find(threadId).getRetryAttempt());
+    // After the scheduled retry_at the durable recovery can re-acquire and complete the debt.
+    assertTrue(
+        threadStore
+            .tryAcquire(threadId, "owner-2", retryAt.plusSeconds(1), Duration.ofMinutes(1))
+            .isPresent());
+    assertTrue(transactions.completeRetryDebt(threadId, "owner-2", retryAt.plusSeconds(2)));
+  }
+
+  /** FAILED 路径切到 FAILED 状态、清除 processor、写 thread_failed 事件。 */
+  @Test
+  void recordAssistantErrorFailedTerminatesThread() {
+    Instant now = Instant.parse("2026-08-02T00:00:00Z");
+    ThreadTransactions.SessionCreateResult created =
+        transactions.createSession("error-fail", false, now);
+    long threadId = created.mainThread().id();
+    transactions.submitUserMessage(threadId, userMessage("go"), "u", now);
+    assertTrue(threadStore.tryAcquire(threadId, "owner", now, Duration.ofMinutes(1)).isPresent());
+    transactions.harvestQueuedInputs(threadId, "owner", now.plusSeconds(1));
+    long planned = 9_900_010L;
+    AssistantErrorEntryPayload payload =
+        new AssistantErrorEntryPayload("INVALID_REQUEST", "bad api key", 0, null, false);
+    assertTrue(
+        transactions.recordAssistantError(
+            threadId,
+            "owner",
+            planned,
+            payload,
+            ThreadTransactions.AssistantErrorOutcome.FAILED,
+            null,
+            List.of(
+                new ThreadEventDraft(
+                    ThreadEventType.ASSISTANT_FAILED,
+                    planned,
+                    ThreadEventPayloads.of(
+                        "kind",
+                        "INVALID_REQUEST",
+                        "message",
+                        "bad api key",
+                        "retryScheduled",
+                        false,
+                        "retryAttempt",
+                        0)),
+                new ThreadEventDraft(
+                    ThreadEventType.THREAD_FAILED,
+                    ThreadEventPayloads.of("reason", "bad_key", "kind", "INVALID_REQUEST"))),
+            now.plusSeconds(2)));
+    HarnessThreadDO thread = threadMapper.find(threadId);
+    assertEquals(planned, thread.getHeadEntryId());
+    assertEquals("FAILED", thread.getStatus());
+    assertNull(thread.getProcessorToken());
+    assertNull(thread.getRetryAt());
+    assertEquals(1, eventMapper.countByType(threadId, ThreadEventType.ASSISTANT_FAILED.value()));
+    assertEquals(1, eventMapper.countByType(threadId, ThreadEventType.THREAD_FAILED.value()));
+  }
+
+  /** Lost ownership: recordAssistantError must return false without inserting an orphan entry. */
+  @Test
+  void recordAssistantErrorRefusesLostToken() {
+    Instant now = Instant.parse("2026-08-03T00:00:00Z");
+    ThreadTransactions.SessionCreateResult created =
+        transactions.createSession("error-lost", false, now);
+    long threadId = created.mainThread().id();
+    transactions.submitUserMessage(threadId, userMessage("go"), "u", now);
+    assertTrue(threadStore.tryAcquire(threadId, "owner", now, Duration.ofMinutes(1)).isPresent());
+    transactions.harvestQueuedInputs(threadId, "owner", now.plusSeconds(1));
+    long headBefore = threadMapper.find(threadId).getHeadEntryId();
+    long entryCountBefore = entryMapper.listBySession(created.sessionId()).size();
+    assertFalse(
+        transactions.recordAssistantError(
+            threadId,
+            "stolen-token",
+            9_900_020L,
+            new AssistantErrorEntryPayload("TRANSIENT", "x", 1, 2, true),
+            ThreadTransactions.AssistantErrorOutcome.RETRY_SCHEDULED,
+            now.plusSeconds(5),
+            List.of(),
+            now.plusSeconds(1)));
+    HarnessThreadDO thread = threadMapper.find(threadId);
+    assertEquals(headBefore, thread.getHeadEntryId());
+    assertEquals(entryCountBefore, entryMapper.listBySession(created.sessionId()).size());
+  }
+
+  /** RETRY_SCHEDULED 必须显式带 retryAt；缺值即时拒绝。 */
+  @Test
+  void recordAssistantErrorRetryRequiresRetryAt() {
+    Instant now = Instant.parse("2026-08-04T00:00:00Z");
+    ThreadTransactions.SessionCreateResult created =
+        transactions.createSession("error-validate", false, now);
+    long threadId = created.mainThread().id();
+    transactions.submitUserMessage(threadId, userMessage("go"), "u", now);
+    assertTrue(threadStore.tryAcquire(threadId, "owner", now, Duration.ofMinutes(1)).isPresent());
+    transactions.harvestQueuedInputs(threadId, "owner", now.plusSeconds(1));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            transactions.recordAssistantError(
+                threadId,
+                "owner",
+                9_900_030L,
+                new AssistantErrorEntryPayload("TRANSIENT", "x", 1, 2, true),
+                ThreadTransactions.AssistantErrorOutcome.RETRY_SCHEDULED,
+                null,
+                List.of(),
+                now.plusSeconds(1)));
   }
 }

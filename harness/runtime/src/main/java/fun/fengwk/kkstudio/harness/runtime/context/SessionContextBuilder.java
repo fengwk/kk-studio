@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.context;
 
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantErrorEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.BranchSummaryEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.CustomMessageEntryPayload;
@@ -61,6 +62,8 @@ public final class SessionContextBuilder {
         messages.add(AgentMessage.system("Session summary:\n" + compaction.summary()));
       } else if (entry.payload() instanceof BranchSummaryEntryPayload branchSummary) {
         messages.add(AgentMessage.system("Branch summary:\n" + branchSummary.summary()));
+      } else if (entry.payload() instanceof AssistantErrorEntryPayload) {
+        // UI/audit artifact of a failed attempt; it must not enter the next Provider Context.
       }
     }
     return List.copyOf(messages);

@@ -70,6 +70,7 @@ export function ResourceEditorModal({
           {modal.kind === 'provider' && (
             <ProviderForm
               draft={providerDraft}
+              mode={modal.mode}
               fieldErrors={fieldErrors}
               onChange={onProviderDraftChange}
             />

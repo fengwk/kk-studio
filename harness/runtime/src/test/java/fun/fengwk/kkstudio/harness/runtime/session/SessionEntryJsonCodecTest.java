@@ -22,7 +22,7 @@ class SessionEntryJsonCodecTest {
 
   /**
    * 全部持久化 payload
-   * 必须逐一无损往返：ROOT/MESSAGE/AGENT_CHANGE/COMPACTION/BRANCH_SUMMARY/CUSTOM/CUSTOM_MESSAGE/LABEL。
+   * 必须逐一无损往返：ROOT/MESSAGE/AGENT_CHANGE/COMPACTION/BRANCH_SUMMARY/CUSTOM/CUSTOM_MESSAGE/LABEL/ASSISTANT_ERROR。
    */
   @Test
   void shouldRoundTripEveryPayloadType() {
@@ -37,7 +37,8 @@ class SessionEntryJsonCodecTest {
             new BranchSummaryEntryPayload("branch summary"),
             new CustomEntryPayload("trace", "{\"enabled\":true}"),
             new CustomMessageEntryPayload(userMessage),
-            new LabelEntryPayload("checkpoint"));
+            new LabelEntryPayload("checkpoint"),
+            new AssistantErrorEntryPayload("TRANSIENT", "model call timed out", 2, 3, true));
 
     assertEquals(SessionEntryType.values().length, payloads.size());
     assertEquals(
@@ -47,6 +48,43 @@ class SessionEntryJsonCodecTest {
       assertEquals(
           payload, codec.decode(payload.type(), codec.encode(payload)), payload.type().name());
     }
+  }
+
+  /** AssistantErrorEntryPayload 必须严格拒绝空白 kind、负数 attempt、未知字段。 */
+  @Test
+  void shouldStrictlyRejectIllegalAssistantErrorPayload() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AssistantErrorEntryPayload("", "msg", 0, null, false));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AssistantErrorEntryPayload("TRANSIENT", null, 0, null, false));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AssistantErrorEntryPayload("TRANSIENT", "msg", -1, null, false));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AssistantErrorEntryPayload("TRANSIENT", "msg", 0, -1, false));
+
+    String unknown =
+        "{\"kind\":\"TRANSIENT\",\"message\":\"m\",\"retryAttempt\":0,\"maxRetries\":null,"
+            + "\"retryScheduled\":false,\"extra\":\"nope\"}";
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(SessionEntryType.ASSISTANT_ERROR, unknown));
+
+    String wrongType =
+        "{\"kind\":\"TRANSIENT\",\"message\":\"m\",\"retryAttempt\":\"zero\",\"maxRetries\":null,"
+            + "\"retryScheduled\":false}";
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(SessionEntryType.ASSISTANT_ERROR, wrongType));
+
+    String missingKind =
+        "{\"message\":\"m\",\"retryAttempt\":0,\"maxRetries\":null,\"retryScheduled\":false}";
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(SessionEntryType.ASSISTANT_ERROR, missingKind));
   }
 
   /** 八种消息 content 必须无损往返，ToolCall 与 ToolResult 的调用身份必须一致。 */

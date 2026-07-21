@@ -203,20 +203,91 @@ describe('thread timeline', () => {
     expect(timeline.messages).toMatchObject([{ role: 'assistant', text: '尚未落库', status: 'done' }])
   })
 
-  it('removes interrupted stream output when its failure has an automatic retry plan', () => {
+  it('replaces interrupted stream output with a visible retry error entry', () => {
     const timeline = buildThreadTimeline(
       [],
       [],
       [
         threadEvent('1', 'assistant_started', '99', {}),
         threadEvent('2', 'assistant_delta_batch', '99', { deltas: [{ kind: 'text', text: '临时片段' }] }),
-        threadEvent('3', 'assistant_failed', '99', { retryScheduled: true }),
+        threadEvent('3', 'assistant_failed', '99', { message: '服务暂时不可用', retryScheduled: true }),
         threadEvent('4', 'thread_retry_scheduled', null, { retryAttempt: 1 }),
       ],
     )
 
-    expect(timeline.messages).toEqual([])
+    expect(timeline.messages).toMatchObject([
+      { id: '99', role: 'assistant', text: '服务暂时不可用', status: 'error' },
+    ])
     expect(timeline.hasLiveProjection).toBe(false)
+  })
+
+  it('dedupes a durable assistant error entry with its live failure event', () => {
+    const events = [
+      threadEvent('1', 'assistant_started', '99', {}),
+      threadEvent('2', 'assistant_delta_batch', '99', { deltas: [{ kind: 'text', text: '临时片段' }] }),
+      threadEvent('3', 'assistant_failed', '99', { message: '连接失败', retryScheduled: true }),
+    ]
+
+    const live = buildThreadTimeline([], [], events)
+    expect(live.messages).toMatchObject([
+      { id: '99', role: 'assistant', text: '连接失败', status: 'error' },
+    ])
+
+    const durable = buildThreadTimeline(
+      [entry('99', 'assistant_error', assistantErrorPayload('连接失败', true, 1, 3))],
+      [],
+      events,
+    )
+    expect(durable.messages).toMatchObject([
+      { id: '99', role: 'assistant', text: '连接失败', status: 'error' },
+    ])
+    expect(durable.messages).toHaveLength(1)
+  })
+
+  it('keeps every retry error visible before a later successful assistant response', () => {
+    const timeline = buildThreadTimeline(
+      [
+        entry('1', 'message', messagePayload('USER', [{ type: 'text', text: '问题' }])),
+        entry('2', 'assistant_error', assistantErrorPayload('第一次失败', true, 1, 3)),
+        entry('3', 'assistant_error', assistantErrorPayload('第二次失败', true, 2, 3)),
+        entry('4', 'message', messagePayload('ASSISTANT', [{ type: 'text', text: '最终成功' }])),
+      ],
+      [],
+      [
+        threadEvent('1', 'assistant_failed', '2', { message: '第一次失败', retryScheduled: true }),
+        threadEvent('2', 'assistant_failed', '3', { message: '第二次失败', retryScheduled: true }),
+        threadEvent('3', 'assistant_completed', '4', {}),
+      ],
+    )
+
+    expect(timeline.messages).toMatchObject([
+      { id: '1', role: 'user', text: '问题' },
+      { id: '2', role: 'assistant', text: '第一次失败', status: 'error' },
+      { id: '3', role: 'assistant', text: '第二次失败', status: 'error' },
+      { id: '4', role: 'assistant', text: '最终成功', status: 'done' },
+    ])
+  })
+
+  it('does not let a legacy failure event contaminate the next successful assistant', () => {
+    const timeline = buildThreadTimeline(
+      [],
+      [],
+      [
+        threadEvent('1', 'assistant_started', '10', {}),
+        threadEvent('2', 'assistant_delta_batch', '10', { deltas: [{ kind: 'text', text: '中断片段' }] }),
+        threadEvent('3', 'assistant_failed', '10', { message: '旧失败', retryScheduled: false }),
+        threadEvent('4', 'thread_failed', null, { reason: 'legacy' }),
+        threadEvent('5', 'assistant_started', '11', {}),
+        threadEvent('6', 'assistant_delta_batch', '11', { deltas: [{ kind: 'text', text: '正常回答' }] }),
+        threadEvent('7', 'assistant_completed', '11', {}),
+      ],
+    )
+
+    expect(timeline.messages).toMatchObject([
+      { id: '10', role: 'assistant', text: '旧失败', status: 'error' },
+      { role: 'assistant', text: '正常回答', status: 'done' },
+    ])
+    expect(timeline.messages).toHaveLength(2)
   })
 
   it('correlates tool events and stringifies json partial/final content', () => {
@@ -475,4 +546,14 @@ function threadEvent(
 
 function messagePayload(role: string, contents: Array<Record<string, unknown>>) {
   return { message: { role, contents }, assistantMetadata: null }
+}
+
+function assistantErrorPayload(message: string, retryScheduled: boolean, retryAttempt: number, maxRetries: number) {
+  return {
+    kind: 'TRANSIENT',
+    message,
+    retryAttempt,
+    maxRetries,
+    retryScheduled,
+  }
 }
