@@ -26,7 +26,12 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
         <section className="thread-block thread-block-assistant thread-assistant-shell">
           <CopyButton source={text} className="thread-assistant-copy" label="复制全文" />
           <div className="thread-block-body thread-assistant-text">
-            <MarkdownRenderer content={text} />
+            {message.status === 'error' ? (
+              // Provider failures must stay raw (JSON/HTML bodies). Markdown would escape or reformat them.
+              <pre className="thread-error-raw">{text}</pre>
+            ) : (
+              <MarkdownRenderer content={text} />
+            )}
           </div>
         </section>
       ) : null}
