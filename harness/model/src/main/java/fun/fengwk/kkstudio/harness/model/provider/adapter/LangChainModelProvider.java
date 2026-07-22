@@ -491,8 +491,13 @@ abstract class LangChainModelProvider implements ModelProvider {
   }
 
   static ProviderStopReason toStopReason(FinishReason finishReason, boolean hasToolCalls) {
+    // MiniMax and some OpenAI-compatible endpoints report STOP/OTHER for turns that still carry
+    // executable tool calls. A callable response must remain executable at the common boundary.
+    if (hasToolCalls) {
+      return ProviderStopReason.TOOL_CALLS;
+    }
     if (finishReason == null) {
-      return hasToolCalls ? ProviderStopReason.TOOL_CALLS : ProviderStopReason.COMPLETED;
+      return ProviderStopReason.COMPLETED;
     }
     return switch (finishReason) {
       case STOP -> ProviderStopReason.COMPLETED;

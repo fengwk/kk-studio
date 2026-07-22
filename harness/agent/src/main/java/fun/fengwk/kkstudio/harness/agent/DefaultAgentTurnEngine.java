@@ -455,9 +455,9 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
     private final StringBuilder arguments = new StringBuilder();
 
     private void append(ProviderStreamEvent.ToolCallDelta delta) {
-      append(id, delta.id());
-      append(name, delta.name());
-      append(arguments, delta.argumentsJson());
+      appendIdentity(id, delta.id());
+      appendIdentity(name, delta.name());
+      appendArguments(arguments, delta.argumentsJson());
     }
 
     private ProviderStreamEvent.ToolCallDelta gap(int index, ProviderToolCall complete) {
@@ -470,7 +470,27 @@ public final class DefaultAgentTurnEngine implements AgentTurnEngine {
       return new ProviderStreamEvent.ToolCallDelta(index, idGap, nameGap, argumentsGap);
     }
 
-    private static void append(StringBuilder target, String value) {
+    private static void appendIdentity(StringBuilder target, String value) {
+      if (value == null || value.isBlank()) {
+        return;
+      }
+      if (target.length() == 0) {
+        target.append(value);
+        return;
+      }
+      String current = target.toString();
+      if (value.equals(current) || current.startsWith(value)) {
+        return;
+      }
+      if (value.startsWith(current)) {
+        target.append(value, current.length(), value.length());
+        return;
+      }
+      throw new IllegalArgumentException(
+          "streamed tool call identity conflicts: " + current + " vs " + value);
+    }
+
+    private static void appendArguments(StringBuilder target, String value) {
       if (value != null) {
         target.append(value);
       }

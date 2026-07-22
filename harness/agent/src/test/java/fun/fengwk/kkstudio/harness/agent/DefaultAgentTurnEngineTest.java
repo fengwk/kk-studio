@@ -89,6 +89,26 @@ class DefaultAgentTurnEngineTest {
     assertFalse(handler.failed);
   }
 
+  /** 重复发送完整工具调用标识的兼容流仍能与最终快照对齐。 */
+  @Test
+  void acceptsRepeatedToolCallIdentityDeltas() {
+    ProviderToolCall call = new ProviderToolCall("call-1", "read", "{\"path\":\"README.md\"}");
+    FakeModelProvider provider =
+        FakeModelProvider.sequence()
+            .delta(new ProviderStreamEvent.ToolCallDelta(0, "call-1", "read", "{\"path\":\""))
+            .delta(new ProviderStreamEvent.ToolCallDelta(0, "call-1", "read", "README.md\"}"))
+            .complete(response("", "", List.of(call), ProviderStopReason.TOOL_CALLS))
+            .build();
+    RecordingHandler handler = new RecordingHandler();
+
+    new DefaultAgentTurnEngine(provider).execute(request(), handler);
+
+    assertFalse(handler.failed);
+    assertEquals("call-1", handler.result.toolCalls().get(0).id());
+    assertEquals("read", handler.result.toolCalls().get(0).toolName());
+    assertEquals("{\"path\":\"README.md\"}", handler.result.toolCalls().get(0).argumentsJson());
+  }
+
   /** interceptor 严格按传入顺序串行执行，前项结果对后项可见，最终结果实际交给 Provider。 */
   @Test
   void interceptsProviderRequestInInputOrder() {
