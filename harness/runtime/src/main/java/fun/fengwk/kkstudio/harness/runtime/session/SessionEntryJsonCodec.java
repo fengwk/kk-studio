@@ -55,6 +55,9 @@ public final class SessionEntryJsonCodec {
     } else if (payload instanceof AgentChangeEntryPayload value) {
       node.put("agentDefinitionId", value.agentDefinitionId());
       node.put("agentName", value.agentName());
+    } else if (payload instanceof ModelChangeEntryPayload value) {
+      node.put("modelId", value.modelId());
+      node.put("variant", value.variant());
     } else if (payload instanceof CompactionEntryPayload value) {
       node.put("summary", value.summary());
       node.put("firstKeptEntryId", value.firstKeptEntryId());
@@ -105,6 +108,10 @@ public final class SessionEntryJsonCodec {
         fields(node, "agentDefinitionId", "agentName");
         yield new AgentChangeEntryPayload(
             positiveLong(node, "agentDefinitionId"), text(node, "agentName"));
+      }
+      case MODEL_CHANGE -> {
+        fields(node, "modelId", "variant");
+        yield new ModelChangeEntryPayload(text(node, "modelId"), text(node, "variant"));
       }
       case COMPACTION -> {
         fields(node, "summary", "firstKeptEntryId", "tokensBefore", "detailsJson");

@@ -180,6 +180,10 @@ export function buildThreadTimeline(
         break
       }
       case 'model_changed': {
+        // Durable MODEL_CHANGE entry already projected; skip event overlay when subject matches.
+        if (event.subjectEntryId && entryIds.has(event.subjectEntryId)) {
+          break
+        }
         insertAfterTurnTail(messages, event.subjectEntryId, projectModelChangedMeta(event, payload))
         break
       }

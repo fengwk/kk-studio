@@ -42,6 +42,21 @@ export function projectDurableEntry(
     })
     return
   }
+  if (entry.entryType === 'model_change') {
+    const modelId = getString(payload.modelId) || 'model'
+    const variant = getString(payload.variant)
+    messages.push({
+      id: entry.entryId,
+      role: 'meta',
+      kind: 'model_change',
+      subjectEntryId: entry.entryId,
+      text: variant ? `Model 已切换为 ${modelId} · ${variant}` : `Model 已切换为 ${modelId}`,
+      details: { modelId, variant },
+      createdAt: entry.createTime,
+      status: 'done',
+    })
+    return
+  }
   if (entry.entryType === 'assistant_error') {
     messages.push({
       id: entry.entryId,

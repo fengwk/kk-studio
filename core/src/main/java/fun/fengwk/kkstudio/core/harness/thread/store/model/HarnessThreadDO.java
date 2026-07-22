@@ -28,19 +28,19 @@ public class HarnessThreadDO {
   /** RETRYING 状态的下一次可执行时间。 */
   private LocalDateTime retryAt;
 
-  /** 当前生效 AgentDefinition id。 */
+  /** 当前生效配置：AgentDefinition id。 */
   private Long activeAgentDefinitionId;
 
-  /** 捕获的 Agent 名称。 */
+  /** 当前生效配置：捕获时的 Agent 名称。 */
   private String activeAgentName;
 
-  /** Thread 级 model id。 */
+  /** 当前生效配置：model id。 */
   private String modelId;
 
-  /** Thread 级 model variant。 */
+  /** 当前生效配置：model variant。 */
   private String variant;
 
-  /** Thread 级 YOLO；与 schema 非空默认 false 对齐。 */
+  /** 运行策略：YOLO；与 schema 非空默认 false 对齐。不入 Entry。 */
   private Boolean yoloEnabled = false;
 
   /** 当前 processor fencing token；空表示空闲。 */

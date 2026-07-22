@@ -22,7 +22,7 @@ class SessionEntryJsonCodecTest {
 
   /**
    * 全部持久化 payload
-   * 必须逐一无损往返：ROOT/MESSAGE/AGENT_CHANGE/COMPACTION/BRANCH_SUMMARY/CUSTOM/CUSTOM_MESSAGE/LABEL/ASSISTANT_ERROR。
+   * 必须逐一无损往返：ROOT/MESSAGE/AGENT_CHANGE/MODEL_CHANGE/COMPACTION/BRANCH_SUMMARY/CUSTOM/CUSTOM_MESSAGE/LABEL/ASSISTANT_ERROR。
    */
   @Test
   void shouldRoundTripEveryPayloadType() {
@@ -33,6 +33,7 @@ class SessionEntryJsonCodecTest {
             new RootEntryPayload(),
             new MessageEntryPayload(userMessage),
             new AgentChangeEntryPayload(7L, "replacement"),
+            new ModelChangeEntryPayload("model-7", "default"),
             new CompactionEntryPayload("summary", 42L, 0, "{\"reason\":\"budget\"}"),
             new BranchSummaryEntryPayload("branch summary"),
             new CustomEntryPayload("trace", "{\"enabled\":true}"),
