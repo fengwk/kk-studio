@@ -1,5 +1,4 @@
 import type { AgentDraft, ModelDraft } from '@/features/ai/ai-console-types'
-import { extractDefaultVariantFromModel } from '@/features/ai/ai-model-draft-codec'
 import type { AgentModelView } from '@/features/ai/AgentModelView'
 import type { AgentProviderDTO } from '@/shared/api/contracts'
 import {
@@ -50,15 +49,15 @@ export function normalizeAgentDraftDefaultVariant(draft: AgentDraft, models: Age
 
   const options = variantOptionsFromModel(selectedModel)
   const currentVariant = trimValue(draft.variant)
-  const configuredDefault = extractDefaultVariantFromModel(selectedModel)
-  const preferred =
-    currentVariant && options.includes(currentVariant)
-      ? currentVariant
-      : options.includes(configuredDefault)
-        ? configuredDefault
-        : options[0]
-  const variant = resolvePreferredVariant(preferred ?? '', options)
-  return variant === draft.variant ? draft : { ...draft, variant }
+  // Empty override is intentional: use model.defaultVariant at runtime.
+  if (!currentVariant) {
+    return currentVariant === draft.variant ? draft : { ...draft, variant: '' }
+  }
+  // Drop invalid overrides so the form falls back to model default.
+  if (!options.includes(currentVariant)) {
+    return draft.variant === '' ? draft : { ...draft, variant: '' }
+  }
+  return currentVariant === draft.variant ? draft : { ...draft, variant: currentVariant }
 }
 
 export function normalizeAgentDraftSelection(
@@ -74,12 +73,12 @@ export function normalizeAgentDraftSelection(
     ? models.find((model) => String(model.id) === preferredModelId)
     : undefined
   if (preferred) {
-    const options = variantOptionsFromModel(preferred)
     return normalizeAgentDraftDefaultVariant(
       {
         ...draft,
         modelId: String(preferred.id),
-        variant: trimValue(draft.variant) || options[0] || draft.variant,
+        // Switching default model clears override so the new model default applies.
+        variant: '',
       },
       models,
     )
@@ -89,12 +88,11 @@ export function normalizeAgentDraftSelection(
   if (!fallback) {
     return normalizeAgentDraftDefaultVariant(draft, models)
   }
-  const options = variantOptionsFromModel(fallback)
   return normalizeAgentDraftDefaultVariant(
     {
       ...draft,
       modelId: String(fallback.id),
-      variant: trimValue(draft.variant) || options[0] || draft.variant,
+      variant: '',
     },
     models,
   )
@@ -103,15 +101,12 @@ export function normalizeAgentDraftSelection(
 export function applyAgentModelSelection(draft: AgentDraft, modelId: string, models: AgentModelView[]): AgentDraft {
   const selectedModel = models.find((model) => String(model.id) === modelId)
   if (!selectedModel) {
-    return { ...draft, modelId }
+    return { ...draft, modelId, variant: '' }
   }
-  const options = variantOptionsFromModel(selectedModel)
-  const configuredDefault = extractDefaultVariantFromModel(selectedModel)
-  const preferred = options.includes(configuredDefault) ? configuredDefault : options[0]
-  const variant = resolvePreferredVariant(preferred ?? '', options)
   return {
     ...draft,
     modelId: String(selectedModel.id),
-    variant,
+    // Clear override when model changes; model.defaultVariant is used unless user re-overrides.
+    variant: '',
   }
 }

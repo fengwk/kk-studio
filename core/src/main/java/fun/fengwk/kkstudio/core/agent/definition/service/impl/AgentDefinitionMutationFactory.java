@@ -69,10 +69,8 @@ final class AgentDefinitionMutationFactory {
       throw new IllegalArgumentException("agent config must not be null");
     }
     String configJson = configCodec.encode(normalizeConfig(config));
+    // null/blank = no override; runtime/thread apply resolves model.defaultVariant.
     String variant = editableSupport.trimToNull(properties.getVariant());
-    if (variant == null) {
-      throw new IllegalArgumentException("agent variant must not be blank");
-    }
     return new Mutation(
         name,
         editableSupport.trimToNull(properties.getDescription()),

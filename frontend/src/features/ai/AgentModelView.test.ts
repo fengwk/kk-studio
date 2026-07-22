@@ -4,7 +4,7 @@ import type {
   AgentModelDTO,
   AgentProviderDTO,
 } from '@/shared/api/contracts'
-import { toAgentModelViews } from '@/features/ai/AgentModelView'
+import { formatModelRef, modelRef, toAgentModelViews } from '@/features/ai/AgentModelView'
 
 function baseConfig(): AgentModelConfigDTO {
   return {
@@ -86,5 +86,19 @@ describe('toAgentModelViews', () => {
     const providers = [provider('42', 'numeric')]
     const models = [model('m1', '42')]
     expect(toAgentModelViews(models, providers)[0].providerName).toBe('numeric')
+  })
+})
+
+describe('formatModelRef', () => {
+  it('composes the canonical provider/model identity', () => {
+    expect(formatModelRef('minimax', 'MiniMax-M2.7')).toBe('minimax/MiniMax-M2.7')
+    expect(formatModelRef('minimax', 'minimax/MiniMax-M2.7')).toBe('minimax/MiniMax-M2.7')
+    expect(formatModelRef(null, 'orphan')).toBe('orphan')
+    expect(formatModelRef('only-provider', null)).toBe('only-provider')
+  })
+
+  it('builds refs from AgentModelView', () => {
+    const view = toAgentModelViews([model('MiniMax-M2.7', 'p1')], [provider('p1', 'minimax')])[0]
+    expect(modelRef(view)).toBe('minimax/MiniMax-M2.7')
   })
 })

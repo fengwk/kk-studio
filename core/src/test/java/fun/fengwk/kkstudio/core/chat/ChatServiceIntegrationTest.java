@@ -55,13 +55,23 @@ class ChatServiceIntegrationTest {
       assertEquals("alpha", loaded.getTitle());
       assertEquals("1", loaded.getDefaultAgentId());
 
+      ChatCreateDTO blankTitle = new ChatCreateDTO();
+      assertThrows(IllegalArgumentException.class, () -> chatService.createChat(blankTitle));
+
       ChatCreateDTO unknownAgent = new ChatCreateDTO();
+      unknownAgent.setTitle("orphan");
       unknownAgent.setDefaultAgentId("999999999999");
       assertThrows(IllegalArgumentException.class, () -> chatService.createChat(unknownAgent));
 
       ChatUpdateDTO badUpdate = new ChatUpdateDTO();
       badUpdate.setDefaultAgentId("999999999999");
       assertThrows(IllegalArgumentException.class, () -> chatService.updateChat(chatId, badUpdate));
+
+      ChatUpdateDTO blankTitleUpdate = new ChatUpdateDTO();
+      blankTitleUpdate.setTitle("   ");
+      assertThrows(
+          IllegalArgumentException.class, () -> chatService.updateChat(chatId, blankTitleUpdate));
+      assertEquals("alpha", chatService.getChat(chatId).getTitle());
 
       ChatUpdateDTO update = new ChatUpdateDTO();
       update.setTitle("beta");
@@ -94,7 +104,9 @@ class ChatServiceIntegrationTest {
 
   @Test
   void attachDetachMembershipIsIdempotentOnDuplicateAttach() {
-    ChatDTO chat = chatService.createChat(new ChatCreateDTO());
+    ChatCreateDTO create = new ChatCreateDTO();
+    create.setTitle("membership");
+    ChatDTO chat = chatService.createChat(create);
     HarnessSessionDTO session =
         sessionCommandService.createSession(sessionCreate("1", "chat-member"));
     String chatId = chat.getId();

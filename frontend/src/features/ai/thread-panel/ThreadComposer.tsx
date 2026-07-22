@@ -1,7 +1,14 @@
-import { useEffect, useMemo, useRef, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { SendIcon } from '@/features/canvas/icons'
-import { ThreadCommandPalette } from '@/features/ai/thread-panel/ThreadCommandPalette'
-import { filterThreadCommands, type ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
+import {
+  ThreadCommandPalette,
+} from '@/features/ai/thread-panel/ThreadCommandPalette'
+import {
+  firstEnabledCommandIndex,
+  stepEnabledCommandIndex,
+  useFilteredThreadCommands,
+} from '@/features/ai/thread-panel/thread-command-navigation'
+import { THREAD_COMMANDS, type ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
 
 const TEXTAREA_MIN_HEIGHT = 28
 const TEXTAREA_LINE_HEIGHT = 18
@@ -11,6 +18,7 @@ const TEXTAREA_MAX_HEIGHT = TEXTAREA_MIN_HEIGHT + TEXTAREA_LINE_HEIGHT * (TEXTAR
 /**
  * Canvas-style dock: typing `/` opens the command table with search.
  * Composer stays enabled while Thread is working or a prior HTTP mutation is in flight.
+ * ArrowUp/ArrowDown move the highlighted command; Enter confirms the active enabled item.
  */
 export function ThreadComposer({
   draft,
@@ -19,7 +27,7 @@ export function ThreadComposer({
   onDraftChange,
   onSubmit,
   onCommand,
-  commands,
+  commands = THREAD_COMMANDS,
 }: {
   draft: string
   pending: boolean
@@ -34,12 +42,21 @@ export function ThreadComposer({
 
   const slashMode = draft.startsWith('/')
   const query = slashMode ? draft.slice(1) : ''
+  const filteredCommands = useFilteredThreadCommands(query, commands)
+  const [activeIndex, setActiveIndex] = useState(0)
 
   // Pending HTTP mutation must not block continuous submissions.
   const canSend = useMemo(
     () => Boolean(draft.trim()) && !disabled && !draft.startsWith('/'),
     [disabled, draft],
   )
+
+  useEffect(() => {
+    if (!slashMode) {
+      return
+    }
+    setActiveIndex(firstEnabledCommandIndex(filteredCommands))
+  }, [slashMode, query, filteredCommands])
 
   useEffect(() => {
     const el = textareaRef.current
@@ -85,6 +102,9 @@ export function ThreadComposer({
   }
 
   function handleSelect(command: ThreadCommand) {
+    if (command.disabled) {
+      return
+    }
     closeSlashMode()
     onCommand(command)
   }
@@ -96,12 +116,24 @@ export function ThreadComposer({
       closeSlashMode()
       return
     }
+    if (slashMode && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+      event.preventDefault()
+      event.stopPropagation()
+      const delta = event.key === 'ArrowDown' ? 1 : -1
+      setActiveIndex((current) => stepEnabledCommandIndex(filteredCommands, current, delta))
+      return
+    }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       if (slashMode) {
         event.preventDefault()
-        const command = filterThreadCommands(query, commands)[0]
-        if (command) {
+        const command = filteredCommands[activeIndex]
+        if (command && !command.disabled) {
           handleSelect(command)
+        } else {
+          const fallback = filteredCommands.find((item) => !item.disabled)
+          if (fallback) {
+            handleSelect(fallback)
+          }
         }
         return
       }
@@ -117,6 +149,8 @@ export function ThreadComposer({
         open={slashMode}
         query={query}
         commands={commands}
+        activeIndex={activeIndex}
+        onActiveIndexChange={setActiveIndex}
         onSelect={handleSelect}
       />
       <div className="thread-dock">

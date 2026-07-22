@@ -8,11 +8,10 @@ import {
   focusPane,
   loadChatPaneState,
   saveChatPaneState,
-  updatePaneTarget,
+  updatePaneThread,
   type ChatLayout,
   type ChatPaneState,
   type PaneSortPreference,
-  type PaneTarget,
 } from '@/features/ai/chat-pane-state'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
@@ -71,8 +70,8 @@ export function ChatWorkspacePage() {
     setPaneState((current) => focusPane(current, paneId))
   }
 
-  function setTarget(paneId: string, target: PaneTarget) {
-    setPaneState((current) => updatePaneTarget(current, paneId, target))
+  function setThread(paneId: string, threadId: string | null) {
+    setPaneState((current) => updatePaneThread(current, paneId, threadId))
   }
 
   function setSessionSort(sort: PaneSortPreference) {
@@ -134,7 +133,7 @@ export function ChatWorkspacePage() {
             sessionSort={paneState.sessionSort}
             threadSort={paneState.threadSort}
             onFocus={() => setFocused(pane.id)}
-            onTargetChange={(target) => setTarget(pane.id, target)}
+            onThreadChange={(threadId) => setThread(pane.id, threadId)}
             onSessionSortChange={setSessionSort}
             onThreadSortChange={setThreadSort}
             onDefaultAgentChange={async (agentId) => {

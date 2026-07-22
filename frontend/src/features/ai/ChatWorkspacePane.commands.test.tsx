@@ -34,6 +34,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     listSessionTasks: vi.fn(),
     createThreadEventStream: vi.fn(),
     setThreadAgent: vi.fn(),
+    setThreadModel: vi.fn(),
     setThreadYolo: vi.fn(),
     submitThreadMessage: vi.fn(),
   },
@@ -166,11 +167,16 @@ describe('ChatWorkspacePane commands', () => {
       clientMessageId: 'c', status: 'QUEUED', appliedEntryId: null, resolvedAt: null,
       cancelledByStopId: null, createTime: null,
     })
+    vi.mocked(harnessService.setThreadModel).mockResolvedValue({
+      inputId: 'm', threadId: 't1', sequence: 2, inputType: 'SET_MODEL', payloadJson: '{}',
+      clientMessageId: 'c', status: 'QUEUED', appliedEntryId: null, resolvedAt: null,
+      cancelledByStopId: null, createTime: null,
+    })
   })
 
   it('switches session/thread targets and queues setThreadAgent', async () => {
     const user = userEvent.setup()
-    const onTargetChange = vi.fn()
+    const onThreadChange = vi.fn()
     const onSessionSortChange = vi.fn()
     const onThreadSortChange = vi.fn()
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -180,12 +186,12 @@ describe('ChatWorkspacePane commands', () => {
           chatId="chat-1"
           chat={{ id: 'chat-1', title: 'C', defaultAgentId: 'a1', version: 1, createTime: null, updateTime: null }}
           agents={agents}
-          pane={{ id: 'pane-1', target: { sessionId: 's1', threadId: 't1' } }}
+          pane={{ id: 'pane-1', threadId: 't1' }}
           focused
           sessionSort="recent"
           threadSort="recent"
           onFocus={() => undefined}
-          onTargetChange={onTargetChange}
+          onThreadChange={onThreadChange}
           onSessionSortChange={onSessionSortChange}
           onThreadSortChange={onThreadSortChange}
           onDefaultAgentChange={async () => undefined}
@@ -199,7 +205,7 @@ describe('ChatWorkspacePane commands', () => {
     await user.click(screen.getByRole('button', { name: '创建时间' }))
     expect(onSessionSortChange).toHaveBeenCalledWith('created')
     await user.click(screen.getByRole('button', { name: /S2/ }))
-    expect(onTargetChange).toHaveBeenCalledWith({ sessionId: 's2', threadId: 't9' })
+    expect(onThreadChange).toHaveBeenCalledWith('t9')
 
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('/thread{Enter}')
@@ -207,7 +213,7 @@ describe('ChatWorkspacePane commands', () => {
     await user.click(screen.getByRole('button', { name: '最近更新' }))
     expect(onThreadSortChange).toHaveBeenCalledWith('recent')
     await user.click(screen.getByRole('button', { name: /t2/ }))
-    expect(onTargetChange).toHaveBeenCalledWith({ sessionId: 's1', threadId: 't2' })
+    expect(onThreadChange).toHaveBeenCalledWith('t2')
 
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('/agent{Enter}')
@@ -216,5 +222,29 @@ describe('ChatWorkspacePane commands', () => {
     await waitFor(() => expect(harnessService.setThreadAgent).toHaveBeenCalled())
     expect(harnessService.setThreadAgent.mock.calls[0][0]).toBe('t1')
     expect(harnessService.setThreadAgent.mock.calls[0][1].agentDefinitionId).toBe('a2')
+
+    await user.click(screen.getByLabelText('给 AI 发送消息'))
+    await user.keyboard('/model{Enter}')
+    expect(await screen.findByText('选择 Model')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '最近更新' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'minimax/MiniMax' }))
+    await waitFor(() =>
+      expect(harnessService.setThreadModel).toHaveBeenCalledWith(
+        't1',
+        expect.objectContaining({ modelId: 'm1', variant: 'default' }),
+      ),
+    )
+
+    await user.click(screen.getByLabelText('给 AI 发送消息'))
+    await user.keyboard('/variant{Enter}')
+    expect(await screen.findByText('选择 Variant')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '最近更新' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /^default/ }))
+    await waitFor(() =>
+      expect(harnessService.setThreadModel).toHaveBeenLastCalledWith(
+        't1',
+        expect.objectContaining({ modelId: 'm1', variant: 'default' }),
+      ),
+    )
   })
 })

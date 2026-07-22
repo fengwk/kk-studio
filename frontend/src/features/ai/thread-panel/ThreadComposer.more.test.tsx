@@ -43,6 +43,18 @@ describe('ThreadComposer interactions', () => {
     expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'yolo' }))
   })
 
+  it('navigates slash options with ArrowUp/ArrowDown then confirms with Enter', async () => {
+    const user = userEvent.setup()
+    const onCommand = vi.fn()
+    render(<ControlledComposer onSubmit={vi.fn()} onCommand={onCommand} />)
+    const textarea = screen.getByLabelText('给 AI 发送消息')
+    await user.type(textarea, '/')
+    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
+    // first enabled is session; ArrowDown -> thread, agent, model...
+    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}')
+    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'agent' }))
+  })
+
   it('opens only from slash mode and closes with Escape', async () => {
     const user = userEvent.setup()
     render(<ControlledComposer onSubmit={vi.fn()} onCommand={vi.fn()} />)
@@ -110,6 +122,8 @@ describe('ThreadCommandPalette', () => {
       <ThreadCommandPalette
         open
         query="stop"
+        activeIndex={0}
+        onActiveIndexChange={vi.fn()}
         onSelect={onSelect}
       />,
     )

@@ -12,6 +12,10 @@
 | `data-mysql.sql` | MySQL 最小 seed |
 | `src/test/resources/schema-h2.sql` | Core 集成测试 schema |
 
+## MySQL Schema 升级
+
+仓库未集成自动 schema migration。新建数据库使用 `schema-mysql.sql`；已有 MySQL 数据库必须在部署对应应用版本前，按文件名顺序手工执行 `scripts/migrations/mysql/` 下的升级 SQL。当前 Agent 可省略 Variant override 的升级脚本为 `20260722_agent_definition_variant_nullable.sql`。
+
 ## 全局资源与实时注册表
 
 | 表 | 职责 | 关键约束 |
@@ -50,7 +54,7 @@
 | `harness_thread_stop` | Stop 幂等回执 | `thread_id`、`client_request_id`；唯一 `(thread_id, client_request_id)` |
 | `harness_thread_event` | Thread event journal | `id`（全局 SSE cursor）、`thread_id`、`subject_entry_id`、`event_type`、`payload_json`；索引 `(thread_id, id)` |
 
-Chat 不保存 Pane；Pane 布局、焦点和目标仅在浏览器按 Chat ID 保存。Session **不**保存 Branch 或配置副本；`main_thread_id` 是创建时原子生成、之后稳定不变的默认入口。Branch 不单独建表。Thread 行保存当前 Agent identity、model/variant 与 YOLO；Entry 只记录消息、`AGENT_CHANGE` identity、Compaction 和其他语义事实，不保存完整 Agent 配置。`payload_json` 是严格 Session Entry JSON 边界。ThreadEvent `payload_json` 含 schema version 的实时进度；Entry 是完整语义基线，Event 是可观测覆盖层。
+Chat 不保存 Pane；Pane 布局、焦点与各面板 `threadId` 仅在浏览器按 Chat ID 保存（不存 sessionId）。Session **不**保存 Branch 或配置副本；`main_thread_id` 是创建时原子生成、之后稳定不变的默认入口。Branch 不单独建表。Thread 行保存当前 Agent identity、model/variant 与 YOLO；Entry 只记录消息、`AGENT_CHANGE` identity、Compaction 和其他语义事实，不保存完整 Agent 配置。`payload_json` 是严格 Session Entry JSON 边界。ThreadEvent `payload_json` 含 schema version 的实时进度；Entry 是完整语义基线，Event 是可观测覆盖层。
 
 `processor_token` / `processor_until` 是跨节点单飞租约；`version` 为乐观版本。
 

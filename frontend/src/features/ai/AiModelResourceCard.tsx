@@ -7,7 +7,7 @@ import {
 } from '@/features/ai/ai-model-draft-codec'
 import { formatCompactList } from '@/features/ai/ai-resource-card-format'
 import { ResourceCardLayout } from '@/features/ai/AiResourceCardLayout'
-import type { AgentModelView } from '@/features/ai/AgentModelView'
+import { modelRef, type AgentModelView } from '@/features/ai/AgentModelView'
 
 function formatAbilities(model: AgentModelView): string {
   const draft = toModelDraft(model)
@@ -51,13 +51,14 @@ export function ModelResourceCard({
 }) {
   const variants = extractVariantIdsFromModel(model)
   const defaultVariant = extractDefaultVariantFromModel(model)
+  const ref = modelRef(model)
   return (
     <ResourceCardLayout
       icon="model"
-      title={model.name}
-      subtitle={model.description || `${model.providerName || model.providerId}/${model.name}`}
+      title={ref}
+      subtitle={model.description || ref}
       rows={[
-        ['Provider', model.providerName || String(model.providerId)],
+        ['Ref', ref],
         ['Limit', formatLimit(model)],
         ['Ability', formatAbilities(model)],
         ['Default', defaultVariant || '—'],

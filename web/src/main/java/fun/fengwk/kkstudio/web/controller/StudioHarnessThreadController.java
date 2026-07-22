@@ -4,7 +4,6 @@ import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -37,7 +36,12 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
 
-/** Thread API：查询、typed mailbox 输入、路径 entries、inputs、events 与 SSE。 */
+/**
+ * Thread API：查询、typed mailbox 输入、路径 entries、inputs、events 与 SSE。
+ *
+ * <p>统一返回 {@link Result}，HTTP 状态由 convention4j {@code ResultResponseBodyAdvice} 按 {@code
+ * result.status} 对齐；入队类接口使用 {@link Results#accepted}（202）。
+ */
 @RestController
 @RequestMapping("/api")
 public class StudioHarnessThreadController {
@@ -71,46 +75,40 @@ public class StudioHarnessThreadController {
   }
 
   @PostMapping("/threads/{threadId}/messages")
-  public ResponseEntity<Result<HarnessThreadInputDTO>> submitMessage(
+  public Result<HarnessThreadInputDTO> submitMessage(
       @PathVariable String threadId, @RequestBody HarnessThreadMessageCreateDTO createDTO) {
-    HarnessThreadInputDTO input =
-        withMissingResourceTranslation(() -> commandService.submitUserMessage(threadId, createDTO));
-    return ResponseEntity.status(HttpStatus.ACCEPTED).body(Results.ok(input));
+    return Results.accepted(
+        withMissingResourceTranslation(
+            () -> commandService.submitUserMessage(threadId, createDTO)));
   }
 
   @PostMapping("/threads/{threadId}/messages/custom")
-  public ResponseEntity<Result<HarnessThreadInputDTO>> submitCustomMessage(
+  public Result<HarnessThreadInputDTO> submitCustomMessage(
       @PathVariable String threadId, @RequestBody HarnessThreadCustomMessageCreateDTO createDTO) {
-    HarnessThreadInputDTO input =
+    return Results.accepted(
         withMissingResourceTranslation(
-            () -> commandService.submitCustomMessage(threadId, createDTO));
-    return ResponseEntity.status(HttpStatus.ACCEPTED).body(Results.ok(input));
+            () -> commandService.submitCustomMessage(threadId, createDTO)));
   }
 
   @PutMapping("/threads/{threadId}/yolo")
-  public ResponseEntity<Result<HarnessThreadInputDTO>> queueYolo(
+  public Result<HarnessThreadInputDTO> queueYolo(
       @PathVariable String threadId, @RequestBody HarnessThreadYoloSetDTO request) {
-    HarnessThreadInputDTO input =
-        withMissingResourceTranslation(() -> commandService.queueYolo(threadId, request));
-    return ResponseEntity.status(HttpStatus.ACCEPTED).body(Results.ok(input));
+    return Results.accepted(
+        withMissingResourceTranslation(() -> commandService.queueYolo(threadId, request)));
   }
 
   @PutMapping("/threads/{threadId}/agent")
-  public ResponseEntity<Result<HarnessThreadInputDTO>> queueAgent(
+  public Result<HarnessThreadInputDTO> queueAgent(
       @PathVariable String threadId, @RequestBody HarnessThreadAgentSetDTO request) {
-    HarnessThreadInputDTO input =
-        withMissingResourceTranslation(() -> commandService.queueAgent(threadId, request));
-    return ResponseEntity.status(HttpStatus.ACCEPTED).body(Results.ok(input));
+    return Results.accepted(
+        withMissingResourceTranslation(() -> commandService.queueAgent(threadId, request)));
   }
 
   @PutMapping("/threads/{threadId}/model")
-  public ResponseEntity<Result<HarnessThreadInputDTO>> queueModel(
+  public Result<HarnessThreadInputDTO> queueModel(
       @PathVariable String threadId, @RequestBody HarnessThreadModelSetDTO request) {
-    return ResponseEntity.status(HttpStatus.ACCEPTED)
-        .body(
-            Results.ok(
-                withMissingResourceTranslation(
-                    () -> commandService.queueModel(threadId, request))));
+    return Results.accepted(
+        withMissingResourceTranslation(() -> commandService.queueModel(threadId, request)));
   }
 
   @PostMapping("/threads/{threadId}/stop")

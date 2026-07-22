@@ -32,15 +32,16 @@ final class AgentModelReferenceResolver {
     return provider;
   }
 
-  void ensureNameAvailable(String name) {
-    if (agentModelRepository.getByName(name) != null) {
-      throw new IllegalArgumentException("agent model name already exists: " + name);
+  void ensureNameAvailable(long providerId, String name) {
+    if (agentModelRepository.getByProviderIdAndName(providerId, name) != null) {
+      throw new IllegalArgumentException(
+          "agent model name already exists under this provider: " + name);
     }
   }
 
-  void ensureNameAvailable(String currentName, String nextName) {
+  void ensureNameAvailable(long providerId, String currentName, String nextName) {
     if (!currentName.equals(nextName)) {
-      ensureNameAvailable(nextName);
+      ensureNameAvailable(providerId, nextName);
     }
   }
 

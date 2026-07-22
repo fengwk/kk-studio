@@ -110,3 +110,21 @@ coverage
 
 # Local agent workspaces
 .workspace/
+
+# E2E reports/artifacts (screenshots, logs, summary)
+reports/
+
+# Local secrets / credentials (prevent accidental commit before public release)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*
+service-account*.json
+id_rsa
+id_ed25519
+*.jks
+secrets/

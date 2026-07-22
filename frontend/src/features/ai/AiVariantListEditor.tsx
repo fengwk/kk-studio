@@ -1,3 +1,4 @@
+import { FieldLabel } from '@/features/ai/FieldLabel'
 import { Plus, Trash2 } from 'lucide-react'
 import type { VariantDraft } from '@/features/ai/ai-console-types'
 import { sanitizeDecimalInput, sanitizeIntegerInput } from '@/features/ai/ai-number-input'
@@ -68,7 +69,7 @@ export function VariantListEditor({
           <div className="variant-editor" key={variant.draftId}>
             <div className={`editor-grid${reasoning ? ' editor-grid-3' : ' editor-grid-2'}`}>
               <label className="form-group">
-                <span>Variant ID</span>
+                <FieldLabel required>Variant ID</FieldLabel>
                 <input
                   aria-label={`Variant ID ${index + 1}`}
                   value={variant.id}
@@ -83,7 +84,7 @@ export function VariantListEditor({
                     effortError && !variant.reasoningEffort.trim() ? ' is-error' : ''
                   }`}
                 >
-                  <span>思考强度</span>
+                  <FieldLabel required>思考强度</FieldLabel>
                   <input
                     aria-label={`Reasoning Effort ${index + 1}`}
                     value={variant.reasoningEffort}
@@ -100,7 +101,7 @@ export function VariantListEditor({
                 </label>
               ) : null}
               <label className="form-group">
-                <span>Max Output</span>
+                <FieldLabel>Max Output</FieldLabel>
                 <input
                   aria-label={`Variant Max Output Tokens ${index + 1}`}
                   type="number"
@@ -123,7 +124,7 @@ export function VariantListEditor({
               <p className="inline-hint">一般无需配置，留空=厂商默认。</p>
               <div className="editor-grid editor-grid-3">
                 <label className="form-group">
-                  <span>Temperature</span>
+                  <FieldLabel>Temperature</FieldLabel>
                   <input
                     aria-label={`Temperature ${index + 1}`}
                     type="number"
@@ -140,7 +141,7 @@ export function VariantListEditor({
                   />
                 </label>
                 <label className="form-group">
-                  <span>Top P</span>
+                  <FieldLabel>Top P</FieldLabel>
                   <input
                     aria-label={`Top P ${index + 1}`}
                     type="number"
@@ -156,7 +157,7 @@ export function VariantListEditor({
                   />
                 </label>
                 <label className="form-group">
-                  <span>Top K</span>
+                  <FieldLabel>Top K</FieldLabel>
                   <input
                     aria-label={`Top K ${index + 1}`}
                     type="number"
@@ -171,7 +172,7 @@ export function VariantListEditor({
                   />
                 </label>
                 <label className="form-group">
-                  <span>Freq Penalty</span>
+                  <FieldLabel>Freq Penalty</FieldLabel>
                   <input
                     aria-label={`Frequency Penalty ${index + 1}`}
                     type="number"
@@ -187,7 +188,7 @@ export function VariantListEditor({
                   />
                 </label>
                 <label className="form-group">
-                  <span>Pres Penalty</span>
+                  <FieldLabel>Pres Penalty</FieldLabel>
                   <input
                     aria-label={`Presence Penalty ${index + 1}`}
                     type="number"
@@ -203,7 +204,7 @@ export function VariantListEditor({
                   />
                 </label>
                 <label className="form-group">
-                  <span>Stop</span>
+                  <FieldLabel>Stop</FieldLabel>
                   <input
                     aria-label={`Stop Sequences ${index + 1}`}
                     value={variant.stopSequences}

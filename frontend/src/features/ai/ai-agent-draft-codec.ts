@@ -7,7 +7,6 @@ import type {
   AgentModelDTO,
 } from '@/shared/api/contracts'
 import type { AgentDraft } from '@/features/ai/ai-console-types'
-import { extractDefaultVariantFromModel } from '@/features/ai/ai-model-draft-codec'
 import { trimToNull } from '@/features/ai/ai-resource-draft-primitives'
 
 function normalizeNames(items: string[] | null | undefined): string[] {
@@ -118,7 +117,8 @@ export function emptyAgentDraft(model?: AgentModelDTO): AgentDraft {
     description: '',
     systemPrompt: '',
     modelId: model ? String(model.id) : '',
-    variant: extractDefaultVariantFromModel(model),
+    // Empty = no override; runtime uses model.defaultVariant.
+    variant: '',
     environmentName: '',
     tools: [],
     skills: [],
@@ -139,7 +139,7 @@ export function toAgentDraft(agent: AgentDefinitionDTO): AgentDraft {
     description: agent.description || '',
     systemPrompt: agent.systemPrompt || '',
     modelId: agent.modelId,
-    variant: agent.variant,
+    variant: agent.variant?.trim() || '',
     environmentName: config.environmentName || '',
     tools: normalizeNames(config.tools),
     skills: normalizeNames(config.skills),
@@ -157,10 +157,8 @@ export function toEditableAgent(draft: AgentDraft): AgentDefinitionCreateDTO {
   if (!modelId) {
     throw new Error('modelId must not be blank')
   }
-  const variant = draft.variant.trim()
-  if (!variant) {
-    throw new Error('variant must not be blank')
-  }
+  // Blank override is allowed; backend resolves model.defaultVariant when needed.
+  const variant = trimToNull(draft.variant)
   return {
     name,
     description: trimToNull(draft.description),

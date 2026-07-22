@@ -1,7 +1,7 @@
 import { useDeferredValue, useMemo, useState } from 'react'
-import { filterAgents, filterModels, filterProviders } from '@/features/ai/ai-console-utils'
+import { filterAgents, filterChats, filterModels, filterProviders } from '@/features/ai/ai-console-utils'
 import { toUserFacingErrorMessage } from '@/features/ai/ai-resource-form-validation'
-import type { AgentModelView } from '@/features/ai/AgentModelView'
+import { modelRef, type AgentModelView } from '@/features/ai/AgentModelView'
 import type {
   AgentDefinitionDTO,
   AgentProviderDTO,
@@ -18,15 +18,21 @@ export function useAiConsoleController() {
   const chatController = useChatListController(resourceController.agents)
 
   const filteredChats = useMemo(
-    () =>
-      chatController.chats.filter(
-        (chat) => !deferredSearch || (chat.title ?? '').toLowerCase().includes(deferredSearch) || chat.id.includes(deferredSearch),
-      ),
+    () => filterChats(chatController.chats, deferredSearch),
     [chatController.chats, deferredSearch],
   )
-  const filteredAgents = useMemo(() => filterAgents(resourceController.agents, deferredSearch), [deferredSearch, resourceController.agents])
-  const filteredModels = useMemo(() => filterModels(resourceController.models, deferredSearch), [deferredSearch, resourceController.models])
-  const filteredProviders = useMemo(() => filterProviders(resourceController.providers, deferredSearch), [deferredSearch, resourceController.providers])
+  const filteredAgents = useMemo(
+    () => filterAgents(resourceController.agents, deferredSearch),
+    [deferredSearch, resourceController.agents],
+  )
+  const filteredModels = useMemo(
+    () => filterModels(resourceController.models, deferredSearch),
+    [deferredSearch, resourceController.models],
+  )
+  const filteredProviders = useMemo(
+    () => filterProviders(resourceController.providers, deferredSearch),
+    [deferredSearch, resourceController.providers],
+  )
 
   const queryResults = [
     resourceController.providersQuery,
@@ -76,7 +82,11 @@ export function useAiConsoleController() {
       onCreate: resourceController.openCreateModel,
       onEdit: (model: AgentModelView) => resourceController.openEditModel(model.id),
       onDelete: (model: AgentModelView) =>
-        resourceController.deleteModel(model.providerName || String(model.providerId), model.name, model.id),
+        resourceController.deleteModel(
+          model.providerName || String(model.providerId),
+          modelRef(model),
+          model.id,
+        ),
     },
     providerPanelProps: {
       providers: filteredProviders,

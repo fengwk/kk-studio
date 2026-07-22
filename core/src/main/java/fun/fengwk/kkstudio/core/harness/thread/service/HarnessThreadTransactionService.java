@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.mapper.AgentDefinitionMapper;
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.model.AgentDefinitionDO;
+import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionEntryMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
@@ -103,6 +104,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
   private final ToolPolicyResolver policyResolver;
   private final ThreadTurnAdmission turnAdmission;
   private final AgentDefinitionMapper agentDefinitionMapper;
+  private final AgentModelDefaultVariantResolver variantResolver;
   private final SessionEntryJsonCodec payloadCodec = new SessionEntryJsonCodec();
 
   public HarnessThreadTransactionService(
@@ -122,7 +124,8 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
       ToolPreparationService toolPreparationService,
       ToolPolicyResolver policyResolver,
       ThreadTurnAdmission turnAdmission,
-      AgentDefinitionMapper agentDefinitionMapper) {
+      AgentDefinitionMapper agentDefinitionMapper,
+      AgentModelDefaultVariantResolver variantResolver) {
     this.threadMapper = Objects.requireNonNull(threadMapper, "threadMapper");
     this.inputMapper = Objects.requireNonNull(inputMapper, "inputMapper");
     this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
@@ -143,6 +146,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     this.turnAdmission = Objects.requireNonNull(turnAdmission, "turnAdmission");
     this.agentDefinitionMapper =
         Objects.requireNonNull(agentDefinitionMapper, "agentDefinitionMapper");
+    this.variantResolver = Objects.requireNonNull(variantResolver, "variantResolver");
   }
 
   @Override
@@ -233,7 +237,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
       agentDefinitionId = agentChange.agentDefinitionId();
       agentName = agentChange.agentName();
       modelId = String.valueOf(definition.getModelId());
-      variant = definition.getVariant();
+      variant = variantResolver.resolve(definition.getModelId(), definition.getVariant());
     }
 
     long threadId = idGenerator.newThreadId();
@@ -421,7 +425,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
         new AgentChangeEntryPayload(fields.agentDefinitionId(), fields.agentName()),
         timestamp);
     String modelId = String.valueOf(definition.getModelId());
-    String variant = definition.getVariant();
+    String variant = variantResolver.resolve(definition.getModelId(), definition.getVariant());
     if (threadMapper.updateAgentSettings(
             thread.getId(),
             processorToken,

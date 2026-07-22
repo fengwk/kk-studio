@@ -15,6 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.mapper.AgentDefinitionMapper;
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.model.AgentDefinitionDO;
+import fun.fengwk.kkstudio.core.agent.model.repo.impl.mapper.AgentModelMapper;
+import fun.fengwk.kkstudio.core.agent.model.repo.impl.model.AgentModelDO;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionEntryMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionEntryDO;
 import fun.fengwk.kkstudio.core.harness.thread.store.MysqlHarnessThreadStore;
@@ -66,6 +68,7 @@ class HarnessThreadTransactionServiceIntegrationTest {
   @Autowired private HarnessThreadEventMapper eventMapper;
   @Autowired private ToolInvocationMapper invocationMapper;
   @Autowired private AgentDefinitionMapper agentDefinitionMapper;
+  @Autowired private AgentModelMapper agentModelMapper;
 
   @Test
   void createsAgentlessRootAndRejectsUnknownBranchOrigins() {
@@ -128,14 +131,26 @@ class HarnessThreadTransactionServiceIntegrationTest {
     assertEquals(
         0, eventMapper.countByType(agentlessBranch.id(), ThreadEventType.AGENT_CHANGED.value()));
 
+    long secondModelId = 9_100_000L;
+    AgentModelDO secondModel = new AgentModelDO();
+    secondModel.setId(secondModelId);
+    secondModel.setProviderId(1L);
+    secondModel.setName("branch-second-model");
+    secondModel.setDescription("model for branch definition selection");
+    secondModel.setConfigJson(
+        """
+        {"limit":{"context":32768,"output":4096},"abilities":{"tools":true,"reasoning":false,"inputModalities":["TEXT"]},"defaultVariant":"initial","variants":[{"id":"initial"},{"id":"current"}],"pricing":{"currency":"USD","pricingTier":"test","serviceTier":"default","serviceTierMultiplier":1,"version":"v1","inputPerMillionTokens":0,"outputPerMillionTokens":0,"cacheReadPerMillionTokens":0,"cacheWritePerMillionTokens":0,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0}}
+        """);
+    assertEquals(1, agentModelMapper.insert(secondModel));
+
     long secondAgentId = 9_100_001L;
     AgentDefinitionDO secondAgent = new AgentDefinitionDO();
     secondAgent.setId(secondAgentId);
     secondAgent.setName("branch-second-agent");
     secondAgent.setDescription("second agent for path selection");
     secondAgent.setSystemPrompt("second");
-    secondAgent.setModelId(1L);
-    secondAgent.setVariant("second-variant");
+    secondAgent.setModelId(secondModelId);
+    secondAgent.setVariant("initial");
     secondAgent.setConfigJson(
         "{\"tools\":[],\"skills\":[],\"allowedSubagents\":[],\"executionPolicy\":{}}");
     assertEquals(1, agentDefinitionMapper.insert(secondAgent));
@@ -146,12 +161,7 @@ class HarnessThreadTransactionServiceIntegrationTest {
     transactions.submitSetAgent(
         mainThreadId, secondAgentId, "captured-second-name", "set-second", now.plusSeconds(4));
     // 父 Thread 显式 model override 不得被分支复用。
-    transactions.submitSetModel(
-        mainThreadId,
-        "parent-override-model",
-        "parent-override-variant",
-        "set-model",
-        now.plusSeconds(5));
+    transactions.submitSetModel(mainThreadId, "1", "default", "set-model", now.plusSeconds(5));
     assertTrue(
         threadStore
             .tryAcquire(mainThreadId, "branch-owner", now.plusSeconds(2), Duration.ofMinutes(1))
@@ -161,8 +171,8 @@ class HarnessThreadTransactionServiceIntegrationTest {
     assertTrue(harvest.harvested());
     HarnessThreadDO mainAfter = threadMapper.find(mainThreadId);
     assertEquals(secondAgentId, mainAfter.getActiveAgentDefinitionId());
-    assertEquals("parent-override-model", mainAfter.getModelId());
-    assertEquals("parent-override-variant", mainAfter.getVariant());
+    assertEquals("1", mainAfter.getModelId());
+    assertEquals("default", mainAfter.getVariant());
 
     List<HarnessSessionEntryDO> entriesBeforeBranch = entryMapper.listBySession(sessionId);
     assertEquals(
@@ -172,8 +182,8 @@ class HarnessThreadTransactionServiceIntegrationTest {
     assertEquals(entriesBeforeBranch.get(2).getId(), headAfterAgents);
 
     // 更新当前 Definition model/variant：分支必须读到更新后的值，而非历史 apply 时快照。
-    secondAgent.setModelId(1L);
-    secondAgent.setVariant("current-definition-variant");
+    secondAgent.setModelId(secondModelId);
+    secondAgent.setVariant("current");
     assertEquals(1, agentDefinitionMapper.updateById(secondAgent));
 
     int threadCountBefore = threadMapper.listBySession(sessionId).size();
@@ -185,8 +195,8 @@ class HarnessThreadTransactionServiceIntegrationTest {
     assertEquals(headAfterAgents, branch.headEntryId());
     assertEquals(secondAgentId, branch.activeAgentDefinitionId());
     assertEquals("captured-second-name", branch.activeAgentName());
-    assertEquals("1", branch.modelId());
-    assertEquals("current-definition-variant", branch.variant());
+    assertEquals(Long.toString(secondModelId), branch.modelId());
+    assertEquals("current", branch.variant());
     assertFalse(branch.yoloEnabled());
     assertEquals(1, eventMapper.countByType(branch.id(), ThreadEventType.THREAD_STARTED.value()));
     assertEquals(0, eventMapper.countByType(branch.id(), ThreadEventType.AGENT_CHANGED.value()));

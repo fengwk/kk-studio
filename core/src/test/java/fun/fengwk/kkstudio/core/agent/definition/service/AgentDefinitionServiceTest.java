@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.agent.definition.service;
 
 import static fun.fengwk.kkstudio.core.agent.model.AgentModelTestData.executable;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -70,6 +71,43 @@ public class AgentDefinitionServiceTest {
         () -> agentDefinitionService.deleteAgent(id(definition.getId())));
     agentModelService.deleteModel(id(model.getId()));
     agentProviderService.deleteProvider(id(provider.getId()));
+  }
+
+  @Test
+  public void rejectsVariantOutsideTheSelectedModelConfiguration() {
+    String suffix = Long.toString(System.nanoTime());
+    AgentProviderDTO provider = provider("agent-variant-provider-" + suffix);
+    AgentModelDTO model = model(provider.getId(), "agent-variant-model-" + suffix);
+    AgentDefinitionCreateDTO invalid = agent(model.getId(), "agent-invalid-variant-" + suffix);
+    invalid.setVariant("missing");
+
+    try {
+      assertThrows(
+          IllegalArgumentException.class, () -> agentDefinitionService.createAgent(invalid));
+
+      AgentDefinitionCreateDTO defaultVariant =
+          agent(model.getId(), "agent-valid-variant-" + suffix);
+      defaultVariant.setVariant(null);
+      AgentDefinitionDTO created = agentDefinitionService.createAgent(defaultVariant);
+      try {
+        assertNull(created.getVariant());
+        AgentDefinitionUpdateDTO invalidUpdate = new AgentDefinitionUpdateDTO();
+        invalidUpdate.setName(created.getName());
+        invalidUpdate.setDescription(created.getDescription());
+        invalidUpdate.setSystemPrompt(created.getSystemPrompt());
+        invalidUpdate.setModelId(model.getId());
+        invalidUpdate.setVariant("missing");
+        invalidUpdate.setConfig(created.getConfig());
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> agentDefinitionService.updateAgent(id(created.getId()), invalidUpdate));
+      } finally {
+        agentDefinitionService.deleteAgent(id(created.getId()));
+      }
+    } finally {
+      agentModelService.deleteModel(id(model.getId()));
+      agentProviderService.deleteProvider(id(provider.getId()));
+    }
   }
 
   private AgentProviderDTO provider(String name) {

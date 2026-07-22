@@ -34,8 +34,8 @@ public class MysqlAgentModelRepository implements AgentModelRepository {
   }
 
   @Override
-  public AgentModel getByName(String name) {
-    return convert(agentModelMapper.getByName(name));
+  public AgentModel getByProviderIdAndName(long providerId, String name) {
+    return convert(agentModelMapper.getByProviderIdAndName(providerId, name));
   }
 
   @Override

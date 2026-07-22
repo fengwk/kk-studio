@@ -45,7 +45,7 @@ export function useAiConsoleResourceController() {
   function deleteModel(providerName: string, modelName: string, modelId: AgentResourceId) {
     setDeleteConfirm({
       title: '删除 Model',
-      description: `将删除 Model ${providerName}/${modelName}。`,
+      description: `将删除 Model ${modelName.includes('/') ? modelName : `${providerName}/${modelName}`}。`,
       confirmLabel: '确认删除',
       tone: 'danger',
       onConfirm: () => mutations.deleteModel(modelId),

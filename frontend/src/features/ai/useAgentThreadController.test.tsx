@@ -213,10 +213,6 @@ describe('useAgentThreadController', () => {
       expect.objectContaining({ yoloEnabled: true, clientMessageId: expect.any(String) }),
     ))
 
-    act(() => result.current.setDraft('keep'))
-    act(() => result.current.runCommand({ id: 'clear-draft', label: 'clear', description: '' }))
-    expect(result.current.draft).toBe('')
-
     act(() => result.current.runCommand({ id: 'stop', label: 'stop', description: '' }))
     await waitFor(() => expect(harnessService.stopThread).toHaveBeenCalled())
 
@@ -493,7 +489,7 @@ describe('useAgentThreadController', () => {
   it('resolves footer model labels from agent catalog without unknown-model', async () => {
     const { result } = renderHook(() => useAgentThreadController('1'), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
-    expect(result.current.runtimeLabels.modelName).toBe('MiniMax-M2.7')
+    expect(result.current.runtimeLabels.modelName).toBe('minimax/MiniMax-M2.7')
     expect(result.current.runtimeLabels.providerName).toBe('minimax')
     expect(result.current.runtimeLabels.contextWindow).toBe(128000)
     expect(result.current.runtimeLabels.modelName).not.toBe('unknown-model')
