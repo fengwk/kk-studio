@@ -54,7 +54,7 @@
 | `harness_thread_stop` | Stop 幂等回执 | `thread_id`、`client_request_id`；唯一 `(thread_id, client_request_id)` |
 | `harness_thread_event` | Thread event journal | `id`（全局 SSE cursor）、`thread_id`、`subject_entry_id`、`event_type`、`payload_json`；索引 `(thread_id, id)` |
 
-Chat 不保存 Pane；Pane 布局、焦点与各面板 `threadId` 仅在浏览器按 Chat ID 保存（不存 sessionId）。Session **不**保存 Branch 或配置副本；`main_thread_id` 是创建时原子生成、之后稳定不变的默认入口。Branch 不单独建表。Thread 行保存当前 Agent identity、model/variant 与 YOLO；Entry 只记录消息、`AGENT_CHANGE` identity、Compaction 和其他语义事实，不保存完整 Agent 配置。`payload_json` 是严格 Session Entry JSON 边界。ThreadEvent `payload_json` 含 schema version 的实时进度；Entry 是完整语义基线，Event 是可观测覆盖层。
+Chat 不保存 Pane；Pane 布局、焦点与各面板 `threadId` 仅在浏览器按 Chat ID 保存（不存 sessionId）。Session **不**保存 Branch 或配置副本；`main_thread_id` 是创建时原子生成、之后稳定不变的默认入口。Branch 不单独建表。Thread 行保存当前生效配置（Agent/model/variant）与运行策略（YOLO）；Entry 记录消息、配置变更（`AGENT_CHANGE` / `MODEL_CHANGE`）、Compaction 和其他语义事实，不保存完整 Agent 配置。`payload_json` 是严格 Session Entry JSON 边界。ThreadEvent `payload_json` 含 schema version 的实时进度；Entry 是完整语义基线，Event 是可观测覆盖层。
 
 `processor_token` / `processor_until` 是跨节点单飞租约；`version` 为乐观版本。
 
