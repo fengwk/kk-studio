@@ -22,10 +22,10 @@ public interface ThreadTransactions {
   /**
    * 在同一 Session tree 上从任意 durable Entry 新建 Thread cursor（不克隆 Entry）。
    *
-   * <p>按 root→fromEntryId 路径上最后一次 {@code AGENT_CHANGE} 初始化 Thread 独立字段： agent 身份取该 Entry 的
-   * id/name；model/variant 取该 id 的<strong>当前</strong> AgentDefinition。无 Agent 历史则 agent/model
-   * 为空；yolo 恒为 false。不写合成 Entry，也不复用父 Thread model override。历史 AgentDefinition 已删除时抛 {@link
-   * IllegalArgumentException}，事务回滚。
+   * <p>按 root→fromEntryId 路径计算新 Thread 的<strong>当前生效配置</strong>：last {@code AGENT_CHANGE} 为 agent
+   * 身份；last {@code MODEL_CHANGE} 为 model/variant。无 MODEL_CHANGE 时回退该 Agent 的 <strong>当前</strong>
+   * AgentDefinition 默认 model/variant。无 Agent 历史则 agent/model 为空；yolo 恒为 false（运行策略）。不写合成
+   * Entry，也不复制父 Thread 当前字段。历史 AgentDefinition 已删除时抛 {@link IllegalArgumentException}，事务回滚。
    */
   AgentThread createThreadFromEntry(long sessionId, long fromEntryId, Instant now);
 
@@ -40,7 +40,8 @@ public interface ThreadTransactions {
       long threadId, boolean yoloEnabled, String clientMessageId, Instant now);
 
   /**
-   * 排队 SET_AGENT。payload 只记录 id 与捕获时的 name；apply 时再加载当前 AgentDefinition 写入 Thread model/variant。
+   * 排队 SET_AGENT。payload 只记录 id 与捕获时的 name；apply 时写 AGENT_CHANGE + MODEL_CHANGE Entry，并更新 Thread
+   * 当前生效配置。
    */
   ThreadInput submitSetAgent(
       long threadId, long agentDefinitionId, String agentName, String clientMessageId, Instant now);

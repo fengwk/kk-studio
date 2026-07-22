@@ -25,6 +25,8 @@ export function useChatListController(agents: AgentDefinitionDTO[]) {
   const [modalOpen, setModalOpen] = useState(false)
   const [selectedAgentId, setSelectedAgentId] = useState('')
   const [title, setTitle] = useState('')
+  const [formError, setFormError] = useState('')
+  const [nameError, setNameError] = useState('')
 
   const chatsQuery = useQuery({
     queryKey: queryKeys.chats.list,
@@ -34,13 +36,15 @@ export function useChatListController(agents: AgentDefinitionDTO[]) {
   const createChatMutation = useInvalidateMutation({
     mutationFn: () =>
       chatService.createChat({
-        title: title.trim() || undefined,
+        title: title.trim(),
         defaultAgentId: selectedAgentId || undefined,
       }),
     invalidateQueryKeys: [queryKeys.chats.list],
     onSuccess: async (chat: ChatDTO) => {
       setModalOpen(false)
       setTitle('')
+      setFormError('')
+      setNameError('')
       navigate(`/chats/${encodeURIComponent(chat.id)}`)
     },
   })
@@ -48,18 +52,40 @@ export function useChatListController(agents: AgentDefinitionDTO[]) {
   function openCreateChat(agentId?: string) {
     setSelectedAgentId(resolveChatDefaultAgentId(agentId, selectedAgentId, agents))
     setTitle('')
+    setFormError('')
+    setNameError('')
     setModalOpen(true)
+  }
+
+  function handleTitleChange(next: string) {
+    setTitle(next)
+    if (nameError || formError) {
+      setNameError('')
+      setFormError('')
+    }
+  }
+
+  function handleSelectAgent(agentId: string) {
+    setSelectedAgentId(agentId)
   }
 
   const submitCreateChat: FormEventHandler<HTMLFormElement> = (event) => {
     event.preventDefault()
+    if (!title.trim()) {
+      setFormError('请填写 Chat 名称')
+      setNameError('请填写名称')
+      return
+    }
+    setFormError('')
+    setNameError('')
     createChatMutation.mutate(undefined)
   }
 
   return {
     chatsQuery,
     chats: chatsQuery.data ?? [],
-    chatMutationError: createChatMutation.error,
+    // Keep API mutation errors out of page banner while modal is open; modal owns validation UX.
+    chatMutationError: modalOpen ? null : createChatMutation.error,
     openCreateChat,
     createChatModal: {
       open: modalOpen,
@@ -67,9 +93,15 @@ export function useChatListController(agents: AgentDefinitionDTO[]) {
       selectedAgentId,
       title,
       pending: createChatMutation.isPending,
-      onClose: () => setModalOpen(false),
-      onSelectAgent: setSelectedAgentId,
-      onTitleChange: setTitle,
+      formError: formError || (createChatMutation.error ? String(createChatMutation.error.message || createChatMutation.error) : ''),
+      nameError,
+      onClose: () => {
+        setModalOpen(false)
+        setFormError('')
+        setNameError('')
+      },
+      onSelectAgent: handleSelectAgent,
+      onTitleChange: handleTitleChange,
       onSubmit: submitCreateChat,
     },
   }

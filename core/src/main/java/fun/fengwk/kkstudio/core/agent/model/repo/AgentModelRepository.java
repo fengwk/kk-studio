@@ -12,7 +12,8 @@ public interface AgentModelRepository {
 
   AgentModel getById(long id);
 
-  AgentModel getByName(String name);
+  /** Model names are unique within a provider, not globally. */
+  AgentModel getByProviderIdAndName(long providerId, String name);
 
   boolean create(AgentModel model);
 

@@ -58,10 +58,20 @@ describe('useChatListController', () => {
     act(() => result.current.openCreateChat('a1'))
     expect(result.current.createChatModal.open).toBe(true)
     expect(result.current.createChatModal.selectedAgentId).toBe('a1')
+
+    await act(async () => {
+      result.current.createChatModal.onSubmit({ preventDefault() {} } as never)
+    })
+    expect(chatService.createChat).not.toHaveBeenCalled()
+    expect(result.current.createChatModal.formError).toBe('请填写 Chat 名称')
+    expect(result.current.createChatModal.nameError).toBe('请填写名称')
+
     act(() => {
       result.current.createChatModal.onTitleChange('Hello')
       result.current.createChatModal.onSelectAgent('')
     })
+    expect(result.current.createChatModal.formError).toBe('')
+    expect(result.current.createChatModal.nameError).toBe('')
     await act(async () => {
       result.current.createChatModal.onSubmit({ preventDefault() {} } as never)
     })

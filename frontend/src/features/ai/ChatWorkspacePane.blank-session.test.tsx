@@ -65,14 +65,14 @@ const agents = [
 ]
 
 function renderBlankPane(overrides?: {
-  onTargetChange?: (target: { sessionId?: string; threadId?: string }) => void
+  onThreadChange?: (threadId: string | null) => void
   onDefaultAgentChange?: (agentId: string) => Promise<void>
   defaultAgentId?: string | null
 }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  const onTargetChange = overrides?.onTargetChange ?? vi.fn()
+  const onThreadChange = overrides?.onThreadChange ?? vi.fn()
   const onDefaultAgentChange = overrides?.onDefaultAgentChange ?? vi.fn(async () => undefined)
   render(
     <QueryClientProvider client={queryClient}>
@@ -87,19 +87,19 @@ function renderBlankPane(overrides?: {
           updateTime: null,
         }}
         agents={agents}
-        pane={{ id: 'pane-1', target: {} }}
+        pane={{ id: 'pane-1', threadId: null }}
         focused
         sessionSort="recent"
         threadSort="recent"
         onFocus={() => undefined}
-        onTargetChange={onTargetChange}
+        onThreadChange={onThreadChange}
         onSessionSortChange={() => undefined}
         onThreadSortChange={() => undefined}
         onDefaultAgentChange={onDefaultAgentChange}
       />
     </QueryClientProvider>,
   )
-  return { onTargetChange, onDefaultAgentChange }
+  return { onThreadChange, onDefaultAgentChange }
 }
 
 describe('BlankComposerPane /session and agent error handling', () => {
@@ -114,8 +114,23 @@ describe('BlankComposerPane /session and agent error handling', () => {
     vi.mocked(harnessService.createThreadEventStream).mockReturnValue(new FakeEventSource() as EventSource)
   })
 
-  it('exposes only the session slash command on blank panes', () => {
-    expect(BLANK_PANE_COMMANDS.map((command) => command.id)).toEqual(['session'])
+  it('exposes full command table on blank panes with unsupported entries disabled', () => {
+    expect(BLANK_PANE_COMMANDS.map((command) => command.id)).toEqual([
+      'session',
+      'thread',
+      'agent',
+      'model',
+      'variant',
+      'yolo',
+      'tree',
+      'stop',
+      'new',
+    ])
+    expect(BLANK_PANE_COMMANDS.filter((command) => !command.disabled).map((command) => command.id)).toEqual([
+      'session',
+      'agent',
+    ])
+    expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'new')?.disabled).toBe(true)
   })
 
   it('opens /session picker and replaces blank pane target with selected Session mainThreadId', async () => {
@@ -201,7 +216,7 @@ describe('BlankComposerPane /session and agent error handling', () => {
       ]
     })
 
-    const { onTargetChange } = renderBlankPane()
+    const { onThreadChange } = renderBlankPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/session{Enter}')
@@ -214,10 +229,7 @@ describe('BlankComposerPane /session and agent error handling', () => {
     expect(items[1]).toHaveTextContent('Idle')
 
     await user.click(screen.getByRole('button', { name: /Running/ }))
-    expect(onTargetChange).toHaveBeenCalledWith({
-      sessionId: 's-running',
-      threadId: 't-running-main',
-    })
+    expect(onThreadChange).toHaveBeenCalledWith('t-running-main')
     // First-send path must not run for explicit session reuse.
     expect(harnessService.createSession).not.toHaveBeenCalled()
   })

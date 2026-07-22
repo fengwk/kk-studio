@@ -5,6 +5,7 @@ public sealed interface SessionEntryPayload
     permits RootEntryPayload,
         MessageEntryPayload,
         AgentChangeEntryPayload,
+        ModelChangeEntryPayload,
         CompactionEntryPayload,
         BranchSummaryEntryPayload,
         CustomEntryPayload,

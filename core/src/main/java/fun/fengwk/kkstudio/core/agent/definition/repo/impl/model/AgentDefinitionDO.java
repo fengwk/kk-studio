@@ -23,7 +23,7 @@ public class AgentDefinitionDO {
   /** 默认绑定的 model id。 */
   private Long modelId;
 
-  /** 默认 model variant 名。 */
+  /** 覆盖 model.defaultVariant；null/blank 表示使用模型默认。 */
   private String variant;
 
   /** Agent 配置 JSON（tools/skills/executionPolicy 等）。 */

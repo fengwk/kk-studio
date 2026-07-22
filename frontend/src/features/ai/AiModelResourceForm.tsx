@@ -6,6 +6,7 @@ import { variantOptionsFromDraft } from '@/features/ai/ai-draft-normalizers'
 import { sanitizeDecimalInput, sanitizeIntegerInput } from '@/features/ai/ai-number-input'
 import type { ResourceFieldKey } from '@/features/ai/ai-resource-form-validation'
 import { VariantListEditor } from '@/features/ai/AiVariantListEditor'
+import { FieldLabel } from '@/features/ai/FieldLabel'
 import { FormSelect } from '@/features/ai/FormSelect'
 import type { AgentProviderDTO } from '@/shared/api/contracts'
 
@@ -100,7 +101,7 @@ export function ModelForm({
   return (
     <>
       <label className={`form-group${fieldErrors.providerId ? ' is-error' : ''}`}>
-        <span>Provider</span>
+        <FieldLabel required>Provider</FieldLabel>
         <FormSelect
           aria-label="Provider"
           value={draft.providerId}
@@ -113,7 +114,7 @@ export function ModelForm({
       </label>
 
       <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
-        <span>Name</span>
+        <FieldLabel required>Name</FieldLabel>
         <input
           value={draft.name}
           onChange={(event) => onChange({ ...draft, name: event.target.value })}
@@ -124,7 +125,7 @@ export function ModelForm({
       </label>
 
       <label className="form-group">
-        <span>Description</span>
+        <FieldLabel>Description</FieldLabel>
         <input
           value={draft.description}
           onChange={(event) => onChange({ ...draft, description: event.target.value })}
@@ -138,7 +139,7 @@ export function ModelForm({
         </div>
         <div className="form-grid-2">
           <label className={`form-group${fieldErrors.contextWindow ? ' is-error' : ''}`}>
-            <span>Context Window</span>
+            <FieldLabel required>Context Window</FieldLabel>
             <input
               type="number"
               inputMode="numeric"
@@ -156,7 +157,7 @@ export function ModelForm({
             ) : null}
           </label>
           <label className={`form-group${fieldErrors.maxOutputTokens ? ' is-error' : ''}`}>
-            <span>Max Output Tokens</span>
+            <FieldLabel required>Max Output Tokens</FieldLabel>
             <input
               type="number"
               inputMode="numeric"
@@ -203,7 +204,7 @@ export function ModelForm({
       <fieldset
         className={`form-group capability-picker${fieldErrors.inputModalities ? ' is-error' : ''}`}
       >
-        <legend>输入类型</legend>
+        <legend><FieldLabel required>输入类型</FieldLabel></legend>
         <p className="inline-hint">模型可接受的输入模态；至少保留一种（不能全部取消）。</p>
         <div className="capability-options">
           {AGENT_MODEL_INPUT_MODALITIES.map((item) => {
@@ -236,7 +237,7 @@ export function ModelForm({
         <div className="form-grid-2">
           {PRICING_UNIT_FIELDS.map(({ field, label }) => (
             <label className="form-group" key={field}>
-              <span>{label}</span>
+              <FieldLabel required>{label}</FieldLabel>
               <div className="price-input">
                 <span className="price-affix" aria-hidden="true">
                   $
@@ -265,7 +266,7 @@ export function ModelForm({
       </section>
 
       <label className={`form-group${fieldErrors.defaultVariant ? ' is-error' : ''}`}>
-        <span>Default Variant</span>
+        <FieldLabel required>Default Variant</FieldLabel>
         <FormSelect
           aria-label="Default Variant"
           value={selectedDefaultVariant}

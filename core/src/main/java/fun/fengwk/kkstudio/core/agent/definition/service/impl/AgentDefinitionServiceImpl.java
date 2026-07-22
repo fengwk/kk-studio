@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.agent.definition.service.AgentDefinitionService;
 import fun.fengwk.kkstudio.core.agent.definition.service.converter.AgentDefinitionConverter;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
+import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
@@ -23,6 +24,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
   private final AgentDefinitionConverter agentDefinitionConverter;
   private final AgentDefinitionMutationFactory definitionMutationFactory;
   private final AgentDefinitionReferenceResolver referenceResolver;
+  private final AgentModelDefaultVariantResolver variantResolver;
   private final AgentDefinitionLiveCapabilityValidator liveCapabilityValidator;
   private final AgentDefinitionConfigCodec configCodec;
 
@@ -37,6 +39,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     referenceResolver.requireModel(modelId);
     AgentDefinition definition = definitionMutationFactory.newAgent(modelId, createDTO);
     referenceResolver.ensureNameAvailable(definition.getName());
+    variantResolver.resolve(modelId, definition.getVariant());
     liveCapabilityValidator.validate(configCodec.decode(definition.getConfigJson()));
     if (!agentDefinitionRepository.create(definition)) {
       throw new IllegalStateException("create agent definition failed");
@@ -53,6 +56,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     definitionMutationFactory.update(definition, updateDTO);
     definition.setModelId(modelId);
     referenceResolver.ensureNameAvailable(currentName, definition.getName());
+    variantResolver.resolve(modelId, definition.getVariant());
     liveCapabilityValidator.validate(configCodec.decode(definition.getConfigJson()));
     if (!agentDefinitionRepository.updateById(definition)) {
       throw new IllegalStateException("update agent definition failed: " + id);

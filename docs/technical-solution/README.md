@@ -21,6 +21,7 @@ flowchart TD
     A --> K[comfyui-workflow-api.md<br/>ComfyUI 工作流与 S3 直传后端]
     A --> L[environment-daemon-gateway.md<br/>Environment Daemon Gateway]
     A --> M[prompt-to-artifact.md<br/>Prompt 到 Artifact 数据流]
+    A --> P[e2e-regression.md<br/>E2E 回归矩阵与报告]
 ```
 
 ## 阅读顺序
@@ -41,6 +42,7 @@ flowchart TD
 | 12 | [comfyui-workflow-api.md](comfyui-workflow-api.md) | ComfyUI 工作流卡片 CRUD + 无状态提交 / 查询 / 取消 + S3 输入桥 + job-scoped 输出下载 | 接入 ComfyUI 控制台与 S3 直传后端 |
 | 13 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Environment 注册、Daemon v1 WebSocket、持久 ToolInvocation 分发与回调 | 接入远端 Environment Tool |
 | 14 | [prompt-to-artifact.md](prompt-to-artifact.md) | Prompt、Provider、Tool、Artifact 和浏览器读取的端到端事实链 | 修改跨边界执行或 artifact 呈现 |
+| 15 | [e2e-regression.md](e2e-regression.md) | 矩阵分层、契约锚点、报告目录与前端变更维护 | 跑/改 E2E 回归 |
 
 ## 按主题索引
 
@@ -61,6 +63,7 @@ flowchart TD
 | ComfyUI 工作流与 S3 直传后端 | [comfyui-workflow-api.md](comfyui-workflow-api.md) |
 | Environment Daemon Gateway | [environment-daemon-gateway.md](environment-daemon-gateway.md) |
 | Prompt 到 Artifact 数据流 | [prompt-to-artifact.md](prompt-to-artifact.md) |
+| E2E 回归矩阵与报告 | [e2e-regression.md](e2e-regression.md) |
 
 ## 维护规则
 

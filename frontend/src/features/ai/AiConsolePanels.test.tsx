@@ -121,8 +121,8 @@ describe('AiConsolePanels', () => {
     )
     expect(screen.getByText('One')).toBeInTheDocument()
     expect(screen.getByText('assistant')).toBeInTheDocument()
-    expect(screen.getAllByText('MiniMax').length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/minimax/i).length).toBeGreaterThan(0)
+    // Model cards use the canonical provider/model display ref.
+    expect(screen.getAllByText(/minimax\/MiniMax/i).length).toBeGreaterThan(0)
     expect(screen.getByText(/ctx 128000/)).toBeInTheDocument()
     await user.click(screen.getAllByRole('button', { name: '新建 Chat' })[0]!)
     expect(onCreate).toHaveBeenCalled()

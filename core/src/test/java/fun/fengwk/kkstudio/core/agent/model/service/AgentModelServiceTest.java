@@ -18,7 +18,7 @@ import fun.fengwk.kkstudio.share.model.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
 
-/** Model and provider references are global. */
+/** Model names are unique per provider; providers remain globally unique by name. */
 @SpringBootTest(classes = CoreTestApplication.class)
 public class AgentModelServiceTest {
 
@@ -26,16 +26,24 @@ public class AgentModelServiceTest {
   @Autowired private AgentModelService agentModelService;
 
   @Test
-  public void shouldUseGlobalProviderAndModelNames() {
+  public void shouldScopeModelNamesToProvider() {
     String suffix = Long.toString(System.nanoTime());
     AgentProviderDTO provider = provider("model-provider-" + suffix);
-    String modelName = "model-" + suffix;
+    AgentProviderDTO otherProvider = provider("model-provider-other-" + suffix);
+    String modelName = "MiniMax-M2.7-" + suffix;
 
     AgentModelDTO model = agentModelService.createModel(model(provider.getId(), modelName));
     assertEquals(provider.getId(), model.getProviderId());
+    // same provider + same name is rejected
     assertThrows(
         IllegalArgumentException.class,
         () -> agentModelService.createModel(model(provider.getId(), modelName)));
+    // different providers may reuse the same model name
+    AgentModelDTO sameNameOtherProvider =
+        agentModelService.createModel(model(otherProvider.getId(), modelName));
+    assertEquals(otherProvider.getId(), sameNameOtherProvider.getProviderId());
+    assertEquals(modelName, sameNameOtherProvider.getName());
+
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -59,9 +67,11 @@ public class AgentModelServiceTest {
             .anyMatch(candidate -> candidate.getId().equals(model.getId())));
 
     agentModelService.deleteModel(id(model.getId()));
+    agentModelService.deleteModel(id(sameNameOtherProvider.getId()));
     assertThrows(
         IllegalArgumentException.class, () -> agentModelService.deleteModel(id(model.getId())));
     agentProviderService.deleteProvider(id(provider.getId()));
+    agentProviderService.deleteProvider(id(otherProvider.getId()));
   }
 
   private AgentProviderDTO provider(String name) {

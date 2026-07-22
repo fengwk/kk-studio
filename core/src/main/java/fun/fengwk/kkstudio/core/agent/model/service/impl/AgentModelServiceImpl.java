@@ -33,7 +33,7 @@ public class AgentModelServiceImpl implements AgentModelService {
     long providerId = parseId(createDTO == null ? null : createDTO.getProviderId(), "providerId");
     referenceResolver.requireProvider(providerId);
     AgentModel model = modelMutationFactory.newModel(providerId, createDTO);
-    referenceResolver.ensureNameAvailable(model.getName());
+    referenceResolver.ensureNameAvailable(providerId, model.getName());
     if (!agentModelRepository.create(model)) {
       throw new IllegalStateException("create agent model failed");
     }
@@ -45,7 +45,8 @@ public class AgentModelServiceImpl implements AgentModelService {
     AgentModel model = referenceResolver.requireModel(id);
     String currentName = model.getName();
     modelMutationFactory.update(model, updateDTO);
-    referenceResolver.ensureNameAvailable(currentName, model.getName());
+    // provider_id is immutable on update; uniqueness is still scoped to the owning provider.
+    referenceResolver.ensureNameAvailable(model.getProviderId(), currentName, model.getName());
     if (!agentModelRepository.updateById(model)) {
       throw new IllegalStateException("update agent model failed: " + id);
     }

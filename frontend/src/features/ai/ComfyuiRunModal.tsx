@@ -12,6 +12,7 @@ import {
   parseComfyuiBindings,
   prettyJson,
 } from '@/features/ai/comfyui-utils'
+import { FieldLabel } from '@/features/ai/FieldLabel'
 import { comfyuiService } from '@/shared/api/comfyui-service'
 import type {
   ComfyuiInputBinding,
@@ -316,12 +317,13 @@ function ParameterBindingField({
   onChange: (value: string) => void
 }) {
   const valueType = binding.valueType ?? 'string'
-  const label = `${binding.name}${binding.required ? ' *' : ''}`
+  const labelNode = <FieldLabel required={Boolean(binding.required)}>{binding.name}</FieldLabel>
+  const label = binding.name
   const hint = binding.description || `${binding.nodeId}.${binding.inputName} · ${valueType}`
   if (valueType === 'boolean') {
     return (
       <label className="form-group">
-        {label}
+        {labelNode}
         <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}>
           <option value="">{binding.required ? '请选择 true 或 false' : '未提供（保留 workflow 原值）'}</option>
           <option value="false">false</option>
@@ -334,7 +336,7 @@ function ParameterBindingField({
   if (valueType === 'json' || shouldUseTextarea(binding, value)) {
     return (
       <label className="form-group">
-        {label}
+        {labelNode}
         <textarea aria-label={label} className={valueType === 'json' ? 'code-textarea' : undefined} value={String(value)} onChange={(event) => onChange(event.target.value)} />
         <span className="inline-hint">{hint}</span>
       </label>
@@ -342,7 +344,7 @@ function ParameterBindingField({
   }
   return (
     <label className="form-group">
-      {label}
+      {labelNode}
       <input
         aria-label={label}
         type={valueType === 'integer' || valueType === 'number' ? 'number' : 'text'}
@@ -366,9 +368,8 @@ function FileBindingField({
 }) {
   return (
     <label className="form-group comfyui-file-field">
-      {binding.name}
-      {binding.required ? ' *' : ''}
-      <input aria-label={`${binding.name}${binding.required ? ' *' : ''}`} type="file" onChange={(event) => onChange(event.target.files?.[0])} />
+      <FieldLabel required={Boolean(binding.required)}>{binding.name}</FieldLabel>
+      <input aria-label={binding.required ? `${binding.name} *` : binding.name} type="file" onChange={(event) => onChange(event.target.files?.[0])} />
       <span className="inline-hint">{binding.description || `${binding.nodeId}.${binding.inputName}`}</span>
       {file && <span className="comfyui-selected-file">已选择：{file.name}</span>}
     </label>

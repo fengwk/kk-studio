@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.mapper.AgentDefinitionMapper;
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.model.AgentDefinitionDO;
+import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.harness.runtime.context.AgentRuntimeConfig;
@@ -30,15 +31,18 @@ public class HarnessAgentDefinitionSupport {
   private final AgentDefinitionMapper agentDefinitionMapper;
   private final ObjectMapper objectMapper;
   private final LiveEnvironmentRegistry environmentRegistry;
+  private final AgentModelDefaultVariantResolver variantResolver;
 
   public HarnessAgentDefinitionSupport(
       AgentDefinitionMapper agentDefinitionMapper,
       ObjectMapper objectMapper,
-      LiveEnvironmentRegistry environmentRegistry) {
+      LiveEnvironmentRegistry environmentRegistry,
+      AgentModelDefaultVariantResolver variantResolver) {
     this.agentDefinitionMapper =
         Objects.requireNonNull(agentDefinitionMapper, "agentDefinitionMapper");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
+    this.variantResolver = Objects.requireNonNull(variantResolver, "variantResolver");
   }
 
   public AgentDefinitionDO requireDefinition(long agentDefinitionId) {
@@ -68,8 +72,15 @@ public class HarnessAgentDefinitionSupport {
     ParsedConfig parsed = parseConfig(definition);
     String resolvedModelId =
         modelId == null || modelId.isBlank() ? String.valueOf(definition.getModelId()) : modelId;
-    String resolvedVariant =
+    String candidateVariant =
         variant == null || variant.isBlank() ? definition.getVariant() : variant;
+    long modelResourceId;
+    try {
+      modelResourceId = Long.parseLong(resolvedModelId);
+    } catch (NumberFormatException error) {
+      throw new IllegalArgumentException("invalid modelId: " + resolvedModelId, error);
+    }
+    String resolvedVariant = variantResolver.resolve(modelResourceId, candidateVariant);
     List<SelectedSkillMetadata> selectedSkills =
         resolveSelectedSkills(parsed.skills(), parsed.environmentName());
     return new AgentRuntimeConfig(

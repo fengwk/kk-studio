@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.mapper.AgentDefinitionMapper;
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.model.AgentDefinitionDO;
+import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonConnection;
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.harness.runtime.context.AgentRuntimeConfig;
@@ -52,9 +53,12 @@ class HarnessAgentDefinitionSupportTest {
         definition(
             9L, "first prompt", "local-dev", List.of("read"), List.of("shared", "project", "dev"));
     when(mapper.getById(9L)).thenReturn(definition);
+    AgentModelDefaultVariantResolver variantResolver = mock(AgentModelDefaultVariantResolver.class);
+    when(variantResolver.resolve(11L, "quality")).thenReturn("quality");
 
     HarnessAgentDefinitionSupport support =
-        new HarnessAgentDefinitionSupport(mapper, new ObjectMapper(), environments);
+        new HarnessAgentDefinitionSupport(
+            mapper, new ObjectMapper(), environments, variantResolver);
 
     AgentRuntimeConfig first = support.runtimeConfig(definition, "11", "quality", true);
     assertEquals("first prompt", first.systemPrompt());
@@ -88,8 +92,11 @@ class HarnessAgentDefinitionSupportTest {
     LiveEnvironmentRegistry environments =
         new LiveEnvironmentRegistry(new DaemonToolCapabilitiesCodec());
     AgentDefinitionDO definition = definition(3L, "prompt", "missing-env", List.of(), List.of());
+    AgentModelDefaultVariantResolver variantResolver = mock(AgentModelDefaultVariantResolver.class);
+    when(variantResolver.resolve(11L, "default")).thenReturn("default");
     HarnessAgentDefinitionSupport support =
-        new HarnessAgentDefinitionSupport(mapper, new ObjectMapper(), environments);
+        new HarnessAgentDefinitionSupport(
+            mapper, new ObjectMapper(), environments, variantResolver);
     assertTrue(
         assertThrows(
                 IllegalArgumentException.class,

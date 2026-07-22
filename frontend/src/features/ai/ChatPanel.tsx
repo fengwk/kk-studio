@@ -37,6 +37,9 @@ export function ChatPanel({
   onSubmit,
   onCommand,
   commands,
+  onAgentClick,
+  onModelClick,
+  onVariantClick,
 }: {
   timeline: ThreadTimeline
   runtimeLabels?: {
@@ -83,6 +86,9 @@ export function ChatPanel({
   onSubmit: () => void
   onCommand: (command: ThreadCommand) => void
   commands?: ThreadCommand[]
+  onAgentClick?: () => void
+  onModelClick?: () => void
+  onVariantClick?: () => void
 }) {
   const pendingPermissions = observability.toolInvocations.filter(
     (invocation) => invocation.status === 'WAITING_APPROVAL',
@@ -165,6 +171,9 @@ export function ChatPanel({
           contextWindow={runtimeLabels?.contextWindow}
           yoloEnabled={observability.yolo?.enabled}
           usage={observability.usage}
+          onAgentClick={onAgentClick}
+          onModelClick={onModelClick}
+          onVariantClick={onVariantClick}
         />
       }
     />

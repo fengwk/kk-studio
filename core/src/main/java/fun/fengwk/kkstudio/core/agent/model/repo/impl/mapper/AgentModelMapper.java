@@ -44,9 +44,13 @@ public interface AgentModelMapper extends BaseMapper {
   @ResultMap("agentModelResultMap")
   AgentModelDO getById(@Param("id") long id);
 
-  @Select("select " + COLUMNS + " from agent_model where name = #{name}")
+  @Select(
+      "select "
+          + COLUMNS
+          + " from agent_model where provider_id = #{providerId} and name = #{name}")
   @ResultMap("agentModelResultMap")
-  AgentModelDO getByName(@Param("name") String name);
+  AgentModelDO getByProviderIdAndName(
+      @Param("providerId") long providerId, @Param("name") String name);
 
   @Insert(
       """

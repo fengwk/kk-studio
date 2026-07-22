@@ -6,6 +6,8 @@ type StatusSegment = {
   className: string
   text: string
   title: string
+  onClick?: () => void
+  onSecondaryClick?: () => void
 }
 
 /** 与 CSS `.thread-status-sep { margin: 0 8px }` + `|` 宽大致一致，略偏小以多装一点 */
@@ -25,6 +27,9 @@ export function ThreadStatusFooter({
   yoloEnabled,
   usage,
   contextWindow,
+  onAgentClick,
+  onModelClick,
+  onVariantClick,
 }: {
   agentName?: string
   providerName?: string
@@ -33,6 +38,9 @@ export function ThreadStatusFooter({
   yoloEnabled?: boolean
   usage?: ModelUsageSummaryDTO
   contextWindow?: number
+  onAgentClick?: () => void
+  onModelClick?: () => void
+  onVariantClick?: () => void
 }) {
   const agentLabel = clean(agentName) || 'agent'
   const provider = clean(providerName)
@@ -49,8 +57,10 @@ export function ThreadStatusFooter({
   const hitPercent = resolveCacheHitPercent(usage, cacheRead, input)
   const cost = (usage?.costs ?? []).reduce((sum, item) => sum + asNumber(item.total), 0)
 
-  const modelRef = provider ? `${provider}/${model}` : model
-  const modelText = `${modelRef} · ${variant}`
+  // modelName may already be the canonical provider/model ref from callers.
+  const composedModelRef =
+    provider && model && !model.startsWith(`${provider}/`) ? `${provider}/${model}` : model
+  const modelText = `${composedModelRef} · ${variant}`
   const agentText = yoloOn ? `agent:${agentLabel} · YOLO` : `agent:${agentLabel}`
   // 未开对话 / 零用量也展示，便于看到 context 上限与费用位（与 pi/opencode 一致）
   const usageText = [
@@ -65,11 +75,26 @@ export function ThreadStatusFooter({
 
   const segments = useMemo(
     () => [
-      { key: 'agent', className: 'thread-status-agent', text: agentText, title: agentText },
-      { key: 'model', className: 'thread-status-model', text: modelText, title: modelText },
+      {
+        key: 'agent',
+        className: 'thread-status-agent',
+        text: agentText,
+        title: onAgentClick ? `${agentText} · 点击切换 Agent` : agentText,
+        onClick: onAgentClick,
+      },
+      {
+        key: 'model',
+        className: 'thread-status-model',
+        text: modelText,
+        title: onModelClick || onVariantClick
+          ? `${modelText} · 点击切换 Model，右键切换 Variant`
+          : modelText,
+        onClick: onModelClick,
+        onSecondaryClick: onVariantClick,
+      },
       { key: 'usage', className: 'thread-status-usage', text: usageText, title: usageText },
     ],
-    [agentText, modelText, usageText],
+    [agentText, modelText, usageText, onAgentClick, onModelClick, onVariantClick],
   )
 
   return (
@@ -79,7 +104,12 @@ export function ThreadStatusFooter({
   )
 }
 
-function StatusSegmentRows({ segments }: { segments: StatusSegment[] }) {
+type ClickableStatusSegment = StatusSegment & {
+  onClick?: () => void
+  onSecondaryClick?: () => void
+}
+
+function StatusSegmentRows({ segments }: { segments: ClickableStatusSegment[] }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const [rows, setRows] = useState<number[][]>(() => [segments.map((_, i) => i)])
 
@@ -133,9 +163,33 @@ function StatusSegmentRows({ segments }: { segments: StatusSegment[] }) {
                     |
                   </span>
                 ) : null}
-                <span className={`thread-status-seg ${segment.className}`} title={segment.title}>
-                  {segment.text}
-                </span>
+                {segment.onClick || segment.onSecondaryClick ? (
+                  <button
+                    type="button"
+                    className={`thread-status-seg is-clickable ${segment.className}`}
+                    title={segment.title}
+                    onClick={() => {
+                      if (segment.onClick) {
+                        segment.onClick()
+                        return
+                      }
+                      segment.onSecondaryClick?.()
+                    }}
+                    onContextMenu={(event) => {
+                      if (!segment.onSecondaryClick) {
+                        return
+                      }
+                      event.preventDefault()
+                      segment.onSecondaryClick()
+                    }}
+                  >
+                    {segment.text}
+                  </button>
+                ) : (
+                  <span className={`thread-status-seg ${segment.className}`} title={segment.title}>
+                    {segment.text}
+                  </span>
+                )}
               </span>
             )
           })}

@@ -8,7 +8,7 @@ import {
   normalizeChatPaneState,
   saveChatPaneState,
   sortWithRunningFirst,
-  updatePaneTarget,
+  updatePaneThread,
 } from '@/features/ai/chat-pane-state'
 
 class MemoryStorage implements Storage {
@@ -38,22 +38,19 @@ describe('chat-pane-state', () => {
     const state = createDefaultChatPaneState()
     expect(state.layout).toBe('single')
     expect(state.panes).toHaveLength(1)
-    expect(state.panes[0].target).toEqual({})
+    expect(state.panes[0].threadId).toBeNull()
     expect(state.focusedPaneId).toBe(state.panes[0].id)
   })
 
-  it('retains pane targets when expanding and shrinking layouts', () => {
-    const base = updatePaneTarget(createDefaultChatPaneState(), 'pane-1', {
-      sessionId: 's1',
-      threadId: 't1',
-    })
+  it('retains pane thread bindings when expanding and shrinking layouts', () => {
+    const base = updatePaneThread(createDefaultChatPaneState(), 'pane-1', 't1')
     const expanded = applyChatLayout(base, 'split-3')
     expect(expanded.panes).toHaveLength(3)
-    expect(expanded.panes[0].target).toEqual({ sessionId: 's1', threadId: 't1' })
-    expect(expanded.panes[1].target).toEqual({})
+    expect(expanded.panes[0].threadId).toBe('t1')
+    expect(expanded.panes[1].threadId).toBeNull()
     const shrunk = applyChatLayout(expanded, 'single')
     expect(shrunk.panes).toHaveLength(1)
-    expect(shrunk.panes[0].target).toEqual({ sessionId: 's1', threadId: 't1' })
+    expect(shrunk.panes[0].threadId).toBe('t1')
   })
 
   it('normalizes corrupted storage and persists by chat id', () => {
@@ -66,14 +63,30 @@ describe('chat-pane-state', () => {
     expect(loaded.panes).toHaveLength(6)
   })
 
-  it('focuses panes and detects bound targets', () => {
+  it('migrates legacy target.sessionId/threadId shape to threadId only', () => {
+    const migrated = normalizeChatPaneState({
+      layout: 'single',
+      focusedPaneId: 'pane-1',
+      panes: [{ id: 'pane-1', target: { sessionId: 's1', threadId: 't9' } }],
+    })
+    expect(migrated.panes[0].threadId).toBe('t9')
+    expect((migrated.panes[0] as { target?: unknown }).target).toBeUndefined()
+  })
+
+  it('focuses panes and detects bound thread ids', () => {
     const state = createDefaultChatPaneState('split-2')
     expect(focusPane(state, 'missing').focusedPaneId).toBe(state.focusedPaneId)
     expect(focusPane(state, state.panes[1].id).focusedPaneId).toBe(state.panes[1].id)
-    expect(isPaneBound({})).toBe(false)
-    expect(isPaneBound({ sessionId: 's', threadId: 't' })).toBe(true)
+    expect(isPaneBound(null)).toBe(false)
+    expect(isPaneBound('t')).toBe(true)
     expect(loadChatPaneState('')).toEqual(createDefaultChatPaneState())
-    expect(normalizeChatPaneState({ layout: 'split-2', focusedPaneId: 'gone', panes: [{ id: 'custom', target: { sessionId: 's' } }] }).focusedPaneId).toBe('custom')
+    expect(
+      normalizeChatPaneState({
+        layout: 'split-2',
+        focusedPaneId: 'gone',
+        panes: [{ id: 'custom', threadId: null }],
+      }).focusedPaneId,
+    ).toBe('custom')
   })
 
   it('sorts running items first then by preferred time', () => {

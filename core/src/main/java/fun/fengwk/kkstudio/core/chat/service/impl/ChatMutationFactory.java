@@ -15,9 +15,10 @@ import java.util.function.LongSupplier;
 /**
  * Normalizes Chat mutable fields and allocates Chat ids.
  *
- * <p>Update semantics: {@code null} fields preserve the current value; blank strings clear optional
- * fields to null. Non-blank {@code defaultAgentId} is parsed as a positive decimal string; catalog
- * existence is validated by {@link ChatGuard}.
+ * <p>Update semantics: {@code null} fields preserve the current value. Chat title is required when
+ * supplied; blank {@code defaultAgentId} clears that optional field. Non-blank {@code
+ * defaultAgentId} is parsed as a positive decimal string; catalog existence is validated by {@link
+ * ChatGuard}.
  */
 @Component
 public class ChatMutationFactory {
@@ -41,7 +42,11 @@ public class ChatMutationFactory {
     }
     Chat chat = new Chat();
     chat.setId(idGenerator.getAsLong());
-    chat.setTitle(editableSupport.trimToNull(createDTO.getTitle()));
+    String title = editableSupport.trimToNull(createDTO.getTitle());
+    if (title == null) {
+      throw new IllegalArgumentException("chat title must not be blank");
+    }
+    chat.setTitle(title);
     chat.setDefaultAgentId(parseOptionalAgentId(createDTO.getDefaultAgentId()));
     return chat;
   }
@@ -54,7 +59,11 @@ public class ChatMutationFactory {
       throw new IllegalArgumentException("chat body must not be null");
     }
     if (updateDTO.getTitle() != null) {
-      chat.setTitle(editableSupport.trimToNull(updateDTO.getTitle()));
+      String title = editableSupport.trimToNull(updateDTO.getTitle());
+      if (title == null) {
+        throw new IllegalArgumentException("chat title must not be blank");
+      }
+      chat.setTitle(title);
     }
     if (updateDTO.getDefaultAgentId() != null) {
       chat.setDefaultAgentId(parseOptionalAgentId(updateDTO.getDefaultAgentId()));
