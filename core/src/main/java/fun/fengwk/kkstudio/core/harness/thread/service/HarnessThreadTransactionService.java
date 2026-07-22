@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.CustomMessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.MessageEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.ModelChangeEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.RootEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryPayload;
@@ -211,8 +212,8 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
       throw new IllegalArgumentException("unknown entry: " + fromEntryId);
     }
 
-    // 从 root→fromEntryId 路径取最后一次 AGENT_CHANGE 身份；model/variant 取当前 Definition。
-    // 不写合成 AGENT_CHANGE Entry，不复用父 Thread 的 model override，yolo 恒为 false。
+    // 按路径配置变更写新 Thread 当前生效配置：last AGENT_CHANGE → agent；last MODEL_CHANGE → model/variant。
+    // 无 MODEL_CHANGE 时回退当前 Definition 默认；不复制父 Thread 字段；yolo 恒为 false。
     Long agentDefinitionId = null;
     String agentName = null;
     String modelId = null;
@@ -234,6 +235,16 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
       agentName = agentChange.agentName();
       modelId = String.valueOf(definition.getModelId());
       variant = definition.getVariant();
+    }
+    HarnessSessionEntryDO modelChangeRow =
+        entryMapper.findLatestOnPathByType(
+            sessionId, fromEntryId, SessionEntryType.MODEL_CHANGE.value());
+    if (modelChangeRow != null) {
+      ModelChangeEntryPayload modelChange =
+          (ModelChangeEntryPayload)
+              payloadCodec.decode(SessionEntryType.MODEL_CHANGE, modelChangeRow.getPayloadJson());
+      modelId = modelChange.modelId();
+      variant = modelChange.variant();
     }
 
     long threadId = idGenerator.newThreadId();
@@ -413,15 +424,23 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
       throw new IllegalStateException(
           "agent definition missing at apply time: " + fields.agentDefinitionId());
     }
-    long entryId = idGenerator.newSessionEntryId();
+    // 写配置变更 Entry（AGENT_CHANGE + 同批 MODEL_CHANGE=Definition 默认），并更新 Thread 当前生效配置。
+    long agentEntryId = idGenerator.newSessionEntryId();
     insertEntry(
-        entryId,
+        agentEntryId,
         thread.getSessionId(),
         headEntryId,
         new AgentChangeEntryPayload(fields.agentDefinitionId(), fields.agentName()),
         timestamp);
     String modelId = String.valueOf(definition.getModelId());
     String variant = definition.getVariant();
+    long modelEntryId = idGenerator.newSessionEntryId();
+    insertEntry(
+        modelEntryId,
+        thread.getSessionId(),
+        agentEntryId,
+        new ModelChangeEntryPayload(modelId, variant),
+        timestamp);
     if (threadMapper.updateAgentSettings(
             thread.getId(),
             processorToken,
@@ -437,10 +456,10 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     thread.setActiveAgentName(fields.agentName());
     thread.setModelId(modelId);
     thread.setVariant(variant);
-    markApplied(input, entryId, now);
+    markApplied(input, modelEntryId, now);
     eventStore.append(
         thread.getId(),
-        entryId,
+        modelEntryId,
         ThreadEventType.INPUT_APPLIED,
         ThreadEventPayloads.of(
             "inputId",
@@ -452,7 +471,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
         now);
     eventStore.append(
         thread.getId(),
-        entryId,
+        agentEntryId,
         ThreadEventType.AGENT_CHANGED,
         ThreadEventPayloads.of(
             "agentDefinitionId",
@@ -464,7 +483,13 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
             "variant",
             variant),
         now);
-    return new AppliedInput(withApplied(input, entryId, now), entryId);
+    eventStore.append(
+        thread.getId(),
+        modelEntryId,
+        ThreadEventType.MODEL_CHANGED,
+        ThreadEventPayloads.of("modelId", modelId, "variant", variant),
+        now);
+    return new AppliedInput(withApplied(input, modelEntryId, now), modelEntryId);
   }
 
   private AppliedInput applySetModel(
@@ -474,17 +499,25 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
       long headEntryId,
       Instant now) {
     ModelFields fields = readModel(input.payloadJson());
+    LocalDateTime timestamp = utc(now);
+    long modelEntryId = idGenerator.newSessionEntryId();
+    insertEntry(
+        modelEntryId,
+        thread.getSessionId(),
+        headEntryId,
+        new ModelChangeEntryPayload(fields.modelId(), fields.variant()),
+        timestamp);
     if (threadMapper.updateModelSettings(
-            thread.getId(), processorToken, fields.modelId(), fields.variant(), utc(now))
+            thread.getId(), processorToken, fields.modelId(), fields.variant(), timestamp)
         != 1) {
       throw new ConcurrentModificationException("cannot update model settings");
     }
     thread.setModelId(fields.modelId());
     thread.setVariant(fields.variant());
-    markApplied(input, headEntryId, now);
+    markApplied(input, modelEntryId, now);
     eventStore.append(
         thread.getId(),
-        headEntryId,
+        modelEntryId,
         ThreadEventType.INPUT_APPLIED,
         ThreadEventPayloads.of(
             "inputId",
@@ -496,11 +529,11 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
         now);
     eventStore.append(
         thread.getId(),
-        headEntryId,
+        modelEntryId,
         ThreadEventType.MODEL_CHANGED,
         ThreadEventPayloads.of("modelId", fields.modelId(), "variant", fields.variant()),
         now);
-    return new AppliedInput(withApplied(input, headEntryId, now), headEntryId);
+    return new AppliedInput(withApplied(input, modelEntryId, now), modelEntryId);
   }
 
   private AppliedInput applySetYolo(

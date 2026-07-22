@@ -3,9 +3,10 @@ package fun.fengwk.kkstudio.harness.runtime.session;
 import java.util.Objects;
 
 /**
- * Thread 有序 SET_AGENT 应用后的审计 Entry。
+ * SET_AGENT 应用后写入的 Agent 配置变更 Entry。
  *
- * <p>只记录 agentDefinitionId 与捕获时的 agentName；不得写入 prompt/tools/skills 等完整配置。
+ * <p>只记录 agentDefinitionId 与捕获时的 agentName；不得写入 prompt/tools/skills 等完整配置。 Thread 的 agent 字段是该
+ * Thread 当前生效配置。
  */
 public record AgentChangeEntryPayload(long agentDefinitionId, String agentName)
     implements SessionEntryPayload {

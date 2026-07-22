@@ -65,6 +65,7 @@ public final class SessionContextBuilder {
       } else if (entry.payload() instanceof AssistantErrorEntryPayload) {
         // UI/audit artifact of a failed attempt; it must not enter the next Provider Context.
       }
+      // AGENT_CHANGE / MODEL_CHANGE / ROOT / LABEL / CUSTOM are config history or UI meta only.
     }
     return List.copyOf(messages);
   }

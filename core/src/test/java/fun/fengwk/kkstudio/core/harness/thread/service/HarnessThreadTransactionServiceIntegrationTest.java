@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantErrorEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.ModelChangeEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
@@ -102,11 +103,11 @@ class HarnessThreadTransactionServiceIntegrationTest {
   }
 
   /**
-   * 分支创建语义：无 Agent 路径保持空；路径取最后一次 AGENT_CHANGE；model/variant 用当前 Definition 而非父 Thread override；缺失
-   * Definition 原子失败且不落 Thread；不追加合成 AGENT_CHANGE。
+   * 分支创建语义：无 Agent 路径保持空；路径取最后一次 AGENT_CHANGE + MODEL_CHANGE 写出当前生效配置；缺失 Definition 原子失败且不落
+   * Thread；不追加合成 AGENT_CHANGE。
    */
   @Test
-  void initializesBranchThreadFromLastAgentOnPathWithCurrentDefinitionModel() {
+  void initializesBranchThreadCurrentConfigFromPathAgentAndModelChanges() {
     Instant now = Instant.parse("2026-02-08T00:00:00Z");
     ThreadTransactions.SessionCreateResult created =
         transactions.createSession("branch-agent", false, now);
@@ -145,7 +146,7 @@ class HarnessThreadTransactionServiceIntegrationTest {
         mainThreadId, SEED_AGENT_ID, "captured-seed-name", "set-seed", now.plusSeconds(3));
     transactions.submitSetAgent(
         mainThreadId, secondAgentId, "captured-second-name", "set-second", now.plusSeconds(4));
-    // 父 Thread 显式 model override 不得被分支复用。
+    // SET_MODEL 写入路径上的 MODEL_CHANGE；从 head 分支应继承该当前生效 model/variant。
     transactions.submitSetModel(
         mainThreadId,
         "parent-override-model",
@@ -165,13 +166,15 @@ class HarnessThreadTransactionServiceIntegrationTest {
     assertEquals("parent-override-variant", mainAfter.getVariant());
 
     List<HarnessSessionEntryDO> entriesBeforeBranch = entryMapper.listBySession(sessionId);
+    // SET_AGENT → AGENT_CHANGE + MODEL_CHANGE；再 SET_MODEL → 额外 MODEL_CHANGE（配置变更记录）。
     assertEquals(
-        List.of("root", "agent_change", "agent_change"),
+        List.of(
+            "root", "agent_change", "model_change", "agent_change", "model_change", "model_change"),
         entriesBeforeBranch.stream().map(HarnessSessionEntryDO::getEntryType).toList());
-    long headAfterAgents = mainAfter.getHeadEntryId();
-    assertEquals(entriesBeforeBranch.get(2).getId(), headAfterAgents);
+    long headAfterConfig = mainAfter.getHeadEntryId();
+    assertEquals(entriesBeforeBranch.get(5).getId(), headAfterConfig);
 
-    // 更新当前 Definition model/variant：分支必须读到更新后的值，而非历史 apply 时快照。
+    // 改 Definition 不得覆盖路径上已写入的 MODEL_CHANGE。
     secondAgent.setModelId(1L);
     secondAgent.setVariant("current-definition-variant");
     assertEquals(1, agentDefinitionMapper.updateById(secondAgent));
@@ -179,19 +182,20 @@ class HarnessThreadTransactionServiceIntegrationTest {
     int threadCountBefore = threadMapper.listBySession(sessionId).size();
     int entryCountBefore = entryMapper.listBySession(sessionId).size();
     AgentThread branch =
-        transactions.createThreadFromEntry(sessionId, headAfterAgents, now.plusSeconds(7));
+        transactions.createThreadFromEntry(sessionId, headAfterConfig, now.plusSeconds(7));
     assertEquals(threadCountBefore + 1, threadMapper.listBySession(sessionId).size());
     assertEquals(entryCountBefore, entryMapper.listBySession(sessionId).size());
-    assertEquals(headAfterAgents, branch.headEntryId());
+    assertEquals(headAfterConfig, branch.headEntryId());
     assertEquals(secondAgentId, branch.activeAgentDefinitionId());
     assertEquals("captured-second-name", branch.activeAgentName());
-    assertEquals("1", branch.modelId());
-    assertEquals("current-definition-variant", branch.variant());
+    // 从 head 分支：当前生效 model/variant 取路径 last MODEL_CHANGE（SET_MODEL），而非 Definition。
+    assertEquals("parent-override-model", branch.modelId());
+    assertEquals("parent-override-variant", branch.variant());
     assertFalse(branch.yoloEnabled());
     assertEquals(1, eventMapper.countByType(branch.id(), ThreadEventType.THREAD_STARTED.value()));
     assertEquals(0, eventMapper.countByType(branch.id(), ThreadEventType.AGENT_CHANGED.value()));
 
-    // 从较早 seed AGENT_CHANGE 分支应取 seed 身份与 seed 当前 Definition model，而非路径上更晚的 second。
+    // 从 seed AGENT_CHANGE 分支：路径尚无 MODEL_CHANGE，回退 seed 当前 Definition。
     long seedAgentChangeId = entriesBeforeBranch.get(1).getId();
     AgentThread olderBranch =
         transactions.createThreadFromEntry(sessionId, seedAgentChangeId, now.plusSeconds(8));
@@ -207,7 +211,7 @@ class HarnessThreadTransactionServiceIntegrationTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                transactions.createThreadFromEntry(sessionId, headAfterAgents, now.plusSeconds(9)));
+                transactions.createThreadFromEntry(sessionId, headAfterConfig, now.plusSeconds(9)));
     assertTrue(missing.getMessage().startsWith("unknown agent definition:"));
     assertEquals(threadCountBeforeMissing, threadMapper.listBySession(sessionId).size());
     assertEquals(entryCountBefore, entryMapper.listBySession(sessionId).size());
@@ -262,8 +266,9 @@ class HarnessThreadTransactionServiceIntegrationTest {
     assertTrue(Boolean.TRUE.equals(thread.getYoloEnabled()));
 
     List<HarnessSessionEntryDO> entries = entryMapper.listBySession(created.sessionId());
+    // SET_AGENT → agent_change + model_change；SET_MODEL → 再写 model_change；SET_YOLO 不写 Entry。
     assertEquals(
-        List.of("root", "agent_change"),
+        List.of("root", "agent_change", "model_change", "model_change"),
         entries.stream().map(HarnessSessionEntryDO::getEntryType).toList());
     AgentChangeEntryPayload change = payload(entries.get(1), AgentChangeEntryPayload.class);
     assertEquals(SEED_AGENT_ID, change.agentDefinitionId());
@@ -272,9 +277,15 @@ class HarnessThreadTransactionServiceIntegrationTest {
     assertFalse(entries.get(1).getPayloadJson().contains("snapshot"));
     assertFalse(entries.get(1).getPayloadJson().contains("tools"));
     assertFalse(entries.get(1).getPayloadJson().contains("executionPolicy"));
+    ModelChangeEntryPayload setAgentModel = payload(entries.get(2), ModelChangeEntryPayload.class);
+    assertEquals("1", setAgentModel.modelId());
+    ModelChangeEntryPayload setModel = payload(entries.get(3), ModelChangeEntryPayload.class);
+    assertEquals("model-2", setModel.modelId());
+    assertEquals("variant-2", setModel.variant());
 
+    // SET_AGENT 也会发 MODEL_CHANGED；再加一次 SET_MODEL。
     assertEquals(1, eventMapper.countByType(threadId, ThreadEventType.AGENT_CHANGED.value()));
-    assertEquals(1, eventMapper.countByType(threadId, ThreadEventType.MODEL_CHANGED.value()));
+    assertEquals(2, eventMapper.countByType(threadId, ThreadEventType.MODEL_CHANGED.value()));
     assertEquals(1, eventMapper.countByType(threadId, ThreadEventType.YOLO_CHANGED.value()));
   }
 
