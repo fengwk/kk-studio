@@ -131,7 +131,7 @@ class StudioHarnessThreadControllerTest {
             put("/api/threads/{id}/model", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"modelId\":\"model-1\",\"variant\":\"default\",\"clientMessageId\":\"model-1\"}"))
+                    "{\"modelId\":\"1\",\"variant\":\"default\",\"clientMessageId\":\"model-1\"}"))
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.data.inputType").value("SET_MODEL"));
 
@@ -234,6 +234,20 @@ class StudioHarnessThreadControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"modelId\":\"\",\"variant\":\"default\",\"clientMessageId\":\"invalid-model\"}"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(
+            put("/api/threads/{id}/model", threadId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"modelId\":\"1\",\"variant\":\"missing\",\"clientMessageId\":\"invalid-variant\"}"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(
+            put("/api/threads/{id}/model", threadId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"modelId\":\"999999999999\",\"variant\":\"default\",\"clientMessageId\":\"missing-model\"}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(

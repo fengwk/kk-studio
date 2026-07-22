@@ -1,10 +1,10 @@
 import { useEffect, useRef, type RefObject } from 'react'
 
 /**
- * 贴底自动滚动阈值：约等于常见桌面一次滚轮（deltaY≈100）的行程。
+ * 贴底自动滚动阈值：约 2 次常见桌面滚轮行程（deltaY≈100）。
  * 用户上滑超过该距离后停止跟随；回到阈值内再恢复。
  */
-export const CHAT_STICK_TO_BOTTOM_THRESHOLD_PX = 100
+export const CHAT_STICK_TO_BOTTOM_THRESHOLD_PX = 210
 
 function distanceFromBottom(element: HTMLElement): number {
   return element.scrollHeight - element.scrollTop - element.clientHeight

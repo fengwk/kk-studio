@@ -1,14 +1,21 @@
+/**
+ * Chat 工作区本地状态（浏览器 localStorage）。
+ *
+ * 只存 UI 姿势与“每个面板绑哪条 Thread”：
+ * - layout / focusedPaneId / 列表排序偏好
+ * - panes[].threadId（null = 空面板）
+ *
+ * 不存 Session、Agent、消息等服务端真相。旧版 { target: { sessionId, threadId } }
+ * 读取时自动降级为 threadId。
+ */
+
 export type ChatLayout = 'single' | 'split-2' | 'split-3' | 'grid-4' | 'grid-6' | 'grid-8'
 export type PaneSortPreference = 'recent' | 'created'
 
-export interface PaneTarget {
-  sessionId?: string
-  threadId?: string
-}
-
 export interface ChatPane {
   id: string
-  target: PaneTarget
+  /** 空面板为 null；绑定后只记 threadId，session 从 Thread 反查。 */
+  threadId: string | null
 }
 
 export interface ChatPaneState {
@@ -39,7 +46,7 @@ function createPaneId(index: number): string {
 }
 
 export function createEmptyPane(index: number): ChatPane {
-  return { id: createPaneId(index), target: {} }
+  return { id: createPaneId(index), threadId: null }
 }
 
 export function createDefaultChatPaneState(layout: ChatLayout = 'single'): ChatPaneState {
@@ -56,15 +63,6 @@ export function createDefaultChatPaneState(layout: ChatLayout = 'single'): ChatP
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object'
-}
-
-function parseTarget(value: unknown): PaneTarget {
-  if (!isRecord(value)) {
-    return {}
-  }
-  const sessionId = typeof value.sessionId === 'string' && value.sessionId.trim() ? value.sessionId : undefined
-  const threadId = typeof value.threadId === 'string' && value.threadId.trim() ? value.threadId : undefined
-  return { sessionId, threadId }
 }
 
 function parseLayout(value: unknown): ChatLayout {
@@ -85,6 +83,36 @@ function parseSort(value: unknown): PaneSortPreference {
   return value === 'created' ? 'created' : 'recent'
 }
 
+/** Accepts current threadId and legacy target.threadId. */
+function parseThreadId(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim()
+  }
+  if (!isRecord(value)) {
+    return null
+  }
+  if (typeof value.threadId === 'string' && value.threadId.trim()) {
+    return value.threadId.trim()
+  }
+  // legacy: { target: { sessionId, threadId } }
+  if (isRecord(value.target) && typeof value.target.threadId === 'string' && value.target.threadId.trim()) {
+    return value.target.threadId.trim()
+  }
+  return null
+}
+
+function parsePane(value: unknown, index: number): ChatPane {
+  if (!isRecord(value)) {
+    return createEmptyPane(index)
+  }
+  const id = typeof value.id === 'string' && value.id.trim() ? value.id.trim() : createPaneId(index)
+  // New shape: pane.threadId; legacy: pane.target.threadId
+  const threadId =
+    parseThreadId(value.threadId)
+    ?? (isRecord(value.target) ? parseThreadId(value.target) : null)
+  return { id, threadId }
+}
+
 export function normalizeChatPaneState(raw: unknown): ChatPaneState {
   const defaults = createDefaultChatPaneState()
   if (!isRecord(raw)) {
@@ -95,12 +123,7 @@ export function normalizeChatPaneState(raw: unknown): ChatPaneState {
   const rawPanes = Array.isArray(raw.panes) ? raw.panes : []
   const panes: ChatPane[] = []
   for (let index = 0; index < capacity; index += 1) {
-    const candidate = rawPanes[index]
-    if (isRecord(candidate) && typeof candidate.id === 'string' && candidate.id.trim()) {
-      panes.push({ id: candidate.id, target: parseTarget(candidate.target) })
-    } else {
-      panes.push(createEmptyPane(index))
-    }
+    panes.push(parsePane(rawPanes[index], index))
   }
   const focusedPaneId =
     typeof raw.focusedPaneId === 'string' && panes.some((pane) => pane.id === raw.focusedPaneId)
@@ -115,7 +138,7 @@ export function normalizeChatPaneState(raw: unknown): ChatPaneState {
   }
 }
 
-/** Resize panes when layout changes, retaining targets where possible. */
+/** Resize panes when layout changes, retaining thread bindings where possible. */
 export function applyChatLayout(state: ChatPaneState, layout: ChatLayout): ChatPaneState {
   if (state.layout === layout) {
     return state
@@ -124,7 +147,7 @@ export function applyChatLayout(state: ChatPaneState, layout: ChatLayout): ChatP
   const panes: ChatPane[] = []
   for (let index = 0; index < capacity; index += 1) {
     const existing = state.panes[index]
-    panes.push(existing ? { ...existing, target: { ...existing.target } } : createEmptyPane(index))
+    panes.push(existing ? { id: existing.id, threadId: existing.threadId } : createEmptyPane(index))
   }
   const focusedPaneId = panes.some((pane) => pane.id === state.focusedPaneId)
     ? state.focusedPaneId
@@ -137,10 +160,17 @@ export function applyChatLayout(state: ChatPaneState, layout: ChatLayout): ChatP
   }
 }
 
-export function updatePaneTarget(state: ChatPaneState, paneId: string, target: PaneTarget): ChatPaneState {
+export function updatePaneThread(
+  state: ChatPaneState,
+  paneId: string,
+  threadId: string | null,
+): ChatPaneState {
+  const normalized = threadId && threadId.trim() ? threadId.trim() : null
   return {
     ...state,
-    panes: state.panes.map((pane) => (pane.id === paneId ? { ...pane, target: { ...target } } : pane)),
+    panes: state.panes.map((pane) =>
+      pane.id === paneId ? { ...pane, threadId: normalized } : pane,
+    ),
   }
 }
 
@@ -166,15 +196,19 @@ export function loadChatPaneState(chatId: string, storage: Storage = localStorag
   }
 }
 
-export function saveChatPaneState(chatId: string, state: ChatPaneState, storage: Storage = localStorage): void {
+export function saveChatPaneState(
+  chatId: string,
+  state: ChatPaneState,
+  storage: Storage = localStorage,
+): void {
   if (!chatId) {
     return
   }
   storage.setItem(storageKey(chatId), JSON.stringify(normalizeChatPaneState(state)))
 }
 
-export function isPaneBound(target: PaneTarget): target is { sessionId: string; threadId: string } {
-  return Boolean(target.sessionId && target.threadId)
+export function isPaneBound(threadId: string | null | undefined): threadId is string {
+  return Boolean(threadId && threadId.trim())
 }
 
 export type Timestamped = {

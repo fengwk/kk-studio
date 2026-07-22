@@ -6,6 +6,7 @@ import {
   emptyModelDraft,
   extractContextWindow,
   extractDefaultVariantFromModel,
+  extractMaxOutputTokens,
   extractVariantIdsFromModel,
   toEditableModel,
   toEditableModelUpdate,
@@ -344,6 +345,15 @@ describe('ai-model-draft-codec', () => {
   it('returns no variant data for missing models', () => {
     expect(extractVariantIdsFromModel(undefined)).toEqual([])
     expect(extractDefaultVariantFromModel(undefined)).toBe('')
+  })
+
+  /** Incomplete wire models must not crash list/filter projections. */
+  it('tolerates models whose structured config is missing', () => {
+    const incomplete = { id: '1', name: 'broken' } as AgentModelDTO
+    expect(extractVariantIdsFromModel(incomplete)).toEqual([])
+    expect(extractDefaultVariantFromModel(incomplete)).toBe('')
+    expect(extractContextWindow(incomplete)).toBeUndefined()
+    expect(extractMaxOutputTokens(incomplete)).toBeUndefined()
   })
 
   /** emptyModelDraft without a model or provider keeps an empty providerId and TEXT only. */

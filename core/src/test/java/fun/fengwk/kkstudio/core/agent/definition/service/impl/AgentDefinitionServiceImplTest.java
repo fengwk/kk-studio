@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.core.agent.definition.configuration.AgentDefinitionCo
 import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.agent.definition.service.converter.AgentDefinitionConverter;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
+import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
 
@@ -25,6 +26,7 @@ public class AgentDefinitionServiceImplTest {
     AgentDefinitionConverter converter = mock(AgentDefinitionConverter.class);
     AgentDefinitionMutationFactory factory = mock(AgentDefinitionMutationFactory.class);
     AgentDefinitionReferenceResolver resolver = mock(AgentDefinitionReferenceResolver.class);
+    AgentModelDefaultVariantResolver variantResolver = mock(AgentModelDefaultVariantResolver.class);
     AgentDefinitionLiveCapabilityValidator validator =
         mock(AgentDefinitionLiveCapabilityValidator.class);
     doNothing().when(validator).validate(any());
@@ -34,6 +36,7 @@ public class AgentDefinitionServiceImplTest {
             converter,
             factory,
             resolver,
+            variantResolver,
             validator,
             new AgentDefinitionConfigCodec(new ObjectMapper()));
 

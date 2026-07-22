@@ -1,3 +1,4 @@
+import { FieldLabel } from '@/features/ai/FieldLabel'
 import {
   buildCapabilityCandidates,
   PLATFORM_ENVIRONMENT_NAME,
@@ -6,7 +7,7 @@ import {
 } from '@/features/ai/agent-capability-candidates'
 import type { AgentDraft } from '@/features/ai/ai-console-types'
 import { applyAgentModelSelection, variantOptionsFromModel } from '@/features/ai/ai-draft-normalizers'
-import type { AgentModelView } from '@/features/ai/AgentModelView'
+import { modelRef, type AgentModelView } from '@/features/ai/AgentModelView'
 import { emptyAgentDraft } from '@/features/ai/ai-resource-draft-codecs'
 import type { ResourceFieldKey } from '@/features/ai/ai-resource-form-validation'
 import { FormSelect } from '@/features/ai/FormSelect'
@@ -59,49 +60,50 @@ export function AgentForm({
   return (
     <>
       <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
-        <span>Name</span>
+        <FieldLabel required>Name</FieldLabel>
         <input value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} placeholder="default-assistant" required />
         {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}
       </label>
       <label className="form-group">
-        <span>Description</span>
+        <FieldLabel>Description</FieldLabel>
         <input value={draft.description} onChange={(event) => onChange({ ...draft, description: event.target.value })} placeholder="用途说明" />
       </label>
       <label className={`form-group${fieldErrors.modelId ? ' is-error' : ''}`}>
-        <span>Model</span>
+        <FieldLabel required>Default Model</FieldLabel>
         <FormSelect
-          aria-label="Model"
+          aria-label="Default Model"
           value={draft.modelId}
           required
-          options={models.map((model) => {
-            const provider = model.providerName?.trim()
-            return {
-              value: String(model.id),
-              label: provider ? `${model.name} (${provider})` : model.name,
-            }
-          })}
+          options={models.map((model) => ({
+            value: String(model.id),
+            label: modelRef(model),
+          }))}
           onChange={(modelId) => onChange(applyAgentModelSelection(draft, modelId, models))}
         />
         {fieldErrors.modelId ? <span className="field-error">{fieldErrors.modelId}</span> : null}
       </label>
       <label className={`form-group${fieldErrors.variant ? ' is-error' : ''}`}>
-        <span>Variant</span>
+        <FieldLabel>Default Variant Override</FieldLabel>
         <FormSelect
-          aria-label="Variant"
+          aria-label="Default Variant Override"
           value={selectedVariant}
           disabled={models.length === 0}
-          options={variantOptions.map((variantName) => ({ value: variantName, label: variantName }))}
+          placeholder="（使用模型默认）"
+          options={[
+            { value: '', label: '（使用模型默认）' },
+            ...variantOptions.map((variantName) => ({ value: variantName, label: variantName })),
+          ]}
           onChange={(variant) => onChange({ ...draft, variant })}
         />
         {fieldErrors.variant ? <span className="field-error">{fieldErrors.variant}</span> : null}
       </label>
       <label className="form-group">
-        <span>System Prompt</span>
+        <FieldLabel>System Prompt</FieldLabel>
         <textarea value={draft.systemPrompt} onChange={(event) => onChange({ ...draft, systemPrompt: event.target.value })} placeholder="系统提示词" rows={4} />
       </label>
 
       <label className={`form-group${fieldErrors.environmentName ? ' is-error' : ''}`}>
-        <span>Environment</span>
+        <FieldLabel>Environment</FieldLabel>
         <FormSelect
           aria-label="Environment"
           value={draft.environmentName}
@@ -193,7 +195,7 @@ export function AgentForm({
         ) : null}
         <div className="form-grid-2">
           <label className="form-group">
-            <span>maxTurns</span>
+            <FieldLabel>maxTurns</FieldLabel>
             <input
               type="number"
               inputMode="numeric"
@@ -210,7 +212,7 @@ export function AgentForm({
             />
           </label>
           <label className="form-group">
-            <span>maxDepth</span>
+            <FieldLabel>maxDepth</FieldLabel>
             <input
               type="number"
               inputMode="numeric"
@@ -227,7 +229,7 @@ export function AgentForm({
             />
           </label>
           <label className="form-group">
-            <span>maxDirectSubagents</span>
+            <FieldLabel>maxDirectSubagents</FieldLabel>
             <input
               type="number"
               inputMode="numeric"
@@ -247,7 +249,7 @@ export function AgentForm({
             />
           </label>
           <label className="form-group">
-            <span>maxTotalSubagents</span>
+            <FieldLabel>maxTotalSubagents</FieldLabel>
             <input
               type="number"
               inputMode="numeric"

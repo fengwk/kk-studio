@@ -8,7 +8,14 @@ export { ThreadSubagentWidget } from '@/features/ai/thread-panel/ThreadSubagentW
 export { ThreadActivityWidget } from '@/features/ai/thread-panel/ThreadActivityWidget'
 export { ThreadCommandPalette } from '@/features/ai/thread-panel/ThreadCommandPalette'
 export { ThreadStatusFooter } from '@/features/ai/thread-panel/ThreadStatusFooter'
-export { THREAD_COMMANDS, filterThreadCommands, type ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
+export {
+  THREAD_COMMANDS,
+  filterThreadCommands,
+  firstEnabledThreadCommand,
+  threadCommandsForScene,
+  type ThreadCommand,
+  type ThreadCommandScene,
+} from '@/features/ai/thread-panel/thread-commands'
 export { MessageList } from '@/features/ai/thread-panel/messages/MessageList'
 export { AssistantMessageBlock } from '@/features/ai/thread-panel/messages/AssistantMessageBlock'
 export { UserMessageBlock } from '@/features/ai/thread-panel/messages/UserMessageBlock'

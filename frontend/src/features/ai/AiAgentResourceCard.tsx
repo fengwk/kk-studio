@@ -1,13 +1,12 @@
 import { ResourceCardLayout } from '@/features/ai/AiResourceCardLayout'
-import type { AgentModelView } from '@/features/ai/AgentModelView'
+import { modelRef, type AgentModelView } from '@/features/ai/AgentModelView'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts'
 
 function formatAgentModelLabel(model: AgentModelView | undefined, modelId: string): string {
   if (!model) {
-    return modelId.trim()
+    return modelId.trim() || 'unknown-model'
   }
-  const provider = model.providerName?.trim()
-  return provider ? `${provider}/${model.name}` : model.name
+  return modelRef(model)
 }
 
 /** 卡片上的 Policy = 编辑页 executionPolicy（maxTurns/maxDepth/...）的紧凑摘要。 */
@@ -55,8 +54,8 @@ export function AgentResourceCard({
       title={agent.name}
       subtitle={agent.description || agent.systemPrompt || agent.name}
       rows={[
-        ['Model', modelLabel],
-        ['Variant', agent.variant.trim()],
+        ['Default Model', modelLabel],
+        ['Variant', agent.variant?.trim() ? agent.variant.trim() : '模型默认'],
         ['Env', environmentName],
         { label: 'Tools', tags: tools, limit: 2 },
         { label: 'Skills', tags: skills, limit: 2 },

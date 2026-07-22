@@ -14,6 +14,7 @@ export function SelectionListModal({
   items,
   sort,
   onSortChange,
+  showSort = true,
   onSelect,
   onClose,
   emptyText = '暂无选项',
@@ -23,6 +24,7 @@ export function SelectionListModal({
   items: SelectionListItem[]
   sort: PaneSortPreference
   onSortChange: (sort: PaneSortPreference) => void
+  showSort?: boolean
   onSelect: (id: string) => void
   onClose: () => void
   emptyText?: string
@@ -36,25 +38,27 @@ export function SelectionListModal({
       <div className="modal-card selection-modal" aria-label={title} onMouseDown={(event) => event.stopPropagation()}>
         <ModalHeader title={title} onClose={onClose} />
         <div className="modal-body">
-          <div className="selection-sort-row">
-            <span>排序</span>
-            <div className="selection-sort-actions">
-              <button
-                type="button"
-                className={sort === 'recent' ? 'active' : undefined}
-                onClick={() => onSortChange('recent')}
-              >
-                最近更新
-              </button>
-              <button
-                type="button"
-                className={sort === 'created' ? 'active' : undefined}
-                onClick={() => onSortChange('created')}
-              >
-                创建时间
-              </button>
+          {showSort ? (
+            <div className="selection-sort-row">
+              <span>排序</span>
+              <div className="selection-sort-actions">
+                <button
+                  type="button"
+                  className={sort === 'recent' ? 'active' : undefined}
+                  onClick={() => onSortChange('recent')}
+                >
+                  最近更新
+                </button>
+                <button
+                  type="button"
+                  className={sort === 'created' ? 'active' : undefined}
+                  onClick={() => onSortChange('created')}
+                >
+                  创建时间
+                </button>
+              </div>
             </div>
-          </div>
+          ) : null}
           <ul className="selection-list">
             {items.length === 0 ? <li className="selection-empty">{emptyText}</li> : null}
             {items.map((item) => (

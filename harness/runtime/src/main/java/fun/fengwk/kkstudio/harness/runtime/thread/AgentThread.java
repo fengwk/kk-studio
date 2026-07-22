@@ -6,7 +6,7 @@ import java.util.Objects;
 /**
  * 持久化的 Branch 运行单元。
  *
- * <p>持有 head、mailbox sequence、执行状态、processor lease，以及当前生效的 Thread 级运行时设置（Agent / Model / YOLO）。完整
+ * <p>持有 head、mailbox sequence、执行状态、processor lease、当前生效配置（agent / model / variant）与运行策略（YOLO）。完整
  * system prompt、tools、skills 等不落 Thread 行，Turn 时按当前 AgentDefinition 动态装载。
  */
 public record AgentThread(

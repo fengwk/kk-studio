@@ -198,6 +198,7 @@ root_thread_id
 ROOT
 MESSAGE
 AGENT_CHANGE
+MODEL_CHANGE
 COMPACTION
 BRANCH_SUMMARY
 CUSTOM
@@ -206,7 +207,7 @@ LABEL
 ASSISTANT_ERROR
 ```
 
-`ROOT` 是 Session 语义根 Entry，不携带运行时配置。`AGENT_CHANGE` 只记录 `agentDefinitionId` 与捕获时的 `agentName`，禁止写入 prompt/tools/skills/subagents/policy 或完整 snapshot。Model/variant 与 YOLO 是 Thread 状态，不作为 Entry payload。
+`ROOT` 是 Session 语义根 Entry，不携带运行时配置。`AGENT_CHANGE` 只记录 `agentDefinitionId` 与捕获时的 `agentName`，禁止写入 prompt/tools/skills/subagents/policy 或完整 snapshot。`MODEL_CHANGE` 记录路径上的 `modelId`/`variant` 配置变更。Thread 的 agent/model/variant 是**该 Thread 当前生效配置**（apply 到 head 后的最终状态，供 UI/Turn 直接读取）；**YOLO 是 Thread 运行策略**，不入 Entry。
 
 `ASSISTANT_ERROR` 是一次 Provider/setup/Tool prepare 失败的不可变审计与 transcript 条目，记录错误类别、面向用户的错误信息、retry attempt 与是否已安排重试。其 ID 复用该次 Turn 预分配的 assistant entry ID，使 durable Entry 与 `assistant_failed` SSE 事件可去重；它会推进 Thread head，但 `SessionContextBuilder` 必须显式跳过它，禁止错误原文进入下一次 Provider Context。
 
@@ -263,13 +264,16 @@ yoloEnabled = false
 
 不复制 Entry、ToolInvocation、Event，也不为分支创建追加合成 `AGENT_CHANGE` Entry（head 保持 `fromEntryId`，Entry Tree 仍 append-only）。
 
-Agent / Model 初始化：
+Agent / Model 初始化（按路径配置变更 → 写出新 Thread 的当前生效配置）：
 
 1. 加载 Session Entry Tree 上 root → `fromEntryId` 的路径。
-2. 在路径中取最后一次 `AGENT_CHANGE`（仅读其 `agentDefinitionId` 与捕获时的 `agentName`）。
-3. 若无 `AGENT_CHANGE`：Thread 的 agent/model/variant 为空（与无 Agent Session 一致）。
-4. 若存在：用该 Entry 的 Agent 身份写入 Thread 独立字段，并用该 `agentDefinitionId` 的**当前** AgentDefinition 解析 `modelId`/`variant`。不复用父 Thread 的 model override，也不把 prompt/tools/skills/subagents/policy 写入 Entry 或 Thread。
-5. 历史 AgentDefinition 已不存在时整事务失败（`IllegalArgumentException` / HTTP 404：`unknown agent definition:`），不落半残 Thread。
+2. 取最后一次 `AGENT_CHANGE`（仅 `agentDefinitionId` / 捕获时 `agentName`）。
+3. 取最后一次 `MODEL_CHANGE`（`modelId` / `variant`）。
+4. 若无 `AGENT_CHANGE`：新 Thread 的 agent/model/variant 为空。
+5. 若有 Agent 无 `MODEL_CHANGE`：用当前 AgentDefinition 默认 model/variant 作为当前生效配置。
+6. 若有 `MODEL_CHANGE`：以该 Entry 的 model/variant 为准（含历史上的 SET_MODEL），不复制父 Thread 当前字段。
+7. 历史 AgentDefinition 已不存在时整事务失败（`IllegalArgumentException` / HTTP 404：`unknown agent definition:`），不落半残 Thread。
+8. YOLO 恒为 `false`（运行策略，不从 Entry 继承）。
 
 新 Thread 仅写 `THREAD_STARTED` Event；Pane 状态以 Thread DTO/SSE 为准。后续仍可通过有序 Input（`SET_AGENT` / `SET_MODEL` / `SET_YOLO`）变更。
 
@@ -326,7 +330,7 @@ Harvest 只发生在安全边界：
 2. 读取 Thread 当前 `input_sequence` 作为 cutoff。
 3. 按 sequence 查询 `QUEUED AND sequence <= cutoff` 的 Input。
 4. 在消息边界选择本批：连续配置 Input 先于下一条消息应用；每批最多一条 USER/CUSTOM 消息；该消息之后的配置不得进入本批。
-5. 应用配置：SET_AGENT 写入 `AGENT_CHANGE` Entry 并更新 Thread agent/model/variant（apply 时加载当前 AgentDefinition）；SET_MODEL / SET_YOLO 只更新 Thread 状态；三者均写 durable 配置事件（`AGENT_CHANGED` / `MODEL_CHANGED` / `YOLO_CHANGED`）。
+5. 应用配置：SET_AGENT 写入 `AGENT_CHANGE` + `MODEL_CHANGE` Entry，并更新 Thread 当前生效配置（apply 时加载当前 AgentDefinition 默认 model/variant）；SET_MODEL 写入 `MODEL_CHANGE` 并更新 Thread 当前生效 model/variant；SET_YOLO 只更新 Thread 运行策略；三者均写 durable 配置事件（`AGENT_CHANGED` / `MODEL_CHANGED` / `YOLO_CHANGED`）。
 6. 应用消息：append Message/Custom Entry。
 7. 每条 Input CAS 为 `APPLIED` 并记录 `applied_entry_id`（无新 Entry 时指向当前 head）。
 8. 若 head 推进则更新 Thread head。

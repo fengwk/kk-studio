@@ -142,7 +142,7 @@ describe('AI resource cards', () => {
         deletePending={false}
       />,
     )
-    expect(screen.getByText('MiniMax')).toBeInTheDocument()
+    expect(screen.getByText('provider-1/MiniMax')).toBeInTheDocument()
     expect(screen.getAllByText('assistant')).toHaveLength(2)
   })
 
@@ -156,6 +156,7 @@ describe('AI resource cards', () => {
       />,
     )
 
+    expect(screen.getAllByText('minimax/MiniMax').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('ctx 128000 · out 8192')).toBeInTheDocument()
     expect(screen.getByText('tools · reasoning · TEXT, IMAGE, AUDIO +1')).toBeInTheDocument()
     expect(screen.getAllByText('quality')).toHaveLength(2)
@@ -179,7 +180,8 @@ describe('AI resource cards', () => {
         deletePending={false}
       />,
     )
-    expect(screen.getByText('provider-1/MiniMax')).toBeInTheDocument()
+    // provider deleted: still keep unique providerId/model ref
+    expect(screen.getAllByText('provider-1/MiniMax').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(3)
   })
 

@@ -3,6 +3,7 @@ import { ModalBackdrop, ModalHeader } from '@/features/ai/AiConsoleModalLayout'
 import { StateBlock } from '@/features/ai/AiConsoleCards'
 import type { ComfyuiWorkflowDraft } from '@/features/ai/ai-console-types'
 import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts'
+import { FieldLabel } from '@/features/ai/FieldLabel'
 
 type EditorModal =
   | { mode: 'create'; workflow: null }
@@ -45,7 +46,7 @@ export function ComfyuiWorkflowEditorModal({
           {error && <StateBlock title={error} tone="danger" />}
           <div className="metadata-grid metadata-grid-two">
             <label className="form-group">
-              API name
+              <FieldLabel required>API name</FieldLabel>
               <input
                 aria-label="API name"
                 value={draft.apiName}
@@ -56,16 +57,16 @@ export function ComfyuiWorkflowEditorModal({
               <span className="inline-hint">小写字母开头，仅允许小写字母、数字和连字符。</span>
             </label>
             <label className="form-group">
-              Display name
+              <FieldLabel required>Display name</FieldLabel>
               <input aria-label="Display name" value={draft.name} onChange={(event) => update('name', event.target.value)} placeholder="Image Upscale" />
             </label>
           </div>
           <label className="form-group">
-            Description
+            <FieldLabel>Description</FieldLabel>
             <textarea value={draft.description} onChange={(event) => update('description', event.target.value)} placeholder="工作流用途说明" />
           </label>
           <label className="form-group">
-            API-format workflow JSON
+            <FieldLabel required>API-format workflow JSON</FieldLabel>
             <textarea
               aria-label="API-format workflow JSON"
               className="code-textarea comfyui-workflow-json"
@@ -75,7 +76,7 @@ export function ComfyuiWorkflowEditorModal({
             />
           </label>
           <label className="form-group">
-            Input bindings JSON
+            <FieldLabel required>Input bindings JSON</FieldLabel>
             <textarea
               aria-label="Input bindings JSON"
               className="code-textarea comfyui-bindings-json"
@@ -86,7 +87,7 @@ export function ComfyuiWorkflowEditorModal({
             <span className="inline-hint">必须是数组；每项声明 name、kind、nodeId 和 inputName。</span>
           </label>
           <label className="form-group">
-            Default JSONPath selector
+            <FieldLabel>Default JSONPath selector</FieldLabel>
             <input
               value={draft.defaultSelector}
               onChange={(event) => update('defaultSelector', event.target.value)}

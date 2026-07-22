@@ -15,6 +15,35 @@ export interface AgentModelView extends AgentModelDTO {
 }
 
 /**
+ * Canonical human-facing model identity: {@code provider/model}.
+ *
+ * <p>Wire identity remains Snowflake ids; this is the unique display/reference label used by cards,
+ * selectors, footer and confirmations.
+ */
+export function formatModelRef(
+  providerName: string | null | undefined,
+  modelName: string | null | undefined,
+): string {
+  const provider = providerName?.trim() ?? ''
+  const model = modelName?.trim() ?? ''
+  if (provider && model) {
+    // Avoid double-prefix when callers already pass a composed ref.
+    if (model === provider || model.startsWith(`${provider}/`)) {
+      return model
+    }
+    return `${provider}/${model}`
+  }
+  return model || provider || 'unknown-model'
+}
+
+/** Convenience for {@link AgentModelView}. Falls back to providerId when provider was deleted. */
+export function modelRef(
+  model: Pick<AgentModelView, 'name' | 'providerName' | 'providerId'>,
+): string {
+  return formatModelRef(model.providerName ?? String(model.providerId), model.name)
+}
+
+/**
  * One helper, one join: every model is paired with the provider whose {@code id} matches its
  * {@code providerId}. Models without a matching provider keep {@link AgentModelView.providerName}
  * as {@code null} so callers can render a deleted/missing label without crashing.

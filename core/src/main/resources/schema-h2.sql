@@ -23,7 +23,7 @@ create table if not exists agent_model (
     gmt_modified        timestamp(3) not null default current_timestamp(),
     version             bigint not null default 0,
     primary key (id),
-    unique (name)
+    unique (provider_id, name)
 );
 
 create table if not exists agent_definition (
@@ -32,7 +32,7 @@ create table if not exists agent_definition (
     description     varchar(512),
     system_prompt   text,
     model_id        bigint not null,
-    variant         varchar(64) not null,
+    variant         varchar(64),                                  -- null = 使用 model.defaultVariant
     config_json     text not null,
     gmt_create      timestamp(3) not null default current_timestamp(),
     gmt_modified    timestamp(3) not null default current_timestamp(),
@@ -82,9 +82,9 @@ create table if not exists harness_thread (
     retry_at                     timestamp(3),                    -- RETRYING 的下一次可执行时间
     active_agent_definition_id   bigint,                          -- 当前 AgentDefinition id
     active_agent_name            varchar(256),                    -- 捕获的 Agent 名称
-    model_id                     varchar(128),                    -- Thread 级 model id
-    variant                      varchar(128),                    -- Thread 级 model variant
-    yolo_enabled                 boolean not null default false,  -- Thread 级 YOLO
+    model_id                     varchar(128),                    -- 当前生效配置 model id
+    variant                      varchar(128),                    -- 当前生效配置 model variant
+    yolo_enabled                 boolean not null default false,  -- 运行策略 YOLO（不入 Entry）
     processor_token              varchar(128),                    -- 当前 processor fencing token
     processor_until              timestamp(3),                    -- token 租约截止
     gmt_create                   timestamp(3) not null default current_timestamp(),

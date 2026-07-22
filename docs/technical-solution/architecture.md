@@ -65,10 +65,10 @@ frontend → web APIs (via shared/api)
 | 事实 | 职责 |
 | --- | --- |
 | **Chat** | 持久会话集合、可选默认 Agent；通过 `ChatSession` 关联 Session；不保存 Pane |
-| **Pane** | 当前浏览器的 Chat 工作区姿势：布局、焦点和 `{sessionId, threadId}` 目标仅存 localStorage |
+| **Pane** | 当前浏览器的 Chat 工作区姿势：布局、焦点与各面板 `threadId`（可空）仅存 localStorage；Session 从 Thread 反查 |
 | **Session** | 共享 append-only Entry Tree 容器、稳定 `mainThreadId` 与父子 Session 关系；不保存 Branch 或完整 Agent 配置 |
-| **Entry** | 语义持久真源：消息、`AGENT_CHANGE` identity、Tool Result、Compaction |
-| **AgentThread** | durable Branch actor：`sessionId`、`headEntryId`、input sequence、状态、processor token/until/version，以及当前 Agent ID/name、model/variant、YOLO |
+| **Entry** | 语义持久真源：消息、配置变更（`AGENT_CHANGE` / `MODEL_CHANGE`）、Tool Result、Compaction |
+| **AgentThread** | durable Branch actor：`sessionId`、`headEntryId`、input sequence、状态、processor token/until/version，以及当前生效配置（agent/model/variant）与运行策略（YOLO） |
 | **Branch(thread)** | 由 root→`headEntryId` 路径派生，不独立持久化；多 Thread 可共享 head 后自然分叉 |
 | **ThreadInput** | 多生产者有序 mailbox：消息与 `SET_AGENT` / `SET_MODEL` / `SET_YOLO`；`clientMessageId` 幂等；一次 Harvest 可应用多个 Input |
 | **ThreadStop** | Stop 网络幂等回执，以及被取消 mailbox Input 的关联 |

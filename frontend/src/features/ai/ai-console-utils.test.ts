@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
   filterAgents,
+  filterChats,
+  filterEnvironments,
   filterModels,
   filterProviders,
   formatBackendDate,
   includesSearch,
+  naturalNameCompare,
   resourceTitle,
 } from '@/features/ai/ai-console-utils'
+import type { AgentModelView } from '@/features/ai/AgentModelView'
 import type { ModelDraft } from '@/features/ai/ai-console-types'
 import {
   emptyAgentDraft,
@@ -90,7 +94,7 @@ describe('ai-console-utils', () => {
     expect(emptyModelDraft().inputModalities).toEqual(['TEXT'])
     expect(emptyAgentDraft(model())).toMatchObject({
       modelId: 'model-1',
-      variant: 'default',
+      variant: '',
     })
 
     expect(
@@ -278,9 +282,7 @@ describe('ai-console-utils', () => {
         executionPolicy: { ...agentInput.executionPolicy, maxTurns: '1.5' },
       }),
     ).toThrow(/executionPolicy\.maxTurns must be a positive integer/)
-    expect(() => toEditableAgent({ ...agentInput, variant: ' ' })).toThrow(
-      /variant must not be blank/,
-    )
+    expect(toEditableAgent({ ...agentInput, variant: ' ' }).variant).toBeNull()
     expect(() =>
       toEditableAgent({ ...agentInput, allowedSubagents: ['reviewer', ' reviewer '] }),
     ).toThrow(/allowedSubagents 不能重复/)
@@ -308,7 +310,10 @@ describe('ai-console-utils', () => {
         updateTime: '2026-06-20T02:00:00',
       },
     ]
-    const models = [model()]
+    const models: AgentModelView[] = [
+      { ...model({ name: 'MiniMax-M2.7' }), providerName: 'minimax' },
+      { ...model({ id: 'model-2', name: 'gpt-5.4' }), providerName: 'openai' },
+    ]
     const providers = [
       {
         id: 'provider-1',
@@ -319,14 +324,49 @@ describe('ai-console-utils', () => {
         configured: true,
         modelCallTimeoutMillis: 1800000,
         modelCallIdleTimeoutMillis: 120000,
+        version: 1,
+        createTime: '2026-06-20T02:00:00',
+        updateTime: '2026-06-20T02:00:00',
+      },
+      {
+        id: 'provider-2',
+        name: 'openai',
+        description: 'OpenAI',
+        providerType: 'openai_response',
+        baseUrl: null,
+        configured: true,
+        modelCallTimeoutMillis: 1800000,
+        modelCallIdleTimeoutMillis: 120000,
+        version: 1,
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       },
     ]
 
-    expect(filterAgents(agents, 'cloud')).toHaveLength(1)
-    expect(filterModels(models, 'default')).toHaveLength(1)
-    expect(filterProviders(providers, 'endpoint')).toHaveLength(1)
+    expect(filterAgents(agents, 'assistant')).toHaveLength(1)
+    expect(filterAgents(agents, 'cloud')).toHaveLength(0)
+    expect(filterModels(models, 'minimax/MiniMax-M2.7').map((item) => item.name)).toEqual(['MiniMax-M2.7'])
+    expect(filterModels(models, 'default')).toHaveLength(0)
+    // Sorted by full ref: minimax/... before openai/...
+    expect(filterModels(models, '').map((item) => item.name)).toEqual(['MiniMax-M2.7', 'gpt-5.4'])
+    expect(filterProviders(providers, 'minimax').map((item) => item.name)).toEqual(['minimax'])
+    expect(filterProviders(providers, 'endpoint')).toHaveLength(0)
+    expect(filterProviders(providers, '').map((item) => item.name)).toEqual(['minimax', 'openai'])
+    expect(filterEnvironments([{ name: 'tool-e2e', status: 'READY', lastSeen: null, tools: [], skills: [] }, { name: 'platform', status: 'READY', lastSeen: null, tools: [], skills: [] }], '').map((item) => item.name)).toEqual([
+      'platform',
+      'tool-e2e',
+    ])
+    expect(
+      filterChats(
+        [
+          { id: '2', title: 'beta', defaultAgentId: null, version: 1, createTime: '2026-06-21T00:00:00', updateTime: '2026-06-21T00:00:00' },
+          { id: '1', title: 'alpha', defaultAgentId: null, version: 1, createTime: '2026-06-22T00:00:00', updateTime: '2026-06-20T00:00:00' },
+        ],
+        '',
+      ).map((item) => item.title),
+    ).toEqual(['alpha', 'beta'])
+    expect(filterChats([{ id: '1', title: 'alpha', defaultAgentId: null, version: 1, createTime: null, updateTime: null }], 'alp')).toHaveLength(1)
+    expect(naturalNameCompare('m2', 'm10')).toBeLessThan(0)
     expect(includesSearch('MiniMax', 'mini')).toBe(true)
     expect(includesSearch('MiniMax', '')).toBe(true)
 

@@ -328,10 +328,10 @@ class ThreadProcessorIntegrationTest {
     assertNotNull(yoloInputs.get(0).getAppliedEntryId());
     assertTrue(inputs.stream().allMatch(i -> i.getAppliedEntryId() != null));
     assertTrue(queryService.getThread(thread.getThreadId()).getYoloEnabled());
-    // SET_YOLO 不推进 head Entry；head 仍停在 bootstrap agent_change。
+    // SET_YOLO 不推进 head Entry；head 仍停在 bootstrap 的 model_change。
     assertEquals(headBefore, threadStore.find(threadId).orElseThrow().headEntryId());
     List<HarnessSessionEntryDTO> path = queryService.listPathEntries(thread.getThreadId());
-    assertEquals("agent_change", path.get(path.size() - 1).getEntryType());
+    assertEquals("model_change", path.get(path.size() - 1).getEntryType());
     assertTrue(
         queryService.listEvents(thread.getThreadId(), 0, 100).stream()
             .anyMatch(e -> "yolo_changed".equals(e.getEventType())));

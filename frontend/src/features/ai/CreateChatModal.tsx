@@ -1,5 +1,6 @@
 import type { FormEventHandler } from 'react'
 import { ModalBackdrop, ModalHeader } from '@/features/ai/AiConsoleModalLayout'
+import { FieldLabel } from '@/features/ai/FieldLabel'
 import { FormSelect } from '@/features/ai/FormSelect'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts'
 
@@ -9,6 +10,8 @@ export function CreateChatModal({
   selectedAgentId,
   title,
   pending,
+  formError = '',
+  nameError = '',
   onClose,
   onSelectAgent,
   onTitleChange,
@@ -19,6 +22,8 @@ export function CreateChatModal({
   selectedAgentId: string
   title: string
   pending: boolean
+  formError?: string
+  nameError?: string
   onClose: () => void
   onSelectAgent: (agentId: string) => void
   onTitleChange: (title: string) => void
@@ -30,17 +35,33 @@ export function CreateChatModal({
 
   return (
     <ModalBackdrop onClose={onClose}>
-      <form className="modal-card" aria-label="新建 Chat" onSubmit={onSubmit} onMouseDown={(event) => event.stopPropagation()}>
+      <form
+        className="modal-card"
+        aria-label="新建 Chat"
+        onSubmit={onSubmit}
+        onMouseDown={(event) => event.stopPropagation()}
+        noValidate
+      >
         <ModalHeader title="新建 Chat" onClose={onClose} />
         <div className="modal-body">
-          <label className="form-group">
-            <span>Title（可选）</span>
-            <input value={title} onChange={(event) => onTitleChange(event.target.value)} placeholder="Chat 标题" />
+          {formError ? (
+            <div className="form-error-banner" role="alert">
+              {formError}
+            </div>
+          ) : null}
+          <label className={`form-group${nameError ? ' is-error' : ''}`}>
+            <FieldLabel required>Name</FieldLabel>
+            <input
+              value={title}
+              onChange={(event) => onTitleChange(event.target.value)}
+              placeholder="Chat 名称（可重名）"
+            />
+            {nameError ? <span className="field-error">{nameError}</span> : null}
           </label>
           <label className="form-group">
-            <span>Default Agent（可选）</span>
+            <FieldLabel>Default Agent</FieldLabel>
             <FormSelect
-              aria-label="Default Agent（可选）"
+              aria-label="Default Agent"
               value={selectedAgentId}
               placeholder="（无）"
               options={[

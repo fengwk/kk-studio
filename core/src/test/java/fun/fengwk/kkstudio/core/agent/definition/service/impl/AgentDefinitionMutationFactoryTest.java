@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.agent.definition.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -119,7 +120,9 @@ public class AgentDefinitionMutationFactoryTest {
     incomplete.setName("agent");
     assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, incomplete));
     incomplete.setConfig(new AgentDefinitionConfigDTO());
-    assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, incomplete));
+    // Variant override is optional; null means use model.defaultVariant at apply/runtime.
+    AgentDefinition allowedBlankVariant = factory.newAgent(2L, incomplete);
+    assertNull(allowedBlankVariant.getVariant());
 
     AgentExecutionPolicyDTO policy = new AgentExecutionPolicyDTO();
     policy.setMaxTurns(0);

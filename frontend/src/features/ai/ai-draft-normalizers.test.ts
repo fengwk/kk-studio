@@ -135,7 +135,8 @@ describe('ai-draft-normalizers', () => {
         }),
       ],
     )
-    expect(normalizedAgent.variant).toBe('precise')
+    // Invalid override is cleared so the model default is used.
+    expect(normalizedAgent.variant).toBe('')
 
     expect(
       normalizeAgentDraftDefaultVariant(
@@ -178,7 +179,7 @@ describe('ai-draft-normalizers', () => {
 
     expect(applyAgentModelSelection(draft, 'model-sonnet', models)).toMatchObject({
       modelId: 'model-sonnet',
-      variant: 'creative',
+      variant: '',
     })
     expect(applyAgentModelSelection(draft, 'unknown', models)).toMatchObject({
       modelId: 'unknown',
@@ -218,11 +219,11 @@ describe('ai-draft-normalizers', () => {
 
     const preferred = normalizeAgentDraftSelection(draft, models, 'model-sonnet')
     expect(preferred.modelId).toBe('model-sonnet')
-    expect(preferred.variant).toBe('creative')
+    expect(preferred.variant).toBe('')
 
     const fallback = normalizeAgentDraftSelection(draft, models)
     expect(fallback.modelId).toBe('model-minimax')
-    expect(fallback.variant).toBe('default')
+    expect(fallback.variant).toBe('')
 
     const empty = normalizeAgentDraftSelection(draft, [])
     expect(empty.modelId).toBe('gone')
