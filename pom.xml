@@ -23,8 +23,7 @@
     </modules>
 
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>utf-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>utf-8</project.reporting.outputEncoding>
         <kk-studio.version>1.0.0</kk-studio.version>
@@ -44,6 +43,11 @@
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
                 <artifactId>kk-studio-studio</artifactId>
+                <version>${kk-studio.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>fun.fengwk.kk-studio</groupId>
+                <artifactId>kk-studio-harness-kernel</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>

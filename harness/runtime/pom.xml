@@ -16,6 +16,10 @@
     <dependencies>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-kernel</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-harness-agent</artifactId>
         </dependency>
         <dependency>
