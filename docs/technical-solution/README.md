@@ -9,6 +9,9 @@ flowchart TD
     A[技术方案入口]
     A --> B[architecture.md<br/>总体架构]
     A --> O[domain-map.md<br/>领域词汇与映射]
+    A --> Q[harness-kernel-architecture.md<br/>Harness Kernel 与执行内核]
+    A --> X[harness-kernel-contracts.md<br/>Kernel 与 Runtime 公共契约]
+    A --> S[harness-storage-runtime.md<br/>PostgreSQL、Redis 与恢复]
     A --> N[infinite-canvas-implementation-design.md<br/>无限画布与 Workflow]
     A --> R[harness-thread-actor.md<br/>Harness 最终实施架构]
     A --> C[cloud-embedded-agent-runtime.md<br/>Harness 运行时]
@@ -31,18 +34,21 @@ flowchart TD
 | 1 | [architecture.md](architecture.md) | 双域拓扑、模块边界、落地进度 | 先建立全局认知 |
 | 2 | [domain-map.md](domain-map.md) | Harness/Studio 词汇与前后端映射 | 统一命名与对接 |
 | 3 | [infinite-canvas-implementation-design.md](infinite-canvas-implementation-design.md) | Canvas、Resource、Function、Workflow 和 Agent Port | 实现无限画布与 Workflow |
-| 4 | [harness-thread-actor.md](harness-thread-actor.md) | Session Tree、Main Thread、durable Thread actor、mailbox、Stop/自动重试、Tool permission 与前后端契约 | Harness 架构事实源 |
-| 5 | [cloud-embedded-agent-runtime.md](cloud-embedded-agent-runtime.md) | Session Tree、AgentThread、Tool、Task 与 Daemon 执行链路 | 实现运行时 |
-| 6 | [backend-implementation-design.md](backend-implementation-design.md) | `share` / `core` / `web` 的 HTTP、SSE 和 WebSocket 边界 | 修改后端控制面 |
-| 7 | [storage-models.md](storage-models.md) | 表结构、资源文件、seed 语义 | 调整存储或初始化脚本 |
-| 8 | [frontend-implementation-design.md](frontend-implementation-design.md) | 路由、状态管理、测试边界；视觉约定见 [前端设计规范](../product-design/frontend-design-system.md) | 修改前端页面或 API 适配 |
-| 9 | [harness-extensions.md](harness-extensions.md) | typed registry、hook 顺序、factory 与 lifecycle | 扩展 Harness 执行链 |
-| 10 | [prompt-cache-usage-cost.md](prompt-cache-usage-cost.md) | cache control、usage、pricing、ledger 与聚合 API | 修改模型调用计量与缓存链路 |
-| 11 | [s3-presign.md](s3-presign.md) | 固定 bucket、path-style 的 S3 预签名直传 / 直下载 | 接入浏览器到对象存储的直传链路 |
-| 12 | [comfyui-workflow-api.md](comfyui-workflow-api.md) | ComfyUI 工作流卡片 CRUD + 无状态提交 / 查询 / 取消 + S3 输入桥 + job-scoped 输出下载 | 接入 ComfyUI 控制台与 S3 直传后端 |
-| 13 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Environment 注册、Daemon v1 WebSocket、持久 ToolInvocation 分发与回调 | 接入远端 Environment Tool |
-| 14 | [prompt-to-artifact.md](prompt-to-artifact.md) | Prompt、Provider、Tool、Artifact 和浏览器读取的端到端事实链 | 修改跨边界执行或 artifact 呈现 |
-| 15 | [e2e-regression.md](e2e-regression.md) | 矩阵分层、契约锚点、报告目录与前端变更维护 | 跑/改 E2E 回归 |
+| 4 | [harness-kernel-architecture.md](harness-kernel-architecture.md) | Kernel、Runtime、Invocation、Interaction 与 durable actor 边界 | Harness 核心执行架构 |
+| 5 | [harness-kernel-contracts.md](harness-kernel-contracts.md) | 核心类型、状态机、端口与事务契约 | 编写 Kernel、Runtime 和 Adapter |
+| 6 | [harness-storage-runtime.md](harness-storage-runtime.md) | PostgreSQL、Redis、通知、实时流、恢复与测试 | 实现持久化和事件驱动基础设施 |
+| 7 | [harness-thread-actor.md](harness-thread-actor.md) | 当前 Thread API 与前后端契约；重构期间按 Kernel 设计收敛 | 修改 Thread 对外契约 |
+| 8 | [cloud-embedded-agent-runtime.md](cloud-embedded-agent-runtime.md) | Session Tree、AgentThread、Tool 与 Daemon 执行链路 | 实现运行时 |
+| 9 | [backend-implementation-design.md](backend-implementation-design.md) | `share` / `core` / `web` 的 HTTP、SSE 和 WebSocket 边界 | 修改后端控制面 |
+| 10 | [storage-models.md](storage-models.md) | 表结构、资源文件、seed 语义 | 调整存储或初始化脚本 |
+| 11 | [frontend-implementation-design.md](frontend-implementation-design.md) | 路由、状态管理、测试边界；视觉约定见 [前端设计规范](../product-design/frontend-design-system.md) | 修改前端页面或 API 适配 |
+| 12 | [harness-extensions.md](harness-extensions.md) | typed registry、hook 顺序、factory 与 lifecycle | 扩展 Harness 执行链 |
+| 13 | [prompt-cache-usage-cost.md](prompt-cache-usage-cost.md) | cache control、usage、pricing、ledger 与聚合 API | 修改模型调用计量与缓存链路 |
+| 14 | [s3-presign.md](s3-presign.md) | 固定 bucket、path-style 的 S3 预签名直传 / 直下载 | 接入浏览器到对象存储的直传链路 |
+| 15 | [comfyui-workflow-api.md](comfyui-workflow-api.md) | ComfyUI 工作流卡片 CRUD + 无状态提交 / 查询 / 取消 + S3 输入桥 + job-scoped 输出下载 | 接入 ComfyUI 控制台与 S3 直传后端 |
+| 16 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Environment 注册、Daemon v1 WebSocket、持久 ToolInvocation 分发与回调 | 接入远端 Environment Tool |
+| 17 | [prompt-to-artifact.md](prompt-to-artifact.md) | Prompt、Provider、Tool、Artifact 和浏览器读取的端到端事实链 | 修改跨边界执行或 artifact 呈现 |
+| 18 | [e2e-regression.md](e2e-regression.md) | 矩阵分层、契约锚点、报告目录与前端变更维护 | 跑/改 E2E 回归 |
 
 ## 按主题索引
 
@@ -51,7 +57,10 @@ flowchart TD
 | 总体架构 | [architecture.md](architecture.md) |
 | 领域词汇与映射 | [domain-map.md](domain-map.md) |
 | 无限画布与 Workflow | [infinite-canvas-implementation-design.md](infinite-canvas-implementation-design.md) |
-| Harness 最终实施架构 | [harness-thread-actor.md](harness-thread-actor.md) |
+| 当前 Thread API 与迁移契约 | [harness-thread-actor.md](harness-thread-actor.md) |
+| Harness Kernel 与执行内核 | [harness-kernel-architecture.md](harness-kernel-architecture.md) |
+| Kernel 与 Runtime 公共契约 | [harness-kernel-contracts.md](harness-kernel-contracts.md) |
+| PostgreSQL、Redis 与恢复 | [harness-storage-runtime.md](harness-storage-runtime.md) |
 | Harness 运行时 | [cloud-embedded-agent-runtime.md](cloud-embedded-agent-runtime.md) |
 | 后端实现 | [backend-implementation-design.md](backend-implementation-design.md) |
 | 存储模型 | [storage-models.md](storage-models.md) |
@@ -69,6 +78,6 @@ flowchart TD
 
 | 规则 | 说明 |
 | --- | --- |
-| 状态准确 | Harness 文档以 [harness-thread-actor.md](harness-thread-actor.md) 为最终架构事实源；其他文档描述同一职责边界与契约 |
+| 状态准确 | Harness 核心以 [harness-kernel-architecture.md](harness-kernel-architecture.md) 为最终架构事实源，存储与通知以 [harness-storage-runtime.md](harness-storage-runtime.md) 为事实源；旧 Thread/Runtime 文档在重构中按二者收敛或删除 |
 | 上下文无关 | 不要求读者了解讨论过程或其他文档的隐含前提 |
 | 分层清晰 | 架构、运行时、存储、前后端实现分别维护，避免交叉重复 |
