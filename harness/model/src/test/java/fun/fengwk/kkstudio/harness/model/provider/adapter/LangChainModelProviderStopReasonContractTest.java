@@ -7,29 +7,40 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
 
-/** LangChain4j finish reason 必须无损归一化到 Provider 公共契约。 */
+/** LangChain4j finish reason 必须归一化到 Provider 公共契约。 */
 class LangChainModelProviderStopReasonContractTest {
 
-  /** SDK 明确给出的结束原因优先于响应中是否存在工具调用。 */
+  /** 无 tool call 时，SDK finish reason 无损映射。 */
   @Test
-  void mapsEveryExplicitFinishReasonExactly() {
-    assertMapping(FinishReason.STOP, ProviderStopReason.COMPLETED);
-    assertMapping(FinishReason.LENGTH, ProviderStopReason.LENGTH);
-    assertMapping(FinishReason.TOOL_EXECUTION, ProviderStopReason.TOOL_CALLS);
-    assertMapping(FinishReason.CONTENT_FILTER, ProviderStopReason.CONTENT_FILTER);
-    assertMapping(FinishReason.OTHER, ProviderStopReason.OTHER);
+  void mapsEveryExplicitFinishReasonWithoutToolCalls() {
+    assertEquals(
+        ProviderStopReason.COMPLETED,
+        LangChainModelProvider.toStopReason(FinishReason.STOP, false));
+    assertEquals(
+        ProviderStopReason.LENGTH, LangChainModelProvider.toStopReason(FinishReason.LENGTH, false));
+    assertEquals(
+        ProviderStopReason.TOOL_CALLS,
+        LangChainModelProvider.toStopReason(FinishReason.TOOL_EXECUTION, false));
+    assertEquals(
+        ProviderStopReason.CONTENT_FILTER,
+        LangChainModelProvider.toStopReason(FinishReason.CONTENT_FILTER, false));
+    assertEquals(
+        ProviderStopReason.OTHER, LangChainModelProvider.toStopReason(FinishReason.OTHER, false));
   }
 
-  /** 只有 SDK 未给 finish reason 时才按完整 tool calls 回退。 */
+  /** 完整 tool calls 优先于兼容端点可能给出的 STOP/OTHER finish reason。 */
   @Test
-  void fallsBackToToolCallsOnlyForNullFinishReason() {
-    assertEquals(ProviderStopReason.COMPLETED, LangChainModelProvider.toStopReason(null, false));
+  void prefersToolCallsWheneverExecutableCallsPresent() {
     assertEquals(ProviderStopReason.TOOL_CALLS, LangChainModelProvider.toStopReason(null, true));
-  }
-
-  private static void assertMapping(
-      FinishReason finishReason, ProviderStopReason expectedStopReason) {
-    assertEquals(expectedStopReason, LangChainModelProvider.toStopReason(finishReason, false));
-    assertEquals(expectedStopReason, LangChainModelProvider.toStopReason(finishReason, true));
+    assertEquals(
+        ProviderStopReason.TOOL_CALLS,
+        LangChainModelProvider.toStopReason(FinishReason.STOP, true));
+    assertEquals(
+        ProviderStopReason.TOOL_CALLS,
+        LangChainModelProvider.toStopReason(FinishReason.OTHER, true));
+    assertEquals(
+        ProviderStopReason.TOOL_CALLS,
+        LangChainModelProvider.toStopReason(FinishReason.TOOL_EXECUTION, true));
+    assertEquals(ProviderStopReason.COMPLETED, LangChainModelProvider.toStopReason(null, false));
   }
 }
