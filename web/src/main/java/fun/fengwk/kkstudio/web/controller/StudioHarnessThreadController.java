@@ -49,6 +49,7 @@ public class StudioHarnessThreadController {
   private final HarnessThreadQueryService queryService;
   private final HarnessObservabilityQueryService observabilityQueryService;
 
+  /** 创建 Thread API Controller。 */
   public StudioHarnessThreadController(
       HarnessThreadCommandService commandService,
       HarnessThreadQueryService queryService,
@@ -59,21 +60,25 @@ public class StudioHarnessThreadController {
         Objects.requireNonNull(observabilityQueryService, "observabilityQueryService");
   }
 
+  /** 查询所有 Thread。 */
   @GetMapping("/threads")
   public Result<List<HarnessThreadDTO>> listAllThreads() {
     return Results.ok(queryService.listAll());
   }
 
+  /** 查询指定 Thread 的当前状态。 */
   @GetMapping("/threads/{threadId}")
   public Result<HarnessThreadDTO> getThread(@PathVariable String threadId) {
     return Results.ok(withMissingResourceTranslation(() -> queryService.getThread(threadId)));
   }
 
+  /** 查询指定 Session 下的所有 Thread。 */
   @GetMapping("/sessions/{sessionId}/threads")
   public Result<List<HarnessThreadDTO>> listThreads(@PathVariable String sessionId) {
     return Results.ok(withMissingResourceTranslation(() -> queryService.listBySession(sessionId)));
   }
 
+  /** 将用户消息异步入队；202 仅表示消息已接受，不代表模型已完成。 */
   @PostMapping("/threads/{threadId}/messages")
   public Result<HarnessThreadInputDTO> submitMessage(
       @PathVariable String threadId, @RequestBody HarnessThreadMessageCreateDTO createDTO) {
@@ -82,6 +87,7 @@ public class StudioHarnessThreadController {
             () -> commandService.submitUserMessage(threadId, createDTO)));
   }
 
+  /** 将自定义消息异步入队。 */
   @PostMapping("/threads/{threadId}/messages/custom")
   public Result<HarnessThreadInputDTO> submitCustomMessage(
       @PathVariable String threadId, @RequestBody HarnessThreadCustomMessageCreateDTO createDTO) {
@@ -90,6 +96,7 @@ public class StudioHarnessThreadController {
             () -> commandService.submitCustomMessage(threadId, createDTO)));
   }
 
+  /** 异步更新 Thread 的 YOLO 运行策略。 */
   @PutMapping("/threads/{threadId}/yolo")
   public Result<HarnessThreadInputDTO> queueYolo(
       @PathVariable String threadId, @RequestBody HarnessThreadYoloSetDTO request) {
@@ -97,6 +104,7 @@ public class StudioHarnessThreadController {
         withMissingResourceTranslation(() -> commandService.queueYolo(threadId, request)));
   }
 
+  /** 异步切换 Thread 的当前 Agent。 */
   @PutMapping("/threads/{threadId}/agent")
   public Result<HarnessThreadInputDTO> queueAgent(
       @PathVariable String threadId, @RequestBody HarnessThreadAgentSetDTO request) {
@@ -104,6 +112,7 @@ public class StudioHarnessThreadController {
         withMissingResourceTranslation(() -> commandService.queueAgent(threadId, request)));
   }
 
+  /** 异步切换 Thread 的当前 Model 与 Variant。 */
   @PutMapping("/threads/{threadId}/model")
   public Result<HarnessThreadInputDTO> queueModel(
       @PathVariable String threadId, @RequestBody HarnessThreadModelSetDTO request) {
@@ -111,22 +120,26 @@ public class StudioHarnessThreadController {
         withMissingResourceTranslation(() -> commandService.queueModel(threadId, request)));
   }
 
+  /** 停止 Thread，并取消尚未处理的输入。 */
   @PostMapping("/threads/{threadId}/stop")
   public Result<HarnessThreadStopResultDTO> stop(
       @PathVariable String threadId, @RequestBody HarnessThreadStopDTO request) {
     return Results.ok(withMissingResourceTranslation(() -> commandService.stop(threadId, request)));
   }
 
+  /** 查询当前 branch path 上的持久化 Session Entry。 */
   @GetMapping("/threads/{threadId}/entries")
   public Result<List<HarnessSessionEntryDTO>> listPathEntries(@PathVariable String threadId) {
     return Results.ok(withMissingResourceTranslation(() -> queryService.listPathEntries(threadId)));
   }
 
+  /** 查询 Thread mailbox 中的输入及其处理状态。 */
   @GetMapping("/threads/{threadId}/inputs")
   public Result<List<HarnessThreadInputDTO>> listInputs(@PathVariable String threadId) {
     return Results.ok(withMissingResourceTranslation(() -> queryService.listInputs(threadId)));
   }
 
+  /** 从指定事件 ID 后分页查询 Thread Event。 */
   @GetMapping("/threads/{threadId}/events")
   public Result<List<ThreadEventDTO>> listEvents(
       @PathVariable String threadId,
@@ -138,6 +151,7 @@ public class StudioHarnessThreadController {
             () -> queryService.listEvents(threadId, afterEventId, page)));
   }
 
+  /** 通过可续传的 SSE 流订阅 Thread Event。 */
   @GetMapping(
       path = "/threads/{threadId}/events/stream",
       produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -151,6 +165,7 @@ public class StudioHarnessThreadController {
     return StudioHarnessThreadSseEmitter.stream(threadId, cursor, observabilityQueryService);
   }
 
+  /** 将服务层异常转换为统一的 HTTP 错误响应。 */
   private static <T> T withMissingResourceTranslation(Supplier<T> operation) {
     try {
       return operation.get();
