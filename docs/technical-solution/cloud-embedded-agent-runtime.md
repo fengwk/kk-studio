@@ -97,7 +97,7 @@ sequenceDiagram
 
 ## 权限与路径配置
 
-Thread 保存 agent/model/yolo；完整 Agent 配置（prompt/tools/skills/subagents/policy/environmentName）在 Turn 时从当前 AgentDefinition 动态装载。tools/skills 使用短名；Skill 元数据 platform-first 解析后写入 runtime config，并渲染为 system prompt 的 `<available_skills>`。有 selected skills 时自动注入 `load_skill`；Goal CONTROL 工具（`create_goal`/`get_goal`/`update_goal`）始终自动注入，状态按 Thread 持久化。`SET_AGENT` / `SET_MODEL` / `SET_YOLO` 作为有序 Input 在消息边界 Harvest 后生效，不即时改写进行中的模型请求。
+Thread 保存当前生效配置（agent/model/variant）与运行策略（yolo）；完整 Agent 配置（prompt/tools/skills/subagents/policy/environmentName）在 Turn 时从当前 AgentDefinition 动态装载。`SET_AGENT` / `SET_MODEL` 会写配置变更 Entry 并更新当前生效配置；`SET_YOLO` 只改 Thread 运行策略。tools/skills 使用短名；Skill 元数据 platform-first 解析后写入 runtime config，并渲染为 system prompt 的 `<available_skills>`。有 selected skills 时自动注入 `load_skill`；Goal CONTROL 工具（`create_goal`/`get_goal`/`update_goal`）始终自动注入，状态按 Thread 持久化。上述 Input 在消息边界 Harvest 后生效，不即时改写进行中的模型请求。
 
 `POST /api/tool-invocations/{id}/decision` 原子写入 allow/deny，并 kick 所属 Thread。子代理权限请求投影到 Root Activity，根 UI 可作 relay。
 
