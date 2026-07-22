@@ -97,6 +97,24 @@ describe('ai-resource-form-validation additional branches', () => {
     expect(toUserFacingErrorMessage('opaque failure')).toBe('保存失败，请检查必填项后重试')
   })
 
+  it('surfaces model name conflicts under a provider as readable Chinese', () => {
+    expect(
+      toUserFacingErrorMessage(
+        new Error('agent model name already exists under this provider: MiniMax-M2.7'),
+      ),
+    ).toBe('当前 Provider 下已存在同名 Model，请换一个名称')
+    // 兼容旧文案，避免升级中的后端仍返回全局唯一错误时前端吞掉
+    expect(toUserFacingErrorMessage(new Error('agent model name already exists: MiniMax-M2.7'))).toBe(
+      '当前 Provider 下已存在同名 Model，请换一个名称',
+    )
+  })
+
+  it('passes through other backend business English errors instead of a generic banner', () => {
+    expect(toUserFacingErrorMessage(new Error('invalid agent model: config is required'))).toBe(
+      'invalid agent model: config is required',
+    )
+  })
+
   it.each([
     { kind: 'provider', mode: 'create' },
     { kind: 'provider', mode: 'edit', id: 'provider-1' },
@@ -140,7 +158,7 @@ describe('ai-resource-form-validation additional branches', () => {
   })
 
   it.each([
-    [agent({ variant: '' }), 'variant'],
+    // empty variant is a valid "use model default" override
     [agent({ tools: ['one/read', 'two/read'] }), 'tools'],
     [agent({ skills: ['one/dev', 'two/dev'] }), 'skills'],
     [agent({ allowedSubagents: ['helper', 'helper'] }), 'allowedSubagents'],

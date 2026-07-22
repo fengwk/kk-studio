@@ -1,5 +1,7 @@
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { StateBlock } from '@/features/ai/AiConsoleCards'
+import { filterEnvironments } from '@/features/ai/ai-console-utils'
 import { environmentService } from '@/shared/api/environment-service'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 import { queryKeys } from '@/shared/lib/query-keys'
@@ -74,7 +76,11 @@ export function EnvironmentsPage() {
     refetchInterval: 10_000,
   })
 
-  const environments = environmentsQuery.data ?? []
+  // Natural name order so live environments are easy to scan.
+  const environments = useMemo(
+    () => filterEnvironments(environmentsQuery.data ?? [], ''),
+    [environmentsQuery.data],
+  )
 
   return (
     <section className="screen active">

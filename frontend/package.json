@@ -10,7 +10,12 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "e2e": "../scripts/e2e.sh",
+    "e2e:ui": "../scripts/e2e.sh --ui",
+    "e2e:matrix": "node ../scripts/e2e/run-matrix.mjs --frontend-url http://127.0.0.1:5173",
+    "e2e:list": "node ../scripts/e2e/run-matrix.mjs --list",
+    "e2e:docs": "node ../scripts/e2e/run-matrix.mjs --docs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.60.2",
@@ -31,6 +36,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",
+    "@playwright/test": "^1.55.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

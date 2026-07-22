@@ -196,7 +196,8 @@ export interface AgentDefinitionDTO {
   description: string | null
   systemPrompt: string | null
   modelId: string
-  variant: string
+  /** Optional override; null means use the selected Model's defaultVariant. */
+  variant: string | null
   config: AgentDefinitionConfigDTO
   version: BackendLong
   createTime: BackendDateTime
@@ -209,7 +210,8 @@ export interface AgentDefinitionEditablePropertiesDTO {
   description: string | null
   systemPrompt: string | null
   modelId: string
-  variant: string
+  /** Optional override; null means use the selected Model's defaultVariant. */
+  variant: string | null
   config: AgentDefinitionConfigDTO
 }
 
@@ -251,7 +253,7 @@ export interface ChatCreateDTO {
   defaultAgentId?: string
 }
 
-/** Partial update: null preserves; blank string clears optional fields. */
+/** Partial update: null preserves; title must be non-blank when supplied; blank defaultAgentId clears it. */
 export interface ChatUpdateDTO {
   title?: string | null
   defaultAgentId?: string | null

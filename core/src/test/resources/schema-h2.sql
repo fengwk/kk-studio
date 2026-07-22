@@ -23,7 +23,7 @@ create table if not exists agent_model (
     gmt_modified        timestamp(3) not null default current_timestamp(),
     version             bigint not null default 0,
     primary key (id),
-    unique (name)
+    unique (provider_id, name)
 );
 
 create table if not exists agent_definition (
@@ -32,7 +32,7 @@ create table if not exists agent_definition (
     description     varchar(512),
     system_prompt   text,
     model_id        bigint not null,
-    variant         varchar(64) not null,
+    variant         varchar(64),
     config_json     text not null,
     gmt_create      timestamp(3) not null default current_timestamp(),
     gmt_modified    timestamp(3) not null default current_timestamp(),

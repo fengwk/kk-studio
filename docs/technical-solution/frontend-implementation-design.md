@@ -47,14 +47,14 @@
 | --- | --- |
 | `layout` | `single` / `split-2` / `split-3` / `grid-6` |
 | `focusedPaneId` | 当前聚焦 Pane |
-| `panes[]` | 固定 1/2/3/6 个格子；`target={sessionId?,threadId?}` |
+| `panes[]` | 随 layout 容量 1–8 个格子；`{ id, threadId }`（`threadId=null` 为空面板；不存 sessionId） |
 | `sessionSort` / `threadSort` | `recent`（updateTime）或 `created`（createTime） |
 
-布局切换尽可能保留既有 pane target。服务端不存 Pane 状态。无 Window 抽象。
+布局切换尽可能保留既有 `threadId` 绑定。服务端不存 Pane 状态；多窗口不实时同步。无 Window 抽象。
 
 ### 空 Pane 与首发
 
-每个 Pane 初始为会话 composer；空 Pane 仅暴露 `/session` 以复用本 Chat 成员 Session（选中后替换该 Pane target 为 Main Thread）：
+每个 Pane 初始为会话 composer；空 Pane 可 `/session` 复用本 Chat 成员 Session（选中后 `threadId = mainThreadId`）：
 
 1. Footer/chip 显示 Agent：空 Pane 用 Chat default；已绑定 Pane 用 Thread DTO 的 active agent。
 2. 无可用 Agent 时提交会打开 Agent 选择器；选中后更新 Chat.defaultAgentId，并继续 pending 首发。
@@ -63,14 +63,14 @@
    - `POST /chats/:id/sessions` attach
    - `PUT /threads/:id/agent`（SET_AGENT，新 clientMessageId）
    - `POST /threads/:id/messages`（USER_MESSAGE，另一个新 clientMessageId）
-   - 将 pane target 设为该 Main Thread
+   - 将 `pane.threadId` 设为该 Main Thread
 
 ### Slash 命令（已绑定 Thread Pane）
 
 | 命令 | 行为 |
 | --- | --- |
-| `/session` | 空 Pane 与已绑定 Pane 均可用；列出当前 Chat **全部**成员 Session；按各 Session 的 Threads 判断 running 后优先，再按用户 sort；选中后替换 **该** Pane target 为 Main Thread |
-| `/thread` | 当前 Session Threads；同样 running 优先 + sort；选中后替换 pane target |
+| `/session` | 空 Pane 与已绑定 Pane 均可用；列出当前 Chat **全部**成员 Session；按各 Session 的 Threads 判断 running 后优先，再按用户 sort；选中后 `threadId = mainThreadId` |
+| `/thread` | 当前 Session Threads；同样 running 优先 + sort；选中后替换 `threadId` |
 | `/agent` | Agent 选择器；对当前 Thread `setThreadAgent`；不手工同步其它 Pane，依赖 query invalidate + SSE |
 | `/tree` `/stop` `/yolo` `/clear` | 保留既有语义；Provider 瞬态失败由服务端自动重试，不提供 `/retry` |
 
@@ -142,7 +142,7 @@ Thread 主区纵向固定：可滚动 transcript；Working/queue/widgets；Compo
 
 ### 历史分支与 Stop
 
-- `/tree` 按需查询 Session Entry Tree，打开独立历史分支面板；确认后创建 Secondary Thread，并把 **当前 Pane** target 切到新 Thread（不改 URL）。
+- `/tree` 按需查询 Session Entry Tree，打开独立历史分支面板；确认后创建 Secondary Thread，并把 **当前 Pane** 的 `threadId` 切到新 Thread（不改 URL）。
 - `/stop` 的 `restoredMessages` 以空行合并回 Composer，并生成新 `clientMessageId`。
 - `RETRYING` 时显示到期倒计时或自动重试进度，且不把后续 queued Input 误显示为 Working；重试耗尽或不可重试失败进入 `FAILED`，显示停止提示，下一条用户消息会重新启动普通循环。
 - AI 设置页以秒为单位编辑基础/最大间隔（1–60 秒，最多三位小数），无损换算为 API 的毫秒整数；重试次数范围为 0–10。

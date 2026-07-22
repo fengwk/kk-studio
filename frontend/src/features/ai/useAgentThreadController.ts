@@ -14,7 +14,7 @@ import { useHarnessThreadEventStream } from '@/features/ai/useHarnessThreadEvent
 import { useHarnessThreadObservability } from '@/features/ai/useHarnessThreadObservability'
 import { useHarnessTaskTimeline } from '@/features/ai/useHarnessTaskTimeline'
 import { harnessService } from '@/shared/api/harness-service'
-import type { AgentModelView } from '@/features/ai/AgentModelView'
+import { formatModelRef, type AgentModelView } from '@/features/ai/AgentModelView'
 import type {
   AgentDefinitionDTO,
   AgentProviderDTO,
@@ -32,7 +32,7 @@ function errorMessage(error: unknown): string {
   return '请求失败'
 }
 
-export function useAgentThreadController(threadId: string, sessionId: string, initialDraft = '') {
+export function useAgentThreadController(threadId: string, sessionIdHint = '', initialDraft = '') {
   const [draft, setDraftState] = useState(initialDraft)
   const [actionError, setActionError] = useState<string | null>(null)
   // Local in-flight count keeps pending accurate across overlapping mutateAsync calls.
@@ -57,7 +57,7 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
     threadQuery,
     entriesQuery,
     eventsQuery,
-  } = useAgentThreadQueries(threadId, sessionId)
+  } = useAgentThreadQueries(threadId, sessionIdHint)
   const createMessageMutation = useAgentThreadMessageMutation(threadId)
   const timeline = buildThreadTimeline(entries, inputs, events)
   const working = isThreadWorking(thread, timeline)
@@ -69,8 +69,8 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
   const runtimeLabels = resolveRuntimeLabels(thread, currentAgent, models, providers)
   const observability = useHarnessThreadObservability(threadId, working)
   const taskTimeline = useHarnessTaskTimeline(
-    thread?.sessionId ?? sessionId,
-    threadQuery.isSuccess && Boolean(thread?.sessionId || sessionId),
+    thread?.sessionId ?? sessionIdHint,
+    threadQuery.isSuccess && Boolean(thread?.sessionId || sessionIdHint),
   )
 
   useChatTranscriptAutoScroll(
@@ -93,6 +93,18 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
     mutationFn: (agentDefinitionId: string) =>
       harnessService.setThreadAgent(threadId, {
         agentDefinitionId,
+        clientMessageId: createClientMessageId(),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) })
+      await queryClient.invalidateQueries({ queryKey: queryKeys.threads.inputs(threadId) })
+    },
+  })
+  const setModelMutation = useMutation({
+    mutationFn: (payload: { modelId: string; variant: string }) =>
+      harnessService.setThreadModel(threadId, {
+        modelId: payload.modelId,
+        variant: payload.variant,
         clientMessageId: createClientMessageId(),
       }),
     onSuccess: async () => {
@@ -162,9 +174,6 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
         observability.setYolo(enabled)
         return
       }
-      case 'clear-draft':
-        setDraft('')
-        return
       case 'stop':
         void stopThread()
         return
@@ -214,6 +223,16 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
       })
   }
 
+  function setThreadModel(modelId: string, variant: string): Promise<void> {
+    setActionError(null)
+    return setModelMutation
+      .mutateAsync({ modelId, variant })
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        setActionError(errorMessage(error))
+      })
+  }
+
   return {
     threads,
     session,
@@ -246,6 +265,7 @@ export function useAgentThreadController(threadId: string, sessionId: string, in
     submitMessage,
     stopThread,
     setThreadAgent,
+    setThreadModel,
     runCommand,
   }
 }
@@ -263,10 +283,13 @@ function resolveRuntimeLabels(
     : undefined
   const contextWindow = extractContextWindow(model)
 
+  const providerName = firstNonEmpty(provider?.name, model?.providerName)
+  const bareModelName = firstNonEmpty(model?.name, modelId)
   return {
     agentName: firstNonEmpty(thread?.activeAgentName, agent?.name, thread?.activeAgentDefinitionId, '（无 Agent）'),
-    providerName: firstNonEmpty(provider?.name, model?.providerName),
-    modelName: firstNonEmpty(model?.name, modelId),
+    providerName,
+    // Canonical display identity is provider/model.
+    modelName: formatModelRef(providerName, bareModelName),
     variantName: firstNonEmpty(thread?.variant, agent?.variant),
     contextWindow,
   }

@@ -47,6 +47,7 @@ function draft(overrides: Partial<AgentDraft> = {}): AgentDraft {
     name: ' assistant ',
     description: ' description ',
     systemPrompt: ' prompt ',
+    variant: 'quality',
     environmentName: ' local ',
     tools: ['platform/read', 'local/bash'],
     skills: ['platform/dev'],
@@ -63,7 +64,7 @@ function draft(overrides: Partial<AgentDraft> = {}): AgentDraft {
 
 describe('ai-agent-draft-codec', () => {
   it('creates empty drafts from an optional model without inventing a variant', () => {
-    expect(emptyAgentDraft(model())).toMatchObject({ modelId: 'model-1', variant: 'quality' })
+    expect(emptyAgentDraft(model())).toMatchObject({ modelId: 'model-1', variant: '' })
     expect(emptyAgentDraft()).toMatchObject({ modelId: '', variant: '' })
   })
 
@@ -125,12 +126,13 @@ describe('ai-agent-draft-codec', () => {
     expect(
       toAgentDraft({
         ...agent,
+        variant: null,
         config: {
           ...agent.config,
           executionPolicy: { ...agent.config.executionPolicy, maxDepth: 3 },
         },
-      }).executionPolicy.maxDepth,
-    ).toBe('3')
+      }),
+    ).toMatchObject({ variant: '', executionPolicy: { maxDepth: '3' } })
   })
 
   it('builds complete create and update bodies', () => {
@@ -161,12 +163,12 @@ describe('ai-agent-draft-codec', () => {
       systemPrompt: null,
       config: { environmentName: null },
     })
+    expect(toEditableAgent(draft({ variant: ' ' })).variant).toBeNull()
   })
 
   it.each([
     [{ name: ' ' }, /name/],
     [{ modelId: ' ' }, /modelId/],
-    [{ variant: ' ' }, /variant/],
     [{ executionPolicy: { ...draft().executionPolicy, maxTurns: '0' } }, /maxTurns/],
     [{ executionPolicy: { ...draft().executionPolicy, maxDepth: '1.5' } }, /maxDepth/],
     [{ executionPolicy: { ...draft().executionPolicy, maxDirectSubagents: '-1' } }, /maxDirectSubagents/],

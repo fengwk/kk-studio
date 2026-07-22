@@ -1,3 +1,4 @@
+import { FieldLabel } from '@/features/ai/FieldLabel'
 import { FormSelect } from '@/features/ai/FormSelect'
 import { providerTypes } from '@/features/ai/ai-console-types'
 import type { ProviderDraft } from '@/features/ai/ai-console-types'
@@ -17,12 +18,12 @@ export function ProviderForm({
   return (
     <>
       <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
-        <span>Name</span>
+        <FieldLabel required>Name</FieldLabel>
         <input value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} placeholder="minimax" required />
         {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}
       </label>
       <label className="form-group">
-        <span>API Key（可选）</span>
+        <FieldLabel>API Key（可选）</FieldLabel>
         <input
           type="password"
           autoComplete="off"
@@ -37,11 +38,11 @@ export function ProviderForm({
         </small>
       </label>
       <label className="form-group">
-        <span>Description</span>
+        <FieldLabel>Description</FieldLabel>
         <input value={draft.description} onChange={(event) => onChange({ ...draft, description: event.target.value })} placeholder="用途说明" />
       </label>
       <label className="form-group">
-        <span>Provider Type</span>
+        <FieldLabel required>Provider Type</FieldLabel>
         <FormSelect
           aria-label="Provider Type"
           value={draft.providerType}
@@ -51,12 +52,12 @@ export function ProviderForm({
         />
       </label>
       <label className={`form-group${fieldErrors.baseUrl ? ' is-error' : ''}`}>
-        <span>Base URL</span>
+        <FieldLabel>Base URL</FieldLabel>
         <input value={draft.baseUrl} onChange={(event) => onChange({ ...draft, baseUrl: event.target.value })} placeholder="https://api.example.com/v1" />
         {fieldErrors.baseUrl ? <span className="field-error">{fieldErrors.baseUrl}</span> : null}
       </label>
       <label className="form-group">
-        <span>Model Call Timeout (ms)</span>
+        <FieldLabel>Model Call Timeout (ms)</FieldLabel>
         <input
           value={draft.modelCallTimeoutMillis}
           onChange={(event) => onChange({ ...draft, modelCallTimeoutMillis: event.target.value })}
@@ -65,7 +66,7 @@ export function ProviderForm({
         />
       </label>
       <label className="form-group">
-        <span>Model Call Idle Timeout (ms)</span>
+        <FieldLabel>Model Call Idle Timeout (ms)</FieldLabel>
         <input
           value={draft.modelCallIdleTimeoutMillis}
           onChange={(event) => onChange({ ...draft, modelCallIdleTimeoutMillis: event.target.value })}

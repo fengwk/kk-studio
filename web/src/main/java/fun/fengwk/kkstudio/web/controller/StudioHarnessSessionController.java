@@ -4,7 +4,6 @@ import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -25,7 +24,12 @@ import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import java.util.List;
 import java.util.function.Supplier;
 
-/** Session 创建、查询及 Session 内 branch Thread 创建 API。 */
+/**
+ * Session 创建、查询及 Session 内 branch Thread 创建 API。
+ *
+ * <p>统一返回 {@link Result}；创建类接口使用 {@link Results#created}（201），由 ResultResponseBodyAdvice 同步 HTTP
+ * 状态。
+ */
 @AllArgsConstructor
 @RestController
 @RequestMapping("/api/sessions")
@@ -36,10 +40,8 @@ public class StudioHarnessSessionController {
   private final HarnessThreadCommandService threadCommandService;
 
   @PostMapping
-  public ResponseEntity<Result<HarnessSessionDTO>> createSession(
-      @RequestBody HarnessSessionCreateDTO request) {
-    return ResponseEntity.status(HttpStatus.CREATED)
-        .body(Results.ok(withHttpTranslation(() -> commandService.createSession(request))));
+  public Result<HarnessSessionDTO> createSession(@RequestBody HarnessSessionCreateDTO request) {
+    return Results.created(withHttpTranslation(() -> commandService.createSession(request)));
   }
 
   @GetMapping
@@ -49,31 +51,19 @@ public class StudioHarnessSessionController {
 
   @GetMapping("/{id}")
   public Result<HarnessSessionDTO> getSession(@PathVariable("id") String id) {
-    try {
-      return Results.ok(queryService.getSession(id));
-    } catch (IllegalArgumentException | IllegalStateException error) {
-      throw translateHttpError(error);
-    }
+    return Results.ok(withHttpTranslation(() -> queryService.getSession(id)));
   }
 
   @GetMapping("/{id}/entries")
   public Result<List<HarnessSessionEntryDTO>> listEntries(@PathVariable("id") String id) {
-    try {
-      return Results.ok(queryService.listEntries(id));
-    } catch (IllegalArgumentException | IllegalStateException error) {
-      throw translateHttpError(error);
-    }
+    return Results.ok(withHttpTranslation(() -> queryService.listEntries(id)));
   }
 
   @PostMapping("/{id}/threads")
-  public ResponseEntity<Result<HarnessThreadDTO>> createThread(
+  public Result<HarnessThreadDTO> createThread(
       @PathVariable("id") String id, @RequestBody HarnessThreadCreateDTO request) {
-    try {
-      return ResponseEntity.status(HttpStatus.CREATED)
-          .body(Results.ok(threadCommandService.createThread(id, request)));
-    } catch (IllegalArgumentException | IllegalStateException error) {
-      throw translateHttpError(error);
-    }
+    return Results.created(
+        withHttpTranslation(() -> threadCommandService.createThread(id, request)));
   }
 
   private static <T> T withHttpTranslation(Supplier<T> operation) {

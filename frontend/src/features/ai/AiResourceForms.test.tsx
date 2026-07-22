@@ -119,11 +119,12 @@ describe('AiResourceForms', () => {
 
     expect(screen.getByRole('button', { name: '使用第一个 Model 填充默认配置' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '使用第一个 Model 填充默认配置' }))
-    expect(screen.getByLabelText('Model')).toHaveValue('model-1')
-    expect(screen.getByLabelText('Variant')).toHaveValue('default')
+    expect(screen.getByLabelText('Default Model')).toHaveValue('model-1')
+    // empty override = use model.defaultVariant at runtime
+    expect(screen.getByLabelText('Default Variant Override')).toHaveValue('')
 
-    await selectFormOption(user, 'Model', 'Claude-Sonnet-4.5 (anthropic)')
-    expect(screen.getByLabelText('Variant')).toHaveValue('creative')
+    await selectFormOption(user, 'Default Model', 'anthropic/Claude-Sonnet-4.5')
+    expect(screen.getByLabelText('Default Variant Override')).toHaveValue('')
     expect(screen.getByText('暂无候选 Tools')).toBeInTheDocument()
   })
 

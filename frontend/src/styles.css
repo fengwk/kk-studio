@@ -2690,7 +2690,7 @@ div.is-error {
   margin: 0;
   padding: 4px;
   list-style: none;
-  max-height: 220px;
+  max-height: min(420px, 55vh);
   overflow-y: auto;
 }
 
@@ -2710,8 +2710,22 @@ div.is-error {
 }
 
 .thread-command-list button.active,
-.thread-command-list button:hover {
+.thread-command-list button:hover:not(:disabled) {
   background: var(--surface-active);
+}
+
+.thread-command-list button.is-disabled,
+.thread-command-list button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  color: var(--fg-dim);
+}
+
+.thread-command-list button.is-disabled .thread-command-label,
+.thread-command-list button:disabled .thread-command-label,
+.thread-command-list button.is-disabled .thread-command-desc,
+.thread-command-list button:disabled .thread-command-desc {
+  color: var(--fg-dim);
 }
 
 .thread-command-label {
@@ -2789,6 +2803,24 @@ div.is-error {
   opacity: 0.45;
   font-weight: 300;
   user-select: none;
+}
+
+.thread-status-seg.is-clickable {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.thread-status-seg.is-clickable:hover {
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .thread-status-seg {

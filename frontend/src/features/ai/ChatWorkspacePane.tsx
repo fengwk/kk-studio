@@ -8,30 +8,34 @@ import {
   sortWithRunningFirst,
   type ChatPane,
   type PaneSortPreference,
-  type PaneTarget,
-} from '@/features/ai/chat-pane-state'
+  } from '@/features/ai/chat-pane-state'
 import { isRunningThread } from '@/features/ai/chat-session-picker'
 import { performBlankPaneFirstSend } from '@/features/ai/chat-first-send'
 import { branchTarget } from '@/features/ai/session-entry-tree'
-import { THREAD_COMMANDS, type ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
+import {
+  threadCommandsForScene,
+  type ThreadCommand,
+} from '@/features/ai/thread-panel/thread-commands'
 import { ThreadComposer } from '@/features/ai/thread-panel/ThreadComposer'
 import { ThreadStatusFooter } from '@/features/ai/thread-panel/ThreadStatusFooter'
 import { useAgentThreadController } from '@/features/ai/useAgentThreadController'
 import { useChatSessionPicker } from '@/features/ai/useChatSessionPicker'
-import { toAgentModelViews, type AgentModelView } from '@/features/ai/AgentModelView'
+import { modelRef, toAgentModelViews, type AgentModelView } from '@/features/ai/AgentModelView'
 import type {
   AgentDefinitionDTO,
   ChatDTO,
   HarnessSessionEntryDTO,
   HarnessThreadDTO,
 } from '@/shared/api/contracts'
-import { extractContextWindow } from '@/features/ai/ai-model-draft-codec'
+import { extractContextWindow, extractDefaultVariantFromModel } from '@/features/ai/ai-model-draft-codec'
+import { variantOptionsFromModel } from '@/features/ai/ai-draft-variant-options'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 
-/** Blank panes only expose explicit Session reuse; first-send stays on plain submit. */
-export const BLANK_PANE_COMMANDS: ThreadCommand[] = THREAD_COMMANDS.filter((command) => command.id === 'session')
+/** Blank pane: full stable command table; unsupported entries are disabled (grayed). */
+export const BLANK_PANE_COMMANDS: ThreadCommand[] = threadCommandsForScene('blank')
+export const BOUND_PANE_COMMANDS: ThreadCommand[] = threadCommandsForScene('bound')
 
 function resolveDefaultAgent(
   chat: ChatDTO | undefined,
@@ -61,9 +65,8 @@ function resolveBlankPaneFooterLabels(
   const model = models.find((item) => String(item.id) === modelId)
   return {
     agentName: agent.name || '（无 Agent）',
-    // AgentModelView already carries the enriched providerName so we don't have to re-join here.
     providerName: model?.providerName || undefined,
-    modelName: model?.name || modelId || undefined,
+    modelName: model ? modelRef(model) : modelId || undefined,
     variantName: agent.variant || undefined,
     contextWindow: extractContextWindow(model),
   }
@@ -88,7 +91,7 @@ export function ChatWorkspacePane({
   sessionSort,
   threadSort,
   onFocus,
-  onTargetChange,
+  onThreadChange,
   onSessionSortChange,
   onThreadSortChange,
   onDefaultAgentChange,
@@ -101,24 +104,23 @@ export function ChatWorkspacePane({
   sessionSort: PaneSortPreference
   threadSort: PaneSortPreference
   onFocus: () => void
-  onTargetChange: (target: PaneTarget) => void
+  onThreadChange: (threadId: string | null) => void
   onSessionSortChange: (sort: PaneSortPreference) => void
   onThreadSortChange: (sort: PaneSortPreference) => void
   onDefaultAgentChange: (agentId: string) => Promise<void>
 }) {
-  if (isPaneBound(pane.target)) {
+  if (isPaneBound(pane.threadId)) {
     return (
       <BoundThreadPane
         chatId={chatId}
         agents={agents}
         paneId={pane.id}
-        sessionId={pane.target.sessionId}
-        threadId={pane.target.threadId}
+        threadId={pane.threadId}
         focused={focused}
         sessionSort={sessionSort}
         threadSort={threadSort}
         onFocus={onFocus}
-        onTargetChange={onTargetChange}
+        onThreadChange={onThreadChange}
         onSessionSortChange={onSessionSortChange}
         onThreadSortChange={onThreadSortChange}
       />
@@ -133,7 +135,7 @@ export function ChatWorkspacePane({
       focused={focused}
       sessionSort={sessionSort}
       onFocus={onFocus}
-      onTargetChange={onTargetChange}
+      onThreadChange={onThreadChange}
       onSessionSortChange={onSessionSortChange}
       onDefaultAgentChange={onDefaultAgentChange}
     />
@@ -147,7 +149,7 @@ function BlankComposerPane({
   focused,
   sessionSort,
   onFocus,
-  onTargetChange,
+  onThreadChange,
   onSessionSortChange,
   onDefaultAgentChange,
 }: {
@@ -157,7 +159,7 @@ function BlankComposerPane({
   focused: boolean
   sessionSort: PaneSortPreference
   onFocus: () => void
-  onTargetChange: (target: PaneTarget) => void
+  onThreadChange: (threadId: string | null) => void
   onSessionSortChange: (sort: PaneSortPreference) => void
   onDefaultAgentChange: (agentId: string) => Promise<void>
 }) {
@@ -202,7 +204,7 @@ function BlankComposerPane({
       ])
       setDraft('')
       setPendingContent(null)
-      onTargetChange({ sessionId: result.sessionId, threadId: result.threadId })
+      onThreadChange(result.threadId)
     } catch (error) {
       setActionError(errorMessage(error, '首发失败'))
       setDraft(content)
@@ -227,11 +229,19 @@ function BlankComposerPane({
 
   function handleCommand(command: ThreadCommand) {
     onFocus()
-    if (command.id === 'session') {
-      setSessionModalOpen(true)
+    if (command.disabled) {
       return
     }
-    setActionError(`未知命令：${command.id}`)
+    switch (command.id) {
+      case 'session':
+        setSessionModalOpen(true)
+        return
+      case 'agent':
+        setAgentModalOpen(true)
+        return
+      default:
+        setActionError(command.disabledReason || `当前场景不可用：/${command.id}`)
+    }
   }
 
   async function handleAgentSelected(agentId: string) {
@@ -258,7 +268,7 @@ function BlankComposerPane({
         <main className="chat-main thread-panel-main">
           <div className="blank-pane-body">
             <h2>新对话</h2>
-            <p>输入后创建 Session；也可用 /session 复用。</p>
+            <p>输入后创建新的 Session / Thread；/agent 选默认 Agent，/session 复用已有会话。</p>
             {actionError ? <div className="thread-error-panel">{actionError}</div> : null}
           </div>
           <ThreadComposer
@@ -279,6 +289,10 @@ function BlankComposerPane({
             variantName={defaultAgent ? footerLabels.variantName : undefined}
             contextWindow={defaultAgent ? footerLabels.contextWindow : undefined}
             yoloEnabled={false}
+            onAgentClick={() => {
+              onFocus()
+              setAgentModalOpen(true)
+            }}
           />
         </main>
       </section>
@@ -311,7 +325,7 @@ function BlankComposerPane({
             return
           }
           setSessionModalOpen(false)
-          onTargetChange({ sessionId: session.sessionId, threadId: session.mainThreadId })
+          onThreadChange(session.mainThreadId)
         }}
       />
     </section>
@@ -322,35 +336,37 @@ function BoundThreadPane({
   chatId,
   agents,
   paneId,
-  sessionId,
   threadId,
   focused,
   sessionSort,
   threadSort,
   onFocus,
-  onTargetChange,
+  onThreadChange,
   onSessionSortChange,
   onThreadSortChange,
 }: {
   chatId: string
   agents: AgentDefinitionDTO[]
   paneId: string
-  sessionId: string
   threadId: string
   focused: boolean
   sessionSort: PaneSortPreference
   threadSort: PaneSortPreference
   onFocus: () => void
-  onTargetChange: (target: PaneTarget) => void
+  onThreadChange: (threadId: string | null) => void
   onSessionSortChange: (sort: PaneSortPreference) => void
   onThreadSortChange: (sort: PaneSortPreference) => void
 }) {
-  const controller = useAgentThreadController(threadId, sessionId)
+  // sessionId is not persisted on pane; resolve from Thread after load.
+  const controller = useAgentThreadController(threadId)
+  const sessionId = controller.thread?.sessionId ?? ''
   const queryClient = useQueryClient()
   const [historyBranchOpen, setHistoryBranchOpen] = useState(false)
   const [sessionModalOpen, setSessionModalOpen] = useState(false)
   const [threadModalOpen, setThreadModalOpen] = useState(false)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
+  const [modelModalOpen, setModelModalOpen] = useState(false)
+  const [variantModalOpen, setVariantModalOpen] = useState(false)
   const [branchDraft, setBranchDraft] = useState('')
   const sessionPicker = useChatSessionPicker(chatId, sessionModalOpen, sessionSort)
 
@@ -379,13 +395,18 @@ function BoundThreadPane({
       if (!target.fromEntryId) {
         return Promise.reject(new Error('根节点不能作为可编辑消息分支'))
       }
+      if (!sessionId) {
+        return Promise.reject(new Error('Thread 尚未加载 Session'))
+      }
       return harnessService.createSessionThread(sessionId, { fromEntryId: target.fromEntryId })
     },
     onSuccess: async (nextThread, entry) => {
       setHistoryBranchOpen(false)
-      await queryClient.invalidateQueries({ queryKey: queryKeys.sessions.threads(sessionId) })
+      if (sessionId) {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.sessions.threads(sessionId) })
+      }
       setBranchDraft(branchTarget(entry).draft)
-      onTargetChange({ sessionId, threadId: nextThread.threadId })
+      onThreadChange(nextThread.threadId)
     },
   })
 
@@ -397,6 +418,9 @@ function BoundThreadPane({
 
   function handleCommand(command: ThreadCommand) {
     onFocus()
+    if (command.disabled) {
+      return
+    }
     switch (command.id) {
       case 'session':
         setSessionModalOpen(true)
@@ -407,13 +431,33 @@ function BoundThreadPane({
       case 'agent':
         setAgentModalOpen(true)
         return
+      case 'model':
+        setModelModalOpen(true)
+        return
+      case 'variant':
+        setVariantModalOpen(true)
+        return
       case 'tree':
         setHistoryBranchOpen(true)
+        return
+      case 'new':
+        // Detach pane from current Session/Thread so next send creates a fresh pair.
+        controller.setDraft('')
+        onThreadChange(null)
         return
       default:
         controller.runCommand(command)
     }
   }
+
+  const currentModelId = firstNonEmpty(
+    controller.thread?.modelId,
+    controller.agent?.modelId,
+  )
+  const currentModel =
+    controller.models.find((model) => String(model.id) === currentModelId) ??
+    controller.models.find((model) => model.name === currentModelId)
+  const currentVariantOptions = variantOptionsFromModel(currentModel)
 
   return (
     <section className={`chat-pane ${focused ? 'focused' : ''}`} onMouseDown={onFocus} data-pane-id={paneId}>
@@ -437,7 +481,19 @@ function BoundThreadPane({
           void controller.submitMessage()
         }}
         onCommand={handleCommand}
-        commands={THREAD_COMMANDS}
+        commands={BOUND_PANE_COMMANDS}
+        onAgentClick={() => {
+          onFocus()
+          setAgentModalOpen(true)
+        }}
+        onModelClick={() => {
+          onFocus()
+          setModelModalOpen(true)
+        }}
+        onVariantClick={() => {
+          onFocus()
+          setVariantModalOpen(true)
+        }}
       />
       {historyBranchOpen ? (
         <HistoryBranchPanel
@@ -468,7 +524,7 @@ function BoundThreadPane({
             return
           }
           setSessionModalOpen(false)
-          onTargetChange({ sessionId: session.sessionId, threadId: session.mainThreadId })
+          onThreadChange(session.mainThreadId)
         }}
       />
       <SelectionListModal
@@ -481,7 +537,7 @@ function BoundThreadPane({
         onClose={() => setThreadModalOpen(false)}
         onSelect={(selectedThreadId) => {
           setThreadModalOpen(false)
-          onTargetChange({ sessionId, threadId: selectedThreadId })
+          onThreadChange(selectedThreadId)
         }}
       />
       <AgentSelectionModal
@@ -499,8 +555,68 @@ function BoundThreadPane({
           })
         }}
       />
+      <SelectionListModal
+        open={modelModalOpen}
+        title="选择 Model"
+        items={controller.models.map((model) => ({
+          id: String(model.id),
+          title: modelRef(model),
+          subtitle: model.description || undefined,
+        }))}
+        sort="recent"
+        onSortChange={() => undefined}
+        showSort={false}
+        emptyText="暂无可用 Model"
+        onClose={() => setModelModalOpen(false)}
+        onSelect={(modelId) => {
+          setModelModalOpen(false)
+          const model = controller.models.find((item) => String(item.id) === modelId)
+          if (!model) {
+            return
+          }
+          const variant =
+            extractDefaultVariantFromModel(model) ||
+            variantOptionsFromModel(model)[0] ||
+            'default'
+          void controller.setThreadModel(String(model.id), variant)
+        }}
+      />
+      <SelectionListModal
+        open={variantModalOpen}
+        title="选择 Variant"
+        items={currentVariantOptions.map((variant) => ({
+          id: variant,
+          title: variant,
+          subtitle: currentModel ? modelRef(currentModel) : undefined,
+        }))}
+        sort="recent"
+        onSortChange={() => undefined}
+        showSort={false}
+        emptyText={currentModel ? '当前 Model 暂无 Variant' : '请先设置 Model'}
+        onClose={() => setVariantModalOpen(false)}
+        onSelect={(variant) => {
+          setVariantModalOpen(false)
+          if (!currentModel) {
+            return
+          }
+          void controller.setThreadModel(String(currentModel.id), variant)
+        }}
+      />
     </section>
   )
+}
+
+function firstNonEmpty(...values: unknown[]): string {
+  for (const value of values) {
+    if (value == null) {
+      continue
+    }
+    const text = String(value).trim()
+    if (text) {
+      return text
+    }
+  }
+  return ''
 }
 
 function toThreadItem(thread: HarnessThreadDTO, mainSessionId: string) {

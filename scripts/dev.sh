@@ -44,8 +44,13 @@ Environment:
   BACKEND_PORT=18080
   FRONTEND_PORT=5173
   SPRING_PROFILES_ACTIVE=e2e   # dev = H2+stub; e2e = H2+real provider seed
-  MINIMAX_API_KEY=<required when e2e seed still uses MiniMax>
-  MINIMAX_BASE_URL=https://api.minimax.io/v1
+  MINIMAX_API_KEY / MINIMAX_BASE_URL
+  OPENAI_API_KEY / OPENAI_BASE_URL
+  XAI_API_KEY / XAI_BASE_URL
+  DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL
+  GEMINI_API_KEY / GOOGLE_BASE_URL
+  # e2e profile: only configured env vars are written into provider rows (no defaults)
+  # OpenAI-compatible base URLs (openai / openai_response) get a trailing /v1 when set
   DEV_KILL_PORTS=true
   DEV_SKIP_PACKAGE=false
   DEV_SKIP_NPM_INSTALL=false
@@ -81,29 +86,86 @@ profile_enabled() {
   esac
 }
 
-normalize_minimax_base_url() {
-  local url=${1%/}
-  case "$url" in
-    https://api.minimaxi.com|https://api.minimax.io)
-      echo "$url/v1"
-      ;;
-    *)
-      echo "$url"
-      ;;
-  esac
-}
+# Write only env-provided baseUrl/credential into a seeded provider row. Missing env => leave DB null/unchanged.
+sync_e2e_provider_credentials() {
+  require_cmd python3
+  step "Syncing e2e provider credentials from env (only set fields; secrets not printed)"
+  BACKEND_URL="$BACKEND_URL" \
+  MINIMAX_API_KEY="${MINIMAX_API_KEY-}" MINIMAX_BASE_URL="${MINIMAX_BASE_URL-}" \
+  OPENAI_API_KEY="${OPENAI_API_KEY-}" OPENAI_BASE_URL="${OPENAI_BASE_URL-}" \
+  XAI_API_KEY="${XAI_API_KEY-}" XAI_BASE_URL="${XAI_BASE_URL-}" \
+  DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY-}" DEEPSEEK_BASE_URL="${DEEPSEEK_BASE_URL-}" \
+  GEMINI_API_KEY="${GEMINI_API_KEY-}" GOOGLE_BASE_URL="${GOOGLE_BASE_URL-}" \
+  python3 - <<'PY'
+import json, os, urllib.request
 
-resolve_minimax_base_url() {
-  normalize_minimax_base_url "${MINIMAX_BASE_URL:-${MINIMAX_CHAT_BASE_URL:-https://api.minimax.io/v1}}"
-}
+BACKEND = os.environ["BACKEND_URL"].rstrip("/")
+PROVIDERS = [
+    (1, "minimax", "MiniMax (OpenAI Responses).", "openai_response", "MINIMAX_BASE_URL", "MINIMAX_API_KEY"),
+    (2, "openai", "OpenAI (OpenAI Responses).", "openai_response", "OPENAI_BASE_URL", "OPENAI_API_KEY"),
+    (3, "xai", "xAI / Grok (OpenAI Responses).", "openai_response", "XAI_BASE_URL", "XAI_API_KEY"),
+    (4, "deepseek", "DeepSeek (OpenAI Chat Completions).", "openai", "DEEPSEEK_BASE_URL", "DEEPSEEK_API_KEY"),
+    (5, "google", "Google Gemini.", "google", "GOOGLE_BASE_URL", "GEMINI_API_KEY"),
+]
 
-require_e2e_provider_env() {
-  # Current data-e2e.sql seeds MiniMax; require its key when e2e is active.
-  # When e2e seed switches to another provider, update this guard accordingly.
-  if profile_enabled e2e && [ -z "${MINIMAX_API_KEY:-}" ]; then
-    echo "MINIMAX_API_KEY is required when SPRING_PROFILES_ACTIVE includes e2e (current e2e seed uses MiniMax)" >&2
-    exit 1
-  fi
+def get(url):
+    with urllib.request.urlopen(url, timeout=30) as resp:
+        return json.load(resp)
+
+def put(url, payload):
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+        method="PUT",
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.load(resp)
+
+def normalize_openai_compatible_base_url(base, provider_type):
+    """When env already sets a base URL, ensure OpenAI-compatible hosts end with /v1.
+    Never invent a default host; google and blank values are left unchanged.
+    """
+    if not base:
+        return base
+    if provider_type not in ("openai", "openai_response"):
+        return base
+    cleaned = base.rstrip("/")
+    if cleaned.endswith("/v1"):
+        return cleaned
+    return cleaned + "/v1"
+
+listed = get(f"{BACKEND}/api/providers?pageNumber=1&pageSize=50")
+rows = ((listed.get("data") or {}).get("results") or [])
+by_id = {str(r.get("id")): r for r in rows}
+
+for provider_id, name, description, provider_type, base_env, key_env in PROVIDERS:
+    base = (os.environ.get(base_env) or "").strip() or None
+    key = (os.environ.get(key_env) or "").strip() or None
+    if base is None and key is None:
+        print(f"provider {name}: skip (no {base_env}/{key_env})")
+        continue
+    if base is not None:
+        normalized = normalize_openai_compatible_base_url(base, provider_type)
+        if normalized != base:
+            print(f"provider {name}: normalize baseUrl {base} -> {normalized}")
+        base = normalized
+    current = by_id.get(str(provider_id)) or {}
+    payload = {
+        "name": name,
+        "description": description,
+        "providerType": provider_type,
+        "baseUrl": base if base is not None else current.get("baseUrl"),
+        "modelCallTimeoutMillis": int(current.get("modelCallTimeoutMillis") or 1800000),
+        "modelCallIdleTimeoutMillis": int(current.get("modelCallIdleTimeoutMillis") or 120000),
+    }
+    # credential omitted/null keeps existing secret on update; only set when env provides it.
+    if key is not None:
+        payload["credential"] = key
+    body = put(f"{BACKEND}/api/providers/{provider_id}", payload)
+    data = body.get("data") or {}
+    print(f"provider {name}: configured={data.get('configured')} baseUrl_set={bool(data.get('baseUrl'))}")
+PY
 }
 
 stop_pid_file() {
@@ -196,32 +258,6 @@ package_backend() {
   env JAVA_HOME="$java_home" mvn -pl web -am -DskipTests package
 }
 
-sync_seeded_minimax_provider() {
-  local minimax_base_url=$1
-  local payload
-  payload=$(jq -nc \
-    --arg name "minimax" \
-    --arg description "MiniMax provider for local development and real-agent verification." \
-    --arg providerType "openai" \
-    --arg baseUrl "$minimax_base_url" \
-    --arg credential "$MINIMAX_API_KEY" \
-    --argjson modelCallTimeoutMillis 1800000 \
-    --argjson modelCallIdleTimeoutMillis 120000 \
-    '{
-      name: $name,
-      description: $description,
-      providerType: $providerType,
-      baseUrl: $baseUrl,
-      credential: $credential,
-      modelCallTimeoutMillis: $modelCallTimeoutMillis,
-      modelCallIdleTimeoutMillis: $modelCallIdleTimeoutMillis
-    }')
-  step "Syncing seeded MiniMax provider"
-  curl -fsS -X PUT "$BACKEND_URL/api/providers/1" \
-    -H 'Content-Type: application/json' \
-    -d "$payload" >/dev/null
-}
-
 stop_all() {
   mkdir -p "$WORK_DIR"
   stop_pid_file "$FRONTEND_PID_FILE" frontend
@@ -240,10 +276,7 @@ start_all() {
   require_cmd npm
 
   local java_home
-  local minimax_base_url
   java_home=$(resolve_java_home)
-  require_e2e_provider_env
-  minimax_base_url=$(resolve_minimax_base_url)
 
   mkdir -p "$WORK_DIR"
   stop_all
@@ -264,8 +297,7 @@ start_all() {
   wait_http "$BACKEND_URL/api/agents?pageNumber=1&pageSize=1" backend
 
   if profile_enabled e2e; then
-    # Sync credentials for the current e2e seed provider (MiniMax by default).
-    sync_seeded_minimax_provider "$minimax_base_url"
+    sync_e2e_provider_credentials
   fi
 
   step "Starting frontend on $FRONTEND_URL"

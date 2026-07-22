@@ -115,7 +115,7 @@ describe('ChatWorkspacePage', () => {
   it('renders blank pane with chat default agent and switches layouts while retaining targets', async () => {
     const user = userEvent.setup()
     const seeded = applyChatLayout(createDefaultChatPaneState(), 'split-2')
-    seeded.panes[0].target = { sessionId: 's1', threadId: 't1' }
+    seeded.panes[0].threadId = 't1'
     saveChatPaneState('chat-1', seeded)
 
     vi.mocked(harnessService.getThread).mockResolvedValue({

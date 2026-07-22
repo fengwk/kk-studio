@@ -8,6 +8,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.mapper.AgentDefinitionMapper;
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.model.AgentDefinitionDO;
+import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadCommandService;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -39,6 +40,7 @@ import java.util.Objects;
 public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandService {
   private final ThreadTransactions transactions;
   private final AgentDefinitionMapper agentDefinitionMapper;
+  private final AgentModelDefaultVariantResolver variantResolver;
   private final ThreadKick threadKick;
   private final ThreadProviderCancellation providerCancellation;
   private final HarnessThreadDtoConverter converter;
@@ -46,12 +48,14 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
   public HarnessThreadCommandServiceImpl(
       ThreadTransactions transactions,
       AgentDefinitionMapper agentDefinitionMapper,
+      AgentModelDefaultVariantResolver variantResolver,
       ThreadKick threadKick,
       @Qualifier("threadProviderCancellation") ThreadProviderCancellation providerCancellation,
       HarnessThreadDtoConverter converter) {
     this.transactions = Objects.requireNonNull(transactions, "transactions");
     this.agentDefinitionMapper =
         Objects.requireNonNull(agentDefinitionMapper, "agentDefinitionMapper");
+    this.variantResolver = Objects.requireNonNull(variantResolver, "variantResolver");
     this.threadKick = Objects.requireNonNull(threadKick, "threadKick");
     this.providerCancellation =
         Objects.requireNonNull(providerCancellation, "providerCancellation");
@@ -151,13 +155,11 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
   public HarnessThreadInputDTO queueModel(String threadId, HarnessThreadModelSetDTO request) {
     Objects.requireNonNull(request, "request");
     long id = HarnessIds.parsePositive(threadId, "threadId");
+    long modelId = HarnessIds.parsePositive(request.getModelId(), "modelId");
+    String variant = variantResolver.resolve(modelId, request.getVariant());
     ThreadInput input =
         transactions.submitSetModel(
-            id,
-            request.getModelId(),
-            request.getVariant(),
-            request.getClientMessageId(),
-            Instant.now());
+            id, Long.toString(modelId), variant, request.getClientMessageId(), Instant.now());
     afterCommitKick(id);
     return converter.convert(input);
   }

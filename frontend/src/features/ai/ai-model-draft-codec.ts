@@ -373,17 +373,17 @@ export function toEditableModelUpdate(draft: ModelDraft): AgentModelUpdateDTO {
 }
 
 export function extractVariantIdsFromModel(model?: AgentModelDTO | null): string[] {
-  return model ? model.config.variants.map((variant) => variant.id) : []
+  return model?.config?.variants?.map((variant) => variant.id) ?? []
 }
 
 export function extractDefaultVariantFromModel(model?: AgentModelDTO | null): string {
-  return model?.config.defaultVariant ?? ''
+  return model?.config?.defaultVariant ?? ''
 }
 
 export function extractContextWindow(model?: AgentModelDTO | null): number | undefined {
-  return model?.config.limit.context
+  return model?.config?.limit?.context
 }
 
 export function extractMaxOutputTokens(model?: AgentModelDTO | null): number | undefined {
-  return model?.config.limit.output
+  return model?.config?.limit?.output
 }

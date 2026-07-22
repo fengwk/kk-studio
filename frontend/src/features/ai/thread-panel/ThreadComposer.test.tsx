@@ -2,16 +2,38 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { ThreadComposer } from '@/features/ai/thread-panel/ThreadComposer'
-import { filterThreadCommands, THREAD_COMMANDS } from '@/features/ai/thread-panel/thread-commands'
+import {
+  filterThreadCommands,
+  firstEnabledThreadCommand,
+  threadCommandsForScene,
+  THREAD_COMMANDS,
+} from '@/features/ai/thread-panel/thread-commands'
 
 describe('ThreadComposer and commands', () => {
-  it('filters slash commands to the exact remaining command ids', () => {
-    expect(THREAD_COMMANDS.map((c) => c.id)).toEqual(['session', 'thread', 'agent', 'yolo', 'tree', 'stop', 'clear-draft'])
+  it('keeps stable command order and grays unsupported blank-scene commands', () => {
+    expect(THREAD_COMMANDS.map((c) => c.id)).toEqual([
+      'session',
+      'thread',
+      'agent',
+      'model',
+      'variant',
+      'yolo',
+      'tree',
+      'stop',
+      'new',
+    ])
+    const blank = threadCommandsForScene('blank')
+    expect(blank.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
+    expect(blank.filter((c) => !c.disabled).map((c) => c.id)).toEqual(['session', 'agent'])
+    expect(blank.find((c) => c.id === 'new')?.disabled).toBe(true)
+    expect(blank.find((c) => c.id === 'model')?.disabled).toBe(true)
+    expect(threadCommandsForScene('bound').every((c) => !c.disabled)).toBe(true)
     expect(filterThreadCommands('yo').map((c) => c.id)).toEqual(['yolo'])
     expect(filterThreadCommands('sto').map((c) => c.id)).toEqual(['stop'])
     expect(filterThreadCommands('tree')[0]?.id).toBe('tree')
     expect(['history', 'branch', 'fork', 'thread'].every((keyword) => filterThreadCommands(keyword).some((command) => command.id === 'tree'))).toBe(true)
-    expect(filterThreadCommands('').map((c) => c.id)).toEqual(['session', 'thread', 'agent', 'yolo', 'tree', 'stop', 'clear-draft'])
+    expect(filterThreadCommands('', blank).map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
+    expect(firstEnabledThreadCommand('', blank)?.id).toBe('session')
     expect(filterThreadCommands('missing')).toEqual([])
   })
 

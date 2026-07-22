@@ -23,7 +23,7 @@ create table if not exists agent_model (
     gmt_modified        datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',
     version             bigint not null default '0' comment '数据版本号',
     primary key (id),
-    unique key uk_agent_model_name (name)
+    unique key uk_agent_model_provider_name (provider_id, name)
 ) engine=InnoDB default charset=utf8mb4 comment='agent model';
 
 create table if not exists agent_definition (
@@ -32,7 +32,7 @@ create table if not exists agent_definition (
     description     varchar(512) null comment '描述',
     system_prompt   longtext null comment '系统提示词',
     model_id        bigint not null comment '默认 model',
-    variant         varchar(64) not null comment '默认 variant',
+    variant         varchar(64) null comment '覆盖 model.defaultVariant；null 表示使用模型默认',
     config_json     longtext not null comment 'Agent 配置 JSON',
     gmt_create      datetime(3) not null default current_timestamp(3) comment '创建时间',
     gmt_modified    datetime(3) not null default current_timestamp(3) on update current_timestamp(3) comment '更新时间',

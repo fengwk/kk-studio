@@ -57,8 +57,21 @@ export function toUserFacingErrorMessage(error: unknown): string {
     { match: /topK/i, message: 'Top K 必须为正整数' },
     { match: /frequencyPenalty|presencePenalty/i, message: 'Penalty 必须为有效数字' },
     { match: /providerId|请选择 Provider/i, message: '请选择 Provider' },
+    // 名称冲突：优先于通用 409/Conflict，便于用户理解「同 Provider 下重名」
+    {
+      match: /agent model name already exists( under this provider)?:?\s*(.*)$/i,
+      message: '当前 Provider 下已存在同名 Model，请换一个名称',
+    },
+    {
+      match: /agent provider name already exists:?\s*(.*)$/i,
+      message: 'Provider 名称已存在，请换一个名称',
+    },
+    {
+      match: /agent definition name already exists:?\s*(.*)$/i,
+      message: 'Agent 名称已存在，请换一个名称',
+    },
     { match: /pricing|PerMillion|serviceTier|must not be negative|must be a number/i, message: '请检查价格：填写 0 或正数即可' },
-    { match: /modelId|请选择 Model/i, message: '请选择 Model' },
+    { match: /modelId|请选择 Model|Default Model/i, message: '请选择 Default Model' },
     { match: /baseUrl/i, message: '请填写 Base URL' },
     { match: /tools.*重名|tools/i, message: 'Tools 名称冲突，请检查勾选项' },
     { match: /skills.*重名|skills/i, message: 'Skills 名称冲突，请检查勾选项' },
@@ -78,8 +91,15 @@ export function toUserFacingErrorMessage(error: unknown): string {
     }
   }
 
-  // 已是中文则直接展示；英文技术串兜底
+  // 已是中文则直接展示
   if (/[\u4e00-\u9fff]/.test(text)) {
+    return text
+  }
+  // 后端业务英文错误（非通用 HTTP 短语）直接透出，避免吞成笼统文案
+  if (
+    /^(agent |invalid |unknown |stored |config\.|provider |model |chat )/i.test(text) ||
+    /already exists|must not|must be|is required|not found|in use/i.test(text)
+  ) {
     return text
   }
   return '保存失败，请检查必填项后重试'
