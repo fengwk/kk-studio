@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 
 import java.util.Collection;
@@ -19,8 +19,8 @@ public final class DaemonToolRegistry {
   public synchronized void register(Tool tool) {
     tool = Objects.requireNonNull(tool, "tool");
     ToolDescriptor descriptor = Objects.requireNonNull(tool.descriptor(), "tool.descriptor()");
-    if (descriptor.executionMode() != ToolExecutionMode.ENVIRONMENT) {
-      throw new IllegalArgumentException("daemon tool must use ENVIRONMENT execution mode");
+    if (descriptor.executionLocation() != ToolExecutionLocation.ENVIRONMENT) {
+      throw new IllegalArgumentException("daemon tool must use ENVIRONMENT execution location");
     }
     if (tools.putIfAbsent(descriptor.name(), tool) != null) {
       throw new IllegalArgumentException("tool is already registered: " + descriptor.name());

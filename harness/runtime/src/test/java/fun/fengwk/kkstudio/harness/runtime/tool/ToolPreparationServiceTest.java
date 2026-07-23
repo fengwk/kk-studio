@@ -16,7 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
@@ -72,7 +72,7 @@ class ToolPreparationServiceTest {
     assertFalse(prepared.get(2).resultJson().contains("\"terminate\""));
     assertEquals(NOW.plusSeconds(30), prepared.get(0).deadlineAt());
     assertEquals("1", prepared.get(0).binding().descriptor().version());
-    assertEquals(ToolTargetType.CLOUD, prepared.get(0).binding().targetType());
+    assertEquals(ToolExecutionLocation.PLATFORM, prepared.get(0).binding().location());
   }
 
   /** YOLO 仅绕过 permission，不能绕过 schema、path surface 或 binding 校验。 */
@@ -293,7 +293,7 @@ class ToolPreparationServiceTest {
             null,
             new ToolParamsSchema(
                 "", Map.of("path", new ToolStringSchema("path")), Set.of("path"), false),
-            ToolExecutionMode.CLOUD,
+            ToolExecutionLocation.PLATFORM,
             ToolSideEffect.IDEMPOTENT,
             timeout);
     return ToolBinding.of(descriptor);

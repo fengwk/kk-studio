@@ -415,7 +415,7 @@ export interface ToolInvocationDTO {
   toolCallId: string
   toolName: string
   toolVersion: string
-  targetType: string
+  location: 'PLATFORM' | 'ENVIRONMENT'
   environmentName: string | null
   argumentsJson: string
   status: string

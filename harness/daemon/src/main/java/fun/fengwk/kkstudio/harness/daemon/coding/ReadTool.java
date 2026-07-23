@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
@@ -45,7 +45,7 @@ public final class ReadTool extends AbstractCodingTool {
                     "limit", new ToolIntegerSchema("Maximum number of lines")),
                 Set.of("path"),
                 false),
-            ToolExecutionMode.ENVIRONMENT,
+            ToolExecutionLocation.ENVIRONMENT,
             ToolSideEffect.READ_ONLY,
             Duration.ofMinutes(1)));
   }

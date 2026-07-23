@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionRegistry;
 import fun.fengwk.kkstudio.harness.runtime.extension.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
@@ -122,7 +122,7 @@ class AgentDefinitionLiveCapabilityValidatorTest {
   }
 
   private static Tool cloudTool(String name, String version) {
-    return tool(name, version, ToolExecutionMode.CLOUD);
+    return tool(name, version, ToolExecutionLocation.PLATFORM);
   }
 
   private static AgentDefinitionConfigDTO config() {
@@ -133,10 +133,10 @@ class AgentDefinitionLiveCapabilityValidatorTest {
   }
 
   private static ToolDescriptor environmentTool(String name, String version) {
-    return descriptor(name, version, ToolExecutionMode.ENVIRONMENT);
+    return descriptor(name, version, ToolExecutionLocation.ENVIRONMENT);
   }
 
-  private static Tool tool(String name, String version, ToolExecutionMode mode) {
+  private static Tool tool(String name, String version, ToolExecutionLocation mode) {
     ToolDescriptor descriptor = descriptor(name, version, mode);
     return new Tool() {
       @Override
@@ -152,7 +152,8 @@ class AgentDefinitionLiveCapabilityValidatorTest {
     };
   }
 
-  private static ToolDescriptor descriptor(String name, String version, ToolExecutionMode mode) {
+  private static ToolDescriptor descriptor(
+      String name, String version, ToolExecutionLocation mode) {
     return new ToolDescriptor(
         name,
         version,

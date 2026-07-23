@@ -83,7 +83,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.TurnResourceResolver;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnResources;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.share.model.HarnessSessionCreateDTO;
@@ -134,7 +134,7 @@ class ThreadProcessorIntegrationTest {
           "retry tool",
           null,
           new ToolParamsSchema("", Map.of(), Set.of(), false),
-          ToolExecutionMode.CONTROL,
+          ToolExecutionLocation.PLATFORM,
           ToolSideEffect.READ_ONLY,
           Duration.ofMinutes(1));
 
@@ -1025,7 +1025,7 @@ class ThreadProcessorIntegrationTest {
     inv.setToolCallId("call-" + id);
     inv.setToolName("noop");
     inv.setToolVersion("1");
-    inv.setTargetType("CONTROL");
+    inv.setLocation("PLATFORM");
     inv.setArgumentsJson("{}");
     inv.setStatus("SUCCEEDED");
     inv.setPermissionAction("ALLOW");
@@ -1050,7 +1050,7 @@ class ThreadProcessorIntegrationTest {
     inv.setToolCallId("call-wait-" + id);
     inv.setToolName("write");
     inv.setToolVersion("1");
-    inv.setTargetType("CONTROL");
+    inv.setLocation("PLATFORM");
     inv.setArgumentsJson("{}");
     inv.setStatus("WAITING_APPROVAL");
     inv.setPermissionAction("ASK");

@@ -147,7 +147,7 @@ class HarnessThreadRecoveryMapperTest {
     inv.setToolCallId("call-" + id);
     inv.setToolName("write");
     inv.setToolVersion("1");
-    inv.setTargetType("CONTROL");
+    inv.setLocation("PLATFORM");
     inv.setArgumentsJson("{}");
     inv.setStatus("WAITING_APPROVAL");
     inv.setPermissionAction("ASK");

@@ -17,14 +17,13 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ClaimedToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorkerConfig;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
@@ -604,9 +603,9 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
                 () ->
                     new IllegalArgumentException(
                         offlineUnavailableMessage(environmentName, invocation.toolName())));
-    if (descriptor.executionMode() != ToolExecutionMode.ENVIRONMENT) {
+    if (descriptor.executionLocation() != ToolExecutionLocation.ENVIRONMENT) {
       throw new IllegalArgumentException(
-          "Environment capability must use ENVIRONMENT execution mode");
+          "Environment capability must use ENVIRONMENT execution location");
     }
     if (descriptor.sideEffect() != invocation.sideEffect()) {
       throw new IllegalArgumentException(
@@ -615,7 +614,7 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
               + "@"
               + invocation.toolVersion());
     }
-    return new ToolBinding(descriptor, ToolTargetType.ENVIRONMENT, environmentName);
+    return ToolBinding.of(descriptor, environmentName);
   }
 
   private ToolResult decodeResult(ActiveInvocation active, String payloadJson) {

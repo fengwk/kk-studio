@@ -44,7 +44,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventType;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -217,7 +217,7 @@ class DatabaseTaskRuntimeLifecycleTest {
     open.setToolCallId("call-1");
     open.setToolName("bash");
     open.setToolVersion("1");
-    open.setTargetType(ToolTargetType.CLOUD.name());
+    open.setLocation(ToolExecutionLocation.PLATFORM.name());
     open.setArgumentsJson("{}");
     open.setStatus(ToolInvocationStatus.QUEUED.name());
     open.setPermissionAction("ALLOW");
@@ -540,7 +540,7 @@ class DatabaseTaskRuntimeLifecycleTest {
     invocation.setToolCallId("call-" + id);
     invocation.setToolName("tool");
     invocation.setToolVersion("1");
-    invocation.setTargetType(ToolTargetType.CONTROL.name());
+    invocation.setLocation(ToolExecutionLocation.PLATFORM.name());
     invocation.setArgumentsJson("{}");
     invocation.setPermissionAction("ALLOW");
     invocation.setSideEffect("READ_ONLY");

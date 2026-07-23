@@ -8,7 +8,7 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolPermissionDecision;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
 import java.time.Instant;
@@ -44,7 +44,7 @@ public class MysqlToolInvocationStore {
         source.getToolCallId(),
         source.getToolName(),
         source.getToolVersion(),
-        ToolTargetType.valueOf(source.getTargetType()),
+        ToolExecutionLocation.valueOf(source.getLocation()),
         source.getEnvironmentName(),
         source.getArgumentsJson(),
         ToolInvocationStatus.valueOf(source.getStatus()),

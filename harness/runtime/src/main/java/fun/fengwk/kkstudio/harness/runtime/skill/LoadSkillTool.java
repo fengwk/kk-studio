@@ -8,7 +8,7 @@ import fun.fengwk.kkstudio.harness.runtime.context.SelectedSkillMetadata;
 import fun.fengwk.kkstudio.harness.runtime.goal.GoalToolPrompts;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * CONTROL tool that loads full SKILL.md text for a skill selected by the current Thread Agent.
+ * PLATFORM tool that loads full SKILL.md text for a skill selected by the current Thread Agent.
  *
  * <p>Resolves only selected skills; source Environment comes from runtime selected skill metadata
  * (platform-first). Does not expose local paths.
@@ -54,7 +54,7 @@ public final class LoadSkillTool implements Tool {
               Map.of("name", new ToolStringSchema("Exact short skill name from available_skills.")),
               Set.of("name"),
               false),
-          ToolExecutionMode.CONTROL,
+          ToolExecutionLocation.PLATFORM,
           ToolSideEffect.READ_ONLY,
           Duration.ofMinutes(1));
 

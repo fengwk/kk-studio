@@ -8,7 +8,8 @@ import java.util.Objects;
 /**
  * Enforces the Daemon environment root boundary for every filesystem-facing tool.
  *
- * <p>Cloud permission authorizes a command; it never relaxes this local path and symlink boundary.
+ * <p>Platform permission authorizes a command; it never relaxes this local path and symlink
+ * boundary.
  */
 public final class EnvironmentPathBoundary {
 

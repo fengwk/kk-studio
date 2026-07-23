@@ -181,7 +181,7 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     assertEquals(Long.toString(assistantEntryId), first.getAssistantEntryId());
     assertEquals("write", first.getToolName());
     assertEquals("1", first.getToolVersion());
-    assertEquals("CLOUD", first.getTargetType());
+    assertEquals("PLATFORM", first.getLocation());
     assertEquals("{\"path\":\"notes.txt\"}", first.getArgumentsJson());
     assertEquals("RUNNING", first.getStatus());
     assertEquals("ASK", first.getPermissionAction());
@@ -385,7 +385,7 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     row.setToolCallId(toolCallId);
     row.setToolName(toolName);
     row.setToolVersion("1");
-    row.setTargetType("CLOUD");
+    row.setLocation("PLATFORM");
     row.setArgumentsJson("{\"path\":\"notes.txt\"}");
     row.setStatus(status);
     row.setPermissionAction(permissionAction);

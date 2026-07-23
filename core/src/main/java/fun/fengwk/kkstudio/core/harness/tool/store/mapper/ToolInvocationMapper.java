@@ -20,7 +20,7 @@ public interface ToolInvocationMapper extends BaseMapper {
   String COLUMNS =
       """
       ti.id, ti.thread_id, ti.assistant_entry_id, ti.ordinal, ti.tool_call_id, ti.tool_name,
-      ti.tool_version, ti.target_type, ti.environment_name, ti.arguments_json, ti.status,
+      ti.tool_version, ti.target_type as location, ti.environment_name, ti.arguments_json, ti.status,
       ti.permission_action, ti.permission_decision, ti.side_effect, ti.deadline_at, ti.lease_owner,
       ti.lease_until, ti.cancel_requested_at, ti.result_json, ti.error_message,
       ti.gmt_create as create_time, ti.started_at, ti.finished_at,
@@ -37,7 +37,7 @@ public interface ToolInvocationMapper extends BaseMapper {
           gmt_modified
       ) values (
           #{id}, #{threadId}, #{assistantEntryId}, #{ordinal}, #{toolCallId}, #{toolName},
-          #{toolVersion}, #{targetType}, #{environmentName}, #{argumentsJson}, #{status},
+          #{toolVersion}, #{location}, #{environmentName}, #{argumentsJson}, #{status},
           #{permissionAction}, #{permissionDecision}, #{sideEffect}, #{deadlineAt}, #{leaseOwner},
           #{leaseUntil}, #{cancelRequestedAt}, #{resultJson}, #{errorMessage}, #{createTime},
           #{startedAt}, #{finishedAt}, #{updateTime}
@@ -56,7 +56,7 @@ public interface ToolInvocationMapper extends BaseMapper {
         @Result(column = "tool_call_id", property = "toolCallId"),
         @Result(column = "tool_name", property = "toolName"),
         @Result(column = "tool_version", property = "toolVersion"),
-        @Result(column = "target_type", property = "targetType"),
+        @Result(column = "location", property = "location"),
         @Result(column = "environment_name", property = "environmentName"),
         @Result(column = "arguments_json", property = "argumentsJson"),
         @Result(column = "status", property = "status"),
@@ -100,7 +100,7 @@ public interface ToolInvocationMapper extends BaseMapper {
           + COLUMNS
           + """
       from tool_invocation ti
-      where ti.target_type in ('CLOUD', 'CONTROL')
+      where ti.target_type = 'PLATFORM'
         and (ti.status = 'QUEUED'
           or (ti.status = 'CANCEL_REQUESTED'
             and (ti.lease_owner is null or ti.lease_until is null or ti.lease_until <= #{now}))
@@ -109,7 +109,7 @@ public interface ToolInvocationMapper extends BaseMapper {
       limit 1
       """)
   @ResultMap("toolInvocationResultMap")
-  ToolInvocationDO findClaimCandidate(@Param("now") LocalDateTime now);
+  ToolInvocationDO findPlatformClaimCandidate(@Param("now") LocalDateTime now);
 
   @Select(
       """
@@ -119,7 +119,7 @@ public interface ToolInvocationMapper extends BaseMapper {
           + """
       from tool_invocation ti
       where ti.thread_id = #{threadId}
-        and ti.target_type in ('CLOUD', 'CONTROL')
+        and ti.target_type = 'PLATFORM'
         and (ti.status = 'QUEUED'
           or (ti.status = 'CANCEL_REQUESTED'
             and (ti.lease_owner is null or ti.lease_until is null or ti.lease_until <= #{now}))
@@ -128,7 +128,7 @@ public interface ToolInvocationMapper extends BaseMapper {
       limit 1
       """)
   @ResultMap("toolInvocationResultMap")
-  ToolInvocationDO findClaimCandidateForThread(
+  ToolInvocationDO findPlatformClaimCandidateForThread(
       @Param("threadId") long threadId, @Param("now") LocalDateTime now);
 
   @Select(

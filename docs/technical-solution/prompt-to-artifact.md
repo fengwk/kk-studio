@@ -43,7 +43,7 @@ Provider Tool Call 经 Binding、interceptor 与 Permission Boundary 后写入 `
 
 ## Artifact 边界
 
-- 大型 Cloud Tool 输出可外置为全局 Artifact；Session Entry 只保存 `artifactId`、media type 与可选 preview。
+- 大型 PLATFORM Tool 输出可外置为全局 Artifact；Session Entry 只保存 `artifactId`、media type 与可选 preview。
 - Environment daemon 的 artifact wire content 经 Gateway 校验 ownership、envelope、Base64 canonical 形式与大小后写入 Artifact Store。
 - Artifact Store 保存不可变 bytes、media type、encoding、size、SHA-256。
 - ComfyUI/S3 对象走固定 bucket 预签名，**不**复用 Tool Artifact Store。

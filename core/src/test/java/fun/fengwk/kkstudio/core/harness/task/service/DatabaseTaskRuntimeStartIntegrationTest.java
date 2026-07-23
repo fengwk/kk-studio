@@ -420,7 +420,7 @@ class DatabaseTaskRuntimeStartIntegrationTest {
     invocation.setToolCallId("task-" + id);
     invocation.setToolName("task");
     invocation.setToolVersion("1");
-    invocation.setTargetType("CONTROL");
+    invocation.setLocation("PLATFORM");
     invocation.setArgumentsJson("{}");
     invocation.setStatus(ToolInvocationStatus.RUNNING.name());
     invocation.setPermissionAction("ALLOW");

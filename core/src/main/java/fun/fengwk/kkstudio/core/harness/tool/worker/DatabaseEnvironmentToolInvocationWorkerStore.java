@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Database lease port for one Environment's durable remote invocations. */
+/** Database lease port for one Environment's durable Tool invocations. */
 @Repository
 public class DatabaseEnvironmentToolInvocationWorkerStore {
 
@@ -73,7 +73,7 @@ public class DatabaseEnvironmentToolInvocationWorkerStore {
         .toList();
   }
 
-  /** Extends a remote lease while its bound daemon connection remains usable. */
+  /** Extends an Environment lease while its bound Daemon connection remains usable. */
   public boolean heartbeat(ClaimedToolInvocation claimed, Instant now, Duration leaseDuration) {
     Objects.requireNonNull(claimed, "claimed");
     ToolInvocation invocation = claimed.invocation();

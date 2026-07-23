@@ -19,11 +19,11 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
-/** Shared argument parsing and immediate completion helpers for CONTROL tools. */
-final class ControlToolSupport {
+/** Shared argument parsing and immediate completion helpers for PLATFORM tools. */
+final class PlatformToolSupport {
   static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-  private ControlToolSupport() {}
+  private PlatformToolSupport() {}
 
   static ToolExecutionHandle complete(
       ToolExecutionRequest request,

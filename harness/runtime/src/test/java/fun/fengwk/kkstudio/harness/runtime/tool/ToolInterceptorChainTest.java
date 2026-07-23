@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
@@ -293,7 +293,7 @@ class ToolInterceptorChainTest {
         name,
         null,
         schema,
-        ToolExecutionMode.CLOUD,
+        ToolExecutionLocation.PLATFORM,
         ToolSideEffect.IDEMPOTENT,
         Duration.ofSeconds(30));
   }

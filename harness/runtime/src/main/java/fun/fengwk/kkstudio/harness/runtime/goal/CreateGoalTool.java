@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.goal;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
@@ -20,7 +20,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/** CONTROL tool: create or replace the durable Thread goal. */
+/** PLATFORM tool: create or replace the durable Thread goal. */
 public final class CreateGoalTool implements Tool {
   public static final String NAME = "create_goal";
   public static final String VERSION = "1";
@@ -42,7 +42,7 @@ public final class CreateGoalTool implements Tool {
                           "Optional positive token budget, only when explicitly requested.")),
               Set.of("objective"),
               false),
-          ToolExecutionMode.CONTROL,
+          ToolExecutionLocation.PLATFORM,
           ToolSideEffect.IDEMPOTENT,
           Duration.ZERO);
 
@@ -61,17 +61,18 @@ public final class CreateGoalTool implements Tool {
 
   @Override
   public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
-    return ControlToolSupport.complete(request, listener, this::run);
+    return PlatformToolSupport.complete(request, listener, this::run);
   }
 
   private ToolResult run(ToolExecutionRequest request) {
-    JsonNode args = ControlToolSupport.requireObjectArgs(request.call().argumentsJson());
-    ControlToolSupport.rejectUnknownFields(args, Set.of("objective", "tokenBudget"));
-    String objective = ControlToolSupport.requireNonBlankString(args, "objective");
-    Long tokenBudget = ControlToolSupport.optionalPositiveLong(args, "tokenBudget");
+    JsonNode args = PlatformToolSupport.requireObjectArgs(request.call().argumentsJson());
+    PlatformToolSupport.rejectUnknownFields(args, Set.of("objective", "tokenBudget"));
+    String objective = PlatformToolSupport.requireNonBlankString(args, "objective");
+    Long tokenBudget = PlatformToolSupport.optionalPositiveLong(args, "tokenBudget");
     ThreadGoal goal =
         store.createOrReplace(
             request.context().threadId(), objective, tokenBudget, clock.instant());
-    return ControlToolSupport.success(request.call().id(), ControlToolSupport.formatGoalJson(goal));
+    return PlatformToolSupport.success(
+        request.call().id(), PlatformToolSupport.formatGoalJson(goal));
   }
 }

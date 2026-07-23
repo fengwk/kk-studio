@@ -1351,7 +1351,7 @@ public class HarnessThreadTransactionService implements ThreadTransactions {
     row.setToolCallId(prepared.call().id());
     row.setToolName(prepared.binding().descriptor().name());
     row.setToolVersion(prepared.binding().descriptor().version());
-    row.setTargetType(prepared.binding().targetType().name());
+    row.setLocation(prepared.binding().location().name());
     row.setEnvironmentName(prepared.binding().environmentName());
     row.setArgumentsJson(prepared.call().argumentsJson());
     row.setStatus(prepared.initialStatus().name());

@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
@@ -33,9 +33,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Executes a Cloud-authorized shell command after enforcing only the explicit environment workdir.
+ * Executes a Platform-authorized shell command after enforcing the explicit environment workdir.
  *
- * <p>Static parsing cannot sandbox shell internals; command authorization belongs to Cloud
+ * <p>Static parsing cannot sandbox shell internals; command authorization belongs to Platform
  * permission. The Daemon nevertheless validates workdir and terminates the complete process tree on
  * timeout or cancellation.
  */
@@ -55,17 +55,17 @@ public final class BashTool implements Tool {
         new ToolDescriptor(
             "bash",
             "1",
-            "Execute an already Cloud-authorized bash command in a validated environment workdir.",
+            "Execute an already Platform-authorized bash command in a validated environment workdir.",
             null,
             new ToolParamsSchema(
                 "Bash parameters",
                 Map.of(
-                    "command", new ToolStringSchema("Cloud-authorized shell command"),
+                    "command", new ToolStringSchema("Platform-authorized shell command"),
                     "workdir",
                         new ToolStringSchema("Optional environment-root-relative directory")),
                 Set.of("command"),
                 false),
-            ToolExecutionMode.ENVIRONMENT,
+            ToolExecutionLocation.ENVIRONMENT,
             ToolSideEffect.NON_IDEMPOTENT,
             Duration.ofMinutes(5));
   }

@@ -140,7 +140,7 @@ class StudioHarnessObservabilityControllerTest {
         .andExpect(jsonPath("$.data[0].assistantEntryId").value(Long.toString(assistantEntryId)))
         .andExpect(jsonPath("$.data[0].ordinal").value(0))
         .andExpect(jsonPath("$.data[0].toolName").value("write"))
-        .andExpect(jsonPath("$.data[0].targetType").value("CLOUD"))
+        .andExpect(jsonPath("$.data[0].location").value("PLATFORM"))
         .andExpect(jsonPath("$.data[0].status").value("QUEUED"))
         .andExpect(jsonPath("$.data[0].argumentsJson").value("{\"path\":\"notes.txt\"}"));
 
@@ -330,7 +330,7 @@ class StudioHarnessObservabilityControllerTest {
     row.setToolCallId(toolCallId);
     row.setToolName(toolName);
     row.setToolVersion("1");
-    row.setTargetType("CLOUD");
+    row.setLocation("PLATFORM");
     row.setArgumentsJson("{\"path\":\"notes.txt\"}");
     row.setStatus(status);
     row.setPermissionAction("ALLOW");

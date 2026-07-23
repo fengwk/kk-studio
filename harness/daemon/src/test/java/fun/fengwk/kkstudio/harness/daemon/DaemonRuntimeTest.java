@@ -29,7 +29,7 @@ import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
@@ -105,7 +105,7 @@ class DaemonRuntimeTest {
     assertEquals("test", descriptor.path("name").asText());
     assertEquals("1.0.0", descriptor.path("version").asText());
     assertEquals("test", descriptor.path("rendererKey").asText());
-    assertEquals("ENVIRONMENT", descriptor.path("executionMode").asText());
+    assertEquals("ENVIRONMENT", descriptor.path("executionLocation").asText());
     assertEquals("READ_ONLY", descriptor.path("sideEffect").asText());
     assertEquals(10_000, descriptor.path("timeoutMillis").asLong());
     assertEquals("object", descriptor.path("inputSchema").path("type").asText());
@@ -164,7 +164,8 @@ class DaemonRuntimeTest {
     assertEquals(1, capabilities.tools().size());
     assertEquals("schema", capabilities.tools().get(0).name());
     assertEquals("2.1.0", capabilities.tools().get(0).version());
-    assertEquals(ToolExecutionMode.ENVIRONMENT, capabilities.tools().get(0).executionMode());
+    assertEquals(
+        ToolExecutionLocation.ENVIRONMENT, capabilities.tools().get(0).executionLocation());
   }
 
   /** READY 后必须在配置周期内发送 HEARTBEAT。 */
@@ -227,7 +228,7 @@ class DaemonRuntimeTest {
 
     List<DaemonEnvelope> messages = transport.takeMessages(2);
     assertMessageTypes(messages, ACK, DaemonMessageType.FAILED);
-    assertTrue(messages.get(1).payloadJson().contains("unknown local tool"));
+    assertTrue(messages.get(1).payloadJson().contains("unknown environment tool"));
   }
 
   /** 引用错误的 Environment 或非法 INVOKE payload 必须得到明确 ERROR/FAILED 响应。 */
@@ -340,7 +341,7 @@ class DaemonRuntimeTest {
 
   /** WELCOME/ACK/ERROR 只推进连接 sequence，不创建 invocation 或发送额外响应。 */
   @Test
-  void acceptsInboundCloudControlMessagesWithinSequence() throws InterruptedException {
+  void acceptsInboundPlatformProtocolMessagesWithinSequence() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     TestTool tool = new TestTool();
     runtime = runtime(transport, tool);
@@ -348,9 +349,9 @@ class DaemonRuntimeTest {
     runtime.start();
     transport.awaitConnections(1);
     transport.takeMessages(3);
-    transport.receive(control(DaemonMessageType.WELCOME, 20));
-    transport.receive(control(DaemonMessageType.ACK, 21));
-    transport.receive(control(DaemonMessageType.ERROR, 22));
+    transport.receive(platformMessage(DaemonMessageType.WELCOME, 20));
+    transport.receive(platformMessage(DaemonMessageType.ACK, 21));
+    transport.receive(platformMessage(DaemonMessageType.ERROR, 22));
     assertFalse(transport.hasMessages());
 
     transport.receive(invoke("after-control", 23));
@@ -961,7 +962,7 @@ class DaemonRuntimeTest {
             + "\",\"arguments\":{}}");
   }
 
-  private DaemonEnvelope control(DaemonMessageType messageType, long sequence) {
+  private DaemonEnvelope platformMessage(DaemonMessageType messageType, long sequence) {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION_1, messageType, "environment", null, sequence, "{}");
   }
@@ -1112,7 +1113,7 @@ class DaemonRuntimeTest {
                         true)),
                 Set.of("text"),
                 false),
-            ToolExecutionMode.ENVIRONMENT,
+            ToolExecutionLocation.ENVIRONMENT,
             ToolSideEffect.IDEMPOTENT,
             Duration.ofSeconds(3));
 
@@ -1137,7 +1138,7 @@ class DaemonRuntimeTest {
             "default timeout tool",
             null,
             new ToolParamsSchema("fallback arguments", Map.of(), Set.of(), false),
-            ToolExecutionMode.ENVIRONMENT,
+            ToolExecutionLocation.ENVIRONMENT,
             ToolSideEffect.READ_ONLY,
             Duration.ZERO);
     private final TestHandle handle = new TestHandle();
@@ -1171,7 +1172,7 @@ class DaemonRuntimeTest {
             "test tool",
             null,
             new ToolParamsSchema("test arguments", Map.of(), Set.of(), false),
-            ToolExecutionMode.ENVIRONMENT,
+            ToolExecutionLocation.ENVIRONMENT,
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(10));
     private final AtomicInteger executions = new AtomicInteger();

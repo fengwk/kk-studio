@@ -12,16 +12,16 @@ import fun.fengwk.kkstudio.harness.runtime.goal.CreateGoalTool;
 import fun.fengwk.kkstudio.harness.runtime.goal.GetGoalTool;
 import fun.fengwk.kkstudio.harness.runtime.goal.UpdateGoalTool;
 import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** Verifies platform CONTROL tools are Spring beans and registered on the Host. */
+/** Verifies platform tools are Spring beans and registered on the Host. */
 @SpringBootTest
-class PlatformControlToolsWiringTest {
+class PlatformToolsWiringTest {
 
   @Autowired private List<Tool> tools;
   @Autowired private HarnessExtensionHost host;
@@ -31,17 +31,17 @@ class PlatformControlToolsWiringTest {
   @Autowired private LoadSkillTool loadSkillTool;
 
   @Test
-  void registersControlToolsOnHost() {
+  void registersPlatformToolsOnHost() {
     Set<String> beanNames =
         tools.stream().map(tool -> tool.descriptor().name()).collect(Collectors.toSet());
     assertTrue(
         beanNames.containsAll(Set.of("create_goal", "get_goal", "update_goal", "load_skill")));
 
     assertEquals("1", createGoalTool.descriptor().version());
-    assertEquals(ToolExecutionMode.CONTROL, createGoalTool.descriptor().executionMode());
-    assertEquals(ToolExecutionMode.CONTROL, getGoalTool.descriptor().executionMode());
-    assertEquals(ToolExecutionMode.CONTROL, updateGoalTool.descriptor().executionMode());
-    assertEquals(ToolExecutionMode.CONTROL, loadSkillTool.descriptor().executionMode());
+    assertEquals(ToolExecutionLocation.PLATFORM, createGoalTool.descriptor().executionLocation());
+    assertEquals(ToolExecutionLocation.PLATFORM, getGoalTool.descriptor().executionLocation());
+    assertEquals(ToolExecutionLocation.PLATFORM, updateGoalTool.descriptor().executionLocation());
+    assertEquals(ToolExecutionLocation.PLATFORM, loadSkillTool.descriptor().executionLocation());
 
     assertTrue(host.createTool("create_goal", "1").isPresent());
     assertTrue(host.createTool("get_goal", "1").isPresent());

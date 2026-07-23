@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ClaimedToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
@@ -38,7 +37,7 @@ import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
@@ -204,7 +203,7 @@ class EnvironmentDaemonWebSocketDaemonIntegrationTest {
         "echo",
         "echo",
         new ToolParamsSchema(null, Map.of(), Set.of(), false),
-        ToolExecutionMode.ENVIRONMENT,
+        ToolExecutionLocation.ENVIRONMENT,
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(10));
   }
@@ -223,7 +222,7 @@ class EnvironmentDaemonWebSocketDaemonIntegrationTest {
         "provider-call",
         "echo",
         "1",
-        ToolTargetType.ENVIRONMENT,
+        ToolExecutionLocation.ENVIRONMENT,
         ENVIRONMENT_NAME,
         "{}",
         status,

@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
@@ -32,7 +32,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Durable, callback-driven CONTROL task Tool. Polling only observes durable child state; no worker
+ * Durable, callback-driven PLATFORM task Tool. Polling only observes durable child state; no worker
  * thread ever waits for child execution.
  */
 public final class TaskTool implements Tool {
@@ -56,7 +56,7 @@ public final class TaskTool implements Tool {
                           Arrays.stream(WorkingCopyPolicy.values()).map(Enum::name).toList())),
               Set.of("subagent_type", "prompt"),
               false),
-          ToolExecutionMode.CONTROL,
+          ToolExecutionLocation.PLATFORM,
           ToolSideEffect.IDEMPOTENT,
           Duration.ZERO);
 

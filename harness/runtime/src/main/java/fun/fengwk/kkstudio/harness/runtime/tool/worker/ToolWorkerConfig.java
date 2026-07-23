@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 import java.time.Duration;
 import java.util.Objects;
 
-/** Bounded persistence cadence for one Cloud/Control worker. */
+/** Bounded persistence cadence for one Platform worker. */
 public record ToolWorkerConfig(
     Duration leaseDuration,
     Duration heartbeatInterval,

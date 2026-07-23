@@ -44,7 +44,7 @@ public class HarnessObservabilityDtoConverter {
     dto.setToolCallId(row.getToolCallId());
     dto.setToolName(row.getToolName());
     dto.setToolVersion(row.getToolVersion());
-    dto.setTargetType(row.getTargetType());
+    dto.setLocation(row.getLocation());
     dto.setEnvironmentName(row.getEnvironmentName());
     dto.setArgumentsJson(row.getArgumentsJson());
     dto.setStatus(row.getStatus());

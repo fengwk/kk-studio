@@ -108,7 +108,7 @@ function invocation(status: string): ToolInvocationDTO {
     toolCallId: 'call-1',
     toolName: 'bash',
     toolVersion: '1',
-    targetType: 'environment',
+    location: 'ENVIRONMENT',
     environmentName: 'env-1',
     argumentsJson: '{"cmd":"ls"}',
     status,

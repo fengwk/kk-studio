@@ -69,7 +69,7 @@ Daemon 随后按序发送：
 HELLO -> CAPABILITIES -> READY {"pull":true}
 ```
 
-`CAPABILITIES` 使用共享 `DaemonToolCapabilitiesCodec` 严格解码，形状为 `{"tools":[...],"skills":[{"name","description"}]}`。每个 tool descriptor 必须使用 `ENVIRONMENT` execution mode，`name@version` 必须唯一；skills 仅上报短 `name`/`description`，不含本地路径或正文。`READY` 仅在 capabilities 接收后生效；`HEARTBEAT` 仅在 READY 后接受，并刷新 live registry 的 `lastSeen`。断线时 registry 移除该 name 条目。
+`CAPABILITIES` 使用共享 `DaemonToolCapabilitiesCodec` 严格解码，形状为 `{"tools":[...],"skills":[{"name","description"}]}`。每个 tool descriptor 必须使用 `ENVIRONMENT` execution location，`name@version` 必须唯一；skills 仅上报短 `name`/`description`，不含本地路径或正文。`READY` 仅在 capabilities 接收后生效；`HEARTBEAT` 仅在 READY 后接受，并刷新 live registry 的 `lastSeen`。断线时 registry 移除该 name 条目。
 
 只读查询：
 
@@ -81,7 +81,7 @@ GET /api/environments
 
 保留名 `platform` 表示内置 Skills Provider：Agent 保存与 Turn 解析时，Skill 候选 = READY `platform` + 可选所选 Environment，platform 同名优先。Agent 可选 `environmentName`；保存时非空名必须对应 READY live Environment。Tool/Skill 配置仅允许短名。
 
-Gateway 可按需通过 `LOAD_SKILL` 请求完整 skill 正文。平台 CONTROL 工具 `load_skill` 将其暴露给已选择 Skills 的 Agent：
+Gateway 可按需通过 `LOAD_SKILL` 请求完整 skill 正文。PLATFORM 工具 `load_skill` 将其暴露给已选择 Skills 的 Agent：
 
 ```text
 LOAD_SKILL {"name":"dev"}  --invocationId 必填-->
@@ -153,7 +153,7 @@ terminal CAS 成功后才发布 `ToolCompleted` lifecycle observation，并使�
 
 Daemon 的 invocation journal 记录本地 invocation ID 的 RUNNING/terminal 状态。重连后重新发送 HELLO、CAPABILITIES 和 READY；Gateway 可安全重新分发可重试调用。重复 `INVOKE` 在 journal 中命中 RUNNING 时返回 `STARTED {"replayed":true}`，命中终态时重放该终态。Daemon 对 `CANCEL` 取消本地 handle 并发送 `CANCELLED`。
 
-Daemon 仅注册 `ENVIRONMENT` execution mode 的工具。其 `PARTIAL` 和 `COMPLETED` result 使用同一 codec 读取本地 artifact bytes，因此 Cloud 不依赖 Daemon 本地文件路径。
+Daemon 仅注册 `ENVIRONMENT` execution location 的工具。其 `PARTIAL` 和 `COMPLETED` result 使用同一 codec 读取本地 artifact bytes，因此 Gateway 不依赖 Daemon 本地文件路径。
 
 ### Coding tools
 

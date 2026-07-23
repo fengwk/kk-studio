@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.tool.daemon;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 
 /**
- * Cloud Gateway 接收端保存 wire artifact bytes 并返回新 global {@link ArtifactRef} 的 SPI。
+ * Platform Gateway 接收端保存 wire artifact bytes 并返回新 global {@link ArtifactRef} 的 SPI。
  *
  * <p>实现负责把 {@code contentBase64} 解码后的字节持久化到自己的 immutable ArtifactStore，并返回具有全局 id 的新 ref，使 Daemon
  * 本地 ref 被替换为 receiver 的全局 ref；该 ref 必须随终态 payload 重放自包含，不依赖连接内内存映射。

@@ -41,7 +41,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnResourceResolver;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
 import java.time.Clock;
@@ -414,7 +414,7 @@ class ThreadProcessorControlFlowTest {
         "call",
         "tool",
         "1",
-        ToolTargetType.CONTROL,
+        ToolExecutionLocation.PLATFORM,
         null,
         "{}",
         ToolInvocationStatus.WAITING_APPROVAL,

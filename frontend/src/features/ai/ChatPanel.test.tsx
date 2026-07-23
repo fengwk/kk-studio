@@ -38,7 +38,7 @@ describe('ChatPanel', () => {
               toolCallId: 'c1',
               toolName: 'bash',
               toolVersion: '1',
-              targetType: 'PLATFORM',
+              location: 'PLATFORM',
               environmentName: null,
               argumentsJson: '{}',
               status: 'WAITING_APPROVAL',

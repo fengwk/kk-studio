@@ -28,10 +28,10 @@ public class ToolInvocationDO {
   /** 冻结的工具版本。 */
   private String toolVersion;
 
-  /** 目标类型：CONTROL / CLOUD / ENVIRONMENT。 */
-  private String targetType;
+  /** 执行位置：PLATFORM / ENVIRONMENT。 */
+  private String location;
 
-  /** ENVIRONMENT 目标实时名称；其他类型为空。 */
+  /** ENVIRONMENT 实时名称；PLATFORM 为空。 */
   private String environmentName;
 
   /** interceptor 处理后的参数 JSON。 */

@@ -12,7 +12,7 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Adapts {@link EnvironmentSkillLoader} for CONTROL tools without creating a Spring cycle through
+ * Adapts {@link EnvironmentSkillLoader} for platform tools without creating a Spring cycle through
  * {@code HarnessExtensionHost}.
  */
 @Component

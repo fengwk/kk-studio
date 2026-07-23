@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.tool;
 
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
 import java.time.Instant;
@@ -15,7 +16,7 @@ public record ToolInvocation(
     String toolCallId,
     String toolName,
     String toolVersion,
-    ToolTargetType targetType,
+    ToolExecutionLocation location,
     String environmentName,
     String argumentsJson,
     ToolInvocationStatus status,
@@ -46,17 +47,17 @@ public record ToolInvocation(
     if (toolCallId.length() > 256 || toolName.length() > 128 || toolVersion.length() > 128) {
       throw new IllegalArgumentException("tool identity exceeds persistent column bounds");
     }
-    targetType = Objects.requireNonNull(targetType, "targetType");
+    location = Objects.requireNonNull(location, "location");
     if (environmentName != null && environmentName.isBlank()) {
       throw new IllegalArgumentException("environmentName must not be blank when present");
     }
     if (environmentName != null && environmentName.length() > 128) {
       throw new IllegalArgumentException("environmentName must fit persistent column bounds");
     }
-    if (targetType == ToolTargetType.ENVIRONMENT && environmentName == null) {
+    if (location == ToolExecutionLocation.ENVIRONMENT && environmentName == null) {
       throw new IllegalArgumentException("ENVIRONMENT invocations require environmentName");
     }
-    if (targetType != ToolTargetType.ENVIRONMENT && environmentName != null) {
+    if (location != ToolExecutionLocation.ENVIRONMENT && environmentName != null) {
       throw new IllegalArgumentException("environmentName is only valid for ENVIRONMENT tools");
     }
     argumentsJson = requireNonBlank(argumentsJson, "argumentsJson");
