@@ -54,19 +54,18 @@ public record ProviderResponse(
     if (value == null) {
       return EMPTY_USAGE_JSON;
     }
-    String trimmed = value.trim();
-    if (trimmed.isEmpty()) {
+    if (value.isBlank()) {
       throw new IllegalArgumentException("rawUsageJson must contain JSON");
     }
     JsonNode node;
     try {
-      node = OBJECT_MAPPER.readTree(trimmed);
+      node = OBJECT_MAPPER.readTree(value);
     } catch (JsonProcessingException exception) {
       throw new IllegalArgumentException("rawUsageJson must contain JSON", exception);
     }
     if (!node.isObject() && !node.isArray()) {
       throw new IllegalArgumentException("rawUsageJson must be a JSON object or array");
     }
-    return trimmed;
+    return value;
   }
 }

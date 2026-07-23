@@ -1,0 +1,31 @@
+{
+  "text": "The capital of France is Paris.",
+  "thinking": "user asked geography",
+  "toolCalls": [
+    {"id": "call-1", "name": "lookup", "argumentsJson": "{\n  \"q\":\"paris\"\n}"},
+    {"id": "call-2", "name": "weather", "argumentsJson": "{\"city\":\"Paris\", \"units\":\"metric\"}"}
+  ],
+  "stopReason": "COMPLETED",
+  "usage": {
+    "inputTokens": 100,
+    "outputTokens": 20,
+    "cacheReadTokens": 0,
+    "cacheWriteTokens": 50,
+    "cacheWriteLongTokens": 0,
+    "reasoningTokens": 5,
+    "providerTotalTokens": 175
+  },
+  "cost": {
+    "currency": "USD",
+    "input": "0.000450000000",
+    "output": "0.000180000000",
+    "cacheRead": "0",
+    "cacheWrite": "0.000281250000",
+    "cacheWriteLong": "0",
+    "reasoning": "0",
+    "total": "0.000911250000"
+  },
+  "requestId": null,
+  "serviceTier": null,
+  "rawUsageJson": "{\n  \"completion_tokens\":20,\n  \"prompt_tokens\":100\n}"
+}
