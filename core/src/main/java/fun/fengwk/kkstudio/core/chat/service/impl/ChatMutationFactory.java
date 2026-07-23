@@ -1,16 +1,13 @@
 package fun.fengwk.kkstudio.core.chat.service.impl;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
-import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
 import fun.fengwk.kkstudio.core.chat.service.ChatIds;
 import fun.fengwk.kkstudio.core.chat.service.model.Chat;
+import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.model.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.model.ChatUpdateDTO;
-
-import java.util.function.LongSupplier;
 
 /**
  * Normalizes Chat mutable fields and allocates Chat ids.
@@ -24,14 +21,10 @@ import java.util.function.LongSupplier;
 public class ChatMutationFactory {
 
   private final AgentEditableSupport editableSupport;
-  private final LongSupplier idGenerator;
+  private final PostgresqlSequenceIdGenerator idGenerator;
 
-  @Autowired
-  public ChatMutationFactory(AgentEditableSupport editableSupport) {
-    this(editableSupport, AgentIdGenerator::nextChatId);
-  }
-
-  public ChatMutationFactory(AgentEditableSupport editableSupport, LongSupplier idGenerator) {
+  public ChatMutationFactory(
+      AgentEditableSupport editableSupport, PostgresqlSequenceIdGenerator idGenerator) {
     this.editableSupport = editableSupport;
     this.idGenerator = idGenerator;
   }
@@ -41,7 +34,7 @@ public class ChatMutationFactory {
       throw new IllegalArgumentException("chat body must not be null");
     }
     Chat chat = new Chat();
-    chat.setId(idGenerator.getAsLong());
+    chat.setId(idGenerator.next());
     String title = editableSupport.trimToNull(createDTO.getTitle());
     if (title == null) {
       throw new IllegalArgumentException("chat title must not be blank");

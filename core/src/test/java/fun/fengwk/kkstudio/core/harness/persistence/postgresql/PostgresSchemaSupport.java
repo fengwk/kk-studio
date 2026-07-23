@@ -3,8 +3,6 @@ package fun.fengwk.kkstudio.core.harness.persistence.postgresql;
 import org.postgresql.util.PSQLException;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
@@ -17,43 +15,45 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Shared support base for the PostgreSQL final-schema tests.
  *
- * <p>Spins up a {@code postgres:17-alpine} Testcontainers instance and exposes the JDBC URL plus a
- * helper that applies the authoritative {@code schema-postgresql.sql}. Tests run outside any Spring
- * {@code ApplicationContext}; Docker must be available, otherwise tests fail rather than silently
- * skip.
+ * <p>Starts one process-wide {@code postgres:17-alpine} Testcontainers instance and exposes the
+ * JDBC URL plus helpers that apply the authoritative {@code schema-postgresql.sql}. Keeping one
+ * stable container allows schema tests and cached Spring contexts to share the same JDBC endpoint.
+ * Docker must be available, otherwise class initialization fails rather than silently skipping.
  */
-@Testcontainers
-abstract class PostgresSchemaSupport {
+public abstract class PostgresSchemaSupport {
 
-  @Container
   @SuppressWarnings("resource")
-  static final PostgreSQLContainer POSTGRES =
+  public static final PostgreSQLContainer POSTGRES =
       new PostgreSQLContainer(DockerImageName.parse("postgres:17-alpine"))
           .withDatabaseName("kk_studio")
           .withUsername("kk_studio")
           .withPassword("kk_studio");
 
+  static {
+    POSTGRES.start();
+  }
+
   /** Counter shared across fixtures so per-test ids never clash across tests. */
-  static final AtomicLong FIXTURE_IDS = new AtomicLong(10_000_000L);
+  public static final AtomicLong FIXTURE_IDS = new AtomicLong(10_000_000L);
 
   /** Open a new JDBC connection to the running container. */
-  static Connection newConnection() throws SQLException {
+  public static Connection newConnection() throws SQLException {
     return DriverManager.getConnection(
         POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
   }
 
   /** Apply the authoritative PostgreSQL schema. */
-  static void applySchema(Connection conn) {
+  public static void applySchema(Connection conn) {
     ScriptUtils.executeSqlScript(conn, new ClassPathResource("schema-postgresql.sql"));
   }
 
   /** Apply a SQL classpath resource. */
-  static void applyScript(Connection conn, String classpathLocation) {
+  public static void applyScript(Connection conn, String classpathLocation) {
     ScriptUtils.executeSqlScript(conn, new ClassPathResource(classpathLocation));
   }
 
   /** Drop every object in the public schema, leaving an empty database for the next test. */
-  static void resetDatabase(Connection conn) throws SQLException {
+  public static void resetDatabase(Connection conn) throws SQLException {
     try (Statement st = conn.createStatement()) {
       st.execute("drop schema if exists public cascade");
       st.execute("create schema public");
@@ -61,7 +61,7 @@ abstract class PostgresSchemaSupport {
   }
 
   /** Run one transaction and require PostgreSQL to reject it with the named constraint. */
-  static void assertTransactionConstraintViolation(
+  public static void assertTransactionConstraintViolation(
       Connection conn, String expectedConstraint, SqlCommand command) throws SQLException {
     boolean previousAutoCommit = conn.getAutoCommit();
     conn.setAutoCommit(false);

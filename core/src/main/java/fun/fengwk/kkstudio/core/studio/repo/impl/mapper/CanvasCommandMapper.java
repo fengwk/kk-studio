@@ -17,17 +17,17 @@ public interface CanvasCommandMapper extends BaseMapper {
       """
       insert into canvas_command (
           id, command_id, workspace_id, canvas_id, base_revision, result_revision,
-          request_hash, payload_json, result_json, gmt_create
+          request_hash, payload, result, created_at
       ) values (
           #{id}, #{commandId}, #{workspaceId}, #{canvasId}, #{baseRevision}, #{resultRevision},
-          #{requestHash}, #{payloadJson}, #{resultJson}, current_timestamp(3)
+          #{requestHash}, cast(#{payloadJson} as jsonb), cast(#{resultJson} as jsonb), current_timestamp
       )
       """)
   int insert(CanvasCommandDO command);
 
   @Select(
       "select id, command_id, workspace_id, canvas_id, base_revision, result_revision,"
-          + " request_hash, payload_json, result_json, gmt_create as create_time"
+          + " request_hash, payload, result, created_at as create_time"
           + " from canvas_command where workspace_id = #{workspaceId} and command_id = #{commandId}")
   @Results({
     @Result(column = "id", property = "id"),
@@ -37,8 +37,8 @@ public interface CanvasCommandMapper extends BaseMapper {
     @Result(column = "base_revision", property = "baseRevision"),
     @Result(column = "result_revision", property = "resultRevision"),
     @Result(column = "request_hash", property = "requestHash"),
-    @Result(column = "payload_json", property = "payloadJson"),
-    @Result(column = "result_json", property = "resultJson"),
+    @Result(column = "payload", property = "payloadJson"),
+    @Result(column = "result", property = "resultJson"),
     @Result(column = "create_time", property = "createTime")
   })
   CanvasCommandDO getByCommandId(

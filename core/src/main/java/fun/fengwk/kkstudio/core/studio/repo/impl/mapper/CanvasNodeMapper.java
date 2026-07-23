@@ -19,19 +19,20 @@ public interface CanvasNodeMapper extends BaseMapper {
 
   String COLUMNS =
       "id, canvas_id, kind, node_type, node_type_version, name, parent_group_id, x, y, width, height,"
-          + " rotation, z_index, locked, hidden, validity, data_json, revision, gmt_deleted as"
-          + " deleted_time, version, gmt_create as create_time, gmt_modified as update_time";
+          + " rotation, z_index, locked, hidden, validity, data, revision, deleted_at as"
+          + " deleted_time, version, created_at as create_time, updated_at as update_time";
 
   @Insert(
       """
       insert into canvas_node (
           id, canvas_id, kind, node_type, node_type_version, name, parent_group_id,
-          x, y, width, height, rotation, z_index, locked, hidden, validity, data_json, revision,
-          gmt_deleted, gmt_create, gmt_modified, version
+          x, y, width, height, rotation, z_index, locked, hidden, validity, data, revision,
+          deleted_at, created_at, updated_at, version
       ) values (
           #{id}, #{canvasId}, #{kind}, #{nodeType}, #{nodeTypeVersion}, #{name}, #{parentGroupId},
           #{x}, #{y}, #{width}, #{height}, #{rotation}, #{zIndex}, #{locked}, #{hidden},
-          #{validity}, #{dataJson}, #{revision}, null, current_timestamp(3), current_timestamp(3), 0
+          #{validity}, cast(#{dataJson} as jsonb), #{revision}, null,
+          current_timestamp, current_timestamp, 0
       )
       """)
   int insert(CanvasNodeDO node);
@@ -39,7 +40,7 @@ public interface CanvasNodeMapper extends BaseMapper {
   @Select(
       "select "
           + COLUMNS
-          + " from canvas_node where canvas_id = #{canvasId} and gmt_deleted is null")
+          + " from canvas_node where canvas_id = #{canvasId} and deleted_at is null")
   @Results(
       id = "canvasNodeMap",
       value = {
@@ -59,7 +60,7 @@ public interface CanvasNodeMapper extends BaseMapper {
         @Result(column = "locked", property = "locked"),
         @Result(column = "hidden", property = "hidden"),
         @Result(column = "validity", property = "validity"),
-        @Result(column = "data_json", property = "dataJson"),
+        @Result(column = "data", property = "dataJson"),
         @Result(column = "revision", property = "revision"),
         @Result(column = "deleted_time", property = "deletedTime"),
         @Result(column = "version", property = "version"),
@@ -71,7 +72,7 @@ public interface CanvasNodeMapper extends BaseMapper {
   @Select(
       "select "
           + COLUMNS
-          + " from canvas_node where id = #{id} and canvas_id = #{canvasId} and gmt_deleted is null")
+          + " from canvas_node where id = #{id} and canvas_id = #{canvasId} and deleted_at is null")
   @ResultMap("canvasNodeMap")
   CanvasNodeDO getActive(@Param("canvasId") long canvasId, @Param("id") long id);
 
@@ -79,21 +80,21 @@ public interface CanvasNodeMapper extends BaseMapper {
       """
       update canvas_node
       set x = #{x}, y = #{y}, revision = #{revision},
-          gmt_modified = current_timestamp(3), version = version + 1
-      where id = #{id} and canvas_id = #{canvasId} and gmt_deleted is null
+          updated_at = current_timestamp, version = version + 1
+      where id = #{id} and canvas_id = #{canvasId} and deleted_at is null
       """)
   int updatePosition(CanvasNodeDO node);
 
   @Update(
       """
       update canvas_node
-      set gmt_deleted = current_timestamp(3), revision = #{revision},
-          gmt_modified = current_timestamp(3), version = version + 1
-      where id = #{id} and canvas_id = #{canvasId} and gmt_deleted is null
+      set deleted_at = current_timestamp, revision = #{revision},
+          updated_at = current_timestamp, version = version + 1
+      where id = #{id} and canvas_id = #{canvasId} and deleted_at is null
       """)
   int softDelete(
       @Param("canvasId") long canvasId, @Param("id") long id, @Param("revision") long revision);
 
-  @Select("select count(*) from canvas_node where canvas_id = #{canvasId} and gmt_deleted is null")
+  @Select("select count(*) from canvas_node where canvas_id = #{canvasId} and deleted_at is null")
   long countActive(@Param("canvasId") long canvasId);
 }

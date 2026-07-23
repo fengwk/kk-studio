@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.core.studio.repo.impl.model;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /** {@code canvas_node} 行映射：画布节点。 */
 @Data
@@ -61,15 +61,15 @@ public class CanvasNodeDO {
   /** 节点业务 revision。 */
   private Long revision;
 
-  /** 软删除时间（映射 {@code gmt_deleted}）；空表示未删除。 */
-  private LocalDateTime deletedTime;
+  /** 软删除时间（映射 {@code deleted_at} timestamptz）；空表示未删除。 */
+  private OffsetDateTime deletedTime;
 
   /** 乐观锁行版本。 */
   private Long version;
 
-  /** 创建时间（映射 {@code gmt_create}）。 */
-  private LocalDateTime createTime;
+  /** 创建时间（映射 {@code created_at} timestamptz）。 */
+  private OffsetDateTime createTime;
 
-  /** 更新时间（映射 {@code gmt_modified}）。 */
-  private LocalDateTime updateTime;
+  /** 更新时间（映射 {@code updated_at} timestamptz）。 */
+  private OffsetDateTime updateTime;
 }

@@ -11,12 +11,15 @@ import fun.fengwk.kkstudio.core.agent.definition.repo.impl.mapper.AgentDefinitio
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.model.AgentDefinitionDO;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
-/** MySQL-backed global Agent definition repository. */
+/** PostgreSQL-backed global Agent definition repository. */
 @AllArgsConstructor
 @Repository
-public class MysqlAgentDefinitionRepository implements AgentDefinitionRepository {
+public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepository {
 
   private final AgentDefinitionMapper agentDefinitionMapper;
 
@@ -81,8 +84,12 @@ public class MysqlAgentDefinitionRepository implements AgentDefinitionRepository
     result.setVariant(definition.getVariant());
     result.setConfigJson(definition.getConfigJson());
     result.setVersion(definition.getVersion());
-    result.setCreateTime(definition.getCreateTime());
-    result.setUpdateTime(definition.getUpdateTime());
+    result.setCreateTime(toLocalDateTime(definition.getCreateTime()));
+    result.setUpdateTime(toLocalDateTime(definition.getUpdateTime()));
     return result;
+  }
+
+  private static LocalDateTime toLocalDateTime(OffsetDateTime value) {
+    return value == null ? null : value.withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime();
   }
 }

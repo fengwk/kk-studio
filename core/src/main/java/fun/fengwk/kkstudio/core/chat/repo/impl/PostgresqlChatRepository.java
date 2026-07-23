@@ -10,13 +10,16 @@ import fun.fengwk.kkstudio.core.chat.repo.impl.model.ChatDO;
 import fun.fengwk.kkstudio.core.chat.repo.impl.model.ChatSessionDO;
 import fun.fengwk.kkstudio.core.chat.service.model.Chat;
 
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/** MySQL / H2-backed Chat collection repository. */
+/** PostgreSQL-backed Chat collection repository. */
 @AllArgsConstructor
 @Repository
-public class MysqlChatRepository implements ChatRepository {
+public class PostgresqlChatRepository implements ChatRepository {
 
   private final ChatMapper chatMapper;
   private final ChatSessionMapper chatSessionMapper;
@@ -100,8 +103,12 @@ public class MysqlChatRepository implements ChatRepository {
     target.setTitle(row.getTitle());
     target.setDefaultAgentId(row.getDefaultAgentId());
     target.setVersion(row.getVersion());
-    target.setCreateTime(row.getCreateTime());
-    target.setUpdateTime(row.getUpdateTime());
+    target.setCreateTime(toLocalDateTime(row.getCreateTime()));
+    target.setUpdateTime(toLocalDateTime(row.getUpdateTime()));
     return target;
+  }
+
+  private static LocalDateTime toLocalDateTime(OffsetDateTime value) {
+    return value == null ? null : value.withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime();
   }
 }

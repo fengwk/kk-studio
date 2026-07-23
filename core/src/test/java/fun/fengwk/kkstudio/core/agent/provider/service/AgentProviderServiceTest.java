@@ -7,9 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 
-import fun.fengwk.kkstudio.core.CoreTestApplication;
+import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
@@ -17,8 +16,7 @@ import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
 import java.util.Arrays;
 
 /** Provider names are global and credentials never cross the service boundary. */
-@SpringBootTest(classes = CoreTestApplication.class)
-public class AgentProviderServiceTest {
+public class AgentProviderServiceTest extends PostgresSpringTestSupport {
 
   @Autowired private AgentProviderService agentProviderService;
 

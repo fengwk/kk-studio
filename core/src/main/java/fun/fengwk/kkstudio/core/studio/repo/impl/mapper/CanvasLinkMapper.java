@@ -19,15 +19,15 @@ public interface CanvasLinkMapper extends BaseMapper {
   @Insert(
       """
       insert into canvas_link (
-          id, canvas_id, source_node_id, target_node_id, revision, gmt_create
+          id, canvas_id, source_node_id, target_node_id, revision, created_at
       ) values (
-          #{id}, #{canvasId}, #{sourceNodeId}, #{targetNodeId}, #{revision}, current_timestamp(3)
+          #{id}, #{canvasId}, #{sourceNodeId}, #{targetNodeId}, #{revision}, current_timestamp
       )
       """)
   int insert(CanvasLinkDO link);
 
   @Select(
-      "select id, canvas_id, source_node_id, target_node_id, revision, gmt_create as create_time"
+      "select id, canvas_id, source_node_id, target_node_id, revision, created_at as create_time"
           + " from canvas_link where canvas_id = #{canvasId}")
   @Results(
       id = "canvasLinkMap",

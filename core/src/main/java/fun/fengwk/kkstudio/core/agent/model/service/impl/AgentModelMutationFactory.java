@@ -1,11 +1,10 @@
 package fun.fengwk.kkstudio.core.agent.model.service.impl;
 
-import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextModelId;
-
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
+import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.model.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelEditablePropertiesDTO;
 
@@ -14,9 +13,13 @@ import fun.fengwk.kkstudio.share.model.AgentModelEditablePropertiesDTO;
 final class AgentModelMutationFactory {
 
   private final AgentModelRuntimeConfigParser runtimeConfigParser;
+  private final PostgresqlSequenceIdGenerator idGenerator;
 
-  AgentModelMutationFactory(AgentModelRuntimeConfigParser runtimeConfigParser) {
+  AgentModelMutationFactory(
+      AgentModelRuntimeConfigParser runtimeConfigParser,
+      PostgresqlSequenceIdGenerator idGenerator) {
     this.runtimeConfigParser = runtimeConfigParser;
+    this.idGenerator = idGenerator;
   }
 
   AgentModel newModel(long providerId, AgentModelEditablePropertiesDTO properties) {
@@ -25,7 +28,7 @@ final class AgentModelMutationFactory {
     }
     Mutation mutation = newMutation(properties);
     AgentModel model = new AgentModel();
-    model.setId(nextModelId());
+    model.setId(idGenerator.next());
     model.setProviderId(providerId);
     apply(model, mutation);
     return model;

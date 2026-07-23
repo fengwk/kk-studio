@@ -9,11 +9,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 
-import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.agent.model.service.AgentModelService;
 import fun.fengwk.kkstudio.core.agent.provider.service.AgentProviderService;
+import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionDTO;
@@ -27,8 +26,7 @@ import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
 import java.util.List;
 
 /** Agent definitions and their model references are global. */
-@SpringBootTest(classes = CoreTestApplication.class)
-public class AgentDefinitionServiceTest {
+public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
 
   @Autowired private AgentProviderService agentProviderService;
   @Autowired private AgentModelService agentModelService;

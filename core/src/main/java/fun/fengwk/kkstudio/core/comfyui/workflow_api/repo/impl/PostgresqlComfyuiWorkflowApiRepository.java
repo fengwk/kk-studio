@@ -11,6 +11,9 @@ import fun.fengwk.kkstudio.core.comfyui.workflow_api.repo.impl.mapper.ComfyuiWor
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.repo.impl.model.ComfyuiWorkflowApiDO;
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.model.ComfyuiWorkflowApi;
 
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -18,7 +21,7 @@ import java.util.List;
  */
 @AllArgsConstructor
 @Repository
-public class MysqlComfyuiWorkflowApiRepository implements ComfyuiWorkflowApiRepository {
+public class PostgresqlComfyuiWorkflowApiRepository implements ComfyuiWorkflowApiRepository {
 
   private final ComfyuiWorkflowApiMapper comfyuiWorkflowApiMapper;
 
@@ -90,8 +93,12 @@ public class MysqlComfyuiWorkflowApiRepository implements ComfyuiWorkflowApiRepo
     row.setInputBindingsJson(rowDO.getInputBindingsJson());
     row.setDefaultSelector(rowDO.getDefaultSelector());
     row.setEnabled(rowDO.getEnabled());
-    row.setCreateTime(rowDO.getCreateTime());
-    row.setUpdateTime(rowDO.getUpdateTime());
+    row.setCreateTime(toLocalDateTime(rowDO.getCreateTime()));
+    row.setUpdateTime(toLocalDateTime(rowDO.getUpdateTime()));
     return row;
+  }
+
+  private static LocalDateTime toLocalDateTime(OffsetDateTime value) {
+    return value == null ? null : value.withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime();
   }
 }

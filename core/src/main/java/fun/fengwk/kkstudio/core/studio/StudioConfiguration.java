@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasCommandMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasDocumentMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasLinkMapper;
@@ -42,9 +43,10 @@ public class StudioConfiguration {
       CanvasNodeMapper nodeMapper,
       CanvasLinkMapper linkMapper,
       CanvasCommandMapper commandMapper,
-      ObjectMapper objectMapper) {
+      ObjectMapper objectMapper,
+      PostgresqlSequenceIdGenerator idGenerator) {
     return new DurableCanvasService(
-        documentMapper, nodeMapper, linkMapper, commandMapper, objectMapper);
+        documentMapper, nodeMapper, linkMapper, commandMapper, objectMapper, idGenerator);
   }
 
   @Bean

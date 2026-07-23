@@ -20,9 +20,9 @@ public interface ChatMapper extends BaseMapper {
 
   String COLUMNS =
       "id, title, default_agent_id, version, "
-          + "gmt_create as create_time, gmt_modified as update_time";
+          + "created_at as create_time, updated_at as update_time";
 
-  @Select("select " + COLUMNS + " from chat order by gmt_modified desc, id desc")
+  @Select("select " + COLUMNS + " from chat order by updated_at desc, id desc")
   @Results(
       id = "chatResultMap",
       value = {
@@ -43,10 +43,10 @@ public interface ChatMapper extends BaseMapper {
       """
       insert into chat (
           id, title, default_agent_id,
-          gmt_create, gmt_modified, version
+          created_at, updated_at, version
       ) values (
           #{id}, #{title}, #{defaultAgentId},
-          current_timestamp(3), current_timestamp(3), 0
+          current_timestamp, current_timestamp, 0
       )
       """)
   int insert(ChatDO chat);
@@ -55,7 +55,7 @@ public interface ChatMapper extends BaseMapper {
       """
       update chat
       set title = #{chat.title}, default_agent_id = #{chat.defaultAgentId},
-          gmt_modified = current_timestamp(3), version = version + 1
+          updated_at = current_timestamp, version = version + 1
       where id = #{chat.id}
       """)
   int updateById(@Param("chat") ChatDO chat);
@@ -63,7 +63,7 @@ public interface ChatMapper extends BaseMapper {
   @Update(
       """
       update chat
-      set gmt_modified = current_timestamp(3), version = version + 1
+      set updated_at = current_timestamp, version = version + 1
       where id = #{id}
       """)
   int touch(@Param("id") long id);

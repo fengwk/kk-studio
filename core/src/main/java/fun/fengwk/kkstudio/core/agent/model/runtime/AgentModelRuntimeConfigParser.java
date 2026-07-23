@@ -30,14 +30,11 @@ import java.util.Set;
 /**
  * Single typed codec/parser for Agent model configurations.
  *
- * <p>This class owns every read/write against the persisted {@code config_json} column. Mutations
+ * <p>This class owns every read/write against the persisted {@code config} JSONB column. Mutations
  * and reads must go through {@link #decode(String)} / {@link #encode(AgentModelConfigDTO)}; any
  * other path that performs its own ObjectMapper mapping will drift out of sync. Validation runs
- * against the typed DTOs; persisted JSON is treated as an opaque carrier.
- *
- * <p>Field paths in validation messages use the public {@code config.*} terminology. Internal
- * storage references may continue to call the column {@code config_json}; that naming choice is not
- * surfaced to clients.
+ * against the typed DTOs; persisted JSON is treated as an opaque carrier. Validation messages use
+ * the public {@code config.*} terminology.
  */
 @Component
 public final class AgentModelRuntimeConfigParser {

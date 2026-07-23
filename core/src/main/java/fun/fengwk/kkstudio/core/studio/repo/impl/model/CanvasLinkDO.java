@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.core.studio.repo.impl.model;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /** {@code canvas_link} 行映射：画布可见性连线（非 ResourceReference）。 */
 @Data
@@ -22,6 +22,6 @@ public class CanvasLinkDO {
   /** 连线业务 revision。 */
   private Long revision;
 
-  /** 创建时间（映射 {@code gmt_create}）。 */
-  private LocalDateTime createTime;
+  /** 创建时间（映射 {@code created_at} timestamptz）。 */
+  private OffsetDateTime createTime;
 }
