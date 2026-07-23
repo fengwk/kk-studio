@@ -227,7 +227,8 @@ Pub/Sub 丢失不会丢工作。低频 recovery 查询 `runnable=true` 或过期
   "attempt": 1,
   "type": "MODEL_DELTA",
   "payload": {
-    "attempt": 1
+    "kind": "TEXT_DELTA",
+    "text": "..."
   },
   "createdAt": "..."
 }
@@ -235,7 +236,9 @@ Pub/Sub 丢失不会丢工作。低频 recovery 查询 `runnable=true` 或过期
 
 约束：
 
-- 使用 `MAXLEN ~` 或时间清理限制容量；
+- payload discriminator 固定为 `TEXT_DELTA`、`THINKING_DELTA` 或 `TOOL_CALL_DELTA`，严格区分大小写；
+- `attempt` 只在 envelope 顶层出现，不在 payload 内复制；
+- 每个 Thread 使用独立 Redis Stream，并在每次 `XADD` 时使用 exact `MAXLEN` 确保容量上界；
 - 可重试 Invocation 的 projection 必须携带 `attempt`；客户端只合并与 PostgreSQL snapshot 当前 attempt
   一致的片段，不能把失败 attempt 的 partial 拼接到后续 attempt；
 - terminal 后只保留短 reconnect window；
