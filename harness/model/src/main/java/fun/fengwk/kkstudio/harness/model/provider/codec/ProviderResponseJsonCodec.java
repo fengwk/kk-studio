@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.model.provider.codec;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -68,6 +70,11 @@ public final class ProviderResponseJsonCodec {
           "reasoning",
           "total");
 
+  static {
+    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+  }
+
   public ProviderResponseJsonCodec() {}
 
   public String encode(ProviderResponse response) {
@@ -101,7 +108,7 @@ public final class ProviderResponseJsonCodec {
     } else {
       node.put("serviceTier", response.serviceTier());
     }
-    node.put("rawUsageJson", response.rawUsageJson());
+    node.put("rawUsageJson", requireJsonContainer(response.rawUsageJson(), "rawUsageJson"));
     return node;
   }
 
@@ -135,7 +142,7 @@ public final class ProviderResponseJsonCodec {
     ModelCost cost = decodeCost(node.get("cost"));
     String requestId = decodeNullableText(node, "requestId");
     String serviceTier = decodeNullableText(node, "serviceTier");
-    String rawUsageJson = text(node, "rawUsageJson");
+    String rawUsageJson = jsonContainerText(node, "rawUsageJson");
     return new ProviderResponse(
         text,
         thinking,
@@ -152,7 +159,7 @@ public final class ProviderResponseJsonCodec {
     ObjectNode node = NODES.objectNode();
     node.put("id", call.id());
     node.put("name", call.name());
-    node.put("argumentsJson", call.argumentsJson());
+    node.put("argumentsJson", requireJsonObject(call.argumentsJson(), "argumentsJson"));
     return node;
   }
 
@@ -274,12 +281,37 @@ public final class ProviderResponseJsonCodec {
 
   private static String jsonObjectText(ObjectNode node, String field) {
     String value = text(node, field);
+    return requireJsonObject(value, field);
+  }
+
+  private static String jsonContainerText(ObjectNode node, String field) {
+    String value = text(node, field);
+    return requireJsonContainer(value, field);
+  }
+
+  private static String requireJsonObject(String value, String field) {
+    JsonNode parsed = parseJson(value, field);
+    if (!parsed.isObject()) {
+      throw new IllegalArgumentException(field + " must contain a JSON object");
+    }
+    return value;
+  }
+
+  private static String requireJsonContainer(String value, String field) {
+    JsonNode parsed = parseJson(value, field);
+    if (!parsed.isObject() && !parsed.isArray()) {
+      throw new IllegalArgumentException(field + " must contain a JSON object or array");
+    }
+    return value;
+  }
+
+  private static JsonNode parseJson(String value, String field) {
     try {
       JsonNode parsed = OBJECT_MAPPER.readTree(value);
-      if (!parsed.isObject()) {
-        throw new IllegalArgumentException(field + " must contain a JSON object");
+      if (parsed == null) {
+        throw new IllegalArgumentException(field + " must contain JSON");
       }
-      return value;
+      return parsed;
     } catch (JsonProcessingException exception) {
       throw new IllegalArgumentException(field + " must contain JSON", exception);
     }

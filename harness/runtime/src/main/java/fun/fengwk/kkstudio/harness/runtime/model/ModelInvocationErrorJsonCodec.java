@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.model;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -24,6 +26,11 @@ public final class ModelInvocationErrorJsonCodec {
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
   private static final Set<String> EXPECTED_FIELDS = Set.of("kind", "message");
+
+  static {
+    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+  }
 
   public ModelInvocationErrorJsonCodec() {}
 

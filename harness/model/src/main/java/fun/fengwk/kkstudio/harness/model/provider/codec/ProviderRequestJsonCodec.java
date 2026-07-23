@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.model.provider.codec;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -75,6 +77,11 @@ public final class ProviderRequestJsonCodec {
   private static final Set<String> TOOL_CALL_BLOCK_FIELDS = orderedSet("type", "toolCall");
   private static final Set<String> TOOL_RESULT_BLOCK_FIELDS =
       orderedSet("type", "toolCallId", "toolName", "contents", "error", "detailsJson");
+
+  static {
+    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+  }
 
   public ProviderRequestJsonCodec() {}
 
@@ -216,7 +223,7 @@ public final class ProviderRequestJsonCodec {
     ObjectNode node = NODES.objectNode();
     node.put("name", tool.name());
     node.put("description", tool.description());
-    node.put("inputSchemaJson", tool.inputSchemaJson());
+    node.put("inputSchemaJson", requireJsonObject(tool.inputSchemaJson(), "inputSchemaJson"));
     return node;
   }
 
@@ -266,7 +273,7 @@ public final class ProviderRequestJsonCodec {
     if (content instanceof ProviderJsonBlock value) {
       ObjectNode node = NODES.objectNode();
       node.put("type", "json");
-      node.put("json", value.json());
+      node.put("json", requireJson(value.json(), "json"));
       return node;
     }
     if (content instanceof ProviderToolCallBlock value) {
@@ -285,7 +292,7 @@ public final class ProviderRequestJsonCodec {
         contents.add(encodeContentBlock(item));
       }
       node.put("error", value.error());
-      node.put("detailsJson", value.detailsJson());
+      node.put("detailsJson", requireJsonObject(value.detailsJson(), "detailsJson"));
       return node;
     }
     throw new IllegalArgumentException("unsupported provider content block: " + content.getClass());
@@ -354,7 +361,7 @@ public final class ProviderRequestJsonCodec {
     ObjectNode node = NODES.objectNode();
     node.put("id", call.id());
     node.put("name", call.name());
-    node.put("argumentsJson", call.argumentsJson());
+    node.put("argumentsJson", requireJsonObject(call.argumentsJson(), "argumentsJson"));
     return node;
   }
 
@@ -491,10 +498,27 @@ public final class ProviderRequestJsonCodec {
 
   private static JsonNode parseJson(String value, String field) {
     try {
-      return OBJECT_MAPPER.readTree(value);
+      JsonNode parsed = OBJECT_MAPPER.readTree(value);
+      if (parsed == null) {
+        throw new IllegalArgumentException(field + " must contain JSON");
+      }
+      return parsed;
     } catch (JsonProcessingException exception) {
       throw new IllegalArgumentException(field + " must contain JSON", exception);
     }
+  }
+
+  private static String requireJson(String value, String field) {
+    parseJson(value, field);
+    return value;
+  }
+
+  private static String requireJsonObject(String value, String field) {
+    JsonNode parsed = parseJson(value, field);
+    if (!parsed.isObject()) {
+      throw new IllegalArgumentException(field + " must contain a JSON object");
+    }
+    return value;
   }
 
   private static <E extends Enum<E>> Set<E> decodeEnumSet(

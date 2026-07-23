@@ -1,0 +1,18 @@
+/**
+ * Production adapter binding the Runtime {@code ModelInvocationTransactions} port to the PostgreSQL
+ * final schema ({@code harness_model_invocation} / {@code harness_thread}).
+ *
+ * <p>All mutations follow the strict lock order fixed by {@link
+ * fun.fengwk.kkstudio.harness.runtime.model.worker.ModelInvocationTransactions}: {@code Thread FOR
+ * UPDATE} must be acquired before {@code ModelInvocation FOR UPDATE}, except for {@code claim}
+ * which first does a non-locking peek of {@code threadId} before re-locking. Every claim-following
+ * update carries the full CAS predicate ({@code id}, {@code thread_id}, {@code status='RUNNING'},
+ * {@code execution_epoch}, {@code attempt}, {@code worker_token}, {@code worker_until > now}) in
+ * the SQL itself so the database is the final authority on ownership.
+ *
+ * <p>The package intentionally does not declare a {@code ModelWorker} bean, does not publish
+ * activation notifications, and does not embed any {@code harness_thread.*} legacy columns. {@link
+ * HarnessModelInvocationThreadMapper} is a narrow mapper covering only the final-schema Thread
+ * columns this adapter needs (no {@code gmt_*}/{@code status}/{@code version}).
+ */
+package fun.fengwk.kkstudio.core.harness.model.worker;

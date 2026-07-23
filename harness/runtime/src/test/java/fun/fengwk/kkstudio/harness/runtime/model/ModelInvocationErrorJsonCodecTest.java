@@ -49,6 +49,16 @@ class ModelInvocationErrorJsonCodecTest {
     }
   }
 
+  /** String decoding rejects duplicate fields and trailing documents before tree projection. */
+  @Test
+  void rejectsDuplicateFieldsAndTrailingDocuments() {
+    String canonical = canonicalNode().toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(canonical + " {}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode("{\"kind\":\"TRANSIENT\",\"kind\":\"AUTH\",\"message\":\"x\"}"));
+  }
+
   /** Unknown, missing, and wrong-typed fields are rejected rather than ignored or defaulted. */
   @Test
   void rejectsUnknownMissingAndWrongTypedFields() {

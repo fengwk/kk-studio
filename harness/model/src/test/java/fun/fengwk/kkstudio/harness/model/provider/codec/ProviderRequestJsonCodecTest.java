@@ -157,6 +157,39 @@ class ProviderRequestJsonCodecTest {
   }
 
   /**
+   * String and raw-JSON boundaries reject duplicate fields and trailing documents symmetrically.
+   */
+  @Test
+  void rejectsDuplicateAndTrailingDocumentsAtStrictJsonBoundaries() {
+    ProviderRequest request = canonicalRequest();
+    String encoded = codec.encode(request);
+    String duplicateTopLevel =
+        "{\"model\":" + canonicalNode().get("model") + "," + encoded.substring(1);
+
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(encoded + " {}"));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicateTopLevel));
+
+    ObjectNode duplicateArguments = canonicalNode();
+    ObjectNode toolCall =
+        (ObjectNode)
+            duplicateArguments.path("messages").get(2).path("contents").get(0).path("toolCall");
+    toolCall.put("argumentsJson", "{\"q\":\"paris\",\"q\":\"lyon\"}");
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicateArguments.toString()));
+
+    ProviderToolDefinition invalidTool =
+        new ProviderToolDefinition(
+            "duplicate_schema", "duplicate schema", "{\"type\":\"object\",\"type\":\"array\"}");
+    ProviderRequest invalidRequest =
+        new ProviderRequest(
+            request.model(),
+            request.variant(),
+            request.messages(),
+            List.of(invalidTool),
+            request.cacheControl());
+    assertThrows(IllegalArgumentException.class, () -> codec.encode(invalidRequest));
+  }
+
+  /**
    * Each object layer rejects an extra field, a missing field, and a field with the wrong JSON
    * type, preventing partially compatible persisted payloads.
    */

@@ -92,6 +92,47 @@ class ProviderResponseJsonCodecTest {
     assertEquals(rawUsageJson, decoded.rawUsageJson());
   }
 
+  /** String, tool-argument, and raw-usage JSON reject duplicate fields and trailing documents. */
+  @Test
+  void rejectsDuplicateAndTrailingDocumentsAtStrictJsonBoundaries() {
+    ProviderResponse response = canonicalResponse();
+    String encoded = codec.encode(response);
+    String duplicateTopLevel = "{\"text\":\"duplicate\"," + encoded.substring(1);
+
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(encoded + " []"));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicateTopLevel));
+
+    ObjectNode duplicateArguments = canonicalNode();
+    toolCall(duplicateArguments).put("argumentsJson", "{\"city\":\"Paris\",\"city\":\"Lyon\"}");
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicateArguments.toString()));
+
+    ProviderResponse invalidArguments =
+        new ProviderResponse(
+            response.text(),
+            response.thinking(),
+            List.of(new ProviderToolCall("call", "weather", "{\"q\":1,\"q\":2}")),
+            response.stopReason(),
+            response.usage(),
+            response.cost(),
+            response.requestId(),
+            response.serviceTier(),
+            response.rawUsageJson());
+    assertThrows(IllegalArgumentException.class, () -> codec.encode(invalidArguments));
+
+    ProviderResponse invalidUsage =
+        new ProviderResponse(
+            response.text(),
+            response.thinking(),
+            response.toolCalls(),
+            response.stopReason(),
+            response.usage(),
+            response.cost(),
+            response.requestId(),
+            response.serviceTier(),
+            "{\"total\":1,\"total\":2}");
+    assertThrows(IllegalArgumentException.class, () -> codec.encode(invalidUsage));
+  }
+
   /** Every response object layer independently rejects unknown, missing, and wrong-typed fields. */
   @Test
   void rejectsUnknownMissingAndWrongTypedFieldsAtEveryObjectLayer() {
