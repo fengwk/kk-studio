@@ -1,0 +1,527 @@
+package fun.fengwk.kkstudio.core.harness.model.worker;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
+
+import fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus;
+import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.model.worker.ClaimedModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelInvocationTransactions;
+import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelInvocationUpdateOutcome;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.util.Objects;
+import java.util.Optional;
+
+/**
+ * final-schema PostgreSQL 适配器，实现 Runtime {@link ModelInvocationTransactions}。
+ *
+ * <p>所有 mutation 走单一 Spring {@code @Transactional} 边界；在事务内锁 Thread 再锁 Invocation；SQL CAS 谓词与 Java
+ * 双重检验。所有失败模式（stale token/attempt/epoch/lease/status/duplicate terminal）以 {@link
+ * ModelInvocationUpdateOutcome#LOST_OWNERSHIP} 形式返回；数据库 invariant breach（缺失外键、无法
+ * markRunnable）抛运行时异常让 Spring 回滚。
+ *
+ * <p>本 bean 由 {@code @Service} 暴露给 Runtime，不创建任何 {@code ModelWorker} bean。
+ */
+@Service
+public class PostgresqlModelInvocationTransactions implements ModelInvocationTransactions {
+
+  private static final int MAX_TOKEN_LENGTH = 128;
+  private static final Duration MIN_LEASE = Duration.ofMillis(1);
+
+  private final ModelInvocationMapper invocationMapper;
+  private final HarnessModelInvocationThreadMapper threadMapper;
+
+  public PostgresqlModelInvocationTransactions(
+      ModelInvocationMapper invocationMapper, HarnessModelInvocationThreadMapper threadMapper) {
+    this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
+    this.threadMapper = Objects.requireNonNull(threadMapper, "threadMapper");
+  }
+
+  // ---------- read paths ----------
+
+  @Override
+  @Transactional(readOnly = true)
+  public Optional<ModelInvocation> findClaimable(long invocationId, Instant now) {
+    Objects.requireNonNull(now, "now");
+    if (invocationId <= 0) {
+      throw new IllegalArgumentException("invocationId must be positive");
+    }
+    ModelInvocationDO row =
+        invocationMapper.findClaimable(
+            invocationId, ModelInvocationRowConverter.toUtcOffsetDateTime(now));
+    return row == null
+        ? Optional.empty()
+        : Optional.of(ModelInvocationRowConverter.toAggregate(row));
+  }
+
+  @Override
+  @Transactional(readOnly = true)
+  public Optional<ModelInvocation> findNextClaimable(Instant now) {
+    Objects.requireNonNull(now, "now");
+    ModelInvocationDO row =
+        invocationMapper.findNextClaimable(ModelInvocationRowConverter.toUtcOffsetDateTime(now));
+    return row == null
+        ? Optional.empty()
+        : Optional.of(ModelInvocationRowConverter.toAggregate(row));
+  }
+
+  // ---------- claim ----------
+
+  @Override
+  @Transactional(isolation = Isolation.READ_COMMITTED)
+  public Optional<ClaimedModelInvocation> claim(
+      long invocationId,
+      String workerToken,
+      ModelCallTimeoutPolicy timeoutPolicy,
+      Duration workerLeaseDuration,
+      Instant now) {
+    Objects.requireNonNull(workerToken, "workerToken");
+    Objects.requireNonNull(timeoutPolicy, "timeoutPolicy");
+    Objects.requireNonNull(workerLeaseDuration, "workerLeaseDuration");
+    Objects.requireNonNull(now, "now");
+    if (invocationId <= 0) {
+      throw new IllegalArgumentException("invocationId must be positive");
+    }
+    if (workerToken.isBlank()) {
+      throw new IllegalArgumentException("workerToken must not be blank");
+    }
+    if (workerToken.length() > MAX_TOKEN_LENGTH) {
+      throw new IllegalArgumentException("workerToken must be <= " + MAX_TOKEN_LENGTH + " chars");
+    }
+    if (workerLeaseDuration.compareTo(MIN_LEASE) < 0) {
+      throw new IllegalArgumentException("workerLeaseDuration must be >= 1ms");
+    }
+
+    // 1) 非锁 peek：只读 threadId 与初始可 claim 性。
+    ModelInvocationDO peek =
+        invocationMapper.findClaimable(
+            invocationId, ModelInvocationRowConverter.toUtcOffsetDateTime(now));
+    if (peek == null) {
+      return Optional.empty();
+    }
+
+    // 2) 锁 Thread（FOR UPDATE）；缺失则视为 invariant breach。
+    HarnessModelInvocationThreadDO threadRow = threadMapper.findForUpdate(peek.getThreadId());
+    if (threadRow == null) {
+      throw new IllegalStateException("owning thread missing for invocation " + invocationId);
+    }
+    if (!Objects.equals(threadRow.getExecutionEpoch(), peek.getExecutionEpoch())) {
+      return Optional.empty();
+    }
+
+    // 3) 锁 Invocation（FOR UPDATE）并完整重校验。
+    ModelInvocationDO row = invocationMapper.findForUpdate(peek.getId(), peek.getThreadId());
+    if (row == null) {
+      return Optional.empty();
+    }
+    if (!Objects.equals(row.getExecutionEpoch(), threadRow.getExecutionEpoch())) {
+      return Optional.empty();
+    }
+    int expectedAttempt = row.getAttempt();
+    OffsetDateTime nowOffset = ModelInvocationRowConverter.toUtcOffsetDateTime(now);
+
+    InvocationStatus status = InvocationStatus.valueOf(row.getStatus());
+    if (status == InvocationStatus.QUEUED) {
+      OffsetDateTime startedOffset =
+          max(nowOffset, Objects.requireNonNull(row.getCreatedAt(), "createdAt"));
+      OffsetDateTime leaseUntil =
+          addAtPersistencePrecision(startedOffset, workerLeaseDuration, "workerLeaseDuration");
+      OffsetDateTime deadlineOffset =
+          addAtPersistencePrecision(
+              startedOffset, timeoutPolicy.modelCallTimeout(), "modelCallTimeout");
+      int updated =
+          invocationMapper.claimFromQueued(
+              row.getId(),
+              row.getThreadId(),
+              row.getExecutionEpoch(),
+              workerToken,
+              leaseUntil,
+              startedOffset,
+              deadlineOffset,
+              startedOffset,
+              expectedAttempt);
+      if (updated != 1) {
+        return Optional.empty();
+      }
+      return loadClaimed(row.getId(), row.getThreadId(), workerToken, false);
+    }
+    if (status == InvocationStatus.RETRY_WAIT) {
+      OffsetDateTime leaseUntil =
+          addAtPersistencePrecision(
+              max(nowOffset, Objects.requireNonNull(row.getStartedAt(), "startedAt")),
+              workerLeaseDuration,
+              "workerLeaseDuration");
+      int updated =
+          invocationMapper.claimFromRetryWait(
+              row.getId(),
+              row.getThreadId(),
+              row.getExecutionEpoch(),
+              expectedAttempt,
+              workerToken,
+              leaseUntil,
+              nowOffset,
+              nowOffset);
+      if (updated != 1) {
+        return Optional.empty();
+      }
+      return loadClaimed(row.getId(), row.getThreadId(), workerToken, false);
+    }
+    if (status == InvocationStatus.RUNNING) {
+      String existingToken = Objects.requireNonNull(row.getWorkerToken(), "workerToken");
+      OffsetDateTime leaseUntil =
+          addAtPersistencePrecision(
+              max(nowOffset, Objects.requireNonNull(row.getStartedAt(), "startedAt")),
+              workerLeaseDuration,
+              "workerLeaseDuration");
+      int updated =
+          invocationMapper.recoverExpiredLease(
+              row.getId(),
+              row.getThreadId(),
+              row.getExecutionEpoch(),
+              expectedAttempt,
+              existingToken,
+              workerToken,
+              leaseUntil,
+              nowOffset);
+      if (updated != 1) {
+        return Optional.empty();
+      }
+      return loadClaimed(row.getId(), row.getThreadId(), workerToken, true);
+    }
+    return Optional.empty();
+  }
+
+  // ---------- claim-following mutations ----------
+
+  @Override
+  @Transactional(isolation = Isolation.READ_COMMITTED)
+  public ModelInvocationUpdateOutcome renew(
+      ClaimedModelInvocation claimed, Duration workerLeaseDuration, Instant now) {
+    Objects.requireNonNull(claimed, "claimed");
+    Objects.requireNonNull(workerLeaseDuration, "workerLeaseDuration");
+    Objects.requireNonNull(now, "now");
+    if (workerLeaseDuration.compareTo(MIN_LEASE) < 0) {
+      throw new IllegalArgumentException("workerLeaseDuration must be >= 1ms");
+    }
+    ModelInvocationDO row = lockAndValidateOwned(claimed, now);
+    if (row == null) {
+      return ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
+    }
+    OffsetDateTime nowOffset = ModelInvocationRowConverter.toUtcOffsetDateTime(now);
+    OffsetDateTime leaseUntil =
+        addAtPersistencePrecision(
+            max(nowOffset, Objects.requireNonNull(row.getStartedAt(), "startedAt")),
+            workerLeaseDuration,
+            "workerLeaseDuration");
+    int updated =
+        invocationMapper.renewLease(
+            claimed.invocation().id(),
+            claimed.invocation().threadId(),
+            claimed.invocation().executionEpoch(),
+            claimed.invocation().attempt(),
+            claimed.invocation().workerLease().token(),
+            leaseUntil,
+            nowOffset);
+    return updated == 1
+        ? ModelInvocationUpdateOutcome.APPLIED
+        : ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
+  }
+
+  @Override
+  @Transactional(isolation = Isolation.READ_COMMITTED)
+  public ModelInvocationUpdateOutcome recordActivity(
+      ClaimedModelInvocation claimed, Instant activityAt, Instant now) {
+    Objects.requireNonNull(claimed, "claimed");
+    Objects.requireNonNull(activityAt, "activityAt");
+    Objects.requireNonNull(now, "now");
+    if (lockAndValidateOwned(claimed, now) == null) {
+      return ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
+    }
+    int updated =
+        invocationMapper.recordActivity(
+            claimed.invocation().id(),
+            claimed.invocation().threadId(),
+            claimed.invocation().executionEpoch(),
+            claimed.invocation().attempt(),
+            claimed.invocation().workerLease().token(),
+            ModelInvocationRowConverter.toUtcOffsetDateTime(activityAt),
+            ModelInvocationRowConverter.toUtcOffsetDateTime(now));
+    return updated == 1
+        ? ModelInvocationUpdateOutcome.APPLIED
+        : ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
+  }
+
+  @Override
+  @Transactional(isolation = Isolation.READ_COMMITTED)
+  public ModelInvocationUpdateOutcome completeSuccess(
+      ClaimedModelInvocation claimed,
+      ProviderResponse result,
+      Instant lastObservedActivityAt,
+      Instant now) {
+    Objects.requireNonNull(result, "result");
+    return completeTerminal(
+        claimed, result, null, lastObservedActivityAt, now, TerminalKind.SUCCESS);
+  }
+
+  @Override
+  @Transactional(isolation = Isolation.READ_COMMITTED)
+  public ModelInvocationUpdateOutcome completeFailure(
+      ClaimedModelInvocation claimed,
+      ModelInvocationError error,
+      Instant lastObservedActivityAt,
+      Instant now) {
+    Objects.requireNonNull(error, "error");
+    return completeTerminal(
+        claimed, null, error, lastObservedActivityAt, now, TerminalKind.FAILURE);
+  }
+
+  @Override
+  @Transactional(isolation = Isolation.READ_COMMITTED)
+  public ModelInvocationUpdateOutcome completeCancelled(
+      ClaimedModelInvocation claimed, Instant lastObservedActivityAt, Instant now) {
+    return completeTerminal(
+        claimed, null, null, lastObservedActivityAt, now, TerminalKind.CANCELLED);
+  }
+
+  @Override
+  @Transactional(isolation = Isolation.READ_COMMITTED)
+  public ModelInvocationUpdateOutcome completeUnknown(
+      ClaimedModelInvocation claimed,
+      ModelInvocationError error,
+      Instant lastObservedActivityAt,
+      Instant now) {
+    Objects.requireNonNull(error, "error");
+    return completeTerminal(
+        claimed, null, error, lastObservedActivityAt, now, TerminalKind.UNKNOWN);
+  }
+
+  @Override
+  @Transactional(isolation = Isolation.READ_COMMITTED)
+  public ModelInvocationUpdateOutcome scheduleRetry(
+      ClaimedModelInvocation claimed,
+      Instant nextAttemptAt,
+      Instant lastObservedActivityAt,
+      Instant now) {
+    Objects.requireNonNull(claimed, "claimed");
+    Objects.requireNonNull(nextAttemptAt, "nextAttemptAt");
+    Objects.requireNonNull(lastObservedActivityAt, "lastObservedActivityAt");
+    Objects.requireNonNull(now, "now");
+    ModelInvocationDO row = lockAndValidateOwned(claimed, now);
+    if (row == null) {
+      return ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
+    }
+    Instant durableActivity =
+        Objects.requireNonNull(row.getLastActivityAt(), "lastActivityAt").toInstant();
+    Instant observedActivity =
+        ModelInvocationRowConverter.toPersistenceInstant(lastObservedActivityAt);
+    Instant effectiveActivity =
+        durableActivity.isAfter(observedActivity) ? durableActivity : observedActivity;
+    Instant persistedNextAttemptAt =
+        ModelInvocationRowConverter.toPersistenceInstant(nextAttemptAt);
+    Instant deadlineAt = Objects.requireNonNull(row.getDeadlineAt(), "deadlineAt").toInstant();
+    if (!persistedNextAttemptAt.isAfter(effectiveActivity)) {
+      throw new IllegalArgumentException(
+          "nextAttemptAt must be strictly after effective lastActivityAt");
+    }
+    if (!persistedNextAttemptAt.isBefore(deadlineAt)) {
+      throw new IllegalArgumentException("nextAttemptAt must be strictly before deadlineAt");
+    }
+    int updated =
+        invocationMapper.scheduleRetry(
+            claimed.invocation().id(),
+            claimed.invocation().threadId(),
+            claimed.invocation().executionEpoch(),
+            claimed.invocation().attempt(),
+            claimed.invocation().workerLease().token(),
+            ModelInvocationRowConverter.toUtcOffsetDateTime(observedActivity),
+            ModelInvocationRowConverter.toUtcOffsetDateTime(persistedNextAttemptAt),
+            ModelInvocationRowConverter.toUtcOffsetDateTime(now));
+    return updated == 1
+        ? ModelInvocationUpdateOutcome.APPLIED
+        : ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
+  }
+
+  // ---------- helpers ----------
+
+  private ModelInvocationDO lockAndValidateOwned(ClaimedModelInvocation claimed, Instant now) {
+    long threadId = claimed.invocation().threadId();
+    HarnessModelInvocationThreadDO threadRow = threadMapper.findForUpdate(threadId);
+    if (threadRow == null) {
+      throw new IllegalStateException(
+          "owning thread missing for invocation " + claimed.invocation().id());
+    }
+    if (!Objects.equals(threadRow.getExecutionEpoch(), claimed.invocation().executionEpoch())) {
+      return null;
+    }
+    ModelInvocationDO row =
+        invocationMapper.findForUpdate(claimed.invocation().id(), claimed.invocation().threadId());
+    if (row == null) {
+      return null;
+    }
+    // token 必须相等；workerUntil 不比较相等性：renew 单调延长时间后，调用方持有的 ClaimedModelInvocation
+    // 仍是旧 until，数据库已经更大；SQL CAS 自身仍校验 worker_until > now，因此租约有效性是最终权威。
+    if (row.getWorkerToken() == null
+        || !row.getWorkerToken().equals(claimed.invocation().workerLease().token())) {
+      return null;
+    }
+    if (!Objects.equals(row.getId(), claimed.invocation().id())) {
+      return null;
+    }
+    if (!Objects.equals(row.getThreadId(), claimed.invocation().threadId())) {
+      return null;
+    }
+    if (!Objects.equals(row.getExecutionEpoch(), claimed.invocation().executionEpoch())) {
+      return null;
+    }
+    if (!Objects.equals(row.getAttempt(), claimed.invocation().attempt())) {
+      return null;
+    }
+    if (!row.getStatus().equals(claimed.invocation().status().name())) {
+      return null;
+    }
+    Instant durableUntil = Objects.requireNonNull(row.getWorkerUntil()).toInstant();
+    if (!durableUntil.isAfter(ModelInvocationRowConverter.toPersistenceInstant(now))) {
+      return null;
+    }
+    return row;
+  }
+
+  private Optional<ClaimedModelInvocation> loadClaimed(
+      long invocationId, long threadId, String workerToken, boolean recoveredLease) {
+    ModelInvocationDO refreshed = invocationMapper.findForUpdate(invocationId, threadId);
+    if (refreshed == null) {
+      throw new IllegalStateException("claimed invocation disappeared: " + invocationId);
+    }
+    ModelInvocation invocation = ModelInvocationRowConverter.toAggregate(refreshed);
+    if (invocation.status() != InvocationStatus.RUNNING
+        || invocation.workerLease() == null
+        || !invocation.workerLease().token().equals(workerToken)) {
+      throw new IllegalStateException("claim result does not match requested ownership");
+    }
+    return Optional.of(new ClaimedModelInvocation(invocation, recoveredLease));
+  }
+
+  private static OffsetDateTime addAtPersistencePrecision(
+      OffsetDateTime base, Duration duration, String name) {
+    OffsetDateTime target =
+        ModelInvocationRowConverter.toUtcOffsetDateTime(base.toInstant().plus(duration));
+    if (!target.isAfter(base)) {
+      throw new IllegalArgumentException(name + " must advance PostgreSQL time by at least 1ms");
+    }
+    return target;
+  }
+
+  private static OffsetDateTime max(OffsetDateTime left, OffsetDateTime right) {
+    return left.isAfter(right) ? left : right;
+  }
+
+  private ModelInvocationUpdateOutcome completeTerminal(
+      ClaimedModelInvocation claimed,
+      ProviderResponse result,
+      ModelInvocationError error,
+      Instant lastObservedActivityAt,
+      Instant now,
+      TerminalKind kind) {
+    Objects.requireNonNull(claimed, "claimed");
+    Objects.requireNonNull(lastObservedActivityAt, "lastObservedActivityAt");
+    Objects.requireNonNull(now, "now");
+    ModelInvocationDO row = lockAndValidateOwned(claimed, now);
+    if (row == null) {
+      return ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
+    }
+    Instant persistedNow = ModelInvocationRowConverter.toPersistenceInstant(now);
+    Instant persistedObserved =
+        ModelInvocationRowConverter.toPersistenceInstant(lastObservedActivityAt);
+    Instant durableActivity =
+        Objects.requireNonNull(row.getLastActivityAt(), "lastActivityAt").toInstant();
+    Instant finishedInstant = max(persistedNow, max(persistedObserved, durableActivity));
+    OffsetDateTime finishedOffset =
+        ModelInvocationRowConverter.toUtcOffsetDateTime(finishedInstant);
+    OffsetDateTime lastObservedOffset =
+        ModelInvocationRowConverter.toUtcOffsetDateTime(persistedObserved);
+    OffsetDateTime nowOffset = ModelInvocationRowConverter.toUtcOffsetDateTime(persistedNow);
+
+    int updated;
+    if (kind == TerminalKind.SUCCESS) {
+      updated =
+          invocationMapper.completeSuccess(
+              row.getId(),
+              row.getThreadId(),
+              row.getExecutionEpoch(),
+              claimed.invocation().attempt(),
+              claimed.invocation().workerLease().token(),
+              ModelInvocationRowConverter.encodeResponse(result),
+              lastObservedOffset,
+              finishedOffset,
+              nowOffset);
+    } else if (kind == TerminalKind.FAILURE) {
+      updated =
+          invocationMapper.completeFailure(
+              row.getId(),
+              row.getThreadId(),
+              row.getExecutionEpoch(),
+              claimed.invocation().attempt(),
+              claimed.invocation().workerLease().token(),
+              ModelInvocationRowConverter.encodeError(error),
+              lastObservedOffset,
+              finishedOffset,
+              nowOffset);
+    } else if (kind == TerminalKind.CANCELLED) {
+      updated =
+          invocationMapper.completeCancelled(
+              row.getId(),
+              row.getThreadId(),
+              row.getExecutionEpoch(),
+              claimed.invocation().attempt(),
+              claimed.invocation().workerLease().token(),
+              lastObservedOffset,
+              finishedOffset,
+              nowOffset);
+    } else {
+      updated =
+          invocationMapper.completeUnknown(
+              row.getId(),
+              row.getThreadId(),
+              row.getExecutionEpoch(),
+              claimed.invocation().attempt(),
+              claimed.invocation().workerLease().token(),
+              ModelInvocationRowConverter.encodeError(error),
+              lastObservedOffset,
+              finishedOffset,
+              nowOffset);
+    }
+    if (updated != 1) {
+      return ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
+    }
+
+    int markRunnable =
+        threadMapper.markRunnable(row.getThreadId(), row.getExecutionEpoch(), finishedOffset);
+    if (markRunnable != 1) {
+      // 这是真正的 invariant breach（FK 缺失、Thread execution_epoch 不匹配），让 Spring 回滚。
+      throw new IllegalStateException(
+          "cannot mark thread "
+              + row.getThreadId()
+              + " runnable while finalising invocation "
+              + row.getId());
+    }
+    return ModelInvocationUpdateOutcome.APPLIED;
+  }
+
+  private enum TerminalKind {
+    SUCCESS,
+    FAILURE,
+    CANCELLED,
+    UNKNOWN
+  }
+
+  private static Instant max(Instant left, Instant right) {
+    return left.isAfter(right) ? left : right;
+  }
+}

@@ -241,7 +241,6 @@ Pub/Sub 丢失不会丢工作。低频 recovery 查询 `runnable=true` 或过期
 - terminal 后只保留短 reconnect window；
 - Redis cursor 过期时客户端重新加载 PostgreSQL snapshot；
 - Event 不用于 maxTurns、retry、状态恢复或业务审计；
-- Model delta 必须携带 attempt，snapshot-first 客户端丢弃旧 attempt fragment；
 - Redis 丢失后允许 in-flight 动画缺口，最终 Entry/Invocation 不受影响。
 
 SSE adapter 使用阻塞读取或 Redis listener，不再每 200ms 轮询 PostgreSQL。
