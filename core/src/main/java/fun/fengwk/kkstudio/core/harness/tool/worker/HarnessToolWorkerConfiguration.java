@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.task.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.task.WorkingCopyRevisionResolver;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.CloudToolWorker;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.PlatformToolWorker;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationWorkerStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolRegistry;
@@ -24,7 +24,7 @@ import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
-/** Wires Cloud/Control SPI implementations to the database-backed durable Tool worker. */
+/** Wires Platform SPI implementations to the database-backed durable Tool worker. */
 @Configuration(proxyBeanMethods = false)
 public class HarnessToolWorkerConfiguration {
   @Bean
@@ -65,7 +65,7 @@ public class HarnessToolWorkerConfiguration {
   @Bean
   @ConditionalOnBean(ToolRegistry.class)
   @ConditionalOnMissingBean
-  public CloudToolWorker cloudToolWorker(
+  public PlatformToolWorker platformToolWorker(
       ToolInvocationWorkerStore store,
       ToolInvocationTransactions transactions,
       ToolRegistry registry,
@@ -75,7 +75,7 @@ public class HarnessToolWorkerConfiguration {
       Clock clock,
       @Qualifier("toolWorkerScheduler") ScheduledExecutorService toolWorkerScheduler,
       HarnessLifecycleObservers lifecycleObservers) {
-    return new CloudToolWorker(
+    return new PlatformToolWorker(
         store,
         transactions,
         registry,
@@ -87,6 +87,6 @@ public class HarnessToolWorkerConfiguration {
         lifecycleObservers);
   }
 
-  // Periodic CloudToolWorker polling removed: tools are launched by ThreadProcessor.dispatchDue
+  // Periodic PlatformToolWorker polling removed: tools are launched by ThreadProcessor.dispatchDue
   // and resume via ToolInvocationTransactions.terminate -> ThreadKick.
 }

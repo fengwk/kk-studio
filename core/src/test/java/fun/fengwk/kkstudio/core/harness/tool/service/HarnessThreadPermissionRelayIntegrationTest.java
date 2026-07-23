@@ -47,7 +47,7 @@ import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageDraft;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecordStore;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
@@ -202,7 +202,7 @@ class HarnessThreadPermissionRelayIntegrationTest {
             "write",
             null,
             new ToolParamsSchema(null, Map.of(), Set.of(), false),
-            ToolExecutionMode.CLOUD,
+            ToolExecutionLocation.PLATFORM,
             ToolSideEffect.NON_IDEMPOTENT,
             Duration.ofSeconds(30));
     return ToolBinding.of(descriptor);

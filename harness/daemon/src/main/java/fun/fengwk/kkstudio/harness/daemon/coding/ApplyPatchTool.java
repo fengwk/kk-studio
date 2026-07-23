@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
@@ -40,7 +40,7 @@ public final class ApplyPatchTool extends AbstractCodingTool {
                             "Working directory for resolving relative patch paths. Defaults to the agent's current working directory.")),
                 Set.of("patchText"),
                 false),
-            ToolExecutionMode.ENVIRONMENT,
+            ToolExecutionLocation.ENVIRONMENT,
             ToolSideEffect.NON_IDEMPOTENT,
             Duration.ofMinutes(2)));
   }

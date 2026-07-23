@@ -12,7 +12,7 @@ public record ToolDescriptor(
     String description,
     String rendererKey,
     ToolParamsSchema inputSchema,
-    ToolExecutionMode executionMode,
+    ToolExecutionLocation executionLocation,
     ToolSideEffect sideEffect,
     Duration timeout) {
 
@@ -29,7 +29,7 @@ public record ToolDescriptor(
     }
     rendererKey = rendererKey == null || rendererKey.isBlank() ? name : rendererKey;
     inputSchema = Objects.requireNonNull(inputSchema, "inputSchema");
-    executionMode = Objects.requireNonNull(executionMode, "executionMode");
+    executionLocation = Objects.requireNonNull(executionLocation, "executionLocation");
     sideEffect = Objects.requireNonNull(sideEffect, "sideEffect");
     timeout = Objects.requireNonNull(timeout, "timeout");
     if (timeout.isNegative()) {

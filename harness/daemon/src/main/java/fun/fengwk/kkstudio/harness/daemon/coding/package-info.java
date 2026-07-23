@@ -2,7 +2,7 @@
  * Production Environment Daemon coding tools.
  *
  * <p>Every filesystem operation enters through one canonical environment root boundary; command
- * permission remains a Cloud responsibility while Daemon retains its non-bypassable workdir
+ * permission remains a Platform responsibility while Daemon retains its non-bypassable workdir
  * boundary.
  *
  * <p>Stable capability set: {@code read}, {@code write}, {@code edit}, {@code apply_patch}, {@code

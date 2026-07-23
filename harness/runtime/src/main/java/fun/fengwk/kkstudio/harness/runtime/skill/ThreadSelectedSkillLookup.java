@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Resolves the current Thread Agent's selected skill metadata for CONTROL tools.
+ * Resolves the current Thread Agent's selected skill metadata for PLATFORM tools.
  *
  * <p>Implemented in Core to avoid circular Spring wiring between platform Tool beans and
  * Host-backed Environment gateway components.

@@ -266,7 +266,7 @@ class ToolInvocationTransactionServiceTest {
         base.toolCallId(),
         base.toolName(),
         base.toolVersion(),
-        base.targetType(),
+        base.location(),
         base.environmentName(),
         base.argumentsJson(),
         base.status(),
@@ -308,7 +308,7 @@ class ToolInvocationTransactionServiceTest {
     inv.setToolCallId("call-" + id);
     inv.setToolName("noop");
     inv.setToolVersion("1");
-    inv.setTargetType("CONTROL");
+    inv.setLocation("PLATFORM");
     inv.setArgumentsJson("{}");
     inv.setStatus("RUNNING");
     inv.setPermissionAction("ALLOW");

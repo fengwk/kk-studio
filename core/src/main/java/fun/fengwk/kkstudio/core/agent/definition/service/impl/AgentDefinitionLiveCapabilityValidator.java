@@ -6,7 +6,7 @@ import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 
@@ -20,7 +20,7 @@ import java.util.Set;
 
 /**
  * Validates Agent live Environment / short-name tool / skill selections against the current live
- * registry and registered non-{@link ToolExecutionMode#ENVIRONMENT} platform tools.
+ * registry and registered {@link ToolExecutionLocation#PLATFORM} tools.
  */
 @Component
 final class AgentDefinitionLiveCapabilityValidator {
@@ -103,7 +103,7 @@ final class AgentDefinitionLiveCapabilityValidator {
         .forEach(
             factory -> {
               ToolDescriptor descriptor = factory.descriptor();
-              if (descriptor.executionMode() == ToolExecutionMode.ENVIRONMENT) {
+              if (descriptor.executionLocation() != ToolExecutionLocation.PLATFORM) {
                 return;
               }
               byName

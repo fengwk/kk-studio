@@ -4,7 +4,7 @@ import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 
 import java.io.IOException;
 
-/** Stores complete local tool output outside the bounded model preview. */
+/** Stores complete Environment Tool output outside the bounded model preview. */
 public interface ArtifactSink {
 
   /** Persists bytes and returns their stable reference. */

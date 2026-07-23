@@ -7,13 +7,13 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
@@ -36,10 +36,10 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Asynchronously dispatches at most one durable Cloud/Control invocation per poll. No worker thread
+ * Asynchronously dispatches at most one durable Platform invocation per poll. No worker thread
  * waits for callbacks: callback ownership is validated by the transaction port before every write.
  */
-public final class CloudToolWorker {
+public final class PlatformToolWorker {
   private final ToolInvocationWorkerStore store;
   private final ToolInvocationTransactions transactions;
   private final ToolRegistry registry;
@@ -51,7 +51,7 @@ public final class CloudToolWorker {
   private final HarnessLifecycleObservers lifecycleObservers;
   private final ConcurrentHashMap<Long, Execution> executions = new ConcurrentHashMap<>();
 
-  public CloudToolWorker(
+  public PlatformToolWorker(
       ToolInvocationWorkerStore store,
       ToolInvocationTransactions transactions,
       ToolRegistry registry,
@@ -72,7 +72,7 @@ public final class CloudToolWorker {
         new HarnessLifecycleObservers(List.of()));
   }
 
-  public CloudToolWorker(
+  public PlatformToolWorker(
       ToolInvocationWorkerStore store,
       ToolInvocationTransactions transactions,
       ToolRegistry registry,
@@ -106,8 +106,8 @@ public final class CloudToolWorker {
   }
 
   /**
-   * Event-triggered path: claim and dispatch all currently due Cloud/Control invocations for one
-   * thread (non-blocking callbacks).
+   * Event-triggered path: claim and dispatch all currently due Platform invocations for one thread
+   * (non-blocking callbacks).
    */
   public int dispatchDueForThread(String workerId, long threadId) {
     requireNonBlank(workerId, "workerId");
@@ -146,8 +146,8 @@ public final class CloudToolWorker {
 
   private void dispatch(ClaimedToolInvocation claimed) {
     ToolInvocation invocation = claimed.invocation();
-    if (!supportedTarget(invocation)) {
-      fail(claimed, "Tool worker cannot execute target " + invocation.targetType() + ".");
+    if (!supportedLocation(invocation)) {
+      fail(claimed, "Tool worker cannot execute location " + invocation.location() + ".");
       return;
     }
     // A reclaimed non-idempotent call may already have produced an external side effect. UNKNOWN
@@ -189,8 +189,7 @@ public final class CloudToolWorker {
     if (!transactions.start(claimed, clock.instant())) {
       return;
     }
-    ToolBinding binding =
-        new ToolBinding(tool.descriptor(), invocation.targetType(), invocation.environmentName());
+    ToolBinding binding = ToolBinding.of(tool.descriptor());
     ToolCall call =
         new ToolCall(invocation.toolCallId(), invocation.toolName(), invocation.argumentsJson());
     Execution execution = new Execution(claimed, binding, call);
@@ -216,14 +215,12 @@ public final class CloudToolWorker {
   private boolean descriptorMatches(ToolInvocation invocation, Tool tool) {
     return tool.descriptor().name().equals(invocation.toolName())
         && tool.descriptor().version().equals(invocation.toolVersion())
-        && ToolTargetType.fromExecutionMode(tool.descriptor().executionMode())
-            == invocation.targetType()
+        && tool.descriptor().executionLocation() == invocation.location()
         && tool.descriptor().sideEffect() == invocation.sideEffect();
   }
 
-  private boolean supportedTarget(ToolInvocation invocation) {
-    return invocation.targetType() == ToolTargetType.CLOUD
-        || invocation.targetType() == ToolTargetType.CONTROL;
+  private boolean supportedLocation(ToolInvocation invocation) {
+    return invocation.location() == ToolExecutionLocation.PLATFORM;
   }
 
   private void fail(ClaimedToolInvocation claimed, String message) {

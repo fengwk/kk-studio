@@ -32,7 +32,7 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
@@ -225,7 +225,7 @@ class CoreHarnessExtensionTest {
             "test tool",
             name,
             new ToolParamsSchema("", Map.of(), Set.of(), false),
-            ToolExecutionMode.CONTROL,
+            ToolExecutionLocation.PLATFORM,
             ToolSideEffect.READ_ONLY,
             Duration.ZERO);
     return new Tool() {

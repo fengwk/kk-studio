@@ -1,5 +1,5 @@
 /**
- * Cloud 与 Environment Daemon 共享的 WebSocket JSON wire 协议。
+ * Platform 与 Environment Daemon 共享的 WebSocket JSON wire 协议。
  *
  * <p>Envelope 只描述传输顺序和关联标识；具体 payload 在协议版本内按 message type 解释。scope 字段为实时唯一 {@code
  * environmentName}，不再使用持久数值 environment id。

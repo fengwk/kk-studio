@@ -21,13 +21,13 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.CloudToolWorker;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.PlatformToolWorker;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationWorkerStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolRegistry;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorkerConfig;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
@@ -88,8 +88,8 @@ class HarnessExtensionConfigurationTest {
       ToolRegistry registry = toolWorkerConfiguration.toolRegistry(host);
       assertSame(tool, registry.find("configured", "1").orElseThrow());
       assertTrue(registry.find("missing", "1").isEmpty());
-      CloudToolWorker cloudToolWorker =
-          toolWorkerConfiguration.cloudToolWorker(
+      PlatformToolWorker platformToolWorker =
+          toolWorkerConfiguration.platformToolWorker(
               mock(ToolInvocationWorkerStore.class),
               mock(ToolInvocationTransactions.class),
               registry,
@@ -99,7 +99,7 @@ class HarnessExtensionConfigurationTest {
               Clock.systemUTC(),
               scheduler,
               new HarnessLifecycleObservers(host.lifecycleObservers()));
-      assertNotNull(cloudToolWorker);
+      assertNotNull(platformToolWorker);
     } finally {
       scheduler.shutdownNow();
       host.close();
@@ -137,7 +137,7 @@ class HarnessExtensionConfigurationTest {
             "test tool",
             name,
             new ToolParamsSchema("", Map.of(), Set.of(), false),
-            ToolExecutionMode.CONTROL,
+            ToolExecutionLocation.PLATFORM,
             ToolSideEffect.READ_ONLY,
             Duration.ZERO);
     return new Tool() {

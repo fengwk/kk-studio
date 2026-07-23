@@ -18,12 +18,11 @@ import fun.fengwk.kkstudio.harness.runtime.tool.AfterToolCallInterceptor;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
@@ -48,7 +47,7 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-class CloudToolWorkerTest {
+class PlatformToolWorkerTest {
   private static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
   private final List<ScheduledExecutorService> schedulers = new ArrayList<>();
 
@@ -498,11 +497,11 @@ class CloudToolWorkerTest {
     assertTrue(toolCompletions(fixture).isEmpty());
   }
 
-  /** Environment invocations are never dispatched by the Cloud/Control worker. */
+  /** Environment invocations are never dispatched by the Platform worker. */
   @Test
-  void rejectsNonCloudTargetBeforeToolExecution() throws Exception {
+  void rejectsNonPlatformLocationBeforeToolExecution() throws Exception {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY, NOW.plusSeconds(30));
-    fixture.store.current = copyWithEnvironmentTarget(fixture.store.current);
+    fixture.store.current = copyWithEnvironmentLocation(fixture.store.current);
 
     fixture.worker.executeNext("worker-a");
 
@@ -510,7 +509,7 @@ class CloudToolWorkerTest {
     assertEquals(0, fixture.tool.executions);
     assertEquals(ToolInvocationStatus.FAILED, fixture.transactions.status);
     assertToolCompletion(
-        fixture, ToolInvocationStatus.FAILED, "Tool worker cannot execute target ENVIRONMENT.");
+        fixture, ToolInvocationStatus.FAILED, "Tool worker cannot execute location ENVIRONMENT.");
   }
 
   /** A Tool error callback is terminalized asynchronously with its diagnostic message. */
@@ -589,7 +588,7 @@ class CloudToolWorkerTest {
   }
 
   private static List<String> texts(List<ToolResult> results) {
-    return results.stream().map(CloudToolWorkerTest::text).toList();
+    return results.stream().map(PlatformToolWorkerTest::text).toList();
   }
 
   private static void assertToolCompletion(
@@ -649,7 +648,7 @@ class CloudToolWorkerTest {
         source.toolCallId(),
         source.toolName(),
         source.toolVersion(),
-        source.targetType(),
+        source.location(),
         source.environmentName(),
         source.argumentsJson(),
         status,
@@ -677,7 +676,7 @@ class CloudToolWorkerTest {
         source.toolCallId(),
         source.toolName(),
         source.toolVersion(),
-        source.targetType(),
+        source.location(),
         source.environmentName(),
         source.argumentsJson(),
         source.status(),
@@ -696,7 +695,7 @@ class CloudToolWorkerTest {
         source.updatedAt());
   }
 
-  private ToolInvocation copyWithEnvironmentTarget(ToolInvocation source) {
+  private ToolInvocation copyWithEnvironmentLocation(ToolInvocation source) {
     return new ToolInvocation(
         source.id(),
         source.threadId(),
@@ -705,7 +704,7 @@ class CloudToolWorkerTest {
         source.toolCallId(),
         source.toolName(),
         source.toolVersion(),
-        ToolTargetType.ENVIRONMENT,
+        ToolExecutionLocation.ENVIRONMENT,
         "env-7",
         source.argumentsJson(),
         source.status(),
@@ -733,7 +732,7 @@ class CloudToolWorkerTest {
         source.toolCallId(),
         source.toolName(),
         source.toolVersion(),
-        source.targetType(),
+        source.location(),
         source.environmentName(),
         source.argumentsJson(),
         source.status(),
@@ -762,7 +761,7 @@ class CloudToolWorkerTest {
     private HarnessLifecycleObservers lifecycleObservers =
         new HarnessLifecycleObservers(List.of(observations::add));
     private ToolRegistry registry;
-    private CloudToolWorker worker;
+    private PlatformToolWorker worker;
 
     private Fixture(ToolSideEffect sideEffect, Instant deadline) {
       tool = new RecordingTool(descriptor(sideEffect));
@@ -778,11 +777,11 @@ class CloudToolWorkerTest {
       worker = newWorker(store, config);
     }
 
-    private CloudToolWorker newWorker(
+    private PlatformToolWorker newWorker(
         ToolInvocationWorkerStore claimStore, ToolWorkerConfig config) {
       ScheduledExecutorService scheduler = new ScheduledThreadPoolExecutor(2);
       schedulers.add(scheduler);
-      return new CloudToolWorker(
+      return new PlatformToolWorker(
           claimStore,
           transactions,
           registry,
@@ -804,7 +803,7 @@ class CloudToolWorkerTest {
         "call-1",
         descriptor.name(),
         descriptor.version(),
-        ToolTargetType.CLOUD,
+        ToolExecutionLocation.PLATFORM,
         null,
         "{}",
         ToolInvocationStatus.RUNNING,
@@ -830,7 +829,7 @@ class CloudToolWorkerTest {
         "test tool",
         null,
         new ToolParamsSchema("input", Map.of(), Set.of(), false),
-        ToolExecutionMode.CLOUD,
+        ToolExecutionLocation.PLATFORM,
         sideEffect,
         Duration.ofSeconds(30));
   }

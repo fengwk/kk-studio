@@ -19,8 +19,8 @@ import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ClaimedToolInvocation;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
 import java.time.Duration;
@@ -95,7 +95,7 @@ class DatabaseEnvironmentToolInvocationWorkerStoreTest {
         IllegalArgumentException.class,
         () ->
             store.heartbeat(
-                new ClaimedToolInvocation(cloudInvocation(), false), NOW, LEASE_DURATION));
+                new ClaimedToolInvocation(platformInvocation(), false), NOW, LEASE_DURATION));
 
     ClaimedToolInvocation environmentClaimed =
         new ClaimedToolInvocation(environmentInvocation(), false);
@@ -121,14 +121,14 @@ class DatabaseEnvironmentToolInvocationWorkerStoreTest {
   }
 
   private static ToolInvocation environmentInvocation() {
-    return invocation(ToolTargetType.ENVIRONMENT, ENVIRONMENT_NAME);
+    return invocation(ToolExecutionLocation.ENVIRONMENT, ENVIRONMENT_NAME);
   }
 
-  private static ToolInvocation cloudInvocation() {
-    return invocation(ToolTargetType.CLOUD, null);
+  private static ToolInvocation platformInvocation() {
+    return invocation(ToolExecutionLocation.PLATFORM, null);
   }
 
-  private static ToolInvocation invocation(ToolTargetType targetType, String environmentName) {
+  private static ToolInvocation invocation(ToolExecutionLocation location, String environmentName) {
     return new ToolInvocation(
         INVOCATION_ID,
         101L,
@@ -137,7 +137,7 @@ class DatabaseEnvironmentToolInvocationWorkerStoreTest {
         "tool-call",
         "read",
         "1",
-        targetType,
+        location,
         environmentName,
         "{}",
         ToolInvocationStatus.RUNNING,

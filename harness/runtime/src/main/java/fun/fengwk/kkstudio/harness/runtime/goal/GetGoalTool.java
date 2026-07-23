@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.goal;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
@@ -17,7 +17,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/** CONTROL tool: read the durable Thread goal. */
+/** PLATFORM tool: read the durable Thread goal. */
 public final class GetGoalTool implements Tool {
   public static final String NAME = "get_goal";
   public static final String VERSION = "1";
@@ -29,7 +29,7 @@ public final class GetGoalTool implements Tool {
           GoalToolPrompts.load("goal-get-tool.md"),
           NAME,
           new ToolParamsSchema("Read the current Thread goal.", Map.of(), Set.of(), false),
-          ToolExecutionMode.CONTROL,
+          ToolExecutionLocation.PLATFORM,
           ToolSideEffect.READ_ONLY,
           Duration.ZERO);
 
@@ -46,13 +46,14 @@ public final class GetGoalTool implements Tool {
 
   @Override
   public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
-    return ControlToolSupport.complete(request, listener, this::run);
+    return PlatformToolSupport.complete(request, listener, this::run);
   }
 
   private ToolResult run(ToolExecutionRequest request) {
-    JsonNode args = ControlToolSupport.requireObjectArgs(request.call().argumentsJson());
-    ControlToolSupport.rejectUnknownFields(args, Set.of());
+    JsonNode args = PlatformToolSupport.requireObjectArgs(request.call().argumentsJson());
+    PlatformToolSupport.rejectUnknownFields(args, Set.of());
     ThreadGoal goal = store.find(request.context().threadId()).orElse(null);
-    return ControlToolSupport.success(request.call().id(), ControlToolSupport.formatGetGoal(goal));
+    return PlatformToolSupport.success(
+        request.call().id(), PlatformToolSupport.formatGetGoal(goal));
   }
 }

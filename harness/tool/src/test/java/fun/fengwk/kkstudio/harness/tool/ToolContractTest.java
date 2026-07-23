@@ -62,7 +62,7 @@ class ToolContractTest {
                 "Search",
                 null,
                 schema(),
-                ToolExecutionMode.CLOUD,
+                ToolExecutionLocation.PLATFORM,
                 ToolSideEffect.READ_ONLY,
                 Duration.ZERO));
   }
@@ -129,7 +129,7 @@ class ToolContractTest {
         "Search the repository",
         rendererKey,
         schema(),
-        ToolExecutionMode.CLOUD,
+        ToolExecutionLocation.PLATFORM,
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(10));
   }

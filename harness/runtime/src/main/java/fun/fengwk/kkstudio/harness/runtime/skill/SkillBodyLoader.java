@@ -7,7 +7,7 @@ import java.util.concurrent.CompletableFuture;
 /**
  * Loads full SKILL.md body from a named Environment without exposing local paths.
  *
- * <p>Thin runtime port over Core's Environment skill loader so CONTROL tools do not depend on Host
+ * <p>Thin runtime port over Core's Environment skill loader so PLATFORM tools do not depend on Host
  * lifecycle beans directly.
  */
 public interface SkillBodyLoader {

@@ -611,7 +611,7 @@ class HarnessThreadTransactionServiceIntegrationTest {
     invocation.setToolCallId("waiting-" + threadId);
     invocation.setToolName("write");
     invocation.setToolVersion("1");
-    invocation.setTargetType("CONTROL");
+    invocation.setLocation("PLATFORM");
     invocation.setArgumentsJson("{}");
     invocation.setStatus("WAITING_APPROVAL");
     invocation.setPermissionAction("ASK");

@@ -19,17 +19,15 @@ import java.time.ZoneOffset;
 import java.util.Objects;
 import java.util.Optional;
 
-/**
- * Database claim port for Cloud/Control leases; all compare-and-set predicates live in the mapper.
- */
+/** Database claim port for Platform leases; all compare-and-set predicates live in the mapper. */
 @Repository
-public class DatabaseToolInvocationWorkerStore implements ToolInvocationWorkerStore {
+public class DatabasePlatformToolInvocationWorkerStore implements ToolInvocationWorkerStore {
   private static final int MAX_CLAIM_CONTENTION_RETRIES = 64;
 
   private final ToolInvocationMapper invocationMapper;
   private final MysqlToolInvocationStore invocationStore;
 
-  public DatabaseToolInvocationWorkerStore(
+  public DatabasePlatformToolInvocationWorkerStore(
       ToolInvocationMapper invocationMapper, MysqlToolInvocationStore invocationStore) {
     this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
     this.invocationStore = Objects.requireNonNull(invocationStore, "invocationStore");
@@ -52,7 +50,7 @@ public class DatabaseToolInvocationWorkerStore implements ToolInvocationWorkerSt
     // Each failed CAS rereads a current candidate in a separate autocommit statement. This avoids
     // retrying a stale REPEATABLE READ snapshot while another worker is claiming due work.
     for (int retry = 0; retry < MAX_CLAIM_CONTENTION_RETRIES; retry++) {
-      ToolInvocationDO candidate = invocationMapper.findClaimCandidate(timestamp);
+      ToolInvocationDO candidate = invocationMapper.findPlatformClaimCandidate(timestamp);
       if (candidate == null) {
         return Optional.empty();
       }
@@ -102,7 +100,7 @@ public class DatabaseToolInvocationWorkerStore implements ToolInvocationWorkerSt
     LocalDateTime leaseUntil = utc(now.plus(leaseDuration));
     for (int retry = 0; retry < MAX_CLAIM_CONTENTION_RETRIES; retry++) {
       ToolInvocationDO candidate =
-          invocationMapper.findClaimCandidateForThread(threadId, timestamp);
+          invocationMapper.findPlatformClaimCandidateForThread(threadId, timestamp);
       if (candidate == null) {
         return Optional.empty();
       }

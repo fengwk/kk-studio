@@ -6,7 +6,7 @@ import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
 import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.CloudToolWorker;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.PlatformToolWorker;
 
 import java.time.Instant;
 import java.util.List;
@@ -14,8 +14,8 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Event-triggered tool port for ThreadProcessor: list unresolved invocations, dispatch due
- * Cloud/Control work for the owning thread, and detect terminal results awaiting entry apply.
+ * Event-triggered tool port for ThreadProcessor: list unresolved invocations, dispatch due Platform
+ * work for the owning thread, and detect terminal results awaiting entry apply.
  *
  * <p>Pending-apply is decided solely from this thread's head and its own invocations (not tree-wide
  * children), so sibling threads sharing the same assistant head do not block each other.
@@ -24,15 +24,15 @@ import java.util.UUID;
 public class DatabaseThreadToolPort implements ThreadProcessor.ThreadToolPort {
   private final MysqlToolInvocationStore invocationStore;
   private final ToolInvocationMapper invocationMapper;
-  private final CloudToolWorker cloudToolWorker;
+  private final PlatformToolWorker platformToolWorker;
 
   public DatabaseThreadToolPort(
       MysqlToolInvocationStore invocationStore,
       ToolInvocationMapper invocationMapper,
-      CloudToolWorker cloudToolWorker) {
+      PlatformToolWorker platformToolWorker) {
     this.invocationStore = Objects.requireNonNull(invocationStore, "invocationStore");
     this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
-    this.cloudToolWorker = Objects.requireNonNull(cloudToolWorker, "cloudToolWorker");
+    this.platformToolWorker = Objects.requireNonNull(platformToolWorker, "platformToolWorker");
   }
 
   @Override
@@ -49,7 +49,7 @@ public class DatabaseThreadToolPort implements ThreadProcessor.ThreadToolPort {
   public int dispatchDue(long threadId, Instant now) {
     Objects.requireNonNull(now, "now");
     String workerId = "thread-tool-" + UUID.randomUUID();
-    return cloudToolWorker.dispatchDueForThread(workerId, threadId);
+    return platformToolWorker.dispatchDueForThread(workerId, threadId);
   }
 
   @Override

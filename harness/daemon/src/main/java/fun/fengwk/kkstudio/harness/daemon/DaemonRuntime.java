@@ -18,7 +18,7 @@ import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
 import fun.fengwk.kkstudio.harness.daemon.transport.JdkWebSocketTransport;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonArtifactContentWriter;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
@@ -257,9 +257,9 @@ public final class DaemonRuntime implements AutoCloseable {
     DaemonToolCapabilitiesCodec capabilitiesCodec = new DaemonToolCapabilitiesCodec();
     List<ToolDescriptor> tools = new ArrayList<>(toolRegistry.descriptors());
     for (ToolDescriptor descriptor : tools) {
-      if (descriptor.executionMode() != ToolExecutionMode.ENVIRONMENT) {
+      if (descriptor.executionLocation() != ToolExecutionLocation.ENVIRONMENT) {
         throw new IllegalStateException(
-            "daemon tool must use ENVIRONMENT execution mode: " + descriptor.name());
+            "daemon tool must use ENVIRONMENT execution location: " + descriptor.name());
       }
     }
     List<DaemonSkillDescriptor> skills = new ArrayList<>(skillRegistry.descriptors());
@@ -309,7 +309,7 @@ public final class DaemonRuntime implements AutoCloseable {
         }
         case WELCOME, ACK, ERROR -> {
           connection.acceptInboundEnvelope(identity);
-          // Cloud control messages do not alter local invocation facts.
+          // Gateway protocol messages do not alter Daemon invocation facts.
         }
         default -> throw new DaemonProtocolException(
             "unexpected inbound messageType: " + envelope.messageType());
@@ -342,11 +342,13 @@ public final class DaemonRuntime implements AutoCloseable {
           toolRegistry
               .find(payload.toolName())
               .orElseThrow(
-                  () -> new IllegalArgumentException("unknown local tool: " + payload.toolName()));
+                  () ->
+                      new IllegalArgumentException(
+                          "unknown environment tool: " + payload.toolName()));
       ToolDescriptor descriptor = tool.descriptor();
       if (!descriptor.version().equals(payload.toolVersion())) {
         throw new IllegalArgumentException(
-            "toolVersion does not match local descriptor: " + payload.toolVersion());
+            "toolVersion does not match environment descriptor: " + payload.toolVersion());
       }
       Duration timeout = resolveTimeout(payload.timeout(), descriptor);
       ToolExecutionRequest request =

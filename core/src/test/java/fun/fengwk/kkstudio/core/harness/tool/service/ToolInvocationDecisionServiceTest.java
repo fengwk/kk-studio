@@ -405,7 +405,7 @@ class ToolInvocationDecisionServiceTest {
     inv.setToolCallId("call-" + id);
     inv.setToolName("write");
     inv.setToolVersion("1");
-    inv.setTargetType("CONTROL");
+    inv.setLocation("PLATFORM");
     inv.setArgumentsJson("{}");
     inv.setStatus(ToolInvocationStatus.WAITING_APPROVAL.name());
     inv.setPermissionAction("ASK");

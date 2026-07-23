@@ -39,9 +39,8 @@ import fun.fengwk.kkstudio.harness.runtime.extension.ToolFactory;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnResources;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
@@ -278,7 +277,7 @@ class DatabaseTurnResourceResolverTest {
     // Registered ENVIRONMENT tools are not platform tools; short name needs selected Environment.
     AgentRuntimeConfig environmentTool = config.withTools(List.of("shell"));
     try (Fixture fixture =
-        new Fixture(factory, List.of(tool("shell", "1", ToolExecutionMode.ENVIRONMENT)))) {
+        new Fixture(factory, List.of(tool("shell", "1", ToolExecutionLocation.ENVIRONMENT)))) {
       fixture.session();
       fixture.model(model(11L, 22L, MODEL_CONFIG));
       fixture.provider(provider(22L, AgentProviderType.openai));
@@ -295,10 +294,10 @@ class DatabaseTurnResourceResolverTest {
         new CapturingProviderFactory(
             ProviderType.OPENAI,
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
-    Tool createGoal = tool("create_goal", "1", ToolExecutionMode.CONTROL);
-    Tool getGoal = tool("get_goal", "1", ToolExecutionMode.CONTROL);
-    Tool updateGoal = tool("update_goal", "1", ToolExecutionMode.CONTROL);
-    Tool loadSkill = tool("load_skill", "1", ToolExecutionMode.CONTROL);
+    Tool createGoal = tool("create_goal", "1", ToolExecutionLocation.PLATFORM);
+    Tool getGoal = tool("get_goal", "1", ToolExecutionLocation.PLATFORM);
+    Tool updateGoal = tool("update_goal", "1", ToolExecutionLocation.PLATFORM);
+    Tool loadSkill = tool("load_skill", "1", ToolExecutionLocation.PLATFORM);
     Tool read = tool("read", "1");
 
     try (Fixture fixture =
@@ -330,7 +329,7 @@ class DatabaseTurnResourceResolverTest {
           withSkills.toolBindings().stream().map(b -> b.descriptor().name()).toList());
       assertTrue(
           withSkills.toolBindings().stream()
-              .allMatch(binding -> binding.targetType() == ToolTargetType.CONTROL));
+              .allMatch(binding -> binding.location() == ToolExecutionLocation.PLATFORM));
     }
   }
 
@@ -349,7 +348,7 @@ class DatabaseTurnResourceResolverTest {
             "shell tool",
             "renderer",
             new ToolParamsSchema("", Map.of(), Set.of(), false),
-            ToolExecutionMode.ENVIRONMENT,
+            ToolExecutionLocation.ENVIRONMENT,
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(5));
     ToolDescriptor envRead =
@@ -359,7 +358,7 @@ class DatabaseTurnResourceResolverTest {
             "env read",
             "read",
             new ToolParamsSchema("", Map.of(), Set.of(), false),
-            ToolExecutionMode.ENVIRONMENT,
+            ToolExecutionLocation.ENVIRONMENT,
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(5));
 
@@ -376,10 +375,10 @@ class DatabaseTurnResourceResolverTest {
               runtimeConfig("11", "quality", "local-dev", List.of("read", "shell")));
 
       assertEquals(2, resources.toolBindings().size());
-      assertEquals(ToolTargetType.CLOUD, resources.toolBindings().get(0).targetType());
+      assertEquals(ToolExecutionLocation.PLATFORM, resources.toolBindings().get(0).location());
       assertEquals("read", resources.toolBindings().get(0).descriptor().name());
       assertEquals("1", resources.toolBindings().get(0).descriptor().version());
-      assertEquals(ToolTargetType.ENVIRONMENT, resources.toolBindings().get(1).targetType());
+      assertEquals(ToolExecutionLocation.ENVIRONMENT, resources.toolBindings().get(1).location());
       assertEquals("local-dev", resources.toolBindings().get(1).environmentName());
       assertEquals("shell", resources.toolBindings().get(1).descriptor().name());
     }
@@ -418,7 +417,7 @@ class DatabaseTurnResourceResolverTest {
         new CapturingProviderFactory(
             ProviderType.OPENAI,
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
-    Tool shellCloud = tool("shell", "1", ToolExecutionMode.CLOUD);
+    Tool shellPlatform = tool("shell", "1", ToolExecutionLocation.PLATFORM);
     ToolDescriptor shellEnv =
         new ToolDescriptor(
             "shell",
@@ -426,10 +425,10 @@ class DatabaseTurnResourceResolverTest {
             "env shell",
             "shell",
             new ToolParamsSchema("", Map.of(), Set.of(), false),
-            ToolExecutionMode.ENVIRONMENT,
+            ToolExecutionLocation.ENVIRONMENT,
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(5));
-    try (Fixture fixture = new Fixture(factory, List.of(shellCloud))) {
+    try (Fixture fixture = new Fixture(factory, List.of(shellPlatform))) {
       fixture.session();
       fixture.model(model(11L, 22L, MODEL_CONFIG));
       fixture.provider(provider(22L, AgentProviderType.openai));
@@ -515,10 +514,10 @@ class DatabaseTurnResourceResolverTest {
   }
 
   private static Tool tool(String name, String version) {
-    return tool(name, version, ToolExecutionMode.CLOUD);
+    return tool(name, version, ToolExecutionLocation.PLATFORM);
   }
 
-  private static Tool tool(String name, String version, ToolExecutionMode executionMode) {
+  private static Tool tool(String name, String version, ToolExecutionLocation location) {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             name,
@@ -526,7 +525,7 @@ class DatabaseTurnResourceResolverTest {
             "test tool",
             name,
             new ToolParamsSchema("", Map.of(), Set.of(), false),
-            executionMode,
+            location,
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(30));
     return new Tool() {

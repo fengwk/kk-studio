@@ -25,7 +25,6 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ClaimedToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
@@ -34,7 +33,7 @@ import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
@@ -730,7 +729,7 @@ class EnvironmentDaemonGatewayTest {
         "provider-call",
         "read",
         "1",
-        ToolTargetType.ENVIRONMENT,
+        ToolExecutionLocation.ENVIRONMENT,
         ENVIRONMENT_NAME,
         "{}",
         ToolInvocationStatus.RUNNING,
@@ -758,7 +757,7 @@ class EnvironmentDaemonGatewayTest {
         source.toolCallId(),
         source.toolName(),
         source.toolVersion(),
-        source.targetType(),
+        source.location(),
         source.environmentName(),
         source.argumentsJson(),
         status,
@@ -786,7 +785,7 @@ class EnvironmentDaemonGatewayTest {
         source.toolCallId(),
         source.toolName(),
         source.toolVersion(),
-        source.targetType(),
+        source.location(),
         source.environmentName(),
         source.argumentsJson(),
         source.status(),
@@ -814,7 +813,7 @@ class EnvironmentDaemonGatewayTest {
         source.toolCallId(),
         source.toolName(),
         source.toolVersion(),
-        source.targetType(),
+        source.location(),
         source.environmentName(),
         argumentsJson,
         source.status(),
@@ -840,7 +839,7 @@ class EnvironmentDaemonGatewayTest {
         "read",
         "read",
         new ToolParamsSchema(null, Map.of(), Set.of(), false),
-        ToolExecutionMode.ENVIRONMENT,
+        ToolExecutionLocation.ENVIRONMENT,
         sideEffect,
         Duration.ofSeconds(30));
   }

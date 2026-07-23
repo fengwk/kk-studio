@@ -5,7 +5,7 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolArgumentsValidator;
 import java.util.Objects;
 import java.util.Set;
 
-/** Cloud 与 Daemon 间每个 JSON 消息的版本化 envelope。 */
+/** Platform 与 Daemon 间每个 JSON 消息的版本化 envelope。 */
 public record DaemonEnvelope(
     int protocolVersion,
     DaemonMessageType messageType,

@@ -120,7 +120,7 @@ Observer 按 Host 顺序调用。单个 observer 的 `RuntimeException` 会在�
 - OpenAI Responses Provider factory
 - Anthropic Provider factory
 - Google Provider factory
-- Spring 提供的非 Environment Tool factories（含平台 CONTROL：`task`、`load_skill`、`create_goal`、`get_goal`、`update_goal`）
+- Spring 提供的 PLATFORM Tool factories（含 `task`、`load_skill`、`create_goal`、`get_goal`、`update_goal`）
 
 Spring Tool 列表在 contribution 前按 descriptor `name`、`version` 排序。Tool registry 只从 Host factory lookup 创建工具实例。
 

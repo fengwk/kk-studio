@@ -7,7 +7,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolArraySchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolBooleanSchema;
@@ -34,14 +34,15 @@ import java.util.TreeSet;
 /**
  * Daemon v1 {@code CAPABILITIES} payload 的共享严格 codec。
  *
- * <p>Cloud 与 Daemon 必须使用同一个 codec 把 tools 与 skills 编码为 canonical wire JSON，并在收到该 JSON 时还原为相同结构，避免
- * Cloud 侧的 capability 解析与 Daemon 侧的发序列化在结构上产生漂移。
+ * <p>Platform 与 Daemon 必须使用同一个 codec 把 tools 与 skills 编码为 canonical wire JSON，并在收到该 JSON
+ * 时还原为相同结构，避免 Platform 侧的 capability 解析与 Daemon 侧的序列化在结构上产生漂移。
  *
  * <p>codec 在边界拒绝：
  *
  * <ul>
  *   <li>未知顶层字段、未知 descriptor / schema / skill 字段、未知 schema {@code type}；
- *   <li>{@link ToolExecutionMode} 不是 {@code ENVIRONMENT} 的 descriptor（cloud 只能寻址 Environment）；
+ *   <li>{@link ToolExecutionLocation} 不是 {@code ENVIRONMENT} 的 descriptor（Daemon 只发布 Environment
+ *       Tool）；
  *   <li>重复的 {@code name@version} tool capability 或重复 skill {@code name}；
  *   <li>错误的 JSON 类型（如非 string 的 enum / required 元素，非 array 的 enum / required，非 object 的 properties
  *       / items）；
@@ -73,9 +74,9 @@ public final class DaemonToolCapabilitiesCodec {
         if (descriptor == null) {
           throw new DaemonProtocolException("CAPABILITIES descriptor must not be null");
         }
-        if (descriptor.executionMode() != ToolExecutionMode.ENVIRONMENT) {
+        if (descriptor.executionLocation() != ToolExecutionLocation.ENVIRONMENT) {
           throw new DaemonProtocolException(
-              "CAPABILITIES descriptor executionMode must be ENVIRONMENT: "
+              "CAPABILITIES descriptor executionLocation must be ENVIRONMENT: "
                   + descriptor.name()
                   + "@"
                   + descriptor.version());
@@ -166,7 +167,7 @@ public final class DaemonToolCapabilitiesCodec {
     target.put("version", descriptor.version());
     target.put("description", descriptor.description());
     target.put("rendererKey", descriptor.rendererKey());
-    target.put("executionMode", descriptor.executionMode().name());
+    target.put("executionLocation", descriptor.executionLocation().name());
     target.put("sideEffect", descriptor.sideEffect().name());
     target.put("timeoutMillis", descriptor.timeout().toMillis());
     target.set("inputSchema", writeParamsSchema(descriptor.inputSchema()));
@@ -265,7 +266,7 @@ public final class DaemonToolCapabilitiesCodec {
             "version",
             "description",
             "rendererKey",
-            "executionMode",
+            "executionLocation",
             "sideEffect",
             "timeoutMillis",
             "inputSchema");
@@ -274,10 +275,10 @@ public final class DaemonToolCapabilitiesCodec {
     String version = requiredText(obj, "version", context);
     String description = requiredText(obj, "description", context);
     String rendererKey = requiredText(obj, "rendererKey", context);
-    ToolExecutionMode executionMode = readExecutionMode(obj, context);
-    if (executionMode != ToolExecutionMode.ENVIRONMENT) {
+    ToolExecutionLocation executionLocation = readExecutionLocation(obj, context);
+    if (executionLocation != ToolExecutionLocation.ENVIRONMENT) {
       throw new DaemonProtocolException(
-          context + " executionMode must be ENVIRONMENT: " + name + "@" + version);
+          context + " executionLocation must be ENVIRONMENT: " + name + "@" + version);
     }
     ToolSideEffect sideEffect = readSideEffect(obj, context);
     Duration timeout = Duration.ofMillis(requiredNonNegativeLong(obj, "timeoutMillis", context));
@@ -288,7 +289,14 @@ public final class DaemonToolCapabilitiesCodec {
     }
     ToolParamsSchema inputSchema = readParamsSchema((JsonNode) inputSchemaNode, context);
     return constructDescriptor(
-        name, version, description, rendererKey, inputSchema, executionMode, sideEffect, timeout);
+        name,
+        version,
+        description,
+        rendererKey,
+        inputSchema,
+        executionLocation,
+        sideEffect,
+        timeout);
   }
 
   /**
@@ -301,12 +309,19 @@ public final class DaemonToolCapabilitiesCodec {
       String description,
       String rendererKey,
       ToolParamsSchema inputSchema,
-      ToolExecutionMode executionMode,
+      ToolExecutionLocation executionLocation,
       ToolSideEffect sideEffect,
       Duration timeout) {
     try {
       return new ToolDescriptor(
-          name, version, description, rendererKey, inputSchema, executionMode, sideEffect, timeout);
+          name,
+          version,
+          description,
+          rendererKey,
+          inputSchema,
+          executionLocation,
+          sideEffect,
+          timeout);
     } catch (IllegalArgumentException error) {
       throw new DaemonProtocolException(
           "CAPABILITIES descriptor validation failed for "
@@ -319,12 +334,12 @@ public final class DaemonToolCapabilitiesCodec {
     }
   }
 
-  private static ToolExecutionMode readExecutionMode(ObjectNode obj, String context) {
-    String value = requiredText(obj, "executionMode", context);
+  private static ToolExecutionLocation readExecutionLocation(ObjectNode obj, String context) {
+    String value = requiredText(obj, "executionLocation", context);
     try {
-      return ToolExecutionMode.valueOf(value);
+      return ToolExecutionLocation.valueOf(value);
     } catch (IllegalArgumentException error) {
-      throw new DaemonProtocolException(context + " unknown executionMode: " + value, error);
+      throw new DaemonProtocolException(context + " unknown executionLocation: " + value, error);
     }
   }
 

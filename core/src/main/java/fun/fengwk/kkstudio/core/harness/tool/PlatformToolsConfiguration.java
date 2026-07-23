@@ -16,11 +16,11 @@ import fun.fengwk.kkstudio.harness.runtime.skill.ThreadSelectedSkillLookup;
 import java.time.Clock;
 
 /**
- * Wires platform CONTROL tools ({@code load_skill}, goal tools) as Spring {@code Tool} beans for
- * {@code CoreHarnessExtension} collection.
+ * Wires platform tools ({@code load_skill}, goal tools) as Spring {@code Tool} beans for {@code
+ * CoreHarnessExtension} collection.
  */
 @Configuration(proxyBeanMethods = false)
-public class PlatformControlToolsConfiguration {
+public class PlatformToolsConfiguration {
 
   @Bean
   @ConditionalOnBean(GoalStore.class)

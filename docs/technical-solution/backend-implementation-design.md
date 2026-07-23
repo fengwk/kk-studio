@@ -107,7 +107,7 @@ Thread Event SSE 先重放 durable events，再监听未来轮询结果；事件
 
 ## Tool、Environment 与 Artifact
 
-Tool Invocation 在数据库中经历权限、lease、partial 与 terminal 状态。Cloud Tool 由 ThreadProcessor `dispatchDue` 事件触发执行；Environment Tool 由 gateway 分发给 daemon。Environment 不提供 REST CRUD；`GET /api/environments` 只投影当前连接 Daemon 发现的内存 Registry，capability / last-seen 仅由 daemon 协议更新。协议细节见 [Environment Daemon Gateway](environment-daemon-gateway.md)。
+Tool Invocation 在数据库中经历权限、lease、partial 与 terminal 状态。PLATFORM Tool 由 ThreadProcessor `dispatchDue` 事件触发执行；ENVIRONMENT Tool 由 gateway 分发给 daemon。Environment 不提供 REST CRUD；`GET /api/environments` 只投影当前连接 Daemon 发现的内存 Registry，capability / last-seen 仅由 daemon 协议更新。协议细节见 [Environment Daemon Gateway](environment-daemon-gateway.md)。
 
 `GET /api/artifacts/{id}` 返回原始 bytes 与有效 media type；异常 media 降级为 `application/octet-stream`，并附加 `X-Content-Type-Options: nosniff` 与 `Content-Security-Policy: sandbox`。
 

@@ -27,9 +27,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.SessionStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnResourceResolver;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnResources;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionMode;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 
 import java.util.ArrayList;
@@ -43,11 +42,11 @@ import java.util.Set;
 /**
  * Resolves a Thread Turn to Provider, model, variant, and short-name tool bindings.
  *
- * <p>Tool short names resolve platform-first (registered non-ENVIRONMENT tools) then selected
- * Environment capability. A selected Environment that is offline or missing fails clearly.
+ * <p>Tool short names resolve platform-first (registered PLATFORM tools) then selected Environment
+ * capability. A selected Environment that is offline or missing fails clearly.
  *
- * <p>Platform CONTROL tools {@code create_goal}/{@code get_goal}/{@code update_goal} are always
- * injected when registered. {@code load_skill} is injected only when the Agent has selected skills.
+ * <p>Platform tools {@code create_goal}/{@code get_goal}/{@code update_goal} are always injected
+ * when registered. {@code load_skill} is injected only when the Agent has selected skills.
  */
 @Component
 public final class DatabaseTurnResourceResolver implements TurnResourceResolver {
@@ -193,7 +192,7 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
       }
       result.add(binding);
     }
-    // Platform CONTROL tools auto-exposed without requiring Agent config listing.
+    // Platform tools auto-exposed without requiring Agent config listing.
     injectPlatformToolIfRegistered(result, descriptorNames, "create_goal");
     injectPlatformToolIfRegistered(result, descriptorNames, "get_goal");
     injectPlatformToolIfRegistered(result, descriptorNames, "update_goal");
@@ -238,12 +237,11 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
               + ": "
               + shortName);
     }
-    if (descriptor.executionMode() != ToolExecutionMode.ENVIRONMENT) {
+    if (descriptor.executionLocation() != ToolExecutionLocation.ENVIRONMENT) {
       throw new IllegalArgumentException(
-          "environment tool must use ENVIRONMENT execution mode: " + shortName);
+          "environment tool must use ENVIRONMENT execution location: " + shortName);
     }
-    return new ToolBinding(
-        descriptor, ToolTargetType.ENVIRONMENT, selectedEnvironment.environmentName());
+    return ToolBinding.of(descriptor, selectedEnvironment.environmentName());
   }
 
   private Tool resolvePlatformTool(String shortName) {
@@ -253,7 +251,7 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
       if (!descriptor.name().equals(shortName)) {
         continue;
       }
-      if (descriptor.executionMode() == ToolExecutionMode.ENVIRONMENT) {
+      if (descriptor.executionLocation() != ToolExecutionLocation.PLATFORM) {
         continue;
       }
       matches.add(
@@ -272,8 +270,7 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
     }
     if (matches.size() > 1) {
       throw new IllegalArgumentException(
-          "tool short name must resolve to exactly one registered non-ENVIRONMENT version: "
-              + shortName);
+          "tool short name must resolve to exactly one registered PLATFORM version: " + shortName);
     }
     return matches.get(0);
   }

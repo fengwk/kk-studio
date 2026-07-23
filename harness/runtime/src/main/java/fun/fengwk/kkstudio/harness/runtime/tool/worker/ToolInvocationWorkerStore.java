@@ -6,7 +6,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 
-/** Claim and observation port for Cloud/Control invocation leases. */
+/** Claim and observation port for Platform invocation leases. */
 public interface ToolInvocationWorkerStore {
   Optional<ClaimedToolInvocation> claimDue(String leaseOwner, Instant now, Duration leaseDuration);
 
