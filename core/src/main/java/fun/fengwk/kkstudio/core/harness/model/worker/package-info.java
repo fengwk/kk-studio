@@ -10,9 +10,10 @@
  * {@code execution_epoch}, {@code attempt}, {@code worker_token}, {@code worker_until > now}) in
  * the SQL itself so the database is the final authority on ownership.
  *
- * <p>The package intentionally does not declare a {@code ModelWorker} bean, does not publish
- * activation notifications, and does not embed any {@code harness_thread.*} legacy columns. {@link
- * HarnessModelInvocationThreadMapper} is a narrow mapper covering only the final-schema Thread
- * columns this adapter needs (no {@code gmt_*}/{@code status}/{@code version}).
+ * <p>{@link HarnessModelWorkerConfiguration} composes the durable {@code ModelWorker}, its
+ * dedicated scheduler, and PostgreSQL recovery lifecycle. It does not embed any {@code
+ * harness_thread.*} legacy columns. {@link HarnessModelInvocationThreadMapper} is a narrow mapper
+ * covering only the final-schema Thread columns this adapter needs (no {@code gmt_*}/{@code
+ * status}/{@code version}).
  */
 package fun.fengwk.kkstudio.core.harness.model.worker;

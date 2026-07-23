@@ -22,6 +22,21 @@ public class HarnessRuntimeProperties {
   /** 单次恢复扫描最多 kick 的 Thread 数。 */
   private int threadRecoveryBatchSize = 100;
 
+  /** Model worker 持有 Invocation 的 deployment lease 时长。 */
+  private Duration modelWorkerLeaseDuration = Duration.ofSeconds(30);
+
+  /** Model worker lease heartbeat 间隔。 */
+  private Duration modelWorkerHeartbeatInterval = Duration.ofSeconds(10);
+
+  /** Model worker 持久化真实 Provider activity 的最小 cadence。 */
+  private Duration modelWorkerActivityFlushInterval = Duration.ofMillis(100);
+
+  /** Model Invocation PostgreSQL 恢复扫描间隔。 */
+  private Duration modelRecoveryInterval = Duration.ofSeconds(1);
+
+  /** 单次 Model Invocation 恢复扫描最多领取的任务数。 */
+  private int modelRecoveryBatchSize = 100;
+
   private Path environmentRoot = Path.of(System.getProperty("user.dir", "."));
   private Path workdir = Path.of(".");
 
