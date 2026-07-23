@@ -501,6 +501,15 @@ transient failure
 - notifier 和 realtime sink 都是 best-effort。其异常不得回滚或替代 durable transition；进程 stop 仅取消本地
   handle，留给 lease recovery。
 
+生产部署通过 `kk-studio.harness.runtime` 配置 Model Worker：
+
+- `model-worker-lease-duration` 默认 `30s`，`model-worker-heartbeat-interval` 默认 `10s`，
+  `model-worker-activity-flush-interval` 默认 `100ms`；heartbeat 必须短于 lease。
+- `model-recovery-interval` 默认 `1s`，`model-recovery-batch-size` 默认 `100`。生命周期以 fixed-delay 从
+  启动即刻开始扫描，每次最多领取一个 batch，直到没有可 claim 的 Invocation。
+- 仅当 `workers-enabled=true` 时启动恢复轮询；停止时先取消轮询，再关闭本地 Model 执行 handle，durable 状态由
+  lease recovery 保守处理。
+
 ### 7.2 ToolWorker
 
 ```text

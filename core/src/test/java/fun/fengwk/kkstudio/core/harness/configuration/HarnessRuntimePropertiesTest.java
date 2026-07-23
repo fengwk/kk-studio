@@ -6,8 +6,21 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
+import java.time.Duration;
 
 class HarnessRuntimePropertiesTest {
+
+  /** Deployment defaults keep the durable Model worker's leases and recovery polling bounded. */
+  @Test
+  void providesModelWorkerDeploymentDefaults() {
+    HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
+
+    assertEquals(Duration.ofSeconds(30), properties.getModelWorkerLeaseDuration());
+    assertEquals(Duration.ofSeconds(10), properties.getModelWorkerHeartbeatInterval());
+    assertEquals(Duration.ofMillis(100), properties.getModelWorkerActivityFlushInterval());
+    assertEquals(Duration.ofSeconds(1), properties.getModelRecoveryInterval());
+    assertEquals(100, properties.getModelRecoveryBatchSize());
+  }
 
   /** Relative workdirs resolve under environmentRoot while traversal and absolute escapes fail. */
   @Test
