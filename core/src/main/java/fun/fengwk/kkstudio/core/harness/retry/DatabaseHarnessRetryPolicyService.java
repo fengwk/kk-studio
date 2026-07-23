@@ -4,8 +4,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.core.harness.retry.mapper.HarnessRetryPolicyMapper;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRetryBackoffStrategy;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRetryPolicy;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.share.model.HarnessRetryPolicyDTO;
 
 import java.time.Duration;
@@ -27,7 +27,7 @@ public class DatabaseHarnessRetryPolicyService implements HarnessRetryPolicyServ
   }
 
   @Override
-  public ThreadRetryPolicy resolve() {
+  public InvocationRetryPolicy resolve() {
     HarnessRetryPolicyDO policy = mapper.find();
     if (policy == null) {
       throw new IllegalStateException("harness retry policy is not initialized");
@@ -46,7 +46,7 @@ public class DatabaseHarnessRetryPolicyService implements HarnessRetryPolicyServ
     if (retryPolicy == null) {
       throw new IllegalArgumentException("retryPolicy must not be null");
     }
-    ThreadRetryPolicy policy = toPolicy(retryPolicy);
+    InvocationRetryPolicy policy = toPolicy(retryPolicy);
     LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
     HarnessRetryPolicyDO existing = mapper.findForUpdate();
     if (existing == null) {
@@ -67,7 +67,7 @@ public class DatabaseHarnessRetryPolicyService implements HarnessRetryPolicyServ
     return toDto(policy);
   }
 
-  private static ThreadRetryPolicy toPolicy(HarnessRetryPolicyDTO dto) {
+  private static InvocationRetryPolicy toPolicy(HarnessRetryPolicyDTO dto) {
     return toPolicy(
         dto.getMaxRetries(),
         dto.getBackoffStrategy(),
@@ -75,7 +75,7 @@ public class DatabaseHarnessRetryPolicyService implements HarnessRetryPolicyServ
         dto.getMaxDelayMillis());
   }
 
-  private static ThreadRetryPolicy toPolicy(HarnessRetryPolicyDO row) {
+  private static InvocationRetryPolicy toPolicy(HarnessRetryPolicyDO row) {
     return toPolicy(
         row.getMaxRetries(),
         row.getBackoffStrategy(),
@@ -83,7 +83,7 @@ public class DatabaseHarnessRetryPolicyService implements HarnessRetryPolicyServ
         row.getMaxDelayMillis());
   }
 
-  private static ThreadRetryPolicy toPolicy(
+  private static InvocationRetryPolicy toPolicy(
       Integer maxRetries, String backoffStrategy, Long baseDelayMillis, Long maxDelayMillis) {
     if (maxRetries == null || maxRetries < 0 || maxRetries > MAX_RETRIES_LIMIT) {
       throw new IllegalArgumentException("maxRetries must be between 0 and " + MAX_RETRIES_LIMIT);
@@ -93,9 +93,9 @@ public class DatabaseHarnessRetryPolicyService implements HarnessRetryPolicyServ
     if (maximum < base) {
       throw new IllegalArgumentException("maxDelayMillis must not be less than baseDelayMillis");
     }
-    return new ThreadRetryPolicy(
+    return new InvocationRetryPolicy(
         maxRetries,
-        ThreadRetryBackoffStrategy.fromValue(backoffStrategy),
+        InvocationRetryBackoffStrategy.fromValue(backoffStrategy),
         Duration.ofMillis(base),
         Duration.ofMillis(maximum));
   }
@@ -113,7 +113,7 @@ public class DatabaseHarnessRetryPolicyService implements HarnessRetryPolicyServ
     return value;
   }
 
-  private static HarnessRetryPolicyDO toDO(ThreadRetryPolicy policy, LocalDateTime now) {
+  private static HarnessRetryPolicyDO toDO(InvocationRetryPolicy policy, LocalDateTime now) {
     HarnessRetryPolicyDO row = new HarnessRetryPolicyDO();
     row.setId(1);
     row.setMaxRetries(policy.maxRetries());
@@ -125,7 +125,7 @@ public class DatabaseHarnessRetryPolicyService implements HarnessRetryPolicyServ
     return row;
   }
 
-  private static HarnessRetryPolicyDTO toDto(ThreadRetryPolicy policy) {
+  private static HarnessRetryPolicyDTO toDto(InvocationRetryPolicy policy) {
     HarnessRetryPolicyDTO dto = new HarnessRetryPolicyDTO();
     dto.setMaxRetries(policy.maxRetries());
     dto.setBackoffStrategy(policy.backoffStrategy().name());

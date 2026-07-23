@@ -22,8 +22,8 @@ import java.util.Objects;
  *
  * <p>State transitions are not implemented here; the record exposes only pure query helpers ({@link
  * #isTerminalUnapplied()}, {@link #hasActiveWorkerAt(Instant)}, {@link
- * #isDispatchableAt(Instant)}). All mutation belongs to a separate {@code
- * ModelInvocationTransactions} component (out of scope for this slice).
+ * #isDispatchableAt(Instant)}). All worker mutation belongs to {@link
+ * fun.fengwk.kkstudio.harness.runtime.model.worker.ModelInvocationTransactions}.
  */
 public record ModelInvocation(
     long id,

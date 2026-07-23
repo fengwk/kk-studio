@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.agent.extension.ProviderRequestInterceptorCha
 import fun.fengwk.kkstudio.harness.runtime.context.SessionContextBuilder;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.CustomMessageEntryPayload;
@@ -33,7 +34,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessor.ThreadToolPort;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessorConfig;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeConfigResolver;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStore;
@@ -455,7 +455,7 @@ class ThreadProcessorControlFlowTest {
             new ProviderMessageProjector(),
             resourceResolver,
             mock(CompactionService.class),
-            () -> ThreadRetryPolicy.DEFAULT,
+            () -> InvocationRetryPolicy.DEFAULT,
             new ThreadProcessorConfig(Duration.ofSeconds(3), Duration.ofSeconds(1), 1_024, 2),
             Clock.systemUTC(),
             (delay, task) -> {},
