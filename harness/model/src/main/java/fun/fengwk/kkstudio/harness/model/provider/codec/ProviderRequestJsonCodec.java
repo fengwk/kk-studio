@@ -8,15 +8,11 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheBreakpoint;
-import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapability;
-import fun.fengwk.kkstudio.harness.model.cache.PromptCacheMode;
-import fun.fengwk.kkstudio.harness.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.codec.ModelDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAudioBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderImageBlock;
@@ -30,7 +26,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderVideoBlock;
 
 import java.math.BigDecimal;
@@ -59,50 +54,11 @@ public final class ProviderRequestJsonCodec {
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
   private static final Comparator<Enum<?>> ENUM_NAME_COMPARATOR = Comparator.comparing(Enum::name);
 
+  /** 共享 model/variant 子树 codec，确保 wire 与 {@code ModelDescriptorJsonCodec} 单一权威实现一致。 */
+  private static final ModelDescriptorJsonCodec SHARED_MODEL_CODEC = new ModelDescriptorJsonCodec();
+
   private static final Set<String> REQUEST_FIELDS =
       orderedSet("model", "variant", "messages", "tools", "cacheControl");
-  private static final Set<String> MODEL_FIELDS =
-      orderedSet(
-          "providerResourceId",
-          "modelResourceId",
-          "providerType",
-          "modelId",
-          "displayName",
-          "contextWindow",
-          "maxOutputTokens",
-          "inputModalities",
-          "tools",
-          "reasoning",
-          "variants",
-          "pricing",
-          "promptCachePolicy");
-  private static final Set<String> VARIANT_FIELDS =
-      orderedSet(
-          "id",
-          "maxOutputTokens",
-          "temperature",
-          "topP",
-          "topK",
-          "frequencyPenalty",
-          "presencePenalty",
-          "stopSequences",
-          "reasoningEffort");
-  private static final Set<String> PRICING_FIELDS =
-      orderedSet(
-          "currency",
-          "pricingTier",
-          "serviceTier",
-          "serviceTierMultiplier",
-          "version",
-          "inputPerMillionTokens",
-          "outputPerMillionTokens",
-          "cacheReadPerMillionTokens",
-          "cacheWritePerMillionTokens",
-          "cacheWriteLongPerMillionTokens",
-          "reasoningPerMillionTokens");
-  private static final Set<String> CACHE_POLICY_FIELDS = orderedSet("capability", "retention");
-  private static final Set<String> CACHE_CAPABILITY_FIELDS =
-      orderedSet("mode", "supportedRetentions", "supportedBreakpoints");
   private static final Set<String> CACHE_CONTROL_FIELDS =
       orderedSet("retention", "affinityKey", "breakpoints");
   private static final Set<String> MESSAGE_FIELDS = orderedSet("role", "contents");
@@ -134,8 +90,8 @@ public final class ProviderRequestJsonCodec {
   public JsonNode encodeNode(ProviderRequest request) {
     Objects.requireNonNull(request, "request");
     ObjectNode node = NODES.objectNode();
-    node.set("model", encodeModel(request.model()));
-    node.set("variant", encodeVariant(request.variant()));
+    node.set("model", SHARED_MODEL_CODEC.encodeDescriptorNode(request.model()));
+    node.set("variant", SHARED_MODEL_CODEC.encodeVariantNode(request.variant()));
     ArrayNode messages = node.putArray("messages");
     for (ProviderMessage message : request.messages()) {
       messages.add(encodeMessage(message));
@@ -161,8 +117,8 @@ public final class ProviderRequestJsonCodec {
     Objects.requireNonNull(value, "value");
     ObjectNode node = object(value, "request");
     requireFields(node, REQUEST_FIELDS, "request");
-    ModelDescriptor model = decodeModel(node.get("model"));
-    ModelVariant variant = decodeVariant(node.get("variant"));
+    ModelDescriptor model = SHARED_MODEL_CODEC.decodeDescriptorNode(node.get("model"));
+    ModelVariant variant = SHARED_MODEL_CODEC.decodeVariantNode(node.get("variant"));
     ArrayNode messages = array(node.get("messages"), "messages");
     List<ProviderMessage> messageList = new ArrayList<>(messages.size());
     for (JsonNode item : messages) {
@@ -175,223 +131,6 @@ public final class ProviderRequestJsonCodec {
     }
     ProviderCacheControl cacheControl = decodeCacheControl(node.get("cacheControl"));
     return new ProviderRequest(model, variant, messageList, toolList, cacheControl);
-  }
-
-  // ---------- ModelDescriptor ----------
-
-  private ObjectNode encodeModel(ModelDescriptor descriptor) {
-    ObjectNode node = NODES.objectNode();
-    node.put("providerResourceId", descriptor.providerResourceId());
-    node.put("modelResourceId", descriptor.modelResourceId());
-    node.put("providerType", descriptor.providerType().name());
-    node.put("modelId", descriptor.modelId());
-    node.put("displayName", descriptor.displayName());
-    node.put("contextWindow", descriptor.contextWindow());
-    node.put("maxOutputTokens", descriptor.maxOutputTokens());
-    ArrayNode modalities = node.putArray("inputModalities");
-    for (ModelInputModality modality :
-        sortedEnums(descriptor.inputModalities(), "inputModalities")) {
-      modalities.add(modality.name());
-    }
-    node.put("tools", descriptor.tools());
-    node.put("reasoning", descriptor.reasoning());
-    ArrayNode variants = node.putArray("variants");
-    for (ModelVariant variant : descriptor.variants()) {
-      variants.add(encodeVariant(variant));
-    }
-    node.set("pricing", encodePricing(descriptor.pricing()));
-    node.set("promptCachePolicy", encodeCachePolicy(descriptor.promptCachePolicy()));
-    return node;
-  }
-
-  private ModelDescriptor decodeModel(JsonNode value) {
-    ObjectNode node = object(value, "model");
-    requireFields(node, MODEL_FIELDS, "model");
-    ProviderType providerType;
-    try {
-      providerType = ProviderType.valueOf(text(node, "providerType"));
-    } catch (IllegalArgumentException exception) {
-      throw new IllegalArgumentException("unknown providerType", exception);
-    }
-    long providerResourceId = positiveLong(node, "providerResourceId");
-    long modelResourceId = positiveLong(node, "modelResourceId");
-    String modelId = text(node, "modelId");
-    String displayName = text(node, "displayName");
-    long contextWindow = positiveLong(node, "contextWindow");
-    long maxOutputTokens = positiveLong(node, "maxOutputTokens");
-    if (maxOutputTokens > contextWindow) {
-      throw new IllegalArgumentException("maxOutputTokens must not exceed contextWindow");
-    }
-    Set<ModelInputModality> inputModalities =
-        decodeEnumSet(node.get("inputModalities"), ModelInputModality.class, "inputModalities");
-    boolean tools = bool(node, "tools");
-    boolean reasoning = bool(node, "reasoning");
-    ArrayNode variants = array(node.get("variants"), "variants");
-    List<ModelVariant> variantList = new ArrayList<>(variants.size());
-    for (JsonNode item : variants) {
-      variantList.add(decodeVariant(item));
-    }
-    ModelPricing pricing = decodePricing(node.get("pricing"));
-    PromptCachePolicy policy = decodeCachePolicy(node.get("promptCachePolicy"));
-    return new ModelDescriptor(
-        providerResourceId,
-        modelResourceId,
-        providerType,
-        modelId,
-        displayName,
-        contextWindow,
-        maxOutputTokens,
-        inputModalities,
-        tools,
-        reasoning,
-        variantList,
-        pricing,
-        policy);
-  }
-
-  // ---------- ModelVariant ----------
-
-  private ObjectNode encodeVariant(ModelVariant variant) {
-    ObjectNode node = NODES.objectNode();
-    node.put("id", variant.id());
-    encodeNullableInt(node, "maxOutputTokens", variant.maxOutputTokens());
-    encodeNullableDouble(node, "temperature", variant.temperature());
-    encodeNullableDouble(node, "topP", variant.topP());
-    encodeNullableInt(node, "topK", variant.topK());
-    encodeNullableDouble(node, "frequencyPenalty", variant.frequencyPenalty());
-    encodeNullableDouble(node, "presencePenalty", variant.presencePenalty());
-    ArrayNode stopSequences = node.putArray("stopSequences");
-    for (String stop : variant.stopSequences()) {
-      stopSequences.add(stop);
-    }
-    if (variant.reasoningEffort() == null) {
-      node.putNull("reasoningEffort");
-    } else {
-      node.put("reasoningEffort", variant.reasoningEffort());
-    }
-    return node;
-  }
-
-  private ModelVariant decodeVariant(JsonNode value) {
-    ObjectNode node = object(value, "variant");
-    requireFields(node, VARIANT_FIELDS, "variant");
-    Integer maxOutputTokens = decodeNullableInt(node, "maxOutputTokens");
-    Double temperature = decodeNullableDouble(node, "temperature");
-    Double topP = decodeNullableDouble(node, "topP");
-    Integer topK = decodeNullableInt(node, "topK");
-    Double frequencyPenalty = decodeNullableDouble(node, "frequencyPenalty");
-    Double presencePenalty = decodeNullableDouble(node, "presencePenalty");
-    ArrayNode stopSequences = array(node.get("stopSequences"), "stopSequences");
-    List<String> stopList = new ArrayList<>(stopSequences.size());
-    for (JsonNode item : stopSequences) {
-      if (!item.isTextual() || item.textValue().isBlank()) {
-        throw new IllegalArgumentException("stopSequences must contain non-blank strings");
-      }
-      stopList.add(item.textValue());
-    }
-    String reasoningEffort = decodeNullableText(node, "reasoningEffort");
-    return new ModelVariant(
-        text(node, "id"),
-        maxOutputTokens,
-        temperature,
-        topP,
-        topK,
-        frequencyPenalty,
-        presencePenalty,
-        stopList,
-        reasoningEffort);
-  }
-
-  // ---------- ModelPricing ----------
-
-  private ObjectNode encodePricing(ModelPricing pricing) {
-    ObjectNode node = NODES.objectNode();
-    node.put("currency", pricing.currency());
-    node.put("pricingTier", pricing.pricingTier());
-    node.put("serviceTier", pricing.serviceTier());
-    node.put("serviceTierMultiplier", pricing.serviceTierMultiplier().toPlainString());
-    node.put("version", pricing.version());
-    node.put("inputPerMillionTokens", pricing.inputPerMillionTokens().toPlainString());
-    node.put("outputPerMillionTokens", pricing.outputPerMillionTokens().toPlainString());
-    node.put("cacheReadPerMillionTokens", pricing.cacheReadPerMillionTokens().toPlainString());
-    node.put("cacheWritePerMillionTokens", pricing.cacheWritePerMillionTokens().toPlainString());
-    node.put(
-        "cacheWriteLongPerMillionTokens", pricing.cacheWriteLongPerMillionTokens().toPlainString());
-    node.put("reasoningPerMillionTokens", pricing.reasoningPerMillionTokens().toPlainString());
-    return node;
-  }
-
-  private ModelPricing decodePricing(JsonNode value) {
-    ObjectNode node = object(value, "pricing");
-    requireFields(node, PRICING_FIELDS, "pricing");
-    return new ModelPricing(
-        text(node, "currency"),
-        text(node, "pricingTier"),
-        text(node, "serviceTier"),
-        decimal(node, "serviceTierMultiplier"),
-        text(node, "version"),
-        decimal(node, "inputPerMillionTokens"),
-        decimal(node, "outputPerMillionTokens"),
-        decimal(node, "cacheReadPerMillionTokens"),
-        decimal(node, "cacheWritePerMillionTokens"),
-        decimal(node, "cacheWriteLongPerMillionTokens"),
-        decimal(node, "reasoningPerMillionTokens"));
-  }
-
-  // ---------- PromptCachePolicy / PromptCacheCapability ----------
-
-  private ObjectNode encodeCachePolicy(PromptCachePolicy policy) {
-    ObjectNode node = NODES.objectNode();
-    node.set("capability", encodeCacheCapability(policy.capability()));
-    node.put("retention", policy.retention().name());
-    return node;
-  }
-
-  private PromptCachePolicy decodeCachePolicy(JsonNode value) {
-    ObjectNode node = object(value, "promptCachePolicy");
-    requireFields(node, CACHE_POLICY_FIELDS, "promptCachePolicy");
-    PromptCacheCapability capability = decodeCacheCapability(node.get("capability"));
-    PromptCacheRetention retention;
-    try {
-      retention = PromptCacheRetention.valueOf(text(node, "retention"));
-    } catch (IllegalArgumentException exception) {
-      throw new IllegalArgumentException("unknown prompt cache retention", exception);
-    }
-    return new PromptCachePolicy(capability, retention);
-  }
-
-  private ObjectNode encodeCacheCapability(PromptCacheCapability capability) {
-    ObjectNode node = NODES.objectNode();
-    node.put("mode", capability.mode().name());
-    ArrayNode retentions = node.putArray("supportedRetentions");
-    for (PromptCacheRetention retention :
-        sortedEnums(capability.supportedRetentions(), "supportedRetentions")) {
-      retentions.add(retention.name());
-    }
-    ArrayNode breakpoints = node.putArray("supportedBreakpoints");
-    for (PromptCacheBreakpoint breakpoint :
-        sortedEnums(capability.supportedBreakpoints(), "supportedBreakpoints")) {
-      breakpoints.add(breakpoint.name());
-    }
-    return node;
-  }
-
-  private PromptCacheCapability decodeCacheCapability(JsonNode value) {
-    ObjectNode node = object(value, "capability");
-    requireFields(node, CACHE_CAPABILITY_FIELDS, "capability");
-    PromptCacheMode mode;
-    try {
-      mode = PromptCacheMode.valueOf(text(node, "mode"));
-    } catch (IllegalArgumentException exception) {
-      throw new IllegalArgumentException("unknown prompt cache mode", exception);
-    }
-    Set<PromptCacheRetention> retentions =
-        decodeEnumSet(
-            node.get("supportedRetentions"), PromptCacheRetention.class, "supportedRetentions");
-    Set<PromptCacheBreakpoint> breakpoints =
-        decodeEnumSet(
-            node.get("supportedBreakpoints"), PromptCacheBreakpoint.class, "supportedBreakpoints");
-    return new PromptCacheCapability(mode, retentions, breakpoints);
   }
 
   // ---------- ProviderCacheControl ----------

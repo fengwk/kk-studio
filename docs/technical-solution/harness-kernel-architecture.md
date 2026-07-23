@@ -60,12 +60,13 @@ Runtime 依赖 Kernel、Model API 和 Tool API，负责：
 - Thread reconcile；
 - mailbox turn boundary；
 - response debt；
-- Context 构建与 Compaction；
+- 完整运行配置快照、Entry durable JSON 边界；
+- Context 构建、Compaction 与冻结 ProviderRequest planning；
 - ModelInvocation、ToolInvocation 和 Interaction 的协调；
 - durable suspend/resume；
 - retry、timeout、Stop 与 recovery 协议。
 
-ModelInvocation、ToolInvocation 和 Interaction 是 Runtime 组织的具体 durable aggregates，不进入最底层 Kernel。Runtime 只通过 Store、Executor、Notifier 等端口访问持久化和执行能力。
+ModelInvocation、ToolInvocation 和 Interaction 是 Runtime 组织的具体 durable aggregates，不进入最底层 Kernel。Runtime 只通过 Store、Executor、Notifier 等端口访问持久化和执行能力。`ModelInvocationPlanner` 是纯函数：只读取传入的完整 Entry path，不读取 Store、Spring、Clock 或 live Definition，也不写 Entry/head。
 
 ### 2.3 Execution SPI 与 Transport
 
@@ -145,7 +146,8 @@ Entry 类型保持语义化，但不复制运行控制状态：
 - `CUSTOM_MESSAGE`
 - `COMPACTION`
 - `ASSISTANT_ERROR`
-- 必要的 label/summary 类型
+- `LABEL`
+- `BRANCH_SUMMARY`
 
 `RUNTIME_CONFIG` 保存一次完整、不可变、已解析的有效运行快照，包括：
 
@@ -160,6 +162,10 @@ Entry 类型保持语义化，但不复制运行控制状态：
 快照只保存非敏感配置和值对象。API key、secret 和短期 credential 只保存稳定 credential reference，由执行 adapter 在调用时解析，不进入 Entry payload。
 
 配置修改不是 patch fold。每次 `SET_AGENT`、`SET_MODEL` 或其他配置命令都解析并追加一个完整 `RUNTIME_CONFIG` Entry。任意 Entry head 都能独立恢复其有效配置，不再读取当前可变 Definition 补齐历史缺口。
+
+`RuntimeConfigSnapshot` 在构造边界同时验证跨字段关系：声明 Tool 时 Model 必须支持 Tool；`ENVIRONMENT` ToolBinding 与 Skill source 必须绑定同一个冻结 environment。Tool、Skill 与 policy 集合 canonical 排序，保证相同快照得到相同 JSON。
+
+`RuntimeEntryPayloadJsonCodec` 是 Entry payload 的 durable JSON 边界：逐字段读取、固定字段顺序，拒绝未知/缺失字段、错误类型、duplicate field 与 trailing token。`json`、`argumentsJson`、`detailsJson` 保留原字符串；其中可执行 arguments 与 details 必须是单一 JSON object。`RUNTIME_CONFIG`、Model descriptor、Tool descriptor 和 ModelInvocation error 子树分别委派各自唯一 codec，不复制字段协议。
 
 ### 4.2 Thread
 
@@ -214,6 +220,10 @@ Mailbox 采用 TURN_BOUNDARY：
 消息之后到达的配置或下一条消息不能改变该消息对应的 ModelInvocation 快照。
 
 ### 4.4 ModelInvocation
+
+`ModelInvocationPlanner` 从完整 root-to-head Entry path 逆向判定最近 response debt：USER、TOOL 或 COMPACTION 产生 debt；ASSISTANT 与 ASSISTANT_ERROR 是已终结响应的 barrier。发现 debt 后只使用截至 debt Entry 的路径前缀与该前缀内最近 `RUNTIME_CONFIG` 构造请求，因而 head 与 debt 之间后来追加的配置、标签、branch summary 或 SYSTEM custom message 不能反向改变该消息的执行快照。plan 的 source identity 仍绑定实际 Thread head。
+
+planner 按 retained-range 语义应用最后一个有效 Compaction，投影 Branch Summary、消息与 orphan ToolCall 修复，组装 canonical Skill system section 与冻结 Tool definitions，最后应用 Prompt Cache policy。所得完整 `ProviderRequest` 写入 ModelInvocation，后续 worker 不再重建历史配置。
 
 ModelInvocation 是一次 Provider 调用的唯一 durable 执行事实，负责：
 
@@ -298,8 +308,8 @@ Thread Reconciler 是 Entry/head 的唯一写者。一次 activation：
 4. 应用当前 Assistant 对应的 terminal ToolInvocations；
 5. 偿还 retry/continuation debt；
 6. 按 TURN_BOUNDARY harvest mailbox；
-7. 计算 response debt；
-8. 必要时创建 ModelInvocation；
+7. 由纯 planner 计算 response debt 与冻结 ProviderRequest；
+8. 必要时以实际 head 为 source identity 创建 ModelInvocation；
 9. 没有可推进事实时事务性 quiesce；
 10. 释放 lease 并退出。
 

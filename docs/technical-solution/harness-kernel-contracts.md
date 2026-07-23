@@ -141,9 +141,10 @@ Runtime 包建议：
 fun.fengwk.kkstudio.harness.runtime
 ├── reconcile/
 ├── model/
+│   └── plan/
 ├── tool/
 ├── interaction/
-├── context/
+├── entry/
 ├── subagent/
 ├── port/
 └── configuration/
@@ -155,7 +156,7 @@ fun.fengwk.kkstudio.harness.runtime
 public record RuntimeConfigSnapshot(
     AgentSnapshot agent,
     ModelSnapshot model,
-    List<ToolBindingSnapshot> tools,
+    List<ToolBinding> tools,
     List<SkillSnapshot> skills,
     ExecutionPolicySnapshot policy,
     EnvironmentSnapshot environment) implements EntryPayload {}
@@ -167,9 +168,35 @@ public record RuntimeConfigSnapshot(
 - 不包含 secret value；
 - credential 只使用稳定 reference；
 - 所有集合排序确定，JSON 编码稳定；
-- 每次配置命令写完整 snapshot。
+- Tool 非空时 Model descriptor 必须支持 Tool；
+- ENVIRONMENT ToolBinding 与 Skill source 必须等于冻结 environment；
+- 每次配置命令写完整 snapshot，不从 live Definition 补历史字段。
 
-### 3.2 ModelInvocation
+### 3.2 Entry payload JSON
+
+`RuntimeEntryPayloadJsonCodec` 提供：
+
+```java
+String encode(EntryPayload payload);
+ObjectNode encodeNode(EntryPayload payload);
+EntryPayload decode(EntryType type, String json);
+EntryPayload decodeNode(EntryType type, JsonNode value);
+```
+
+支持 `ROOT/RUNTIME_CONFIG/MESSAGE/CUSTOM_MESSAGE/COMPACTION/ASSISTANT_ERROR/LABEL/BRANCH_SUMMARY`。所有对象使用 exact field set；String API 拒绝 duplicate field 与 trailing token。Message content discriminator 固定为 `text/image/audio/thinking/json/tool_call/tool_result/artifact`。raw JSON 字符串不归一化；`argumentsJson` 与 `detailsJson` 必须是单一 object，Tool Result 不允许嵌套 Tool Call/Tool Result。
+
+### 3.3 ModelInvocationPlanner
+
+```java
+public Optional<ModelInvocationPlan> plan(
+    long sessionId,
+    long sourceHeadEntryId,
+    List<SessionEntry> rootToHead);
+```
+
+输入必须是同一 Session 的完整连续 root-to-head path，最后一个 Entry 必须等于 `sourceHeadEntryId`。planner 不访问 Store、Spring、Clock 或 live Definition，不写 Entry/head。发现 response debt 后只读取 debt 前缀；返回的 plan 仍绑定实际 head，并包含经 Prompt Cache finalization 的完整 `ProviderRequest`。
+
+### 3.4 ModelInvocation
 
 ```java
 public record ModelInvocation(
@@ -177,14 +204,15 @@ public record ModelInvocation(
     long threadId,
     long sourceHeadEntryId,
     long executionEpoch,
-    ModelRequestSnapshot request,
+    ProviderRequest request,
     InvocationStatus status,
     int attempt,
     Instant nextAttemptAt,
     Lease workerLease,
     Instant deadlineAt,
     Instant lastActivityAt,
-    ModelTerminalResult result,
+    ProviderResponse result,
+    ModelInvocationError error,
     Instant appliedAt,
     Instant createdAt,
     Instant startedAt,
@@ -193,12 +221,15 @@ public record ModelInvocation(
 
 约束：
 
-- 同一 Thread/source head 最多一个非终态 ModelInvocation；
+- `(threadId, sourceHeadEntryId, executionEpoch)` 唯一；
 - worker 不能写 Entry/head；
+- claim 后 mutation 同时 fence Invocation identity/status、execution epoch、attempt、worker token 与有效 lease；
+- Provider I/O 已开始但 worker ownership 丢失时不自动重放，过期 RUNNING lease 收敛为 UNKNOWN；
 - Reconciler 只能 apply terminal 且 `appliedAt == null` 的 result；
-- apply 成功时写 Assistant/AssistantError Entry、Usage、ToolInvocations、head 和 `appliedAt`。
+- worker terminal transaction 只写 Invocation terminal 并原子设置 Thread `runnable=true`；
+- Reconciler apply 成功时写 Assistant/AssistantError Entry、Usage、ToolInvocations、head 和 `appliedAt`。
 
-### 3.3 ToolInvocation
+### 3.5 ToolInvocation
 
 ```java
 public enum ToolExecutionLocation {
@@ -239,7 +270,7 @@ public record ToolInvocation(
 - sibling 全部 terminal 后，Reconciler 在一个事务中按 ordinal 写 Tool Result Entry，并设置所有 sibling `appliedAt`；
 - ENVIRONMENT 必须有 environmentName，PLATFORM 必须没有。
 
-### 3.4 Interaction
+### 3.6 Interaction
 
 ```java
 public enum InteractionStatus {

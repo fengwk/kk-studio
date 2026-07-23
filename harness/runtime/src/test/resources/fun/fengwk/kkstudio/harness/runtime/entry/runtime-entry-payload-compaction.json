@@ -1,0 +1,6 @@
+{
+  "summary": "budget summary",
+  "firstKeptEntryId": 42,
+  "tokensBefore": 1024,
+  "detailsJson": "{\"reason\":\"budget\"}"
+}
