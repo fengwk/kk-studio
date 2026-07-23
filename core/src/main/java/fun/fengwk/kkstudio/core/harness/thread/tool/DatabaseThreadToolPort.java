@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.core.harness.thread.tool;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.harness.tool.store.MysqlToolInvocationStore;
-import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.PlatformToolWorker;
@@ -23,15 +22,11 @@ import java.util.UUID;
 @Component
 public class DatabaseThreadToolPort implements ThreadProcessor.ThreadToolPort {
   private final MysqlToolInvocationStore invocationStore;
-  private final ToolInvocationMapper invocationMapper;
   private final PlatformToolWorker platformToolWorker;
 
   public DatabaseThreadToolPort(
-      MysqlToolInvocationStore invocationStore,
-      ToolInvocationMapper invocationMapper,
-      PlatformToolWorker platformToolWorker) {
+      MysqlToolInvocationStore invocationStore, PlatformToolWorker platformToolWorker) {
     this.invocationStore = Objects.requireNonNull(invocationStore, "invocationStore");
-    this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
     this.platformToolWorker = Objects.requireNonNull(platformToolWorker, "platformToolWorker");
   }
 
