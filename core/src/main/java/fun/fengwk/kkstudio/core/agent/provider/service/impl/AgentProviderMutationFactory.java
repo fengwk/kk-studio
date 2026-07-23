@@ -1,12 +1,11 @@
 package fun.fengwk.kkstudio.core.agent.provider.service.impl;
 
-import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextProviderId;
-
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
+import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.model.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderType;
 
@@ -16,17 +15,21 @@ final class AgentProviderMutationFactory {
 
   private final AgentEditableSupport editableSupport;
   private final AgentProviderConfigurationCodec configurationCodec;
+  private final PostgresqlSequenceIdGenerator idGenerator;
 
   AgentProviderMutationFactory(
-      AgentEditableSupport editableSupport, AgentProviderConfigurationCodec configurationCodec) {
+      AgentEditableSupport editableSupport,
+      AgentProviderConfigurationCodec configurationCodec,
+      PostgresqlSequenceIdGenerator idGenerator) {
     this.editableSupport = editableSupport;
     this.configurationCodec = configurationCodec;
+    this.idGenerator = idGenerator;
   }
 
   AgentProvider newProvider(AgentProviderEditablePropertiesDTO properties) {
     Mutation mutation = newMutation(properties, null, null, null, true);
     AgentProvider provider = new AgentProvider();
-    provider.setId(nextProviderId());
+    provider.setId(idGenerator.next());
     apply(provider, mutation);
     return provider;
   }

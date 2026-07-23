@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.core.chat.service.impl;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
 import fun.fengwk.kkstudio.core.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.core.chat.service.ChatService;
 import fun.fengwk.kkstudio.core.chat.service.converter.ChatConverter;
@@ -11,6 +10,7 @@ import fun.fengwk.kkstudio.core.chat.service.model.Chat;
 import fun.fengwk.kkstudio.core.harness.session.service.impl.HarnessSessionDtoConverter;
 import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
+import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.model.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.model.ChatDTO;
 import fun.fengwk.kkstudio.share.model.ChatUpdateDTO;
@@ -31,6 +31,7 @@ public class ChatServiceImpl implements ChatService {
   private final ChatGuard guard;
   private final HarnessSessionMapper harnessSessionMapper;
   private final HarnessSessionDtoConverter harnessSessionDtoConverter;
+  private final PostgresqlSequenceIdGenerator idGenerator;
 
   public ChatServiceImpl(
       ChatRepository repository,
@@ -38,13 +39,15 @@ public class ChatServiceImpl implements ChatService {
       ChatMutationFactory mutationFactory,
       ChatGuard guard,
       HarnessSessionMapper harnessSessionMapper,
-      HarnessSessionDtoConverter harnessSessionDtoConverter) {
+      HarnessSessionDtoConverter harnessSessionDtoConverter,
+      PostgresqlSequenceIdGenerator idGenerator) {
     this.repository = repository;
     this.converter = converter;
     this.mutationFactory = mutationFactory;
     this.guard = guard;
     this.harnessSessionMapper = harnessSessionMapper;
     this.harnessSessionDtoConverter = harnessSessionDtoConverter;
+    this.idGenerator = idGenerator;
   }
 
   @Override
@@ -116,7 +119,7 @@ public class ChatServiceImpl implements ChatService {
     Chat chat = guard.requireChat(chatId);
     HarnessSessionDO session = guard.requireSession(sessionId);
     if (!repository.isSessionAttached(chat.getId(), session.getId())) {
-      long membershipId = AgentIdGenerator.nextChatSessionId();
+      long membershipId = idGenerator.next();
       if (!repository.attachSession(membershipId, chat.getId(), session.getId())) {
         throw new IllegalStateException(
             "attach session failed: chat=" + chatId + ", session=" + sessionId);

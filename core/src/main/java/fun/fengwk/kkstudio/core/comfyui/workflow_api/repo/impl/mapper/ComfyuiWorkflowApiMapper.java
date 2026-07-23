@@ -31,15 +31,15 @@ public interface ComfyuiWorkflowApiMapper extends BaseMapper {
             api_name,
             name,
             description,
-            workflow_json,
-            input_bindings_json,
+            workflow,
+            input_bindings,
             default_selector,
             enabled,
-            gmt_create as create_time,
-            gmt_modified as update_time
+            created_at as create_time,
+            updated_at as update_time
         from comfyui_workflow_api
         order by id asc
-        limit #{offset}, #{limit}
+        limit #{limit} offset #{offset}
         """)
   @Results(
       id = "comfyuiWorkflowApiResultMap",
@@ -48,8 +48,8 @@ public interface ComfyuiWorkflowApiMapper extends BaseMapper {
         @Result(column = "api_name", property = "apiName"),
         @Result(column = "name", property = "name"),
         @Result(column = "description", property = "description"),
-        @Result(column = "workflow_json", property = "workflowJson"),
-        @Result(column = "input_bindings_json", property = "inputBindingsJson"),
+        @Result(column = "workflow", property = "workflowJson"),
+        @Result(column = "input_bindings", property = "inputBindingsJson"),
         @Result(column = "default_selector", property = "defaultSelector"),
         @Result(column = "enabled", property = "enabled"),
         @Result(column = "create_time", property = "createTime"),
@@ -64,12 +64,12 @@ public interface ComfyuiWorkflowApiMapper extends BaseMapper {
             api_name,
             name,
             description,
-            workflow_json,
-            input_bindings_json,
+            workflow,
+            input_bindings,
             default_selector,
             enabled,
-            gmt_create as create_time,
-            gmt_modified as update_time
+            created_at as create_time,
+            updated_at as update_time
         from comfyui_workflow_api
         where id = #{id}
         """)
@@ -83,12 +83,12 @@ public interface ComfyuiWorkflowApiMapper extends BaseMapper {
             api_name,
             name,
             description,
-            workflow_json,
-            input_bindings_json,
+            workflow,
+            input_bindings,
             default_selector,
             enabled,
-            gmt_create as create_time,
-            gmt_modified as update_time
+            created_at as create_time,
+            updated_at as update_time
         from comfyui_workflow_api
         where api_name = #{apiName}
         """)
@@ -102,12 +102,12 @@ public interface ComfyuiWorkflowApiMapper extends BaseMapper {
             api_name,
             name,
             description,
-            workflow_json,
-            input_bindings_json,
+            workflow,
+            input_bindings,
             default_selector,
             enabled,
-            gmt_create as create_time,
-            gmt_modified as update_time
+            created_at as create_time,
+            updated_at as update_time
         from comfyui_workflow_api
         where api_name = #{apiName} and enabled = #{enabled}
         """)
@@ -122,24 +122,24 @@ public interface ComfyuiWorkflowApiMapper extends BaseMapper {
             api_name,
             name,
             description,
-            workflow_json,
-            input_bindings_json,
+            workflow,
+            input_bindings,
             default_selector,
             enabled,
-            gmt_create,
-            gmt_modified,
+            created_at,
+            updated_at,
             version
         ) values (
             #{id},
             #{apiName},
             #{name},
             #{description},
-            #{workflowJson},
-            #{inputBindingsJson},
+            cast(#{workflowJson} as jsonb),
+            cast(#{inputBindingsJson} as jsonb),
             #{defaultSelector},
             #{enabled},
-            current_timestamp(3),
-            current_timestamp(3),
+            current_timestamp,
+            current_timestamp,
             0
         )
         """)
@@ -152,11 +152,11 @@ public interface ComfyuiWorkflowApiMapper extends BaseMapper {
             api_name = #{row.apiName},
             name = #{row.name},
             description = #{row.description},
-            workflow_json = #{row.workflowJson},
-            input_bindings_json = #{row.inputBindingsJson},
+            workflow = cast(#{row.workflowJson} as jsonb),
+            input_bindings = cast(#{row.inputBindingsJson} as jsonb),
             default_selector = #{row.defaultSelector},
             enabled = #{row.enabled},
-            gmt_modified = current_timestamp(3),
+            updated_at = current_timestamp,
             version = version + 1
         where id = #{row.id}
         """)

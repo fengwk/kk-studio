@@ -3,13 +3,16 @@ package fun.fengwk.kkstudio.core.agent.definition.service.impl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import fun.fengwk.kkstudio.core.agent.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
+import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
@@ -178,7 +181,11 @@ public class AgentDefinitionMutationFactoryTest {
   }
 
   private AgentDefinitionMutationFactory factory(ObjectMapper objectMapper) {
+    PostgresqlSequenceIdGenerator idGenerator = Mockito.mock(PostgresqlSequenceIdGenerator.class);
+    when(idGenerator.next()).thenReturn(303L);
     return new AgentDefinitionMutationFactory(
-        new AgentEditableSupport(objectMapper), new AgentDefinitionConfigCodec(objectMapper));
+        new AgentEditableSupport(objectMapper),
+        new AgentDefinitionConfigCodec(objectMapper),
+        idGenerator);
   }
 }

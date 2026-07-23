@@ -1,11 +1,10 @@
 package fun.fengwk.kkstudio.core.comfyui.workflow_api.service.impl;
 
-import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextComfyuiWorkflowApiId;
-
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.model.ComfyuiWorkflowApi;
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiBindingsParser;
+import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiCreateDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiUpdateDTO;
@@ -27,12 +26,15 @@ final class ComfyuiWorkflowApiMutationFactory {
   private static final int MAX_DESCRIPTION_LENGTH = 512;
 
   private final ComfyuiWorkflowApiBindingsParser bindingsParser;
+  private final PostgresqlSequenceIdGenerator idGenerator;
 
-  ComfyuiWorkflowApiMutationFactory(ComfyuiWorkflowApiBindingsParser bindingsParser) {
+  ComfyuiWorkflowApiMutationFactory(
+      ComfyuiWorkflowApiBindingsParser bindingsParser, PostgresqlSequenceIdGenerator idGenerator) {
     if (bindingsParser == null) {
       throw new IllegalArgumentException("bindingsParser must not be null");
     }
     this.bindingsParser = bindingsParser;
+    this.idGenerator = idGenerator;
   }
 
   Mutation newCreateMutation(ComfyuiWorkflowApiCreateDTO createDTO) {
@@ -47,7 +49,7 @@ final class ComfyuiWorkflowApiMutationFactory {
   ComfyuiWorkflowApi newWorkflow(Mutation mutation) {
     requireNonNull(mutation, "mutation");
     ComfyuiWorkflowApi row = new ComfyuiWorkflowApi();
-    row.setId(nextComfyuiWorkflowApiId());
+    row.setId(idGenerator.next());
     apply(row, mutation);
     return row;
   }

@@ -2,13 +2,13 @@ package fun.fengwk.kkstudio.core.chat.repo.impl.model;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /** {@code chat} 行映射：持久化的多 Session 集合。 */
 @Data
 public class ChatDO {
 
-  /** 业务主键（Snowflake）。 */
+  /** 业务主键。 */
   private Long id;
 
   /** 可选标题。 */
@@ -20,9 +20,9 @@ public class ChatDO {
   /** 乐观锁行版本。 */
   private Long version;
 
-  /** 创建时间（映射 {@code gmt_create}）。 */
-  private LocalDateTime createTime;
+  /** 创建时间（映射 {@code created_at} timestamptz）。 */
+  private OffsetDateTime createTime;
 
-  /** 更新时间（映射 {@code gmt_modified}）。 */
-  private LocalDateTime updateTime;
+  /** 更新时间（映射 {@code updated_at} timestamptz）。 */
+  private OffsetDateTime updateTime;
 }

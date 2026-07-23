@@ -2,13 +2,16 @@ package fun.fengwk.kkstudio.core.agent.provider.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import fun.fengwk.kkstudio.core.agent.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
+import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderType;
 import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
@@ -92,7 +95,11 @@ public class AgentProviderMutationFactoryTest {
 
   private AgentProviderMutationFactory factory() {
     ObjectMapper objectMapper = new ObjectMapper();
+    PostgresqlSequenceIdGenerator idGenerator = Mockito.mock(PostgresqlSequenceIdGenerator.class);
+    when(idGenerator.next()).thenReturn(101L);
     return new AgentProviderMutationFactory(
-        new AgentEditableSupport(objectMapper), new AgentProviderConfigurationCodec(objectMapper));
+        new AgentEditableSupport(objectMapper),
+        new AgentProviderConfigurationCodec(objectMapper),
+        idGenerator);
   }
 }

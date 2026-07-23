@@ -19,13 +19,16 @@ import java.util.List;
 public interface AgentDefinitionMapper extends BaseMapper {
 
   String COLUMNS =
-      "id, name, description, system_prompt, model_id, variant, config_json, version, "
-          + "gmt_create as create_time, gmt_modified as update_time";
+      "id, name, description, system_prompt, model_id, variant, config, version, "
+          + "created_at as create_time, updated_at as update_time";
 
   @Select("select count(*) from agent_definition")
   long count();
 
-  @Select("select " + COLUMNS + " from agent_definition order by id asc limit #{offset}, #{limit}")
+  @Select(
+      "select "
+          + COLUMNS
+          + " from agent_definition order by id asc limit #{limit} offset #{offset}")
   @Results(
       id = "agentDefinitionResultMap",
       value = {
@@ -35,7 +38,7 @@ public interface AgentDefinitionMapper extends BaseMapper {
         @Result(column = "system_prompt", property = "systemPrompt"),
         @Result(column = "model_id", property = "modelId"),
         @Result(column = "variant", property = "variant"),
-        @Result(column = "config_json", property = "configJson"),
+        @Result(column = "config", property = "configJson"),
         @Result(column = "version", property = "version"),
         @Result(column = "create_time", property = "createTime"),
         @Result(column = "update_time", property = "updateTime")
@@ -53,11 +56,11 @@ public interface AgentDefinitionMapper extends BaseMapper {
   @Insert(
       """
       insert into agent_definition (
-          id, name, description, system_prompt, model_id, variant, config_json,
-          gmt_create, gmt_modified, version
+          id, name, description, system_prompt, model_id, variant, config,
+          created_at, updated_at, version
       ) values (
-          #{id}, #{name}, #{description}, #{systemPrompt}, #{modelId}, #{variant}, #{configJson},
-          current_timestamp(3), current_timestamp(3), 0
+          #{id}, #{name}, #{description}, #{systemPrompt}, #{modelId}, #{variant},
+          cast(#{configJson} as jsonb), current_timestamp, current_timestamp, 0
       )
       """)
   int insert(AgentDefinitionDO agent);
@@ -67,8 +70,8 @@ public interface AgentDefinitionMapper extends BaseMapper {
       update agent_definition
       set name = #{agent.name}, description = #{agent.description},
           system_prompt = #{agent.systemPrompt}, model_id = #{agent.modelId},
-          variant = #{agent.variant}, config_json = #{agent.configJson},
-          gmt_modified = current_timestamp(3), version = version + 1
+          variant = #{agent.variant}, config = cast(#{agent.configJson} as jsonb),
+          updated_at = current_timestamp, version = version + 1
       where id = #{agent.id}
       """)
   int updateById(@Param("agent") AgentDefinitionDO agent);

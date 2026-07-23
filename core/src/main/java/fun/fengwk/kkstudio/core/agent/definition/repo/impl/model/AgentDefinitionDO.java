@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.core.agent.definition.repo.impl.model;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /** {@code agent_definition} 行映射：可创建 Session 的 Agent 定义。 */
 @Data
@@ -32,9 +32,9 @@ public class AgentDefinitionDO {
   /** 乐观锁行版本。 */
   private Long version;
 
-  /** 创建时间（映射 {@code gmt_create}）。 */
-  private LocalDateTime createTime;
+  /** 创建时间（映射 {@code created_at} timestamptz）。 */
+  private OffsetDateTime createTime;
 
-  /** 更新时间（映射 {@code gmt_modified}）。 */
-  private LocalDateTime updateTime;
+  /** 更新时间（映射 {@code updated_at} timestamptz）。 */
+  private OffsetDateTime updateTime;
 }

@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.core.agent.model.repo.impl.model;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /** {@code agent_model} 行映射：模型资源与配置 JSON。 */
 @Data
@@ -26,9 +26,9 @@ public class AgentModelDO {
   /** 乐观锁行版本。 */
   private Long version;
 
-  /** 创建时间（映射 {@code gmt_create}）。 */
-  private LocalDateTime createTime;
+  /** 创建时间（映射 {@code created_at} timestamptz）。 */
+  private OffsetDateTime createTime;
 
-  /** 更新时间（映射 {@code gmt_modified}）。 */
-  private LocalDateTime updateTime;
+  /** 更新时间（映射 {@code updated_at} timestamptz）。 */
+  private OffsetDateTime updateTime;
 }

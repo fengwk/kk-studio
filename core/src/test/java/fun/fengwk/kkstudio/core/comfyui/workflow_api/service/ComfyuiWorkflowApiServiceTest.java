@@ -10,9 +10,8 @@ import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 
-import fun.fengwk.kkstudio.core.CoreTestApplication;
+import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiCreateDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiUpdateDTO;
@@ -20,21 +19,22 @@ import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiUpdateDTO;
 import java.util.NoSuchElementException;
 
 /**
- * {@link ComfyuiWorkflowApiService} 的端到端 CRUD 测试。
+ * {@link ComfyuiWorkflowApiService} end-to-end CRUD coverage over the authoritative PostgreSQL
+ * schema.
  *
- * <p>该测试通过 full Spring context + H2 schema 校验：
+ * <p>Exercises:
  *
  * <ul>
- *   <li>写入链路会触发 JSON 解析与 binding 校验，错误入参会被拒绝；
- *   <li>更新时切换 apiName 必须重新通过唯一性校验；
- *   <li>删除会真的从数据库移除，且查询结果中不再包含对应记录；
- *   <li>DTO id 字段以十进制字符串形式暴露。
+ *   <li>the JSONB {@code workflow} / {@code input_bindings} cast round-trip;
+ *   <li>{@code created_at} / {@code updated_at} timestamptz population via the {@code create_time}
+ *       / {@code update_time} DO aliases;
+ *   <li>apiName global uniqueness enforced by the {@code uk_comfyui_workflow_api_api_name} index;
+ *   <li>DTO id is exposed as a decimal string, matching the snowflake resource contract.
  * </ul>
  *
  * @author fengwk
  */
-@SpringBootTest(classes = CoreTestApplication.class)
-public class ComfyuiWorkflowApiServiceTest {
+public class ComfyuiWorkflowApiServiceTest extends PostgresSpringTestSupport {
 
   private static final String WORKFLOW_JSON =
       "{\n"

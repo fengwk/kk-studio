@@ -13,7 +13,7 @@ public class AgentModel {
   private String name;
   private String description;
 
-  /** Persisted structured configuration, encoded into {@code config_json} on the row. */
+  /** Persisted structured configuration, encoded into the {@code config} JSONB column. */
   private String configJson;
 
   private Long version;

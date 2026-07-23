@@ -2,10 +2,9 @@ package fun.fengwk.kkstudio.core.studio.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
+import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasCommandMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasDocumentMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasLinkMapper;
@@ -39,7 +38,6 @@ import java.util.Optional;
  * <p>Supports document CRUD-ish flow and a tiny command set for text / generate-text nodes and
  * visibility links. ResourceReference and real FunctionRun remain future work.
  */
-@RequiredArgsConstructor
 public class DurableCanvasService implements CanvasQueryService, CanvasCommandService {
 
   private static final String DEFAULT_VIEWPORT = "{\"x\":80,\"y\":20,\"scale\":0.6}";
@@ -50,6 +48,22 @@ public class DurableCanvasService implements CanvasQueryService, CanvasCommandSe
   private final CanvasLinkMapper linkMapper;
   private final CanvasCommandMapper commandMapper;
   private final ObjectMapper objectMapper;
+  private final PostgresqlSequenceIdGenerator idGenerator;
+
+  public DurableCanvasService(
+      CanvasDocumentMapper documentMapper,
+      CanvasNodeMapper nodeMapper,
+      CanvasLinkMapper linkMapper,
+      CanvasCommandMapper commandMapper,
+      ObjectMapper objectMapper,
+      PostgresqlSequenceIdGenerator idGenerator) {
+    this.documentMapper = documentMapper;
+    this.nodeMapper = nodeMapper;
+    this.linkMapper = linkMapper;
+    this.commandMapper = commandMapper;
+    this.objectMapper = objectMapper;
+    this.idGenerator = idGenerator;
+  }
 
   @Override
   public Optional<CanvasSnapshot> findSnapshot(long canvasId) {
@@ -79,7 +93,7 @@ public class DurableCanvasService implements CanvasQueryService, CanvasCommandSe
       normalized = "未命名画布";
     }
     CanvasDocumentDO document = new CanvasDocumentDO();
-    document.setId(AgentIdGenerator.nextCanvasDocumentId());
+    document.setId(idGenerator.next());
     document.setWorkspaceId(workspaceId);
     document.setTitle(normalized);
     document.setSchemaVersion(SCHEMA_VERSION);
@@ -169,7 +183,7 @@ public class DurableCanvasService implements CanvasQueryService, CanvasCommandSe
 
     CanvasSnapshot snapshot = findSnapshot(canvasId).orElseThrow();
     CanvasCommandDO record = new CanvasCommandDO();
-    record.setId(AgentIdGenerator.nextCanvasCommandId());
+    record.setId(idGenerator.next());
     record.setCommandId(commandId);
     record.setWorkspaceId(document.getWorkspaceId());
     record.setCanvasId(canvasId);
@@ -234,7 +248,7 @@ public class DurableCanvasService implements CanvasQueryService, CanvasCommandSe
       throw new IllegalArgumentException("create_link nodes must exist");
     }
     CanvasLinkDO link = new CanvasLinkDO();
-    link.setId(AgentIdGenerator.nextCanvasLinkId());
+    link.setId(idGenerator.next());
     link.setCanvasId(canvasId);
     link.setSourceNodeId(source);
     link.setTargetNodeId(target);
@@ -269,7 +283,7 @@ public class DurableCanvasService implements CanvasQueryService, CanvasCommandSe
 
   private CanvasNodeDO baseNode(long canvasId, long revision) {
     CanvasNodeDO node = new CanvasNodeDO();
-    node.setId(AgentIdGenerator.nextCanvasNodeId());
+    node.setId(idGenerator.next());
     node.setCanvasId(canvasId);
     node.setNodeTypeVersion(1);
     node.setParentGroupId(null);
@@ -277,9 +291,29 @@ public class DurableCanvasService implements CanvasQueryService, CanvasCommandSe
     node.setZIndex(1L);
     node.setLocked(false);
     node.setHidden(false);
-    node.setValidity(NodeValidity.CURRENT.name());
+    node.setValidity(toStorageValidity(NodeValidity.CURRENT));
     node.setRevision(revision);
     return node;
+  }
+
+  private static String toStorageValidity(NodeValidity validity) {
+    return switch (validity) {
+      case CURRENT, EMPTY -> "VALID";
+      case STALE -> "STALE";
+      case BROKEN -> "INVALID";
+    };
+  }
+
+  private static NodeValidity fromStorageValidity(String stored) {
+    if (stored == null) {
+      return NodeValidity.EMPTY;
+    }
+    return switch (stored) {
+      case "VALID" -> NodeValidity.CURRENT;
+      case "INVALID" -> NodeValidity.BROKEN;
+      case "STALE" -> NodeValidity.STALE;
+      default -> throw new IllegalStateException("Unknown stored node validity: " + stored);
+    };
   }
 
   private CanvasDocumentDO requireDocument(long canvasId) {
@@ -334,7 +368,7 @@ public class DurableCanvasService implements CanvasQueryService, CanvasCommandSe
         node.getZIndex(),
         Boolean.TRUE.equals(node.getLocked()),
         Boolean.TRUE.equals(node.getHidden()),
-        NodeValidity.valueOf(node.getValidity()),
+        fromStorageValidity(node.getValidity()),
         node.getRevision(),
         node.getDataJson());
   }

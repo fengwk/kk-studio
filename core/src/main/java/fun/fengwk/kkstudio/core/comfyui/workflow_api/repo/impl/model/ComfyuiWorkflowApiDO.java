@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.core.comfyui.workflow_api.repo.impl.model;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /** {@code comfyui_workflow_api} 行映射：ComfyUI 工作流卡片。 */
 @Data
@@ -32,9 +32,9 @@ public class ComfyuiWorkflowApiDO {
   /** 是否启用。 */
   private Boolean enabled;
 
-  /** 创建时间（映射 {@code gmt_create}）。 */
-  private LocalDateTime createTime;
+  /** 创建时间（映射 {@code created_at} timestamptz）。 */
+  private OffsetDateTime createTime;
 
-  /** 更新时间（映射 {@code gmt_modified}）。 */
-  private LocalDateTime updateTime;
+  /** 更新时间（映射 {@code updated_at} timestamptz）。 */
+  private OffsetDateTime updateTime;
 }

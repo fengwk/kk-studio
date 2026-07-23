@@ -40,7 +40,7 @@ public class AgentModelConverter {
   private AgentModelConfigDTO decodeConfig(AgentModel model) {
     String configJson = model.getConfigJson();
     if (configJson == null || configJson.isBlank()) {
-      throw new IllegalStateException("agent model config_json is required: " + model.getId());
+      throw new IllegalStateException("agent model config is required: " + model.getId());
     }
     return runtimeConfigParser.decode(configJson);
   }

@@ -1,12 +1,11 @@
 package fun.fengwk.kkstudio.core.agent.definition.service.impl;
 
-import static fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator.nextAgentId;
-
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
+import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
@@ -25,11 +24,15 @@ final class AgentDefinitionMutationFactory {
 
   private final AgentEditableSupport editableSupport;
   private final AgentDefinitionConfigCodec configCodec;
+  private final PostgresqlSequenceIdGenerator idGenerator;
 
   AgentDefinitionMutationFactory(
-      AgentEditableSupport editableSupport, AgentDefinitionConfigCodec configCodec) {
+      AgentEditableSupport editableSupport,
+      AgentDefinitionConfigCodec configCodec,
+      PostgresqlSequenceIdGenerator idGenerator) {
     this.editableSupport = editableSupport;
     this.configCodec = configCodec;
+    this.idGenerator = idGenerator;
   }
 
   AgentDefinition newAgent(long modelId, AgentDefinitionEditablePropertiesDTO properties) {
@@ -38,7 +41,7 @@ final class AgentDefinitionMutationFactory {
     }
     Mutation mutation = newMutation(properties);
     AgentDefinition definition = new AgentDefinition();
-    definition.setId(nextAgentId());
+    definition.setId(idGenerator.next());
     definition.setModelId(modelId);
     apply(definition, mutation);
     return definition;

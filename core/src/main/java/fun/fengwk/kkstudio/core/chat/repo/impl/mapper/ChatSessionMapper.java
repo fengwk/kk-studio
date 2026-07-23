@@ -19,16 +19,16 @@ public interface ChatSessionMapper extends BaseMapper {
   @Insert(
       """
       insert into chat_session (
-          id, chat_id, session_id, gmt_create
+          id, chat_id, session_id, created_at
       ) values (
-          #{id}, #{chatId}, #{sessionId}, current_timestamp(3)
+          #{id}, #{chatId}, #{sessionId}, current_timestamp
       )
       """)
   int insert(ChatSessionDO membership);
 
   @Select(
       """
-      select id, chat_id, session_id, gmt_create as create_time
+      select id, chat_id, session_id, created_at as create_time
       from chat_session
       where chat_id = #{chatId} and session_id = #{sessionId}
       """)
@@ -48,7 +48,7 @@ public interface ChatSessionMapper extends BaseMapper {
       select session_id
       from chat_session
       where chat_id = #{chatId}
-      order by gmt_create asc, id asc
+      order by created_at asc, id asc
       """)
   List<Long> listSessionIdsByChatId(@Param("chatId") long chatId);
 

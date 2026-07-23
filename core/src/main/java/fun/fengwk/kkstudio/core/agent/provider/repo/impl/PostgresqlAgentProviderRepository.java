@@ -11,12 +11,15 @@ import fun.fengwk.kkstudio.core.agent.provider.repo.impl.mapper.AgentProviderMap
 import fun.fengwk.kkstudio.core.agent.provider.repo.impl.model.AgentProviderDO;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
-/** MySQL-backed global provider repository. */
+/** PostgreSQL-backed global provider repository. */
 @AllArgsConstructor
 @Repository
-public class MysqlAgentProviderRepository implements AgentProviderRepository {
+public class PostgresqlAgentProviderRepository implements AgentProviderRepository {
 
   private final AgentProviderMapper agentProviderMapper;
 
@@ -86,8 +89,12 @@ public class MysqlAgentProviderRepository implements AgentProviderRepository {
     result.setCredential(provider.getCredential());
     result.setConfigJson(provider.getConfigJson());
     result.setVersion(provider.getVersion());
-    result.setCreateTime(provider.getCreateTime());
-    result.setUpdateTime(provider.getUpdateTime());
+    result.setCreateTime(toLocalDateTime(provider.getCreateTime()));
+    result.setUpdateTime(toLocalDateTime(provider.getUpdateTime()));
     return result;
+  }
+
+  private static LocalDateTime toLocalDateTime(OffsetDateTime value) {
+    return value == null ? null : value.withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime();
   }
 }

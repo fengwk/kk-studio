@@ -6,9 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 
-import fun.fengwk.kkstudio.core.CoreTestApplication;
+import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.studio.StudioWorkspaces;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasDocument;
@@ -16,9 +15,12 @@ import fun.fengwk.kkstudio.studio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.studio.runtime.SystemFunctionIds;
 
-/** Minimal durable canvas create/list/command path. */
-@SpringBootTest(classes = CoreTestApplication.class)
-public class DurableCanvasServiceTest {
+/**
+ * Minimal durable canvas create/list/command path against the authoritative PostgreSQL schema.
+ *
+ * <p>Each test runs in a freshly reset schema, so previous canvas rows do not leak across tests.
+ */
+public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
 
   @Autowired private CanvasCommandService canvasCommandService;
   @Autowired private CanvasQueryService canvasQueryService;
