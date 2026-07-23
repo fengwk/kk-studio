@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.context.DefaultContextTransform;
 import fun.fengwk.kkstudio.harness.runtime.context.SessionContextBuilder;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.CompactionService;
 import fun.fengwk.kkstudio.harness.runtime.thread.DeltaFlushScheduler;
@@ -24,7 +25,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProviderCancellation;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRetryPolicyResolver;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeConfigResolver;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadTransactions;
@@ -129,7 +129,7 @@ public class HarnessThreadWorkerConfiguration {
       ProviderMessageProjector providerMessageProjector,
       TurnResourceResolver turnResourceResolver,
       CompactionService compactionService,
-      ThreadRetryPolicyResolver retryPolicyResolver,
+      InvocationRetryPolicyResolver retryPolicyResolver,
       ThreadProcessorConfig threadProcessorConfig,
       DeltaFlushScheduler threadDeltaFlushScheduler,
       ThreadIdGenerator threadIdGenerator,

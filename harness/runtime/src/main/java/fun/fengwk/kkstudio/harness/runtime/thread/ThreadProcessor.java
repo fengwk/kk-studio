@@ -20,6 +20,8 @@ import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.ThreadIdle;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.TurnStarted;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -100,7 +102,7 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
   private final ProviderMessageProjector messageProjector;
   private final TurnResourceResolver resourceResolver;
   private final CompactionService compactionService;
-  private final ThreadRetryPolicyResolver retryPolicyResolver;
+  private final InvocationRetryPolicyResolver retryPolicyResolver;
   private final ThreadProcessorConfig config;
   private final Clock clock;
   private final DeltaFlushScheduler deltaFlushScheduler;
@@ -143,7 +145,7 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
       ProviderMessageProjector messageProjector,
       TurnResourceResolver resourceResolver,
       CompactionService compactionService,
-      ThreadRetryPolicyResolver retryPolicyResolver,
+      InvocationRetryPolicyResolver retryPolicyResolver,
       ThreadProcessorConfig config,
       Clock clock,
       DeltaFlushScheduler deltaFlushScheduler,
@@ -1080,7 +1082,7 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
 
     /** 瞬态 Provider failure 按当前策略写入一次 durable automatic retry。 */
     private void scheduleOrFail(ProviderException error) {
-      ThreadRetryPolicy policy;
+      InvocationRetryPolicy policy;
       try {
         policy = retryPolicyResolver.resolve();
       } catch (RuntimeException policyError) {

@@ -364,7 +364,8 @@ public interface RealtimeEventSink {
 }
 ```
 
-RealtimeEvent 不是 durable transaction 的返回值或判断条件。Redis sink 失败只记录观测错误，不改变 Invocation terminal。
+RealtimeEvent 不是 durable transaction 的返回值或判断条件。Redis sink 失败只记录观测错误，不改变 Invocation terminal。可重试
+Invocation 的 event 必须携带 attempt，供 snapshot-first 客户端过滤旧 attempt 的 lossy partial。
 
 ### 4.4 ModelExecutor
 
@@ -376,7 +377,8 @@ public interface ModelExecutor {
 }
 ```
 
-Listener：started、delta、completed、failed。Adapter 必须支持 best-effort cancel；Runtime 仍以 worker token/epoch 判断 callback 是否可提交。
+Listener：delta、completed、failed。Invocation 在 durable claim 时进入 RUNNING 并建立 startedAt；Adapter 必须支持
+best-effort cancel，Runtime 仍以 worker token/epoch 判断 callback 是否可提交。
 
 ### 4.5 ToolExecutor
 
@@ -456,8 +458,9 @@ snapshot 可以由多个 SQL 在同一短事务/隔离级别中组成，但不�
 
 ```text
 signal/recovery
-  -> claim ModelInvocation
-  -> resolve credential reference
+  -> find claimable ModelInvocation
+  -> resolve frozen request 的短生命周期执行资源（仅 QUEUED/RETRY_WAIT；不发起 Provider I/O）
+  -> claim ModelInvocation（写入 lease/fencing）
   -> execute Provider
   -> delta to RealtimeEventSink
   -> success/final failure via ModelInvocationTransactions
@@ -467,6 +470,36 @@ transient failure
   -> RETRY_WAIT
   -> due scheduler emits ModelInvocation signal
 ```
+
+协议细节：
+
+- `findClaimable` 不是 ownership；每次 claim 必须生成新 worker token，所有后续 mutation 都必须比较 Invocation
+  id/status、execution epoch、attempt、worker token 与 lease 有效期。CAS 返回 `LOST_OWNERSHIP` 时只关闭本地
+  handle，不能覆盖 durable 状态。
+- `QUEUED -> RUNNING` 建立 `startedAt`、总 `deadlineAt` 和初始 activity。`RETRY_WAIT -> RUNNING`
+  只保留首次建立的总时钟，递增 `attempt`，并以本次外部 Provider attempt 开始时刻刷新 activity，重新开始
+  idle timeout 计量；worker heartbeat 绝不刷新 activity。
+- 已过期 `RUNNING` lease 的接管不能安全确认 Provider 外部副作用，必须落为 `UNKNOWN`，不能重新调用
+  Provider。
+- Provider delta 只写 best-effort realtime projection，并按 cadence 持久化真实 activity；它不写
+  Entry/head，也不唤醒 Thread。完整 response、Provider final error 或 cancellation 的 terminal CAS 才在同一
+  事务写入尚未 flush 的最后真实 delta activity、标记 owning Thread runnable，commit 后再发 Thread signal；terminal
+  callback 的到达时刻本身不伪装成 activity。由最终 response 补齐的 synthetic delta 只能在 success CAS commit 后投影，
+  防止失去 ownership 的 callback 泄漏未被 durable result 接受的最终片段。
+- 瞬态失败的第一个 retry ordinal 等于本次失败的 `attempt`；只有 policy 允许且
+  `now + delay < deadlineAt` 才写 `RETRY_WAIT`。retry mutation 不标记 Thread runnable，只安排
+  `MODEL_INVOCATION` delayed signal；它与 terminal mutation 一样原子保留尚未 flush 的最后真实 delta activity，recovery
+  按 PostgreSQL due scan 兜底。
+- total deadline、idle timeout 和 lease 互相独立。watchdog terminal 化后 best-effort 取消本地 handle；已开始
+  terminal CAS 时继续 heartbeat，直到 CAS 成功、丢失 ownership 或本地 handle 关闭。
+- 首次 attempt 从执行资源的 total timeout 建立 durable deadline；retry 即使重新解析执行资源也不得延长该 deadline。idle
+  timeout 是当前 attempt 的冻结值；RUNNING 崩溃后直接 UNKNOWN，因此 recovery 不需要从 realtime state 重建 idle
+  watchdog。ModelExecutionRequest 携带当前 attempt，外部 idempotency key 稳定于 `(invocationId, attempt)`；ModelExecutor
+  的 transport timeout 还必须受 durable deadline 上限约束。
+- 初始 lease/deadline/idle watchdog 无法注册时，Provider 尚未执行，可按瞬态 setup failure 进入 retry/final failure；Provider
+  已启动后的本地 timer/activity 基础设施故障只关闭本地 handle，等待 lease recovery 保守落 UNKNOWN。
+- notifier 和 realtime sink 都是 best-effort。其异常不得回滚或替代 durable transition；进程 stop 仅取消本地
+  handle，留给 lease recovery。
 
 ### 7.2 ToolWorker
 

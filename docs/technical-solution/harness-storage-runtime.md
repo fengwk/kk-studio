@@ -226,7 +226,9 @@ Pub/Sub 丢失不会丢工作。低频 recovery 查询 `runnable=true` 或过期
   "subjectId": "...",
   "attempt": 1,
   "type": "MODEL_DELTA",
-  "payload": {},
+  "payload": {
+    "attempt": 1
+  },
   "createdAt": "..."
 }
 ```
@@ -234,6 +236,8 @@ Pub/Sub 丢失不会丢工作。低频 recovery 查询 `runnable=true` 或过期
 约束：
 
 - 使用 `MAXLEN ~` 或时间清理限制容量；
+- 可重试 Invocation 的 projection 必须携带 `attempt`；客户端只合并与 PostgreSQL snapshot 当前 attempt
+  一致的片段，不能把失败 attempt 的 partial 拼接到后续 attempt；
 - terminal 后只保留短 reconnect window；
 - Redis cursor 过期时客户端重新加载 PostgreSQL snapshot；
 - Event 不用于 maxTurns、retry、状态恢复或业务审计；
@@ -276,6 +280,16 @@ Tool timeout 分离为：
 - 可选 progress idle timeout。
 
 lease heartbeat 不等于 progress activity。
+
+ModelInvocation 的 retry 还遵循：
+
+- 首次 `QUEUED -> RUNNING` 建立总 `deadline_at`；后续 `RETRY_WAIT -> RUNNING` 不得延长它；
+- 每次实际 Provider attempt 开始时刷新 `last_activity_at`，使 idle timeout 只计量当前 attempt 的无进度时间，
+  而不把 retry wait 误判为 idle；
+- Provider delta 是需要持久化的真实 activity；完整 terminal callback 在同一 fenced mutation 内结束
+  Invocation，并携带尚未 debounce flush 的最后真实 delta activity，因此不以 terminal callback 自身的到达时刻伪造
+  progress；retry mutation 同样保留该 activity；worker lease heartbeat 不是 activity；
+- 已过期 `RUNNING` lease 不能假设外部 Provider 未执行，recovery 终态为 `UNKNOWN`，不得重放。
 
 ## 10. PostgreSQL 锁序
 

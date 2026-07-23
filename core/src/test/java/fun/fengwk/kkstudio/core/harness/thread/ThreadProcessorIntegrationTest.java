@@ -61,6 +61,9 @@ import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.CompactionEntryPayload;
@@ -75,9 +78,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.CompactionService;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessorConfig;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRetryBackoffStrategy;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRetryPolicy;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRetryPolicyResolver;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnResourceResolver;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnResources;
@@ -650,8 +650,11 @@ class ThreadProcessorIntegrationTest {
     HarnessThreadDTO thread = createRoot("proc-retry-tool-wait");
     long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
     retryPolicyResolver.set(
-        new ThreadRetryPolicy(
-            1, ThreadRetryBackoffStrategy.FIXED, Duration.ofMillis(200), Duration.ofMillis(200)));
+        new InvocationRetryPolicy(
+            1,
+            InvocationRetryBackoffStrategy.FIXED,
+            Duration.ofMillis(200),
+            Duration.ofMillis(200)));
     fakeProvider.failNext(ProviderErrorKind.TRANSIENT, "first-fail");
     fakeProvider.completeNextWithToolCall();
     submit(thread.getThreadId(), "will-fail", "cid-retry-tool-fail-" + threadId);
@@ -695,8 +698,11 @@ class ThreadProcessorIntegrationTest {
     HarnessThreadDTO thread = createRoot("proc-retry-exhausted");
     long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
     retryPolicyResolver.set(
-        new ThreadRetryPolicy(
-            1, ThreadRetryBackoffStrategy.FIXED, Duration.ofMillis(100), Duration.ofMillis(100)));
+        new InvocationRetryPolicy(
+            1,
+            InvocationRetryBackoffStrategy.FIXED,
+            Duration.ofMillis(100),
+            Duration.ofMillis(100)));
     fakeProvider.failNext(ProviderErrorKind.TRANSIENT, "first-transient");
     fakeProvider.failNext(ProviderErrorKind.TRANSIENT, "second-transient");
 
@@ -765,9 +771,9 @@ class ThreadProcessorIntegrationTest {
     HarnessThreadDTO thread = createRoot("proc-fail");
     long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
     retryPolicyResolver.set(
-        new ThreadRetryPolicy(
+        new InvocationRetryPolicy(
             3,
-            ThreadRetryBackoffStrategy.EXPONENTIAL,
+            InvocationRetryBackoffStrategy.EXPONENTIAL,
             Duration.ofMillis(10),
             Duration.ofMillis(100)));
     fakeProvider.failNext(ProviderErrorKind.AUTHENTICATION, "bad credential");
@@ -1337,15 +1343,15 @@ class ThreadProcessorIntegrationTest {
   /**
    * Keeps non-retry tests fast while allowing individual cases to prove durable automatic retry.
    */
-  static final class MutableRetryPolicyResolver implements ThreadRetryPolicyResolver {
-    private static final ThreadRetryPolicy NO_RETRY =
-        new ThreadRetryPolicy(
-            0, ThreadRetryBackoffStrategy.FIXED, Duration.ofMillis(10), Duration.ofMillis(10));
+  static final class MutableRetryPolicyResolver implements InvocationRetryPolicyResolver {
+    private static final InvocationRetryPolicy NO_RETRY =
+        new InvocationRetryPolicy(
+            0, InvocationRetryBackoffStrategy.FIXED, Duration.ofMillis(10), Duration.ofMillis(10));
 
-    private volatile ThreadRetryPolicy policy = NO_RETRY;
+    private volatile InvocationRetryPolicy policy = NO_RETRY;
 
     @Override
-    public ThreadRetryPolicy resolve() {
+    public InvocationRetryPolicy resolve() {
       return policy;
     }
 
@@ -1353,7 +1359,7 @@ class ThreadProcessorIntegrationTest {
       policy = NO_RETRY;
     }
 
-    void set(ThreadRetryPolicy value) {
+    void set(InvocationRetryPolicy value) {
       policy = value;
     }
   }

@@ -1,19 +1,22 @@
-package fun.fengwk.kkstudio.harness.runtime.thread;
+package fun.fengwk.kkstudio.harness.runtime.retry;
 
 import java.time.Duration;
 import java.util.Objects;
 
-/** Provider 瞬态失败的全局自动重试策略。 */
-public record ThreadRetryPolicy(
+/** Model 与 Tool Invocation 瞬态失败共享的全局自动重试策略。 */
+public record InvocationRetryPolicy(
     int maxRetries,
-    ThreadRetryBackoffStrategy backoffStrategy,
+    InvocationRetryBackoffStrategy backoffStrategy,
     Duration baseDelay,
     Duration maxDelay) {
-  public static final ThreadRetryPolicy DEFAULT =
-      new ThreadRetryPolicy(
-          3, ThreadRetryBackoffStrategy.EXPONENTIAL, Duration.ofSeconds(2), Duration.ofSeconds(60));
+  public static final InvocationRetryPolicy DEFAULT =
+      new InvocationRetryPolicy(
+          3,
+          InvocationRetryBackoffStrategy.EXPONENTIAL,
+          Duration.ofSeconds(2),
+          Duration.ofSeconds(60));
 
-  public ThreadRetryPolicy {
+  public InvocationRetryPolicy {
     if (maxRetries < 0) {
       throw new IllegalArgumentException("maxRetries must not be negative");
     }
@@ -30,7 +33,7 @@ public record ThreadRetryPolicy(
     if (retryAttempt <= 0) {
       throw new IllegalArgumentException("retryAttempt must be positive");
     }
-    if (backoffStrategy == ThreadRetryBackoffStrategy.FIXED || retryAttempt == 1) {
+    if (backoffStrategy == InvocationRetryBackoffStrategy.FIXED || retryAttempt == 1) {
       return baseDelay;
     }
     long ceilingMillis = maxDelay.toMillis();
