@@ -10,11 +10,13 @@ import java.util.Set;
 /**
  * The runtime-facing description of a model.
  *
- * <p>{@code providerResourceId} / {@code modelResourceId} are the database-side Snowflake IDs used
- * for ledger aggregation; {@code providerType} / {@code modelId} identify the upstream model that
- * the adapter dispatches to. Functional capabilities are expressed directly as the primitive {@code
- * tools} / {@code reasoning} booleans alongside {@link ModelInputModality}, removing the previous
- * redundant derived-capability tracking.
+ * <p>{@code providerResourceId} is the PostgreSQL durable resource id and stable credential
+ * reference for the upstream provider; it is not a secret value and must never carry an API key.
+ * {@code modelResourceId} is the PostgreSQL durable resource id for the model row, used for ledger
+ * aggregation. {@code providerType} / {@code modelId} identify the upstream model that the adapter
+ * dispatches to. Functional capabilities are expressed directly as the primitive {@code tools} /
+ * {@code reasoning} booleans alongside {@link ModelInputModality}, removing the previous redundant
+ * derived-capability tracking.
  */
 public record ModelDescriptor(
     long providerResourceId,

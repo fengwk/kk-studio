@@ -1,0 +1,133 @@
+{
+  "agent": {
+    "definitionId": 1001,
+    "name": "primary-agent",
+    "systemPrompt": "You are a careful assistant."
+  },
+  "model": {
+    "descriptor": {
+      "providerResourceId": 9001,
+      "modelResourceId": 8001,
+      "providerType": "OPENAI",
+      "modelId": "gpt-5-mini",
+      "displayName": "GPT-5 Mini",
+      "contextWindow": 200000,
+      "maxOutputTokens": 16384,
+      "inputModalities": ["AUDIO", "DOCUMENT", "IMAGE", "TEXT", "VIDEO"],
+      "tools": true,
+      "reasoning": true,
+      "variants": [
+        {
+          "id": "balanced",
+          "maxOutputTokens": null,
+          "temperature": 0.2,
+          "topP": 0.9,
+          "topK": null,
+          "frequencyPenalty": null,
+          "presencePenalty": null,
+          "stopSequences": ["STOP"],
+          "reasoningEffort": null
+        }
+      ],
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "tier-1",
+        "serviceTier": "default",
+        "serviceTierMultiplier": "1.5",
+        "version": "v1",
+        "inputPerMillionTokens": "3.000000000000",
+        "outputPerMillionTokens": "6.000000000000",
+        "cacheReadPerMillionTokens": "0.300000000000",
+        "cacheWritePerMillionTokens": "3.750000000000",
+        "cacheWriteLongPerMillionTokens": "0",
+        "reasoningPerMillionTokens": "0"
+      },
+      "promptCachePolicy": {
+        "capability": {
+          "mode": "BREAKPOINTS",
+          "supportedRetentions": ["LONG", "SHORT"],
+          "supportedBreakpoints": ["SYSTEM", "TOOLS"]
+        },
+        "retention": "SHORT"
+      }
+    },
+    "variant": {
+      "id": "balanced",
+      "maxOutputTokens": null,
+      "temperature": 0.2,
+      "topP": 0.9,
+      "topK": null,
+      "frequencyPenalty": null,
+      "presencePenalty": null,
+      "stopSequences": ["STOP"],
+      "reasoningEffort": null
+    }
+  },
+  "tools": [
+    {
+      "descriptor": {
+        "name": "search",
+        "version": "v1",
+        "description": "search helper",
+        "rendererKey": "search",
+        "executionLocation": "PLATFORM",
+        "sideEffect": "READ_ONLY",
+        "timeoutMillis": 1000,
+        "inputSchema": {
+          "type": "object",
+          "description": "params",
+          "properties": {
+            "query": {"type": "string", "description": "search query"}
+          },
+          "required": ["query"],
+          "additionalProperties": false
+        }
+      },
+      "environmentName": null
+    },
+    {
+      "descriptor": {
+        "name": "shell",
+        "version": "v1",
+        "description": "remote shell",
+        "rendererKey": "shell",
+        "executionLocation": "ENVIRONMENT",
+        "sideEffect": "NON_IDEMPOTENT",
+        "timeoutMillis": 500,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "cmd": {"type": "string", "description": "command"}
+          },
+          "required": [],
+          "additionalProperties": true
+        }
+      },
+      "environmentName": "sandbox"
+    }
+  ],
+  "skills": [
+    {
+      "name": "code-review",
+      "description": "code review skill",
+      "sourceEnvironment": "sandbox"
+    },
+    {
+      "name": "research",
+      "description": "research skill",
+      "sourceEnvironment": "sandbox"
+    }
+  ],
+  "policy": {
+    "maxTurns": 16,
+    "maxDepth": 8,
+    "maxDirectSubagents": 4,
+    "maxTotalSubagents": null,
+    "allowedSubagents": ["researcher", "writer"],
+    "yoloEnabled": false
+  },
+  "environment": {
+    "environmentName": "sandbox",
+    "workspaceReference": null
+  }
+}

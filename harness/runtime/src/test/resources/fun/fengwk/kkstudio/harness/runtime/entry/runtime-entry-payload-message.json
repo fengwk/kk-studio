@@ -1,0 +1,36 @@
+{
+  "message": {
+    "role": "ASSISTANT",
+    "contents": [
+      {"type": "text", "text": "answer"},
+      {"type": "image", "mediaType": "image/png", "source": "data:image/png;base64,AA=="},
+      {"type": "audio", "mediaType": "audio/wav", "source": "https://example.test/audio.wav"},
+      {"type": "thinking", "text": "reasoning"},
+      {"type": "json", "json": "[1,{\"ok\":true}]"},
+      {"type": "tool_call", "toolCallId": "call-1", "toolName": "read", "argumentsJson": "{\"path\":\"README.md\"}"},
+      {"type": "artifact", "artifactId": "artifact-1", "mediaType": "text/plain", "preview": null}
+    ]
+  },
+  "assistantMetadata": {
+    "stopReason": "TOOL_CALLS",
+    "usage": {
+      "inputTokens": 321,
+      "outputTokens": 45,
+      "cacheReadTokens": 6,
+      "cacheWriteTokens": 7,
+      "cacheWriteLongTokens": 0,
+      "reasoningTokens": 8,
+      "providerTotalTokens": 387
+    },
+    "cost": {
+      "currency": "USD",
+      "input": "0.000001000000",
+      "output": "0.000001000000",
+      "cacheRead": "0.000001000000",
+      "cacheWrite": "0.000001200000",
+      "cacheWriteLong": "0",
+      "reasoning": "0",
+      "total": "0.000004200000"
+    }
+  }
+}

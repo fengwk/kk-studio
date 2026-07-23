@@ -72,7 +72,7 @@ Redis Stream 使用 Redis 自身 stream id，仅作为 realtime cursor，不进�
 | `session_id` | 所属 Session |
 | `parent_entry_id` | 单父关系，可空 |
 | `entry_type` | 语义类型 |
-| `payload` | `jsonb` typed payload |
+| `payload` | `jsonb` typed payload，由 `RuntimeEntryPayloadJsonCodec` 严格编解码 |
 | `created_at` | 创建时间 |
 
 索引：
@@ -85,7 +85,7 @@ Redis Stream 使用 Redis 自身 stream id，仅作为 realtime cursor，不进�
 
 完整路径使用一次 recursive CTE，从 leaf 沿 parent 回溯后按 depth 反转。禁止应用层逐节点 SELECT。
 
-Context 查询首先定位最近有效 Compaction，再只加载 Compaction 所需 retained range 与其后的 Entry，不读取已被压缩淘汰的祖先 payload。
+Runtime 在完整校验 Session、parent 链和 head identity 后，由 `ModelInvocationPlanner` 应用最后一个有效 Compaction 的 retained range；不得用 live Definition 补齐历史配置。
 
 ### 4.3 `harness_thread`
 
@@ -123,7 +123,7 @@ enqueue、sequence 分配、`runnable=true` 在锁定 Thread 的同一事务内�
 
 ### 4.5 `harness_model_invocation`
 
-保存 source head、execution epoch、request snapshot、状态、worker lease、deadline/activity、retry、terminal response/error 和 applied 标志。
+保存 source head、execution epoch、完整 `ProviderRequest` snapshot、状态、worker lease、deadline/activity、retry、terminal response/error 和 applied 标志。request 由 planner 从 response-debt 前缀与最近 `RUNTIME_CONFIG` 一次性冻结；worker 不重新读取 Entry 或 Definition。
 
 Model response 在 Reconciler 物化为 Entry 后可以按 retention 清理大 request/response payload，但账本和必要错误摘要进入独立长期事实。
 
@@ -224,6 +224,7 @@ Pub/Sub 丢失不会丢工作。低频 recovery 查询 `runnable=true` 或过期
   "threadId": "...",
   "subjectKind": "MODEL_INVOCATION",
   "subjectId": "...",
+  "attempt": 1,
   "type": "MODEL_DELTA",
   "payload": {},
   "createdAt": "..."
@@ -236,6 +237,7 @@ Pub/Sub 丢失不会丢工作。低频 recovery 查询 `runnable=true` 或过期
 - terminal 后只保留短 reconnect window；
 - Redis cursor 过期时客户端重新加载 PostgreSQL snapshot；
 - Event 不用于 maxTurns、retry、状态恢复或业务审计；
+- Model delta 必须携带 attempt，snapshot-first 客户端丢弃旧 attempt fragment；
 - Redis 丢失后允许 in-flight 动画缺口，最终 Entry/Invocation 不受影响。
 
 SSE adapter 使用阻塞读取或 Redis listener，不再每 200ms 轮询 PostgreSQL。
@@ -307,7 +309,8 @@ Recovery SQL 不 join Interaction、Tool、Model、Child Session 来推导 runna
 | Redis Pub/Sub 丢消息 | PostgreSQL runnable recovery |
 | Redis Streams 清空 | 客户端 snapshot reload |
 | Runtime 进程退出 | processor lease 过期后接管 |
-| Model/Tool worker 退出 | Invocation lease 过期后重试/UNKNOWN |
+| Model worker 在 Provider I/O 后失联 | RUNNING lease 过期后终结为 UNKNOWN，不重放未知外部副作用 |
+| QUEUED/RETRY_WAIT signal 丢失 | PostgreSQL due scan 重新 dispatch |
 | terminal callback 重复 | invocation token + terminal CAS |
 | Stop 与 terminal 并发 | execution epoch fencing |
 | notify 先于 commit | 禁止；只允许 afterCommit |
