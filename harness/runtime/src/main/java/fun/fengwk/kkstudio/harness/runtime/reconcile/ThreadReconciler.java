@@ -12,6 +12,10 @@ import java.util.Optional;
 /**
  * Thread Reconciler：一次 activation 内收敛 durable facts 并返回 {@link StepResult}。
  *
+ * <p>它不是常驻 Java 线程。用户 Input、Tool 终态、Interaction 与 Model 完成先在各自事务中提交 durable facts，再于提交后 best-effort
+ * 发出 activation 信号；HTTP/SSE/Provider 回调本身都不是待执行工作队列。跨节点单飞由数据库 processor lease + fencing token
+ * 保证；丢失的 kick 由 runnable 扫描 / recovery 补偿。
+ *
  * <p>严格按以下优先级推进 owned Thread，之间用 bounded step loop 防止死循环：
  *
  * <ol>

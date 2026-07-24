@@ -17,6 +17,12 @@ spring:
         username: unused
         password: unused
 
+  data:
+    redis:
+      # 默认本地 Redis 占位；RedisSpringTestSupport 覆盖到 Testcontainers。
+      host: 127.0.0.1
+      port: 6379
+
   mybatis:
     mapper-locations: classpath:**/*Mapper.xml
     type-aliases-package: fun.fengwk.kkstudio.**.model
@@ -26,6 +32,7 @@ spring:
 convention:
   snowflake-id:
     initial-timestamp: 1702214261706
+    # 测试固定 worker，避免非 Redis 套件依赖 worker 续租；生产见 application.yml Redis worker 策略。
     worker-id: 0
 
 kk-studio:
