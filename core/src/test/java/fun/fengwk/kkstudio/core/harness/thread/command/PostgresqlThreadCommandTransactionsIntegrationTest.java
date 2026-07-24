@@ -43,11 +43,13 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
   @Test
   void createsAgentlessSessionBranchesOnlyWithinSessionAndAllocatesIdempotentSequence() {
     Instant now = Instant.parse("2026-07-24T00:00:00Z");
-    ThreadCommandTransactions.SessionCreation first = transactions.createSession("first", now);
-    ThreadCommandTransactions.SessionCreation second = transactions.createSession("second", now);
+    ThreadCommandTransactions.SessionCreation first =
+        transactions.createSession("first", TestRuntimeConfigs.bootstrap(), now);
+    ThreadCommandTransactions.SessionCreation second =
+        transactions.createSession("second", TestRuntimeConfigs.bootstrap(), now);
 
     assertFalse(first.mainThread().runnable());
-    assertEquals(first.rootEntry().id(), first.mainThread().headEntryId());
+    assertTrue(first.mainThread().headEntryId() > first.rootEntry().id());
     assertEquals(first.mainThread().id(), first.session().mainThreadId());
     assertThrows(
         IllegalArgumentException.class,
@@ -70,7 +72,8 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
   @Test
   void stopFencesEpochAndCancelsQueuedInputsWithoutMakingThreadRunnable() {
     Instant now = Instant.parse("2026-07-24T00:00:00Z");
-    ThreadCommandTransactions.SessionCreation session = transactions.createSession("stop", now);
+    ThreadCommandTransactions.SessionCreation session =
+        transactions.createSession("stop", TestRuntimeConfigs.bootstrap(), now);
     long threadId = session.mainThread().id();
     transactions.enqueue(threadId, userPayload("one"), "one", now);
     transactions.enqueue(threadId, userPayload("two"), "two", now);
@@ -85,7 +88,8 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
   @Test
   void effectiveConfigPrefersLatestQueuedSnapshotBeforeHeadPathFallback() {
     Instant now = Instant.parse("2026-07-24T00:00:00Z");
-    ThreadCommandTransactions.SessionCreation session = transactions.createSession("config", now);
+    ThreadCommandTransactions.SessionCreation session =
+        transactions.createSession("config", TestRuntimeConfigs.bootstrap(), now);
     long threadId = session.mainThread().id();
     RuntimeConfigSnapshot agent = config("agent-a", true);
     RuntimeConfigSnapshot model = config("agent-a", false);

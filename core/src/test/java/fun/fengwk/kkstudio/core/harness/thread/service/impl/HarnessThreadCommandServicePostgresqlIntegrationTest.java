@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import fun.fengwk.kkstudio.core.harness.thread.command.TestRuntimeConfigs;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInputType;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
@@ -42,7 +43,8 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
     seedResources();
     long threadId =
         transactions
-            .createSession("snapshot", Instant.parse("2026-07-24T00:00:00Z"))
+            .createSession(
+                "snapshot", TestRuntimeConfigs.bootstrap(), Instant.parse("2026-07-24T00:00:00Z"))
             .mainThread()
             .id();
 

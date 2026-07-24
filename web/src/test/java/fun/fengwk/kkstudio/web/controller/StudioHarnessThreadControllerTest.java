@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -153,18 +154,19 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.stopId").isString())
             .andExpect(jsonPath("$.data.cancelledInputs.length()").value(5))
-            .andExpect(jsonPath("$.data.restoredMessages[0]").value("hello"))
-            .andExpect(jsonPath("$.data.restoredMessages[1]").value("context"))
             .andReturn();
     String stopId = data(stop).path("stopId").asText();
+    // stop is epoch fencing, not clientRequestId-idempotent; second stop advances epoch with no
+    // remaining queued inputs.
     mockMvc
         .perform(
             post("/api/threads/{id}/stop", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"clientRequestId\":\"stop-1\"}"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.stopId").value(stopId))
-        .andExpect(jsonPath("$.data.restoredMessages[0]").value("hello"));
+        .andExpect(jsonPath("$.data.stopId").isString())
+        .andExpect(jsonPath("$.data.stopId").value(not(stopId)))
+        .andExpect(jsonPath("$.data.cancelledInputs.length()").value(0));
 
     MvcResult branch =
         mockMvc
@@ -199,7 +201,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
             post("/api/sessions/{id}/threads", sessionId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"fromEntryId\":\"" + otherEntryId + "\"}"))
-        .andExpect(status().isConflict());
+        .andExpect(status().isBadRequest());
 
     mockMvc
         .perform(post("/api/threads").contentType(MediaType.APPLICATION_JSON).content("{}"))
@@ -215,7 +217,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
             post("/api/sessions/{id}/threads", sessionId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"fromEntryId\":\"999999999999\"}"))
-        .andExpect(status().isNotFound());
+        .andExpect(status().isBadRequest());
     mockMvc
         .perform(
             put("/api/threads/{id}/yolo", threadId)

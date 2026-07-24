@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -74,13 +75,10 @@ class StudioModelUsageControllerTest extends WebPostgresTestSupport {
     }
   }
 
-  /** 孤立账本不能替代 Thread 元数据及其当前 head 路径。 */
+  /** 孤立账本不能替代 Thread 元数据：没有 Thread 行时查询直接 404。 */
   @Test
   void rejectsUnknownThreadEvenWhenLedgerRowsExist() throws Exception {
-    recordStore.insert(
-        new ModelUsageRecord(
-            recordIds.newModelUsageRecordId(), LARGE_ID, LARGE_ID, LARGE_ID, draft(LARGE_ID), NOW));
-
+    // final schema FKs prevent orphan ledger rows; unknown Thread remains 404 without inserts.
     mockMvc
         .perform(get("/api/usage/threads/{id}", Long.toString(LARGE_ID)))
         .andExpect(status().isNotFound());
@@ -99,7 +97,7 @@ class StudioModelUsageControllerTest extends WebPostgresTestSupport {
 
   private void insertThreadPath() {
     jdbc.execute(
-        (org.springframework.jdbc.core.ConnectionCallback<Void>)
+        (ConnectionCallback<Void>)
             connection -> {
               connection.setAutoCommit(false);
               try (var st = connection.createStatement()) {

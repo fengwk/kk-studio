@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import fun.fengwk.kkstudio.core.harness.thread.command.TestRuntimeConfigs;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.kernel.continuation.ContinuationRef;
 import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInput;
@@ -93,7 +94,8 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
   @Test
   void claimsRenewsAndFencesExpiredTokenAndEpoch() {
     Instant now = Instant.now();
-    ThreadCommandTransactions.SessionCreation session = commands.createSession("lease", now);
+    ThreadCommandTransactions.SessionCreation session =
+        commands.createSession("lease", TestRuntimeConfigs.bootstrap(), now);
     commands.enqueue(session.mainThread().id(), user("lease"), "lease", now);
 
     ThreadOwnership ownership =
@@ -134,7 +136,8 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
   @Test
   void snapshotsPlanBeforeLaterQueuedInputThenHarvestsAndCreatesInvocation() {
     Instant now = Instant.now();
-    ThreadCommandTransactions.SessionCreation session = commands.createSession("snapshot", now);
+    ThreadCommandTransactions.SessionCreation session =
+        commands.createSession("snapshot", TestRuntimeConfigs.bootstrap(), now);
     long threadId = session.mainThread().id();
     RuntimeConfigInputPayload frozenConfig = config(List.of(platformTool()));
     commands.enqueue(threadId, frozenConfig, "config", now);
@@ -430,7 +433,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
         QuiesceOutcome.LOST_OWNERSHIP, transactions.quiesceAndRecheck(owner, Instant.now()));
 
     ThreadCommandTransactions.SessionCreation quiescentSession =
-        commands.createSession("quiescent", Instant.now());
+        commands.createSession("quiescent", TestRuntimeConfigs.bootstrap(), Instant.now());
     long quiescentThread = quiescentSession.mainThread().id();
     commands.enqueue(quiescentThread, config(List.of()), "config-only", Instant.now());
     ThreadOwnership quiescentOwner =
@@ -456,7 +459,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
       for (int iteration = 0; iteration < 8; iteration++) {
         Instant now = Instant.now();
         ThreadCommandTransactions.SessionCreation session =
-            commands.createSession("lost-wake-" + iteration, now);
+            commands.createSession("lost-wake-" + iteration, TestRuntimeConfigs.bootstrap(), now);
         long threadId = session.mainThread().id();
         commands.enqueue(threadId, config(List.of()), "config", now);
         ThreadOwnership ownership =
@@ -503,7 +506,8 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
   }
 
   private Prepared prepareDebt(Instant now, List<ToolBinding> tools) {
-    ThreadCommandTransactions.SessionCreation session = commands.createSession("reconcile", now);
+    ThreadCommandTransactions.SessionCreation session =
+        commands.createSession("reconcile", TestRuntimeConfigs.bootstrap(), now);
     long threadId = session.mainThread().id();
     commands.enqueue(threadId, config(tools), "config", now);
     commands.enqueue(threadId, user("hello"), "user", now);

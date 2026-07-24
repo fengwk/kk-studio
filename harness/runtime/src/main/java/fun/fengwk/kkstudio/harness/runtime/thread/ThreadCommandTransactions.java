@@ -20,8 +20,12 @@ import java.util.Optional;
  */
 public interface ThreadCommandTransactions {
 
-  /** 原子创建 agentless Session、ROOT Entry 与 Main Thread；不会投影 yolo 或 live Definition。 */
-  SessionCreation createSession(String title, Instant now);
+  /**
+   * 原子创建 Session、ROOT Entry、初始 {@code RUNTIME_CONFIG} Entry 与 Main Thread。
+   *
+   * <p>{@code initialConfig} 必须是调用方在事务外已冻结的完整快照；本方法不再读取 live Definition。
+   */
+  SessionCreation createSession(String title, RuntimeConfigSnapshot initialConfig, Instant now);
 
   /** 从同一 Session 的指定 Entry 创建 branch Thread。 */
   HarnessThread createBranch(long sessionId, long fromEntryId, Instant now);

@@ -48,7 +48,7 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
   @Test
   void stopClearsProcessorLeaseAndCancelsOnlySafeInvocationStates() throws Exception {
     ThreadCommandTransactions.SessionCreation creation =
-        transactions.createSession("stop-matrix", BASE);
+        transactions.createSession("stop-matrix", TestRuntimeConfigs.bootstrap(), BASE);
     long sessionId = creation.session().id();
     long threadId = creation.mainThread().id();
     long rootEntryId = creation.rootEntry().id();
@@ -96,7 +96,7 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
   @Test
   void enqueueRollsBackThreadMutationWhenInputInsertIsSuppressed() throws Exception {
     ThreadCommandTransactions.SessionCreation creation =
-        transactions.createSession("rollback", BASE);
+        transactions.createSession("rollback", TestRuntimeConfigs.bootstrap(), BASE);
     long threadId = creation.mainThread().id();
     try (Connection connection = newConnection();
         Statement statement = connection.createStatement()) {
@@ -130,7 +130,8 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
   /** 不存在的 idempotency key 也必须持有 Thread 行锁，串行化随后 live snapshot resolve。 */
   @Test
   void missingIdempotencyLookupSerializesOnThreadLock() throws Exception {
-    long threadId = transactions.createSession("lock", BASE).mainThread().id();
+    long threadId =
+        transactions.createSession("lock", TestRuntimeConfigs.bootstrap(), BASE).mainThread().id();
     CountDownLatch firstLocked = new CountDownLatch(1);
     CountDownLatch releaseFirst = new CountDownLatch(1);
     TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
