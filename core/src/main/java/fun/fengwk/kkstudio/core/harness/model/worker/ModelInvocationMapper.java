@@ -10,6 +10,7 @@ import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 
 /**
  * final-schema {@code harness_model_invocation} 适配器专用 mapper。
@@ -71,6 +72,20 @@ public interface ModelInvocationMapper extends BaseMapper {
         @Result(column = "finished_at", property = "finishedAt")
       })
   ModelInvocationDO findForUpdate(@Param("id") long id, @Param("threadId") long threadId);
+
+  /** snapshot-first 只读：按 Thread 列出全部 ModelInvocation。 */
+  @Select(
+      "select "
+          + SELECT_FIELDS
+          + " from harness_model_invocation mi where mi.thread_id = #{threadId}"
+          + " order by mi.created_at, mi.id")
+  @ResultMap("modelInvocationResultMap")
+  List<ModelInvocationDO> listByThread(@Param("threadId") long threadId);
+
+  /** snapshot-first 只读：按 id 查 ModelInvocation。 */
+  @Select("select " + SELECT_FIELDS + " from harness_model_invocation mi where mi.id = #{id}")
+  @ResultMap("modelInvocationResultMap")
+  ModelInvocationDO find(@Param("id") long id);
 
   /**
    * peek：检查 id 对应 Invocation 是否可被 claim，且当前 owning Thread 的 executionEpoch 与

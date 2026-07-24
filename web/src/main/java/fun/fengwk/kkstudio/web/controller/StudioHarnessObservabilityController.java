@@ -21,6 +21,8 @@ import org.springframework.web.server.ResponseStatusException;
 import fun.fengwk.kkstudio.core.harness.observability.service.HarnessObservabilityQueryService;
 import fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.Artifact;
+import fun.fengwk.kkstudio.share.model.InteractionDTO;
+import fun.fengwk.kkstudio.share.model.ModelInvocationDTO;
 import fun.fengwk.kkstudio.share.model.RootActivityDTO;
 import fun.fengwk.kkstudio.share.model.SubagentTaskDTO;
 import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
@@ -67,6 +69,24 @@ public class StudioHarnessObservabilityController {
   public Result<ToolInvocationDTO> getToolInvocation(@PathVariable("id") String id) {
     try {
       return Results.ok(observabilityService.getToolInvocation(id));
+    } catch (IllegalArgumentException error) {
+      throw translate(error);
+    }
+  }
+
+  @GetMapping("/threads/{id}/model-invocations")
+  public Result<List<ModelInvocationDTO>> listModelInvocations(@PathVariable("id") String id) {
+    try {
+      return Results.ok(observabilityService.listModelInvocations(id));
+    } catch (IllegalArgumentException error) {
+      throw translate(error);
+    }
+  }
+
+  @GetMapping("/threads/{id}/interactions/open")
+  public Result<List<InteractionDTO>> listOpenInteractions(@PathVariable("id") String id) {
+    try {
+      return Results.ok(observabilityService.listOpenInteractions(id));
     } catch (IllegalArgumentException error) {
       throw translate(error);
     }

@@ -10,9 +10,8 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
-import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadMapper;
-import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadViewDO;
+import fun.fengwk.kkstudio.core.harness.query.HarnessQueryRow;
+import fun.fengwk.kkstudio.core.harness.query.PostgresqlHarnessQueryMapper;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
@@ -20,9 +19,6 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheMode;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.session.RootEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
-import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageDraft;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecord;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecordStore;
@@ -38,16 +34,14 @@ class ModelUsageAggregationServiceImplTest {
   private static final Instant NOW = Instant.parse("2026-07-16T00:00:00Z");
 
   private ModelUsageRecordStore recordStore;
-  private HarnessThreadMapper threadMapper;
-  private MysqlHarnessSessionStore sessionStore;
+  private PostgresqlHarnessQueryMapper queryMapper;
   private ModelUsageAggregationServiceImpl service;
 
   @BeforeEach
   void setUp() {
     recordStore = mock(ModelUsageRecordStore.class);
-    threadMapper = mock(HarnessThreadMapper.class);
-    sessionStore = mock(MysqlHarnessSessionStore.class);
-    service = new ModelUsageAggregationServiceImpl(recordStore, threadMapper, sessionStore);
+    queryMapper = mock(PostgresqlHarnessQueryMapper.class);
+    service = new ModelUsageAggregationServiceImpl(recordStore, queryMapper);
   }
 
   @Test
@@ -59,8 +53,8 @@ class ModelUsageAggregationServiceImplTest {
         record(3L, eligible("EUR", "beta", usage(5, 6, 70, 0, 0, 2, 83)));
     ModelUsageRecord nonEligible =
         record(4L, nonEligible("USD", usage(1000, 8, 500, 7, 9, 4, 1528)));
-    when(threadMapper.findView(21L)).thenReturn(threadView(21L, 11L, 104L));
-    when(sessionStore.loadPath(11L, 104L))
+    when(queryMapper.findThreadView(21L)).thenReturn(threadView(21L, 11L, 104L));
+    when(queryMapper.loadPath(11L, 104L))
         .thenReturn(
             List.of(
                 pathEntry(11L, 101L),
@@ -99,8 +93,8 @@ class ModelUsageAggregationServiceImplTest {
   @Test
   void summarizesThreadAlongHeadPathExcludingSiblingBranch() {
     // path: 10 → 20 → 30；旁枝 entry 40 的 usage 不计入
-    when(threadMapper.findView(21L)).thenReturn(threadView(21L, 11L, 30L));
-    when(sessionStore.loadPath(11L, 30L))
+    when(queryMapper.findThreadView(21L)).thenReturn(threadView(21L, 11L, 30L));
+    when(queryMapper.loadPath(11L, 30L))
         .thenReturn(List.of(pathEntry(11L, 10L), pathEntry(11L, 20L), pathEntry(11L, 30L)));
 
     ModelUsageRecord prefix =
@@ -139,8 +133,8 @@ class ModelUsageAggregationServiceImplTest {
 
   @Test
   void returnsZeroSummariesForEmptyScopes() {
-    when(threadMapper.findView(41L)).thenReturn(threadView(41L, 44L, 410L));
-    when(sessionStore.loadPath(44L, 410L)).thenReturn(List.of(pathEntry(44L, 410L)));
+    when(queryMapper.findThreadView(41L)).thenReturn(threadView(41L, 44L, 410L));
+    when(queryMapper.loadPath(44L, 410L)).thenReturn(List.of(pathEntry(44L, 410L)));
     when(recordStore.listBySessionId(44L)).thenReturn(List.of());
     when(recordStore.listBySessionId(42L)).thenReturn(List.of());
     when(recordStore.listByModelResourceId(43L)).thenReturn(List.of());
@@ -167,8 +161,8 @@ class ModelUsageAggregationServiceImplTest {
     ModelUsageRecord maximum =
         record(21L, nonEligible("USD", usage(Long.MAX_VALUE, 0, 0, 0, 0, 0, 0)));
     ModelUsageRecord one = record(22L, nonEligible("USD", usage(1, 0, 0, 0, 0, 0, 0)));
-    when(threadMapper.findView(51L)).thenReturn(threadView(51L, 11L, 122L));
-    when(sessionStore.loadPath(11L, 122L))
+    when(queryMapper.findThreadView(51L)).thenReturn(threadView(51L, 11L, 122L));
+    when(queryMapper.loadPath(11L, 122L))
         .thenReturn(List.of(pathEntry(11L, 121L), pathEntry(11L, 122L)));
     when(recordStore.listBySessionId(11L)).thenReturn(List.of(maximum, one));
 
@@ -194,18 +188,19 @@ class ModelUsageAggregationServiceImplTest {
     assertTrue(summary.getCosts().isEmpty());
   }
 
-  private static HarnessThreadViewDO threadView(long threadId, long sessionId, long headEntryId) {
-    HarnessThreadViewDO view = new HarnessThreadViewDO();
+  private static HarnessQueryRow threadView(long threadId, long sessionId, long headEntryId) {
+    HarnessQueryRow view = new HarnessQueryRow();
     view.setId(threadId);
     view.setSessionId(sessionId);
     view.setHeadEntryId(headEntryId);
     return view;
   }
 
-  private static SessionEntry pathEntry(long sessionId, long id) {
-    // 仅用于 id 集合过滤；payload 类型无关紧要
-    return new SessionEntry(
-        id, sessionId, null, SessionEntryType.ROOT, new RootEntryPayload(), NOW);
+  private static HarnessQueryRow pathEntry(long sessionId, long id) {
+    HarnessQueryRow row = new HarnessQueryRow();
+    row.setId(id);
+    row.setSessionId(sessionId);
+    return row;
   }
 
   private static ModelUsageRecord record(long id, ModelUsageDraft draft) {

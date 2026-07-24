@@ -2,11 +2,9 @@ package fun.fengwk.kkstudio.core.harness.usage.service.impl;
 
 import org.springframework.stereotype.Service;
 
-import fun.fengwk.kkstudio.core.harness.session.store.MysqlHarnessSessionStore;
-import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadMapper;
-import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadViewDO;
+import fun.fengwk.kkstudio.core.harness.query.HarnessQueryRow;
+import fun.fengwk.kkstudio.core.harness.query.PostgresqlHarnessQueryMapper;
 import fun.fengwk.kkstudio.core.harness.usage.service.ModelUsageAggregationService;
-import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecord;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecordStore;
 import fun.fengwk.kkstudio.share.model.ModelUsageSummaryDTO;
@@ -16,32 +14,29 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
+/** Thread 路径过滤的 usage 聚合；path 走 final schema recursive CTE。 */
 @Service
 public class ModelUsageAggregationServiceImpl implements ModelUsageAggregationService {
 
   private final ModelUsageRecordStore recordStore;
-  private final HarnessThreadMapper threadMapper;
-  private final MysqlHarnessSessionStore sessionStore;
+  private final PostgresqlHarnessQueryMapper queryMapper;
 
   public ModelUsageAggregationServiceImpl(
-      ModelUsageRecordStore recordStore,
-      HarnessThreadMapper threadMapper,
-      MysqlHarnessSessionStore sessionStore) {
+      ModelUsageRecordStore recordStore, PostgresqlHarnessQueryMapper queryMapper) {
     this.recordStore = Objects.requireNonNull(recordStore, "recordStore");
-    this.threadMapper = Objects.requireNonNull(threadMapper, "threadMapper");
-    this.sessionStore = Objects.requireNonNull(sessionStore, "sessionStore");
+    this.queryMapper = Objects.requireNonNull(queryMapper, "queryMapper");
   }
 
   @Override
   public ModelUsageSummaryDTO summarizeThread(long threadId) {
-    HarnessThreadViewDO view = threadMapper.findView(threadId);
+    HarnessQueryRow view = queryMapper.findThreadView(threadId);
     if (view == null) {
       throw new IllegalArgumentException("unknown thread: " + threadId);
     }
-    List<SessionEntry> path = sessionStore.loadPath(view.getSessionId(), view.getHeadEntryId());
+    List<HarnessQueryRow> path = queryMapper.loadPath(view.getSessionId(), view.getHeadEntryId());
     Set<Long> pathEntryIds = new HashSet<>(path.size() * 2);
-    for (SessionEntry entry : path) {
-      pathEntryIds.add(entry.id());
+    for (HarnessQueryRow entry : path) {
+      pathEntryIds.add(entry.getId());
     }
     // Session 账本中仅保留路径上 assistant entry 的记录（共享前缀 + 本枝，排除旁枝）
     List<ModelUsageRecord> onPath =

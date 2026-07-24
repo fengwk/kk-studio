@@ -13,6 +13,7 @@ import org.apache.ibatis.annotations.Update;
 import fun.fengwk.kkstudio.core.harness.interaction.store.model.InteractionDO;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 
 /** PostgreSQL mapper confined to the durable generic {@code harness_interaction} fact. */
 @Mapper
@@ -59,6 +60,32 @@ public interface InteractionMapper extends BaseMapper {
   @ResultMap("interactionResultMap")
   InteractionDO findOpenByOwner(
       @Param("ownerKind") String ownerKind, @Param("ownerId") long ownerId);
+
+  @Select(
+      "select "
+          + COLUMNS
+          + " from harness_interaction i"
+          + " where i.status = 'OPEN'"
+          + " and ("
+          + " (i.owner_kind = 'THREAD' and i.owner_id = #{threadId})"
+          + " or ("
+          + " i.owner_kind = 'MODEL_INVOCATION'"
+          + " and exists ("
+          + " select 1 from harness_model_invocation mi"
+          + " where mi.id = i.owner_id and mi.thread_id = #{threadId}"
+          + " )"
+          + " )"
+          + " or ("
+          + " i.owner_kind = 'TOOL_INVOCATION'"
+          + " and exists ("
+          + " select 1 from harness_tool_invocation ti"
+          + " where ti.id = i.owner_id and ti.thread_id = #{threadId}"
+          + " )"
+          + " )"
+          + " )"
+          + " order by i.created_at, i.id")
+  @ResultMap("interactionResultMap")
+  List<InteractionDO> listOpenByThread(@Param("threadId") long threadId);
 
   @Select("select " + COLUMNS + " from harness_interaction i where i.id = #{id} for update")
   @ResultMap("interactionResultMap")
