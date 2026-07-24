@@ -163,6 +163,7 @@ class ModelInvocationPlannerTest {
     ModelInvocationPlan plan = PLANNER.plan(SESSION_ID, 7, path).orElseThrow();
 
     assertEquals(7, plan.sourceHeadEntryId());
+    assertEquals(oldConfig, plan.configSnapshot());
     assertEquals("model-old", plan.request().model().modelId());
     assertEquals(List.of(ProviderMessageRole.SYSTEM, ProviderMessageRole.USER), roles(plan));
     assertEquals("old-system", text(plan.request().messages().get(0)));

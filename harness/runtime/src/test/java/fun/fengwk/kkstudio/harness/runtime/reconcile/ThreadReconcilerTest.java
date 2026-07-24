@@ -202,7 +202,9 @@ class ThreadReconcilerTest {
   @Test
   void createModelInvocationRunsBeforeHarvest() {
     FakeTransactions txs = new FakeTransactions();
-    ModelInvocationPlan plan = new ModelInvocationPlan(1L, ReconcileTestSupport.providerRequest());
+    ModelInvocationPlan plan =
+        new ModelInvocationPlan(
+            1L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
     txs.queueSnapshot(
         b -> {
           b.modelInvocationPlan = Optional.of(plan);
@@ -281,7 +283,11 @@ class ThreadReconcilerTest {
         b -> {
           b.headEntryId = 2L;
           b.modelInvocationPlan =
-              Optional.of(new ModelInvocationPlan(2L, ReconcileTestSupport.providerRequest()));
+              Optional.of(
+                  new ModelInvocationPlan(
+                      2L,
+                      ReconcileTestSupport.providerRequest(),
+                      ReconcileTestSupport.configSnapshot()));
           b.queuedInputs.add(later);
         });
     txs.createOutcome =
@@ -314,7 +320,9 @@ class ThreadReconcilerTest {
     txs.queueSnapshot(b -> b.queuedInputs.addAll(List.of(cfg, msg, later)));
     txs.harvestOutcome = ApplyOutcome.PROGRESSED;
 
-    ModelInvocationPlan plan = new ModelInvocationPlan(2L, ReconcileTestSupport.providerRequest());
+    ModelInvocationPlan plan =
+        new ModelInvocationPlan(
+            2L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
     txs.queueSnapshot(
         b -> {
           b.headEntryId = 2L;
@@ -431,7 +439,9 @@ class ThreadReconcilerTest {
   @Test
   void lostOwnershipOnCreateReturnsLostOwnership() {
     FakeTransactions txs = new FakeTransactions();
-    ModelInvocationPlan plan = new ModelInvocationPlan(1L, ReconcileTestSupport.providerRequest());
+    ModelInvocationPlan plan =
+        new ModelInvocationPlan(
+            1L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
     txs.queueSnapshot(b -> b.modelInvocationPlan = Optional.of(plan));
     txs.createOutcome = new ModelCreationOutcome.LostOwnership();
 
@@ -485,7 +495,9 @@ class ThreadReconcilerTest {
   @Test
   void createFailureReleasesLeaseAndReturnsFailed() {
     FakeTransactions txs = new FakeTransactions();
-    ModelInvocationPlan plan = new ModelInvocationPlan(1L, ReconcileTestSupport.providerRequest());
+    ModelInvocationPlan plan =
+        new ModelInvocationPlan(
+            1L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
     Failure failure = new Failure("CREATE_FAIL", "boom");
     txs.queueSnapshot(b -> b.modelInvocationPlan = Optional.of(plan));
     txs.createOutcome = new ModelCreationOutcome.Failed(failure);

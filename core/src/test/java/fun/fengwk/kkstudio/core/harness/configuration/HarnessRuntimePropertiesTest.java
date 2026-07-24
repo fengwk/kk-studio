@@ -15,6 +15,11 @@ class HarnessRuntimePropertiesTest {
   void providesModelWorkerDeploymentDefaults() {
     HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
 
+    assertEquals(Duration.ofSeconds(1), properties.getThreadRecoveryInterval());
+    assertEquals(100, properties.getThreadRecoveryBatchSize());
+    assertEquals(Duration.ofSeconds(30), properties.getThreadProcessorLeaseDuration());
+    assertEquals(8, properties.getThreadWorkerConcurrency());
+    assertEquals(16, properties.getThreadReconcilerMaxSteps());
     assertEquals(Duration.ofSeconds(30), properties.getModelWorkerLeaseDuration());
     assertEquals(Duration.ofSeconds(10), properties.getModelWorkerHeartbeatInterval());
     assertEquals(Duration.ofMillis(100), properties.getModelWorkerActivityFlushInterval());

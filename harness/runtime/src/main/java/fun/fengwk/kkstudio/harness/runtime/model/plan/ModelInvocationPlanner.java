@@ -95,7 +95,7 @@ public final class ModelInvocationPlanner {
             ProviderCacheControl.none());
     ProviderRequest request =
         new PromptCacheRequestFinalizer(sessionId, cacheKeyFactory).intercept(baseRequest);
-    return Optional.of(new ModelInvocationPlan(sourceHeadEntryId, request));
+    return Optional.of(new ModelInvocationPlan(sourceHeadEntryId, request, config));
   }
 
   private static List<SessionEntry> validatePath(

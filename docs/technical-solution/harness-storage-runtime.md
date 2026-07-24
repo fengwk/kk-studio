@@ -168,27 +168,27 @@ Model/Tool retry 到期只标记对应 Invocation dispatchable，并发送 Invoc
 
 ### 5.2 claim
 
-Worker 使用 PostgreSQL 条件更新或 `FOR UPDATE SKIP LOCKED`：
+Thread activation 使用 PostgreSQL 条件更新：
 
 ```text
 runnable=true
-或 processor lease 已过期
-且没有其他有效 owner
+且 processor lease 为空或已过期
 ```
 
-claim 原子写入新 token/until 并清除本次已观察的 runnable。处理期间若出现新事实，其他事务再次写 `runnable=true`。
+claim 原子写入新 token/until，不递增 `execution_epoch`，并在 ownership 存续期间保持 `runnable=true`。该布尔值表示 durable work/recovery intent，不是一次性消费的 edge；有效 processor lease 才是并发 activation 的权威 fence。
+
+成功 suspend、创建 ModelInvocation 或 quiesce 时，同一事务清除 processor lease 并设置 `runnable=false`。意外异常或 step-limit 的 best-effort release 只清除 lease 并保留 `runnable=true`，使低频 recovery 能重新激活。
 
 ### 5.3 quiesce
 
 Reconciler 进入 IDLE 前锁 Thread 并重新检查：
 
-- `runnable`；
 - queued Input；
 - terminal-but-unapplied Invocation；
-- retry due；
-- unresolved blocker。
+- unresolved blocker；
+- 当前 immutable path 是否仍有 response debt。
 
-无工作时清 processor lease；存在工作时保持 ownership 并继续 reconcile。该锁序封闭 enqueue/terminal 与 quiesce 的丢唤醒竞态。
+当前 owner 观察到的 `runnable` 必然仍为 true，因此它不作为 recheck 的独立 work 项。无工作时原子设置 `runnable=false` 并清 processor lease；存在工作时保持 ownership 并继续 reconcile。Thread row lock 与 enqueue/terminal 的 Thread-first 锁序共同封闭丢唤醒竞态。
 
 ## 6. Redis Pub/Sub wake hint
 
@@ -310,11 +310,9 @@ Thread
 
 Recovery 是正确性兜底，不是主调度路径：
 
-1. 扫描 `runnable=true` Thread；
-2. 扫描 processor lease 过期 Thread；
-3. 各 Invocation worker 扫描自己的过期 lease、due retry 和 timeout；
-4. 扫描已 terminal 但尚未 applied 的 Invocation；
-5. 重新发布 Redis hint 或直接 schedule 本地 activation。
+1. 扫描 `runnable=true` 且 processor lease 为空/过期的 Thread；
+2. 各 Invocation worker 扫描自己的过期 lease、due retry 和 timeout；
+3. 重新发布 Redis hint 或直接 schedule 本地 activation。
 
 Recovery SQL 不 join Interaction、Tool、Model、Child Session 来推导 runnable；完成事务负责提前写 `Thread.runnable=true`。
 

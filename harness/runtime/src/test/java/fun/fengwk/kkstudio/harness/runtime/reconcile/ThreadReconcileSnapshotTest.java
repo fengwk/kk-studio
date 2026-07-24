@@ -208,7 +208,8 @@ class ThreadReconcileSnapshotTest {
     ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
     HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok", 1L);
     ModelInvocationPlan plan =
-        new ModelInvocationPlan(999L, ReconcileTestSupport.providerRequest());
+        new ModelInvocationPlan(
+            999L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -226,7 +227,9 @@ class ThreadReconcileSnapshotTest {
   void rejectsMultiplePrimaryDebts() {
     ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
     HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok", 1L);
-    ModelInvocationPlan plan = new ModelInvocationPlan(1L, ReconcileTestSupport.providerRequest());
+    ModelInvocationPlan plan =
+        new ModelInvocationPlan(
+            1L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
     assertThrows(
         IllegalArgumentException.class,
         () ->
