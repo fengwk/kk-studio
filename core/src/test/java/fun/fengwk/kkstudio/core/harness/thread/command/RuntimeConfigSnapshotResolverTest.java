@@ -190,6 +190,13 @@ class RuntimeConfigSnapshotResolverTest {
     when(providers.getById(7L)).thenReturn(null);
     assertThrows(
         IllegalArgumentException.class, () -> resolver.replaceModel(current, 9, "quality"));
+
+    model(10, true, "quality");
+    AgentProvider invalidProvider = new AgentProvider();
+    invalidProvider.setId(7L);
+    when(providers.getById(7L)).thenReturn(invalidProvider);
+    assertThrows(
+        IllegalArgumentException.class, () -> resolver.replaceModel(current, 10, "quality"));
     verify(providerFactory, never()).create(anyString(), anyString());
   }
 
