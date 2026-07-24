@@ -5,16 +5,12 @@ import fun.fengwk.kkstudio.share.model.InteractionDTO;
 import fun.fengwk.kkstudio.share.model.ModelInvocationDTO;
 import fun.fengwk.kkstudio.share.model.RootActivityDTO;
 import fun.fengwk.kkstudio.share.model.SubagentTaskDTO;
-import fun.fengwk.kkstudio.share.model.ThreadEventDTO;
 import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
 
 import java.util.List;
 
 /** Harness observability 查询：snapshot-first Invocation/Interaction、RootActivity、Artifact。 */
 public interface HarnessObservabilityQueryService {
-
-  /** ThreadEvent history 已停用；实现返回空列表以兼容旧 SSE 轮询路径。 */
-  List<ThreadEventDTO> listThreadEvents(String threadId, long afterEventId, int limit);
 
   List<RootActivityDTO> listRootActivities(String sessionId, long afterEventId, int limit);
 

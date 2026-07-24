@@ -22,7 +22,6 @@ describe('harnessService', () => {
     await service.getThread('thread /1')
     await service.listThreadEntries('thread /1')
     await service.listThreadInputs('thread /1')
-    await service.listThreadEvents('thread /1', '9', 10)
     await service.listThreadToolInvocations('thread /1')
     await service.getThreadUsage('thread /1')
     await service.setThreadYolo('thread /1', { yoloEnabled: true, clientMessageId: 'cid-yolo' })
@@ -31,7 +30,6 @@ describe('harnessService', () => {
     await service.listSessionEntries('session /1')
     await service.listRootActivities('session /1', '9')
     await service.listSessionTasks('session /1')
-    await service.decideToolInvocation('tool /1', 'allow')
     await service.getRetryPolicy()
     await service.updateRetryPolicy({
       maxRetries: 3,
@@ -57,6 +55,7 @@ describe('harnessService', () => {
       maxDelayMillis: 60_000,
     })
     expect(client.put).not.toHaveBeenCalledWith(expect.stringContaining('/toolset'), expect.anything())
+    expect(client.post).not.toHaveBeenCalledWith(expect.stringContaining('/decision'), expect.anything())
   })
 
   it('keeps Redis stream cursors as strings in SSE URLs', () => {

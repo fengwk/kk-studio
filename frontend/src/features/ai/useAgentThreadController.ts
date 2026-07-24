@@ -56,7 +56,6 @@ export function useAgentThreadController(threadId: string, sessionIdHint = '', i
     session,
     threadQuery,
     entriesQuery,
-    eventsQuery,
   } = useAgentThreadQueries(threadId, sessionIdHint)
   const createMessageMutation = useAgentThreadMessageMutation(threadId)
   const timeline = buildThreadTimeline(entries, inputs, events)
@@ -78,7 +77,7 @@ export function useAgentThreadController(threadId: string, sessionIdHint = '', i
     timeline.messages.length,
     entries.length + events.length,
   )
-  useHarnessThreadEventStream(threadId, Boolean(threadId) && eventsQuery.isSuccess)
+  useHarnessThreadEventStream(threadId, Boolean(threadId))
 
   useEffect(() => {
     setDraftState(initialDraft)
@@ -206,7 +205,6 @@ export function useAgentThreadController(threadId: string, sessionIdHint = '', i
           queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) }),
           queryClient.invalidateQueries({ queryKey: queryKeys.threads.entries(threadId) }),
           queryClient.invalidateQueries({ queryKey: queryKeys.threads.inputs(threadId) }),
-          queryClient.invalidateQueries({ queryKey: queryKeys.threads.events(threadId) }),
           queryClient.invalidateQueries({ queryKey: queryKeys.sessions.threads(thread.sessionId) }),
         ])
       })
@@ -248,7 +246,7 @@ export function useAgentThreadController(threadId: string, sessionIdHint = '', i
     working,
     retryPresentation,
     messagesLoading: threadQuery.isLoading || entriesQuery.isLoading,
-    messagesError: threadQuery.error || entriesQuery.error || eventsQuery.error,
+    messagesError: threadQuery.error || entriesQuery.error,
     bodyRef,
     draft,
     // Overlapping submits keep pending accurate via local count, not mutation observer alone.

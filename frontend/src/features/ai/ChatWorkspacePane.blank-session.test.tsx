@@ -30,12 +30,10 @@ vi.mock('@/shared/api/harness-service', () => ({
     getSession: vi.fn(),
     listThreadEntries: vi.fn(),
     listThreadInputs: vi.fn(),
-    listThreadEvents: vi.fn(),
     listThreadToolInvocations: vi.fn(),
     getThreadUsage: vi.fn(),
     listRootActivities: vi.fn(),
     listSessionTasks: vi.fn(),
-    createThreadEventStream: vi.fn(),
     createThreadRealtimeStream: vi.fn(),
   },
 }))
@@ -112,7 +110,6 @@ describe('BlankComposerPane /session and agent error handling', () => {
       totalCount: agents.length,
       results: agents,
     })
-    vi.mocked(harnessService.createThreadEventStream).mockReturnValue(new FakeEventSource() as EventSource)
     vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(new FakeEventSource() as EventSource)
   })
 

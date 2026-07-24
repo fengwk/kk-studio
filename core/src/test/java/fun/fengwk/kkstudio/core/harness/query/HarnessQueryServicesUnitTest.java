@@ -103,7 +103,6 @@ class HarnessQueryServicesUnitTest {
     assertEquals(1, threadQuery.listBySession("1").size());
     assertEquals(1, threadQuery.listPathEntries("21").size());
     assertEquals(1, threadQuery.listInputs("21").size());
-    assertTrue(threadQuery.listEvents("21", 0, 10).isEmpty());
     assertThrows(IllegalArgumentException.class, () -> threadQuery.getThread("999"));
     assertThrows(IllegalArgumentException.class, () -> threadQuery.listBySession("999"));
   }
@@ -133,7 +132,6 @@ class HarnessQueryServicesUnitTest {
 
     assertEquals(1, observabilityQuery.listModelInvocations("21").size());
     assertEquals(1, observabilityQuery.listOpenInteractions("21").size());
-    assertTrue(observabilityQuery.listThreadEvents("21", 0, 5).isEmpty());
     assertTrue(observabilityQuery.listSessionTasks("1").isEmpty());
     assertThrows(
         IllegalArgumentException.class, () -> observabilityQuery.listModelInvocations("9"));

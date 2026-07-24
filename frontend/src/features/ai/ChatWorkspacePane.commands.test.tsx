@@ -27,12 +27,10 @@ vi.mock('@/shared/api/harness-service', () => ({
     listSessionThreads: vi.fn(),
     listThreadEntries: vi.fn(),
     listThreadInputs: vi.fn(),
-    listThreadEvents: vi.fn(),
     listThreadToolInvocations: vi.fn(),
     getThreadUsage: vi.fn(),
     listRootActivities: vi.fn(),
     listSessionTasks: vi.fn(),
-    createThreadEventStream: vi.fn(),
     createThreadRealtimeStream: vi.fn(),
     setThreadAgent: vi.fn(),
     setThreadModel: vi.fn(),
@@ -116,7 +114,6 @@ describe('ChatWorkspacePane commands', () => {
       id: 'p1', name: 'minimax', description: null, providerType: 'openai', baseUrl: null, configured: true,
       modelCallTimeoutMillis: 1, modelCallIdleTimeoutMillis: 1, createTime: null, updateTime: null,
     }]))
-    vi.mocked(harnessService.createThreadEventStream).mockReturnValue(new FakeEventSource() as EventSource)
     vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(new FakeEventSource() as EventSource)
     vi.mocked(harnessService.getThread).mockResolvedValue({
       threadId: 't1', sessionId: 's1', sessionTitle: 'S1', headEntryId: null, status: 'RUNNING',
@@ -154,7 +151,6 @@ describe('ChatWorkspacePane commands', () => {
     ])
     vi.mocked(harnessService.listThreadEntries).mockResolvedValue([])
     vi.mocked(harnessService.listThreadInputs).mockResolvedValue([])
-    vi.mocked(harnessService.listThreadEvents).mockResolvedValue([])
     vi.mocked(harnessService.listThreadToolInvocations).mockResolvedValue([])
     vi.mocked(harnessService.getThreadUsage).mockResolvedValue({
       scopeType: 'thread', scopeId: 't1', recordCount: 0, inputTokens: 0, outputTokens: 0,

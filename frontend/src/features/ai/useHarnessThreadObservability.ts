@@ -29,27 +29,13 @@ export function useHarnessThreadObservability(threadId: string, working: boolean
       ])
     },
   })
-  const decideToolMutation = useMutation({
-    mutationFn: ({ invocationId, decision }: { invocationId: string; decision: 'allow' | 'deny' }) =>
-      harnessService.decideToolInvocation(invocationId, decision),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.toolInvocations(threadId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.events(threadId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) }),
-      ])
-    },
-  })
 
   return {
     usage: usageQuery.data,
     toolInvocations: toolInvocationsQuery.data ?? [],
     observabilityError: usageQuery.error || toolInvocationsQuery.error,
     yoloPending: setYoloMutation.isPending,
-    decisionPending: decideToolMutation.isPending,
     setYolo: (enabled: boolean) =>
       setYoloMutation.mutate({ yoloEnabled: enabled, clientMessageId: createClientMessageId() }),
-    decideTool: (invocationId: string, decision: 'allow' | 'deny') =>
-      decideToolMutation.mutate({ invocationId, decision }),
   }
 }

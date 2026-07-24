@@ -158,7 +158,7 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
   }
 
   private void requireFrozenSnapshot(long sessionId) {
-    // Path-level snapshot validation is performed when ThreadProcessor builds context from head.
+    // Path-level snapshot validation is performed when the reconciler builds context from head.
     sessionStore
         .find(sessionId)
         .orElseThrow(() -> new IllegalArgumentException("unknown session: " + sessionId));
