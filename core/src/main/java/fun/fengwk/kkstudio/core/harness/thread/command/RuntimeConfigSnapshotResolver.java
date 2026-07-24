@@ -96,6 +96,9 @@ public class RuntimeConfigSnapshotResolver {
       RuntimeConfigSnapshot current, long modelId, String requestedVariant) {
     Objects.requireNonNull(current, "current");
     ModelSnapshot model = resolveModel(modelId, requestedVariant);
+    if (!current.tools().isEmpty() && !model.descriptor().tools()) {
+      throw new IllegalArgumentException("selected model does not support configured tools");
+    }
     return new RuntimeConfigSnapshot(
         current.agent(),
         model,
