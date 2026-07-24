@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -210,7 +212,7 @@ class PostgresqlInteractionTransactionsIntegrationTest extends PostgresSpringTes
     assertTrue(threadRunnable(OWNER.id()));
     ToolState tool = toolState();
     assertEquals("FAILED", tool.status());
-    assertEquals(
+    assertJsonEquals(
         PostgresqlInteractionTransactions.INTERACTION_REJECTED_ERROR_JSON, tool.errorJson());
     assertTrue(tool.finished());
     assertNull(tool.resultJson());
@@ -231,7 +233,7 @@ class PostgresqlInteractionTransactionsIntegrationTest extends PostgresSpringTes
     assertTrue(threadRunnable(OWNER.id()));
     ToolState tool = toolState();
     assertEquals("FAILED", tool.status());
-    assertEquals(
+    assertJsonEquals(
         PostgresqlInteractionTransactions.INTERACTION_REJECTED_ERROR_JSON, tool.errorJson());
   }
 
@@ -361,6 +363,18 @@ class PostgresqlInteractionTransactionsIntegrationTest extends PostgresSpringTes
       }
     } catch (SQLException error) {
       throw new AssertionError(error);
+    }
+  }
+
+  private static void assertJsonEquals(String expected, String actual) {
+    try {
+      ObjectMapper mapper = new ObjectMapper();
+      JsonNode expectedNode = mapper.readTree(expected);
+      JsonNode actualNode = mapper.readTree(actual);
+      assertEquals(expectedNode, actualNode);
+    } catch (Exception error) {
+      throw new AssertionError(
+          "json compare failed: expected=" + expected + " actual=" + actual, error);
     }
   }
 

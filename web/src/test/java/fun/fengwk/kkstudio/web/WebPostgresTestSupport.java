@@ -58,6 +58,7 @@ public abstract class WebPostgresTestSupport {
         st.execute("create schema public");
       }
       ScriptUtils.executeSqlScript(conn, new ClassPathResource("schema-postgresql.sql"));
+      ScriptUtils.executeSqlScript(conn, new ClassPathResource("data-dev-postgresql.sql"));
     }
   }
 }

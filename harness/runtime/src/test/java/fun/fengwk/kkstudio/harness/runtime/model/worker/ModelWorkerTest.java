@@ -292,6 +292,7 @@ class ModelWorkerTest {
 
     assertTrue(fixture.worker.dispatch(1L));
     await(fixture.transactions.terminalized);
+    await(fixture.executor.handle.cancelledLatch);
 
     assertEquals(InvocationStatus.FAILED, fixture.transactions.current.status());
     assertTrue(fixture.transactions.current.error().message().contains("idle"));
@@ -309,6 +310,8 @@ class ModelWorkerTest {
 
     assertTrue(fixture.worker.dispatch(1L));
     await(fixture.transactions.terminalized);
+    // finishLocal cancel is best-effort and may complete just after the terminal CAS latch.
+    await(fixture.executor.handle.cancelledLatch);
 
     assertEquals(InvocationStatus.FAILED, fixture.transactions.current.status());
     assertTrue(fixture.transactions.current.error().message().contains("deadline"));

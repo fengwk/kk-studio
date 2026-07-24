@@ -42,9 +42,9 @@ class StudioModelUsageControllerTest extends WebPostgresTestSupport {
 
   @BeforeEach
   void clean() {
-    jdbc.update("delete from model_usage_record");
+    jdbc.update("delete from harness_model_usage");
     jdbc.update("delete from harness_thread where id = ?", LARGE_ID);
-    jdbc.update("delete from harness_session_entry where session_id = ?", LARGE_ID);
+    jdbc.update("delete from harness_entry where session_id = ?", LARGE_ID);
     jdbc.update("delete from harness_session where id = ?", LARGE_ID);
   }
 
@@ -98,35 +98,49 @@ class StudioModelUsageControllerTest extends WebPostgresTestSupport {
   }
 
   private void insertThreadPath() {
-    jdbc.update(
-        "insert into harness_session "
-            + "(id, title, main_thread_id, root_session_id, depth) values (?, ?, ?, ?, ?)",
-        LARGE_ID,
-        "usage-test",
-        LARGE_ID,
-        LARGE_ID,
-        0);
-    jdbc.update(
-        "insert into harness_session_entry "
-            + "(id, session_id, parent_entry_id, entry_type, payload_json) "
-            + "values (?, ?, null, 'root', '{}')",
-        ROOT_ENTRY_ID,
-        LARGE_ID);
-    jdbc.update(
-        "insert into harness_session_entry "
-            + "(id, session_id, parent_entry_id, entry_type, payload_json) "
-            + "values (?, ?, ?, 'message', ?)",
-        LARGE_ID,
-        LARGE_ID,
-        ROOT_ENTRY_ID,
-        assistantPayloadJson());
-    jdbc.update(
-        "insert into harness_thread "
-            + "(id, session_id, head_entry_id, status, input_sequence, yolo_enabled) "
-            + "values (?, ?, ?, 'IDLE', 0, false)",
-        LARGE_ID,
-        LARGE_ID,
-        LARGE_ID);
+    jdbc.execute(
+        (org.springframework.jdbc.core.ConnectionCallback<Void>)
+            connection -> {
+              connection.setAutoCommit(false);
+              try (var st = connection.createStatement()) {
+                st.execute(
+                    "insert into harness_session (id, title, main_thread_id, created_at, updated_at) values ("
+                        + LARGE_ID
+                        + ", 'usage-test', "
+                        + LARGE_ID
+                        + ", now(), now())");
+                st.execute(
+                    "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
+                        + " values ("
+                        + ROOT_ENTRY_ID
+                        + ", "
+                        + LARGE_ID
+                        + ", null, 'ROOT', '{}'::jsonb, now())");
+                st.execute(
+                    "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
+                        + " values ("
+                        + LARGE_ID
+                        + ", "
+                        + LARGE_ID
+                        + ", "
+                        + ROOT_ENTRY_ID
+                        + ", 'MESSAGE', cast('"
+                        + assistantPayloadJson().replace("'", "''")
+                        + "' as jsonb), now())");
+                st.execute(
+                    "insert into harness_thread (id, session_id, head_entry_id, input_sequence, runnable,"
+                        + " execution_epoch, created_at, updated_at) values ("
+                        + LARGE_ID
+                        + ", "
+                        + LARGE_ID
+                        + ", "
+                        + LARGE_ID
+                        + ", 0, false, 0, now(), now())");
+              }
+              connection.commit();
+              connection.setAutoCommit(true);
+              return null;
+            });
   }
 
   private static String assistantPayloadJson() {

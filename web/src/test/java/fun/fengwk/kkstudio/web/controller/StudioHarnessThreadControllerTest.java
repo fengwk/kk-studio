@@ -86,12 +86,15 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
                 .content("{\"content\":\"hello\",\"clientMessageId\":\"message-1\"}"))
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.data.inputId").value(inputId));
+    // final command path is key-idempotent: same clientMessageId replays the original input.
     mockMvc
         .perform(
             post("/api/threads/{id}/messages", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"content\":\"changed\",\"clientMessageId\":\"message-1\"}"))
-        .andExpect(status().isConflict());
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.data.inputId").value(inputId))
+        .andExpect(jsonPath("$.data.status").value("QUEUED"));
 
     mockMvc
         .perform(
@@ -366,12 +369,14 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
                 .content("{\"yoloEnabled\":true,\"clientMessageId\":\"replay\"}"))
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.data.inputType").value("SET_YOLO"));
+    // Payload differences under the same clientMessageId are ignored; original input is returned.
     mockMvc
         .perform(
             put("/api/threads/{id}/yolo", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"yoloEnabled\":false,\"clientMessageId\":\"replay\"}"))
-        .andExpect(status().isConflict());
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.data.inputType").value("SET_YOLO"));
   }
 
   private JsonNode createSession(String title, boolean yoloEnabled) throws Exception {

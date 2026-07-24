@@ -20,6 +20,9 @@ import fun.fengwk.kkstudio.share.model.ChatUpdateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionDTO;
 
+import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -33,6 +36,24 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
   @Autowired private ChatService chatService;
   @Autowired private HarnessSessionCommandService sessionCommandService;
   @Autowired private JdbcTemplate jdbcTemplate;
+
+  @Override
+  protected void applySeed(Connection conn) {
+    try {
+      String seed =
+          new String(
+              ChatServiceIntegrationTest.class
+                  .getClassLoader()
+                  .getResourceAsStream("data-dev-postgresql.sql")
+                  .readAllBytes(),
+              StandardCharsets.UTF_8);
+      try (Statement st = conn.createStatement()) {
+        st.execute(seed);
+      }
+    } catch (Exception error) {
+      throw new IllegalStateException("failed to seed agent definition for chat tests", error);
+    }
+  }
 
   @Test
   void crudListsNewestFirstAndValidatesDefaultAgent() {
