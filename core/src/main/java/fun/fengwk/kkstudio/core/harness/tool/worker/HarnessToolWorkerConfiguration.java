@@ -6,21 +6,21 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
-import fun.fengwk.kkstudio.harness.runtime.task.TaskRuntime;
-import fun.fengwk.kkstudio.harness.runtime.task.TaskTool;
-import fun.fengwk.kkstudio.harness.runtime.task.WorkingCopyRevisionResolver;
+import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
+import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyResolver;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.PlatformToolWorker;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationWorkerStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolRegistry;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorkerConfig;
 
 import java.time.Clock;
-import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -36,23 +36,8 @@ public class HarnessToolWorkerConfiguration {
   @Bean(destroyMethod = "shutdown")
   @ConditionalOnMissingBean(name = "toolWorkerScheduler")
   public ScheduledExecutorService toolWorkerScheduler() {
-    return Executors.newScheduledThreadPool(2);
-  }
-
-  @Bean
-  @ConditionalOnMissingBean
-  public WorkingCopyRevisionResolver workingCopyRevisionResolver() {
-    return (policy, childSessionId) -> Optional.empty();
-  }
-
-  @Bean
-  @ConditionalOnBean(TaskRuntime.class)
-  @ConditionalOnMissingBean
-  public TaskTool taskTool(
-      TaskRuntime runtime,
-      @Qualifier("toolWorkerScheduler") ScheduledExecutorService toolWorkerScheduler,
-      Clock clock) {
-    return new TaskTool(runtime, toolWorkerScheduler, clock);
+    return Executors.newScheduledThreadPool(
+        2, Thread.ofPlatform().name("tool-worker-", 0L).daemon(true).factory());
   }
 
   @Bean
@@ -66,27 +51,42 @@ public class HarnessToolWorkerConfiguration {
   @ConditionalOnBean(ToolRegistry.class)
   @ConditionalOnMissingBean
   public PlatformToolWorker platformToolWorker(
-      ToolInvocationWorkerStore store,
       ToolInvocationTransactions transactions,
       ToolRegistry registry,
       ToolInterceptorChain interceptorChain,
       ArtifactStore artifactStore,
+      InvocationRetryPolicyResolver retryPolicyResolver,
+      RealtimeEventSink realtimeEventSink,
+      ActivationNotifier activationNotifier,
       ToolWorkerConfig config,
       Clock clock,
       @Qualifier("toolWorkerScheduler") ScheduledExecutorService toolWorkerScheduler,
       HarnessLifecycleObservers lifecycleObservers) {
     return new PlatformToolWorker(
-        store,
         transactions,
         registry,
         interceptorChain,
         artifactStore,
+        retryPolicyResolver,
+        realtimeEventSink,
+        activationNotifier,
         config,
         clock,
         toolWorkerScheduler,
-        lifecycleObservers);
+        lifecycleObservers,
+        () -> UUID.randomUUID().toString());
   }
 
-  // Periodic PlatformToolWorker polling removed: tools are launched by ThreadProcessor.dispatchDue
-  // and resume via ToolInvocationTransactions.terminate -> ThreadKick.
+  @Bean
+  public ToolWorkerLifecycle toolWorkerLifecycle(
+      HarnessRuntimeProperties properties,
+      PlatformToolWorker worker,
+      @Qualifier("toolWorkerScheduler") ScheduledExecutorService scheduler) {
+    return new ToolWorkerLifecycle(
+        properties,
+        worker,
+        scheduler,
+        properties.getToolRecoveryInterval(),
+        properties.getToolRecoveryBatchSize());
+  }
 }

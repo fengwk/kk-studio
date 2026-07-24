@@ -2,16 +2,16 @@ package fun.fengwk.kkstudio.core.harness.tool.store;
 
 import org.springframework.stereotype.Repository;
 
-import fun.fengwk.kkstudio.core.agent.support.AgentIdGenerator;
 import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolArtifactMapper;
 import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolArtifactDO;
+import fun.fengwk.kkstudio.harness.runtime.port.HarnessIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.Artifact;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.LocalDateTime;
+import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.HexFormat;
@@ -22,9 +22,14 @@ import java.util.Optional;
 @Repository
 public class DatabaseArtifactStore implements ArtifactStore {
   private final ToolArtifactMapper mapper;
+  private final HarnessIdGenerator idGenerator;
+  private final Clock clock;
 
-  public DatabaseArtifactStore(ToolArtifactMapper mapper) {
+  public DatabaseArtifactStore(
+      ToolArtifactMapper mapper, HarnessIdGenerator idGenerator, Clock clock) {
     this.mapper = Objects.requireNonNull(mapper, "mapper");
+    this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
+    this.clock = Objects.requireNonNull(clock, "clock");
   }
 
   @Override
@@ -33,7 +38,7 @@ public class DatabaseArtifactStore implements ArtifactStore {
       throw new IllegalArgumentException("artifact metadata must be valid");
     }
     byte[] immutable = Arrays.copyOf(Objects.requireNonNull(content, "content"), content.length);
-    long id = AgentIdGenerator.nextToolArtifactId();
+    long id = idGenerator.nextArtifactId();
     ToolArtifactDO target = new ToolArtifactDO();
     target.setId(id);
     target.setMediaType(mediaType);
@@ -41,7 +46,7 @@ public class DatabaseArtifactStore implements ArtifactStore {
     target.setContent(immutable);
     target.setSizeBytes((long) immutable.length);
     target.setSha256(sha256(immutable));
-    target.setCreateTime(LocalDateTime.now(ZoneOffset.UTC));
+    target.setCreatedAt(clock.instant().atOffset(ZoneOffset.UTC));
     if (mapper.insert(target) != 1) {
       throw new IllegalStateException("cannot persist tool artifact");
     }

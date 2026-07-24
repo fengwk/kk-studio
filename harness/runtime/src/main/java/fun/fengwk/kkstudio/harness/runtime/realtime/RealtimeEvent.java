@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.realtime;
 import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Instant;
 import java.util.Objects;
@@ -14,7 +15,7 @@ import java.util.Objects;
  * snapshot-first 客户端能够丢弃旧 attempt 的残留片段。Redis adapter 将其编码为 stream envelope；Entry、Invocation 或
  * Thread 的恢复逻辑不得依赖该 event 是否存在。
  */
-public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta {
+public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta, RealtimeEvent.ToolPartial {
 
   long threadId();
 
@@ -55,6 +56,33 @@ public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta {
     @Override
     public RealtimeEventType type() {
       return RealtimeEventType.MODEL_DELTA;
+    }
+  }
+
+  /** One best-effort partial result emitted by a ToolInvocation attempt. */
+  record ToolPartial(
+      long threadId, long toolInvocationId, int attempt, ToolResult partial, Instant createdAt)
+      implements RealtimeEvent {
+
+    public ToolPartial {
+      if (threadId <= 0 || toolInvocationId <= 0) {
+        throw new IllegalArgumentException("threadId and toolInvocationId must be positive");
+      }
+      if (attempt <= 0) {
+        throw new IllegalArgumentException("attempt must be positive");
+      }
+      partial = Objects.requireNonNull(partial, "partial");
+      createdAt = Objects.requireNonNull(createdAt, "createdAt");
+    }
+
+    @Override
+    public ExecutionTarget subject() {
+      return new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, toolInvocationId);
+    }
+
+    @Override
+    public RealtimeEventType type() {
+      return RealtimeEventType.TOOL_PARTIAL;
     }
   }
 }

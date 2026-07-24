@@ -15,4 +15,6 @@ public interface HarnessIdGenerator {
   long nextToolInvocationId();
 
   long nextInteractionId();
+
+  long nextArtifactId();
 }

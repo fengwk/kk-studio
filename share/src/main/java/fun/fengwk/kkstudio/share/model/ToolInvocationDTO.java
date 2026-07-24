@@ -9,6 +9,7 @@ import java.time.Instant;
 public class ToolInvocationDTO {
   private String id;
   private String threadId;
+  private String sessionId;
   private String assistantEntryId;
   private Integer ordinal;
   private String toolCallId;
@@ -17,17 +18,17 @@ public class ToolInvocationDTO {
   private String location;
   private String environmentName;
   private String argumentsJson;
+  private Long executionEpoch;
   private String status;
-  private String permissionAction;
-  private String permissionDecision;
+  private Integer attempt;
+  private Instant nextAttemptAt;
+  private Instant workerUntil;
   private Instant deadlineAt;
-  private String leaseOwner;
-  private Instant leaseUntil;
-  private Instant cancelRequestedAt;
+  private Instant lastActivityAt;
   private String resultJson;
-  private String errorMessage;
-  private Instant createTime;
+  private String errorJson;
+  private Instant appliedAt;
+  private Instant createdAt;
   private Instant startedAt;
   private Instant finishedAt;
-  private Instant updateTime;
 }

@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -20,6 +22,11 @@ import java.util.Objects;
 /** Strict persistence codec for final and partial Tool results. */
 public final class ToolResultJsonCodec {
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+  static {
+    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+  }
 
   private ToolResultJsonCodec() {}
 
@@ -91,7 +98,7 @@ public final class ToolResultJsonCodec {
     return switch (type) {
       case "text" -> {
         requireFields(node, "type", "text");
-        yield new TextToolContent(text(node, "text"));
+        yield new TextToolContent(textAllowEmpty(node, "text"));
       }
       case "json" -> {
         requireFields(node, "type", "json");
@@ -104,7 +111,7 @@ public final class ToolResultJsonCodec {
       case "artifact" -> {
         requireFields(node, "type", "artifactId", "mediaType", "sizeBytes");
         JsonNode size = node.get("sizeBytes");
-        if (!size.isIntegralNumber() || size.longValue() < 0) {
+        if (!size.isIntegralNumber() || !size.canConvertToLong() || size.longValue() < 0) {
           throw new IllegalArgumentException("sizeBytes must be non-negative integer");
         }
         yield new ArtifactToolContent(
@@ -148,6 +155,14 @@ public final class ToolResultJsonCodec {
     JsonNode value = node.get(name);
     if (value == null || !value.isTextual() || value.textValue().isBlank()) {
       throw new IllegalArgumentException(name + " must be non-blank text");
+    }
+    return value.textValue();
+  }
+
+  private static String textAllowEmpty(ObjectNode node, String name) {
+    JsonNode value = node.get(name);
+    if (value == null || !value.isTextual()) {
+      throw new IllegalArgumentException(name + " must be text");
     }
     return value.textValue();
   }

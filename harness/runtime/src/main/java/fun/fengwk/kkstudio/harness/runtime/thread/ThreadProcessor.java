@@ -486,15 +486,15 @@ public final class ThreadProcessor implements ThreadKick, ThreadProviderCancella
    * 收敛当前 head Assistant 所属的 ToolInvocation。
    *
    * <p>Tool 不在 ThreadProcessor 内同步执行。这里仅派发 due invocation、观察非终态 invocation，并把全部终态 result 以固定顺序追加为
-   * Tool Result Entry。任何 non-terminal（包括 WAITING_APPROVAL）都会令 Thread 释放 token 等待外部
-   * worker/用户决策；外部完成后通过 durable commit + kick 重新进入本方法。
+   * Tool Result Entry。任何 non-terminal 都会令 Thread 释放 token 等待外部 worker/用户决策；外部完成后通过 durable commit +
+   * kick 重新进入本方法。
    */
   private ToolProgress progressTools(AgentThread thread, String token, Instant now) {
-    // 始终尝试派发 due tools，以便 WAITING_APPROVAL 旁的 QUEUED 兄弟可被推进。
+    // 始终尝试派发 due tools，以便 QUEUED 旁的兄弟可被推进。
     toolPort.dispatchDue(thread.id(), now);
     List<ToolInvocation> open = toolPort.listNonTerminal(thread.id(), thread.headEntryId());
     if (!open.isEmpty()) {
-      // 任意非终态（含 WAITING_APPROVAL / CANCEL_REQUESTED）都进入外部等待。
+      // 任意非终态都进入外部等待。
       return ToolProgress.WAITING;
     }
     if (toolPort.hasTerminalResultsPendingApply(thread.id(), thread.headEntryId())) {

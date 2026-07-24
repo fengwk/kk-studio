@@ -101,11 +101,4 @@ public interface HarnessSubagentTaskMapper extends BaseMapper {
       @Param("status") String status,
       @Param("reportJson") String reportJson,
       @Param("now") LocalDateTime now);
-
-  @Select(
-      "select ti.id from tool_invocation ti"
-          + " join harness_subagent_task t on t.parent_invocation_id = ti.id"
-          + " where ti.thread_id = #{parentThreadId}"
-          + " order by ti.id asc")
-  List<Long> listTaskInvocationIdsByParentThread(@Param("parentThreadId") long parentThreadId);
 }

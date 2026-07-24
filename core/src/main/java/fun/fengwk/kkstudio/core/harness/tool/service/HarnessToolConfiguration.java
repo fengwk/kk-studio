@@ -14,10 +14,8 @@ import fun.fengwk.kkstudio.harness.runtime.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsCodec;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationIdGenerator;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolPreparationService;
 
-/** Tool preparation 的可信编译期组件装配。 */
+/** Tool settings、permission evaluator 与执行 interceptor 的生产装配。 */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(ToolSettingsProperties.class)
 public class HarnessToolConfiguration {
@@ -52,14 +50,5 @@ public class HarnessToolConfiguration {
   public ToolInterceptorChain toolInterceptorChain(HarnessExtensionHost host) {
     return new ToolInterceptorChain(
         host.beforeToolCallInterceptors(), host.afterToolCallInterceptors());
-  }
-
-  @Bean
-  @ConditionalOnMissingBean
-  public ToolPreparationService toolPreparationService(
-      ToolInvocationIdGenerator idGenerator,
-      ToolInterceptorChain interceptorChain,
-      ObjectMapper objectMapper) {
-    return new ToolPreparationService(idGenerator, interceptorChain, objectMapper);
   }
 }

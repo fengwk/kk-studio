@@ -8,8 +8,11 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.tool.TextToolContent;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * Realtime event 严格确定性 codec 测试。覆盖三种 delta 形态（TextDelta / ThinkingDelta /
@@ -83,6 +86,38 @@ class RealtimeEventJsonCodecTest {
     ProviderStreamEvent.ToolCallDelta decodedDelta =
         (ProviderStreamEvent.ToolCallDelta) decoded.delta();
     assertEquals(rawFragment, decodedDelta.argumentsJson());
+  }
+
+  @Test
+  void toolPartialRoundTripsWithCanonicalToolResultPayload() {
+    Instant now = Instant.parse("2026-01-05T00:00:00Z");
+    RealtimeEvent.ToolPartial event =
+        new RealtimeEvent.ToolPartial(
+            7L,
+            99L,
+            2,
+            new ToolResult("call-1", List.of(new TextToolContent("partial")), false, "{}", false),
+            now);
+    String canonical =
+        "{\"threadId\":\"7\",\"subjectKind\":\"TOOL_INVOCATION\",\"subjectId\":\"99\","
+            + "\"attempt\":2,\"type\":\"TOOL_PARTIAL\","
+            + "\"payload\":{\"toolCallId\":\"call-1\",\"contents\":[{\"type\":\"text\","
+            + "\"text\":\"partial\"}],\"error\":false,\"details\":{}},"
+            + "\"createdAt\":\"2026-01-05T00:00:00Z\"}";
+
+    assertEquals(canonical, codec.encode(event));
+    assertEquals(event, codec.decode(canonical));
+  }
+
+  @Test
+  void rejectsToolPartialWithWrongSubjectKindOrUnknownResultField() {
+    ObjectNode wrongSubject = canonicalToolPartialNode();
+    wrongSubject.put("subjectKind", "MODEL_INVOCATION");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(wrongSubject));
+
+    ObjectNode invalidPayload = canonicalToolPartialNode();
+    ((ObjectNode) invalidPayload.get("payload")).put("extra", true);
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(invalidPayload));
   }
 
   @Test
@@ -347,6 +382,23 @@ class RealtimeEventJsonCodecTest {
     payload.put("text", "hi");
     node.set("payload", payload);
     node.put("createdAt", "2026-01-01T00:00:00Z");
+    return node;
+  }
+
+  private static ObjectNode canonicalToolPartialNode() {
+    ObjectNode node = NODES.objectNode();
+    node.put("threadId", "7");
+    node.put("subjectKind", "TOOL_INVOCATION");
+    node.put("subjectId", "99");
+    node.put("attempt", 2);
+    node.put("type", "TOOL_PARTIAL");
+    ObjectNode payload = NODES.objectNode();
+    payload.put("toolCallId", "call-1");
+    payload.set("contents", NODES.arrayNode());
+    payload.put("error", false);
+    payload.set("details", NODES.objectNode());
+    node.set("payload", payload);
+    node.put("createdAt", "2026-01-05T00:00:00Z");
     return node;
   }
 }

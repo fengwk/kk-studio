@@ -1,21 +1,72 @@
 package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
+import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
+import java.util.Optional;
+import java.util.function.Supplier;
 
-/** Durable tool result journal；终态后 kick 所属 Thread，不再 coordinate Run。 */
+/**
+ * ToolInvocation worker use-case transaction port. Terminal mutations atomically mark the owning
+ * Thread runnable; retry mutations keep the Thread suspended and only reschedule the Invocation.
+ */
 public interface ToolInvocationTransactions {
-  boolean start(ClaimedToolInvocation claimed, Instant now);
 
-  boolean appendPartial(ClaimedToolInvocation claimed, List<ToolResult> partials, Instant now);
+  Optional<ToolInvocation> findClaimable(long invocationId, Instant now);
 
-  boolean terminate(
+  Optional<ToolInvocation> findNextClaimable(
+      ToolExecutionLocation location, String environmentName, Instant now);
+
+  Optional<ToolInvocation> findNextExpiredRunning(ToolExecutionLocation location, Instant now);
+
+  Optional<ClaimedToolInvocation> claim(
+      long invocationId,
+      String workerToken,
+      Duration executionTimeout,
+      Duration workerLeaseDuration,
+      Instant now);
+
+  ToolInvocationUpdateOutcome renew(
+      ClaimedToolInvocation claimed, Duration workerLeaseDuration, Instant now);
+
+  ToolInvocationUpdateOutcome recordActivity(
+      ClaimedToolInvocation claimed, Instant activityAt, Instant now);
+
+  ToolInvocationUpdateOutcome releaseUnstarted(
       ClaimedToolInvocation claimed,
-      ToolInvocationStatus terminalStatus,
-      ToolResult result,
-      String errorMessage,
+      InvocationStatus previousStatus,
+      Instant nextAttemptAt,
+      Instant now);
+
+  ToolInvocationUpdateOutcome completeSuccess(
+      ClaimedToolInvocation claimed,
+      Supplier<ToolResult> resultSupplier,
+      Instant lastObservedActivityAt,
+      Instant now);
+
+  ToolInvocationUpdateOutcome completeFailure(
+      ClaimedToolInvocation claimed,
+      ToolInvocationError error,
+      Instant lastObservedActivityAt,
+      Instant now);
+
+  ToolInvocationUpdateOutcome completeCancelled(
+      ClaimedToolInvocation claimed, Instant lastObservedActivityAt, Instant now);
+
+  ToolInvocationUpdateOutcome completeUnknown(
+      ClaimedToolInvocation claimed,
+      ToolInvocationError error,
+      Instant lastObservedActivityAt,
+      Instant now);
+
+  ToolInvocationUpdateOutcome scheduleRetry(
+      ClaimedToolInvocation claimed,
+      Instant nextAttemptAt,
+      Instant lastObservedActivityAt,
       Instant now);
 }

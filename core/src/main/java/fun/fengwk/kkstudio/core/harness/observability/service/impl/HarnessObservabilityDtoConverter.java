@@ -4,11 +4,13 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.harness.task.store.model.HarnessSubagentTaskDO;
 import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadEventDO;
-import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
+import fun.fengwk.kkstudio.core.harness.tool.worker.ToolInvocationDO;
 import fun.fengwk.kkstudio.harness.runtime.task.RootActivity;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskReport;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskResultFormatter;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.share.model.RootActivityDTO;
 import fun.fengwk.kkstudio.share.model.SubagentTaskDTO;
 import fun.fengwk.kkstudio.share.model.SubagentTaskReportDTO;
@@ -21,6 +23,9 @@ import java.util.List;
 
 @Component
 public class HarnessObservabilityDtoConverter {
+
+  private static final ToolDescriptorJsonCodec TOOL_DESCRIPTOR_CODEC =
+      new ToolDescriptorJsonCodec();
 
   public ThreadEventDTO convert(HarnessThreadEventDO row) {
     ThreadEventDTO dto = new ThreadEventDTO();
@@ -36,43 +41,48 @@ public class HarnessObservabilityDtoConverter {
   }
 
   public ToolInvocationDTO convert(ToolInvocationDO row) {
+    ToolDescriptor descriptor = TOOL_DESCRIPTOR_CODEC.decode(row.getDescriptorJson());
     ToolInvocationDTO dto = new ToolInvocationDTO();
     dto.setId(Long.toString(row.getId()));
     dto.setThreadId(Long.toString(row.getThreadId()));
+    dto.setSessionId(Long.toString(row.getSessionId()));
     dto.setAssistantEntryId(Long.toString(row.getAssistantEntryId()));
     dto.setOrdinal(row.getOrdinal());
     dto.setToolCallId(row.getToolCallId());
-    dto.setToolName(row.getToolName());
-    dto.setToolVersion(row.getToolVersion());
+    dto.setToolName(descriptor.name());
+    dto.setToolVersion(descriptor.version());
     dto.setLocation(row.getLocation());
     dto.setEnvironmentName(row.getEnvironmentName());
     dto.setArgumentsJson(row.getArgumentsJson());
+    dto.setExecutionEpoch(row.getExecutionEpoch());
     dto.setStatus(row.getStatus());
-    dto.setPermissionAction(row.getPermissionAction());
-    dto.setPermissionDecision(row.getPermissionDecision());
+    dto.setAttempt(row.getAttempt());
+    if (row.getNextAttemptAt() != null) {
+      dto.setNextAttemptAt(row.getNextAttemptAt().toInstant());
+    }
+
+    if (row.getWorkerUntil() != null) {
+      dto.setWorkerUntil(row.getWorkerUntil().toInstant());
+    }
     if (row.getDeadlineAt() != null) {
-      dto.setDeadlineAt(row.getDeadlineAt().toInstant(ZoneOffset.UTC));
+      dto.setDeadlineAt(row.getDeadlineAt().toInstant());
     }
-    dto.setLeaseOwner(row.getLeaseOwner());
-    if (row.getLeaseUntil() != null) {
-      dto.setLeaseUntil(row.getLeaseUntil().toInstant(ZoneOffset.UTC));
-    }
-    if (row.getCancelRequestedAt() != null) {
-      dto.setCancelRequestedAt(row.getCancelRequestedAt().toInstant(ZoneOffset.UTC));
+    if (row.getLastActivityAt() != null) {
+      dto.setLastActivityAt(row.getLastActivityAt().toInstant());
     }
     dto.setResultJson(row.getResultJson());
-    dto.setErrorMessage(row.getErrorMessage());
-    if (row.getCreateTime() != null) {
-      dto.setCreateTime(row.getCreateTime().toInstant(ZoneOffset.UTC));
+    dto.setErrorJson(row.getErrorJson());
+    if (row.getAppliedAt() != null) {
+      dto.setAppliedAt(row.getAppliedAt().toInstant());
+    }
+    if (row.getCreatedAt() != null) {
+      dto.setCreatedAt(row.getCreatedAt().toInstant());
     }
     if (row.getStartedAt() != null) {
-      dto.setStartedAt(row.getStartedAt().toInstant(ZoneOffset.UTC));
+      dto.setStartedAt(row.getStartedAt().toInstant());
     }
     if (row.getFinishedAt() != null) {
-      dto.setFinishedAt(row.getFinishedAt().toInstant(ZoneOffset.UTC));
-    }
-    if (row.getUpdateTime() != null) {
-      dto.setUpdateTime(row.getUpdateTime().toInstant(ZoneOffset.UTC));
+      dto.setFinishedAt(row.getFinishedAt().toInstant());
     }
     return dto;
   }

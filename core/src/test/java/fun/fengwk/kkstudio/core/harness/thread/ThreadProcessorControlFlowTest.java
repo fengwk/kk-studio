@@ -15,9 +15,9 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.agent.extension.ProviderRequestInterceptorChain;
+import fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.context.SessionContextBuilder;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -40,15 +40,18 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnResourceResolver;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -406,22 +409,31 @@ class ThreadProcessorControlFlowTest {
 
   private static ToolInvocation waitingInvocation() {
     Instant now = Instant.parse("2026-01-01T00:00:00Z");
+    ToolDescriptor descriptor =
+        new ToolDescriptor(
+            "tool",
+            "1",
+            "tool",
+            null,
+            new ToolParamsSchema("", Map.of(), Set.of(), false),
+            ToolExecutionLocation.PLATFORM,
+            ToolSideEffect.READ_ONLY,
+            Duration.ofSeconds(30));
     return new ToolInvocation(
         1L,
         1L,
         3L,
         0,
         "call",
-        "tool",
-        "1",
+        descriptor,
+        "{}",
         ToolExecutionLocation.PLATFORM,
         null,
-        "{}",
-        ToolInvocationStatus.WAITING_APPROVAL,
-        PermissionAction.ASK,
+        0L,
+        InvocationStatus.QUEUED,
+        1,
         null,
-        ToolSideEffect.READ_ONLY,
-        now.plusSeconds(30),
+        null,
         null,
         null,
         null,
@@ -429,8 +441,7 @@ class ThreadProcessorControlFlowTest {
         null,
         now,
         null,
-        null,
-        now);
+        null);
   }
 
   private static ProcessorFixture fixture(Executor executor, ScheduledExecutorService scheduler) {
