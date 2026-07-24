@@ -29,6 +29,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
 import java.time.Instant;
 
 /**
@@ -39,6 +40,8 @@ class PostgresqlInteractionTransactionsIntegrationTest extends PostgresSpringTes
   private static final ExecutionTarget OWNER =
       new ExecutionTarget(ExecutionTargetKind.THREAD, 700L);
   private static final ExecutionTarget NEXT = OWNER;
+  private static final ExecutionTarget TOOL_OWNER =
+      new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, 800L);
 
   @Autowired private PostgresqlInteractionTransactions transactions;
 
@@ -161,6 +164,115 @@ class PostgresqlInteractionTransactionsIntegrationTest extends PostgresSpringTes
     assertEquals(OWNER, cancelled.nextTarget());
   }
 
+  /** Allowing a Tool re-signals that Tool only; its suspended owning Thread must remain dormant. */
+  @Test
+  void resumesQueuedToolWithoutActivatingOwningThread() throws SQLException {
+    seedQueuedTool();
+    Interaction created = createTool(null);
+
+    assertEquals(InteractionStatus.OPEN, created.status());
+    assertFalse(threadRunnable(OWNER.id()));
+    assertEquals("QUEUED", toolState().status());
+    assertEquals(created.id(), transactions.findOpenByOwner(TOOL_OWNER).orElseThrow().id());
+
+    InteractionTransition transition =
+        transactions.resolve(
+            created.id(),
+            0L,
+            new InteractionResponse("{\"allowed\":true}"),
+            new InteractionResolution(resumeTool(), TOOL_OWNER),
+            CREATED_AT.plusSeconds(1));
+
+    assertEquals(TOOL_OWNER, transition.nextTarget());
+    assertEquals(InteractionStatus.RESOLVED, transition.interaction().status());
+    assertFalse(threadRunnable(OWNER.id()));
+    assertEquals("QUEUED", toolState().status());
+    assertNull(toolState().errorJson());
+    assertTrue(transactions.findOpenByOwner(TOOL_OWNER).isEmpty());
+  }
+
+  /** Rejecting a Tool completes its durable owner transition before reactivating its Thread. */
+  @Test
+  void rejectsQueuedToolAndActivatesOwningThread() throws SQLException {
+    seedQueuedTool();
+    Interaction created = createTool(null);
+
+    InteractionTransition transition =
+        transactions.resolve(
+            created.id(),
+            0L,
+            new InteractionResponse("{\"allowed\":false}"),
+            new InteractionResolution(rejectTool(), OWNER),
+            CREATED_AT.plusSeconds(1));
+
+    assertEquals(OWNER, transition.nextTarget());
+    assertEquals(InteractionStatus.RESOLVED, transition.interaction().status());
+    assertTrue(threadRunnable(OWNER.id()));
+    ToolState tool = toolState();
+    assertEquals("FAILED", tool.status());
+    assertEquals(
+        PostgresqlInteractionTransactions.INTERACTION_REJECTED_ERROR_JSON, tool.errorJson());
+    assertTrue(tool.finished());
+    assertNull(tool.resultJson());
+  }
+
+  /** Expiration has the same reject-and-reactivate owner effect without retaining a response. */
+  @Test
+  void expiresQueuedToolAsFailedAndActivatesOwningThread() throws SQLException {
+    Instant expiresAt = CREATED_AT.plusSeconds(10);
+    seedQueuedTool();
+    Interaction created = createTool(expiresAt);
+
+    InteractionTransition transition = transactions.expire(created.id(), 0L, expiresAt);
+
+    assertEquals(OWNER, transition.nextTarget());
+    assertEquals(InteractionStatus.EXPIRED, transition.interaction().status());
+    assertNull(transition.interaction().response());
+    assertTrue(threadRunnable(OWNER.id()));
+    ToolState tool = toolState();
+    assertEquals("FAILED", tool.status());
+    assertEquals(
+        PostgresqlInteractionTransactions.INTERACTION_REJECTED_ERROR_JSON, tool.errorJson());
+  }
+
+  /** A stale terminal race rolls back the owner mutation and retains the first terminal outcome. */
+  @Test
+  void rollsBackToolOwnerMutationWhenTerminalVersionIsStale() throws SQLException {
+    seedQueuedTool();
+    Interaction created = createTool(null);
+    transactions.resolve(
+        created.id(),
+        0L,
+        new InteractionResponse("true"),
+        new InteractionResolution(resumeTool(), TOOL_OWNER),
+        CREATED_AT.plusSeconds(1));
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            transactions.resolve(
+                created.id(),
+                0L,
+                new InteractionResponse("false"),
+                new InteractionResolution(rejectTool(), OWNER),
+                CREATED_AT.plusSeconds(2)));
+    assertFalse(threadRunnable(OWNER.id()));
+    assertEquals("QUEUED", toolState().status());
+    assertNull(toolState().errorJson());
+    assertEquals(
+        InteractionStatus.RESOLVED, transactions.find(created.id()).orElseThrow().status());
+  }
+
+  /** A unique OPEN conflict rolls back the suspension made before the interaction insert. */
+  @Test
+  void rollsBackThreadSuspensionWhenOpenInteractionAlreadyExists() throws SQLException {
+    insertOpenInteraction(900L, OWNER);
+
+    assertThrows(RuntimeException.class, () -> create(null));
+    assertTrue(threadRunnable(OWNER.id()));
+    assertEquals(InteractionStatus.OPEN, transactions.find(900L).orElseThrow().status());
+  }
+
   private Interaction create(Instant expiresAt) {
     return transactions.create(
         new InteractionCreate(
@@ -172,8 +284,70 @@ class PostgresqlInteractionTransactionsIntegrationTest extends PostgresSpringTes
             CREATED_AT));
   }
 
+  private Interaction createTool(Instant expiresAt) {
+    return transactions.create(
+        new InteractionCreate(
+            TOOL_OWNER,
+            "tool-permission",
+            new InteractionRequest("{\"question\":true}"),
+            new InteractionOwnerDirective(InteractionOwnerAction.SUSPEND_TOOL_INVOCATION),
+            expiresAt,
+            CREATED_AT));
+  }
+
   private InteractionOwnerDirective resumeThread() {
     return new InteractionOwnerDirective(InteractionOwnerAction.RESUME_THREAD);
+  }
+
+  private InteractionOwnerDirective resumeTool() {
+    return new InteractionOwnerDirective(InteractionOwnerAction.RESUME_TOOL_TO_QUEUED);
+  }
+
+  private InteractionOwnerDirective rejectTool() {
+    return new InteractionOwnerDirective(InteractionOwnerAction.REJECT_TOOL_TO_FAILED);
+  }
+
+  private void seedQueuedTool() throws SQLException {
+    try (Connection connection = newConnection();
+        Statement statement = connection.createStatement()) {
+      statement.executeUpdate(
+          "insert into harness_tool_invocation (id, thread_id, session_id, assistant_entry_id, ordinal,"
+              + " tool_call_id, descriptor, arguments, location, execution_epoch, status, attempt, created_at)"
+              + " values (800, 700, 600, 601, 0, 'call-800', '{}'::jsonb, '{}'::jsonb, 'PLATFORM',"
+              + " 0, 'QUEUED', 1, '2026-01-01T00:00:00Z')");
+    }
+  }
+
+  private void insertOpenInteraction(long interactionId, ExecutionTarget owner)
+      throws SQLException {
+    try (Connection connection = newConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "insert into harness_interaction (id, owner_kind, owner_id, handler_type, request, status,"
+                    + " version, created_at) values (?, ?, ?, 'existing', '{}'::jsonb, 'OPEN', 0, ?)")) {
+      statement.setLong(1, interactionId);
+      statement.setString(2, owner.kind().name());
+      statement.setLong(3, owner.id());
+      statement.setTimestamp(4, Timestamp.from(CREATED_AT));
+      statement.executeUpdate();
+    }
+  }
+
+  private ToolState toolState() {
+    try (Connection connection = newConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "select status, error::text, result::text, finished_at is not null"
+                    + " from harness_tool_invocation where id = ?")) {
+      statement.setLong(1, TOOL_OWNER.id());
+      try (ResultSet result = statement.executeQuery()) {
+        assertTrue(result.next());
+        return new ToolState(
+            result.getString(1), result.getString(2), result.getString(3), result.getBoolean(4));
+      }
+    } catch (SQLException error) {
+      throw new AssertionError(error);
+    }
   }
 
   private boolean threadRunnable(long threadId) {
@@ -189,4 +363,6 @@ class PostgresqlInteractionTransactionsIntegrationTest extends PostgresSpringTes
       throw new AssertionError(error);
     }
   }
+
+  private record ToolState(String status, String errorJson, String resultJson, boolean finished) {}
 }
