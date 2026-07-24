@@ -165,6 +165,8 @@ class RuntimeConfigSnapshotResolverTest {
 
   @Test
   void rejectsMissingDefinitionsModelsProvidersAndVariants() {
+    assertThrows(NullPointerException.class, () -> resolver.replaceModel(null, 1, "default"));
+    assertThrows(NullPointerException.class, () -> resolver.replaceYolo(null, true));
     assertThrows(IllegalArgumentException.class, () -> resolver.resolveAgent(0, false));
     assertThrows(IllegalArgumentException.class, () -> resolver.resolveAgent(1, false));
 
