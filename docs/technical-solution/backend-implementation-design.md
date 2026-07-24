@@ -40,7 +40,8 @@ flowchart LR
 | Thread 控制 | `POST /api/threads/{id}/stop` | 幂等取消 queued Input / Tool work |
 | Retry policy | `GET` / `PUT /api/harness/retry-policy` | 全局持久化自动重试策略 |
 | Root Activity / Task | `GET /api/sessions/{id}/activities`、`GET /api/sessions/{id}/tasks` | 根活动投影与子代理任务 |
-| Tool | `GET /api/threads/{id}/tool-invocations`、`GET /api/tool-invocations/{id}`、`POST /api/tool-invocations/{id}/decision` | Tool 状态与权限决策 |
+| Tool | `GET /api/threads/{id}/tool-invocations`、`GET /api/tool-invocations/{id}` | Tool 状态查询 |
+| Interaction | `GET /api/interactions/{id}`、`GET /api/interactions/open`、`POST /api/interactions/{id}/response` | 通用 durable 人机/外部交互查询与响应 |
 | Artifact / Usage | `/api/artifacts/{id}`、`/api/usage/threads/{id}`、`/api/usage/sessions/{id}`、`/api/usage/models/{id}` | artifact bytes 与用量汇总 |
 | Environment | `GET /api/environments`、`/api/environments/daemon/v1` | 只读实时 Registry 与 daemon WebSocket |
 
@@ -57,7 +58,7 @@ ComfyUI 和 S3 接口边界见 [ComfyUI 工作流 API](comfyui-workflow-api.md) 
 | `StudioHarnessSessionController` | `/api/sessions` | Session/Main Thread 创建、Session 查询与 Secondary Thread 创建 |
 | `StudioChatController` | `/api/chats` | Chat CRUD 与 Chat-Session 成员关系 |
 | `StudioHarnessObservabilityController` | `/api` | activities、tool-invocations、tasks、artifacts |
-| `StudioToolInvocationController` | `/api` | permission decision |
+| `StudioInteractionController` | `/api/interactions` | 通用 Interaction 查询与响应 |
 | `StudioModelUsageController` | `/api/usage` | Thread / Session / Model 聚合 |
 | `StudioToolEnvironmentController` | `/api/environments` | 只读实时 Environment Registry |
 
@@ -82,7 +83,7 @@ Java 领域类型使用 `AgentThread`，避免与 `java.lang.Thread` 冲突。
 | `HarnessThreadTransactionService` | Thread/Input/Entry/Tool/Usage 原子事务（实现 `ThreadTransactions`） |
 | `HarnessSessionQueryService` | Session 只读 |
 | `HarnessObservabilityQueryService` | events、activities、invocations、tasks、artifacts |
-| `ToolInvocationDecisionService` | 权限决策 |
+| `InteractionService` | 通用 Interaction 查询、handler resolution 与提交后 activation |
 | `ModelUsageAggregationService` | 账本聚合 |
 | `ThreadRecoveryLifecycle` | 低频 recoverable kick |
 
