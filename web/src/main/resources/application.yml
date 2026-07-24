@@ -14,6 +14,11 @@ spring:
       # gson GsonHttpMessageConvertersConfiguration
       preferred-json-mapper: jackson
 
+  data:
+    redis:
+      # Redis 用于 harness wake/realtime projection 与 legacy Snowflake worker 续租；可用环境变量覆盖。
+      url: ${KK_STUDIO_REDIS_URL:redis://localhost:6379}
+
   # PostgreSQL 连接配置（唯一 durable 数据库）
   datasource:
     driver-class-name: org.postgresql.Driver
@@ -46,10 +51,9 @@ logging:
 # 规约配置
 convention:
   snowflake-id:
-    # 雪花id开始时间，固定不可变（legacy 兼容；新 durable id 使用 PostgreSQL sequence）
+    # 雪花id开始时间，固定不可变（legacy Agent catalog 等仍可能使用；Harness durable id 使用 PostgreSQL sequence）
     initial-timestamp: 1702214261706
-    # 当前 MVP 固定 worker id，不依赖 Redis 申请 worker id
-    worker-id: 0
+    # 不固定 worker-id：由 convention4j RedisWorkerIdClient 在 Redis 中申请并续租。
 
   i18n:
     # i18n properties文件名称
