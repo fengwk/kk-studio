@@ -16,20 +16,20 @@ import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecord;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecordStore;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ConcurrentModificationException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/** MySQL/H2 持久化模型调用账本；严格遵循 port 的最小契约，幂等由两个 unique 键兜底。 */
+/** PostgreSQL 持久化模型调用账本（{@code harness_model_usage}）。 */
 @Repository
-public class MysqlModelUsageRecordStore implements ModelUsageRecordStore {
+public class PostgresqlModelUsageRecordStore implements ModelUsageRecordStore {
 
   private final ModelUsageRecordMapper mapper;
 
-  public MysqlModelUsageRecordStore(ModelUsageRecordMapper mapper) {
+  public PostgresqlModelUsageRecordStore(ModelUsageRecordMapper mapper) {
     this.mapper = Objects.requireNonNull(mapper, "mapper");
   }
 
@@ -39,7 +39,7 @@ public class MysqlModelUsageRecordStore implements ModelUsageRecordStore {
     int affected = mapper.insert(toDO(record));
     if (affected != 1) {
       throw new ConcurrentModificationException(
-          "model_usage_record insert affected " + affected + " rows but expected 1");
+          "harness_model_usage insert affected " + affected + " rows but expected 1");
     }
     return affected;
   }
@@ -172,12 +172,12 @@ public class MysqlModelUsageRecordStore implements ModelUsageRecordStore {
         instant(source.getCreateTime()));
   }
 
-  private static LocalDateTime utc(Instant instant) {
+  private static OffsetDateTime utc(Instant instant) {
     Objects.requireNonNull(instant, "instant");
-    return LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
+    return OffsetDateTime.ofInstant(instant, ZoneOffset.UTC);
   }
 
-  private static Instant instant(LocalDateTime value) {
-    return value == null ? null : value.toInstant(ZoneOffset.UTC);
+  private static Instant instant(OffsetDateTime value) {
+    return value == null ? null : value.toInstant();
   }
 }

@@ -14,8 +14,7 @@ import fun.fengwk.kkstudio.core.harness.usage.store.model.ModelUsageRecordDO;
 import java.util.List;
 
 /**
- * model_usage_record 行级 MyBatis 映射；幂等由 unique(assistant_entry_id) 与 unique(thread_id, attempt,
- * turn_index) 兜底。
+ * harness_model_usage 行级 MyBatis 映射；幂等由 unique(assistant_entry_id) 与 unique(assistant_entry_id) 兜底。
  */
 @Mapper
 public interface ModelUsageRecordMapper extends BaseMapper {
@@ -35,12 +34,12 @@ public interface ModelUsageRecordMapper extends BaseMapper {
           + " pricing_input_per_million_tokens, pricing_output_per_million_tokens,"
           + " pricing_cache_read_per_million_tokens, pricing_cache_write_per_million_tokens,"
           + " pricing_cache_write_long_per_million_tokens, pricing_reasoning_per_million_tokens,"
-          + " request_id, reported_service_tier, raw_usage_json,"
-          + " gmt_create as create_time";
+          + " request_id, reported_service_tier, raw_usage::text as raw_usage,"
+          + " created_at as create_time";
 
   @Insert(
       """
-      insert into model_usage_record (
+      insert into harness_model_usage (
           id, session_id, thread_id, assistant_entry_id,
           provider_resource_id, model_resource_id, provider_type, provider_model_id,
           prompt_cache_mode, prompt_cache_retention, cache_eligible, cache_affinity_key,
@@ -55,8 +54,8 @@ public interface ModelUsageRecordMapper extends BaseMapper {
           pricing_input_per_million_tokens, pricing_output_per_million_tokens,
           pricing_cache_read_per_million_tokens, pricing_cache_write_per_million_tokens,
           pricing_cache_write_long_per_million_tokens, pricing_reasoning_per_million_tokens,
-          request_id, reported_service_tier, raw_usage_json,
-          gmt_create
+          request_id, reported_service_tier, raw_usage,
+          created_at
       ) values (
           #{id}, #{sessionId}, #{threadId}, #{assistantEntryId},
           #{providerResourceId}, #{modelResourceId}, #{providerType}, #{providerModelId},
@@ -72,7 +71,7 @@ public interface ModelUsageRecordMapper extends BaseMapper {
           #{pricingInputPerMillionTokens}, #{pricingOutputPerMillionTokens},
           #{pricingCacheReadPerMillionTokens}, #{pricingCacheWritePerMillionTokens},
           #{pricingCacheWriteLongPerMillionTokens}, #{pricingReasoningPerMillionTokens},
-          #{requestId}, #{reportedServiceTier}, #{rawUsageJson},
+          #{requestId}, #{reportedServiceTier}, cast(#{rawUsageJson} as jsonb),
           #{createTime}
       )
       """)
@@ -81,7 +80,7 @@ public interface ModelUsageRecordMapper extends BaseMapper {
   @Select(
       "select "
           + COLUMNS
-          + " from model_usage_record where assistant_entry_id = #{assistantEntryId}")
+          + " from harness_model_usage where assistant_entry_id = #{assistantEntryId}")
   @Results(
       id = "modelUsageRecordResultMap",
       value = {
@@ -140,7 +139,7 @@ public interface ModelUsageRecordMapper extends BaseMapper {
             property = "pricingReasoningPerMillionTokens"),
         @Result(column = "request_id", property = "requestId"),
         @Result(column = "reported_service_tier", property = "reportedServiceTier"),
-        @Result(column = "raw_usage_json", property = "rawUsageJson"),
+        @Result(column = "raw_usage", property = "rawUsageJson"),
         @Result(column = "create_time", property = "createTime")
       })
   ModelUsageRecordDO findByAssistantEntryId(@Param("assistantEntryId") long assistantEntryId);
@@ -148,14 +147,14 @@ public interface ModelUsageRecordMapper extends BaseMapper {
   @Select(
       "select "
           + COLUMNS
-          + " from model_usage_record where session_id = #{sessionId} order by id asc")
+          + " from harness_model_usage where session_id = #{sessionId} order by id asc")
   @ResultMap("modelUsageRecordResultMap")
   List<ModelUsageRecordDO> listBySessionId(@Param("sessionId") long sessionId);
 
   @Select(
       "select "
           + COLUMNS
-          + " from model_usage_record where model_resource_id = #{modelResourceId} order by id asc")
+          + " from harness_model_usage where model_resource_id = #{modelResourceId} order by id asc")
   @ResultMap("modelUsageRecordResultMap")
   List<ModelUsageRecordDO> listByModelResourceId(@Param("modelResourceId") long modelResourceId);
 }

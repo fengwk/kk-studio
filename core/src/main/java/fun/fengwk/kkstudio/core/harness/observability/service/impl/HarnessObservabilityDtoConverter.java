@@ -2,19 +2,14 @@ package fun.fengwk.kkstudio.core.harness.observability.service.impl;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.core.harness.task.store.model.HarnessSubagentTaskDO;
-import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadEventDO;
 import fun.fengwk.kkstudio.core.harness.tool.worker.ToolInvocationDO;
 import fun.fengwk.kkstudio.harness.runtime.task.RootActivity;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskReport;
-import fun.fengwk.kkstudio.harness.runtime.task.TaskResultFormatter;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.share.model.RootActivityDTO;
-import fun.fengwk.kkstudio.share.model.SubagentTaskDTO;
 import fun.fengwk.kkstudio.share.model.SubagentTaskReportDTO;
-import fun.fengwk.kkstudio.share.model.ThreadEventDTO;
 import fun.fengwk.kkstudio.share.model.ToolArtifactRefDTO;
 import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
 
@@ -26,19 +21,6 @@ public class HarnessObservabilityDtoConverter {
 
   private static final ToolDescriptorJsonCodec TOOL_DESCRIPTOR_CODEC =
       new ToolDescriptorJsonCodec();
-
-  public ThreadEventDTO convert(HarnessThreadEventDO row) {
-    ThreadEventDTO dto = new ThreadEventDTO();
-    dto.setEventId(Long.toString(row.getId()));
-    dto.setThreadId(Long.toString(row.getThreadId()));
-    if (row.getSubjectEntryId() != null) {
-      dto.setSubjectEntryId(Long.toString(row.getSubjectEntryId()));
-    }
-    dto.setEventType(row.getEventType());
-    dto.setPayloadJson(row.getPayloadJson());
-    dto.setCreateTime(row.getCreateTime());
-    return dto;
-  }
 
   public ToolInvocationDTO convert(ToolInvocationDO row) {
     ToolDescriptor descriptor = TOOL_DESCRIPTOR_CODEC.decode(row.getDescriptorJson());
@@ -99,35 +81,7 @@ public class HarnessObservabilityDtoConverter {
     return dto;
   }
 
-  public SubagentTaskDTO convert(HarnessSubagentTaskDO row) {
-    SubagentTaskDTO dto = new SubagentTaskDTO();
-    dto.setParentInvocationId(Long.toString(row.getParentInvocationId()));
-    dto.setParentSessionId(Long.toString(row.getParentSessionId()));
-    if (row.getParentThreadId() != null) {
-      dto.setParentThreadId(Long.toString(row.getParentThreadId()));
-    }
-    dto.setChildSessionId(Long.toString(row.getChildSessionId()));
-    if (row.getChildThreadId() != null) {
-      dto.setChildThreadId(Long.toString(row.getChildThreadId()));
-    }
-    dto.setTargetAgent(row.getTargetAgent());
-    dto.setWorkingCopyPolicy(row.getWorkingCopyPolicy());
-    dto.setWorkingCopyRevision(row.getWorkingCopyRevision());
-    dto.setMaxTurns(row.getMaxTurns());
-    dto.setStatus(row.getStatus());
-    if (row.getReportJson() != null && !row.getReportJson().isBlank()) {
-      dto.setReport(convertReport(TaskResultFormatter.decodeJson(row.getReportJson())));
-    }
-    if (row.getCreateTime() != null) {
-      dto.setCreateTime(row.getCreateTime().toInstant(ZoneOffset.UTC));
-    }
-    if (row.getUpdateTime() != null) {
-      dto.setUpdateTime(row.getUpdateTime().toInstant(ZoneOffset.UTC));
-    }
-    return dto;
-  }
-
-  private SubagentTaskReportDTO convertReport(TaskReport report) {
+  public SubagentTaskReportDTO convertReport(TaskReport report) {
     SubagentTaskReportDTO dto = new SubagentTaskReportDTO();
     dto.setChildSessionId(Long.toString(report.childSessionId()));
     dto.setChildThreadId(Long.toString(report.childThreadId()));

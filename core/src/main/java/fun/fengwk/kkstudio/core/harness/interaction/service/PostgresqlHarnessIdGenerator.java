@@ -4,12 +4,13 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.port.HarnessIdGenerator;
+import fun.fengwk.kkstudio.harness.runtime.session.SessionIdGenerator;
 
 import java.util.Objects;
 
 /** Harness id port backed exclusively by the existing PostgreSQL {@code kk_studio_id_seq}. */
 @Component
-public class PostgresqlHarnessIdGenerator implements HarnessIdGenerator {
+public class PostgresqlHarnessIdGenerator implements HarnessIdGenerator, SessionIdGenerator {
   private final PostgresqlSequenceIdGenerator sequenceIdGenerator;
 
   public PostgresqlHarnessIdGenerator(PostgresqlSequenceIdGenerator sequenceIdGenerator) {
@@ -22,6 +23,11 @@ public class PostgresqlHarnessIdGenerator implements HarnessIdGenerator {
   }
 
   @Override
+  public long newSessionId() {
+    return nextSessionId();
+  }
+
+  @Override
   public long nextThreadId() {
     return next();
   }
@@ -29,6 +35,11 @@ public class PostgresqlHarnessIdGenerator implements HarnessIdGenerator {
   @Override
   public long nextEntryId() {
     return next();
+  }
+
+  @Override
+  public long newEntryId() {
+    return nextEntryId();
   }
 
   @Override

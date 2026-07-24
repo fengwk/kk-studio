@@ -9,7 +9,7 @@ import org.apache.ibatis.annotations.Update;
 
 import fun.fengwk.kkstudio.core.harness.retry.HarnessRetryPolicyDO;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /** 单例 Harness retry policy 的最小持久化映射。 */
 @Mapper
@@ -21,8 +21,8 @@ public interface HarnessRetryPolicyMapper extends BaseMapper {
              backoff_strategy as backoffStrategy,
              base_delay_millis as baseDelayMillis,
              max_delay_millis as maxDelayMillis,
-             gmt_create as createTime,
-             gmt_modified as updateTime
+             created_at as createTime,
+             updated_at as updateTime
       from harness_retry_policy
       where id = 1
       """)
@@ -35,8 +35,8 @@ public interface HarnessRetryPolicyMapper extends BaseMapper {
              backoff_strategy as backoffStrategy,
              base_delay_millis as baseDelayMillis,
              max_delay_millis as maxDelayMillis,
-             gmt_create as createTime,
-             gmt_modified as updateTime
+             created_at as createTime,
+             updated_at as updateTime
       from harness_retry_policy
       where id = 1
       for update
@@ -47,7 +47,7 @@ public interface HarnessRetryPolicyMapper extends BaseMapper {
       """
       insert into harness_retry_policy (
           id, max_retries, backoff_strategy, base_delay_millis, max_delay_millis,
-          gmt_create, gmt_modified
+          created_at, updated_at
       ) values (
           1, #{maxRetries}, #{backoffStrategy}, #{baseDelayMillis}, #{maxDelayMillis},
           #{createTime}, #{updateTime}
@@ -62,7 +62,7 @@ public interface HarnessRetryPolicyMapper extends BaseMapper {
           backoff_strategy = #{backoffStrategy},
           base_delay_millis = #{baseDelayMillis},
           max_delay_millis = #{maxDelayMillis},
-          gmt_modified = #{updateTime}
+          updated_at = #{updateTime}
       where id = 1
       """)
   int update(
@@ -70,5 +70,5 @@ public interface HarnessRetryPolicyMapper extends BaseMapper {
       @Param("backoffStrategy") String backoffStrategy,
       @Param("baseDelayMillis") long baseDelayMillis,
       @Param("maxDelayMillis") long maxDelayMillis,
-      @Param("updateTime") LocalDateTime updateTime);
+      @Param("updateTime") OffsetDateTime updateTime);
 }

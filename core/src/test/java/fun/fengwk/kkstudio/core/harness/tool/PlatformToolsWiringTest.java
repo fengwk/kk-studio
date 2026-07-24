@@ -5,8 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 
+import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
 import fun.fengwk.kkstudio.harness.runtime.goal.CreateGoalTool;
 import fun.fengwk.kkstudio.harness.runtime.goal.GetGoalTool;
@@ -20,8 +20,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /** Verifies platform tools are Spring beans and registered on the Host. */
-@SpringBootTest
-class PlatformToolsWiringTest {
+class PlatformToolsWiringTest extends PostgresSpringTestSupport {
 
   @Autowired private List<Tool> tools;
   @Autowired private HarnessExtensionHost host;

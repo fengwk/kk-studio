@@ -49,4 +49,11 @@ public class HarnessRedisConfiguration {
       RealtimeEventJsonCodec eventCodec) {
     return new RedisRealtimeEventSink(stringRedisTemplate::getObject, properties, eventCodec);
   }
+
+  @Bean
+  @ConditionalOnMissingBean
+  public RedisRealtimeEventTail redisRealtimeEventTail(
+      ObjectProvider<StringRedisTemplate> stringRedisTemplate, HarnessRedisProperties properties) {
+    return new RedisRealtimeEventTail(stringRedisTemplate::getObject, properties);
+  }
 }

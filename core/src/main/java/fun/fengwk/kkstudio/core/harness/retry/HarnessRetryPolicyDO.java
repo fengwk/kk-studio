@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.core.harness.retry;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /** 单例全局重试策略持久行。 */
 @Data
@@ -12,6 +12,6 @@ public class HarnessRetryPolicyDO {
   private String backoffStrategy;
   private Long baseDelayMillis;
   private Long maxDelayMillis;
-  private LocalDateTime createTime;
-  private LocalDateTime updateTime;
+  private OffsetDateTime createTime;
+  private OffsetDateTime updateTime;
 }

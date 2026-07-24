@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.core.harness.usage.store.model;
 import lombok.Data;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /** {@code model_usage_record} 行映射：一次 Assistant Entry 的模型用量账本。 */
 @Data
@@ -134,6 +134,6 @@ public class ModelUsageRecordDO {
   /** Provider 原始 usage JSON。 */
   private String rawUsageJson;
 
-  /** 创建时间（映射 {@code gmt_create}）。 */
-  private LocalDateTime createTime;
+  /** 创建时间（映射 {@code created_at}）。 */
+  private OffsetDateTime createTime;
 }

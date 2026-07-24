@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.share.model.HarnessRetryPolicyDTO;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Objects;
 
@@ -47,7 +47,7 @@ public class DatabaseHarnessRetryPolicyService implements HarnessRetryPolicyServ
       throw new IllegalArgumentException("retryPolicy must not be null");
     }
     InvocationRetryPolicy policy = toPolicy(retryPolicy);
-    LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+    OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
     HarnessRetryPolicyDO existing = mapper.findForUpdate();
     if (existing == null) {
       HarnessRetryPolicyDO row = toDO(policy, now);
@@ -113,7 +113,7 @@ public class DatabaseHarnessRetryPolicyService implements HarnessRetryPolicyServ
     return value;
   }
 
-  private static HarnessRetryPolicyDO toDO(InvocationRetryPolicy policy, LocalDateTime now) {
+  private static HarnessRetryPolicyDO toDO(InvocationRetryPolicy policy, OffsetDateTime now) {
     HarnessRetryPolicyDO row = new HarnessRetryPolicyDO();
     row.setId(1);
     row.setMaxRetries(policy.maxRetries());

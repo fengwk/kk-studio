@@ -15,24 +15,27 @@ import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryStore;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntryType;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionStore;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-/** MySQL/H2 Session Tree Store；路径读取只按 Entry 主键回溯。 */
+/**
+ * PostgreSQL Session/Entry store on final schema {@code harness_session}/{@code harness_entry}.
+ *
+ * <p>{@code root_session_id}/{@code depth}/{@code version} 不落库：读取时由 parent 链派生；写入只校验 runtime {@link
+ * Session} 不变量并投影 final 列。
+ */
 @Repository
-public class MysqlHarnessSessionStore implements SessionStore, SessionEntryStore {
+public class PostgresqlHarnessSessionStore implements SessionStore, SessionEntryStore {
   private final HarnessSessionMapper sessionMapper;
   private final HarnessSessionEntryMapper entryMapper;
   private final SessionEntryJsonCodec payloadCodec = new SessionEntryJsonCodec();
 
-  public MysqlHarnessSessionStore(
+  public PostgresqlHarnessSessionStore(
       HarnessSessionMapper sessionMapper, HarnessSessionEntryMapper entryMapper) {
     this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
     this.entryMapper = Objects.requireNonNull(entryMapper, "entryMapper");
@@ -40,14 +43,19 @@ public class MysqlHarnessSessionStore implements SessionStore, SessionEntryStore
 
   @Override
   public Optional<Session> find(long sessionId) {
-    return Optional.ofNullable(sessionMapper.find(sessionId)).map(this::toSession);
+    HarnessSessionDO row = sessionMapper.find(sessionId);
+    if (row == null) {
+      return Optional.empty();
+    }
+    return Optional.of(toSession(row));
   }
 
   @Override
   public void create(Session session) {
     if (session.parentSessionId() != null
         || session.rootSessionId() != session.id()
-        || session.depth() != 0) {
+        || session.depth() != 0
+        || session.parentInvocationId() != null) {
       throw new IllegalArgumentException(
           "a root session must have neither parent nor non-zero depth");
     }
@@ -58,8 +66,9 @@ public class MysqlHarnessSessionStore implements SessionStore, SessionEntryStore
   @Transactional
   public void createFork(Session session, List<SessionEntry> entries) {
     entries = List.copyOf(entries);
-    if (session.parentSessionId() == null) {
-      throw new IllegalArgumentException("a child session must reference its parent session");
+    if (session.parentSessionId() == null || session.parentInvocationId() == null) {
+      throw new IllegalArgumentException(
+          "a child session must reference parent session and parent invocation together");
     }
     Session parent = requireSession(session.parentSessionId());
     if (parent.rootSessionId() != session.rootSessionId()
@@ -91,22 +100,22 @@ public class MysqlHarnessSessionStore implements SessionStore, SessionEntryStore
 
   @Override
   public List<SessionEntry> loadPath(long sessionId, long leafEntryId) {
-    List<SessionEntry> reversePath = new ArrayList<>();
+    List<HarnessSessionEntryDO> rows = entryMapper.loadPath(sessionId, leafEntryId);
+    if (rows.isEmpty()) {
+      throw new InvalidSessionTreeException(
+          "missing or cross-session parent entry: " + leafEntryId);
+    }
     Set<Long> visited = new HashSet<>();
-    Long entryId = leafEntryId;
-    while (entryId != null) {
-      if (!visited.add(entryId)) {
+    for (HarnessSessionEntryDO row : rows) {
+      if (!visited.add(row.getId())) {
         throw new InvalidSessionTreeException("cycle detected in session entry path");
       }
-      SessionEntry entry = find(sessionId, entryId).orElse(null);
-      if (entry == null) {
-        throw new InvalidSessionTreeException("missing or cross-session parent entry: " + entryId);
+      if (row.getSessionId() == null || row.getSessionId() != sessionId) {
+        throw new InvalidSessionTreeException(
+            "missing or cross-session parent entry: " + row.getId());
       }
-      reversePath.add(entry);
-      entryId = entry.parentEntryId();
     }
-    Collections.reverse(reversePath);
-    return List.copyOf(reversePath);
+    return rows.stream().map(this::toEntry).toList();
   }
 
   @Override
@@ -140,12 +149,9 @@ public class MysqlHarnessSessionStore implements SessionStore, SessionEntryStore
     target.setTitle(session.title());
     target.setMainThreadId(session.mainThreadId());
     target.setParentSessionId(session.parentSessionId());
-    target.setRootSessionId(session.rootSessionId());
     target.setParentInvocationId(session.parentInvocationId());
-    target.setDepth(session.depth());
-    target.setVersion(session.version());
-    target.setCreateTime(LocalDateTime.ofInstant(session.createdAt(), ZoneOffset.UTC));
-    target.setUpdateTime(LocalDateTime.ofInstant(session.updatedAt(), ZoneOffset.UTC));
+    target.setCreatedAt(OffsetDateTime.ofInstant(session.createdAt(), ZoneOffset.UTC));
+    target.setUpdatedAt(OffsetDateTime.ofInstant(session.updatedAt(), ZoneOffset.UTC));
     return target;
   }
 
@@ -154,34 +160,65 @@ public class MysqlHarnessSessionStore implements SessionStore, SessionEntryStore
     target.setId(entry.id());
     target.setSessionId(entry.sessionId());
     target.setParentEntryId(entry.parentEntryId());
-    target.setEntryType(entry.type().value());
+    // final schema stores uppercase EntryType-compatible names when available.
+    target.setEntryType(toPersistedEntryType(entry.type()));
     target.setPayloadJson(payloadCodec.encode(entry.payload()));
-    target.setCreateTime(LocalDateTime.ofInstant(entry.createdAt(), ZoneOffset.UTC));
+    target.setCreatedAt(OffsetDateTime.ofInstant(entry.createdAt(), ZoneOffset.UTC));
     return target;
   }
 
   private Session toSession(HarnessSessionDO row) {
+    long id = row.getId();
+    Long rootId = sessionMapper.findRootSessionId(id);
+    int depth = sessionMapper.findDepth(id);
+    long resolvedRoot = rootId == null ? id : rootId;
     return new Session(
-        row.getId(),
+        id,
         row.getMainThreadId(),
         row.getTitle(),
         row.getParentSessionId(),
-        row.getRootSessionId(),
+        resolvedRoot,
         row.getParentInvocationId(),
-        row.getDepth(),
-        row.getVersion(),
-        row.getCreateTime().toInstant(ZoneOffset.UTC),
-        row.getUpdateTime().toInstant(ZoneOffset.UTC));
+        depth,
+        0L,
+        row.getCreatedAt().toInstant(),
+        row.getUpdatedAt().toInstant());
   }
 
   private SessionEntry toEntry(HarnessSessionEntryDO row) {
-    SessionEntryType type = SessionEntryType.fromValue(row.getEntryType());
+    SessionEntryType type = fromPersistedEntryType(row.getEntryType());
     return new SessionEntry(
         row.getId(),
         row.getSessionId(),
         row.getParentEntryId(),
         type,
         payloadCodec.decode(type, row.getPayloadJson()),
-        row.getCreateTime().toInstant(ZoneOffset.UTC));
+        row.getCreatedAt().toInstant());
+  }
+
+  private static String toPersistedEntryType(SessionEntryType type) {
+    return switch (type) {
+      case ROOT -> "ROOT";
+      case MESSAGE -> "MESSAGE";
+      case CUSTOM_MESSAGE -> "CUSTOM_MESSAGE";
+      case COMPACTION -> "COMPACTION";
+      case ASSISTANT_ERROR -> "ASSISTANT_ERROR";
+      case LABEL -> "LABEL";
+      case BRANCH_SUMMARY -> "BRANCH_SUMMARY";
+        // Legacy runtime types are not part of final schema check constraint.
+      case AGENT_CHANGE, MODEL_CHANGE, CUSTOM -> type.name();
+    };
+  }
+
+  private static SessionEntryType fromPersistedEntryType(String value) {
+    if (value == null || value.isBlank()) {
+      throw new IllegalArgumentException("entry type must not be blank");
+    }
+    String normalized = value.trim();
+    try {
+      return SessionEntryType.valueOf(normalized.toUpperCase());
+    } catch (IllegalArgumentException ignored) {
+      return SessionEntryType.fromValue(normalized.toLowerCase());
+    }
   }
 }
