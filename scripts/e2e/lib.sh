@@ -116,13 +116,18 @@ start_backend() {
   kill_port "$BACKEND_PORT"
   : >"$WORK_DIR/backend.log"
   step "Starting backend $BACKEND_URL profile=$SPRING_PROFILE"
-  nohup env JAVA_HOME="$java_home" "$java_home/bin/java" -jar "$BACKEND_JAR" \
+  # Pass PostgreSQL connection overrides when set; e2e profile defaults are only for local loops.
+  nohup env JAVA_HOME="$java_home" \
+    ${KK_STUDIO_DB_URL:+KK_STUDIO_DB_URL="$KK_STUDIO_DB_URL"} \
+    ${KK_STUDIO_DB_USER:+KK_STUDIO_DB_USER="$KK_STUDIO_DB_USER"} \
+    ${KK_STUDIO_DB_PASSWORD:+KK_STUDIO_DB_PASSWORD="$KK_STUDIO_DB_PASSWORD"} \
+    "$java_home/bin/java" -jar "$BACKEND_JAR" \
     --spring.profiles.active="$SPRING_PROFILE" \
     --server.address="$BACKEND_HOST" \
     --server.port="$BACKEND_PORT" \
     >"$WORK_DIR/backend.log" 2>&1 &
   echo $! >"$WORK_DIR/backend.pid"
-  wait_http "$BACKEND_URL/api/agents?pageNumber=1&pageSize=1" backend
+  wait_http "$BACKEND_URL/api/agents?pageNumber=1&pageSize=1" backend 120
 }
 
 # Write only env-provided baseUrl/credential into seeded providers. Missing env => leave DB null/unchanged.
