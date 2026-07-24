@@ -16,8 +16,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import fun.fengwk.kkstudio.core.harness.observability.service.HarnessObservabilityQueryService;
-import fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits;
+import fun.fengwk.kkstudio.core.harness.redis.RedisRealtimeEventTail;
+import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadCommandService;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadQueryService;
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
@@ -47,17 +47,16 @@ import java.util.function.Supplier;
 public class StudioHarnessThreadController {
   private final HarnessThreadCommandService commandService;
   private final HarnessThreadQueryService queryService;
-  private final HarnessObservabilityQueryService observabilityQueryService;
+  private final RedisRealtimeEventTail realtimeEventTail;
 
   /** 创建 Thread API Controller。 */
   public StudioHarnessThreadController(
       HarnessThreadCommandService commandService,
       HarnessThreadQueryService queryService,
-      HarnessObservabilityQueryService observabilityQueryService) {
+      RedisRealtimeEventTail realtimeEventTail) {
     this.commandService = Objects.requireNonNull(commandService, "commandService");
     this.queryService = Objects.requireNonNull(queryService, "queryService");
-    this.observabilityQueryService =
-        Objects.requireNonNull(observabilityQueryService, "observabilityQueryService");
+    this.realtimeEventTail = Objects.requireNonNull(realtimeEventTail, "realtimeEventTail");
   }
 
   /** 查询所有 Thread。 */
@@ -151,18 +150,24 @@ public class StudioHarnessThreadController {
             () -> queryService.listEvents(threadId, afterEventId, page)));
   }
 
-  /** 通过可续传的 SSE 流订阅 Thread Event。 */
+  /**
+   * Snapshot-first realtime SSE tail over Redis Streams.
+   *
+   * <p>{@code afterEventId} / {@code Last-Event-ID} are Redis stream ids ({@code ms-seq}). Clients
+   * must load the PostgreSQL snapshot before connecting; Redis loss only drops the lossy tail.
+   */
   @GetMapping(
       path = "/threads/{threadId}/events/stream",
       produces = MediaType.TEXT_EVENT_STREAM_VALUE)
   public SseEmitter streamEvents(
       @PathVariable String threadId,
-      @RequestParam(defaultValue = "0") String afterEventId,
+      @RequestParam(defaultValue = "0-0") String afterEventId,
       @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
-    long cursor =
-        ObservabilityLimits.resolveResumeCursor(afterEventId, lastEventId, "afterEventId");
     withMissingResourceTranslation(() -> queryService.getThread(threadId));
-    return StudioHarnessThreadSseEmitter.stream(threadId, cursor, observabilityQueryService);
+    String cursor =
+        lastEventId != null && !lastEventId.isBlank() ? lastEventId.trim() : afterEventId;
+    long id = HarnessIds.parsePositive(threadId, "threadId");
+    return StudioHarnessThreadSseEmitter.stream(id, cursor, realtimeEventTail);
   }
 
   /** 将服务层异常转换为统一的 HTTP 错误响应。 */

@@ -43,7 +43,7 @@ Commands:
 Environment:
   BACKEND_PORT=18080
   FRONTEND_PORT=5173
-  SPRING_PROFILES_ACTIVE=e2e   # dev = H2+stub; e2e = H2+real provider seed
+  SPRING_PROFILES_ACTIVE=e2e   # dev/e2e 均使用 PostgreSQL；dev=stub seed，e2e=real provider seed
   MINIMAX_API_KEY / MINIMAX_BASE_URL
   OPENAI_API_KEY / OPENAI_BASE_URL
   XAI_API_KEY / XAI_BASE_URL

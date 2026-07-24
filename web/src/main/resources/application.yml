@@ -14,14 +14,14 @@ spring:
       # gson GsonHttpMessageConvertersConfiguration
       preferred-json-mapper: jackson
 
-  # mysql连接配置
+  # PostgreSQL 连接配置（唯一 durable 数据库）
   datasource:
-    driver-class-name: com.mysql.jdbc.Driver
-    # 替换为mysql {host}、{port}、{database}
-    url: jdbc:mysql://{host}:{port}/{database}?useUnicode=true&characterEncoding=utf-8&zeroDateTimeBehavior=convertToNull&allowMultiQueries=true&connectTimeout=3000&socketTimeout=3000&useSSL=false
-    # 替换为mysql {username}
+    driver-class-name: org.postgresql.Driver
+    # 替换为 PostgreSQL {host}、{port}、{database}
+    url: jdbc:postgresql://{host}:{port}/{database}
+    # 替换为 PostgreSQL {username}
     username: {username}
-    # 替换为mysql {password}
+    # 替换为 PostgreSQL {password}
     password: {password}
 
 server:
@@ -46,7 +46,7 @@ logging:
 # 规约配置
 convention:
   snowflake-id:
-    # 雪花id开始时间，固定不可变
+    # 雪花id开始时间，固定不可变（legacy 兼容；新 durable id 使用 PostgreSQL sequence）
     initial-timestamp: 1702214261706
     # 当前 MVP 固定 worker id，不依赖 Redis 申请 worker id
     worker-id: 0

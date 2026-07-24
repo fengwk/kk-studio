@@ -14,14 +14,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiCreateDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiUpdateDTO;
-import fun.fengwk.kkstudio.web.WebTestApplication;
+import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 /**
  * {@link StudioComfyuiWorkflowApiController} 的端到端测试。
@@ -39,8 +38,7 @@ import fun.fengwk.kkstudio.web.WebTestApplication;
  * @author fengwk
  */
 @AutoConfigureMockMvc
-@SpringBootTest(classes = WebTestApplication.class)
-public class StudioComfyuiWorkflowApiControllerTest {
+public class StudioComfyuiWorkflowApiControllerTest extends WebPostgresTestSupport {
 
   private static final String WORKFLOW_JSON =
       "{\n"

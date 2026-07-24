@@ -13,17 +13,17 @@ import org.apache.ibatis.annotations.Update;
 
 import fun.fengwk.kkstudio.core.harness.goal.store.model.HarnessThreadGoalDO;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 @Mapper
 public interface HarnessThreadGoalMapper extends BaseMapper {
   String COLUMNS =
       "thread_id, objective, token_budget, status, reason,"
-          + " gmt_create as create_time, gmt_modified as update_time";
+          + " created_at as create_time, updated_at as update_time";
 
   @Insert(
       "insert into harness_thread_goal (thread_id, objective, token_budget, status, reason,"
-          + " gmt_create, gmt_modified) values (#{threadId}, #{objective}, #{tokenBudget},"
+          + " created_at, updated_at) values (#{threadId}, #{objective}, #{tokenBudget},"
           + " #{status}, #{reason}, #{createTime}, #{updateTime})")
   int insert(HarnessThreadGoalDO goal);
 
@@ -48,18 +48,18 @@ public interface HarnessThreadGoalMapper extends BaseMapper {
 
   @Update(
       "update harness_thread_goal set objective = #{objective}, token_budget = #{tokenBudget},"
-          + " status = #{status}, reason = #{reason}, gmt_modified = #{updateTime}"
+          + " status = #{status}, reason = #{reason}, updated_at = #{updateTime}"
           + " where thread_id = #{threadId}")
   int update(HarnessThreadGoalDO goal);
 
   @Update(
       "update harness_thread_goal set status = #{status}, reason = #{reason},"
-          + " gmt_modified = #{now} where thread_id = #{threadId} and status = 'active'")
+          + " updated_at = #{now} where thread_id = #{threadId} and status = 'active'")
   int updateTerminal(
       @Param("threadId") long threadId,
       @Param("status") String status,
       @Param("reason") String reason,
-      @Param("now") LocalDateTime now);
+      @Param("now") OffsetDateTime now);
 
   @Delete("delete from harness_thread_goal where thread_id = #{threadId}")
   int delete(@Param("threadId") long threadId);

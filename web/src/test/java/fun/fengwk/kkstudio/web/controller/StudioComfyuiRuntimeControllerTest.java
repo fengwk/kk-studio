@@ -18,7 +18,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -30,7 +29,7 @@ import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowCancelDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowJobDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunDTO;
 import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunRequestDTO;
-import fun.fengwk.kkstudio.web.WebTestApplication;
+import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 /**
  * {@link StudioComfyuiRuntimeController} HTTP 契约测试。
@@ -47,8 +46,7 @@ import fun.fengwk.kkstudio.web.WebTestApplication;
  * @author fengwk
  */
 @AutoConfigureMockMvc
-@SpringBootTest(classes = WebTestApplication.class)
-public class StudioComfyuiRuntimeControllerTest {
+public class StudioComfyuiRuntimeControllerTest extends WebPostgresTestSupport {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;

@@ -13,24 +13,27 @@ import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionEntryD
 
 import java.util.List;
 
+/** final {@code harness_entry} mapper。 */
 @Mapper
 public interface HarnessSessionEntryMapper extends BaseMapper {
+  String COLUMNS =
+      "id, session_id, parent_entry_id, entry_type, payload::text as payload_json, created_at";
+
   @Insert(
       """
-      insert into harness_session_entry (
-          id, session_id, parent_entry_id, entry_type, payload_json, gmt_create
+      insert into harness_entry (
+          id, session_id, parent_entry_id, entry_type, payload, created_at
       ) values (
-          #{id}, #{sessionId}, #{parentEntryId}, #{entryType}, #{payloadJson}, #{createTime}
+          #{id}, #{sessionId}, #{parentEntryId}, #{entryType},
+          cast(#{payloadJson} as jsonb), #{createdAt}
       )
       """)
   int insert(HarnessSessionEntryDO entry);
 
   @Select(
-      """
-      select id, session_id, parent_entry_id, entry_type, payload_json, gmt_create as create_time
-      from harness_session_entry
-      where session_id = #{sessionId} and id = #{entryId}
-      """)
+      "select "
+          + COLUMNS
+          + " from harness_entry where session_id = #{sessionId} and id = #{entryId}")
   @Results(
       id = "harnessSessionEntryResultMap",
       value = {
@@ -39,60 +42,36 @@ public interface HarnessSessionEntryMapper extends BaseMapper {
         @Result(column = "parent_entry_id", property = "parentEntryId"),
         @Result(column = "entry_type", property = "entryType"),
         @Result(column = "payload_json", property = "payloadJson"),
-        @Result(column = "create_time", property = "createTime")
+        @Result(column = "created_at", property = "createdAt")
       })
   HarnessSessionEntryDO find(@Param("sessionId") long sessionId, @Param("entryId") long entryId);
 
   @Select(
-      """
-      select id, session_id, parent_entry_id, entry_type, payload_json, gmt_create as create_time
-      from harness_session_entry
-      where id = #{entryId}
-      """)
-  @ResultMap("harnessSessionEntryResultMap")
-  HarnessSessionEntryDO findById(@Param("entryId") long entryId);
-
-  @Select(
-      """
-      select id, session_id, parent_entry_id, entry_type, payload_json, gmt_create as create_time
-      from harness_session_entry
-      where session_id = #{sessionId}
-        and ((#{parentEntryId} is null and parent_entry_id is null)
-             or parent_entry_id = #{parentEntryId})
-      order by id asc
-      """)
+      "select "
+          + COLUMNS
+          + " from harness_entry where session_id = #{sessionId}"
+          + " and ((#{parentEntryId} is null and parent_entry_id is null)"
+          + " or parent_entry_id = #{parentEntryId}) order by id asc")
   @ResultMap("harnessSessionEntryResultMap")
   List<HarnessSessionEntryDO> listChildren(
       @Param("sessionId") long sessionId, @Param("parentEntryId") Long parentEntryId);
 
   @Select(
-      "select id, session_id, parent_entry_id, entry_type, payload_json, "
-          + "gmt_create as create_time from harness_session_entry where session_id = #{sessionId} "
-          + "and entry_type = #{entryType} order by id desc limit 1")
+      """
+      with recursive path as (
+        select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at, 0 as depth
+        from harness_entry e
+        where e.session_id = #{sessionId} and e.id = #{leafEntryId}
+        union all
+        select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at, p.depth + 1
+        from harness_entry e
+        join path p on p.parent_entry_id = e.id and p.session_id = e.session_id
+      )
+      select id, session_id, parent_entry_id, entry_type, payload::text as payload_json, created_at
+      from path
+      order by depth desc
+      """)
   @ResultMap("harnessSessionEntryResultMap")
-  HarnessSessionEntryDO findLatestByType(
-      @Param("sessionId") long sessionId, @Param("entryType") String entryType);
-
-  @Select(
-      "with recursive path (id, parent_entry_id, path_depth) as (select id, parent_entry_id, 0"
-          + " from harness_session_entry where session_id = #{sessionId} and id = #{leafEntryId}"
-          + " union all select entry.id, entry.parent_entry_id, path.path_depth + 1 from"
-          + " harness_session_entry entry join path on entry.id = path.parent_entry_id where"
-          + " entry.session_id = #{sessionId}) select entry.id, entry.session_id,"
-          + " entry.parent_entry_id, entry.entry_type, entry.payload_json,"
-          + " entry.gmt_create as create_time from harness_session_entry entry join path on"
-          + " path.id = entry.id where entry.entry_type = #{entryType} order by path.path_depth"
-          + " asc limit 1")
-  @ResultMap("harnessSessionEntryResultMap")
-  HarnessSessionEntryDO findLatestOnPathByType(
-      @Param("sessionId") long sessionId,
-      @Param("leafEntryId") long leafEntryId,
-      @Param("entryType") String entryType);
-
-  @Select(
-      "select id, session_id, parent_entry_id, entry_type, payload_json, "
-          + "gmt_create as create_time from harness_session_entry where session_id = #{sessionId} "
-          + "order by id")
-  @ResultMap("harnessSessionEntryResultMap")
-  List<HarnessSessionEntryDO> listBySession(@Param("sessionId") long sessionId);
+  List<HarnessSessionEntryDO> loadPath(
+      @Param("sessionId") long sessionId, @Param("leafEntryId") long leafEntryId);
 }

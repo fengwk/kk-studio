@@ -2,6 +2,8 @@
 
 本文描述 `kk-studio` 当前生效的端到端自动化回归：矩阵分层、入口、报告目录、用例清单与维护方式。
 
+> 运行时依赖 **PostgreSQL**（`schema-postgresql.sql` + `data-e2e-postgresql.sql`）。不再使用 H2/MySQL 作为 durable 存储；启动 e2e 前需提供可写的 PG（可用环境变量 `KK_STUDIO_DB_URL` / `KK_STUDIO_DB_USER` / `KK_STUDIO_DB_PASSWORD`）。
+
 ## 边界
 
 - **已覆盖**：API 契约、资源 CRUD、Model/Agent 配置校验矩阵、Chat/Session/Thread 编排、usage 语义；可选真模型/分支/tool。

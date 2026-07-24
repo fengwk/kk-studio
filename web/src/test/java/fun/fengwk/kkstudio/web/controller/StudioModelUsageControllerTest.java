@@ -8,11 +8,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
-import fun.fengwk.kkstudio.core.harness.usage.store.MysqlModelUsageRecordStore;
+import fun.fengwk.kkstudio.core.harness.usage.store.PostgresqlModelUsageRecordStore;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
@@ -23,22 +22,21 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageDraft;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecord;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecordIdGenerator;
-import fun.fengwk.kkstudio.web.WebTestApplication;
+import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
 @AutoConfigureMockMvc
-@SpringBootTest(classes = WebTestApplication.class)
-class StudioModelUsageControllerTest {
+class StudioModelUsageControllerTest extends WebPostgresTestSupport {
 
   private static final long LARGE_ID = 9_007_199_254_740_993L;
   private static final long ROOT_ENTRY_ID = LARGE_ID - 1;
   private static final Instant NOW = Instant.parse("2026-07-16T00:00:00Z");
 
   @Autowired private MockMvc mockMvc;
-  @Autowired private MysqlModelUsageRecordStore recordStore;
+  @Autowired private PostgresqlModelUsageRecordStore recordStore;
   @Autowired private ModelUsageRecordIdGenerator recordIds;
   @Autowired private JdbcTemplate jdbc;
 

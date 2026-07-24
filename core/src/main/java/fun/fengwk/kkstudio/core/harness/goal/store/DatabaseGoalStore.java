@@ -10,7 +10,7 @@ import fun.fengwk.kkstudio.harness.runtime.goal.GoalStore;
 import fun.fengwk.kkstudio.harness.runtime.goal.ThreadGoal;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Objects;
 import java.util.Optional;
@@ -43,7 +43,7 @@ public class DatabaseGoalStore implements GoalStore {
       throw new IllegalArgumentException("tokenBudget must be positive when present");
     }
     Instant timestamp = Objects.requireNonNull(now, "now");
-    LocalDateTime local = LocalDateTime.ofInstant(timestamp, ZoneOffset.UTC);
+    OffsetDateTime local = OffsetDateTime.ofInstant(timestamp, ZoneOffset.UTC);
     HarnessThreadGoalDO existing = mapper.findForUpdate(threadId);
     HarnessThreadGoalDO row = new HarnessThreadGoalDO();
     row.setThreadId(threadId);
@@ -88,7 +88,7 @@ public class DatabaseGoalStore implements GoalStore {
             threadId,
             status.name(),
             reason.trim(),
-            LocalDateTime.ofInstant(timestamp, ZoneOffset.UTC));
+            OffsetDateTime.ofInstant(timestamp, ZoneOffset.UTC));
     if (updated != 1) {
       throw new IllegalStateException(
           "Goal status is " + current.name() + "; it cannot be updated by the model.");
@@ -104,8 +104,8 @@ public class DatabaseGoalStore implements GoalStore {
         row.getTokenBudget(),
         GoalStatus.parseStored(row.getStatus()),
         row.getReason(),
-        row.getCreateTime().toInstant(ZoneOffset.UTC),
-        row.getUpdateTime().toInstant(ZoneOffset.UTC));
+        row.getCreateTime().toInstant(),
+        row.getUpdateTime().toInstant());
   }
 
   private static void requirePositive(long threadId) {

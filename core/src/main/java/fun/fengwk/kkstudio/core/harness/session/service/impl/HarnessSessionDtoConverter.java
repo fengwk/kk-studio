@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.share.model.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 
 /** Maps harness session / entry persistence rows to share DTOs. */
@@ -31,6 +32,10 @@ public class HarnessSessionDtoConverter {
         source.parentInvocationId() == null
             ? null
             : HarnessIds.format(source.parentInvocationId()));
+    if (source.parentSessionId() == null) {
+      target.setRootSessionId(HarnessIds.format(source.id()));
+      target.setDepth(0);
+    }
     target.setCreateTime(LocalDateTime.ofInstant(source.createdAt(), ZoneOffset.UTC));
     target.setUpdateTime(LocalDateTime.ofInstant(source.updatedAt(), ZoneOffset.UTC));
     return target;
@@ -44,7 +49,6 @@ public class HarnessSessionDtoConverter {
     target.setSessionId(HarnessIds.format(source.getId()));
     target.setTitle(source.getTitle());
     target.setMainThreadId(HarnessIds.format(source.getMainThreadId()));
-    target.setRootSessionId(HarnessIds.format(source.getRootSessionId()));
     target.setParentSessionId(
         source.getParentSessionId() == null
             ? null
@@ -53,9 +57,12 @@ public class HarnessSessionDtoConverter {
         source.getParentInvocationId() == null
             ? null
             : HarnessIds.format(source.getParentInvocationId()));
-    target.setDepth(source.getDepth());
-    target.setCreateTime(source.getCreateTime());
-    target.setUpdateTime(source.getUpdateTime());
+    if (source.getParentSessionId() == null) {
+      target.setRootSessionId(HarnessIds.format(source.getId()));
+      target.setDepth(0);
+    }
+    target.setCreateTime(toUtcLocal(source.getCreatedAt()));
+    target.setUpdateTime(toUtcLocal(source.getUpdatedAt()));
     return target;
   }
 
@@ -70,7 +77,11 @@ public class HarnessSessionDtoConverter {
         source.getParentEntryId() == null ? null : HarnessIds.format(source.getParentEntryId()));
     target.setEntryType(source.getEntryType());
     target.setPayloadJson(source.getPayloadJson());
-    target.setCreateTime(source.getCreateTime());
+    target.setCreateTime(toUtcLocal(source.getCreatedAt()));
     return target;
+  }
+
+  private static LocalDateTime toUtcLocal(OffsetDateTime value) {
+    return value == null ? null : value.withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime();
   }
 }

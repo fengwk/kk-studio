@@ -9,14 +9,12 @@ import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonConnection;
 import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonGateway;
-import fun.fengwk.kkstudio.web.WebTestApplication;
+import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -30,8 +28,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * Network contract for the Daemon WebSocket adapter; no protocol state is kept in the web layer.
  */
-@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, classes = WebTestApplication.class)
-class EnvironmentDaemonWebSocketEndpointTest {
+class EnvironmentDaemonWebSocketEndpointTest extends WebPostgresTestSupport {
 
   @LocalServerPort private int port;
 

@@ -9,12 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.chat.service.ChatService;
 import fun.fengwk.kkstudio.core.harness.session.service.HarnessSessionCommandService;
+import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.model.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.model.ChatDTO;
 import fun.fengwk.kkstudio.share.model.ChatUpdateDTO;
@@ -26,11 +25,10 @@ import java.util.List;
 import java.util.NoSuchElementException;
 
 /**
- * H2-backed Chat service coverage: CRUD, membership, unknown ids, attach idempotence, and default
- * Agent validation.
+ * PostgreSQL-backed Chat service coverage: CRUD, membership, unknown ids, attach idempotence, and
+ * default Agent validation.
  */
-@SpringBootTest(classes = CoreTestApplication.class)
-class ChatServiceIntegrationTest {
+class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private ChatService chatService;
   @Autowired private HarnessSessionCommandService sessionCommandService;

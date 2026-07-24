@@ -4,7 +4,7 @@
 # 共享函数库：e2e 入口与各 case 共用。
 # 约定：
 # - 默认 backend=127.0.0.1:18081、frontend=127.0.0.1:5173、profile=e2e
-# - H2 是内存库，重启 backend 后必须重新注入 Provider credential
+# - 使用 PostgreSQL durable 库；重启 backend 后若 seed 不保留需重新注入 Provider credential
 # - frontend Vite 代理必须指向当前 backend：API_PROXY_TARGET=http://$BACKEND_HOST:$BACKEND_PORT
 # - daemon 不是 fat jar，必须用 -cp（daemon jar + runtime classpath）启动 DaemonMain
 

@@ -13,30 +13,25 @@ import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
 
 import java.util.List;
 
+/** final {@code harness_session} mapper。 */
 @Mapper
 public interface HarnessSessionMapper extends BaseMapper {
+  String COLUMNS =
+      "id, title, main_thread_id, parent_session_id, parent_invocation_id, created_at, updated_at";
+
   @Insert(
       """
       insert into harness_session (
-          id, title, main_thread_id,
-          parent_session_id, root_session_id, parent_invocation_id, depth,
-          gmt_create, gmt_modified, version
+          id, title, main_thread_id, parent_session_id, parent_invocation_id,
+          created_at, updated_at
       ) values (
-          #{id}, #{title}, #{mainThreadId},
-          #{parentSessionId}, #{rootSessionId}, #{parentInvocationId}, #{depth},
-          #{createTime}, #{updateTime}, #{version}
+          #{id}, #{title}, #{mainThreadId}, #{parentSessionId}, #{parentInvocationId},
+          #{createdAt}, #{updatedAt}
       )
       """)
   int insert(HarnessSessionDO session);
 
-  @Select(
-      """
-      select id, title, main_thread_id,
-             parent_session_id, root_session_id, parent_invocation_id, depth,
-             version, gmt_create as create_time, gmt_modified as update_time
-      from harness_session
-      where id = #{sessionId}
-      """)
+  @Select("select " + COLUMNS + " from harness_session where id = #{sessionId}")
   @Results(
       id = "harnessSessionResultMap",
       value = {
@@ -44,48 +39,47 @@ public interface HarnessSessionMapper extends BaseMapper {
         @Result(column = "title", property = "title"),
         @Result(column = "main_thread_id", property = "mainThreadId"),
         @Result(column = "parent_session_id", property = "parentSessionId"),
-        @Result(column = "root_session_id", property = "rootSessionId"),
         @Result(column = "parent_invocation_id", property = "parentInvocationId"),
-        @Result(column = "depth", property = "depth"),
-        @Result(column = "version", property = "version"),
-        @Result(column = "create_time", property = "createTime"),
-        @Result(column = "update_time", property = "updateTime")
+        @Result(column = "created_at", property = "createdAt"),
+        @Result(column = "updated_at", property = "updatedAt")
       })
   HarnessSessionDO find(@Param("sessionId") long sessionId);
 
   @Select(
-      """
-      select id, title, main_thread_id,
-             parent_session_id, root_session_id, parent_invocation_id, depth,
-             version, gmt_create as create_time, gmt_modified as update_time
-      from harness_session
-      where id = #{sessionId}
-      for update
-      """)
-  @ResultMap("harnessSessionResultMap")
-  HarnessSessionDO findForUpdate(@Param("sessionId") long sessionId);
-
-  @Select(
-      """
-      select id, title, main_thread_id,
-             parent_session_id, root_session_id, parent_invocation_id, depth,
-             version, gmt_create as create_time, gmt_modified as update_time
-      from harness_session
-      where parent_session_id is null
-      order by gmt_modified desc, id desc
-      """)
+      "select "
+          + COLUMNS
+          + " from harness_session where parent_session_id is null"
+          + " order by updated_at desc, id desc")
   @ResultMap("harnessSessionResultMap")
   List<HarnessSessionDO> listRoots();
 
   @Select(
       """
-      select id, title, main_thread_id,
-             parent_session_id, root_session_id, parent_invocation_id, depth,
-             version, gmt_create as create_time, gmt_modified as update_time
-      from harness_session
-      where root_session_id = #{rootSessionId} and id <> #{rootSessionId}
-      order by id asc
+      with recursive ancestors as (
+        select id, parent_session_id, 0 as depth
+        from harness_session
+        where id = #{sessionId}
+        union all
+        select s.id, s.parent_session_id, a.depth + 1
+        from harness_session s
+        join ancestors a on s.id = a.parent_session_id
+      )
+      select id from ancestors where parent_session_id is null order by depth desc limit 1
       """)
-  @ResultMap("harnessSessionResultMap")
-  List<HarnessSessionDO> listByRoot(@Param("rootSessionId") long rootSessionId);
+  Long findRootSessionId(@Param("sessionId") long sessionId);
+
+  @Select(
+      """
+      with recursive ancestors as (
+        select id, parent_session_id, 0 as depth
+        from harness_session
+        where id = #{sessionId}
+        union all
+        select s.id, s.parent_session_id, a.depth + 1
+        from harness_session s
+        join ancestors a on s.id = a.parent_session_id
+      )
+      select coalesce(max(depth), 0) from ancestors
+      """)
+  int findDepth(@Param("sessionId") long sessionId);
 }

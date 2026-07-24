@@ -6,12 +6,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 
-import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.ai.image.model.GptImage2Response;
 import fun.fengwk.kkstudio.core.ai.image.model.GptImage2Size;
 import fun.fengwk.kkstudio.core.ai.image.model.ImageData;
+import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -23,8 +22,7 @@ import java.util.List;
  *
  * @author fengwk
  */
-@SpringBootTest(classes = CoreTestApplication.class)
-public class GptImage2ServiceTest {
+public class GptImage2ServiceTest extends PostgresSpringTestSupport {
 
   @Autowired private GptImage2Service gptImage2Service;
 

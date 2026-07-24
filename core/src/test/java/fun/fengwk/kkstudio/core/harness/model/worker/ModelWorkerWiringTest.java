@@ -5,17 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 
-import fun.fengwk.kkstudio.core.CoreTestApplication;
+import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelWorker;
 import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelWorkerConfig;
 
 /**
  * Verifies disabled test deployment composes Model worker infrastructure without invoking adapters.
  */
-@SpringBootTest(classes = CoreTestApplication.class)
-class ModelWorkerWiringTest {
+class ModelWorkerWiringTest extends PostgresSpringTestSupport {
 
   @Autowired private ModelWorker modelWorker;
   @Autowired private ModelWorkerConfig modelWorkerConfig;

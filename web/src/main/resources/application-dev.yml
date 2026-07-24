@@ -4,22 +4,19 @@ spring:
     init:
       mode: always
       schema-locations:
-        - classpath:schema-h2.sql
+        - classpath:schema-postgresql.sql
       data-locations:
-        - classpath:data-dev.sql
+        - classpath:data-dev-postgresql.sql
 
   datasource:
     multi:
       primary:
         primary: true
-        driver-class-name: org.h2.Driver
-        url: jdbc:h2:mem:kk-studio-dev;DB_CLOSE_DELAY=-1;MODE=MySQL;DATABASE_TO_LOWER=TRUE
-        username: SA
-
-  h2:
-    console:
-      enabled: true
-      path: /h2-console
+        driver-class-name: org.postgresql.Driver
+        # 本地/开发默认指向 PostgreSQL；可被环境变量覆盖
+        url: ${KK_STUDIO_DB_URL:jdbc:postgresql://127.0.0.1:5432/kk_studio}
+        username: ${KK_STUDIO_DB_USER:kk_studio}
+        password: ${KK_STUDIO_DB_PASSWORD:kk_studio}
 
   mybatis:
     mapper-locations: classpath:**/*Mapper.xml

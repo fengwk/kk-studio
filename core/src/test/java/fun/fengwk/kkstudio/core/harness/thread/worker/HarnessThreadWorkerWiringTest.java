@@ -7,10 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 
-import fun.fengwk.kkstudio.core.CoreTestApplication;
+import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.reconcile.ThreadActivationDispatcher;
 import fun.fengwk.kkstudio.harness.runtime.reconcile.ThreadReconciler;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
@@ -18,8 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProviderCancellation;
 
 /** 生产 composition root 只暴露 final Reconciler/dispatcher/recovery 资源。 */
-@SpringBootTest(classes = CoreTestApplication.class)
-class HarnessThreadWorkerWiringTest {
+class HarnessThreadWorkerWiringTest extends PostgresSpringTestSupport {
 
   @Autowired private ApplicationContext context;
   @Autowired private ThreadReconciler reconciler;

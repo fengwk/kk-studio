@@ -12,7 +12,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -30,15 +29,14 @@ import fun.fengwk.kkstudio.share.model.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
-import fun.fengwk.kkstudio.web.WebTestApplication;
+import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.math.BigDecimal;
 import java.util.List;
 
 /** HTTP contract for global Agent resources, string IDs and credential redaction. */
 @AutoConfigureMockMvc
-@SpringBootTest(classes = WebTestApplication.class)
-public class StudioAgentResourceControllerTest {
+public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;

@@ -14,7 +14,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -23,7 +22,7 @@ import fun.fengwk.kkstudio.share.model.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.model.ChatSessionAttachDTO;
 import fun.fengwk.kkstudio.share.model.ChatUpdateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionCreateDTO;
-import fun.fengwk.kkstudio.web.WebTestApplication;
+import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 /**
  * {@link StudioChatController} end-to-end tests.
@@ -31,8 +30,7 @@ import fun.fengwk.kkstudio.web.WebTestApplication;
  * <p>验证 Chat CRUD、Session 成员关联/解绑、未知 id 失败、重复 attach 幂等，以及 defaultAgent 校验。
  */
 @AutoConfigureMockMvc
-@SpringBootTest(classes = WebTestApplication.class)
-public class StudioChatControllerTest {
+public class StudioChatControllerTest extends WebPostgresTestSupport {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;

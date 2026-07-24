@@ -7,27 +7,52 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.core.harness.goal.store.DatabaseGoalStore;
+import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.goal.GoalStatus;
 import fun.fengwk.kkstudio.harness.runtime.goal.ThreadGoal;
 
 import java.time.Instant;
 
 /** Integration coverage for durable Thread goal create/replace/update. */
-@SpringBootTest
-class DatabaseGoalStoreIntegrationTest {
+class DatabaseGoalStoreIntegrationTest extends PostgresSpringTestSupport {
   private static final long THREAD_ID = 9_820_001L;
   private static final Instant NOW = Instant.parse("2026-07-20T12:00:00Z");
 
   @Autowired private DatabaseGoalStore store;
   @Autowired private JdbcTemplate jdbc;
+  @Autowired private TransactionTemplate transactionTemplate;
 
   @BeforeEach
   void clean() {
-    jdbc.update("delete from harness_thread_goal");
+    // Session/main-thread FK is DEFERRABLE; bootstrap must commit in one transaction.
+    transactionTemplate.executeWithoutResult(
+        status -> {
+          jdbc.update("delete from harness_thread_goal");
+          jdbc.update("delete from harness_thread");
+          jdbc.update("delete from harness_entry");
+          jdbc.update("delete from harness_session");
+          jdbc.update(
+              "insert into harness_session (id, title, main_thread_id, created_at, updated_at)"
+                  + " values (?, 'g', ?, now(), now())",
+              THREAD_ID + 1,
+              THREAD_ID);
+          jdbc.update(
+              "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
+                  + " created_at) values (?, ?, null, 'ROOT', '{}'::jsonb, now())",
+              THREAD_ID + 2,
+              THREAD_ID + 1);
+          jdbc.update(
+              "insert into harness_thread (id, session_id, head_entry_id, input_sequence, runnable,"
+                  + " execution_epoch, created_at, updated_at) values (?, ?, ?, 0, false, 0,"
+                  + " now(), now())",
+              THREAD_ID,
+              THREAD_ID + 1,
+              THREAD_ID + 2);
+        });
   }
 
   @Test
