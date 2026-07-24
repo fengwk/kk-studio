@@ -55,10 +55,13 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
 
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
-  public SessionCreation createSession(String title, Instant now) {
+  public SessionCreation createSession(
+      String title, RuntimeConfigSnapshot initialConfig, Instant now) {
+    Objects.requireNonNull(initialConfig, "initialConfig");
     Instant persistedNow = persistenceInstant(now);
     long sessionId = idGenerator.nextSessionId();
     long rootEntryId = idGenerator.nextEntryId();
+    long configEntryId = idGenerator.nextEntryId();
     long threadId = idGenerator.nextThreadId();
     OffsetDateTime timestamp = offset(persistedNow);
 
@@ -73,7 +76,16 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
             timestamp),
         "insert root entry");
     requireAffected(
-        mapper.insertThread(threadId, sessionId, rootEntryId, timestamp), "insert main thread");
+        mapper.insertEntry(
+            configEntryId,
+            sessionId,
+            rootEntryId,
+            EntryType.RUNTIME_CONFIG.name(),
+            ENTRY_CODEC.encode(initialConfig),
+            timestamp),
+        "insert runtime config entry");
+    requireAffected(
+        mapper.insertThread(threadId, sessionId, configEntryId, timestamp), "insert main thread");
     Session session =
         new Session(sessionId, threadId, title, null, null, persistedNow, persistedNow);
     SessionEntry root =
@@ -81,7 +93,7 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
             rootEntryId, sessionId, null, EntryType.ROOT, new RootEntryPayload(), persistedNow);
     HarnessThread thread =
         new HarnessThread(
-            threadId, sessionId, rootEntryId, 0, false, 0, null, persistedNow, persistedNow);
+            threadId, sessionId, configEntryId, 0, false, 0, null, persistedNow, persistedNow);
     return new SessionCreation(session, root, thread);
   }
 

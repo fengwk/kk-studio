@@ -13,6 +13,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.core.harness.observability.service.impl.HarnessObservabilityQueryServiceImpl;
 import fun.fengwk.kkstudio.core.harness.session.service.HarnessSessionQueryService;
+import fun.fengwk.kkstudio.core.harness.thread.command.TestRuntimeConfigs;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadQueryService;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInputType;
@@ -73,7 +74,7 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
   @Test
   void readsRootChildSessionsBranchPathDerivedStatusAndSnapshots() {
     ThreadCommandTransactions.SessionCreation root =
-        commandTransactions.createSession("root-session", NOW);
+        commandTransactions.createSession("root-session", TestRuntimeConfigs.bootstrap(), NOW);
     String rootSessionId = Long.toString(root.session().id());
     String rootThreadId = Long.toString(root.mainThread().id());
 

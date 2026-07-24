@@ -8,30 +8,28 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.sql.Statement;
 
 /**
- * Shared PostgreSQL Testcontainers support for web module SpringBoot tests.
+ * Shared PostgreSQL support for web module SpringBoot tests.
  *
- * <p>Disables {@code spring.sql.init} and re-applies {@code schema-postgresql.sql} before each
- * test.
+ * <p>Uses a process-level singleton container (not {@code @Container}) so the JDBC URL stays stable
+ * for the cached Spring context across test classes. Each test resets {@code public} and re-applies
+ * {@code schema-postgresql.sql} plus the dev seed.
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, classes = WebTestApplication.class)
-@Testcontainers(disabledWithoutDocker = false)
 public abstract class WebPostgresTestSupport {
 
   private static final String SQL_INIT_NEVER = "never";
   private static final String WORKERS_DISABLED = "false";
 
-  @Container
   @SuppressWarnings("resource")
-  protected static final PostgreSQLContainer POSTGRES =
+  private static final PostgreSQLContainer POSTGRES =
       new PostgreSQLContainer("postgres:17-alpine").withDatabaseName("kk_studio_web_test");
 
   static {
@@ -46,6 +44,8 @@ public abstract class WebPostgresTestSupport {
     registry.add("spring.datasource.multi.primary.password", POSTGRES::getPassword);
     registry.add("spring.sql.init.mode", () -> SQL_INIT_NEVER);
     registry.add("kk-studio.harness.runtime.workers-enabled", () -> WORKERS_DISABLED);
+    // Keep snowflake bridge on a fixed worker so missing Redis cannot break id allocation.
+    registry.add("convention.snowflake-id.worker-id", () -> "0");
   }
 
   @BeforeEach
@@ -59,6 +59,12 @@ public abstract class WebPostgresTestSupport {
       }
       ScriptUtils.executeSqlScript(conn, new ClassPathResource("schema-postgresql.sql"));
       ScriptUtils.executeSqlScript(conn, new ClassPathResource("data-dev-postgresql.sql"));
+      try (Statement st = conn.createStatement();
+          ResultSet rs = st.executeQuery("select count(*) from agent_definition where id = 1")) {
+        if (!rs.next() || rs.getLong(1) != 1L) {
+          throw new IllegalStateException("dev seed did not insert agent_definition id=1");
+        }
+      }
     }
   }
 }

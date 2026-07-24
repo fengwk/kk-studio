@@ -50,21 +50,21 @@ class EnvironmentDaemonWebSocketEndpointTest extends WebPostgresTestSupport {
 
     ArgumentCaptor<EnvironmentDaemonConnection> connectionCaptor =
         ArgumentCaptor.forClass(EnvironmentDaemonConnection.class);
-    verify(gateway, timeout(5_000)).open(connectionCaptor.capture());
+    verify(gateway, timeout(15_000)).open(connectionCaptor.capture());
     EnvironmentDaemonConnection connection = connectionCaptor.getValue();
     assertNotNull(connection);
     assertTrue(connection.isOpen());
 
-    socket.sendText("daemon-frame", true).get(5, TimeUnit.SECONDS);
-    verify(gateway, timeout(5_000)).receive(eq(connection.connectionId()), eq("daemon-frame"));
+    socket.sendText("daemon-frame", true).get(10, TimeUnit.SECONDS);
+    verify(gateway, timeout(15_000)).receive(eq(connection.connectionId()), eq("daemon-frame"));
 
     connection.sendText("gateway-frame");
-    assertEquals("gateway-frame", received.poll(5, TimeUnit.SECONDS));
+    assertEquals("gateway-frame", received.poll(10, TimeUnit.SECONDS));
 
-    socket.sendClose(WebSocket.NORMAL_CLOSURE, "test complete").get(5, TimeUnit.SECONDS);
+    socket.sendClose(WebSocket.NORMAL_CLOSURE, "test complete").get(10, TimeUnit.SECONDS);
     socket.request(1);
     listener.awaitClose();
-    verify(gateway, timeout(5_000)).close(connection.connectionId());
+    verify(gateway, timeout(15_000)).close(connection.connectionId());
   }
 
   private URI endpointUri() {

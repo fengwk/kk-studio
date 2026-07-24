@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.persistence.id;
 
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Select;
 
 /**
@@ -21,6 +22,11 @@ public interface SequenceMapper extends BaseMapper {
    * Returns the next value from {@code kk_studio_id_seq}. The result is a positive {@code long}; no
    * caching is performed at this layer.
    */
+  /**
+   * {@code flushCache/useCache} must disable MyBatis first-level caching: identical {@code nextval}
+   * SQL would otherwise return the first allocated id for the rest of the SqlSession.
+   */
+  @Options(flushCache = Options.FlushCachePolicy.TRUE, useCache = false)
   @Select("select nextval('kk_studio_id_seq')")
   long nextValue();
 }
