@@ -2,38 +2,33 @@ package fun.fengwk.kkstudio.core.harness.task.store;
 
 import org.springframework.stereotype.Repository;
 
-import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
-import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
-import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadEventMapper;
-import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadMapper;
-import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadDO;
-import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadEventDO;
+import fun.fengwk.kkstudio.core.harness.query.DerivedThreadStatus;
+import fun.fengwk.kkstudio.core.harness.query.HarnessQueryRow;
+import fun.fengwk.kkstudio.core.harness.query.PostgresqlHarnessQueryMapper;
 import fun.fengwk.kkstudio.harness.runtime.task.RootActivity;
 import fun.fengwk.kkstudio.harness.runtime.task.RootActivityStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventType;
 
-import java.time.ZoneOffset;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 
 /**
- * Root-tree activity projection from ThreadEvent journal across all sessions under a root session.
+ * Root-tree activity projection from final session tree + derived Thread status。
+ *
+ * <p>不再读 {@code harness_thread_event}；eventId 使用 thread id 作为稳定 cursor。
  */
 @Repository
 public class DatabaseRootActivityStore implements RootActivityStore {
-  private final HarnessSessionMapper sessionMapper;
-  private final HarnessThreadMapper threadMapper;
-  private final HarnessThreadEventMapper eventMapper;
+  private final PostgresqlHarnessQueryMapper queryMapper;
+  private final Clock clock;
 
-  public DatabaseRootActivityStore(
-      HarnessSessionMapper sessionMapper,
-      HarnessThreadMapper threadMapper,
-      HarnessThreadEventMapper eventMapper) {
-    this.sessionMapper = Objects.requireNonNull(sessionMapper, "sessionMapper");
-    this.threadMapper = Objects.requireNonNull(threadMapper, "threadMapper");
-    this.eventMapper = Objects.requireNonNull(eventMapper, "eventMapper");
+  public DatabaseRootActivityStore(PostgresqlHarnessQueryMapper queryMapper, Clock clock) {
+    this.queryMapper = Objects.requireNonNull(queryMapper, "queryMapper");
+    this.clock = Objects.requireNonNull(clock, "clock");
   }
 
   @Override
@@ -44,44 +39,67 @@ public class DatabaseRootActivityStore implements RootActivityStore {
     if (afterEventId < 0 || limit <= 0) {
       throw new IllegalArgumentException("afterEventId and limit must be valid");
     }
-    HarnessSessionDO root = sessionMapper.find(rootSessionId);
-    if (root == null) {
+    HarnessQueryRow seed = queryMapper.findSession(rootSessionId);
+    if (seed == null) {
       throw new IllegalArgumentException("unknown session: " + rootSessionId);
     }
-    long resolvedRoot = root.getRootSessionId() == null ? root.getId() : root.getRootSessionId();
-
+    long resolvedRoot = resolveRoot(seed);
+    Instant now = clock.instant();
     List<RootActivity> activities = new ArrayList<>();
-    for (HarnessSessionDO session : listSessionsUnderRoot(resolvedRoot)) {
-      for (HarnessThreadDO thread : threadMapper.listBySession(session.getId())) {
-        List<HarnessThreadEventDO> events =
-            eventMapper.listAfter(thread.getId(), afterEventId, Math.max(limit * 4, 100));
-        for (HarnessThreadEventDO event : events) {
-          activities.add(
-              new RootActivity(
-                  resolvedRoot,
-                  session.getId(),
-                  thread.getId(),
-                  event.getId(),
-                  ThreadEventType.fromValue(event.getEventType()),
-                  event.getPayloadJson(),
-                  event.getCreateTime().toInstant(ZoneOffset.UTC)));
+    for (HarnessQueryRow session : queryMapper.listSessionTree(resolvedRoot)) {
+      for (HarnessQueryRow thread : queryMapper.listThreadViewsBySession(session.getId())) {
+        if (thread.getId() <= afterEventId) {
+          continue;
         }
+        String status = DerivedThreadStatus.derive(thread, now);
+        String title = thread.getSessionTitle() == null ? "" : thread.getSessionTitle();
+        activities.add(
+            new RootActivity(
+                resolvedRoot,
+                session.getId(),
+                thread.getId(),
+                thread.getId(),
+                toEventType(status),
+                "{\"status\":\"" + status + "\",\"title\":\"" + escape(title) + "\"}",
+                thread.getUpdatedAt() == null
+                    ? thread.getCreatedAt().toInstant()
+                    : thread.getUpdatedAt().toInstant()));
       }
     }
     return activities.stream()
-        .filter(a -> a.eventId() > afterEventId)
         .sorted(Comparator.comparingLong(RootActivity::eventId))
         .limit(limit)
         .toList();
   }
 
-  private List<HarnessSessionDO> listSessionsUnderRoot(long rootSessionId) {
-    List<HarnessSessionDO> out = new ArrayList<>();
-    HarnessSessionDO root = sessionMapper.find(rootSessionId);
-    if (root != null) {
-      out.add(root);
+  private long resolveRoot(HarnessQueryRow session) {
+    long current = session.getId();
+    Long parent = session.getParentSessionId();
+    int guard = 0;
+    while (parent != null) {
+      HarnessQueryRow parentRow = queryMapper.findSession(parent);
+      if (parentRow == null) {
+        break;
+      }
+      current = parentRow.getId();
+      parent = parentRow.getParentSessionId();
+      if (++guard > 10_000) {
+        throw new IllegalStateException("session parent chain too deep: " + session.getId());
+      }
     }
-    out.addAll(sessionMapper.listByRoot(rootSessionId));
-    return out;
+    return current;
+  }
+
+  private static ThreadEventType toEventType(String status) {
+    return switch (status) {
+      case DerivedThreadStatus.RUNNING, DerivedThreadStatus.RUNNABLE -> ThreadEventType
+          .THREAD_RUNNING;
+      case DerivedThreadStatus.WAITING -> ThreadEventType.THREAD_WAITING;
+      default -> ThreadEventType.THREAD_IDLE;
+    };
+  }
+
+  private static String escape(String value) {
+    return value.replace("\\", "\\\\").replace("\"", "\\\"");
   }
 }
