@@ -30,14 +30,13 @@ import fun.fengwk.kkstudio.share.model.HarnessThreadModelSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadYoloSetDTO;
-import fun.fengwk.kkstudio.share.model.ThreadEventDTO;
 
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
 
 /**
- * Thread API：查询、typed mailbox 输入、路径 entries、inputs、events 与 SSE。
+ * Thread API：查询、typed mailbox 输入、路径 entries、inputs 与 Redis realtime SSE。
  *
  * <p>统一返回 {@link Result}，HTTP 状态由 convention4j {@code ResultResponseBodyAdvice} 按 {@code
  * result.status} 对齐；入队类接口使用 {@link Results#accepted}（202）。
@@ -136,18 +135,6 @@ public class StudioHarnessThreadController {
   @GetMapping("/threads/{threadId}/inputs")
   public Result<List<HarnessThreadInputDTO>> listInputs(@PathVariable String threadId) {
     return Results.ok(withMissingResourceTranslation(() -> queryService.listInputs(threadId)));
-  }
-
-  /** 从指定事件 ID 后分页查询 Thread Event。 */
-  @GetMapping("/threads/{threadId}/events")
-  public Result<List<ThreadEventDTO>> listEvents(
-      @PathVariable String threadId,
-      @RequestParam(defaultValue = "0") long afterEventId,
-      @RequestParam(required = false) Integer limit) {
-    int page = limit == null ? 100 : limit;
-    return Results.ok(
-        withMissingResourceTranslation(
-            () -> queryService.listEvents(threadId, afterEventId, page)));
   }
 
   /**

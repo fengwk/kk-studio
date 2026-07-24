@@ -589,7 +589,7 @@ class DatabaseTurnResourceResolverTest {
               environments);
     }
 
-    /** requireFrozenSnapshot only checks session existence; path snapshot is ThreadProcessor. */
+    /** requireFrozenSnapshot only checks session existence; path snapshot is reconciler-side. */
     private void session() {
       when(sessions.find(SESSION_ID))
           .thenReturn(Optional.of(Session.root(SESSION_ID, 1L, "session", NOW)));

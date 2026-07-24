@@ -255,10 +255,6 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
     assertEquals("OPEN", opens.get(0).getStatus());
     assertEquals("THREAD", opens.get(0).getOwnerKind());
 
-    // ThreadEvent history 停用
-    assertTrue(threadQueryService.listEvents(rootThreadId, 0, 10).isEmpty());
-    assertTrue(observabilityQueryService.listThreadEvents(rootThreadId, 0, 10).isEmpty());
-
     // Root activities: session tree + derived status projection
     List<RootActivityDTO> activities =
         observabilityQueryService.listRootActivities(rootSessionId, 0, 50);

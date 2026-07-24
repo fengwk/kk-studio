@@ -1,32 +1,28 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { TaskTimelinePanel } from '@/features/ai/TaskTimelinePanel'
 import type { SubagentTaskNode } from '@/features/ai/subagent-task-tree'
 import type { RootActivityDTO } from '@/shared/api/contracts'
 
 describe('TaskTimelinePanel', () => {
-  it('renders root activity, nested tasks, child report/revision/artifacts and permission relay decisions', async () => {
+  it('renders root activity, nested tasks, child report/revision/artifacts without decision UX', async () => {
     const user = userEvent.setup()
-    const onDecision = vi.fn()
     render(
       <MemoryRouter>
         <TaskTimelinePanel
           activities={[activity('subagent_started', { childSessionId: 'child-1', target: 'researcher' })]}
           taskTree={[node]}
-          relayPermissions={[{ invocationId: 'invocation-1', sessionId: 'child-1', tool: 'write_file', workdir: '/repo', arguments: '{}' }]}
           loading={false}
           error={null}
-          decisionPending={false}
-          onDecision={onDecision}
         />
       </MemoryRouter>,
     )
 
     expect(screen.getByText('启动子代理 researcher')).toBeInTheDocument()
-    expect(screen.getByText('子代理权限：write_file')).toBeInTheDocument()
     expect(screen.getByText('nested-agent')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /researcher/i }))
 
@@ -34,11 +30,6 @@ describe('TaskTimelinePanel', () => {
     expect(screen.getByText('ISOLATED / revision-7')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'image/png · artifact-1' })).toHaveAttribute('href', '/api/artifacts/artifact-1')
     expect(screen.getByTitle('子 Thread child-thread-1')).toBeInTheDocument()
-
-    await user.click(screen.getAllByRole('button', { name: '允许' })[0]!)
-    await user.click(screen.getAllByRole('button', { name: '拒绝' })[0]!)
-    expect(onDecision).toHaveBeenNthCalledWith(1, 'invocation-1', 'allow')
-    expect(onDecision).toHaveBeenNthCalledWith(2, 'invocation-1', 'deny')
   })
 
   it('renders loading, error and empty states without a selected task', () => {
@@ -47,11 +38,8 @@ describe('TaskTimelinePanel', () => {
         <TaskTimelinePanel
           activities={[]}
           taskTree={[]}
-          relayPermissions={[]}
           loading
           error={new Error('offline')}
-          decisionPending={false}
-          onDecision={() => undefined}
         />
       </MemoryRouter>,
     )
@@ -75,11 +63,8 @@ describe('TaskTimelinePanel', () => {
             activity('thread_started', {}),
           ].map((item, index) => ({ ...item, eventId: String(index + 1) }))}
           taskTree={[]}
-          relayPermissions={[]}
           loading={false}
           error={null}
-          decisionPending={false}
-          onDecision={() => undefined}
         />
       </MemoryRouter>,
     )
@@ -92,52 +77,15 @@ describe('TaskTimelinePanel', () => {
     expect(screen.queryByText('thread_started')).not.toBeInTheDocument()
   })
 
-  it('renders permissions-only mode and can select a nested child task', async () => {
+  it('can select a nested child task', async () => {
     const user = userEvent.setup()
-    const onDecision = vi.fn()
-    const { rerender } = render(
-      <MemoryRouter>
-        <TaskTimelinePanel
-          activities={[]}
-          taskTree={[]}
-          relayPermissions={[]}
-          loading={false}
-          error={null}
-          decisionPending={false}
-          onDecision={onDecision}
-          permissionsOnly
-        />
-      </MemoryRouter>,
-    )
-    expect(document.body.textContent).toBe('')
-
-    rerender(
+    render(
       <MemoryRouter>
         <TaskTimelinePanel
           activities={[]}
           taskTree={[node]}
-          relayPermissions={[{ invocationId: 'invocation-1', sessionId: 'child-1', tool: 'bash', workdir: '', arguments: '' }]}
           loading={false}
           error={null}
-          decisionPending
-          onDecision={onDecision}
-          permissionsOnly
-        />
-      </MemoryRouter>,
-    )
-    expect(screen.getByText('子代理权限：bash')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '允许' })).toBeDisabled()
-
-    rerender(
-      <MemoryRouter>
-        <TaskTimelinePanel
-          activities={[]}
-          taskTree={[node]}
-          relayPermissions={[]}
-          loading={false}
-          error={null}
-          decisionPending={false}
-          onDecision={onDecision}
         />
       </MemoryRouter>,
     )

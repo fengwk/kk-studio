@@ -1,17 +1,13 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  lastEventIdCursor,
-  loadThreadEventHistory,
-  mergeThreadEventLists,
-} from '@/features/ai/harness-thread-event-stream'
+import { useQuery } from '@tanstack/react-query'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { toAgentModelViews, type AgentModelView } from '@/features/ai/AgentModelView'
 import type { ThreadEventDTO } from '@/shared/api/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
 
+const EMPTY_EVENTS: ThreadEventDTO[] = []
+
 export function useAgentThreadQueries(threadId: string, sessionIdHint = '') {
-  const queryClient = useQueryClient()
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents.list,
     queryFn: () => agentService.listAgents(),
@@ -67,24 +63,6 @@ export function useAgentThreadQueries(threadId: string, sessionIdHint = '') {
     refetchInterval: workingHint ? 1000 : false,
   })
 
-  const eventsQuery = useQuery({
-    queryKey: queryKeys.threads.events(threadId),
-    queryFn: async () => {
-      if (!threadId) {
-        return []
-      }
-      const cached = queryClient.getQueryData<ThreadEventDTO[]>(queryKeys.threads.events(threadId)) ?? []
-      // The cache preserves backend journal order, so resume after its last event.
-      const afterEventId = lastEventIdCursor(cached)
-      const page = await loadThreadEventHistory(
-        (cursor, limit) => harnessService.listThreadEvents(threadId, cursor, limit),
-        200,
-        afterEventId,
-      )
-      return mergeThreadEventLists(cached, page)
-    },
-    enabled: Boolean(threadId),
-  })
   // Mirror the console join so the thread panel surfaces the same enriched label without leaking
   // the join field through the wire contract.
   const providers = providersQuery.data?.results ?? []
@@ -101,7 +79,6 @@ export function useAgentThreadQueries(threadId: string, sessionIdHint = '') {
     threadQuery,
     entriesQuery,
     inputsQuery,
-    eventsQuery,
     agents: agentsQuery.data?.results ?? [],
     models,
     providers,
@@ -110,7 +87,8 @@ export function useAgentThreadQueries(threadId: string, sessionIdHint = '') {
     thread,
     entries: entriesQuery.data ?? [],
     inputs,
-    events: eventsQuery.data ?? [],
+    // ThreadEvent history REST is removed; timeline falls back to entries/inputs snapshots.
+    events: EMPTY_EVENTS,
   }
 }
 

@@ -4,7 +4,12 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** Thread 事件 journal；eventId 即 SSE cursor。 */
+/**
+ * Legacy Thread event journal DTO.
+ *
+ * <p>History REST API has been removed; retained for frontend timeline projection helpers and
+ * residual RootActivity-adjacent contracts until live projection fully leaves event shapes.
+ */
 @Data
 public class ThreadEventDTO {
   private String eventId;

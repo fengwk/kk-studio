@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.share.model.InteractionDTO;
 import fun.fengwk.kkstudio.share.model.ModelInvocationDTO;
 import fun.fengwk.kkstudio.share.model.RootActivityDTO;
 import fun.fengwk.kkstudio.share.model.SubagentTaskDTO;
-import fun.fengwk.kkstudio.share.model.ThreadEventDTO;
 import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
 
 import java.time.Clock;
@@ -27,7 +26,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 
-/** final PostgreSQL observability read model；不再读 ThreadEvent / SubagentTask 表。 */
+/** final PostgreSQL observability read model；SubagentTask 表暂未落地时返回空列表。 */
 @Service
 public class HarnessObservabilityQueryServiceImpl implements HarnessObservabilityQueryService {
   private final PostgresqlHarnessQueryMapper queryMapper;
@@ -58,15 +57,6 @@ public class HarnessObservabilityQueryServiceImpl implements HarnessObservabilit
     this.queryConverter = Objects.requireNonNull(queryConverter, "queryConverter");
     this.converter = Objects.requireNonNull(converter, "converter");
     this.clock = Objects.requireNonNull(clock, "clock");
-  }
-
-  @Override
-  public List<ThreadEventDTO> listThreadEvents(String threadId, long afterEventId, int limit) {
-    // ThreadEvent history 已停用：保留接口兼容并返回空页。
-    HarnessIds.parsePositive(threadId, "threadId");
-    ObservabilityLimits.requireNonNegativeCursor(afterEventId, "afterEventId");
-    ObservabilityLimits.normalizeLimit(limit, ObservabilityLimits.DEFAULT_LIMIT);
-    return List.of();
   }
 
   @Override

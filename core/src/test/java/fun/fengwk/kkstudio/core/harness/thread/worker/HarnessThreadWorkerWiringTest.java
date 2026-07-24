@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.reconcile.ThreadActivationDispatcher;
 import fun.fengwk.kkstudio.harness.runtime.reconcile.ThreadReconciler;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProviderCancellation;
 
 /** 生产 composition root 只暴露 final Reconciler/dispatcher/recovery 资源。 */
@@ -27,10 +26,10 @@ class HarnessThreadWorkerWiringTest extends PostgresSpringTestSupport {
   @Test
   void composesFinalThreadWorkerWhileWorkersAreDisabled() {
     assertNotNull(reconciler);
+    assertNotNull(context.getBean(ThreadKick.class));
     assertInstanceOf(ThreadActivationDispatcher.class, threadKick);
     assertNotNull(recoveryLifecycle);
     assertFalse(recoveryLifecycle.isRunning());
-    assertEquals(0, context.getBeansOfType(ThreadProcessor.class).size());
     assertEquals(0, context.getBeansOfType(ThreadProviderCancellation.class).size());
   }
 }

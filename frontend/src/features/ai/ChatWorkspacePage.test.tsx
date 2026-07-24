@@ -32,12 +32,10 @@ vi.mock('@/shared/api/harness-service', () => ({
     getThread: vi.fn(),
     listThreadEntries: vi.fn(),
     listThreadInputs: vi.fn(),
-    listThreadEvents: vi.fn(),
     listThreadToolInvocations: vi.fn(),
     getThreadUsage: vi.fn(),
     listRootActivities: vi.fn(),
     listSessionTasks: vi.fn(),
-    createThreadEventStream: vi.fn(),
     createThreadRealtimeStream: vi.fn(),
     setThreadAgent: vi.fn(),
     submitThreadMessage: vi.fn(),
@@ -110,7 +108,6 @@ describe('ChatWorkspacePage', () => {
       updateTime: null,
     })
     vi.mocked(chatService.listChatSessions).mockResolvedValue([])
-    vi.mocked(harnessService.createThreadEventStream).mockReturnValue(new FakeEventSource() as EventSource)
     vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(new FakeEventSource() as EventSource)
   })
 
@@ -150,7 +147,6 @@ describe('ChatWorkspacePage', () => {
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([])
     vi.mocked(harnessService.listThreadEntries).mockResolvedValue([])
     vi.mocked(harnessService.listThreadInputs).mockResolvedValue([])
-    vi.mocked(harnessService.listThreadEvents).mockResolvedValue([])
     vi.mocked(harnessService.listThreadToolInvocations).mockResolvedValue([])
     vi.mocked(harnessService.getThreadUsage).mockResolvedValue({
       scopeType: 'thread',
@@ -295,7 +291,6 @@ describe('ChatWorkspacePage', () => {
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([])
     vi.mocked(harnessService.listThreadEntries).mockResolvedValue([])
     vi.mocked(harnessService.listThreadInputs).mockResolvedValue([])
-    vi.mocked(harnessService.listThreadEvents).mockResolvedValue([])
     vi.mocked(harnessService.listThreadToolInvocations).mockResolvedValue([])
     vi.mocked(harnessService.getThreadUsage).mockResolvedValue({
       scopeType: 'thread',

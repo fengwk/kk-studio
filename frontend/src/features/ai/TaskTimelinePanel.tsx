@@ -1,10 +1,9 @@
-import { ChevronRight, ExternalLink, GitBranch, ShieldCheck } from 'lucide-react'
+import { ChevronRight, ExternalLink, GitBranch } from 'lucide-react'
 import { useState } from 'react'
 import { formatBackendDate } from '@/features/ai/ai-console-utils'
 import { getString, parsePayload } from '@/features/ai/thread-event-payload'
 import type { SubagentTaskNode } from '@/features/ai/subagent-task-tree'
 import type { RootActivityDTO } from '@/shared/api/contracts'
-import type { RelayPermission } from '@/features/ai/useHarnessTaskTimeline'
 
 const TIMELINE_TYPES = new Set([
   'subagent_started',
@@ -17,43 +16,17 @@ const TIMELINE_TYPES = new Set([
 export function TaskTimelinePanel({
   activities,
   taskTree,
-  relayPermissions,
   loading,
   error,
-  decisionPending,
-  onDecision,
-  permissionsOnly = false,
 }: {
   activities: RootActivityDTO[]
   taskTree: SubagentTaskNode[]
-  relayPermissions: RelayPermission[]
   loading: boolean
   error: unknown
-  decisionPending: boolean
-  onDecision: (invocationId: string, decision: 'allow' | 'deny') => void
-  permissionsOnly?: boolean
 }) {
   const [selectedInvocationId, setSelectedInvocationId] = useState<string | null>(null)
   const selected = findTask(taskTree, selectedInvocationId)
   const timeline = activities.filter((activity) => TIMELINE_TYPES.has(activity.eventType))
-
-  if (permissionsOnly) {
-    if (relayPermissions.length === 0) {
-      return null
-    }
-    return (
-      <section className="task-timeline-panel permissions-only" aria-label="子代理权限">
-        {relayPermissions.map((permission) => (
-          <PermissionRelay
-            key={permission.invocationId}
-            permission={permission}
-            pending={decisionPending}
-            onDecision={onDecision}
-          />
-        ))}
-      </section>
-    )
-  }
 
   return (
     <section className="task-timeline-panel" aria-label="任务时间线">
@@ -72,9 +45,6 @@ export function TaskTimelinePanel({
         ))}
       </div>
       <div className="task-timeline-column task-detail-column">
-        {relayPermissions.map((permission) => (
-          <PermissionRelay key={permission.invocationId} permission={permission} pending={decisionPending} onDecision={onDecision} />
-        ))}
         {selected ? <ChildTaskViewer node={selected} /> : <span className="task-empty">选择子代理查看报告、版本与产物</span>}
       </div>
     </section>
@@ -157,28 +127,6 @@ function ChildTaskViewer({ node }: { node: SubagentTaskNode }) {
           ))}
         </div>
       )}
-    </div>
-  )
-}
-
-function PermissionRelay({
-  permission,
-  pending,
-  onDecision,
-}: {
-  permission: RelayPermission
-  pending: boolean
-  onDecision: (invocationId: string, decision: 'allow' | 'deny') => void
-}) {
-  return (
-    <div className="task-permission-relay">
-      <ShieldCheck aria-hidden="true" />
-      <div>
-        <strong>子代理权限：{permission.tool}</strong>
-        <span>{permission.workdir || permission.sessionId}{permission.arguments ? ` · ${permission.arguments}` : ''}</span>
-      </div>
-      <button type="button" className="ghost-btn" disabled={pending} onClick={() => onDecision(permission.invocationId, 'deny')}>拒绝</button>
-      <button type="button" className="btn-primary" disabled={pending} onClick={() => onDecision(permission.invocationId, 'allow')}>允许</button>
     </div>
   )
 }

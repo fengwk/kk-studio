@@ -16,7 +16,6 @@ import type {
   ModelUsageSummaryDTO,
   RootActivityDTO,
   SubagentTaskDTO,
-  ThreadEventDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts'
 
@@ -43,10 +42,6 @@ export function createHarnessService(client: HttpClient = apiClient) {
       client.get(`/threads/${encodeURIComponent(threadId)}/entries`),
     listThreadInputs: (threadId: string): Promise<HarnessThreadInputDTO[]> =>
       client.get(`/threads/${encodeURIComponent(threadId)}/inputs`),
-    listThreadEvents: (threadId: string, afterEventId = '0', limit?: number): Promise<ThreadEventDTO[]> =>
-      client.get(`/threads/${encodeURIComponent(threadId)}/events`, {
-        params: { afterEventId, ...(limit === undefined ? {} : { limit }) },
-      }),
     listThreadToolInvocations: (threadId: string): Promise<ToolInvocationDTO[]> =>
       client.get(`/threads/${encodeURIComponent(threadId)}/tool-invocations`),
     getThreadUsage: (threadId: string): Promise<ModelUsageSummaryDTO> =>
@@ -64,13 +59,6 @@ export function createHarnessService(client: HttpClient = apiClient) {
       client.get(`/sessions/${encodeURIComponent(sessionId)}/activities`, { params: { afterEventId } }),
     listSessionTasks: (sessionId: string): Promise<SubagentTaskDTO[]> =>
       client.get(`/sessions/${encodeURIComponent(sessionId)}/tasks`),
-    decideToolInvocation: (invocationId: string, decision: 'allow' | 'deny'): Promise<ToolInvocationDTO> =>
-      client.post(`/tool-invocations/${encodeURIComponent(invocationId)}/decision`, { decision }),
-    /** @deprecated Use createThreadRealtimeStream; ThreadEvent history is no longer durable truth. */
-    createThreadEventStream: (threadId: string, afterEventId = '0-0'): EventSource => {
-      const query = new URLSearchParams({ afterEventId })
-      return new EventSource(`${apiBaseUrl}/threads/${encodeURIComponent(threadId)}/events/stream?${query}`)
-    },
     /** Redis-backed realtime SSE tail. Cursor is a Redis stream id (`ms-seq`). */
     createThreadRealtimeStream: (threadId: string, afterStreamId = '0-0'): EventSource => {
       const query = new URLSearchParams({ afterEventId: afterStreamId })

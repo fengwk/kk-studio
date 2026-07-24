@@ -37,7 +37,7 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Observability query 单元级边界：ThreadEvent 停用、ToolInvocation 投影、Artifact 查找。
+ * Observability query 单元级边界：ToolInvocation 投影、Artifact 查找。
  *
  * <p>PostgreSQL snapshot 端到端见 {@code PostgresqlHarnessQueryServiceIntegrationTest}。
  */
@@ -71,13 +71,6 @@ class HarnessObservabilityQueryServiceIntegrationTest {
             new HarnessQueryDtoConverter(),
             new HarnessObservabilityDtoConverter(),
             Clock.fixed(NOW, ZoneOffset.UTC));
-  }
-
-  @Test
-  void threadEventHistoryIsDisabled() {
-    assertTrue(service.listThreadEvents("7100001", 0, 10).isEmpty());
-    assertThrows(IllegalArgumentException.class, () -> service.listThreadEvents("abc", 0, 10));
-    assertThrows(IllegalArgumentException.class, () -> service.listThreadEvents("0", 0, 10));
   }
 
   @Test

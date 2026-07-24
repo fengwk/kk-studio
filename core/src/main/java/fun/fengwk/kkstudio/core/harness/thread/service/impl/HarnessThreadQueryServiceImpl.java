@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.core.harness.thread.service.impl;
 
 import org.springframework.stereotype.Service;
 
-import fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits;
 import fun.fengwk.kkstudio.core.harness.query.HarnessQueryDtoConverter;
 import fun.fengwk.kkstudio.core.harness.query.HarnessQueryRow;
 import fun.fengwk.kkstudio.core.harness.query.PostgresqlHarnessQueryMapper;
@@ -11,14 +10,13 @@ import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadQueryService
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
-import fun.fengwk.kkstudio.share.model.ThreadEventDTO;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 
-/** final PostgreSQL Thread snapshot read model；不再读 ThreadEvent journal。 */
+/** final PostgreSQL Thread snapshot read model。 */
 @Service
 public class HarnessThreadQueryServiceImpl implements HarnessThreadQueryService {
   private final PostgresqlHarnessQueryMapper queryMapper;
@@ -69,15 +67,6 @@ public class HarnessThreadQueryServiceImpl implements HarnessThreadQueryService 
   public List<HarnessThreadInputDTO> listInputs(String threadId) {
     HarnessQueryRow thread = requireThread(threadId);
     return queryMapper.listInputsByThread(thread.getId()).stream().map(converter::toInput).toList();
-  }
-
-  @Override
-  public List<ThreadEventDTO> listEvents(String threadId, long afterEventId, int limit) {
-    // ThreadEvent history API 已停用：final schema 无 harness_thread_event。
-    requireThread(threadId);
-    ObservabilityLimits.requireNonNegativeCursor(afterEventId, "afterEventId");
-    ObservabilityLimits.normalizeLimit(limit, ObservabilityLimits.DEFAULT_LIMIT);
-    return List.of();
   }
 
   private HarnessQueryRow requireThread(String threadId) {
