@@ -182,6 +182,8 @@ class RuntimeConfigSnapshotResolverTest {
     assertThrows(IllegalArgumentException.class, () -> resolver.resolveAgent(1, false));
 
     RuntimeConfigSnapshot current = emptySnapshot();
+    assertThrows(
+        IllegalArgumentException.class, () -> resolver.replaceModel(current, 0, "quality"));
     AgentModel noProvider = new AgentModel();
     noProvider.setId(8L);
     noProvider.setProviderId(null);
@@ -193,6 +195,12 @@ class RuntimeConfigSnapshotResolverTest {
     assertThrows(
         IllegalArgumentException.class, () -> resolver.replaceModel(current, 9, "quality"));
 
+    model(10, true, "quality");
+    when(extensions.providerFactory(ProviderType.OPENAI)).thenReturn(Optional.empty());
+    assertThrows(
+        IllegalArgumentException.class, () -> resolver.replaceModel(current, 10, "quality"));
+
+    when(extensions.providerFactory(ProviderType.OPENAI)).thenReturn(Optional.of(providerFactory));
     model(10, true, "quality");
     AgentProvider invalidProvider = new AgentProvider();
     invalidProvider.setId(7L);
