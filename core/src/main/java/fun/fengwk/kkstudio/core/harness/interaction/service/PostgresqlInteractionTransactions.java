@@ -21,6 +21,8 @@ import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionStatus;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionTransactions;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionTransition;
 import fun.fengwk.kkstudio.harness.runtime.port.HarnessIdGenerator;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -41,7 +43,8 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
    * Canonical durable error payload written when an Interaction rejects a queued Tool invocation.
    */
   static final String INTERACTION_REJECTED_ERROR_JSON =
-      "{\"kind\": \"INTERACTION_REJECTED\", \"message\": \"Interaction was rejected.\"}";
+      new ToolInvocationErrorJsonCodec()
+          .encode(new ToolInvocationError("INTERACTION_REJECTED", "Interaction was rejected."));
 
   private final InteractionMapper interactionMapper;
   private final InteractionOwnerThreadMapper threadMapper;

@@ -15,6 +15,11 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.configuration.AgentSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.configuration.EnvironmentSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.configuration.ExecutionPolicySnapshot;
+import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -75,6 +80,8 @@ final class ReconcileTestSupport {
             BigDecimal.ZERO,
             BigDecimal.ZERO,
             BigDecimal.ZERO);
+    ModelVariant variant =
+        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
     ModelDescriptor model =
         new ModelDescriptor(
             1L,
@@ -87,12 +94,21 @@ final class ReconcileTestSupport {
             Set.of(ModelInputModality.TEXT),
             false,
             false,
-            List.of(),
+            List.of(variant),
             pricing,
             PromptCachePolicy.automatic(PromptCacheCapability.automatic()));
-    ModelVariant variant =
-        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
     return new ProviderRequest(model, variant, List.of(), List.of(), ProviderCacheControl.none());
+  }
+
+  static RuntimeConfigSnapshot configSnapshot() {
+    ProviderRequest request = providerRequest();
+    return new RuntimeConfigSnapshot(
+        new AgentSnapshot(1L, "agent", "system"),
+        new ModelSnapshot(request.model(), request.variant()),
+        List.of(),
+        List.of(),
+        new ExecutionPolicySnapshot(1, 1, 1, null, List.of(), false),
+        new EnvironmentSnapshot(null, "workspace"));
   }
 
   /**

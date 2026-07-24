@@ -13,19 +13,28 @@ class ModelInvocationPlanTest {
   void rejectsNonPositiveHead() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ModelInvocationPlan(0L, ReconcileTestSupport.providerRequest()));
+        () ->
+            new ModelInvocationPlan(
+                0L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot()));
   }
 
   @Test
   void rejectsNullRequest() {
-    assertThrows(NullPointerException.class, () -> new ModelInvocationPlan(1L, null));
+    assertThrows(
+        NullPointerException.class,
+        () -> new ModelInvocationPlan(1L, null, ReconcileTestSupport.configSnapshot()));
+    assertThrows(
+        NullPointerException.class,
+        () -> new ModelInvocationPlan(1L, ReconcileTestSupport.providerRequest(), null));
   }
 
   @Test
   void valueEquality() {
-    ModelInvocationPlan a = new ModelInvocationPlan(9L, ReconcileTestSupport.providerRequest());
-    ModelInvocationPlan b = new ModelInvocationPlan(9L, a.request());
-    ModelInvocationPlan c = new ModelInvocationPlan(10L, a.request());
+    ModelInvocationPlan a =
+        new ModelInvocationPlan(
+            9L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
+    ModelInvocationPlan b = new ModelInvocationPlan(9L, a.request(), a.configSnapshot());
+    ModelInvocationPlan c = new ModelInvocationPlan(10L, a.request(), a.configSnapshot());
 
     assertEquals(a, b);
     assertEquals(a.hashCode(), b.hashCode());

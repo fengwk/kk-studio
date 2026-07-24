@@ -194,7 +194,7 @@ public Optional<ModelInvocationPlan> plan(
     List<SessionEntry> rootToHead);
 ```
 
-输入必须是同一 Session 的完整连续 root-to-head path，最后一个 Entry 必须等于 `sourceHeadEntryId`。planner 不访问 Store、Spring、Clock 或 live Definition，不写 Entry/head。发现 response debt 后只读取 debt 前缀；返回的 plan 仍绑定实际 head，并包含经 Prompt Cache finalization 的完整 `ProviderRequest`。
+输入必须是同一 Session 的完整连续 root-to-head path，最后一个 Entry 必须等于 `sourceHeadEntryId`。planner 不访问 Store、Spring、Clock 或 live Definition，不写 Entry/head。发现 response debt 后只读取 debt 前缀；返回的 plan 仍绑定实际 head，并同时包含 debt 前缀实际使用的完整 `RuntimeConfigSnapshot` 与经 Prompt Cache finalization 的完整 `ProviderRequest`。后续 queued 配置不能反向改变已存在的 response debt。
 
 ### 3.4 ModelInvocation
 
@@ -398,7 +398,7 @@ Runtime 不在多个通用 Repository 之间自行拼事务。PostgreSQL adapter
 
 ### 5.1 ThreadCommandTransactions
 
-- 创建 Session/Main Thread/ROOT/初始配置；
+- agentless 创建 Session/Main Thread/ROOT；
 - 创建 Branch Thread；
 - enqueue Input 并分配 sequence；
 - Stop：epoch++、fence、取消 queued Input/Invocation；
@@ -410,6 +410,7 @@ Runtime 不在多个通用 Repository 之间自行拼事务。PostgreSQL adapter
 - 读取一致的 reconcile snapshot；
 - apply Model terminal；
 - apply Tool terminals；
+- suspend blocker 并在 Thread lock 下 recheck；
 - harvest TURN_BOUNDARY；
 - 创建 ModelInvocation 并释放 Thread；
 - quiesce；
@@ -510,7 +511,30 @@ transient failure
 - 仅当 `workers-enabled=true` 时启动恢复轮询；停止时先取消轮询，再关闭本地 Model 执行 handle，durable 状态由
   lease recovery 保守处理。
 
-### 7.2 ToolWorker
+### 7.2 ThreadReconciler
+
+```text
+THREAD signal/recovery
+  -> claim runnable Thread processor lease
+  -> terminal Model apply
+  -> terminal Tool sibling apply
+  -> durable blocker suspend
+  -> response-debt ModelInvocation create
+  -> one TURN_BOUNDARY harvest
+  -> quiesce
+```
+
+协议细节：
+
+- claim 只要求 `runnable=true` 且 processor lease 为空/过期；不递增 stop 使用的 `execution_epoch`，ownership 期间保持 `runnable=true`。
+- terminal Model apply 从 immutable source-head path 重新 planning，并要求重建的 `ProviderRequest` 与 durable request 完全相等；成功路径在同一事务追加 Assistant Entry、完整 usage ledger、冻结的 PLATFORM/ENVIRONMENT ToolInvocation、推进 head 并设置 `appliedAt`。
+- Tool sibling 只有全部 terminal 且全部未 applied 时才能批量 apply；结果按 ordinal 追加 Text/JSON/Artifact Tool message，失败与 UNKNOWN 使用 strict typed `ToolInvocationError`，取消生成 canonical cancellation error。
+- blocker suspension 忽略尚不能越过 blocker 的后续 queued Input；blocker terminal/替换才继续本次 activation。quiesce 则把 action、blocker、response debt 和 queued Input 全部视为 work。
+- 成功 suspend、ModelInvocation creation 与 quiesce 原子清 lease 并设置 `runnable=false`；异常兜底 release 保持 `runnable=true`。
+- 进程内 dispatcher 按 Thread 合并 activation，并保留 active 期间的一次 rerun edge；跨节点并发仍以 PostgreSQL claim 为权威。恢复生命周期从启动即刻 fixed-delay 扫描 `runnable=true` 且 lease 可用的 Thread。
+- 默认 `thread-processor-lease-duration=30s`、`thread-worker-concurrency=8`、`thread-reconciler-max-steps=16`、`thread-recovery-interval=1s`、`thread-recovery-batch-size=100`。
+
+### 7.3 ToolWorker
 
 ```text
 signal/recovery
@@ -526,7 +550,7 @@ transient failure
   -> due scheduler emits ToolInvocation signal
 ```
 
-### 7.3 SubagentTool
+### 7.4 SubagentTool
 
 `task` Tool 的 PLATFORM 实现：
 
