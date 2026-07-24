@@ -33,6 +33,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     listRootActivities: vi.fn(),
     listSessionTasks: vi.fn(),
     createThreadEventStream: vi.fn(),
+    createThreadRealtimeStream: vi.fn(),
     setThreadAgent: vi.fn(),
     setThreadModel: vi.fn(),
     setThreadYolo: vi.fn(),
@@ -116,6 +117,7 @@ describe('ChatWorkspacePane commands', () => {
       modelCallTimeoutMillis: 1, modelCallIdleTimeoutMillis: 1, createTime: null, updateTime: null,
     }]))
     vi.mocked(harnessService.createThreadEventStream).mockReturnValue(new FakeEventSource() as EventSource)
+    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(new FakeEventSource() as EventSource)
     vi.mocked(harnessService.getThread).mockResolvedValue({
       threadId: 't1', sessionId: 's1', sessionTitle: 'S1', headEntryId: null, status: 'RUNNING',
       inputSequence: 1, activeAgentDefinitionId: 'a1', activeAgentName: 'assistant', modelId: 'm1',

@@ -38,6 +38,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     listRootActivities: vi.fn(),
     listSessionTasks: vi.fn(),
     createThreadEventStream: vi.fn(),
+    createThreadRealtimeStream: vi.fn(),
     setThreadAgent: vi.fn(),
     submitThreadMessage: vi.fn(),
     setThreadYolo: vi.fn(),
@@ -110,6 +111,7 @@ describe('ChatWorkspacePage', () => {
     })
     vi.mocked(chatService.listChatSessions).mockResolvedValue([])
     vi.mocked(harnessService.createThreadEventStream).mockReturnValue(new FakeEventSource() as EventSource)
+    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(new FakeEventSource() as EventSource)
   })
 
   it('renders blank pane with chat default agent and switches layouts while retaining targets', async () => {

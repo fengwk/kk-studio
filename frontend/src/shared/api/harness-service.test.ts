@@ -59,10 +59,10 @@ describe('harnessService', () => {
     expect(client.put).not.toHaveBeenCalledWith(expect.stringContaining('/toolset'), expect.anything())
   })
 
-  it('keeps Snowflake replay cursors as strings in SSE URLs', () => {
+  it('keeps Redis stream cursors as strings in SSE URLs', () => {
     const eventSource = vi.fn()
     vi.stubGlobal('EventSource', eventSource)
-    createHarnessService(createClient()).createThreadEventStream('1', '9007199254740993')
-    expect(eventSource).toHaveBeenCalledWith('/api/threads/1/events/stream?afterEventId=9007199254740993')
+    createHarnessService(createClient()).createThreadRealtimeStream('1', '9007199254740993-0')
+    expect(eventSource).toHaveBeenCalledWith('/api/threads/1/events/stream?afterEventId=9007199254740993-0')
   })
 })

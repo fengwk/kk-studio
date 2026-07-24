@@ -36,6 +36,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     listRootActivities: vi.fn(),
     listSessionTasks: vi.fn(),
     createThreadEventStream: vi.fn(),
+    createThreadRealtimeStream: vi.fn(),
   },
 }))
 
@@ -112,6 +113,7 @@ describe('BlankComposerPane /session and agent error handling', () => {
       results: agents,
     })
     vi.mocked(harnessService.createThreadEventStream).mockReturnValue(new FakeEventSource() as EventSource)
+    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(new FakeEventSource() as EventSource)
   })
 
   it('exposes full command table on blank panes with unsupported entries disabled', () => {

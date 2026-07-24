@@ -25,6 +25,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     listThreadEvents: vi.fn(),
     submitThreadMessage: vi.fn(),
     createThreadEventStream: vi.fn(),
+    createThreadRealtimeStream: vi.fn(),
     listRootActivities: vi.fn(),
     listSessionTasks: vi.fn(),
     setThreadYolo: vi.fn(),
@@ -165,6 +166,7 @@ describe('useAgentThreadController', () => {
     })
     vi.mocked(harnessService.listThreadToolInvocations).mockResolvedValue([])
     vi.mocked(harnessService.createThreadEventStream).mockReturnValue(new FakeEventSource() as EventSource)
+    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(new FakeEventSource() as EventSource)
     vi.mocked(harnessService.submitThreadMessage).mockResolvedValue({
       inputId: 'i1',
       threadId: '1',
