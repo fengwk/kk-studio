@@ -37,6 +37,12 @@ import java.util.Optional;
  */
 @Service
 public class PostgresqlInteractionTransactions implements InteractionTransactions {
+  /**
+   * Canonical durable error payload written when an Interaction rejects a queued Tool invocation.
+   */
+  static final String INTERACTION_REJECTED_ERROR_JSON =
+      "{\"kind\": \"INTERACTION_REJECTED\", \"message\": \"Interaction was rejected.\"}";
+
   private final InteractionMapper interactionMapper;
   private final InteractionOwnerThreadMapper threadMapper;
   private final InteractionToolOwnerMapper toolMapper;
@@ -297,7 +303,6 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
       if (toolMapper.keepQueued(tool.getId()) != 1) {
         throw new IllegalStateException("tool invocation queue resume lost race: " + tool.getId());
       }
-      setThreadRunnable(tool.getThreadId(), true, transitionAt);
       return;
     }
     if (action == InteractionOwnerAction.REJECT_TOOL_TO_FAILED
@@ -310,7 +315,7 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
               InteractionRowConverter.toUtcOffsetDateTime(startedAt),
               InteractionRowConverter.toUtcOffsetDateTime(startedAt.plus(Duration.ofMillis(1))),
               InteractionRowConverter.toUtcOffsetDateTime(startedAt),
-              "{\"type\":\"INTERACTION_REJECTED\",\"message\":\"Interaction was rejected.\"}")
+              INTERACTION_REJECTED_ERROR_JSON)
           != 1) {
         throw new IllegalStateException("tool invocation rejection lost race: " + tool.getId());
       }
