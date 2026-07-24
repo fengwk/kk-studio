@@ -5,12 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import fun.fengwk.kkstudio.core.CoreTestApplication;
 import fun.fengwk.kkstudio.core.harness.observability.service.impl.HarnessObservabilityQueryServiceImpl;
@@ -22,16 +25,21 @@ import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadEventMa
 import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadMapper;
 import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadDO;
 import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadEventDO;
-import fun.fengwk.kkstudio.core.harness.tool.store.DatabaseArtifactStore;
-import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
-import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
+import fun.fengwk.kkstudio.core.harness.tool.worker.PostgresqlToolInvocationMapper;
+import fun.fengwk.kkstudio.core.harness.tool.worker.ToolInvocationDO;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskReport;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskResultFormatter;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskState;
 import fun.fengwk.kkstudio.harness.runtime.task.WorkingCopyPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventType;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.Artifact;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.share.model.RootActivityDTO;
 import fun.fengwk.kkstudio.share.model.SubagentTaskDTO;
 import fun.fengwk.kkstudio.share.model.SubagentTaskReportDTO;
@@ -39,8 +47,14 @@ import fun.fengwk.kkstudio.share.model.ThreadEventDTO;
 import fun.fengwk.kkstudio.share.model.ToolArtifactRefDTO;
 import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 /**
  * Observability query integration: ThreadEvent id-cursor paging, root-tree activity projection,
@@ -56,17 +70,16 @@ class HarnessObservabilityQueryServiceIntegrationTest {
   @Autowired private HarnessSessionMapper sessionMapper;
   @Autowired private HarnessThreadMapper threadMapper;
   @Autowired private HarnessThreadEventMapper eventMapper;
-  @Autowired private ToolInvocationMapper invocationMapper;
+  @MockitoBean private PostgresqlToolInvocationMapper invocationMapper;
   @Autowired private HarnessSubagentTaskMapper taskMapper;
-  @Autowired private DatabaseArtifactStore artifactStore;
+  @MockitoBean private ArtifactStore artifactStore;
   @Autowired private JdbcTemplate jdbc;
 
   @BeforeEach
   void clean() {
+    reset(invocationMapper, artifactStore);
     jdbc.update("delete from model_usage_record");
-    jdbc.update("delete from tool_artifact");
     jdbc.update("delete from harness_subagent_task");
-    jdbc.update("delete from tool_invocation");
     jdbc.update("delete from harness_thread_event");
     jdbc.update("delete from harness_thread_input");
     jdbc.update("delete from harness_thread");
@@ -165,11 +178,14 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     long assistantEntryId = 7_300_501L;
     insertThread(threadId, 7_300_101L);
 
-    // Insert higher ordinal first; projection must still return ordinal ASC.
-    insertInvocation(
-        7_300_301L, threadId, assistantEntryId, 1, "call-b", "read", "QUEUED", "ALLOW", null);
-    insertInvocation(
-        7_300_302L, threadId, assistantEntryId, 0, "call-a", "write", "RUNNING", "ASK", "ALLOW");
+    ToolInvocationDO firstRow =
+        invocation(
+            7_300_302L, threadId, 7_300_101L, assistantEntryId, 0, "call-a", "write", "RUNNING");
+    ToolInvocationDO secondRow =
+        invocation(
+            7_300_301L, threadId, 7_300_101L, assistantEntryId, 1, "call-b", "read", "QUEUED");
+    when(invocationMapper.listByThread(threadId)).thenReturn(List.of(firstRow, secondRow));
+    when(invocationMapper.find(firstRow.getId())).thenReturn(firstRow);
 
     List<ToolInvocationDTO> projected = service.listToolInvocations(Long.toString(threadId));
     assertEquals(2, projected.size());
@@ -178,16 +194,17 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     ToolInvocationDTO first = projected.get(0);
     assertEquals("7300302", first.getId());
     assertEquals(Long.toString(threadId), first.getThreadId());
+    assertEquals("7300101", first.getSessionId());
     assertEquals(Long.toString(assistantEntryId), first.getAssistantEntryId());
     assertEquals("write", first.getToolName());
     assertEquals("1", first.getToolVersion());
     assertEquals("PLATFORM", first.getLocation());
     assertEquals("{\"path\":\"notes.txt\"}", first.getArgumentsJson());
     assertEquals("RUNNING", first.getStatus());
-    assertEquals("ASK", first.getPermissionAction());
-    assertEquals("ALLOW", first.getPermissionDecision());
+    assertEquals(1L, first.getExecutionEpoch());
+    assertEquals(1, first.getAttempt());
     assertNotNull(first.getDeadlineAt());
-    assertNotNull(first.getCreateTime());
+    assertNotNull(first.getCreatedAt());
 
     ToolInvocationDTO single = service.getToolInvocation("7300302");
     assertEquals("write", single.getToolName());
@@ -298,11 +315,17 @@ class HarnessObservabilityQueryServiceIntegrationTest {
   /** Artifact lookup returns raw bytes; missing/invalid ids map to IllegalArgumentException. */
   @Test
   void resolvesArtifactBytesAndDistinguishesMissingFromInvalid() {
-    var ref = artifactStore.save("application/json", "raw", "{\"ok\":true}".getBytes());
-    Artifact ok = service.getArtifact(ref.artifactId());
+    long artifactId = 7_500_001L;
+    Artifact stored =
+        new Artifact(
+            artifactId, "application/json", "raw", "{\"ok\":true}".getBytes(), 11, "digest");
+    when(artifactStore.find(Long.toString(artifactId))).thenReturn(Optional.of(stored));
+    when(artifactStore.find("9999999999")).thenReturn(Optional.empty());
+
+    Artifact ok = service.getArtifact(Long.toString(artifactId));
     assertArrayEquals("{\"ok\":true}".getBytes(), ok.content());
     assertEquals("application/json", ok.mediaType());
-    assertEquals(ref.artifactId(), Long.toString(ok.id()));
+    assertEquals(Long.toString(artifactId), Long.toString(ok.id()));
 
     IllegalArgumentException missing =
         assertThrows(IllegalArgumentException.class, () -> service.getArtifact("9999999999"));
@@ -367,36 +390,48 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     eventMapper.insert(event);
   }
 
-  private void insertInvocation(
+  private static ToolInvocationDO invocation(
       long id,
       long threadId,
+      long sessionId,
       long assistantEntryId,
       int ordinal,
       String toolCallId,
       String toolName,
-      String status,
-      String permissionAction,
-      String permissionDecision) {
+      String status) {
     ToolInvocationDO row = new ToolInvocationDO();
     row.setId(id);
     row.setThreadId(threadId);
+    row.setSessionId(sessionId);
     row.setAssistantEntryId(assistantEntryId);
     row.setOrdinal(ordinal);
     row.setToolCallId(toolCallId);
-    row.setToolName(toolName);
-    row.setToolVersion("1");
+    row.setDescriptorJson(
+        new ToolDescriptorJsonCodec()
+            .encode(
+                new ToolDescriptor(
+                    toolName,
+                    "1",
+                    toolName,
+                    toolName,
+                    new ToolParamsSchema("", Map.of(), Set.of(), false),
+                    ToolExecutionLocation.PLATFORM,
+                    ToolSideEffect.IDEMPOTENT,
+                    Duration.ofMinutes(1))));
     row.setLocation("PLATFORM");
     row.setArgumentsJson("{\"path\":\"notes.txt\"}");
+    row.setExecutionEpoch(1L);
     row.setStatus(status);
-    row.setPermissionAction(permissionAction);
-    row.setPermissionDecision(permissionDecision);
-    row.setSideEffect("IDEMPOTENT");
-    row.setDeadlineAt(NOW.plusHours(1));
-    row.setCreateTime(NOW);
-    row.setUpdateTime(NOW);
+    row.setAttempt(1);
+    OffsetDateTime createdAt = NOW.atOffset(ZoneOffset.UTC);
+    row.setCreatedAt(createdAt);
     if ("RUNNING".equals(status)) {
-      row.setStartedAt(NOW.plusSeconds(1));
+      row.setWorkerToken("worker-a");
+      row.setWorkerUntil(createdAt.plusMinutes(1));
+      row.setStartedAt(createdAt);
+      row.setDeadlineAt(createdAt.plusHours(1));
+      row.setLastActivityAt(createdAt);
     }
-    invocationMapper.insert(row);
+    return row;
   }
 }

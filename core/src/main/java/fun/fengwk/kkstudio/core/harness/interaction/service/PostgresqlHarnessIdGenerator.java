@@ -51,6 +51,11 @@ public class PostgresqlHarnessIdGenerator implements HarnessIdGenerator {
     return next();
   }
 
+  @Override
+  public long nextArtifactId() {
+    return next();
+  }
+
   private long next() {
     return sequenceIdGenerator.next();
   }

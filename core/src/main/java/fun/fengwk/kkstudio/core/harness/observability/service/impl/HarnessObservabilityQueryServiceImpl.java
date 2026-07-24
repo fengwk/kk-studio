@@ -7,7 +7,7 @@ import fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimit
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.harness.task.store.mapper.HarnessSubagentTaskMapper;
 import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadEventMapper;
-import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
+import fun.fengwk.kkstudio.core.harness.tool.worker.PostgresqlToolInvocationMapper;
 import fun.fengwk.kkstudio.harness.runtime.task.RootActivityStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.Artifact;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
@@ -22,7 +22,7 @@ import java.util.Objects;
 @Service
 public class HarnessObservabilityQueryServiceImpl implements HarnessObservabilityQueryService {
   private final HarnessThreadEventMapper eventMapper;
-  private final ToolInvocationMapper invocationMapper;
+  private final PostgresqlToolInvocationMapper invocationMapper;
   private final HarnessSubagentTaskMapper taskMapper;
   private final RootActivityStore rootActivityStore;
   private final ArtifactStore artifactStore;
@@ -30,7 +30,7 @@ public class HarnessObservabilityQueryServiceImpl implements HarnessObservabilit
 
   public HarnessObservabilityQueryServiceImpl(
       HarnessThreadEventMapper eventMapper,
-      ToolInvocationMapper invocationMapper,
+      PostgresqlToolInvocationMapper invocationMapper,
       HarnessSubagentTaskMapper taskMapper,
       RootActivityStore rootActivityStore,
       ArtifactStore artifactStore,

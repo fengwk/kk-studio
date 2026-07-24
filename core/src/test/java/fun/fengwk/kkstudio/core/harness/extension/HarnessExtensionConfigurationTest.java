@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.harness.tool.service.HarnessToolConfiguration;
 import fun.fengwk.kkstudio.core.harness.tool.worker.HarnessToolWorkerConfiguration;
+import fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtension;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionRegistry;
@@ -18,12 +19,11 @@ import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
 import fun.fengwk.kkstudio.harness.runtime.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.PlatformToolWorker;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationWorkerStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolRegistry;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorkerConfig;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -62,7 +62,7 @@ class HarnessExtensionConfigurationTest {
       HarnessLifecycleObservers lifecycleObservers = configuration.harnessLifecycleObservers(host);
       lifecycleObservers.publish(
           new ToolCompleted(
-              1L, 2L, ToolInvocationStatus.SUCCEEDED, null, Instant.parse("2026-07-01T00:00:00Z")));
+              1L, 2L, InvocationStatus.SUCCEEDED, null, Instant.parse("2026-07-01T00:00:00Z")));
       assertEquals(List.of("custom"), observed);
     } finally {
       host.close();
@@ -82,7 +82,6 @@ class HarnessExtensionConfigurationTest {
       HarnessToolConfiguration toolConfiguration = new HarnessToolConfiguration();
       ToolInterceptorChain chain = toolConfiguration.toolInterceptorChain(host);
       assertTrue(chain.hasPermissionBoundary());
-      assertNotNull(toolConfiguration.toolPreparationService(() -> 1L, chain, new ObjectMapper()));
 
       HarnessToolWorkerConfiguration toolWorkerConfiguration = new HarnessToolWorkerConfiguration();
       ToolRegistry registry = toolWorkerConfiguration.toolRegistry(host);
@@ -90,11 +89,13 @@ class HarnessExtensionConfigurationTest {
       assertTrue(registry.find("missing", "1").isEmpty());
       PlatformToolWorker platformToolWorker =
           toolWorkerConfiguration.platformToolWorker(
-              mock(ToolInvocationWorkerStore.class),
               mock(ToolInvocationTransactions.class),
               registry,
               chain,
               mock(ArtifactStore.class),
+              () -> InvocationRetryPolicy.DEFAULT,
+              event -> {},
+              target -> {},
               ToolWorkerConfig.DEFAULT,
               Clock.systemUTC(),
               scheduler,

@@ -5,9 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
-import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -21,13 +19,12 @@ import java.util.Set;
 class ToolDomainContractsTest {
   private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
 
-  /** ToolInvocation 快照保存单 bigint id、冻结 binding 和 permission/result 状态。 */
+  /** ToolInvocation 快照保存单 bigint id、冻结 descriptor 与统一 Invocation 状态。 */
   @Test
   void validatesToolInvocationSnapshot() {
     ToolInvocation invocation =
         invocation(1L, 2L, 3L, 0, "call", "tool", "1", ToolExecutionLocation.PLATFORM, null);
-    assertEquals(ToolInvocationStatus.QUEUED, invocation.status());
-    assertEquals(PermissionAction.ALLOW, invocation.permissionAction());
+    assertEquals(InvocationStatus.QUEUED, invocation.status());
 
     assertThrows(
         IllegalArgumentException.class,
@@ -117,108 +114,6 @@ class ToolDomainContractsTest {
         () -> ToolBinding.of(descriptor("tool", ToolExecutionLocation.PLATFORM, "v".repeat(129))));
   }
 
-  /** Prepared invocation action/status/result 必须一致，并再次验证 call schema。 */
-  @Test
-  void validatesPreparedInvocationConsistency() {
-    ToolBinding binding = ToolBinding.of(descriptor("tool", ToolExecutionLocation.PLATFORM));
-    ToolCall call = new ToolCall("call", "tool", "{}");
-    PermissionPromptPreview preview = new PermissionPromptPreview("tool", ".", "{}");
-    PreparedToolInvocation pending =
-        new PreparedToolInvocation(
-            1L,
-            0,
-            binding,
-            call,
-            PermissionAction.ASK,
-            ToolInvocationStatus.WAITING_APPROVAL,
-            NOW,
-            preview,
-            null,
-            null);
-    assertEquals(ToolInvocationStatus.WAITING_APPROVAL, pending.initialStatus());
-
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new PreparedToolInvocation(
-                1L,
-                0,
-                binding,
-                new ToolCall("x".repeat(257), "tool", "{}"),
-                PermissionAction.ASK,
-                ToolInvocationStatus.WAITING_APPROVAL,
-                NOW,
-                preview,
-                null,
-                null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new PreparedToolInvocation(
-                0L,
-                0,
-                binding,
-                call,
-                PermissionAction.ASK,
-                ToolInvocationStatus.WAITING_APPROVAL,
-                NOW,
-                preview,
-                null,
-                null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new PreparedToolInvocation(
-                1L,
-                -1,
-                binding,
-                call,
-                PermissionAction.ASK,
-                ToolInvocationStatus.WAITING_APPROVAL,
-                NOW,
-                preview,
-                null,
-                null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new PreparedToolInvocation(
-                1L,
-                0,
-                binding,
-                call,
-                PermissionAction.ALLOW,
-                ToolInvocationStatus.WAITING_APPROVAL,
-                NOW,
-                preview,
-                null,
-                null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new PreparedToolInvocation(
-                1L,
-                0,
-                binding,
-                call,
-                PermissionAction.DENY,
-                ToolInvocationStatus.FAILED,
-                NOW,
-                preview,
-                null,
-                null));
-  }
-
-  /** API decision parser 大小写兼容并拒绝空值与未知决定。 */
-  @Test
-  void parsesPermissionDecision() {
-    assertEquals(ToolPermissionDecision.ALLOW, ToolPermissionDecision.fromApiValue(" Allow "));
-    assertEquals(ToolPermissionDecision.DENY, ToolPermissionDecision.fromApiValue("deny"));
-    assertThrows(IllegalArgumentException.class, () -> ToolPermissionDecision.fromApiValue(null));
-    assertThrows(
-        IllegalArgumentException.class, () -> ToolPermissionDecision.fromApiValue("approve"));
-  }
-
   private static ToolInvocation invocation(
       long id,
       long threadId,
@@ -235,25 +130,23 @@ class ToolDomainContractsTest {
         assistantEntryId,
         ordinal,
         toolCallId,
-        toolName,
-        toolVersion,
+        descriptor(toolName, location, toolVersion),
+        "{}",
         location,
         environmentName,
-        "{}",
-        ToolInvocationStatus.QUEUED,
-        PermissionAction.ALLOW,
+        0L,
+        InvocationStatus.QUEUED,
+        1,
         null,
-        ToolSideEffect.READ_ONLY,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
         NOW,
         null,
-        null,
-        null,
-        null,
-        null,
-        NOW,
-        null,
-        null,
-        NOW);
+        null);
   }
 
   private static ToolDescriptor descriptor(String name, ToolExecutionLocation location) {

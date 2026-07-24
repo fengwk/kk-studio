@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -18,7 +17,6 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentGatewayProperties;
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
-import fun.fengwk.kkstudio.core.harness.tool.worker.DatabaseEnvironmentToolInvocationWorkerStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
@@ -35,6 +33,7 @@ import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
@@ -64,7 +63,6 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest {
   @Autowired private LiveEnvironmentRegistry registry;
   @Autowired private EnvironmentGatewayProperties properties;
 
-  @MockitoBean private DatabaseEnvironmentToolInvocationWorkerStore invocationStore;
   @MockitoBean private ToolInvocationTransactions transactions;
   @MockitoBean private ArtifactStore artifactStore;
 
@@ -74,7 +72,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest {
    */
   @Test
   void largeCapabilitiesFrameReachesReadyWithoutClose1009() throws Exception {
-    when(invocationStore.listDueEnvironmentCandidates(any(), anyInt())).thenReturn(List.of());
+    when(transactions.findNextClaimable(any(), any(), any())).thenReturn(Optional.empty());
 
     int minBytes = TOMCAT_DEFAULT_TEXT_BUFFER_BYTES + 4 * 1024;
     String capabilitiesPayloadJson = largeCapabilitiesPayload(minBytes);

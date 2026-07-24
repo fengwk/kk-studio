@@ -14,19 +14,18 @@ import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolArtifactDO;
 public interface ToolArtifactMapper extends BaseMapper {
   @Insert(
       """
-      insert into tool_artifact (
-          id, media_type, encoding, content, size_bytes, sha256, gmt_create
+      insert into harness_artifact (
+          id, media_type, encoding, content, size_bytes, sha256, created_at
       ) values (
-          #{id}, #{mediaType}, #{encoding}, #{content}, #{sizeBytes}, #{sha256}, #{createTime}
+          #{id}, #{mediaType}, #{encoding}, #{content}, #{sizeBytes}, #{sha256}, #{createdAt}
       )
       """)
   int insert(ToolArtifactDO artifact);
 
   @Select(
       """
-      select id, media_type, encoding, content, size_bytes, sha256,
-             gmt_create as create_time
-      from tool_artifact
+      select id, media_type, encoding, content, size_bytes, sha256, created_at
+      from harness_artifact
       where id = #{id}
       """)
   @Results(
@@ -38,7 +37,7 @@ public interface ToolArtifactMapper extends BaseMapper {
         @Result(column = "content", property = "content"),
         @Result(column = "size_bytes", property = "sizeBytes"),
         @Result(column = "sha256", property = "sha256"),
-        @Result(column = "create_time", property = "createTime")
+        @Result(column = "created_at", property = "createdAt")
       })
   ToolArtifactDO find(@Param("id") long id);
 }

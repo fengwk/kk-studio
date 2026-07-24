@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.extension;
 
+import fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationStatus;
 
 import java.time.Instant;
 import java.util.Objects;
@@ -60,11 +60,7 @@ public sealed interface HarnessLifecycleObservation
   }
 
   record ToolCompleted(
-      long invocationId,
-      long threadId,
-      ToolInvocationStatus status,
-      String error,
-      Instant occurredAt)
+      long invocationId, long threadId, InvocationStatus status, String error, Instant occurredAt)
       implements HarnessLifecycleObservation {
     public ToolCompleted {
       if (invocationId <= 0 || threadId <= 0) {

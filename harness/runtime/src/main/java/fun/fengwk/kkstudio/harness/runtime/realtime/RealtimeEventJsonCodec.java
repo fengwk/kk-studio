@@ -10,6 +10,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolResultJsonCodec;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -21,8 +23,8 @@ import java.util.Set;
 /**
  * 有界 realtime projection 的确定性 strict JSON codec。
  *
- * <p>当前仅支持 {@link RealtimeEvent.ModelDelta}；top-level exact field set {@code {threadId,
- * subjectKind, subjectId, attempt, type, payload, createdAt}}。{@code attempt} 只出现在 top-level。
+ * <p>支持 Model delta 与 Tool partial；top-level exact field set {@code {threadId, subjectKind,
+ * subjectId, attempt, type, payload, createdAt}}。{@code attempt} 只出现在 top-level。
  *
  * <p>{@code payload} discriminator 严格大小写：
  *
@@ -52,7 +54,9 @@ public final class RealtimeEventJsonCodec {
       orderedSet("kind", "index", "id", "name", "argumentsJson");
 
   private static final String MODEL_INVOCATION = ExecutionTargetKind.MODEL_INVOCATION.name();
+  private static final String TOOL_INVOCATION = ExecutionTargetKind.TOOL_INVOCATION.name();
   private static final String MODEL_DELTA = RealtimeEventType.MODEL_DELTA.name();
+  private static final String TOOL_PARTIAL = RealtimeEventType.TOOL_PARTIAL.name();
 
   private static final String TEXT_DELTA = "TEXT_DELTA";
   private static final String THINKING_DELTA = "THINKING_DELTA";
@@ -76,6 +80,9 @@ public final class RealtimeEventJsonCodec {
     Objects.requireNonNull(event, "event");
     if (event instanceof RealtimeEvent.ModelDelta delta) {
       return encodeModelDelta(delta);
+    }
+    if (event instanceof RealtimeEvent.ToolPartial partial) {
+      return encodeToolPartial(partial);
     }
     throw new IllegalArgumentException("unsupported realtime event: " + event.getClass().getName());
   }
@@ -119,16 +126,23 @@ public final class RealtimeEventJsonCodec {
           "realtimeEvent.createdAt must be an ISO-8601 instant string", error);
     }
 
-    if (type != RealtimeEventType.MODEL_DELTA) {
-      throw new IllegalArgumentException("realtimeEvent.type must be MODEL_DELTA: " + typeName);
+    if (type == RealtimeEventType.MODEL_DELTA) {
+      if (subjectKind != ExecutionTargetKind.MODEL_INVOCATION) {
+        throw new IllegalArgumentException(
+            "MODEL_DELTA subjectKind must be MODEL_INVOCATION: " + subjectKindName);
+      }
+      ProviderStreamEvent delta = decodePayload((ObjectNode) payloadNode);
+      return new RealtimeEvent.ModelDelta(threadId, subjectId, attempt, delta, createdAt);
     }
-    if (subjectKind != ExecutionTargetKind.MODEL_INVOCATION) {
-      throw new IllegalArgumentException(
-          "realtimeEvent.subjectKind must be MODEL_INVOCATION: " + subjectKindName);
+    if (type == RealtimeEventType.TOOL_PARTIAL) {
+      if (subjectKind != ExecutionTargetKind.TOOL_INVOCATION) {
+        throw new IllegalArgumentException(
+            "TOOL_PARTIAL subjectKind must be TOOL_INVOCATION: " + subjectKindName);
+      }
+      ToolResult partial = ToolResultJsonCodec.decode(write((ObjectNode) payloadNode));
+      return new RealtimeEvent.ToolPartial(threadId, subjectId, attempt, partial, createdAt);
     }
-
-    ProviderStreamEvent delta = decodePayload((ObjectNode) payloadNode);
-    return new RealtimeEvent.ModelDelta(threadId, subjectId, attempt, delta, createdAt);
+    throw new IllegalArgumentException("unsupported realtimeEvent.type: " + typeName);
   }
 
   // ---------- Encoders ----------
@@ -142,6 +156,18 @@ public final class RealtimeEventJsonCodec {
     node.put("type", MODEL_DELTA);
     node.set("payload", encodePayload(delta.delta()));
     node.put("createdAt", delta.createdAt().toString());
+    return node;
+  }
+
+  private static ObjectNode encodeToolPartial(RealtimeEvent.ToolPartial partial) {
+    ObjectNode node = NODES.objectNode();
+    node.put("threadId", Long.toString(partial.threadId()));
+    node.put("subjectKind", TOOL_INVOCATION);
+    node.put("subjectId", Long.toString(partial.toolInvocationId()));
+    node.put("attempt", partial.attempt());
+    node.put("type", TOOL_PARTIAL);
+    node.set("payload", ToolResultJsonCodec.encodeNode(partial.partial()));
+    node.put("createdAt", partial.createdAt().toString());
     return node;
   }
 

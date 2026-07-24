@@ -25,8 +25,6 @@ public final class AgentIdGenerator {
   public static final String HARNESS_THREAD_STOP = "harness_thread_stop";
   public static final String HARNESS_THREAD_EVENT = "harness_thread_event";
   public static final String MODEL_USAGE_RECORD = "model_usage_record";
-  public static final String TOOL_INVOCATION = "tool_invocation";
-  public static final String TOOL_ARTIFACT = "tool_artifact";
 
   private AgentIdGenerator() {}
 
@@ -56,13 +54,5 @@ public final class AgentIdGenerator {
 
   public static long nextModelUsageRecordId() {
     return GlobalSnowflakeIdGenerator.next(MODEL_USAGE_RECORD);
-  }
-
-  public static long nextToolInvocationId() {
-    return GlobalSnowflakeIdGenerator.next(TOOL_INVOCATION);
-  }
-
-  public static long nextToolArtifactId() {
-    return GlobalSnowflakeIdGenerator.next(TOOL_ARTIFACT);
   }
 }

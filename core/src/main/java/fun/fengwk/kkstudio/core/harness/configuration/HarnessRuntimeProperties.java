@@ -46,6 +46,12 @@ public class HarnessRuntimeProperties {
   /** 单次 Model Invocation 恢复扫描最多领取的任务数。 */
   private int modelRecoveryBatchSize = 100;
 
+  /** Tool Invocation PostgreSQL 恢复扫描间隔。 */
+  private Duration toolRecoveryInterval = Duration.ofSeconds(1);
+
+  /** 单次 Tool Invocation 恢复扫描最多领取的任务数。 */
+  private int toolRecoveryBatchSize = 100;
+
   private Path environmentRoot = Path.of(System.getProperty("user.dir", "."));
   private Path workdir = Path.of(".");
 

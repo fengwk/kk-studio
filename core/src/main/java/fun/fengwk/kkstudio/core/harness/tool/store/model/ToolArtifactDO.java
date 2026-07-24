@@ -2,12 +2,12 @@ package fun.fengwk.kkstudio.core.harness.tool.store.model;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
-/** {@code tool_artifact} 行映射：全局可寻址的不可变工具输出。 */
+/** {@code harness_artifact} 行映射：全局可寻址的不可变工具输出。 */
 @Data
 public class ToolArtifactDO {
-  /** 全局主键（Snowflake）。 */
+  /** PostgreSQL sequence 主键。 */
   private Long id;
 
   /** RFC media type。 */
@@ -25,6 +25,6 @@ public class ToolArtifactDO {
   /** 内容 SHA-256 摘要。 */
   private String sha256;
 
-  /** 创建时间（映射 {@code gmt_create}）。 */
-  private LocalDateTime createTime;
+  /** 创建时间。 */
+  private OffsetDateTime createdAt;
 }

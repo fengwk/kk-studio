@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.web.controller;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -15,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -26,19 +29,30 @@ import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadEventMa
 import fun.fengwk.kkstudio.core.harness.thread.store.mapper.HarnessThreadMapper;
 import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadDO;
 import fun.fengwk.kkstudio.core.harness.thread.store.model.HarnessThreadEventDO;
-import fun.fengwk.kkstudio.core.harness.tool.store.DatabaseArtifactStore;
-import fun.fengwk.kkstudio.core.harness.tool.store.mapper.ToolInvocationMapper;
-import fun.fengwk.kkstudio.core.harness.tool.store.model.ToolInvocationDO;
+import fun.fengwk.kkstudio.core.harness.tool.worker.PostgresqlToolInvocationMapper;
+import fun.fengwk.kkstudio.core.harness.tool.worker.ToolInvocationDO;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskReport;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskResultFormatter;
 import fun.fengwk.kkstudio.harness.runtime.task.TaskState;
 import fun.fengwk.kkstudio.harness.runtime.task.WorkingCopyPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadEventType;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.Artifact;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.web.WebTestApplication;
 
-import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 /**
  * HTTP contract for {@link StudioHarnessObservabilityController}: current session/thread routes
@@ -59,17 +73,16 @@ class StudioHarnessObservabilityControllerTest {
   @Autowired private HarnessSessionMapper sessionMapper;
   @Autowired private HarnessThreadMapper threadMapper;
   @Autowired private HarnessThreadEventMapper eventMapper;
-  @Autowired private ToolInvocationMapper invocationMapper;
+  @MockitoBean private PostgresqlToolInvocationMapper invocationMapper;
   @Autowired private HarnessSubagentTaskMapper taskMapper;
-  @Autowired private DatabaseArtifactStore artifactStore;
+  @MockitoBean private ArtifactStore artifactStore;
   @Autowired private JdbcTemplate jdbc;
 
   @BeforeEach
   void clean() {
+    reset(invocationMapper, artifactStore);
     jdbc.update("delete from model_usage_record");
-    jdbc.update("delete from tool_artifact");
     jdbc.update("delete from harness_subagent_task");
-    jdbc.update("delete from tool_invocation");
     jdbc.update("delete from harness_thread_event");
     jdbc.update("delete from harness_thread_input");
     jdbc.update("delete from harness_thread");
@@ -128,8 +141,12 @@ class StudioHarnessObservabilityControllerTest {
     long threadId = LARGE_ID + 10;
     long assistantEntryId = LARGE_ID + 11;
     long invocationId = LARGE_ID + 12;
-    insertThread(threadId, LARGE_ID + 13);
-    insertInvocation(invocationId, threadId, assistantEntryId, 0, "call-1", "write", "QUEUED");
+    long sessionId = LARGE_ID + 13;
+    insertThread(threadId, sessionId);
+    ToolInvocationDO invocation =
+        invocation(invocationId, threadId, sessionId, assistantEntryId, 0, "call-1", "write");
+    when(invocationMapper.listByThread(threadId)).thenReturn(List.of(invocation));
+    when(invocationMapper.find(invocationId)).thenReturn(invocation);
 
     mockMvc
         .perform(get("/api/threads/{id}/tool-invocations", Long.toString(threadId)))
@@ -164,7 +181,8 @@ class StudioHarnessObservabilityControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.id").value(firstInvocationId))
         .andExpect(jsonPath("$.data.toolName").value("write"))
-        .andExpect(jsonPath("$.data.deadlineAt").exists());
+        .andExpect(jsonPath("$.data.executionEpoch").value(1))
+        .andExpect(jsonPath("$.data.attempt").value(1));
 
     mockMvc
         .perform(get("/api/threads/{id}/tool-invocations", "abc"))
@@ -234,11 +252,15 @@ class StudioHarnessObservabilityControllerTest {
   /** Artifact GET returns raw bytes; malformed ids are 400; unknown ids are 404. */
   @Test
   void readsArtifactBytesAndDistinguishesBadRequestFromNotFound() throws Exception {
-    var ref = artifactStore.save("text/plain", "raw", "hello".getBytes());
+    long artifactId = LARGE_ID + 29;
+    Artifact artifact =
+        new Artifact(artifactId, "text/plain", "raw", "hello".getBytes(), 5, "digest");
+    when(artifactStore.find(Long.toString(artifactId))).thenReturn(Optional.of(artifact));
+    when(artifactStore.find("9999999999")).thenReturn(Optional.empty());
 
     MvcResult okResult =
         mockMvc
-            .perform(get("/api/artifacts/{id}", ref.artifactId()))
+            .perform(get("/api/artifacts/{id}", Long.toString(artifactId)))
             .andExpect(status().isOk())
             .andExpect(header().string("Content-Type", "text/plain"))
             .andExpect(header().string("X-Content-Type-Options", "nosniff"))
@@ -256,16 +278,9 @@ class StudioHarnessObservabilityControllerTest {
   @Test
   void fallsBackToOctetStreamForMalformedPersistedArtifactMediaType() throws Exception {
     long artifactId = LARGE_ID + 30;
-    jdbc.update(
-        "insert into tool_artifact (id, media_type, encoding, content, size_bytes, sha256,"
-            + " gmt_create) values (?, ?, ?, ?, ?, ?, ?)",
-        artifactId,
-        "not a media type",
-        "identity",
-        new byte[] {1},
-        1L,
-        "digest",
-        Timestamp.valueOf(NOW));
+    Artifact artifact =
+        new Artifact(artifactId, "not a media type", "identity", new byte[] {1}, 1, "digest");
+    when(artifactStore.find(Long.toString(artifactId))).thenReturn(Optional.of(artifact));
 
     mockMvc
         .perform(get("/api/artifacts/{id}", artifactId))
@@ -314,30 +329,40 @@ class StudioHarnessObservabilityControllerTest {
     eventMapper.insert(event);
   }
 
-  private void insertInvocation(
+  private static ToolInvocationDO invocation(
       long id,
       long threadId,
+      long sessionId,
       long assistantEntryId,
       int ordinal,
       String toolCallId,
-      String toolName,
-      String status) {
+      String toolName) {
     ToolInvocationDO row = new ToolInvocationDO();
     row.setId(id);
     row.setThreadId(threadId);
+    row.setSessionId(sessionId);
     row.setAssistantEntryId(assistantEntryId);
     row.setOrdinal(ordinal);
     row.setToolCallId(toolCallId);
-    row.setToolName(toolName);
-    row.setToolVersion("1");
+    row.setDescriptorJson(
+        new ToolDescriptorJsonCodec()
+            .encode(
+                new ToolDescriptor(
+                    toolName,
+                    "1",
+                    toolName,
+                    toolName,
+                    new ToolParamsSchema("", Map.of(), Set.of(), false),
+                    ToolExecutionLocation.PLATFORM,
+                    ToolSideEffect.IDEMPOTENT,
+                    Duration.ofMinutes(1))));
     row.setLocation("PLATFORM");
     row.setArgumentsJson("{\"path\":\"notes.txt\"}");
-    row.setStatus(status);
-    row.setPermissionAction("ALLOW");
-    row.setSideEffect("IDEMPOTENT");
-    row.setDeadlineAt(NOW.plusHours(1));
-    row.setCreateTime(NOW);
-    row.setUpdateTime(NOW);
-    invocationMapper.insert(row);
+    row.setExecutionEpoch(1L);
+    row.setStatus("QUEUED");
+    row.setAttempt(1);
+    OffsetDateTime createdAt = NOW.atOffset(ZoneOffset.UTC);
+    row.setCreatedAt(createdAt);
+    return row;
   }
 }

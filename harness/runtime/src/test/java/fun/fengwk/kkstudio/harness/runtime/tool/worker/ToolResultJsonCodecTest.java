@@ -55,6 +55,16 @@ class ToolResultJsonCodecTest {
     assertEquals("{}", decoded.detailsJson());
   }
 
+  @Test
+  void roundTripsEmptyTextContentProducedByWorkerNormalization() {
+    ToolResult decoded =
+        ToolResultJsonCodec.decode(
+            ToolResultJsonCodec.encode(
+                new ToolResult("call", List.of(new TextToolContent("")), false, "{}", false)));
+
+    assertEquals("", ((TextToolContent) decoded.contents().getFirst()).text());
+  }
+
   /** Persisted result input is strict so malformed journal data cannot become a Session message. */
   @Test
   void rejectsMalformedOrUnknownContents() {
@@ -118,5 +128,20 @@ class ToolResultJsonCodecTest {
         () ->
             ToolResultJsonCodec.decode(
                 "{\"toolCallId\":\"call\",\"contents\":[],\"error\":false,\"missing\":true}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ToolResultJsonCodec.decode(
+                "{\"toolCallId\":\"call\",\"toolCallId\":\"other\",\"contents\":[],\"error\":false,\"details\":{}}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ToolResultJsonCodec.decode(
+                "{\"toolCallId\":\"call\",\"contents\":[],\"error\":false,\"details\":{}} trailing"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ToolResultJsonCodec.decode(
+                "{\"toolCallId\":\"call\",\"contents\":[{\"type\":\"artifact\",\"artifactId\":\"1\",\"mediaType\":\"text/plain\",\"sizeBytes\":9223372036854775808}],\"error\":false,\"details\":{}}"));
   }
 }
