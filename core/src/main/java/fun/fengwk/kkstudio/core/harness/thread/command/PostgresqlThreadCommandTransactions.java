@@ -120,6 +120,9 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
   public Optional<EnqueueResult> findExistingInput(long threadId, String idempotencyKey) {
     requirePositive(threadId, "threadId");
     requireNonBlank(idempotencyKey, "idempotencyKey");
+    // A missing unique-key row cannot be locked. Lock its owning Thread first so the facade's
+    // outer transaction serializes the retry check with live snapshot resolution and enqueue.
+    lockThread(threadId);
     ThreadCommandRow existing = mapper.findInputByKeyForUpdate(threadId, idempotencyKey);
     return existing == null
         ? Optional.empty()
