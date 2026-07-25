@@ -298,10 +298,10 @@ Canvas Agent 现有模块：
 
 ```text
 CanvasAgentDock
-├── CanvasAgentThread
+├── CanvasAgentConversation
 │   └── CanvasAgentMessage
 │       ├── UserThreadMessage
-│       ├── AgentThreadMessage
+│       ├── AssistantThreadMessage
 │       ├── GenerationThreadMessage
 │       └── RunThreadMessage
 ├── CanvasAddMenu

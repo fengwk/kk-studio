@@ -3,7 +3,7 @@
 #
 # 快速开始：
 #   ./scripts/e2e.sh                  # 复用已启动服务，跑 L1（免费）
-#   ./scripts/e2e.sh --rebuild        # 强制 Java17 重打包并重启 backend/frontend
+#   ./scripts/e2e.sh --rebuild        # 强制 Java 21 重打包并重启 backend/frontend
 #   ./scripts/e2e.sh --real           # + 真 MiniMax 文本轮次（需 MINIMAX_API_KEY）
 #   ./scripts/e2e.sh --real --with-branch
 #   ./scripts/e2e.sh --real --with-tools
@@ -66,7 +66,7 @@ Env:
   GEMINI_API_KEY / GOOGLE_BASE_URL
   # only set env vars are written into provider rows (no defaults)
   # openai/openai_response base URLs are normalized to end with /v1 when set
-  JAVA_HOME_17=...
+  JAVA_HOME_21=...
 EOF
 }
 

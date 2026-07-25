@@ -66,9 +66,9 @@ require_cmd() {
 }
 
 resolve_java_home() {
-  local java_home=${JAVA_HOME_17:-${JAVA_HOME:-}}
+  local java_home=${JAVA_HOME_21:-${JAVA_HOME:-}}
   if [ -z "$java_home" ] || [ ! -x "$java_home/bin/java" ]; then
-    echo "JAVA_HOME_17 or JAVA_HOME must point to JDK 17" >&2
+    echo "JAVA_HOME_21 or JAVA_HOME must point to JDK 21" >&2
     exit 1
   fi
   echo "$java_home"

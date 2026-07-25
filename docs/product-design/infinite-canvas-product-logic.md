@@ -1128,4 +1128,4 @@ Canvas 导出包包含 schemaVersion、固定 revision 的 Node/Link/Reference �
 12. Workflow ForEach 能逐项执行并聚合结果，执行前可估算成本。
 13. Canvas 与 Workflow 所有修改都经过带 revision 的 Command。
 14. 页面刷新、执行恢复和 SSE 重连不会丢失已确认状态。
-15. Agent 接入不要求 Canvas 依赖 Harness 内部 Session、AgentThread、ThreadInput 或 Tool 类型。
+15. Agent 接入不要求 Canvas 依赖 Harness 内部 Session、HarnessThread、ThreadInput 或 Tool 类型。
