@@ -11,18 +11,20 @@
 
 - [docs/technical-solution/architecture.md](docs/technical-solution/architecture.md)
 - [docs/technical-solution/domain-map.md](docs/technical-solution/domain-map.md)
-- [docs/technical-solution/harness-thread-actor.md](docs/technical-solution/harness-thread-actor.md)（Harness 架构事实源）
+- [docs/technical-solution/harness-runtime-architecture.md](docs/technical-solution/harness-runtime-architecture.md)
 
 ## 能力摘要
 
-- Harness：Session Main Thread、Entry Tree Branch、ordered mailbox、ThreadEvent journal 与 SSE cursor 恢复
+- Harness：Session Main Thread、Entry Tree Branch、ordered mailbox、Model/Tool Invocation、Interaction；PostgreSQL truth + Redis wake/realtime
 - Studio：Canvas 文档、节点、Link、Command 已最小持久化；Resource、FunctionRun、Workflow Runtime 待补
 - 前端：AI 接真实 Thread API；Canvas Library/Create 接真实 API，Editor 仍使用本地交互投影
 
 ## 模块
 
 ```text
-share / studio / core / web / harness/* / frontend
+share / studio / core / web
+harness-tool / harness-runtime / harness-daemon
+frontend
 ```
 
 ## 开发
@@ -30,7 +32,7 @@ share / studio / core / web / harness/* / frontend
 后端：
 
 ```bash
-env JAVA_HOME=$JAVA_HOME_17 mvn test
+env JAVA_HOME=$JAVA_HOME_21 mvn test
 ```
 
 前端：

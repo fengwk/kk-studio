@@ -21,8 +21,9 @@ flowchart LR
     Web[web]
     Core[core adapters]
     Studio[studio domain]
-    Harness[harness/* domain]
-    Store[(MySQL / H2)]
+    Harness[harness tool/runtime/daemon]
+    Store[(PostgreSQL)]
+    Redis[(Redis)]
     S3[(Object storage)]
     Env[Environment Daemon]
 
@@ -34,6 +35,7 @@ flowchart LR
     Core --> Studio
     Core --> Harness
     Core --> Store
+    Core --> Redis
     Core --> S3
     Browser --> S3
     Env <-->|WebSocket| Web
@@ -44,8 +46,10 @@ flowchart LR
 | 模块 | 职责 | 禁止 |
 | --- | --- | --- |
 | `studio` | Canvas / Resource / Function / Workflow 纯领域与端口 | Spring、MyBatis、HTTP、Harness 类型 |
-| `harness/*` | Agent 执行领域（Session / Thread / Tool / Task / Usage） | 依赖 studio、承载 Canvas 语义 |
-| `core` | 两边的持久化、事务、worker、S3、ComfyUI 与 Studio adapters | 成为第二个“万能领域层” |
+| `harness-tool` | location-neutral Tool API / schema / RemoteTool / Daemon 协议 | Runtime 状态机 |
+| `harness-runtime` | Session / Thread / Invocation / Interaction / Reconciler / Model 契约 | Provider SDK、Spring、HTTP |
+| `harness-daemon` | 独立 Environment 进程适配器 | 依赖 runtime / Spring |
+| `core` | 两边的持久化、事务、worker、S3、ComfyUI 与 Studio adapters；LangChain4j Provider | 成为第二个“万能领域层” |
 | `web` | HTTP / SSE / WebSocket 适配；DTO 映射 | 领域状态机 |
 | `share` | HTTP DTO | 领域规则 |
 | `frontend` | React：`features/ai`、`features/canvas`、platform shell | 把后端契约写死在 UI 组件内部 |
@@ -54,9 +58,11 @@ flowchart LR
 
 ```text
 web → core → studio
-          → harness/*
+          → harness-runtime → harness-tool
+          → harness-tool
 web → share
 core → share
+harness-daemon → harness-tool
 frontend → web APIs (via shared/api)
 ```
 
@@ -65,25 +71,26 @@ frontend → web APIs (via shared/api)
 | 事实 | 职责 |
 | --- | --- |
 | **Chat** | 持久会话集合、可选默认 Agent；通过 `ChatSession` 关联 Session；不保存 Pane |
-| **Pane** | 当前浏览器的 Chat 工作区姿势：布局、焦点与各面板 `threadId`（可空）仅存 localStorage；Session 从 Thread 反查 |
-| **Session** | 共享 append-only Entry Tree 容器、稳定 `mainThreadId` 与父子 Session 关系；不保存 Branch 或完整 Agent 配置 |
-| **Entry** | 语义持久真源：消息、配置变更（`AGENT_CHANGE` / `MODEL_CHANGE`）、Tool Result、Compaction |
-| **AgentThread** | durable Branch actor：`sessionId`、`headEntryId`、input sequence、状态、processor token/until/version，以及当前生效配置（agent/model/variant）与运行策略（YOLO） |
-| **Branch(thread)** | 由 root→`headEntryId` 路径派生，不独立持久化；多 Thread 可共享 head 后自然分叉 |
-| **ThreadInput** | 多生产者有序 mailbox：消息与 `SET_AGENT` / `SET_MODEL` / `SET_YOLO`；`clientMessageId` 幂等；一次 Harvest 可应用多个 Input |
-| **ThreadStop** | Stop 网络幂等回执，以及被取消 mailbox Input 的关联 |
-| **ThreadEvent** | Thread 级 journal / 可观测覆盖层；全局十进制 `eventId` 作 SSE cursor |
-| **ToolInvocation** | 工具权限、lease、结果与终态；ID 是副作用幂等边界 |
-| **SubagentTask** | parent invocation → child Session + child Thread 关系、maxTurns、report |
-| **Root Activity** | 根 Session 树内事件投影（查询合成，非独立写表） |
-| **Usage / Cost** | 每 Assistant Entry 一条不可变账本 |
+| **Pane** | 浏览器本地 Chat 工作区姿势：布局、焦点与各面板 `threadId` 仅存 localStorage |
+| **Session** | 共享 append-only Entry Tree、稳定 `mainThreadId`；schema 可表达父子 Session，但 Child Session/task 产品工作流未实现 |
+| **Entry** | 语义持久真源：消息、`RUNTIME_CONFIG`、Tool Result、Compaction 等 |
+| **HarnessThread** | durable Branch actor：`sessionId`、`headEntryId`、input sequence、`runnable`、execution epoch、processor lease |
+| **Branch(thread)** | 由 root→`headEntryId` 路径派生，不独立持久化 |
+| **ThreadInput** | 多生产者有序 mailbox：消息与配置命令；幂等键；TURN_BOUNDARY harvest |
+| **ModelInvocation** | 冻结 ProviderRequest 的 durable Provider 调用 |
+| **ToolInvocation** | 工具 lease、结果与终态；`PLATFORM`/`ENVIRONMENT` 路由；ID 是副作用幂等边界 |
+| **Interaction** | 通用 approval/clarification/external input |
+| **Root Activity** | 根 Session 树内查询投影（非独立写表） |
+| **Usage / Cost** | 每 Assistant Entry 一条不可变账本（`harness_model_usage`） |
 | **Live Environment** | 当前 Daemon 连接发现的内存工具/Skill 元数据；按名称唯一，不持久化 |
 
-前端 AI 从 Chat 卡片进入本地 Pane 工作区；Pane 可重复打开同一 Thread。空 Pane 首发按 `create Session -> attach Chat -> SET_AGENT -> USER_MESSAGE` 进入 mailbox。前端以 Thread 路径 Entries 为历史基线，未物化的 `USER_MESSAGE` / `CUSTOM_MESSAGE` inputs 与 active ThreadEvents 作覆盖层；SSE 以全局 `eventId` 字符串 cursor 恢复。Session 入口始终打开稳定 Main Thread；Tree filter 只改变投影，不改变 Branch 或 Provider Context。
+前端 AI 从 Chat 卡片进入本地 Pane 工作区。空 Pane 首发：`create Session -> attach Chat -> SET_AGENT -> USER_MESSAGE`。前端以 Thread 路径 Entries 为历史基线，未物化的 `USER_MESSAGE` / `CUSTOM_MESSAGE` inputs 为装饰队列；流式覆盖来自 Redis realtime SSE（事件名 `realtime`，stream-id cursor）。Session 入口始终打开稳定 Main Thread。
 
-执行由事件触发的 `ThreadProcessor` 推进：提交、Stop、自动重试到期、权限决定、Tool 或 Subagent 完成后 `kick`；低频 `ThreadRecoveryLifecycle` 扫描丢失的 durable work 与到期重试。Child Session 的 Tool ASK 仍归属 Child Thread，并向 delegation root Thread 写 relay event，根 UI 以同一 Invocation ID 决策。
+执行由 `ThreadReconciler` 推进 Entry/head；`ModelWorker` / 统一 `ToolWorker` 只写 Invocation 事实。提交、Stop、Interaction 解决、Invocation terminal 后 afterCommit wake；低频 recovery 扫描 `runnable` 与过期 lease。
 
 ComfyUI Run 与 Studio `FunctionRun` 是独立概念，不纳入 Harness Thread 模型。
+
+详细架构见 [harness-runtime-architecture.md](harness-runtime-architecture.md)。
 
 ## 4. Studio 事实
 
@@ -134,9 +141,9 @@ Canvas 表现模型与 Studio 词汇映射：`features/canvas/domain-map.ts`。
 | 文档 | 用途 |
 | --- | --- |
 | [domain-map.md](domain-map.md) | 词汇与前后端映射 |
-| [harness-thread-actor.md](harness-thread-actor.md) | Harness Session/Thread 架构事实源 |
+| [harness-runtime-architecture.md](harness-runtime-architecture.md) | Harness 执行架构事实源 |
+| [harness-runtime-contracts.md](harness-runtime-contracts.md) | Runtime 类型与事务契约 |
 | [infinite-canvas-implementation-design.md](infinite-canvas-implementation-design.md) | Studio 目标契约 |
-| [cloud-embedded-agent-runtime.md](cloud-embedded-agent-runtime.md) | Harness Thread 执行链 |
 | [frontend-implementation-design.md](frontend-implementation-design.md) | 前端落地 |
 | [frontend-design-system.md](../product-design/frontend-design-system.md) | 视觉 token |
-| [storage-models.md](storage-models.md) | 当前关系存储（Harness 与 Canvas 最小持久化） |
+| [storage-models.md](storage-models.md) | 关系存储摘要 |

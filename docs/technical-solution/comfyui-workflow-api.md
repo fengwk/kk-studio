@@ -15,7 +15,7 @@
 
 | 模块 | 角色 |
 | --- | --- |
-| `share/.../ComfyuiWorkflow*.java` | HTTP / DTO 边界 DTO；卡片 `id` 在边界以十进制字符串形式暴露（与项目内其它 snowflake 资源一致），持久层内部仍为 `long` |
+| `share/.../ComfyuiWorkflow*.java` | HTTP / DTO 边界 DTO；卡片 `id` 在边界以十进制字符串形式暴露，持久层内部仍为 `long` |
 | `core/comfyui/ComfyuiConfiguration` | Spring 配置：`ComfyUIClient` bean 仅在 `kk-studio.comfyui.enabled=true` 时创建 |
 | `core/comfyui/ComfyuiProperties` | `kk-studio.comfyui.*` 配置属性 |
 | `core/comfyui/ComfyuiRuntimeService` | 无状态运行期：参数映射、S3 输入桥、提交、查询（按 JSONPath selector 投影规范化结果）、取消、job-scoped 输出下载 |

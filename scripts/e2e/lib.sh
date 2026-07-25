@@ -6,7 +6,7 @@
 # - 默认 backend=127.0.0.1:18081、frontend=127.0.0.1:5173、profile=e2e
 # - 使用 PostgreSQL durable 库；重启 backend 后若 seed 不保留需重新注入 Provider credential
 # - frontend Vite 代理必须指向当前 backend：API_PROXY_TARGET=http://$BACKEND_HOST:$BACKEND_PORT
-# - daemon 不是 fat jar，必须用 -cp（daemon jar + runtime classpath）启动 DaemonMain
+# - daemon 不是 fat jar，必须用 -cp（daemon jar + 其自身 runtime 依赖 classpath）启动 DaemonMain，而非 harness-runtime 模块 classpath
 
 set -euo pipefail
 
@@ -39,9 +39,9 @@ require_cmd() {
 }
 
 resolve_java_home() {
-  local java_home=${JAVA_HOME_17:-${JAVA_HOME:-}}
+  local java_home=${JAVA_HOME_21:-${JAVA_HOME:-}}
   if [ -z "$java_home" ] || [ ! -x "$java_home/bin/java" ]; then
-    die "JAVA_HOME_17 or JAVA_HOME must point to JDK 17"
+    die "JAVA_HOME_21 or JAVA_HOME must point to JDK 21"
   fi
   echo "$java_home"
 }
@@ -90,7 +90,7 @@ kill_daemon() {
 
 package_backend() {
   local java_home=$1
-  step "Packaging backend (Java 17, offline, skipTests)"
+  step "Packaging backend (Java 21, offline, skipTests)"
   (
     cd "$REPO_ROOT"
     env JAVA_HOME="$java_home" mvn -o -pl web -am -DskipTests package
@@ -211,11 +211,6 @@ for provider_id, name, description, provider_type, base_env, key_env in PROVIDER
 PY
 }
 
-# Backward-compatible alias for older callers.
-sync_minimax_provider() {
-  sync_e2e_provider_credentials
-}
-
 start_frontend() {
   mkdir -p "$WORK_DIR"
   kill_port "$FRONTEND_PORT"
@@ -283,23 +278,33 @@ ensure_stack() {
   java_home=$(resolve_java_home)
   mkdir -p "$WORK_DIR"
 
-  if [ "$rebuild" = "true" ] || [ ! -f "$BACKEND_JAR" ]; then
+  if [ "$rebuild" = "true" ]; then
+    package_backend "$java_home"
+    start_backend "$java_home"
+    start_frontend
+    if [ "$with_daemon" = "true" ]; then
+      start_daemon "$java_home"
+    fi
+    return
+  fi
+
+  if [ ! -f "$BACKEND_JAR" ]; then
     package_backend "$java_home"
   fi
 
   if ! curl -fsS "$BACKEND_URL/api/agents?pageNumber=1&pageSize=1" >/dev/null 2>&1; then
     start_backend "$java_home"
-    sync_minimax_provider
+    sync_e2e_provider_credentials
   else
     step "Reusing backend $BACKEND_URL"
-    # 若模型契约仍是旧 configJson，则强制重建
+    # Reused processes must expose the current structured model contract.
     if ! curl -fsS "$BACKEND_URL/api/models?pageNumber=1&pageSize=1" \
       | python3 -c 'import sys,json; d=json.load(sys.stdin); m=((d.get("data") or {}).get("results") or [None])[0];
 raise SystemExit(0 if m and isinstance(m.get("config"), dict) else 1)' 2>/dev/null; then
       step "Backend contract stale (missing model.config); rebuilding and restarting"
       package_backend "$java_home"
       start_backend "$java_home"
-      sync_minimax_provider
+      sync_e2e_provider_credentials
     fi
   fi
 

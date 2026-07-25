@@ -12,7 +12,7 @@
 | Function | 命名输入、配置、命名输出和统一 FunctionRun |
 | Workflow | 独立 Draft/Version/Run，发布后成为 Function |
 | Agent | 通过 Catalog/Execution Port 和 Tool Adapter 接入，不依赖 Harness 内部类型 |
-| 持久化 | MySQL/H2 元数据与 Command/Run/Event，Payload 使用可替换 ResourceStore |
+| 持久化 | PostgreSQL 元数据与 Command/Run/Event，Payload 使用可替换 ResourceStore |
 | 前端 | React 页面扩展，Canvas 与 Workflow 复用图形基础设施但使用独立领域 Store |
 | 并发 | Revision + Command 幂等键 + 数据库状态机 + Worker lease |
 | 事件 | Append-only Event + cursor SSE，刷新和断线可恢复 |
@@ -25,7 +25,7 @@
 | core Studio 适配 | `DurableCanvasService` + 内存 FunctionCatalog；Resource/Workflow/Function Runtime 仍为 stub |
 | share DTO | `share.model.studio.*` |
 | web API | `/api/canvases`、`/api/functions`、`/api/workflows` |
-| Canvas DB schema | H2/MySQL 已落地 `canvas_document` / `canvas_node` / `canvas_link` / `canvas_command` |
+| Canvas DB schema | PostgreSQL 已落地 `canvas_document` / `canvas_node` / `canvas_link` / `canvas_command` |
 | Canvas Command | 已支持 create text/generate-text/link、move nodes、delete node；revision 与幂等冲突已落地 |
 | Canvas 前端 | Library/Create 已接真实 API；Editor snapshot 与 command 闭环待接 |
 | 生成 Provider | **未实现**（`system.generate-*` 仅 Catalog 定义） |
@@ -118,7 +118,7 @@ flowchart TD
     WorkflowService[Workflow Compiler + Runtime]
     AgentPort[Agent Execution Port]
     Catalog[Function Catalog]
-    Store[(MySQL / H2)]
+    Store[(PostgreSQL)]
     Payload[(ResourceStore / Object Storage)]
 
     User --> CanvasUI
@@ -213,7 +213,7 @@ flowchart LR
 
 ### 5.1 标识
 
-所有业务 ID 使用 Snowflake 或等价 64 位 ID，Web DTO 序列化为字符串。Function 系统标识使用不可变引用：
+所有持久化业务 ID 由 PostgreSQL sequence 分配，Web DTO 序列化为十进制字符串。Function 系统标识使用不可变引用：
 
 ```java
 public record FunctionRef(String functionId, String version) {}
@@ -386,7 +386,7 @@ Group 使用 `parent_group_id` 保存单父关系。服务端在移动层级时�
 - 新的 `member -> parentGroup` 聚合边不会让有效依赖图形成环。
 - 最大嵌套深度不超过 Workspace 策略。
 
-MySQL 5.7 不依赖递归 CTE。MVP 在 Canvas 规模上限内一次加载 `id + parent_group_id` 构建内存邻接表，用于后代移动、Group 展开和环校验；所有结果仍在同一 Canvas revision 事务中提交。
+MVP 在 Canvas 规模上限内一次加载 `id + parent_group_id` 构建内存邻接表，用于后代移动、Group 展开和环校验；所有结果仍在同一 Canvas revision 事务中提交。
 
 `RemoveGroup` 默认在同一 Command 中把直接成员 reparent 到被删 Group 的父级、保持世界坐标并重算相关 Group selector；递归删除使用独立破坏性命令。
 
@@ -809,7 +809,7 @@ gmt_next_attempt
 状态和输出在数据库中，Worker 崩溃后由新 Worker claim。非幂等执行出现未知副作用时进入等待人工处理，不自动重复调用。
 `attempt` 记录同一 Run 内由执行策略允许的自动尝试；用户或 Workflow policy 在终态后重试时创建新 FunctionRun，并使用 `retry_of_run_id` 关联。
 
-MVP 使用数据库轮询，不引入 MQ/Redis。Worker 先分页读取 due Run ID，再以 `status + gmt_lease_expire + version` 条件 CAS claim；不依赖 MySQL 8 的 `SKIP LOCKED`。同一模式用于 Workflow 父 Run 恢复。
+MVP 使用数据库轮询，不引入 MQ。Worker 先分页读取 due Run ID，再以 `status + gmt_lease_expire + version` 条件 CAS claim。同一模式用于 Workflow 父 Run 恢复。
 
 ### 12.5 输入快照
 
@@ -1074,7 +1074,7 @@ Workflow Output 聚合 Step 的 Run 所属 Resource 后，创建父 FunctionRun 
 
 ## 15. Agent 接入边界
 
-Agent Harness 已以 Session Entry Tree 与 AgentThread 落地；Studio Agent Adapter 仍由 `core` 提供，`studio` 不依赖其实现。本方案只冻结端口职责，不冻结 AgentRef、Snapshot、HTTP API 或 Harness 类型。
+Agent Harness 已以 Session Entry Tree 与 HarnessThread 落地；Studio Agent Adapter 仍由 `core` 提供，`studio` 不依赖其实现。本方案只冻结端口职责，不冻结 AgentRef、Snapshot、HTTP API 或 Harness 类型。
 
 本节 Java 片段表示 studio 侧所需的最小归一化语义，不是对未来 Agent Harness API 的签名要求；Adapter 可以按最终 Harness 契约转换。
 
@@ -1192,7 +1192,7 @@ core/src/main/java/fun/fengwk/kkstudio/core/studio
 
 ## 17. 存储模型
 
-本节定义完整目标 schema；当前仅落地 `canvas_document`、`canvas_node`、`canvas_link` 与 `canvas_command`，具体当前字段以 [storage-models.md](storage-models.md) 和 H2/MySQL schema 为准。完整目标中 MySQL 5.7 与 H2 使用同一逻辑 schema。所有 `*_json` 字段使用 `longtext` 并在 application/domain codec 中校验，不依赖数据库专有 JSON 查询；业务 ID 使用 BIGINT，Web 层序列化为字符串；通用时间字段沿用仓库 `gmt_create` / `gmt_modified` 命名。除 append-only Event/Version 表外，可更新表统一带 `version` 行版本用于持久化 CAS，它与 Canvas/Workflow 业务 revision 不同。
+本节定义完整目标 schema；当前仅落地 `canvas_document`、`canvas_node`、`canvas_link` 与 `canvas_command`，具体当前字段以 [storage-models.md](storage-models.md) 和 `schema-postgresql.sql` 为准。结构化 payload 使用 `jsonb` 并在 application/domain codec 中校验；业务 ID 使用 BIGINT，Web 层序列化为字符串；时间字段使用 `timestamptz(3)`。除 append-only Event/Version 表外，可更新表统一带 `version` 行版本用于持久化 CAS，它与 Canvas/Workflow 业务 revision 不同。
 
 ### 17.1 表清单
 
@@ -1558,7 +1558,7 @@ gmt_modified
 unique(parent_function_run_id, step_id, iteration_key)
 ```
 
-`iteration_key` 非空；普通 Step 固定为 `value`，ForEach 使用稳定 item key，避免 MySQL 唯一索引对 NULL 的多值语义破坏幂等。
+`iteration_key` 非空；普通 Step 固定为 `value`，ForEach 使用稳定 item key，避免唯一索引对 NULL 的多值语义破坏幂等。
 
 ### 17.15 `studio_event`
 
@@ -1582,7 +1582,7 @@ unique(event_id)
 unique(workspace_id, cursor)
 ```
 
-写 Event 的事务锁定对应 `workspace_event_sequence` 行并递增 cursor，因此同一 Workspace 的 cursor 与提交顺序一致；`event_id` 使用业务 ID 生成器，`sequence` 用于单聚合顺序校验。不能直接把数据库全局自增值或跨进程 Snowflake ID 当成无遗漏的 Workspace 提交顺序 cursor。
+写 Event 的事务锁定对应 `workspace_event_sequence` 行并递增 cursor，因此同一 Workspace 的 cursor 与提交顺序一致；`event_id` 使用业务 ID 生成器，`sequence` 用于单聚合顺序校验。全局业务 ID 序列允许间隙且不表达 Workspace 提交顺序，不能替代 cursor。
 
 高频 Run progress 保存在 `function_run_event`；只把 queued、waiting、terminal、approval 和 output publication 等 Workspace 需要观察的摘要投影到 `studio_event`。
 
@@ -2050,7 +2050,7 @@ FunctionRun 保存 estimated/actual cost。Workflow Compiler 生成上界：
 
 ### 25.2 Persistence 集成测试
 
-- MySQL/H2 schema 一致。
+- PostgreSQL schema 与代码契约一致。
 - revision 并发冲突。
 - Command 幂等。
 - Run lease reclaim。
@@ -2100,7 +2100,7 @@ MVP 基线：
 - studio model/canvas package。
 - CanvasDocument、Node、Link、Reference、Command。
 - Resource/ResourceVersion/ResourceStore。
-- MySQL/H2 schema、repository 和 API。
+- PostgreSQL schema、repository 和 API。
 - 前端 Canvas snapshot、interaction store 和 Node renderer。
 
 ### 26.2 Function 闭环
@@ -2141,14 +2141,14 @@ MVP 基线：
 后端：
 
 ```bash
-env JAVA_HOME=$JAVA_HOME_17 mvn clean verify
+env JAVA_HOME=$JAVA_HOME_21 mvn clean verify
 ```
 
 定向模块：
 
 ```bash
-env JAVA_HOME=$JAVA_HOME_17 mvn -pl studio -am test
-env JAVA_HOME=$JAVA_HOME_17 mvn -pl web -am test
+env JAVA_HOME=$JAVA_HOME_21 mvn -pl studio -am test
+env JAVA_HOME=$JAVA_HOME_21 mvn -pl web -am test
 ```
 
 前端：

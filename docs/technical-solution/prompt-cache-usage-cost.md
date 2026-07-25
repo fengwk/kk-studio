@@ -1,6 +1,6 @@
 # Prompt Cache、Usage 与 Cost Ledger
 
-本文描述 Harness 当前生效的提示缓存控制、模型用量归一化、成本快照、原子账本和聚合查询方案。一次成功的 Provider 调用以最终 `ProviderRequest` 和完成时 `ProviderResponse` 为输入，生成 Assistant Entry 与一条不可变 `model_usage_record`；聚合层再按 Thread、Session 或 Model 读取账本。
+本文描述 Harness 当前生效的提示缓存控制、模型用量归一化、成本快照、原子账本和聚合查询方案。一次成功的 Provider 调用以最终 `ProviderRequest` 和完成时 `ProviderResponse` 为输入，生成 Assistant Entry 与一条不可变 `harness_model_usage` 账本；聚合层再按 Thread、Session 或 Model 读取账本。
 
 ## 端到端链路
 
@@ -11,18 +11,18 @@ flowchart LR
     R --> D[ModelWorker / Provider Adapter]
     D --> E[ProviderResponse<br/>usage metadata]
     E --> F[ModelUsageDraft]
-    F --> G[Assistant Entry + model_usage_record<br/>同一事务]
+    F --> G[Assistant Entry + harness_model_usage<br/>Reconciler apply 事务]
     G --> H[Thread / Session / Model 聚合 API]
 ```
 
 链路中的事实边界如下：
 
 1. `ModelInvocationPlanner` 先构造 `cacheControl = NONE` 的标准请求。
-2. 同一步骤直接调用绑定 `sessionId` 的 `PromptCacheRequestFinalizer`，覆盖请求中已有的 cache control；不存在 extension interceptor 或执行时 hook。
-3. 最终请求作为冻结 `ProviderRequest` 写入 durable ModelInvocation；`ModelWorker` 只回放该请求。
+2. 同一步骤直接调用绑定 `sessionId` 的 `PromptCacheRequestFinalizer`，由它独占最终 cache control 的生成。
+3. 最终请求作为冻结 `ProviderRequest` 写入 durable ModelInvocation；`ModelWorker` 只回放该请求中的 providerType/providerResourceId/model。
 4. Provider Adapter 只接收冻结后的控制结果。
 5. Provider 完成后，`ModelUsageDraft.from(...)` 从该请求和响应冻结缓存、模型、用量、成本与 Provider metadata。
-6. 在 token fencing 下将 Assistant Entry、`model_usage_record`、Thread head 与对应 ThreadEvents 原子提交；工具调用路径还在同一事务中写 Tool Invocations。
+6. `ModelWorker` 先提交 ModelInvocation terminal 并标记 Thread runnable；`ThreadReconciler` 在 processor fencing 下原子提交 Assistant Entry、`harness_model_usage`、可选 ToolInvocations 与 head。
 
 ## Prompt Cache 控制
 
@@ -225,77 +225,58 @@ id, sessionId, threadId, assistantEntryId, createdAt
 
 Assistant Entry 的 `AssistantMessageMetadata` 同时保存 `stopReason`、`ModelUsage` 和 `ModelCost`。Assistant metadata 必须且只能出现在 ASSISTANT message 中；账本通过 `assistantEntryId` 与该 Entry 一一关联。
 
-无工具完成路径与工具准备路径都由 `HarnessThreadTransactionService` 的事务方法提交：
+Model terminal 由 worker 写入 `harness_model_invocation`；Assistant/账本物化由 Reconciler apply 事务提交：
 
 ```text
-lock Thread and verify processor token
+lock Thread and verify processor token + execution epoch
 -> append Assistant Entry
--> insert model_usage_record with the same assistantEntryId
+-> insert harness_model_usage with the same assistantEntryId
 -> optional: insert Tool Invocations
 -> advance Thread head with processor fencing
--> append terminal ThreadEvents
+-> set ModelInvocation.appliedAt
 ```
 
 原子性规则：
 
-- Thread 不存在或 `processorToken` 不匹配时，方法返回 `false`，不写 Assistant Entry、账本或 Invocation。
-- Assistant Entry 和账本先写入；若 Thread head fencing advance 失败，抛出 `ConcurrentModificationException` 并回滚整个事务，禁止留下孤儿 Entry 或账本。
-- 工具准备路径中的 Invocation 唯一键冲突，同样回滚 Assistant Entry、账本、Invocation、head 与 ThreadEvents。
+- Thread 不存在或 processor token / epoch 不匹配时，apply 失败，不写 Assistant Entry、账本或 Tool Invocation。
+- Assistant Entry 和账本同事务；head fencing 失败则整事务回滚，禁止留下孤儿 Entry 或账本。
+- 工具准备路径中的 Invocation 唯一键冲突同样回滚。
 - Provider 调用属于外部 at-least-once 边界；持久提交以 processor token、唯一 `assistant_entry_id` 和 Invocation 唯一键阻止同一成功事实重复落库。
 
 账本由数据库唯一键保证每个成功完成事实只写一次：
 
-- `unique (assistant_entry_id)`
+- `unique (assistant_entry_id)` on `harness_model_usage`
 
-## `model_usage_record` Schema
+## `harness_model_usage` Schema
 
-生产 H2 与 MySQL schema 包含同一组字段。除 `cache_affinity_key`、`request_id`、`reported_service_tier` 外，其余业务字段均为 `NOT NULL`。
+权威 DDL 见 `schema-postgresql.sql`。除可空 cache/request metadata 字段外，归属与用量主字段均为 `NOT NULL`。
 
-| 分组 | 字段 | H2 类型 | MySQL 类型 |
-| --- | --- | --- | --- |
-| 标识 | `id` | `bigint` | `bigint` |
-| 归属 | `session_id` | `bigint` | `bigint` |
-| 归属 | `thread_id` | `bigint` | `bigint` |
-| 归属 | `assistant_entry_id` | `bigint` | `bigint` |
-| Provider | `provider_resource_id` | `bigint` | `bigint` |
-| Model | `model_resource_id` | `bigint` | `bigint` |
-| Provider | `provider_type` | `varchar(64)` | `varchar(64)` |
-| Model | `provider_model_id` | `varchar(256)` | `varchar(256)` |
-| Cache | `prompt_cache_mode` | `varchar(32)` | `varchar(32)` |
-| Cache | `prompt_cache_retention` | `varchar(16)` | `varchar(16)` |
-| Cache | `cache_eligible` | `boolean` | `tinyint(1)` |
-| Cache | `cache_affinity_key` | `varchar(512) null` | `varchar(512) null` |
-| 完成 | `stop_reason` | `varchar(32)` | `varchar(32)` |
-| Usage | `usage_input_tokens` | `bigint` | `bigint` |
-| Usage | `usage_output_tokens` | `bigint` | `bigint` |
-| Usage | `usage_cache_read_tokens` | `bigint` | `bigint` |
-| Usage | `usage_cache_write_tokens` | `bigint` | `bigint` |
-| Usage | `usage_cache_write_long_tokens` | `bigint` | `bigint` |
-| Usage | `usage_reasoning_tokens` | `bigint` | `bigint` |
-| Usage | `usage_provider_total_tokens` | `bigint` | `bigint` |
-| Cost | `cost_currency` | `varchar(16)` | `varchar(16)` |
-| Cost | `cost_input` | `numeric(32,12)` | `decimal(32,12)` |
-| Cost | `cost_output` | `numeric(32,12)` | `decimal(32,12)` |
-| Cost | `cost_cache_read` | `numeric(32,12)` | `decimal(32,12)` |
-| Cost | `cost_cache_write` | `numeric(32,12)` | `decimal(32,12)` |
-| Cost | `cost_cache_write_long` | `numeric(32,12)` | `decimal(32,12)` |
-| Cost | `cost_reasoning` | `numeric(32,12)` | `decimal(32,12)` |
-| Cost | `cost_total` | `numeric(32,12)` | `decimal(32,12)` |
-| Pricing | `pricing_currency` | `varchar(16)` | `varchar(16)` |
-| Pricing | `pricing_tier` | `varchar(64)` | `varchar(64)` |
-| Pricing | `pricing_service_tier` | `varchar(64)` | `varchar(64)` |
-| Pricing | `pricing_service_tier_multiplier` | `numeric(32,12)` | `decimal(32,12)` |
-| Pricing | `pricing_version` | `varchar(64)` | `varchar(64)` |
-| Pricing | `pricing_input_per_million_tokens` | `numeric(32,12)` | `decimal(32,12)` |
-| Pricing | `pricing_output_per_million_tokens` | `numeric(32,12)` | `decimal(32,12)` |
-| Pricing | `pricing_cache_read_per_million_tokens` | `numeric(32,12)` | `decimal(32,12)` |
-| Pricing | `pricing_cache_write_per_million_tokens` | `numeric(32,12)` | `decimal(32,12)` |
-| Pricing | `pricing_cache_write_long_per_million_tokens` | `numeric(32,12)` | `decimal(32,12)` |
-| Pricing | `pricing_reasoning_per_million_tokens` | `numeric(32,12)` | `decimal(32,12)` |
-| Provider metadata | `request_id` | `varchar(256) null` | `varchar(256) null` |
-| Provider metadata | `reported_service_tier` | `varchar(64) null` | `varchar(64) null` |
-| Provider metadata | `raw_usage_json` | `clob` | `longtext` |
-| 时间 | `gmt_create` | `timestamp(3)` | `datetime(3)` |
+| 分组 | 字段 | PostgreSQL 类型 |
+| --- | --- | --- |
+| 标识 | `id` | `bigint` |
+| 归属 | `session_id` | `bigint` |
+| 归属 | `thread_id` | `bigint` |
+| 归属 | `assistant_entry_id` | `bigint` |
+| Provider | `provider_resource_id` | `bigint` |
+| Model | `model_resource_id` | `bigint` |
+| Provider | `provider_type` | `varchar(64)` |
+| Model | `provider_model_id` | `varchar(256)` |
+| Cache | `prompt_cache_mode` | `varchar(32)` |
+| Cache | `prompt_cache_retention` | `varchar(16)` |
+| Cache | `cache_eligible` | `boolean` |
+| Cache | `cache_affinity_key` | `varchar(512) null` |
+| 完成 | `stop_reason` | `varchar(32)` |
+| Usage | `usage_input_tokens` | `bigint` |
+| Usage | `usage_output_tokens` | `bigint` |
+| Usage | `usage_cache_read_tokens` | `bigint` |
+| Usage | `usage_cache_write_tokens` | `bigint` |
+| Usage | `usage_cache_write_long_tokens` | `bigint` |
+| Usage | `usage_reasoning_tokens` | `bigint` |
+| Usage | `usage_provider_total_tokens` | `bigint` |
+| Cost | `cost_*` | `numeric(32,12)` |
+| Pricing | `pricing_*` | `varchar` / `numeric(32,12)` |
+| Provider metadata | `request_id` / `reported_service_tier` / `raw_usage` | 可空 varchar / jsonb |
+| 时间 | `created_at` | `timestamptz(3)` |
 
 约束与查询索引：
 
@@ -306,17 +287,6 @@ index (thread_id, id)
 index (session_id, id)
 index (model_resource_id, id)
 ```
-
-MySQL 中对应名称为：
-
-```text
-uk_model_usage_record_assistant_entry
-idx_model_usage_record_thread
-idx_model_usage_record_session
-idx_model_usage_record_model
-```
-
-H2 使用 `numeric(32,12)`、`clob`、`timestamp(3)`；MySQL 使用 `decimal(32,12)`、`longtext`、`datetime(3)`，表引擎为 InnoDB，字符集为 utf8mb4。
 
 ## 聚合 API 与指标
 
@@ -395,11 +365,11 @@ tokenReadRatio =
 
 ## Executable Model 配置解析
 
-持久 `agent_model.config_json` 是结构化 Model 配置的数据库载体，必须在 mutation 阶段和 Turn 启动时同时验证，确保模型 ID、变体、缓存策略、价格快照和工具绑定都能被 runtime 实际执行。能力由 `config_json.abilities` 直接派生。
+持久 `agent_model.config` JSONB 是结构化 Model 配置的数据库载体，必须在 mutation 阶段和 Turn 启动时同时验证，确保模型 ID、变体、缓存策略、价格快照和工具绑定都能被 runtime 实际执行。能力由 `config.abilities` 直接派生。
 
 ### 必需字段
 
-`config_json` 必须是合法 JSON object，固定包含：
+`config` 必须是合法 JSON object，固定包含：
 
 - `limit.context` / `limit.output`：正整数，`limit.output <= limit.context`。
 - `abilities.tools` / `abilities.reasoning`：boolean。
@@ -408,7 +378,7 @@ tokenReadRatio =
 - `defaultVariant`：字符串，必须命中 `variants[].id`。
 - `pricing.currency/pricingTier/serviceTier/serviceTierMultiplier/version` 全部非空且 `serviceTierMultiplier > 0`；六类每百万 token 单价 `inputPerMillionTokens/outputPerMillionTokens/cacheReadPerMillionTokens/cacheWritePerMillionTokens/cacheWriteLongPerMillionTokens/reasoningPerMillionTokens` 均为非负有限数。
 
-runtime 仅从 `config_json.abilities` 派生 `tools` / `reasoning` 与 `inputModalities`，并直接投影到 `ModelDescriptor`。
+runtime 仅从 `config.abilities` 派生 `tools` / `reasoning` 与 `inputModalities`，并直接投影到 `ModelDescriptor`。
 
 ### API 契约
 
@@ -416,50 +386,36 @@ runtime 仅从 `config_json.abilities` 派生 `tools` / `reasoning` 与 `inputMo
 
 ### 解析失败语义
 
-缺失或类型错误的必要字段、未知字段、标量类型强制转换、尾随 JSON、`limit.output > limit.context`、未知 enum 值、重复变体 `id`、未匹配 `defaultVariant` 等任何不合规输入都会在 `AgentModelMutationFactory`（写入阶段）或 `DatabaseTurnResourceResolver`（Turn 启动阶段）抛出 `IllegalArgumentException`，并阻止 Provider Turn。任何可以写库但不能执行的 `agent_model` 记录都被视为非法，立即失败。
+缺失或类型错误的必要字段、未知字段、标量类型强制转换、尾随 JSON、`limit.output > limit.context`、未知 enum 值、重复变体 `id`、未匹配 `defaultVariant` 等任何不合规输入都会在 `AgentModelMutationFactory`（写入阶段）或 `RuntimeConfigSnapshotResolver / ModelExecutionResolver`（Turn 启动阶段）抛出 `IllegalArgumentException`，并阻止 Provider Turn。任何可以写库但不能执行的 `agent_model` 记录都被视为非法，立即失败。
 
 ### 模型 CRUD 契约
 
-`AgentModelMutationFactory` 在 create 与 update 路径上通过 `AgentModelRuntimeConfigParser.encode(...)` 完成 typed 校验与持久化编码，使 `newModel(...)` 或 `update(...)` 不会产生不可执行记录。`AgentModelConverter` 通过同一 parser 将 `config_json` 解码为 `AgentModelConfigDTO`；`DatabaseTurnResourceResolver` 再次解析该配置并构造运行时 `ModelDescriptor` 与 `ModelVariant`。
+`AgentModelMutationFactory` 在 create 与 update 路径上通过 typed 校验与持久化编码，使 `newModel(...)` 或 `update(...)` 不会产生不可执行记录。运行时从 `RUNTIME_CONFIG` 与持久 Provider/Model 资源解析 `ModelDescriptor` / `ModelVariant`。
 
 ## Resource 解析与进程生命周期
 
-`DatabaseTurnResourceResolver` 从 Thread 运行时配置（当前 AgentDefinition + Thread model/variant）解析 modelId/variant/tools 为 `TurnResources`，并强制 Provider credential/config 来自持久库。
+执行资源来自冻结 `RuntimeConfigSnapshot` 与持久 Provider/Model 配置，不 live 重建 Agent。
 
 ### Provider Factory 调用
 
-解析器只通过 `HarnessExtensionHost.providerFactory(ProviderType)` 拉取可信工厂，并只使用：
+只通过 `HarnessExtensionHost.providerFactory(ProviderType)` 拉取可信工厂：
 
-- `ProviderFactory.create(credential, configJson)` 构造 `ProviderAdapter`；
-- 工厂暴露的 `PromptCacheCapability` 决定 `PromptCachePolicy`，按 ProviderType 固定映射为 OpenAI/Responses 的 `affinityShort`、Anthropic 的 `breakpointsShort`、Google 的 `automatic`。本仓库不向 Google 提交任何 cached-content resource，cache 事实完全由 `ProviderResponse` usage 归一化读取。
+- `ProviderFactory.create(credential, configJson)` 构造 `ProviderAdapter`
+- 工厂暴露的 `PromptCacheCapability` 决定 `PromptCachePolicy`；cache 事实由 `ProviderResponse` usage 归一化读取
 
-注册的 `ProviderFactory` 返回的 `ProviderAdapter` 必须与请求的 `ProviderType` 匹配，否则立即失败；持久 Provider 配置中的 `modelCallTimeoutMillis` 与 `modelCallIdleTimeoutMillis` 必须为正整数，缺失时分别回退为 30 分钟与 120 秒；持久 `baseUrl` 必须非空。
+`ProviderAdapter` 必须与请求 `ProviderType` 匹配；timeout 配置缺失时回退为合理默认值。
 
 ### Tool Binding 解析
 
-Agent 配置中的 `tools` 仅为短名。Turn 时 platform-first：先匹配已注册的非 ENVIRONMENT tool（同名须唯一版本），再回退到所选 READY Environment capability 中的同名 tool 并绑定 `environmentName`。所选 Environment 离线或缺失则明确失败；不支持 `environment:<name>/...` 长名字符串。
+Agent 配置中的 `tools` 仅为短名。platform-first：先匹配已注册 PLATFORM tool，再回退所选 READY Environment capability 并绑定 `environmentName`。Environment 离线则明确失败。
 
 ### 进程生命周期
 
-`ThreadProcessor` 是由 `ThreadKick` 激活的有界执行器，不是周期 Turn worker：
-
-- input、权限决定、Tool terminal 与 Subagent completion 都在事务提交后 kick 所属 Thread。
-- Processor 从数据库获取 `processor_token` / `processor_until`；Provider 调用期间按 lease 的三分之一续租，丢租后先标记 ownership lost，再取消本地 handle 并拒绝后续 delta/callback 提交。
-- 每个 Turn 冻结 Provider 的 `modelCallTimeoutMillis` / `modelCallIdleTimeoutMillis`：前者同时作为 SDK 调用 deadline 和 Processor 总时长 watchdog，后者从 Turn 创建开始计时，并由 `onStarted` 与每个 Provider delta 重置。任一 watchdog 到期会先持久化失败，再 best-effort 取消本地 handle。
-- Provider 完成后由 `commitFinalAssistant` 或 `prepareTools` 在同一事务中写 Assistant Entry 与账本；token fencing 失败时整笔提交回滚。
-- `ThreadRecoveryLifecycle` 只低频 kick expired token、pending input、due/expired Tool 或 head 上待应用 terminal Tool Result；它不是 Usage、Turn 或 Tool 的主轮询器。
-- 非 Environment Tool 由 ThreadProcessor 对当前 Thread 调用 `dispatchDueForThread`；Environment Tool 由 daemon gateway 基于 durable Invocation 推进。
-
-## Validation
-
-| 验证目标 | 测试文件 |
-| --- | --- |
-| 配置解析、缺字段、类型错误、enum 未知、变体重复 | [`AgentModelRuntimeConfigParserTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/agent/model/runtime/AgentModelRuntimeConfigParserTest.java) |
-| Mutation 拒绝不可执行 JSON、保留/重新校验部分更新 | [`AgentModelMutationFactoryTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/agent/model/service/impl/AgentModelMutationFactoryTest.java) |
-| Provider timeout 默认、规范化、CRUD、Turn 资源解析与总/idle watchdog | [`AgentProviderConfigurationCodecTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/agent/provider/configuration/AgentProviderConfigurationCodecTest.java)、[`AgentProviderMutationFactoryTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/agent/provider/service/impl/AgentProviderMutationFactoryTest.java)、[`DatabaseTurnResourceResolverTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/resource/DatabaseTurnResourceResolverTest.java)、[`ThreadProcessorIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/ThreadProcessorIntegrationTest.java) |
-| workdir 不能逃逸 environmentRoot、properties 边界 | [`HarnessRuntimePropertiesTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/configuration/HarnessRuntimePropertiesTest.java) |
-| Thread Turn、lease heartbeat、并发 enqueue、Usage 原子提交与失败语义 | [`ThreadProcessorIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/ThreadProcessorIntegrationTest.java) |
-| Recovery 只选择可恢复 durable work | [`HarnessThreadRecoveryMapperTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/store/HarnessThreadRecoveryMapperTest.java)、[`ThreadRecoveryLifecycleTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/worker/ThreadRecoveryLifecycleTest.java) |
+- `ThreadReconciler` 由 Thread signal/recovery 激活，是 Entry/head 唯一写者。
+- `ModelWorker` / 统一 `ToolWorker` 只写 Invocation 事实与 realtime projection。
+- Provider 调用使用冻结 `ProviderRequest` 的 total/idle deadline；worker lease heartbeat 不是 progress activity。
+- Provider terminal 后 worker 写 ModelInvocation 并标记 Thread runnable；Reconciler apply 写 Assistant Entry 与 `harness_model_usage`。
+- Recovery 低频扫描 runnable Thread、过期 lease 与 due retry；不是主调度路径。
 
 ## 组件与文件地图
 
@@ -471,23 +427,22 @@ Agent 配置中的 `tools` 仅为短名。Turn 时 platform-first：先匹配已
 | Provider mapping | control 校验与 OpenAI、Anthropic、Google Adapter | [`CacheRequestValidator.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/model/provider/CacheRequestValidator.java)、[`OpenAiProviderAdapter.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/model/provider/OpenAiProviderAdapter.java)、[`OpenAiResponsesProviderAdapter.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/model/provider/OpenAiResponsesProviderAdapter.java)、[`AnthropicProviderAdapter.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/model/provider/AnthropicProviderAdapter.java)、[`GoogleProviderAdapter.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/model/provider/GoogleProviderAdapter.java) |
 | Usage normalization | 七类 usage、metadata、raw usage | [`ProviderUsageNormalizer.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/model/provider/ProviderUsageNormalizer.java)、[`ProviderResponse.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/model/provider/ProviderResponse.java) |
 | Pricing/cost | 请求价格与成本快照 | [`ModelUsage.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/model/ModelUsage.java)、[`ModelPricing.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/model/ModelPricing.java)、[`ModelCost.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/model/ModelCost.java) |
-| Ledger domain | Assistant metadata、Draft、Record、Store port | [`AssistantMessageMetadata.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/session/AssistantMessageMetadata.java)、[`MessageEntryPayload.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/session/MessageEntryPayload.java)、[`ModelUsageDraft.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageDraft.java)、[`ModelUsageRecord.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageRecord.java)、[`ModelUsageRecordStore.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageRecordStore.java) |
-| Ledger transaction | Assistant/ledger/invocation/head/events 原子提交 | [`HarnessThreadTransactionService.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/thread/service/HarnessThreadTransactionService.java) |
-| Ledger persistence | MyBatis 行映射与 domain 转换 | [`MysqlModelUsageRecordStore.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/usage/store/MysqlModelUsageRecordStore.java)、[`ModelUsageRecordMapper.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/usage/store/mapper/ModelUsageRecordMapper.java)、[`ModelUsageRecordDO.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/usage/store/model/ModelUsageRecordDO.java) |
-| Schema | H2 与 MySQL DDL | [`schema-h2.sql`](../../core/src/main/resources/schema-h2.sql)、[`schema-mysql.sql`](../../core/src/main/resources/schema-mysql.sql) |
-| Aggregation/API | scope 聚合、指标、Controller、DTO | [`ModelUsageAggregationServiceImpl.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/usage/service/impl/ModelUsageAggregationServiceImpl.java)、[`ModelUsageSummaryAccumulator.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/usage/service/impl/ModelUsageSummaryAccumulator.java)、[`StudioModelUsageController.java`](../../web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioModelUsageController.java)、[`ModelUsageSummaryDTO.java`](../../share/src/main/java/fun/fengwk/kkstudio/share/model/ModelUsageSummaryDTO.java) |
-| Frontend contract | 大整数与 decimal 类型边界、Thread/Session/Model API client | [`contracts.ts`](../../frontend/src/shared/api/contracts.ts)、[`harness-service.ts`](../../frontend/src/shared/api/harness-service.ts)、[`agent-service.ts`](../../frontend/src/shared/api/agent-service.ts) |
+| Ledger domain | Draft、Record、Store port | [`ModelUsageDraft.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageDraft.java)、[`ModelUsageRecord.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageRecord.java)、[`ModelUsageRecordStore.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageRecordStore.java) |
+| Ledger persistence | PostgreSQL MyBatis | [`PostgresqlModelUsageRecordStore.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/usage/store/PostgresqlModelUsageRecordStore.java)、[`ModelUsageRecordMapper.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/usage/store/mapper/ModelUsageRecordMapper.java) |
+| Schema | PostgreSQL DDL | [`schema-postgresql.sql`](../../core/src/main/resources/schema-postgresql.sql) |
+| Aggregation/API | scope 聚合、Controller、DTO | [`ModelUsageAggregationServiceImpl.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/usage/service/impl/ModelUsageAggregationServiceImpl.java)、[`StudioModelUsageController.java`](../../web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioModelUsageController.java)、[`ModelUsageSummaryDTO.java`](../../share/src/main/java/fun/fengwk/kkstudio/share/model/ModelUsageSummaryDTO.java) |
+| Frontend contract | Thread/Session/Model API client | [`contracts.ts`](../../frontend/src/shared/api/contracts.ts)、[`harness-service.ts`](../../frontend/src/shared/api/harness-service.ts)、[`agent-service.ts`](../../frontend/src/shared/api/agent-service.ts) |
 
 ## 验证面
 
 | 验证目标 | 测试文件 |
 | --- | --- |
 | Affinity key 格式、输入范围、动态历史排除、NUL 与字段边界 | [`PromptCacheAffinityKeyFactoryTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheAffinityKeyFactoryTest.java) |
-| Finalizer 覆盖 hook control、mode/retention、SYSTEM/TOOLS 交集 | [`PromptCacheRequestFinalizerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheRequestFinalizerTest.java) |
-| Planner 冻结 request 与 finalizer 行为 | [`ModelInvocationPlannerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/model/plan/ModelInvocationPlannerTest.java)、[`PromptCacheRequestFinalizerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheRequestFinalizerTest.java) |
+| Finalizer 覆盖 mode/retention、SYSTEM/TOOLS 交集 | [`PromptCacheRequestFinalizerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheRequestFinalizerTest.java) |
+| Planner 冻结 request 与 finalizer 行为 | [`ModelInvocationPlannerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/model/plan/ModelInvocationPlannerTest.java) |
 | Provider capability 与 HTTP cache 字段映射 | [`CoreHarnessExtensionTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/extension/CoreHarnessExtensionTest.java)、[`ProviderAdapterContractTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/model/provider/ProviderAdapterContractTest.java) |
 | 七类 usage、provider total、raw usage 正文隔离 | [`ProviderUsageNormalizerTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/model/provider/ProviderUsageNormalizerTest.java) |
 | 六分项成本、multiplier、scale 与公共不变量 | [`ModelContractTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/model/ModelContractTest.java)、[`ModelUsageDraftTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageDraftTest.java) |
-| Assistant/账本提交、processor fencing、steer-all 消息批次的单次 Provider Turn | [`ThreadProcessorIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/ThreadProcessorIntegrationTest.java) |
+| Model worker / reconcile 与 usage 提交路径 | [`ModelWorkerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/model/worker/ModelWorkerTest.java)、[`PostgresqlModelInvocationTransactionsIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/model/worker/PostgresqlModelInvocationTransactionsIntegrationTest.java)、[`PostgresqlThreadReconcileTransactionsIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/reconcile/PostgresqlThreadReconcileTransactionsIntegrationTest.java) |
 | Record 的 Thread 归属、不变量与正 ID | [`ModelUsageRecordTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageRecordTest.java) |
 | 前端 Thread Usage API 路径与十进制字符串 ID | [`harness-service.test.ts`](../../frontend/src/shared/api/harness-service.test.ts)、[`agent-service.test.ts`](../../frontend/src/shared/api/agent-service.test.ts) |

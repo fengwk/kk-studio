@@ -15,8 +15,8 @@ flowchart TD
     I --> J[product-design/infinite-canvas-prototype/index.html]
     B --> C[architecture.md]
     B --> L[infinite-canvas-implementation-design.md]
-    B --> S[harness-thread-actor.md]
-    B --> D[cloud-embedded-agent-runtime.md]
+    B --> S[harness-runtime-architecture.md]
+    B --> X[harness-runtime-contracts.md]
     B --> E[backend-implementation-design.md]
     B --> F[storage-models.md]
     B --> G[frontend-implementation-design.md]
@@ -33,13 +33,14 @@ flowchart TD
 
 | 文档 | 角色 | 说明 |
 | --- | --- | --- |
-| [technical-solution/README.md](technical-solution/README.md) | 技术方案入口 | 汇总已落地架构与当前批准的目标落地设计 |
+| [technical-solution/README.md](technical-solution/README.md) | 技术方案入口 | 汇总已落地架构与实现边界 |
 | [technical-solution/domain-map.md](technical-solution/domain-map.md) | 领域词汇 | Harness/Studio 双域词汇与前后端映射 |
-| [product-design/infinite-canvas-prototype.md](product-design/infinite-canvas-prototype.md) | 产品原型 | 定义无限画布的产品定位、页面原型、交互和视觉边界；可直接打开 [交互原型](product-design/infinite-canvas-prototype/index.html) |
-| [product-design/infinite-canvas-product-logic.md](product-design/infinite-canvas-product-logic.md) | 产品逻辑 | 定义 Node、Resource、Link、ResourceReference、Function、Workflow、传播、运行和 MVP 闭环标准 |
-| [product-design/frontend-design-system.md](product-design/frontend-design-system.md) | 前端设计规范 | 定义全局 token、AppShell、组件与 Agent 面板模块化约定；明确视觉统一进度与迁移清单 |
-| [technical-solution/infinite-canvas-implementation-design.md](technical-solution/infinite-canvas-implementation-design.md) | 无限画布技术方案 | 定义领域模块、存储、Command、Function/Workflow Runtime、Web API、前端状态和低耦合 Agent Port |
-| [technical-solution/harness-thread-actor.md](technical-solution/harness-thread-actor.md) | Harness 架构事实源 | 定义 Session Tree、Main Thread、durable Thread actor、mailbox、Stop/自动重试、Tool permission、Subagent 和前后端契约 |
+| [product-design/infinite-canvas-prototype.md](product-design/infinite-canvas-prototype.md) | 产品原型 | 无限画布产品定位、页面原型、交互和视觉边界；可直接打开 [交互原型](product-design/infinite-canvas-prototype/index.html) |
+| [product-design/infinite-canvas-product-logic.md](product-design/infinite-canvas-product-logic.md) | 产品逻辑 | Node、Resource、Link、Function、Workflow 与 MVP 闭环 |
+| [product-design/frontend-design-system.md](product-design/frontend-design-system.md) | 前端设计规范 | 全局 token、AppShell、组件约定 |
+| [technical-solution/infinite-canvas-implementation-design.md](technical-solution/infinite-canvas-implementation-design.md) | 无限画布技术方案 | 领域模块、存储、Command、Function/Workflow Runtime、Web API |
+| [technical-solution/harness-runtime-architecture.md](technical-solution/harness-runtime-architecture.md) | Harness 架构事实源 | Session Tree、Thread、Invocation、Interaction 与 durable actor 边界 |
+| [technical-solution/harness-runtime-contracts.md](technical-solution/harness-runtime-contracts.md) | Runtime 契约 | 类型、状态机、端口与事务契约 |
 
 ## 维护规则
 
@@ -47,4 +48,4 @@ flowchart TD
 | --- | --- |
 | 单一事实来源 | 同一主题只维护一份当前有效文档，不维护历史版本分叉 |
 | 上下文无关 | 文档应让新接手的 Agent 不依赖会话历史即可理解 |
-| 状态边界明确 | 每份文档只陈述当前生效的职责、协议与约束；Harness 以其架构事实源统一术语 |
+| 状态边界明确 | 每份文档只陈述当前生效的职责、协议与约束 |
