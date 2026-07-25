@@ -74,6 +74,37 @@ class ThreadCommandCoordinatorTest {
     assertEquals(0, transactions.enqueueCalls);
   }
 
+  /**
+   * Every typed command returns its durable idempotent result before validating new request data.
+   */
+  @Test
+  void typedCommandRetriesShortCircuitBeforeValidationAndConfigLookup() {
+    ThreadInput user = rememberExisting(ThreadInputType.USER_MESSAGE, "user-key");
+    ThreadInput custom = rememberExisting(ThreadInputType.CUSTOM_MESSAGE, "custom-key");
+    ThreadInput yolo = rememberExisting(ThreadInputType.SET_YOLO, "yolo-key");
+    ThreadInput model = rememberExisting(ThreadInputType.SET_MODEL, "model-key");
+
+    assertSame(user, coordinator.submitUserMessage(1L, " ", "user-key").input());
+    assertSame(custom, coordinator.submitCustomMessage(1L, null, " ", "custom-key").input());
+    assertSame(yolo, coordinator.queueYolo(1L, true, "yolo-key").input());
+    assertSame(model, coordinator.queueModel(1L, 99L, "deleted", "model-key").input());
+    assertEquals(0, transactions.lockCalls);
+    assertEquals(0, transactions.enqueueCalls);
+    assertEquals(0, configSource.replaceCalls);
+  }
+
+  /** Branch creation is a framework-free pass-through with the injected clock instant. */
+  @Test
+  void createBranchDelegatesWithInjectedClock() {
+    HarnessThread expected = new HarnessThread(5L, 2L, 3L, 0L, false, 0L, null, NOW, NOW);
+    transactions.branch = expected;
+
+    assertSame(expected, coordinator.createBranch(2L, 3L));
+    assertEquals(2L, transactions.lastBranchSessionId);
+    assertEquals(3L, transactions.lastBranchEntryId);
+    assertEquals(NOW, transactions.lastBranchNow);
+  }
+
   /** User message payload is typed USER_MESSAGE with USER role text content after validation. */
   @Test
   void submitUserMessageBuildsTypedPayloadAfterContentValidation() {
@@ -112,6 +143,16 @@ class ThreadCommandCoordinatorTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> coordinator.submitCustomMessage(1L, "assistant", "x", "c1"));
+  }
+
+  @Test
+  void submitCustomMessageRejectsBlankAndUnknownRoles() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> coordinator.submitCustomMessage(1L, " ", "x", "blank-role"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> coordinator.submitCustomMessage(1L, "operator", "x", "unknown-role"));
   }
 
   /** YOLO freezes via pure snapshot transform without touching RuntimeConfigSource. */
@@ -172,11 +213,39 @@ class ThreadCommandCoordinatorTest {
     assertEquals(ThreadInputType.SET_MODEL, transactions.lastPayload.type());
   }
 
+  /** Config replacement commands require an existing frozen runtime config. */
+  @Test
+  void configReplacementRejectsThreadWithoutRuntimeConfig() {
+    assertThrows(IllegalStateException.class, () -> coordinator.queueYolo(1L, true, "y-missing"));
+    assertThrows(
+        IllegalStateException.class, () -> coordinator.queueModel(1L, 3L, "fast", "model-missing"));
+    assertEquals(0, transactions.enqueueCalls);
+    assertEquals(0, configSource.replaceCalls);
+  }
+
   @Test
   void stopUsesInjectedClock() {
     ThreadCommandCoordinator.StopResult stop = coordinator.stop(1L);
     assertEquals(NOW, transactions.lastStopNow);
     assertEquals(1L, stop.executionEpoch());
+  }
+
+  private ThreadInput rememberExisting(ThreadInputType type, String key) {
+    ThreadInputPayload payload = new StubPayload(type);
+    ThreadInput input =
+        new ThreadInput(
+            9L + transactions.existing.size(),
+            1L,
+            1L,
+            type,
+            payload,
+            key,
+            InputStatus.QUEUED,
+            NOW,
+            null);
+    transactions.existing.put(
+        "1:" + key, new ThreadCommandTransactions.EnqueueResult(input, TARGET));
+    return input;
   }
 
   private record StubPayload(ThreadInputType type) implements ThreadInputPayload {}
@@ -219,6 +288,10 @@ class ThreadCommandCoordinatorTest {
     ThreadInputPayload lastPayload;
     Instant lastNow;
     Instant lastStopNow;
+    HarnessThread branch;
+    long lastBranchSessionId;
+    long lastBranchEntryId;
+    Instant lastBranchNow;
     final AtomicInteger nextId = new AtomicInteger(100);
 
     @Override
@@ -229,7 +302,10 @@ class ThreadCommandCoordinatorTest {
 
     @Override
     public HarnessThread createBranch(long sessionId, long fromEntryId, Instant now) {
-      throw new UnsupportedOperationException();
+      lastBranchSessionId = sessionId;
+      lastBranchEntryId = fromEntryId;
+      lastBranchNow = now;
+      return branch;
     }
 
     @Override

@@ -1,5 +1,7 @@
 /**
- * Durable ToolInvocation 状态、冻结 binding、preparation 与可信编译期 interceptor contract。该包不执行 Tool；实际
- * Platform/Environment worker 由后续任务实现。
+ * Durable ToolInvocation 状态、冻结 binding、preparation 与可信 interceptor contract。
+ *
+ * <p>统一执行状态机位于 {@link fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorker}；Platform 与
+ * Environment 路由共享同一 worker 和 {@link fun.fengwk.kkstudio.harness.tool.execution.Tool} API。
  */
 package fun.fengwk.kkstudio.harness.runtime.tool;

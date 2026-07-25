@@ -8,12 +8,14 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import fun.fengwk.kkstudio.core.harness.realtime.HarnessRealtimeEventTail;
@@ -23,8 +25,10 @@ import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** SSE close cancels the tail worker so block-read loops stop; overload rejects without work. */
 class StudioHarnessThreadSseEmitterTest {
@@ -85,6 +89,28 @@ class StudioHarnessThreadSseEmitterTest {
         IllegalStateException.class,
         () -> emitter.send(SseEmitter.event().name("probe").data("x")));
     Thread.sleep(200);
+    verifyNoInteractions(tail);
+  }
+
+  /** Production AsyncTaskExecutor and plain Executor adapters both retain a cancellable Future. */
+  @Test
+  void supportsManagedAsyncAndPlainExecutorsWithoutInlinePolling() {
+    HarnessRealtimeEventTail tail = mock(HarnessRealtimeEventTail.class);
+    AsyncTaskExecutor async = mock(AsyncTaskExecutor.class);
+    @SuppressWarnings("unchecked")
+    Future<Object> asyncFuture = mock(Future.class);
+    doReturn(asyncFuture).when(async).submit(any(Runnable.class));
+
+    SseEmitter asyncEmitter = StudioHarnessThreadSseEmitter.stream(1L, "0-0", tail, async);
+
+    verify(async).submit(any(Runnable.class));
+    asyncEmitter.complete();
+
+    AtomicReference<Runnable> submitted = new AtomicReference<>();
+    SseEmitter plainEmitter = StudioHarnessThreadSseEmitter.stream(1L, "0-0", tail, submitted::set);
+
+    assertNotNull(submitted.get());
+    plainEmitter.complete();
     verifyNoInteractions(tail);
   }
 }

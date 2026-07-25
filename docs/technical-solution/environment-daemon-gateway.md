@@ -8,11 +8,11 @@ Environment 是**服务器内存**中的实时资源，按非空 `environmentNam
 
 | 层 | 职责 |
 | --- | --- |
-| `core/environment` | LiveEnvironmentRegistry、Daemon 协议传输、RemoteToolTransport、load_skill 端口 |
+| `core/environment` | LiveEnvironmentRegistry、Daemon endpoint/Gateway、RemoteToolTransport、load_skill 端口 |
 | `harness-tool` | location-neutral Tool API、RemoteTool、Daemon v1 envelope/capabilities/result codec |
 | `harness-daemon` | 独立 Daemon 连接、重连、本地工具执行与 invocation journal |
 | `harness-runtime` | 统一 `ToolWorker`、ToolInvocation durable 状态、`ToolExecutionLocation` 路由 |
-| `web` | `/api/environments/daemon/v1` WebSocket 文本帧适配；只读 `GET /api/environments` |
+| `web` | 通过 Core endpoint/query API 提供 `/api/environments/daemon/v1` WebSocket 文本帧与只读 `GET /api/environments`；不直接消费 Harness 类型 |
 
 数据库是 ToolInvocation 状态、lease、终态结果、所属 Thread runnable 与全局 Artifact 的唯一来源。partial 进度进入 Redis realtime projection。Gateway 拥有连接与协议，不是第二套 durable 状态机。
 
@@ -82,12 +82,15 @@ sequenceDiagram
     participant W as WebSocket adapter
     participant G as Environment Gateway
     participant R as Live Registry
+    participant L as READY listener bridge
     participant TW as ToolWorker
     participant DB as PostgreSQL
 
     D->>W: HELLO / CAPABILITIES / READY
     W->>G: open / receive text frames
     G->>R: bind name, capabilities, READY/lastSeen
+    G-->>L: READY hint after protocol locks
+    L-->>TW: scheduler dispatchNext(ENVIRONMENT, name)
     TW->>DB: claim ToolInvocation lease
     TW->>G: RemoteTool send INVOKE
     G->>D: INVOKE
@@ -106,6 +109,8 @@ Wire `invocationId` 始终是持久 Invocation ID 的十进制字符串。`INVOK
 4. recovered lease 的非幂等调用保守收敛为 `UNKNOWN`，不重发
 
 连接丢失或发送失败只丢弃瞬时 active handle，不伪造终态。持久 lease 到期后由 recovery/claim 接管。
+
+Gateway 构造时注入不可变 `EnvironmentReadyListener`，不持有 ToolWorker，也不暴露 mutable handler/executor setter。`HarnessToolWorkerConfiguration` 只按 `RemoteToolTransport` SPI 构造 ToolWorker；listener 使用 lazy ToolWorker provider 与 tool-worker scheduler，调度失败时 best-effort 直调。Gateway `pollOnce` 复用同一 listener，保证 READY hint 丢失后仍可恢复。
 
 ## 回调、结果与 Artifact
 
