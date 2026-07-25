@@ -9,7 +9,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** 基于 JDK 17 {@link WebSocket} 的生产 transport。 */
+/** 基于 JDK {@link WebSocket} 的生产 transport。 */
 public final class JdkWebSocketTransport implements DaemonTransport {
 
   private final HttpClient httpClient;

@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.core.harness.redis;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
 
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTarget;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 
 import java.util.Objects;

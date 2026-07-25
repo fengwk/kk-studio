@@ -44,8 +44,6 @@ public abstract class WebPostgresTestSupport {
     registry.add("spring.datasource.multi.primary.password", POSTGRES::getPassword);
     registry.add("spring.sql.init.mode", () -> SQL_INIT_NEVER);
     registry.add("kk-studio.harness.runtime.workers-enabled", () -> WORKERS_DISABLED);
-    // Keep snowflake bridge on a fixed worker so missing Redis cannot break id allocation.
-    registry.add("convention.snowflake-id.worker-id", () -> "0");
   }
 
   @BeforeEach

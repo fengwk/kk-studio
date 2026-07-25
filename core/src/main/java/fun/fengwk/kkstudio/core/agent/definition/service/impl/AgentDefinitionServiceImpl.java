@@ -80,7 +80,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
       }
       return id;
     } catch (NumberFormatException error) {
-      throw new IllegalArgumentException("modelId must be a positive Snowflake ID", error);
+      throw new IllegalArgumentException("modelId must be a positive decimal id", error);
     }
   }
 }

@@ -27,11 +27,6 @@ spring:
     configuration:
       map-underscore-to-camel-case: true
 
-convention:
-  snowflake-id:
-    initial-timestamp: 1702214261706
-    # 测试固定 worker，避免无 Redis 时 worker 续租失败；生产见 application.yml Redis worker 策略。
-    worker-id: 0
 
 kk-studio:
   harness:

@@ -7,8 +7,8 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTargetKind;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 
 /** ExecutionTarget 严格确定性 codec 测试。 */
 class ExecutionTargetJsonCodecTest {

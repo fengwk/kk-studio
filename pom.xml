@@ -48,11 +48,6 @@
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-harness-kernel</artifactId>
-                <version>${kk-studio.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>fun.fengwk.kk-studio</groupId>
                 <artifactId>kk-studio-harness-tool</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>

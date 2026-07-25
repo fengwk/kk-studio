@@ -17,10 +17,8 @@ import fun.fengwk.kkstudio.core.harness.model.worker.ModelInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.observability.service.impl.HarnessObservabilityDtoConverter;
 import fun.fengwk.kkstudio.core.harness.observability.service.impl.HarnessObservabilityQueryServiceImpl;
 import fun.fengwk.kkstudio.core.harness.session.service.impl.HarnessSessionQueryServiceImpl;
-import fun.fengwk.kkstudio.core.harness.task.store.DatabaseRootActivityStore;
 import fun.fengwk.kkstudio.core.harness.thread.service.impl.HarnessThreadQueryServiceImpl;
 import fun.fengwk.kkstudio.core.harness.tool.worker.PostgresqlToolInvocationMapper;
-import fun.fengwk.kkstudio.harness.runtime.task.RootActivity;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.share.model.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
@@ -43,7 +41,6 @@ class HarnessQueryServicesUnitTest {
   private HarnessSessionQueryServiceImpl sessionQuery;
   private HarnessThreadQueryServiceImpl threadQuery;
   private HarnessObservabilityQueryServiceImpl observabilityQuery;
-  private DatabaseRootActivityStore rootActivityStore;
   private ModelInvocationMapper modelInvocationMapper;
   private InteractionMapper interactionMapper;
 
@@ -65,7 +62,6 @@ class HarnessQueryServicesUnitTest {
             converter,
             new HarnessObservabilityDtoConverter(),
             CLOCK);
-    rootActivityStore = new DatabaseRootActivityStore(queryMapper, CLOCK);
   }
 
   @Test
@@ -146,14 +142,6 @@ class HarnessQueryServicesUnitTest {
     assertEquals(1, activities.size());
     assertEquals("RUNNABLE", activities.get(0).getEventType());
 
-    List<RootActivity> storeActs = rootActivityStore.list(1L, 0, 10);
-    assertEquals(1, storeActs.size());
-    assertEquals(21L, storeActs.get(0).threadId());
-    assertThrows(IllegalArgumentException.class, () -> rootActivityStore.list(0, 0, 1));
-    assertThrows(IllegalArgumentException.class, () -> rootActivityStore.list(1L, -1, 1));
-    when(queryMapper.findSession(99L)).thenReturn(null);
-    assertThrows(IllegalArgumentException.class, () -> rootActivityStore.list(99L, 0, 1));
-
     // child session resolves up to root for activities
     HarnessQueryRow child = session(2L, 1L, "child");
     when(queryMapper.findSession(2L)).thenReturn(child);
@@ -161,8 +149,6 @@ class HarnessQueryServicesUnitTest {
     when(queryMapper.listSessionTree(1L)).thenReturn(List.of(root, child));
     when(queryMapper.listThreadViewsBySession(2L)).thenReturn(List.of());
     assertEquals(1, observabilityQuery.listRootActivities("2", 0, 10).size());
-    assertEquals(1, rootActivityStore.list(2L, 0, 10).size());
-    assertTrue(rootActivityStore.list(1L, 21L, 10).isEmpty());
     assertThrows(
         IllegalArgumentException.class, () -> observabilityQuery.getArtifact("not-a-number"));
     assertThrows(IllegalArgumentException.class, () -> observabilityQuery.getToolInvocation("0"));

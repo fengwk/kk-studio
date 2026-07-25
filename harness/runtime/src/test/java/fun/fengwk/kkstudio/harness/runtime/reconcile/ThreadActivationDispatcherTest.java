@@ -7,11 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.kernel.continuation.ContinuationRef;
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTargetKind;
-import fun.fengwk.kkstudio.harness.kernel.execution.Failure;
-import fun.fengwk.kkstudio.harness.kernel.execution.StepResult;
+import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
+import fun.fengwk.kkstudio.harness.runtime.execution.Failure;
+import fun.fengwk.kkstudio.harness.runtime.execution.StepResult;
 import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 
 import java.util.ArrayDeque;

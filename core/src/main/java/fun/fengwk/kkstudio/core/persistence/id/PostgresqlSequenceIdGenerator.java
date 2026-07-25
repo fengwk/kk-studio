@@ -5,16 +5,13 @@ import org.springframework.stereotype.Component;
 import java.util.Objects;
 
 /**
- * Single source of truth for non-Harness durable ids.
+ * Single source of truth for application durable ids.
  *
  * <p>Each call advances the PostgreSQL {@code kk_studio_id_seq} (declared in {@code
  * schema-postgresql.sql}) exactly once via {@link SequenceMapper#nextValue()}. The result is the
  * raw {@code bigint} returned by {@code nextval} and is therefore guaranteed to be positive, unique
- * across the cluster, and shared across every business generator that delegates here. No caching,
- * no Redis dependency, no Snowflake namespace fallback.
- *
- * <p>Callers in this slice are constructor-injected; the static service-locator pattern from the
- * legacy {@code AgentIdGenerator} has been removed.
+ * across the cluster, and shared across business and Harness generators that delegate here. No
+ * caching, Redis dependency or external id-service fallback participates in allocation.
  *
  * @author fengwk
  */

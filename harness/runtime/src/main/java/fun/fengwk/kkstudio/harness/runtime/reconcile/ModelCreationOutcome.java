@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.reconcile;
 
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTargetKind;
-import fun.fengwk.kkstudio.harness.kernel.execution.Failure;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
+import fun.fengwk.kkstudio.harness.runtime.execution.Failure;
 
 import java.util.Objects;
 
@@ -12,8 +12,8 @@ import java.util.Objects;
  * <p>{@link Created} 携带新 ModelInvocation 的 {@link ExecutionTarget}，其 kind 必须为 {@link
  * ExecutionTargetKind#MODEL_INVOCATION}，target 由事务在内部分配。{@link LostOwnership} 表示 fencing 失败。{@link
  * Failed} 表示 typed 事务失败（如 plan 校验未通过），调用方经 best-effort release 后返回 {@link
- * fun.fengwk.kkstudio.harness.kernel.execution.StepResult.Failed}。意外 RuntimeException 经 best-effort
- * release 后重新抛出。
+ * fun.fengwk.kkstudio.harness.runtime.execution.StepResult.Failed}。意外 RuntimeException 经
+ * best-effort release 后重新抛出。
  */
 public sealed interface ModelCreationOutcome {
 

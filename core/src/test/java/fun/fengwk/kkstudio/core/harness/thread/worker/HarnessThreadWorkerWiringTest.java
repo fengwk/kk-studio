@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.core.harness.thread.worker;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -13,7 +12,6 @@ import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.reconcile.ThreadActivationDispatcher;
 import fun.fengwk.kkstudio.harness.runtime.reconcile.ThreadReconciler;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadProviderCancellation;
 
 /** 生产 composition root 只暴露 final Reconciler/dispatcher/recovery 资源。 */
 class HarnessThreadWorkerWiringTest extends PostgresSpringTestSupport {
@@ -30,6 +28,5 @@ class HarnessThreadWorkerWiringTest extends PostgresSpringTestSupport {
     assertInstanceOf(ThreadActivationDispatcher.class, threadKick);
     assertNotNull(recoveryLifecycle);
     assertFalse(recoveryLifecycle.isRunning());
-    assertEquals(0, context.getBeansOfType(ThreadProviderCancellation.class).size());
   }
 }

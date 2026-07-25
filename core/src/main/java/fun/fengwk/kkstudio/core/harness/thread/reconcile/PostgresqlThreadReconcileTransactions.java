@@ -6,26 +6,21 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.harness.kernel.continuation.ContinuationRef;
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTargetKind;
-import fun.fengwk.kkstudio.harness.kernel.execution.Lease;
-import fun.fengwk.kkstudio.harness.kernel.session.EntryPayload;
-import fun.fengwk.kkstudio.harness.kernel.session.EntryType;
-import fun.fengwk.kkstudio.harness.kernel.session.SessionEntry;
-import fun.fengwk.kkstudio.harness.kernel.thread.HarnessThread;
-import fun.fengwk.kkstudio.harness.kernel.thread.InputStatus;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInput;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInputType;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderRequestJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderResponseJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
 import fun.fengwk.kkstudio.harness.runtime.entry.AssistantErrorEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.RuntimeEntryPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
+import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlanner;
@@ -45,13 +40,18 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ArtifactMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
+import fun.fengwk.kkstudio.harness.runtime.thread.InputStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeConfigInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeEntryInputPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
@@ -104,7 +104,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   @Autowired
   public PostgresqlThreadReconcileTransactions(
       ThreadReconcileMapper mapper, HarnessIdGenerator ids, HarnessRuntimeProperties properties) {
-    this(mapper, ids, new ModelInvocationPlanner(), properties.getThreadProcessorLeaseDuration());
+    this(mapper, ids, new ModelInvocationPlanner(), properties.getThreadReconcileLeaseDuration());
   }
 
   PostgresqlThreadReconcileTransactions(
@@ -117,7 +117,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     this.planner = Objects.requireNonNull(planner, "planner");
     this.leaseDuration = Objects.requireNonNull(leaseDuration, "leaseDuration");
     if (leaseDuration.isZero() || leaseDuration.isNegative()) {
-      throw new IllegalArgumentException("thread processor lease duration must be positive");
+      throw new IllegalArgumentException("thread reconcile lease duration must be positive");
     }
   }
 

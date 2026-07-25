@@ -9,15 +9,15 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.harness.thread.command.RuntimeConfigSnapshotResolver;
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTargetKind;
-import fun.fengwk.kkstudio.harness.kernel.thread.InputStatus;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInput;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInputPayload;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInputType;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
+import fun.fengwk.kkstudio.harness.runtime.thread.InputStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 import fun.fengwk.kkstudio.share.model.HarnessThreadAgentSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 
@@ -32,7 +32,7 @@ class HarnessThreadCommandServiceImplTest {
     ThreadCommandTransactions transactions = mock(ThreadCommandTransactions.class);
     RuntimeConfigSnapshotResolver resolver = mock(RuntimeConfigSnapshotResolver.class);
     ActivationNotifier notifier = mock(ActivationNotifier.class);
-    KernelHarnessThreadDtoConverter converter = mock(KernelHarnessThreadDtoConverter.class);
+    HarnessThreadDtoConverter converter = mock(HarnessThreadDtoConverter.class);
     HarnessThreadCommandServiceImpl service =
         new HarnessThreadCommandServiceImpl(
             transactions, resolver, () -> ToolSettings.DEFAULT, notifier, converter);

@@ -3,21 +3,24 @@ package fun.fengwk.kkstudio.harness.runtime.session;
 import java.time.Instant;
 import java.util.Objects;
 
-/** Session 聚合快照：共享 append-only Entry Tree 与稳定 Main Thread。 */
+/**
+ * Session 聚合边界：共享一份 append-only Entry Tree 并指向稳定 Main Thread。
+ *
+ * <p>{@code title} 为可空展示属性。{@code parentSessionId} 与 {@code parentInvocationId} 仅在 Child Session
+ * 上有值，且必须同时存在。
+ */
 public record Session(
     long id,
     long mainThreadId,
     String title,
     Long parentSessionId,
-    long rootSessionId,
     Long parentInvocationId,
-    int depth,
-    long version,
     Instant createdAt,
     Instant updatedAt) {
+
   public Session {
-    if (id <= 0 || rootSessionId <= 0 || mainThreadId <= 0) {
-      throw new IllegalArgumentException("session, root and mainThread ids must be positive");
+    if (id <= 0 || mainThreadId <= 0) {
+      throw new IllegalArgumentException("session and mainThread ids must be positive");
     }
     if (parentSessionId != null && parentSessionId <= 0) {
       throw new IllegalArgumentException("parentSessionId must be positive when present");
@@ -25,13 +28,12 @@ public record Session(
     if (parentInvocationId != null && parentInvocationId <= 0) {
       throw new IllegalArgumentException("parentInvocationId must be positive when present");
     }
-    if (depth < 0 || version < 0) {
-      throw new IllegalArgumentException("depth and version must not be negative");
+    if ((parentSessionId == null) != (parentInvocationId == null)) {
+      throw new IllegalArgumentException(
+          "parentSessionId and parentInvocationId must be present together");
     }
-    if ((parentSessionId == null
-            && (rootSessionId != id || depth != 0 || parentInvocationId != null))
-        || (parentSessionId != null && (rootSessionId == id || depth == 0))) {
-      throw new IllegalArgumentException("root and child session fields are inconsistent");
+    if (title != null && title.isBlank()) {
+      throw new IllegalArgumentException("title must not be blank when present");
     }
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
     updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
@@ -40,29 +42,8 @@ public record Session(
     }
   }
 
-  public static Session root(long id, long mainThreadId, String title, Instant now) {
-    return new Session(id, mainThreadId, title, null, id, null, 0, 0, now, now);
-  }
-
-  public static Session child(
-      long id,
-      long mainThreadId,
-      String title,
-      long parentSessionId,
-      long rootSessionId,
-      long parentInvocationId,
-      int depth,
-      Instant now) {
-    return new Session(
-        id,
-        mainThreadId,
-        title,
-        parentSessionId,
-        rootSessionId,
-        parentInvocationId,
-        depth,
-        0,
-        now,
-        now);
+  /** 是否为根 Session（无父 Session）。 */
+  public boolean isRoot() {
+    return parentSessionId == null;
   }
 }

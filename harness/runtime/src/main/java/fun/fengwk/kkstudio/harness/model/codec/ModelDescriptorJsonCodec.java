@@ -33,7 +33,7 @@ import java.util.TreeSet;
 /**
  * 共享的 {@link ModelDescriptor} / {@link ModelVariant} 严格 deterministic JSON codec。
  *
- * <p>本 codec 是 harness-model 中 model 与 variant 子树的唯一权威实现；其他 codec（如 {@code
+ * <p>本 codec 是 runtime 模块 {@code harness.model} 包中 model 与 variant 子树的唯一权威实现；其他 codec（如 {@code
  * ProviderRequestJsonCodec}）必须把对应子树委派到本类，避免 wire 漂移。
  *
  * <p>字段访问为逐字段 JsonNode 读 / 写：每个对象层都先列出允许字段集合，未知字段直接抛 {@link IllegalArgumentException}；类型不符（如非

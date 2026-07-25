@@ -22,8 +22,8 @@ public class HarnessRuntimeProperties {
   /** 单次恢复扫描最多 kick 的 Thread 数。 */
   private int threadRecoveryBatchSize = 100;
 
-  /** Thread reconcile processor lease；该 lease 只保护单次 activation，不改变 stop epoch。 */
-  private Duration threadProcessorLeaseDuration = Duration.ofSeconds(30);
+  /** Thread reconcile activation lease；只保护单次 activation，不改变 stop epoch。 */
+  private Duration threadReconcileLeaseDuration = Duration.ofSeconds(30);
 
   /** 本进程 Thread activation 的有界并发度。 */
   private int threadWorkerConcurrency = 8;

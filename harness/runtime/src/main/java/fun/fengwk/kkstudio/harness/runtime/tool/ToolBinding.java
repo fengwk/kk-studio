@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.tool;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 
 import java.util.Objects;
 

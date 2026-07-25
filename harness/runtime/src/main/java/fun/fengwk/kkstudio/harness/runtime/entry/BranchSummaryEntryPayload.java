@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.entry;
 
-import fun.fengwk.kkstudio.harness.kernel.session.EntryType;
-
 /** Branch 路径结束处的摘要 Entry。 */
 public record BranchSummaryEntryPayload(String summary) implements RuntimeEntryPayload {
 

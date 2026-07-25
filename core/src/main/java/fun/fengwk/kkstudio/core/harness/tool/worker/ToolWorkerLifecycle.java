@@ -4,8 +4,8 @@ import org.springframework.context.SmartLifecycle;
 
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorker;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 
 import java.time.Duration;
 import java.util.Objects;

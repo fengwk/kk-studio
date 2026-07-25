@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.interaction;
 
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTarget;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 
 import java.time.Instant;
 import java.util.Objects;

@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonGateway;
 import fun.fengwk.kkstudio.core.harness.tool.service.HarnessToolConfiguration;
 import fun.fengwk.kkstudio.core.harness.tool.worker.HarnessToolWorkerConfiguration;
-import fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtension;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionRegistry;

@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.extension;
 
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.context.ContextTransform;
 import fun.fengwk.kkstudio.harness.runtime.tool.AfterToolCallInterceptor;
 import fun.fengwk.kkstudio.harness.runtime.tool.BeforeToolCallInterceptor;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -16,10 +15,8 @@ import java.util.Objects;
 /** 仅允许扩展贡献受支持的 typed contract，并在 Host 初始化后冻结。 */
 public final class HarnessExtensionRegistry {
 
-  private final List<ContextTransform> contextTransforms = new ArrayList<>();
   private final List<BeforeToolCallInterceptor> beforeToolCallInterceptors = new ArrayList<>();
   private final List<AfterToolCallInterceptor> afterToolCallInterceptors = new ArrayList<>();
-  private final List<BeforeCompactionInterceptor> beforeCompactionInterceptors = new ArrayList<>();
   private final List<HarnessLifecycleObserver> lifecycleObservers = new ArrayList<>();
   private final List<ProviderFactory> providerFactories = new ArrayList<>();
   private final List<ToolFactory> toolFactories = new ArrayList<>();
@@ -32,20 +29,12 @@ public final class HarnessExtensionRegistry {
 
   HarnessExtensionRegistry() {}
 
-  public void addContextTransform(ContextTransform transform) {
-    add(contextTransforms, transform, "transform");
-  }
-
   public void addBeforeToolCallInterceptor(BeforeToolCallInterceptor interceptor) {
     add(beforeToolCallInterceptors, interceptor, "interceptor");
   }
 
   public void addAfterToolCallInterceptor(AfterToolCallInterceptor interceptor) {
     add(afterToolCallInterceptors, interceptor, "interceptor");
-  }
-
-  public void addBeforeCompactionInterceptor(BeforeCompactionInterceptor interceptor) {
-    add(beforeCompactionInterceptors, interceptor, "interceptor");
   }
 
   public void addLifecycleObserver(HarnessLifecycleObserver observer) {
@@ -94,20 +83,12 @@ public final class HarnessExtensionRegistry {
     frozen = true;
   }
 
-  List<ContextTransform> contextTransforms() {
-    return List.copyOf(contextTransforms);
-  }
-
   List<BeforeToolCallInterceptor> beforeToolCallInterceptors() {
     return List.copyOf(beforeToolCallInterceptors);
   }
 
   List<AfterToolCallInterceptor> afterToolCallInterceptors() {
     return List.copyOf(afterToolCallInterceptors);
-  }
-
-  List<BeforeCompactionInterceptor> beforeCompactionInterceptors() {
-    return List.copyOf(beforeCompactionInterceptors);
   }
 
   List<HarnessLifecycleObserver> lifecycleObservers() {

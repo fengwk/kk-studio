@@ -7,9 +7,8 @@ import org.springframework.context.annotation.Import;
 /**
  * Web module Spring Boot test entry.
  *
- * <p>WebPostgresTestSupport pins a fixed Snowflake worker id so suites remain stable without a
- * production Redis worker lease; Redis-backed realtime adapters still receive Testcontainers when
- * exercised.
+ * <p>Postgres-backed integration suites pin durable ids through PostgreSQL sequences; Redis-backed
+ * realtime adapters still receive Testcontainers when exercised.
  */
 @SpringBootApplication
 @Import(HarnessWebTestConfiguration.class)

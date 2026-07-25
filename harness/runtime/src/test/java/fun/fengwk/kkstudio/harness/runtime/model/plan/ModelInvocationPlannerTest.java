@@ -9,9 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.kernel.session.EntryPayload;
-import fun.fengwk.kkstudio.harness.kernel.session.EntryType;
-import fun.fengwk.kkstudio.harness.kernel.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
@@ -36,6 +33,8 @@ import fun.fengwk.kkstudio.harness.runtime.entry.AssistantErrorEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSummaryEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.CompactionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.entry.LabelEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.RootEntryPayload;
@@ -44,6 +43,7 @@ import fun.fengwk.kkstudio.harness.runtime.reconcile.ModelInvocationPlan;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;

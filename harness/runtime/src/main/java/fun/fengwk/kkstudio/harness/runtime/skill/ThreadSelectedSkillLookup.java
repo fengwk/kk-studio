@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.skill;
 
-import fun.fengwk.kkstudio.harness.runtime.context.SelectedSkillMetadata;
-
 import java.util.List;
 import java.util.Optional;
 

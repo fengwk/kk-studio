@@ -2,8 +2,8 @@
  * Session Entry {@code RUNTIME_CONFIG} 的最终不可变快照族与严格 deterministic JSON codec。
  *
  * <p>{@link RuntimeConfigSnapshot} 实现 {@link
- * fun.fengwk.kkstudio.harness.kernel.session.EntryPayload} 且 {@link
- * fun.fengwk.kkstudio.harness.kernel.session.EntryType#RUNTIME_CONFIG type} 自报。聚合冻结 {@link
+ * fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload} 且 {@link
+ * fun.fengwk.kkstudio.harness.runtime.entry.EntryType#RUNTIME_CONFIG type} 自报。聚合冻结 {@link
  * AgentSnapshot} / {@link ModelSnapshot} / 工具绑定 / {@link SkillSnapshot} / {@link
  * ExecutionPolicySnapshot} / {@link EnvironmentSnapshot}；credential reference 走 {@link
  * fun.fengwk.kkstudio.harness.model.ModelDescriptor#providerResourceId}。

@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.entry;
 
-import fun.fengwk.kkstudio.harness.kernel.session.EntryType;
-
 /** 不修改旧 Entry 的压缩摘要及其保留边界。 */
 public record CompactionEntryPayload(
     String summary, long firstKeptEntryId, int tokensBefore, String detailsJson)

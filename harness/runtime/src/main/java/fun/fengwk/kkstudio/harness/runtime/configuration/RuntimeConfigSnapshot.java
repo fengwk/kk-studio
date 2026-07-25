@@ -1,11 +1,11 @@
 package fun.fengwk.kkstudio.harness.runtime.configuration;
 
-import fun.fengwk.kkstudio.harness.kernel.session.EntryPayload;
-import fun.fengwk.kkstudio.harness.kernel.session.EntryType;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -59,7 +59,7 @@ public record RuntimeConfigSnapshot(
     validateCrossFieldInvariants(tools, skills, environment, model);
   }
 
-  /** Kernel {@link EntryType#RUNTIME_CONFIG RUNTIME_CONFIG}。 */
+  /** {@link EntryType#RUNTIME_CONFIG RUNTIME_CONFIG} Entry payload type。 */
   @Override
   public EntryType type() {
     return EntryType.RUNTIME_CONFIG;

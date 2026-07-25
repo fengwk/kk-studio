@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.port;
 
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTarget;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 
 /**
  * PostgreSQL durable mutation 成功提交后的最佳努力执行信号。

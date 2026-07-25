@@ -10,12 +10,10 @@ import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.harness.thread.command.RuntimeConfigSnapshotResolver;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadCommandService;
 import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProvider;
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInputPayload;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInputType;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -24,6 +22,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeConfigInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeEntryInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 import fun.fengwk.kkstudio.share.model.HarnessThreadAgentSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadCustomMessageCreateDTO;
@@ -31,7 +31,6 @@ import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadModelSetDTO;
-import fun.fengwk.kkstudio.share.model.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadYoloSetDTO;
 
@@ -50,14 +49,14 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
   private final RuntimeConfigSnapshotResolver snapshotResolver;
   private final ToolSettingsProvider toolSettingsProvider;
   private final ActivationNotifier activationNotifier;
-  private final KernelHarnessThreadDtoConverter converter;
+  private final HarnessThreadDtoConverter converter;
 
   public HarnessThreadCommandServiceImpl(
       ThreadCommandTransactions transactions,
       RuntimeConfigSnapshotResolver snapshotResolver,
       ToolSettingsProvider toolSettingsProvider,
       ActivationNotifier activationNotifier,
-      KernelHarnessThreadDtoConverter converter) {
+      HarnessThreadDtoConverter converter) {
     this.transactions = Objects.requireNonNull(transactions, "transactions");
     this.snapshotResolver = Objects.requireNonNull(snapshotResolver, "snapshotResolver");
     this.toolSettingsProvider =
@@ -190,16 +189,13 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
 
   @Override
   @Transactional
-  public HarnessThreadStopResultDTO stop(String threadId, HarnessThreadStopDTO request) {
-    Objects.requireNonNull(request, "request");
+  public HarnessThreadStopResultDTO stop(String threadId) {
     long id = HarnessIds.parsePositive(threadId, "threadId");
-    requireClientRequestId(request.getClientRequestId());
     ThreadCommandTransactions.StopResult result = transactions.stop(id, Instant.now());
     afterCommitNotify(result.target());
     HarnessThreadStopResultDTO dto = new HarnessThreadStopResultDTO();
-    dto.setStopId(Long.toString(result.executionEpoch()));
+    dto.setExecutionEpoch(result.executionEpoch());
     dto.setCancelledInputs(result.cancelledInputs().stream().map(converter::convert).toList());
-    dto.setRestoredMessages(List.of());
     return dto;
   }
 
@@ -226,12 +222,6 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
       throw new IllegalArgumentException("content must not be blank");
     }
     return content;
-  }
-
-  private static void requireClientRequestId(String clientRequestId) {
-    if (clientRequestId == null || clientRequestId.isBlank()) {
-      throw new IllegalArgumentException("clientRequestId must not be blank");
-    }
   }
 
   private static AgentMessageRole parseCustomRole(String value) {

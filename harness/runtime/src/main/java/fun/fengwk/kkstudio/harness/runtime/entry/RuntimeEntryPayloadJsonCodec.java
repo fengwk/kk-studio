@@ -9,8 +9,6 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.kernel.session.EntryPayload;
-import fun.fengwk.kkstudio.harness.kernel.session.EntryType;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
@@ -42,9 +40,9 @@ import java.util.Set;
 /**
  * 最终 8 类 Runtime Entry payload 的严格、确定性 JSON codec。
  *
- * <p>直接对应 Kernel {@link EntryType}，仅支持 {@link RootEntryPayload} / {@link RuntimeConfigSnapshot} /
- * {@link MessageEntryPayload} / {@link CustomMessageEntryPayload} / {@link CompactionEntryPayload}
- * / {@link AssistantErrorEntryPayload} / {@link LabelEntryPayload} / {@link
+ * <p>直接对应 {@link EntryType}，仅支持 {@link RootEntryPayload} / {@link RuntimeConfigSnapshot} / {@link
+ * MessageEntryPayload} / {@link CustomMessageEntryPayload} / {@link CompactionEntryPayload} /
+ * {@link AssistantErrorEntryPayload} / {@link LabelEntryPayload} / {@link
  * BranchSummaryEntryPayload}；其它 {@link EntryPayload} 实现显式拒绝。
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link

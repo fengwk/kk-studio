@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.core.harness.thread.command.ThreadCommandRow;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.SkillSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.context.SelectedSkillMetadata;
+import fun.fengwk.kkstudio.harness.runtime.skill.SelectedSkillMetadata;
 import fun.fengwk.kkstudio.harness.runtime.skill.ThreadSelectedSkillLookup;
 
 import java.util.List;

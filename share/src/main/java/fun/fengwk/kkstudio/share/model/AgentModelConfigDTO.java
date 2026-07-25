@@ -6,7 +6,7 @@ import java.util.List;
 
 /**
  * Structured Agent model configuration. This is the single source of truth exposed by the public
- * AgentModel API and persisted as a single {@code config_json} column by the repository.
+ * AgentModel API and persisted in the {@code agent_model.config} JSONB column.
  *
  * <p>Schema:
  *

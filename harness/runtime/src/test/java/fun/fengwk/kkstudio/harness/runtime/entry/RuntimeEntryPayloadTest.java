@@ -9,9 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.kernel.session.EntryPayload;
-import fun.fengwk.kkstudio.harness.kernel.session.EntryType;
-import fun.fengwk.kkstudio.harness.kernel.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
@@ -20,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
@@ -34,7 +32,7 @@ import java.util.List;
  *
  * <ul>
  *   <li>7 种 payload 类型的 {@link EntryType} 自报与 {@link EntryPayload} 契约；
- *   <li>Kernel {@link SessionEntry} 在 type/payload 一致性上的强制校验；
+ *   <li>{@link SessionEntry} 在 type/payload 一致性上的强制校验；
  *   <li>assistant metadata 必须与 ASSISTANT role 一致；
  *   <li>tool-call 内容与 {@link ProviderStopReason#TOOL_CALLS} 严格一致；
  *   <li>compaction 数值与 detailsJson 约束；

@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.core.harness.interaction.service;
 
 import fun.fengwk.kkstudio.core.harness.interaction.store.model.InteractionDO;
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTargetKind;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.interaction.Interaction;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionRequest;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionResponse;

@@ -29,7 +29,7 @@ import java.util.NoSuchElementException;
  *   <li>{@code created_at} / {@code updated_at} timestamptz population via the {@code create_time}
  *       / {@code update_time} DO aliases;
  *   <li>apiName global uniqueness enforced by the {@code uk_comfyui_workflow_api_api_name} index;
- *   <li>DTO id is exposed as a decimal string, matching the snowflake resource contract.
+ *   <li>DTO id is exposed as a positive decimal string, matching the durable id resource contract.
  * </ul>
  *
  * @author fengwk
@@ -67,7 +67,7 @@ public class ComfyuiWorkflowApiServiceTest extends PostgresSpringTestSupport {
     // 写入链路会把工作流、绑定、selector、enabled 全部持久化，并回填 id/timestamps。
     ComfyuiWorkflowApiDTO created = comfyuiWorkflowApiService.createWorkflow(createDTO);
     assertNotNull(created.getId());
-    // DTO 边界：id 必须是十进制字符串形式，与 snowflake 资源约定一致。
+    // DTO 边界：id 必须是正的十进制字符串形式。
     assertTrue(created.getId().matches("\\d+"));
     assertEquals(apiName, created.getApiName());
     assertEquals("Demo", created.getName());

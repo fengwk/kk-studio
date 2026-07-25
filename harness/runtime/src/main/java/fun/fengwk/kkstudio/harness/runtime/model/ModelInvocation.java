@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime.model;
 
-import fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus;
-import fun.fengwk.kkstudio.harness.kernel.execution.Lease;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 
 import java.time.Instant;
 import java.util.Objects;
@@ -15,10 +15,10 @@ import java.util.Objects;
  * so callers cannot construct an invalid state.
  *
  * <p>The lifecycle {@link InvocationStatus} and worker {@link Lease} are imported directly from the
- * shared Kernel types so this slice does not redefine them. {@code sessionId} is intentionally
- * absent: it is a persistence-side composite-FK carrier and has no meaning in the Runtime aggregate
- * (see {@code fk_harness_model_invocation_thread} / {@code fk_harness_model_invocation_head} in the
- * schema).
+ * shared runtime execution types so this slice does not redefine them. {@code sessionId} is
+ * intentionally absent: it is a persistence-side composite-FK carrier and has no meaning in the
+ * Runtime aggregate (see {@code fk_harness_model_invocation_thread} / {@code
+ * fk_harness_model_invocation_head} in the schema).
  *
  * <p>State transitions are not implemented here; the record exposes only pure query helpers ({@link
  * #isTerminalUnapplied()}, {@link #hasActiveWorkerAt(Instant)}, {@link

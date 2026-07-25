@@ -68,8 +68,6 @@ public class HarnessQueryDtoConverter {
     dto.setStatus(DerivedThreadStatus.derive(row, now));
     dto.setInputSequence(row.getInputSequence());
     // RUNTIME_CONFIG 派生字段不在 final thread row；保持 null 而非假数据。
-    dto.setRetryAttempt(null);
-    dto.setRetryAt(null);
     dto.setActiveAgentDefinitionId(null);
     dto.setActiveAgentName(null);
     dto.setModelId(null);
@@ -94,9 +92,7 @@ public class HarnessQueryDtoConverter {
     dto.setPayloadJson(row.getPayloadJson());
     dto.setClientMessageId(row.getIdempotencyKey());
     dto.setStatus(row.getStatus());
-    dto.setAppliedEntryId(null);
     dto.setResolvedAt(toUtcLocal(row.getAppliedAt()));
-    dto.setCancelledByStopId(null);
     dto.setCreateTime(toUtcLocal(row.getCreatedAt()));
     return dto;
   }
@@ -152,7 +148,7 @@ public class HarnessQueryDtoConverter {
     dto.setRootSessionId(HarnessIds.format(rootSessionId));
     dto.setSessionId(HarnessIds.format(thread.getSessionId()));
     dto.setThreadId(HarnessIds.format(thread.getId()));
-    // 使用 thread id 作为稳定 cursor；无 ThreadEvent journal。
+    // Root activity 使用 thread id 作为稳定查询 cursor；Redis realtime 使用独立 stream id。
     dto.setEventId(HarnessIds.format(thread.getId()));
     dto.setEventType(status);
     String title = thread.getSessionTitle() == null ? "" : thread.getSessionTitle();

@@ -4,7 +4,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** Cursorable root-session tree activity event. All Snowflake IDs are serialized as strings. */
+/** Cursorable root-session tree activity event. All durable IDs are decimal strings. */
 @Data
 public class RootActivityDTO {
   private String rootSessionId;

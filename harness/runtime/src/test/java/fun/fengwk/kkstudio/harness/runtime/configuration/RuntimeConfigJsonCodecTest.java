@@ -15,7 +15,6 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.kernel.session.EntryType;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
@@ -25,9 +24,10 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
@@ -47,9 +47,9 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * {@link RuntimeConfigJsonCodec} 的契约与 round-trip 测试，覆盖完整 fixture、canonical 排序、strict 拒绝路径、Kernel
- * {@link EntryType#RUNTIME_CONFIG} 绑定，以及关键负向边界（重复 provider tool name、重复 skill name、重复
- * allowedSubagents、variant 不属于 descriptor、optional null 等）。
+ * {@link RuntimeConfigJsonCodec} 的契约与 round-trip 测试，覆盖完整 fixture、canonical 排序、strict
+ * 拒绝路径、EntryPayload {@link EntryType#RUNTIME_CONFIG} 绑定，以及关键负向边界（重复 provider tool name、重复 skill
+ * name、重复 allowedSubagents、variant 不属于 descriptor、optional null 等）。
  *
  * <p>不变量：codec 必须复用 {@link ToolDescriptorJsonCodec} 与 model codec 的 node API，不复制字段 实现；fixture 在
  * {@code src/test/resources/.../runtime-config.json}。
@@ -81,7 +81,7 @@ class RuntimeConfigJsonCodecTest {
     assertEquals(expectedJson, canonicalJson.replaceAll("\\s+", ""));
   }
 
-  /** Kernel EntryPayload 契约：type() == RUNTIME_CONFIG。 */
+  /** EntryPayload 契约：type() == RUNTIME_CONFIG。 */
   @Test
   void kernelEntryPayloadTypeIsRuntimeConfig() {
     RuntimeConfigSnapshot snapshot = canonicalSnapshot();

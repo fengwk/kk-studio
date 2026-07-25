@@ -17,7 +17,7 @@ class HarnessRuntimePropertiesTest {
 
     assertEquals(Duration.ofSeconds(1), properties.getThreadRecoveryInterval());
     assertEquals(100, properties.getThreadRecoveryBatchSize());
-    assertEquals(Duration.ofSeconds(30), properties.getThreadProcessorLeaseDuration());
+    assertEquals(Duration.ofSeconds(30), properties.getThreadReconcileLeaseDuration());
     assertEquals(8, properties.getThreadWorkerConcurrency());
     assertEquals(16, properties.getThreadReconcilerMaxSteps());
     assertEquals(Duration.ofSeconds(30), properties.getModelWorkerLeaseDuration());

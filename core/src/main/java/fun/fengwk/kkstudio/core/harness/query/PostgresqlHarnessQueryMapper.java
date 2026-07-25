@@ -10,7 +10,7 @@ import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
 
-/** final schema snapshot-first 查询专用 mapper；不复用 legacy MySQL 列名 SQL。 */
+/** PostgreSQL snapshot-first 查询专用 mapper。 */
 @Mapper
 public interface PostgresqlHarnessQueryMapper extends BaseMapper {
 

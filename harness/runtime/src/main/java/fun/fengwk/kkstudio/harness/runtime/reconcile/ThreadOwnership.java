@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.reconcile;
 
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTargetKind;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 
 import java.util.Objects;
 
@@ -10,7 +10,7 @@ import java.util.Objects;
  *
  * <p>每次写入都必须携带当前 activation 的 {@code threadId + executionEpoch + processorToken}；PostgreSQL adapter
  * 在同一事务中校验三者一致才能提交。Lease 到期时间仍由 {@link
- * fun.fengwk.kkstudio.harness.kernel.thread.HarnessThread#processorLease()} 表达。
+ * fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread#processorLease()} 表达。
  *
  * <p>不可变且不含续租时间或回调；所有权失效应由调用方重新 {@code claim} 而非重用过期 ownership。
  */

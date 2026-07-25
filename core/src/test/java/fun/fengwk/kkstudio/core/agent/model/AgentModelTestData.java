@@ -71,7 +71,7 @@ public final class AgentModelTestData {
     try {
       return new ObjectMapper().readValue(json, AgentModelConfigDTO.class);
     } catch (Exception error) {
-      throw new IllegalArgumentException("invalid config_json", error);
+      throw new IllegalArgumentException("invalid config", error);
     }
   }
 

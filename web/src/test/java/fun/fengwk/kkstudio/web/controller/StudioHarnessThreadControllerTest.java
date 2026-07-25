@@ -147,25 +147,19 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
 
     MvcResult stop =
         mockMvc
-            .perform(
-                post("/api/threads/{id}/stop", threadId)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"clientRequestId\":\"stop-1\"}"))
+            .perform(post("/api/threads/{id}/stop", threadId))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.stopId").isString())
+            // Long fields are stringified by convention4j for JS-safe wire form.
+            .andExpect(jsonPath("$.data.executionEpoch").isString())
             .andExpect(jsonPath("$.data.cancelledInputs.length()").value(5))
             .andReturn();
-    String stopId = data(stop).path("stopId").asText();
-    // stop is epoch fencing, not clientRequestId-idempotent; second stop advances epoch with no
-    // remaining queued inputs.
+    String firstEpoch = data(stop).path("executionEpoch").asText();
+    // stop is pure epoch fencing; repeated stop advances epoch with no remaining queued inputs.
     mockMvc
-        .perform(
-            post("/api/threads/{id}/stop", threadId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"clientRequestId\":\"stop-1\"}"))
+        .perform(post("/api/threads/{id}/stop", threadId))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.stopId").isString())
-        .andExpect(jsonPath("$.data.stopId").value(not(stopId)))
+        .andExpect(jsonPath("$.data.executionEpoch").isString())
+        .andExpect(jsonPath("$.data.executionEpoch").value(not(firstEpoch)))
         .andExpect(jsonPath("$.data.cancelledInputs.length()").value(0));
 
     MvcResult branch =
@@ -252,12 +246,8 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
                 .content(
                     "{\"modelId\":\"999999999999\",\"variant\":\"default\",\"clientMessageId\":\"missing-model\"}"))
         .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(
-            post("/api/threads/{id}/stop", threadId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{}"))
-        .andExpect(status().isBadRequest());
+    // Stop no longer requires a body; empty POST is a valid epoch fence.
+    mockMvc.perform(post("/api/threads/{id}/stop", threadId)).andExpect(status().isOk());
     mockMvc.perform(post("/api/threads/{id}/retry", threadId)).andExpect(status().isNotFound());
     mockMvc.perform(get("/api/threads/{id}", "abc")).andExpect(status().isBadRequest());
     mockMvc.perform(get("/api/threads/{id}", "999999999999")).andExpect(status().isNotFound());

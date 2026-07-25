@@ -14,7 +14,6 @@
     <packaging>pom</packaging>
 
     <modules>
-        <module>kernel</module>
         <module>tool</module>
         <module>runtime</module>
         <module>daemon</module>

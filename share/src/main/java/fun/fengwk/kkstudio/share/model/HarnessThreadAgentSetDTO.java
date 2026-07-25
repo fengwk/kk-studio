@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.share.model;
 
 import lombok.Data;
 
-/** Thread 级 Agent 切换请求；入队 SET_AGENT（仅 id，name 由服务端捕获），由 Processor 有序应用。 */
+/** Thread 级 Agent 切换请求；服务端解析 Definition 并冻结完整配置快照后入队 SET_AGENT。 */
 @Data
 public class HarnessThreadAgentSetDTO {
   /** 目标 AgentDefinition id（decimal string）。 */

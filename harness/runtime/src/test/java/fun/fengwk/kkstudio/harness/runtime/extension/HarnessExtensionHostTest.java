@@ -12,7 +12,6 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.context.ContextTransform;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionException.Phase;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -36,12 +35,9 @@ class HarnessExtensionHostTest {
   /** Host 先按 priority/id 排扩展，并保留同一扩展内的贡献顺序。 */
   @Test
   void ordersExtensionsAndContributionsDeterministically() {
-    ContextTransform betaFirst = state -> state;
-    ContextTransform betaSecond = state -> state;
-    ContextTransform alpha = state -> state;
-    ContextTransform early = state -> state;
     ProviderFactory betaProvider = providerFactory(ProviderType.OPENAI);
     ProviderFactory earlyProvider = providerFactory(ProviderType.GOOGLE);
+    ProviderFactory alphaProvider = providerFactory(ProviderType.ANTHROPIC);
     ToolFactory betaTool = toolFactory(tool("beta", "1"));
     ToolFactory earlyTool = toolFactory(tool("early", "1"));
 
@@ -52,23 +48,19 @@ class HarnessExtensionHostTest {
                     "beta",
                     10,
                     registry -> {
-                      registry.addContextTransform(betaFirst);
-                      registry.addContextTransform(betaSecond);
                       registry.addProviderFactory(betaProvider);
                       registry.addToolFactory(betaTool);
                     }),
-                extension("alpha", 10, registry -> registry.addContextTransform(alpha)),
+                extension("alpha", 10, registry -> registry.addProviderFactory(alphaProvider)),
                 extension(
                     "early",
                     -1,
                     registry -> {
-                      registry.addContextTransform(early);
                       registry.addProviderFactory(earlyProvider);
                       registry.addToolFactory(earlyTool);
                     })));
 
-    assertEquals(List.of(early, alpha, betaFirst, betaSecond), host.contextTransforms());
-    assertEquals(List.of(earlyProvider, betaProvider), host.providerFactories());
+    assertEquals(List.of(earlyProvider, alphaProvider, betaProvider), host.providerFactories());
     assertEquals(
         List.of("early", "beta"),
         host.toolFactories().stream().map(factory -> factory.descriptor().name()).toList());
@@ -135,10 +127,8 @@ class HarnessExtensionHostTest {
   void rejectsNullAndLateContributions() {
     List<Consumer<HarnessExtensionRegistry>> nullRegistrations =
         List.of(
-            registry -> registry.addContextTransform(null),
             registry -> registry.addBeforeToolCallInterceptor(null),
             registry -> registry.addAfterToolCallInterceptor(null),
-            registry -> registry.addBeforeCompactionInterceptor(null),
             registry -> registry.addLifecycleObserver(null),
             registry -> registry.addProviderFactory(null),
             registry -> registry.addToolFactory(null),
@@ -160,7 +150,7 @@ class HarnessExtensionHostTest {
         new HarnessExtensionHost(
             List.of(extension("retained", 0, registry -> retained.set(registry))));
     assertThrows(
-        IllegalStateException.class, () -> retained.get().addContextTransform(state -> state));
+        IllegalStateException.class, () -> retained.get().addLifecycleObserver(observation -> {}));
     host.close();
   }
 
@@ -174,19 +164,15 @@ class HarnessExtensionHostTest {
                     "all",
                     0,
                     registry -> {
-                      registry.addContextTransform(state -> state);
                       registry.addBeforeToolCallInterceptor(context -> null);
                       registry.addAfterToolCallInterceptor(context -> context.result());
-                      registry.addBeforeCompactionInterceptor(context -> context.context());
                       registry.addLifecycleObserver(observation -> {});
                       registry.addProviderFactory(providerFactory(ProviderType.ANTHROPIC));
                       registry.addToolFactory(toolFactory(tool("all", "1")));
                     })));
 
-    assertImmutable(host.contextTransforms());
     assertImmutable(host.beforeToolCallInterceptors());
     assertImmutable(host.afterToolCallInterceptors());
-    assertImmutable(host.beforeCompactionInterceptors());
     assertImmutable(host.lifecycleObservers());
     assertImmutable(host.providerFactories());
     assertImmutable(host.toolFactories());
