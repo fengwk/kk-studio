@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.controller;
 
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,7 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import fun.fengwk.kkstudio.core.harness.redis.RedisRealtimeEventTail;
+import fun.fengwk.kkstudio.core.harness.realtime.HarnessRealtimeEventTail;
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadCommandService;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadQueryService;
@@ -32,6 +33,7 @@ import fun.fengwk.kkstudio.share.model.HarnessThreadYoloSetDTO;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 
 /**
@@ -45,16 +47,19 @@ import java.util.function.Supplier;
 public class StudioHarnessThreadController {
   private final HarnessThreadCommandService commandService;
   private final HarnessThreadQueryService queryService;
-  private final RedisRealtimeEventTail realtimeEventTail;
+  private final HarnessRealtimeEventTail realtimeEventTail;
+  private final Executor eventStreamExecutor;
 
   /** 创建 Thread API Controller。 */
   public StudioHarnessThreadController(
       HarnessThreadCommandService commandService,
       HarnessThreadQueryService queryService,
-      RedisRealtimeEventTail realtimeEventTail) {
+      HarnessRealtimeEventTail realtimeEventTail,
+      @Qualifier("harnessEventStreamTaskExecutor") Executor eventStreamExecutor) {
     this.commandService = Objects.requireNonNull(commandService, "commandService");
     this.queryService = Objects.requireNonNull(queryService, "queryService");
     this.realtimeEventTail = Objects.requireNonNull(realtimeEventTail, "realtimeEventTail");
+    this.eventStreamExecutor = Objects.requireNonNull(eventStreamExecutor, "eventStreamExecutor");
   }
 
   /** 查询所有 Thread。 */
@@ -152,7 +157,7 @@ public class StudioHarnessThreadController {
     String cursor =
         lastEventId != null && !lastEventId.isBlank() ? lastEventId.trim() : afterEventId;
     long id = HarnessIds.parsePositive(threadId, "threadId");
-    return StudioHarnessThreadSseEmitter.stream(id, cursor, realtimeEventTail);
+    return StudioHarnessThreadSseEmitter.stream(id, cursor, realtimeEventTail, eventStreamExecutor);
   }
 
   /** 将服务层异常转换为统一的 HTTP 错误响应。 */

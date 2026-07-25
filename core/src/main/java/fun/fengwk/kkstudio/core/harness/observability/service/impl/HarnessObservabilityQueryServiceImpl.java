@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.core.harness.interaction.store.mapper.InteractionMapp
 import fun.fengwk.kkstudio.core.harness.model.worker.ModelInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.observability.service.HarnessObservabilityQueryService;
 import fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits;
+import fun.fengwk.kkstudio.core.harness.observability.service.model.ArtifactContent;
 import fun.fengwk.kkstudio.core.harness.query.HarnessQueryDtoConverter;
 import fun.fengwk.kkstudio.core.harness.query.HarnessQueryRow;
 import fun.fengwk.kkstudio.core.harness.query.PostgresqlHarnessQueryMapper;
@@ -108,11 +109,19 @@ public class HarnessObservabilityQueryServiceImpl implements HarnessObservabilit
   }
 
   @Override
-  public Artifact getArtifact(String artifactId) {
+  public ArtifactContent getArtifact(String artifactId) {
     HarnessIds.parsePositive(artifactId, "artifactId");
-    return artifactStore
-        .find(artifactId)
-        .orElseThrow(() -> new IllegalArgumentException("unknown artifact: " + artifactId));
+    Artifact artifact =
+        artifactStore
+            .find(artifactId)
+            .orElseThrow(() -> new IllegalArgumentException("unknown artifact: " + artifactId));
+    return new ArtifactContent(
+        artifact.id(),
+        artifact.mediaType(),
+        artifact.encoding(),
+        artifact.content(),
+        artifact.sizeBytes(),
+        artifact.sha256());
   }
 
   @Override

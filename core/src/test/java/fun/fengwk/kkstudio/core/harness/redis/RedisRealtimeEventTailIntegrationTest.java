@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
+import fun.fengwk.kkstudio.core.harness.realtime.HarnessRealtimeEventTail;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
@@ -24,7 +25,7 @@ class RedisRealtimeEventTailIntegrationTest extends RedisSpringTestSupport {
   @Autowired private HarnessRedisProperties properties;
   @Autowired private RealtimeEventSink sink;
   @Autowired private RealtimeEventJsonCodec eventCodec;
-  @Autowired private RedisRealtimeEventTail tail;
+  @Autowired private HarnessRealtimeEventTail tail;
 
   @BeforeEach
   void clean() {
@@ -39,7 +40,7 @@ class RedisRealtimeEventTailIntegrationTest extends RedisSpringTestSupport {
     sink.append(
         new RealtimeEvent.ModelDelta(11L, 1L, 1, new ProviderStreamEvent.TextDelta("two"), now));
 
-    List<RedisRealtimeEventTail.Record> firstPage = tail.readAfter(11L, "0-0", 10, Duration.ZERO);
+    List<HarnessRealtimeEventTail.Record> firstPage = tail.readAfter(11L, "0-0", 10, Duration.ZERO);
     assertEquals(2, firstPage.size());
     assertEquals(
         eventCodec.encode(
@@ -47,7 +48,7 @@ class RedisRealtimeEventTailIntegrationTest extends RedisSpringTestSupport {
                 11L, 1L, 1, new ProviderStreamEvent.TextDelta("one"), now)),
         firstPage.get(0).payloadJson());
 
-    List<RedisRealtimeEventTail.Record> secondPage =
+    List<HarnessRealtimeEventTail.Record> secondPage =
         tail.readAfter(11L, firstPage.get(0).id(), 10, Duration.ZERO);
     assertEquals(1, secondPage.size());
     assertTrue(secondPage.get(0).payloadJson().contains("\"two\""));

@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
+import fun.fengwk.kkstudio.core.harness.realtime.HarnessRealtimeEventTail;
 import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
@@ -52,7 +53,7 @@ public class HarnessRedisConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public RedisRealtimeEventTail redisRealtimeEventTail(
+  public HarnessRealtimeEventTail redisRealtimeEventTail(
       ObjectProvider<StringRedisTemplate> stringRedisTemplate, HarnessRedisProperties properties) {
     return new RedisRealtimeEventTail(stringRedisTemplate::getObject, properties);
   }

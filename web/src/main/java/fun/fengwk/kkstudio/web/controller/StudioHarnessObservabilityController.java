@@ -20,7 +20,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.core.harness.observability.service.HarnessObservabilityQueryService;
 import fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.Artifact;
+import fun.fengwk.kkstudio.core.harness.observability.service.model.ArtifactContent;
 import fun.fengwk.kkstudio.share.model.InteractionDTO;
 import fun.fengwk.kkstudio.share.model.ModelInvocationDTO;
 import fun.fengwk.kkstudio.share.model.RootActivityDTO;
@@ -103,7 +103,7 @@ public class StudioHarnessObservabilityController {
 
   @GetMapping("/artifacts/{id}")
   public ResponseEntity<ByteArrayResource> getArtifact(@PathVariable("id") String id) {
-    Artifact artifact;
+    ArtifactContent artifact;
     try {
       artifact = observabilityService.getArtifact(id);
     } catch (IllegalArgumentException error) {

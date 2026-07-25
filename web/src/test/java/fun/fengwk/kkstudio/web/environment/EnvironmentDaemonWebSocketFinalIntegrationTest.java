@@ -9,16 +9,13 @@ import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-import fun.fengwk.kkstudio.harness.daemon.DaemonConfig;
-import fun.fengwk.kkstudio.harness.daemon.DaemonRuntime;
-import fun.fengwk.kkstudio.harness.daemon.DaemonToolRegistry;
-import fun.fengwk.kkstudio.harness.daemon.coding.ArtifactSource;
-import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
@@ -30,31 +27,54 @@ import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransaction
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationUpdateOutcome;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
+import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec.DaemonToolCapabilities;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.WebSocket;
+import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
-/** End-to-end Daemon v1 WebSocket contract against the final Tool transaction port. */
+/**
+ * End-to-end Daemon v1 WebSocket contract against the final Tool transaction port.
+ *
+ * <p>Uses a minimal JDK WebSocket fake daemon client so the web module does not depend on the
+ * harness-daemon module.
+ */
 class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupport {
   private static final String ENVIRONMENT_NAME = "env-42";
   private static final long INVOCATION_ID = 99L;
+  private static final String DAEMON_TOKEN = "test-daemon-token";
+  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
+  private static final DaemonToolCapabilitiesCodec CAPABILITIES_CODEC =
+      new DaemonToolCapabilitiesCodec();
+  private static final DaemonToolResultCodec RESULT_CODEC = new DaemonToolResultCodec();
 
   @LocalServerPort private int port;
 
@@ -67,12 +87,9 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
     ToolDescriptor descriptor = descriptor();
     completedResult.set(null);
     configureClaimedInvocation(descriptor);
-    DaemonToolRegistry registry = new DaemonToolRegistry();
-    registry.register(new CompletingTool(descriptor));
-    DaemonRuntime runtime =
-        new DaemonRuntime(daemonConfig(), registry, DaemonSkillRegistry.empty());
-    try {
-      runtime.start();
+    try (FakeDaemonClient daemon = FakeDaemonClient.connect(endpointUri(), ENVIRONMENT_NAME)) {
+      daemon.handshake(descriptor);
+      daemon.awaitInvokeAndCompleteText("daemon completed");
 
       verify(transactions, timeout(10_000))
           .claim(eq(INVOCATION_ID), anyString(), eq(Duration.ofSeconds(10)), any(), any());
@@ -81,51 +98,40 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
       assertEquals("provider-call", completedResult.get().toolCallId());
       assertEquals(
           "daemon completed", ((TextToolContent) completedResult.get().contents().get(0)).text());
-    } finally {
-      runtime.close();
     }
   }
 
   @Test
-  void daemonArtifactCompletionIsPersistedByGateway() {
+  void daemonArtifactCompletionIsPersistedByGateway() throws Exception {
     byte[] bytes = new byte[] {1, 2, 3};
-    ArtifactRef local = new ArtifactRef("daemon-local", "application/octet-stream", bytes.length);
-    ArtifactRef global = new ArtifactRef("global-artifact", local.mediaType(), bytes.length);
+    ArtifactRef global =
+        new ArtifactRef("global-artifact", "application/octet-stream", bytes.length);
     ToolDescriptor descriptor = descriptor();
     completedResult.set(null);
     configureClaimedInvocation(descriptor);
     when(artifactStore.save(anyString(), anyString(), any())).thenReturn(global);
-    DaemonToolRegistry registry = new DaemonToolRegistry();
-    registry.register(new ArtifactCompletingTool(descriptor, local));
-    ArtifactSource source = ignored -> bytes;
-    DaemonRuntime runtime =
-        new DaemonRuntime(daemonConfig(), registry, DaemonSkillRegistry.empty(), source);
-    try {
-      runtime.start();
+    try (FakeDaemonClient daemon = FakeDaemonClient.connect(endpointUri(), ENVIRONMENT_NAME)) {
+      daemon.handshake(descriptor);
+      daemon.awaitInvokeAndCompleteBinary("application/octet-stream", bytes);
 
       ArgumentCaptor<byte[]> contentCaptor = ArgumentCaptor.forClass(byte[].class);
       verify(artifactStore, timeout(10_000))
-          .save(eq(local.mediaType()), eq("identity"), contentCaptor.capture());
+          .save(eq("application/octet-stream"), eq("identity"), contentCaptor.capture());
       assertArrayEquals(bytes, contentCaptor.getValue());
       verify(transactions, timeout(10_000)).completeSuccess(any(), any(), any(), any());
       ArtifactToolContent artifact = (ArtifactToolContent) completedResult.get().contents().get(0);
       assertEquals(global, artifact.artifact());
-    } finally {
-      runtime.close();
     }
   }
 
   @Test
-  void daemonFailureUsesFencedFailureTransition() {
+  void daemonFailureUsesFencedFailureTransition() throws Exception {
     ToolDescriptor descriptor = descriptor();
     completedResult.set(null);
     configureClaimedInvocation(descriptor);
-    DaemonToolRegistry registry = new DaemonToolRegistry();
-    registry.register(new FailingTool(descriptor));
-    DaemonRuntime runtime =
-        new DaemonRuntime(daemonConfig(), registry, DaemonSkillRegistry.empty());
-    try {
-      runtime.start();
+    try (FakeDaemonClient daemon = FakeDaemonClient.connect(endpointUri(), ENVIRONMENT_NAME)) {
+      daemon.handshake(descriptor);
+      daemon.awaitInvokeAndFail("daemon failed");
 
       ArgumentCaptor<ToolInvocationError> errorCaptor =
           ArgumentCaptor.forClass(ToolInvocationError.class);
@@ -133,8 +139,6 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
           .completeFailure(any(), errorCaptor.capture(), any(), any());
       assertEquals("EXECUTION_FAILED", errorCaptor.getValue().kind());
       assertEquals("daemon failed", errorCaptor.getValue().message());
-    } finally {
-      runtime.close();
     }
   }
 
@@ -174,17 +178,8 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
     }
   }
 
-  private DaemonConfig daemonConfig() {
-    return new DaemonConfig(
-        URI.create("ws://localhost:" + port + EnvironmentDaemonWebSocketHandler.PATH),
-        ENVIRONMENT_NAME,
-        "websocket-integration-daemon",
-        Duration.ofSeconds(30),
-        Duration.ofMillis(50),
-        Duration.ofSeconds(1),
-        Duration.ofSeconds(10),
-        "test-daemon-token",
-        List.of());
+  private URI endpointUri() {
+    return URI.create("ws://localhost:" + port + EnvironmentDaemonWebSocketHandler.PATH);
   }
 
   private static ToolDescriptor descriptor() {
@@ -252,85 +247,179 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
         null);
   }
 
-  private static final class CompletingTool implements Tool {
-    private final ToolDescriptor descriptor;
+  /**
+   * Minimal daemon-side peer for the v1 WebSocket protocol used by EnvironmentDaemonGateway.
+   *
+   * <p>Only implements HELLO/CAPABILITIES/READY plus one INVOKE response path needed by this test.
+   */
+  private static final class FakeDaemonClient implements AutoCloseable {
+    private final String environmentName;
+    private final WebSocket socket;
+    private final FrameListener listener;
+    private final AtomicLong outboundSequence = new AtomicLong();
 
-    private CompletingTool(ToolDescriptor descriptor) {
-      this.descriptor = descriptor;
+    private FakeDaemonClient(String environmentName, WebSocket socket, FrameListener listener) {
+      this.environmentName = environmentName;
+      this.socket = socket;
+      this.listener = listener;
+    }
+
+    static FakeDaemonClient connect(URI endpoint, String environmentName) throws Exception {
+      FrameListener listener = new FrameListener();
+      WebSocket socket =
+          HttpClient.newHttpClient()
+              .newWebSocketBuilder()
+              .buildAsync(endpoint, listener)
+              .get(10, TimeUnit.SECONDS);
+      return new FakeDaemonClient(environmentName, socket, listener);
+    }
+
+    void handshake(ToolDescriptor descriptor) throws Exception {
+      send(
+          DaemonMessageType.HELLO,
+          null,
+          "{"
+              + "\"daemonId\":\"websocket-integration-daemon\","
+              + "\"protocolVersion\":1,"
+              + "\"gatewayToken\":\""
+              + DAEMON_TOKEN
+              + "\"}");
+      String welcome = listener.awaitText(5_000);
+      assertEquals("WELCOME", messageType(welcome));
+
+      String capabilities =
+          CAPABILITIES_CODEC.encode(new DaemonToolCapabilities(List.of(descriptor), List.of()));
+      send(DaemonMessageType.CAPABILITIES, null, capabilities);
+      send(DaemonMessageType.READY, null, "{\"pull\":true}");
+    }
+
+    void awaitInvokeAndCompleteText(String text) throws Exception {
+      DaemonEnvelope invoke = awaitInvoke();
+      send(DaemonMessageType.STARTED, invoke.invocationId(), "{}");
+      String payload =
+          RESULT_CODEC.encodeResult(
+              new ToolResult(
+                  invoke.invocationId(), List.of(new TextToolContent(text)), false, "{}", false),
+              ignored -> new byte[0]);
+      send(DaemonMessageType.COMPLETED, invoke.invocationId(), payload);
+    }
+
+    void awaitInvokeAndCompleteBinary(String mediaType, byte[] bytes) throws Exception {
+      DaemonEnvelope invoke = awaitInvoke();
+      send(DaemonMessageType.STARTED, invoke.invocationId(), "{}");
+      String payload =
+          RESULT_CODEC.encodeResult(
+              new ToolResult(
+                  invoke.invocationId(),
+                  List.of(new BinaryToolContent(mediaType, bytes)),
+                  false,
+                  "{}",
+                  false),
+              ignored -> bytes);
+      send(DaemonMessageType.COMPLETED, invoke.invocationId(), payload);
+    }
+
+    void awaitInvokeAndFail(String message) throws Exception {
+      DaemonEnvelope invoke = awaitInvoke();
+      send(DaemonMessageType.STARTED, invoke.invocationId(), "{}");
+      send(
+          DaemonMessageType.FAILED,
+          invoke.invocationId(),
+          "{\"message\":" + OBJECT_MAPPER.writeValueAsString(message) + "}");
+    }
+
+    private DaemonEnvelope awaitInvoke() throws Exception {
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+      while (System.nanoTime() < deadline) {
+        String raw = listener.awaitText(Math.max(1, remainingMillis(deadline)));
+        DaemonEnvelope envelope = ENVELOPE_CODEC.decode(raw);
+        if (envelope.messageType() == DaemonMessageType.INVOKE) {
+          return envelope;
+        }
+      }
+      throw new AssertionError("timed out waiting for INVOKE");
+    }
+
+    private void send(DaemonMessageType type, String invocationId, String payloadJson)
+        throws Exception {
+      String encoded =
+          ENVELOPE_CODEC.encode(
+              new DaemonEnvelope(
+                  DaemonProtocol.VERSION_1,
+                  type,
+                  environmentName,
+                  invocationId,
+                  outboundSequence.getAndIncrement(),
+                  payloadJson));
+      socket.sendText(encoded, true).get(5, TimeUnit.SECONDS);
     }
 
     @Override
-    public ToolDescriptor descriptor() {
-      return descriptor;
+    public void close() {
+      try {
+        socket.sendClose(WebSocket.NORMAL_CLOSURE, "test complete").get(5, TimeUnit.SECONDS);
+      } catch (Exception ignored) {
+        // Server may already have closed after terminal protocol handling.
+      }
     }
 
-    @Override
-    public ToolExecutionHandle execute(
-        ToolExecutionRequest request, ToolExecutionListener listener) {
-      listener.onComplete(
-          new ToolResult(
-              request.call().id(),
-              List.of(new TextToolContent("daemon completed")),
-              false,
-              "{}",
-              false));
-      return CompletedHandle.INSTANCE;
+    private static String messageType(String envelopeJson) throws Exception {
+      JsonNode root = OBJECT_MAPPER.readTree(envelopeJson);
+      JsonNode node = root.get("messageType");
+      if (node == null || !node.isTextual()) {
+        throw new AssertionError("envelope must carry messageType: " + envelopeJson);
+      }
+      return node.asText();
+    }
+
+    private static long remainingMillis(long deadlineNanos) {
+      return Math.max(1L, TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime()));
     }
   }
 
-  private static final class ArtifactCompletingTool implements Tool {
-    private final ToolDescriptor descriptor;
-    private final ArtifactRef artifact;
+  private static final class FrameListener implements WebSocket.Listener {
+    private final StringBuilder currentMessage = new StringBuilder();
+    private final List<String> inbox = new ArrayList<>();
+    private final Object lock = new Object();
 
-    private ArtifactCompletingTool(ToolDescriptor descriptor, ArtifactRef artifact) {
-      this.descriptor = descriptor;
-      this.artifact = artifact;
+    @Override
+    public void onOpen(WebSocket webSocket) {
+      webSocket.request(1);
     }
 
     @Override
-    public ToolDescriptor descriptor() {
-      return descriptor;
+    public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+      currentMessage.append(data);
+      if (last) {
+        String complete = currentMessage.toString();
+        currentMessage.setLength(0);
+        synchronized (lock) {
+          inbox.add(complete);
+          lock.notifyAll();
+        }
+      }
+      webSocket.request(1);
+      return CompletableFuture.completedFuture(null);
     }
 
     @Override
-    public ToolExecutionHandle execute(
-        ToolExecutionRequest request, ToolExecutionListener listener) {
-      listener.onComplete(
-          new ToolResult(
-              request.call().id(), List.of(new ArtifactToolContent(artifact)), false, "{}", false));
-      return CompletedHandle.INSTANCE;
-    }
-  }
-
-  private static final class FailingTool implements Tool {
-    private final ToolDescriptor descriptor;
-
-    private FailingTool(ToolDescriptor descriptor) {
-      this.descriptor = descriptor;
+    public CompletionStage<?> onBinary(WebSocket webSocket, ByteBuffer data, boolean last) {
+      webSocket.request(1);
+      return CompletableFuture.completedFuture(null);
     }
 
-    @Override
-    public ToolDescriptor descriptor() {
-      return descriptor;
-    }
-
-    @Override
-    public ToolExecutionHandle execute(
-        ToolExecutionRequest request, ToolExecutionListener listener) {
-      listener.onError(new IllegalStateException("daemon failed"));
-      return CompletedHandle.INSTANCE;
-    }
-  }
-
-  private enum CompletedHandle implements ToolExecutionHandle {
-    INSTANCE;
-
-    @Override
-    public void cancel() {}
-
-    @Override
-    public boolean isCancelled() {
-      return false;
+    String awaitText(long timeoutMillis) throws Exception {
+      long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+      synchronized (lock) {
+        while (inbox.isEmpty()) {
+          long remaining = deadline - System.nanoTime();
+          if (remaining <= 0) {
+            throw new AssertionError("timed out waiting for websocket text frame");
+          }
+          lock.wait(Math.max(1L, TimeUnit.NANOSECONDS.toMillis(remaining)));
+        }
+        return inbox.remove(0);
+      }
     }
   }
 }
