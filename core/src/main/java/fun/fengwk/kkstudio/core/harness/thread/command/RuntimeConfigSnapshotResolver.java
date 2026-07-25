@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.configuration.EnvironmentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.ExecutionPolicySnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSource;
 import fun.fengwk.kkstudio.harness.runtime.configuration.SkillSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
 import fun.fengwk.kkstudio.harness.runtime.extension.ProviderFactory;
@@ -45,12 +46,13 @@ import java.util.Set;
 /**
  * 仅用于命令提交时的 live resource -> immutable {@link RuntimeConfigSnapshot} 冻结器。
  *
- * <p>这里可以读取 Definition、Model、Provider、ready Environment 和 extension descriptors，但严禁调用 {@link
- * ProviderFactory#create(String, String)} 或任何 Provider I/O。credential 不进入 descriptor；它只在后续 worker
- * 依据 {@code providerResourceId} 短生命周期解析。
+ * <p>实现 runtime {@link RuntimeConfigSource}：可以读取 Definition、Model、Provider、ready Environment 和
+ * extension descriptors，但严禁调用 {@link ProviderFactory#create(String, String)} 或任何 Provider
+ * I/O。credential 不进入 descriptor；它只在后续 worker 依据 {@code providerResourceId} 短生命周期解析。纯 YOLO 替换由
+ * runtime 编排侧的 {@link RuntimeConfigSnapshot#withYoloEnabled(boolean)} 完成。
  */
 @Component
-public class RuntimeConfigSnapshotResolver {
+public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
 
   private final AgentDefinitionMapper definitionMapper;
   private final AgentDefinitionConfigCodec definitionConfigCodec;
@@ -82,6 +84,7 @@ public class RuntimeConfigSnapshotResolver {
   }
 
   /** 使用 Definition 的默认 model/variant 构造完整快照。 */
+  @Override
   public RuntimeConfigSnapshot resolveAgent(long definitionId, boolean yoloEnabled) {
     AgentDefinitionDO definition = requireDefinition(definitionId);
     if (definition.getModelId() == null || definition.getModelId() <= 0) {
@@ -91,6 +94,7 @@ public class RuntimeConfigSnapshotResolver {
   }
 
   /** 复制现有快照，只替换完整、当前可用的 model/variant；并重新校验 tool capability。 */
+  @Override
   public RuntimeConfigSnapshot replaceModel(
       RuntimeConfigSnapshot current, long modelId, String requestedVariant) {
     Objects.requireNonNull(current, "current");
@@ -104,25 +108,6 @@ public class RuntimeConfigSnapshotResolver {
         current.tools(),
         current.skills(),
         current.policy(),
-        current.environment());
-  }
-
-  /** 复制现有快照，只替换 policy.yolo。 */
-  public RuntimeConfigSnapshot replaceYolo(RuntimeConfigSnapshot current, boolean yoloEnabled) {
-    Objects.requireNonNull(current, "current");
-    ExecutionPolicySnapshot policy = current.policy();
-    return new RuntimeConfigSnapshot(
-        current.agent(),
-        current.model(),
-        current.tools(),
-        current.skills(),
-        new ExecutionPolicySnapshot(
-            policy.maxTurns(),
-            policy.maxDepth(),
-            policy.maxDirectSubagents(),
-            policy.maxTotalSubagents(),
-            policy.allowedSubagents(),
-            yoloEnabled),
         current.environment());
   }
 

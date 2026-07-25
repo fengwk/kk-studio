@@ -130,7 +130,7 @@ class RuntimeConfigSnapshotResolverTest {
     model(3, true, "fast");
 
     RuntimeConfigSnapshot replaced = resolver.replaceModel(current, 3, "fast");
-    RuntimeConfigSnapshot yolo = resolver.replaceYolo(replaced, true);
+    RuntimeConfigSnapshot yolo = replaced.withYoloEnabled(true);
     assertEquals(current.agent(), replaced.agent());
     assertEquals(current.tools(), replaced.tools());
     assertEquals("fast", replaced.model().variant().id());
@@ -166,7 +166,6 @@ class RuntimeConfigSnapshotResolverTest {
   @Test
   void rejectsMissingDefinitionsModelsProvidersAndVariants() {
     assertThrows(NullPointerException.class, () -> resolver.replaceModel(null, 1, "default"));
-    assertThrows(NullPointerException.class, () -> resolver.replaceYolo(null, true));
     assertThrows(IllegalArgumentException.class, () -> resolver.resolveAgent(0, false));
     assertThrows(IllegalArgumentException.class, () -> resolver.resolveAgent(1, false));
 
