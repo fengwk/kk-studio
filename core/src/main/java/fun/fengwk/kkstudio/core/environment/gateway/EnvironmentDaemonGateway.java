@@ -39,9 +39,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
 /**
@@ -53,7 +51,8 @@ import java.util.regex.Pattern;
  * environment/connection/invocation ownership.
  */
 @Service
-public class EnvironmentDaemonGateway implements EnvironmentSkillLoader, RemoteToolTransport {
+public class EnvironmentDaemonGateway
+    implements EnvironmentDaemonEndpoint, EnvironmentSkillLoader, RemoteToolTransport {
 
   private static final Pattern UNSIGNED_POSITIVE_DECIMAL = Pattern.compile("^[1-9][0-9]*$");
 
@@ -64,40 +63,27 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader, RemoteT
   private final DaemonSkillLoadCodec skillLoadCodec = new DaemonSkillLoadCodec();
   private final EnvironmentGatewayProperties properties;
   private final Clock clock;
+  private final EnvironmentReadyListener environmentReadyListener;
   private final Map<String, ConnectionState> connections = new HashMap<>();
   private final Map<String, ConnectionState> environmentConnections = new HashMap<>();
   private final Map<String, ActiveRemote> activeByEnvironment = new HashMap<>();
   private final Map<String, PendingSkillLoad> pendingSkillLoads = new HashMap<>();
-  private volatile Consumer<String> environmentReadyHandler = ignored -> {};
-  private volatile Executor readyDispatchExecutor = Runnable::run;
 
   public EnvironmentDaemonGateway(
       LiveEnvironmentRegistry environmentRegistry,
       DaemonToolCapabilitiesCodec capabilitiesCodec,
       EnvironmentGatewayProperties properties,
-      Clock clock) {
+      Clock clock,
+      EnvironmentReadyListener environmentReadyListener) {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.capabilitiesCodec = Objects.requireNonNull(capabilitiesCodec, "capabilitiesCodec");
     this.properties = Objects.requireNonNull(properties, "properties");
     this.clock = Objects.requireNonNull(clock, "clock");
+    this.environmentReadyListener =
+        environmentReadyListener == null ? ignored -> {} : environmentReadyListener;
   }
 
-  /** Wires READY notifications so ToolWorker can claim due ENVIRONMENT work. */
-  public void setEnvironmentReadyHandler(Consumer<String> environmentReadyHandler) {
-    this.environmentReadyHandler =
-        environmentReadyHandler == null ? ignored -> {} : environmentReadyHandler;
-  }
-
-  /**
-   * Executor used to schedule READY dispatch off the WebSocket receive stack. Defaults to direct
-   * execution (tests); production wires the tool-worker scheduler.
-   */
-  public void setReadyDispatchExecutor(Executor readyDispatchExecutor) {
-    this.readyDispatchExecutor =
-        readyDispatchExecutor == null ? Runnable::run : readyDispatchExecutor;
-  }
-
-  /** Registers a newly opened transport before its first HELLO frame arrives. */
+  @Override
   public void open(EnvironmentDaemonConnection connection) {
     Objects.requireNonNull(connection, "connection");
     String connectionId = requireNonBlank(connection.connectionId(), "connectionId");
@@ -111,10 +97,7 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader, RemoteT
     }
   }
 
-  /**
-   * Processes one inbound text frame. Protocol decode/sequence validation may hold connection
-   * state; ToolExecutionListener and READY dispatch always run after locks are released.
-   */
+  @Override
   public void receive(String connectionId, String rawMessage) {
     ConnectionState state;
     synchronized (this) {
@@ -143,7 +126,7 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader, RemoteT
     runDeferred(deferred);
   }
 
-  /** Drops a transport handle; active remotes are notified as outcome-uncertain. */
+  @Override
   public void close(String connectionId) {
     ConnectionState state;
     synchronized (this) {
@@ -155,7 +138,7 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader, RemoteT
   }
 
   /**
-   * Notifies ToolWorker for each READY environment. Durable recovery remains in ToolWorker;
+   * Notifies the READY listener for each READY environment. Durable recovery remains in ToolWorker;
    * retained for lifecycle scheduling and deterministic tests.
    */
   public void pollOnce() {
@@ -167,13 +150,8 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader, RemoteT
               .map(state -> state.environmentName)
               .toList();
     }
-    Consumer<String> handler = environmentReadyHandler;
     for (String environmentName : ready) {
-      try {
-        handler.accept(environmentName);
-      } catch (RuntimeException ignored) {
-        // Recovery polling remains authoritative when the routing hint fails.
-      }
+      notifyEnvironmentReady(environmentName);
     }
   }
 
@@ -385,7 +363,7 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader, RemoteT
     environmentRegistry.markReady(state.environmentName, state.connection, now);
     state.ready = true;
     String environmentName = state.environmentName;
-    deferred.add(() -> scheduleReadyDispatch(environmentName));
+    deferred.add(() -> notifyEnvironmentReady(environmentName));
   }
 
   private void handleHeartbeat(ConnectionState state, DaemonEnvelope envelope) {
@@ -659,24 +637,11 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader, RemoteT
     }
   }
 
-  private void scheduleReadyDispatch(String environmentName) {
-    Consumer<String> handler = environmentReadyHandler;
-    Executor executor = readyDispatchExecutor;
+  private void notifyEnvironmentReady(String environmentName) {
     try {
-      executor.execute(
-          () -> {
-            try {
-              handler.accept(environmentName);
-            } catch (RuntimeException ignored) {
-              // Durable polling remains authoritative.
-            }
-          });
-    } catch (RuntimeException rejected) {
-      try {
-        handler.accept(environmentName);
-      } catch (RuntimeException ignored) {
-        // Best-effort fallback when the scheduler rejects work.
-      }
+      environmentReadyListener.onEnvironmentReady(environmentName);
+    } catch (RuntimeException ignored) {
+      // Listener failures must not re-enter protocol state. Durable polling remains authoritative.
     }
   }
 

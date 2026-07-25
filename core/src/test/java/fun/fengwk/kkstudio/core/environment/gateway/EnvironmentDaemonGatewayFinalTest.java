@@ -58,8 +58,7 @@ class EnvironmentDaemonGatewayFinalTest {
   @Test
   void readyNotifiesHandlerAndInvokeSendsProtocolThenMapsCompletion() {
     List<String> ready = new ArrayList<>();
-    Fixture fixture = fixture();
-    fixture.gateway.setEnvironmentReadyHandler(ready::add);
+    Fixture fixture = fixture(ready::add);
     FakeConnection connection = fixture.connectReady("connection-a");
 
     assertEquals(List.of(ENVIRONMENT_NAME), ready);
@@ -165,20 +164,22 @@ class EnvironmentDaemonGatewayFinalTest {
 
   @Test
   void readyHandlerAndTerminalCallbacksRunOutsideTransportLocks() {
-    Fixture fixture = fixture();
     AtomicBoolean readySawLockFree = new AtomicBoolean();
     AtomicBoolean completeSawLockFree = new AtomicBoolean();
-    fixture.gateway.setEnvironmentReadyHandler(
-        env -> {
-          // Re-enter gateway monitor (loadSkill) without re-dispatching READY. Deadlocks if READY
-          // still held ConnectionState or gateway locks incorrectly.
-          try {
-            fixture.gateway.loadSkill(env, "missing-skill", Duration.ofMillis(20)).get();
-          } catch (Exception ignored) {
-            // Offline/timeout paths still exercise locked sections.
-          }
-          readySawLockFree.set(true);
-        });
+    AtomicReference<EnvironmentDaemonGateway> gatewayRef = new AtomicReference<>();
+    Fixture fixture =
+        fixture(
+            env -> {
+              // Re-enter gateway monitor (loadSkill) without re-dispatching READY. Deadlocks if
+              // READY still held ConnectionState or gateway locks incorrectly.
+              try {
+                gatewayRef.get().loadSkill(env, "missing-skill", Duration.ofMillis(20)).get();
+              } catch (Exception ignored) {
+                // Offline/timeout paths still exercise locked sections.
+              }
+              readySawLockFree.set(true);
+            });
+    gatewayRef.set(fixture.gateway);
     FakeConnection connection = fixture.connectReady("connection-lock-free");
     assertTrue(readySawLockFree.get());
 
@@ -305,7 +306,11 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   private Fixture fixture() {
-    return new Fixture(descriptor());
+    return fixture(environmentName -> {});
+  }
+
+  private Fixture fixture(EnvironmentReadyListener readyListener) {
+    return new Fixture(descriptor(), readyListener);
   }
 
   private static ToolDescriptor descriptor() {
@@ -326,7 +331,7 @@ class EnvironmentDaemonGatewayFinalTest {
     private final EnvironmentDaemonGateway gateway;
     private final ToolDescriptor descriptor;
 
-    private Fixture(ToolDescriptor descriptor) {
+    private Fixture(ToolDescriptor descriptor, EnvironmentReadyListener readyListener) {
       this.descriptor = descriptor;
       EnvironmentGatewayProperties gatewayProperties = new EnvironmentGatewayProperties();
       gatewayProperties.setDaemonToken(GATEWAY_TOKEN);
@@ -350,7 +355,8 @@ class EnvironmentDaemonGatewayFinalTest {
                 public Instant instant() {
                   return now.get();
                 }
-              });
+              },
+              readyListener);
     }
 
     private FakeConnection connectReady(String connectionId) {

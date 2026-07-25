@@ -9,7 +9,6 @@ import static org.mockito.Mockito.mock;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonGateway;
 import fun.fengwk.kkstudio.core.harness.tool.service.HarnessToolConfiguration;
 import fun.fengwk.kkstudio.core.harness.tool.worker.HarnessToolWorkerConfiguration;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
@@ -33,6 +32,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.time.Clock;
@@ -91,7 +91,7 @@ class HarnessExtensionConfigurationTest {
           toolWorkerConfiguration.toolWorker(
               mock(ToolInvocationTransactions.class),
               registry,
-              mock(EnvironmentDaemonGateway.class),
+              mock(RemoteToolTransport.class),
               chain,
               mock(ArtifactStore.class),
               () -> InvocationRetryPolicy.DEFAULT,

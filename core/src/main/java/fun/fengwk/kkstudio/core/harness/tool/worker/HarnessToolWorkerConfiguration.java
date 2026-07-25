@@ -1,12 +1,13 @@
 package fun.fengwk.kkstudio.core.harness.tool.worker;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonGateway;
+import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
@@ -14,13 +15,13 @@ import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
 import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyResolver;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolRegistry;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorker;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorkerConfig;
+import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
 
 import java.time.Clock;
 import java.util.UUID;
@@ -50,13 +51,25 @@ public class HarnessToolWorkerConfiguration {
     return host::createTool;
   }
 
+  /**
+   * Production READY bridge. Uses a lazy {@link ToolWorker} so Gateway construction does not form a
+   * cycle with this listener.
+   */
   @Bean
-  @ConditionalOnBean({ToolRegistry.class, EnvironmentDaemonGateway.class})
+  @ConditionalOnMissingBean
+  public EnvironmentReadyListener environmentReadyListener(
+      ObjectProvider<ToolWorker> toolWorker,
+      @Qualifier("toolWorkerScheduler") ScheduledExecutorService toolWorkerScheduler) {
+    return new ToolWorkerEnvironmentReadyListener(toolWorker, toolWorkerScheduler);
+  }
+
+  @Bean
+  @ConditionalOnBean({ToolRegistry.class, RemoteToolTransport.class})
   @ConditionalOnMissingBean
   public ToolWorker toolWorker(
       ToolInvocationTransactions transactions,
       ToolRegistry registry,
-      EnvironmentDaemonGateway remoteTransport,
+      RemoteToolTransport remoteTransport,
       ToolInterceptorChain interceptorChain,
       ArtifactStore artifactStore,
       InvocationRetryPolicyResolver retryPolicyResolver,
@@ -66,25 +79,20 @@ public class HarnessToolWorkerConfiguration {
       Clock clock,
       @Qualifier("toolWorkerScheduler") ScheduledExecutorService toolWorkerScheduler,
       HarnessLifecycleObservers lifecycleObservers) {
-    ToolWorker worker =
-        new ToolWorker(
-            transactions,
-            registry,
-            remoteTransport,
-            interceptorChain,
-            artifactStore,
-            retryPolicyResolver,
-            realtimeEventSink,
-            activationNotifier,
-            config,
-            clock,
-            toolWorkerScheduler,
-            lifecycleObservers,
-            () -> UUID.randomUUID().toString());
-    remoteTransport.setReadyDispatchExecutor(toolWorkerScheduler);
-    remoteTransport.setEnvironmentReadyHandler(
-        environmentName -> worker.dispatchNext(ToolExecutionLocation.ENVIRONMENT, environmentName));
-    return worker;
+    return new ToolWorker(
+        transactions,
+        registry,
+        remoteTransport,
+        interceptorChain,
+        artifactStore,
+        retryPolicyResolver,
+        realtimeEventSink,
+        activationNotifier,
+        config,
+        clock,
+        toolWorkerScheduler,
+        lifecycleObservers,
+        () -> UUID.randomUUID().toString());
   }
 
   @Bean
