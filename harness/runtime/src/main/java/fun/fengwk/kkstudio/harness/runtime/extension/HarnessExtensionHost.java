@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.extension;
 
-import fun.fengwk.kkstudio.harness.agent.extension.BeforeProviderRequestInterceptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.context.ContextTransform;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionException.Phase;
@@ -24,7 +23,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class HarnessExtensionHost implements AutoCloseable {
 
   private final List<ContextTransform> contextTransforms;
-  private final List<BeforeProviderRequestInterceptor> beforeProviderRequestInterceptors;
   private final List<BeforeToolCallInterceptor> beforeToolCallInterceptors;
   private final List<AfterToolCallInterceptor> afterToolCallInterceptors;
   private final List<BeforeCompactionInterceptor> beforeCompactionInterceptors;
@@ -63,7 +61,6 @@ public final class HarnessExtensionHost implements AutoCloseable {
     registry.freeze();
 
     contextTransforms = registry.contextTransforms();
-    beforeProviderRequestInterceptors = registry.beforeProviderRequestInterceptors();
     beforeToolCallInterceptors = registry.beforeToolCallInterceptors();
     afterToolCallInterceptors = registry.afterToolCallInterceptors();
     beforeCompactionInterceptors = registry.beforeCompactionInterceptors();
@@ -77,10 +74,6 @@ public final class HarnessExtensionHost implements AutoCloseable {
 
   public List<ContextTransform> contextTransforms() {
     return contextTransforms;
-  }
-
-  public List<BeforeProviderRequestInterceptor> beforeProviderRequestInterceptors() {
-    return beforeProviderRequestInterceptors;
   }
 
   public List<BeforeToolCallInterceptor> beforeToolCallInterceptors() {

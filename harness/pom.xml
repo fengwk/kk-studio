@@ -15,9 +15,7 @@
 
     <modules>
         <module>kernel</module>
-        <module>model</module>
         <module>tool</module>
-        <module>agent</module>
         <module>runtime</module>
         <module>daemon</module>
     </modules>

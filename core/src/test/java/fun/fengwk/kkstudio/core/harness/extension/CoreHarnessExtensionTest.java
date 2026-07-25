@@ -9,14 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.core.harness.model.provider.AnthropicProviderAdapter;
+import fun.fengwk.kkstudio.core.harness.model.provider.GoogleProviderAdapter;
+import fun.fengwk.kkstudio.core.harness.model.provider.OpenAiProviderAdapter;
+import fun.fengwk.kkstudio.core.harness.model.provider.OpenAiResponsesProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.model.provider.adapter.AnthropicProviderAdapter;
-import fun.fengwk.kkstudio.harness.model.provider.adapter.GoogleProviderAdapter;
-import fun.fengwk.kkstudio.harness.model.provider.adapter.OpenAiProviderAdapter;
-import fun.fengwk.kkstudio.harness.model.provider.adapter.OpenAiResponsesProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtension;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionException;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;

@@ -94,7 +94,7 @@ public final class ModelInvocationPlanner {
             providerTools,
             ProviderCacheControl.none());
     ProviderRequest request =
-        new PromptCacheRequestFinalizer(sessionId, cacheKeyFactory).intercept(baseRequest);
+        new PromptCacheRequestFinalizer(sessionId, cacheKeyFactory).apply(baseRequest);
     return Optional.of(new ModelInvocationPlan(sourceHeadEntryId, request, config));
   }
 
