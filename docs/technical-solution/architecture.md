@@ -49,8 +49,8 @@ flowchart LR
 | `harness-tool` | location-neutral Tool API / schema / RemoteTool / Daemon 协议 | Runtime 状态机 |
 | `harness-runtime` | Session / Thread / Invocation / Interaction / Reconciler / Model 契约 | Provider SDK、Spring、HTTP |
 | `harness-daemon` | 独立 Environment 进程适配器 | 依赖 runtime / Spring |
-| `core` | 两边的持久化、事务、worker、S3、ComfyUI 与 Studio adapters；LangChain4j Provider | 成为第二个“万能领域层” |
-| `web` | HTTP / SSE / WebSocket 适配；DTO 映射 | 领域状态机 |
+| `core` | Application boundary、composition、持久化/事务、worker lifecycle、S3、ComfyUI 与 Studio adapters；LangChain4j Provider | 成为第二个“万能领域层” |
+| `web` | HTTP / SSE / WebSocket 适配；只消费 Core API 与 share DTO | Harness 类型和领域状态机 |
 | `share` | HTTP DTO | 领域规则 |
 | `frontend` | React：`features/ai`、`features/canvas`、platform shell | 把后端契约写死在 UI 组件内部 |
 

@@ -25,12 +25,14 @@ harness/
 
 ```mermaid
 flowchart TB
-    C[Application Composition Root / core + web]
+    W[web transport adapters]
+    C[core application API / composition root / adapters]
     R[harness-runtime]
     T[harness-tool]
     D[harness-daemon]
     Mpkg["package harness.model<br/>(inside runtime module)"]
 
+    W --> C
     C --> R
     C --> T
     R --> T
@@ -43,10 +45,28 @@ flowchart TB
 | `harness-tool` | `ToolDescriptor`、异步 `Tool` API、schema、`RemoteTool`、transport-neutral Daemon wire | Runtime 状态机、Session/Thread、Spring |
 | `harness-runtime` | Session/Entry/HarnessThread/ThreadInput、execution 类型、Reconciler、Model/Tool Invocation、Interaction、retry/realtime ports；Model/provider 契约与 codec（包 `fun.fengwk.kkstudio.harness.model`） | Provider SDK、Spring、MyBatis、HTTP |
 | `harness-daemon` | Environment 进程：连接、本地 Tool 执行、invocation journal、coding tools | 依赖 runtime / core / Spring |
-| `core` | PostgreSQL/Redis adapter、事务、worker 生命周期、LangChain4j Provider adapter、业务扩展 | 第二套领域状态机 |
-| `web` | HTTP / SSE / WebSocket 适配 | 领域状态机 |
+| `core` | 薄 application boundary、Spring composition、PostgreSQL/Redis adapter、worker lifecycle、LangChain4j Provider adapter、业务扩展 | 第二套领域状态机 |
+| `web` | HTTP / SSE / WebSocket 适配，只消费 Core API 与 share DTO | Harness 类型和领域状态机 |
 
 Model 契约物理位于 runtime 模块的 `harness.model` 包；LangChain4j adapter 与 SDK 依赖位于 `core`。
+
+### 2.1 API / SPI 接入
+
+依赖方向按调用方向区分：
+
+```text
+web -> Core application API / share DTO
+
+Core composition root -> Runtime inbound API
+  ThreadCommandCoordinator / SessionCommandCoordinator / InteractionCoordinator
+  ThreadReconciler / ModelWorker / ToolWorker
+
+Runtime -> outbound SPI <- Core adapters
+  transaction ports / RuntimeConfigSource / Model execution
+  ActivationNotifier / RealtimeEventSink / ArtifactStore / RemoteToolTransport
+```
+
+Core composition root 直接构造 Runtime concrete coordinator/worker 是正常的 inbound API 使用，不需要再套同义接口。业务编排与状态机留在 Runtime；Core 只保留 Spring 事务和 after-commit bridge、live resource 解析、DTO/十进制 ID 映射与基础设施实现。Web 生产代码和 POM 不直接依赖 Harness 模块。
 
 ## 3. Durable 事实所有权
 
@@ -172,12 +192,12 @@ Root activity 由 durable facts 即时查询投影。
 
 | 写者 | 可写 | 不可写 |
 | --- | --- | --- |
-| Session/Branch command | 新建 Session/Main Thread、初始 ROOT/RUNTIME_CONFIG Entry 或 Branch head | 推进已有 Thread 的语义 head |
+| Session/Thread command coordinator | 新建 Session/Main Thread、初始 ROOT/RUNTIME_CONFIG Entry、Branch head 或 typed Input | 推进已有 Thread 的语义 head |
 | `ThreadReconciler` | 已有 Thread 的 Entry/head 推进、Input apply、ModelInvocation 创建、ToolInvocation 创建、Usage apply 路径 | 外部 Provider/Tool I/O |
 | `ModelWorker` | ModelInvocation 状态 / lease / terminal / realtime | Entry/head |
 | `ToolWorker` | ToolInvocation 状态 / lease / terminal / realtime | Entry/head |
 | Interaction transaction | Interaction 与 owner dispatchable/runnable | 越权改 Entry |
-| Thread command | Session 创建、Input enqueue、Stop epoch | 绕过 Reconciler 推进 head |
+| Thread command transaction | Session 创建、Input enqueue、Stop epoch | 绕过 Reconciler 推进 head |
 
 Session/Branch command 只负责 bootstrap；`ThreadReconciler` 是已有 Thread 语义推进的唯一写者。一次 activation：
 

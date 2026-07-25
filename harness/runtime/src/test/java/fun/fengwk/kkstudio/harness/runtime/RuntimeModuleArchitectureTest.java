@@ -11,34 +11,27 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
  * Lightweight architecture guard for the runtime module.
  *
- * <p>Scans the entire {@code src/main/java} tree (including {@code harness.model}) and rejects
- * Spring/MyBatis/servlet/web, Provider SDK, core/web and deleted kernel dependencies.
+ * <p>Scans the entire {@code src/main/java} tree (including {@code harness.model}) against an
+ * allowlist, and verifies the three Harness modules plus their direct production dependencies.
  */
 class RuntimeModuleArchitectureTest {
 
-  private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
+  private static final List<String> ALLOWED_IMPORT_PREFIXES =
       List.of(
-          "org.springframework.",
-          "org.mybatis.",
-          "org.apache.ibatis.",
-          "jakarta.servlet.",
-          "javax.servlet.",
-          "jakarta.ws.",
-          "javax.ws.",
-          "org.springframework.web.",
-          "dev.langchain4j.",
-          "com.openai.",
-          "com.anthropic.",
-          "com.google.genai.",
-          "com.google.ai.",
-          "fun.fengwk.kkstudio.core.",
-          "fun.fengwk.kkstudio.web.",
-          "fun.fengwk.kkstudio.harness.kernel.");
+          "java.",
+          "javax.",
+          "com.fasterxml.jackson.",
+          "fun.fengwk.kkstudio.harness.model.",
+          "fun.fengwk.kkstudio.harness.runtime.",
+          "fun.fengwk.kkstudio.harness.tool.");
 
   private static final List<String> FORBIDDEN_TEXT_MARKERS =
       List.of(
@@ -46,8 +39,13 @@ class RuntimeModuleArchitectureTest {
           "fun.fengwk.kkstudio.harness.kernel.",
           "kk-studio-harness-kernel");
 
+  private static final Pattern MODULE_PATTERN =
+      Pattern.compile("<module>\\s*([^<]+?)\\s*</module>");
+  private static final Pattern DEPENDENCY_PATTERN =
+      Pattern.compile("<dependency>(.*?)</dependency>", Pattern.DOTALL);
+
   @Test
-  void runtimeMainSourcesAvoidInfrastructureProviderSdkAndDeletedKernel() throws IOException {
+  void runtimeMainSourcesAndHarnessModulesStayWithinDeclaredBoundaries() throws IOException {
     Path main = locateRuntimeMainJava();
     assertTrue(Files.isDirectory(main), "runtime main sources must exist: " + main);
 
@@ -61,6 +59,21 @@ class RuntimeModuleArchitectureTest {
     assertFalse(
         Files.exists(deletedKernelModule),
         "deleted harness/kernel module directory must not exist: " + deletedKernelModule);
+
+    Path harnessRoot = moduleRoot.getParent();
+    assertHarnessModules(harnessRoot.resolve("pom.xml"));
+    assertDirectProductionDependencies(
+        harnessRoot.resolve("tool/pom.xml"), Set.of("com.fasterxml.jackson.core:jackson-databind"));
+    assertDirectProductionDependencies(
+        harnessRoot.resolve("runtime/pom.xml"),
+        Set.of(
+            "com.fasterxml.jackson.core:jackson-databind",
+            "fun.fengwk.kk-studio:kk-studio-harness-tool"));
+    assertDirectProductionDependencies(
+        harnessRoot.resolve("daemon/pom.xml"),
+        Set.of(
+            "com.fasterxml.jackson.core:jackson-databind",
+            "fun.fengwk.kk-studio:kk-studio-harness-tool"));
 
     List<String> violations = scanViolations(main);
     assertTrue(
@@ -81,10 +94,8 @@ class RuntimeModuleArchitectureTest {
                     String trimmed = line.trim();
                     if (trimmed.startsWith("import ")) {
                       String imported = normalizeImport(trimmed);
-                      for (String prefix : FORBIDDEN_IMPORT_PREFIXES) {
-                        if (imported.startsWith(prefix)) {
-                          violations.add(relative(main, path) + ": " + trimmed);
-                        }
+                      if (!isAllowedImport(imported)) {
+                        violations.add(relative(main, path) + ": disallowed import " + trimmed);
                       }
                     }
                     for (String marker : FORBIDDEN_TEXT_MARKERS) {
@@ -99,6 +110,57 @@ class RuntimeModuleArchitectureTest {
               });
     }
     return violations;
+  }
+
+  private static boolean isAllowedImport(String imported) {
+    return ALLOWED_IMPORT_PREFIXES.stream().anyMatch(imported::startsWith);
+  }
+
+  private static void assertHarnessModules(Path pom) throws IOException {
+    String text = Files.readString(pom, StandardCharsets.UTF_8);
+    Matcher matcher = MODULE_PATTERN.matcher(text);
+    List<String> modules = new ArrayList<>();
+    while (matcher.find()) {
+      modules.add(matcher.group(1).trim());
+    }
+    assertTrue(
+        modules.equals(List.of("tool", "runtime", "daemon")),
+        () -> "harness modules must be exactly tool/runtime/daemon, got " + modules);
+  }
+
+  private static void assertDirectProductionDependencies(Path pom, Set<String> allowed)
+      throws IOException {
+    String text = Files.readString(pom, StandardCharsets.UTF_8);
+    Matcher matcher = DEPENDENCY_PATTERN.matcher(text);
+    List<String> violations = new ArrayList<>();
+    while (matcher.find()) {
+      String dependency = matcher.group(1);
+      String scope = optionalTag(dependency, "scope");
+      if ("test".equals(scope)) {
+        continue;
+      }
+      String coordinate =
+          requiredTag(dependency, "groupId") + ":" + requiredTag(dependency, "artifactId");
+      if (!allowed.contains(coordinate)) {
+        violations.add(coordinate + (scope == null ? "" : " [" + scope + "]"));
+      }
+    }
+    assertTrue(
+        violations.isEmpty(),
+        () -> "disallowed direct production dependencies in " + pom + ": " + violations);
+  }
+
+  private static String requiredTag(String block, String tag) {
+    String value = optionalTag(block, tag);
+    if (value == null || value.isBlank()) {
+      throw new IllegalStateException("dependency must declare " + tag);
+    }
+    return value;
+  }
+
+  private static String optionalTag(String block, String tag) {
+    Matcher matcher = Pattern.compile("<" + tag + ">\\s*([^<]+?)\\s*</" + tag + ">").matcher(block);
+    return matcher.find() ? matcher.group(1).trim() : null;
   }
 
   private static String normalizeImport(String importLine) {

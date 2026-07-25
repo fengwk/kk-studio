@@ -15,25 +15,33 @@ import java.util.stream.Stream;
 /**
  * Lightweight architecture guard for the web module.
  *
- * <p>Production sources must not import harness packages, and {@code web/pom.xml} must not declare
- * direct harness module dependencies. Runtime/tool contracts remain available transitively through
- * Core for tests only.
+ * <p>Production sources must not reference Harness packages or selected Core infrastructure
+ * implementations, and {@code web/pom.xml} must not declare direct Harness module dependencies.
+ * Runtime/tool contracts remain available transitively through Core for integration tests only.
  */
 class WebModuleArchitectureTest {
 
-  private static final String FORBIDDEN_IMPORT_PREFIX = "fun.fengwk.kkstudio.harness.";
+  private static final String HARNESS_REFERENCE_PREFIX = "fun.fengwk.kkstudio.harness.";
+  private static final String CORE_REFERENCE_PREFIX = "fun.fengwk.kkstudio.core.";
+  private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
+      List.of(
+          HARNESS_REFERENCE_PREFIX,
+          CORE_REFERENCE_PREFIX + "environment.gateway." + "EnvironmentDaemonGateway",
+          CORE_REFERENCE_PREFIX + "environment.registry." + "LiveEnvironment",
+          CORE_REFERENCE_PREFIX + "environment.registry." + "LiveEnvironmentRegistry",
+          CORE_REFERENCE_PREFIX + "harness.redis." + "RedisRealtimeEventTail");
   private static final List<String> FORBIDDEN_POM_ARTIFACTS =
       List.of("kk-studio-harness-runtime", "kk-studio-harness-tool", "kk-studio-harness-daemon");
 
   @Test
-  void webMainSourcesAvoidHarnessImportsAndDirectPomDependencies() throws IOException {
+  void webMainSourcesUseCoreBoundariesAndAvoidDirectHarnessDependencies() throws IOException {
     Path main = locateWebMainJava();
     assertTrue(Files.isDirectory(main), "web main sources must exist: " + main);
 
-    List<String> importViolations = scanImportViolations(main);
+    List<String> importViolations = scanViolations(main);
     assertTrue(
         importViolations.isEmpty(),
-        () -> "harness import violations:\n" + String.join("\n", importViolations));
+        () -> "web boundary violations:\n" + String.join("\n", importViolations));
 
     Path pom = locateWebPom(main);
     assertTrue(Files.isRegularFile(pom), "web/pom.xml must exist: " + pom);
@@ -49,7 +57,7 @@ class WebModuleArchitectureTest {
         () -> "web pom harness dependency violations:\n" + String.join("\n", pomViolations));
   }
 
-  private static List<String> scanImportViolations(Path main) throws IOException {
+  private static List<String> scanViolations(Path main) throws IOException {
     List<String> violations = new ArrayList<>();
     try (Stream<Path> stream = Files.walk(main)) {
       stream
@@ -63,9 +71,14 @@ class WebModuleArchitectureTest {
                     String trimmed = line.trim();
                     if (trimmed.startsWith("import ")) {
                       String imported = normalizeImport(trimmed);
-                      if (imported.startsWith(FORBIDDEN_IMPORT_PREFIX)) {
-                        violations.add(relative(main, path) + ": " + trimmed);
+                      for (String prefix : FORBIDDEN_IMPORT_PREFIXES) {
+                        if (imported.startsWith(prefix)) {
+                          violations.add(relative(main, path) + ": " + trimmed);
+                        }
                       }
+                    } else if (trimmed.contains(HARNESS_REFERENCE_PREFIX)) {
+                      violations.add(
+                          relative(main, path) + ": forbidden Harness reference " + trimmed);
                     }
                   }
                 } catch (IOException error) {

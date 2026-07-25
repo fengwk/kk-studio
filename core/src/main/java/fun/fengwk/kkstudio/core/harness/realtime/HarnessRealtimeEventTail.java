@@ -23,7 +23,7 @@ public interface HarnessRealtimeEventTail {
    * Normalizes SSE resume cursors to the canonical realtime stream cursor form {@code ms-seq}.
    *
    * <p>Blank, null, or {@code "0"} become {@code "0-0"} (start of retained window). Any other value
-   * must already be a positive decimal pair separated by {@code '-'}.
+   * must already be a non-negative decimal pair separated by {@code '-'}.
    */
   static String normalizeAfterId(String afterId) {
     if (afterId == null || afterId.isBlank() || "0".equals(afterId.trim())) {

@@ -17,7 +17,7 @@ harness-tool
 harness-runtime
   fun.fengwk.kkstudio.harness.runtime
     ├── session/ thread/ entry/ execution/ continuation/
-    ├── reconcile/ model/ tool/ interaction/
+    ├── reconcile/ model/ tool/ interaction/       # coordinators + state machines
     ├── realtime/ retry/ port/ extension/ configuration/
     ├── permission/ skill/ goal/ usage/ cache/
   fun.fengwk.kkstudio.harness.model   # provider/model 契约与 codec（runtime 模块内包）
@@ -246,6 +246,14 @@ public record Interaction(
 
 Handler 返回 deterministic resolution，由 Interaction transaction adapter 原子应用，不直接控制事务提交。
 
+### 3.7 Command coordinators
+
+- `SessionCommandCoordinator` 冻结 bootstrap Agent config，并通过 `ThreadCommandTransactions` 创建 Session/ROOT/RUNTIME_CONFIG/Main Thread；产品默认值由 Core 提供。
+- `ThreadCommandCoordinator` 拥有 typed payload 构造、消息/role 校验、idempotency short-circuit、当前 config 选择、SET_AGENT/SET_MODEL/SET_YOLO 完整快照和 Stop 调用；对 Core 返回 coordinator-owned result，不泄漏 transaction SPI result。
+- `InteractionCoordinator` 拥有 handler lookup、projection、expiry 判定和 deterministic resolution。
+
+Coordinator 不依赖 Spring/DTO/HTTP；Core boundary 负责十进制字符串解析、Spring 外层事务、after-commit signal 与 DTO 映射。
+
 ## 4. Runtime ports
 
 ### 4.1 HarnessIdGenerator
@@ -312,6 +320,19 @@ public interface Tool {
 ```
 
 Adapter 必须支持 best-effort cancel；Runtime 以 worker token/epoch 判断 callback 是否可提交。
+
+### 4.5 RuntimeConfigSource
+
+```java
+public interface RuntimeConfigSource {
+  RuntimeConfigSnapshot resolveAgent(long definitionId, boolean yoloEnabled);
+
+  RuntimeConfigSnapshot replaceModel(
+      RuntimeConfigSnapshot current, long modelId, String requestedVariant);
+}
+```
+
+这是 command-time live resource 冻结 SPI。Core 实现可以读取 Definition、Model、Provider、ready Environment 与 extension descriptors，但不得发起 Provider I/O。纯 `SET_YOLO` 变换由 `RuntimeConfigSnapshot.withYoloEnabled` 完成。
 
 ## 5. Transaction ports
 
@@ -434,6 +455,8 @@ signal/recovery
 ## 8. Query / API 边界
 
 Query 可组合 PostgreSQL facts 生成 DTO，不得把 query projection 写回 Runtime aggregate。
+
+Web 只消费 Core application API 与 share DTO；不得直接导入 Harness domain/worker、Redis adapter、LiveEnvironment registry 或 concrete Environment gateway。Core observability/environment/realtime API 在返回 Web 前完成 Runtime/Tool/Redis 类型隔离。
 
 核心查询：
 

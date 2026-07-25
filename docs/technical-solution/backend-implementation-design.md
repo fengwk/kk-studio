@@ -1,6 +1,6 @@
 # 后端落地设计
 
-本文描述当前 `share`、`core` 和 `web` 的 Harness 控制面。领域状态由 `core` 管理，`web` 仅负责 HTTP、SSE 和 WebSocket 适配。
+本文描述当前 `share`、`core` 和 `web` 的 Harness 控制面。领域状态机与 framework-free 用例编排由 `harness-runtime` 管理；`core` 提供 application boundary、composition 与基础设施 adapter，`web` 仅负责 HTTP、SSE 和 WebSocket 适配。
 
 ## 分层
 
@@ -9,7 +9,7 @@ flowchart LR
     Client[Browser / Daemon]
     Web[web controllers and adapters]
     Core[core application services]
-    Runtime[harness-runtime ports]
+    Runtime[harness-runtime API / SPI]
     Store[(PostgreSQL / Redis / S3)]
 
     Client --> Web --> Core --> Runtime
@@ -20,9 +20,9 @@ flowchart LR
 | --- | --- |
 | `share` | DTO、JSON 字段和 HTTP 数据边界 |
 | `web` | 路由、参数解析、SSE emitter、WebSocket adapter、HTTP 状态映射 |
-| `core.harness` | Session、Thread、Tool、Usage、Artifact、Interaction 的应用服务与持久化 |
+| `core.harness` | 薄 application boundary、Spring composition 与 PostgreSQL/Redis/Provider adapter |
 | `core.environment` | 内存 Live Environment Registry、RemoteToolTransport、daemon gateway |
-| `harness-runtime` | Reconciler / Invocation / Interaction / Model 契约与 ports |
+| `harness-runtime` | Command coordinators、Reconciler、Invocation workers、Interaction、Model 契约与 outbound SPI |
 | `harness-tool` | Tool API / RemoteTool / Daemon 协议 |
 
 ## API 边界
@@ -119,6 +119,8 @@ GET /api/threads/{id}/events/stream?afterEventId={redis-stream-id}
 - `ENVIRONMENT` → `RemoteTool` → Gateway transport → Daemon → 同一 Tool API
 
 Gateway 只管理连接与协议，不是第二套 durable 状态机。Environment 不提供 REST CRUD；`GET /api/environments` 投影当前连接 Daemon 的内存 Registry。协议细节见 [environment-daemon-gateway.md](environment-daemon-gateway.md)。
+
+WebSocket handler 只依赖 Core `EnvironmentDaemonEndpoint`；Gateway 以 `RemoteToolTransport` SPI 接入统一 `ToolWorker`。Daemon READY hint 通过不可变 listener bridge 离开 WebSocket 栈后调度，低频 `pollOnce` 仍负责丢失 hint 的恢复。
 
 `GET /api/artifacts/{id}` 返回原始 bytes 与有效 media type；异常 media 降级为 `application/octet-stream`，并附加 `X-Content-Type-Options: nosniff` 与 `Content-Security-Policy: sandbox`。
 
