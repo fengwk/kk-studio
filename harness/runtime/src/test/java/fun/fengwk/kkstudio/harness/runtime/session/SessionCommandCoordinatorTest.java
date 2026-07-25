@@ -29,14 +29,14 @@ class SessionCommandCoordinatorTest {
     SessionCommandCoordinator coordinator =
         new SessionCommandCoordinator(transactions, configSource, Clock.fixed(NOW, ZoneOffset.UTC));
 
-    ThreadCommandTransactions.SessionCreation creation = coordinator.createSession("t", 1L, true);
+    Session session = coordinator.createSession("t", 1L, true);
 
     assertEquals(1L, configSource.lastDefinitionId);
     assertEquals(true, configSource.lastYolo);
     assertSame(configSource.resolved, transactions.lastConfig);
     assertEquals("t", transactions.lastTitle);
     assertEquals(NOW, transactions.lastNow);
-    assertSame(transactions.creation, creation);
+    assertSame(transactions.session, session);
   }
 
   private static final class FakeConfigSource implements RuntimeConfigSource {
@@ -63,7 +63,7 @@ class SessionCommandCoordinatorTest {
     String lastTitle;
     RuntimeConfigSnapshot lastConfig;
     Instant lastNow;
-    SessionCreation creation;
+    Session session;
 
     @Override
     public SessionCreation createSession(
@@ -71,9 +71,8 @@ class SessionCommandCoordinatorTest {
       lastTitle = title;
       lastConfig = initialConfig;
       lastNow = now;
-      Session session = new Session(10L, 11L, title, null, null, now, now);
-      creation = new SessionCreation(session, null, null);
-      return creation;
+      session = new Session(10L, 11L, title, null, null, now, now);
+      return new SessionCreation(session, null, null);
     }
 
     @Override

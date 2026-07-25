@@ -11,8 +11,9 @@ import java.util.Objects;
  * Framework-free Session bootstrap orchestration.
  *
  * <p>Resolves the initial agent snapshot from live resources and creates Session / ROOT /
- * RUNTIME_CONFIG / Main Thread via {@link ThreadCommandTransactions}. Product defaults such as the
- * bootstrap agent definition id and default yolo flag are supplied by the composition root.
+ * RUNTIME_CONFIG / Main Thread via durable transaction ports. Returns only the domain {@link
+ * Session} needed by composition-root callers. Product defaults such as the bootstrap agent
+ * definition id and default yolo flag are supplied by the composition root.
  */
 public final class SessionCommandCoordinator {
 
@@ -33,10 +34,10 @@ public final class SessionCommandCoordinator {
    * @param title optional session title
    * @param agentDefinitionId live agent definition used for the initial RUNTIME_CONFIG
    * @param yoloEnabled bootstrap yolo flag (typically product default when no prior config exists)
+   * @return the created domain Session
    */
-  public ThreadCommandTransactions.SessionCreation createSession(
-      String title, long agentDefinitionId, boolean yoloEnabled) {
+  public Session createSession(String title, long agentDefinitionId, boolean yoloEnabled) {
     RuntimeConfigSnapshot bootstrap = configSource.resolveAgent(agentDefinitionId, yoloEnabled);
-    return transactions.createSession(title, bootstrap, clock.instant());
+    return transactions.createSession(title, bootstrap, clock.instant()).session();
   }
 }

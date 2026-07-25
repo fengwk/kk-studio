@@ -66,7 +66,7 @@ class ThreadCommandCoordinatorTest {
     transactions.existing.put(
         "1:same-key", new ThreadCommandTransactions.EnqueueResult(persisted, TARGET));
 
-    ThreadCommandTransactions.EnqueueResult result =
+    ThreadCommandCoordinator.EnqueueResult result =
         coordinator.queueAgent(1L, 99L, false, "same-key");
     assertSame(persisted, result.input());
     assertEquals(0, configSource.resolveCalls);
@@ -174,7 +174,7 @@ class ThreadCommandCoordinatorTest {
 
   @Test
   void stopUsesInjectedClock() {
-    ThreadCommandTransactions.StopResult stop = coordinator.stop(1L);
+    ThreadCommandCoordinator.StopResult stop = coordinator.stop(1L);
     assertEquals(NOW, transactions.lastStopNow);
     assertEquals(1L, stop.executionEpoch());
   }

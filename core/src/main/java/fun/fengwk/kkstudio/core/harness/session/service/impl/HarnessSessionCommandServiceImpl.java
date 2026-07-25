@@ -39,11 +39,9 @@ public class HarnessSessionCommandServiceImpl implements HarnessSessionCommandSe
   public HarnessSessionDTO createSession(HarnessSessionCreateDTO request) {
     Objects.requireNonNull(request, "request");
     return sessionConverter.convert(
-        coordinator
-            .createSession(
-                request.getTitle(),
-                DEFAULT_AGENT_DEFINITION_ID,
-                toolSettingsProvider.get().defaultYolo())
-            .session());
+        coordinator.createSession(
+            request.getTitle(),
+            DEFAULT_AGENT_DEFINITION_ID,
+            toolSettingsProvider.get().defaultYolo()));
   }
 }

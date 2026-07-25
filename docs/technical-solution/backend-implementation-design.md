@@ -76,7 +76,7 @@ Java 领域类型使用 `HarnessThread`，避免与 `java.lang.Thread` 冲突。
 
 | 服务 | 职责 |
 | --- | --- |
-| `SessionCommandCoordinator` / `ThreadCommandCoordinator` | harness-runtime 内 framework-free 命令编排：payload 构造、配置冻结、幂等短路、调用 transaction port |
+| `SessionCommandCoordinator` / `ThreadCommandCoordinator` | harness-runtime 内 framework-free 命令编排：payload 构造、配置冻结、幂等短路、映射 coordinator-owned results；Core 不依赖 transaction SPI |
 | `RuntimeConfigSource` | live Agent/Model 冻结 SPI；Core `RuntimeConfigSnapshotResolver` 实现；纯 YOLO 替换在 runtime |
 | `HarnessSessionCommandService` | Core 薄边界：产品默认、Spring 事务、DTO 映射 |
 | `HarnessThreadCommandService` | Core 薄边界：decimal/DTO、after-commit activation |

@@ -18,7 +18,7 @@ import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.InputStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator.EnqueueResult;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
@@ -59,7 +59,7 @@ class HarnessThreadCommandServiceImplTest {
     ExecutionTarget target = new ExecutionTarget(ExecutionTargetKind.THREAD, 1);
     HarnessThreadInputDTO expected = new HarnessThreadInputDTO();
     when(coordinator.findExistingInput(1, "same-key"))
-        .thenReturn(Optional.of(new ThreadCommandTransactions.EnqueueResult(persisted, target)));
+        .thenReturn(Optional.of(new EnqueueResult(persisted, target)));
     when(converter.convert(persisted)).thenReturn(expected);
 
     HarnessThreadAgentSetDTO retry = new HarnessThreadAgentSetDTO();
