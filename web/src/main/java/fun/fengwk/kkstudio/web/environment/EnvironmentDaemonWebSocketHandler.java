@@ -7,43 +7,44 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonConnection;
-import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonGateway;
+import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonEndpoint;
 
 import java.io.IOException;
 import java.util.Objects;
 
 /**
- * Spring WebSocket adapter; durable protocol semantics remain in {@link EnvironmentDaemonGateway}.
+ * Spring WebSocket adapter; durable protocol semantics remain behind {@link
+ * EnvironmentDaemonEndpoint}.
  */
 @Component
 public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandler {
 
   public static final String PATH = "/api/environments/daemon/v1";
 
-  private final EnvironmentDaemonGateway gateway;
+  private final EnvironmentDaemonEndpoint endpoint;
 
-  public EnvironmentDaemonWebSocketHandler(EnvironmentDaemonGateway gateway) {
-    this.gateway = Objects.requireNonNull(gateway, "gateway");
+  public EnvironmentDaemonWebSocketHandler(EnvironmentDaemonEndpoint endpoint) {
+    this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
   }
 
   @Override
   public void afterConnectionEstablished(WebSocketSession session) {
-    gateway.open(new SpringWebSocketConnection(session));
+    endpoint.open(new SpringWebSocketConnection(session));
   }
 
   @Override
   protected void handleTextMessage(WebSocketSession session, TextMessage message) {
-    gateway.receive(session.getId(), message.getPayload());
+    endpoint.receive(session.getId(), message.getPayload());
   }
 
   @Override
   public void handleTransportError(WebSocketSession session, Throwable exception) {
-    gateway.close(session.getId());
+    endpoint.close(session.getId());
   }
 
   @Override
   public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-    gateway.close(session.getId());
+    endpoint.close(session.getId());
   }
 
   private static final class SpringWebSocketConnection implements EnvironmentDaemonConnection {

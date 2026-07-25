@@ -32,7 +32,11 @@ class EnvironmentDaemonWebSocketEndpointTest extends WebPostgresTestSupport {
 
   @LocalServerPort private int port;
 
-  @MockitoBean private EnvironmentDaemonGateway gateway;
+  /**
+   * Mock the concrete Gateway (implements {@code EnvironmentDaemonEndpoint}) so other Core ports
+   * that share the same bean remain satisfied in the web slice.
+   */
+  @MockitoBean private EnvironmentDaemonGateway endpoint;
 
   /**
    * The endpoint bridges complete text frames in both directions and notifies the durable gateway
@@ -50,13 +54,13 @@ class EnvironmentDaemonWebSocketEndpointTest extends WebPostgresTestSupport {
 
     ArgumentCaptor<EnvironmentDaemonConnection> connectionCaptor =
         ArgumentCaptor.forClass(EnvironmentDaemonConnection.class);
-    verify(gateway, timeout(15_000)).open(connectionCaptor.capture());
+    verify(endpoint, timeout(15_000)).open(connectionCaptor.capture());
     EnvironmentDaemonConnection connection = connectionCaptor.getValue();
     assertNotNull(connection);
     assertTrue(connection.isOpen());
 
     socket.sendText("daemon-frame", true).get(10, TimeUnit.SECONDS);
-    verify(gateway, timeout(15_000)).receive(eq(connection.connectionId()), eq("daemon-frame"));
+    verify(endpoint, timeout(15_000)).receive(eq(connection.connectionId()), eq("daemon-frame"));
 
     connection.sendText("gateway-frame");
     assertEquals("gateway-frame", received.poll(10, TimeUnit.SECONDS));
@@ -64,7 +68,7 @@ class EnvironmentDaemonWebSocketEndpointTest extends WebPostgresTestSupport {
     socket.sendClose(WebSocket.NORMAL_CLOSURE, "test complete").get(10, TimeUnit.SECONDS);
     socket.request(1);
     listener.awaitClose();
-    verify(gateway, timeout(15_000)).close(connection.connectionId());
+    verify(endpoint, timeout(15_000)).close(connection.connectionId());
   }
 
   private URI endpointUri() {
