@@ -30,7 +30,7 @@ public final class ToolResultJsonCodec {
 
   private ToolResultJsonCodec() {}
 
-  /** Canonical object tree used by persistence and ThreadEvent partialResults. */
+  /** Canonical object tree used by durable ToolInvocation result persistence. */
   public static JsonNode encodeNode(ToolResult result) {
     Objects.requireNonNull(result, "result");
     ObjectNode node = OBJECT_MAPPER.createObjectNode();

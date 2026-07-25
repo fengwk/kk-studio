@@ -70,7 +70,7 @@ public class AgentModelServiceImpl implements AgentModelService {
       }
       return id;
     } catch (NumberFormatException error) {
-      throw new IllegalArgumentException(field + " must be a positive Snowflake ID", error);
+      throw new IllegalArgumentException(field + " must be a positive decimal id", error);
     }
   }
 }

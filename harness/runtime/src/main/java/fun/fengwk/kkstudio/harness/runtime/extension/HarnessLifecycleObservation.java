@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.extension;
 
-import fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 
 import java.time.Instant;
 import java.util.Objects;

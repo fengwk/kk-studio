@@ -1,37 +1,29 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
-/** 有序 Thread 输入类型。 */
+/**
+ * Thread mailbox 的命令类型枚举。
+ *
+ * <p>固定枚举值集合，不为未来命令预留。
+ */
 public enum ThreadInputType {
-  USER_MESSAGE("user_message"),
-  CUSTOM_MESSAGE("custom_message"),
-  SET_AGENT("set_agent"),
-  SET_MODEL("set_model"),
-  SET_YOLO("set_yolo");
+  /** 用户消息。 */
+  USER_MESSAGE,
+  /** 业务扩展注入的消息。 */
+  CUSTOM_MESSAGE,
+  /** 切换 Agent identity。 */
+  SET_AGENT,
+  /** 切换 Model/variant。 */
+  SET_MODEL,
+  /** 切换 Thread 的 YOLO policy。 */
+  SET_YOLO;
 
-  private final String value;
-
-  ThreadInputType(String value) {
-    this.value = value;
-  }
-
-  public String value() {
-    return value;
-  }
-
+  /** 是否为消息类输入（位于 TURN_BOUNDARY 末端）。 */
   public boolean isMessage() {
     return this == USER_MESSAGE || this == CUSTOM_MESSAGE;
   }
 
+  /** 是否为配置类输入（位于 TURN_BOUNDARY 前段）。 */
   public boolean isConfig() {
     return this == SET_AGENT || this == SET_MODEL || this == SET_YOLO;
-  }
-
-  public static ThreadInputType fromValue(String value) {
-    for (ThreadInputType type : values()) {
-      if (type.value.equals(value)) {
-        return type;
-      }
-    }
-    throw new IllegalArgumentException("unknown thread input type: " + value);
   }
 }

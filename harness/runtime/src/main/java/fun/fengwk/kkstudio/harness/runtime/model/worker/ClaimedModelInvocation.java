@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.model.worker;
 
-import fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocation;
 
 import java.util.Objects;

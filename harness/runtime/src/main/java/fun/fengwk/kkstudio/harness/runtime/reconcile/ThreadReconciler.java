@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.reconcile;
 
-import fun.fengwk.kkstudio.harness.kernel.continuation.ContinuationRef;
-import fun.fengwk.kkstudio.harness.kernel.execution.Failure;
-import fun.fengwk.kkstudio.harness.kernel.execution.StepResult;
+import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
+import fun.fengwk.kkstudio.harness.runtime.execution.Failure;
+import fun.fengwk.kkstudio.harness.runtime.execution.StepResult;
 
 import java.time.Clock;
 import java.time.Instant;

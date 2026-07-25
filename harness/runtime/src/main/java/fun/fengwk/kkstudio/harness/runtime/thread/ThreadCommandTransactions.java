@@ -1,12 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.kernel.session.Session;
-import fun.fengwk.kkstudio.harness.kernel.session.SessionEntry;
-import fun.fengwk.kkstudio.harness.kernel.thread.HarnessThread;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInput;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
+import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 
 import java.time.Instant;
 import java.util.List;
@@ -23,7 +20,7 @@ public interface ThreadCommandTransactions {
   /**
    * 原子创建 Session、ROOT Entry、初始 {@code RUNTIME_CONFIG} Entry 与 Main Thread。
    *
-   * <p>{@code initialConfig} 必须是调用方在事务外已冻结的完整快照；本方法不再读取 live Definition。
+   * <p>{@code initialConfig} 必须是调用方在事务外已冻结的完整快照；本方法只持久化该快照。
    */
   SessionCreation createSession(String title, RuntimeConfigSnapshot initialConfig, Instant now);
 

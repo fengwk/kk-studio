@@ -10,13 +10,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.kernel.continuation.ContinuationRef;
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTargetKind;
-import fun.fengwk.kkstudio.harness.kernel.execution.Failure;
-import fun.fengwk.kkstudio.harness.kernel.execution.StepResult;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInput;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInputType;
+import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
+import fun.fengwk.kkstudio.harness.runtime.execution.Failure;
+import fun.fengwk.kkstudio.harness.runtime.execution.StepResult;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 
 import java.time.Clock;
 import java.time.Duration;

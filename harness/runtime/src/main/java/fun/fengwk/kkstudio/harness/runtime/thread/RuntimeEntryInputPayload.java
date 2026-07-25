@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInputPayload;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInputType;
 import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.RuntimeEntryPayload;

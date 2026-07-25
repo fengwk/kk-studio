@@ -6,9 +6,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 /**
  * Core module Spring Boot test entry.
  *
- * <p>Harness Redis integration tests use Testcontainers via {@code RedisSpringTestSupport}; other
- * suites pin {@code convention.snowflake-id.worker-id=0} so they do not require a live Redis worker
- * lease.
+ * <p>Harness Redis integration tests use Testcontainers via {@code RedisSpringTestSupport}. Durable
+ * ids are allocated from PostgreSQL sequences.
  */
 @SpringBootApplication
 public class CoreTestApplication {

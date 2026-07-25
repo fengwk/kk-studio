@@ -16,7 +16,7 @@ spring:
 
   data:
     redis:
-      # Redis 用于 harness wake/realtime projection 与 legacy Snowflake worker 续租；可用环境变量覆盖。
+      # Redis 用于 harness wake/realtime projection；可用环境变量覆盖。
       url: ${KK_STUDIO_REDIS_URL:redis://localhost:6379}
 
   # PostgreSQL 连接配置（唯一 durable 数据库）
@@ -50,11 +50,6 @@ logging:
 
 # 规约配置
 convention:
-  snowflake-id:
-    # 雪花id开始时间，固定不可变（legacy Agent catalog 等仍可能使用；Harness durable id 使用 PostgreSQL sequence）
-    initial-timestamp: 1702214261706
-    # 不固定 worker-id：由 convention4j RedisWorkerIdClient 在 Redis 中申请并续租。
-
   i18n:
     # i18n properties文件名称
     base-name: string

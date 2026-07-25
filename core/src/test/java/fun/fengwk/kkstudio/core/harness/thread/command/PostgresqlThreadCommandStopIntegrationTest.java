@@ -14,7 +14,6 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInputType;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -22,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeEntryInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;

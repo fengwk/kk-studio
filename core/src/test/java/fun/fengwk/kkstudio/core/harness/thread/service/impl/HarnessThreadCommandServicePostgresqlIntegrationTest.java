@@ -9,11 +9,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import fun.fengwk.kkstudio.core.harness.thread.command.TestRuntimeConfigs;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInputType;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeConfigInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 import fun.fengwk.kkstudio.share.model.HarnessThreadAgentSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadModelSetDTO;

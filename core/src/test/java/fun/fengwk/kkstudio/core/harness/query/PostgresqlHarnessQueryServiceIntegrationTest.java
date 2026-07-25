@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.core.harness.session.service.HarnessSessionQueryServi
 import fun.fengwk.kkstudio.core.harness.thread.command.TestRuntimeConfigs;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadQueryService;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInputType;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -24,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeEntryInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;

@@ -28,10 +28,6 @@ spring:
     configuration:
       map-underscore-to-camel-case: true
 
-convention:
-  snowflake-id:
-    initial-timestamp: 1702214261706
-    # 开发环境默认走 Redis worker；无 Redis 时可显式设置 convention.snowflake-id.worker-id=0
 
 logging:
   level:

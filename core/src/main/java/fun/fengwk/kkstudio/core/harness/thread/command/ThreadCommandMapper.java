@@ -12,7 +12,7 @@ import org.apache.ibatis.annotations.Update;
 import java.time.OffsetDateTime;
 import java.util.List;
 
-/** final schema command adapter 专用 mapper；不复用 legacy Thread mapper。 */
+/** PostgreSQL Thread command adapter 专用 mapper。 */
 @Mapper
 public interface ThreadCommandMapper extends BaseMapper {
 

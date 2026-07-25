@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.reconcile;
 
-import fun.fengwk.kkstudio.harness.kernel.execution.StepResult;
+import fun.fengwk.kkstudio.harness.runtime.execution.StepResult;
 import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
 

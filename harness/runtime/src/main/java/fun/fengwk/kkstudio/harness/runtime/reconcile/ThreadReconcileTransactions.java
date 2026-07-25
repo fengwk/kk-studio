@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.reconcile;
 
-import fun.fengwk.kkstudio.harness.kernel.continuation.ContinuationRef;
+import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
 
 import java.time.Instant;
 import java.util.Optional;

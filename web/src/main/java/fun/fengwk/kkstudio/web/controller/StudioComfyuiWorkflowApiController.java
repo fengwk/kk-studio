@@ -27,8 +27,7 @@ import java.util.NoSuchElementException;
 /**
  * ComfyUI 工作流卡片 CRUD 接口。
  *
- * <p>所有路径 / DTO 边界上的 id 都是十进制字符串形式的 snowflake id（与项目内其它 snowflake 资源保持一致）， 由服务层在内部严格解析为 {@code
- * long} 后再访问数据库。
+ * <p>所有路径 / DTO 边界上的 id 都是正的十进制字符串（PostgreSQL sequence），由服务层在内部严格解析为 {@code long} 后再访问数据库。
  *
  * <p>错误映射：malformed / nonpositive id → 400；id 解析通过但找不到记录 → 404；其它业务校验（workflowJson 非法、apiName 重复等）→
  * 400。

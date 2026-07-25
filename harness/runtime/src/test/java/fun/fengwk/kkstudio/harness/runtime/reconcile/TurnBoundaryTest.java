@@ -7,10 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.kernel.thread.InputStatus;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInput;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInputPayload;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInputType;
+import fun.fengwk.kkstudio.harness.runtime.thread.InputStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 
 import java.util.ArrayList;
 import java.util.List;

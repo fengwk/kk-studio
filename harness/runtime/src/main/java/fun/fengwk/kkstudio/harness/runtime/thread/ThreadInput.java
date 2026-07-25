@@ -3,80 +3,61 @@ package fun.fengwk.kkstudio.harness.runtime.thread;
 import java.time.Instant;
 import java.util.Objects;
 
-/** 有序、网络幂等的 Thread mailbox 输入。 */
+/**
+ * 有序、幂等的 Thread mailbox 输入。
+ *
+ * <p>{@code idempotencyKey} 是稳定客户端引用键，用于网络重试下的去重；{@code appliedAt} 的语义由 {@link InputStatus}
+ * 决定：{@code APPLIED} 时必须非空且不得早于 {@code createdAt}，{@code QUEUED} 与 {@code CANCELLED} 时必须为 null。
+ */
 public record ThreadInput(
     long id,
     long threadId,
     long sequence,
-    ThreadInputType inputType,
-    String payloadJson,
-    String clientMessageId,
-    ThreadInputStatus status,
-    Long appliedEntryId,
-    Instant resolvedAt,
-    Long cancelledByStopId,
-    Instant createdAt) {
+    ThreadInputType type,
+    ThreadInputPayload payload,
+    String idempotencyKey,
+    InputStatus status,
+    Instant createdAt,
+    Instant appliedAt) {
 
   public ThreadInput {
-    if (id <= 0 || threadId <= 0) {
-      throw new IllegalArgumentException("input and thread ids must be positive");
+    if (id <= 0) {
+      throw new IllegalArgumentException("input id must be positive");
+    }
+    if (threadId <= 0) {
+      throw new IllegalArgumentException("threadId must be positive");
     }
     if (sequence <= 0) {
       throw new IllegalArgumentException("sequence must be positive");
     }
-    inputType = Objects.requireNonNull(inputType, "inputType");
-    payloadJson = Objects.requireNonNull(payloadJson, "payloadJson");
-    if (payloadJson.isBlank()) {
-      throw new IllegalArgumentException("payloadJson must not be blank");
+    type = Objects.requireNonNull(type, "type");
+    payload = Objects.requireNonNull(payload, "payload");
+    if (type != payload.type()) {
+      throw new IllegalArgumentException("input type does not match payload type");
     }
-    clientMessageId = Objects.requireNonNull(clientMessageId, "clientMessageId");
-    if (clientMessageId.isBlank()) {
-      throw new IllegalArgumentException("clientMessageId must not be blank");
+    idempotencyKey = Objects.requireNonNull(idempotencyKey, "idempotencyKey");
+    if (idempotencyKey.isBlank()) {
+      throw new IllegalArgumentException("idempotencyKey must not be blank");
     }
     status = Objects.requireNonNull(status, "status");
-    if (appliedEntryId != null && appliedEntryId <= 0) {
-      throw new IllegalArgumentException("appliedEntryId must be positive when present");
-    }
-    if (cancelledByStopId != null && cancelledByStopId <= 0) {
-      throw new IllegalArgumentException("cancelledByStopId must be positive when present");
-    }
-    switch (status) {
-      case QUEUED -> {
-        if (appliedEntryId != null || resolvedAt != null || cancelledByStopId != null) {
-          throw new IllegalArgumentException("queued input must not carry resolution fields");
-        }
-      }
-      case APPLIED -> {
-        if (appliedEntryId == null || resolvedAt == null) {
-          throw new IllegalArgumentException(
-              "applied input requires appliedEntryId and resolvedAt");
-        }
-        if (cancelledByStopId != null) {
-          throw new IllegalArgumentException("applied input must not carry cancelledByStopId");
-        }
-      }
-      case CANCELLED -> {
-        if (cancelledByStopId == null || resolvedAt == null) {
-          throw new IllegalArgumentException(
-              "cancelled input requires cancelledByStopId and resolvedAt");
-        }
-        if (appliedEntryId != null) {
-          throw new IllegalArgumentException("cancelled input must not carry appliedEntryId");
-        }
-      }
-    }
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
+    if (status == InputStatus.APPLIED) {
+      Objects.requireNonNull(appliedAt, "appliedAt");
+      if (appliedAt.isBefore(createdAt)) {
+        throw new IllegalArgumentException("appliedAt must not precede createdAt");
+      }
+    } else if (appliedAt != null) {
+      throw new IllegalArgumentException("non-APPLIED input must not carry appliedAt");
+    }
   }
 
-  public boolean queued() {
-    return status == ThreadInputStatus.QUEUED;
+  /** 该 Input 是否仍处于 mailbox 队列。 */
+  public boolean isQueued() {
+    return status == InputStatus.QUEUED;
   }
 
-  public boolean applied() {
-    return status == ThreadInputStatus.APPLIED;
-  }
-
-  public boolean cancelled() {
-    return status == ThreadInputStatus.CANCELLED;
+  /** 该 Input 是否已进入 terminal（APPLIED 或 CANCELLED）。 */
+  public boolean isTerminal() {
+    return status.isTerminal();
   }
 }

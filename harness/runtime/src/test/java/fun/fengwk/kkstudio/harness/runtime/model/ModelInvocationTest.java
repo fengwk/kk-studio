@@ -7,8 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus;
-import fun.fengwk.kkstudio.harness.kernel.execution.Lease;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -25,6 +23,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -74,10 +74,11 @@ class ModelInvocationTest {
   }
 
   /**
-   * Reflection guards the architecture boundary: the aggregate uses only the shared Kernel types.
+   * Reflection guards the architecture boundary: the aggregate uses only the shared runtime
+   * execution types.
    */
   @Test
-  void usesKernelInvocationStatusAndLeaseWithoutRuntimeDuplicates() {
+  void usesSharedInvocationStatusAndLeaseWithoutDuplicates() {
     assertEquals(
         InvocationStatus.class,
         Arrays.stream(ModelInvocation.class.getRecordComponents())
@@ -249,7 +250,7 @@ class ModelInvocationTest {
     assertEquals(CREATED, invocation.appliedAt());
   }
 
-  /** Terminal-unapplied detection delegates to the Kernel terminal definition. */
+  /** Terminal-unapplied detection delegates to the shared InvocationStatus terminal definition. */
   @Test
   void identifiesOnlyUnappliedTerminalInvocations() {
     assertFalse(queuedBuilder().build().isTerminalUnapplied());
@@ -261,7 +262,7 @@ class ModelInvocationTest {
     assertTrue(unknownBuilder().build().isTerminalUnapplied());
   }
 
-  /** Worker lease activity uses the Kernel's strict observedAt-before-until boundary. */
+  /** Worker lease activity uses the shared Lease strict observedAt-before-until boundary. */
   @Test
   void reportsActiveWorkerWithStrictLeaseBoundary() {
     ModelInvocation running = runningBuilder().build();

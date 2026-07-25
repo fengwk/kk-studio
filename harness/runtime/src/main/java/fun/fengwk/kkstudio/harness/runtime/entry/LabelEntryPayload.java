@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.entry;
 
-import fun.fengwk.kkstudio.harness.kernel.session.EntryType;
-
 /** 不投影到 Provider Context 的路径标签 Entry。 */
 public record LabelEntryPayload(String label) implements RuntimeEntryPayload {
 

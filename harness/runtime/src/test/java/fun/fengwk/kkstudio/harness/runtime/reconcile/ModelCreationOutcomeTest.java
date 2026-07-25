@@ -7,9 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTargetKind;
-import fun.fengwk.kkstudio.harness.kernel.execution.Failure;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
+import fun.fengwk.kkstudio.harness.runtime.execution.Failure;
 
 /** {@link ModelCreationOutcome} 三种变体的值相等性与构造约束测试。 */
 class ModelCreationOutcomeTest {

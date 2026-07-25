@@ -5,7 +5,7 @@ import java.time.OffsetDateTime;
 import java.util.Objects;
 
 /**
- * Thread 展示状态派生：仅依赖 durable facts，不读历史 status 列或 ThreadEvent。
+ * Thread 展示状态派生：仅依赖 PostgreSQL durable snapshot facts，不依赖 realtime projection。
  *
  * <pre>
  * RUNNING  : processor_token 非空且 processor_until &gt; now

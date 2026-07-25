@@ -27,7 +27,6 @@ import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadModelSetDTO;
-import fun.fengwk.kkstudio.share.model.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadYoloSetDTO;
 
@@ -118,11 +117,10 @@ public class StudioHarnessThreadController {
         withMissingResourceTranslation(() -> commandService.queueModel(threadId, request)));
   }
 
-  /** 停止 Thread，并取消尚未处理的输入。 */
+  /** 停止 Thread：递增 executionEpoch，并取消尚未处理的输入。无请求体。 */
   @PostMapping("/threads/{threadId}/stop")
-  public Result<HarnessThreadStopResultDTO> stop(
-      @PathVariable String threadId, @RequestBody HarnessThreadStopDTO request) {
-    return Results.ok(withMissingResourceTranslation(() -> commandService.stop(threadId, request)));
+  public Result<HarnessThreadStopResultDTO> stop(@PathVariable String threadId) {
+    return Results.ok(withMissingResourceTranslation(() -> commandService.stop(threadId)));
   }
 
   /** 查询当前 branch path 上的持久化 Session Entry。 */

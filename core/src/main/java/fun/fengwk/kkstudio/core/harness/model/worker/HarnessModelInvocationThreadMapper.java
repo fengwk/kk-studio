@@ -12,8 +12,7 @@ import java.time.OffsetDateTime;
 
 /**
  * 适配器专用的 {@code harness_thread} 窄视图 mapper，只覆盖 {@link PostgresqlModelInvocationTransactions} 实际需要的
- * {@code id/runnable/execution_epoch}。不复用仍绑定 legacy {@code gmt_*}/{@code status}/{@code version} 列的
- * {@code HarnessThreadMapper}。
+ * {@code id/runnable/execution_epoch}。
  *
  * <p>任何 {@code markRunnable} 路径都用 {@code greatest(updated_at, #{now})} 写入，确保 {@code updated_at}
  * 在并发场景下永不倒退。

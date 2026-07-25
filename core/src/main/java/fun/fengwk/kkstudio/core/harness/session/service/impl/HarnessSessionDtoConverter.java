@@ -5,7 +5,7 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
 import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionEntryDO;
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
-import fun.fengwk.kkstudio.harness.kernel.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.share.model.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
 
@@ -17,7 +17,7 @@ import java.time.ZoneOffset;
 @Component
 public class HarnessSessionDtoConverter {
 
-  /** final Kernel Session 到当前 share DTO 的兼容投影。 */
+  /** Session 到 share DTO 的投影。 */
   public HarnessSessionDTO convert(Session source) {
     if (source == null) {
       return null;

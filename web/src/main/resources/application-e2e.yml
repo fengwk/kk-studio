@@ -23,10 +23,6 @@ spring:
     configuration:
       map-underscore-to-camel-case: true
 
-convention:
-  snowflake-id:
-    initial-timestamp: 1702214261706
-    worker-id: 0
 
 kk-studio:
   harness:

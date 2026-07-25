@@ -5,7 +5,8 @@ import lombok.Data;
 import java.util.List;
 
 /**
- * Agent definition execution configuration persisted as {@code config_json}.
+ * Agent definition execution configuration persisted in the {@code agent_definition.config} JSONB
+ * column.
  *
  * <p>{@code environmentName} is optional. {@code tools} / {@code skills} / {@code allowedSubagents}
  * are short names only (no namespace or path strings).

@@ -5,8 +5,8 @@ import java.util.Objects;
 /**
  * Strict parser for ComfyUI workflow card bigint ids exposed at the web / DTO boundary. Rejects
  * null, blank, non-decimal or non-positive values with {@link IllegalArgumentException}, which the
- * global handler maps to HTTP 400. Mirrors {@code HarnessIds} so all snowflake resources share the
- * same boundary semantics.
+ * global handler maps to HTTP 400. Mirrors {@code HarnessIds} so durable positive decimal string
+ * IDs share the same boundary semantics.
  */
 public final class ComfyuiWorkflowApiIds {
 

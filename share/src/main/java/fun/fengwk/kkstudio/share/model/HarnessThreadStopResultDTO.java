@@ -4,10 +4,9 @@ import lombok.Data;
 
 import java.util.List;
 
-/** Stop durable 回执与可恢复草稿。 */
+/** Stop 结果：新 executionEpoch 与本次取消的 Input。 */
 @Data
 public class HarnessThreadStopResultDTO {
-  private String stopId;
+  private Long executionEpoch;
   private List<HarnessThreadInputDTO> cancelledInputs;
-  private List<String> restoredMessages;
 }

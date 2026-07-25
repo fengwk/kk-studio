@@ -6,13 +6,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.core.harness.model.worker.HarnessModelInvocationThreadDO;
 import fun.fengwk.kkstudio.core.harness.model.worker.HarnessModelInvocationThreadMapper;
-import fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ClaimedToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationUpdateOutcome;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Duration;

@@ -318,7 +318,7 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void inputTypesMatchKernelContractWithoutLegacyAlias() throws SQLException {
+  void inputTypesMatchRuntimeContractWithoutLegacyAlias() throws SQLException {
     ThreadFixture thread = createThread();
     try (Connection conn = newConnection()) {
       insertInputWithoutAppliedAt(

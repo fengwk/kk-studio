@@ -1,11 +1,11 @@
 package fun.fengwk.kkstudio.core.harness.model.worker;
 
-import fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus;
-import fun.fengwk.kkstudio.harness.kernel.execution.Lease;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderRequestJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderResponseJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;

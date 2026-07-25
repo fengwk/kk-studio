@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.extension;
 
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.context.ContextTransform;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionException.Phase;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionRegistry.DisposerRegistration;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionRegistry.ToolKey;
@@ -22,10 +21,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** 校验、排序并冻结显式提供的 Harness 扩展贡献。 */
 public final class HarnessExtensionHost implements AutoCloseable {
 
-  private final List<ContextTransform> contextTransforms;
   private final List<BeforeToolCallInterceptor> beforeToolCallInterceptors;
   private final List<AfterToolCallInterceptor> afterToolCallInterceptors;
-  private final List<BeforeCompactionInterceptor> beforeCompactionInterceptors;
   private final List<HarnessLifecycleObserver> lifecycleObservers;
   private final List<ProviderFactory> providerFactories;
   private final List<ToolFactory> toolFactories;
@@ -60,10 +57,8 @@ public final class HarnessExtensionHost implements AutoCloseable {
     }
     registry.freeze();
 
-    contextTransforms = registry.contextTransforms();
     beforeToolCallInterceptors = registry.beforeToolCallInterceptors();
     afterToolCallInterceptors = registry.afterToolCallInterceptors();
-    beforeCompactionInterceptors = registry.beforeCompactionInterceptors();
     lifecycleObservers = registry.lifecycleObservers();
     providerFactories = registry.providerFactories();
     toolFactories = registry.toolFactories();
@@ -72,20 +67,12 @@ public final class HarnessExtensionHost implements AutoCloseable {
     disposers = registry.disposers();
   }
 
-  public List<ContextTransform> contextTransforms() {
-    return contextTransforms;
-  }
-
   public List<BeforeToolCallInterceptor> beforeToolCallInterceptors() {
     return beforeToolCallInterceptors;
   }
 
   public List<AfterToolCallInterceptor> afterToolCallInterceptors() {
     return afterToolCallInterceptors;
-  }
-
-  public List<BeforeCompactionInterceptor> beforeCompactionInterceptors() {
-    return beforeCompactionInterceptors;
   }
 
   public List<HarnessLifecycleObserver> lifecycleObservers() {

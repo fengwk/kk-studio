@@ -1,10 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime.reconcile;
 
-import fun.fengwk.kkstudio.harness.kernel.continuation.ContinuationRef;
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTargetKind;
-import fun.fengwk.kkstudio.harness.kernel.thread.HarnessThread;
-import fun.fengwk.kkstudio.harness.kernel.thread.InputStatus;
-import fun.fengwk.kkstudio.harness.kernel.thread.ThreadInput;
+import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
+import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
+import fun.fengwk.kkstudio.harness.runtime.thread.InputStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
 
 import java.util.List;
 import java.util.Objects;

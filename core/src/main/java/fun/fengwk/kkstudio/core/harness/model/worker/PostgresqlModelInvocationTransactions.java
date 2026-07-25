@@ -4,9 +4,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.worker.ClaimedModelInvocation;

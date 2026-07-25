@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.harness.runtime.context.SelectedSkillMetadata;
 import fun.fengwk.kkstudio.harness.runtime.goal.GoalToolPrompts;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;

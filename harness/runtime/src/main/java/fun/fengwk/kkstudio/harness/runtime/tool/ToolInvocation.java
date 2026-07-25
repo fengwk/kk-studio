@@ -1,9 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.tool;
 
-import fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus;
-import fun.fengwk.kkstudio.harness.kernel.execution.Lease;
+import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Instant;
@@ -11,7 +10,7 @@ import java.util.Objects;
 
 /**
  * Immutable durable aggregate mirroring one final-schema {@code harness_tool_invocation} row.
- * Worker state uses the shared Kernel {@link InvocationStatus} and {@link Lease}; permission or
+ * Worker state uses the shared runtime {@link InvocationStatus} and {@link Lease}; permission or
  * external-input waiting is represented by a separate Interaction fact rather than Tool-specific
  * states.
  */

@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.entry;
 
-import fun.fengwk.kkstudio.harness.kernel.session.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 
 import java.util.Objects;

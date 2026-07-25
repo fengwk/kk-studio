@@ -3,19 +3,11 @@ package fun.fengwk.kkstudio.core.harness.observability.service.impl;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.harness.tool.worker.ToolInvocationDO;
-import fun.fengwk.kkstudio.harness.runtime.task.RootActivity;
-import fun.fengwk.kkstudio.harness.runtime.task.TaskReport;
-import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
-import fun.fengwk.kkstudio.share.model.RootActivityDTO;
-import fun.fengwk.kkstudio.share.model.SubagentTaskReportDTO;
-import fun.fengwk.kkstudio.share.model.ToolArtifactRefDTO;
 import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
 
-import java.time.ZoneOffset;
-import java.util.List;
-
+/** Observability projection converter for durable ToolInvocation rows. */
 @Component
 public class HarnessObservabilityDtoConverter {
 
@@ -67,47 +59,5 @@ public class HarnessObservabilityDtoConverter {
       dto.setFinishedAt(row.getFinishedAt().toInstant());
     }
     return dto;
-  }
-
-  public RootActivityDTO convert(RootActivity activity) {
-    RootActivityDTO dto = new RootActivityDTO();
-    dto.setRootSessionId(Long.toString(activity.rootSessionId()));
-    dto.setSessionId(Long.toString(activity.sessionId()));
-    dto.setThreadId(Long.toString(activity.threadId()));
-    dto.setEventId(Long.toString(activity.eventId()));
-    dto.setEventType(activity.type().value());
-    dto.setPayloadJson(activity.payloadJson());
-    dto.setCreateTime(activity.createdAt().atOffset(ZoneOffset.UTC).toLocalDateTime());
-    return dto;
-  }
-
-  public SubagentTaskReportDTO convertReport(TaskReport report) {
-    SubagentTaskReportDTO dto = new SubagentTaskReportDTO();
-    dto.setChildSessionId(Long.toString(report.childSessionId()));
-    dto.setChildThreadId(Long.toString(report.childThreadId()));
-    dto.setStatus(report.terminalState().name());
-    dto.setFinalReport(report.finalAssistantReport());
-    dto.setTurnCount(report.turnCount());
-    dto.setToolCount(report.toolCount());
-    dto.setWorkingCopyPolicy(report.workingCopyPolicy().name());
-    dto.setWorkingCopyRevision(report.workingCopyRevision());
-    dto.setArtifacts(toArtifactDtos(report.artifacts()));
-    return dto;
-  }
-
-  private List<ToolArtifactRefDTO> toArtifactDtos(List<ArtifactRef> artifacts) {
-    if (artifacts == null || artifacts.isEmpty()) {
-      return List.of();
-    }
-    return artifacts.stream()
-        .map(
-            ref -> {
-              ToolArtifactRefDTO dto = new ToolArtifactRefDTO();
-              dto.setArtifactId(ref.artifactId());
-              dto.setMediaType(ref.mediaType());
-              dto.setSizeBytes(ref.sizeBytes());
-              return dto;
-            })
-        .toList();
   }
 }

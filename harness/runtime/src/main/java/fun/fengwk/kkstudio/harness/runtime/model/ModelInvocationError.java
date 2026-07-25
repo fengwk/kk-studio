@@ -9,10 +9,9 @@ import java.util.Objects;
  * harness_model_invocation} for {@code FAILED} / {@code UNKNOWN} statuses.
  *
  * <p>The snapshot is intentionally narrow: a non-null {@link ProviderErrorKind} plus a non-blank
- * human-readable {@code message}. It is constructed exclusively from the original {@link
- * fun.fengwk.kkstudio.harness.model.provider.ProviderException} classification by the future
- * terminal-state adapter. It is persisted only for terminal {@code FAILED}/{@code UNKNOWN}; {@code
- * RETRY_WAIT} carries no terminal payload.
+ * human-readable {@code message}. The terminal-state adapter constructs it from the original {@link
+ * fun.fengwk.kkstudio.harness.model.provider.ProviderException} classification. It is persisted
+ * only for terminal {@code FAILED}/{@code UNKNOWN}; {@code RETRY_WAIT} carries no terminal payload.
  *
  * <p>Strict JSON encoding/decoding lives in {@link ModelInvocationErrorJsonCodec}.
  */

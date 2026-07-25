@@ -13,8 +13,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus;
-import fun.fengwk.kkstudio.harness.kernel.execution.Lease;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -34,6 +32,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderRequestJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderResponseJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;

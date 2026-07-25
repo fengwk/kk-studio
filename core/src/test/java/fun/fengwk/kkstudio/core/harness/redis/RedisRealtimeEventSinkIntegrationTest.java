@@ -1,11 +1,8 @@
 package fun.fengwk.kkstudio.core.harness.redis;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import fun.fengwk.convention4j.common.idgen.snowflakes.FixedWorkerIdClient;
-import fun.fengwk.convention4j.common.idgen.snowflakes.WorkerIdClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,7 +25,6 @@ class RedisRealtimeEventSinkIntegrationTest extends RedisSpringTestSupport {
   @Autowired private HarnessRedisProperties properties;
   @Autowired private RealtimeEventJsonCodec eventCodec;
   @Autowired private RealtimeEventSink configuredSink;
-  @Autowired private WorkerIdClient workerIdClient;
 
   private RedisRealtimeEventSink sink;
 
@@ -160,10 +156,5 @@ class RedisRealtimeEventSinkIntegrationTest extends RedisSpringTestSupport {
     String expected = "kk-studio:harness:realtime:thread:42";
     Long length = stringRedisTemplate.opsForStream().size(expected);
     assertEquals(1L, length);
-  }
-
-  @Test
-  void explicitLegacySnowflakeWorkerIdRemainsFixedWhenRedisIsPresent() {
-    assertInstanceOf(FixedWorkerIdClient.class, workerIdClient);
   }
 }

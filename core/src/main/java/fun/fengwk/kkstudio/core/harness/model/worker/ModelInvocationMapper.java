@@ -15,10 +15,9 @@ import java.util.List;
 /**
  * final-schema {@code harness_model_invocation} 适配器专用 mapper。
  *
- * <p>本 mapper 仅供 {@link PostgresqlModelInvocationTransactions} 使用；不与绑定 legacy {@code gmt_*}/{@code
- * status}/{@code version} 列的 {@code HarnessThreadMapper} 共享。所有 claim-following mutation 都在 SQL
- * 中自带完整 CAS 谓词（id, thread_id, status, execution_epoch, attempt, worker_token, worker_until > now），由
- * PostgreSQL 作为 owner 校验的最终权威。jsonb 写入使用 {@code cast(? as jsonb)}。
+ * <p>本 mapper 仅供 {@link PostgresqlModelInvocationTransactions} 使用。所有 claim-following mutation 都在
+ * SQL 中自带完整 CAS 谓词（id, thread_id, status, execution_epoch, attempt, worker_token, worker_until >
+ * now），由 PostgreSQL 作为 owner 校验的最终权威。jsonb 写入使用 {@code cast(? as jsonb)}。
  */
 @Mapper
 public interface ModelInvocationMapper extends BaseMapper {
