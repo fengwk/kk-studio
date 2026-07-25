@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.core.harness.observability.service;
 
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.Artifact;
+import fun.fengwk.kkstudio.core.harness.observability.service.model.ArtifactContent;
 import fun.fengwk.kkstudio.share.model.InteractionDTO;
 import fun.fengwk.kkstudio.share.model.ModelInvocationDTO;
 import fun.fengwk.kkstudio.share.model.RootActivityDTO;
@@ -24,5 +24,5 @@ public interface HarnessObservabilityQueryService {
 
   List<SubagentTaskDTO> listSessionTasks(String sessionId);
 
-  Artifact getArtifact(String artifactId);
+  ArtifactContent getArtifact(String artifactId);
 }

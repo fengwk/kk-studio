@@ -6,6 +6,8 @@ import org.springframework.data.redis.connection.stream.StreamOffset;
 import org.springframework.data.redis.connection.stream.StreamReadOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
+import fun.fengwk.kkstudio.core.harness.realtime.HarnessRealtimeEventTail;
+
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,7 +20,7 @@ import java.util.function.Supplier;
  * RedisRealtimeEventSink}; failures propagate so the SSE adapter can disconnect without touching
  * PostgreSQL correctness.
  */
-public final class RedisRealtimeEventTail {
+public final class RedisRealtimeEventTail implements HarnessRealtimeEventTail {
 
   private static final String EVENT_FIELD = "event";
 
@@ -39,11 +41,7 @@ public final class RedisRealtimeEventTail {
         Objects.requireNonNull(properties, "properties").requireRealtimeKeyPrefix();
   }
 
-  /**
-   * Reads records strictly after {@code afterId}. Use {@code "0-0"} (or blank/0) to start from the
-   * beginning of the retained window; use a previous SSE id to resume. When {@code block} is
-   * positive and no records are available, waits up to that duration.
-   */
+  @Override
   public List<Record> readAfter(long threadId, String afterId, int count, Duration block) {
     if (threadId <= 0) {
       throw new IllegalArgumentException("threadId must be positive");
@@ -56,7 +54,7 @@ public final class RedisRealtimeEventTail {
       throw new IllegalArgumentException("block must not be negative");
     }
     String key = realtimeKeyPrefix + Long.toString(threadId);
-    String exclusiveStart = normalizeAfterId(afterId);
+    String exclusiveStart = HarnessRealtimeEventTail.normalizeAfterId(afterId);
     StringRedisTemplate template = stringRedisTemplateSupplier.get();
     if (template == null) {
       throw new IllegalStateException("StringRedisTemplate is unavailable");
@@ -86,24 +84,5 @@ public final class RedisRealtimeEventTail {
       result.add(new Record(id, payload.toString()));
     }
     return List.copyOf(result);
-  }
-
-  public static String normalizeAfterId(String afterId) {
-    if (afterId == null || afterId.isBlank() || "0".equals(afterId.trim())) {
-      return "0-0";
-    }
-    String trimmed = afterId.trim();
-    if (!trimmed.matches("\\d+-\\d+")) {
-      throw new IllegalArgumentException(
-          "afterEventId must be a Redis stream id (ms-seq) or 0: " + afterId);
-    }
-    return trimmed;
-  }
-
-  public record Record(String id, String payloadJson) {
-    public Record {
-      Objects.requireNonNull(id, "id");
-      Objects.requireNonNull(payloadJson, "payloadJson");
-    }
   }
 }
