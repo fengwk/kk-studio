@@ -1,5 +1,5 @@
-import { asRecord, getString } from '@/features/ai/thread-event-payload'
-import type { ToolAttachment, ToolAttachmentType } from '@/features/ai/thread-event-types'
+import { asRecord, getString } from '@/features/ai/payload-json'
+import type { ToolAttachment, ToolAttachmentType } from '@/features/ai/thread-timeline-types'
 
 export function contentText(content: Record<string, unknown>): string {
   const type = getString(content.type)

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -78,6 +78,29 @@ describe('ThreadComposer interactions', () => {
       />,
     )
     expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
+  })
+
+  it('cancels delayed focus work when the composer unmounts', () => {
+    vi.useFakeTimers()
+    try {
+      const { unmount } = render(
+        <ThreadComposer
+          draft="hello"
+          pending={false}
+          disabled={false}
+          onDraftChange={vi.fn()}
+          onSubmit={vi.fn()}
+          onCommand={vi.fn()}
+        />,
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+      expect(vi.getTimerCount()).toBe(1)
+      unmount()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('does not render standalone actor-state, Stop, Retry, or add controls', () => {

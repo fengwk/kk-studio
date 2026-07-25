@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { extractContextWindow } from '@/features/ai/ai-model-draft-codec'
-import { buildThreadTimeline, isThreadWorking } from '@/features/ai/thread-events'
-import { deriveThreadRetryPresentation } from '@/features/ai/thread-retry-presentation'
+import { buildThreadTimeline, isThreadWorking } from '@/features/ai/thread-timeline'
 import type { ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
 import {
   createClientMessageId,
@@ -10,7 +9,7 @@ import {
 } from '@/features/ai/useAgentThreadMessageMutation'
 import { useAgentThreadQueries } from '@/features/ai/useAgentThreadQueries'
 import { useChatTranscriptAutoScroll } from '@/features/ai/useChatTranscriptAutoScroll'
-import { useHarnessThreadEventStream } from '@/features/ai/useHarnessThreadEventStream'
+import { useHarnessThreadRealtime } from '@/features/ai/useHarnessThreadRealtime'
 import { useHarnessThreadObservability } from '@/features/ai/useHarnessThreadObservability'
 import { useHarnessTaskTimeline } from '@/features/ai/useHarnessTaskTimeline'
 import { harnessService } from '@/shared/api/harness-service'
@@ -39,8 +38,6 @@ export function useAgentThreadController(threadId: string, sessionIdHint = '', i
   const [inFlightSubmissions, setInFlightSubmissions] = useState(0)
   const clientMessageIdRef = useRef<string | null>(null)
   const replayContentRef = useRef<string | null>(null)
-  const stopRequestIdRef = useRef<string | null>(null)
-  const handledStopIdsRef = useRef(new Set<string>())
   const bodyRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
 
@@ -52,15 +49,13 @@ export function useAgentThreadController(threadId: string, sessionIdHint = '', i
     thread,
     entries,
     inputs,
-    events,
     session,
     threadQuery,
     entriesQuery,
   } = useAgentThreadQueries(threadId, sessionIdHint)
   const createMessageMutation = useAgentThreadMessageMutation(threadId)
-  const timeline = buildThreadTimeline(entries, inputs, events)
+  const timeline = buildThreadTimeline(entries, inputs)
   const working = isThreadWorking(thread, timeline)
-  const retryPresentation = deriveThreadRetryPresentation(thread, events)
   const agentsById = new Map(agents.map((agent) => [String(agent.id), agent]))
   const currentAgent = thread?.activeAgentDefinitionId
     ? agentsById.get(String(thread.activeAgentDefinitionId))
@@ -75,9 +70,9 @@ export function useAgentThreadController(threadId: string, sessionIdHint = '', i
   useChatTranscriptAutoScroll(
     bodyRef,
     timeline.messages.length,
-    entries.length + events.length,
+    entries.length + inputs.length,
   )
-  useHarnessThreadEventStream(threadId, Boolean(threadId))
+  useHarnessThreadRealtime(threadId, Boolean(threadId))
 
   useEffect(() => {
     setDraftState(initialDraft)
@@ -86,7 +81,7 @@ export function useAgentThreadController(threadId: string, sessionIdHint = '', i
   }, [initialDraft, threadId])
 
   const stopMutation = useMutation({
-    mutationFn: (clientRequestId: string) => harnessService.stopThread(threadId, { clientRequestId }),
+    mutationFn: () => harnessService.stopThread(threadId),
   })
   const setAgentMutation = useMutation({
     mutationFn: (agentDefinitionId: string) =>
@@ -186,21 +181,12 @@ export function useAgentThreadController(threadId: string, sessionIdHint = '', i
       return Promise.resolve()
     }
     setActionError(null)
-    const clientRequestId = stopRequestIdRef.current ?? createClientMessageId()
-    stopRequestIdRef.current = clientRequestId
-    return stopMutation.mutateAsync(clientRequestId)
-      .then(async (result) => {
-        // A completed Stop receipt closes this idempotency attempt. A later Stop is a new request.
-        stopRequestIdRef.current = null
-        if (!handledStopIdsRef.current.has(result.stopId)) {
-          handledStopIdsRef.current.add(result.stopId)
-          const restored = result.restoredMessages.filter((message) => message.trim())
-          if (restored.length > 0) {
-            setDraftState((current) => [...restored, current.trim()].filter(Boolean).join('\n\n'))
-          }
-          clientMessageIdRef.current = null
-          replayContentRef.current = null
-        }
+    return stopMutation
+      .mutateAsync()
+      .then(async () => {
+        // Stop is not request-idempotent; clear local message replay identity only on success.
+        clientMessageIdRef.current = null
+        replayContentRef.current = null
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) }),
           queryClient.invalidateQueries({ queryKey: queryKeys.threads.entries(threadId) }),
@@ -244,7 +230,6 @@ export function useAgentThreadController(threadId: string, sessionIdHint = '', i
     timeline,
     runtimeLabels,
     working,
-    retryPresentation,
     messagesLoading: threadQuery.isLoading || entriesQuery.isLoading,
     messagesError: threadQuery.error || entriesQuery.error,
     bodyRef,

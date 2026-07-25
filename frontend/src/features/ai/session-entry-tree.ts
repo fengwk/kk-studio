@@ -1,5 +1,5 @@
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts'
-import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/thread-event-payload'
+import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/payload-json'
 
 export type SessionTreeFilter = 'conversation' | 'all'
 
@@ -42,7 +42,7 @@ export const PROJECTED_PREVIEW_LIMIT = 220
  * Visibility never changes the source tree. Instead, every displayed Entry is attached to its
  * nearest displayed ancestor. This lets filters and searches omit bookkeeping or intermediate
  * Entries without retaining their original indentation. Sibling order is inherited directly from
- * the server response; no timestamp or Snowflake ordering is inferred on the client.
+ * the server response; no timestamp or identifier ordering is inferred on the client.
  */
 export function buildSessionEntryTree(
   entries: HarnessSessionEntryDTO[],
@@ -186,24 +186,24 @@ function matchesSessionTreeEntrySearch(
 }
 
 export function sessionEntryKind(entry: HarnessSessionEntryDTO): SessionEntryKind {
-  const entryType = entry.entryType.toLowerCase()
-  if (entryType === 'label') {
+  const entryType = entry.entryType
+  if (entryType === 'LABEL') {
     return 'label'
   }
-  if (entryType === 'custom_message') {
+  if (entryType === 'CUSTOM_MESSAGE') {
     return 'custom'
   }
-  if (entryType !== 'message') {
+  if (entryType !== 'MESSAGE') {
     return 'other'
   }
-  const role = getString(asRecord(parsePayload(entry.payloadJson).message).role).toLowerCase()
-  if (role === 'user') {
+  const role = getString(asRecord(parsePayload(entry.payloadJson).message).role)
+  if (role === 'USER') {
     return 'user'
   }
-  if (role === 'assistant') {
+  if (role === 'ASSISTANT') {
     return 'assistant'
   }
-  if (role === 'tool') {
+  if (role === 'TOOL') {
     return 'tool'
   }
   return 'other'
@@ -233,8 +233,7 @@ export function sessionEntryText(entry: HarnessSessionEntryDTO): string {
   return collectMessageText(messageContents(entry), true).join('\n')
 }
 
-/** Single-line preview used by the tree row. It only contains visible text content: explicit
- * `thinking` blocks and legacy <think>…</think> markup are excluded. */
+/** Single-line preview used by the tree row. Explicit `thinking` blocks are excluded. */
 export function sessionEntryPreview(
   entry: HarnessSessionEntryDTO,
   kind: SessionEntryKind,
@@ -266,7 +265,7 @@ function sessionEntryVisibleText(entry: HarnessSessionEntryDTO): string {
 function collectMessageText(contents: Record<string, unknown>[], includeThinking: boolean): string[] {
   const result: string[] = []
   for (const content of contents) {
-    const type = getString(content.type).toLowerCase()
+    const type = getString(content.type)
     if (type === 'tool_result') {
       result.push(...collectMessageText(getRecordList(content.contents), includeThinking))
       continue
@@ -280,8 +279,7 @@ function collectMessageText(contents: Record<string, unknown>[], includeThinking
       }
       continue
     }
-    // Old persisted fixtures may omit `type`; if a text field exists it is still a text block.
-    if (type === 'text' || !type) {
+    if (type === 'text') {
       const text = getString(content.text)
       if (text) {
         result.push(text)
@@ -292,35 +290,7 @@ function collectMessageText(contents: Record<string, unknown>[], includeThinking
 }
 
 function flattenVisibleText(text: string): string {
-  return stripThinkTags(text).replace(/\s+/g, ' ').trim()
-}
-
-const THINK_OPEN_TAG = '<think>'
-const THINK_CLOSE_TAG = '</think>'
-
-/** Removes legacy <think>…</think> text sections. Explicit persisted `thinking` contents are
- * filtered before this helper runs. */
-export function stripThinkTags(text: string): string {
-  if (!text) {
-    return ''
-  }
-  const lower = text.toLowerCase()
-  let result = ''
-  let cursor = 0
-  while (cursor < text.length) {
-    const openIndex = lower.indexOf(THINK_OPEN_TAG, cursor)
-    if (openIndex < 0) {
-      result += text.slice(cursor)
-      break
-    }
-    result += text.slice(cursor, openIndex)
-    const closeIndex = lower.indexOf(THINK_CLOSE_TAG, openIndex + THINK_OPEN_TAG.length)
-    if (closeIndex < 0) {
-      break
-    }
-    cursor = closeIndex + THINK_CLOSE_TAG.length
-  }
-  return result
+  return text.replace(/\s+/g, ' ').trim()
 }
 
 function truncatePreview(text: string, limit: number): string {

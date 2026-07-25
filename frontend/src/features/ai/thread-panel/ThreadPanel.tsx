@@ -4,7 +4,7 @@ import { ThreadErrorPanel } from '@/features/ai/thread-panel/ThreadErrorPanel'
 import { ThreadTranscript } from '@/features/ai/thread-panel/ThreadTranscript'
 import { ThreadWidgetStack } from '@/features/ai/thread-panel/ThreadWidgetStack'
 import type { ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
-import type { DialogueMessage, QueuedThreadMessage } from '@/features/ai/thread-events'
+import type { DialogueMessage, QueuedThreadMessage } from '@/features/ai/thread-timeline'
 
 /**
  * Full-bleed thread panel:
@@ -21,7 +21,6 @@ export function ThreadPanel({
   composerDisabled,
   composerPending,
   working,
-  retryPresentation,
   actionError,
   onDismissActionError,
   onDraftChange,
@@ -41,11 +40,6 @@ export function ThreadPanel({
   composerDisabled: boolean
   composerPending: boolean
   working: boolean
-  retryPresentation?: {
-    workingLabel: string | null
-    stoppedNotice: string | null
-    queueLabel: string
-  }
   actionError?: string | null
   onDismissActionError?: () => void
   onDraftChange: (draft: string) => void
@@ -65,13 +59,7 @@ export function ThreadPanel({
           error={messagesError}
           bodyRef={bodyRef}
         />
-        <ThreadWidgetStack
-          working={working || composerPending}
-          queuedMessages={queuedMessages}
-          workingLabel={retryPresentation?.workingLabel}
-          stoppedNotice={retryPresentation?.stoppedNotice}
-          queueLabel={retryPresentation?.queueLabel}
-        >
+        <ThreadWidgetStack working={working || composerPending} queuedMessages={queuedMessages}>
           {widgets}
         </ThreadWidgetStack>
         {actionError ? (

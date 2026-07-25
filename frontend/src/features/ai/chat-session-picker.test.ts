@@ -45,9 +45,10 @@ function thread(
 }
 
 describe('chat-session-picker', () => {
-  it('detects running threads including processing-only', () => {
+  it('detects running threads including processing-only and RUNNABLE', () => {
     expect(isRunningThread(thread('s', 't', 'IDLE', true))).toBe(true)
-    expect(isRunningThread(thread('s', 't', 'FAILED', false))).toBe(false)
+    expect(isRunningThread(thread('s', 't', 'IDLE', false))).toBe(false)
+    expect(isRunningThread(thread('s', 't', 'RUNNABLE', false))).toBe(true)
     expect(isSessionRunning([thread('s', 't1', 'IDLE'), thread('s', 't2', 'WAITING')])).toBe(true)
     expect(isSessionRunning([])).toBe(false)
   })

@@ -11,7 +11,6 @@ describe('ChatPanel', () => {
           messages: [{ id: 'm1', role: 'user', text: 'hello', subjectEntryId: 'e1', createdAt: null }],
           queuedMessages: [],
           hasPendingInputs: false,
-          hasLiveProjection: false,
         }}
         runtimeLabels={{
           agentName: 'assistant',
