@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.controller;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -9,6 +10,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
@@ -18,11 +20,13 @@ import fun.fengwk.kkstudio.core.harness.realtime.HarnessRealtimeEventTail;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** SSE close cancels the Redis tail worker so block-read loops stop. */
+/** SSE close cancels the tail worker so block-read loops stop; overload rejects without work. */
 class StudioHarnessThreadSseEmitterTest {
 
   @Test
@@ -58,5 +62,29 @@ class StudioHarnessThreadSseEmitterTest {
     } finally {
       executor.shutdownNow();
     }
+  }
+
+  /**
+   * Bounded overload: a saturated executor fails the stream immediately without starting tail
+   * polling or leaving background work that would call the tail later.
+   */
+  @Test
+  void rejectedExecutorFailsWithoutInvokingTail() throws Exception {
+    HarnessRealtimeEventTail tail = mock(HarnessRealtimeEventTail.class);
+    Executor rejecting =
+        command -> {
+          throw new RejectedExecutionException("saturated");
+        };
+
+    SseEmitter emitter = StudioHarnessThreadSseEmitter.stream(1L, "0-0", tail, rejecting);
+
+    assertNotNull(emitter);
+    verifyNoInteractions(tail);
+    // Failed emitters reject further sends; proves the stream completed with an error.
+    assertThrows(
+        IllegalStateException.class,
+        () -> emitter.send(SseEmitter.event().name("probe").data("x")));
+    Thread.sleep(200);
+    verifyNoInteractions(tail);
   }
 }
