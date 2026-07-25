@@ -80,7 +80,7 @@ public class EnvironmentDaemonGateway
     this.properties = Objects.requireNonNull(properties, "properties");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.environmentReadyListener =
-        environmentReadyListener == null ? ignored -> {} : environmentReadyListener;
+        Objects.requireNonNull(environmentReadyListener, "environmentReadyListener");
   }
 
   @Override
