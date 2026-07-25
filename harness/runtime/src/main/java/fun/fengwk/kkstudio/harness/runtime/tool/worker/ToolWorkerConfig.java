@@ -3,22 +3,30 @@ package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 import java.time.Duration;
 import java.util.Objects;
 
-/** Bounded persistence cadence for one Platform worker. */
+/** Bounded persistence cadence for the location-agnostic ToolWorker. */
 public record ToolWorkerConfig(
     Duration leaseDuration,
     Duration heartbeatInterval,
     Duration partialFlushInterval,
+    Duration unavailableRetryDelay,
     int partialBatchBytes,
     int inlineResultBytes,
     int previewBytes) {
   public static final ToolWorkerConfig DEFAULT =
       new ToolWorkerConfig(
-          Duration.ofSeconds(30), Duration.ofSeconds(10), Duration.ofMillis(150), 8192, 8192, 1024);
+          Duration.ofSeconds(30),
+          Duration.ofSeconds(10),
+          Duration.ofMillis(150),
+          Duration.ofSeconds(1),
+          8192,
+          8192,
+          1024);
 
   public ToolWorkerConfig {
     leaseDuration = positive(leaseDuration, "leaseDuration");
     heartbeatInterval = positive(heartbeatInterval, "heartbeatInterval");
     partialFlushInterval = positive(partialFlushInterval, "partialFlushInterval");
+    unavailableRetryDelay = positive(unavailableRetryDelay, "unavailableRetryDelay");
     if (partialBatchBytes <= 0 || inlineResultBytes <= 0 || previewBytes <= 0) {
       throw new IllegalArgumentException("tool worker byte limits must be positive");
     }

@@ -25,7 +25,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeEntryInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
@@ -61,7 +60,6 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
               "run",
               "bash",
               new ToolParamsSchema("", Map.of(), Set.of(), false),
-              ToolExecutionLocation.PLATFORM,
               ToolSideEffect.READ_ONLY,
               Duration.ofSeconds(1)));
 

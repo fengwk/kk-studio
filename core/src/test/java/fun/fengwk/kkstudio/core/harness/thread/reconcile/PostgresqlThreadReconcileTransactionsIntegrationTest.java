@@ -602,7 +602,6 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
         name,
         null,
         new ToolParamsSchema(null, Map.of(), Set.of(), false),
-        location,
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(1));
   }

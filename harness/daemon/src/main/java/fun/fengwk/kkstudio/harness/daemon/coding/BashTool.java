@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
@@ -65,7 +64,6 @@ public final class BashTool implements Tool {
                         new ToolStringSchema("Optional environment-root-relative directory")),
                 Set.of("command"),
                 false),
-            ToolExecutionLocation.ENVIRONMENT,
             ToolSideEffect.NON_IDEMPOTENT,
             Duration.ofMinutes(5));
   }

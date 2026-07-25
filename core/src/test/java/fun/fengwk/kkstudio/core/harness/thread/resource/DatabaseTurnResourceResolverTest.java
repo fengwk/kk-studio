@@ -274,16 +274,15 @@ class DatabaseTurnResourceResolverTest {
           () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, namedTool));
     }
 
-    // Registered ENVIRONMENT tools are not platform tools; short name needs selected Environment.
-    AgentRuntimeConfig environmentTool = config.withTools(List.of("shell"));
-    try (Fixture fixture =
-        new Fixture(factory, List.of(tool("shell", "1", ToolExecutionLocation.ENVIRONMENT)))) {
+    // Unknown short names fail without a selected Environment capability source.
+    AgentRuntimeConfig unknownTool = config.withTools(List.of("shell"));
+    try (Fixture fixture = new Fixture(factory, List.of(tool("read", "1")))) {
       fixture.session();
       fixture.model(model(11L, 22L, MODEL_CONFIG));
       fixture.provider(provider(22L, AgentProviderType.openai));
       assertThrows(
           IllegalArgumentException.class,
-          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, environmentTool));
+          () -> fixture.resolver.resolve(SESSION_ID, THREAD_ID, unknownTool));
     }
   }
 
@@ -348,7 +347,6 @@ class DatabaseTurnResourceResolverTest {
             "shell tool",
             "renderer",
             new ToolParamsSchema("", Map.of(), Set.of(), false),
-            ToolExecutionLocation.ENVIRONMENT,
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(5));
     ToolDescriptor envRead =
@@ -358,7 +356,6 @@ class DatabaseTurnResourceResolverTest {
             "env read",
             "read",
             new ToolParamsSchema("", Map.of(), Set.of(), false),
-            ToolExecutionLocation.ENVIRONMENT,
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(5));
 
@@ -425,7 +422,6 @@ class DatabaseTurnResourceResolverTest {
             "env shell",
             "shell",
             new ToolParamsSchema("", Map.of(), Set.of(), false),
-            ToolExecutionLocation.ENVIRONMENT,
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(5));
     try (Fixture fixture = new Fixture(factory, List.of(shellPlatform))) {
@@ -525,7 +521,6 @@ class DatabaseTurnResourceResolverTest {
             "test tool",
             name,
             new ToolParamsSchema("", Map.of(), Set.of(), false),
-            location,
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(30));
     return new Tool() {

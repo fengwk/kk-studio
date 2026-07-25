@@ -123,7 +123,7 @@ public record RuntimeConfigSnapshot(
     String envName = environment.environmentName();
     for (ToolBinding binding : tools) {
       ToolDescriptor tool = binding.descriptor();
-      if (tool.executionLocation() == ToolExecutionLocation.ENVIRONMENT) {
+      if (binding.location() == ToolExecutionLocation.ENVIRONMENT) {
         if (envName == null) {
           throw new IllegalArgumentException(
               "environment.environmentName must be present for ENVIRONMENT tool: " + tool.name());

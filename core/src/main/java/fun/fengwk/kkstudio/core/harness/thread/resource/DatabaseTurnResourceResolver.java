@@ -28,7 +28,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.TurnResourceResolver;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnResources;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 
 import java.util.ArrayList;
@@ -237,10 +236,6 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
               + ": "
               + shortName);
     }
-    if (descriptor.executionLocation() != ToolExecutionLocation.ENVIRONMENT) {
-      throw new IllegalArgumentException(
-          "environment tool must use ENVIRONMENT execution location: " + shortName);
-    }
     return ToolBinding.of(descriptor, selectedEnvironment.environmentName());
   }
 
@@ -249,9 +244,6 @@ public final class DatabaseTurnResourceResolver implements TurnResourceResolver 
     for (var factory : extensionHost.toolFactories()) {
       ToolDescriptor descriptor = factory.descriptor();
       if (!descriptor.name().equals(shortName)) {
-        continue;
-      }
-      if (descriptor.executionLocation() != ToolExecutionLocation.PLATFORM) {
         continue;
       }
       matches.add(

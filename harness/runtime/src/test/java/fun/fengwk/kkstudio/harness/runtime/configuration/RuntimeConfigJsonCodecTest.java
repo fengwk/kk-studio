@@ -836,16 +836,17 @@ class RuntimeConfigJsonCodecTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                ToolBinding.of(
+                new ToolBinding(
                     new ToolDescriptor(
                         "shell",
                         "v1",
                         "shell",
                         "shell",
                         new ToolParamsSchema(null, Map.of(), Set.of(), true),
-                        ToolExecutionLocation.ENVIRONMENT,
                         ToolSideEffect.NON_IDEMPOTENT,
-                        Duration.ofMillis(500))));
+                        Duration.ofMillis(500)),
+                    ToolExecutionLocation.ENVIRONMENT,
+                    null));
     assertTrue(error.getMessage().contains("ENVIRONMENT tools require environmentName"));
   }
 
@@ -1026,9 +1027,8 @@ class RuntimeConfigJsonCodecTest {
 
   private static List<ToolBinding> canonicalTools() {
     return List.of(
-        new ToolBinding(platformDescriptor("search", "v1", "search helper"), null),
-        new ToolBinding(
-            environmentDescriptor("shell", "v1", "remote shell", "sandbox"), "sandbox"));
+        ToolBinding.of(platformDescriptor("search", "v1", "search helper")),
+        ToolBinding.of(environmentDescriptor("shell", "v1", "remote shell", "sandbox"), "sandbox"));
   }
 
   private static List<SkillSnapshot> canonicalSkills() {
@@ -1057,7 +1057,6 @@ class RuntimeConfigJsonCodecTest {
             Map.of("query", new ToolStringSchema("search query")),
             Set.of("query"),
             false),
-        ToolExecutionLocation.PLATFORM,
         ToolSideEffect.READ_ONLY,
         Duration.ofMillis(1000));
   }
@@ -1070,7 +1069,6 @@ class RuntimeConfigJsonCodecTest {
         description,
         name,
         new ToolParamsSchema(null, Map.of("cmd", new ToolStringSchema("command")), Set.of(), true),
-        ToolExecutionLocation.ENVIRONMENT,
         ToolSideEffect.NON_IDEMPOTENT,
         Duration.ofMillis(500));
   }

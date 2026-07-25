@@ -9,6 +9,7 @@ import static org.mockito.Mockito.mock;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonGateway;
 import fun.fengwk.kkstudio.core.harness.tool.service.HarnessToolConfiguration;
 import fun.fengwk.kkstudio.core.harness.tool.worker.HarnessToolWorkerConfiguration;
 import fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus;
@@ -22,12 +23,11 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.PlatformToolWorker;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolRegistry;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorker;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorkerConfig;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
@@ -87,10 +87,11 @@ class HarnessExtensionConfigurationTest {
       ToolRegistry registry = toolWorkerConfiguration.toolRegistry(host);
       assertSame(tool, registry.find("configured", "1").orElseThrow());
       assertTrue(registry.find("missing", "1").isEmpty());
-      PlatformToolWorker platformToolWorker =
-          toolWorkerConfiguration.platformToolWorker(
+      ToolWorker toolWorker =
+          toolWorkerConfiguration.toolWorker(
               mock(ToolInvocationTransactions.class),
               registry,
+              mock(EnvironmentDaemonGateway.class),
               chain,
               mock(ArtifactStore.class),
               () -> InvocationRetryPolicy.DEFAULT,
@@ -100,7 +101,7 @@ class HarnessExtensionConfigurationTest {
               Clock.systemUTC(),
               scheduler,
               new HarnessLifecycleObservers(host.lifecycleObservers()));
-      assertNotNull(platformToolWorker);
+      assertNotNull(toolWorker);
     } finally {
       scheduler.shutdownNow();
       host.close();
@@ -138,7 +139,6 @@ class HarnessExtensionConfigurationTest {
             "test tool",
             name,
             new ToolParamsSchema("", Map.of(), Set.of(), false),
-            ToolExecutionLocation.PLATFORM,
             ToolSideEffect.READ_ONLY,
             Duration.ZERO);
     return new Tool() {

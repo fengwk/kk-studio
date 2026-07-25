@@ -44,15 +44,6 @@ class ToolDomainContractsTest {
         () -> invocation(1L, 2L, 3L, 0, " ", "tool", "1", ToolExecutionLocation.PLATFORM, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> invocation(1L, 2L, 3L, 0, "call", " ", "1", ToolExecutionLocation.PLATFORM, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> invocation(1L, 2L, 3L, 0, "call", "tool", " ", ToolExecutionLocation.PLATFORM, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> invocation(1L, 2L, 3L, 0, "call", "tool", "1", ToolExecutionLocation.PLATFORM, " "));
-    assertThrows(
-        IllegalArgumentException.class,
         () ->
             invocation(
                 1L, 2L, 3L, 0, "call", "tool", "1", ToolExecutionLocation.PLATFORM, "env-9"));
@@ -81,37 +72,31 @@ class ToolDomainContractsTest {
                 1L, 2L, 3L, 0, "x".repeat(257), "tool", "1", ToolExecutionLocation.PLATFORM, null));
   }
 
-  /** Binding location 来自 descriptor executionLocation，environmentName 只属于 ENVIRONMENT。 */
+  /** Binding 拥有 location；environmentName 只属于 ENVIRONMENT。 */
   @Test
   void validatesFrozenToolBinding() {
-    ToolBinding platform = ToolBinding.of(descriptor("tool", ToolExecutionLocation.PLATFORM));
+    ToolBinding platform = ToolBinding.of(descriptor("tool"));
     assertEquals(ToolExecutionLocation.PLATFORM, platform.location());
     assertEquals(null, platform.environmentName());
-    ToolBinding environment =
-        ToolBinding.of(descriptor("environment", ToolExecutionLocation.ENVIRONMENT), "env-9");
+    ToolBinding environment = ToolBinding.of(descriptor("environment"), "env-9");
     assertEquals("env-9", environment.environmentName());
     assertEquals(ToolExecutionLocation.ENVIRONMENT, environment.location());
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> ToolBinding.of(descriptor("tool", ToolExecutionLocation.PLATFORM), "env-1"));
+        () -> new ToolBinding(descriptor("tool"), ToolExecutionLocation.PLATFORM, "env-1"));
+    assertThrows(
+        IllegalArgumentException.class, () -> ToolBinding.of(descriptor("environment"), " "));
+    assertThrows(
+        IllegalArgumentException.class, () -> ToolBinding.of(descriptor("environment"), null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> ToolBinding.of(descriptor("environment", ToolExecutionLocation.ENVIRONMENT), " "));
+        () -> ToolBinding.of(descriptor("environment"), "e".repeat(129)));
     assertThrows(
         IllegalArgumentException.class,
-        () -> ToolBinding.of(descriptor("environment", ToolExecutionLocation.ENVIRONMENT), null));
+        () -> new ToolBinding(descriptor("environment"), ToolExecutionLocation.ENVIRONMENT, null));
     assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            ToolBinding.of(
-                descriptor("environment", ToolExecutionLocation.ENVIRONMENT), "e".repeat(129)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ToolBinding.of(descriptor("environment", ToolExecutionLocation.ENVIRONMENT)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ToolBinding.of(descriptor("tool", ToolExecutionLocation.PLATFORM, "v".repeat(129))));
+        IllegalArgumentException.class, () -> ToolBinding.of(descriptor("tool", "v".repeat(129))));
   }
 
   private static ToolInvocation invocation(
@@ -130,7 +115,7 @@ class ToolDomainContractsTest {
         assistantEntryId,
         ordinal,
         toolCallId,
-        descriptor(toolName, location, toolVersion),
+        descriptor(toolName, toolVersion),
         "{}",
         location,
         environmentName,
@@ -149,19 +134,17 @@ class ToolDomainContractsTest {
         null);
   }
 
-  private static ToolDescriptor descriptor(String name, ToolExecutionLocation location) {
-    return descriptor(name, location, "1");
+  private static ToolDescriptor descriptor(String name) {
+    return descriptor(name, "1");
   }
 
-  private static ToolDescriptor descriptor(
-      String name, ToolExecutionLocation location, String version) {
+  private static ToolDescriptor descriptor(String name, String version) {
     return new ToolDescriptor(
         name,
         version,
         name,
         null,
         new ToolParamsSchema("", Map.of(), Set.of(), false),
-        location,
         ToolSideEffect.IDEMPOTENT,
         Duration.ofSeconds(1));
   }

@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
@@ -56,7 +55,6 @@ public final class TaskTool implements Tool {
                           Arrays.stream(WorkingCopyPolicy.values()).map(Enum::name).toList())),
               Set.of("subagent_type", "prompt"),
               false),
-          ToolExecutionLocation.PLATFORM,
           ToolSideEffect.IDEMPOTENT,
           Duration.ZERO);
 

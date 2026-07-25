@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.context.AgentRuntimeConfig;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
@@ -60,7 +59,6 @@ class TaskDomainTest {
             "task",
             "task",
             new ToolParamsSchema("task", Map.of(), Set.of(), false),
-            ToolExecutionLocation.PLATFORM,
             ToolSideEffect.IDEMPOTENT,
             Duration.ZERO);
 

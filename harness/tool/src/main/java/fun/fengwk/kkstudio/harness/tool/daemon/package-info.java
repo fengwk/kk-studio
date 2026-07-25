@@ -31,6 +31,8 @@
  *       Base64（无换行），且解码后长度必须等于 {@code sizeBytes}。
  * </ul>
  *
- * <p>artifact 字节随终态 payload 自包含；连接断开后通过 invocation journal 重发不需要连接内内存映射。
+ * <p>artifact 字节随终态 payload 自包含并解码为内联 {@code BinaryToolContent}；PARTIAL 禁止 artifact。持久化
+ * ArtifactStore 仅由 ToolWorker 在 fenced terminal supplier 内写入。连接断开后通过 invocation journal
+ * 重发不需要连接内内存映射。
  */
 package fun.fengwk.kkstudio.harness.tool.daemon;

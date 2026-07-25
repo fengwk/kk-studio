@@ -8,8 +8,8 @@ Environment 是**服务器内存**中的实时资源，按非空 `environmentNam
 
 | 层 | 职责 |
 | --- | --- |
-| `core/environment` | LiveEnvironmentRegistry、协议状态机、Environment 专用 invocation lease、load_skill 端口 |
-| `harness/tool` | Daemon v1 envelope、capabilities 与 result/artifact/skill codec |
+| `core/environment` | LiveEnvironmentRegistry、Daemon 协议传输、RemoteToolTransport、load_skill 端口 |
+| `harness/tool` | location-neutral Tool API、RemoteTool、Daemon v1 envelope/capabilities/result codec |
 | `harness/daemon` | 独立 Daemon 连接、重连、本地工具执行与 invocation journal |
 | `web` | `/api/environments/daemon/v1` WebSocket 文本帧适配；只读 `GET /api/environments` |
 
@@ -69,7 +69,7 @@ Daemon 随后按序发送：
 HELLO -> CAPABILITIES -> READY {"pull":true}
 ```
 
-`CAPABILITIES` 使用共享 `DaemonToolCapabilitiesCodec` 严格解码，形状为 `{"tools":[...],"skills":[{"name","description"}]}`。每个 tool descriptor 必须使用 `ENVIRONMENT` execution location，`name@version` 必须唯一；skills 仅上报短 `name`/`description`，不含本地路径或正文。`READY` 仅在 capabilities 接收后生效；`HEARTBEAT` 仅在 READY 后接受，并刷新 live registry 的 `lastSeen`。断线时 registry 移除该 name 条目。
+`CAPABILITIES` 使用共享 `DaemonToolCapabilitiesCodec` 严格解码，形状为 `{"tools":[...],"skills":[{"name","description"}]}`。tool descriptor 是 location-neutral 的功能描述（不含 executionLocation），`name@version` 必须唯一；ENVIRONMENT 路由由连接绑定的 `environmentName` 与 ToolBinding 提供。skills 仅上报短 `name`/`description`，不含本地路径或正文。`READY` 仅在 capabilities 接收后生效并触发统一 ToolWorker 拉取 due 工作；`HEARTBEAT` 仅在 READY 后接受，并刷新 live registry 的 `lastSeen`。断线时 registry 移除该 name 条目。
 
 只读查询：
 
@@ -95,7 +95,7 @@ LOAD_SKILL {"name":"dev"}  --invocationId 必填-->
 
 `tool_invocation.environment_name` 冻结实时环境名。`DatabaseEnvironmentToolInvocationWorkerStore` 仅查询 `target_type = ENVIRONMENT`、目标 `environment_name` 相同且 due 的记录。它使用 Environment 约束的 compare-and-set claim 和 heartbeat SQL。
 
-Gateway 对 READY 连接按名 claim 并分发。若目标 Environment 不在 live registry 或未 READY，则**立即**将 due invocation 收敛为确定性 `FAILED`，错误/结果文案为：
+统一 `ToolWorker` 对 READY 环境按名 claim 并经 `RemoteTool`/`EnvironmentDaemonGateway` 分发。若目标 Environment 不在 live registry 或未 READY，则**立即**将 due invocation 收敛为确定性 `FAILED`，错误/结果文案为：
 
 ```text
 <environment> is offline; <tool> is unavailable

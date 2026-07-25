@@ -70,7 +70,6 @@
         "version": "v1",
         "description": "search helper",
         "rendererKey": "search",
-        "executionLocation": "PLATFORM",
         "sideEffect": "READ_ONLY",
         "timeoutMillis": 1000,
         "inputSchema": {
@@ -91,7 +90,6 @@
         "version": "v1",
         "description": "remote shell",
         "rendererKey": "shell",
-        "executionLocation": "ENVIRONMENT",
         "sideEffect": "NON_IDEMPOTENT",
         "timeoutMillis": 500,
         "inputSchema": {

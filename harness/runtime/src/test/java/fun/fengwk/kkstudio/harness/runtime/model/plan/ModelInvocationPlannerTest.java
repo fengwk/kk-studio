@@ -49,7 +49,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
@@ -182,7 +181,7 @@ class ModelInvocationPlannerTest {
             List.of(
                 new SkillSnapshot("z&", "quote \" and '", "env"),
                 new SkillSnapshot("a<", "angle >", "env")),
-            List.of(new ToolBinding(zeta, null), new ToolBinding(alpha, null)),
+            List.of(ToolBinding.of(zeta), ToolBinding.of(alpha)),
             disabled());
 
     ModelInvocationPlan plan =
@@ -318,7 +317,7 @@ class ModelInvocationPlannerTest {
             "breakpoints",
             "system",
             List.of(),
-            List.of(new ToolBinding(tool("lookup", "query"), null)),
+            List.of(ToolBinding.of(tool("lookup", "query"))),
             breakpoints);
     ModelInvocationPlan breakpointPlan =
         plan(path(new RootEntryPayload(), breakpointConfig, message(user("question"))));
@@ -503,7 +502,6 @@ class ModelInvocationPlannerTest {
             Map.of("query", new ToolStringSchema(parameterDescription)),
             Set.of("query"),
             false),
-        ToolExecutionLocation.PLATFORM,
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(1));
   }

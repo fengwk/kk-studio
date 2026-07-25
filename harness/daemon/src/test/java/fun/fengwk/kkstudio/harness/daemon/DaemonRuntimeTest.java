@@ -11,6 +11,7 @@ import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.STARTED;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -26,10 +27,10 @@ import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
+import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
@@ -58,10 +59,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -105,7 +104,7 @@ class DaemonRuntimeTest {
     assertEquals("test", descriptor.path("name").asText());
     assertEquals("1.0.0", descriptor.path("version").asText());
     assertEquals("test", descriptor.path("rendererKey").asText());
-    assertEquals("ENVIRONMENT", descriptor.path("executionLocation").asText());
+    assertFalse(descriptor.has("executionLocation"));
     assertEquals("READ_ONLY", descriptor.path("sideEffect").asText());
     assertEquals(10_000, descriptor.path("timeoutMillis").asLong());
     assertEquals("object", descriptor.path("inputSchema").path("type").asText());
@@ -164,8 +163,8 @@ class DaemonRuntimeTest {
     assertEquals(1, capabilities.tools().size());
     assertEquals("schema", capabilities.tools().get(0).name());
     assertEquals("2.1.0", capabilities.tools().get(0).version());
-    assertEquals(
-        ToolExecutionLocation.ENVIRONMENT, capabilities.tools().get(0).executionLocation());
+    assertEquals("schema", capabilities.tools().get(0).name());
+    assertNotNull(capabilities.tools().get(0).sideEffect());
   }
 
   /** READY 后必须在配置周期内发送 HEARTBEAT。 */
@@ -589,23 +588,12 @@ class DaemonRuntimeTest {
     String base64 = content.get("contentBase64").asText();
     assertEquals(Base64.getEncoder().encodeToString(data), base64);
 
-    // Receivers can persist independently and obtain a global ref distinct from the local id.
+    // Receivers decode to inline binary content; durable externalization is ToolWorker ownership.
     DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
-    Map<String, byte[]> receivedStore = new HashMap<>();
-    AtomicInteger counter = new AtomicInteger();
-    ToolResult decoded =
-        resultCodec.decodeResult(
-            payload,
-            (mediaType, size, bytes) -> {
-              String id = "global-" + counter.incrementAndGet();
-              receivedStore.put(id, Arrays.copyOf(bytes, bytes.length));
-              return new ArtifactRef(id, mediaType, size);
-            });
+    ToolResult decoded = resultCodec.decodeResult(payload);
     assertEquals(1, decoded.contents().size());
-    ArtifactToolContent decodedArtifact = (ArtifactToolContent) decoded.contents().get(0);
-    assertFalse(stored.artifactId().equals(decodedArtifact.artifact().artifactId()));
-    assertEquals("global-1", decodedArtifact.artifact().artifactId());
-    assertArrayEquals(data, receivedStore.get("global-1"));
+    BinaryToolContent binary = (BinaryToolContent) decoded.contents().get(0);
+    assertArrayEquals(data, binary.content());
     assertTrue(
         payload.contains("\"contentBase64\":\"yv66vg==\"")
             || payload.contains("\"contentBase64\":\"" + base64 + "\""));
@@ -1113,7 +1101,6 @@ class DaemonRuntimeTest {
                         true)),
                 Set.of("text"),
                 false),
-            ToolExecutionLocation.ENVIRONMENT,
             ToolSideEffect.IDEMPOTENT,
             Duration.ofSeconds(3));
 
@@ -1138,7 +1125,6 @@ class DaemonRuntimeTest {
             "default timeout tool",
             null,
             new ToolParamsSchema("fallback arguments", Map.of(), Set.of(), false),
-            ToolExecutionLocation.ENVIRONMENT,
             ToolSideEffect.READ_ONLY,
             Duration.ZERO);
     private final TestHandle handle = new TestHandle();
@@ -1172,7 +1158,6 @@ class DaemonRuntimeTest {
             "test tool",
             null,
             new ToolParamsSchema("test arguments", Map.of(), Set.of(), false),
-            ToolExecutionLocation.ENVIRONMENT,
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(10));
     private final AtomicInteger executions = new AtomicInteger();

@@ -10,7 +10,6 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolArraySchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolBooleanSchema;
@@ -37,9 +36,9 @@ import java.util.TreeSet;
 /**
  * 严格、deterministic 的 {@link ToolDescriptor} 与 tool input schema JSON 编解码。
  *
- * <p>支持 PLATFORM 与 ENVIRONMENT 两种 {@link ToolExecutionLocation} 以及所有 {@link ToolSchemaElement}
- * 类型。编解码复用同一个底层 {@link ObjectMapper}，后者启用了 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS} 与
- * {@link JsonParser.Feature#STRICT_DUPLICATE_DETECTION}，从而在边界拒绝 trailing token 与 duplicate field。
+ * <p>Descriptor 是 location-neutral 的功能描述；执行位置属于 binding/invocation。编解码复用同一个底层 {@link
+ * ObjectMapper}，后者启用了 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS} 与 {@link
+ * JsonParser.Feature#STRICT_DUPLICATE_DETECTION}，从而在边界拒绝 trailing token 与 duplicate field。
  *
  * <p>字段访问为逐字段 JsonNode 读：每个对象都先取出允许字段集合，未知字段直接抛 {@link IllegalArgumentException}；类型不符（如 non-string
  * 的 enum 元素）同样抛出。
@@ -102,7 +101,6 @@ public final class ToolDescriptorJsonCodec {
     target.put("version", descriptor.version());
     target.put("description", descriptor.description());
     target.put("rendererKey", descriptor.rendererKey());
-    target.put("executionLocation", descriptor.executionLocation().name());
     target.put("sideEffect", descriptor.sideEffect().name());
     target.put("timeoutMillis", descriptor.timeout().toMillis());
     target.set("inputSchema", writeParamsSchema(descriptor.inputSchema()));
@@ -189,7 +187,6 @@ public final class ToolDescriptorJsonCodec {
             "version",
             "description",
             "rendererKey",
-            "executionLocation",
             "sideEffect",
             "timeoutMillis",
             "inputSchema");
@@ -198,7 +195,6 @@ public final class ToolDescriptorJsonCodec {
     String version = requiredText(obj, "version", "descriptor");
     String description = requiredText(obj, "description", "descriptor");
     String rendererKey = requiredText(obj, "rendererKey", "descriptor");
-    ToolExecutionLocation executionLocation = readExecutionLocation(obj);
     ToolSideEffect sideEffect = readSideEffect(obj);
     long timeoutMillis = requiredNonNegativeLong(obj, "timeoutMillis", "descriptor");
     JsonNode inputSchemaNode = requiredField(obj, "inputSchema", "descriptor");
@@ -209,7 +205,6 @@ public final class ToolDescriptorJsonCodec {
         description,
         rendererKey,
         inputSchema,
-        executionLocation,
         sideEffect,
         Duration.ofMillis(timeoutMillis));
   }
@@ -220,32 +215,15 @@ public final class ToolDescriptorJsonCodec {
       String description,
       String rendererKey,
       ToolParamsSchema inputSchema,
-      ToolExecutionLocation executionLocation,
       ToolSideEffect sideEffect,
       Duration timeout) {
     try {
       return new ToolDescriptor(
-          name,
-          version,
-          description,
-          rendererKey,
-          inputSchema,
-          executionLocation,
-          sideEffect,
-          timeout);
+          name, version, description, rendererKey, inputSchema, sideEffect, timeout);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
           "descriptor validation failed for " + name + "@" + version + ": " + error.getMessage(),
           error);
-    }
-  }
-
-  private static ToolExecutionLocation readExecutionLocation(ObjectNode obj) {
-    String value = requiredText(obj, "executionLocation", "descriptor");
-    try {
-      return ToolExecutionLocation.valueOf(value);
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException("descriptor unknown executionLocation: " + value, error);
     }
   }
 

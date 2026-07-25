@@ -103,9 +103,6 @@ final class AgentDefinitionLiveCapabilityValidator {
         .forEach(
             factory -> {
               ToolDescriptor descriptor = factory.descriptor();
-              if (descriptor.executionLocation() != ToolExecutionLocation.PLATFORM) {
-                return;
-              }
               byName
                   .computeIfAbsent(descriptor.name(), ignored -> new ArrayList<>())
                   .add(descriptor);

@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.harness.model.provider.adapter.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.context.ContextTransform;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionException.Phase;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
@@ -410,7 +409,6 @@ class HarnessExtensionHostTest {
         name,
         null,
         new ToolParamsSchema("", Map.of(), Set.of(), false),
-        ToolExecutionLocation.PLATFORM,
         ToolSideEffect.READ_ONLY,
         Duration.ZERO);
   }

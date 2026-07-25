@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
+import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
@@ -36,14 +37,9 @@ import java.util.Set;
  *       Base64（无换行）。
  * </ul>
  *
- * <p>codec 在边界拒绝：非对象 / 未知 / 缺失 / 多余字段；非 string 的 text / artifactId / mediaType；非 long 的 sizeBytes；非
- * canonical Base64 或解码后长度不匹配 sizeBytes；非对象的 details；非数组的 contents；非允许 type 字符串。JSON content 可以是任意
- * JSON 值。错误均以 {@link DaemonProtocolException} 抛出。
- *
- * <p>{@link #encodeResult(ToolResult, DaemonArtifactContentWriter)} 通过 {@link
- * DaemonArtifactContentWriter} 从 Daemon 本地 artifact sink 读取 bytes；{@link #decodeResult(String,
- * DaemonArtifactContentReader)} 通过 {@link DaemonArtifactContentReader} 在接收端持久化并返回全局 ref。codec 不依赖
- * {@code harness/daemon}，由 daemon / future gateway 各自提供 SPI 实现。
+ * <p>解码将 artifact 还原为内联 {@link BinaryToolContent}，不在 codec 边界持久化 ArtifactStore。PARTIAL 应在调用侧拒绝
+ * artifact（见 {@link #decodeResult(String, long, boolean)}）。编码时 {@link ArtifactToolContent} 通过
+ * {@link DaemonArtifactContentWriter} 读取本地 bytes；{@link BinaryToolContent} 直接写出。
  */
 public final class DaemonToolResultCodec {
 
@@ -74,56 +70,41 @@ public final class DaemonToolResultCodec {
     return writeJson(root);
   }
 
-  /**
-   * 将 v1 wire JSON 文本解码为 {@link ToolResult}；artifact 内容会通过 {@link DaemonArtifactContentReader}
-   * 持久化并返回新的全局 ref。
-   *
-   * @param payloadJson wire JSON 文本。
-   * @param artifactReader artifact 持久化 SPI。
-   * @return 还原后的 {@link ToolResult}；{@link ArtifactToolContent} 使用 reader 返回的全局 ref。
-   * @throws DaemonProtocolException 任何协议层错误。
-   */
-  public ToolResult decodeResult(String payloadJson, DaemonArtifactContentReader artifactReader) {
-    return decodeResult(payloadJson, artifactReader, Long.MAX_VALUE);
+  /** 将 v1 wire JSON 文本解码为 {@link ToolResult}；artifact 还原为内联 {@link BinaryToolContent}。 */
+  public ToolResult decodeResult(String payloadJson) {
+    return decodeResult(payloadJson, Long.MAX_VALUE, true);
   }
 
   /**
    * 将 v1 wire JSON 文本解码为 {@link ToolResult}，并在 Base64 分配前限制单个 artifact 的声明字节数。
    *
-   * @param payloadJson wire JSON 文本。
-   * @param artifactReader artifact 持久化 SPI。
-   * @param maximumArtifactBytes 单个 artifact 可接受的最大原始字节数。
-   * @return 还原后的 {@link ToolResult}；{@link ArtifactToolContent} 使用 reader 返回的全局 ref。
-   * @throws DaemonProtocolException 任何协议层错误。
+   * @param allowArtifacts false 时拒绝 artifact 内容（PARTIAL 使用）。
    */
   public ToolResult decodeResult(
-      String payloadJson, DaemonArtifactContentReader artifactReader, long maximumArtifactBytes) {
-    return decodeResult(payloadJson, null, artifactReader, maximumArtifactBytes);
+      String payloadJson, long maximumArtifactBytes, boolean allowArtifacts) {
+    return decodeResult(payloadJson, null, maximumArtifactBytes, allowArtifacts);
   }
 
   /**
-   * Decodes a result for one expected daemon invocation before any artifact content is persisted.
-   *
-   * <p>The expected wire {@code toolCallId} is verified before traversing {@code contents}, so an
-   * unrelated callback cannot create orphaned artifact records through the reader SPI.
+   * Decodes a result for one expected daemon invocation. Artifacts stay inline as {@link
+   * BinaryToolContent}; no durable store is touched.
    */
   public ToolResult decodeResultForInvocation(
       String payloadJson,
       String expectedToolCallId,
-      DaemonArtifactContentReader artifactReader,
-      long maximumArtifactBytes) {
+      long maximumArtifactBytes,
+      boolean allowArtifacts) {
     if (expectedToolCallId == null || expectedToolCallId.isBlank()) {
       throw new IllegalArgumentException("expectedToolCallId must not be blank");
     }
-    return decodeResult(payloadJson, expectedToolCallId, artifactReader, maximumArtifactBytes);
+    return decodeResult(payloadJson, expectedToolCallId, maximumArtifactBytes, allowArtifacts);
   }
 
   private ToolResult decodeResult(
       String payloadJson,
       String expectedToolCallId,
-      DaemonArtifactContentReader artifactReader,
-      long maximumArtifactBytes) {
-    Objects.requireNonNull(artifactReader, "artifactReader");
+      long maximumArtifactBytes,
+      boolean allowArtifacts) {
     if (maximumArtifactBytes < 0) {
       throw new IllegalArgumentException("maximumArtifactBytes must not be negative");
     }
@@ -162,7 +143,7 @@ public final class DaemonToolResultCodec {
     for (JsonNode element : contentsNode) {
       contents.add(
           readContent(
-              element, "result.contents[" + index + "]", artifactReader, maximumArtifactBytes));
+              element, "result.contents[" + index + "]", maximumArtifactBytes, allowArtifacts));
       index++;
     }
     return new ToolResult(toolCallId, List.copyOf(contents), error, detailsJson, false);
@@ -177,6 +158,13 @@ public final class DaemonToolResultCodec {
     } else if (content instanceof JsonToolContent json) {
       wireContent.put("type", "json");
       wireContent.set("json", readJson(json.json()));
+    } else if (content instanceof BinaryToolContent binary) {
+      byte[] bytes = binary.content();
+      wireContent.put("type", "artifact");
+      wireContent.put("artifactId", "inline");
+      wireContent.put("mediaType", binary.mediaType());
+      wireContent.put("sizeBytes", bytes.length);
+      wireContent.put("contentBase64", Base64.getEncoder().encodeToString(bytes));
     } else if (content instanceof ArtifactToolContent artifact) {
       ArtifactRef ref = artifact.artifact();
       byte[] bytes;
@@ -210,16 +198,12 @@ public final class DaemonToolResultCodec {
   }
 
   private ToolContent readContent(
-      JsonNode node,
-      String context,
-      DaemonArtifactContentReader artifactReader,
-      long maximumArtifactBytes) {
+      JsonNode node, String context, long maximumArtifactBytes, boolean allowArtifacts) {
     ObjectNode obj = requiredObject(node, context);
-    Set<String> allowed = Set.of("type", "text");
     String type = requiredText(obj, "type", context);
     switch (type) {
       case "text" -> {
-        rejectUnknownFields(obj, allowed, context);
+        rejectUnknownFields(obj, Set.of("type", "text"), context);
         String text = requiredText(obj, "text", context);
         return new TextToolContent(text);
       }
@@ -232,10 +216,13 @@ public final class DaemonToolResultCodec {
         return new JsonToolContent(writeJson(value));
       }
       case "artifact" -> {
+        if (!allowArtifacts) {
+          throw new DaemonProtocolException("PARTIAL result must not contain artifact content");
+        }
         Set<String> allowedArtifact =
             Set.of("type", "artifactId", "mediaType", "sizeBytes", "contentBase64");
         rejectUnknownFields(obj, allowedArtifact, context);
-        String artifactId = requiredText(obj, "artifactId", context);
+        requiredText(obj, "artifactId", context);
         String mediaType = requiredText(obj, "mediaType", context);
         long sizeBytes = requiredLong(obj, "sizeBytes", context);
         if (sizeBytes < 0) {
@@ -274,27 +261,7 @@ public final class DaemonToolResultCodec {
         if (!Base64.getEncoder().encodeToString(bytes).equals(contentBase64)) {
           throw new DaemonProtocolException(context + " 'contentBase64' must use canonical Base64");
         }
-        ArtifactRef ref = artifactReader.store(mediaType, sizeBytes, bytes);
-        if (ref == null) {
-          throw new DaemonProtocolException(context + " artifact reader returned null ref");
-        }
-        if (!mediaType.equals(ref.mediaType())) {
-          throw new DaemonProtocolException(
-              context
-                  + " artifact reader returned mismatched mediaType: wire="
-                  + mediaType
-                  + " ref="
-                  + ref.mediaType());
-        }
-        if (ref.sizeBytes() != sizeBytes) {
-          throw new DaemonProtocolException(
-              context
-                  + " artifact reader returned mismatched sizeBytes: wire="
-                  + sizeBytes
-                  + " ref="
-                  + ref.sizeBytes());
-        }
-        return new ArtifactToolContent(ref);
+        return new BinaryToolContent(mediaType, bytes);
       }
       default -> throw new DaemonProtocolException(context + " unknown content type: " + type);
     }

@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.extension.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.extension.ToolFactory;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderType;
@@ -216,9 +215,6 @@ public class RuntimeConfigSnapshotResolver {
         throw new IllegalArgumentException("unknown tool without ready environment: " + name);
       }
       ToolDescriptor environmentTool = uniqueEnvironmentTool(environment, name);
-      if (environmentTool.executionLocation() != ToolExecutionLocation.ENVIRONMENT) {
-        throw new IllegalArgumentException("environment tool must be ENVIRONMENT: " + name);
-      }
       addBinding(result, selected, ToolBinding.of(environmentTool, environment.environmentName()));
     }
     for (String automatic : List.of("create_goal", "get_goal", "update_goal")) {
@@ -269,9 +265,6 @@ public class RuntimeConfigSnapshotResolver {
     Map<String, ToolDescriptor> result = new HashMap<>();
     for (ToolFactory factory : extensionHost.toolFactories()) {
       ToolDescriptor descriptor = factory.descriptor();
-      if (descriptor.executionLocation() != ToolExecutionLocation.PLATFORM) {
-        continue;
-      }
       ToolDescriptor prior = result.putIfAbsent(descriptor.name(), descriptor);
       if (prior != null) {
         throw new IllegalArgumentException(

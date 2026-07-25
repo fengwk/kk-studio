@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
 import fun.fengwk.kkstudio.harness.daemon.transport.JdkWebSocketTransport;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonArtifactContentWriter;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
@@ -256,12 +255,6 @@ public final class DaemonRuntime implements AutoCloseable {
   private void sendCapabilities(ActiveConnection connection) {
     DaemonToolCapabilitiesCodec capabilitiesCodec = new DaemonToolCapabilitiesCodec();
     List<ToolDescriptor> tools = new ArrayList<>(toolRegistry.descriptors());
-    for (ToolDescriptor descriptor : tools) {
-      if (descriptor.executionLocation() != ToolExecutionLocation.ENVIRONMENT) {
-        throw new IllegalStateException(
-            "daemon tool must use ENVIRONMENT execution location: " + descriptor.name());
-      }
-    }
     List<DaemonSkillDescriptor> skills = new ArrayList<>(skillRegistry.descriptors());
     String payloadJson =
         capabilitiesCodec.encode(

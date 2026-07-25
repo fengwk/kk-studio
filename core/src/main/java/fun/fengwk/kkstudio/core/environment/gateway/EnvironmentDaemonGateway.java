@@ -4,37 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
 
-import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.environment.service.EnvironmentSkillLoadResult;
 import fun.fengwk.kkstudio.core.environment.service.EnvironmentSkillLoader;
-import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.kernel.execution.ExecutionTargetKind;
-import fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.ToolCompleted;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
-import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
-import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
-import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
-import fun.fengwk.kkstudio.harness.runtime.tool.AfterToolCallContext;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.ClaimedToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationUpdateOutcome;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorkerConfig;
-import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
-import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
-import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
@@ -44,6 +18,13 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillLoadCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
+import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
+import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolCancelledException;
+import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolSendUncertainException;
+import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
+import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -52,89 +33,88 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
 /**
- * Connection-local Daemon v1 protocol handling and durable Environment invocation dispatch.
+ * Connection/protocol transport and capability/skill adapter for Environment daemons.
  *
- * <p>The live {@link LiveEnvironmentRegistry} owns READY connections and canonical capabilities.
- * Durable ToolInvocation leases/results remain in the database. Queued ENVIRONMENT invocations wait
- * for a matching READY connection; expired RUNNING leases recover globally as UNKNOWN.
+ * <p>Does not own durable ToolInvocation claim/lease/terminal/retry/artifact lifecycle. Durable
+ * execution is owned by {@code ToolWorker}; this class supplies the core-side {@link
+ * RemoteToolTransport} and forwards daemon callbacks to the registered Tool listener with strict
+ * environment/connection/invocation ownership.
  */
 @Service
-public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
+public class EnvironmentDaemonGateway implements EnvironmentSkillLoader, RemoteToolTransport {
 
   private static final Pattern UNSIGNED_POSITIVE_DECIMAL = Pattern.compile("^[1-9][0-9]*$");
-  private static final Duration DEFAULT_EXECUTION_TIMEOUT = Duration.ofMinutes(5);
 
   private final LiveEnvironmentRegistry environmentRegistry;
-  private final ToolInvocationTransactions transactions;
-  private final ToolInterceptorChain interceptorChain;
-  private final ArtifactStore artifactStore;
-  private final HarnessLifecycleObservers lifecycleObservers;
-  private final RealtimeEventSink realtimeEventSink;
-  private final ActivationNotifier activationNotifier;
   private final DaemonToolCapabilitiesCodec capabilitiesCodec;
   private final DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
   private final DaemonSkillLoadCodec skillLoadCodec = new DaemonSkillLoadCodec();
-  private final HarnessRuntimeProperties runtimeProperties;
   private final EnvironmentGatewayProperties properties;
-  private final ToolWorkerConfig workerConfig;
   private final Clock clock;
   private final Map<String, ConnectionState> connections = new HashMap<>();
   private final Map<String, ConnectionState> environmentConnections = new HashMap<>();
-  private final Map<String, ActiveInvocation> activeInvocations = new HashMap<>();
-  private final Set<String> dispatchingEnvironments = new HashSet<>();
+  private final Map<String, ActiveRemote> activeByEnvironment = new HashMap<>();
   private final Map<String, PendingSkillLoad> pendingSkillLoads = new HashMap<>();
+  private volatile Consumer<String> environmentReadyHandler = ignored -> {};
+  private volatile Executor readyDispatchExecutor = Runnable::run;
 
   public EnvironmentDaemonGateway(
       LiveEnvironmentRegistry environmentRegistry,
-      ToolInvocationTransactions transactions,
-      ToolInterceptorChain interceptorChain,
-      ArtifactStore artifactStore,
-      HarnessLifecycleObservers lifecycleObservers,
-      RealtimeEventSink realtimeEventSink,
-      ActivationNotifier activationNotifier,
       DaemonToolCapabilitiesCodec capabilitiesCodec,
-      HarnessRuntimeProperties runtimeProperties,
       EnvironmentGatewayProperties properties,
-      ToolWorkerConfig workerConfig,
       Clock clock) {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
-    this.transactions = Objects.requireNonNull(transactions, "transactions");
-    this.interceptorChain = Objects.requireNonNull(interceptorChain, "interceptorChain");
-    this.artifactStore = Objects.requireNonNull(artifactStore, "artifactStore");
-    this.lifecycleObservers = Objects.requireNonNull(lifecycleObservers, "lifecycleObservers");
-    this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
-    this.activationNotifier = Objects.requireNonNull(activationNotifier, "activationNotifier");
     this.capabilitiesCodec = Objects.requireNonNull(capabilitiesCodec, "capabilitiesCodec");
-    this.runtimeProperties = Objects.requireNonNull(runtimeProperties, "runtimeProperties");
     this.properties = Objects.requireNonNull(properties, "properties");
-    this.workerConfig = Objects.requireNonNull(workerConfig, "workerConfig");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
+  /** Wires READY notifications so ToolWorker can claim due ENVIRONMENT work. */
+  public void setEnvironmentReadyHandler(Consumer<String> environmentReadyHandler) {
+    this.environmentReadyHandler =
+        environmentReadyHandler == null ? ignored -> {} : environmentReadyHandler;
+  }
+
+  /**
+   * Executor used to schedule READY dispatch off the WebSocket receive stack. Defaults to direct
+   * execution (tests); production wires the tool-worker scheduler.
+   */
+  public void setReadyDispatchExecutor(Executor readyDispatchExecutor) {
+    this.readyDispatchExecutor =
+        readyDispatchExecutor == null ? Runnable::run : readyDispatchExecutor;
+  }
+
   /** Registers a newly opened transport before its first HELLO frame arrives. */
-  public synchronized void open(EnvironmentDaemonConnection connection) {
+  public void open(EnvironmentDaemonConnection connection) {
     Objects.requireNonNull(connection, "connection");
     String connectionId = requireNonBlank(connection.connectionId(), "connectionId");
+    ConnectionState previous;
     ConnectionState state = new ConnectionState(connection);
-    ConnectionState previous = connections.put(connectionId, state);
+    synchronized (this) {
+      previous = connections.put(connectionId, state);
+    }
     if (previous != null) {
-      closeState(previous);
+      closeConnectionState(previous);
     }
   }
 
-  /** Processes one inbound text frame; malformed protocol input never mutates durable state. */
+  /**
+   * Processes one inbound text frame. Protocol decode/sequence validation may hold connection
+   * state; ToolExecutionListener and READY dispatch always run after locks are released.
+   */
   public void receive(String connectionId, String rawMessage) {
     ConnectionState state;
     synchronized (this) {
@@ -143,39 +123,125 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
     if (state == null) {
       return;
     }
+    List<Runnable> deferred = new ArrayList<>();
+    RuntimeException protocolError = null;
     synchronized (state) {
       try {
         DaemonEnvelope envelope = envelopeCodec.decode(rawMessage);
         if (!state.acceptInbound(envelope, envelopeCodec.readPayload(envelope))) {
           return;
         }
-        handleInbound(state, envelope);
+        handleInbound(state, envelope, deferred);
       } catch (RuntimeException error) {
-        protocolFailure(state, error);
+        protocolError = error;
+      }
+    }
+    if (protocolError != null) {
+      protocolFailure(state, protocolError);
+      return;
+    }
+    runDeferred(deferred);
+  }
+
+  /** Drops a transport handle; active remotes are notified as outcome-uncertain. */
+  public void close(String connectionId) {
+    ConnectionState state;
+    synchronized (this) {
+      state = connections.remove(connectionId);
+    }
+    if (state != null) {
+      closeConnectionState(state);
+    }
+  }
+
+  /**
+   * Notifies ToolWorker for each READY environment. Durable recovery remains in ToolWorker;
+   * retained for lifecycle scheduling and deterministic tests.
+   */
+  public void pollOnce() {
+    List<String> ready;
+    synchronized (this) {
+      ready =
+          environmentConnections.values().stream()
+              .filter(ConnectionState::isReady)
+              .map(state -> state.environmentName)
+              .toList();
+    }
+    Consumer<String> handler = environmentReadyHandler;
+    for (String environmentName : ready) {
+      try {
+        handler.accept(environmentName);
+      } catch (RuntimeException ignored) {
+        // Recovery polling remains authoritative when the routing hint fails.
       }
     }
   }
 
-  /** Drops a transport handle without changing its durable invocation lease. */
-  public synchronized void close(String connectionId) {
-    ConnectionState state = connections.remove(connectionId);
-    if (state != null) {
-      closeState(state);
-    }
-  }
-
-  /** Durable worker tick; exposed for lifecycle scheduling and deterministic integration tests. */
-  public void pollOnce() {
-    Instant now = clock.instant();
-    recoverExpiredEnvironmentInvocations(now);
-    List<ConnectionState> readyConnections;
+  @Override
+  public ToolExecutionHandle invoke(
+      String environmentName, ToolExecutionRequest request, ToolExecutionListener listener) {
+    String name = requireNonBlank(environmentName, "environmentName");
+    Objects.requireNonNull(request, "request");
+    Objects.requireNonNull(listener, "listener");
+    ConnectionState state;
+    ActiveRemote active;
+    String invokePayload;
+    long invocationId;
     synchronized (this) {
-      readyConnections =
-          environmentConnections.values().stream().filter(ConnectionState::isReady).toList();
+      state = environmentConnections.get(name);
+      if (state == null || !state.isReady() || !environmentRegistry.isReady(name)) {
+        throw new RemoteToolUnavailableException(
+            offlineUnavailableMessage(name, request.call().toolName()));
+      }
+      if (activeByEnvironment.containsKey(name)) {
+        throw new RemoteToolUnavailableException(
+            name + " already has an active remote tool invocation");
+      }
+      ToolDescriptor capability =
+          environmentRegistry
+              .find(name)
+              .flatMap(
+                  env ->
+                      env.tools().stream()
+                          .filter(
+                              tool ->
+                                  tool.name().equals(request.call().toolName())
+                                      && tool.version().equals(request.descriptor().version()))
+                          .findFirst())
+              .orElse(null);
+      if (capability == null || !capability.equals(request.descriptor())) {
+        throw new RemoteToolUnavailableException(
+            offlineUnavailableMessage(name, request.call().toolName()));
+      }
+      invocationId = request.context().invocationId();
+      if (invocationId <= 0) {
+        throw new IllegalArgumentException("invocationId must be positive");
+      }
+      active =
+          new ActiveRemote(
+              name, state.connection.connectionId(), invocationId, request.call(), listener);
+      activeByEnvironment.put(name, active);
+      invokePayload = createInvokePayload(request);
     }
-    for (ConnectionState state : readyConnections) {
-      pollEnvironment(state, now);
+    // Send outside the gateway monitor to avoid this->state lock inversion with receive paths.
+    SendOutcome outcome =
+        sendWithOutcome(
+            state, DaemonMessageType.INVOKE, Long.toString(invocationId), invokePayload);
+    if (outcome == SendOutcome.SENT) {
+      return active;
     }
+    // Prevent connection-close notify from double-firing with the thrown uncertain path.
+    active.terminal = true;
+    synchronized (this) {
+      activeByEnvironment.remove(name, active);
+    }
+    if (outcome == SendOutcome.UNCERTAIN) {
+      close(state.connection.connectionId());
+      throw new RemoteToolSendUncertainException(
+          "INVOKE send outcome is uncertain for environment " + name);
+    }
+    throw new RemoteToolUnavailableException(
+        offlineUnavailableMessage(name, request.call().toolName()));
   }
 
   @Override
@@ -224,7 +290,22 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
             });
   }
 
-  private void handleInbound(ConnectionState state, DaemonEnvelope envelope) {
+  private String createInvokePayload(ToolExecutionRequest request) {
+    long timeoutMillis = Math.max(0, request.timeout().toMillis());
+    JsonNode arguments = envelopeCodec.readJson(request.call().argumentsJson());
+    if (!arguments.isObject()) {
+      throw new IllegalStateException("frozen Environment tool arguments must be a JSON object");
+    }
+    ObjectNode payload = envelopeCodec.createPayload();
+    payload.put("toolName", request.call().toolName());
+    payload.put("toolVersion", request.descriptor().version());
+    payload.set("arguments", arguments);
+    payload.put("timeoutMillis", timeoutMillis);
+    return envelopeCodec.writeJson(payload);
+  }
+
+  private void handleInbound(
+      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     if (!state.helloReceived && envelope.messageType() != DaemonMessageType.HELLO) {
       throw new DaemonProtocolException("HELLO must be the first daemon message");
     }
@@ -235,17 +316,17 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
     switch (envelope.messageType()) {
       case HELLO -> handleHello(state, envelope);
       case CAPABILITIES -> handleCapabilities(state, envelope);
-      case READY -> handleReady(state, envelope);
+      case READY -> handleReady(state, envelope, deferred);
       case HEARTBEAT -> handleHeartbeat(state, envelope);
       case STARTED -> handleStarted(state, envelope);
-      case PARTIAL -> handlePartial(state, envelope);
-      case COMPLETED -> handleCompleted(state, envelope);
-      case FAILED -> handleFailed(state, envelope);
-      case CANCELLED -> handleCancelled(state, envelope);
+      case PARTIAL -> handlePartial(state, envelope, deferred);
+      case COMPLETED -> handleCompleted(state, envelope, deferred);
+      case FAILED -> handleFailed(state, envelope, deferred);
+      case CANCELLED -> handleCancelled(state, envelope, deferred);
       case ACK -> handleAck(state, envelope);
       case ERROR -> handleError(state, envelope);
-      case SKILL_LOADED -> handleSkillLoaded(state, envelope);
-      case SKILL_LOAD_FAILED -> handleSkillLoadFailed(state, envelope);
+      case SKILL_LOADED -> handleSkillLoaded(state, envelope, deferred);
+      case SKILL_LOAD_FAILED -> handleSkillLoadFailed(state, envelope, deferred);
       case WELCOME, INVOKE, CANCEL, LOAD_SKILL -> throw new DaemonProtocolException(
           "daemon must not send " + envelope.messageType() + " to gateway");
     }
@@ -287,7 +368,8 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
     state.capabilitiesReceived = true;
   }
 
-  private void handleReady(ConnectionState state, DaemonEnvelope envelope) {
+  private void handleReady(
+      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     requireHello(state);
     requireNoInvocationId(envelope);
     if (!state.capabilitiesReceived) {
@@ -302,7 +384,8 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
     Instant now = clock.instant();
     environmentRegistry.markReady(state.environmentName, state.connection, now);
     state.ready = true;
-    pollEnvironment(state, now);
+    String environmentName = state.environmentName;
+    deferred.add(() -> scheduleReadyDispatch(environmentName));
   }
 
   private void handleHeartbeat(ConnectionState state, DaemonEnvelope envelope) {
@@ -342,49 +425,54 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
     }
   }
 
-  private void handlePartial(ConnectionState state, DaemonEnvelope envelope) {
-    ActiveInvocation active = requireActive(state, envelope);
-    ToolResult result = decodePartialResult(active, envelope.payloadJson());
-    Instant activityAt = clock.instant();
-    if (transactions.recordActivity(active.claimed, activityAt, activityAt)
-        != ToolInvocationUpdateOutcome.APPLIED) {
-      cancelAndRemove(state, active);
-      return;
-    }
-    active.lastObservedActivityAt = activityAt;
-    try {
-      realtimeEventSink.append(
-          new RealtimeEvent.ToolPartial(
-              active.claimed.invocation().threadId(),
-              active.claimed.invocation().id(),
-              active.claimed.invocation().attempt(),
-              result,
-              activityAt));
-    } catch (RuntimeException ignored) {
-      // Realtime projection is best effort.
-    }
+  private void handlePartial(
+      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
+    ActiveRemote active = requireActive(state, envelope);
+    ToolResult result =
+        resultCodec.decodeResultForInvocation(
+            envelope.payloadJson(),
+            wireInvocationId(active),
+            properties.requireMaxArtifactBytes(),
+            false);
+    ToolResult mapped =
+        new ToolResult(
+            active.call.id(), result.contents(), result.error(), result.detailsJson(), false);
+    deferred.add(() -> active.listener.onPartial(mapped));
   }
 
-  private void handleCompleted(ConnectionState state, DaemonEnvelope envelope) {
-    ActiveInvocation active = requireActive(state, envelope);
-    completeSuccess(active, envelope.payloadJson());
+  private void handleCompleted(
+      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
+    ActiveRemote active = takeActive(state, envelope);
+    ToolResult result =
+        resultCodec.decodeResultForInvocation(
+            envelope.payloadJson(),
+            wireInvocationId(active),
+            properties.requireMaxArtifactBytes(),
+            true);
+    ToolResult mapped =
+        new ToolResult(
+            active.call.id(), result.contents(), result.error(), result.detailsJson(), false);
+    deferred.add(() -> active.listener.onComplete(mapped));
   }
 
-  private void handleFailed(ConnectionState state, DaemonEnvelope envelope) {
-    ActiveInvocation active = requireActive(state, envelope);
+  private void handleFailed(
+      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
+    ActiveRemote active = takeActive(state, envelope);
     String message =
         requiredSingleText(envelopeCodec.readPayload(envelope), "message", "FAILED payload");
-    complete(active, InvocationStatus.FAILED, message);
+    deferred.add(() -> active.listener.onError(new IllegalStateException(message)));
   }
 
-  private void handleCancelled(ConnectionState state, DaemonEnvelope envelope) {
-    ActiveInvocation active = requireActive(state, envelope);
+  private void handleCancelled(
+      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
+    ActiveRemote active = takeActive(state, envelope);
     String reason =
         requiredSingleText(envelopeCodec.readPayload(envelope), "reason", "CANCELLED payload");
-    complete(active, InvocationStatus.CANCELLED, reason);
+    deferred.add(() -> active.listener.onError(new RemoteToolCancelledException(reason)));
   }
 
-  private void handleSkillLoaded(ConnectionState state, DaemonEnvelope envelope) {
+  private void handleSkillLoaded(
+      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     requireReady(state);
     PendingSkillLoad pending = takePendingSkillLoad(state, envelope);
     DaemonSkillLoadCodec.SkillLoaded loaded = skillLoadCodec.decodeLoaded(envelope.payloadJson());
@@ -392,10 +480,14 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
       throw new DaemonProtocolException(
           "SKILL_LOADED name does not match request: " + loaded.name());
     }
-    pending.future.complete(new EnvironmentSkillLoadResult.Loaded(loaded.name(), loaded.content()));
+    deferred.add(
+        () ->
+            pending.future.complete(
+                new EnvironmentSkillLoadResult.Loaded(loaded.name(), loaded.content())));
   }
 
-  private void handleSkillLoadFailed(ConnectionState state, DaemonEnvelope envelope) {
+  private void handleSkillLoadFailed(
+      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     requireReady(state);
     PendingSkillLoad pending = takePendingSkillLoad(state, envelope);
     DaemonSkillLoadCodec.SkillLoadFailed failed =
@@ -404,7 +496,10 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
       throw new DaemonProtocolException(
           "SKILL_LOAD_FAILED name does not match request: " + failed.name());
     }
-    pending.future.complete(new EnvironmentSkillLoadResult.Failed(failed.name(), failed.message()));
+    deferred.add(
+        () ->
+            pending.future.complete(
+                new EnvironmentSkillLoadResult.Failed(failed.name(), failed.message())));
   }
 
   private PendingSkillLoad takePendingSkillLoad(ConnectionState state, DaemonEnvelope envelope) {
@@ -422,470 +517,15 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
     return pending;
   }
 
-  private void recoverExpiredEnvironmentInvocations(Instant now) {
-    int batchSize = runtimeProperties.getToolRecoveryBatchSize();
-    if (batchSize <= 0) {
-      throw new IllegalArgumentException(
-          "kk-studio.harness.runtime.tool-recovery-batch-size must be positive");
-    }
-    for (int index = 0; index < batchSize; index++) {
-      ToolInvocation candidate =
-          transactions.findNextExpiredRunning(ToolExecutionLocation.ENVIRONMENT, now).orElse(null);
-      if (candidate == null) {
-        return;
-      }
-      Duration executionTimeout =
-          candidate.descriptor().timeout().isZero()
-              ? DEFAULT_EXECUTION_TIMEOUT
-              : candidate.descriptor().timeout();
-      ClaimedToolInvocation claimed =
-          transactions
-              .claim(
-                  candidate.id(),
-                  recoveryLeaseOwner(),
-                  executionTimeout,
-                  workerConfig.leaseDuration(),
-                  now)
-              .orElse(null);
-      if (claimed == null) {
-        continue;
-      }
-      if (!claimed.recoveredLease()) {
-        throw new IllegalStateException("expired Environment recovery claimed a fresh invocation");
-      }
-      String message = "Tool ownership was lost; side effect result is unknown.";
-      complete(new ActiveInvocation(claimed, null, "recovery"), InvocationStatus.UNKNOWN, message);
-    }
-  }
-
-  private void pollEnvironment(ConnectionState state, Instant now) {
-    if (!state.isReady()) {
-      return;
-    }
-    ActiveInvocation active;
-    synchronized (this) {
-      active = activeInvocations.get(state.environmentName);
-    }
-    if (active != null) {
-      pollActive(state, active, now);
-      return;
-    }
-    dispatchNext(state, now);
-  }
-
-  private void pollActive(ConnectionState state, ActiveInvocation active, Instant now) {
-    if (!active.connectionId.equals(state.connection.connectionId())) {
-      return;
-    }
-    ToolInvocation current = active.claimed.invocation();
-    if (!now.isBefore(current.deadlineAt())) {
-      send(state, DaemonMessageType.CANCEL, wireInvocationId(active), "{}");
-      complete(
-          active,
-          InvocationStatus.UNKNOWN,
-          "Tool deadline elapsed; remote side effect result is unknown.");
-      return;
-    }
-    if (!active.claimHeartbeat(now, workerConfig.heartbeatInterval())) {
-      return;
-    }
-    if (transactions.renew(active.claimed, workerConfig.leaseDuration(), now)
-        != ToolInvocationUpdateOutcome.APPLIED) {
-      cancelAndRemove(state, active);
-    }
-  }
-
-  private void dispatchNext(ConnectionState state, Instant now) {
-    String environmentName = state.environmentName;
-    synchronized (this) {
-      if (activeInvocations.containsKey(environmentName)
-          || !state.isReady()
-          || !dispatchingEnvironments.add(environmentName)) {
-        return;
-      }
-    }
-    try {
-      String owner = leaseOwner(environmentName);
-      ToolInvocation candidate =
-          transactions
-              .findNextClaimable(ToolExecutionLocation.ENVIRONMENT, environmentName, now)
-              .orElse(null);
-      if (candidate == null) {
-        return;
-      }
-      Duration executionTimeout =
-          candidate.descriptor().timeout().isZero()
-              ? DEFAULT_EXECUTION_TIMEOUT
-              : candidate.descriptor().timeout();
-      ClaimedToolInvocation claimed =
-          transactions
-              .claim(candidate.id(), owner, executionTimeout, workerConfig.leaseDuration(), now)
-              .orElse(null);
-      if (claimed == null) {
-        return;
-      }
-      ToolInvocation invocation = claimed.invocation();
-      if (claimed.recoveredLease()) {
-        String message = "Tool ownership was lost; side effect result is unknown.";
-        complete(
-            new ActiveInvocation(claimed, null, state.connection.connectionId()),
-            InvocationStatus.UNKNOWN,
-            message);
-        return;
-      }
-      if (!now.isBefore(invocation.deadlineAt())) {
-        complete(
-            new ActiveInvocation(claimed, null, state.connection.connectionId()),
-            InvocationStatus.FAILED,
-            "Tool execution deadline exceeded.");
-        return;
-      }
-      if (!state.isReady() || !environmentRegistry.isReady(environmentName)) {
-        releaseUnstarted(candidate, claimed, now);
-        return;
-      }
-      ToolBinding binding;
-      String invokePayload;
-      try {
-        binding = resolveBinding(invocation);
-        invokePayload = createInvokePayload(invocation, now);
-      } catch (RuntimeException error) {
-        if (!state.isReady() || !environmentRegistry.isReady(environmentName)) {
-          releaseUnstarted(candidate, claimed, now);
-          return;
-        }
-        String message = errorMessage(error, "Frozen Environment tool is unavailable.");
-        complete(
-            new ActiveInvocation(claimed, null, state.connection.connectionId()),
-            InvocationStatus.FAILED,
-            message);
-        return;
-      }
-      ActiveInvocation active =
-          new ActiveInvocation(claimed, binding, state.connection.connectionId());
-      synchronized (this) {
-        activeInvocations.put(environmentName, active);
-      }
-      SendOutcome sendOutcome = sendInvoke(state, active, invokePayload);
-      if (sendOutcome == SendOutcome.NOT_SENT) {
-        removeActive(active);
-        releaseUnstarted(candidate, claimed, now);
-      } else if (sendOutcome == SendOutcome.UNCERTAIN) {
-        removeActive(active);
-      }
-    } finally {
-      synchronized (this) {
-        dispatchingEnvironments.remove(environmentName);
-      }
-    }
-  }
-
-  private String createInvokePayload(ToolInvocation invocation, Instant now) {
-    long timeoutMillis = Math.max(0, Duration.between(now, invocation.deadlineAt()).toMillis());
-    JsonNode arguments = envelopeCodec.readJson(invocation.argumentsJson());
-    if (!arguments.isObject()) {
-      throw new IllegalStateException("frozen Environment tool arguments must be a JSON object");
-    }
-    ObjectNode payload = envelopeCodec.createPayload();
-    payload.put("toolName", invocation.toolName());
-    payload.put("toolVersion", invocation.toolVersion());
-    payload.set("arguments", arguments);
-    payload.put("timeoutMillis", timeoutMillis);
-    return envelopeCodec.writeJson(payload);
-  }
-
-  private SendOutcome sendInvoke(
-      ConnectionState state, ActiveInvocation active, String invokePayload) {
-    return sendWithOutcome(
-        state, DaemonMessageType.INVOKE, wireInvocationId(active), invokePayload);
-  }
-
-  private void releaseUnstarted(
-      ToolInvocation candidate, ClaimedToolInvocation claimed, Instant now) {
-    Instant nextAttemptAt = null;
-    if (candidate.status() == InvocationStatus.RETRY_WAIT) {
-      nextAttemptAt = now.plus(runtimeProperties.requirePollInterval());
-      if (!nextAttemptAt.isBefore(claimed.invocation().deadlineAt())) {
-        complete(
-            new ActiveInvocation(claimed, null, "unavailable"),
-            InvocationStatus.FAILED,
-            "Environment was unavailable before the Tool deadline.");
-        return;
-      }
-    }
-    if (transactions.releaseUnstarted(claimed, candidate.status(), nextAttemptAt, now)
-        == ToolInvocationUpdateOutcome.APPLIED) {
-      try {
-        activationNotifier.notifyAfterCommit(
-            new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, candidate.id()));
-      } catch (RuntimeException ignored) {
-        // Recovery polling remains authoritative when the routing hint is lost.
-      }
-    }
-  }
-
-  private ToolBinding resolveBinding(ToolInvocation invocation) {
-    String environmentName = invocation.environmentName();
-    if (environmentName == null || environmentName.isBlank()) {
-      throw new IllegalArgumentException("Environment invocation has no environmentName");
-    }
-    LiveEnvironment environment =
-        environmentRegistry
-            .find(environmentName)
-            .filter(LiveEnvironment::isReady)
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        offlineUnavailableMessage(environmentName, invocation.toolName())));
-    ToolDescriptor descriptor =
-        environment.tools().stream()
-            .filter(
-                candidate ->
-                    candidate.name().equals(invocation.toolName())
-                        && candidate.version().equals(invocation.toolVersion()))
-            .findFirst()
-            .orElseThrow(
-                () ->
-                    new IllegalArgumentException(
-                        offlineUnavailableMessage(environmentName, invocation.toolName())));
-    if (descriptor.executionLocation() != ToolExecutionLocation.ENVIRONMENT) {
-      throw new IllegalArgumentException(
-          "Environment capability must use ENVIRONMENT execution location");
-    }
-    if (!descriptor.equals(invocation.descriptor())) {
-      throw new IllegalArgumentException(
-          "Environment capability does not match frozen invocation: "
-              + invocation.toolName()
-              + "@"
-              + invocation.toolVersion());
-    }
-    return ToolBinding.of(descriptor, environmentName);
-  }
-
-  private StagedToolResult decodeResult(ActiveInvocation active, String payloadJson) {
-    Map<String, StagedArtifact> stagedArtifacts = new HashMap<>();
-    String stagedPrefix = "staged-" + UUID.randomUUID();
-    ToolResult remote =
-        resultCodec.decodeResultForInvocation(
-            payloadJson,
-            wireInvocationId(active),
-            (mediaType, sizeBytes, bytes) -> {
-              String stagedId = stagedPrefix + "-" + stagedArtifacts.size();
-              ArtifactRef ref = new ArtifactRef(stagedId, mediaType, sizeBytes);
-              stagedArtifacts.put(stagedId, new StagedArtifact(ref, bytes));
-              return ref;
-            },
-            properties.requireMaxArtifactBytes());
-    ToolInvocation invocation = active.claimed.invocation();
-    return new StagedToolResult(
-        new ToolResult(
-            invocation.toolCallId(),
-            remote.contents(),
-            remote.error(),
-            remote.detailsJson(),
-            false),
-        stagedArtifacts);
-  }
-
-  private ToolResult decodePartialResult(ActiveInvocation active, String payloadJson) {
-    ToolResult remote =
-        resultCodec.decodeResultForInvocation(
-            payloadJson,
-            wireInvocationId(active),
-            (mediaType, sizeBytes, bytes) -> {
-              throw new DaemonProtocolException("PARTIAL result must not contain artifact content");
-            },
-            properties.requireMaxArtifactBytes());
-    ToolInvocation invocation = active.claimed.invocation();
-    return new ToolResult(
-        invocation.toolCallId(), remote.contents(), remote.error(), remote.detailsJson(), false);
-  }
-
-  private void completeSuccess(ActiveInvocation active, String payloadJson) {
-    ToolInvocation invocation = active.claimed.invocation();
-    Instant now = clock.instant();
-    Instant terminalAt = now;
-    InvocationStatus status = InvocationStatus.SUCCEEDED;
-    String error = null;
-    ToolInvocationUpdateOutcome outcome;
-    try {
-      outcome =
-          transactions.completeSuccess(
-              active.claimed,
-              () -> prepareTerminalResult(active, payloadJson),
-              active.lastObservedActivityAt,
-              now);
-    } catch (DaemonProtocolException protocolError) {
-      throw protocolError;
-    } catch (TerminalResultPreparationException preparationError) {
-      status = InvocationStatus.FAILED;
-      error = preparationError.getMessage();
-      terminalAt = clock.instant();
-      outcome =
-          transactions.completeFailure(
-              active.claimed,
-              new ToolInvocationError(preparationError.kind, error),
-              active.lastObservedActivityAt,
-              terminalAt);
-    } catch (RuntimeException persistenceError) {
-      status = InvocationStatus.FAILED;
-      error = errorMessage(persistenceError, "Tool result persistence failed.");
-      terminalAt = clock.instant();
-      outcome =
-          transactions.completeFailure(
-              active.claimed,
-              new ToolInvocationError("RESULT_PERSISTENCE_FAILED", error),
-              active.lastObservedActivityAt,
-              terminalAt);
-    }
-    finishTerminal(active, invocation, status, error, terminalAt, outcome);
-  }
-
-  private ToolResult prepareTerminalResult(ActiveInvocation active, String payloadJson) {
-    StagedToolResult staged = decodeResult(active, payloadJson);
-    ToolResult result = staged.result;
-    ToolInvocation invocation = active.claimed.invocation();
-    if (active.binding != null) {
-      try {
-        result =
-            interceptorChain.after(
-                new AfterToolCallContext(
-                    invocation.id(),
-                    active.binding,
-                    new ToolCall(
-                        invocation.toolCallId(), invocation.toolName(), invocation.argumentsJson()),
-                    result));
-      } catch (RuntimeException hookError) {
-        throw new TerminalResultPreparationException(
-            "AFTER_INTERCEPTOR_FAILED",
-            errorMessage(hookError, "afterToolCall interceptor failed."),
-            hookError);
-      }
-    }
-    return externalize(result, staged.artifacts);
-  }
-
-  private ToolResult externalize(ToolResult result, Map<String, StagedArtifact> stagedArtifacts) {
-    List<ToolContent> contents = new ArrayList<>();
-    for (ToolContent content : result.contents()) {
-      if (content instanceof ArtifactToolContent artifactContent) {
-        StagedArtifact staged = stagedArtifacts.get(artifactContent.artifact().artifactId());
-        if (staged == null) {
-          contents.add(content);
-          continue;
-        }
-        if (!staged.ref.equals(artifactContent.artifact())) {
-          throw new IllegalArgumentException("staged artifact metadata was modified");
-        }
-        contents.add(new ArtifactToolContent(staged.persist(artifactStore)));
-        continue;
-      }
-      byte[] bytes = contentBytes(content);
-      if (bytes.length <= workerConfig.inlineResultBytes()) {
-        contents.add(content);
-        continue;
-      }
-      String mediaType = content instanceof JsonToolContent ? "application/json" : "text/plain";
-      ArtifactRef artifact = artifactStore.save(mediaType, "utf-8", bytes);
-      contents.add(new TextToolContent(preview(bytes)));
-      contents.add(new ArtifactToolContent(artifact));
-    }
-    if (contents.isEmpty()) {
-      contents.add(new TextToolContent(""));
-    }
-    return new ToolResult(
-        result.toolCallId(), contents, result.error(), result.detailsJson(), false);
-  }
-
-  private static byte[] contentBytes(ToolContent content) {
-    if (content instanceof TextToolContent text) {
-      return text.text().getBytes(StandardCharsets.UTF_8);
-    }
-    if (content instanceof JsonToolContent json) {
-      return json.json().getBytes(StandardCharsets.UTF_8);
-    }
-    return new byte[0];
-  }
-
-  private String preview(byte[] bytes) {
-    if (bytes.length <= workerConfig.previewBytes()) {
-      return new String(bytes, StandardCharsets.UTF_8);
-    }
-    String value = new String(bytes, StandardCharsets.UTF_8);
-    StringBuilder prefix = new StringBuilder();
-    int previewBytes = 0;
-    for (int offset = 0; offset < value.length(); ) {
-      int codePoint = value.codePointAt(offset);
-      int codePointBytes =
-          new String(Character.toChars(codePoint)).getBytes(StandardCharsets.UTF_8).length;
-      if (previewBytes + codePointBytes > workerConfig.previewBytes()) {
-        break;
-      }
-      prefix.appendCodePoint(codePoint);
-      previewBytes += codePointBytes;
-      offset += Character.charCount(codePoint);
-    }
-    return prefix + "\n[full output stored as artifact]";
-  }
-
-  private void complete(ActiveInvocation active, InvocationStatus status, String error) {
-    ToolInvocation invocation = active.claimed.invocation();
-    if (status == InvocationStatus.SUCCEEDED) {
-      throw new IllegalArgumentException("successful completion requires a lazy result supplier");
-    }
-    Instant now = clock.instant();
-    ToolInvocationUpdateOutcome outcome =
-        switch (status) {
-          case FAILED -> transactions.completeFailure(
-              active.claimed,
-              new ToolInvocationError("EXECUTION_FAILED", requireError(error)),
-              active.lastObservedActivityAt,
-              now);
-          case UNKNOWN -> transactions.completeUnknown(
-              active.claimed,
-              new ToolInvocationError("LEASE_EXPIRED", requireError(error)),
-              active.lastObservedActivityAt,
-              now);
-          case CANCELLED -> transactions.completeCancelled(
-              active.claimed, active.lastObservedActivityAt, now);
-          default -> throw new IllegalArgumentException("status must be terminal: " + status);
-        };
-    finishTerminal(active, invocation, status, error, now, outcome);
-  }
-
-  private void finishTerminal(
-      ActiveInvocation active,
-      ToolInvocation invocation,
-      InvocationStatus status,
-      String error,
-      Instant now,
-      ToolInvocationUpdateOutcome outcome) {
-    if (outcome == ToolInvocationUpdateOutcome.APPLIED) {
-      lifecycleObservers.publish(
-          new ToolCompleted(invocation.id(), invocation.threadId(), status, error, now));
-      try {
-        activationNotifier.notifyAfterCommit(
-            new ExecutionTarget(ExecutionTargetKind.THREAD, invocation.threadId()));
-      } catch (RuntimeException ignored) {
-        // Wake hints are best effort; PostgreSQL recovery owns correctness.
-      }
-    }
-    removeActive(active);
-  }
-
-  private static String requireError(String error) {
-    return error == null || error.isBlank() ? "Tool execution failed." : error;
-  }
-
-  private ActiveInvocation requireActive(ConnectionState state, DaemonEnvelope envelope) {
+  private ActiveRemote requireActive(ConnectionState state, DaemonEnvelope envelope) {
     requireReady(state);
     long invocationId = parsePositive(envelope.invocationId(), "invocationId");
-    ActiveInvocation active;
+    ActiveRemote active;
     synchronized (this) {
-      active = activeInvocations.get(state.environmentName);
+      active = activeByEnvironment.get(state.environmentName);
     }
     if (active == null
-        || active.claimed.invocation().id() != invocationId
+        || active.invocationId != invocationId
         || !active.connectionId.equals(state.connection.connectionId())) {
       throw new DaemonProtocolException(
           "daemon callback does not own invocationId: " + envelope.invocationId());
@@ -893,19 +533,13 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
     return active;
   }
 
-  private void removeActive(ActiveInvocation active) {
-    String environmentName = active.claimed.invocation().environmentName();
-    if (environmentName == null) {
-      return;
-    }
+  private ActiveRemote takeActive(ConnectionState state, DaemonEnvelope envelope) {
+    ActiveRemote active = requireActive(state, envelope);
     synchronized (this) {
-      activeInvocations.remove(environmentName, active);
+      activeByEnvironment.remove(state.environmentName, active);
     }
-  }
-
-  private void cancelAndRemove(ConnectionState state, ActiveInvocation active) {
-    send(state, DaemonMessageType.CANCEL, wireInvocationId(active), "{}");
-    removeActive(active);
+    active.terminal = true;
+    return active;
   }
 
   private boolean send(
@@ -916,7 +550,10 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
   private SendOutcome sendWithOutcome(
       ConnectionState state, DaemonMessageType type, String invocationId, String payloadJson) {
     synchronized (state) {
-      if (state.closed || !state.connection.isOpen() || state.environmentName == null) {
+      if (state.cleaned
+          || state.sendFailed
+          || !state.connection.isOpen()
+          || state.environmentName == null) {
         return SendOutcome.NOT_SENT;
       }
       DaemonEnvelope envelope =
@@ -931,7 +568,9 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
         state.connection.sendText(envelopeCodec.encode(envelope));
         return SendOutcome.SENT;
       } catch (RuntimeException error) {
-        close(state.connection.connectionId());
+        // Transport is unusable for further sends, but registry/connection cleanup is not done yet.
+        // Caller must invoke close() so closeConnectionState can finish exactly once.
+        state.sendFailed = true;
         return SendOutcome.UNCERTAIN;
       }
     }
@@ -945,55 +584,110 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
     close(state.connection.connectionId());
   }
 
-  private synchronized void closeState(ConnectionState state) {
-    if (state.closed) {
-      return;
-    }
-    state.closed = true;
-    if (state.environmentName != null) {
-      environmentRegistry.unregister(state.environmentName, state.connection);
-      environmentConnections.remove(state.environmentName, state);
-      ActiveInvocation active = activeInvocations.get(state.environmentName);
-      if (active != null && active.connectionId.equals(state.connection.connectionId())) {
-        activeInvocations.remove(state.environmentName, active);
+  private void closeConnectionState(ConnectionState state) {
+    ActiveRemote lostRemote = null;
+    List<PendingSkillLoad> doomedSkills = List.of();
+    String environmentName = null;
+    synchronized (this) {
+      if (state.cleaned) {
+        return;
       }
-      failPendingSkillLoads(state.environmentName);
+      // cleaned is the completed-cleanup fence; sendFailed only means transport is unusable.
+      state.cleaned = true;
+      state.sendFailed = true;
+      environmentName = state.environmentName;
+      if (environmentName != null) {
+        environmentRegistry.unregister(environmentName, state.connection);
+        environmentConnections.remove(environmentName, state);
+        ActiveRemote active = activeByEnvironment.get(environmentName);
+        if (active != null && active.connectionId.equals(state.connection.connectionId())) {
+          activeByEnvironment.remove(environmentName, active);
+          boolean shouldNotify = !active.terminal;
+          active.terminal = true;
+          if (shouldNotify) {
+            lostRemote = active;
+          }
+        }
+        doomedSkills = takePendingSkillLoads(environmentName);
+      }
+      connections.remove(state.connection.connectionId(), state);
     }
     try {
       state.connection.close();
     } catch (RuntimeException ignored) {
-      // The durable lease is deliberately left untouched regardless of transport close behavior.
+      // Transport close failures must not touch durable state.
     }
+    if (lostRemote != null) {
+      ActiveRemote remote = lostRemote;
+      String env = environmentName;
+      runDeferred(
+          List.of(
+              () ->
+                  remote.listener.onError(
+                      new RemoteToolSendUncertainException(
+                          "Daemon connection lost for environment "
+                              + env
+                              + "; remote tool outcome is uncertain."))));
+    }
+    completeDoomedSkillLoads(environmentName, doomedSkills);
   }
 
-  private void failPendingSkillLoads(String environmentName) {
-    List<Map.Entry<String, PendingSkillLoad>> doomed = new ArrayList<>();
+  private List<PendingSkillLoad> takePendingSkillLoads(String environmentName) {
+    List<PendingSkillLoad> doomed = new ArrayList<>();
+    List<String> keys = new ArrayList<>();
     for (Map.Entry<String, PendingSkillLoad> entry : pendingSkillLoads.entrySet()) {
       if (environmentName.equals(entry.getValue().environmentName)) {
-        doomed.add(entry);
+        keys.add(entry.getKey());
+        doomed.add(entry.getValue());
       }
     }
-    for (Map.Entry<String, PendingSkillLoad> entry : doomed) {
-      pendingSkillLoads.remove(entry.getKey(), entry.getValue());
-      entry
-          .getValue()
-          .future
-          .complete(
-              new EnvironmentSkillLoadResult.Failed(
-                  entry.getValue().skillName,
-                  environmentName
-                      + " is offline; "
-                      + entry.getValue().skillName
-                      + " is unavailable"));
+    for (String key : keys) {
+      pendingSkillLoads.remove(key);
+    }
+    return doomed;
+  }
+
+  private void completeDoomedSkillLoads(String environmentName, List<PendingSkillLoad> doomed) {
+    if (environmentName == null || doomed.isEmpty()) {
+      return;
+    }
+    for (PendingSkillLoad pending : doomed) {
+      pending.future.complete(
+          new EnvironmentSkillLoadResult.Failed(
+              pending.skillName,
+              environmentName + " is offline; " + pending.skillName + " is unavailable"));
     }
   }
 
-  private String leaseOwner(String environmentName) {
-    return runtimeProperties.requireWorkerId() + "-environment-" + environmentName;
+  private void scheduleReadyDispatch(String environmentName) {
+    Consumer<String> handler = environmentReadyHandler;
+    Executor executor = readyDispatchExecutor;
+    try {
+      executor.execute(
+          () -> {
+            try {
+              handler.accept(environmentName);
+            } catch (RuntimeException ignored) {
+              // Durable polling remains authoritative.
+            }
+          });
+    } catch (RuntimeException rejected) {
+      try {
+        handler.accept(environmentName);
+      } catch (RuntimeException ignored) {
+        // Best-effort fallback when the scheduler rejects work.
+      }
+    }
   }
 
-  private String recoveryLeaseOwner() {
-    return runtimeProperties.requireWorkerId() + "-environment-recovery";
+  private static void runDeferred(List<Runnable> deferred) {
+    for (Runnable action : deferred) {
+      try {
+        action.run();
+      } catch (RuntimeException ignored) {
+        // Listener/projection failures must not re-enter protocol state.
+      }
+    }
   }
 
   private void verifyGatewayToken(String suppliedToken) {
@@ -1004,8 +698,8 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
     }
   }
 
-  private static String wireInvocationId(ActiveInvocation active) {
-    return Long.toString(active.claimed.invocation().id());
+  private static String wireInvocationId(ActiveRemote active) {
+    return Long.toString(active.invocationId);
   }
 
   private static String offlineUnavailableMessage(String environmentName, String toolName) {
@@ -1101,56 +795,54 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
     UNCERTAIN
   }
 
-  private record StagedToolResult(ToolResult result, Map<String, StagedArtifact> artifacts) {}
-
-  private static final class StagedArtifact {
-    private final ArtifactRef ref;
-    private final byte[] bytes;
-    private ArtifactRef persisted;
-
-    private StagedArtifact(ArtifactRef ref, byte[] bytes) {
-      this.ref = Objects.requireNonNull(ref, "ref");
-      this.bytes = Objects.requireNonNull(bytes, "bytes").clone();
-    }
-
-    private ArtifactRef persist(ArtifactStore artifactStore) {
-      if (persisted == null) {
-        persisted = artifactStore.save(ref.mediaType(), "identity", bytes);
-      }
-      return persisted;
-    }
-  }
-
-  private static final class TerminalResultPreparationException extends RuntimeException {
-    private final String kind;
-
-    private TerminalResultPreparationException(String kind, String message, Throwable cause) {
-      super(message, cause);
-      this.kind = kind;
-    }
-  }
-
-  private static final class ActiveInvocation {
-    private final ClaimedToolInvocation claimed;
-    private final ToolBinding binding;
+  private final class ActiveRemote implements ToolExecutionHandle {
+    private final String environmentName;
     private final String connectionId;
-    private Instant nextHeartbeatAt = Instant.MIN;
-    private Instant lastObservedActivityAt;
+    private final long invocationId;
+    private final ToolCall call;
+    private final ToolExecutionListener listener;
+    private volatile boolean cancelled;
+    private volatile boolean terminal;
+    private volatile boolean cancelSent;
 
-    private ActiveInvocation(
-        ClaimedToolInvocation claimed, ToolBinding binding, String connectionId) {
-      this.claimed = Objects.requireNonNull(claimed, "claimed");
-      this.binding = binding;
-      this.connectionId = requireNonBlank(connectionId, "connectionId");
-      this.lastObservedActivityAt = claimed.invocation().lastActivityAt();
+    private ActiveRemote(
+        String environmentName,
+        String connectionId,
+        long invocationId,
+        ToolCall call,
+        ToolExecutionListener listener) {
+      this.environmentName = environmentName;
+      this.connectionId = connectionId;
+      this.invocationId = invocationId;
+      this.call = call;
+      this.listener = listener;
     }
 
-    private synchronized boolean claimHeartbeat(Instant now, Duration interval) {
-      if (now.isBefore(nextHeartbeatAt)) {
-        return false;
+    @Override
+    public void cancel() {
+      // Idempotent ToolExecutionHandle.cancel: at most one CANCEL after a successful start, and
+      // never
+      // after a terminal COMPLETED/FAILED/CANCELLED callback.
+      synchronized (this) {
+        if (cancelled || terminal || cancelSent) {
+          cancelled = true;
+          return;
+        }
+        cancelled = true;
+        cancelSent = true;
       }
-      nextHeartbeatAt = now.plus(interval);
-      return true;
+      ConnectionState state;
+      synchronized (EnvironmentDaemonGateway.this) {
+        state = environmentConnections.get(environmentName);
+      }
+      if (state != null && state.connection.connectionId().equals(connectionId)) {
+        send(state, DaemonMessageType.CANCEL, Long.toString(invocationId), "{}");
+      }
+    }
+
+    @Override
+    public boolean isCancelled() {
+      return cancelled;
     }
   }
 
@@ -1178,7 +870,13 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
     private volatile boolean helloReceived;
     private volatile boolean capabilitiesReceived;
     private volatile boolean ready;
-    private volatile boolean closed;
+
+    /** Transport is unusable for further sends (failed send or cleanup started). */
+    private volatile boolean sendFailed;
+
+    /** Registry/connection maps have been cleaned exactly once. */
+    private volatile boolean cleaned;
+
     private long outboundSequence;
     private InboundEnvelopeIdentity lastInbound;
 
@@ -1187,7 +885,7 @@ public class EnvironmentDaemonGateway implements EnvironmentSkillLoader {
     }
 
     private boolean isReady() {
-      return !closed && ready && connection.isOpen() && environmentName != null;
+      return !cleaned && !sendFailed && ready && connection.isOpen() && environmentName != null;
     }
 
     private boolean acceptInbound(DaemonEnvelope envelope, JsonNode payload) {

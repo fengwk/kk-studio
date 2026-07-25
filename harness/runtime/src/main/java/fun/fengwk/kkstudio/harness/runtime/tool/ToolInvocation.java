@@ -62,9 +62,6 @@ public record ToolInvocation(
       throw new IllegalArgumentException("attempt must be positive");
     }
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
-    if (descriptor.executionLocation() != location) {
-      throw new IllegalArgumentException("descriptor location must equal invocation location");
-    }
     validateShape(
         status,
         nextAttemptAt,
