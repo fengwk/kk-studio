@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.cache;
 
-import fun.fengwk.kkstudio.harness.agent.extension.BeforeProviderRequestInterceptor;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheMode;
@@ -15,12 +14,12 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Provider request 链上唯一的 cache control 派生点，固定在所有 Extension Host hooks 之后。
+ * ModelInvocationPlanner 在冻结 {@link ProviderRequest} 时的唯一 cache control 派生点。
  *
  * <p>行为契约：
  *
  * <ul>
- *   <li>构造时绑定 sessionId，永远覆盖请求中已有的 {@link ProviderCacheControl}；不信任任何 extension 伪造的 control。
+ *   <li>构造时绑定 sessionId，永远覆盖请求中已有的 {@link ProviderCacheControl}；不存在执行时 hook 重写路径。
  *   <li>{@link PromptCacheRetention#NONE} 一律输出 {@link ProviderCacheControl#none()}。
  *   <li>policy capability 为 {@link PromptCacheMode#UNKNOWN} / {@link PromptCacheMode#UNSUPPORTED} /
  *       {@link PromptCacheMode#AUTOMATIC} 一律输出 {@code none()}；harness 不向 Provider 传递 cache hint。
@@ -31,7 +30,7 @@ import java.util.Set;
  *       ProviderCacheControl#breakpoints}。
  * </ul>
  */
-public final class PromptCacheRequestFinalizer implements BeforeProviderRequestInterceptor {
+public final class PromptCacheRequestFinalizer {
 
   private final long sessionId;
   private final PromptCacheAffinityKeyFactory keyFactory;
@@ -48,8 +47,7 @@ public final class PromptCacheRequestFinalizer implements BeforeProviderRequestI
     this(sessionId, new PromptCacheAffinityKeyFactory());
   }
 
-  @Override
-  public ProviderRequest intercept(ProviderRequest request) {
+  public ProviderRequest apply(ProviderRequest request) {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(request.model(), "request.model()");
     PromptCacheCapability capability = request.model().promptCachePolicy().capability();

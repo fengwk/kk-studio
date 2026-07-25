@@ -10,8 +10,8 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.model.provider.adapter.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.context.ContextTransform;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionException.Phase;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -136,7 +136,6 @@ class HarnessExtensionHostTest {
     List<Consumer<HarnessExtensionRegistry>> nullRegistrations =
         List.of(
             registry -> registry.addContextTransform(null),
-            registry -> registry.addBeforeProviderRequestInterceptor(null),
             registry -> registry.addBeforeToolCallInterceptor(null),
             registry -> registry.addAfterToolCallInterceptor(null),
             registry -> registry.addBeforeCompactionInterceptor(null),
@@ -176,7 +175,6 @@ class HarnessExtensionHostTest {
                     0,
                     registry -> {
                       registry.addContextTransform(state -> state);
-                      registry.addBeforeProviderRequestInterceptor(request -> request);
                       registry.addBeforeToolCallInterceptor(context -> null);
                       registry.addAfterToolCallInterceptor(context -> context.result());
                       registry.addBeforeCompactionInterceptor(context -> context.context());
@@ -186,7 +184,6 @@ class HarnessExtensionHostTest {
                     })));
 
     assertImmutable(host.contextTransforms());
-    assertImmutable(host.beforeProviderRequestInterceptors());
     assertImmutable(host.beforeToolCallInterceptors());
     assertImmutable(host.afterToolCallInterceptors());
     assertImmutable(host.beforeCompactionInterceptors());

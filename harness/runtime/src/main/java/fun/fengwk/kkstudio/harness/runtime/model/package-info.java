@@ -30,8 +30,8 @@
  *
  * <p>Dependency direction: this package depends on the {@code harness-kernel} shared lifecycle
  * types ({@link fun.fengwk.kkstudio.harness.kernel.execution.InvocationStatus}, {@link
- * fun.fengwk.kkstudio.harness.kernel.execution.Lease}) and on {@code harness-model} value objects
- * plus Jackson {@code JsonNode}; lifecycle status and lease records are not redefined here. No
- * Spring, JDBC, Redis, threading or SDK type may leak in.
+ * fun.fengwk.kkstudio.harness.kernel.execution.Lease}) and on in-module {@code harness.model} value
+ * objects plus Jackson {@code JsonNode}; lifecycle status and lease records are not redefined here.
+ * No Spring, JDBC, Redis, threading or SDK type may leak in.
  */
 package fun.fengwk.kkstudio.harness.runtime.model;

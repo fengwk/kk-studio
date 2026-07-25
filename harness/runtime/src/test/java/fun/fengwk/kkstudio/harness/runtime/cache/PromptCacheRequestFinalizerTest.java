@@ -48,8 +48,8 @@ class PromptCacheRequestFinalizerTest {
     PromptCacheRequestFinalizer a = new PromptCacheRequestFinalizer(101L);
     PromptCacheRequestFinalizer b = new PromptCacheRequestFinalizer(202L);
     assertNotEquals(
-        a.intercept(request).cacheControl().affinityKey(),
-        b.intercept(request).cacheControl().affinityKey());
+        a.apply(request).cacheControl().affinityKey(),
+        b.apply(request).cacheControl().affinityKey());
   }
 
   @Test
@@ -62,7 +62,7 @@ class PromptCacheRequestFinalizerTest {
             List.of(systemText("S1")),
             List.of());
     ProviderCacheControl resolved =
-        new PromptCacheRequestFinalizer(SESSION_ID).intercept(forged).cacheControl();
+        new PromptCacheRequestFinalizer(SESSION_ID).apply(forged).cacheControl();
     assertEquals(PromptCacheRetention.NONE, resolved.retention());
     assertTrue(resolved.breakpoints().isEmpty());
     assertEquals(null, resolved.affinityKey());
@@ -79,7 +79,7 @@ class PromptCacheRequestFinalizerTest {
             List.of(systemText("S1")),
             List.of());
     ProviderCacheControl resolved =
-        new PromptCacheRequestFinalizer(SESSION_ID).intercept(forged).cacheControl();
+        new PromptCacheRequestFinalizer(SESSION_ID).apply(forged).cacheControl();
     assertEquals(PromptCacheRetention.NONE, resolved.retention());
   }
 
@@ -95,7 +95,7 @@ class PromptCacheRequestFinalizerTest {
             List.of(systemText("S1")),
             List.of());
     ProviderCacheControl resolved =
-        new PromptCacheRequestFinalizer(SESSION_ID).intercept(forged).cacheControl();
+        new PromptCacheRequestFinalizer(SESSION_ID).apply(forged).cacheControl();
     assertEquals(PromptCacheRetention.NONE, resolved.retention());
   }
 
@@ -108,7 +108,7 @@ class PromptCacheRequestFinalizerTest {
             List.of(systemText("S1")),
             List.of());
     ProviderCacheControl resolved =
-        new PromptCacheRequestFinalizer(SESSION_ID).intercept(forged).cacheControl();
+        new PromptCacheRequestFinalizer(SESSION_ID).apply(forged).cacheControl();
     assertEquals(PromptCacheRetention.NONE, resolved.retention());
   }
 
@@ -117,7 +117,7 @@ class PromptCacheRequestFinalizerTest {
     ProviderRequest empty =
         requestWith(affinityModel(), ProviderCacheControl.none(), List.of(), List.of());
     ProviderCacheControl resolved =
-        new PromptCacheRequestFinalizer(SESSION_ID).intercept(empty).cacheControl();
+        new PromptCacheRequestFinalizer(SESSION_ID).apply(empty).cacheControl();
     assertEquals(PromptCacheRetention.SHORT, resolved.retention());
     assertTrue(resolved.affinityKey().startsWith("pc1-"));
   }
@@ -132,8 +132,8 @@ class PromptCacheRequestFinalizerTest {
             ProviderCacheControl.none(),
             List.of(systemText("S1")),
             List.of(tool("alpha")));
-    String keyA = a.intercept(request).cacheControl().affinityKey();
-    String keyB = b.intercept(request).cacheControl().affinityKey();
+    String keyA = a.apply(request).cacheControl().affinityKey();
+    String keyB = b.apply(request).cacheControl().affinityKey();
     assertNotEquals(keyA, keyB);
   }
 
@@ -147,7 +147,7 @@ class PromptCacheRequestFinalizerTest {
             List.of(systemText("S1")),
             List.of());
     ProviderCacheControl onlySystemResolved =
-        new PromptCacheRequestFinalizer(SESSION_ID).intercept(onlySystem).cacheControl();
+        new PromptCacheRequestFinalizer(SESSION_ID).apply(onlySystem).cacheControl();
     assertEquals(PromptCacheRetention.SHORT, onlySystemResolved.retention());
     assertEquals(EnumSet.of(PromptCacheBreakpoint.SYSTEM), onlySystemResolved.breakpoints());
 
@@ -159,7 +159,7 @@ class PromptCacheRequestFinalizerTest {
             List.of(),
             List.of(tool("alpha")));
     ProviderCacheControl onlyToolsResolved =
-        new PromptCacheRequestFinalizer(SESSION_ID).intercept(onlyTools).cacheControl();
+        new PromptCacheRequestFinalizer(SESSION_ID).apply(onlyTools).cacheControl();
     assertEquals(EnumSet.of(PromptCacheBreakpoint.TOOLS), onlyToolsResolved.breakpoints());
 
     // 请求同时存在 system + tools => 两个都进入 breakpoints。
@@ -170,7 +170,7 @@ class PromptCacheRequestFinalizerTest {
             List.of(systemText("S1")),
             List.of(tool("alpha")));
     ProviderCacheControl bothResolved =
-        new PromptCacheRequestFinalizer(SESSION_ID).intercept(both).cacheControl();
+        new PromptCacheRequestFinalizer(SESSION_ID).apply(both).cacheControl();
     assertEquals(
         EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS),
         bothResolved.breakpoints());
@@ -183,7 +183,7 @@ class PromptCacheRequestFinalizerTest {
             List.of(),
             List.of());
     ProviderCacheControl emptyResolved =
-        new PromptCacheRequestFinalizer(SESSION_ID).intercept(empty).cacheControl();
+        new PromptCacheRequestFinalizer(SESSION_ID).apply(empty).cacheControl();
     assertEquals(PromptCacheRetention.NONE, emptyResolved.retention());
   }
 
@@ -197,7 +197,7 @@ class PromptCacheRequestFinalizerTest {
             List.of(systemText("S1")),
             List.of(tool("alpha")));
     ProviderCacheControl resolved =
-        new PromptCacheRequestFinalizer(SESSION_ID).intercept(request).cacheControl();
+        new PromptCacheRequestFinalizer(SESSION_ID).apply(request).cacheControl();
     assertEquals(EnumSet.of(PromptCacheBreakpoint.SYSTEM), resolved.breakpoints());
   }
 
@@ -212,7 +212,7 @@ class PromptCacheRequestFinalizerTest {
                 EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
             List.of(systemText("S1")),
             List.of(tool("alpha")));
-    ProviderRequest after = new PromptCacheRequestFinalizer(SESSION_ID).intercept(forged);
+    ProviderRequest after = new PromptCacheRequestFinalizer(SESSION_ID).apply(forged);
     assertSame(forged.model(), after.model());
     assertSame(forged.variant(), after.variant());
     assertEquals(forged.messages(), after.messages());

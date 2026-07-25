@@ -119,7 +119,7 @@ harness/
 core/
 ├── harness/persistence/postgresql/
 ├── harness/notification/redis/
-├── harness/model/provider/
+├── harness/runtime model.provider contracts/
 ├── harness/tool/
 ├── harness/interaction/
 └── harness/configuration/
@@ -130,7 +130,7 @@ web/
 └── environment/
 ```
 
-现有 `harness/agent` 的单 Turn 聚合职责并入 `harness/runtime` 的 ModelInvocation 执行路径；不保留只有一层转发价值的独立 Agent 执行模块。
+Model 调用路径为 `ModelInvocationPlanner` 冻结 `ProviderRequest` 后由 `ModelWorker` 执行；不再保留独立 Agent 执行模块或 interceptor chain。
 
 ## 4. 一等 durable facts
 

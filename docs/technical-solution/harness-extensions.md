@@ -24,9 +24,8 @@ public interface HarnessExtension {
 
 | 模块 | 职责 |
 | --- | --- |
-| `harness/agent` | Provider request interceptor contract 与串行执行链 |
-| `harness/runtime` | Extension Host、typed registry、Context / Tool / Compaction hooks、lifecycle observation 与 factory contract；`ThreadProcessor` 消费这些 hooks |
-| `core` | Spring 装配、内置 Permission / Provider / Tool contribution |
+| `harness/runtime` | Extension Host、typed registry、Context / Tool / Compaction hooks、lifecycle observation、Provider/Model 契约与 factory contract；ModelInvocationPlanner 冻结 ProviderRequest |
+| `core` | Spring 装配、内置 Permission / Provider adapter（LangChain4j）/ Tool contribution |
 
 Host 只装载应用显式提供的已编译实例。Session Entry、AgentThread、ThreadInput、Tool Invocation 和 ThreadEvent 继续由原生 Runtime 与数据库状态机管理。
 
@@ -50,7 +49,6 @@ Extension 可通过 `registry.onDispose(...)` 注册清理动作。Host 关闭�
 | Extension point | 输入输出 | 生效位置 |
 | --- | --- | --- |
 | `ContextTransform` | `ContextState -> ContextState` | Session head path 完成默认转换后 |
-| `BeforeProviderRequestInterceptor` | `ProviderRequest -> ProviderRequest` | 标准 Provider request 构建完成后、`ModelProvider.stream(...)` 前 |
 | `BeforeToolCallInterceptor` | `BeforeToolCallContext -> BeforeToolCallResult` | Tool Invocation 创建前 |
 | `AfterToolCallInterceptor` | `AfterToolCallContext -> ToolResult` | Tool callback 完成后、Invocation terminal CAS 前 |
 | `BeforeCompactionInterceptor` | `BeforeCompactionContext -> SessionContext` | Compaction delegate 调用前 |
@@ -91,7 +89,7 @@ Tool 执行完成后，after chain 在 terminal CAS 前串行变换最终 `ToolR
 
 ### Provider request
 
-`DefaultAgentTurnEngine` 完成 model、variant、messages 和 tools 的标准 request 构建后执行 Provider interceptor chain。`ThreadProcessor` 再为当前 `sessionId` 追加 `PromptCacheRequestFinalizer`。最终 request 交给 `ModelProvider.stream(...)`。Provider 瞬态失败按当前持久 retry policy 保留失败 head 并自动重试；Interceptor、不可重试 Provider 或重试耗尽进入 Thread FAILED 路径并写 ThreadEvent。
+`ModelInvocationPlanner` 从 response debt 前缀构造标准 `ProviderRequest`（`cacheControl = NONE`），再直接调用 `PromptCacheRequestFinalizer` 派生最终 cache control，得到冻结后的请求写入 durable ModelInvocation。`ModelWorker` / `ModelExecutor` 只回放该冻结请求，不再经过 extension interceptor 或执行时 hook。Provider 瞬态失败按当前持久 retry policy 自动重试；不可重试 Provider 或重试耗尽进入 Thread FAILED 路径。
 
 ### Compaction
 
@@ -137,13 +135,12 @@ flowchart TD
     A[CoreHarnessExtension] --> H[HarnessExtensionHost]
     B[Application HarnessExtension beans] --> H
     H --> C[SessionContextBuilder]
-    H --> D[ProviderRequestInterceptorChain]
     H --> E[ToolInterceptorChain]
     H --> F[InterceptingCompactionService]
     H --> G[HarnessLifecycleObservers]
     H --> P[ProviderFactory lookup]
     H --> T[ToolFactory lookup]
-    H --> TP[ThreadProcessor wiring]
+    H --> M[ModelInvocationPlanner / ModelWorker wiring]
 ```
 
 `HarnessExtensionHost` 是 Runtime hook 和 factory contribution 的唯一 Spring 装配入口。`ThreadProcessor` 与 Tool worker 只消费 Host 冻结后的不可变列表或 lookup。

@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.extension;
 
-import fun.fengwk.kkstudio.harness.agent.extension.BeforeProviderRequestInterceptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.context.ContextTransform;
 import fun.fengwk.kkstudio.harness.runtime.tool.AfterToolCallInterceptor;
@@ -18,8 +17,6 @@ import java.util.Objects;
 public final class HarnessExtensionRegistry {
 
   private final List<ContextTransform> contextTransforms = new ArrayList<>();
-  private final List<BeforeProviderRequestInterceptor> beforeProviderRequestInterceptors =
-      new ArrayList<>();
   private final List<BeforeToolCallInterceptor> beforeToolCallInterceptors = new ArrayList<>();
   private final List<AfterToolCallInterceptor> afterToolCallInterceptors = new ArrayList<>();
   private final List<BeforeCompactionInterceptor> beforeCompactionInterceptors = new ArrayList<>();
@@ -37,10 +34,6 @@ public final class HarnessExtensionRegistry {
 
   public void addContextTransform(ContextTransform transform) {
     add(contextTransforms, transform, "transform");
-  }
-
-  public void addBeforeProviderRequestInterceptor(BeforeProviderRequestInterceptor interceptor) {
-    add(beforeProviderRequestInterceptors, interceptor, "interceptor");
   }
 
   public void addBeforeToolCallInterceptor(BeforeToolCallInterceptor interceptor) {
@@ -103,10 +96,6 @@ public final class HarnessExtensionRegistry {
 
   List<ContextTransform> contextTransforms() {
     return List.copyOf(contextTransforms);
-  }
-
-  List<BeforeProviderRequestInterceptor> beforeProviderRequestInterceptors() {
-    return List.copyOf(beforeProviderRequestInterceptors);
   }
 
   List<BeforeToolCallInterceptor> beforeToolCallInterceptors() {
