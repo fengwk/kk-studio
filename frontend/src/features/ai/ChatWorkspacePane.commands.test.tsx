@@ -162,13 +162,13 @@ describe('ChatWorkspacePane commands', () => {
     vi.mocked(harnessService.listSessionTasks).mockResolvedValue([])
     vi.mocked(harnessService.setThreadAgent).mockResolvedValue({
       inputId: 'i', threadId: 't1', sequence: 1, inputType: 'SET_AGENT', payloadJson: '{}',
-      clientMessageId: 'c', status: 'QUEUED', appliedEntryId: null, resolvedAt: null,
-      cancelledByStopId: null, createTime: null,
+      clientMessageId: 'c', status: 'QUEUED', resolvedAt: null,
+      createTime: null,
     })
     vi.mocked(harnessService.setThreadModel).mockResolvedValue({
       inputId: 'm', threadId: 't1', sequence: 2, inputType: 'SET_MODEL', payloadJson: '{}',
-      clientMessageId: 'c', status: 'QUEUED', appliedEntryId: null, resolvedAt: null,
-      cancelledByStopId: null, createTime: null,
+      clientMessageId: 'c', status: 'QUEUED', resolvedAt: null,
+      createTime: null,
     })
   })
 

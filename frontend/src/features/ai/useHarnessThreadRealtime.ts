@@ -7,10 +7,10 @@ import { queryKeys } from '@/shared/lib/query-keys'
  * Snapshot-first realtime subscription.
  *
  * 1) Refresh authoritative PostgreSQL snapshot queries.
- * 2) Tail Redis-backed SSE (`realtime` events). Lossy deltas only invalidate caches;
- *    authoritative state is always reloaded from REST.
+ * 2) Tail Redis-backed SSE (`realtime` events on `/events/stream`). Lossy deltas only
+ *    invalidate caches; authoritative state is always reloaded from REST.
  */
-export function useHarnessThreadEventStream(threadId: string, enabled: boolean) {
+export function useHarnessThreadRealtime(threadId: string, enabled: boolean) {
   const queryClient = useQueryClient()
 
   useEffect(() => {

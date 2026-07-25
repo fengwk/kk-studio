@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { asRecord, getInteger, getRecordList, getString, getToolContentType, parsePayload } from '@/features/ai/thread-event-payload'
+import { asRecord, getInteger, getRecordList, getString, getToolContentType, parsePayload } from '@/features/ai/payload-json'
 
-describe('thread event payload helpers', () => {
+describe('payload-json helpers', () => {
   it('parses only object payloads and safely falls back for absent or malformed input', () => {
     expect(parsePayload('{"content":"ok"}')).toEqual({ content: 'ok' })
     expect(parsePayload(null)).toEqual({})

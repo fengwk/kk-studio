@@ -4,11 +4,7 @@ export type DialogueRole = 'user' | 'assistant' | 'system' | 'tool' | 'meta'
 export type DialogueStatus = 'streaming' | 'done' | 'error'
 export type ToolAttachmentType = 'image' | 'audio' | 'video' | 'file'
 /** 控制面/回合摘要等特殊消息，与 user/assistant/tool 正文区分 */
-export type MetaMessageKind =
-  | 'agent_change'
-  | 'model_change'
-  | 'turn_usage'
-  | 'notice'
+export type MetaMessageKind = 'turn_usage'
 
 export interface ToolAttachment {
   type: ToolAttachmentType
@@ -68,6 +64,4 @@ export interface ThreadTimeline {
   queuedMessages: QueuedThreadMessage[]
   /** True when the mailbox contains a queued user-visible input. */
   hasPendingInputs: boolean
-  /** True only for active open stream work (open assistant or streaming tool). */
-  hasLiveProjection: boolean
 }

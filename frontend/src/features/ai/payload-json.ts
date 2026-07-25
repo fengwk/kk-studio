@@ -1,4 +1,4 @@
-import type { ToolAttachmentType } from '@/features/ai/thread-event-types'
+import type { ToolAttachmentType } from '@/features/ai/thread-timeline-types'
 
 export function parsePayload(payloadJson: string | null): Record<string, unknown> {
   if (!payloadJson) {

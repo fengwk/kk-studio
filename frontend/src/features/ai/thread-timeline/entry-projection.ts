@@ -1,9 +1,8 @@
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts'
-import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/thread-event-payload'
-import type { DialogueMessage, ToolDialogueMessage } from '@/features/ai/thread-event-types'
+import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/payload-json'
+import type { DialogueMessage, ToolDialogueMessage } from '@/features/ai/thread-timeline-types'
 import { contentText, toArtifactAttachment } from '@/features/ai/thread-timeline/content-utils'
 import { projectTurnUsageFromAssistantMetadata } from '@/features/ai/thread-timeline/meta-projection'
-import { toolCallKey } from '@/features/ai/thread-timeline/stream-projection'
 
 export function projectDurableEntry(
   entry: HarnessSessionEntryDTO,
@@ -11,7 +10,8 @@ export function projectDurableEntry(
   durableToolArguments: Map<string, string[]>,
 ) {
   const payload = parsePayload(entry.payloadJson)
-  if (entry.entryType === 'compaction') {
+  const entryType = entry.entryType
+  if (entryType === 'COMPACTION') {
     const summary = getString(payload.summary)
     if (summary) {
       messages.push({
@@ -25,50 +25,19 @@ export function projectDurableEntry(
     }
     return
   }
-  if (entry.entryType === 'agent_change') {
-    const agentName = getString(payload.agentName) || getString(payload.agentDefinitionId) || 'agent'
-    messages.push({
-      id: entry.entryId,
-      role: 'meta',
-      kind: 'agent_change',
-      subjectEntryId: entry.entryId,
-      text: `Agent 已切换为 ${agentName}`,
-      details: {
-        agentDefinitionId: payload.agentDefinitionId,
-        agentName,
-      },
-      createdAt: entry.createTime,
-      status: 'done',
-    })
-    return
-  }
-  if (entry.entryType === 'model_change') {
-    const modelId = getString(payload.modelId) || 'model'
-    const variant = getString(payload.variant)
-    messages.push({
-      id: entry.entryId,
-      role: 'meta',
-      kind: 'model_change',
-      subjectEntryId: entry.entryId,
-      text: variant ? `Model 已切换为 ${modelId} · ${variant}` : `Model 已切换为 ${modelId}`,
-      details: { modelId, variant },
-      createdAt: entry.createTime,
-      status: 'done',
-    })
-    return
-  }
-  if (entry.entryType === 'assistant_error') {
+  if (entryType === 'ASSISTANT_ERROR') {
+    const error = asRecord(payload.error)
     messages.push({
       id: entry.entryId,
       role: 'assistant',
       subjectEntryId: entry.entryId,
-      text: getString(payload.message) || '助手请求失败',
+      text: getString(error.message) || '助手请求失败',
       createdAt: entry.createTime,
       status: 'error',
     })
     return
   }
-  if (entry.entryType !== 'message' && entry.entryType !== 'custom_message') {
+  if (entryType !== 'MESSAGE' && entryType !== 'CUSTOM_MESSAGE') {
     return
   }
 
@@ -111,16 +80,15 @@ export function projectDurableEntry(
         createdAt: entry.createTime,
         status: 'done',
       })
-      // 持久元数据里的 usage/cost：刷新后也能显示本回合费用（不依赖 event 是否被 skip）
-      const metadata = asRecord(payload.assistantMetadata)
-      const turnUsage = projectTurnUsageFromAssistantMetadata(
-        entry.entryId,
-        metadata,
-        entry.createTime,
-      )
-      if (turnUsage) {
-        messages.push(turnUsage)
-      }
+    }
+    const metadata = asRecord(payload.assistantMetadata)
+    const turnUsage = projectTurnUsageFromAssistantMetadata(
+      entry.entryId,
+      metadata,
+      entry.createTime,
+    )
+    if (turnUsage) {
+      messages.push(turnUsage)
     }
     return
   }
@@ -159,43 +127,6 @@ function projectToolResult(
   }
 }
 
-export function findMaterializedAssistantEntryIds(entries: HarnessSessionEntryDTO[]): Set<string> {
-  const ids = new Set<string>()
-  for (const entry of entries) {
-    if (entry.entryType === 'assistant_error') {
-      ids.add(entry.entryId)
-      continue
-    }
-    if (entry.entryType !== 'message') {
-      continue
-    }
-    const message = asRecord(parsePayload(entry.payloadJson).message)
-    if (getString(message.role) === 'ASSISTANT') {
-      ids.add(entry.entryId)
-    }
-  }
-  return ids
-}
-
-export function findMaterializedToolKeys(entries: HarnessSessionEntryDTO[]): Set<string> {
-  const keys = new Set<string>()
-  for (const entry of entries) {
-    if (entry.entryType !== 'message') {
-      continue
-    }
-    const message = asRecord(parsePayload(entry.payloadJson).message)
-    if (getString(message.role) !== 'TOOL') {
-      continue
-    }
-    for (const content of getRecordList(message.contents)) {
-      if (getString(content.type) !== 'tool_result') {
-        continue
-      }
-      const toolCallId = getString(content.toolCallId)
-      if (toolCallId) {
-        keys.add(`call:${toolCallId}`)
-      }
-    }
-  }
-  return keys
+function toolCallKey(toolCallId: string): string {
+  return toolCallId ? `call:${toolCallId}` : ''
 }

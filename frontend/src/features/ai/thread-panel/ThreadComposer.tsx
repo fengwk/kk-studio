@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { SendIcon } from '@/features/canvas/icons'
 import {
   ThreadCommandPalette,
@@ -38,6 +38,7 @@ export function ThreadComposer({
   commands?: ThreadCommand[]
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const focusTimerRef = useRef<number | null>(null)
   const wasPendingRef = useRef(false)
 
   const slashMode = draft.startsWith('/')
@@ -50,6 +51,40 @@ export function ThreadComposer({
     () => Boolean(draft.trim()) && !disabled && !draft.startsWith('/'),
     [disabled, draft],
   )
+
+  const clearFocusTimer = useCallback(() => {
+    if (focusTimerRef.current === null) {
+      return
+    }
+    window.clearTimeout(focusTimerRef.current)
+    focusTimerRef.current = null
+  }, [])
+
+  const focusComposer = useCallback(() => {
+    clearFocusTimer()
+    const scheduleFocus = (attempt: number, delay: number) => {
+      focusTimerRef.current = window.setTimeout(() => {
+        focusTimerRef.current = null
+        tryFocus(attempt)
+      }, delay)
+    }
+    const tryFocus = (attempt: number) => {
+      const el = textareaRef.current
+      if (!el || el.disabled) {
+        if (attempt < 5) {
+          scheduleFocus(attempt + 1, 16)
+        }
+        return
+      }
+      if (document.activeElement !== el) {
+        el.focus({ preventScroll: true })
+      }
+      if (attempt < 5 && document.activeElement !== el) {
+        scheduleFocus(attempt + 1, 16)
+      }
+    }
+    scheduleFocus(0, 0)
+  }, [clearFocusTimer])
 
   useEffect(() => {
     if (!slashMode) {
@@ -75,26 +110,9 @@ export function ThreadComposer({
       focusComposer()
     }
     wasPendingRef.current = pending
-  }, [pending, disabled])
+  }, [pending, disabled, focusComposer])
 
-  function focusComposer() {
-    const tryFocus = (attempt: number) => {
-      const el = textareaRef.current
-      if (!el || el.disabled) {
-        if (attempt < 5) {
-          window.setTimeout(() => tryFocus(attempt + 1), 16)
-        }
-        return
-      }
-      if (document.activeElement !== el) {
-        el.focus({ preventScroll: true })
-      }
-      if (attempt < 5 && document.activeElement !== el) {
-        window.setTimeout(() => tryFocus(attempt + 1), 16)
-      }
-    }
-    window.setTimeout(() => tryFocus(0), 0)
-  }
+  useEffect(() => () => clearFocusTimer(), [clearFocusTimer])
 
   function closeSlashMode() {
     onDraftChange('')

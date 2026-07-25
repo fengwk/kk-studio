@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { AssistantMessageBlock } from '@/features/ai/thread-panel/messages/AssistantMessageBlock'
 import { isVisibleDialogueMessage } from '@/features/ai/thread-panel/visibility'
-import type { DialogueMessage } from '@/features/ai/thread-events'
+import type { DialogueMessage } from '@/features/ai/thread-timeline'
 
 describe('isVisibleDialogueMessage', () => {
   it('keeps thinking-only assistant messages visible', () => {

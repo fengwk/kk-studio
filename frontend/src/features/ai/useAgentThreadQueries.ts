@@ -2,10 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { toAgentModelViews, type AgentModelView } from '@/features/ai/AgentModelView'
-import type { ThreadEventDTO } from '@/shared/api/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
-
-const EMPTY_EVENTS: ThreadEventDTO[] = []
 
 export function useAgentThreadQueries(threadId: string, sessionIdHint = '') {
   const agentsQuery = useQuery({
@@ -48,13 +45,13 @@ export function useAgentThreadQueries(threadId: string, sessionIdHint = '') {
     enabled: Boolean(threadId),
     refetchInterval: (query) => {
       const inputs = query.state.data ?? []
-      return (thread?.status !== 'FAILED' && inputs.some((input) => input.status === 'QUEUED')) || isThreadActive(thread?.status) ? 1000 : false
+      return inputs.some((input) => input.status === 'QUEUED') || isThreadActive(thread?.status) ? 1000 : false
     },
   })
   const inputs = inputsQuery.data ?? []
   const workingHint =
     isThreadActive(thread?.status)
-    || (thread?.status !== 'FAILED' && inputs.some((input) => input.status === 'QUEUED'))
+    || inputs.some((input) => input.status === 'QUEUED')
 
   const entriesQuery = useQuery({
     queryKey: queryKeys.threads.entries(threadId),
@@ -87,11 +84,10 @@ export function useAgentThreadQueries(threadId: string, sessionIdHint = '') {
     thread,
     entries: entriesQuery.data ?? [],
     inputs,
-    // ThreadEvent history REST is removed; timeline falls back to entries/inputs snapshots.
-    events: EMPTY_EVENTS,
   }
 }
 
-function isThreadActive(status: string | undefined): boolean {
-  return status === 'RUNNING' || status === 'WAITING' || status === 'RETRYING'
+/** RUNNING / WAITING / RUNNABLE remain polled until the Thread settles to IDLE. */
+export function isThreadActive(status: string | undefined): boolean {
+  return status === 'RUNNING' || status === 'WAITING' || status === 'RUNNABLE'
 }

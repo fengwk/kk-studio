@@ -3,18 +3,22 @@ import { describe, expect, it } from 'vitest'
 import { ThreadWidgetStack } from '@/features/ai/thread-panel/ThreadWidgetStack'
 
 describe('ThreadWidgetStack', () => {
-  it('shows a stopped retry notice and restart queue without a misleading Working strip', () => {
+  it('shows the generic working strip when working without custom retry copy', () => {
     render(
       <ThreadWidgetStack
-        working={false}
-        stoppedNotice="本次请求已停止；发送新消息可重新开始。"
-        queueLabel="等待重启"
+        working
         queuedMessages={[{ inputId: 'input-1', role: 'user', text: '下一条消息', sequence: 1 }]}
       />,
     )
 
-    expect(screen.getByText('本次请求已停止；发送新消息可重新开始。')).toBeInTheDocument()
-    expect(screen.getByText('等待重启')).toBeInTheDocument()
-    expect(screen.queryByText('Working...')).not.toBeInTheDocument()
+    expect(screen.getByText('Working...')).toBeInTheDocument()
+    expect(screen.getByText('queued')).toBeInTheDocument()
+    expect(screen.getByText('下一条消息')).toBeInTheDocument()
+    expect(screen.queryByText('本次请求已停止；发送新消息可重新开始。')).not.toBeInTheDocument()
+  })
+
+  it('hides the working strip when idle with no queue', () => {
+    const { container } = render(<ThreadWidgetStack working={false} queuedMessages={[]} />)
+    expect(container).toBeEmptyDOMElement()
   })
 })

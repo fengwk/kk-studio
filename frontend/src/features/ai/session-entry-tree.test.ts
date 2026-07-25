@@ -9,19 +9,17 @@ import {
   resolveSelection,
   sessionEntryKind,
   sessionEntryPreview,
-  sessionEntryText,
-  stripThinkTags,
 } from '@/features/ai/session-entry-tree'
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts'
+import type { EntryType, HarnessSessionEntryDTO } from '@/shared/api/contracts'
 
 const entries: HarnessSessionEntryDTO[] = [
-  entry('root', null, 'root', {}),
-  entry('user', 'root', 'message', message('USER', 'original prompt')),
-  entry('assistant', 'user', 'message', message('ASSISTANT', 'answer')),
-  entry('tool', 'assistant', 'message', message('TOOL', 'tool result')),
-  entry('custom', 'assistant', 'custom_message', message('SYSTEM', 'custom text')),
-  entry('label', 'assistant', 'label', { label: 'checkpoint' }),
-  entry('config', 'root', 'agent_change', { agentDefinitionId: '1', agentName: 'assistant' }),
+  entry('root', null, 'ROOT', {}),
+  entry('user', 'root', 'MESSAGE', message('USER', 'original prompt')),
+  entry('assistant', 'user', 'MESSAGE', message('ASSISTANT', 'answer')),
+  entry('tool', 'assistant', 'MESSAGE', message('TOOL', 'tool result')),
+  entry('custom', 'assistant', 'CUSTOM_MESSAGE', message('SYSTEM', 'custom text')),
+  entry('label', 'assistant', 'LABEL', { label: 'checkpoint' }),
+  entry('config', 'root', 'RUNTIME_CONFIG', {}),
 ]
 
 describe('Session Entry Tree', () => {
@@ -34,22 +32,22 @@ describe('Session Entry Tree', () => {
     const rootWithoutParent = {
       entryId: 'root-without-parent',
       sessionId: 's1',
-      entryType: 'root',
+      entryType: 'ROOT',
       payloadJson: '{}',
       createTime: null,
     } as HarnessSessionEntryDTO
-    const user = entry('child', 'root-without-parent', 'message', message('USER', 'child prompt'))
+    const user = entry('child', 'root-without-parent', 'MESSAGE', message('USER', 'child prompt'))
 
     expect(buildSessionEntryTree([rootWithoutParent, user], 'conversation').map((item) => item.entry.entryId)).toEqual(['child'])
   })
 
   it('keeps linear chains compact: depth advances only on visible sibling splits', () => {
     const chain: HarnessSessionEntryDTO[] = [
-      entry('root', null, 'message', message('USER', 'first')),
-      entry('a', 'root', 'message', message('ASSISTANT', 'second')),
-      entry('b', 'a', 'message', message('ASSISTANT', 'third')),
-      entry('c', 'b', 'message', message('ASSISTANT', 'fourth')),
-      entry('d', 'c', 'message', message('ASSISTANT', 'fifth')),
+      entry('root', null, 'MESSAGE', message('USER', 'first')),
+      entry('a', 'root', 'MESSAGE', message('ASSISTANT', 'second')),
+      entry('b', 'a', 'MESSAGE', message('ASSISTANT', 'third')),
+      entry('c', 'b', 'MESSAGE', message('ASSISTANT', 'fourth')),
+      entry('d', 'c', 'MESSAGE', message('ASSISTANT', 'fifth')),
     ]
     const rows = buildSessionEntryTree(chain, 'all')
     expect(rows.map((row) => row.depth)).toEqual([0, 0, 0, 0, 0])
@@ -91,10 +89,10 @@ describe('Session Entry Tree', () => {
 
   it('keeps system and tool Entries out of the conversation view while re-attaching visible descendants', () => {
     const tree: HarnessSessionEntryDTO[] = [
-      entry('root', null, 'root', {}),
-      entry('user', 'root', 'message', message('USER', 'a user prompt')),
-      entry('tool', 'user', 'message', message('TOOL', 'a tool result')),
-      entry('assistant', 'tool', 'message', message('ASSISTANT', 'final answer')),
+      entry('root', null, 'ROOT', {}),
+      entry('user', 'root', 'MESSAGE', message('USER', 'a user prompt')),
+      entry('tool', 'user', 'MESSAGE', message('TOOL', 'a tool result')),
+      entry('assistant', 'tool', 'MESSAGE', message('ASSISTANT', 'final answer')),
     ]
     const rows = buildSessionEntryTree(tree, 'conversation')
     expect(rows.map((row) => row.entry.entryId)).toEqual(['user', 'assistant'])
@@ -106,13 +104,13 @@ describe('Session Entry Tree', () => {
 
   it('keeps depth shallow when filtered intermediates hide a branch point', () => {
     const tree: HarnessSessionEntryDTO[] = [
-      entry('root', null, 'root', {}),
-      entry('user1', 'root', 'message', message('USER', 'first user')),
-      entry('tool', 'user1', 'message', message('TOOL', 'a tool result')),
-      entry('assistant', 'tool', 'message', message('ASSISTANT', 'second reply')),
-      entry('custom', 'tool', 'custom_message', message('SYSTEM', 'second branch')),
-      entry('user2', 'root', 'message', message('USER', 'second user')),
-      entry('response', 'user2', 'message', message('ASSISTANT', 'reply')),
+      entry('root', null, 'ROOT', {}),
+      entry('user1', 'root', 'MESSAGE', message('USER', 'first user')),
+      entry('tool', 'user1', 'MESSAGE', message('TOOL', 'a tool result')),
+      entry('assistant', 'tool', 'MESSAGE', message('ASSISTANT', 'second reply')),
+      entry('custom', 'tool', 'CUSTOM_MESSAGE', message('SYSTEM', 'second branch')),
+      entry('user2', 'root', 'MESSAGE', message('USER', 'second user')),
+      entry('response', 'user2', 'MESSAGE', message('ASSISTANT', 'reply')),
     ]
     const rows = buildSessionEntryTree(tree, 'conversation')
     const byEntryId = new Map(rows.map((row) => [row.entry.entryId, row]))
@@ -128,11 +126,11 @@ describe('Session Entry Tree', () => {
 
   it('preserves server pre-order when hidden intermediates expose visible siblings', () => {
     const tree: HarnessSessionEntryDTO[] = [
-      entry('root', null, 'root', {}),
-      entry('left', 'root', 'message', message('USER', 'left')),
-      entry('hidden', 'root', 'message', message('TOOL', 'hidden tool')),
-      entry('middle', 'hidden', 'message', message('ASSISTANT', 'middle')),
-      entry('right', 'root', 'message', message('USER', 'right')),
+      entry('root', null, 'ROOT', {}),
+      entry('left', 'root', 'MESSAGE', message('USER', 'left')),
+      entry('hidden', 'root', 'MESSAGE', message('TOOL', 'hidden tool')),
+      entry('middle', 'hidden', 'MESSAGE', message('ASSISTANT', 'middle')),
+      entry('right', 'root', 'MESSAGE', message('USER', 'right')),
     ]
 
     const rows = buildSessionEntryTree(tree, 'conversation')
@@ -158,19 +156,8 @@ describe('Session Entry Tree', () => {
     expect(matchesSessionTreeFilter('other', 'all')).toBe(true)
   })
 
-  it('strips <think>…</think> from assistant previews while keeping the full text in branching drafts', () => {
-    const assistant = entry(
-      'assistant-thinking',
-      'root',
-      'message',
-      message('ASSISTANT', '先内部思考。\n\n<think>secret plan</think>'),
-    )
-    expect(sessionEntryPreview(assistant, 'assistant')).toBe('先内部思考。')
-    expect(sessionEntryText(assistant)).toBe('先内部思考。\n\n<think>secret plan</think>')
-  })
-
   it('excludes explicit thinking content from previews and search without truncating editable drafts', () => {
-    const assistant = entry('assistant-thinking-block', 'root', 'message', {
+    const assistant = entry('assistant-thinking-block', 'root', 'MESSAGE', {
       message: {
         role: 'ASSISTANT',
         contents: [
@@ -180,7 +167,7 @@ describe('Session Entry Tree', () => {
       },
     })
     const fullDraft = '用户原始内容 '.repeat(40)
-    const custom = entry('custom-draft', 'root', 'custom_message', message('SYSTEM', fullDraft))
+    const custom = entry('custom-draft', 'root', 'CUSTOM_MESSAGE', message('SYSTEM', fullDraft))
 
     expect(sessionEntryPreview(assistant, 'assistant')).toBe('面向用户的正文')
     expect(buildSessionEntryTree([assistant], 'all', parseHistorySearchTokens('内部计划'))).toEqual([])
@@ -190,9 +177,9 @@ describe('Session Entry Tree', () => {
 
   it('flattens whitespace and truncates the projected preview to the configured limit', () => {
     const long = 'a'.repeat(500)
-    const assistant = entry('long', null, 'message', message('ASSISTANT', long))
+    const assistant = entry('long', null, 'MESSAGE', message('ASSISTANT', long))
     expect(sessionEntryPreview(assistant, 'assistant')).toHaveLength(220)
-    const compact = entry('compact', null, 'message', message('ASSISTANT', 'line one\n\nline two'))
+    const compact = entry('compact', null, 'MESSAGE', message('ASSISTANT', 'line one\n\nline two'))
     expect(sessionEntryPreview(compact, 'assistant')).toBe('line one line two')
   })
 
@@ -218,8 +205,8 @@ describe('Session Entry Tree', () => {
     const assistant = entry(
       'assistant-search',
       null,
-      'message',
-      message('ASSISTANT', '客户需要 <think>secret</think> 一份 季度报告'),
+      'MESSAGE',
+      message('ASSISTANT', '客户需要一份季度报告'),
     )
     const tokens = parseHistorySearchTokens('客户 报告')
     const rows = buildSessionEntryTree([assistant], 'all', tokens)
@@ -232,15 +219,9 @@ describe('Session Entry Tree', () => {
     expect(parseHistorySearchTokens('   ')).toEqual([])
     expect(parseHistorySearchTokens(' 季度 \t 报告 ')).toEqual(['季度', '报告'])
   })
-
-  it('exposes stripThinkTags helper for direct reuse', () => {
-    expect(stripThinkTags('a<think>b</think>c')).toBe('ac')
-    expect(stripThinkTags('a<think>unterminated')).toBe('a')
-    expect(stripThinkTags('')).toBe('')
-  })
 })
 
-function entry(entryId: string, parentEntryId: string | null, entryType: string, payload: unknown): HarnessSessionEntryDTO {
+function entry(entryId: string, parentEntryId: string | null, entryType: EntryType, payload: unknown): HarnessSessionEntryDTO {
   return { entryId, sessionId: 's1', parentEntryId, entryType, payloadJson: JSON.stringify(payload), createTime: null }
 }
 

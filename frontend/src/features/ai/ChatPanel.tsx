@@ -5,7 +5,7 @@ import { ThreadStatusFooter } from '@/features/ai/thread-panel/ThreadStatusFoote
 import { ThreadSubagentWidget } from '@/features/ai/thread-panel/ThreadSubagentWidget'
 import type { ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
 import type { SubagentTaskNode } from '@/features/ai/subagent-task-tree'
-import type { ThreadTimeline } from '@/features/ai/thread-events'
+import type { ThreadTimeline } from '@/features/ai/thread-timeline'
 import type {
   ModelUsageSummaryDTO,
   RootActivityDTO,
@@ -19,7 +19,6 @@ export function ChatPanel({
   timeline,
   runtimeLabels,
   working,
-  retryPresentation,
   messagesLoading,
   messagesError,
   bodyRef,
@@ -47,11 +46,6 @@ export function ChatPanel({
     contextWindow?: number
   }
   working: boolean
-  retryPresentation?: {
-    workingLabel: string | null
-    stoppedNotice: string | null
-    queueLabel: string
-  }
   messagesLoading: boolean
   messagesError: unknown
   bodyRef: RefObject<HTMLDivElement | null>
@@ -92,7 +86,6 @@ export function ChatPanel({
       composerDisabled={disabled}
       composerPending={pending}
       working={working}
-      retryPresentation={retryPresentation}
       actionError={actionError}
       onDismissActionError={onDismissActionError}
       onDraftChange={onDraftChange}

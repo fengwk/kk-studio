@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import { ThinkingBlock } from '@/features/ai/thread-panel/messages/ThinkingBlock'
-import type { TextDialogueMessage } from '@/features/ai/thread-events'
+import type { TextDialogueMessage } from '@/features/ai/thread-timeline'
 import { CopyButton } from '@/shared/ui/markdown/CodeBlock'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 

@@ -63,14 +63,13 @@ describe('chat-pane-state', () => {
     expect(loaded.panes).toHaveLength(6)
   })
 
-  it('migrates legacy target.sessionId/threadId shape to threadId only', () => {
-    const migrated = normalizeChatPaneState({
+  it('ignores unsupported nested pane bindings', () => {
+    const normalized = normalizeChatPaneState({
       layout: 'single',
       focusedPaneId: 'pane-1',
       panes: [{ id: 'pane-1', target: { sessionId: 's1', threadId: 't9' } }],
     })
-    expect(migrated.panes[0].threadId).toBe('t9')
-    expect((migrated.panes[0] as { target?: unknown }).target).toBeUndefined()
+    expect(normalized.panes[0].threadId).toBeNull()
   })
 
   it('focuses panes and detects bound thread ids', () => {

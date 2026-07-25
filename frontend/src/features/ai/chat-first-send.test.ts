@@ -42,10 +42,8 @@ describe('performBlankPaneFirstSend', () => {
         payloadJson: '{}',
         clientMessageId: data.clientMessageId,
         status: 'QUEUED' as const,
-        appliedEntryId: null,
-        resolvedAt: null,
-        cancelledByStopId: null,
-        createTime: null,
+            resolvedAt: null,
+            createTime: null,
       }
     })
     const submitThreadMessage = vi.fn(async (_threadId: string, data: { clientMessageId: string; content: string }) => {
@@ -58,10 +56,8 @@ describe('performBlankPaneFirstSend', () => {
         payloadJson: '{}',
         clientMessageId: data.clientMessageId,
         status: 'QUEUED' as const,
-        appliedEntryId: null,
-        resolvedAt: null,
-        cancelledByStopId: null,
-        createTime: null,
+            resolvedAt: null,
+            createTime: null,
       }
     })
 

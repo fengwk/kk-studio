@@ -1,4 +1,4 @@
-import { getString, parsePayload } from '@/features/ai/thread-event-payload'
+import { getString, parsePayload } from '@/features/ai/payload-json'
 import type { RootActivityDTO } from '@/shared/api/contracts'
 
 const LIVE_ACTIVITY_TYPES = new Set([

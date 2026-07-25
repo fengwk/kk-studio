@@ -12,7 +12,7 @@ describe('harness root activity stream', () => {
     expect(parseRootActivity('{bad')).toBeNull()
   })
 
-  it('deduplicates by event id and orders decimal Snowflake cursors without number coercion', () => {
+  it('deduplicates and orders decimal event ids without number coercion', () => {
     const small = activity('9')
     const large = activity('344139441037639680')
     const later = activity('344139441037639681')

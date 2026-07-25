@@ -5,8 +5,7 @@
  * - layout / focusedPaneId / 列表排序偏好
  * - panes[].threadId（null = 空面板）
  *
- * 不存 Session、Agent、消息等服务端真相。旧版 { target: { sessionId, threadId } }
- * 读取时自动降级为 threadId。
+ * 不存 Session、Agent、消息等服务端真相。
  */
 
 export type ChatLayout = 'single' | 'split-2' | 'split-3' | 'grid-4' | 'grid-6' | 'grid-8'
@@ -83,20 +82,9 @@ function parseSort(value: unknown): PaneSortPreference {
   return value === 'created' ? 'created' : 'recent'
 }
 
-/** Accepts current threadId and legacy target.threadId. */
 function parseThreadId(value: unknown): string | null {
   if (typeof value === 'string' && value.trim()) {
     return value.trim()
-  }
-  if (!isRecord(value)) {
-    return null
-  }
-  if (typeof value.threadId === 'string' && value.threadId.trim()) {
-    return value.threadId.trim()
-  }
-  // legacy: { target: { sessionId, threadId } }
-  if (isRecord(value.target) && typeof value.target.threadId === 'string' && value.target.threadId.trim()) {
-    return value.target.threadId.trim()
   }
   return null
 }
@@ -106,10 +94,7 @@ function parsePane(value: unknown, index: number): ChatPane {
     return createEmptyPane(index)
   }
   const id = typeof value.id === 'string' && value.id.trim() ? value.id.trim() : createPaneId(index)
-  // New shape: pane.threadId; legacy: pane.target.threadId
-  const threadId =
-    parseThreadId(value.threadId)
-    ?? (isRecord(value.target) ? parseThreadId(value.target) : null)
+  const threadId = parseThreadId(value.threadId)
   return { id, threadId }
 }
 
@@ -234,7 +219,7 @@ function backendTimeValue(value: unknown): number {
 }
 
 function isRunningStatus(status: string | undefined): boolean {
-  return status === 'RUNNING' || status === 'WAITING' || status === 'RETRYING'
+  return status === 'RUNNING' || status === 'WAITING' || status === 'RUNNABLE'
 }
 
 /** Running items first, then user sort preference (recent=updateTime, created=createTime). */

@@ -17,8 +17,8 @@ export interface AgentModelView extends AgentModelDTO {
 /**
  * Canonical human-facing model identity: {@code provider/model}.
  *
- * <p>Wire identity remains Snowflake ids; this is the unique display/reference label used by cards,
- * selectors, footer and confirmations.
+ * <p>Wire identity remains a positive decimal id string; this is the unique display/reference label
+ * used by cards, selectors, footer and confirmations.
  */
 export function formatModelRef(
   providerName: string | null | undefined,

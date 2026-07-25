@@ -89,9 +89,7 @@ function input(inputId: string, text: string): HarnessThreadInputDTO {
     }),
     clientMessageId: 'cid',
     status: 'QUEUED',
-    appliedEntryId: null,
     resolvedAt: null,
-    cancelledByStopId: null,
     createTime: null,
   }
 }

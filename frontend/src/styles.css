@@ -1857,12 +1857,6 @@ div.is-error {
   color: var(--fg-muted);
 }
 
-.thread-block-meta.kind-agent_change .thread-meta-icon,
-.thread-block-meta.kind-model_change .thread-meta-icon {
-  color: var(--green-primary);
-  opacity: 0.75;
-}
-
 /* 长会话离屏消息降耗：不裁切布局，浏览器可跳过绘制 */
 .thread-turn {
   content-visibility: auto;
@@ -2390,14 +2384,6 @@ div.is-error {
   border-radius: 50%;
   background: var(--fg-muted);
   animation: thread-pulse 1.1s ease-out infinite;
-}
-
-.thread-retry-notice {
-  width: 100%;
-  margin: 0 0 6px;
-  color: var(--warning);
-  font-size: 12px;
-  line-height: 1.5;
 }
 
 .thread-input-queue {

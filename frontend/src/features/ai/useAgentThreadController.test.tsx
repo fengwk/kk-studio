@@ -169,8 +169,8 @@ describe('useAgentThreadController', () => {
       inputType: 'user_message',
       payloadJson: '{}',
       clientMessageId: 'cid',
-      appliedEntryId: null,
-      appliedAt: null,
+      status: 'QUEUED',
+      resolvedAt: null,
       createTime: null,
     })
     vi.mocked(harnessService.setThreadYolo).mockResolvedValue({
@@ -180,11 +180,11 @@ describe('useAgentThreadController', () => {
       inputType: 'set_yolo',
       payloadJson: '{}',
       clientMessageId: 'cid-yolo',
-      appliedEntryId: null,
-      appliedAt: null,
+      status: 'QUEUED',
+      resolvedAt: null,
       createTime: null,
     })
-    vi.mocked(harnessService.stopThread).mockResolvedValue({ stopId: 'stop-1', cancelledInputs: [], restoredMessages: ['queued A', 'queued B'] })
+    vi.mocked(harnessService.stopThread).mockResolvedValue({ executionEpoch: 1, cancelledInputs: [] })
   })
 
   it('submits messages, runs slash commands, and rejects unknown commands', async () => {
@@ -266,8 +266,8 @@ describe('useAgentThreadController', () => {
         inputType: 'user_message',
         payloadJson: '{}',
         clientMessageId: firstId,
-        appliedEntryId: null,
-        appliedAt: null,
+        status: 'QUEUED',
+        resolvedAt: null,
         createTime: null,
       })
       await promiseA
@@ -283,8 +283,8 @@ describe('useAgentThreadController', () => {
         inputType: 'user_message',
         payloadJson: '{}',
         clientMessageId: secondId,
-        appliedEntryId: null,
-        appliedAt: null,
+        status: 'QUEUED',
+        resolvedAt: null,
         createTime: null,
       })
       await promiseB
@@ -311,8 +311,8 @@ describe('useAgentThreadController', () => {
         inputType: 'user_message',
         payloadJson: '{}',
         clientMessageId: 'retry',
-        appliedEntryId: null,
-        appliedAt: null,
+        status: 'QUEUED',
+        resolvedAt: null,
         createTime: null,
       })
 
@@ -340,8 +340,8 @@ describe('useAgentThreadController', () => {
         inputType: 'user_message',
         payloadJson: '{}',
         clientMessageId: 'cid-b',
-        appliedEntryId: null,
-        appliedAt: null,
+        status: 'QUEUED',
+        resolvedAt: null,
         createTime: null,
       })
       await promiseB
@@ -381,8 +381,8 @@ describe('useAgentThreadController', () => {
         inputType: 'user_message',
         payloadJson: '{}',
         clientMessageId: 'retry',
-        appliedEntryId: null,
-        appliedAt: null,
+        status: 'QUEUED',
+        resolvedAt: null,
         createTime: null,
       })
 
@@ -416,8 +416,8 @@ describe('useAgentThreadController', () => {
         inputType: 'user_message',
         payloadJson: '{}',
         clientMessageId: 'cid-b',
-        appliedEntryId: null,
-        appliedAt: null,
+        status: 'QUEUED',
+        resolvedAt: null,
         createTime: null,
       })
       await promiseB
@@ -442,8 +442,8 @@ describe('useAgentThreadController', () => {
         inputType: 'user_message',
         payloadJson: '{}',
         clientMessageId: 'retry',
-        appliedEntryId: null,
-        appliedAt: null,
+        status: 'QUEUED',
+        resolvedAt: null,
         createTime: null,
       })
       .mockResolvedValueOnce({
@@ -453,8 +453,8 @@ describe('useAgentThreadController', () => {
         inputType: 'user_message',
         payloadJson: '{}',
         clientMessageId: 'new',
-        appliedEntryId: null,
-        appliedAt: null,
+        status: 'QUEUED',
+        resolvedAt: null,
         createTime: null,
       })
 
@@ -559,25 +559,21 @@ describe('useAgentThreadController', () => {
     expect(result.current.draft).toBe('already-typing')
   })
 
-  it('keeps a failed Stop id for retry, then starts a new idempotency attempt after success', async () => {
+  it('surfaces stop failures without draft rewrite, then clears message replay identity on success', async () => {
     vi.mocked(harnessService.getThread).mockResolvedValue({ ...thread, status: 'RUNNING' } as never)
     vi.mocked(harnessService.stopThread)
       .mockRejectedValueOnce(new Error('network unavailable'))
-      .mockResolvedValueOnce({ stopId: 'stop-1', cancelledInputs: [], restoredMessages: ['queued A', 'queued B'] })
-      .mockResolvedValueOnce({ stopId: 'stop-2', cancelledInputs: [], restoredMessages: ['queued C'] })
+      .mockResolvedValueOnce({ executionEpoch: 1, cancelledInputs: [] })
     const { result } = renderHook(() => useAgentThreadController('1', 's1'), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
     act(() => result.current.setDraft('current draft'))
     await act(async () => { await result.current.stopThread() })
     expect(result.current.actionError).toContain('network unavailable')
-    const failedRequestId = vi.mocked(harnessService.stopThread).mock.calls[0][1].clientRequestId
+    expect(result.current.draft).toBe('current draft')
+    expect(harnessService.stopThread).toHaveBeenCalledWith('1')
     await act(async () => { await result.current.stopThread() })
-    expect(vi.mocked(harnessService.stopThread).mock.calls[1][1].clientRequestId).toBe(failedRequestId)
-    expect(result.current.draft).toBe('queued A\n\nqueued B\n\ncurrent draft')
-    act(() => result.current.setDraft('new message'))
-    await act(async () => { await result.current.stopThread() })
-    expect(vi.mocked(harnessService.stopThread).mock.calls[2][1].clientRequestId).not.toBe(failedRequestId)
-    expect(result.current.draft).toBe('queued C\n\nnew message')
+    expect(result.current.draft).toBe('current draft')
+    expect(vi.mocked(harnessService.stopThread)).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -588,8 +584,6 @@ const thread = {
   headEntryId: 'h1',
   status: 'IDLE' as const,
   inputSequence: 0,
-  retryAttempt: 0,
-  retryAt: null,
   activeAgentDefinitionId: 'agent-1',
   activeAgentName: 'assistant',
   modelId: 'm1',

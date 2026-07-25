@@ -239,10 +239,8 @@ describe('ChatWorkspacePage', () => {
         payloadJson: '{}',
         clientMessageId: 'c1',
         status: 'QUEUED',
-        appliedEntryId: null,
-        resolvedAt: null,
-        cancelledByStopId: null,
-        createTime: null,
+            resolvedAt: null,
+            createTime: null,
       }
     })
     vi.mocked(harnessService.submitThreadMessage).mockImplementation(async () => {
@@ -255,10 +253,8 @@ describe('ChatWorkspacePage', () => {
         payloadJson: '{}',
         clientMessageId: 'c2',
         status: 'QUEUED',
-        appliedEntryId: null,
-        resolvedAt: null,
-        cancelledByStopId: null,
-        createTime: null,
+            resolvedAt: null,
+            createTime: null,
       }
     })
     vi.mocked(harnessService.getThread).mockResolvedValue({

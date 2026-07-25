@@ -1,7 +1,7 @@
 import { ChevronRight, ExternalLink, GitBranch } from 'lucide-react'
 import { useState } from 'react'
 import { formatBackendDate } from '@/features/ai/ai-console-utils'
-import { getString, parsePayload } from '@/features/ai/thread-event-payload'
+import { getString, parsePayload } from '@/features/ai/payload-json'
 import type { SubagentTaskNode } from '@/features/ai/subagent-task-tree'
 import type { RootActivityDTO } from '@/shared/api/contracts'
 

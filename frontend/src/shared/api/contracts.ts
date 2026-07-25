@@ -14,11 +14,7 @@ export interface PageResult<T> {
 
 export type BackendDateTime = string | number[] | null
 
-/**
- * Agent resource ids are decimal strings minted by Snowflake IDs on the backend
- * (e.g. {@code "1700000000000000000"}). They are not numeric on the wire — always
- * stringify before URL-encoding.
- */
+/** Backend resource ids are positive decimal strings and must remain strings on the wire. */
 export type AgentResourceId = string
 
 export type BackendLong = number | string
@@ -283,25 +279,34 @@ export interface LiveEnvironmentDTO {
   skills: LiveEnvironmentSkillDTO[]
 }
 
+export type EntryType =
+  | 'ROOT'
+  | 'RUNTIME_CONFIG'
+  | 'MESSAGE'
+  | 'CUSTOM_MESSAGE'
+  | 'COMPACTION'
+  | 'ASSISTANT_ERROR'
+  | 'LABEL'
+  | 'BRANCH_SUMMARY'
+
 export interface HarnessSessionEntryDTO {
   entryId: string
   sessionId: string
   parentEntryId: string | null
-  entryType: string
+  entryType: EntryType
   payloadJson: string
   createTime: BackendDateTime
 }
 
-/** AgentThread query projection; ids are decimal strings. */
+/** HarnessThread query projection; ids are decimal strings. */
 export interface HarnessThreadDTO {
   threadId: string
   sessionId: string
   sessionTitle: string | null
   headEntryId: string | null
+  /** Derived display status: RUNNING > WAITING > RUNNABLE > IDLE. */
   status: ThreadStatus
   inputSequence: BackendLong
-  retryAttempt: number
-  retryAt: BackendDateTime
   activeAgentDefinitionId: string | null
   activeAgentName: string | null
   modelId: string | null
@@ -343,7 +348,8 @@ export interface HarnessThreadModelSetDTO {
   clientMessageId: string
 }
 
-export type ThreadStatus = 'IDLE' | 'RUNNING' | 'WAITING' | 'FAILED' | 'RETRYING'
+/** Query-derived Thread status only. Invocation retry waits are projected as WAITING. */
+export type ThreadStatus = 'IDLE' | 'RUNNING' | 'WAITING' | 'RUNNABLE'
 
 /** Global automatic retry policy; PUT bodies are complete replacements. */
 export interface HarnessRetryPolicyDTO {
@@ -371,30 +377,14 @@ export interface HarnessThreadInputDTO {
   payloadJson: string
   clientMessageId: string
   status: ThreadInputStatus
-  appliedEntryId: string | null
   resolvedAt: BackendDateTime
-  cancelledByStopId: string | null
   createTime: BackendDateTime
-}
-
-export interface HarnessThreadStopDTO {
-  clientRequestId: string
 }
 
 export interface HarnessThreadStopResultDTO {
-  stopId: string
+  /** convention4j serializes Java Long as decimal string on the wire. */
+  executionEpoch: BackendLong
   cancelledInputs: HarnessThreadInputDTO[]
-  restoredMessages: string[]
-}
-
-/** Thread event journal; eventId is the SSE cursor. */
-export interface ThreadEventDTO {
-  eventId: string
-  threadId: string
-  subjectEntryId: string | null
-  eventType: string
-  payloadJson: string
-  createTime: BackendDateTime
 }
 
 export interface RootActivityDTO {

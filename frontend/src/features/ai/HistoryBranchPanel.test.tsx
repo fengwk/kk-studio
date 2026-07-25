@@ -5,13 +5,13 @@ import { describe, expect, it, vi } from 'vitest'
 import { HistoryBranchPanel } from '@/features/ai/HistoryBranchPanel'
 
 const branchEntries = [
-  { entryId: 'root', sessionId: 's', parentEntryId: null, entryType: 'root', payloadJson: '{}', createTime: null },
-  { entryId: 'user', sessionId: 's', parentEntryId: 'root', entryType: 'message', payloadJson: '{"message":{"role":"USER","contents":[{"text":"user prompt"}]}}', createTime: null },
-  { entryId: 'assistant', sessionId: 's', parentEntryId: 'user', entryType: 'message', payloadJson: '{"message":{"role":"ASSISTANT","contents":[{"text":"assistant reply"}]}}', createTime: null },
-  { entryId: 'tool', sessionId: 's', parentEntryId: 'assistant', entryType: 'message', payloadJson: '{"message":{"role":"TOOL","contents":[{"text":"tool result"}]}}', createTime: null },
-  { entryId: 'tool2', sessionId: 's', parentEntryId: 'assistant', entryType: 'message', payloadJson: '{"message":{"role":"TOOL","contents":[{"text":"another tool result"}]}}', createTime: null },
-  { entryId: 'follow-up', sessionId: 's', parentEntryId: 'tool', entryType: 'message', payloadJson: '{"message":{"role":"ASSISTANT","contents":[{"text":"follow up"}]}}', createTime: null },
-  { entryId: 'follow-up-2', sessionId: 's', parentEntryId: 'tool2', entryType: 'message', payloadJson: '{"message":{"role":"ASSISTANT","contents":[{"text":"follow up two"}]}}', createTime: null },
+  { entryId: 'root', sessionId: 's', parentEntryId: null, entryType: 'ROOT', payloadJson: '{}', createTime: null },
+  { entryId: 'user', sessionId: 's', parentEntryId: 'root', entryType: 'MESSAGE', payloadJson: '{"message":{"role":"USER","contents":[{"type":"text","text":"user prompt"}]}}', createTime: null },
+  { entryId: 'assistant', sessionId: 's', parentEntryId: 'user', entryType: 'MESSAGE', payloadJson: '{"message":{"role":"ASSISTANT","contents":[{"type":"text","text":"assistant reply"}]}}', createTime: null },
+  { entryId: 'tool', sessionId: 's', parentEntryId: 'assistant', entryType: 'MESSAGE', payloadJson: '{"message":{"role":"TOOL","contents":[{"type":"text","text":"tool result"}]}}', createTime: null },
+  { entryId: 'tool2', sessionId: 's', parentEntryId: 'assistant', entryType: 'MESSAGE', payloadJson: '{"message":{"role":"TOOL","contents":[{"type":"text","text":"another tool result"}]}}', createTime: null },
+  { entryId: 'follow-up', sessionId: 's', parentEntryId: 'tool', entryType: 'MESSAGE', payloadJson: '{"message":{"role":"ASSISTANT","contents":[{"type":"text","text":"follow up"}]}}', createTime: null },
+  { entryId: 'follow-up-2', sessionId: 's', parentEntryId: 'tool2', entryType: 'MESSAGE', payloadJson: '{"message":{"role":"ASSISTANT","contents":[{"type":"text","text":"follow up two"}]}}', createTime: null },
 ]
 
 describe('HistoryBranchPanel', () => {
@@ -97,7 +97,7 @@ describe('HistoryBranchPanel', () => {
       entryId: 'long-entry',
       sessionId: 's',
       parentEntryId: 'user',
-      entryType: 'message',
+      entryType: 'MESSAGE',
       payloadJson: JSON.stringify({ message: { role: 'ASSISTANT', contents: [{ type: 'text', text: longText }] } }),
       createTime: null,
     }

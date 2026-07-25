@@ -1,4 +1,4 @@
-import type { DialogueMessage } from '@/features/ai/thread-events'
+import type { DialogueMessage } from '@/features/ai/thread-timeline'
 
 export function isVisibleDialogueMessage(message: DialogueMessage): boolean {
   if (message.role === 'meta') {

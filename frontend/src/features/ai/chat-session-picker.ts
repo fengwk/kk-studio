@@ -6,12 +6,12 @@ export function isRunningThread(thread: HarnessThreadDTO): boolean {
   return (
     thread.status === 'RUNNING'
     || thread.status === 'WAITING'
-    || thread.status === 'RETRYING'
+    || thread.status === 'RUNNABLE'
     || Boolean(thread.processing)
   )
 }
 
-/** True when any Thread of the Session is running / waiting / retrying / processing. */
+/** True when any Thread of the Session is running / waiting / runnable / processing. */
 export function isSessionRunning(threads: HarnessThreadDTO[] | undefined): boolean {
   return (threads ?? []).some(isRunningThread)
 }
