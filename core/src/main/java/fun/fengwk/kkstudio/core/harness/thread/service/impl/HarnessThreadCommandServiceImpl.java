@@ -12,7 +12,8 @@ import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator.EnqueueResult;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator.StopResult;
 import fun.fengwk.kkstudio.share.model.HarnessThreadAgentSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadCustomMessageCreateDTO;
@@ -86,7 +87,7 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
   public HarnessThreadInputDTO queueYolo(String threadId, HarnessThreadYoloSetDTO request) {
     Objects.requireNonNull(request, "request");
     long id = HarnessIds.parsePositive(threadId, "threadId");
-    Optional<ThreadCommandTransactions.EnqueueResult> existing =
+    Optional<EnqueueResult> existing =
         coordinator.findExistingInput(id, request.getClientMessageId());
     if (existing.isPresent()) {
       return convertAndNotify(existing.get());
@@ -106,7 +107,7 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     long id = HarnessIds.parsePositive(threadId, "threadId");
     // Short-circuit before parsing live definition ids so retries never re-validate deleted/changed
     // resources.
-    Optional<ThreadCommandTransactions.EnqueueResult> existing =
+    Optional<EnqueueResult> existing =
         coordinator.findExistingInput(id, request.getClientMessageId());
     if (existing.isPresent()) {
       return convertAndNotify(existing.get());
@@ -126,7 +127,7 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
   public HarnessThreadInputDTO queueModel(String threadId, HarnessThreadModelSetDTO request) {
     Objects.requireNonNull(request, "request");
     long id = HarnessIds.parsePositive(threadId, "threadId");
-    Optional<ThreadCommandTransactions.EnqueueResult> existing =
+    Optional<EnqueueResult> existing =
         coordinator.findExistingInput(id, request.getClientMessageId());
     if (existing.isPresent()) {
       return convertAndNotify(existing.get());
@@ -140,7 +141,7 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
   @Transactional
   public HarnessThreadStopResultDTO stop(String threadId) {
     long id = HarnessIds.parsePositive(threadId, "threadId");
-    ThreadCommandTransactions.StopResult result = coordinator.stop(id);
+    StopResult result = coordinator.stop(id);
     afterCommitNotify(result.target());
     HarnessThreadStopResultDTO dto = new HarnessThreadStopResultDTO();
     dto.setExecutionEpoch(result.executionEpoch());
@@ -148,7 +149,7 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     return dto;
   }
 
-  private HarnessThreadInputDTO convertAndNotify(ThreadCommandTransactions.EnqueueResult result) {
+  private HarnessThreadInputDTO convertAndNotify(EnqueueResult result) {
     afterCommitNotify(result.target());
     return converter.convert(result.input());
   }
