@@ -7,23 +7,12 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
-import fun.fengwk.kkstudio.core.harness.thread.command.RuntimeConfigSnapshotResolver;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadCommandService;
 import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProvider;
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeConfigInputPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeEntryInputPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 import fun.fengwk.kkstudio.share.model.HarnessThreadAgentSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadCustomMessageCreateDTO;
@@ -34,31 +23,28 @@ import fun.fengwk.kkstudio.share.model.HarnessThreadModelSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadYoloSetDTO;
 
-import java.time.Instant;
-import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 
-/** final Thread command facade：在 enqueue 前冻结所有配置 payload，提交后仅 best-effort signal。 */
+/**
+ * Thin Core Thread command boundary: decimal/DTO parse, product defaults, Spring transaction and
+ * after-commit activation. Runtime orchestration lives in {@link ThreadCommandCoordinator}.
+ */
 @Slf4j
 @Service
 public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandService {
 
-  private final ThreadCommandTransactions transactions;
-  private final RuntimeConfigSnapshotResolver snapshotResolver;
+  private final ThreadCommandCoordinator coordinator;
   private final ToolSettingsProvider toolSettingsProvider;
   private final ActivationNotifier activationNotifier;
   private final HarnessThreadDtoConverter converter;
 
   public HarnessThreadCommandServiceImpl(
-      ThreadCommandTransactions transactions,
-      RuntimeConfigSnapshotResolver snapshotResolver,
+      ThreadCommandCoordinator coordinator,
       ToolSettingsProvider toolSettingsProvider,
       ActivationNotifier activationNotifier,
       HarnessThreadDtoConverter converter) {
-    this.transactions = Objects.requireNonNull(transactions, "transactions");
-    this.snapshotResolver = Objects.requireNonNull(snapshotResolver, "snapshotResolver");
+    this.coordinator = Objects.requireNonNull(coordinator, "coordinator");
     this.toolSettingsProvider =
         Objects.requireNonNull(toolSettingsProvider, "toolSettingsProvider");
     this.activationNotifier = Objects.requireNonNull(activationNotifier, "activationNotifier");
@@ -71,8 +57,7 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     Objects.requireNonNull(createDTO, "createDTO");
     long parsedSessionId = HarnessIds.parsePositive(sessionId, "sessionId");
     long fromEntryId = HarnessIds.parsePositive(createDTO.getFromEntryId(), "fromEntryId");
-    return converter.convert(
-        transactions.createBranch(parsedSessionId, fromEntryId, Instant.now()));
+    return converter.convert(coordinator.createBranch(parsedSessionId, fromEntryId));
   }
 
   @Override
@@ -81,19 +66,8 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
       String threadId, HarnessThreadMessageCreateDTO createDTO) {
     Objects.requireNonNull(createDTO, "createDTO");
     long id = HarnessIds.parsePositive(threadId, "threadId");
-    Optional<HarnessThreadInputDTO> existing = retry(id, createDTO.getClientMessageId());
-    if (existing.isPresent()) {
-      return existing.get();
-    }
-    String content = requireContent(createDTO.getContent());
-    AgentMessage message =
-        new AgentMessage(
-            AgentMessageRole.USER, List.<AgentMessageContent>of(new TextMessageContent(content)));
-    return enqueue(
-        id,
-        new RuntimeEntryInputPayload(
-            ThreadInputType.USER_MESSAGE, new MessageEntryPayload(message)),
-        createDTO.getClientMessageId());
+    return convertAndNotify(
+        coordinator.submitUserMessage(id, createDTO.getContent(), createDTO.getClientMessageId()));
   }
 
   @Override
@@ -102,20 +76,9 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
       String threadId, HarnessThreadCustomMessageCreateDTO createDTO) {
     Objects.requireNonNull(createDTO, "createDTO");
     long id = HarnessIds.parsePositive(threadId, "threadId");
-    Optional<HarnessThreadInputDTO> existing = retry(id, createDTO.getClientMessageId());
-    if (existing.isPresent()) {
-      return existing.get();
-    }
-    AgentMessage message =
-        new AgentMessage(
-            parseCustomRole(createDTO.getRole()),
-            List.<AgentMessageContent>of(
-                new TextMessageContent(requireContent(createDTO.getContent()))));
-    return enqueue(
-        id,
-        new RuntimeEntryInputPayload(
-            ThreadInputType.CUSTOM_MESSAGE, new CustomMessageEntryPayload(message)),
-        createDTO.getClientMessageId());
+    return convertAndNotify(
+        coordinator.submitCustomMessage(
+            id, createDTO.getRole(), createDTO.getContent(), createDTO.getClientMessageId()));
   }
 
   @Override
@@ -123,23 +86,17 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
   public HarnessThreadInputDTO queueYolo(String threadId, HarnessThreadYoloSetDTO request) {
     Objects.requireNonNull(request, "request");
     long id = HarnessIds.parsePositive(threadId, "threadId");
-    Optional<HarnessThreadInputDTO> existing = retry(id, request.getClientMessageId());
+    Optional<ThreadCommandTransactions.EnqueueResult> existing =
+        coordinator.findExistingInput(id, request.getClientMessageId());
     if (existing.isPresent()) {
-      return existing.get();
+      return convertAndNotify(existing.get());
     }
     if (request.getYoloEnabled() == null) {
       throw new IllegalArgumentException("yoloEnabled must not be null");
     }
-    RuntimeConfigSnapshot current =
-        transactions
-            .lockAndFindCurrentConfig(id)
-            .orElseThrow(() -> new IllegalStateException("thread has no runtime config: " + id));
-    RuntimeConfigSnapshot frozen =
-        snapshotResolver.replaceYolo(current, Boolean.TRUE.equals(request.getYoloEnabled()));
-    return enqueue(
-        id,
-        new RuntimeConfigInputPayload(ThreadInputType.SET_YOLO, frozen),
-        request.getClientMessageId());
+    return convertAndNotify(
+        coordinator.queueYolo(
+            id, Boolean.TRUE.equals(request.getYoloEnabled()), request.getClientMessageId()));
   }
 
   @Override
@@ -147,22 +104,21 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
   public HarnessThreadInputDTO queueAgent(String threadId, HarnessThreadAgentSetDTO request) {
     Objects.requireNonNull(request, "request");
     long id = HarnessIds.parsePositive(threadId, "threadId");
-    Optional<HarnessThreadInputDTO> existing = retry(id, request.getClientMessageId());
+    // Short-circuit before parsing live definition ids so retries never re-validate deleted/changed
+    // resources.
+    Optional<ThreadCommandTransactions.EnqueueResult> existing =
+        coordinator.findExistingInput(id, request.getClientMessageId());
     if (existing.isPresent()) {
-      return existing.get();
+      return convertAndNotify(existing.get());
     }
     long definitionId =
         HarnessIds.parsePositive(request.getAgentDefinitionId(), "agentDefinitionId");
-    boolean yolo =
-        transactions
-            .lockAndFindCurrentConfig(id)
-            .map(snapshot -> snapshot.policy().yoloEnabled())
-            .orElseGet(() -> toolSettingsProvider.get().defaultYolo());
-    RuntimeConfigSnapshot frozen = snapshotResolver.resolveAgent(definitionId, yolo);
-    return enqueue(
-        id,
-        new RuntimeConfigInputPayload(ThreadInputType.SET_AGENT, frozen),
-        request.getClientMessageId());
+    return convertAndNotify(
+        coordinator.queueAgent(
+            id,
+            definitionId,
+            toolSettingsProvider.get().defaultYolo(),
+            request.getClientMessageId()));
   }
 
   @Override
@@ -170,28 +126,21 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
   public HarnessThreadInputDTO queueModel(String threadId, HarnessThreadModelSetDTO request) {
     Objects.requireNonNull(request, "request");
     long id = HarnessIds.parsePositive(threadId, "threadId");
-    Optional<HarnessThreadInputDTO> existing = retry(id, request.getClientMessageId());
+    Optional<ThreadCommandTransactions.EnqueueResult> existing =
+        coordinator.findExistingInput(id, request.getClientMessageId());
     if (existing.isPresent()) {
-      return existing.get();
+      return convertAndNotify(existing.get());
     }
     long modelId = HarnessIds.parsePositive(request.getModelId(), "modelId");
-    RuntimeConfigSnapshot current =
-        transactions
-            .lockAndFindCurrentConfig(id)
-            .orElseThrow(() -> new IllegalStateException("thread has no runtime config: " + id));
-    RuntimeConfigSnapshot frozen =
-        snapshotResolver.replaceModel(current, modelId, request.getVariant());
-    return enqueue(
-        id,
-        new RuntimeConfigInputPayload(ThreadInputType.SET_MODEL, frozen),
-        request.getClientMessageId());
+    return convertAndNotify(
+        coordinator.queueModel(id, modelId, request.getVariant(), request.getClientMessageId()));
   }
 
   @Override
   @Transactional
   public HarnessThreadStopResultDTO stop(String threadId) {
     long id = HarnessIds.parsePositive(threadId, "threadId");
-    ThreadCommandTransactions.StopResult result = transactions.stop(id, Instant.now());
+    ThreadCommandTransactions.StopResult result = coordinator.stop(id);
     afterCommitNotify(result.target());
     HarnessThreadStopResultDTO dto = new HarnessThreadStopResultDTO();
     dto.setExecutionEpoch(result.executionEpoch());
@@ -199,45 +148,9 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     return dto;
   }
 
-  private HarnessThreadInputDTO enqueue(
-      long threadId, ThreadInputPayload payload, String idempotencyKey) {
-    ThreadCommandTransactions.EnqueueResult result =
-        transactions.enqueue(threadId, payload, idempotencyKey, Instant.now());
+  private HarnessThreadInputDTO convertAndNotify(ThreadCommandTransactions.EnqueueResult result) {
     afterCommitNotify(result.target());
     return converter.convert(result.input());
-  }
-
-  private Optional<HarnessThreadInputDTO> retry(long threadId, String idempotencyKey) {
-    return transactions
-        .findExistingInput(threadId, idempotencyKey)
-        .map(
-            result -> {
-              afterCommitNotify(result.target());
-              return converter.convert(result.input());
-            });
-  }
-
-  private static String requireContent(String content) {
-    if (content == null || content.isBlank()) {
-      throw new IllegalArgumentException("content must not be blank");
-    }
-    return content;
-  }
-
-  private static AgentMessageRole parseCustomRole(String value) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException("role must not be blank");
-    }
-    AgentMessageRole role;
-    try {
-      role = AgentMessageRole.valueOf(value.toUpperCase(Locale.ROOT));
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException("unsupported custom message role: " + value, error);
-    }
-    if (role != AgentMessageRole.SYSTEM && role != AgentMessageRole.USER) {
-      throw new IllegalArgumentException("custom message role must be system or user");
-    }
-    return role;
   }
 
   private void afterCommitNotify(ExecutionTarget target) {

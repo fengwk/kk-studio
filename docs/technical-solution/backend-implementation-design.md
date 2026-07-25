@@ -76,14 +76,17 @@ Java 领域类型使用 `HarnessThread`，避免与 `java.lang.Thread` 冲突。
 
 | 服务 | 职责 |
 | --- | --- |
-| `HarnessSessionCommandService` | create Session/Main Thread / Secondary Thread |
-| `HarnessThreadCommandService` | submit message / queue Agent、Model、YOLO / Stop |
+| `SessionCommandCoordinator` / `ThreadCommandCoordinator` | harness-runtime 内 framework-free 命令编排：payload 构造、配置冻结、幂等短路、调用 transaction port |
+| `RuntimeConfigSource` | live Agent/Model 冻结 SPI；Core `RuntimeConfigSnapshotResolver` 实现；纯 YOLO 替换在 runtime |
+| `HarnessSessionCommandService` | Core 薄边界：产品默认、Spring 事务、DTO 映射 |
+| `HarnessThreadCommandService` | Core 薄边界：decimal/DTO、after-commit activation |
+| `InteractionCoordinator` | harness-runtime 内 handler 投影、expiry、resolution |
+| `InteractionService` | Core 薄边界：decimal/DTO、notifier isolation |
 | `HarnessRetryPolicyService` | 全局自动重试策略 |
 | `HarnessThreadQueryService` | thread、路径 entries、inputs |
 | Thread command / reconcile transactions | PostgreSQL 原子事务适配 |
 | `HarnessSessionQueryService` | Session 只读 |
 | `HarnessObservabilityQueryService` | activities、invocations、artifacts 查询投影 |
-| `InteractionService` | Interaction 查询与 resolution |
 | `ModelUsageAggregationService` | 账本聚合 |
 | Thread / Model / Tool recovery lifecycles | 低频 recoverable scan |
 

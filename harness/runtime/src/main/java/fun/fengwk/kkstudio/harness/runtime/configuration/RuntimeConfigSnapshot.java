@@ -66,6 +66,26 @@ public record RuntimeConfigSnapshot(
   }
 
   /**
+   * Returns a copy with only {@code policy.yoloEnabled} replaced. Pure snapshot transform for
+   * SET_YOLO command orchestration; does not touch live resources.
+   */
+  public RuntimeConfigSnapshot withYoloEnabled(boolean yoloEnabled) {
+    return new RuntimeConfigSnapshot(
+        agent,
+        model,
+        tools,
+        skills,
+        new ExecutionPolicySnapshot(
+            policy.maxTurns(),
+            policy.maxDepth(),
+            policy.maxDirectSubagents(),
+            policy.maxTotalSubagents(),
+            policy.allowedSubagents(),
+            yoloEnabled),
+        environment);
+  }
+
+  /**
    * tools canonical 排序：{@code (descriptor.name, descriptor.version, environmentName)}，{@code
    * environmentName} 为 null 时排在前面（{@code nullsFirst}），保证 deterministic 顺序。
    */

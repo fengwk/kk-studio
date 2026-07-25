@@ -31,8 +31,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
-/** 共享的 reconcile 测试 fixture：Thread、Lease、ThreadInput、ProviderRequest、Clock 工厂。 */
-final class ReconcileTestSupport {
+/** 共享的 runtime 测试 fixture：Thread、Lease、ThreadInput、ProviderRequest、Clock 工厂。 */
+public final class ReconcileTestSupport {
 
   static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
 
@@ -100,7 +100,7 @@ final class ReconcileTestSupport {
     return new ProviderRequest(model, variant, List.of(), List.of(), ProviderCacheControl.none());
   }
 
-  static RuntimeConfigSnapshot configSnapshot() {
+  public static RuntimeConfigSnapshot configSnapshot() {
     ProviderRequest request = providerRequest();
     return new RuntimeConfigSnapshot(
         new AgentSnapshot(1L, "agent", "system"),
