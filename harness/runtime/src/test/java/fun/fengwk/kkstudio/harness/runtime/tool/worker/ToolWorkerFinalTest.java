@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -25,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
+import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
@@ -34,6 +36,9 @@ import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolSendUncertainException;
+import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
+import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.nio.charset.StandardCharsets;
@@ -51,9 +56,16 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
-class PlatformToolWorkerFinalTest {
+class ToolWorkerFinalTest {
+  private static RemoteToolTransport noopTransport() {
+    return (environmentName, request, listener) -> {
+      throw new RemoteToolUnavailableException("no remote transport in platform fixture");
+    };
+  }
+
   private static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
 
   private final List<ScheduledExecutorService> schedulers = new ArrayList<>();
@@ -64,14 +76,129 @@ class PlatformToolWorkerFinalTest {
   }
 
   @Test
-  void validatesTargetAndFiltersEnvironmentCandidateBeforeClaim() {
+  void validatesPositiveInvocationId() {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
     assertThrows(IllegalArgumentException.class, () -> fixture.worker.dispatch(0));
+  }
 
+  @Test
+  void environmentUnavailableBeforeSendReleasesClaimWithoutFailure() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
     fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
-    assertFalse(fixture.worker.dispatch(1));
-    assertEquals(0, fixture.transactions.claimCalls);
+    fixture.transactions.descriptor = environmentDescriptor();
+    fixture.rebuildWorkerWithTransport(
+        (environmentName, request, listener) -> {
+          throw new RemoteToolUnavailableException(environmentName + " offline");
+        });
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertEquals(1, fixture.transactions.claimCalls);
+    assertEquals(1, fixture.transactions.releaseUnstartedCalls);
+    assertNull(fixture.transactions.terminalStatus);
     assertEquals(0, fixture.tool.executions);
+  }
+
+  @Test
+  void environmentUncertainSendCompletesUnknownImmediately() {
+    Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT);
+    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.descriptor = environmentDescriptor();
+    fixture.rebuildWorkerWithTransport(
+        (environmentName, request, listener) -> {
+          throw new RemoteToolSendUncertainException("maybe delivered");
+        });
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertEquals(1, fixture.transactions.claimCalls);
+    assertEquals(0, fixture.transactions.releaseUnstartedCalls);
+    assertEquals(InvocationStatus.UNKNOWN, fixture.transactions.terminalStatus);
+    assertEquals("REMOTE_UNCERTAIN", fixture.transactions.error.kind());
+    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+  }
+
+  @Test
+  void asyncUncertainDisconnectCompletesUnknownWithoutRetryEvenWhenIdempotent() {
+    Fixture fixture = fixture(ToolSideEffect.IDEMPOTENT);
+    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.descriptor = environmentDescriptor();
+    fixture.retryPolicy =
+        new InvocationRetryPolicy(
+            3, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(1), Duration.ofSeconds(1));
+    AtomicReference<ToolExecutionListener> remoteListener = new AtomicReference<>();
+    fixture.rebuildWorkerWithTransport(
+        (environmentName, request, listener) -> {
+          remoteListener.set(listener);
+          return new ToolExecutionHandle() {
+            @Override
+            public void cancel() {}
+
+            @Override
+            public boolean isCancelled() {
+              return false;
+            }
+          };
+        });
+
+    assertTrue(fixture.worker.dispatch(1));
+    remoteListener
+        .get()
+        .onError(new RemoteToolSendUncertainException("connection lost mid-flight"));
+
+    assertEquals(0, fixture.transactions.retryCalls);
+    assertEquals(InvocationStatus.UNKNOWN, fixture.transactions.terminalStatus);
+    assertEquals("REMOTE_UNCERTAIN", fixture.transactions.error.kind());
+    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+  }
+
+  @Test
+  void environmentSlotReleasedWhenClaimedExecutionThrowsUnexpectedly() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.descriptor = environmentDescriptor();
+    fixture.rebuildWorkerWithTransport(
+        (environmentName, request, listener) -> {
+          throw new IllegalStateException("transport exploded");
+        });
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertEquals(InvocationStatus.FAILED, fixture.transactions.terminalStatus);
+    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+  }
+
+  @Test
+  void environmentRemoteCompleteExternalizesInlineBinaryArtifactLazily() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.descriptor = environmentDescriptor();
+    AtomicReference<ToolExecutionListener> remoteListener = new AtomicReference<>();
+    fixture.rebuildWorkerWithTransport(
+        (environmentName, request, listener) -> {
+          remoteListener.set(listener);
+          return new ToolExecutionHandle() {
+            @Override
+            public void cancel() {}
+
+            @Override
+            public boolean isCancelled() {
+              return false;
+            }
+          };
+        });
+
+    assertTrue(fixture.worker.dispatch(1));
+    remoteListener
+        .get()
+        .onComplete(
+            new ToolResult(
+                "call-1",
+                List.of(new BinaryToolContent("text/plain", new byte[] {9, 9})),
+                false,
+                "{}",
+                false));
+
+    assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.terminalStatus);
+    assertTrue(fixture.transactions.result.contents().get(0) instanceof ArtifactToolContent);
+    assertArrayEquals(new byte[] {9, 9}, fixture.artifacts.content);
   }
 
   @Test
@@ -79,10 +206,11 @@ class PlatformToolWorkerFinalTest {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
     ScheduledExecutorService scheduler = new ScheduledThreadPoolExecutor(2);
     schedulers.add(scheduler);
-    PlatformToolWorker worker =
-        new PlatformToolWorker(
+    ToolWorker worker =
+        new ToolWorker(
             fixture.transactions,
             (name, version) -> fixture.registryTool.map(value -> (Tool) value),
+            noopTransport(),
             fixture.interceptorChain,
             fixture.artifacts,
             () -> fixture.retryPolicy,
@@ -125,7 +253,13 @@ class PlatformToolWorkerFinalTest {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
     fixture.rebuildWorker(
         new ToolWorkerConfig(
-            Duration.ofSeconds(30), Duration.ofSeconds(10), Duration.ofSeconds(10), 1, 8192, 1024));
+            Duration.ofSeconds(30),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(1),
+            1,
+            8192,
+            1024));
 
     assertTrue(fixture.worker.dispatch(1));
     fixture.tool.listener.onPartial(result("partial"));
@@ -148,7 +282,13 @@ class PlatformToolWorkerFinalTest {
     fixture.transactions.activityOutcome = ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     fixture.rebuildWorker(
         new ToolWorkerConfig(
-            Duration.ofSeconds(30), Duration.ofSeconds(10), Duration.ofSeconds(10), 1, 1, 1));
+            Duration.ofSeconds(30),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(1),
+            1,
+            1,
+            1));
 
     assertTrue(fixture.worker.dispatch(1));
     fixture.tool.listener.onPartial(result("partial-large-output"));
@@ -166,7 +306,13 @@ class PlatformToolWorkerFinalTest {
     fixture.activationFailure = true;
     fixture.rebuildWorker(
         new ToolWorkerConfig(
-            Duration.ofSeconds(30), Duration.ofSeconds(10), Duration.ofSeconds(10), 1, 8192, 1024));
+            Duration.ofSeconds(30),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(1),
+            1,
+            8192,
+            1024));
 
     assertTrue(fixture.worker.dispatch(1));
     fixture.tool.listener.onPartial(result("partial"));
@@ -277,7 +423,13 @@ class PlatformToolWorkerFinalTest {
     fixture.transactions.terminalOutcome = ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     fixture.rebuildWorker(
         new ToolWorkerConfig(
-            Duration.ofSeconds(30), Duration.ofSeconds(10), Duration.ofSeconds(10), 8192, 1, 1));
+            Duration.ofSeconds(30),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(1),
+            8192,
+            1,
+            1));
 
     assertTrue(fixture.worker.dispatch(1));
     fixture.tool.listener.onComplete(result("large-output"));
@@ -312,7 +464,13 @@ class PlatformToolWorkerFinalTest {
     fixture.artifacts.failure = new IllegalStateException("artifact database unavailable");
     fixture.rebuildWorker(
         new ToolWorkerConfig(
-            Duration.ofSeconds(30), Duration.ofSeconds(10), Duration.ofSeconds(10), 8192, 1, 1));
+            Duration.ofSeconds(30),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(1),
+            8192,
+            1,
+            1));
 
     assertTrue(fixture.worker.dispatch(1));
     fixture.tool.listener.onComplete(result("large-output"));
@@ -327,7 +485,13 @@ class PlatformToolWorkerFinalTest {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
     fixture.rebuildWorker(
         new ToolWorkerConfig(
-            Duration.ofSeconds(30), Duration.ofSeconds(10), Duration.ofSeconds(10), 8192, 1, 5));
+            Duration.ofSeconds(30),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(1),
+            8192,
+            1,
+            5));
 
     assertTrue(fixture.worker.dispatch(1));
     fixture.tool.listener.onComplete(result("😀😀"));
@@ -343,12 +507,22 @@ class PlatformToolWorkerFinalTest {
     fixture.transactions.renewOutcome = ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     fixture.rebuildWorker(
         new ToolWorkerConfig(
-            Duration.ofSeconds(1), Duration.ofMillis(5), Duration.ofSeconds(10), 8192, 8192, 1024));
+            Duration.ofSeconds(1),
+            Duration.ofMillis(5),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(1),
+            8192,
+            8192,
+            1024));
 
     assertTrue(fixture.worker.dispatch(1));
     assertTrue(fixture.transactions.renewed.await(1, TimeUnit.SECONDS));
     assertTrue(fixture.tool.handle.cancelledLatch.await(1, TimeUnit.SECONDS));
     assertNull(fixture.transactions.terminalStatus);
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+    while (fixture.worker.hasActiveExecution() && System.nanoTime() < deadline) {
+      Thread.sleep(5);
+    }
     assertFalse(fixture.worker.hasActiveExecution());
   }
 
@@ -365,6 +539,82 @@ class PlatformToolWorkerFinalTest {
 
     assertTrue(fixture.tool.handle.cancelled);
     assertNull(fixture.transactions.terminalStatus);
+    assertFalse(fixture.worker.hasActiveExecution());
+  }
+
+  @Test
+  void recoverNextExpiredFencesStalePlatformHandleAndIgnoresLateComplete() {
+    Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT);
+    assertTrue(fixture.worker.dispatch(1));
+    assertTrue(fixture.worker.hasActiveExecution());
+
+    fixture.transactions.recoveredLease = true;
+    fixture.transactions.expiredCandidate =
+        running(descriptor(ToolSideEffect.NON_IDEMPOTENT), "old");
+    assertTrue(fixture.worker.recoverNextExpired(ToolExecutionLocation.PLATFORM));
+
+    assertEquals(InvocationStatus.UNKNOWN, fixture.transactions.terminalStatus);
+    assertEquals("LEASE_EXPIRED", fixture.transactions.error.kind());
+    assertTrue(fixture.tool.handle.cancelled);
+    assertFalse(fixture.worker.hasActiveExecution());
+
+    fixture.transactions.terminalStatus = null;
+    fixture.tool.listener.onComplete(result("late"));
+    assertNull(fixture.transactions.terminalStatus);
+  }
+
+  @Test
+  void recoverNextExpiredFencesStaleEnvironmentHandleAndClearsSlot() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.descriptor = environmentDescriptor();
+    AtomicReference<ToolExecutionListener> remoteListener = new AtomicReference<>();
+    fixture.rebuildWorkerWithTransport(
+        (environmentName, request, listener) -> {
+          remoteListener.set(listener);
+          return new ToolExecutionHandle() {
+            private boolean cancelled;
+
+            @Override
+            public void cancel() {
+              cancelled = true;
+            }
+
+            @Override
+            public boolean isCancelled() {
+              return cancelled;
+            }
+          };
+        });
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertTrue(fixture.worker.hasActiveExecution("env-a"));
+
+    fixture.transactions.recoveredLease = true;
+    fixture.transactions.expiredCandidate = running(environmentDescriptor(), "old");
+    assertTrue(fixture.worker.recoverNextExpired(ToolExecutionLocation.ENVIRONMENT));
+
+    assertEquals(InvocationStatus.UNKNOWN, fixture.transactions.terminalStatus);
+    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    remoteListener.get().onComplete(result("late-remote"));
+    assertEquals(InvocationStatus.UNKNOWN, fixture.transactions.terminalStatus);
+  }
+
+  @Test
+  void localConflictAbandonsStaleHandleAndUnknownsNewClaimWithoutRerunningTool() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    assertTrue(fixture.worker.dispatch(1));
+    int executionsAfterFirst = fixture.tool.executions;
+
+    // Simulate reclaim of the same invocation while the stale local handle is still mapped.
+    fixture.transactions.recoveredLease = false;
+    fixture.transactions.forceLocalConflict = true;
+    assertTrue(fixture.worker.dispatch(1));
+
+    assertEquals(executionsAfterFirst, fixture.tool.executions);
+    assertEquals(InvocationStatus.UNKNOWN, fixture.transactions.terminalStatus);
+    assertEquals("LOCAL_CONFLICT", fixture.transactions.error.kind());
+    assertTrue(fixture.tool.handle.cancelled);
     assertFalse(fixture.worker.hasActiveExecution());
   }
 
@@ -389,7 +639,6 @@ class PlatformToolWorkerFinalTest {
         "test tool",
         null,
         new ToolParamsSchema("input", Map.of(), Set.of(), false),
-        ToolExecutionLocation.PLATFORM,
         sideEffect,
         Duration.ofSeconds(30));
   }
@@ -401,7 +650,6 @@ class PlatformToolWorkerFinalTest {
         "environment tool",
         null,
         new ToolParamsSchema("input", Map.of(), Set.of(), false),
-        ToolExecutionLocation.ENVIRONMENT,
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(30));
   }
@@ -415,7 +663,9 @@ class PlatformToolWorkerFinalTest {
         "call-1",
         descriptor,
         "{}",
-        descriptor.executionLocation(),
+        environmentName == null
+            ? ToolExecutionLocation.PLATFORM
+            : ToolExecutionLocation.ENVIRONMENT,
         environmentName,
         7L,
         InvocationStatus.QUEUED,
@@ -433,6 +683,11 @@ class PlatformToolWorkerFinalTest {
   }
 
   private static ToolInvocation running(ToolDescriptor descriptor, String token) {
+    String environmentName = descriptor.name().startsWith("environment") ? "env-a" : null;
+    ToolExecutionLocation location =
+        environmentName == null
+            ? ToolExecutionLocation.PLATFORM
+            : ToolExecutionLocation.ENVIRONMENT;
     return new ToolInvocation(
         1L,
         2L,
@@ -441,8 +696,8 @@ class PlatformToolWorkerFinalTest {
         "call-1",
         descriptor,
         "{}",
-        ToolExecutionLocation.PLATFORM,
-        null,
+        location,
+        environmentName,
         7L,
         InvocationStatus.RUNNING,
         1,
@@ -484,7 +739,8 @@ class PlatformToolWorkerFinalTest {
             0, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(1), Duration.ofSeconds(1));
     private boolean realtimeFailure;
     private boolean activationFailure;
-    private PlatformToolWorker worker;
+    private ToolWorker worker;
+    private RemoteToolTransport transport = noopTransport();
 
     private Fixture(ToolSideEffect sideEffect) {
       ToolDescriptor descriptor = descriptor(sideEffect);
@@ -497,13 +753,19 @@ class PlatformToolWorkerFinalTest {
       rebuildWorker(ToolWorkerConfig.DEFAULT);
     }
 
+    private void rebuildWorkerWithTransport(RemoteToolTransport transport) {
+      this.transport = transport;
+      rebuildWorker(ToolWorkerConfig.DEFAULT);
+    }
+
     private void rebuildWorker(ToolWorkerConfig config) {
       ScheduledExecutorService scheduler = new ScheduledThreadPoolExecutor(2);
       schedulers.add(scheduler);
       worker =
-          new PlatformToolWorker(
+          new ToolWorker(
               transactions,
               (name, version) -> registryTool.map(value -> (Tool) value),
+              transport,
               interceptorChain,
               artifacts,
               () -> retryPolicy,
@@ -529,8 +791,10 @@ class PlatformToolWorkerFinalTest {
 
   private static final class RecordingTransactions implements ToolInvocationTransactions {
     private ToolInvocation candidate;
-    private final ToolDescriptor descriptor;
+    private ToolInvocation expiredCandidate;
+    private ToolDescriptor descriptor;
     private boolean recoveredLease;
+    private boolean forceLocalConflict;
     private int claimCalls;
     private int findNextCalls;
     private ToolExecutionLocation queriedLocation;
@@ -542,6 +806,7 @@ class PlatformToolWorkerFinalTest {
     private final CountDownLatch renewed = new CountDownLatch(1);
     private final List<Instant> activities = new ArrayList<>();
     private int retryCalls;
+    private int releaseUnstartedCalls;
     private Instant nextAttemptAt;
     private InvocationStatus terminalStatus;
     private ToolResult result;
@@ -572,6 +837,9 @@ class PlatformToolWorkerFinalTest {
     @Override
     public Optional<ToolInvocation> findNextExpiredRunning(
         ToolExecutionLocation location, Instant now) {
+      if (expiredCandidate != null && expiredCandidate.location() == location) {
+        return Optional.of(expiredCandidate);
+      }
       return Optional.empty();
     }
 
@@ -587,8 +855,12 @@ class PlatformToolWorkerFinalTest {
       assertEquals("worker-token", workerToken);
       assertEquals(descriptor.timeout(), executionTimeout);
       assertTrue(workerLeaseDuration.isPositive());
-      return Optional.of(
-          new ClaimedToolInvocation(running(descriptor, workerToken), recoveredLease));
+      boolean recovered = recoveredLease || forceLocalConflict;
+      // forceLocalConflict still claims with recovered=false so dispatchClaimed hits putIfAbsent.
+      if (forceLocalConflict) {
+        recovered = false;
+      }
+      return Optional.of(new ClaimedToolInvocation(running(descriptor, workerToken), recovered));
     }
 
     @Override
@@ -611,7 +883,8 @@ class PlatformToolWorkerFinalTest {
         InvocationStatus previousStatus,
         Instant nextAttemptAt,
         Instant now) {
-      return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
+      releaseUnstartedCalls++;
+      return ToolInvocationUpdateOutcome.APPLIED;
     }
 
     @Override

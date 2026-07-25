@@ -708,7 +708,6 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
         "test tool",
         null,
         new ToolParamsSchema("", Map.of(), Set.of(), false),
-        location,
         sideEffect,
         Duration.ofMinutes(30));
   }

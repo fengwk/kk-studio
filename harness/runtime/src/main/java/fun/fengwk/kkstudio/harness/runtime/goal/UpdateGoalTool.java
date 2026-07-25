@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.runtime.goal;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
@@ -41,7 +40,6 @@ public final class UpdateGoalTool implements Tool {
                           "Detailed rationale and concrete evidence supporting this completion or blocked status.")),
               Set.of("status", "reason"),
               false),
-          ToolExecutionLocation.PLATFORM,
           ToolSideEffect.IDEMPOTENT,
           Duration.ZERO);
 

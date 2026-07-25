@@ -285,7 +285,6 @@ class RuntimeConfigSnapshotResolverTest {
     ToolDescriptor descriptor = mock(ToolDescriptor.class);
     when(descriptor.name()).thenReturn(name);
     when(descriptor.version()).thenReturn("v1");
-    when(descriptor.executionLocation()).thenReturn(location);
     return descriptor;
   }
 

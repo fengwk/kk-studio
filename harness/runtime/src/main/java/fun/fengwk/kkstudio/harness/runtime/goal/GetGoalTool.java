@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.runtime.goal;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
@@ -29,7 +28,6 @@ public final class GetGoalTool implements Tool {
           GoalToolPrompts.load("goal-get-tool.md"),
           NAME,
           new ToolParamsSchema("Read the current Thread goal.", Map.of(), Set.of(), false),
-          ToolExecutionLocation.PLATFORM,
           ToolSideEffect.READ_ONLY,
           Duration.ZERO);
 

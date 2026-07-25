@@ -63,9 +63,10 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
   private final AtomicReference<ToolResult> completedResult = new AtomicReference<>();
 
   @Test
-  void daemonHandshakeDispatchAndCompletionReachDurableGateway() {
+  void daemonHandshakeDispatchAndCompletionReachDurableGateway() throws Exception {
     ToolDescriptor descriptor = descriptor();
-    ClaimedToolInvocation claimed = configureClaimedInvocation(descriptor);
+    completedResult.set(null);
+    configureClaimedInvocation(descriptor);
     DaemonToolRegistry registry = new DaemonToolRegistry();
     registry.register(new CompletingTool(descriptor));
     DaemonRuntime runtime =
@@ -75,7 +76,8 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
 
       verify(transactions, timeout(10_000))
           .claim(eq(INVOCATION_ID), anyString(), eq(Duration.ofSeconds(10)), any(), any());
-      verify(transactions, timeout(10_000)).completeSuccess(eq(claimed), any(), any(), any());
+      verify(transactions, timeout(10_000)).completeSuccess(any(), any(), any(), any());
+      awaitCompletedResult();
       assertEquals("provider-call", completedResult.get().toolCallId());
       assertEquals(
           "daemon completed", ((TextToolContent) completedResult.get().contents().get(0)).text());
@@ -90,7 +92,8 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
     ArtifactRef local = new ArtifactRef("daemon-local", "application/octet-stream", bytes.length);
     ArtifactRef global = new ArtifactRef("global-artifact", local.mediaType(), bytes.length);
     ToolDescriptor descriptor = descriptor();
-    ClaimedToolInvocation claimed = configureClaimedInvocation(descriptor);
+    completedResult.set(null);
+    configureClaimedInvocation(descriptor);
     when(artifactStore.save(anyString(), anyString(), any())).thenReturn(global);
     DaemonToolRegistry registry = new DaemonToolRegistry();
     registry.register(new ArtifactCompletingTool(descriptor, local));
@@ -104,7 +107,7 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
       verify(artifactStore, timeout(10_000))
           .save(eq(local.mediaType()), eq("identity"), contentCaptor.capture());
       assertArrayEquals(bytes, contentCaptor.getValue());
-      verify(transactions, timeout(10_000)).completeSuccess(eq(claimed), any(), any(), any());
+      verify(transactions, timeout(10_000)).completeSuccess(any(), any(), any(), any());
       ArtifactToolContent artifact = (ArtifactToolContent) completedResult.get().contents().get(0);
       assertEquals(global, artifact.artifact());
     } finally {
@@ -115,7 +118,8 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
   @Test
   void daemonFailureUsesFencedFailureTransition() {
     ToolDescriptor descriptor = descriptor();
-    ClaimedToolInvocation claimed = configureClaimedInvocation(descriptor);
+    completedResult.set(null);
+    configureClaimedInvocation(descriptor);
     DaemonToolRegistry registry = new DaemonToolRegistry();
     registry.register(new FailingTool(descriptor));
     DaemonRuntime runtime =
@@ -126,7 +130,7 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
       ArgumentCaptor<ToolInvocationError> errorCaptor =
           ArgumentCaptor.forClass(ToolInvocationError.class);
       verify(transactions, timeout(10_000))
-          .completeFailure(eq(claimed), errorCaptor.capture(), any(), any());
+          .completeFailure(any(), errorCaptor.capture(), any(), any());
       assertEquals("EXECUTION_FAILED", errorCaptor.getValue().kind());
       assertEquals("daemon failed", errorCaptor.getValue().message());
     } finally {
@@ -134,25 +138,40 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
     }
   }
 
-  private ClaimedToolInvocation configureClaimedInvocation(ToolDescriptor descriptor) {
+  private void configureClaimedInvocation(ToolDescriptor descriptor) {
     ToolInvocation candidate = queued(descriptor);
-    ToolInvocation running = running(descriptor);
-    ClaimedToolInvocation claimed = new ClaimedToolInvocation(running, false);
     when(transactions.findNextClaimable(
             eq(ToolExecutionLocation.ENVIRONMENT), eq(ENVIRONMENT_NAME), any()))
         .thenReturn(Optional.of(candidate), Optional.empty());
     when(transactions.claim(eq(INVOCATION_ID), anyString(), any(), any(), any()))
-        .thenReturn(Optional.of(claimed));
-    when(transactions.completeSuccess(eq(claimed), any(), any(), any()))
         .thenAnswer(
             invocation -> {
+              String token = invocation.getArgument(1);
+              return Optional.of(new ClaimedToolInvocation(running(descriptor, token), false));
+            });
+    when(transactions.completeSuccess(any(), any(), any(), any()))
+        .thenAnswer(
+            invocation -> {
+              @SuppressWarnings("unchecked")
               Supplier<ToolResult> resultSupplier = invocation.getArgument(1);
               completedResult.set(resultSupplier.get());
               return ToolInvocationUpdateOutcome.APPLIED;
             });
-    when(transactions.completeFailure(eq(claimed), any(), any(), any()))
+    when(transactions.completeFailure(any(), any(), any(), any()))
         .thenReturn(ToolInvocationUpdateOutcome.APPLIED);
-    return claimed;
+    when(transactions.renew(any(), any(), any())).thenReturn(ToolInvocationUpdateOutcome.APPLIED);
+    when(transactions.recordActivity(any(), any(), any()))
+        .thenReturn(ToolInvocationUpdateOutcome.APPLIED);
+  }
+
+  private void awaitCompletedResult() throws InterruptedException {
+    long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+    while (completedResult.get() == null && System.nanoTime() < deadline) {
+      Thread.sleep(20);
+    }
+    if (completedResult.get() == null) {
+      throw new AssertionError("timed out waiting for completed tool result");
+    }
   }
 
   private DaemonConfig daemonConfig() {
@@ -175,7 +194,6 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
         "echo",
         "echo",
         new ToolParamsSchema(null, Map.of(), Set.of(), false),
-        ToolExecutionLocation.ENVIRONMENT,
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(10));
   }
@@ -207,7 +225,7 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
         null);
   }
 
-  private static ToolInvocation running(ToolDescriptor descriptor) {
+  private static ToolInvocation running(ToolDescriptor descriptor, String workerToken) {
     Instant now = Instant.now();
     return new ToolInvocation(
         INVOCATION_ID,
@@ -223,7 +241,7 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
         InvocationStatus.RUNNING,
         1,
         null,
-        new Lease("gateway-owner", now.plusSeconds(15)),
+        new Lease(workerToken, now.plusSeconds(15)),
         now.plusSeconds(30),
         now,
         null,

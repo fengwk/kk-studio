@@ -8,7 +8,6 @@ import fun.fengwk.kkstudio.harness.runtime.context.SelectedSkillMetadata;
 import fun.fengwk.kkstudio.harness.runtime.goal.GoalToolPrompts;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
@@ -54,7 +53,6 @@ public final class LoadSkillTool implements Tool {
               Map.of("name", new ToolStringSchema("Exact short skill name from available_skills.")),
               Set.of("name"),
               false),
-          ToolExecutionLocation.PLATFORM,
           ToolSideEffect.READ_ONLY,
           Duration.ofMinutes(1));
 

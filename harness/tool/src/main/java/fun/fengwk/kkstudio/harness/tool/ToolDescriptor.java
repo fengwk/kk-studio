@@ -5,14 +5,13 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import java.time.Duration;
 import java.util.Objects;
 
-/** 可向模型声明并由执行器实现的工具描述。 */
+/** 可向模型声明并由执行器实现的工具描述；不携带执行位置。 */
 public record ToolDescriptor(
     String name,
     String version,
     String description,
     String rendererKey,
     ToolParamsSchema inputSchema,
-    ToolExecutionLocation executionLocation,
     ToolSideEffect sideEffect,
     Duration timeout) {
 
@@ -29,7 +28,6 @@ public record ToolDescriptor(
     }
     rendererKey = rendererKey == null || rendererKey.isBlank() ? name : rendererKey;
     inputSchema = Objects.requireNonNull(inputSchema, "inputSchema");
-    executionLocation = Objects.requireNonNull(executionLocation, "executionLocation");
     sideEffect = Objects.requireNonNull(sideEffect, "sideEffect");
     timeout = Objects.requireNonNull(timeout, "timeout");
     if (timeout.isNegative()) {

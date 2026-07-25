@@ -265,7 +265,10 @@ public final class RuntimeConfigJsonCodec {
         throw new IllegalArgumentException("tool.environmentName must not be blank");
       }
     }
-    return new ToolBinding(descriptor, environmentName);
+    if (environmentName == null) {
+      return ToolBinding.of(descriptor);
+    }
+    return ToolBinding.of(descriptor, environmentName);
   }
 
   private static SkillSnapshot readSkill(JsonNode value) {

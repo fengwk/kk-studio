@@ -34,7 +34,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolArraySchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolBooleanSchema;
@@ -589,7 +588,6 @@ class DefaultAgentTurnEngineTest {
                     "All schemas",
                     null,
                     schema,
-                    ToolExecutionLocation.PLATFORM,
                     ToolSideEffect.READ_ONLY,
                     Duration.ZERO)));
     FakeModelProvider provider =
@@ -646,7 +644,6 @@ class DefaultAgentTurnEngineTest {
                 null,
                 new ToolParamsSchema(
                     "", Map.of("path", new ToolStringSchema("")), Set.of("path"), false),
-                ToolExecutionLocation.PLATFORM,
                 ToolSideEffect.READ_ONLY,
                 Duration.ofSeconds(5))));
   }

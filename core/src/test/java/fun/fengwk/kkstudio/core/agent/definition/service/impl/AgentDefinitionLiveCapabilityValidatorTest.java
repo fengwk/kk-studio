@@ -160,7 +160,6 @@ class AgentDefinitionLiveCapabilityValidatorTest {
         name + " tool",
         name,
         new ToolParamsSchema("", Map.of(), Set.of(), false),
-        mode,
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(5));
   }

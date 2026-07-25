@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.PlatformToolWorker;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorker;
 
 import java.time.Duration;
 import java.util.concurrent.RejectedExecutionException;
@@ -31,7 +31,7 @@ class ToolWorkerLifecycleTest {
   @Test
   void validatesRecoveryCadenceAndBatchSize() {
     HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
-    PlatformToolWorker worker = mock(PlatformToolWorker.class);
+    ToolWorker worker = mock(ToolWorker.class);
     ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
 
     assertThrows(
@@ -46,7 +46,7 @@ class ToolWorkerLifecycleTest {
   void disabledWorkersDoNotScheduleOrScan() {
     HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
     properties.setWorkersEnabled(false);
-    PlatformToolWorker worker = mock(PlatformToolWorker.class);
+    ToolWorker worker = mock(ToolWorker.class);
     ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
     ToolWorkerLifecycle lifecycle =
         new ToolWorkerLifecycle(properties, worker, scheduler, Duration.ofSeconds(1), 2);
@@ -63,7 +63,7 @@ class ToolWorkerLifecycleTest {
   @Test
   void startIsIdempotentAndStopCancelsScheduleAndAbandonsLocalExecution() {
     HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
-    PlatformToolWorker worker = mock(PlatformToolWorker.class);
+    ToolWorker worker = mock(ToolWorker.class);
     ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
     @SuppressWarnings("unchecked")
     ScheduledFuture<Object> future = mock(ScheduledFuture.class);
@@ -93,7 +93,7 @@ class ToolWorkerLifecycleTest {
   @Test
   void scanHonorsBatchBoundAndStopsAtFirstEmptyDispatch() {
     HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
-    PlatformToolWorker worker = mock(PlatformToolWorker.class);
+    ToolWorker worker = mock(ToolWorker.class);
     ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
     ToolWorkerLifecycle lifecycle =
         new ToolWorkerLifecycle(properties, worker, scheduler, Duration.ofSeconds(1), 2);
@@ -102,7 +102,7 @@ class ToolWorkerLifecycleTest {
     assertEquals(2, lifecycle.scanOnce());
     verify(worker, times(2)).dispatchNext();
 
-    PlatformToolWorker emptyWorker = mock(PlatformToolWorker.class);
+    ToolWorker emptyWorker = mock(ToolWorker.class);
     ToolWorkerLifecycle empty =
         new ToolWorkerLifecycle(properties, emptyWorker, scheduler, Duration.ofSeconds(1), 3);
     when(emptyWorker.dispatchNext()).thenReturn(true, false, true);
@@ -113,7 +113,7 @@ class ToolWorkerLifecycleTest {
   @Test
   void schedulerRejectionRestoresStoppedState() {
     HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
-    PlatformToolWorker worker = mock(PlatformToolWorker.class);
+    ToolWorker worker = mock(ToolWorker.class);
     ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
     when(scheduler.scheduleWithFixedDelay(any(), anyLong(), anyLong(), any()))
         .thenThrow(new RejectedExecutionException("saturated"));
@@ -127,7 +127,7 @@ class ToolWorkerLifecycleTest {
   @Test
   void scheduledScanIsolatesWorkerFailureAndStopCallbackAlwaysRuns() {
     HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
-    PlatformToolWorker worker = mock(PlatformToolWorker.class);
+    ToolWorker worker = mock(ToolWorker.class);
     ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
     @SuppressWarnings("unchecked")
     ScheduledFuture<Object> future = mock(ScheduledFuture.class);

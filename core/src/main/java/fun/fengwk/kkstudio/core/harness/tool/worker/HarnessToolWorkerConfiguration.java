@@ -6,6 +6,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonGateway;
+import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
@@ -14,17 +16,18 @@ import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyResolver;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.PlatformToolWorker;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolRegistry;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorker;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorkerConfig;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 
 import java.time.Clock;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
-/** Wires Platform SPI implementations to the database-backed durable Tool worker. */
+/** Wires SPI implementations to the location-agnostic durable Tool worker. */
 @Configuration(proxyBeanMethods = false)
 public class HarnessToolWorkerConfiguration {
   @Bean
@@ -48,11 +51,12 @@ public class HarnessToolWorkerConfiguration {
   }
 
   @Bean
-  @ConditionalOnBean(ToolRegistry.class)
+  @ConditionalOnBean({ToolRegistry.class, EnvironmentDaemonGateway.class})
   @ConditionalOnMissingBean
-  public PlatformToolWorker platformToolWorker(
+  public ToolWorker toolWorker(
       ToolInvocationTransactions transactions,
       ToolRegistry registry,
+      EnvironmentDaemonGateway remoteTransport,
       ToolInterceptorChain interceptorChain,
       ArtifactStore artifactStore,
       InvocationRetryPolicyResolver retryPolicyResolver,
@@ -62,29 +66,37 @@ public class HarnessToolWorkerConfiguration {
       Clock clock,
       @Qualifier("toolWorkerScheduler") ScheduledExecutorService toolWorkerScheduler,
       HarnessLifecycleObservers lifecycleObservers) {
-    return new PlatformToolWorker(
-        transactions,
-        registry,
-        interceptorChain,
-        artifactStore,
-        retryPolicyResolver,
-        realtimeEventSink,
-        activationNotifier,
-        config,
-        clock,
-        toolWorkerScheduler,
-        lifecycleObservers,
-        () -> UUID.randomUUID().toString());
+    ToolWorker worker =
+        new ToolWorker(
+            transactions,
+            registry,
+            remoteTransport,
+            interceptorChain,
+            artifactStore,
+            retryPolicyResolver,
+            realtimeEventSink,
+            activationNotifier,
+            config,
+            clock,
+            toolWorkerScheduler,
+            lifecycleObservers,
+            () -> UUID.randomUUID().toString());
+    remoteTransport.setReadyDispatchExecutor(toolWorkerScheduler);
+    remoteTransport.setEnvironmentReadyHandler(
+        environmentName -> worker.dispatchNext(ToolExecutionLocation.ENVIRONMENT, environmentName));
+    return worker;
   }
 
   @Bean
   public ToolWorkerLifecycle toolWorkerLifecycle(
       HarnessRuntimeProperties properties,
-      PlatformToolWorker worker,
+      ToolWorker worker,
+      LiveEnvironmentRegistry environmentRegistry,
       @Qualifier("toolWorkerScheduler") ScheduledExecutorService scheduler) {
     return new ToolWorkerLifecycle(
         properties,
         worker,
+        environmentRegistry,
         scheduler,
         properties.getToolRecoveryInterval(),
         properties.getToolRecoveryBatchSize());

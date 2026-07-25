@@ -2,8 +2,10 @@ package fun.fengwk.kkstudio.core.harness.tool.worker;
 
 import org.springframework.context.SmartLifecycle;
 
+import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.PlatformToolWorker;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorker;
+import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -11,13 +13,14 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
-/** Runs bounded PostgreSQL PLATFORM ToolInvocation recovery scans. */
+/** Runs bounded PostgreSQL ToolInvocation recovery for PLATFORM and READY ENVIRONMENT work. */
 public final class ToolWorkerLifecycle implements SmartLifecycle {
   private static final System.Logger LOGGER = System.getLogger(ToolWorkerLifecycle.class.getName());
   private static final int PHASE = Integer.MAX_VALUE - 70;
 
   private final HarnessRuntimeProperties properties;
-  private final PlatformToolWorker worker;
+  private final ToolWorker worker;
+  private final LiveEnvironmentRegistry environmentRegistry;
   private final ScheduledExecutorService scheduler;
   private final Duration interval;
   private final int batchSize;
@@ -27,12 +30,23 @@ public final class ToolWorkerLifecycle implements SmartLifecycle {
 
   public ToolWorkerLifecycle(
       HarnessRuntimeProperties properties,
-      PlatformToolWorker worker,
+      ToolWorker worker,
+      ScheduledExecutorService scheduler,
+      Duration interval,
+      int batchSize) {
+    this(properties, worker, null, scheduler, interval, batchSize);
+  }
+
+  public ToolWorkerLifecycle(
+      HarnessRuntimeProperties properties,
+      ToolWorker worker,
+      LiveEnvironmentRegistry environmentRegistry,
       ScheduledExecutorService scheduler,
       Duration interval,
       int batchSize) {
     this.properties = Objects.requireNonNull(properties, "properties");
     this.worker = Objects.requireNonNull(worker, "worker");
+    this.environmentRegistry = environmentRegistry;
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.interval = Objects.requireNonNull(interval, "interval");
     if (interval.toMillis() <= 0 || batchSize <= 0) {
@@ -99,8 +113,36 @@ public final class ToolWorkerLifecycle implements SmartLifecycle {
   public int scanOnce() {
     int dispatched = 0;
     synchronized (monitor) {
-      while (properties.isWorkersEnabled() && dispatched < batchSize && worker.dispatchNext()) {
-        dispatched++;
+      while (properties.isWorkersEnabled() && dispatched < batchSize) {
+        boolean progressed = false;
+        if (worker.recoverNextExpired(ToolExecutionLocation.PLATFORM)) {
+          progressed = true;
+          dispatched++;
+        }
+        if (dispatched < batchSize
+            && worker.recoverNextExpired(ToolExecutionLocation.ENVIRONMENT)) {
+          progressed = true;
+          dispatched++;
+        }
+        if (dispatched < batchSize && worker.dispatchNext()) {
+          progressed = true;
+          dispatched++;
+        }
+        if (environmentRegistry != null && dispatched < batchSize) {
+          for (var environment : environmentRegistry.listReady()) {
+            if (dispatched >= batchSize) {
+              break;
+            }
+            if (worker.dispatchNext(
+                ToolExecutionLocation.ENVIRONMENT, environment.environmentName())) {
+              progressed = true;
+              dispatched++;
+            }
+          }
+        }
+        if (!progressed) {
+          break;
+        }
       }
     }
     return dispatched;

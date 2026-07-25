@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
@@ -38,7 +37,6 @@ public final class WriteTool extends AbstractCodingTool {
                         new ToolStringSchema("Optional environment-root-relative directory")),
                 Set.of("path", "content"),
                 false),
-            ToolExecutionLocation.ENVIRONMENT,
             ToolSideEffect.IDEMPOTENT,
             Duration.ofMinutes(1)));
   }
