@@ -36,21 +36,19 @@ class DatabaseGoalStoreIntegrationTest extends PostgresSpringTestSupport {
           jdbc.update("delete from harness_entry");
           jdbc.update("delete from harness_session");
           jdbc.update(
-              "insert into harness_session (id, title, main_thread_id, created_at, updated_at)"
-                  + " values (?, 'g', ?, now(), now())",
-              THREAD_ID + 1,
-              THREAD_ID);
+              "insert into harness_session (id, title, created_at, updated_at)"
+                  + " values (?, 'g', now(), now())",
+              THREAD_ID + 1);
           jdbc.update(
               "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
                   + " created_at) values (?, ?, null, 'ROOT', '{}'::jsonb, now())",
               THREAD_ID + 2,
               THREAD_ID + 1);
           jdbc.update(
-              "insert into harness_thread (id, session_id, head_entry_id, input_sequence, runnable,"
-                  + " execution_epoch, created_at, updated_at) values (?, ?, ?, 0, false, 0,"
+              "insert into harness_thread (id, head_entry_id, input_sequence, runnable,"
+                  + " execution_epoch, created_at, updated_at) values (?, ?, 0, false, 0,"
                   + " now(), now())",
               THREAD_ID,
-              THREAD_ID + 1,
               THREAD_ID + 2);
         });
   }

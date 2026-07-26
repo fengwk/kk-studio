@@ -142,14 +142,23 @@ class PostgresqlDurableFactsSchemaTest extends PostgresSchemaSupport {
       insertUsage(conn, first.sessionId, first.threadId, firstAssistant);
     }
 
-    // assistant_entry_id belongs to first.session but the carrier session_id is
-    // second.session, so (session_id, assistant_entry_id) cannot pair on
-    // harness_entry (session_id, id).
+    // assistant_entry_id belongs to second.session but the carrier session_id is
+    // first.session, so (session_id, assistant_entry_id) cannot pair on
+    // harness_entry (session_id, id). A not-yet-used assistant Entry is required here so the
+    // single-column uniqueness on assistant_entry_id cannot mask the composite FK.
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
           "fk_harness_model_usage_assistant_entry",
-          () -> insertUsage(conn, second.sessionId, second.threadId, firstAssistant));
+          () -> insertUsage(conn, first.sessionId, second.threadId, secondAssistant));
+    }
+
+    // One usage row per assistant Entry, regardless of which Thread produced it.
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "uk_harness_model_usage_assistant_entry",
+          () -> insertUsage(conn, first.sessionId, second.threadId, firstAssistant));
     }
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(

@@ -110,8 +110,7 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
       "canvas_node",
       "canvas_link",
       "canvas_command",
-      "chat",
-      "chat_session"
+      "chat"
     };
 
     long previous = 0L;

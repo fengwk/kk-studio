@@ -6,12 +6,13 @@ import java.sql.SQLException;
 import java.util.Objects;
 
 /**
- * Deterministic ids for a Session + Main Thread + ROOT Entry bundle that satisfies the deferred FK
- * cycle in a single transaction.
+ * Deterministic ids for a Session + ROOT Entry + Thread bundle bound to that ROOT.
  *
- * <p>Tests bootstrap by calling {@link #insertFresh()} or {@link #insertAtomically(Connection)}.
- * The two cycle-closing FKs are checked at COMMIT, after all three rows exist. Child helpers keep
- * fixture construction deterministic without random ids or clock-derived values.
+ * <p>Session and Thread are independent aggregates now: the Session/Entry rows are inserted first,
+ * and the Thread only references the ROOT through the deferrable single-column {@code
+ * head_entry_id} FK. Tests bootstrap by calling {@link #insertFresh()} or {@link
+ * #insertAtomically(Connection)}. Child helpers keep fixture construction deterministic without
+ * random ids or clock-derived values.
  */
 final class ThreadFixture {
 
@@ -33,7 +34,7 @@ final class ThreadFixture {
     return new ThreadFixture(s, t, r);
   }
 
-  /** Allocate and persist a fresh Session/Main Thread/ROOT bundle. */
+  /** Allocate and persist a fresh Session/ROOT/bound Thread bundle. */
   static ThreadFixture insertFresh() throws SQLException {
     ThreadFixture fixture = fresh();
     try (Connection conn = PostgresSchemaSupport.newConnection()) {
@@ -42,7 +43,7 @@ final class ThreadFixture {
     return fixture;
   }
 
-  /** Insert Session, Main Thread and ROOT Entry atomically using the supplied connection. */
+  /** Insert Session, ROOT Entry and a Thread bound to that ROOT using the supplied connection. */
   void insertAtomically(Connection conn) throws SQLException {
     Objects.requireNonNull(conn);
     boolean prevAutoCommit = conn.getAutoCommit();
@@ -50,20 +51,9 @@ final class ThreadFixture {
     try {
       try (PreparedStatement ps =
           conn.prepareStatement(
-              "insert into harness_session (id, title, main_thread_id, created_at, updated_at)"
-                  + " values (?, 'fixture', ?, current_timestamp, current_timestamp)")) {
+              "insert into harness_session (id, title, created_at, updated_at)"
+                  + " values (?, 'fixture', current_timestamp, current_timestamp)")) {
         ps.setLong(1, sessionId);
-        ps.setLong(2, threadId);
-        ps.executeUpdate();
-      }
-      try (PreparedStatement ps =
-          conn.prepareStatement(
-              "insert into harness_thread (id, session_id, head_entry_id, input_sequence,"
-                  + " runnable, execution_epoch, created_at, updated_at)"
-                  + " values (?, ?, ?, 0, false, 1, current_timestamp, current_timestamp)")) {
-        ps.setLong(1, threadId);
-        ps.setLong(2, sessionId);
-        ps.setLong(3, rootEntryId);
         ps.executeUpdate();
       }
       try (PreparedStatement ps =
@@ -75,6 +65,15 @@ final class ThreadFixture {
         ps.setLong(2, sessionId);
         ps.executeUpdate();
       }
+      try (PreparedStatement ps =
+          conn.prepareStatement(
+              "insert into harness_thread (id, head_entry_id, input_sequence,"
+                  + " runnable, execution_epoch, created_at, updated_at)"
+                  + " values (?, ?, 0, false, 1, current_timestamp, current_timestamp)")) {
+        ps.setLong(1, threadId);
+        ps.setLong(2, rootEntryId);
+        ps.executeUpdate();
+      }
       conn.commit();
     } catch (SQLException | RuntimeException e) {
       conn.rollback();
@@ -84,6 +83,21 @@ final class ThreadFixture {
         conn.setAutoCommit(true);
       }
     }
+  }
+
+  /** Allocate and persist a fresh UNBOUND Thread (no Session, no head Entry). */
+  static long insertUnboundThread() throws SQLException {
+    long threadId = PostgresSchemaSupport.FIXTURE_IDS.addAndGet(1_000L) + 300L;
+    try (Connection conn = PostgresSchemaSupport.newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "insert into harness_thread (id, head_entry_id, input_sequence, runnable,"
+                    + " execution_epoch, created_at, updated_at)"
+                    + " values (?, null, 0, false, 0, current_timestamp, current_timestamp)")) {
+      ps.setLong(1, threadId);
+      ps.executeUpdate();
+    }
+    return threadId;
   }
 
   /** Append a non-ROOT entry under the ROOT (e.g. a MESSAGE for assistant chains). */

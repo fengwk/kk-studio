@@ -60,14 +60,6 @@ public interface ChatMapper extends BaseMapper {
       """)
   int updateById(@Param("chat") ChatDO chat);
 
-  @Update(
-      """
-      update chat
-      set updated_at = current_timestamp, version = version + 1
-      where id = #{id}
-      """)
-  int touch(@Param("id") long id);
-
   @Delete("delete from chat where id = #{id}")
   int deleteById(@Param("id") long id);
 }

@@ -373,7 +373,7 @@ create table harness_model_invocation (
     constraint uk_harness_model_invocation_source
         unique (thread_id, source_head_entry_id, execution_epoch),
     -- Owning Thread is referenced by id only; the thread<->session relationship
-    -- is enforced upstream via harness_session.main_thread_id.
+    -- is enforced upstream by Thread commands via the head Entry.
     constraint fk_harness_model_invocation_thread foreign key (thread_id)
         references harness_thread (id),
     -- session_id stays as a constraint carrier so the source head Entry belongs
@@ -542,7 +542,7 @@ create table harness_tool_invocation (
         unique (thread_id, assistant_entry_id, execution_epoch, ordinal),
     constraint uk_harness_tool_invocation_session_id unique (session_id, id),
     -- Owning Thread is referenced by id only; the thread<->session relationship
-    -- is enforced upstream via harness_session.main_thread_id.
+    -- is enforced upstream by Thread commands via the head Entry.
     constraint fk_harness_tool_invocation_thread foreign key (thread_id)
         references harness_thread (id),
     -- session_id stays as a constraint carrier so the assistant Entry belongs
@@ -842,7 +842,7 @@ create table harness_model_usage (
     created_at                         timestamptz(3) not null default current_timestamp,
     constraint uk_harness_model_usage_assistant_entry unique (assistant_entry_id),
     -- Owning Thread is referenced by id only; the thread<->session relationship
-    -- is enforced upstream via harness_session.main_thread_id.
+    -- is enforced upstream by Thread commands via the head Entry.
     constraint fk_harness_model_usage_thread foreign key (thread_id)
         references harness_thread (id),
     -- session_id stays as a constraint carrier so the assistant Entry belongs

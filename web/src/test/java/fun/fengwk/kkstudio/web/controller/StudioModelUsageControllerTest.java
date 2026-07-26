@@ -102,11 +102,9 @@ class StudioModelUsageControllerTest extends WebPostgresTestSupport {
               connection.setAutoCommit(false);
               try (var st = connection.createStatement()) {
                 st.execute(
-                    "insert into harness_session (id, title, main_thread_id, created_at, updated_at) values ("
+                    "insert into harness_session (id, title, created_at, updated_at) values ("
                         + LARGE_ID
-                        + ", 'usage-test', "
-                        + LARGE_ID
-                        + ", now(), now())");
+                        + ", 'usage-test', now(), now())");
                 st.execute(
                     "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
                         + " values ("
@@ -126,10 +124,8 @@ class StudioModelUsageControllerTest extends WebPostgresTestSupport {
                         + assistantPayloadJson().replace("'", "''")
                         + "' as jsonb), now())");
                 st.execute(
-                    "insert into harness_thread (id, session_id, head_entry_id, input_sequence, runnable,"
+                    "insert into harness_thread (id, head_entry_id, input_sequence, runnable,"
                         + " execution_epoch, created_at, updated_at) values ("
-                        + LARGE_ID
-                        + ", "
                         + LARGE_ID
                         + ", "
                         + LARGE_ID

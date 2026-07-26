@@ -15,17 +15,5 @@ public interface ChatRepository {
 
   boolean updateById(Chat chat);
 
-  boolean touch(long id);
-
   boolean deleteById(long id);
-
-  boolean attachSession(long membershipId, long chatId, long sessionId);
-
-  boolean isSessionAttached(long chatId, long sessionId);
-
-  List<Long> listSessionIds(long chatId);
-
-  boolean detachSession(long chatId, long sessionId);
-
-  int deleteMembershipsByChatId(long chatId);
 }

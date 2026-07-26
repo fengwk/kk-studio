@@ -291,7 +291,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void onlySessionBootstrapCycleForeignKeysAreInitiallyDeferred() throws SQLException {
+  void onlyTheThreadHeadForeignKeyIsInitiallyDeferred() throws SQLException {
     Set<String> deferred = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -303,10 +303,12 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         deferred.add(rs.getString(1));
       }
     }
+    // Session no longer points back at a Thread, so the old bootstrap cycle is gone; only the
+    // optional Thread head remains deferrable so bootstrap can bind a freshly inserted Entry.
     assertEquals(
-        Set.of("fk_harness_session_main_thread", "fk_harness_thread_head"),
+        Set.of("fk_harness_thread_head"),
         deferred,
-        "only the Session/Main Thread/ROOT bootstrap cycle needs deferred FKs");
+        "only the optional Thread head FK needs deferral once Session and Thread are decoupled");
   }
 
   @Test
@@ -335,7 +337,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_harness_entry_session_id",
             "uk_harness_entry_single_root",
             "uk_harness_session_parent_invocation",
-            "uk_harness_thread_session_id",
             "uk_harness_thread_input_sequence",
             "uk_harness_thread_input_idempotency",
             "uk_harness_model_invocation_source",

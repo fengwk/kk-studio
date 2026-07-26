@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import fun.fengwk.kkstudio.core.harness.thread.command.TestRuntimeConfigs;
+import fun.fengwk.kkstudio.core.harness.thread.command.TestThreads;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.configuration.AgentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.EnvironmentSnapshot;
@@ -94,54 +94,91 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
   @Test
   void claimsRenewsAndFencesExpiredTokenAndEpoch() {
     Instant now = Instant.now();
-    ThreadCommandTransactions.SessionCreation session =
-        commands.createSession("lease", TestRuntimeConfigs.bootstrap(), now);
-    commands.enqueue(session.mainThread().id(), user("lease"), "lease", now);
+    TestThreads.Bootstrapped boot = TestThreads.bootstrap(commands, "lease", now);
+    long threadId = boot.threadId();
+    commands.enqueue(threadId, user("lease"), "lease", boot.executionEpoch(), now);
 
-    ThreadOwnership ownership =
-        transactions.claim(session.mainThread().id(), "one", now).orElseThrow();
+    ThreadOwnership ownership = transactions.claim(threadId, "one", now).orElseThrow();
     assertTrue(transactions.renew(ownership, now.plusSeconds(1)));
     assertFalse(
         transactions.renew(
             new ThreadOwnership(ownership.threadId(), ownership.executionEpoch(), "other"),
             now.plusSeconds(1)));
-    assertTrue(
-        transactions
-            .claim(session.mainThread().id(), "two", now.plus(Duration.ofMinutes(10)))
-            .isPresent());
+    assertTrue(transactions.claim(threadId, "two", now.plus(Duration.ofMinutes(10))).isPresent());
     ThreadOwnership recovered =
-        transactions
-            .claim(session.mainThread().id(), "three", now.plus(Duration.ofMinutes(20)))
-            .orElseThrow();
+        transactions.claim(threadId, "three", now.plus(Duration.ofMinutes(20))).orElseThrow();
     assertFalse(
         transactions.loadOwnedSnapshot(ownership, now.plus(Duration.ofMinutes(10))).isPresent());
-    commands.stop(session.mainThread().id(), now.plus(Duration.ofMinutes(20)).plusSeconds(1));
+    commands.stop(
+        threadId, recovered.executionEpoch(), now.plus(Duration.ofMinutes(20)).plusSeconds(1));
     assertFalse(transactions.renew(recovered, now.plus(Duration.ofMinutes(20)).plusSeconds(2)));
 
+    long afterStopEpoch = recovered.executionEpoch() + 1;
     commands.enqueue(
-        session.mainThread().id(),
+        threadId,
         user("after-stop"),
         "after-stop",
+        afterStopEpoch,
         now.plus(Duration.ofMinutes(20)).plusSeconds(3));
     ThreadOwnership afterStop =
         transactions
-            .claim(
-                session.mainThread().id(),
-                "after-stop",
-                now.plus(Duration.ofMinutes(20)).plusSeconds(3))
+            .claim(threadId, "after-stop", now.plus(Duration.ofMinutes(20)).plusSeconds(3))
             .orElseThrow();
-    assertEquals(recovered.executionEpoch() + 1, afterStop.executionEpoch());
+    assertEquals(afterStopEpoch, afterStop.executionEpoch());
+  }
+
+  /** stop + rebind 之后旧 epoch 的 ownership 不能 renew/claim，也不能再 apply 结果。 */
+  @Test
+  void rebindInvalidatesStaleOwnershipRenewClaimAndApply() {
+    Instant now = Instant.now();
+    Prepared prepared = prepareDebt(now, List.of());
+    long modelId = createInvocation(prepared, now);
+    completeModel(modelId, "SUCCEEDED", response(List.of()), null);
+    ThreadOwnership stale = prepared.ownership();
+    long staleEpoch = stale.executionEpoch();
+
+    // 用户逻辑 stop 后把 head 拨回 ROOT：epoch 前进两次，旧 worker 的一切写入都被 fence。
+    commands.stop(prepared.threadId(), staleEpoch, Instant.now());
+    commands.updateHead(prepared.threadId(), staleEpoch + 1, prepared.rootEntryId(), Instant.now());
+
+    assertFalse(
+        transactions.renew(stale, Instant.now()), "stale ownership must not renew after rebind");
+    assertFalse(
+        transactions.loadOwnedSnapshot(stale, Instant.now()).isPresent(),
+        "stale ownership must not load a snapshot after rebind");
+    assertEquals(
+        ApplyOutcome.LOST_OWNERSHIP,
+        transactions.applyTerminalModel(stale, modelId, Instant.now()),
+        "the old epoch worker must not apply into the new context");
+    // rebind cleared runnable, so no processor can claim the Thread until new work arrives
+    assertFalse(transactions.claim(prepared.threadId(), "stale-claim", Instant.now()).isPresent());
+    assertEquals(
+        prepared.rootEntryId(),
+        longScalar("select head_entry_id from harness_thread where id = " + prepared.threadId()));
+  }
+
+  /** UNBOUND Thread 既不接受 enqueue，也不会被 reconcile claim。 */
+  @Test
+  void reconcileNeverClaimsUnboundThread() {
+    Instant now = Instant.now();
+    long threadId = commands.createThread(now).id();
+    assertThrows(
+        IllegalStateException.class, () -> commands.enqueue(threadId, user("x"), "x", 0L, now));
+    assertFalse(transactions.claim(threadId, "unbound", now).isPresent());
+    // even a forcibly runnable UNBOUND Thread stays unclaimable
+    execute("update harness_thread set runnable = true where id = " + threadId);
+    assertFalse(transactions.claim(threadId, "unbound-runnable", now).isPresent());
   }
 
   @Test
   void snapshotsPlanBeforeLaterQueuedInputThenHarvestsAndCreatesInvocation() {
     Instant now = Instant.now();
-    ThreadCommandTransactions.SessionCreation session =
-        commands.createSession("snapshot", TestRuntimeConfigs.bootstrap(), now);
-    long threadId = session.mainThread().id();
+    TestThreads.Bootstrapped boot = TestThreads.bootstrap(commands, "snapshot", now);
+    long threadId = boot.threadId();
+    long epoch = boot.executionEpoch();
     RuntimeConfigInputPayload frozenConfig = config(List.of(platformTool()));
-    commands.enqueue(threadId, frozenConfig, "config", now);
-    commands.enqueue(threadId, user("hello"), "user", now);
+    commands.enqueue(threadId, frozenConfig, "config", epoch, now);
+    commands.enqueue(threadId, user("hello"), "user", epoch, now);
     ThreadOwnership ownership = transactions.claim(threadId, "snapshot", now).orElseThrow();
 
     ThreadReconcileSnapshot queued = transactions.loadOwnedSnapshot(ownership, now).orElseThrow();
@@ -175,7 +212,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     ModelInvocationPlan plan = snapshot.modelInvocationPlan().orElseThrow();
     assertEquals(frozenConfig.snapshot(), plan.configSnapshot());
 
-    commands.enqueue(threadId, config(List.of()), "later-config", now.plusSeconds(1));
+    commands.enqueue(threadId, config(List.of()), "later-config", epoch, now.plusSeconds(1));
     assertTrue(
         transactions
             .loadOwnedSnapshot(ownership, now.plusSeconds(1))
@@ -203,7 +240,12 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     List<ToolBinding> bindings = List.of(platformTool(), environmentTool());
     Prepared prepared = prepareDebt(now, bindings);
     long modelId = createInvocation(prepared, now);
-    commands.enqueue(prepared.threadId(), config(List.of()), "later-config", now.plusSeconds(1));
+    commands.enqueue(
+        prepared.threadId(),
+        config(List.of()),
+        "later-config",
+        prepared.ownership().executionEpoch(),
+        now.plusSeconds(1));
     completeModel(
         modelId,
         "SUCCEEDED",
@@ -387,7 +429,12 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     wake(prepared.threadId());
     ThreadOwnership owner =
         transactions.claim(prepared.threadId(), "blocker", Instant.now()).orElseThrow();
-    commands.enqueue(prepared.threadId(), user("later"), "later", Instant.now());
+    commands.enqueue(
+        prepared.threadId(),
+        user("later"),
+        "later",
+        prepared.ownership().executionEpoch(),
+        Instant.now());
     ContinuationRef blocker =
         transactions
             .loadOwnedSnapshot(owner, Instant.now())
@@ -432,10 +479,15 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     assertEquals(
         QuiesceOutcome.LOST_OWNERSHIP, transactions.quiesceAndRecheck(owner, Instant.now()));
 
-    ThreadCommandTransactions.SessionCreation quiescentSession =
-        commands.createSession("quiescent", TestRuntimeConfigs.bootstrap(), Instant.now());
-    long quiescentThread = quiescentSession.mainThread().id();
-    commands.enqueue(quiescentThread, config(List.of()), "config-only", Instant.now());
+    TestThreads.Bootstrapped quiescentBoot =
+        TestThreads.bootstrap(commands, "quiescent", Instant.now());
+    long quiescentThread = quiescentBoot.threadId();
+    commands.enqueue(
+        quiescentThread,
+        config(List.of()),
+        "config-only",
+        quiescentBoot.executionEpoch(),
+        Instant.now());
     ThreadOwnership quiescentOwner =
         transactions.claim(quiescentThread, "quiescent", Instant.now()).orElseThrow();
     List<ThreadInput> configOnly =
@@ -458,10 +510,11 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
       for (int iteration = 0; iteration < 8; iteration++) {
         Instant now = Instant.now();
-        ThreadCommandTransactions.SessionCreation session =
-            commands.createSession("lost-wake-" + iteration, TestRuntimeConfigs.bootstrap(), now);
-        long threadId = session.mainThread().id();
-        commands.enqueue(threadId, config(List.of()), "config", now);
+        TestThreads.Bootstrapped boot =
+            TestThreads.bootstrap(commands, "lost-wake-" + iteration, now);
+        long threadId = boot.threadId();
+        long epoch = boot.executionEpoch();
+        commands.enqueue(threadId, config(List.of()), "config", epoch, now);
         ThreadOwnership ownership =
             transactions.claim(threadId, "owner-" + iteration, now).orElseThrow();
         List<ThreadInput> inputs =
@@ -481,7 +534,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
             executor.submit(
                 () -> {
                   start.await();
-                  commands.enqueue(threadId, user("wake"), "wake", Instant.now());
+                  commands.enqueue(threadId, user("wake"), "wake", epoch, Instant.now());
                   return null;
                 });
         start.countDown();
@@ -506,11 +559,10 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
   }
 
   private Prepared prepareDebt(Instant now, List<ToolBinding> tools) {
-    ThreadCommandTransactions.SessionCreation session =
-        commands.createSession("reconcile", TestRuntimeConfigs.bootstrap(), now);
-    long threadId = session.mainThread().id();
-    commands.enqueue(threadId, config(tools), "config", now);
-    commands.enqueue(threadId, user("hello"), "user", now);
+    TestThreads.Bootstrapped boot = TestThreads.bootstrap(commands, "reconcile", now);
+    long threadId = boot.threadId();
+    commands.enqueue(threadId, config(tools), "config", boot.executionEpoch(), now);
+    commands.enqueue(threadId, user("hello"), "user", boot.executionEpoch(), now);
     Instant claimedAt = now;
     assertEquals(
         1L,
@@ -523,7 +575,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     assertEquals(
         ApplyOutcome.PROGRESSED,
         transactions.harvestBoundary(ownership, new TurnBoundary(threadId, inputs), claimedAt));
-    return new Prepared(threadId, ownership);
+    return new Prepared(threadId, boot.rootEntryId(), ownership);
   }
 
   private long createInvocation(Prepared prepared, Instant now) {
@@ -732,5 +784,5 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     }
   }
 
-  private record Prepared(long threadId, ThreadOwnership ownership) {}
+  private record Prepared(long threadId, long rootEntryId, ThreadOwnership ownership) {}
 }
