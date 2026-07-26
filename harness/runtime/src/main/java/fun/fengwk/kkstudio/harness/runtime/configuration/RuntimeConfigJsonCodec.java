@@ -22,7 +22,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import java.util.TreeSet;
 
 /**
  * 严格 deterministic 的 {@link RuntimeConfigSnapshot} JSON codec。
@@ -38,11 +37,10 @@ import java.util.TreeSet;
  *   <li>duplicate field（启用 {@link JsonParser.Feature#STRICT_DUPLICATE_DETECTION}）。
  * </ul>
  *
- * <p>字段顺序固定为 {@code agent, model, tools, skills, policy, environment}；{@code agent.systemPrompt}、
- * {@code policy.maxTotalSubagents}、{@code environment.environmentName / workspaceReference}、 {@code
- * tools[].environmentName} 这些 optional 字段显式输出 {@code null}。{@code model.descriptor} 与 {@code
- * model.variant} 直接委派给 {@link ModelDescriptorJsonCodec}；{@code tools[].descriptor} 直接委派给 {@link
- * ToolDescriptorJsonCodec}，本 codec 不复制任何 model / tool descriptor 字段实现。
+ * <p>字段顺序固定为 {@code agent, model, tools, skills, yoloEnabled}；{@code agent.systemPrompt} 显式输出其值。
+ * {@code model.descriptor} 与 {@code model.variant} 直接委派给 {@link ModelDescriptorJsonCodec}；{@code
+ * tools[].descriptor} 直接委派给 {@link ToolDescriptorJsonCodec}，本 codec 不复制任何 model / tool descriptor
+ * 字段实现。
  */
 public final class RuntimeConfigJsonCodec {
 
@@ -50,23 +48,13 @@ public final class RuntimeConfigJsonCodec {
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> TOP_FIELDS =
-      orderedSet("agent", "model", "tools", "skills", "policy", "environment");
+      orderedSet("agent", "model", "tools", "skills", "yoloEnabled");
   private static final Set<String> AGENT_FIELDS =
       orderedSet("definitionId", "name", "systemPrompt");
   private static final Set<String> MODEL_FIELDS = orderedSet("descriptor", "variant");
   private static final Set<String> TOOL_FIELDS = orderedSet("descriptor", "environmentName");
   private static final Set<String> SKILL_FIELDS =
       orderedSet("name", "description", "sourceEnvironment");
-  private static final Set<String> POLICY_FIELDS =
-      orderedSet(
-          "maxTurns",
-          "maxDepth",
-          "maxDirectSubagents",
-          "maxTotalSubagents",
-          "allowedSubagents",
-          "yoloEnabled");
-  private static final Set<String> ENVIRONMENT_FIELDS =
-      orderedSet("environmentName", "workspaceReference");
 
   private static final ToolDescriptorJsonCodec TOOL_CODEC = new ToolDescriptorJsonCodec();
   private static final ModelDescriptorJsonCodec MODEL_CODEC = new ModelDescriptorJsonCodec();
@@ -98,8 +86,7 @@ public final class RuntimeConfigJsonCodec {
     for (SkillSnapshot skill : snapshot.skills()) {
       skills.add(writeSkill(skill));
     }
-    node.set("policy", writePolicy(snapshot.policy()));
-    node.set("environment", writeEnvironment(snapshot.environment()));
+    node.put("yoloEnabled", snapshot.yoloEnabled());
     return node;
   }
 
@@ -148,11 +135,9 @@ public final class RuntimeConfigJsonCodec {
       skills.add(skill);
     }
 
-    ExecutionPolicySnapshot policy = readPolicy(requireField(root, "policy", "runtimeConfig"));
-    EnvironmentSnapshot environment =
-        readEnvironment(requireField(root, "environment", "runtimeConfig"));
+    boolean yoloEnabled = requiredBoolean(root, "yoloEnabled", "runtimeConfig");
 
-    return new RuntimeConfigSnapshot(agent, model, tools, skills, policy, environment);
+    return new RuntimeConfigSnapshot(agent, model, tools, skills, yoloEnabled);
   }
 
   // ---------- Subtree writers ----------
@@ -188,39 +173,6 @@ public final class RuntimeConfigJsonCodec {
     node.put("name", skill.name());
     node.put("description", skill.description());
     node.put("sourceEnvironment", skill.sourceEnvironment());
-    return node;
-  }
-
-  private static ObjectNode writePolicy(ExecutionPolicySnapshot policy) {
-    ObjectNode node = NODES.objectNode();
-    node.put("maxTurns", policy.maxTurns());
-    node.put("maxDepth", policy.maxDepth());
-    node.put("maxDirectSubagents", policy.maxDirectSubagents());
-    if (policy.maxTotalSubagents() == null) {
-      node.putNull("maxTotalSubagents");
-    } else {
-      node.put("maxTotalSubagents", policy.maxTotalSubagents());
-    }
-    ArrayNode allowed = node.putArray("allowedSubagents");
-    for (String name : policy.allowedSubagents()) {
-      allowed.add(name);
-    }
-    node.put("yoloEnabled", policy.yoloEnabled());
-    return node;
-  }
-
-  private static ObjectNode writeEnvironment(EnvironmentSnapshot environment) {
-    ObjectNode node = NODES.objectNode();
-    if (environment.environmentName() == null) {
-      node.putNull("environmentName");
-    } else {
-      node.put("environmentName", environment.environmentName());
-    }
-    if (environment.workspaceReference() == null) {
-      node.putNull("workspaceReference");
-    } else {
-      node.put("workspaceReference", environment.workspaceReference());
-    }
     return node;
   }
 
@@ -280,68 +232,6 @@ public final class RuntimeConfigJsonCodec {
         requiredText(node, "sourceEnvironment", "skill"));
   }
 
-  private static ExecutionPolicySnapshot readPolicy(JsonNode value) {
-    ObjectNode node = requireObject(value, "policy");
-    requireFields(node, POLICY_FIELDS, "policy");
-    int maxTurns = requiredPositiveInt(node, "maxTurns", "policy");
-    int maxDepth = requiredPositiveInt(node, "maxDepth", "policy");
-    int maxDirectSubagents = requiredPositiveInt(node, "maxDirectSubagents", "policy");
-    JsonNode maxTotalNode = node.get("maxTotalSubagents");
-    Integer maxTotalSubagents;
-    if (maxTotalNode == null || maxTotalNode.isNull()) {
-      maxTotalSubagents = null;
-    } else {
-      if (!maxTotalNode.isIntegralNumber() || !maxTotalNode.canConvertToInt()) {
-        throw new IllegalArgumentException("policy.maxTotalSubagents must be integer or null");
-      }
-      int parsed = maxTotalNode.intValue();
-      if (parsed <= 0) {
-        throw new IllegalArgumentException("policy.maxTotalSubagents must be positive");
-      }
-      maxTotalSubagents = parsed;
-    }
-    JsonNode allowedNode = node.get("allowedSubagents");
-    if (!(allowedNode instanceof ArrayNode allowedArray)) {
-      throw new IllegalArgumentException("policy.allowedSubagents must be an array");
-    }
-    // 严格 duplicate / blank 检查：TreeSet 会静默吞重复，违反 strict codec 契约。
-    Set<String> unique = new LinkedHashSet<>();
-    for (JsonNode item : allowedArray) {
-      if (!item.isTextual()) {
-        throw new IllegalArgumentException("policy.allowedSubagents must contain only strings");
-      }
-      String name = item.textValue();
-      if (name == null || name.isBlank()) {
-        throw new IllegalArgumentException(
-            "policy.allowedSubagents must contain non-blank strings");
-      }
-      if (!unique.add(name)) {
-        throw new IllegalArgumentException(
-            "policy.allowedSubagents contains duplicate entry: " + name);
-      }
-    }
-    TreeSet<String> sorted = new TreeSet<>(unique);
-    boolean yoloEnabled = requiredBoolean(node, "yoloEnabled", "policy");
-    return new ExecutionPolicySnapshot(
-        maxTurns,
-        maxDepth,
-        maxDirectSubagents,
-        maxTotalSubagents,
-        List.copyOf(sorted),
-        yoloEnabled);
-  }
-
-  private static EnvironmentSnapshot readEnvironment(JsonNode value) {
-    ObjectNode node = requireObject(value, "environment");
-    requireFields(node, ENVIRONMENT_FIELDS, "environment");
-    JsonNode envNameNode = node.get("environmentName");
-    String environmentName = readOptionalCanonicalText(envNameNode, "environment.environmentName");
-    JsonNode workspaceNode = node.get("workspaceReference");
-    String workspaceReference =
-        readOptionalCanonicalText(workspaceNode, "environment.workspaceReference");
-    return new EnvironmentSnapshot(environmentName, workspaceReference);
-  }
-
   // ---------- Helpers ----------
 
   private static String write(ObjectNode node) {
@@ -397,40 +287,12 @@ public final class RuntimeConfigJsonCodec {
     return value.longValue();
   }
 
-  private static int requiredPositiveInt(ObjectNode node, String field, String context) {
-    JsonNode value = node.get(field);
-    if (value == null
-        || !value.isIntegralNumber()
-        || !value.canConvertToInt()
-        || value.intValue() <= 0) {
-      throw new IllegalArgumentException(context + "." + field + " must be a positive integer");
-    }
-    return value.intValue();
-  }
-
   private static boolean requiredBoolean(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (value == null || !value.isBoolean()) {
       throw new IllegalArgumentException(context + "." + field + " must be boolean");
     }
     return value.booleanValue();
-  }
-
-  private static String readOptionalCanonicalText(JsonNode value, String name) {
-    if (value == null || value.isNull()) {
-      return null;
-    }
-    if (!value.isTextual()) {
-      throw new IllegalArgumentException(name + " must be text or null");
-    }
-    String text = value.textValue();
-    if (text == null || text.isBlank()) {
-      throw new IllegalArgumentException(name + " must not be blank when present");
-    }
-    if (!text.equals(text.trim())) {
-      throw new IllegalArgumentException(name + " must not have leading or trailing whitespace");
-    }
-    return text;
   }
 
   private static void requireFields(ObjectNode node, Set<String> expected, String name) {

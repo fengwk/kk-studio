@@ -13,15 +13,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import fun.fengwk.kkstudio.core.harness.thread.command.TestThreads;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.configuration.AgentSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.EnvironmentSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.ExecutionPolicySnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -71,7 +68,6 @@ import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -609,13 +605,8 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
             2,
             ProviderType.OPENAI,
             "model",
-            "model",
-            1024,
-            512,
-            EnumSet.of(ModelInputModality.TEXT),
             !tools.isEmpty(),
             false,
-            List.of(variant),
             pricing,
             PromptCachePolicy.disabled());
     return new RuntimeConfigInputPayload(
@@ -625,8 +616,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
             new ModelSnapshot(descriptor, variant),
             tools,
             List.of(),
-            new ExecutionPolicySnapshot(1, 1, 1, null, List.of(), false),
-            new EnvironmentSnapshot("environment", "workspace")));
+            false));
   }
 
   private static RuntimeEntryInputPayload user(String text) {

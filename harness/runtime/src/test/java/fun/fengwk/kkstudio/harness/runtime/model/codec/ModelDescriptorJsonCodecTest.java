@@ -13,7 +13,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
@@ -31,8 +30,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJ
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * {@link ModelDescriptorJsonCodec} 的契约与 round-trip 测试，覆盖 descriptor 与 variant 完整字段、所有 strict
@@ -58,44 +57,7 @@ class ModelDescriptorJsonCodecTest {
     assertEquals(json, codec.encodeDescriptor(decoded));
   }
 
-  /** 空 enum modalities + 空 variants + 空 stopSequences 的 descriptor 必须等价。 */
-  @Test
-  void roundTripsEmptyCollections() {
-    ModelVariant variant =
-        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
-    ModelDescriptor descriptor =
-        new ModelDescriptor(
-            1,
-            2,
-            ProviderType.OPENAI,
-            "m",
-            "d",
-            100,
-            50,
-            EnumSet.of(ModelInputModality.TEXT),
-            false,
-            false,
-            List.of(variant),
-            new ModelPricing(
-                "USD",
-                "t",
-                "s",
-                BigDecimal.ONE,
-                "v",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO),
-            PromptCachePolicy.disabled());
-
-    String json = codec.encodeDescriptor(descriptor);
-    ModelDescriptor decoded = codec.decodeDescriptor(json);
-    assertEquals(descriptor, decoded);
-  }
-
-  /** Variant 完整字段 + nullable 字段必须按 wire 输出，且 decode 后保留 null。 */
+  /** variant 完整字段 + nullable 字段必须按 wire 输出，且 decode 后保留 null。 */
   @Test
   void roundTripsVariantWithAllNullables() {
     ModelVariant variant =
@@ -135,18 +97,8 @@ class ModelDescriptorJsonCodecTest {
             20,
             ProviderType.ANTHROPIC,
             "claude",
-            "Claude",
-            200_000,
-            8_192,
-            EnumSet.of(
-                ModelInputModality.VIDEO,
-                ModelInputModality.TEXT,
-                ModelInputModality.AUDIO,
-                ModelInputModality.IMAGE,
-                ModelInputModality.DOCUMENT),
             true,
             true,
-            List.of(),
             new ModelPricing(
                 "USD",
                 "t",
@@ -161,22 +113,12 @@ class ModelDescriptorJsonCodecTest {
                 BigDecimal.ZERO),
             new PromptCachePolicy(
                 PromptCacheCapability.breakpoints(
-                    EnumSet.of(PromptCacheRetention.LONG, PromptCacheRetention.SHORT),
-                    EnumSet.of(PromptCacheBreakpoint.TOOLS, PromptCacheBreakpoint.SYSTEM)),
+                    Set.of(PromptCacheRetention.LONG, PromptCacheRetention.SHORT),
+                    Set.of(PromptCacheBreakpoint.TOOLS, PromptCacheBreakpoint.SYSTEM)),
                 PromptCacheRetention.LONG));
 
     String json = codec.encodeDescriptor(descriptor);
     JsonNode root = OBJECT_MAPPER.readTree(json);
-    ArrayNode modalities = (ArrayNode) root.get("inputModalities");
-    assertEquals(
-        List.of("AUDIO", "DOCUMENT", "IMAGE", "TEXT", "VIDEO"),
-        List.of(
-            modalities.get(0).asText(),
-            modalities.get(1).asText(),
-            modalities.get(2).asText(),
-            modalities.get(3).asText(),
-            modalities.get(4).asText()));
-
     ArrayNode retentions =
         (ArrayNode) root.get("promptCachePolicy").get("capability").get("supportedRetentions");
     assertEquals(
@@ -213,13 +155,8 @@ class ModelDescriptorJsonCodecTest {
             "modelResourceId",
             "providerType",
             "modelId",
-            "displayName",
-            "contextWindow",
-            "maxOutputTokens",
-            "inputModalities",
             "tools",
             "reasoning",
-            "variants",
             "pricing",
             "promptCachePolicy"),
         List.of(
@@ -230,12 +167,7 @@ class ModelDescriptorJsonCodecTest {
             names.get(4).asText(),
             names.get(5).asText(),
             names.get(6).asText(),
-            names.get(7).asText(),
-            names.get(8).asText(),
-            names.get(9).asText(),
-            names.get(10).asText(),
-            names.get(11).asText(),
-            names.get(12).asText()));
+            names.get(7).asText()));
   }
 
   // ---------- Strict rejection ----------
@@ -252,7 +184,7 @@ class ModelDescriptorJsonCodecTest {
   @Test
   void rejectsMissingDescriptorField() {
     ObjectNode node = canonicalDescriptorNode();
-    node.remove("displayName");
+    node.remove("modelId");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
   }
 
@@ -260,7 +192,7 @@ class ModelDescriptorJsonCodecTest {
   @Test
   void rejectsWrongTypedDescriptorField() {
     ObjectNode node = canonicalDescriptorNode();
-    node.put("contextWindow", "100");
+    node.put("tools", "true");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
   }
 
@@ -272,15 +204,6 @@ class ModelDescriptorJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
   }
 
-  /** maxOutputTokens > contextWindow 必须拒绝。 */
-  @Test
-  void rejectsMaxOutputTokensExceedingContextWindow() {
-    ObjectNode node = canonicalDescriptorNode();
-    node.put("contextWindow", 100);
-    node.put("maxOutputTokens", 101);
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
-  }
-
   /** 未知 providerType 必须拒绝。 */
   @Test
   void rejectsUnknownProviderType() {
@@ -289,102 +212,11 @@ class ModelDescriptorJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
   }
 
-  /** inputModalities 非 string 元素必须拒绝。 */
-  @Test
-  void rejectsNonStringModality() {
-    ObjectNode node = canonicalDescriptorNode();
-    ArrayNode mods = (ArrayNode) node.get("inputModalities");
-    mods.set(0, NODES.numberNode(1));
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
-  }
-
-  /** 未知 modality 名必须拒绝。 */
-  @Test
-  void rejectsUnknownModality() {
-    ObjectNode node = canonicalDescriptorNode();
-    ArrayNode mods = (ArrayNode) node.get("inputModalities");
-    mods.set(0, NODES.textNode("HOLOGRAM"));
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
-  }
-
-  /** inputModalities 含重复 enum name 必须拒绝（TreeSet 不能静默吞掉）。 */
-  @Test
-  void rejectsDuplicateModality() {
-    ObjectNode node = canonicalDescriptorNode();
-    ArrayNode mods = (ArrayNode) node.get("inputModalities");
-    mods.add(NODES.textNode("TEXT"));
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
-  }
-
-  /** nested supportedRetentions 含重复 enum name 必须拒绝。 */
-  @Test
-  void rejectsDuplicateSupportedRetention() {
-    ObjectNode node = canonicalDescriptorNode();
-    ObjectNode capability = (ObjectNode) node.get("promptCachePolicy").get("capability");
-    ArrayNode retentions = (ArrayNode) capability.get("supportedRetentions");
-    retentions.add(NODES.textNode("SHORT"));
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
-  }
-
-  /** nested supportedBreakpoints 含重复 enum name 必须拒绝。 */
-  @Test
-  void rejectsDuplicateSupportedBreakpoint() {
-    ObjectNode node = canonicalDescriptorNode();
-    ObjectNode capability = (ObjectNode) node.get("promptCachePolicy").get("capability");
-    ArrayNode breakpoints = (ArrayNode) capability.get("supportedBreakpoints");
-    breakpoints.add(NODES.textNode("SYSTEM"));
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
-  }
-
-  /** 即便重复 enum 名合法（如 TEXT 出现两次），也必须拒绝，与 set 语义保持一致。 */
-  @Test
-  void rejectsDuplicateEnumEvenWhenAllAreKnown() {
-    ObjectNode node = canonicalDescriptorNode();
-    ArrayNode mods = (ArrayNode) node.get("inputModalities");
-    mods.add(NODES.textNode("AUDIO"));
-    IllegalArgumentException error =
-        assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
-    assertTrue(error.getMessage().contains("duplicate"));
-  }
-
   /** 未知 variant 字段必须拒绝。 */
   @Test
   void rejectsUnknownVariantField() {
     ObjectNode node = canonicalDescriptorNode();
-    ((ObjectNode) node.get("variants").get(0)).put("extra", true);
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
-  }
-
-  /** 缺失 variant 字段必须拒绝。 */
-  @Test
-  void rejectsMissingVariantField() {
-    ObjectNode node = canonicalDescriptorNode();
-    ((ObjectNode) node.get("variants").get(0)).remove("id");
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
-  }
-
-  /** variant 错误类型必须拒绝。 */
-  @Test
-  void rejectsWrongTypedVariantField() {
-    ObjectNode node = canonicalDescriptorNode();
-    ((ObjectNode) node.get("variants").get(0)).put("temperature", "0.2");
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
-  }
-
-  /** variant 非有限 double 必须拒绝。 */
-  @Test
-  void rejectsNonFiniteVariantDouble() {
-    ObjectNode node = canonicalDescriptorNode();
-    ((ObjectNode) node.get("variants").get(0)).put("temperature", Double.NaN);
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
-  }
-
-  /** variant stopSequences 含空白字符串必须拒绝。 */
-  @Test
-  void rejectsBlankStopSequence() {
-    ObjectNode node = canonicalDescriptorNode();
-    ArrayNode stops = (ArrayNode) node.get("variants").get(0).get("stopSequences");
-    stops.set(0, NODES.textNode(" "));
+    node.put("extra", true);
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
   }
 
@@ -392,7 +224,6 @@ class ModelDescriptorJsonCodecTest {
   @Test
   void rejectsUnknownPricingField() {
     ObjectNode node = canonicalDescriptorNode();
-    node.get("pricing").getClass(); // sanity
     ObjectNode pricing = (ObjectNode) node.get("pricing");
     pricing.put("extra", true);
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
@@ -402,7 +233,6 @@ class ModelDescriptorJsonCodecTest {
   @Test
   void rejectsUnknownPromptCacheMode() {
     ObjectNode node = canonicalDescriptorNode();
-    node.get("promptCachePolicy").get("capability");
     ObjectNode capability = (ObjectNode) node.get("promptCachePolicy").get("capability");
     capability.put("mode", "MANUAL");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
@@ -441,9 +271,8 @@ class ModelDescriptorJsonCodecTest {
         "{"
             + "\"providerResourceId\":1,\"providerResourceId\":2,"
             + "\"modelResourceId\":3,\"providerType\":\"OPENAI\",\"modelId\":\"x\","
-            + "\"displayName\":\"d\",\"contextWindow\":100,\"maxOutputTokens\":50,"
-            + "\"inputModalities\":[\"TEXT\"],\"tools\":false,\"reasoning\":false,"
-            + "\"variants\":[],\"pricing\":{\"currency\":\"USD\",\"pricingTier\":\"t\","
+            + "\"tools\":false,\"reasoning\":false,"
+            + "\"pricing\":{\"currency\":\"USD\",\"pricingTier\":\"t\","
             + "\"serviceTier\":\"s\",\"serviceTierMultiplier\":\"1\",\"version\":\"v\","
             + "\"inputPerMillionTokens\":\"0\",\"outputPerMillionTokens\":\"0\","
             + "\"cacheReadPerMillionTokens\":\"0\",\"cacheWritePerMillionTokens\":\"0\","
@@ -458,30 +287,14 @@ class ModelDescriptorJsonCodecTest {
   /** 边界：providerResourceId 必须正整数（0 / 负数 / 字符串拒绝）。 */
   @Test
   void rejectsProviderResourceIdBoundary() {
-    assertRejectsNumericBoundary("providerResourceId");
-  }
-
-  /** 边界：contextWindow 必须正整数。 */
-  @Test
-  void rejectsContextWindowBoundary() {
-    assertRejectsNumericBoundary("contextWindow");
-  }
-
-  /** 边界：maxOutputTokens 必须正整数。 */
-  @Test
-  void rejectsMaxOutputTokensBoundary() {
-    assertRejectsNumericBoundary("maxOutputTokens");
-  }
-
-  private void assertRejectsNumericBoundary(String field) {
     ObjectNode zero = canonicalDescriptorNode();
-    zero.put(field, 0);
+    zero.put("providerResourceId", 0);
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(zero));
     ObjectNode neg = canonicalDescriptorNode();
-    neg.put(field, -1);
+    neg.put("providerResourceId", -1);
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(neg));
     ObjectNode str = canonicalDescriptorNode();
-    str.put(field, "10");
+    str.put("providerResourceId", "10");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(str));
   }
 
@@ -520,10 +333,10 @@ class ModelDescriptorJsonCodecTest {
    * 抽取后 wire bit-identical。
    *
    * <p>{@code ProviderRequestJsonCodec.encode} 输出的 JSON 经 parse 后，整型字段（{@code providerResourceId} /
-   * {@code modelResourceId} / {@code contextWindow} 等）会以 Jackson 默认的最小宽度 numeric node 表示（{@code
-   * IntNode}），而共享 codec 的直接 encodeNode 路径会保留 {@code LongNode}； 两棵 {@link JsonNode} 树虽然文本完全一致，但
-   * {@code JsonNode#equals} 在不同 numeric node 子类上会返回 {@code false}。因此本测试只比较 canonical serialized
-   * wire 文本；同时保留通过 shared codec 反向解码的 对象相等断言，确保两端语义等价。
+   * {@code modelResourceId} 等）会以 Jackson 默认的最小宽度 numeric node 表示（{@code IntNode}），而共享 codec 的直接
+   * encodeNode 路径会保留 {@code LongNode}； 两棵 {@link JsonNode} 树虽然文本完全一致，但 {@code JsonNode#equals} 在不同
+   * numeric node 子类上会返回 {@code false}。因此本测试只比较 canonical serialized wire 文本；同时保留通过 shared codec
+   * 反向解码的 对象相等断言，确保两端语义等价。
    */
   @Test
   void sharedCodecMatchesCanonicalProviderFixture() throws Exception {
@@ -556,27 +369,16 @@ class ModelDescriptorJsonCodecTest {
         2002L,
         ProviderType.OPENAI,
         "gpt-5-mini",
-        "GPT-5 Mini",
-        200_000L,
-        16_384L,
-        EnumSet.of(
-            ModelInputModality.TEXT,
-            ModelInputModality.IMAGE,
-            ModelInputModality.AUDIO,
-            ModelInputModality.VIDEO,
-            ModelInputModality.DOCUMENT),
         true,
         true,
-        List.of(
-            new ModelVariant("default", null, 0.7, 0.9, null, null, null, List.of("STOP"), null)),
         canonicalPricing(),
         PromptCachePolicy.breakpointsShort(canonicalCapability()));
   }
 
   private static PromptCacheCapability canonicalCapability() {
     return PromptCacheCapability.breakpoints(
-        EnumSet.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
-        EnumSet.of(PromptCacheBreakpoint.TOOLS, PromptCacheBreakpoint.SYSTEM));
+        Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
+        Set.of(PromptCacheBreakpoint.TOOLS, PromptCacheBreakpoint.SYSTEM));
   }
 
   private static ModelPricing canonicalPricing() {

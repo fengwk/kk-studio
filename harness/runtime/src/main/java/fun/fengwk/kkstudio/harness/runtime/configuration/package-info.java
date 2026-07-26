@@ -4,9 +4,9 @@
  * <p>{@link RuntimeConfigSnapshot} 实现 {@link
  * fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload} 且 {@link
  * fun.fengwk.kkstudio.harness.runtime.entry.EntryType#RUNTIME_CONFIG type} 自报。聚合冻结 {@link
- * AgentSnapshot} / {@link ModelSnapshot} / 工具绑定 / {@link SkillSnapshot} / {@link
- * ExecutionPolicySnapshot} / {@link EnvironmentSnapshot}；credential reference 走 {@link
- * fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor#providerResourceId}。
+ * AgentSnapshot} / {@link ModelSnapshot} / 工具绑定 / {@link SkillSnapshot} / 顶层 {@code yoloEnabled}
+ * 标志；credential reference 走 {@link
+ * fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor#providerResourceId()}。
  *
  * <p>{@link RuntimeConfigSource} 是 command-time live resource 冻结 SPI（agent 解析与 model 替换）；纯 YOLO 替换由
  * {@link RuntimeConfigSnapshot#withYoloEnabled(boolean)} 承担。

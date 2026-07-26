@@ -8,16 +8,13 @@ import java.util.Objects;
 /**
  * 冻结的 Model 与 effective variant 快照。
  *
- * <p>{@code variant} 必须与 {@code descriptor.variants()} 中某项完全相等（{@link ModelVariant#equals}），否则
- * 视为非法配置组合并拒绝；其它字段仅做非空校验，避免重复构造可变结构。
+ * <p>仅做非空校验。{@code variant} 必须已经过 live resolver 的未知 variant 拒绝流程；descriptor 不再承担 variants 列表，因此本
+ * snapshot 不在构造期重复校验 variant 身份。
  */
 public record ModelSnapshot(ModelDescriptor descriptor, ModelVariant variant) {
 
   public ModelSnapshot {
     descriptor = Objects.requireNonNull(descriptor, "descriptor");
     variant = Objects.requireNonNull(variant, "variant");
-    if (descriptor.variants().stream().noneMatch(variant::equals)) {
-      throw new IllegalArgumentException("variant must equal one of descriptor.variants() entries");
-    }
   }
 }

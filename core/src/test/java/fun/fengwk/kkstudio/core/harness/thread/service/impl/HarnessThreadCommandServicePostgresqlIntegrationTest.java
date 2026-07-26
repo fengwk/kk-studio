@@ -78,13 +78,12 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
     assertEquals(agentSnapshot.agent(), modelSnapshot.agent());
     assertEquals(agentSnapshot.tools(), modelSnapshot.tools());
     assertEquals(agentSnapshot.skills(), modelSnapshot.skills());
-    assertEquals(agentSnapshot.environment(), modelSnapshot.environment());
-    assertEquals(agentSnapshot.policy(), modelSnapshot.policy());
+    assertEquals(agentSnapshot.yoloEnabled(), modelSnapshot.yoloEnabled());
     assertEquals(MODEL_B_ID, modelSnapshot.model().descriptor().modelResourceId());
     assertEquals("fast", modelSnapshot.model().variant().id());
 
     HarnessThreadYoloSetDTO yoloRequest = new HarnessThreadYoloSetDTO();
-    yoloRequest.setYoloEnabled(!modelSnapshot.policy().yoloEnabled());
+    yoloRequest.setYoloEnabled(!modelSnapshot.yoloEnabled());
     yoloRequest.setClientMessageId("yolo-1");
     yoloRequest.setExpectedExecutionEpoch(epoch);
     HarnessThreadInputDTO yoloInput =
@@ -94,8 +93,7 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
     assertEquals(modelSnapshot.model(), yoloSnapshot.model());
     assertEquals(modelSnapshot.tools(), yoloSnapshot.tools());
     assertEquals(modelSnapshot.skills(), yoloSnapshot.skills());
-    assertEquals(modelSnapshot.environment(), yoloSnapshot.environment());
-    assertEquals(!modelSnapshot.policy().yoloEnabled(), yoloSnapshot.policy().yoloEnabled());
+    assertEquals(!modelSnapshot.yoloEnabled(), yoloSnapshot.yoloEnabled());
     assertEquals(1L, agentInput.getSequence());
     assertEquals(2L, modelInput.getSequence());
     assertEquals(3L, yoloInput.getSequence());

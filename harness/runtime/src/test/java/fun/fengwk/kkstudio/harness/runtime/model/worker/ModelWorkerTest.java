@@ -14,7 +14,6 @@ import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -50,7 +49,6 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
@@ -1326,13 +1324,8 @@ class ModelWorkerTest {
             2L,
             ProviderType.OPENAI,
             "model",
-            "Model",
-            4096,
-            1024,
-            Set.of(ModelInputModality.TEXT),
             false,
             false,
-            List.of(variant),
             pricing,
             PromptCachePolicy.disabled());
     return new ProviderRequest(

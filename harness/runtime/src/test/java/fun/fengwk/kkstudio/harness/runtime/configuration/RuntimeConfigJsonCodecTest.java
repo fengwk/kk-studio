@@ -3,8 +3,6 @@ package fun.fengwk.kkstudio.harness.runtime.configuration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -17,7 +15,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
@@ -40,7 +37,6 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -49,7 +45,7 @@ import java.util.Set;
 /**
  * {@link RuntimeConfigJsonCodec} 的契约与 round-trip 测试，覆盖完整 fixture、canonical 排序、strict
  * 拒绝路径、EntryPayload {@link EntryType#RUNTIME_CONFIG} 绑定，以及关键负向边界（重复 provider tool name、重复 skill
- * name、重复 allowedSubagents、variant 不属于 descriptor、optional null 等）。
+ * name、environment 身份不一致、variant 不属于 descriptor、optional null 等）。
  *
  * <p>不变量：codec 必须复用 {@link ToolDescriptorJsonCodec} 与 model codec 的 node API，不复制字段 实现；fixture 在
  * {@code src/test/resources/.../runtime-config.json}。
@@ -97,7 +93,7 @@ class RuntimeConfigJsonCodecTest {
     assertEquals(first, second);
   }
 
-  /** tools / skills / allowedSubagents 经过 canonical 排序后输入顺序无关。 */
+  /** tools / skills 经过 canonical 排序后输入顺序无关。 */
   @Test
   void collectionOrderingIsCanonical() {
     RuntimeConfigSnapshot snapshot = canonicalSnapshot();
@@ -119,10 +115,6 @@ class RuntimeConfigJsonCodecTest {
               + (binding.environmentName() == null ? "" : binding.environmentName()));
     }
     assertEquals(List.of("search@v1@", "shell@v1@sandbox"), toolKeys);
-
-    // allowedSubagents 字典序。
-    List<String> allowed = snapshot.policy().allowedSubagents();
-    assertEquals(List.of("researcher", "writer"), allowed);
   }
 
   /** 输入逆序的工具列表与正序输出等价。 */
@@ -139,16 +131,14 @@ class RuntimeConfigJsonCodecTest {
             canonicalModel(),
             List.of(envShell, platformSearch),
             canonicalSkills(),
-            canonicalPolicy(),
-            canonicalEnvironment());
+            false);
     RuntimeConfigSnapshot ordered =
         new RuntimeConfigSnapshot(
             canonicalAgent(),
             canonicalModel(),
             List.of(platformSearch, envShell),
             canonicalSkills(),
-            canonicalPolicy(),
-            canonicalEnvironment());
+            false);
 
     assertEquals(ordered.tools(), reversed.tools());
     assertEquals(codec.encode(ordered), codec.encode(reversed));
@@ -166,20 +156,11 @@ class RuntimeConfigJsonCodecTest {
             canonicalModel(),
             canonicalTools(),
             List.of(research, codeReview),
-            canonicalPolicy(),
-            canonicalEnvironment());
+            false);
 
     assertEquals(
         List.of("code-review", "research"),
         reversed.skills().stream().map(SkillSnapshot::name).toList());
-  }
-
-  /** 输入逆序的 allowedSubagents 与正序输出等价。 */
-  @Test
-  void allowedSubagentsAreSortedRegardlessOfInputOrder() {
-    ExecutionPolicySnapshot reversed =
-        new ExecutionPolicySnapshot(16, 8, 4, null, List.of("writer", "researcher"), false);
-    assertEquals(List.of("researcher", "writer"), reversed.allowedSubagents());
   }
 
   // ---------- Strict rejection: top-level JSON ----------
@@ -208,19 +189,11 @@ class RuntimeConfigJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
   }
 
-  /** 缺 policy 必须拒绝。 */
+  /** 缺 yoloEnabled 必须拒绝。 */
   @Test
-  void rejectsMissingPolicy() {
+  void rejectsMissingYoloEnabled() {
     ObjectNode root = canonicalNode();
-    root.remove("policy");
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
-  }
-
-  /** 缺 environment 必须拒绝。 */
-  @Test
-  void rejectsMissingEnvironment() {
-    ObjectNode root = canonicalNode();
-    root.remove("environment");
+    root.remove("yoloEnabled");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
   }
 
@@ -251,12 +224,11 @@ class RuntimeConfigJsonCodecTest {
   @Test
   void rejectsDuplicateTopLevelField() {
     String json =
-        "{\"agent\":{},\"agent\":{},"
+        "{\"agent\":{},"
+            + "\"agent\":{},"
             + "\"model\":{\"descriptor\":{},\"variant\":{}},"
             + "\"tools\":[],\"skills\":[],"
-            + "\"policy\":{\"maxTurns\":1,\"maxDepth\":1,\"maxDirectSubagents\":1,"
-            + "\"maxTotalSubagents\":null,\"allowedSubagents\":[],\"yoloEnabled\":false},"
-            + "\"environment\":{\"environmentName\":null,\"workspaceReference\":null}}";
+            + "\"yoloEnabled\":false}";
     assertThrows(IllegalArgumentException.class, () -> codec.decode(json));
   }
 
@@ -277,8 +249,7 @@ class RuntimeConfigJsonCodecTest {
   void acceptsReorderedTopLevelFields() {
     ObjectNode root = canonicalNode();
     ObjectNode reordered = NODES.objectNode();
-    reordered.set("environment", root.get("environment"));
-    reordered.set("policy", root.get("policy"));
+    reordered.set("yoloEnabled", root.get("yoloEnabled"));
     reordered.set("skills", root.get("skills"));
     reordered.set("tools", root.get("tools"));
     reordered.set("model", root.get("model"));
@@ -286,7 +257,18 @@ class RuntimeConfigJsonCodecTest {
     assertEquals(canonicalSnapshot(), codec.decodeNode(reordered));
   }
 
-  /** 跨字段：JSON 解码时 ENVIRONMENT tool environmentName 不匹配 environment.environmentName 必须拒绝。 */
+  /** 跨字段：JSON 解码时 ENVIRONMENT tool 与 skill sourceEnvironment 不一致必须拒绝。 */
+  @Test
+  void decodeRejectsEnvironmentIdentityMismatchBetweenToolAndSkill() {
+    ObjectNode root = canonicalNode();
+    ObjectNode skill = (ObjectNode) ((ArrayNode) root.get("skills")).get(0);
+    skill.put("sourceEnvironment", "other-env");
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
+    assertTrue(error.getMessage().contains("sourceEnvironment"));
+  }
+
+  /** 跨字段：JSON 解码时 ENVIRONMENT tool environmentName 与 skill sourceEnvironment 不一致必须拒绝。 */
   @Test
   void decodeRejectsEnvironmentToolBindingMismatch() {
     ObjectNode root = canonicalNode();
@@ -294,18 +276,7 @@ class RuntimeConfigJsonCodecTest {
     envTool.put("environmentName", "other-env");
     IllegalArgumentException error =
         assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
-    assertTrue(error.getMessage().contains("binding environmentName"));
-  }
-
-  /** 跨字段：JSON 解码时 skill.sourceEnvironment 不匹配 environment.environmentName 必须拒绝。 */
-  @Test
-  void decodeRejectsSkillSourceEnvironmentMismatch() {
-    ObjectNode root = canonicalNode();
-    ObjectNode skill = (ObjectNode) ((ArrayNode) root.get("skills")).get(0);
-    skill.put("sourceEnvironment", "other-env");
-    IllegalArgumentException error =
-        assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
-    assertTrue(error.getMessage().contains("sourceEnvironment"));
+    assertTrue(error.getMessage().contains("environment identity"));
   }
 
   /** 跨字段：JSON 解码时 model.descriptor.tools=false 但 tools 非空必须拒绝。 */
@@ -394,119 +365,13 @@ class RuntimeConfigJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
   }
 
-  // ---------- Strict rejection: policy ----------
+  // ---------- Strict rejection: yoloEnabled ----------
 
-  /** policy 缺字段必须拒绝。 */
-  @Test
-  void rejectsPolicyMissingField() {
-    ObjectNode root = canonicalNode();
-    root.get("policy");
-    ObjectNode policy = (ObjectNode) root.get("policy");
-    policy.remove("yoloEnabled");
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
-  }
-
-  /** policy 未知字段必须拒绝。 */
-  @Test
-  void rejectsPolicyUnknownField() {
-    ObjectNode root = canonicalNode();
-    ((ObjectNode) root.get("policy")).put("extra", 1);
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
-  }
-
-  /** policy maxTurns <= 0 必须拒绝。 */
-  @Test
-  void rejectsNonPositiveMaxTurns() {
-    ObjectNode root = canonicalNode();
-    ((ObjectNode) root.get("policy")).put("maxTurns", 0);
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
-  }
-
-  /** policy maxTotalSubagents 显式 0 必须拒绝。 */
-  @Test
-  void rejectsZeroMaxTotalSubagents() {
-    ObjectNode root = canonicalNode();
-    ((ObjectNode) root.get("policy")).put("maxTotalSubagents", 0);
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
-  }
-
-  /** policy maxTotalSubagents 显式 null 合法（decoder 接受 null）。 */
-  @Test
-  void acceptsNullMaxTotalSubagents() {
-    ObjectNode root = canonicalNode();
-    ((ObjectNode) root.get("policy")).putNull("maxTotalSubagents");
-    RuntimeConfigSnapshot decoded = codec.decodeNode(root);
-    assertNull(decoded.policy().maxTotalSubagents());
-  }
-
-  /** policy.allowedSubagents 含空白字符串必须拒绝。 */
-  @Test
-  void rejectsBlankAllowedSubagent() {
-    ObjectNode root = canonicalNode();
-    ArrayNode allowed = (ArrayNode) root.get("policy").get("allowedSubagents");
-    allowed.set(0, NODES.textNode(" "));
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
-  }
-
-  /** policy.allowedSubagents 含重复 entry 必须拒绝。 */
-  @Test
-  void rejectsDuplicateAllowedSubagent() {
-    ObjectNode root = canonicalNode();
-    ArrayNode allowed = (ArrayNode) root.get("policy").get("allowedSubagents");
-    allowed.add(NODES.textNode("researcher"));
-    IllegalArgumentException error =
-        assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
-    assertTrue(error.getMessage().contains("duplicate"));
-  }
-
-  /** policy.allowedSubagents 非 array 必须拒绝。 */
-  @Test
-  void rejectsNonArrayAllowedSubagents() {
-    ObjectNode root = canonicalNode();
-    ((ObjectNode) root.get("policy")).put("allowedSubagents", "x");
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
-  }
-
-  /** policy.yoloEnabled 非 boolean 必须拒绝。 */
+  /** yoloEnabled 非 boolean 必须拒绝。 */
   @Test
   void rejectsNonBooleanYoloEnabled() {
     ObjectNode root = canonicalNode();
-    ((ObjectNode) root.get("policy")).put("yoloEnabled", "yes");
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
-  }
-
-  // ---------- Strict rejection: environment ----------
-
-  /** environment.environmentName 空白必须拒绝。 */
-  @Test
-  void rejectsBlankEnvironmentName() {
-    ObjectNode root = canonicalNode();
-    ((ObjectNode) root.get("environment")).put("environmentName", "");
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
-  }
-
-  /** environment.environmentName 首尾空白必须拒绝。 */
-  @Test
-  void rejectsSurroundingWhitespaceEnvironmentName() {
-    ObjectNode root = canonicalNode();
-    ((ObjectNode) root.get("environment")).put("environmentName", " default");
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
-  }
-
-  /** environment.workspaceReference null 合法。 */
-  @Test
-  void acceptsNullWorkspaceReference() {
-    ObjectNode root = canonicalNode();
-    ((ObjectNode) root.get("environment")).putNull("workspaceReference");
-    RuntimeConfigSnapshot decoded = codec.decodeNode(root);
-    assertNull(decoded.environment().workspaceReference());
-  }
-
-  /** environment 未知字段必须拒绝。 */
-  @Test
-  void rejectsEnvironmentUnknownField() {
-    ObjectNode root = canonicalNode();
-    ((ObjectNode) root.get("environment")).put("extra", true);
+    root.put("yoloEnabled", "yes");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
   }
 
@@ -564,21 +429,6 @@ class RuntimeConfigJsonCodecTest {
 
   // ---------- Strict rejection: model ----------
 
-  /** model.variant 必须属于 model.descriptor.variants；外部替换 variant 必须拒绝。 */
-  @Test
-  void rejectsVariantNotInDescriptor() {
-    ModelVariant foreignVariant =
-        new ModelVariant("alien", null, 0.7, 0.9, null, null, null, List.of(), null);
-    ObjectNode root = canonicalNode();
-    root.get("model").get("variant");
-    ObjectNode variant = (ObjectNode) root.get("model").get("variant");
-    variant.put("id", "alien");
-    IllegalArgumentException error =
-        assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
-    assertTrue(error.getMessage().contains("variant"));
-    assertNotNull(foreignVariant); // 仅用于 IDE：保留构造
-  }
-
   /** model 未知字段必须拒绝。 */
   @Test
   void rejectsModelUnknownField() {
@@ -619,14 +469,12 @@ class RuntimeConfigJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
   }
 
-  /** agent / policy / environment 顶层显式 JSON null 必须拒绝。 */
+  /** agent 顶层显式 JSON null 必须拒绝。 */
   @Test
-  void rejectsExplicitNullOtherTopLevelObjects() {
-    for (String field : new String[] {"agent", "policy", "environment"}) {
-      ObjectNode root = canonicalNode();
-      root.putNull(field);
-      assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root), field);
-    }
+  void rejectsExplicitNullAgentTopLevel() {
+    ObjectNode root = canonicalNode();
+    root.putNull("agent");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(root));
   }
 
   // ---------- Secret hygiene ----------
@@ -675,20 +523,11 @@ class RuntimeConfigJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> new AgentSnapshot(1L, " ", ""));
   }
 
-  /** ModelSnapshot.variant 必须属于 descriptor.variants。 */
-  @Test
-  void modelSnapshotRejectsForeignVariant() {
-    ModelDescriptor descriptor = canonicalDescriptor();
-    ModelVariant foreign =
-        new ModelVariant("alien", null, 0.1, 0.9, null, null, null, List.of(), null);
-    assertThrows(IllegalArgumentException.class, () -> new ModelSnapshot(descriptor, foreign));
-  }
-
   /** ModelSnapshot 非空校验。 */
   @Test
   void modelSnapshotRejectsNullFields() {
     ModelDescriptor descriptor = canonicalDescriptor();
-    ModelVariant variant = canonicalDescriptor().variants().get(0);
+    ModelVariant variant = canonicalVariant();
     assertThrows(NullPointerException.class, () -> new ModelSnapshot(null, variant));
     assertThrows(NullPointerException.class, () -> new ModelSnapshot(descriptor, null));
   }
@@ -699,62 +538,6 @@ class RuntimeConfigJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> new SkillSnapshot("", "d", "e"));
     assertThrows(IllegalArgumentException.class, () -> new SkillSnapshot("n", " ", "e"));
     assertThrows(IllegalArgumentException.class, () -> new SkillSnapshot("n", "d", " "));
-  }
-
-  /** ExecutionPolicySnapshot 正数校验。 */
-  @Test
-  void executionPolicyRejectsNonPositiveFields() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ExecutionPolicySnapshot(0, 1, 1, null, List.of(), false));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ExecutionPolicySnapshot(1, 0, 1, null, List.of(), false));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ExecutionPolicySnapshot(1, 1, 0, null, List.of(), false));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ExecutionPolicySnapshot(1, 1, 1, 0, List.of(), false));
-  }
-
-  /** ExecutionPolicySnapshot.allowedSubagents 非空 / 唯一 / canonical 字典序。 */
-  @Test
-  void executionPolicyCanonicalizesAllowedSubagents() {
-    ExecutionPolicySnapshot policy =
-        new ExecutionPolicySnapshot(1, 1, 1, null, List.of("writer", "researcher"), false);
-    assertEquals(List.of("researcher", "writer"), policy.allowedSubagents());
-  }
-
-  @Test
-  void executionPolicyRejectsDuplicateAllowedSubagent() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ExecutionPolicySnapshot(1, 1, 1, null, List.of("x", "x"), false));
-  }
-
-  @Test
-  void executionPolicyRejectsBlankAllowedSubagent() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ExecutionPolicySnapshot(1, 1, 1, null, List.of("x", " "), false));
-  }
-
-  /** EnvironmentSnapshot 接受 null，present 时非空白且无首尾空白。 */
-  @Test
-  void environmentSnapshotAcceptsBothNull() {
-    EnvironmentSnapshot env = new EnvironmentSnapshot(null, null);
-    assertNull(env.environmentName());
-    assertNull(env.workspaceReference());
-  }
-
-  @Test
-  void environmentSnapshotRejectsBlankOrSurroundingWhitespace() {
-    assertThrows(IllegalArgumentException.class, () -> new EnvironmentSnapshot("", null));
-    assertThrows(IllegalArgumentException.class, () -> new EnvironmentSnapshot(" ", null));
-    assertThrows(IllegalArgumentException.class, () -> new EnvironmentSnapshot(" default", null));
-    assertThrows(IllegalArgumentException.class, () -> new EnvironmentSnapshot("default ", null));
-    assertThrows(IllegalArgumentException.class, () -> new EnvironmentSnapshot(null, " ref "));
   }
 
   /** RuntimeConfigSnapshot.tools 中含重复 provider tool name 必须拒绝。 */
@@ -770,8 +553,7 @@ class RuntimeConfigJsonCodecTest {
                 canonicalModel(),
                 List.of(platformSearch, platformSearch),
                 canonicalSkills(),
-                canonicalPolicy(),
-                canonicalEnvironment()));
+                false));
   }
 
   /** RuntimeConfigSnapshot.skills 中含重复 name 必须拒绝。 */
@@ -786,33 +568,26 @@ class RuntimeConfigJsonCodecTest {
                 canonicalModel(),
                 canonicalTools(),
                 List.of(skill, skill),
-                canonicalPolicy(),
-                canonicalEnvironment()));
+                false));
   }
 
   /** 跨字段：tools 非空时 model.descriptor().tools() 必须为 true。 */
   @Test
   void runtimeConfigRejectsNonEmptyToolsWhenDescriptorDisablesTools() {
     ModelDescriptor descriptorNoTools = noToolsDescriptor();
-    ModelSnapshot modelNoTools =
-        new ModelSnapshot(descriptorNoTools, descriptorNoTools.variants().get(0));
+    ModelSnapshot modelNoTools = new ModelSnapshot(descriptorNoTools, canonicalVariant());
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class,
             () ->
                 new RuntimeConfigSnapshot(
-                    canonicalAgent(),
-                    modelNoTools,
-                    canonicalTools(),
-                    canonicalSkills(),
-                    canonicalPolicy(),
-                    canonicalEnvironment()));
+                    canonicalAgent(), modelNoTools, canonicalTools(), canonicalSkills(), false));
     assertTrue(error.getMessage().contains("model.descriptor().tools()"));
   }
 
-  /** 跨字段：ENVIRONMENT tool 的 environmentName 必须等于 environment.environmentName。 */
+  /** 跨字段：ENVIRONMENT tool 的 environmentName 必须与 skill.sourceEnvironment 一致。 */
   @Test
-  void runtimeConfigRejectsEnvironmentToolBindingMismatch() {
+  void runtimeConfigRejectsEnvironmentIdentityMismatch() {
     ToolBinding wrongBinding =
         ToolBinding.of(environmentDescriptor("shell", "v1", "shell", "sandbox"), "other-env");
     IllegalArgumentException error =
@@ -823,10 +598,9 @@ class RuntimeConfigJsonCodecTest {
                     canonicalAgent(),
                     canonicalModel(),
                     List.of(wrongBinding),
-                    List.of(),
-                    canonicalPolicy(),
-                    canonicalEnvironment()));
-    assertTrue(error.getMessage().contains("binding environmentName"));
+                    List.of(new SkillSnapshot("a", "b", "sandbox")),
+                    false));
+    assertTrue(error.getMessage().contains("environment identity"));
   }
 
   /** 跨字段：ENVIRONMENT tool 缺 environmentName 被 {@link ToolBinding} 自身校验拒绝——本快照不可越层构造。 */
@@ -850,41 +624,6 @@ class RuntimeConfigJsonCodecTest {
     assertTrue(error.getMessage().contains("ENVIRONMENT tools require environmentName"));
   }
 
-  /** 跨字段：skills 非空时 environment.environmentName 必须存在。 */
-  @Test
-  void runtimeConfigRejectsSkillsWithoutEnvironmentName() {
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                new RuntimeConfigSnapshot(
-                    canonicalAgent(),
-                    canonicalModel(),
-                    List.of(),
-                    List.of(new SkillSnapshot("a", "b", "sandbox")),
-                    canonicalPolicy(),
-                    new EnvironmentSnapshot(null, null)));
-    assertTrue(error.getMessage().contains("skills is non-empty"));
-  }
-
-  /** 跨字段：skill.sourceEnvironment 必须等于 environment.environmentName。 */
-  @Test
-  void runtimeConfigRejectsSkillSourceEnvironmentMismatch() {
-    SkillSnapshot foreignSkill = new SkillSnapshot("a", "b", "other-env");
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                new RuntimeConfigSnapshot(
-                    canonicalAgent(),
-                    canonicalModel(),
-                    List.of(),
-                    List.of(foreignSkill),
-                    canonicalPolicy(),
-                    canonicalEnvironment()));
-    assertTrue(error.getMessage().contains("sourceEnvironment"));
-  }
-
   /** 跨字段 PLATFORM 工具不要求 environment。 */
   @Test
   void runtimeConfigAcceptsPlatformToolWithoutEnvironmentName() {
@@ -894,23 +633,16 @@ class RuntimeConfigJsonCodecTest {
             canonicalModel(),
             List.of(ToolBinding.of(platformDescriptor("search", "v1", "search helper"))),
             List.of(),
-            canonicalPolicy(),
-            canonicalEnvironment());
+            false);
     assertEquals(1, snapshot.tools().size());
     assertEquals(ToolExecutionLocation.PLATFORM, snapshot.tools().get(0).location());
   }
 
-  /** 跨字段空 tools + 空 skills 仍然合法（environment.environmentName 可空）。 */
+  /** 跨字段空 tools + 空 skills 仍然合法（environment identity 可空）。 */
   @Test
   void runtimeConfigAcceptsEmptyToolsAndSkills() {
     RuntimeConfigSnapshot snapshot =
-        new RuntimeConfigSnapshot(
-            canonicalAgent(),
-            canonicalModel(),
-            List.of(),
-            List.of(),
-            canonicalPolicy(),
-            new EnvironmentSnapshot(null, null));
+        new RuntimeConfigSnapshot(canonicalAgent(), canonicalModel(), List.of(), List.of(), false);
     assertEquals(0, snapshot.tools().size());
     assertEquals(0, snapshot.skills().size());
   }
@@ -921,14 +653,8 @@ class RuntimeConfigJsonCodecTest {
         8001L,
         ProviderType.OPENAI,
         "gpt-5-mini",
-        "GPT-5 Mini",
-        200_000L,
-        16_384L,
-        EnumSet.of(ModelInputModality.TEXT),
         false,
         true,
-        List.of(
-            new ModelVariant("balanced", null, 0.2, 0.9, null, null, null, List.of("STOP"), null)),
         new ModelPricing(
             "USD",
             "tier-1",
@@ -968,12 +694,7 @@ class RuntimeConfigJsonCodecTest {
 
   private static RuntimeConfigSnapshot canonicalSnapshot() {
     return new RuntimeConfigSnapshot(
-        canonicalAgent(),
-        canonicalModel(),
-        canonicalTools(),
-        canonicalSkills(),
-        canonicalPolicy(),
-        canonicalEnvironment());
+        canonicalAgent(), canonicalModel(), canonicalTools(), canonicalSkills(), false);
   }
 
   private static AgentSnapshot canonicalAgent() {
@@ -981,8 +702,11 @@ class RuntimeConfigJsonCodecTest {
   }
 
   private static ModelSnapshot canonicalModel() {
-    ModelDescriptor descriptor = canonicalDescriptor();
-    return new ModelSnapshot(descriptor, descriptor.variants().get(0));
+    return new ModelSnapshot(canonicalDescriptor(), canonicalVariant());
+  }
+
+  private static ModelVariant canonicalVariant() {
+    return new ModelVariant("balanced", null, 0.2, 0.9, null, null, null, List.of("STOP"), null);
   }
 
   private static ModelDescriptor canonicalDescriptor() {
@@ -991,19 +715,8 @@ class RuntimeConfigJsonCodecTest {
         8001L,
         ProviderType.OPENAI,
         "gpt-5-mini",
-        "GPT-5 Mini",
-        200_000L,
-        16_384L,
-        EnumSet.of(
-            ModelInputModality.TEXT,
-            ModelInputModality.IMAGE,
-            ModelInputModality.AUDIO,
-            ModelInputModality.VIDEO,
-            ModelInputModality.DOCUMENT),
         true,
         true,
-        List.of(
-            new ModelVariant("balanced", null, 0.2, 0.9, null, null, null, List.of("STOP"), null)),
         new ModelPricing(
             "USD",
             "tier-1",
@@ -1021,8 +734,8 @@ class RuntimeConfigJsonCodecTest {
 
   private static PromptCacheCapability canonicalCapability() {
     return PromptCacheCapability.breakpoints(
-        EnumSet.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
-        EnumSet.of(PromptCacheBreakpoint.TOOLS, PromptCacheBreakpoint.SYSTEM));
+        Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
+        Set.of(PromptCacheBreakpoint.TOOLS, PromptCacheBreakpoint.SYSTEM));
   }
 
   private static List<ToolBinding> canonicalTools() {
@@ -1035,14 +748,6 @@ class RuntimeConfigJsonCodecTest {
     return List.of(
         new SkillSnapshot("research", "research skill", "sandbox"),
         new SkillSnapshot("code-review", "code review skill", "sandbox"));
-  }
-
-  private static ExecutionPolicySnapshot canonicalPolicy() {
-    return new ExecutionPolicySnapshot(16, 8, 4, null, List.of("researcher", "writer"), false);
-  }
-
-  private static EnvironmentSnapshot canonicalEnvironment() {
-    return new EnvironmentSnapshot("sandbox", null);
   }
 
   private static ToolDescriptor platformDescriptor(

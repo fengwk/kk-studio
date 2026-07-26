@@ -1,13 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime.reconcile;
 
 import fun.fengwk.kkstudio.harness.runtime.configuration.AgentSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.EnvironmentSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.ExecutionPolicySnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
@@ -29,7 +26,6 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 
 /** 共享的 runtime 测试 fixture：Thread、Lease、ThreadInput、ProviderRequest、Clock 工厂。 */
 public final class ReconcileTestSupport {
@@ -88,13 +84,8 @@ public final class ReconcileTestSupport {
             2L,
             ProviderType.OPENAI,
             "gpt-test",
-            "Test",
-            8_192L,
-            4_096L,
-            Set.of(ModelInputModality.TEXT),
             false,
             false,
-            List.of(variant),
             pricing,
             PromptCachePolicy.automatic(PromptCacheCapability.automatic()));
     return new ProviderRequest(model, variant, List.of(), List.of(), ProviderCacheControl.none());
@@ -107,8 +98,7 @@ public final class ReconcileTestSupport {
         new ModelSnapshot(request.model(), request.variant()),
         List.of(),
         List.of(),
-        new ExecutionPolicySnapshot(1, 1, 1, null, List.of(), false),
-        new EnvironmentSnapshot(null, "workspace"));
+        false);
   }
 
   /**

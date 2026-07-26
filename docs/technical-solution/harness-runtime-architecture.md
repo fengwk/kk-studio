@@ -96,7 +96,7 @@ Entry 是 transcript 与运行配置的唯一语义事实，类型：
 - `CUSTOM_MESSAGE`
 - `ASSISTANT_ERROR`
 
-`RUNTIME_CONFIG` 保存一次完整、不可变、已解析的有效运行快照：Agent identity、system prompt、effective model/variant、Tool descriptors/bindings、selected skills、execution/interaction policy、environment/workspace 引用。不保存 secret value；credential 只存稳定 reference。
+`RUNTIME_CONFIG` 保存一次完整、不可变、已解析的有效运行快照：Agent identity、system prompt、effective model/variant、Tool descriptors/bindings、selected skills 与 yolo 开关。不保存 secret value；credential 只存稳定 reference。
 
 配置修改不是 patch fold。每次配置命令都解析并追加完整 `RUNTIME_CONFIG`。任意 Entry head 可独立恢复有效配置。
 

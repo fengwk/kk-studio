@@ -391,13 +391,8 @@ class ModelInvocationTest {
             2,
             ProviderType.OPENAI,
             "model",
-            "Model",
-            4096,
-            1024,
-            Set.of(ModelInputModality.TEXT),
             false,
             false,
-            List.of(variant),
             pricing,
             PromptCachePolicy.disabled());
     return new ProviderRequest(

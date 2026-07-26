@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
@@ -38,7 +37,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -152,13 +150,8 @@ class OpenAiProviderAdapterHttpProbeTest {
             2L,
             ProviderType.OPENAI,
             "MiniMax-M2.7",
-            "MiniMax",
-            4096,
-            256,
-            Set.of(ModelInputModality.TEXT),
             true,
             true,
-            List.of(variant),
             new ModelPricing(
                 "USD",
                 "tier-1",

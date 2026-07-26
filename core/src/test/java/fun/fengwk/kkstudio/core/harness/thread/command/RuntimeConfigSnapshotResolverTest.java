@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
-import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
 import fun.fengwk.kkstudio.harness.runtime.extension.ProviderFactory;
@@ -41,7 +40,6 @@ import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderType;
 
 import java.math.BigDecimal;
-import java.nio.file.Path;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
@@ -70,12 +68,9 @@ class RuntimeConfigSnapshotResolverTest {
     extensions = mock(HarnessExtensionHost.class);
     environments = mock(LiveEnvironmentRegistry.class);
     providerFactory = mock(ProviderFactory.class);
-    HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
-    properties.setEnvironmentRoot(Path.of("/workspace"));
-    properties.setWorkdir(Path.of("project"));
     resolver =
         new RuntimeConfigSnapshotResolver(
-            definitions, configs, models, providers, parser, extensions, environments, properties);
+            definitions, configs, models, providers, parser, extensions, environments);
     when(extensions.providerFactory(ProviderType.OPENAI)).thenReturn(Optional.of(providerFactory));
     when(providerFactory.promptCacheCapability())
         .thenReturn(PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
@@ -112,8 +107,7 @@ class RuntimeConfigSnapshotResolverTest {
         Set.of("read", "shell", "create_goal", "load_skill"),
         Set.copyOf(snapshot.tools().stream().map(b -> b.descriptor().name()).toList()));
     assertEquals("dev", snapshot.skills().getFirst().sourceEnvironment());
-    assertEquals("/workspace/project", snapshot.environment().workspaceReference());
-    assertEquals(true, snapshot.policy().yoloEnabled());
+    assertEquals(true, snapshot.yoloEnabled());
     verify(providerFactory, never()).create(anyString(), anyString());
   }
 
@@ -135,7 +129,7 @@ class RuntimeConfigSnapshotResolverTest {
     assertEquals(current.tools(), replaced.tools());
     assertEquals("fast", replaced.model().variant().id());
     assertEquals(replaced.model(), yolo.model());
-    assertEquals(true, yolo.policy().yoloEnabled());
+    assertEquals(true, yolo.yoloEnabled());
 
     model(4, false, "plain");
     assertThrows(IllegalArgumentException.class, () -> resolver.replaceModel(current, 4, "plain"));

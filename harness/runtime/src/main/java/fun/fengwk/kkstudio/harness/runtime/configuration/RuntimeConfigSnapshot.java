@@ -5,7 +5,6 @@ import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -17,8 +16,7 @@ import java.util.Set;
 /**
  * Session Entry {@link EntryType#RUNTIME_CONFIG} 的完整不可变配置快照。
  *
- * <p>{@code agent} / {@code model} / {@code policy} / {@code environment} 引用校验为非空并冻结。{@code tools}
- * 与 {@code skills} 做 defensive copy：
+ * <p>{@code agent} / {@code model} 引用校验为非空并冻结。{@code tools} 与 {@code skills} 做 defensive copy：
  *
  * <ul>
  *   <li>{@code tools} Provider tool name（{@code descriptor.name}）唯一；按 {@code (name, version,
@@ -30,10 +28,10 @@ import java.util.Set;
  *
  * <ul>
  *   <li>{@code tools} 非空时 {@code model.descriptor().tools()} 必须为 true，否则拒绝。
- *   <li>任一 {@link ToolExecutionLocation#ENVIRONMENT} 工具 binding 的 {@code environmentName} 必须与
- *       {@code environment.environmentName()} 完全相等（且非 null）。
- *   <li>{@code skills} 非空时 {@code environment.environmentName()} 必须存在，且每个 {@link
- *       SkillSnapshot#sourceEnvironment()} 必须完全等于该 environmentName。
+ *   <li>收集 {@link ToolExecutionLocation#ENVIRONMENT} 工具 binding 的 {@code environmentName} 与每个
+ *       {@link SkillSnapshot#sourceEnvironment()}；所有非空 identity 必须完全相等（workspace / global
+ *       environment wrapper 不存在）。{@link ToolExecutionLocation#PLATFORM} 工具 binding 的 {@code
+ *       environmentName} 始终为 null，不参与环境一致性校验。
  * </ul>
  *
  * <p>credential reference 走 {@link ModelDescriptor#providerResourceId()}，由 {@code
@@ -44,19 +42,16 @@ public record RuntimeConfigSnapshot(
     ModelSnapshot model,
     List<ToolBinding> tools,
     List<SkillSnapshot> skills,
-    ExecutionPolicySnapshot policy,
-    EnvironmentSnapshot environment)
+    boolean yoloEnabled)
     implements EntryPayload {
 
   public RuntimeConfigSnapshot {
     Objects.requireNonNull(agent, "agent");
     Objects.requireNonNull(model, "model");
-    Objects.requireNonNull(policy, "policy");
-    Objects.requireNonNull(environment, "environment");
 
     tools = canonicalizeTools(tools);
     skills = canonicalizeSkills(skills);
-    validateCrossFieldInvariants(tools, skills, environment, model);
+    validateCrossFieldInvariants(tools, skills, model);
   }
 
   /** {@link EntryType#RUNTIME_CONFIG RUNTIME_CONFIG} Entry payload type。 */
@@ -66,23 +61,11 @@ public record RuntimeConfigSnapshot(
   }
 
   /**
-   * Returns a copy with only {@code policy.yoloEnabled} replaced. Pure snapshot transform for
-   * SET_YOLO command orchestration; does not touch live resources.
+   * Returns a copy with only the top-level {@code yoloEnabled} flag replaced. Pure snapshot
+   * transform for SET_YOLO command orchestration; does not touch live resources.
    */
   public RuntimeConfigSnapshot withYoloEnabled(boolean yoloEnabled) {
-    return new RuntimeConfigSnapshot(
-        agent,
-        model,
-        tools,
-        skills,
-        new ExecutionPolicySnapshot(
-            policy.maxTurns(),
-            policy.maxDepth(),
-            policy.maxDirectSubagents(),
-            policy.maxTotalSubagents(),
-            policy.allowedSubagents(),
-            yoloEnabled),
-        environment);
+    return new RuntimeConfigSnapshot(agent, model, tools, skills, yoloEnabled);
   }
 
   /**
@@ -128,10 +111,7 @@ public record RuntimeConfigSnapshot(
   }
 
   private static void validateCrossFieldInvariants(
-      List<ToolBinding> tools,
-      List<SkillSnapshot> skills,
-      EnvironmentSnapshot environment,
-      ModelSnapshot model) {
+      List<ToolBinding> tools, List<SkillSnapshot> skills, ModelSnapshot model) {
 
     ModelDescriptor descriptor = model.descriptor();
 
@@ -140,44 +120,19 @@ public record RuntimeConfigSnapshot(
           "model.descriptor().tools() must be true when tools is non-empty");
     }
 
-    String envName = environment.environmentName();
+    Set<String> environments = new HashSet<>();
     for (ToolBinding binding : tools) {
-      ToolDescriptor tool = binding.descriptor();
       if (binding.location() == ToolExecutionLocation.ENVIRONMENT) {
-        if (envName == null) {
-          throw new IllegalArgumentException(
-              "environment.environmentName must be present for ENVIRONMENT tool: " + tool.name());
-        }
-        if (!envName.equals(binding.environmentName())) {
-          throw new IllegalArgumentException(
-              "ENVIRONMENT tool "
-                  + tool.name()
-                  + " binding environmentName must equal environment.environmentName: '"
-                  + binding.environmentName()
-                  + "' vs '"
-                  + envName
-                  + "'");
-        }
+        environments.add(binding.environmentName());
       }
     }
-
-    if (!skills.isEmpty()) {
-      if (envName == null) {
-        throw new IllegalArgumentException(
-            "environment.environmentName must be present when skills is non-empty");
-      }
-      for (SkillSnapshot skill : skills) {
-        if (!envName.equals(skill.sourceEnvironment())) {
-          throw new IllegalArgumentException(
-              "skill '"
-                  + skill.name()
-                  + "' sourceEnvironment must equal environment.environmentName: '"
-                  + skill.sourceEnvironment()
-                  + "' vs '"
-                  + envName
-                  + "'");
-        }
-      }
+    for (SkillSnapshot skill : skills) {
+      environments.add(skill.sourceEnvironment());
+    }
+    if (environments.size() > 1) {
+      throw new IllegalArgumentException(
+          "environment identity mismatch between tool environmentName and skill sourceEnvironment: "
+              + environments);
     }
   }
 }

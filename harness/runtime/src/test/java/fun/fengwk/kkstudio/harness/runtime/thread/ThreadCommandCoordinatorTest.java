@@ -191,7 +191,7 @@ class ThreadCommandCoordinatorTest {
 
     RuntimeConfigInputPayload payload = (RuntimeConfigInputPayload) transactions.lastPayload;
     assertEquals(ThreadInputType.SET_YOLO, payload.type());
-    assertTrue(payload.snapshot().policy().yoloEnabled());
+    assertTrue(payload.snapshot().yoloEnabled());
     assertEquals(current.agent(), payload.snapshot().agent());
     assertEquals(0, configSource.resolveCalls);
     assertEquals(0, configSource.replaceCalls);

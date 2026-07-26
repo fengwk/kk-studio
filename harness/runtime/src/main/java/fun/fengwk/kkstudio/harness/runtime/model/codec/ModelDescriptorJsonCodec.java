@@ -10,7 +10,6 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
@@ -44,11 +43,9 @@ import java.util.TreeSet;
  * <p>canonical 输出策略：
  *
  * <ul>
- *   <li>对象字段按声明顺序写入；{@link ModelDescriptor} 的 {@code inputModalities} / 嵌套 {@code
- *       PromptCacheCapability.supportedRetentions} / {@code supportedBreakpoints} 等 {@code
- *       Set<Enum>} 字段按 enum name 升序输出。
+ *   <li>对象字段按声明顺序写入；嵌套 {@code PromptCacheCapability.supportedRetentions} / {@code
+ *       supportedBreakpoints} 等 {@code Set<Enum>} 字段按 enum name 升序输出。
  *   <li>{@link BigDecimal} 字段以 {@code toPlainString()} 文本输出。
- *   <li>{@code List<ModelVariant>} 保留输入顺序（schema 允许 provider 自行 canonical 化）。
  *   <li>{@code ModelVariant} 的 nullable 字段（{@code maxOutputTokens} / {@code temperature} 等）显式输出
  *       {@code null} 而非省略，便于 schema 对照。
  * </ul>
@@ -59,24 +56,19 @@ public final class ModelDescriptorJsonCodec {
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
   private static final Comparator<Enum<?>> ENUM_NAME_COMPARATOR = Comparator.comparing(Enum::name);
 
-  /** descriptor 字段顺序（与现有 ProviderRequestJsonCodec 完全一致，保证 wire 兼容）。 */
+  /** descriptor 字段顺序。 */
   private static final Set<String> DESCRIPTOR_FIELDS =
       orderedSet(
           "providerResourceId",
           "modelResourceId",
           "providerType",
           "modelId",
-          "displayName",
-          "contextWindow",
-          "maxOutputTokens",
-          "inputModalities",
           "tools",
           "reasoning",
-          "variants",
           "pricing",
           "promptCachePolicy");
 
-  /** variant 字段顺序（与现有 ProviderRequestJsonCodec 完全一致）。 */
+  /** variant 字段顺序。 */
   private static final Set<String> VARIANT_FIELDS =
       orderedSet(
           "id",
@@ -178,20 +170,8 @@ public final class ModelDescriptorJsonCodec {
     node.put("modelResourceId", descriptor.modelResourceId());
     node.put("providerType", descriptor.providerType().name());
     node.put("modelId", descriptor.modelId());
-    node.put("displayName", descriptor.displayName());
-    node.put("contextWindow", descriptor.contextWindow());
-    node.put("maxOutputTokens", descriptor.maxOutputTokens());
-    ArrayNode modalities = node.putArray("inputModalities");
-    for (ModelInputModality modality :
-        sortedEnums(descriptor.inputModalities(), "inputModalities")) {
-      modalities.add(modality.name());
-    }
     node.put("tools", descriptor.tools());
     node.put("reasoning", descriptor.reasoning());
-    ArrayNode variants = node.putArray("variants");
-    for (ModelVariant variant : descriptor.variants()) {
-      variants.add(writeVariant(variant));
-    }
     node.set("pricing", writePricing(descriptor.pricing()));
     node.set("promptCachePolicy", writeCachePolicy(descriptor.promptCachePolicy()));
     return node;
@@ -208,21 +188,8 @@ public final class ModelDescriptorJsonCodec {
     long providerResourceId = positiveLong(node, "providerResourceId");
     long modelResourceId = positiveLong(node, "modelResourceId");
     String modelId = text(node, "modelId");
-    String displayName = text(node, "displayName");
-    long contextWindow = positiveLong(node, "contextWindow");
-    long maxOutputTokens = positiveLong(node, "maxOutputTokens");
-    if (maxOutputTokens > contextWindow) {
-      throw new IllegalArgumentException("maxOutputTokens must not exceed contextWindow");
-    }
-    Set<ModelInputModality> inputModalities =
-        decodeEnumSet(node.get("inputModalities"), ModelInputModality.class, "inputModalities");
     boolean tools = bool(node, "tools");
     boolean reasoning = bool(node, "reasoning");
-    ArrayNode variants = array(node.get("variants"), "variants");
-    List<ModelVariant> variantList = new ArrayList<>(variants.size());
-    for (JsonNode item : variants) {
-      variantList.add(readVariant(object(item, "variant")));
-    }
     ModelPricing pricing = readPricing(node.get("pricing"));
     PromptCachePolicy policy = readCachePolicy(node.get("promptCachePolicy"));
     return new ModelDescriptor(
@@ -230,13 +197,8 @@ public final class ModelDescriptorJsonCodec {
         modelResourceId,
         providerType,
         modelId,
-        displayName,
-        contextWindow,
-        maxOutputTokens,
-        inputModalities,
         tools,
         reasoning,
-        variantList,
         pricing,
         policy);
   }

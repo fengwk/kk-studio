@@ -22,14 +22,33 @@ import java.util.Set;
 /** 模型描述、用量与成本公共契约测试。 */
 class ModelContractTest {
 
-  /** 模型输出上限必须位于 context window 内，且输入模态不能缺失。 */
+  /** 模型描述 provider / model id 必须为正整数；modelId 不能为空；pricing / cache policy 不可为空。 */
   @Test
-  void enforcesModelContextAndInputModalityInvariants() {
+  void enforcesDescriptorResourceAndIdentityInvariants() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> descriptor(8_192, 8_193, Set.of(ModelInputModality.TEXT), true, false));
+        () ->
+            new ModelDescriptor(
+                0L,
+                1L,
+                ProviderType.OPENAI,
+                "model",
+                true,
+                false,
+                pricing(),
+                PromptCachePolicy.disabled()));
     assertThrows(
-        IllegalArgumentException.class, () -> descriptor(8_192, 2_048, Set.of(), true, false));
+        IllegalArgumentException.class,
+        () ->
+            new ModelDescriptor(
+                1L,
+                0L,
+                ProviderType.OPENAI,
+                "model",
+                true,
+                false,
+                pricing(),
+                PromptCachePolicy.disabled()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -37,17 +56,28 @@ class ModelContractTest {
                 1L,
                 1L,
                 ProviderType.OPENAI,
-                "model",
-                "Model",
-                8_192,
-                2_048,
-                Set.of(ModelInputModality.TEXT),
+                "",
                 true,
                 false,
-                List.of(
-                    new ModelVariant("long", 4_096, null, null, null, null, null, List.of(), null)),
                 pricing(),
                 PromptCachePolicy.disabled()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ModelDescriptor(
+                1L,
+                1L,
+                ProviderType.OPENAI,
+                "model",
+                true,
+                false,
+                null,
+                PromptCachePolicy.disabled()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ModelDescriptor(
+                1L, 1L, ProviderType.OPENAI, "model", true, false, pricing(), null));
   }
 
   /** Variant 标识与数值必须可稳定下发；惩罚项允许厂商支持的负值，但拒绝非有限数。 */
@@ -84,96 +114,6 @@ class ModelContractTest {
         () -> new ModelVariant("default", null, null, null, null, null, null, List.of(" "), null));
   }
 
-  /** 资源 ID 与 Provider 标识必须为正数，cache policy 与 pricing 不可为空。 */
-  @Test
-  void enforcesDescriptorResourceAndIdentityInvariants() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ModelDescriptor(
-                0L,
-                1L,
-                ProviderType.OPENAI,
-                "model",
-                "Model",
-                8_192,
-                2_048,
-                Set.of(ModelInputModality.TEXT),
-                true,
-                false,
-                List.of(),
-                pricing(),
-                PromptCachePolicy.disabled()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ModelDescriptor(
-                1L,
-                0L,
-                ProviderType.OPENAI,
-                "model",
-                "Model",
-                8_192,
-                2_048,
-                Set.of(ModelInputModality.TEXT),
-                true,
-                false,
-                List.of(),
-                pricing(),
-                PromptCachePolicy.disabled()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ModelDescriptor(
-                1L,
-                1L,
-                ProviderType.OPENAI,
-                "",
-                "Model",
-                8_192,
-                2_048,
-                Set.of(ModelInputModality.TEXT),
-                true,
-                false,
-                List.of(),
-                pricing(),
-                PromptCachePolicy.disabled()));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new ModelDescriptor(
-                1L,
-                1L,
-                ProviderType.OPENAI,
-                "model",
-                "Model",
-                8_192,
-                2_048,
-                Set.of(ModelInputModality.TEXT),
-                true,
-                false,
-                List.of(),
-                null,
-                PromptCachePolicy.disabled()));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new ModelDescriptor(
-                1L,
-                1L,
-                ProviderType.OPENAI,
-                "model",
-                "Model",
-                8_192,
-                2_048,
-                Set.of(ModelInputModality.TEXT),
-                true,
-                false,
-                List.of(),
-                pricing(),
-                null));
-  }
-
   /** 不同 Provider 用量类别必须分别按其适用单价计费。 */
   @Test
   void calculatesCostForEveryUsageCategory() {
@@ -197,7 +137,6 @@ class ModelContractTest {
     assertEquals(1_900_000, usage.totalTokens());
     assertEquals(1_900_000, usage.categorizedTokens());
     assertEquals("USD", cost.currency());
-    assertEquals(new BigDecimal("5.800000000000"), cost.total());
     assertEquals(new BigDecimal("5.800000000000"), cost.amount());
   }
 
@@ -483,49 +422,6 @@ class ModelContractTest {
         ProviderCacheControl.breakpoints(
             PromptCacheRetention.LONG, "model-2", Set.of(PromptCacheBreakpoint.SYSTEM));
     assertEquals(Set.of(PromptCacheBreakpoint.SYSTEM), breakpoints.breakpoints());
-  }
-
-  /** descriptor 必须防御性复制可变集合，防止配置在运行时被调用方修改。 */
-  @Test
-  void copiesDescriptorCollections() {
-    ModelDescriptor descriptor =
-        descriptor(
-            128_000, 8_192, Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE), true, true);
-
-    assertThrows(
-        UnsupportedOperationException.class,
-        () -> descriptor.inputModalities().add(ModelInputModality.AUDIO));
-    assertThrows(
-        UnsupportedOperationException.class,
-        () ->
-            descriptor
-                .variants()
-                .add(
-                    new ModelVariant("fast", null, null, null, null, null, null, List.of(), null)));
-    assertTrue(descriptor.tools());
-    assertTrue(descriptor.reasoning());
-  }
-
-  private ModelDescriptor descriptor(
-      long contextWindow,
-      long maxOutputTokens,
-      Set<ModelInputModality> inputModalities,
-      boolean tools,
-      boolean reasoning) {
-    return new ModelDescriptor(
-        1L,
-        2L,
-        ProviderType.OPENAI,
-        "model",
-        "Model",
-        contextWindow,
-        maxOutputTokens,
-        inputModalities,
-        tools,
-        reasoning,
-        List.of(new ModelVariant("default", null, null, null, null, null, null, List.of(), null)),
-        pricing(),
-        PromptCachePolicy.disabled());
   }
 
   private ModelPricing pricing() {

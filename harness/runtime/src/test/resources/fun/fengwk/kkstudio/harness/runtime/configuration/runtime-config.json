@@ -10,25 +10,8 @@
       "modelResourceId": 8001,
       "providerType": "OPENAI",
       "modelId": "gpt-5-mini",
-      "displayName": "GPT-5 Mini",
-      "contextWindow": 200000,
-      "maxOutputTokens": 16384,
-      "inputModalities": ["AUDIO", "DOCUMENT", "IMAGE", "TEXT", "VIDEO"],
       "tools": true,
       "reasoning": true,
-      "variants": [
-        {
-          "id": "balanced",
-          "maxOutputTokens": null,
-          "temperature": 0.2,
-          "topP": 0.9,
-          "topK": null,
-          "frequencyPenalty": null,
-          "presencePenalty": null,
-          "stopSequences": ["STOP"],
-          "reasoningEffort": null
-        }
-      ],
       "pricing": {
         "currency": "USD",
         "pricingTier": "tier-1",
@@ -116,16 +99,5 @@
       "sourceEnvironment": "sandbox"
     }
   ],
-  "policy": {
-    "maxTurns": 16,
-    "maxDepth": 8,
-    "maxDirectSubagents": 4,
-    "maxTotalSubagents": null,
-    "allowedSubagents": ["researcher", "writer"],
-    "yoloEnabled": false
-  },
-  "environment": {
-    "environmentName": "sandbox",
-    "workspaceReference": null
-  }
+  "yoloEnabled": false
 }
