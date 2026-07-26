@@ -30,25 +30,23 @@ flowchart TB
     R[harness-runtime]
     T[harness-tool]
     D[harness-daemon]
-    Mpkg["package harness.model<br/>(inside runtime module)"]
 
     W --> C
     C --> R
     C --> T
     R --> T
-    R --> Mpkg
     D --> T
 ```
 
 | 模块 | 职责 | 禁止 |
 | --- | --- | --- |
 | `harness-tool` | `ToolDescriptor`、异步 `Tool` API、schema、`RemoteTool`、transport-neutral Daemon wire | Runtime 状态机、Session/Thread、Spring |
-| `harness-runtime` | Session/Entry/HarnessThread/ThreadInput、execution 类型、Reconciler、Model/Tool Invocation、Interaction、retry/realtime ports；Model/provider 契约与 codec（包 `fun.fengwk.kkstudio.harness.model`） | Provider SDK、Spring、MyBatis、HTTP |
+| `harness-runtime` | Session/Entry/HarnessThread/ThreadInput、execution 类型、Reconciler、Model/Tool Invocation、Interaction、retry/realtime ports；Model/provider 契约与 codec（包 `fun.fengwk.kkstudio.harness.runtime.model`） | Provider SDK、Spring、MyBatis、HTTP |
 | `harness-daemon` | Environment 进程：连接、本地 Tool 执行、invocation journal、coding tools | 依赖 runtime / core / Spring |
 | `core` | 薄 application boundary、Spring composition、PostgreSQL/Redis adapter、worker lifecycle、LangChain4j Provider adapter、业务扩展 | 第二套领域状态机 |
 | `web` | HTTP / SSE / WebSocket 适配，只消费 Core API 与 share DTO | Harness 类型和领域状态机 |
 
-Model 契约物理位于 runtime 模块的 `harness.model` 包；LangChain4j adapter 与 SDK 依赖位于 `core`。
+Model 契约收敛在 runtime 模块的 `harness.runtime.model` 子树；LangChain4j adapter 与 SDK 依赖位于 `core`。
 
 ### 2.1 API / SPI 接入
 

@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.core.harness.model;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelExecutionResolver;
 import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelExecutionResource;
 

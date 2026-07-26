@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.configuration;
 
-import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 
 import java.util.Objects;
 

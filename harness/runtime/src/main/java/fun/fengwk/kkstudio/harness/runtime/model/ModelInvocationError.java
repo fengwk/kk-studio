@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.model;
 
-import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 
 import java.util.Objects;
 
@@ -10,8 +10,9 @@ import java.util.Objects;
  *
  * <p>The snapshot is intentionally narrow: a non-null {@link ProviderErrorKind} plus a non-blank
  * human-readable {@code message}. The terminal-state adapter constructs it from the original {@link
- * fun.fengwk.kkstudio.harness.model.provider.ProviderException} classification. It is persisted
- * only for terminal {@code FAILED}/{@code UNKNOWN}; {@code RETRY_WAIT} carries no terminal payload.
+ * fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException} classification. It is
+ * persisted only for terminal {@code FAILED}/{@code UNKNOWN}; {@code RETRY_WAIT} carries no
+ * terminal payload.
  *
  * <p>Strict JSON encoding/decoding lives in {@link ModelInvocationErrorJsonCodec}.
  */

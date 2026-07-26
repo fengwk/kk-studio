@@ -19,8 +19,10 @@ import java.util.stream.Stream;
 /**
  * Lightweight architecture guard for the runtime module.
  *
- * <p>Scans the entire {@code src/main/java} tree (including {@code harness.model}) against an
- * allowlist, and verifies the three Harness modules plus their direct production dependencies.
+ * <p>Scans the entire {@code src/main/java} tree against an allowlist, and verifies the three
+ * Harness modules plus their direct production dependencies. The former top-level model package has
+ * been folded into {@code fun.fengwk.kkstudio.harness.runtime.model}; the old source directory must
+ * not reappear.
  */
 class RuntimeModuleArchitectureTest {
 
@@ -29,7 +31,6 @@ class RuntimeModuleArchitectureTest {
           "java.",
           "javax.",
           "com.fasterxml.jackson.",
-          "fun.fengwk.kkstudio.harness.model.",
           "fun.fengwk.kkstudio.harness.runtime.",
           "fun.fengwk.kkstudio.harness.tool.");
 
@@ -48,6 +49,16 @@ class RuntimeModuleArchitectureTest {
   void runtimeMainSourcesAndHarnessModulesStayWithinDeclaredBoundaries() throws IOException {
     Path main = locateRuntimeMainJava();
     assertTrue(Files.isDirectory(main), "runtime main sources must exist: " + main);
+
+    Path runtimeModelPackage = main.resolve("fun/fengwk/kkstudio/harness/runtime/model");
+    assertTrue(
+        Files.isDirectory(runtimeModelPackage),
+        "runtime model package tree must exist: " + runtimeModelPackage);
+
+    Path deletedLegacyModelPackage = main.resolve("fun/fengwk/kkstudio/harness/model");
+    assertFalse(
+        Files.exists(deletedLegacyModelPackage),
+        "deleted legacy model package tree must not exist: " + deletedLegacyModelPackage);
 
     Path deletedKernelPackage = main.resolve("fun/fengwk/kkstudio/harness/kernel");
     assertFalse(

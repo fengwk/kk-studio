@@ -5,16 +5,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.model.provider.ProviderAudioBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderImageBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ArtifactMessageContent;

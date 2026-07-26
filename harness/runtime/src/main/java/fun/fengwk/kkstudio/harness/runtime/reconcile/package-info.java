@@ -7,7 +7,7 @@
  * adapter；本包不引用 Spring、MyBatis、Redis、JSON 或具体 Thread/Model/Tool 行类型之外的业务概念。
  *
  * <p>外部依赖仅为 {@code harness.runtime.execution/continuation/thread/session}、{@code
- * harness.model}（ProviderRequest）与 {@code java.base}。激活循环的可观察不变量：
+ * harness.runtime.model}（ProviderRequest）与 {@code java.base}。激活循环的可观察不变量：
  *
  * <ul>
  *   <li>每次 mutation 携带 {@link fun.fengwk.kkstudio.harness.runtime.reconcile.ThreadOwnership}

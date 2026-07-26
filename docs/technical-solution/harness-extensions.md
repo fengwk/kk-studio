@@ -22,7 +22,7 @@ public interface HarnessExtension {
 
 | 模块 | 职责 |
 | --- | --- |
-| `harness-runtime` | Extension Host、typed registry、Tool interceptors、lifecycle observation、Provider/Tool factory contract；ModelInvocationPlanner 冻结 ProviderRequest；`harness.model` 包内 Model/Provider 契约 |
+| `harness-runtime` | Extension Host、typed registry、Tool interceptors、lifecycle observation、Provider/Tool factory contract；ModelInvocationPlanner 冻结 ProviderRequest；`harness.runtime.model` 包内 Model/Provider 契约 |
 | `core` | Spring 装配、内置 Permission / LangChain4j Provider adapter / Tool contribution |
 
 Host 只装载应用显式提供的已编译实例。Session Entry、HarnessThread、ThreadInput、Model/Tool Invocation 与 Interaction 由原生 Runtime 与数据库状态机管理。

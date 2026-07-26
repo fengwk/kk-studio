@@ -17,11 +17,12 @@ harness-tool
 harness-runtime
   fun.fengwk.kkstudio.harness.runtime
     ├── session/ thread/ entry/ execution/ continuation/
-    ├── reconcile/ model/ tool/ interaction/       # coordinators + state machines
+    ├── reconcile/ tool/ interaction/              # coordinators + state machines
+    ├── model/                                     # provider/model 契约、codec、ModelInvocation
+    │   ├── provider/ cache/ codec/
+    │   └── plan/ worker/
     ├── realtime/ retry/ port/ extension/ configuration/
-    ├── permission/ skill/ goal/ usage/ cache/
-  fun.fengwk.kkstudio.harness.model   # provider/model 契约与 codec（runtime 模块内包）
-    ├── provider/ cache/ codec/
+    └── permission/ skill/ goal/ usage/ cache/
 
 harness-daemon
   fun.fengwk.kkstudio.harness.daemon  # 仅依赖 harness-tool

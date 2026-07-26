@@ -23,7 +23,6 @@ class DaemonModuleArchitectureTest {
   private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
       List.of(
           "fun.fengwk.kkstudio.harness.runtime.",
-          "fun.fengwk.kkstudio.harness.model.",
           "fun.fengwk.kkstudio.harness.kernel.",
           "fun.fengwk.kkstudio.core.",
           "fun.fengwk.kkstudio.web.",
