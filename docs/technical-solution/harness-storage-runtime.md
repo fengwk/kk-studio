@@ -251,6 +251,6 @@ Recovery SQL 不 join Interaction/Tool/Model 来推导 runnable；完成事务�
 - Interaction resolution
 - 真 Provider 与 Daemon 可选矩阵
 
-## 14. 本地基础设施
+## 14. 本地运行
 
-本地开发通过 `deploy/local/compose.yaml` 启动 PostgreSQL 与 Redis。
+`deploy/local/compose.yaml` 一键启动内嵌 React 的 Spring Boot `app`、PostgreSQL 与 Redis。PostgreSQL 只在空命名卷首次创建时执行 `schema-postgresql.sql` 与 `data-dev-postgresql.sql`；`app` 设置 `SPRING_SQL_INIT_MODE=never`，重启不重复初始化 schema。Harness Daemon 不属于默认 Compose 栈。
