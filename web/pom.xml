@@ -67,7 +67,8 @@
           |
           | 1) prepare-package 阶段：frontend-maven-plugin 在 ../frontend 安装 Node/npm 并执行
           |    npm ci + npm run build；maven-clean-plugin 清空上一轮残留的 target/classes/static/
-          |    以避免 stale 资源；maven-resources-plugin 把 frontend/dist 复制到
+          |    以避免 stale 资源；Vite 输出到 web/target/frontend-dist，
+          |    maven-resources-plugin 再复制到
           |    ${project.build.outputDirectory}/static（绝不写回 src/main/resources/static）。
           | 2) package 阶段：spring-boot-maven-plugin repackage 把上述目录打进 BOOT-INF/classes/static。
           |
@@ -114,7 +115,8 @@
                                     <goal>npm</goal>
                                 </goals>
                                 <configuration>
-                                    <arguments>run build</arguments>
+                                    <arguments>run build -- --outDir ${project.build.directory}/frontend-dist --emptyOutDir</arguments>
+                                    <npmInheritsProxyConfigFromMaven>false</npmInheritsProxyConfigFromMaven>
                                 </configuration>
                             </execution>
                         </executions>
@@ -158,7 +160,7 @@
                                     <overwrite>true</overwrite>
                                     <resources>
                                         <resource>
-                                            <directory>${project.basedir}/../frontend/dist</directory>
+                                            <directory>${project.build.directory}/frontend-dist</directory>
                                         </resource>
                                     </resources>
                                 </configuration>

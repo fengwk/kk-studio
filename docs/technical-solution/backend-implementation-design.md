@@ -1,6 +1,6 @@
 # 后端落地设计
 
-本文描述当前 `share`、`core` 和 `web` 的 Harness 控制面。领域状态机与 framework-free 用例编排由 `harness-runtime` 管理；`core` 提供 application boundary、composition 与基础设施 adapter，`web` 仅负责 HTTP、SSE 和 WebSocket 适配。
+本文描述当前 `share`、`core` 和 `web` 的 Harness 控制面。领域状态机与 framework-free 用例编排由 `harness-runtime` 管理；`core` 提供 application boundary、composition 与基础设施 adapter，`web` 负责 HTTP、SSE、WebSocket 与内嵌前端静态资源适配。
 
 ## 分层
 
@@ -19,7 +19,7 @@ flowchart LR
 | 层 | 职责 |
 | --- | --- |
 | `share` | DTO、JSON 字段和 HTTP 数据边界 |
-| `web` | 路由、参数解析、SSE emitter、WebSocket adapter、HTTP 状态映射 |
+| `web` | 路由、参数解析、SSE emitter、WebSocket adapter、HTTP 状态映射、`classpath:/static` 与 BrowserRouter fallback |
 | `core.harness` | 薄 application boundary、Spring composition 与 PostgreSQL/Redis/Provider adapter |
 | `core.environment` | 内存 Live Environment Registry、RemoteToolTransport、daemon gateway |
 | `harness-runtime` | Command coordinators、Reconciler、Invocation workers、Interaction、Model 契约与 outbound SPI |

@@ -7,7 +7,7 @@
 | **Harness / AI** | 可恢复的 Agent Thread 执行与观测 |
 | **Studio / Canvas** | 资源优先的多模态画布工作台（Function / Workflow） |
 
-两者共享同一部署与 `web` 入口，但**领域模型、状态机、存储事实与前端 feature 分离**。
+两者共享同一部署与 `web` 入口；React 产物嵌入 Spring Boot Fat JAR 并由 `classpath:/static` 提供，但**领域模型、状态机、存储事实与前端 feature 分离**。
 
 词汇与映射见 [domain-map.md](domain-map.md)。
 
@@ -50,7 +50,7 @@ flowchart LR
 | `harness-runtime` | Session / Thread / Invocation / Interaction / Reconciler / Model 契约 | Provider SDK、Spring、HTTP |
 | `harness-daemon` | 独立 Environment 进程适配器 | 依赖 runtime / Spring |
 | `core` | Application boundary、composition、持久化/事务、worker lifecycle、S3、ComfyUI 与 Studio adapters；LangChain4j Provider | 成为第二个“万能领域层” |
-| `web` | HTTP / SSE / WebSocket 适配；只消费 Core API 与 share DTO | Harness 类型和领域状态机 |
+| `web` | HTTP / SSE / WebSocket、内嵌静态资源与 SPA fallback 适配；只消费 Core API 与 share DTO | Harness 类型和领域状态机 |
 | `share` | HTTP DTO | 领域规则 |
 | `frontend` | React：`features/ai`、`features/canvas`、platform shell | 把后端契约写死在 UI 组件内部 |
 

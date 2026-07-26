@@ -1,0 +1,59 @@
+# VCS metadata and local agent workspaces
+.git/
+.gitignore
+.gitattributes
+.workspace/
+
+# Maven build outputs (rebuilt inside the container)
+**/target/
+**/.mvn/wrapper/maven-wrapper.jar
+
+# Frontend caches / outputs (rebuilt inside the container by frontend-maven-plugin)
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+
+# Local reports and artifacts (never required for build)
+reports/
+
+# IDE / editor
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+.project
+.classpath
+.settings/
+.metadata
+.factorypath
+
+# OS noise and logs
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.log
+*.pid
+
+# Local secrets / credentials (must never reach the image)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+id_rsa
+id_ed25519
+credentials*
+service-account*.json
+secrets/
+
+# Archives that should never be part of the build context
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z

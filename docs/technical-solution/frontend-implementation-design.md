@@ -6,7 +6,7 @@
 
 | 主题 | 当前契约 |
 | --- | --- |
-| 工程目录 | `frontend/` 独立 Vite 工程 |
+| 工程与发布 | `frontend/` 保持独立 Vite 工程；Maven `distribution` 在 `prepare-package` 构建并嵌入 `web` Fat JAR 的 `classpath:/static` |
 | 页面范围 | Chat 卡片与本地 Pane 工作区、Provider/Model/Agent、只读 Environment Registry、ComfyUI |
 | 服务端状态 | React Query |
 | 本地状态 | `localStorage` 的 `ChatPaneState`（按 chatId） |
@@ -14,6 +14,7 @@
 | Chat API | `/api/chats` |
 | Harness API | `/api/threads`、`/api/threads/{threadId}`、`/api/sessions`、`/api/tool-invocations`、`/api/usage`、`/api/interactions` |
 | 实时通道 | snapshot-first + Redis-backed SSE（事件名 `realtime`，stream-id cursor） |
+| 浏览器路由 | `BrowserRouter`；Spring 对非 API/Actuator、无扩展名且不存在的 GET 路径回退到 `index.html` |
 | 视觉实现 | 全局 token 见 [前端设计规范](../product-design/frontend-design-system.md) |
 
 ## 路由
