@@ -1,6 +1,6 @@
 /**
- * Canvas domain: document, nodes, links, references and command/query ports.
+ * Canvas domain: document, nodes and links.
  *
- * <p>Does not depend on workflow packages. Functions are referenced only by {@code FunctionRef}.
+ * <p>Does not depend on Spring, MyBatis, HTTP or other Studio packages.
  */
 package fun.fengwk.kkstudio.studio.canvas;

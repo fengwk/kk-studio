@@ -38,7 +38,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "canvas_document",
           "canvas_node",
           "canvas_link",
-          "canvas_command",
+          "canvas_command_dedup",
           "chat",
           "harness_session",
           "harness_entry",
@@ -61,7 +61,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "canvas_document",
           "canvas_node",
           "canvas_link",
-          "canvas_command",
           "chat",
           "harness_entry",
           "harness_session",
@@ -139,62 +138,21 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "created_at",
         "updated_at",
         "version");
-    assertColumns(
-        "canvas_document",
-        "id",
-        "workspace_id",
-        "title",
-        "schema_version",
-        "revision",
-        "lifecycle",
-        "home_viewport",
-        "created_at",
-        "updated_at",
-        "version");
+    assertColumns("canvas_document", "id", "title", "revision", "home_viewport", "updated_at");
     assertColumns(
         "canvas_node",
         "id",
         "canvas_id",
         "kind",
         "node_type",
-        "node_type_version",
         "name",
-        "parent_group_id",
         "x",
         "y",
         "width",
         "height",
-        "rotation",
-        "z_index",
-        "locked",
-        "hidden",
-        "validity",
-        "data",
-        "revision",
-        "deleted_at",
-        "created_at",
-        "updated_at",
-        "version");
-    assertColumns(
-        "canvas_link",
-        "id",
-        "canvas_id",
-        "source_node_id",
-        "target_node_id",
-        "revision",
-        "created_at");
-    assertColumns(
-        "canvas_command",
-        "id",
-        "command_id",
-        "workspace_id",
-        "canvas_id",
-        "base_revision",
-        "result_revision",
-        "request_hash",
-        "payload",
-        "result",
-        "created_at");
+        "data");
+    assertColumns("canvas_link", "id", "canvas_id", "source_node_id", "target_node_id");
+    assertColumns("canvas_command_dedup", "canvas_id", "command_id", "request_hash");
     assertColumns("chat", "id", "title", "default_agent_id", "created_at", "updated_at", "version");
   }
 
@@ -330,10 +288,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_agent_model_provider_name",
             "uk_agent_definition_name",
             "uk_comfyui_workflow_api_api_name",
-            "uk_canvas_document_workspace_id",
             "uk_canvas_node_canvas_id",
             "uk_canvas_link",
-            "uk_canvas_command",
             "uk_harness_entry_session_id",
             "uk_harness_entry_single_root",
             "uk_harness_session_parent_invocation",
@@ -355,8 +311,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                 "select conname from pg_constraint where contype = 'f'"
                     + " and conname in ('fk_agent_model_provider',"
                     + " 'fk_agent_definition_model', 'fk_canvas_node_canvas',"
-                    + " 'fk_canvas_node_parent_group', 'fk_canvas_link_source',"
-                    + " 'fk_canvas_link_target', 'fk_canvas_command_canvas')")) {
+                    + " 'fk_canvas_command_dedup_canvas',"
+                    + " 'fk_canvas_link_source',"
+                    + " 'fk_canvas_link_target')")) {
       while (rs.next()) {
         foreignKeys.add(rs.getString(1));
       }
@@ -366,10 +323,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_agent_model_provider",
             "fk_agent_definition_model",
             "fk_canvas_node_canvas",
-            "fk_canvas_node_parent_group",
+            "fk_canvas_command_dedup_canvas",
             "fk_canvas_link_source",
-            "fk_canvas_link_target",
-            "fk_canvas_command_canvas"),
+            "fk_canvas_link_target"),
         foreignKeys,
         "all non-Harness ownership relations must be enforced by PostgreSQL");
   }

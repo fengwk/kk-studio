@@ -5,7 +5,7 @@
 | 域 | 一句话 |
 | --- | --- |
 | **Harness / AI** | 可恢复的 Agent Thread 执行与观测 |
-| **Studio / Canvas** | 资源优先的多模态画布工作台（Function / Workflow） |
+| **Studio / Canvas** | 全局单实例持久化画布（document / node / link / command-dedup） |
 
 两者共享同一部署与 `web` 入口；React 产物嵌入 Spring Boot Fat JAR 并由 `classpath:/static` 提供，但**领域模型、状态机、存储事实与前端 feature 分离**。
 
@@ -45,7 +45,7 @@ flowchart LR
 
 | 模块 | 职责 | 禁止 |
 | --- | --- | --- |
-| `studio` | Canvas / Resource / Function / Workflow 纯领域与端口 | Spring、MyBatis、HTTP、Harness 类型 |
+| `studio` | Canvas 纯领域与端口 | Spring、MyBatis、HTTP、Harness 类型 |
 | `harness-tool` | location-neutral Tool API / schema / RemoteTool / Daemon 协议 | Runtime 状态机 |
 | `harness-runtime` | Session / Thread / Invocation / Interaction / Reconciler / Model 契约 | Provider SDK、Spring、HTTP |
 | `harness-daemon` | 独立 Environment 进程适配器 | 依赖 runtime / Spring |
@@ -90,7 +90,7 @@ Thread head 的外部重定位（bootstrap / rebind / unbind）要求 Thread 逻
 
 执行由 `ThreadReconciler` 推进 Entry/head；`ModelWorker` / 统一 `ToolWorker` 只写 Invocation 事实。提交、Stop、Interaction 解决、Invocation terminal 后 afterCommit wake；低频 recovery 扫描 `runnable` 与过期 lease。
 
-ComfyUI Run 与 Studio `FunctionRun` 是独立概念，不纳入 Harness Thread 模型。
+ComfyUI Run 独立于 Harness Thread 模型。
 
 详细架构见 [harness-runtime-architecture.md](harness-runtime-architecture.md)。
 
@@ -98,22 +98,17 @@ ComfyUI Run 与 Studio `FunctionRun` 是独立概念，不纳入 Harness Thread 
 
 | 事实 | 职责 | 代码状态 |
 | --- | --- | --- |
-| CanvasDocument + revision | 画布文档 | `canvas_document` 持久化 + command/query |
-| CanvasNode (RESOURCE/FUNCTION/GROUP) | 画布节点 | `canvas_node` 持久化，soft delete |
-| CanvasLink | 可见性 | `canvas_link` 持久化，唯一 `(canvas_id, source_node_id, target_node_id)` |
-| CanvasCommand | 幂等命令记录 | `canvas_command`，唯一 `(workspace_id, command_id)` |
-| ResourceReference | 实际依赖 | 领域契约，持久化待补 |
-| Resource / ResourceVersion | 资源身份与不可变版本 | 领域类型 |
-| FunctionDefinition / FunctionRun | 能力目录与执行 | Catalog 内存种子；Run stub |
-| WorkflowDocument / Version | 工作流程序 | 领域类型 + stub |
+| CanvasDocument + revision | 画布文档 | `canvas_document` 持久化；`updated_at` 用于列表排序 |
+| CanvasNode (RESOURCE/FUNCTION) | 画布节点 | `canvas_node` 持久化；硬删除；`(canvas_id, id)` 唯一 |
+| CanvasLink | 可见性 | `canvas_link` 持久化；同 Canvas 复合 FK，删除节点级联 |
+| CanvasCommandDedup | 幂等去重事实 | `canvas_command_dedup`，主键 `(canvas_id, command_id)` |
 
-Resource / Workflow / FunctionRun 的完整持久化与执行 worker 尚未实现；未就绪能力显式返回 `StudioFeatureNotReadyException` / HTTP 501。
+FUNCTION 节点当前唯一实例是 `system.generate-text` v1。
 
 ## 5. Workspace 策略
 
-- 单实例，无 membership/RBAC。
-- 默认 workspace：`1`（`StudioWorkspaces.DEFAULT_ID`）。
-- API 保留 `workspaceId` 参数；非默认值拒绝。
+- 全局单实例，无 membership/RBAC、无 workspace 列。
+- Canvas 列表、详情与命令使用全局资源路径。
 
 ## 6. 前端结构
 
@@ -132,11 +127,10 @@ Canvas 表现模型与 Studio 词汇映射：`features/canvas/domain-map.ts`。
 ## 7. 清晰度规则（必须遵守）
 
 1. **双域不混写**：Canvas 不引用 Harness Session/Thread 类型；Harness 不引用 CanvasDocument。
-2. **Agent 进入 Studio 只有 Function 门面**：`system.agent.execute`。
-3. **Link 与 Reference 不混称**：演示连线 = visibility；依赖另建。
-4. **stub 必须诚实**：未实现走 not-ready，不伪造成功路径。
+2. **Agent 进入 Studio 只有 Function 门面**：`system.agent.execute`（后续 Adapter 实现）。
+3. **Link 与 Reference 不混称**：当前 Canvas 不持久化 ResourceReference。
+4. **stub 必须诚实**：未实现能力不直接打包进接口；只暴露实际可用的 Canvas 行为。
 5. **文档进度与代码一致**：见各文档落地描述。
-6. **独立 Run 概念不跨域混用**：Studio `FunctionRun`、Canvas `AgentRunNode`、ComfyUI job 各自独立。
 
 ## 8. 入口文档
 
@@ -145,7 +139,6 @@ Canvas 表现模型与 Studio 词汇映射：`features/canvas/domain-map.ts`。
 | [domain-map.md](domain-map.md) | 词汇与前后端映射 |
 | [harness-runtime-architecture.md](harness-runtime-architecture.md) | Harness 执行架构事实源 |
 | [harness-runtime-contracts.md](harness-runtime-contracts.md) | Runtime 类型与事务契约 |
-| [infinite-canvas-implementation-design.md](infinite-canvas-implementation-design.md) | Studio 目标契约 |
 | [frontend-implementation-design.md](frontend-implementation-design.md) | 前端落地 |
 | [frontend-design-system.md](../product-design/frontend-design-system.md) | 视觉 token |
 | [storage-models.md](storage-models.md) | 关系存储摘要 |

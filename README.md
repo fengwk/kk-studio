@@ -5,7 +5,7 @@
 | 域 | 说明 |
 | --- | --- |
 | **Harness / AI** | 可恢复 Agent Thread、Tool 与观测 |
-| **Studio / Canvas** | 资源优先的画布工作台、Function、Workflow |
+| **Studio / Canvas** | 全局单实例画布工作台，持久化 Canvas 文档/节点/连线/幂等命令 |
 
 架构事实源：
 
@@ -16,7 +16,7 @@
 ## 能力摘要
 
 - Harness：Session 共享 append-only Entry Tree；HarnessThread 是可复用 durable runtime process（head 重定位 + epoch fencing + ordered mailbox）；PostgreSQL truth + Redis wake/realtime
-- Studio：Canvas 文档、节点、Link、Command 已最小持久化；Resource、FunctionRun、Workflow Runtime 待补
+- Studio：Canvas 持久化 document / node / link / command-dedup（硬删除节点）；FUNCTION 节点只暴露 `system.generate-text` v1
 - 前端：AI 接真实 Thread API；Canvas Library/Create 接真实 API，Editor 仍使用本地交互投影
 
 ## 模块

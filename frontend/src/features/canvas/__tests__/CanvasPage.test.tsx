@@ -10,29 +10,20 @@ import { AppShell } from '@/platform/shell/AppShell'
 
 
 vi.mock('@/shared/api/studio-service', () => ({
-  DEFAULT_WORKSPACE_ID: '1',
   listCanvases: vi.fn(async () => ([
     {
       id: '1001',
-      workspaceId: '1',
       title: '竞品研究与产品方案',
-      schemaVersion: 1,
       revision: '0',
-      lifecycle: 'ACTIVE',
       homeViewportJson: '{}',
     },
   ])),
   createCanvas: vi.fn(async (title: string) => ({
     id: '1002',
-    workspaceId: '1',
     title: title || '未命名画布',
-    schemaVersion: 1,
     revision: '0',
-    lifecycle: 'ACTIVE',
     homeViewportJson: '{}',
   })),
-  listFunctions: vi.fn(async () => []),
-  getCanvasSnapshot: vi.fn(async () => ({ document: {}, nodes: [], links: [], references: [] })),
 }))
 
 vi.mock('@xyflow/react', async () => {

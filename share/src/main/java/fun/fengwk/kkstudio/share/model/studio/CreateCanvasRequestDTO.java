@@ -4,6 +4,5 @@ import lombok.Data;
 
 @Data
 public class CreateCanvasRequestDTO {
-  private String workspaceId;
   private String title;
 }

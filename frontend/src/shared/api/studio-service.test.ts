@@ -1,12 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiClient } from '@/shared/api/client'
-import {
-  createCanvas,
-  DEFAULT_WORKSPACE_ID,
-  getCanvasSnapshot,
-  listCanvases,
-  listFunctions,
-} from '@/shared/api/studio-service'
+import { createCanvas, listCanvases } from '@/shared/api/studio-service'
 
 vi.mock('@/shared/api/client', () => ({
   apiClient: {
@@ -22,20 +16,15 @@ describe('studio-service', () => {
     vi.clearAllMocks()
   })
 
-  it('lists functions and canvases with default workspace id', async () => {
-    vi.mocked(apiClient.get).mockResolvedValueOnce([]).mockResolvedValueOnce([])
-    await listFunctions()
+  it('lists canvases without a workspace id', async () => {
+    vi.mocked(apiClient.get).mockResolvedValueOnce([])
     await listCanvases()
-    expect(apiClient.get).toHaveBeenNthCalledWith(1, '/functions', { params: { workspaceId: DEFAULT_WORKSPACE_ID } })
-    expect(apiClient.get).toHaveBeenNthCalledWith(2, '/canvases', { params: { workspaceId: DEFAULT_WORKSPACE_ID } })
+    expect(apiClient.get).toHaveBeenCalledWith('/canvases')
   })
 
-  it('creates and loads canvases with encoded ids', async () => {
+  it('creates canvases with a title-only body', async () => {
     vi.mocked(apiClient.post).mockResolvedValue({ id: 'c1' })
-    vi.mocked(apiClient.get).mockResolvedValue({ id: 'c /1' })
-    await createCanvas('Board', 'ws-2')
-    await getCanvasSnapshot('c /1')
-    expect(apiClient.post).toHaveBeenCalledWith('/canvases', { workspaceId: 'ws-2', title: 'Board' })
-    expect(apiClient.get).toHaveBeenCalledWith('/canvases/c%20%2F1')
+    await createCanvas('Board')
+    expect(apiClient.post).toHaveBeenCalledWith('/canvases', { title: 'Board' })
   })
 })

@@ -4,16 +4,14 @@
 
 | 项 | 说明 |
 | --- | --- |
-| 视觉事实源 | 无限画布产品原型（`docs/product-design/infinite-canvas-prototype/`） |
+| 视觉事实源 | 本文 + `frontend/src/styles.css` 的 `:root` token |
 | 实现入口 | `frontend/src/styles.css` 的 `:root` token |
 | 工程分层 | `app` / `platform` / `features/*` / `shared` |
 | 当前状态 | **Token / Shell / CSS 业务色已统一；React 原语库按需延后** |
 
 相关文档：
 
-- 产品原型：[infinite-canvas-prototype.md](infinite-canvas-prototype.md)
 - 前端实现：[../technical-solution/frontend-implementation-design.md](../technical-solution/frontend-implementation-design.md)
-- 画布技术方案：[../technical-solution/infinite-canvas-implementation-design.md](../technical-solution/infinite-canvas-implementation-design.md)
 
 ## 1. 统一进度（必须先读）
 
@@ -57,8 +55,8 @@
 1. **一个产品，一套语言**
    AI、Canvas、后续 Workflow / Asset 共享同一视觉体系，不允许按路由切换产品皮肤。
 
-2. **Canvas 原型是视觉真值**
-   色板、壳层、Agent Dock、生成操作台、选区工具条以 Canvas 原型为准。AI 控制台是同一体系下的信息密集界面，不是第二套主题。
+2. **规范与实现共同约束视觉**
+   色板以本文和全局 token 为准；壳层、Agent Dock、生成操作台、选区工具条以当前实现为准。AI 控制台是同一体系下的信息密集界面，不是第二套主题。
 
 3. **Token 优先，禁止旁路色值**
    新代码不得新增裸 hex/rgb；必须使用 `:root` token 或语义别名。历史硬编码只能在迁移切片中消除。
@@ -438,7 +436,6 @@ rg "#[0-9a-fA-F]{3,8}" frontend/src/styles.css frontend/src/features/**/*.css
 | Canvas 快捷键 | `frontend/src/features/canvas/useCanvasKeyboard.ts` |
 | Canvas 计时器 | `frontend/src/features/canvas/useCanvasTimers.ts` |
 | Canvas JS 主题镜像 | `frontend/src/features/canvas/canvas-theme.ts` |
-| 设计原型 | `docs/product-design/infinite-canvas-prototype/` |
 
 ## 11. 维护规则
 

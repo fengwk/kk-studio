@@ -2,26 +2,18 @@ package fun.fengwk.kkstudio.core.studio.repo.impl.model;
 
 import lombok.Data;
 
-import java.time.OffsetDateTime;
-
-/** {@code canvas_link} 行映射：画布可见性连线（非 ResourceReference）。 */
+/** {@code canvas_link} row mapping: canvas visibility edge between two same-canvas nodes. */
 @Data
 public class CanvasLinkDO {
-  /** 业务主键。 */
+  /** Business id. */
   private Long id;
 
-  /** 所属画布。 */
+  /** Owning canvas id. */
   private Long canvasId;
 
-  /** 源节点 id。 */
+  /** Source node id. */
   private Long sourceNodeId;
 
-  /** 目标节点 id。 */
+  /** Target node id. */
   private Long targetNodeId;
-
-  /** 连线业务 revision。 */
-  private Long revision;
-
-  /** 创建时间（映射 {@code created_at} timestamptz）。 */
-  private OffsetDateTime createTime;
 }

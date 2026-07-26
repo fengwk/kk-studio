@@ -1,8 +1,7 @@
 /**
- * Studio application adapters (composition root for Studio ports).
+ * Studio application adapters (composition root for Canvas ports).
  *
- * <p>Owns Spring wiring and future persistence/provider implementations. Domain types and ports
- * live in {@code fun.fengwk.kkstudio.studio}. HTTP mapping lives in {@code
- * fun.fengwk.kkstudio.web.studio}.
+ * <p>Owns Spring wiring and the durable Canvas persistence adapters. Domain types and ports live in
+ * {@code fun.fengwk.kkstudio.studio}. HTTP mapping lives in {@code fun.fengwk.kkstudio.web.studio}.
  */
 package fun.fengwk.kkstudio.core.studio;

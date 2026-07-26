@@ -9,7 +9,6 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -17,8 +16,6 @@ import fun.fengwk.kkstudio.share.model.studio.ApplyCanvasCommandsRequestDTO;
 import fun.fengwk.kkstudio.share.model.studio.CanvasDocumentDTO;
 import fun.fengwk.kkstudio.share.model.studio.CanvasSnapshotDTO;
 import fun.fengwk.kkstudio.share.model.studio.CreateCanvasRequestDTO;
-import fun.fengwk.kkstudio.studio.StudioFeatureNotReadyException;
-import fun.fengwk.kkstudio.studio.StudioWorkspaces;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.web.studio.StudioWebMapper;
@@ -26,7 +23,13 @@ import fun.fengwk.kkstudio.web.studio.StudioWebMapper;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/** Canvas HTTP boundary for the minimal durable slice. Returns convention {@link Result}. */
+/**
+ * Canvas HTTP boundary for the durable global single-instance product. Returns convention {@link
+ * Result}.
+ *
+ * <p>The HTTP body is intentionally narrow: list / get / create (title only) / commands (revision +
+ * commandId + commandsJson). {@code requestHash} is computed server-side from {@code commandsJson}.
+ */
 @RestController
 @RequestMapping("/api/canvases")
 @RequiredArgsConstructor
@@ -36,10 +39,9 @@ public class StudioCanvasController {
   private final CanvasCommandService canvasCommandService;
 
   @GetMapping
-  public Result<List<CanvasDocumentDTO>> list(
-      @RequestParam(value = "workspaceId", defaultValue = "1") long workspaceId) {
+  public Result<List<CanvasDocumentDTO>> list() {
     return Results.ok(
-        canvasQueryService.listDocuments(workspaceId).stream()
+        canvasQueryService.listDocuments().stream()
             .map(StudioWebMapper::toDto)
             .collect(Collectors.toList()));
   }
@@ -57,32 +59,31 @@ public class StudioCanvasController {
   public Result<CanvasDocumentDTO> create(
       @RequestBody(required = false) CreateCanvasRequestDTO request) {
     try {
-      long workspaceId =
-          request == null || request.getWorkspaceId() == null || request.getWorkspaceId().isBlank()
-              ? StudioWorkspaces.DEFAULT_ID
-              : Long.parseLong(request.getWorkspaceId());
       String title = request == null ? null : request.getTitle();
-      return Results.created(
-          StudioWebMapper.toDto(canvasCommandService.createCanvas(workspaceId, title)));
+      return Results.created(StudioWebMapper.toDto(canvasCommandService.createCanvas(title)));
     } catch (IllegalArgumentException ex) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-    } catch (StudioFeatureNotReadyException ex) {
-      throw new ResponseStatusException(HttpStatus.NOT_IMPLEMENTED, ex.getMessage(), ex);
     }
   }
 
   @PostMapping("/{canvasId}/commands")
   public Result<CanvasSnapshotDTO> applyCommands(
       @PathVariable("canvasId") long canvasId, @RequestBody ApplyCanvasCommandsRequestDTO request) {
+    if (request == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "missing body");
+    }
+    long baseRevision;
+    try {
+      baseRevision = Long.parseLong(request.getBaseRevision());
+    } catch (NumberFormatException ex) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "baseRevision must be a non-negative integer", ex);
+    }
     try {
       return Results.ok(
           StudioWebMapper.toDto(
               canvasCommandService.applyCommands(
-                  canvasId,
-                  Long.parseLong(request.getBaseRevision()),
-                  request.getCommandId(),
-                  request.getRequestHash(),
-                  request.getCommandsJson())));
+                  canvasId, baseRevision, request.getCommandId(), request.getCommandsJson())));
     } catch (IllegalStateException ex) {
       if ("REVISION_CONFLICT".equals(ex.getMessage())
           || "IDEMPOTENCY_CONFLICT".equals(ex.getMessage())) {
@@ -91,8 +92,6 @@ public class StudioCanvasController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
     } catch (IllegalArgumentException ex) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-    } catch (StudioFeatureNotReadyException ex) {
-      throw new ResponseStatusException(HttpStatus.NOT_IMPLEMENTED, ex.getMessage(), ex);
     }
   }
 }

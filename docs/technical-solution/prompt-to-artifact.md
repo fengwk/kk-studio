@@ -53,7 +53,7 @@ partial 写 Redis realtime；terminal 写 Invocation。当前 Tool batch 全部�
 - Environment daemon 的 artifact wire content 经 Gateway 校验后写入 Artifact Store。
 - Artifact Store 保存不可变 bytes、media type、encoding、size、SHA-256。
 - ComfyUI/S3 对象走固定 bucket 预签名，不复用 Tool Artifact Store。
-- Studio `FunctionRun` 与画布资源是独立概念。
+- Studio Canvas 是 Harness / AI 之外独立领域；Artifact 不进入 Canvas domain。
 
 `GET /api/artifacts/{id}` 返回原始 bytes 与有效 media type；异常 media 降级为 `application/octet-stream`。响应带 `X-Content-Type-Options: nosniff` 与 `Content-Security-Policy: sandbox`。
 

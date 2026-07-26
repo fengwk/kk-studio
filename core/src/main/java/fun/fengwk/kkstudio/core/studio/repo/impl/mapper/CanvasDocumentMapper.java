@@ -17,18 +17,15 @@ import java.util.List;
 @Mapper
 public interface CanvasDocumentMapper extends BaseMapper {
 
-  String COLUMNS =
-      "id, workspace_id, title, schema_version, revision, lifecycle, home_viewport, version, "
-          + "created_at as create_time, updated_at as update_time";
+  String COLUMNS = "id, title, revision, home_viewport, updated_at as update_time";
 
   @Insert(
       """
       insert into canvas_document (
-          id, workspace_id, title, schema_version, revision, lifecycle, home_viewport,
-          created_at, updated_at, version
+          id, title, revision, home_viewport, updated_at
       ) values (
-          #{id}, #{workspaceId}, #{title}, #{schemaVersion}, #{revision}, #{lifecycle},
-          cast(#{homeViewportJson} as jsonb), current_timestamp, current_timestamp, 0
+          #{id}, #{title}, #{revision},
+          cast(#{homeViewportJson} as jsonb), current_timestamp
       )
       """)
   int insert(CanvasDocumentDO document);
@@ -38,31 +35,23 @@ public interface CanvasDocumentMapper extends BaseMapper {
       id = "canvasDocumentMap",
       value = {
         @Result(column = "id", property = "id"),
-        @Result(column = "workspace_id", property = "workspaceId"),
         @Result(column = "title", property = "title"),
-        @Result(column = "schema_version", property = "schemaVersion"),
         @Result(column = "revision", property = "revision"),
-        @Result(column = "lifecycle", property = "lifecycle"),
         @Result(column = "home_viewport", property = "homeViewportJson"),
-        @Result(column = "version", property = "version"),
-        @Result(column = "create_time", property = "createTime"),
         @Result(column = "update_time", property = "updateTime")
       })
   CanvasDocumentDO getById(@Param("id") long id);
 
-  @Select(
-      "select "
-          + COLUMNS
-          + " from canvas_document where workspace_id = #{workspaceId} and lifecycle = 'ACTIVE'"
-          + " order by updated_at desc")
+  @Select("select " + COLUMNS + " from canvas_document order by updated_at desc, id desc")
   @ResultMap("canvasDocumentMap")
-  List<CanvasDocumentDO> listByWorkspace(@Param("workspaceId") long workspaceId);
+  List<CanvasDocumentDO> listAll();
 
   @Update(
       """
       update canvas_document
-      set title = #{title}, revision = #{revision}, home_viewport = cast(#{homeViewportJson} as jsonb),
-          updated_at = current_timestamp, version = version + 1
+      set title = #{title}, revision = #{revision},
+          home_viewport = cast(#{homeViewportJson} as jsonb),
+          updated_at = current_timestamp
       where id = #{id} and revision = #{expectedRevision}
       """)
   int updateRevisionAndTitle(
