@@ -24,16 +24,20 @@ describe('ThreadComposer and commands', () => {
     ])
     const blank = threadCommandsForScene('blank')
     expect(blank.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
-    expect(blank.filter((c) => !c.disabled).map((c) => c.id)).toEqual(['session', 'agent'])
+    // A blank pane has no Thread yet, so `/session` (which rebinds the current Thread) is
+    // unavailable while `/thread` (pure pane selection) stays enabled.
+    expect(blank.filter((c) => !c.disabled).map((c) => c.id)).toEqual(['thread', 'agent'])
+    expect(blank.find((c) => c.id === 'session')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'new')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'model')?.disabled).toBe(true)
+    expect(blank.find((c) => c.id === 'tree')?.disabled).toBe(true)
     expect(threadCommandsForScene('bound').every((c) => !c.disabled)).toBe(true)
     expect(filterThreadCommands('yo').map((c) => c.id)).toEqual(['yolo'])
     expect(filterThreadCommands('sto').map((c) => c.id)).toEqual(['stop'])
     expect(filterThreadCommands('tree')[0]?.id).toBe('tree')
-    expect(['history', 'branch', 'fork', 'thread'].every((keyword) => filterThreadCommands(keyword).some((command) => command.id === 'tree'))).toBe(true)
+    expect(['history', 'branch', 'rebind', 'head'].every((keyword) => filterThreadCommands(keyword).some((command) => command.id === 'tree'))).toBe(true)
     expect(filterThreadCommands('', blank).map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
-    expect(firstEnabledThreadCommand('', blank)?.id).toBe('session')
+    expect(firstEnabledThreadCommand('', blank)?.id).toBe('thread')
     expect(filterThreadCommands('missing')).toEqual([])
   })
 

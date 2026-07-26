@@ -41,12 +41,18 @@ describe('useAgentThreadMessageMutation', () => {
       ),
     })
     await act(async () => {
-      await result.current.mutateAsync({ content: 'hello', clientMessageId: 'cid-1' })
+      await result.current.mutateAsync({
+        content: 'hello',
+        clientMessageId: 'cid-1',
+        expectedExecutionEpoch: 2,
+      })
     })
 
+    // The caller-supplied epoch is forwarded verbatim as the CAS fencing token.
     expect(harnessService.submitThreadMessage).toHaveBeenCalledWith('t1', {
       content: 'hello',
       clientMessageId: 'cid-1',
+      expectedExecutionEpoch: 2,
     })
     await waitFor(() => expect(invalidateSpy).toHaveBeenCalled())
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.threads.detail('t1') })
@@ -60,19 +66,23 @@ describe('useAgentThreadMessageMutation', () => {
     const { result } = renderHook(() => useAgentThreadMessageMutation('t1'), { wrapper })
     const clientMessageId = createClientMessageId()
     await act(async () => {
-      await expect(result.current.mutateAsync({ content: 'retry', clientMessageId })).rejects.toThrow('network')
+      await expect(
+        result.current.mutateAsync({ content: 'retry', clientMessageId, expectedExecutionEpoch: 5 }),
+      ).rejects.toThrow('network')
     })
     await act(async () => {
-      await result.current.mutateAsync({ content: 'retry', clientMessageId })
+      await result.current.mutateAsync({ content: 'retry', clientMessageId, expectedExecutionEpoch: 5 })
     })
 
     expect(harnessService.submitThreadMessage).toHaveBeenNthCalledWith(1, 't1', {
       content: 'retry',
       clientMessageId,
+      expectedExecutionEpoch: 5,
     })
     expect(harnessService.submitThreadMessage).toHaveBeenNthCalledWith(2, 't1', {
       content: 'retry',
       clientMessageId,
+      expectedExecutionEpoch: 5,
     })
   })
 })

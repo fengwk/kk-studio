@@ -9,7 +9,11 @@ import {
   type ChatPane,
   type PaneSortPreference,
   } from '@/features/ai/chat-pane-state'
-import { isRunningThread } from '@/features/ai/chat-session-picker'
+import {
+  canRebindThread,
+  isRunningThread,
+  toThreadSelectionItem,
+} from '@/features/ai/chat-session-picker'
 import { performBlankPaneFirstSend } from '@/features/ai/chat-first-send'
 import { branchTarget } from '@/features/ai/session-entry-tree'
 import {
@@ -25,11 +29,11 @@ import type {
   AgentDefinitionDTO,
   ChatDTO,
   HarnessSessionEntryDTO,
-  HarnessThreadDTO,
 } from '@/shared/api/contracts'
 import { extractContextWindow, extractDefaultVariantFromModel } from '@/features/ai/ai-model-draft-codec'
 import { variantOptionsFromModel } from '@/features/ai/ai-draft-variant-options'
 import { agentService } from '@/shared/api/agent-service'
+import { isConflictError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 
@@ -82,8 +86,15 @@ function errorMessage(error: unknown, fallback: string): string {
   return fallback
 }
 
+/** 409 = stale executionEpoch or non-quiescent Thread; never swallow it silently. */
+function rebindErrorMessage(error: unknown): string {
+  if (isConflictError(error)) {
+    return `无法重定位 Thread：状态已变化（${errorMessage(error, '冲突')}），请刷新后重试`
+  }
+  return errorMessage(error, '重定位 Thread 失败')
+}
+
 export function ChatWorkspacePane({
-  chatId,
   chat,
   agents,
   pane,
@@ -96,7 +107,6 @@ export function ChatWorkspacePane({
   onThreadSortChange,
   onDefaultAgentChange,
 }: {
-  chatId: string
   chat: ChatDTO | undefined
   agents: AgentDefinitionDTO[]
   pane: ChatPane
@@ -112,7 +122,6 @@ export function ChatWorkspacePane({
   if (isPaneBound(pane.threadId)) {
     return (
       <BoundThreadPane
-        chatId={chatId}
         agents={agents}
         paneId={pane.id}
         threadId={pane.threadId}
@@ -129,48 +138,49 @@ export function ChatWorkspacePane({
 
   return (
     <BlankComposerPane
-      chatId={chatId}
       chat={chat}
       agents={agents}
       focused={focused}
-      sessionSort={sessionSort}
+      threadSort={threadSort}
       onFocus={onFocus}
       onThreadChange={onThreadChange}
-      onSessionSortChange={onSessionSortChange}
+      onThreadSortChange={onThreadSortChange}
       onDefaultAgentChange={onDefaultAgentChange}
     />
   )
 }
 
 function BlankComposerPane({
-  chatId,
   chat,
   agents,
   focused,
-  sessionSort,
+  threadSort,
   onFocus,
   onThreadChange,
-  onSessionSortChange,
+  onThreadSortChange,
   onDefaultAgentChange,
 }: {
-  chatId: string
   chat: ChatDTO | undefined
   agents: AgentDefinitionDTO[]
   focused: boolean
-  sessionSort: PaneSortPreference
+  threadSort: PaneSortPreference
   onFocus: () => void
   onThreadChange: (threadId: string | null) => void
-  onSessionSortChange: (sort: PaneSortPreference) => void
+  onThreadSortChange: (sort: PaneSortPreference) => void
   onDefaultAgentChange: (agentId: string) => Promise<void>
 }) {
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
-  const [sessionModalOpen, setSessionModalOpen] = useState(false)
+  const [threadModalOpen, setThreadModalOpen] = useState(false)
   const [pendingContent, setPendingContent] = useState<string | null>(null)
   const queryClient = useQueryClient()
-  const sessionPicker = useChatSessionPicker(chatId, sessionModalOpen, sessionSort)
+  const threadsQuery = useQuery({
+    queryKey: queryKeys.threads.list,
+    queryFn: () => harnessService.listThreads(),
+    enabled: threadModalOpen,
+  })
   const modelsQuery = useQuery({
     queryKey: queryKeys.models.list,
     queryFn: () => agentService.listModels(),
@@ -193,18 +203,18 @@ function BlankComposerPane({
     setActionError(null)
     try {
       const result = await performBlankPaneFirstSend({
-        chatId,
         agentDefinitionId: agentId,
         content,
       })
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.chats.sessions(chatId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.threads.list }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions.list }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sessions.detail(result.sessionId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(result.threadId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(result.thread.threadId) }),
       ])
       setDraft('')
       setPendingContent(null)
-      onThreadChange(result.threadId)
+      onThreadChange(result.thread.threadId)
     } catch (error) {
       setActionError(errorMessage(error, '首发失败'))
       setDraft(content)
@@ -233,8 +243,8 @@ function BlankComposerPane({
       return
     }
     switch (command.id) {
-      case 'session':
-        setSessionModalOpen(true)
+      case 'thread':
+        setThreadModalOpen(true)
         return
       case 'agent':
         setAgentModalOpen(true)
@@ -268,7 +278,7 @@ function BlankComposerPane({
         <main className="chat-main thread-panel-main">
           <div className="blank-pane-body">
             <h2>新对话</h2>
-            <p>输入后创建新的 Session / Thread；/agent 选默认 Agent，/session 复用已有会话。</p>
+            <p>输入后创建并 bootstrap 新 Thread；/agent 选默认 Agent，/thread 复用已有 Thread。</p>
             {actionError ? <div className="thread-error-panel">{actionError}</div> : null}
           </div>
           <ThreadComposer
@@ -311,21 +321,20 @@ function BlankComposerPane({
           void handleAgentSelected(agentId)
         }}
       />
+      {/* /thread only rebinds the pane; no Thread is mutated. */}
       <SelectionListModal
-        open={sessionModalOpen}
-        title="选择 Session"
-        items={sessionPicker.sessionItems}
-        sort={sessionSort}
-        onSortChange={onSessionSortChange}
-        emptyText="当前 Chat 暂无 Session"
-        onClose={() => setSessionModalOpen(false)}
-        onSelect={(selectedSessionId) => {
-          const session = sessionPicker.findSession(selectedSessionId)
-          if (!session) {
-            return
-          }
-          setSessionModalOpen(false)
-          onThreadChange(session.mainThreadId)
+        open={threadModalOpen}
+        title="选择 Thread"
+        items={sortWithRunningFirst(threadsQuery.data ?? [], threadSort, isRunningThread).map(
+          toThreadSelectionItem,
+        )}
+        sort={threadSort}
+        onSortChange={onThreadSortChange}
+        emptyText="暂无 Thread"
+        onClose={() => setThreadModalOpen(false)}
+        onSelect={(selectedThreadId) => {
+          setThreadModalOpen(false)
+          onThreadChange(selectedThreadId)
         }}
       />
     </section>
@@ -333,7 +342,6 @@ function BlankComposerPane({
 }
 
 function BoundThreadPane({
-  chatId,
   agents,
   paneId,
   threadId,
@@ -345,7 +353,6 @@ function BoundThreadPane({
   onSessionSortChange,
   onThreadSortChange,
 }: {
-  chatId: string
   agents: AgentDefinitionDTO[]
   paneId: string
   threadId: string
@@ -357,18 +364,22 @@ function BoundThreadPane({
   onSessionSortChange: (sort: PaneSortPreference) => void
   onThreadSortChange: (sort: PaneSortPreference) => void
 }) {
-  // sessionId is not persisted on pane; resolve from Thread after load.
+  // sessionId is not persisted on pane; resolve from the Thread head after load.
   const controller = useAgentThreadController(threadId)
-  const sessionId = controller.thread?.sessionId ?? ''
+  const sessionId = controller.sessionId
   const queryClient = useQueryClient()
-  const [historyBranchOpen, setHistoryBranchOpen] = useState(false)
+  // Session whose Entry Tree the history panel is browsing: current Session for /tree, the
+  // picked Session for /session. Both end in the same PUT /head on the current Thread.
+  const [historySessionId, setHistorySessionId] = useState<string | null>(null)
   const [sessionModalOpen, setSessionModalOpen] = useState(false)
   const [threadModalOpen, setThreadModalOpen] = useState(false)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [modelModalOpen, setModelModalOpen] = useState(false)
   const [variantModalOpen, setVariantModalOpen] = useState(false)
   const [branchDraft, setBranchDraft] = useState('')
-  const sessionPicker = useChatSessionPicker(chatId, sessionModalOpen, sessionSort)
+  const [rebindBlockedReason, setRebindBlockedReason] = useState<string | null>(null)
+  const sessionPicker = useChatSessionPicker(sessionModalOpen, sessionSort)
+  const rebindable = canRebindThread(controller.thread)
 
   useEffect(() => {
     if (branchDraft) {
@@ -380,33 +391,38 @@ function BoundThreadPane({
   }, [branchDraft])
 
   const threadsQuery = useQuery({
-    queryKey: queryKeys.sessions.threads(sessionId),
-    queryFn: () => harnessService.listSessionThreads(sessionId),
-    enabled: threadModalOpen || Boolean(sessionId),
+    queryKey: queryKeys.threads.list,
+    queryFn: () => harnessService.listThreads(),
+    enabled: threadModalOpen,
   })
   const sessionEntriesQuery = useQuery({
-    queryKey: queryKeys.sessions.entries(sessionId),
-    queryFn: () => harnessService.listSessionEntries(sessionId),
-    enabled: historyBranchOpen && Boolean(sessionId),
+    queryKey: queryKeys.sessions.entries(historySessionId ?? ''),
+    queryFn: () => harnessService.listSessionEntries(historySessionId!),
+    enabled: Boolean(historySessionId),
   })
-  const branchMutation = useMutation({
+  const rebindMutation = useMutation({
     mutationFn: (entry: HarnessSessionEntryDTO) => {
       const target = branchTarget(entry)
-      if (!target.fromEntryId) {
+      if (!target.headEntryId) {
         return Promise.reject(new Error('根节点不能作为可编辑消息分支'))
       }
-      if (!sessionId) {
-        return Promise.reject(new Error('Thread 尚未加载 Session'))
+      if (!controller.thread) {
+        return Promise.reject(new Error('Thread 尚未加载'))
       }
-      return harnessService.createSessionThread(sessionId, { fromEntryId: target.fromEntryId })
+      return harnessService.updateThreadHead(threadId, {
+        headEntryId: target.headEntryId,
+        expectedExecutionEpoch: controller.thread.executionEpoch,
+      })
     },
-    onSuccess: async (nextThread, entry) => {
-      setHistoryBranchOpen(false)
-      if (sessionId) {
-        await queryClient.invalidateQueries({ queryKey: queryKeys.sessions.threads(sessionId) })
-      }
+    onSuccess: async (_thread, entry) => {
+      setHistorySessionId(null)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.threads.entries(threadId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.threads.inputs(threadId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.threads.list }),
+      ])
       setBranchDraft(branchTarget(entry).draft)
-      onThreadChange(nextThread.threadId)
     },
   })
 
@@ -414,7 +430,17 @@ function BoundThreadPane({
     threadsQuery.data ?? [],
     threadSort,
     isRunningThread,
-  ).map((thread) => toThreadItem(thread, sessionId))
+  ).map(toThreadSelectionItem)
+
+  /** /session and /tree both relocate the current Thread, so both need a quiescent Thread. */
+  function openRebindTarget(open: () => void) {
+    if (!rebindable) {
+      setRebindBlockedReason('当前 Thread 正在运行，无法重定位；请先 /stop')
+      return
+    }
+    setRebindBlockedReason(null)
+    open()
+  }
 
   function handleCommand(command: ThreadCommand) {
     onFocus()
@@ -423,7 +449,7 @@ function BoundThreadPane({
     }
     switch (command.id) {
       case 'session':
-        setSessionModalOpen(true)
+        openRebindTarget(() => setSessionModalOpen(true))
         return
       case 'thread':
         setThreadModalOpen(true)
@@ -438,10 +464,10 @@ function BoundThreadPane({
         setVariantModalOpen(true)
         return
       case 'tree':
-        setHistoryBranchOpen(true)
+        openRebindTarget(() => setHistorySessionId(sessionId || null))
         return
       case 'new':
-        // Detach pane from current Session/Thread so next send creates a fresh pair.
+        // Detach the pane so the next send creates and bootstraps a fresh Thread.
         controller.setDraft('')
         onThreadChange(null)
         return
@@ -473,8 +499,11 @@ function BoundThreadPane({
         disabled={controller.disabled}
         observability={controller.observability}
         taskTimeline={controller.taskTimeline}
-        actionError={controller.actionError}
-        onDismissActionError={controller.dismissActionError}
+        actionError={rebindBlockedReason ?? controller.actionError}
+        onDismissActionError={() => {
+          setRebindBlockedReason(null)
+          controller.dismissActionError()
+        }}
         onDraftChange={controller.setDraft}
         onSubmit={() => {
           void controller.submitMessage()
@@ -494,45 +523,46 @@ function BoundThreadPane({
           setVariantModalOpen(true)
         }}
       />
-      {historyBranchOpen ? (
+      {historySessionId ? (
         <HistoryBranchPanel
           entries={sessionEntriesQuery.data ?? []}
           currentHeadEntryId={controller.thread?.headEntryId}
           loading={sessionEntriesQuery.isLoading}
           queryError={sessionEntriesQuery.error}
-          pending={branchMutation.isPending}
-          creationError={branchMutation.error}
+          pending={rebindMutation.isPending}
+          rebindError={rebindMutation.error ? rebindErrorMessage(rebindMutation.error) : null}
           onClose={() => {
-            setHistoryBranchOpen(false)
-            branchMutation.reset()
+            setHistorySessionId(null)
+            rebindMutation.reset()
           }}
-          onCreate={(entry) => branchMutation.mutate(entry)}
+          onRebind={(entry) => rebindMutation.mutate(entry)}
         />
       ) : null}
+      {/* /session picks the target Session, then its Entry Tree supplies the new head. */}
       <SelectionListModal
         open={sessionModalOpen}
         title="选择 Session"
         items={sessionPicker.sessionItems}
         sort={sessionSort}
         onSortChange={onSessionSortChange}
-        emptyText="当前 Chat 暂无 Session"
+        emptyText="暂无 Session"
         onClose={() => setSessionModalOpen(false)}
         onSelect={(selectedSessionId) => {
-          const session = sessionPicker.findSession(selectedSessionId)
-          if (!session) {
+          if (!sessionPicker.findSession(selectedSessionId)) {
             return
           }
           setSessionModalOpen(false)
-          onThreadChange(session.mainThreadId)
+          setHistorySessionId(selectedSessionId)
         }}
       />
+      {/* /thread only switches which Thread this pane shows; no Thread is mutated. */}
       <SelectionListModal
         open={threadModalOpen}
         title="选择 Thread"
         items={threadItems}
         sort={threadSort}
         onSortChange={onThreadSortChange}
-        emptyText="当前 Session 暂无 Thread"
+        emptyText="暂无 Thread"
         onClose={() => setThreadModalOpen(false)}
         onSelect={(selectedThreadId) => {
           setThreadModalOpen(false)
@@ -616,14 +646,4 @@ function firstNonEmpty(...values: unknown[]): string {
     }
   }
   return ''
-}
-
-function toThreadItem(thread: HarnessThreadDTO, mainSessionId: string) {
-  const running = isRunningThread(thread)
-  return {
-    id: thread.threadId,
-    title: thread.threadId,
-    subtitle: thread.activeAgentName || thread.sessionTitle || mainSessionId,
-    badge: running ? 'RUNNING' : thread.status,
-  }
 }

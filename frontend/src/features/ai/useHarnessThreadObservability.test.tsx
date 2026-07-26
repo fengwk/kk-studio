@@ -31,12 +31,16 @@ describe('useHarnessThreadObservability', () => {
       .mockResolvedValueOnce({} as never)
     const { result } = renderHook(() => useHarnessThreadObservability('thread-1', false), { wrapper })
 
-    act(() => result.current.setYolo(true))
+    act(() => result.current.setYolo(true, 4))
 
     await waitFor(() => expect(harnessService.setThreadYolo).toHaveBeenCalledTimes(2))
     const firstRequest = vi.mocked(harnessService.setThreadYolo).mock.calls[0][1]
     const secondRequest = vi.mocked(harnessService.setThreadYolo).mock.calls[1][1]
     expect(firstRequest).toEqual(secondRequest)
-    expect(firstRequest).toEqual({ yoloEnabled: true, clientMessageId: expect.any(String) })
+    expect(firstRequest).toEqual({
+      yoloEnabled: true,
+      clientMessageId: expect.any(String),
+      expectedExecutionEpoch: 4,
+    })
   })
 })

@@ -20,15 +20,16 @@ vi.mock('@/shared/api/chat-service', () => ({
   chatService: {
     getChat: vi.fn(),
     updateChat: vi.fn(),
-    listChatSessions: vi.fn(),
-    attachChatSession: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
-    createSession: vi.fn(),
+    createThread: vi.fn(),
+    bootstrapThread: vi.fn(),
     getSession: vi.fn(),
-    listSessionThreads: vi.fn(),
+    listSessions: vi.fn(),
+    listThreads: vi.fn(),
+    listSessionEntries: vi.fn(),
     getThread: vi.fn(),
     listThreadEntries: vi.fn(),
     listThreadInputs: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     setThreadAgent: vi.fn(),
     submitThreadMessage: vi.fn(),
     setThreadYolo: vi.fn(),
+    updateThreadHead: vi.fn(),
   },
 }))
 
@@ -107,7 +109,6 @@ describe('ChatWorkspacePage', () => {
       createTime: null,
       updateTime: null,
     })
-    vi.mocked(chatService.listChatSessions).mockResolvedValue([])
     vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(new FakeEventSource() as EventSource)
   })
 
@@ -121,7 +122,8 @@ describe('ChatWorkspacePage', () => {
       threadId: 't1',
       sessionId: 's1',
       sessionTitle: 's',
-      headEntryId: null,
+      headEntryId: 'h1',
+      executionEpoch: 4,
       status: 'IDLE',
       inputSequence: 0,
       activeAgentDefinitionId: 'a1',
@@ -136,7 +138,6 @@ describe('ChatWorkspacePage', () => {
     vi.mocked(harnessService.getSession).mockResolvedValue({
       sessionId: 's1',
       title: 's',
-      mainThreadId: 't1',
       rootSessionId: 's1',
       parentSessionId: null,
       parentInvocationId: null,
@@ -144,7 +145,9 @@ describe('ChatWorkspacePage', () => {
       createTime: null,
       updateTime: null,
     })
-    vi.mocked(harnessService.listSessionThreads).mockResolvedValue([])
+    vi.mocked(harnessService.listThreads).mockResolvedValue([])
+    vi.mocked(harnessService.listSessions).mockResolvedValue([])
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
     vi.mocked(harnessService.listThreadEntries).mockResolvedValue([])
     vi.mocked(harnessService.listThreadInputs).mockResolvedValue([])
     vi.mocked(harnessService.listThreadToolInvocations).mockResolvedValue([])
@@ -198,49 +201,59 @@ describe('ChatWorkspacePage', () => {
     expect(await screen.findByRole('button', { name: 'assistant' })).toBeInTheDocument()
   })
 
-  it('performs first-send create/attach/setAgent/message order for blank pane with default agent', async () => {
+  it('performs first-send createThread/bootstrap/message order for blank pane with default agent', async () => {
     const user = userEvent.setup()
     const order: string[] = []
-    vi.mocked(harnessService.createSession).mockImplementation(async () => {
-      order.push('create')
+    vi.mocked(harnessService.createThread).mockImplementation(async () => {
+      order.push('createThread')
       return {
-        sessionId: 's-new',
-        title: null,
-        mainThreadId: 't-new',
-        rootSessionId: 's-new',
-        parentSessionId: null,
-        parentInvocationId: null,
-        depth: 0,
-        createTime: null,
-        updateTime: null,
-      }
-    })
-    vi.mocked(chatService.attachChatSession).mockImplementation(async () => {
-      order.push('attach')
-      return {
-        sessionId: 's-new',
-        title: null,
-        mainThreadId: 't-new',
-        rootSessionId: 's-new',
-        parentSessionId: null,
-        parentInvocationId: null,
-        depth: 0,
-        createTime: null,
-        updateTime: null,
-      }
-    })
-    vi.mocked(harnessService.setThreadAgent).mockImplementation(async () => {
-      order.push('agent')
-      return {
-        inputId: 'i1',
         threadId: 't-new',
-        sequence: 1,
-        inputType: 'SET_AGENT',
-        payloadJson: '{}',
-        clientMessageId: 'c1',
-        status: 'QUEUED',
-            resolvedAt: null,
-            createTime: null,
+        sessionId: null,
+        sessionTitle: null,
+        headEntryId: null,
+        executionEpoch: 0,
+        status: 'UNBOUND',
+        inputSequence: 0,
+        activeAgentDefinitionId: null,
+        activeAgentName: null,
+        modelId: null,
+        variant: null,
+        yoloEnabled: false,
+        processing: false,
+        createTime: null,
+        updateTime: null,
+      }
+    })
+    vi.mocked(harnessService.bootstrapThread).mockImplementation(async () => {
+      order.push('bootstrap')
+      return {
+        session: {
+          sessionId: 's-new',
+          title: null,
+          rootSessionId: 's-new',
+          parentSessionId: null,
+          parentInvocationId: null,
+          depth: 0,
+          createTime: null,
+          updateTime: null,
+        },
+        thread: {
+          threadId: 't-new',
+          sessionId: 's-new',
+          sessionTitle: null,
+          headEntryId: 'e-config',
+          executionEpoch: 1,
+          status: 'IDLE',
+          inputSequence: 0,
+          activeAgentDefinitionId: 'a1',
+          activeAgentName: 'assistant',
+          modelId: 'm1',
+          variant: 'default',
+          yoloEnabled: false,
+          processing: false,
+          createTime: null,
+          updateTime: null,
+        },
       }
     })
     vi.mocked(harnessService.submitThreadMessage).mockImplementation(async () => {
@@ -261,7 +274,8 @@ describe('ChatWorkspacePage', () => {
       threadId: 't-new',
       sessionId: 's-new',
       sessionTitle: null,
-      headEntryId: null,
+      headEntryId: 'e-config',
+      executionEpoch: 1,
       status: 'IDLE',
       inputSequence: 2,
       activeAgentDefinitionId: 'a1',
@@ -276,7 +290,6 @@ describe('ChatWorkspacePage', () => {
     vi.mocked(harnessService.getSession).mockResolvedValue({
       sessionId: 's-new',
       title: null,
-      mainThreadId: 't-new',
       rootSessionId: 's-new',
       parentSessionId: null,
       parentInvocationId: null,
@@ -284,7 +297,9 @@ describe('ChatWorkspacePage', () => {
       createTime: null,
       updateTime: null,
     })
-    vi.mocked(harnessService.listSessionThreads).mockResolvedValue([])
+    vi.mocked(harnessService.listThreads).mockResolvedValue([])
+    vi.mocked(harnessService.listSessions).mockResolvedValue([])
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
     vi.mocked(harnessService.listThreadEntries).mockResolvedValue([])
     vi.mocked(harnessService.listThreadInputs).mockResolvedValue([])
     vi.mocked(harnessService.listThreadToolInvocations).mockResolvedValue([])
@@ -313,8 +328,23 @@ describe('ChatWorkspacePage', () => {
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'first message')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(order).toEqual(['create', 'attach', 'agent', 'message']))
-    expect(harnessService.createSession).toHaveBeenCalledWith({})
-    expect(chatService.attachChatSession).toHaveBeenCalledWith('chat-1', { sessionId: 's-new' })
+    // Strict new order; no POST /sessions, no chat attach and no separate SET_AGENT input.
+    await waitFor(() => expect(order).toEqual(['createThread', 'bootstrap', 'message']))
+    expect(harnessService.bootstrapThread).toHaveBeenCalledWith('t-new', {
+      title: undefined,
+      agentDefinitionId: 'a1',
+      yoloEnabled: false,
+      expectedExecutionEpoch: 0,
+    })
+    // The message is fenced by the epoch bootstrap returned, not the pre-bootstrap one.
+    expect(harnessService.submitThreadMessage).toHaveBeenCalledWith('t-new', {
+      content: 'first message',
+      clientMessageId: expect.any(String),
+      expectedExecutionEpoch: 1,
+    })
+    expect(harnessService.setThreadAgent).not.toHaveBeenCalled()
+    // The pane binds to the bootstrapped Thread and leaves the blank state behind.
+    await waitFor(() => expect(screen.queryByText('新对话')).not.toBeInTheDocument())
+    await waitFor(() => expect(harnessService.getThread).toHaveBeenCalledWith('t-new'))
   })
 })

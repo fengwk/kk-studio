@@ -29,7 +29,8 @@ export interface SessionTreeConnector {
 }
 
 export interface BranchTarget {
-  fromEntryId: string | null
+  /** Target head Entry for `PUT /threads/{id}/head`; null when the Entry is not selectable. */
+  headEntryId: string | null
   draft: string
 }
 
@@ -218,13 +219,16 @@ export function matchesSessionTreeFilter(kind: SessionEntryKind, filter: Session
   }
 }
 
-/** USER/CUSTOM branches re-submit editable source text from their parent; all others branch here. */
+/**
+ * USER/CUSTOM entries rewind the head to their parent and restore their editable source text;
+ * every other Entry becomes the head itself.
+ */
 export function branchTarget(entry: HarnessSessionEntryDTO): BranchTarget {
   const kind = sessionEntryKind(entry)
   if (kind === 'user' || kind === 'custom') {
-    return { fromEntryId: entry.parentEntryId ?? null, draft: sessionEntryText(entry) }
+    return { headEntryId: entry.parentEntryId ?? null, draft: sessionEntryText(entry) }
   }
-  return { fromEntryId: entry.entryId, draft: '' }
+  return { headEntryId: entry.entryId, draft: '' }
 }
 
 /** Full text body for branching drafts. This intentionally keeps thinking blocks: USER/CUSTOM

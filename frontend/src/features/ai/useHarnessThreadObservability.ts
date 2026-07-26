@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createClientMessageId } from '@/features/ai/useAgentThreadMessageMutation'
 import { harnessService } from '@/shared/api/harness-service'
-import type { HarnessThreadYoloSetDTO } from '@/shared/api/contracts'
+import type { BackendLong, HarnessThreadYoloSetDTO } from '@/shared/api/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 export function useHarnessThreadObservability(threadId: string, working: boolean) {
@@ -35,7 +35,11 @@ export function useHarnessThreadObservability(threadId: string, working: boolean
     toolInvocations: toolInvocationsQuery.data ?? [],
     observabilityError: usageQuery.error || toolInvocationsQuery.error,
     yoloPending: setYoloMutation.isPending,
-    setYolo: (enabled: boolean) =>
-      setYoloMutation.mutate({ yoloEnabled: enabled, clientMessageId: createClientMessageId() }),
+    setYolo: (enabled: boolean, expectedExecutionEpoch: BackendLong) =>
+      setYoloMutation.mutate({
+        yoloEnabled: enabled,
+        clientMessageId: createClientMessageId(),
+        expectedExecutionEpoch,
+      }),
   }
 }

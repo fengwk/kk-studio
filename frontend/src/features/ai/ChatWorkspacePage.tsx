@@ -125,7 +125,6 @@ export function ChatWorkspacePage() {
         {paneState.panes.map((pane) => (
           <ChatWorkspacePane
             key={pane.id}
-            chatId={chatId}
             chat={chat}
             agents={agents}
             pane={pane}

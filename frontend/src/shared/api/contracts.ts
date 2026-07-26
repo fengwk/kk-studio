@@ -219,7 +219,6 @@ export type AgentDefinitionUpdateDTO = AgentDefinitionEditablePropertiesDTO
 export interface HarnessSessionDTO {
   sessionId: string
   title: string | null
-  mainThreadId: string
   rootSessionId: string
   parentSessionId: string | null
   parentInvocationId: string | null
@@ -253,10 +252,6 @@ export interface ChatCreateDTO {
 export interface ChatUpdateDTO {
   title?: string | null
   defaultAgentId?: string | null
-}
-
-export interface ChatSessionAttachDTO {
-  sessionId: string
 }
 
 export interface LiveEnvironmentToolDTO {
@@ -298,13 +293,18 @@ export interface HarnessSessionEntryDTO {
   createTime: BackendDateTime
 }
 
-/** HarnessThread query projection; ids are decimal strings. */
+/**
+ * HarnessThread query projection; ids are decimal strings.
+ * `sessionId` / `sessionTitle` / `headEntryId` are null while the Thread is UNBOUND.
+ */
 export interface HarnessThreadDTO {
   threadId: string
-  sessionId: string
+  sessionId: string | null
   sessionTitle: string | null
   headEntryId: string | null
-  /** Derived display status: RUNNING > WAITING > RUNNABLE > IDLE. */
+  /** CAS fencing token; every external mutation must echo the currently known value. */
+  executionEpoch: BackendLong
+  /** Derived display status: RUNNING > WAITING > RUNNABLE > UNBOUND/IDLE. */
   status: ThreadStatus
   inputSequence: BackendLong
   activeAgentDefinitionId: string | null
@@ -317,39 +317,62 @@ export interface HarnessThreadDTO {
   updateTime: BackendDateTime
 }
 
-export interface HarnessThreadCreateDTO {
-  fromEntryId: string
+/** Every external Thread mutation carries the expected epoch; a stale value yields 409. */
+export interface HarnessThreadEpochGuardDTO {
+  expectedExecutionEpoch: BackendLong
 }
 
-export interface HarnessThreadMessageCreateDTO {
+/** Atomically creates Session/ROOT/RUNTIME_CONFIG for an UNBOUND Thread and binds its head. */
+export interface HarnessThreadBootstrapDTO extends HarnessThreadEpochGuardDTO {
+  title?: string
+  agentDefinitionId: string
+  yoloEnabled: boolean
+}
+
+export interface HarnessThreadBootstrapResultDTO {
+  session: HarnessSessionDTO
+  thread: HarnessThreadDTO
+}
+
+/** Binds, moves across Sessions, or clears (null) the Thread head. */
+export interface HarnessThreadHeadUpdateDTO extends HarnessThreadEpochGuardDTO {
+  headEntryId: string | null
+}
+
+export interface HarnessThreadMessageCreateDTO extends HarnessThreadEpochGuardDTO {
   content: string
   clientMessageId: string
 }
 
-export interface HarnessThreadCustomMessageCreateDTO {
+export interface HarnessThreadCustomMessageCreateDTO extends HarnessThreadEpochGuardDTO {
   role: 'SYSTEM' | 'USER'
   content: string
   clientMessageId: string
 }
 
-export interface HarnessThreadYoloSetDTO {
+export interface HarnessThreadYoloSetDTO extends HarnessThreadEpochGuardDTO {
   yoloEnabled: boolean
   clientMessageId: string
 }
 
-export interface HarnessThreadAgentSetDTO {
+export interface HarnessThreadAgentSetDTO extends HarnessThreadEpochGuardDTO {
   agentDefinitionId: string
   clientMessageId: string
 }
 
-export interface HarnessThreadModelSetDTO {
+export interface HarnessThreadModelSetDTO extends HarnessThreadEpochGuardDTO {
   modelId: string
   variant: string
   clientMessageId: string
 }
 
-/** Query-derived Thread status only. Invocation retry waits are projected as WAITING. */
-export type ThreadStatus = 'IDLE' | 'RUNNING' | 'WAITING' | 'RUNNABLE'
+export type HarnessThreadStopDTO = HarnessThreadEpochGuardDTO
+
+/**
+ * Query-derived Thread status only. Invocation retry waits are projected as WAITING.
+ * UNBOUND means the Thread has no head Entry yet and accepts bind/bootstrap only.
+ */
+export type ThreadStatus = 'UNBOUND' | 'IDLE' | 'RUNNING' | 'WAITING' | 'RUNNABLE'
 
 /** Global automatic retry policy; PUT bodies are complete replacements. */
 export interface HarnessRetryPolicyDTO {

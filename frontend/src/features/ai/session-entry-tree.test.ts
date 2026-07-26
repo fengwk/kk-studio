@@ -139,11 +139,11 @@ describe('Session Entry Tree', () => {
     expect(rows.map((row) => row.hasBranchConnector)).toEqual([true, true, true])
   })
 
-  it('branches editable USER/CUSTOM entries from their parent and all other entries from themselves', () => {
-    expect(branchTarget(entries[1])).toEqual({ fromEntryId: 'root', draft: 'original prompt' })
-    expect(branchTarget(entries[4])).toEqual({ fromEntryId: 'assistant', draft: 'custom text' })
-    expect(branchTarget(entries[2])).toEqual({ fromEntryId: 'assistant', draft: '' })
-    expect(branchTarget(entries[0])).toEqual({ fromEntryId: 'root', draft: '' })
+  it('rewinds the head to the parent for editable USER/CUSTOM entries and to itself otherwise', () => {
+    expect(branchTarget(entries[1])).toEqual({ headEntryId: 'root', draft: 'original prompt' })
+    expect(branchTarget(entries[4])).toEqual({ headEntryId: 'assistant', draft: 'custom text' })
+    expect(branchTarget(entries[2])).toEqual({ headEntryId: 'assistant', draft: '' })
+    expect(branchTarget(entries[0])).toEqual({ headEntryId: 'root', draft: '' })
   })
 
   it('classifies unknown and malformed Entries while keeping the conversation view free of system records', () => {

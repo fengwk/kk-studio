@@ -1,11 +1,5 @@
 import { apiClient, type HttpClient } from '@/shared/api/client'
-import type {
-  ChatCreateDTO,
-  ChatDTO,
-  ChatSessionAttachDTO,
-  ChatUpdateDTO,
-  HarnessSessionDTO,
-} from '@/shared/api/contracts'
+import type { ChatCreateDTO, ChatDTO, ChatUpdateDTO } from '@/shared/api/contracts'
 
 export function createChatService(client: HttpClient = apiClient) {
   return {
@@ -15,12 +9,6 @@ export function createChatService(client: HttpClient = apiClient) {
     updateChat: (chatId: string, data: ChatUpdateDTO): Promise<ChatDTO> =>
       client.put(`/chats/${encodeURIComponent(chatId)}`, data),
     deleteChat: (chatId: string): Promise<void> => client.delete(`/chats/${encodeURIComponent(chatId)}`),
-    listChatSessions: (chatId: string): Promise<HarnessSessionDTO[]> =>
-      client.get(`/chats/${encodeURIComponent(chatId)}/sessions`),
-    attachChatSession: (chatId: string, data: ChatSessionAttachDTO): Promise<HarnessSessionDTO> =>
-      client.post(`/chats/${encodeURIComponent(chatId)}/sessions`, data),
-    detachChatSession: (chatId: string, sessionId: string): Promise<void> =>
-      client.delete(`/chats/${encodeURIComponent(chatId)}/sessions/${encodeURIComponent(sessionId)}`),
   }
 }
 

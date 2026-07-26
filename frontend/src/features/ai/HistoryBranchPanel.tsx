@@ -33,18 +33,20 @@ export function HistoryBranchPanel({
   loading,
   queryError,
   pending,
-  creationError,
+  rebindError,
   onClose,
-  onCreate,
+  onRebind,
 }: {
   entries: HarnessSessionEntryDTO[]
   currentHeadEntryId?: string | null
   loading: boolean
   queryError: unknown
   pending: boolean
-  creationError: unknown
+  /** Already-formatted rebind failure (409 included); rendered verbatim so it is never swallowed. */
+  rebindError: string | null
   onClose: () => void
-  onCreate: (entry: HarnessSessionEntryDTO) => void
+  /** Relocates the current Thread head onto the selected Entry via PUT /threads/{id}/head. */
+  onRebind: (entry: HarnessSessionEntryDTO) => void
 }) {
   const [filter, setFilter] = useState<SessionTreeFilter>('conversation')
   const [searchQuery, setSearchQuery] = useState('')
@@ -71,8 +73,8 @@ export function HistoryBranchPanel({
     selectedEntryRef.current?.scrollIntoView?.({ block: 'nearest' })
   }, [selectedEntryId])
 
-  const canCreate = Boolean(
-    selectedEntry && branchTarget(selectedEntry).fromEntryId,
+  const canRebind = Boolean(
+    selectedEntry && branchTarget(selectedEntry).headEntryId,
   ) && !loading && !pending
   const effectiveClose = pending ? () => undefined : onClose
 
@@ -147,12 +149,12 @@ export function HistoryBranchPanel({
                   selectedEntryRef={selectedEntryRef}
                   isOnPath={isOnActivePath(ancestry, row.entry.entryId)}
                   isHead={row.entry.entryId === currentHeadEntryId}
-                  isBranchable={Boolean(branchTarget(row.entry).fromEntryId)}
+                  isBranchable={Boolean(branchTarget(row.entry).headEntryId)}
                 />
               ))}
             </div>
           ) : null}
-          {creationError ? <div className="state-block danger" role="alert">创建 Thread 失败</div> : null}
+          {rebindError ? <div className="state-block danger" role="alert">{rebindError}</div> : null}
         </div>
         <div className="modal-footer history-branch-footer">
           <button type="button" className="ghost-btn" onClick={effectiveClose} disabled={pending}>
@@ -161,10 +163,10 @@ export function HistoryBranchPanel({
           <button
             type="button"
             className="btn-primary"
-            disabled={!canCreate}
-            onClick={() => selectedEntry && onCreate(selectedEntry)}
+            disabled={!canRebind}
+            onClick={() => selectedEntry && onRebind(selectedEntry)}
           >
-            从这里开启新 Thread
+            从这里继续当前 Thread
           </button>
         </div>
       </section>

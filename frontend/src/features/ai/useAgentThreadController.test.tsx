@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAgentThreadController } from '@/features/ai/useAgentThreadController'
 import { agentService } from '@/shared/api/agent-service'
+import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 
 vi.mock('@/shared/api/agent-service', () => ({
@@ -17,7 +18,6 @@ vi.mock('@/shared/api/agent-service', () => ({
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     getSession: vi.fn(),
-    listSessionThreads: vi.fn(),
     listSessionEntries: vi.fn(),
     getThread: vi.fn(),
     listThreadEntries: vi.fn(),
@@ -29,6 +29,8 @@ vi.mock('@/shared/api/harness-service', () => ({
     setThreadYolo: vi.fn(),
     getThreadUsage: vi.fn(),
     listThreadToolInvocations: vi.fn(),
+    setThreadAgent: vi.fn(),
+    setThreadModel: vi.fn(),
     stopThread: vi.fn(),
   },
 }))
@@ -127,7 +129,6 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.getSession).mockResolvedValue({
       sessionId: 's1',
       title: 'title',
-      mainThreadId: '1',
       rootSessionId: 's1',
       parentSessionId: null,
       parentInvocationId: null,
@@ -135,7 +136,6 @@ describe('useAgentThreadController', () => {
       createTime: null,
       updateTime: null,
     })
-    vi.mocked(harnessService.listSessionThreads).mockResolvedValue([thread])
     vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
     vi.mocked(harnessService.getThread).mockResolvedValue(thread)
     vi.mocked(harnessService.listThreadEntries).mockResolvedValue([])
@@ -184,7 +184,29 @@ describe('useAgentThreadController', () => {
       resolvedAt: null,
       createTime: null,
     })
-    vi.mocked(harnessService.stopThread).mockResolvedValue({ executionEpoch: 1, cancelledInputs: [] })
+    vi.mocked(harnessService.setThreadAgent).mockResolvedValue({
+      inputId: 'a1',
+      threadId: '1',
+      sequence: 3,
+      inputType: 'SET_AGENT',
+      payloadJson: '{}',
+      clientMessageId: 'cid-agent',
+      status: 'QUEUED',
+      resolvedAt: null,
+      createTime: null,
+    })
+    vi.mocked(harnessService.setThreadModel).mockResolvedValue({
+      inputId: 'm1',
+      threadId: '1',
+      sequence: 4,
+      inputType: 'SET_MODEL',
+      payloadJson: '{}',
+      clientMessageId: 'cid-model',
+      status: 'QUEUED',
+      resolvedAt: null,
+      createTime: null,
+    })
+    vi.mocked(harnessService.stopThread).mockResolvedValue({ executionEpoch: 8, cancelledInputs: [] })
   })
 
   it('submits messages, runs slash commands, and rejects unknown commands', async () => {
@@ -201,17 +223,27 @@ describe('useAgentThreadController', () => {
     await act(async () => {
       await result.current.submitMessage()
     })
-    expect(harnessService.submitThreadMessage).toHaveBeenCalled()
+    // Every mailbox mutation carries the Thread's currently known executionEpoch.
+    expect(harnessService.submitThreadMessage).toHaveBeenCalledWith(
+      '1',
+      expect.objectContaining({ content: 'hello world', expectedExecutionEpoch: 7 }),
+    )
     expect(result.current.draft).toBe('')
 
     act(() => result.current.runCommand({ id: 'yolo', label: 'yolo', description: '' }))
     await waitFor(() => expect(harnessService.setThreadYolo).toHaveBeenCalledWith(
       '1',
-      expect.objectContaining({ yoloEnabled: true, clientMessageId: expect.any(String) }),
+      expect.objectContaining({
+        yoloEnabled: true,
+        clientMessageId: expect.any(String),
+        expectedExecutionEpoch: 7,
+      }),
     ))
 
     act(() => result.current.runCommand({ id: 'stop', label: 'stop', description: '' }))
-    await waitFor(() => expect(harnessService.stopThread).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(harnessService.stopThread).toHaveBeenCalledWith('1', { expectedExecutionEpoch: 7 }),
+    )
 
     act(() => result.current.runCommand({ id: 'unknown', label: 'x', description: '' }))
     expect(result.current.actionError).toContain('未知命令')
@@ -563,17 +595,99 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.getThread).mockResolvedValue({ ...thread, status: 'RUNNING' } as never)
     vi.mocked(harnessService.stopThread)
       .mockRejectedValueOnce(new Error('network unavailable'))
-      .mockResolvedValueOnce({ executionEpoch: 1, cancelledInputs: [] })
-    const { result } = renderHook(() => useAgentThreadController('1', 's1'), { wrapper })
+      .mockResolvedValueOnce({ executionEpoch: 8, cancelledInputs: [] })
+    const { result } = renderHook(() => useAgentThreadController('1'), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
     act(() => result.current.setDraft('current draft'))
     await act(async () => { await result.current.stopThread() })
     expect(result.current.actionError).toContain('network unavailable')
     expect(result.current.draft).toBe('current draft')
-    expect(harnessService.stopThread).toHaveBeenCalledWith('1')
+    expect(harnessService.stopThread).toHaveBeenCalledWith('1', { expectedExecutionEpoch: 7 })
     await act(async () => { await result.current.stopThread() })
     expect(result.current.draft).toBe('current draft')
     expect(vi.mocked(harnessService.stopThread)).toHaveBeenCalledTimes(2)
+  })
+
+  it('treats an UNBOUND Thread as a legal but non-writable state', async () => {
+    vi.mocked(harnessService.getThread).mockResolvedValue({
+      ...thread,
+      sessionId: null,
+      sessionTitle: null,
+      headEntryId: null,
+      status: 'UNBOUND',
+    } as never)
+    const { result } = renderHook(() => useAgentThreadController('1'), { wrapper })
+    await waitFor(() => expect(result.current.thread?.status).toBe('UNBOUND'))
+
+    // The composer is disabled and `bound` is false, but the pane still renders the Thread.
+    expect(result.current.bound).toBe(false)
+    expect(result.current.disabled).toBe(true)
+    expect(result.current.sessionId).toBe('')
+
+    act(() => result.current.setDraft('should not be sent'))
+    await act(async () => { await result.current.submitMessage() })
+    expect(harnessService.submitThreadMessage).not.toHaveBeenCalled()
+    expect(result.current.actionError).toContain('未绑定 Session')
+
+    // Configuration mutations are blocked client-side too: UNBOUND rejects every mailbox Input.
+    await act(async () => { await result.current.setThreadAgent('agent-1') })
+    expect(harnessService.setThreadAgent).not.toHaveBeenCalled()
+    await act(async () => { await result.current.setThreadModel('m1', 'default') })
+    expect(harnessService.setThreadModel).not.toHaveBeenCalled()
+    await act(async () => { await result.current.stopThread() })
+    expect(harnessService.stopThread).not.toHaveBeenCalled()
+    act(() => result.current.runCommand({ id: 'yolo', label: 'yolo', description: '' }))
+    expect(harnessService.setThreadYolo).not.toHaveBeenCalled()
+  })
+
+  it('reports a 409 as a stale-epoch conflict and refetches the Thread instead of swallowing it', async () => {
+    vi.mocked(harnessService.submitThreadMessage).mockRejectedValueOnce(
+      new ApiError('expected execution epoch mismatch', 409),
+    )
+    const { result } = renderHook(() => useAgentThreadController('1'), { wrapper })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    const threadCallsBefore = vi.mocked(harnessService.getThread).mock.calls.length
+
+    act(() => result.current.setDraft('stale message'))
+    await act(async () => { await result.current.submitMessage() })
+
+    expect(result.current.actionError).toContain('Thread 状态已变化')
+    expect(result.current.actionError).toContain('expected execution epoch mismatch')
+    expect(result.current.actionError).toContain('请重试')
+    // The Thread detail query is invalidated so the retry carries the fresh epoch.
+    await waitFor(() =>
+      expect(vi.mocked(harnessService.getThread).mock.calls.length).toBeGreaterThan(threadCallsBefore),
+    )
+    // The failed draft is still restored for an explicit retry.
+    expect(result.current.draft).toBe('stale message')
+  })
+
+  it('reports a 409 on config mutations with the action that failed', async () => {
+    vi.mocked(harnessService.setThreadAgent).mockRejectedValueOnce(
+      new ApiError('thread is not idle', 409),
+    )
+    const { result } = renderHook(() => useAgentThreadController('1'), { wrapper })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    await act(async () => { await result.current.setThreadAgent('agent-1') })
+    expect(harnessService.setThreadAgent).toHaveBeenCalledWith(
+      '1',
+      expect.objectContaining({ agentDefinitionId: 'agent-1', expectedExecutionEpoch: 7 }),
+    )
+    expect(result.current.actionError).toContain('切换 Agent 失败')
+    expect(result.current.actionError).toContain('thread is not idle')
+  })
+
+  it('keeps non-409 failures as plain messages without conflict wording', async () => {
+    vi.mocked(harnessService.setThreadModel).mockRejectedValueOnce(
+      new ApiError('model not found', 404),
+    )
+    const { result } = renderHook(() => useAgentThreadController('1'), { wrapper })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    await act(async () => { await result.current.setThreadModel('m1', 'default') })
+    expect(result.current.actionError).toBe('model not found')
+    expect(result.current.actionError).not.toContain('Thread 状态已变化')
   })
 })
 
@@ -582,6 +696,7 @@ const thread = {
   sessionId: 's1',
   sessionTitle: 'title',
   headEntryId: 'h1',
+  executionEpoch: 7,
   status: 'IDLE' as const,
   inputSequence: 0,
   activeAgentDefinitionId: 'agent-1',
