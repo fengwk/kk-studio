@@ -121,7 +121,7 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     session.setId(2L);
     when(queryMapper.findSession(2L)).thenReturn(session);
     when(queryMapper.listSessionTree(2L)).thenReturn(List.of(session));
-    when(queryMapper.listThreadViewsBySession(2L)).thenReturn(List.of());
+    when(queryMapper.listThreadViewsAtSession(2L)).thenReturn(List.of());
     assertTrue(service.listRootActivities("2", 0, 10).isEmpty());
   }
 }

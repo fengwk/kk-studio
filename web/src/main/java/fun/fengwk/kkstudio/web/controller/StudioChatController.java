@@ -17,20 +17,18 @@ import org.springframework.web.server.ResponseStatusException;
 import fun.fengwk.kkstudio.core.chat.service.ChatService;
 import fun.fengwk.kkstudio.share.model.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.model.ChatDTO;
-import fun.fengwk.kkstudio.share.model.ChatSessionAttachDTO;
 import fun.fengwk.kkstudio.share.model.ChatUpdateDTO;
-import fun.fengwk.kkstudio.share.model.HarnessSessionDTO;
 
 import java.util.List;
 import java.util.NoSuchElementException;
 
 /**
- * Chat collection CRUD and Chat↔Session membership API.
+ * Chat collection CRUD API.
  *
  * <p>所有路径 / DTO 边界上的 id 都是正的十进制字符串（PostgreSQL sequence）。错误映射：malformed / non-positive id 与非法
- * defaultAgentId → 400；找不到 Chat / Session / membership → 404；其它状态冲突 → 409。
+ * defaultAgentId → 400；找不到 Chat → 404；其它状态冲突 → 409。
  *
- * <p>重复 attach 是幂等的（已关联则直接返回现有 Session）。Agent 删除后 Chat 可保留陈旧 defaultAgentId，不建立外键。
+ * <p>Agent 删除后 Chat 可保留陈旧 defaultAgentId，不建立外键。
  */
 @AllArgsConstructor
 @RequestMapping("/api/chats")
@@ -73,43 +71,6 @@ public class StudioChatController {
   public Result<Void> deleteChat(@PathVariable("id") String id) {
     try {
       chatService.deleteChat(id);
-      return Results.noContent();
-    } catch (NoSuchElementException error) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
-    } catch (IllegalStateException error) {
-      throw new ResponseStatusException(HttpStatus.CONFLICT, error.getMessage(), error);
-    }
-  }
-
-  @GetMapping("/{id}/sessions")
-  public Result<List<HarnessSessionDTO>> listSessions(@PathVariable("id") String id) {
-    try {
-      return Results.ok(chatService.listSessions(id));
-    } catch (NoSuchElementException error) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
-    }
-  }
-
-  @PostMapping("/{id}/sessions")
-  public Result<HarnessSessionDTO> attachSession(
-      @PathVariable("id") String id, @RequestBody ChatSessionAttachDTO attachDTO) {
-    if (attachDTO == null || attachDTO.getSessionId() == null) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sessionId must not be null");
-    }
-    try {
-      return Results.created(chatService.attachSession(id, attachDTO.getSessionId()));
-    } catch (NoSuchElementException error) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
-    } catch (IllegalStateException error) {
-      throw new ResponseStatusException(HttpStatus.CONFLICT, error.getMessage(), error);
-    }
-  }
-
-  @DeleteMapping("/{id}/sessions/{sessionId}")
-  public Result<Void> detachSession(
-      @PathVariable("id") String id, @PathVariable("sessionId") String sessionId) {
-    try {
-      chatService.detachSession(id, sessionId);
       return Results.noContent();
     } catch (NoSuchElementException error) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);

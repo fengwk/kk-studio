@@ -88,7 +88,6 @@ class HarnessQueryServicesUnitTest {
     when(queryMapper.findThreadView(21L)).thenReturn(thread);
     when(queryMapper.findSession(1L)).thenReturn(session(1L, null, "root"));
     when(queryMapper.listAllThreadViews()).thenReturn(List.of(thread));
-    when(queryMapper.listThreadViewsBySession(1L)).thenReturn(List.of(thread));
     when(queryMapper.loadPath(1L, 10L)).thenReturn(List.of(entry(10L, 1L, null, "ROOT")));
     when(queryMapper.listInputsByThread(21L))
         .thenReturn(List.of(input(100L, 21L, 1L, "USER_MESSAGE", "QUEUED")));
@@ -96,11 +95,25 @@ class HarnessQueryServicesUnitTest {
     HarnessThreadDTO dto = threadQuery.getThread("21");
     assertEquals("WAITING", dto.getStatus());
     assertEquals(1, threadQuery.listAll().size());
-    assertEquals(1, threadQuery.listBySession("1").size());
     assertEquals(1, threadQuery.listPathEntries("21").size());
     assertEquals(1, threadQuery.listInputs("21").size());
     assertThrows(IllegalArgumentException.class, () -> threadQuery.getThread("999"));
-    assertThrows(IllegalArgumentException.class, () -> threadQuery.listBySession("999"));
+  }
+
+  @Test
+  void unboundThreadIsVisibleAndReportsEmptyPath() {
+    HarnessQueryRow unbound = thread(31L, null, null, false, false);
+    when(queryMapper.findThreadView(31L)).thenReturn(unbound);
+    when(queryMapper.listAllThreadViews()).thenReturn(List.of(unbound));
+    when(queryMapper.listInputsByThread(31L)).thenReturn(List.of());
+
+    HarnessThreadDTO dto = threadQuery.getThread("31");
+    assertEquals("UNBOUND", dto.getStatus());
+    assertNull(dto.getSessionId());
+    assertNull(dto.getHeadEntryId());
+    assertEquals(1, threadQuery.listAll().size());
+    assertTrue(threadQuery.listPathEntries("31").isEmpty(), "UNBOUND thread has no path entries");
+    assertTrue(threadQuery.listInputs("31").isEmpty());
   }
 
   @Test
@@ -137,7 +150,7 @@ class HarnessQueryServicesUnitTest {
     when(queryMapper.listSessionTree(1L)).thenReturn(List.of(root));
     HarnessQueryRow thr = thread(21L, 1L, 10L, false, true);
     thr.setSessionTitle("root");
-    when(queryMapper.listThreadViewsBySession(1L)).thenReturn(List.of(thr));
+    when(queryMapper.listThreadViewsAtSession(1L)).thenReturn(List.of(thr));
     List<RootActivityDTO> activities = observabilityQuery.listRootActivities("1", 0, 10);
     assertEquals(1, activities.size());
     assertEquals("RUNNABLE", activities.get(0).getEventType());
@@ -147,7 +160,7 @@ class HarnessQueryServicesUnitTest {
     when(queryMapper.findSession(2L)).thenReturn(child);
     when(queryMapper.findSession(1L)).thenReturn(root);
     when(queryMapper.listSessionTree(1L)).thenReturn(List.of(root, child));
-    when(queryMapper.listThreadViewsBySession(2L)).thenReturn(List.of());
+    when(queryMapper.listThreadViewsAtSession(2L)).thenReturn(List.of());
     assertEquals(1, observabilityQuery.listRootActivities("2", 0, 10).size());
     assertThrows(
         IllegalArgumentException.class, () -> observabilityQuery.getArtifact("not-a-number"));
@@ -174,7 +187,6 @@ class HarnessQueryServicesUnitTest {
     HarnessQueryRow row = new HarnessQueryRow();
     row.setId(id);
     row.setTitle(title);
-    row.setMainThreadId(id + 100);
     row.setParentSessionId(parent);
     row.setCreatedAt(OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
     row.setUpdatedAt(OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
@@ -182,7 +194,7 @@ class HarnessQueryServicesUnitTest {
   }
 
   private static HarnessQueryRow thread(
-      long id, long sessionId, long head, boolean queued, boolean runnable) {
+      long id, Long sessionId, Long head, boolean queued, boolean runnable) {
     HarnessQueryRow row = new HarnessQueryRow();
     row.setId(id);
     row.setSessionId(sessionId);

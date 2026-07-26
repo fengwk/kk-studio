@@ -6,13 +6,11 @@ import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.core.chat.service.ChatIds;
 import fun.fengwk.kkstudio.core.chat.service.model.Chat;
-import fun.fengwk.kkstudio.core.harness.session.store.mapper.HarnessSessionMapper;
-import fun.fengwk.kkstudio.core.harness.session.store.model.HarnessSessionDO;
 
 import java.util.NoSuchElementException;
 
 /**
- * Guard for Chat CRUD and membership paths.
+ * Guard for Chat CRUD paths.
  *
  * <p>{@code IllegalArgumentException} → 400, {@link NoSuchElementException} → 404.
  */
@@ -21,15 +19,11 @@ public class ChatGuard {
 
   private final ChatRepository chatRepository;
   private final AgentDefinitionRepository agentDefinitionRepository;
-  private final HarnessSessionMapper harnessSessionMapper;
 
   public ChatGuard(
-      ChatRepository chatRepository,
-      AgentDefinitionRepository agentDefinitionRepository,
-      HarnessSessionMapper harnessSessionMapper) {
+      ChatRepository chatRepository, AgentDefinitionRepository agentDefinitionRepository) {
     this.chatRepository = chatRepository;
     this.agentDefinitionRepository = agentDefinitionRepository;
-    this.harnessSessionMapper = harnessSessionMapper;
   }
 
   public Chat requireChat(String id) {
@@ -60,14 +54,5 @@ public class ChatGuard {
     if (agentDefinitionRepository.getById(defaultAgentId) == null) {
       throw new IllegalArgumentException("unknown agent definition: " + defaultAgentId);
     }
-  }
-
-  public HarnessSessionDO requireSession(String sessionId) {
-    long parsed = ChatIds.parsePositive(sessionId, "sessionId");
-    HarnessSessionDO session = harnessSessionMapper.find(parsed);
-    if (session == null) {
-      throw new NoSuchElementException("session not found: " + sessionId);
-    }
-    return session;
   }
 }

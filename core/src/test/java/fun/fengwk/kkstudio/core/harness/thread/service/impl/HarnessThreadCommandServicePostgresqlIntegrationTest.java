@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import fun.fengwk.kkstudio.core.harness.thread.command.TestRuntimeConfigs;
+import fun.fengwk.kkstudio.core.harness.thread.command.TestThreads;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeConfigInputPayload;
@@ -41,16 +41,15 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
   @Test
   void freezesQueuedAgentAndCopiesPendingSnapshotForModelAndYolo() throws Exception {
     seedResources();
-    long threadId =
-        transactions
-            .createSession(
-                "snapshot", TestRuntimeConfigs.bootstrap(), Instant.parse("2026-07-24T00:00:00Z"))
-            .mainThread()
-            .id();
+    TestThreads.Bootstrapped boot =
+        TestThreads.bootstrap(transactions, "snapshot", Instant.parse("2026-07-24T00:00:00Z"));
+    long threadId = boot.threadId();
+    long epoch = boot.executionEpoch();
 
     HarnessThreadAgentSetDTO agentRequest = new HarnessThreadAgentSetDTO();
     agentRequest.setAgentDefinitionId(Long.toString(DEFINITION_ID));
     agentRequest.setClientMessageId("agent-1");
+    agentRequest.setExpectedExecutionEpoch(epoch);
     HarnessThreadInputDTO agentInput =
         commandService.queueAgent(Long.toString(threadId), agentRequest);
     RuntimeConfigSnapshot agentSnapshot = decode(agentInput, ThreadInputType.SET_AGENT);
@@ -62,6 +61,7 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
     HarnessThreadAgentSetDTO retry = new HarnessThreadAgentSetDTO();
     retry.setAgentDefinitionId("deleted-or-invalid");
     retry.setClientMessageId("agent-1");
+    retry.setExpectedExecutionEpoch(epoch);
     HarnessThreadInputDTO retried = commandService.queueAgent(Long.toString(threadId), retry);
     assertEquals(agentInput.getInputId(), retried.getInputId());
     assertEquals(agentInput.getPayloadJson(), retried.getPayloadJson());
@@ -71,6 +71,7 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
     modelRequest.setModelId(Long.toString(MODEL_B_ID));
     modelRequest.setVariant("fast");
     modelRequest.setClientMessageId("model-1");
+    modelRequest.setExpectedExecutionEpoch(epoch);
     HarnessThreadInputDTO modelInput =
         commandService.queueModel(Long.toString(threadId), modelRequest);
     RuntimeConfigSnapshot modelSnapshot = decode(modelInput, ThreadInputType.SET_MODEL);
@@ -85,6 +86,7 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
     HarnessThreadYoloSetDTO yoloRequest = new HarnessThreadYoloSetDTO();
     yoloRequest.setYoloEnabled(!modelSnapshot.policy().yoloEnabled());
     yoloRequest.setClientMessageId("yolo-1");
+    yoloRequest.setExpectedExecutionEpoch(epoch);
     HarnessThreadInputDTO yoloInput =
         commandService.queueYolo(Long.toString(threadId), yoloRequest);
     RuntimeConfigSnapshot yoloSnapshot = decode(yoloInput, ThreadInputType.SET_YOLO);

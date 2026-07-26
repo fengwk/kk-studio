@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.harness.persistence.postgresql;
 
 import static fun.fengwk.kkstudio.core.harness.persistence.postgresql.PostgresSchemaSupport.assertTransactionConstraintViolation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -27,44 +28,85 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void sessionRootAndMainThreadBootstrapAtomically() throws SQLException {
+  void sessionRootBootstrapsIndependentlyAndThreadOnlyReferencesItsHeadEntry() throws SQLException {
     ThreadFixture thread = createThread();
 
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
-                "select s.main_thread_id, e.entry_type from harness_session s"
-                    + " join harness_entry e on e.session_id = s.id"
-                    + " where s.id = ? and e.id = ?")) {
-      ps.setLong(1, thread.sessionId);
-      ps.setLong(2, thread.rootEntryId);
+                "select t.head_entry_id, e.entry_type, e.session_id from harness_thread t"
+                    + " join harness_entry e on e.id = t.head_entry_id"
+                    + " where t.id = ?")) {
+      ps.setLong(1, thread.threadId);
       try (ResultSet rs = ps.executeQuery()) {
         assertTrue(rs.next());
-        assertEquals(thread.threadId, rs.getLong(1));
+        assertEquals(thread.rootEntryId, rs.getLong(1));
         assertEquals("ROOT", rs.getString(2));
+        // The Thread's current Session is derived from the head Entry, never stored on the row.
+        assertEquals(thread.sessionId, rs.getLong(3));
       }
     }
   }
 
+  /** Session 只组织 Entry Tree：不再存 main_thread_id，Thread 也不再存 session_id，chat_session 已删除。 */
   @Test
-  void mainThreadMustBelongToItsSession() throws SQLException {
-    ThreadFixture first = createThread();
-    ThreadFixture second = createThread();
+  void sessionAndThreadNoLongerCarryEachOthersIdentity() throws SQLException {
+    assertFalse(columnExists("harness_session", "main_thread_id"));
+    assertFalse(columnExists("harness_thread", "session_id"));
+    assertFalse(tableExists("chat_session"));
+  }
 
+  /** head_entry_id 可空（UNBOUND Thread），并且只是指向全局 Entry id 的单列 FK。 */
+  @Test
+  void threadHeadEntryIsNullableAndBoundBySingleColumnForeignKey() throws SQLException {
+    long unbound = ThreadFixture.insertUnboundThread();
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "select head_entry_id, execution_epoch from harness_thread where id = ?")) {
+      ps.setLong(1, unbound);
+      try (ResultSet rs = ps.executeQuery()) {
+        assertTrue(rs.next());
+        rs.getLong(1);
+        assertTrue(rs.wasNull(), "UNBOUND thread must persist a null head_entry_id");
+        assertEquals(0L, rs.getLong(2));
+      }
+    }
+
+    // A Thread may point at any Entry in the global id space, including another Session's tree.
+    ThreadFixture other = createThread();
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement("update harness_thread set head_entry_id = ? where id = ?")) {
+      ps.setLong(1, other.rootEntryId);
+      ps.setLong(2, unbound);
+      assertEquals(1, ps.executeUpdate());
+    }
+
+    // The single-column FK still rejects a head that does not exist at all.
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "fk_harness_session_main_thread",
+          "fk_harness_thread_head",
           () -> {
             try (PreparedStatement ps =
-                conn.prepareStatement(
-                    "update harness_session set main_thread_id = ? where id = ?")) {
-              ps.setLong(1, second.threadId);
-              ps.setLong(2, first.sessionId);
+                conn.prepareStatement("update harness_thread set head_entry_id = ? where id = ?")) {
+              ps.setLong(1, FIXTURE_IDS.addAndGet(500_000L));
+              ps.setLong(2, unbound);
               ps.executeUpdate();
             }
           });
     }
+
+    assertEquals(List.of("head_entry_id"), foreignKeyColumns("fk_harness_thread_head"));
+  }
+
+  /** Model/Tool/Usage 只用单列 thread_id FK 引用 Thread，不再假设 Thread 终身属于一个 Session。 */
+  @Test
+  void invocationAndUsageThreadForeignKeysAreSingleColumn() throws SQLException {
+    assertEquals(List.of("thread_id"), foreignKeyColumns("fk_harness_model_invocation_thread"));
+    assertEquals(List.of("thread_id"), foreignKeyColumns("fk_harness_tool_invocation_thread"));
+    assertEquals(List.of("thread_id"), foreignKeyColumns("fk_harness_model_usage_thread"));
   }
 
   @Test
@@ -466,6 +508,54 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
 
   private ThreadFixture createThread() throws SQLException {
     return ThreadFixture.insertFresh();
+  }
+
+  private static boolean columnExists(String table, String column) throws SQLException {
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "select 1 from information_schema.columns where table_schema = 'public'"
+                    + " and table_name = ? and column_name = ?")) {
+      ps.setString(1, table);
+      ps.setString(2, column);
+      try (ResultSet rs = ps.executeQuery()) {
+        return rs.next();
+      }
+    }
+  }
+
+  private static boolean tableExists(String table) throws SQLException {
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "select 1 from information_schema.tables where table_schema = 'public'"
+                    + " and table_name = ?")) {
+      ps.setString(1, table);
+      try (ResultSet rs = ps.executeQuery()) {
+        return rs.next();
+      }
+    }
+  }
+
+  /** Referencing columns of a named FK constraint, in declaration order. */
+  private static List<String> foreignKeyColumns(String constraint) throws SQLException {
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "select a.attname from pg_constraint c"
+                    + " join unnest(c.conkey) with ordinality as k(attnum, ord) on true"
+                    + " join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum"
+                    + " where c.conname = ? and c.contype = 'f' order by k.ord")) {
+      ps.setString(1, constraint);
+      List<String> columns = new ArrayList<>();
+      try (ResultSet rs = ps.executeQuery()) {
+        while (rs.next()) {
+          columns.add(rs.getString(1));
+        }
+      }
+      assertFalse(columns.isEmpty(), "missing foreign key constraint: " + constraint);
+      return columns;
+    }
   }
 
   private void insertInputWithoutAppliedAt(

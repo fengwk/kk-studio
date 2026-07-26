@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.core.chat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -9,33 +8,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.core.chat.service.ChatService;
-import fun.fengwk.kkstudio.core.harness.session.service.HarnessSessionCommandService;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.model.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.model.ChatDTO;
 import fun.fengwk.kkstudio.share.model.ChatUpdateDTO;
-import fun.fengwk.kkstudio.share.model.HarnessSessionCreateDTO;
-import fun.fengwk.kkstudio.share.model.HarnessSessionDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.Statement;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.NoSuchElementException;
 
-/**
- * PostgreSQL-backed Chat service coverage: CRUD, membership, unknown ids, attach idempotence, and
- * default Agent validation.
- */
+/** PostgreSQL-backed Chat service coverage: CRUD, unknown ids, and default Agent validation. */
 class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private ChatService chatService;
-  @Autowired private HarnessSessionCommandService sessionCommandService;
-  @Autowired private JdbcTemplate jdbcTemplate;
 
   @Override
   protected void applySeed(Connection conn) {
@@ -121,63 +110,6 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
     }
   }
 
-  @Test
-  void attachDetachMembershipIsIdempotentOnDuplicateAttach() {
-    ChatCreateDTO create = new ChatCreateDTO();
-    create.setTitle("membership");
-    ChatDTO chat = chatService.createChat(create);
-    HarnessSessionDTO session =
-        sessionCommandService.createSession(sessionCreate("1", "chat-member"));
-    String chatId = chat.getId();
-    String sessionId = session.getSessionId();
-    try {
-      LocalDateTime beforeAttach = chatService.getChat(chatId).getUpdateTime();
-
-      HarnessSessionDTO attached = chatService.attachSession(chatId, sessionId);
-      assertEquals(sessionId, attached.getSessionId());
-      List<HarnessSessionDTO> members = chatService.listSessions(chatId);
-      assertEquals(1, members.size());
-      assertEquals(sessionId, members.get(0).getSessionId());
-
-      ChatDTO afterAttach = chatService.getChat(chatId);
-      assertFalse(afterAttach.getUpdateTime().isBefore(beforeAttach));
-
-      // Duplicate attach is idempotent: membership stays one, no error.
-      HarnessSessionDTO again = chatService.attachSession(chatId, sessionId);
-      assertEquals(sessionId, again.getSessionId());
-      assertEquals(1, chatService.listSessions(chatId).size());
-      Integer membershipCount =
-          jdbcTemplate.queryForObject(
-              "select count(*) from chat_session where chat_id = ? and session_id = ?",
-              Integer.class,
-              Long.parseLong(chatId),
-              Long.parseLong(sessionId));
-      assertEquals(1, membershipCount);
-
-      assertThrows(
-          NoSuchElementException.class, () -> chatService.attachSession(chatId, "999999999999"));
-      assertThrows(
-          NoSuchElementException.class, () -> chatService.attachSession("999999999999", sessionId));
-
-      LocalDateTime beforeDetach = chatService.getChat(chatId).getUpdateTime();
-      chatService.detachSession(chatId, sessionId);
-      assertTrue(chatService.listSessions(chatId).isEmpty());
-      ChatDTO afterDetach = chatService.getChat(chatId);
-      assertFalse(afterDetach.getUpdateTime().isBefore(beforeDetach));
-
-      assertThrows(
-          NoSuchElementException.class, () -> chatService.detachSession(chatId, sessionId));
-    } finally {
-      chatService.deleteChat(chatId);
-      Integer leftover =
-          jdbcTemplate.queryForObject(
-              "select count(*) from chat_session where chat_id = ?",
-              Integer.class,
-              Long.parseLong(chatId));
-      assertEquals(0, leftover);
-    }
-  }
-
   private static int indexOf(List<ChatDTO> listed, String id) {
     for (int i = 0; i < listed.size(); i++) {
       if (id.equals(listed.get(i).getId())) {
@@ -185,12 +117,5 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       }
     }
     return -1;
-  }
-
-  private static HarnessSessionCreateDTO sessionCreate(String agentId, String title) {
-    HarnessSessionCreateDTO create = new HarnessSessionCreateDTO();
-    create.setTitle(title);
-    create.setYoloEnabled(false);
-    return create;
   }
 }

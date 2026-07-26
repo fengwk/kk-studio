@@ -14,18 +14,15 @@ import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.core.harness.session.service.HarnessSessionCommandService;
 import fun.fengwk.kkstudio.core.harness.session.service.HarnessSessionQueryService;
-import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadCommandService;
 import fun.fengwk.kkstudio.share.model.HarnessSessionCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
-import fun.fengwk.kkstudio.share.model.HarnessThreadCreateDTO;
-import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 
 import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * Session 创建、查询及 Session 内 branch Thread 创建 API。
+ * Session 创建与查询 API：Session 只组织 Entry Tree，不创建或持有 Thread。
  *
  * <p>统一返回 {@link Result}；创建类接口使用 {@link Results#created}（201），由 ResultResponseBodyAdvice 同步 HTTP
  * 状态。
@@ -37,7 +34,6 @@ public class StudioHarnessSessionController {
 
   private final HarnessSessionQueryService queryService;
   private final HarnessSessionCommandService commandService;
-  private final HarnessThreadCommandService threadCommandService;
 
   @PostMapping
   public Result<HarnessSessionDTO> createSession(@RequestBody HarnessSessionCreateDTO request) {
@@ -57,13 +53,6 @@ public class StudioHarnessSessionController {
   @GetMapping("/{id}/entries")
   public Result<List<HarnessSessionEntryDTO>> listEntries(@PathVariable("id") String id) {
     return Results.ok(withHttpTranslation(() -> queryService.listEntries(id)));
-  }
-
-  @PostMapping("/{id}/threads")
-  public Result<HarnessThreadDTO> createThread(
-      @PathVariable("id") String id, @RequestBody HarnessThreadCreateDTO request) {
-    return Results.created(
-        withHttpTranslation(() -> threadCommandService.createThread(id, request)));
   }
 
   private static <T> T withHttpTranslation(Supplier<T> operation) {

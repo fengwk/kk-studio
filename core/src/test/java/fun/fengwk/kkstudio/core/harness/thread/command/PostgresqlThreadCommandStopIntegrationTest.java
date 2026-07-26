@@ -47,12 +47,12 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
   /** Stop 只终结尚未执行的 Invocation，RUNNING 依赖 epoch fence 丢失 ownership。 */
   @Test
   void stopClearsProcessorLeaseAndCancelsOnlySafeInvocationStates() throws Exception {
-    ThreadCommandTransactions.SessionCreation creation =
-        transactions.createSession("stop-matrix", TestRuntimeConfigs.bootstrap(), BASE);
-    long sessionId = creation.session().id();
-    long threadId = creation.mainThread().id();
-    long rootEntryId = creation.rootEntry().id();
-    transactions.enqueue(threadId, userPayload("queued"), "input-1", BASE);
+    TestThreads.Bootstrapped boot = TestThreads.bootstrap(transactions, "stop-matrix", BASE);
+    long sessionId = boot.sessionId();
+    long threadId = boot.threadId();
+    long epoch = boot.executionEpoch();
+    long rootEntryId = boot.rootEntryId();
+    transactions.enqueue(threadId, userPayload("queued"), "input-1", epoch, BASE);
     seedProcessorLease(threadId);
 
     long modelQueued = 90_001L;
@@ -61,25 +61,26 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
     insertEntry(sessionId, rootEntryId, 91_001L);
     insertEntry(sessionId, rootEntryId, 91_002L);
     insertEntry(sessionId, rootEntryId, 91_003L);
-    insertModel(modelQueued, threadId, sessionId, 91_001L, "QUEUED");
-    insertModel(modelRetry, threadId, sessionId, 91_002L, "RETRY_WAIT");
-    insertModel(modelRunning, threadId, sessionId, 91_003L, "RUNNING");
+    insertModel(modelQueued, threadId, sessionId, 91_001L, epoch, "QUEUED");
+    insertModel(modelRetry, threadId, sessionId, 91_002L, epoch, "RETRY_WAIT");
+    insertModel(modelRunning, threadId, sessionId, 91_003L, epoch, "RUNNING");
 
     long assistantEntryId = 92_001L;
     insertEntry(sessionId, rootEntryId, assistantEntryId);
     long toolQueued = 93_001L;
     long toolRetry = 93_002L;
     long toolRunning = 93_003L;
-    insertTool(toolQueued, threadId, sessionId, assistantEntryId, 0, "QUEUED");
-    insertTool(toolRetry, threadId, sessionId, assistantEntryId, 1, "RETRY_WAIT");
-    insertTool(toolRunning, threadId, sessionId, assistantEntryId, 2, "RUNNING");
+    insertTool(toolQueued, threadId, sessionId, assistantEntryId, 0, epoch, "QUEUED");
+    insertTool(toolRetry, threadId, sessionId, assistantEntryId, 1, epoch, "RETRY_WAIT");
+    insertTool(toolRunning, threadId, sessionId, assistantEntryId, 2, epoch, "RUNNING");
 
-    ThreadCommandTransactions.StopResult result = transactions.stop(threadId, BASE.plusSeconds(4));
+    ThreadCommandTransactions.StopResult result =
+        transactions.stop(threadId, epoch, BASE.plusSeconds(4));
 
-    assertEquals(1L, result.executionEpoch());
+    assertEquals(epoch + 1, result.executionEpoch());
     assertEquals(1, result.cancelledInputs().size());
     ThreadState thread = threadState(threadId);
-    assertEquals(1L, thread.executionEpoch());
+    assertEquals(epoch + 1, thread.executionEpoch());
     assertFalse(thread.runnable());
     assertNull(thread.processorToken());
     assertNull(thread.processorUntil());
@@ -95,9 +96,8 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
   /** Input insert 被数据库拒绝时，先发生的 sequence/runnable 更新必须一起回滚。 */
   @Test
   void enqueueRollsBackThreadMutationWhenInputInsertIsSuppressed() throws Exception {
-    ThreadCommandTransactions.SessionCreation creation =
-        transactions.createSession("rollback", TestRuntimeConfigs.bootstrap(), BASE);
-    long threadId = creation.mainThread().id();
+    TestThreads.Bootstrapped boot = TestThreads.bootstrap(transactions, "rollback", BASE);
+    long threadId = boot.threadId();
     try (Connection connection = newConnection();
         Statement statement = connection.createStatement()) {
       statement.execute(
@@ -119,7 +119,9 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
 
     assertThrows(
         IllegalStateException.class,
-        () -> transactions.enqueue(threadId, userPayload("rollback"), "rollback", BASE));
+        () ->
+            transactions.enqueue(
+                threadId, userPayload("rollback"), "rollback", boot.executionEpoch(), BASE));
 
     ThreadState thread = threadState(threadId);
     assertEquals(0L, thread.inputSequence());
@@ -130,8 +132,7 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
   /** 不存在的 idempotency key 也必须持有 Thread 行锁，串行化随后 live snapshot resolve。 */
   @Test
   void missingIdempotencyLookupSerializesOnThreadLock() throws Exception {
-    long threadId =
-        transactions.createSession("lock", TestRuntimeConfigs.bootstrap(), BASE).mainThread().id();
+    long threadId = TestThreads.bootstrap(transactions, "lock", BASE).threadId();
     CountDownLatch firstLocked = new CountDownLatch(1);
     CountDownLatch releaseFirst = new CountDownLatch(1);
     TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
@@ -192,26 +193,33 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
   }
 
   private static void insertModel(
-      long id, long threadId, long sessionId, long sourceEntryId, String status)
+      long id, long threadId, long sessionId, long sourceEntryId, long epoch, String status)
       throws SQLException {
     try (Connection connection = newConnection();
         PreparedStatement statement =
             connection.prepareStatement(
                 "insert into harness_model_invocation (id, thread_id, session_id,"
                     + " source_head_entry_id, execution_epoch, request, status, attempt, created_at)"
-                    + " values (?, ?, ?, ?, 0, '{}'::jsonb, 'QUEUED', 1, ?)")) {
+                    + " values (?, ?, ?, ?, ?, '{}'::jsonb, 'QUEUED', 1, ?)")) {
       statement.setLong(1, id);
       statement.setLong(2, threadId);
       statement.setLong(3, sessionId);
       statement.setLong(4, sourceEntryId);
-      statement.setTimestamp(5, Timestamp.from(BASE));
+      statement.setLong(5, epoch);
+      statement.setTimestamp(6, Timestamp.from(BASE));
       assertEquals(1, statement.executeUpdate());
     }
     transitionInvocation("harness_model_invocation", id, status, "model-running");
   }
 
   private static void insertTool(
-      long id, long threadId, long sessionId, long assistantEntryId, int ordinal, String status)
+      long id,
+      long threadId,
+      long sessionId,
+      long assistantEntryId,
+      int ordinal,
+      long epoch,
+      String status)
       throws SQLException {
     try (Connection connection = newConnection();
         PreparedStatement statement =
@@ -219,14 +227,15 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
                 "insert into harness_tool_invocation (id, thread_id, session_id, assistant_entry_id,"
                     + " ordinal, tool_call_id, descriptor, arguments, location, execution_epoch,"
                     + " status, attempt, created_at) values (?, ?, ?, ?, ?, ?, '{}'::jsonb,"
-                    + " '{}'::jsonb, 'PLATFORM', 0, 'QUEUED', 1, ?)")) {
+                    + " '{}'::jsonb, 'PLATFORM', ?, 'QUEUED', 1, ?)")) {
       statement.setLong(1, id);
       statement.setLong(2, threadId);
       statement.setLong(3, sessionId);
       statement.setLong(4, assistantEntryId);
       statement.setInt(5, ordinal);
       statement.setString(6, "call-" + id);
-      statement.setTimestamp(7, Timestamp.from(BASE));
+      statement.setLong(7, epoch);
+      statement.setTimestamp(8, Timestamp.from(BASE));
       assertEquals(1, statement.executeUpdate());
     }
     transitionInvocation("harness_tool_invocation", id, status, "tool-running");

@@ -23,11 +23,15 @@ import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadCommandServi
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadQueryService;
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadAgentSetDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadBootstrapDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadBootstrapResultDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadCustomMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadHeadUpdateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadModelSetDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadYoloSetDTO;
 
@@ -68,16 +72,32 @@ public class StudioHarnessThreadController {
     return Results.ok(queryService.listAll());
   }
 
+  /** 创建 UNBOUND Thread：无请求体，head 为空，尚未绑定任何 Session。 */
+  @PostMapping("/threads")
+  public Result<HarnessThreadDTO> createThread() {
+    return Results.created(withMissingResourceTranslation(commandService::createThread));
+  }
+
   /** 查询指定 Thread 的当前状态。 */
   @GetMapping("/threads/{threadId}")
   public Result<HarnessThreadDTO> getThread(@PathVariable String threadId) {
     return Results.ok(withMissingResourceTranslation(() -> queryService.getThread(threadId)));
   }
 
-  /** 查询指定 Session 下的所有 Thread。 */
-  @GetMapping("/sessions/{sessionId}/threads")
-  public Result<List<HarnessThreadDTO>> listThreads(@PathVariable String sessionId) {
-    return Results.ok(withMissingResourceTranslation(() -> queryService.listBySession(sessionId)));
+  /** 绑定、跨 Session 切换或清空 Thread head，携带 expectedExecutionEpoch 做 CAS fencing。 */
+  @PutMapping("/threads/{threadId}/head")
+  public Result<HarnessThreadDTO> updateHead(
+      @PathVariable String threadId, @RequestBody HarnessThreadHeadUpdateDTO request) {
+    return Results.ok(
+        withMissingResourceTranslation(() -> commandService.updateHead(threadId, request)));
+  }
+
+  /** 为 UNBOUND Thread 原子创建 Session/ROOT/RUNTIME_CONFIG 并绑定 head。 */
+  @PostMapping("/threads/{threadId}/bootstrap")
+  public Result<HarnessThreadBootstrapResultDTO> bootstrapThread(
+      @PathVariable String threadId, @RequestBody HarnessThreadBootstrapDTO request) {
+    return Results.created(
+        withMissingResourceTranslation(() -> commandService.bootstrapThread(threadId, request)));
   }
 
   /** 将用户消息异步入队；202 仅表示消息已接受，不代表模型已完成。 */
@@ -122,10 +142,11 @@ public class StudioHarnessThreadController {
         withMissingResourceTranslation(() -> commandService.queueModel(threadId, request)));
   }
 
-  /** 停止 Thread：递增 executionEpoch，并取消尚未处理的输入。无请求体。 */
+  /** 停止 Thread：递增 executionEpoch，取消尚未处理的输入与 OPEN Interaction。 */
   @PostMapping("/threads/{threadId}/stop")
-  public Result<HarnessThreadStopResultDTO> stop(@PathVariable String threadId) {
-    return Results.ok(withMissingResourceTranslation(() -> commandService.stop(threadId)));
+  public Result<HarnessThreadStopResultDTO> stop(
+      @PathVariable String threadId, @RequestBody HarnessThreadStopDTO request) {
+    return Results.ok(withMissingResourceTranslation(() -> commandService.stop(threadId, request)));
   }
 
   /** 查询当前 branch path 上的持久化 Session Entry。 */
