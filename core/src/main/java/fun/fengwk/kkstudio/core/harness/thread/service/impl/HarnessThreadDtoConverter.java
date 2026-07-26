@@ -21,9 +21,10 @@ public class HarnessThreadDtoConverter {
   public HarnessThreadDTO convert(HarnessThread thread) {
     HarnessThreadDTO dto = new HarnessThreadDTO();
     dto.setThreadId(Long.toString(thread.id()));
-    dto.setSessionId(Long.toString(thread.sessionId()));
-    dto.setHeadEntryId(Long.toString(thread.headEntryId()));
-    dto.setStatus(thread.runnable() ? "RUNNABLE" : "IDLE");
+    dto.setExecutionEpoch(thread.executionEpoch());
+    dto.setHeadEntryId(thread.headEntryId() == null ? null : Long.toString(thread.headEntryId()));
+    dto.setStatus(
+        thread.runnable() ? "RUNNABLE" : (thread.headEntryId() == null ? "UNBOUND" : "IDLE"));
     dto.setInputSequence(thread.inputSequence());
     dto.setProcessing(thread.hasActiveProcessorAt(Instant.now()));
     dto.setCreateTime(LocalDateTime.ofInstant(thread.createdAt(), ZoneOffset.UTC));

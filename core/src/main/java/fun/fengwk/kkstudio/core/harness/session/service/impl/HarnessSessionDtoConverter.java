@@ -25,7 +25,6 @@ public class HarnessSessionDtoConverter {
     HarnessSessionDTO target = new HarnessSessionDTO();
     target.setSessionId(HarnessIds.format(source.id()));
     target.setTitle(source.title());
-    target.setMainThreadId(HarnessIds.format(source.mainThreadId()));
     target.setParentSessionId(
         source.parentSessionId() == null ? null : HarnessIds.format(source.parentSessionId()));
     target.setParentInvocationId(
@@ -48,7 +47,6 @@ public class HarnessSessionDtoConverter {
     HarnessSessionDTO target = new HarnessSessionDTO();
     target.setSessionId(HarnessIds.format(source.getId()));
     target.setTitle(source.getTitle());
-    target.setMainThreadId(HarnessIds.format(source.getMainThreadId()));
     target.setParentSessionId(
         source.getParentSessionId() == null
             ? null

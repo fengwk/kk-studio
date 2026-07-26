@@ -73,7 +73,7 @@ public class HarnessObservabilityQueryServiceImpl implements HarnessObservabilit
     Instant now = clock.instant();
     List<RootActivityDTO> activities = new ArrayList<>();
     for (HarnessQueryRow session : queryMapper.listSessionTree(rootId)) {
-      for (HarnessQueryRow thread : queryMapper.listThreadViewsBySession(session.getId())) {
+      for (HarnessQueryRow thread : queryMapper.listThreadViewsAtSession(session.getId())) {
         if (thread.getId() > afterEventId) {
           activities.add(queryConverter.toRootActivity(rootId, thread, now));
         }

@@ -6,6 +6,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import fun.fengwk.kkstudio.core.harness.session.service.impl.HarnessSessionDtoConverter;
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadCommandService;
 import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProvider;
@@ -15,12 +16,15 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator.EnqueueResult;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator.StopResult;
 import fun.fengwk.kkstudio.share.model.HarnessThreadAgentSetDTO;
-import fun.fengwk.kkstudio.share.model.HarnessThreadCreateDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadBootstrapDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadBootstrapResultDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadCustomMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadHeadUpdateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadModelSetDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadYoloSetDTO;
 
@@ -39,26 +43,70 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
   private final ToolSettingsProvider toolSettingsProvider;
   private final ActivationNotifier activationNotifier;
   private final HarnessThreadDtoConverter converter;
+  private final HarnessSessionDtoConverter sessionConverter;
 
   public HarnessThreadCommandServiceImpl(
       ThreadCommandCoordinator coordinator,
       ToolSettingsProvider toolSettingsProvider,
       ActivationNotifier activationNotifier,
-      HarnessThreadDtoConverter converter) {
+      HarnessThreadDtoConverter converter,
+      HarnessSessionDtoConverter sessionConverter) {
     this.coordinator = Objects.requireNonNull(coordinator, "coordinator");
     this.toolSettingsProvider =
         Objects.requireNonNull(toolSettingsProvider, "toolSettingsProvider");
     this.activationNotifier = Objects.requireNonNull(activationNotifier, "activationNotifier");
     this.converter = Objects.requireNonNull(converter, "converter");
+    this.sessionConverter = Objects.requireNonNull(sessionConverter, "sessionConverter");
   }
 
   @Override
   @Transactional
-  public HarnessThreadDTO createThread(String sessionId, HarnessThreadCreateDTO createDTO) {
-    Objects.requireNonNull(createDTO, "createDTO");
-    long parsedSessionId = HarnessIds.parsePositive(sessionId, "sessionId");
-    long fromEntryId = HarnessIds.parsePositive(createDTO.getFromEntryId(), "fromEntryId");
-    return converter.convert(coordinator.createBranch(parsedSessionId, fromEntryId));
+  public HarnessThreadDTO createThread() {
+    return converter.convert(coordinator.createThread());
+  }
+
+  @Override
+  @Transactional
+  public HarnessThreadBootstrapResultDTO bootstrapThread(
+      String threadId, HarnessThreadBootstrapDTO dto) {
+    Objects.requireNonNull(dto, "dto");
+    long id = HarnessIds.parsePositive(threadId, "threadId");
+    long definitionId = HarnessIds.parsePositive(dto.getAgentDefinitionId(), "agentDefinitionId");
+    if (dto.getYoloEnabled() == null) {
+      throw new IllegalArgumentException("yoloEnabled must not be null");
+    }
+    ThreadCommandCoordinator.BootstrapResult result =
+        coordinator.bootstrapThread(
+            id,
+            requireExpectedEpoch(dto.getExpectedExecutionEpoch()),
+            dto.getTitle(),
+            definitionId,
+            Boolean.TRUE.equals(dto.getYoloEnabled()));
+    HarnessThreadBootstrapResultDTO response = new HarnessThreadBootstrapResultDTO();
+    response.setSession(sessionConverter.convert(result.session()));
+    response.setThread(converter.convert(result.thread()));
+    return response;
+  }
+
+  @Override
+  @Transactional
+  public HarnessThreadDTO updateHead(String threadId, HarnessThreadHeadUpdateDTO dto) {
+    Objects.requireNonNull(dto, "dto");
+    long id = HarnessIds.parsePositive(threadId, "threadId");
+    Long headEntryId =
+        dto.getHeadEntryId() == null
+            ? null
+            : HarnessIds.parsePositive(dto.getHeadEntryId(), "headEntryId");
+    return converter.convert(
+        coordinator.updateHead(
+            id, requireExpectedEpoch(dto.getExpectedExecutionEpoch()), headEntryId));
+  }
+
+  private static long requireExpectedEpoch(Long value) {
+    if (value == null || value < 0) {
+      throw new IllegalArgumentException("expectedExecutionEpoch must not be negative");
+    }
+    return value;
   }
 
   @Override
@@ -68,7 +116,11 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     Objects.requireNonNull(createDTO, "createDTO");
     long id = HarnessIds.parsePositive(threadId, "threadId");
     return convertAndNotify(
-        coordinator.submitUserMessage(id, createDTO.getContent(), createDTO.getClientMessageId()));
+        coordinator.submitUserMessage(
+            id,
+            createDTO.getContent(),
+            createDTO.getClientMessageId(),
+            requireExpectedEpoch(createDTO.getExpectedExecutionEpoch())));
   }
 
   @Override
@@ -79,7 +131,11 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     long id = HarnessIds.parsePositive(threadId, "threadId");
     return convertAndNotify(
         coordinator.submitCustomMessage(
-            id, createDTO.getRole(), createDTO.getContent(), createDTO.getClientMessageId()));
+            id,
+            createDTO.getRole(),
+            createDTO.getContent(),
+            createDTO.getClientMessageId(),
+            requireExpectedEpoch(createDTO.getExpectedExecutionEpoch())));
   }
 
   @Override
@@ -97,7 +153,10 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     }
     return convertAndNotify(
         coordinator.queueYolo(
-            id, Boolean.TRUE.equals(request.getYoloEnabled()), request.getClientMessageId()));
+            id,
+            Boolean.TRUE.equals(request.getYoloEnabled()),
+            request.getClientMessageId(),
+            requireExpectedEpoch(request.getExpectedExecutionEpoch())));
   }
 
   @Override
@@ -119,7 +178,8 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
             id,
             definitionId,
             toolSettingsProvider.get().defaultYolo(),
-            request.getClientMessageId()));
+            request.getClientMessageId(),
+            requireExpectedEpoch(request.getExpectedExecutionEpoch())));
   }
 
   @Override
@@ -134,14 +194,21 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     }
     long modelId = HarnessIds.parsePositive(request.getModelId(), "modelId");
     return convertAndNotify(
-        coordinator.queueModel(id, modelId, request.getVariant(), request.getClientMessageId()));
+        coordinator.queueModel(
+            id,
+            modelId,
+            request.getVariant(),
+            request.getClientMessageId(),
+            requireExpectedEpoch(request.getExpectedExecutionEpoch())));
   }
 
   @Override
   @Transactional
-  public HarnessThreadStopResultDTO stop(String threadId) {
+  public HarnessThreadStopResultDTO stop(String threadId, HarnessThreadStopDTO request) {
+    Objects.requireNonNull(request, "request");
     long id = HarnessIds.parsePositive(threadId, "threadId");
-    StopResult result = coordinator.stop(id);
+    StopResult result =
+        coordinator.stop(id, requireExpectedEpoch(request.getExpectedExecutionEpoch()));
     afterCommitNotify(result.target());
     HarnessThreadStopResultDTO dto = new HarnessThreadStopResultDTO();
     dto.setExecutionEpoch(result.executionEpoch());

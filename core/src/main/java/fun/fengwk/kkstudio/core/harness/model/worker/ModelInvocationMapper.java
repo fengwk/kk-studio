@@ -96,7 +96,7 @@ public interface ModelInvocationMapper extends BaseMapper {
           + SELECT_FIELDS
           + """
       from harness_model_invocation mi
-      join harness_thread t on t.id = mi.thread_id and t.session_id = mi.session_id
+      join harness_thread t on t.id = mi.thread_id
       where mi.id = #{id}
         and t.execution_epoch = mi.execution_epoch
         and (
@@ -118,7 +118,7 @@ public interface ModelInvocationMapper extends BaseMapper {
           + SELECT_FIELDS
           + """
       from harness_model_invocation mi
-      join harness_thread t on t.id = mi.thread_id and t.session_id = mi.session_id
+      join harness_thread t on t.id = mi.thread_id
       where t.execution_epoch = mi.execution_epoch
         and (
           (mi.status = 'RUNNING' and mi.worker_until <= #{now})

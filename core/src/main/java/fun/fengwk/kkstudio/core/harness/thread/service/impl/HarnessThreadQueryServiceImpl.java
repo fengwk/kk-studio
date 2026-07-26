@@ -44,20 +44,11 @@ public class HarnessThreadQueryServiceImpl implements HarnessThreadQueryService 
   }
 
   @Override
-  public List<HarnessThreadDTO> listBySession(String sessionId) {
-    long id = HarnessIds.parsePositive(sessionId, "sessionId");
-    if (queryMapper.findSession(id) == null) {
-      throw new IllegalArgumentException("unknown session: " + sessionId);
-    }
-    Instant now = now();
-    return queryMapper.listThreadViewsBySession(id).stream()
-        .map(row -> converter.toThread(row, now))
-        .toList();
-  }
-
-  @Override
   public List<HarnessSessionEntryDTO> listPathEntries(String threadId) {
     HarnessQueryRow thread = requireThread(threadId);
+    if (thread.getHeadEntryId() == null) {
+      return List.of();
+    }
     return queryMapper.loadPath(thread.getSessionId(), thread.getHeadEntryId()).stream()
         .map(converter::toEntry)
         .toList();

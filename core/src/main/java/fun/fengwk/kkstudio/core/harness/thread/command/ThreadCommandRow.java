@@ -12,7 +12,6 @@ public class ThreadCommandRow {
   private Long threadId;
   private Long parentEntryId;
   private String title;
-  private Long mainThreadId;
   private Long headEntryId;
   private Long inputSequence;
   private Boolean runnable;

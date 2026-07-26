@@ -17,13 +17,10 @@ import java.util.List;
 public interface ThreadCommandMapper extends BaseMapper {
 
   @Insert(
-      "insert into harness_session (id, title, main_thread_id, created_at, updated_at) "
-          + "values (#{id}, #{title}, #{mainThreadId}, #{now}, #{now})")
+      "insert into harness_session (id, title, created_at, updated_at) "
+          + "values (#{id}, #{title}, #{now}, #{now})")
   int insertSession(
-      @Param("id") long id,
-      @Param("title") String title,
-      @Param("mainThreadId") long mainThreadId,
-      @Param("now") OffsetDateTime now);
+      @Param("id") long id, @Param("title") String title, @Param("now") OffsetDateTime now);
 
   @Insert(
       "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at) "
@@ -37,22 +34,19 @@ public interface ThreadCommandMapper extends BaseMapper {
       @Param("now") OffsetDateTime now);
 
   @Insert(
-      "insert into harness_thread (id, session_id, head_entry_id, input_sequence, runnable, execution_epoch, created_at, updated_at) "
-          + "values (#{id}, #{sessionId}, #{headEntryId}, 0, false, 0, #{now}, #{now})")
+      "insert into harness_thread (id, head_entry_id, input_sequence, runnable, execution_epoch, created_at, updated_at) "
+          + "values (#{id}, #{headEntryId}, 0, false, 0, #{now}, #{now})")
   int insertThread(
       @Param("id") long id,
-      @Param("sessionId") long sessionId,
-      @Param("headEntryId") long headEntryId,
+      @Param("headEntryId") Long headEntryId,
       @Param("now") OffsetDateTime now);
 
-  @Select(
-      "select id, title, main_thread_id, created_at, updated_at from harness_session where id = #{sessionId}")
+  @Select("select id, title, created_at, updated_at from harness_session where id = #{sessionId}")
   @Results(
       id = "sessionResultMap",
       value = {
         @Result(column = "id", property = "id"),
         @Result(column = "title", property = "title"),
-        @Result(column = "main_thread_id", property = "mainThreadId"),
         @Result(column = "created_at", property = "createdAt"),
         @Result(column = "updated_at", property = "updatedAt")
       })
@@ -60,7 +54,7 @@ public interface ThreadCommandMapper extends BaseMapper {
 
   @Select(
       "select id, session_id, parent_entry_id, entry_type, payload::text as payload_json, created_at "
-          + "from harness_entry where session_id = #{sessionId} and id = #{entryId}")
+          + "from harness_entry where id = #{entryId}")
   @Results(
       id = "entryResultMap",
       value = {
@@ -71,11 +65,13 @@ public interface ThreadCommandMapper extends BaseMapper {
         @Result(column = "payload_json", property = "payloadJson"),
         @Result(column = "created_at", property = "createdAt")
       })
-  ThreadCommandRow findEntry(@Param("sessionId") long sessionId, @Param("entryId") long entryId);
+  ThreadCommandRow findEntry(@Param("entryId") long entryId);
 
   @Select(
-      "select id, session_id, head_entry_id, input_sequence, runnable, execution_epoch, processor_token, processor_until, created_at, updated_at "
-          + "from harness_thread where id = #{threadId} for update")
+      "select t.id, t.head_entry_id, e.session_id, t.input_sequence, t.runnable, t.execution_epoch,"
+          + " t.processor_token, t.processor_until, t.created_at, t.updated_at"
+          + " from harness_thread t left join harness_entry e on e.id = t.head_entry_id"
+          + " where t.id = #{threadId} for no key update of t")
   @Results(
       id = "threadResultMap",
       value = {
@@ -91,6 +87,85 @@ public interface ThreadCommandMapper extends BaseMapper {
         @Result(column = "updated_at", property = "updatedAt")
       })
   ThreadCommandRow findThreadForUpdate(@Param("threadId") long threadId);
+
+  /**
+   * 当前 epoch 是否仍有可向 Entry Tree 提交结果的执行事实：非终态 Model/Tool Invocation，或它们与 Thread 自身的 OPEN
+   * Interaction。这些状态下禁止外部 rebind。
+   */
+  @Select(
+      """
+      select exists (
+        select 1 from harness_model_invocation mi
+        where mi.thread_id = #{threadId} and mi.execution_epoch = #{epoch}
+          and mi.status not in ('SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN')
+      ) or exists (
+        select 1 from harness_tool_invocation ti
+        where ti.thread_id = #{threadId} and ti.execution_epoch = #{epoch}
+          and ti.status not in ('SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN')
+      ) or exists (
+        select 1 from harness_interaction hi
+        where hi.status = 'OPEN'
+          and (
+            (hi.owner_kind = 'THREAD' and hi.owner_id = #{threadId})
+            or (
+              hi.owner_kind = 'MODEL_INVOCATION'
+              and exists (
+                select 1 from harness_model_invocation mi
+                where mi.id = hi.owner_id and mi.thread_id = #{threadId}
+                  and mi.execution_epoch = #{epoch}
+              )
+            )
+            or (
+              hi.owner_kind = 'TOOL_INVOCATION'
+              and exists (
+                select 1 from harness_tool_invocation ti
+                where ti.id = hi.owner_id and ti.thread_id = #{threadId}
+                  and ti.execution_epoch = #{epoch}
+              )
+            )
+          )
+      )
+      """)
+  boolean hasActiveExecution(@Param("threadId") long threadId, @Param("epoch") long epoch);
+
+  /** 静止 rebind：CAS 期望 epoch，递增代际、清 lease/runnable，并写入可空 head。 */
+  @Update(
+      "update harness_thread set head_entry_id = #{headEntryId}, execution_epoch = #{epoch},"
+          + " processor_token = null, processor_until = null, runnable = false,"
+          + " updated_at = greatest(updated_at, #{now})"
+          + " where id = #{threadId} and execution_epoch = #{expectedEpoch}")
+  int rebindHead(
+      @Param("threadId") long threadId,
+      @Param("expectedEpoch") long expectedEpoch,
+      @Param("epoch") long epoch,
+      @Param("headEntryId") Long headEntryId,
+      @Param("now") OffsetDateTime now);
+
+  /** stop 取消该 Thread 关联的全部 OPEN Interaction，使逻辑停止后立即可 rebind。 */
+  @Update(
+      """
+      update harness_interaction
+      set status = 'CANCELLED', response = null, resolved_at = #{now}, version = version + 1
+      where status = 'OPEN'
+        and (
+          (owner_kind = 'THREAD' and owner_id = #{threadId})
+          or (
+            owner_kind = 'MODEL_INVOCATION'
+            and exists (
+              select 1 from harness_model_invocation mi
+              where mi.id = harness_interaction.owner_id and mi.thread_id = #{threadId}
+            )
+          )
+          or (
+            owner_kind = 'TOOL_INVOCATION'
+            and exists (
+              select 1 from harness_tool_invocation ti
+              where ti.id = harness_interaction.owner_id and ti.thread_id = #{threadId}
+            )
+          )
+        )
+      """)
+  int cancelOpenInteractions(@Param("threadId") long threadId, @Param("now") OffsetDateTime now);
 
   @Select(
       """
