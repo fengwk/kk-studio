@@ -8,5 +8,5 @@ public interface CanvasQueryService {
 
   Optional<CanvasSnapshot> findSnapshot(long canvasId);
 
-  List<CanvasDocument> listDocuments(long workspaceId);
+  List<CanvasDocument> listDocuments();
 }

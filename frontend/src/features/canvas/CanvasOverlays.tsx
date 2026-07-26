@@ -85,11 +85,9 @@ export function CanvasOverlays() {
               ))}
               <p className="panel-section-title">对象模型</p>
               <div className="model-flow">
-                Workspace
-                <span>→</span>
                 CanvasDocument
                 <span>→</span>
-                Node / Link / FunctionRun
+                Node / Link
               </div>
               {content.slice(1).map((item) => (
                 <article key={item.title} className="insight-card">

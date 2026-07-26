@@ -22,18 +22,18 @@ PostgreSQL 是 Harness 执行恢复与 Canvas 最小持久化的事实源。权�
 
 这些资源不带 Tenant、Workspace membership 或 ACL。运行配置以 Entry 中的完整 `RUNTIME_CONFIG` 快照为执行真源，不依赖 live Definition 补齐历史。
 
-## Canvas 最小持久化
+## Canvas 当前持久化
 
 | 表 | 职责 | 关键约束 |
 | --- | --- | --- |
-| `canvas_document` | Canvas 身份、title、schema version、revision、lifecycle 与默认 viewport | 索引 `(workspace_id, updated_at)` |
-| `canvas_node` | RESOURCE/FUNCTION/GROUP 节点 | 按 `(canvas_id, deleted_at)` 查询；软删除 |
-| `canvas_link` | source Resource 对 target 的可见性 Link | 唯一 `(canvas_id, source_node_id, target_node_id)` |
-| `canvas_command` | 客户端幂等命令与 revision 结果 | 唯一 `(workspace_id, command_id)` |
+| `canvas_document` | Canvas 身份、title、revision、默认 viewport | 索引 `(updated_at, id)`；`title` 非空、`revision >= 0`、`id > 0` |
+| `canvas_node` | RESOURCE / FUNCTION 节点；硬删除 | 唯一 `(canvas_id, id)`；`node_type`/`name` 非空、`width`/`height > 0`；FK 复合 `(canvas_id, source_node_id)` / `(canvas_id, target_node_id)` |
+| `canvas_link` | 同 Canvas 的可见性边；节点删除时级联清理 | 唯一 `(canvas_id, source_node_id, target_node_id)`；FK `ON DELETE CASCADE`；`source_node_id <> target_node_id` |
+| `canvas_command_dedup` | 客户端幂等去重事实；`request_hash` 由服务端基于 `commandsJson` 计算 SHA-256 | 主键 `(canvas_id, command_id)`；`request_hash` 为 64 位十六进制字符串 |
 
-当前 `DurableCanvasService` 支持创建 Canvas，以及 `create_text_node`、`create_generate_text_node`、`create_link`、`move_nodes`、`delete_node`。命令以 `baseRevision` 做乐观并发控制。
+当前 `DurableCanvasService` 支持创建 Canvas，以及 `create_text_node`、`create_generate_text_node`、`create_link`、`move_nodes`、`delete_node` 五个命令。命令以 `baseRevision` 做乐观并发控制，按 `(canvas_id, command_id, sha256(commandsJson))` 做幂等。`canvas_command_dedup` 是纯去重事实，不保存 payload/result。
 
-`ResourceReference`、Resource/ResourceVersion、FunctionRun、Workflow 尚未进入当前 schema；完整目标契约见 [infinite-canvas-implementation-design.md](infinite-canvas-implementation-design.md)。
+FUNCTION 节点当前唯一可持久化实例是 `system.generate-text` v1。
 
 ## Chat 与 Harness durable 表
 

@@ -11,19 +11,13 @@ import { GENERATION_PROFILES } from '@/features/canvas/data'
 import { PlusIcon, SendIcon } from '@/features/canvas/icons'
 
 vi.mock('@/shared/api/studio-service', () => ({
-  DEFAULT_WORKSPACE_ID: '1',
   listCanvases: vi.fn(async () => []),
   createCanvas: vi.fn(async () => ({
     id: '1002',
-    workspaceId: '1',
     title: '未命名画布',
-    schemaVersion: 1,
     revision: '0',
-    lifecycle: 'ACTIVE',
     homeViewportJson: '{}',
   })),
-  listFunctions: vi.fn(async () => []),
-  getCanvasSnapshot: vi.fn(async () => ({ document: {}, nodes: [], links: [], references: [] })),
 }))
 
 vi.mock('@xyflow/react', async () => {

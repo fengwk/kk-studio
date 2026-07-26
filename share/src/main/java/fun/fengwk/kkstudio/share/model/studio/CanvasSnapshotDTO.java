@@ -10,5 +10,4 @@ public class CanvasSnapshotDTO {
   private CanvasDocumentDTO document;
   private List<CanvasNodeDTO> nodes = new ArrayList<>();
   private List<CanvasLinkDTO> links = new ArrayList<>();
-  private List<CanvasResourceReferenceDTO> references = new ArrayList<>();
 }

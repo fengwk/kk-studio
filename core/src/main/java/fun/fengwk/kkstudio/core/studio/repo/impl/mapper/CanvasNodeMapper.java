@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.studio.repo.impl.mapper;
 
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -17,30 +18,20 @@ import java.util.List;
 @Mapper
 public interface CanvasNodeMapper extends BaseMapper {
 
-  String COLUMNS =
-      "id, canvas_id, kind, node_type, node_type_version, name, parent_group_id, x, y, width, height,"
-          + " rotation, z_index, locked, hidden, validity, data, revision, deleted_at as"
-          + " deleted_time, version, created_at as create_time, updated_at as update_time";
+  String COLUMNS = "id, canvas_id, kind, node_type, name, x, y, width, height, data";
 
   @Insert(
       """
       insert into canvas_node (
-          id, canvas_id, kind, node_type, node_type_version, name, parent_group_id,
-          x, y, width, height, rotation, z_index, locked, hidden, validity, data, revision,
-          deleted_at, created_at, updated_at, version
+          id, canvas_id, kind, node_type, name, x, y, width, height, data
       ) values (
-          #{id}, #{canvasId}, #{kind}, #{nodeType}, #{nodeTypeVersion}, #{name}, #{parentGroupId},
-          #{x}, #{y}, #{width}, #{height}, #{rotation}, #{zIndex}, #{locked}, #{hidden},
-          #{validity}, cast(#{dataJson} as jsonb), #{revision}, null,
-          current_timestamp, current_timestamp, 0
+          #{id}, #{canvasId}, #{kind}, #{nodeType}, #{name},
+          #{x}, #{y}, #{width}, #{height}, cast(#{dataJson} as jsonb)
       )
       """)
   int insert(CanvasNodeDO node);
 
-  @Select(
-      "select "
-          + COLUMNS
-          + " from canvas_node where canvas_id = #{canvasId} and deleted_at is null")
+  @Select("select " + COLUMNS + " from canvas_node where canvas_id = #{canvasId}")
   @Results(
       id = "canvasNodeMap",
       value = {
@@ -48,53 +39,27 @@ public interface CanvasNodeMapper extends BaseMapper {
         @Result(column = "canvas_id", property = "canvasId"),
         @Result(column = "kind", property = "kind"),
         @Result(column = "node_type", property = "nodeType"),
-        @Result(column = "node_type_version", property = "nodeTypeVersion"),
         @Result(column = "name", property = "name"),
-        @Result(column = "parent_group_id", property = "parentGroupId"),
         @Result(column = "x", property = "x"),
         @Result(column = "y", property = "y"),
         @Result(column = "width", property = "width"),
         @Result(column = "height", property = "height"),
-        @Result(column = "rotation", property = "rotation"),
-        @Result(column = "z_index", property = "zIndex"),
-        @Result(column = "locked", property = "locked"),
-        @Result(column = "hidden", property = "hidden"),
-        @Result(column = "validity", property = "validity"),
-        @Result(column = "data", property = "dataJson"),
-        @Result(column = "revision", property = "revision"),
-        @Result(column = "deleted_time", property = "deletedTime"),
-        @Result(column = "version", property = "version"),
-        @Result(column = "create_time", property = "createTime"),
-        @Result(column = "update_time", property = "updateTime")
+        @Result(column = "data", property = "dataJson")
       })
-  List<CanvasNodeDO> listActiveByCanvas(@Param("canvasId") long canvasId);
+  List<CanvasNodeDO> listByCanvas(@Param("canvasId") long canvasId);
 
-  @Select(
-      "select "
-          + COLUMNS
-          + " from canvas_node where id = #{id} and canvas_id = #{canvasId} and deleted_at is null")
+  @Select("select " + COLUMNS + " from canvas_node where id = #{id} and canvas_id = #{canvasId}")
   @ResultMap("canvasNodeMap")
-  CanvasNodeDO getActive(@Param("canvasId") long canvasId, @Param("id") long id);
+  CanvasNodeDO getById(@Param("canvasId") long canvasId, @Param("id") long id);
 
   @Update(
       """
       update canvas_node
-      set x = #{x}, y = #{y}, revision = #{revision},
-          updated_at = current_timestamp, version = version + 1
-      where id = #{id} and canvas_id = #{canvasId} and deleted_at is null
+      set x = #{x}, y = #{y}
+      where id = #{id} and canvas_id = #{canvasId}
       """)
   int updatePosition(CanvasNodeDO node);
 
-  @Update(
-      """
-      update canvas_node
-      set deleted_at = current_timestamp, revision = #{revision},
-          updated_at = current_timestamp, version = version + 1
-      where id = #{id} and canvas_id = #{canvasId} and deleted_at is null
-      """)
-  int softDelete(
-      @Param("canvasId") long canvasId, @Param("id") long id, @Param("revision") long revision);
-
-  @Select("select count(*) from canvas_node where canvas_id = #{canvasId} and deleted_at is null")
-  long countActive(@Param("canvasId") long canvasId);
+  @Delete("delete from canvas_node where id = #{id} and canvas_id = #{canvasId}")
+  int deleteById(@Param("canvasId") long canvasId, @Param("id") long id);
 }

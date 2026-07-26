@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import {
   createCanvas,
-  DEFAULT_WORKSPACE_ID,
   listCanvases,
   type CanvasDocumentDTO,
 } from '@/shared/api/studio-service'
@@ -12,12 +11,12 @@ export function CanvasLibraryView() {
   const queryClient = useQueryClient()
 
   const canvasesQuery = useQuery({
-    queryKey: ['studio', 'canvases', DEFAULT_WORKSPACE_ID],
-    queryFn: () => listCanvases(DEFAULT_WORKSPACE_ID),
+    queryKey: ['studio', 'canvases'],
+    queryFn: () => listCanvases(),
   })
 
   const createMutation = useMutation({
-    mutationFn: (title: string) => createCanvas(title, DEFAULT_WORKSPACE_ID),
+    mutationFn: (title: string) => createCanvas(title),
     onSuccess: async (created) => {
       await queryClient.invalidateQueries({ queryKey: ['studio', 'canvases'] })
       setToast(`已创建画布「${created.title}」`)
@@ -109,10 +108,6 @@ export function CanvasLibraryView() {
                   revision
                   {' '}
                   {canvas.revision}
-                  {' '}
-                  · 工作区
-                  {' '}
-                  {canvas.workspaceId}
                 </small>
                 <div className="project-footer">
                   <span>真实画布</span>

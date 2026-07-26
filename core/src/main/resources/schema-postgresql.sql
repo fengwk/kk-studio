@@ -96,66 +96,41 @@ create unique index uk_comfyui_workflow_api_api_name
 
 create table canvas_document (
     id              bigint        primary key default nextval('kk_studio_id_seq'),
-    workspace_id    bigint        not null,
     title           varchar(256)  not null,
-    schema_version  integer       not null,
     revision        bigint        not null,
-    lifecycle       varchar(32)   not null,
     home_viewport   jsonb         not null,
-    created_at      timestamptz(3) not null default current_timestamp,
     updated_at      timestamptz(3) not null default current_timestamp,
-    version         bigint        not null default 0,
-    constraint ck_canvas_document_lifecycle check (
-        lifecycle in ('DRAFT','ACTIVE','ARCHIVED','DELETED')
-    ),
-    constraint ck_canvas_document_schema_version_pos check (schema_version >= 1),
+    constraint ck_canvas_document_title_nonblank check (btrim(title) <> ''),
     constraint ck_canvas_document_revision_nonneg check (revision >= 0),
-    constraint ck_canvas_document_version_nonneg check (version >= 0)
+    constraint ck_canvas_document_id_pos check (id > 0)
 );
 
-create index idx_canvas_document_workspace
-    on canvas_document (workspace_id, updated_at);
-create unique index uk_canvas_document_workspace_id
-    on canvas_document (workspace_id, id);
+create index idx_canvas_document_updated
+    on canvas_document (updated_at, id);
 
 create table canvas_node (
-    id                  bigint        primary key default nextval('kk_studio_id_seq'),
-    canvas_id           bigint        not null,
-    kind                varchar(32)   not null,
-    node_type           varchar(128)  not null,
-    node_type_version   integer       not null,
-    name                varchar(256)  not null,
-    parent_group_id     bigint,
-    x                   double precision not null,
-    y                   double precision not null,
-    width               double precision not null,
-    height              double precision not null,
-    rotation            double precision not null,
-    z_index             bigint        not null,
-    locked              boolean       not null,
-    hidden              boolean       not null,
-    validity            varchar(32)   not null,
-    data                jsonb         not null,
-    revision            bigint        not null,
-    deleted_at          timestamptz(3),
-    created_at          timestamptz(3) not null default current_timestamp,
-    updated_at          timestamptz(3) not null default current_timestamp,
-    version             bigint        not null default 0,
+    id           bigint        primary key default nextval('kk_studio_id_seq'),
+    canvas_id    bigint        not null,
+    kind         varchar(32)   not null,
+    node_type    varchar(128)  not null,
+    name         varchar(256)  not null,
+    x            double precision not null,
+    y            double precision not null,
+    width        double precision not null,
+    height       double precision not null,
+    data         jsonb         not null,
+    constraint ck_canvas_node_id_pos check (id > 0),
+    constraint ck_canvas_node_canvas_id_pos check (canvas_id > 0),
     constraint ck_canvas_node_kind check (
-        kind in ('RESOURCE','FUNCTION','GROUP')
+        kind in ('RESOURCE','FUNCTION')
     ),
-    constraint ck_canvas_node_validity check (
-        validity in ('VALID','INVALID','STALE')
-    ),
-    constraint ck_canvas_node_node_type_version_pos check (node_type_version >= 1),
-    constraint ck_canvas_node_revision_nonneg check (revision >= 0),
-    constraint ck_canvas_node_version_nonneg check (version >= 0),
-    constraint ck_canvas_node_parent_not_self check (
-        parent_group_id is null or parent_group_id <> id
-    )
+    constraint ck_canvas_node_type_nonblank check (btrim(node_type) <> ''),
+    constraint ck_canvas_node_name_nonblank check (btrim(name) <> ''),
+    constraint ck_canvas_node_width_pos check (width > 0),
+    constraint ck_canvas_node_height_pos check (height > 0)
 );
 
-create index idx_canvas_node_canvas on canvas_node (canvas_id, deleted_at);
+create index idx_canvas_node_canvas on canvas_node (canvas_id);
 create unique index uk_canvas_node_canvas_id on canvas_node (canvas_id, id);
 
 create table canvas_link (
@@ -163,33 +138,27 @@ create table canvas_link (
     canvas_id       bigint        not null,
     source_node_id  bigint        not null,
     target_node_id  bigint        not null,
-    revision        bigint        not null,
-    created_at      timestamptz(3) not null default current_timestamp,
-    constraint ck_canvas_link_revision_nonneg check (revision >= 0)
+    constraint ck_canvas_link_id_pos check (id > 0),
+    constraint ck_canvas_link_canvas_id_pos check (canvas_id > 0),
+    constraint ck_canvas_link_source_id_pos check (source_node_id > 0),
+    constraint ck_canvas_link_target_id_pos check (target_node_id > 0),
+    constraint ck_canvas_link_distinct check (source_node_id <> target_node_id)
 );
 
 create unique index uk_canvas_link
     on canvas_link (canvas_id, source_node_id, target_node_id);
 
-create table canvas_command (
-    id                bigint        primary key default nextval('kk_studio_id_seq'),
-    command_id        varchar(128)  not null,
-    workspace_id      bigint        not null,
-    canvas_id         bigint        not null,
-    base_revision     bigint        not null,
-    result_revision   bigint        not null,
-    request_hash      varchar(128)  not null,
-    payload           jsonb         not null,
-    result            jsonb         not null,
-    created_at        timestamptz(3) not null default current_timestamp,
-    constraint ck_canvas_command_base_revision_nonneg check (base_revision >= 0),
-    constraint ck_canvas_command_result_revision_nonneg check (result_revision >= 0)
+create table canvas_command_dedup (
+    canvas_id      bigint        not null,
+    command_id     varchar(128)  not null,
+    request_hash   varchar(64)   not null,
+    constraint pk_canvas_command_dedup primary key (canvas_id, command_id),
+    constraint ck_canvas_command_dedup_canvas_id_pos check (canvas_id > 0),
+    constraint ck_canvas_command_dedup_command_id_nonblank check (btrim(command_id) <> ''),
+    constraint ck_canvas_command_dedup_request_hash_length check (
+        char_length(request_hash) = 64
+    )
 );
-
-create index idx_canvas_command_workspace
-    on canvas_command (workspace_id, created_at);
-create unique index uk_canvas_command
-    on canvas_command (workspace_id, command_id);
 
 create table chat (
     id                  bigint        primary key default nextval('kk_studio_id_seq'),
@@ -915,27 +884,24 @@ alter table harness_entry
 
 ------------------------------------------------------------------------------
 -- 5. Canvas self-referencing FKs added after targets exist.
+--    Node hard-delete cascades to its links via ON DELETE CASCADE on the
+--    same-canvas composite FK (canvas_id, source_node_id) / (canvas_id, target_node_id).
 ------------------------------------------------------------------------------
 
 alter table canvas_node
     add constraint fk_canvas_node_canvas foreign key (canvas_id)
-    references canvas_document (id);
+    references canvas_document (id) on delete cascade;
 
-alter table canvas_node
-    add constraint fk_canvas_node_parent_group
-    foreign key (canvas_id, parent_group_id)
-    references canvas_node (canvas_id, id);
+alter table canvas_command_dedup
+    add constraint fk_canvas_command_dedup_canvas foreign key (canvas_id)
+    references canvas_document (id) on delete cascade;
 
 alter table canvas_link
     add constraint fk_canvas_link_source
     foreign key (canvas_id, source_node_id)
-    references canvas_node (canvas_id, id);
+    references canvas_node (canvas_id, id) on delete cascade;
 
 alter table canvas_link
     add constraint fk_canvas_link_target
     foreign key (canvas_id, target_node_id)
-    references canvas_node (canvas_id, id);
-
-alter table canvas_command
-    add constraint fk_canvas_command_canvas foreign key (workspace_id, canvas_id)
-    references canvas_document (workspace_id, id);
+    references canvas_node (canvas_id, id) on delete cascade;

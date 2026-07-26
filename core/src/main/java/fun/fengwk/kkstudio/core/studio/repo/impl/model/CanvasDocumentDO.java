@@ -4,36 +4,21 @@ import lombok.Data;
 
 import java.time.OffsetDateTime;
 
-/** {@code canvas_document} 行映射：画布文档头。 */
+/** {@code canvas_document} row mapping: canvas aggregate head. */
 @Data
 public class CanvasDocumentDO {
-  /** 业务主键。 */
+  /** Business id. */
   private Long id;
 
-  /** 所属工作区。 */
-  private Long workspaceId;
-
-  /** 标题。 */
+  /** Title. */
   private String title;
 
-  /** 文档 schema 版本。 */
-  private Integer schemaVersion;
-
-  /** 业务 revision（CAS 用）。 */
+  /** Business revision used by command CAS. */
   private Long revision;
 
-  /** 生命周期状态。 */
-  private String lifecycle;
-
-  /** 默认视口 JSON。 */
+  /** Default viewport JSON. */
   private String homeViewportJson;
 
-  /** 乐观锁行版本。 */
-  private Long version;
-
-  /** 创建时间（映射 {@code created_at} timestamptz）。 */
-  private OffsetDateTime createTime;
-
-  /** 更新时间（映射 {@code updated_at} timestamptz）。 */
+  /** Updated time (maps {@code updated_at} timestamptz); used for list ordering. */
   private OffsetDateTime updateTime;
 }

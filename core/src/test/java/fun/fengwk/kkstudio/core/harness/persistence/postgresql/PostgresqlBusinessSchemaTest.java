@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.sql.Types;
 
 /** Verifies that non-Harness business data is fully represented by the PostgreSQL schema. */
 class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
@@ -48,42 +47,141 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void canvasRelationsCannotCrossWorkspaceOrCanvasBoundaries() throws SQLException {
+  void canvasLinkStaysWithinItsOwningCanvas() throws SQLException {
     long firstCanvasId = FIXTURE_IDS.incrementAndGet();
     long secondCanvasId = FIXTURE_IDS.incrementAndGet();
     long firstNodeId = FIXTURE_IDS.incrementAndGet();
     long secondNodeId = FIXTURE_IDS.incrementAndGet();
     try (Connection conn = newConnection()) {
-      insertCanvas(conn, firstCanvasId, 10L);
-      insertCanvas(conn, secondCanvasId, 20L);
-      insertNode(conn, firstNodeId, firstCanvasId, "GROUP", null);
-      insertNode(conn, secondNodeId, secondCanvasId, "GROUP", null);
+      insertCanvas(conn, firstCanvasId);
+      insertCanvas(conn, secondCanvasId);
+      insertNode(conn, firstNodeId, firstCanvasId);
+      insertNode(conn, secondNodeId, secondCanvasId);
     }
 
-    try (Connection conn = newConnection()) {
-      long selfId = FIXTURE_IDS.incrementAndGet();
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_canvas_node_parent_not_self",
-          () -> insertNode(conn, selfId, firstCanvasId, "GROUP", selfId));
-    }
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "fk_canvas_node_parent_group",
-          () ->
-              insertNode(
-                  conn, FIXTURE_IDS.incrementAndGet(), firstCanvasId, "RESOURCE", secondNodeId));
-    }
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
           "fk_canvas_link_target",
           () -> insertLink(conn, firstCanvasId, firstNodeId, secondNodeId));
     }
+  }
+
+  @Test
+  void canvasSchemaConstraintsRejectBadInputs() throws SQLException {
+    long canvasId = FIXTURE_IDS.incrementAndGet();
+    long nodeId = FIXTURE_IDS.incrementAndGet();
+    long linkId = FIXTURE_IDS.incrementAndGet();
+    try (Connection conn = newConnection()) {
+      insertCanvas(conn, canvasId);
+      insertNode(conn, nodeId, canvasId);
+    }
+
+    // Document: blank title is rejected.
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
-          conn, "fk_canvas_command_canvas", () -> insertCanvasCommand(conn, 20L, firstCanvasId));
+          conn, "ck_canvas_document_title_nonblank", () -> insertCanvasRow(conn, canvasId, " "));
+    }
+
+    // Node: blank name is rejected.
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_canvas_node_name_nonblank",
+          () -> insertNodeRow(conn, nodeId, canvasId, "RESOURCE", "", 100, 100));
+    }
+
+    // Node: zero width is rejected.
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_canvas_node_width_pos",
+          () -> insertNodeRow(conn, nodeId, canvasId, "RESOURCE", "n", 0, 100));
+    }
+
+    // Node: zero height is rejected.
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_canvas_node_height_pos",
+          () -> insertNodeRow(conn, nodeId, canvasId, "RESOURCE", "n", 100, 0));
+    }
+
+    // Link: self-loop is rejected.
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn, "ck_canvas_link_distinct", () -> insertLink(conn, canvasId, nodeId, nodeId));
+    }
+
+    // Dedup: blank command_id is rejected.
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_canvas_command_dedup_command_id_nonblank",
+          () -> insertDedup(conn, canvasId, " ", "0".repeat(64)));
+    }
+
+    // Dedup: request_hash must contain one SHA-256 hex digest.
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_canvas_command_dedup_request_hash_length",
+          () -> insertDedup(conn, canvasId, "cmd-ok", " "));
+    }
+
+    // Sanity: a fully well-formed dedup row inserts.
+    try (Connection conn = newConnection()) {
+      insertDedup(conn, canvasId, "cmd-" + linkId, "f".repeat(64));
+    }
+  }
+
+  @Test
+  void canvasNodeDeletionCascadesToItsLinks() throws SQLException {
+    long canvasId = FIXTURE_IDS.incrementAndGet();
+    long sourceNode = FIXTURE_IDS.incrementAndGet();
+    long targetNode = FIXTURE_IDS.incrementAndGet();
+    try (Connection conn = newConnection()) {
+      insertCanvas(conn, canvasId);
+      insertNode(conn, sourceNode, canvasId);
+      insertNode(conn, targetNode, canvasId);
+      insertLink(conn, canvasId, sourceNode, targetNode);
+    }
+
+    // Verify link exists.
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "select count(*) from canvas_link where canvas_id = ?"
+                    + " and source_node_id = ? and target_node_id = ?")) {
+      ps.setLong(1, canvasId);
+      ps.setLong(2, sourceNode);
+      ps.setLong(3, targetNode);
+      try (var rs = ps.executeQuery()) {
+        rs.next();
+        assertEquals(1L, rs.getLong(1));
+      }
+    }
+
+    // Delete the source node; ON DELETE CASCADE must remove the link.
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement("delete from canvas_node where id = ? and canvas_id = ?")) {
+      ps.setLong(1, sourceNode);
+      ps.setLong(2, canvasId);
+      assertEquals(1, ps.executeUpdate());
+    }
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "select count(*) from canvas_link where canvas_id = ?"
+                    + " and source_node_id = ? and target_node_id = ?")) {
+      ps.setLong(1, canvasId);
+      ps.setLong(2, sourceNode);
+      ps.setLong(3, targetNode);
+      try (var rs = ps.executeQuery()) {
+        rs.next();
+        assertEquals(0L, rs.getLong(1), "ON DELETE CASCADE must remove the link");
+      }
     }
   }
 
@@ -122,34 +220,57 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
     }
   }
 
-  private void insertCanvas(Connection conn, long id, long workspaceId) throws SQLException {
+  private void insertCanvas(Connection conn, long id) throws SQLException {
+    insertCanvasRow(conn, id, "schema-test");
+  }
+
+  private void insertCanvasRow(Connection conn, long id, String title) throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into canvas_document (id, workspace_id, title, schema_version, revision,"
-                + " lifecycle, home_viewport) values (?, ?, 'schema-test', 1, 0, 'ACTIVE',"
-                + " '{}'::jsonb)")) {
+            "insert into canvas_document (id, title, revision, home_viewport)"
+                + " values (?, ?, 0, '{}'::jsonb)")) {
       ps.setLong(1, id);
-      ps.setLong(2, workspaceId);
+      ps.setString(2, title);
       assertEquals(1, ps.executeUpdate());
     }
   }
 
-  private void insertNode(Connection conn, long id, long canvasId, String kind, Long parentGroupId)
+  private void insertNode(Connection conn, long id, long canvasId) throws SQLException {
+    insertNodeRow(conn, id, canvasId, "RESOURCE", "node", 100, 100);
+  }
+
+  private void insertNodeRow(
+      Connection conn,
+      long id,
+      long canvasId,
+      String kind,
+      String name,
+      double width,
+      double height)
       throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into canvas_node (id, canvas_id, kind, node_type, node_type_version, name,"
-                + " parent_group_id, x, y, width, height, rotation, z_index, locked, hidden,"
-                + " validity, data, revision) values (?, ?, ?, 'schema-test', 1, 'node', ?,"
-                + " 0, 0, 100, 100, 0, 0, false, false, 'VALID', '{}'::jsonb, 0)")) {
+            "insert into canvas_node (id, canvas_id, kind, node_type, name, x, y, width, height,"
+                + " data) values (?, ?, ?, 'schema-test', ?, 0, 0, ?, ?, '{}'::jsonb)")) {
       ps.setLong(1, id);
       ps.setLong(2, canvasId);
       ps.setString(3, kind);
-      if (parentGroupId == null) {
-        ps.setNull(4, Types.BIGINT);
-      } else {
-        ps.setLong(4, parentGroupId);
-      }
+      ps.setString(4, name);
+      ps.setDouble(5, width);
+      ps.setDouble(6, height);
+      assertEquals(1, ps.executeUpdate());
+    }
+  }
+
+  private void insertDedup(Connection conn, long canvasId, String commandId, String requestHash)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into canvas_command_dedup (canvas_id, command_id, request_hash)"
+                + " values (?, ?, ?)")) {
+      ps.setLong(1, canvasId);
+      ps.setString(2, commandId);
+      ps.setString(3, requestHash);
       assertEquals(1, ps.executeUpdate());
     }
   }
@@ -158,25 +279,11 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into canvas_link (canvas_id, source_node_id, target_node_id, revision)"
-                + " values (?, ?, ?, 0)")) {
+            "insert into canvas_link (canvas_id, source_node_id, target_node_id)"
+                + " values (?, ?, ?)")) {
       ps.setLong(1, canvasId);
       ps.setLong(2, sourceNodeId);
       ps.setLong(3, targetNodeId);
-      assertEquals(1, ps.executeUpdate());
-    }
-  }
-
-  private void insertCanvasCommand(Connection conn, long workspaceId, long canvasId)
-      throws SQLException {
-    try (PreparedStatement ps =
-        conn.prepareStatement(
-            "insert into canvas_command (command_id, workspace_id, canvas_id, base_revision,"
-                + " result_revision, request_hash, payload, result) values (?, ?, ?, 0, 1,"
-                + " 'hash', '{}'::jsonb, '{}'::jsonb)")) {
-      ps.setString(1, "command-" + FIXTURE_IDS.incrementAndGet());
-      ps.setLong(2, workspaceId);
-      ps.setLong(3, canvasId);
       assertEquals(1, ps.executeUpdate());
     }
   }

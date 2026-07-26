@@ -109,7 +109,6 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
       "canvas_document",
       "canvas_node",
       "canvas_link",
-      "canvas_command",
       "chat"
     };
 

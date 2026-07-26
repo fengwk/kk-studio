@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.core.studio.repo.impl.mapper;
 
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
-import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -18,16 +17,13 @@ public interface CanvasLinkMapper extends BaseMapper {
 
   @Insert(
       """
-      insert into canvas_link (
-          id, canvas_id, source_node_id, target_node_id, revision, created_at
-      ) values (
-          #{id}, #{canvasId}, #{sourceNodeId}, #{targetNodeId}, #{revision}, current_timestamp
-      )
+      insert into canvas_link (id, canvas_id, source_node_id, target_node_id)
+      values (#{id}, #{canvasId}, #{sourceNodeId}, #{targetNodeId})
       """)
   int insert(CanvasLinkDO link);
 
   @Select(
-      "select id, canvas_id, source_node_id, target_node_id, revision, created_at as create_time"
+      "select id, canvas_id, source_node_id, target_node_id"
           + " from canvas_link where canvas_id = #{canvasId}")
   @Results(
       id = "canvasLinkMap",
@@ -35,12 +31,7 @@ public interface CanvasLinkMapper extends BaseMapper {
         @Result(column = "id", property = "id"),
         @Result(column = "canvas_id", property = "canvasId"),
         @Result(column = "source_node_id", property = "sourceNodeId"),
-        @Result(column = "target_node_id", property = "targetNodeId"),
-        @Result(column = "revision", property = "revision"),
-        @Result(column = "create_time", property = "createTime")
+        @Result(column = "target_node_id", property = "targetNodeId")
       })
   List<CanvasLinkDO> listByCanvas(@Param("canvasId") long canvasId);
-
-  @Delete("delete from canvas_link where id = #{id} and canvas_id = #{canvasId}")
-  int delete(@Param("canvasId") long canvasId, @Param("id") long id);
 }

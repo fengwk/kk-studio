@@ -7,7 +7,7 @@
 | 域 | 代码位置 | 职责 | 当前成熟度 |
 | --- | --- | --- | --- |
 | **Harness / AI** | `harness-tool` / `harness-runtime` / `harness-daemon` + `core.harness` + `features/ai` | Session Entry Tree、可复用 HarnessThread、Model/Tool Invocation、Interaction | 现行契约 |
-| **Studio / Canvas** | `studio` + `core.studio` + `features/canvas` | 画布资源工作台、Function、Workflow | Canvas 最小持久化已落地；其余 Runtime 待补 |
+| **Studio / Canvas** | `studio` + `core.studio` + `features/canvas` | 全局单实例持久化画布（document / node / link / command-dedup） | 现行契约 |
 
 依赖：
 
@@ -32,25 +32,20 @@ harness-daemon → harness-tool
 
 | 规则 | 说明 |
 | --- | --- |
-| 单实例 | 当前产品无多租户 membership |
-| 默认 ID | `StudioWorkspaces.DEFAULT_ID = 1` / 前端 `DEFAULT_WORKSPACE_ID = '1'` |
-| API | 仍接收 `workspaceId` 以便未来扩展；非默认值拒绝 |
+| 全局单实例 | 产品无多租户 membership、无 workspace 表/列 |
+| API | 全局 Canvas 列表、详情与命令路径 |
 
 ## 3. Studio 核心词汇
 
 | 概念 | 含义 |
 | --- | --- |
 | CanvasDocument | 画布文档身份 + revision |
-| CanvasNodeKind | `RESOURCE` / `FUNCTION` / `GROUP` |
-| CanvasLink | 可见性边：source 的 Resource 对 target 可见 |
-| ResourceReference | 实际依赖：target 某输入真正使用的 Resource |
-| Resource | 稳定逻辑身份 |
-| ResourceVersion | 不可变内容版本 |
-| FunctionRef | `functionId + version` |
-| FunctionRun | 一次 Function 执行 |
-| Workflow | 独立程序；发布后成为 Function |
+| CanvasNodeKind | `RESOURCE` / `FUNCTION` |
+| CanvasLink | 可见性边：source 的 Node 对 target 可见 |
+| CanvasSnapshot | 文档 + 节点 + 连线 读模型 |
+| CanvasCommand | 客户端幂等命令（dedup 事实按 `(canvas_id, command_id)` 唯一） |
 
-Link ≠ Reference。演示层若只做连线，必须标注为 visibility。
+FUNCTION 节点当前唯一实例是 `system.generate-text` v1。
 
 ## 4. Harness 核心词汇
 
@@ -72,17 +67,13 @@ Link ≠ Reference。演示层若只做连线，必须标注为 visibility。
 
 | 表现 type | domainKind | 后端语义 |
 | --- | --- | --- |
-| `frame` | `GROUP` | GroupNode |
-| `web` / `image` / `file` / `text` / `matrix` / `result` | `RESOURCE` | ResourceNode |
-| `generator` | `FUNCTION` | FunctionNode（`system.generate-*`） |
-| `run` | `FUNCTION` | FunctionNode 运行实例视图（演示；对应 `system.agent.execute` 的 FunctionRun 呈现） |
+| `web` / `image` / `file` / `text` / `matrix` / `result` | `RESOURCE` | ResourceNode（`node_type` 区分） |
+| `generator` | `FUNCTION` | FunctionNode；持久化后端只有 `system.generate-text` v1 |
 
 | 前端对象 | 后端对象 |
 | --- | --- |
-| `CanvasLink.role='visibility'` | `CanvasLink` |
-| （未建模） | `ResourceReference` |
-| generator mode text/image/video | `system.generate-text/image/video` v1 |
-| Agent Dock 任务 | `system.agent.execute` v1 |
+| `CanvasLink` | `CanvasLink`（可见性边） |
+| generator 文本生成 | `system.generate-text` v1 |
 
 映射代码：`frontend/src/features/canvas/domain-map.ts`。
 
@@ -90,15 +81,15 @@ Link ≠ Reference。演示层若只做连线，必须标注为 visibility。
 
 | API | 状态 |
 | --- | --- |
-| `GET /api/functions?workspaceId=1` | 可用（内存 Catalog） |
-| `GET /api/canvases?workspaceId=1`、`GET /api/canvases/{canvasId}` | 可用（持久 Canvas 列表与 snapshot） |
-| `POST /api/canvases` | 可用（创建 Canvas） |
-| `POST /api/canvases/{canvasId}/commands` | 可用（create text/generate-text/link、move、delete node） |
-| Workflow / FunctionRun 写路径 | `501 Studio feature not ready` |
+| `GET /api/canvases` | 可用（持久 Canvas 列表，按 `updated_at` 倒序） |
+| `GET /api/canvases/{canvasId}` | 可用（持久 Canvas snapshot：document / nodes / links） |
+| `POST /api/canvases` | 可用（body 仅 `{title}`，创建 Canvas） |
+| `POST /api/canvases/{canvasId}/commands` | 可用（create text/generate-text/link、move nodes、delete node；硬删除；按 `(canvas_id, command_id)` 幂等） |
+| `/api/functions`、`/api/workflows`、`/api/function-runs` 等 | 暂不暴露 |
 | Harness `/api/sessions` | 创建 Session/ROOT/RUNTIME_CONFIG、Session 列表/详情与 Entry Tree 查询 |
 | Harness `/api/threads` | 全局 Thread 列表；创建 UNBOUND Thread |
 | Harness `/api/threads/{threadId}` | Thread 读取、bootstrap、`PUT /head` 重定位、mailbox 提交、Entries/Inputs、Redis realtime SSE、Stop；重试策略位于 `/api/harness/retry-policy` |
 
 ## 7. 实现进度一句话
 
-Harness 是以 Session Entry Tree、可复用 Thread（可空 head + epoch fencing）、Thread mailbox、Model/Tool Invocation 与 Interaction 为基础的可恢复执行链；PostgreSQL 为 truth，Redis 为 lossy wake/realtime。Studio 的 Canvas、Resource、FunctionRun 与 Workflow 保持独立领域边界。
+Harness 是以 Session Entry Tree、可复用 Thread（可空 head + epoch fencing）、Thread mailbox、Model/Tool Invocation 与 Interaction 为基础的可恢复执行链；PostgreSQL 为 truth，Redis 为 lossy wake/realtime。Studio 当前只承载 Canvas：document / node / link / command-dedup，硬删除节点并通过同 Canvas 复合 FK 级联清理连线。
