@@ -7,6 +7,7 @@ import type { ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
 import type { SubagentTaskNode } from '@/features/ai/subagent-task-tree'
 import type { ThreadTimeline } from '@/features/ai/thread-timeline'
 import type {
+  BackendLong,
   ModelUsageSummaryDTO,
   RootActivityDTO,
 } from '@/shared/api/contracts'
@@ -57,7 +58,7 @@ export function ChatPanel({
     usage?: ModelUsageSummaryDTO
     observabilityError: unknown
     yoloPending: boolean
-    setYolo: (enabled: boolean) => void
+    setYolo: (enabled: boolean, expectedExecutionEpoch: BackendLong) => void
   }
   taskTimeline: {
     activities: RootActivityDTO[]

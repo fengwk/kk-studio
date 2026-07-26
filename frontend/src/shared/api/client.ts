@@ -10,6 +10,22 @@ export interface HttpClient {
 
 export const apiBaseUrl = '/api'
 
+/** Transport/envelope failure carrying the backend HTTP status so callers can branch on 409. */
+export class ApiError extends Error {
+  readonly status?: number
+
+  constructor(message: string, status?: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
+/** Stale executionEpoch or a non-quiescent Thread; the caller must refresh before retrying. */
+export function isConflictError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 409
+}
+
 const axiosClient = axios.create({
   baseURL: apiBaseUrl,
   timeout: 60000,
@@ -22,13 +38,13 @@ axiosClient.interceptors.response.use(
       return response.data
     }
     if (envelope.status < 200 || envelope.status >= 300) {
-      return Promise.reject(new Error(envelope.message || '请求失败'))
+      return Promise.reject(new ApiError(envelope.message || '请求失败', envelope.status))
     }
     return envelope.data
   },
   (error) => {
     const message = error?.response?.data?.message || error?.message || '请求失败'
-    return Promise.reject(new Error(message))
+    return Promise.reject(new ApiError(message, error?.response?.status))
   },
 )
 

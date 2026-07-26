@@ -1,11 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
-import type { HarnessThreadInputDTO } from '@/shared/api/contracts'
+import type { BackendLong, HarnessThreadInputDTO } from '@/shared/api/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 /**
  * Submit a user message to the Thread queue.
- * Caller owns draft clearing and clientMessageId retry identity.
+ * Caller owns draft clearing, clientMessageId retry identity, and the epoch fencing token.
  * Overlapping mutations are allowed for continuous submissions.
  */
 export function useAgentThreadMessageMutation(threadId: string) {
@@ -14,11 +14,17 @@ export function useAgentThreadMessageMutation(threadId: string) {
     mutationFn: async ({
       content,
       clientMessageId,
+      expectedExecutionEpoch,
     }: {
       content: string
       clientMessageId: string
+      expectedExecutionEpoch: BackendLong
     }): Promise<HarnessThreadInputDTO> =>
-      harnessService.submitThreadMessage(threadId, { content, clientMessageId }),
+      harnessService.submitThreadMessage(threadId, {
+        content,
+        clientMessageId,
+        expectedExecutionEpoch,
+      }),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) }),

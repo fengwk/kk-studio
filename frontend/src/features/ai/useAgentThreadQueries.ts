@@ -4,7 +4,7 @@ import { harnessService } from '@/shared/api/harness-service'
 import { toAgentModelViews, type AgentModelView } from '@/features/ai/AgentModelView'
 import { queryKeys } from '@/shared/lib/query-keys'
 
-export function useAgentThreadQueries(threadId: string, sessionIdHint = '') {
+export function useAgentThreadQueries(threadId: string) {
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents.list,
     queryFn: () => agentService.listAgents(),
@@ -27,13 +27,8 @@ export function useAgentThreadQueries(threadId: string, sessionIdHint = '') {
     },
   })
   const thread = threadQuery.data
-  // Pane only stores threadId; session is derived from Thread (hint is optional bootstrap).
-  const sessionId = thread?.sessionId || sessionIdHint
-  const sessionThreadsQuery = useQuery({
-    queryKey: queryKeys.sessions.threads(sessionId),
-    queryFn: () => harnessService.listSessionThreads(sessionId),
-    enabled: Boolean(sessionId),
-  })
+  // Pane only stores threadId; the Session is derived from the Thread head and is null when UNBOUND.
+  const sessionId = thread?.sessionId ?? ''
   const sessionQuery = useQuery({
     queryKey: queryKeys.sessions.detail(sessionId),
     queryFn: () => harnessService.getSession(sessionId),
@@ -71,7 +66,6 @@ export function useAgentThreadQueries(threadId: string, sessionIdHint = '') {
     agentsQuery,
     modelsQuery,
     providersQuery,
-    sessionThreadsQuery,
     sessionQuery,
     threadQuery,
     entriesQuery,
@@ -80,8 +74,8 @@ export function useAgentThreadQueries(threadId: string, sessionIdHint = '') {
     models,
     providers,
     session: sessionQuery.data,
-    threads: sessionThreadsQuery.data ?? [],
     thread,
+    sessionId,
     entries: entriesQuery.data ?? [],
     inputs,
   }

@@ -15,13 +15,15 @@ const branchEntries = [
 ]
 
 describe('HistoryBranchPanel', () => {
-  it('selects the current head by default and creates only after explicit confirmation', async () => {
+  it('selects the current head by default and rebinds only after explicit confirmation', async () => {
     const user = userEvent.setup()
-    const onCreate = vi.fn()
-    renderPanel({ onCreate, currentHeadEntryId: 'follow-up' })
+    const onRebind = vi.fn()
+    renderPanel({ onRebind, currentHeadEntryId: 'follow-up' })
 
     expect(screen.getByRole('dialog', { name: '历史分支' })).toBeInTheDocument()
     expect(screen.queryByText('选择历史位置后开启新的 Thread，当前 Thread 不会改变。')).not.toBeInTheDocument()
+    // Confirming relocates the *current* Thread; no new-Thread wording remains.
+    expect(screen.queryByRole('button', { name: /开启新 Thread/ })).not.toBeInTheDocument()
     expect(screen.queryByText(/当前分支 head/)).not.toBeInTheDocument()
     expect(within(screen.getByLabelText('显示记录')).getAllByRole('option').map((option) => option.textContent)).toEqual([
       '对话',
@@ -31,30 +33,30 @@ describe('HistoryBranchPanel', () => {
     const headButton = screen.getByRole('button', { name: '助手 · follow up · 当前路径 · 当前线程位置' })
     expect(within(headButton).getByText('当前线程位置')).toBeInTheDocument()
     expect(headButton).toHaveAttribute('aria-pressed', 'true')
-    expect(onCreate).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: '从这里开启新 Thread' }))
-    expect(onCreate).toHaveBeenCalledTimes(1)
-    const createdEntry = onCreate.mock.calls[0][0]
-    expect(createdEntry.entryId).toBe('follow-up')
+    expect(onRebind).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '从这里继续当前 Thread' }))
+    expect(onRebind).toHaveBeenCalledTimes(1)
+    const rebindEntry = onRebind.mock.calls[0][0]
+    expect(rebindEntry.entryId).toBe('follow-up')
   })
 
   it('re-attaches the selection to the nearest visible ancestor when the current selection becomes hidden', async () => {
     const user = userEvent.setup()
-    const onCreate = vi.fn()
-    renderPanel({ onCreate, currentHeadEntryId: 'follow-up' })
+    const onRebind = vi.fn()
+    renderPanel({ onRebind, currentHeadEntryId: 'follow-up' })
 
     await user.selectOptions(screen.getByLabelText('显示记录'), 'all')
     await user.click(screen.getByRole('button', { name: /工具 · tool result/ }))
-    expect(screen.getByRole('button', { name: '从这里开启新 Thread' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '从这里继续当前 Thread' })).toBeEnabled()
 
     // The conversation view hides tools. The selected tool's closest visible raw ancestor is assistant.
     await user.selectOptions(screen.getByLabelText('显示记录'), 'conversation')
     expect(screen.queryByText('tool result')).not.toBeInTheDocument()
-    const confirm = screen.getByRole('button', { name: '从这里开启新 Thread' })
+    const confirm = screen.getByRole('button', { name: '从这里继续当前 Thread' })
     expect(confirm).toBeEnabled()
     await user.click(confirm)
-    expect(onCreate).toHaveBeenCalledTimes(1)
-    expect(onCreate.mock.calls[0][0].entryId).toBe('assistant')
+    expect(onRebind).toHaveBeenCalledTimes(1)
+    expect(onRebind.mock.calls[0][0].entryId).toBe('assistant')
   })
 
   it('supports multi-token AND search across the tree without changing branch targets', async () => {
@@ -66,7 +68,7 @@ describe('HistoryBranchPanel', () => {
     const rows = screen.getAllByRole('listitem')
     expect(rows).toHaveLength(1)
     expect(within(rows[0]!).getByText('follow up two')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '从这里开启新 Thread' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '从这里继续当前 Thread' })).toBeEnabled()
   })
 
   it('keeps the active path marker on every visible node from root to the head', () => {
@@ -118,25 +120,26 @@ describe('HistoryBranchPanel', () => {
     expect(screen.getByText('没有匹配 “missing” 的记录')).toBeInTheDocument()
   })
 
-  it('disables creation while pending and shows loading, empty, error, and creation-failure states', () => {
+  it('disables rebind while pending and shows loading, empty, query-error and rebind-failure states', () => {
     const { rerender } = renderPanel({ loading: true })
     expect(screen.getByText('正在加载历史分支…')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '从这里开启新 Thread' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '从这里继续当前 Thread' })).toBeDisabled()
 
-    rerender(<HistoryBranchPanel entries={[]} currentHeadEntryId={null} loading={false} queryError={null} pending={false} creationError={null} onClose={vi.fn()} onCreate={vi.fn()} />)
+    rerender(<HistoryBranchPanel entries={[]} currentHeadEntryId={null} loading={false} queryError={null} pending={false} rebindError={null} onClose={vi.fn()} onRebind={vi.fn()} />)
     expect(screen.getByText('没有可显示的记录')).toBeInTheDocument()
 
-    rerender(<HistoryBranchPanel entries={[]} currentHeadEntryId={null} loading={false} queryError={new Error('failed')} pending={false} creationError={new Error('failed')} onClose={vi.fn()} onCreate={vi.fn()} />)
+    // The rebind failure text is produced by the caller (409 included) and rendered verbatim.
+    rerender(<HistoryBranchPanel entries={[]} currentHeadEntryId={null} loading={false} queryError={new Error('failed')} pending={false} rebindError="无法重定位 Thread：状态已变化（thread is not idle），请刷新后重试" onClose={vi.fn()} onRebind={vi.fn()} />)
     expect(screen.getByText('历史分支加载失败')).toBeInTheDocument()
-    expect(screen.getByText('创建 Thread 失败')).toBeInTheDocument()
+    expect(screen.getByText('无法重定位 Thread：状态已变化（thread is not idle），请刷新后重试')).toBeInTheDocument()
   })
 
-  it('disables entry selection, confirmation, and closing while creation is pending', async () => {
+  it('disables entry selection, confirmation, and closing while a rebind is pending', async () => {
     const user = userEvent.setup()
     const onClose = vi.fn()
     renderPanel({ pending: true, onClose })
     expect(screen.getByRole('button', { name: /user prompt/ })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '从这里开启新 Thread' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '从这里继续当前 Thread' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '关闭' })).toBeDisabled()
     expect(screen.getByLabelText('显示记录')).toBeDisabled()
     expect(screen.getByLabelText('搜索记录')).toBeDisabled()
@@ -154,9 +157,9 @@ function renderPanel(overrides: Partial<ComponentProps<typeof HistoryBranchPanel
       loading={false}
       queryError={null}
       pending={false}
-      creationError={null}
+      rebindError={null}
       onClose={vi.fn()}
-      onCreate={vi.fn()}
+      onRebind={vi.fn()}
       {...overrides}
     />,
   )

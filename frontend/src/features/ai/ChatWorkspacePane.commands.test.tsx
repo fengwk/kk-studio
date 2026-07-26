@@ -4,8 +4,9 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatWorkspacePane } from '@/features/ai/ChatWorkspacePane'
 import { agentService } from '@/shared/api/agent-service'
-import { chatService } from '@/shared/api/chat-service'
+import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
+import type { HarnessSessionEntryDTO, HarnessThreadDTO } from '@/shared/api/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -14,17 +15,13 @@ vi.mock('@/shared/api/agent-service', () => ({
     listProviders: vi.fn(),
   },
 }))
-vi.mock('@/shared/api/chat-service', () => ({
-  chatService: {
-    listChatSessions: vi.fn(),
-    updateChat: vi.fn(),
-  },
-}))
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     getThread: vi.fn(),
     getSession: vi.fn(),
-    listSessionThreads: vi.fn(),
+    listSessions: vi.fn(),
+    listThreads: vi.fn(),
+    listSessionEntries: vi.fn(),
     listThreadEntries: vi.fn(),
     listThreadInputs: vi.fn(),
     listThreadToolInvocations: vi.fn(),
@@ -32,10 +29,12 @@ vi.mock('@/shared/api/harness-service', () => ({
     listRootActivities: vi.fn(),
     listSessionTasks: vi.fn(),
     createThreadRealtimeStream: vi.fn(),
+    updateThreadHead: vi.fn(),
     setThreadAgent: vi.fn(),
     setThreadModel: vi.fn(),
     setThreadYolo: vi.fn(),
     submitThreadMessage: vi.fn(),
+    stopThread: vi.fn(),
   },
 }))
 
@@ -46,6 +45,60 @@ class FakeEventSource {
 
 const page = <T,>(results: T[]) => ({ pageNumber: 1, pageSize: 50, totalCount: results.length, results })
 
+function thread(overrides: Partial<HarnessThreadDTO>): HarnessThreadDTO {
+  return {
+    threadId: 't1',
+    sessionId: 's1',
+    sessionTitle: 'S1',
+    headEntryId: 'e-assistant',
+    executionEpoch: 5,
+    status: 'IDLE',
+    inputSequence: 1,
+    activeAgentDefinitionId: 'a1',
+    activeAgentName: 'assistant',
+    modelId: 'm1',
+    variant: 'default',
+    yoloEnabled: false,
+    processing: false,
+    createTime: '2026-01-01T00:00:00Z',
+    updateTime: '2026-01-02T00:00:00Z',
+    ...overrides,
+  }
+}
+
+function entry(
+  entryId: string,
+  parentEntryId: string | null,
+  sessionId: string,
+  role: string,
+  text: string,
+): HarnessSessionEntryDTO {
+  return {
+    entryId,
+    sessionId,
+    parentEntryId,
+    entryType: 'MESSAGE',
+    payloadJson: JSON.stringify({ message: { role, contents: [{ type: 'text', text }] } }),
+    createTime: null,
+  }
+}
+
+/** ROOT -> USER -> ASSISTANT, so the USER row has a parent and is a valid rebind target. */
+function sessionEntries(sessionId: string): HarnessSessionEntryDTO[] {
+  return [
+    {
+      entryId: `${sessionId}-root`,
+      sessionId,
+      parentEntryId: null,
+      entryType: 'ROOT',
+      payloadJson: '{}',
+      createTime: null,
+    },
+    entry(`${sessionId}-user`, `${sessionId}-root`, sessionId, 'USER', `${sessionId} prompt`),
+    entry(`${sessionId}-assistant`, `${sessionId}-user`, sessionId, 'ASSISTANT', `${sessionId} reply`),
+  ]
+}
+
 const agents = [
   {
     id: 'a1',
@@ -54,13 +107,7 @@ const agents = [
     systemPrompt: null,
     modelId: 'm1',
     variant: 'default',
-    config: {
-      environmentName: null,
-      tools: [],
-      skills: [],
-      allowedSubagents: [],
-      executionPolicy: {},
-    },
+    config: { environmentName: null, tools: [], skills: [], allowedSubagents: [], executionPolicy: {} },
     createTime: null,
     updateTime: null,
   },
@@ -71,17 +118,36 @@ const agents = [
     systemPrompt: null,
     modelId: 'm1',
     variant: 'default',
-    config: {
-      environmentName: null,
-      tools: [],
-      skills: [],
-      allowedSubagents: [],
-      executionPolicy: {},
-    },
+    config: { environmentName: null, tools: [], skills: [], allowedSubagents: [], executionPolicy: {} },
     createTime: null,
     updateTime: null,
   },
 ]
+
+function renderBoundPane(overrides?: { onThreadChange?: (threadId: string | null) => void }) {
+  const onThreadChange = overrides?.onThreadChange ?? vi.fn()
+  const onSessionSortChange = vi.fn()
+  const onThreadSortChange = vi.fn()
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  render(
+    <QueryClientProvider client={queryClient}>
+      <ChatWorkspacePane
+        chat={{ id: 'chat-1', title: 'C', defaultAgentId: 'a1', version: 1, createTime: null, updateTime: null }}
+        agents={agents}
+        pane={{ id: 'pane-1', threadId: 't1' }}
+        focused
+        sessionSort="recent"
+        threadSort="recent"
+        onFocus={() => undefined}
+        onThreadChange={onThreadChange}
+        onSessionSortChange={onSessionSortChange}
+        onThreadSortChange={onThreadSortChange}
+        onDefaultAgentChange={async () => undefined}
+      />
+    </QueryClientProvider>,
+  )
+  return { onThreadChange, onSessionSortChange, onThreadSortChange }
+}
 
 describe('ChatWorkspacePane commands', () => {
   beforeEach(() => {
@@ -115,40 +181,31 @@ describe('ChatWorkspacePane commands', () => {
       modelCallTimeoutMillis: 1, modelCallIdleTimeoutMillis: 1, createTime: null, updateTime: null,
     }]))
     vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(new FakeEventSource() as EventSource)
-    vi.mocked(harnessService.getThread).mockResolvedValue({
-      threadId: 't1', sessionId: 's1', sessionTitle: 'S1', headEntryId: null, status: 'RUNNING',
-      inputSequence: 1, activeAgentDefinitionId: 'a1', activeAgentName: 'assistant', modelId: 'm1',
-      variant: 'default', yoloEnabled: false, processing: true, createTime: '2026-01-01T00:00:00Z',
-      updateTime: '2026-01-02T00:00:00Z',
-    })
+    vi.mocked(harnessService.getThread).mockResolvedValue(thread({}))
     vi.mocked(harnessService.getSession).mockResolvedValue({
-      sessionId: 's1', title: 'S1', mainThreadId: 't1', rootSessionId: 's1', parentSessionId: null,
+      sessionId: 's1', title: 'S1', rootSessionId: 's1', parentSessionId: null,
       parentInvocationId: null, depth: 0, createTime: null, updateTime: null,
     })
-    vi.mocked(harnessService.listSessionThreads).mockResolvedValue([
+    vi.mocked(harnessService.listSessions).mockResolvedValue([
       {
-        threadId: 't1', sessionId: 's1', sessionTitle: 'S1', headEntryId: null, status: 'RUNNING',
-        inputSequence: 1, activeAgentDefinitionId: 'a1', activeAgentName: 'assistant', modelId: 'm1',
-        variant: 'default', yoloEnabled: false, processing: true, createTime: '2026-01-01T00:00:00Z',
-        updateTime: '2026-01-02T00:00:00Z',
-      },
-      {
-        threadId: 't2', sessionId: 's1', sessionTitle: 'S1', headEntryId: null, status: 'IDLE',
-        inputSequence: 0, activeAgentDefinitionId: 'a1', activeAgentName: 'assistant', modelId: 'm1',
-        variant: 'default', yoloEnabled: false, processing: false, createTime: '2026-01-03T00:00:00Z',
-        updateTime: '2026-01-01T00:00:00Z',
-      },
-    ])
-    vi.mocked(chatService.listChatSessions).mockResolvedValue([
-      {
-        sessionId: 's1', title: 'S1', mainThreadId: 't1', rootSessionId: 's1', parentSessionId: null,
+        sessionId: 's1', title: 'S1', rootSessionId: 's1', parentSessionId: null,
         parentInvocationId: null, depth: 0, createTime: '2026-01-01T00:00:00Z', updateTime: '2026-01-02T00:00:00Z',
       },
       {
-        sessionId: 's2', title: 'S2', mainThreadId: 't9', rootSessionId: 's2', parentSessionId: null,
+        sessionId: 's2', title: 'S2', rootSessionId: 's2', parentSessionId: null,
         parentInvocationId: null, depth: 0, createTime: '2026-01-04T00:00:00Z', updateTime: '2026-01-01T00:00:00Z',
       },
     ])
+    vi.mocked(harnessService.listThreads).mockResolvedValue([
+      thread({}),
+      thread({
+        threadId: 't2', status: 'IDLE', inputSequence: 0, executionEpoch: 1,
+        createTime: '2026-01-03T00:00:00Z', updateTime: '2026-01-01T00:00:00Z',
+      }),
+    ])
+    vi.mocked(harnessService.listSessionEntries).mockImplementation(async (sessionId: string) =>
+      sessionEntries(sessionId),
+    )
     vi.mocked(harnessService.listThreadEntries).mockResolvedValue([])
     vi.mocked(harnessService.listThreadInputs).mockResolvedValue([])
     vi.mocked(harnessService.listThreadToolInvocations).mockResolvedValue([])
@@ -160,58 +217,28 @@ describe('ChatWorkspacePane commands', () => {
     })
     vi.mocked(harnessService.listRootActivities).mockResolvedValue([])
     vi.mocked(harnessService.listSessionTasks).mockResolvedValue([])
+    vi.mocked(harnessService.updateThreadHead).mockResolvedValue(thread({ executionEpoch: 6 }))
     vi.mocked(harnessService.setThreadAgent).mockResolvedValue({
       inputId: 'i', threadId: 't1', sequence: 1, inputType: 'SET_AGENT', payloadJson: '{}',
-      clientMessageId: 'c', status: 'QUEUED', resolvedAt: null,
-      createTime: null,
+      clientMessageId: 'c', status: 'QUEUED', resolvedAt: null, createTime: null,
     })
     vi.mocked(harnessService.setThreadModel).mockResolvedValue({
       inputId: 'm', threadId: 't1', sequence: 2, inputType: 'SET_MODEL', payloadJson: '{}',
-      clientMessageId: 'c', status: 'QUEUED', resolvedAt: null,
-      createTime: null,
+      clientMessageId: 'c', status: 'QUEUED', resolvedAt: null, createTime: null,
     })
   })
 
-  it('switches session/thread targets and queues setThreadAgent', async () => {
+  it('queues epoch-fenced setThreadAgent / setThreadModel from the config pickers', async () => {
     const user = userEvent.setup()
-    const onThreadChange = vi.fn()
-    const onSessionSortChange = vi.fn()
-    const onThreadSortChange = vi.fn()
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-    render(
-      <QueryClientProvider client={queryClient}>
-        <ChatWorkspacePane
-          chatId="chat-1"
-          chat={{ id: 'chat-1', title: 'C', defaultAgentId: 'a1', version: 1, createTime: null, updateTime: null }}
-          agents={agents}
-          pane={{ id: 'pane-1', threadId: 't1' }}
-          focused
-          sessionSort="recent"
-          threadSort="recent"
-          onFocus={() => undefined}
-          onThreadChange={onThreadChange}
-          onSessionSortChange={onSessionSortChange}
-          onThreadSortChange={onThreadSortChange}
-          onDefaultAgentChange={async () => undefined}
-        />
-      </QueryClientProvider>,
-    )
+    const { onThreadSortChange } = renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
-    await user.click(composer)
-    await user.keyboard('/session{Enter}')
-    expect(await screen.findByText('选择 Session')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '创建时间' }))
-    expect(onSessionSortChange).toHaveBeenCalledWith('created')
-    await user.click(screen.getByRole('button', { name: /S2/ }))
-    expect(onThreadChange).toHaveBeenCalledWith('t9')
 
-    await user.click(screen.getByLabelText('给 AI 发送消息'))
+    await user.click(composer)
     await user.keyboard('/thread{Enter}')
     expect(await screen.findByText('选择 Thread')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '最近更新' }))
     expect(onThreadSortChange).toHaveBeenCalledWith('recent')
     await user.click(screen.getByRole('button', { name: /t2/ }))
-    expect(onThreadChange).toHaveBeenCalledWith('t2')
 
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('/agent{Enter}')
@@ -219,7 +246,10 @@ describe('ChatWorkspacePane commands', () => {
     await user.click(screen.getByRole('button', { name: /coder/ }))
     await waitFor(() => expect(harnessService.setThreadAgent).toHaveBeenCalled())
     expect(harnessService.setThreadAgent.mock.calls[0][0]).toBe('t1')
-    expect(harnessService.setThreadAgent.mock.calls[0][1].agentDefinitionId).toBe('a2')
+    expect(harnessService.setThreadAgent.mock.calls[0][1]).toMatchObject({
+      agentDefinitionId: 'a2',
+      expectedExecutionEpoch: 5,
+    })
 
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('/model{Enter}')
@@ -229,20 +259,129 @@ describe('ChatWorkspacePane commands', () => {
     await waitFor(() =>
       expect(harnessService.setThreadModel).toHaveBeenCalledWith(
         't1',
-        expect.objectContaining({ modelId: 'm1', variant: 'default' }),
+        expect.objectContaining({ modelId: 'm1', variant: 'default', expectedExecutionEpoch: 5 }),
       ),
     )
 
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('/variant{Enter}')
     expect(await screen.findByText('选择 Variant')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '最近更新' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /^default/ }))
     await waitFor(() =>
       expect(harnessService.setThreadModel).toHaveBeenLastCalledWith(
         't1',
-        expect.objectContaining({ modelId: 'm1', variant: 'default' }),
+        expect.objectContaining({ modelId: 'm1', variant: 'default', expectedExecutionEpoch: 5 }),
       ),
     )
+  })
+
+  it('/thread only switches the pane target and never mutates a Thread', async () => {
+    const user = userEvent.setup()
+    const { onThreadChange } = renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/thread{Enter}')
+    expect(await screen.findByText('选择 Thread')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /t2/ }))
+
+    expect(onThreadChange).toHaveBeenCalledWith('t2')
+    expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
+    // Threads are listed globally, not per Session.
+    expect(harnessService.listThreads).toHaveBeenCalled()
+  })
+
+  it('/tree rebinds the current Thread head with PUT /head and keeps the pane target', async () => {
+    const user = userEvent.setup()
+    const { onThreadChange } = renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/tree{Enter}')
+    expect(await screen.findByRole('dialog', { name: '历史分支' })).toBeInTheDocument()
+    // /tree derives the Entry Tree from the current Thread's Session.
+    await waitFor(() => expect(harnessService.listSessionEntries).toHaveBeenCalledWith('s1'))
+
+    await user.click(await screen.findByRole('button', { name: /用户 · s1 prompt/ }))
+    await user.click(screen.getByRole('button', { name: '从这里继续当前 Thread' }))
+
+    // Selecting an editable USER Entry rewinds the head to its parent (ROOT) so the prompt
+    // can be re-sent, and fences the write with the Thread's current epoch.
+    await waitFor(() =>
+      expect(harnessService.updateThreadHead).toHaveBeenCalledWith('t1', {
+        headEntryId: 's1-root',
+        expectedExecutionEpoch: 5,
+      }),
+    )
+    // The editable source text is restored into the composer for re-submission.
+    expect(await screen.findByDisplayValue('s1 prompt')).toBeInTheDocument()
+    // Rebinding never creates a Thread and never re-targets the pane.
+    expect(onThreadChange).not.toHaveBeenCalled()
+  })
+
+  it('/session picks a foreign Session then rebinds the same Thread across Sessions', async () => {
+    const user = userEvent.setup()
+    const { onThreadChange, onSessionSortChange } = renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/session{Enter}')
+    expect(await screen.findByText('选择 Session')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '创建时间' }))
+    expect(onSessionSortChange).toHaveBeenCalledWith('created')
+
+    await user.click(await screen.findByRole('button', { name: /S2/ }))
+    // Selecting a Session opens *its* Entry Tree instead of jumping to a main Thread.
+    expect(await screen.findByRole('dialog', { name: '历史分支' })).toBeInTheDocument()
+    await waitFor(() => expect(harnessService.listSessionEntries).toHaveBeenCalledWith('s2'))
+
+    await user.click(await screen.findByRole('button', { name: /助手 · s2 reply/ }))
+    await user.click(screen.getByRole('button', { name: '从这里继续当前 Thread' }))
+
+    // Cross-Session move keeps the same Thread and fences with its current epoch.
+    await waitFor(() =>
+      expect(harnessService.updateThreadHead).toHaveBeenCalledWith('t1', {
+        headEntryId: 's2-assistant',
+        expectedExecutionEpoch: 5,
+      }),
+    )
+    expect(onThreadChange).not.toHaveBeenCalled()
+  })
+
+  it('refuses to open /session or /tree while the Thread is ACTIVE', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThread).mockResolvedValue(thread({ status: 'RUNNING', processing: true }))
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/tree{Enter}')
+    expect(await screen.findByText(/当前 Thread 正在运行，无法重定位/)).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '历史分支' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByLabelText('给 AI 发送消息'))
+    await user.keyboard('/session{Enter}')
+    expect(screen.queryByText('选择 Session')).not.toBeInTheDocument()
+    expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
+  })
+
+  it('surfaces a 409 from PUT /head inside the history panel instead of closing it', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.updateThreadHead).mockRejectedValue(
+      new ApiError('expected execution epoch mismatch', 409),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/tree{Enter}')
+    await user.click(await screen.findByRole('button', { name: /用户 · s1 prompt/ }))
+    await user.click(screen.getByRole('button', { name: '从这里继续当前 Thread' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('无法重定位 Thread')
+    expect(alert).toHaveTextContent('expected execution epoch mismatch')
+    // The panel stays open so the user can retry after the Thread refreshes.
+    expect(screen.getByRole('dialog', { name: '历史分支' })).toBeInTheDocument()
   })
 })

@@ -1,58 +1,50 @@
 import { createClientMessageId } from '@/features/ai/useAgentThreadMessageMutation'
-import type { HarnessSessionDTO, HarnessThreadInputDTO } from '@/shared/api/contracts'
-import { chatService } from '@/shared/api/chat-service'
+import type { HarnessThreadDTO, HarnessThreadInputDTO } from '@/shared/api/contracts'
 import { harnessService } from '@/shared/api/harness-service'
 
 export interface FirstSendResult {
   sessionId: string
-  threadId: string
-  setAgentInput: HarnessThreadInputDTO
+  thread: HarnessThreadDTO
   userMessageInput: HarnessThreadInputDTO
 }
 
 /**
  * Blank pane first send order:
- * 1) create agentless Session
- * 2) attach Session to Chat
- * 3) enqueue SET_AGENT
- * 4) enqueue USER_MESSAGE with a fresh clientMessageId
+ * 1) create an UNBOUND Thread
+ * 2) bootstrap it with the default Agent and yolo, creating Session/ROOT/RUNTIME_CONFIG
+ * 3) enqueue USER_MESSAGE against the epoch returned by bootstrap
  */
 export async function performBlankPaneFirstSend(options: {
-  chatId: string
   agentDefinitionId: string
   content: string
-  createSession?: typeof harnessService.createSession
-  attachChatSession?: typeof chatService.attachChatSession
-  setThreadAgent?: typeof harnessService.setThreadAgent
+  yoloEnabled?: boolean
+  title?: string
+  createThread?: typeof harnessService.createThread
+  bootstrapThread?: typeof harnessService.bootstrapThread
   submitThreadMessage?: typeof harnessService.submitThreadMessage
-  createIds?: () => { setAgentId: string; userMessageId: string }
+  createIds?: () => { userMessageId: string }
 }): Promise<FirstSendResult> {
-  const createSession = options.createSession ?? harnessService.createSession
-  const attachChatSession = options.attachChatSession ?? chatService.attachChatSession
-  const setThreadAgent = options.setThreadAgent ?? harnessService.setThreadAgent
+  const createThread = options.createThread ?? harnessService.createThread
+  const bootstrapThread = options.bootstrapThread ?? harnessService.bootstrapThread
   const submitThreadMessage = options.submitThreadMessage ?? harnessService.submitThreadMessage
-  const ids =
-    options.createIds?.() ??
-    ({
-      setAgentId: createClientMessageId(),
-      userMessageId: createClientMessageId(),
-    } as const)
+  const ids = options.createIds?.() ?? ({ userMessageId: createClientMessageId() } as const)
 
-  const session: HarnessSessionDTO = await createSession({})
-  await attachChatSession(options.chatId, { sessionId: session.sessionId })
-  const setAgentInput = await setThreadAgent(session.mainThreadId, {
+  const created = await createThread()
+  const bootstrapped = await bootstrapThread(created.threadId, {
+    title: options.title,
     agentDefinitionId: options.agentDefinitionId,
-    clientMessageId: ids.setAgentId,
+    yoloEnabled: options.yoloEnabled ?? false,
+    expectedExecutionEpoch: created.executionEpoch,
   })
-  const userMessageInput = await submitThreadMessage(session.mainThreadId, {
+  const userMessageInput = await submitThreadMessage(bootstrapped.thread.threadId, {
     content: options.content,
     clientMessageId: ids.userMessageId,
+    expectedExecutionEpoch: bootstrapped.thread.executionEpoch,
   })
 
   return {
-    sessionId: session.sessionId,
-    threadId: session.mainThreadId,
-    setAgentInput,
+    sessionId: bootstrapped.session.sessionId,
+    thread: bootstrapped.thread,
     userMessageInput,
   }
 }

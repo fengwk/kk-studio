@@ -18,14 +18,14 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
   {
     id: 'session',
     label: 'session',
-    description: '切换当前 Pane 到本 Chat 下的 Session Main Thread',
-    keywords: ['chat', 'switch', 'member'],
+    description: '把当前 Thread 重定位到所选 Session 的历史位置',
+    keywords: ['chat', 'switch', 'rebind', 'head'],
   },
   {
     id: 'thread',
     label: 'thread',
-    description: '切换当前 Pane 到当前 Session 的 Thread',
-    keywords: ['branch', 'switch'],
+    description: '切换当前 Pane 绑定的 Thread（不修改任何 Thread）',
+    keywords: ['branch', 'switch', 'pane'],
   },
   {
     id: 'agent',
@@ -54,8 +54,8 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
   {
     id: 'tree',
     label: 'tree',
-    description: '打开历史分支面板',
-    keywords: ['history', 'branch', 'fork', 'thread'],
+    description: '打开历史面板，把当前 Thread 重定位到所选 Entry',
+    keywords: ['history', 'branch', 'rebind', 'head'],
   },
   {
     id: 'stop',
@@ -71,8 +71,11 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
   },
 ]
 
-/** Commands usable before any Session/Thread exists. `/new` only applies inside a bound Thread. */
-const BLANK_SCENE_ENABLED = new Set(['session', 'agent'])
+/**
+ * Commands usable on an empty pane. `/thread` picks an existing Thread globally; `/session`
+ * rebinds the *current* Thread and therefore needs a pane selection first.
+ */
+const BLANK_SCENE_ENABLED = new Set(['thread', 'agent'])
 
 /** Project stable command list with scene availability (disabled stays listed). */
 export function threadCommandsForScene(scene: ThreadCommandScene): ThreadCommand[] {
@@ -83,7 +86,7 @@ export function threadCommandsForScene(scene: ThreadCommandScene): ThreadCommand
     return {
       ...command,
       disabled: true,
-      disabledReason: '创建对话后可用',
+      disabledReason: '选择或创建 Thread 后可用',
     }
   })
 }
