@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.harness.thread.service.impl;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -18,20 +19,32 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
+import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
+import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.InputStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator.BootstrapResult;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator.EnqueueResult;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
+import fun.fengwk.kkstudio.share.model.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadAgentSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadBootstrapDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadBootstrapResultDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadCustomMessageCreateDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadHeadUpdateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadModelSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadStopDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadStopResultDTO;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -39,6 +52,146 @@ import java.util.Optional;
  * isolates after-commit notifier from durable result mapping.
  */
 class HarnessThreadCommandServiceImplTest {
+
+  /** Thread creation maps the unbound Runtime record through the Core DTO boundary. */
+  @Test
+  void createsThreadAndMapsRuntimeResult() {
+    ThreadCommandCoordinator coordinator = mock(ThreadCommandCoordinator.class);
+    HarnessThreadDtoConverter converter = mock(HarnessThreadDtoConverter.class);
+    HarnessThread thread = mock(HarnessThread.class);
+    HarnessThreadDTO expected = new HarnessThreadDTO();
+    when(coordinator.createThread()).thenReturn(thread);
+    when(converter.convert(thread)).thenReturn(expected);
+    HarnessThreadCommandServiceImpl service =
+        new HarnessThreadCommandServiceImpl(
+            coordinator,
+            () -> ToolSettings.DEFAULT,
+            mock(ActivationNotifier.class),
+            converter,
+            mock(HarnessSessionDtoConverter.class));
+
+    assertSame(expected, service.createThread());
+  }
+
+  /**
+   * Bootstrap maps both atomically-created Session and rebound Thread from one coordinator call.
+   */
+  @Test
+  void bootstrapsThreadAndMapsAtomicResult() {
+    ThreadCommandCoordinator coordinator = mock(ThreadCommandCoordinator.class);
+    HarnessThreadDtoConverter converter = mock(HarnessThreadDtoConverter.class);
+    HarnessSessionDtoConverter sessionConverter = mock(HarnessSessionDtoConverter.class);
+    Session session = mock(Session.class);
+    HarnessThread thread = mock(HarnessThread.class);
+    BootstrapResult result =
+        new BootstrapResult(session, mock(SessionEntry.class), mock(SessionEntry.class), thread);
+    HarnessSessionDTO sessionDTO = new HarnessSessionDTO();
+    HarnessThreadDTO threadDTO = new HarnessThreadDTO();
+    when(coordinator.bootstrapThread(5L, 7L, "title", 11L, true)).thenReturn(result);
+    when(sessionConverter.convert(session)).thenReturn(sessionDTO);
+    when(converter.convert(thread)).thenReturn(threadDTO);
+    HarnessThreadCommandServiceImpl service =
+        new HarnessThreadCommandServiceImpl(
+            coordinator,
+            () -> ToolSettings.DEFAULT,
+            mock(ActivationNotifier.class),
+            converter,
+            sessionConverter);
+    HarnessThreadBootstrapDTO request = new HarnessThreadBootstrapDTO();
+    request.setTitle("title");
+    request.setAgentDefinitionId("11");
+    request.setYoloEnabled(true);
+    request.setExpectedExecutionEpoch(7L);
+
+    HarnessThreadBootstrapResultDTO response = service.bootstrapThread("5", request);
+
+    assertSame(sessionDTO, response.getSession());
+    assertSame(threadDTO, response.getThread());
+  }
+
+  /** Head updates preserve nullable head semantics while always forwarding the caller epoch. */
+  @Test
+  void updatesOrClearsHeadAndMapsRuntimeResult() {
+    ThreadCommandCoordinator coordinator = mock(ThreadCommandCoordinator.class);
+    HarnessThreadDtoConverter converter = mock(HarnessThreadDtoConverter.class);
+    HarnessThread bound = mock(HarnessThread.class);
+    HarnessThread unbound = mock(HarnessThread.class);
+    HarnessThreadDTO boundDTO = new HarnessThreadDTO();
+    HarnessThreadDTO unboundDTO = new HarnessThreadDTO();
+    when(coordinator.updateHead(5L, 7L, 9L)).thenReturn(bound);
+    when(coordinator.updateHead(5L, 8L, null)).thenReturn(unbound);
+    when(converter.convert(bound)).thenReturn(boundDTO);
+    when(converter.convert(unbound)).thenReturn(unboundDTO);
+    HarnessThreadCommandServiceImpl service =
+        new HarnessThreadCommandServiceImpl(
+            coordinator,
+            () -> ToolSettings.DEFAULT,
+            mock(ActivationNotifier.class),
+            converter,
+            mock(HarnessSessionDtoConverter.class));
+    HarnessThreadHeadUpdateDTO bind = new HarnessThreadHeadUpdateDTO();
+    bind.setHeadEntryId("9");
+    bind.setExpectedExecutionEpoch(7L);
+    HarnessThreadHeadUpdateDTO clear = new HarnessThreadHeadUpdateDTO();
+    clear.setExpectedExecutionEpoch(8L);
+
+    assertSame(boundDTO, service.updateHead("5", bind));
+    assertSame(unboundDTO, service.updateHead("5", clear));
+  }
+
+  /** Message and stop facades forward epoch-fenced commands and map their durable outcomes. */
+  @Test
+  void submitsMessagesAndStopsThread() {
+    ThreadCommandCoordinator coordinator = mock(ThreadCommandCoordinator.class);
+    ActivationNotifier notifier = mock(ActivationNotifier.class);
+    HarnessThreadDtoConverter converter = mock(HarnessThreadDtoConverter.class);
+    HarnessThreadCommandServiceImpl service =
+        new HarnessThreadCommandServiceImpl(
+            coordinator,
+            () -> ToolSettings.DEFAULT,
+            notifier,
+            converter,
+            mock(HarnessSessionDtoConverter.class));
+    ThreadInput userInput = mock(ThreadInput.class);
+    ThreadInput customInput = mock(ThreadInput.class);
+    ThreadInput cancelledInput = mock(ThreadInput.class);
+    HarnessThreadInputDTO userDTO = new HarnessThreadInputDTO();
+    HarnessThreadInputDTO customDTO = new HarnessThreadInputDTO();
+    HarnessThreadInputDTO cancelledDTO = new HarnessThreadInputDTO();
+    ExecutionTarget userTarget = new ExecutionTarget(ExecutionTargetKind.THREAD, 5L);
+    ExecutionTarget customTarget = new ExecutionTarget(ExecutionTargetKind.THREAD, 6L);
+    ExecutionTarget stopTarget = new ExecutionTarget(ExecutionTargetKind.THREAD, 7L);
+    when(coordinator.submitUserMessage(5L, "hello", "user-key", 3L))
+        .thenReturn(new EnqueueResult(userInput, userTarget));
+    when(coordinator.submitCustomMessage(5L, "system", "rules", "custom-key", 3L))
+        .thenReturn(new EnqueueResult(customInput, customTarget));
+    when(coordinator.stop(5L, 3L))
+        .thenReturn(new StopResult(4L, List.of(cancelledInput), stopTarget));
+    when(converter.convert(userInput)).thenReturn(userDTO);
+    when(converter.convert(customInput)).thenReturn(customDTO);
+    when(converter.convert(cancelledInput)).thenReturn(cancelledDTO);
+    HarnessThreadMessageCreateDTO user = new HarnessThreadMessageCreateDTO();
+    user.setContent("hello");
+    user.setClientMessageId("user-key");
+    user.setExpectedExecutionEpoch(3L);
+    HarnessThreadCustomMessageCreateDTO custom = new HarnessThreadCustomMessageCreateDTO();
+    custom.setRole("system");
+    custom.setContent("rules");
+    custom.setClientMessageId("custom-key");
+    custom.setExpectedExecutionEpoch(3L);
+    HarnessThreadStopDTO stop = new HarnessThreadStopDTO();
+    stop.setExpectedExecutionEpoch(3L);
+
+    assertSame(userDTO, service.submitUserMessage("5", user));
+    assertSame(customDTO, service.submitCustomMessage("5", custom));
+    HarnessThreadStopResultDTO stopped = service.stop("5", stop);
+
+    assertEquals(4L, stopped.getExecutionEpoch());
+    assertEquals(List.of(cancelledDTO), stopped.getCancelledInputs());
+    verify(notifier).notifyAfterCommit(userTarget);
+    verify(notifier).notifyAfterCommit(customTarget);
+    verify(notifier).notifyAfterCommit(stopTarget);
+  }
 
   @Test
   void configRetryReturnsPersistedInputWithoutResolvingDeletedDefinition() {
