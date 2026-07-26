@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime.model;
 
-import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 
 import java.time.Instant;
 import java.util.Objects;

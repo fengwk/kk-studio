@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.core.harness.usage.service.impl;
 
-import fun.fengwk.kkstudio.harness.model.ModelCost;
-import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageDraft;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecord;
 import fun.fengwk.kkstudio.share.model.ModelUsageCostSummaryDTO;

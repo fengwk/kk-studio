@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.model.worker;
 
-import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 
 /**
  * 由 frozen ProviderRequest 解析一次执行资源的外层 adapter 端口。

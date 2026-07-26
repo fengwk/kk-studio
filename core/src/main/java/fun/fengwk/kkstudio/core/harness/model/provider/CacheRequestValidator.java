@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.core.harness.model.provider;
 
-import fun.fengwk.kkstudio.harness.model.cache.PromptCacheBreakpoint;
-import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 
 /**
  * 四个 Provider 在把 {@link ProviderCacheControl} 翻译到 SDK 字段前，先经过的统一校验器。

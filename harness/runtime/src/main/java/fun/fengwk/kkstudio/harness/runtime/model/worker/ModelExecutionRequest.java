@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.model.worker;
 
-import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 
 import java.time.Instant;
 import java.util.Objects;

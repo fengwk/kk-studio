@@ -3,14 +3,14 @@ package fun.fengwk.kkstudio.core.harness.model.provider;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderAdapter;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.net.URI;
 import java.util.LinkedHashMap;

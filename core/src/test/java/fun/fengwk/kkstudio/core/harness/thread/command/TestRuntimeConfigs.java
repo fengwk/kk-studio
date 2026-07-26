@@ -1,16 +1,16 @@
 package fun.fengwk.kkstudio.core.harness.thread.command;
 
-import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.model.ModelPricing;
-import fun.fengwk.kkstudio.harness.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.model.cache.PromptCachePolicy;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.configuration.AgentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.EnvironmentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.ExecutionPolicySnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.math.BigDecimal;
 import java.util.EnumSet;

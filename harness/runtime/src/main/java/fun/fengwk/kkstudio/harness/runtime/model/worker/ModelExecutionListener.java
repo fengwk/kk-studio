@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.model.worker;
 
-import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 
 /** ModelExecutor 向 ModelWorker 交付的 Provider-neutral 流回调。 */
 public interface ModelExecutionListener {

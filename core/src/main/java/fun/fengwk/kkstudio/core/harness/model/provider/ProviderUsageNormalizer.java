@@ -18,8 +18,8 @@ import dev.langchain4j.model.openaiofficial.OpenAiOfficialResponsesChatResponseM
 import dev.langchain4j.model.openaiofficial.OpenAiOfficialTokenUsage;
 import dev.langchain4j.model.output.TokenUsage;
 
-import fun.fengwk.kkstudio.harness.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.util.ArrayList;
 import java.util.List;

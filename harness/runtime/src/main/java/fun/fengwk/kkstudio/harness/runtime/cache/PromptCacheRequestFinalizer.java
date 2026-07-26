@@ -1,13 +1,13 @@
 package fun.fengwk.kkstudio.harness.runtime.cache;
 
-import fun.fengwk.kkstudio.harness.model.cache.PromptCacheBreakpoint;
-import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapability;
-import fun.fengwk.kkstudio.harness.model.cache.PromptCacheMode;
-import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheMode;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 
 import java.util.EnumSet;
 import java.util.Objects;

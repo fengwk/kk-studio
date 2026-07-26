@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.core.harness.model;
 
-import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
-import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 
 import java.util.Objects;
 import java.util.function.Function;

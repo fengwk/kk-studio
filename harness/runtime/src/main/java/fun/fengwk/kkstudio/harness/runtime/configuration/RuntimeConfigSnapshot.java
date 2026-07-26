@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.configuration;
 
-import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
