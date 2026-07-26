@@ -32,14 +32,14 @@ flowchart LR
 | 域 | 接口 | 用途 |
 | --- | --- | --- |
 | Provider / Model / Agent | `/api/providers`、`/api/models`、`/api/agents` | 全局 Agent 资源 CRUD |
-| Chat | `/api/chats`、`/api/chats/{chatId}/sessions` | 持久 Chat CRUD 与 Session 成员关系 |
-| Session | `POST /api/sessions`、`GET /api/sessions`、`GET /api/sessions/{sessionId}`、`/entries` | 原子创建 Session/Main Thread；Session Tree 与 Entries |
-| Session Threads | `GET` / `POST /api/sessions/{sessionId}/threads` | 列出 Thread；从 durable `fromEntryId` 创建 Secondary Thread |
-| Thread | `GET /api/threads/{threadId}` | 读取 Thread（展示状态由 durable facts 派生） |
-| Thread 输入（202） | `POST /api/threads/{id}/messages`、`PUT .../agent`、`/model`、`/yolo` | mailbox 入队 |
+| Chat | `/api/chats` | 持久 Chat CRUD；Chat 不持有 Session/Thread |
+| Session | `POST /api/sessions`、`GET /api/sessions`、`GET /api/sessions/{sessionId}`、`/entries` | 只创建 Session/ROOT/RUNTIME_CONFIG；Session Tree 与 Entries |
+| Thread | `GET /api/threads`、`POST /api/threads`、`GET /api/threads/{threadId}` | 全局 Thread 列表；创建 UNBOUND Thread（201，无 body）；读取 Thread（展示状态由 durable facts 派生） |
+| Thread head | `POST /api/threads/{id}/bootstrap`、`PUT /api/threads/{id}/head` | bootstrap 创建 Session 并绑定 head（201 `{session, thread}`）；`PUT /head` 做 bind/rebind/unbind |
+| Thread 输入（202） | `POST /api/threads/{id}/messages`、`/messages/custom`、`PUT .../agent`、`/model`、`/yolo` | mailbox 入队 |
 | Thread 投影 | `GET /api/threads/{id}/entries`、`/inputs` | 路径 Entries 与 inputs |
 | Thread realtime | `GET /api/threads/{id}/events/stream` | Redis-backed SSE，事件名 `realtime`，cursor 为 stream-id |
-| Thread 控制 | `POST /api/threads/{id}/stop` | epoch fencing 取消 queued Input / 非终态 Invocation |
+| Thread 控制 | `POST /api/threads/{id}/stop` | epoch fencing 取消 queued Input、可安全取消的 Invocation 与 OPEN Interaction |
 | Retry policy | `GET` / `PUT /api/harness/retry-policy` | 全局持久化自动重试策略 |
 | Root Activity | `GET /api/sessions/{id}/activities` | 根活动查询投影 |
 | Tool | `GET /api/threads/{id}/tool-invocations`、`GET /api/tool-invocations/{id}` | Tool 状态查询 |
@@ -49,14 +49,16 @@ flowchart LR
 
 Model 与 Agent 的 `PUT` 接收完整 editable body。Provider credential 不回显；空 credential 表示保留当前密钥。
 
+`bootstrap`、`PUT /head`、`stop` 与全部 mailbox 请求体都含必填 `expectedExecutionEpoch`。epoch 过期或 Thread 非静止返回 `409`；未知 Thread/Session/Entry/Agent 返回 `404`。
+
 ### Controller 映射
 
 | Controller | 路径前缀 | 职责 |
 | --- | --- | --- |
-| `StudioHarnessThreadController` | `/api/threads` | Thread 读取、入队 202、Stop、entries/inputs、realtime SSE |
+| `StudioHarnessThreadController` | `/api/threads` | Thread 列表/读取/创建、bootstrap、head 重定位、入队 202、Stop、entries/inputs、realtime SSE |
 | `StudioHarnessRetryPolicyController` | `/api/harness/retry-policy` | 自动重试策略 |
-| `StudioHarnessSessionController` | `/api/sessions` | Session/Main Thread 创建与查询、Secondary Thread |
-| `StudioChatController` | `/api/chats` | Chat CRUD 与成员关系 |
+| `StudioHarnessSessionController` | `/api/sessions` | Session 创建与查询、Session Entries |
+| `StudioChatController` | `/api/chats` | Chat CRUD |
 | `StudioHarnessObservabilityController` | `/api` | activities、tool-invocations、artifacts |
 | `StudioInteractionController` | `/api/interactions` | Interaction 查询与响应 |
 | `StudioModelUsageController` | `/api/usage` | 聚合 |
@@ -64,11 +66,15 @@ Model 与 Agent 的 `PUT` 接收完整 editable body。Provider credential 不�
 
 ## Thread 与 Session
 
-`POST /api/sessions` 在一个事务内写入 Session、语义根 `ROOT` Entry 与 Main Thread，并回写稳定 `main_thread_id`。`POST /api/sessions/{sessionId}/threads` 必须以属于该 Session 的 `fromEntryId` 创建新 Thread cursor，不复制 Entry 或 Invocation。
+Session 只组织 Entry Tree，不持有 Thread；Thread 是可跨 Session 复用的 durable runtime process，当前 Session 由 head Entry 派生。
 
-用户消息与设置变更只进入 `ThreadInput` mailbox，不直接写 Entry。`ThreadReconciler` 按 TURN_BOUNDARY harvest、追加 `RUNTIME_CONFIG`/消息 Entry，并在 response debt 时创建冻结 `ModelInvocation`。
+`POST /api/sessions` 在一个事务内写入 Session、语义根 `ROOT` Entry 与初始 `RUNTIME_CONFIG` Entry，不创建 Thread。`POST /api/threads` 创建 UNBOUND Thread；`POST /api/threads/{id}/bootstrap` 在一个事务内创建 Session/ROOT/RUNTIME_CONFIG 并把该 UNBOUND Thread 的 head 绑定到 `RUNTIME_CONFIG` Entry。
 
-查询：Thread Entries 按 root→`headEntryId` 父链返回，inputs 按 `sequence ASC`。`createTime` 只用于展示；不得用墙钟重排因果顺序。
+`PUT /api/threads/{id}/head` 是外部修改 head 的唯一入口，可跨 Session 重定位或传 `null` 回到 UNBOUND；不复制 Entry 或 Invocation。它要求 Thread 逻辑静止：无有效 processor lease、`runnable=false`、无 QUEUED Input、当前 epoch 无非终态 Model/Tool Invocation、无相关 OPEN Interaction。满足后 CAS `expectedExecutionEpoch`，成功则 epoch+1 并清 lease/`runnable`，旧 epoch 的执行结果不再能写入。分支就是这样的 head 重定位，没有独立的 Branch 实体。
+
+用户消息与设置变更只进入 `ThreadInput` mailbox，不直接写 Entry；UNBOUND Thread 拒绝入队。`ThreadReconciler` 按 TURN_BOUNDARY harvest、追加 `RUNTIME_CONFIG`/消息 Entry，并在 response debt 时创建冻结 `ModelInvocation`。
+
+查询：`GET /api/threads` 返回全局 Thread 列表，`sessionId`/`sessionTitle`/`headEntryId` 均可空，DTO 附带当前 `executionEpoch`。Thread Entries 按 root→`headEntryId` 父链返回（UNBOUND 为空），inputs 按 `sequence ASC`。`createTime` 只用于展示；不得用墙钟重排因果顺序。
 
 Java 领域类型使用 `HarnessThread`，避免与 `java.lang.Thread` 冲突。
 
@@ -76,7 +82,7 @@ Java 领域类型使用 `HarnessThread`，避免与 `java.lang.Thread` 冲突。
 
 | 服务 | 职责 |
 | --- | --- |
-| `SessionCommandCoordinator` / `ThreadCommandCoordinator` | harness-runtime 内 framework-free 命令编排：payload 构造、配置冻结、幂等短路、映射 coordinator-owned results；Core 不依赖 transaction SPI |
+| `SessionCommandCoordinator` / `ThreadCommandCoordinator` | harness-runtime 内 framework-free 命令编排：Thread 创建/bootstrap/head 重定位、payload 构造、配置冻结、幂等短路、映射 coordinator-owned results；Core 不依赖 transaction SPI |
 | `RuntimeConfigSource` | live Agent/Model 冻结 SPI；Core `RuntimeConfigSnapshotResolver` 实现；纯 YOLO 替换在 runtime |
 | `HarnessSessionCommandService` | Core 薄边界：产品默认、Spring 事务、DTO 映射 |
 | `HarnessThreadCommandService` | Core 薄边界：decimal/DTO、after-commit activation |
@@ -96,7 +102,7 @@ Java 领域类型使用 `HarnessThread`，避免与 `java.lang.Thread` 冲突。
 锁 Thread 行 → 锁 Invocation / Interaction（按需）→ Entry/Input append
 ```
 
-- 入队与 Stop 锁 Thread；Stop 递增 `execution_epoch` 并 fencing 旧执行。
+- 入队、Stop 与 head 重定位都锁 Thread 行并 CAS `expectedExecutionEpoch`；Stop 与 head 重定位递增 `execution_epoch` 并 fencing 旧执行。
 - Assistant Entry 与 `harness_model_usage` 同事务；`assistant_entry_id` 唯一。
 - Tool 副作用以 `tool_invocation.id` 为幂等键。
 - Model/Tool worker terminal 与 Thread `runnable=true` 同事务。

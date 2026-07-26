@@ -1,4 +1,5 @@
 import { assert, envelopeData, pageResults, sleep, cid } from '../lib/http.mjs'
+import { createBootstrappedThread, rebindWhenQuiescent } from '../lib/harness.mjs'
 import { registerCase, getCase } from '../lib/registry.mjs'
 
 registerCase({
@@ -6,19 +7,18 @@ registerCase({
   level: 'L2',
   title: '真实 Provider 文本轮次成功并记账',
   requires: ['real'],
-  docs: 'SET_AGENT+message 等到 IDLE；assistant entry；usage>0',
+  docs: 'bootstrap 后发消息等到 IDLE；assistant entry；usage>0',
   async run(ctx) {
     await getCase('seed.agent_and_provider').run(ctx)
-    await getCase('chat.session.main_thread').run(ctx)
-    const agent = ctx.vars.agent
-    const tid = ctx.vars.mainThreadId
-    await ctx.call('PUT', `/api/threads/${tid}/agent`, {
-      agentDefinitionId: String(agent.id),
-      clientMessageId: cid(),
+    const { session, thread } = await createBootstrappedThread(ctx, {
+      agentDefinitionId: ctx.vars.agent.id,
+      title: `e2e-real-${cid().slice(0, 8)}`,
     })
+    const tid = thread.threadId
     await ctx.call('POST', `/api/threads/${tid}/messages`, {
       content: '只回复单词 OK，不要调用工具，不要解释。',
       clientMessageId: cid(),
+      expectedExecutionEpoch: Number(thread.executionEpoch),
     })
     let finalStatus = null
     for (let i = 0; i < 90; i++) {
@@ -41,7 +41,7 @@ registerCase({
     const usage = envelopeData(usageJson)
     assert(Number(usage.recordCount || 0) >= 1, JSON.stringify(usage))
     ctx.vars.realThreadId = tid
-    ctx.vars.realSessionId = ctx.vars.sessionId
+    ctx.vars.realSessionId = session.sessionId
     ctx.vars.assistantEntryId = String(assistantEntries.at(-1).entryId)
     ctx.writeArtifact('usage.json', JSON.stringify(usage, null, 2))
   },
@@ -52,18 +52,23 @@ registerCase({
   level: 'L3',
   title: '分支 Thread usage 路径语义',
   requires: ['real', 'branch'],
-  docs: 'fork 后再发一轮；session 去重 vs thread 可重复计共享前缀',
+  docs: '另一条 Thread rebind 到历史 assistant Entry 后再发一轮；session 去重 vs thread 可重复计共享前缀',
   async run(ctx) {
     if (!ctx.vars.realThreadId) await getCase('real.text_turn').run(ctx)
     const mainTid = ctx.vars.realThreadId
     const sessionId = ctx.vars.realSessionId
-    const { json: branchJson } = await ctx.call('POST', `/api/sessions/${sessionId}/threads`, {
-      fromEntryId: ctx.vars.assistantEntryId,
+    // Branching is just another Thread whose head is relocated onto a historical Entry.
+    const { thread: spare } = await createBootstrappedThread(ctx, {
+      agentDefinitionId: ctx.vars.agent.id,
+      title: `e2e-branch-${cid().slice(0, 8)}`,
     })
-    const branchTid = String(envelopeData(branchJson).threadId)
+    const branched = await rebindWhenQuiescent(ctx, spare.threadId, ctx.vars.assistantEntryId)
+    const branchTid = branched.threadId
+    assert(branched.headEntryId === String(ctx.vars.assistantEntryId), JSON.stringify(branched))
     await ctx.call('POST', `/api/threads/${branchTid}/messages`, {
       content: '在分支上只回复单词 BRANCH，不要调用工具。',
       clientMessageId: cid(),
+      expectedExecutionEpoch: Number(branched.executionEpoch),
     })
     let finalStatus = null
     for (let i = 0; i < 90; i++) {
@@ -111,17 +116,16 @@ registerCase({
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
     await getCase('seed.agent_and_provider').run(ctx)
-    await getCase('chat.session.main_thread').run(ctx)
-    const agent = ctx.vars.agent
-    const tid = ctx.vars.mainThreadId
-    await ctx.call('PUT', `/api/threads/${tid}/agent`, {
-      agentDefinitionId: String(agent.id),
-      clientMessageId: cid(),
+    const { thread } = await createBootstrappedThread(ctx, {
+      agentDefinitionId: ctx.vars.agent.id,
+      title: `e2e-tool-${cid().slice(0, 8)}`,
+      yoloEnabled: true,
     })
-    await ctx.call('PUT', `/api/threads/${tid}/yolo`, { yoloEnabled: true, clientMessageId: cid() })
+    const tid = thread.threadId
     await ctx.call('POST', `/api/threads/${tid}/messages`, {
       content: '使用 read 工具读取环境根目录，然后用一句话总结文件数量。',
       clientMessageId: cid(),
+      expectedExecutionEpoch: Number(thread.executionEpoch),
     })
     let finalStatus = null
     for (let i = 0; i < 120; i++) {
