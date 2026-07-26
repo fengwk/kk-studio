@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -37,7 +36,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -471,13 +469,8 @@ class ProviderModelExecutionTest {
             11L,
             ProviderType.OPENAI,
             "frozen-model",
-            "Frozen model",
-            4_096L,
-            1_024L,
-            EnumSet.of(ModelInputModality.TEXT),
             true,
             false,
-            List.of(variant),
             new ModelPricing(
                 "USD",
                 "batch",

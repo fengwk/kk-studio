@@ -13,10 +13,7 @@ import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
-import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.harness.runtime.configuration.AgentSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.EnvironmentSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.ExecutionPolicySnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSource;
@@ -32,7 +29,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderType;
 
 import java.util.ArrayList;
@@ -61,7 +57,6 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
   private final AgentModelRuntimeConfigParser modelConfigParser;
   private final HarnessExtensionHost extensionHost;
   private final LiveEnvironmentRegistry environmentRegistry;
-  private final HarnessRuntimeProperties properties;
 
   public RuntimeConfigSnapshotResolver(
       AgentDefinitionMapper definitionMapper,
@@ -70,8 +65,7 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
       AgentProviderRepository providerRepository,
       AgentModelRuntimeConfigParser modelConfigParser,
       HarnessExtensionHost extensionHost,
-      LiveEnvironmentRegistry environmentRegistry,
-      HarnessRuntimeProperties properties) {
+      LiveEnvironmentRegistry environmentRegistry) {
     this.definitionMapper = Objects.requireNonNull(definitionMapper, "definitionMapper");
     this.definitionConfigCodec =
         Objects.requireNonNull(definitionConfigCodec, "definitionConfigCodec");
@@ -80,7 +74,6 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
     this.extensionHost = Objects.requireNonNull(extensionHost, "extensionHost");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
-    this.properties = Objects.requireNonNull(properties, "properties");
   }
 
   /** 使用 Definition 的默认 model/variant 构造完整快照。 */
@@ -103,12 +96,7 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
       throw new IllegalArgumentException("selected model does not support configured tools");
     }
     return new RuntimeConfigSnapshot(
-        current.agent(),
-        model,
-        current.tools(),
-        current.skills(),
-        current.policy(),
-        current.environment());
+        current.agent(), model, current.tools(), current.skills(), current.yoloEnabled());
   }
 
   private RuntimeConfigSnapshot resolve(
@@ -125,8 +113,7 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
         resolveModel(modelId, requestedVariant),
         tools,
         skills,
-        policy(config.getExecutionPolicy(), config.getAllowedSubagents(), yoloEnabled),
-        new EnvironmentSnapshot(environmentName, properties.resolvedWorkdir().toString()));
+        yoloEnabled);
   }
 
   private ModelSnapshot resolveModel(long modelId, String requestedVariant) {
@@ -153,21 +140,7 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
                     new IllegalArgumentException(
                         "no provider factory registered for " + providerType));
     ParsedAgentModelConfig parsed = modelConfigParser.parse(model.getConfigJson());
-    ModelDescriptor descriptor =
-        new ModelDescriptor(
-            provider.getId(),
-            model.getId(),
-            providerType,
-            model.getName(),
-            displayName(model),
-            parsed.contextWindow(),
-            parsed.maxOutputTokens(),
-            parsed.inputModalities(),
-            parsed.tools(),
-            parsed.reasoning(),
-            parsed.variants(),
-            parsed.pricing(),
-            cachePolicy(providerType, factory.promptCacheCapability()));
+    // 先在 resolver 内完成 variant 身份校验，确保 ModelSnapshot 仅承载已知 variant。
     String variantId =
         requestedVariant == null || requestedVariant.isBlank()
             ? parsed.defaultVariant()
@@ -180,6 +153,16 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
                 () ->
                     new IllegalArgumentException(
                         "unknown variant '" + variantId + "' for model " + modelId));
+    ModelDescriptor descriptor =
+        new ModelDescriptor(
+            provider.getId(),
+            model.getId(),
+            providerType,
+            model.getName(),
+            parsed.tools(),
+            parsed.reasoning(),
+            parsed.pricing(),
+            cachePolicy(providerType, factory.promptCacheCapability()));
     return new ModelSnapshot(descriptor, variant);
   }
 
@@ -284,23 +267,6 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
     bindings.add(binding);
   }
 
-  private static ExecutionPolicySnapshot policy(
-      AgentExecutionPolicyDTO source, List<String> allowedSubagents, boolean yoloEnabled) {
-    if (source == null
-        || source.getMaxTurns() == null
-        || source.getMaxDepth() == null
-        || source.getMaxDirectSubagents() == null) {
-      throw new IllegalArgumentException("agent executionPolicy is incomplete");
-    }
-    return new ExecutionPolicySnapshot(
-        source.getMaxTurns(),
-        source.getMaxDepth(),
-        source.getMaxDirectSubagents(),
-        source.getMaxTotalSubagents(),
-        Objects.requireNonNull(allowedSubagents, "allowedSubagents"),
-        yoloEnabled);
-  }
-
   private AgentDefinitionDO requireDefinition(long definitionId) {
     if (definitionId <= 0) {
       throw new IllegalArgumentException("definitionId must be positive");
@@ -360,11 +326,5 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
       case ANTHROPIC -> PromptCachePolicy.breakpointsShort(capability);
       case GOOGLE -> PromptCachePolicy.automatic(capability);
     };
-  }
-
-  private static String displayName(AgentModel model) {
-    return model.getDescription() == null || model.getDescription().isBlank()
-        ? model.getName()
-        : model.getDescription();
   }
 }

@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
@@ -229,19 +228,7 @@ class PromptCacheRequestFinalizerTest {
 
   private static ModelDescriptor baseModel(PromptCachePolicy policy) {
     return new ModelDescriptor(
-        101L,
-        202L,
-        ProviderType.OPENAI,
-        "m1",
-        "Model",
-        1024,
-        256,
-        Set.of(ModelInputModality.TEXT),
-        true,
-        false,
-        List.of(),
-        pricing(),
-        policy);
+        101L, 202L, ProviderType.OPENAI, "m1", true, false, pricing(), policy);
   }
 
   private static ModelDescriptor affinityModel() {

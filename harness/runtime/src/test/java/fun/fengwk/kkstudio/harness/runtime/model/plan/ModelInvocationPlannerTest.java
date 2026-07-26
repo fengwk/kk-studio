@@ -9,8 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.configuration.AgentSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.EnvironmentSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.ExecutionPolicySnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.SkillSnapshot;
@@ -21,7 +19,6 @@ import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.RootEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -370,26 +367,13 @@ class ModelInvocationPlannerTest {
         new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
     ModelDescriptor descriptor =
         new ModelDescriptor(
-            11,
-            12,
-            ProviderType.OPENAI,
-            modelId,
-            modelId,
-            100_000,
-            8_000,
-            EnumSet.of(ModelInputModality.TEXT),
-            true,
-            false,
-            List.of(variant),
-            zeroPricing(),
-            promptCachePolicy);
+            11, 12, ProviderType.OPENAI, modelId, true, false, zeroPricing(), promptCachePolicy);
     return new RuntimeConfigSnapshot(
         new AgentSnapshot(10, "agent", systemPrompt),
         new ModelSnapshot(descriptor, variant),
         tools,
         skills,
-        new ExecutionPolicySnapshot(20, 4, 2, null, List.of(), false),
-        new EnvironmentSnapshot("env", "workspace"));
+        false);
   }
 
   private static ModelPricing zeroPricing() {

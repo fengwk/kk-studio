@@ -159,7 +159,7 @@ public final class ThreadCommandCoordinator {
     boolean yolo =
         transactions
             .lockAndFindCurrentConfig(threadId, expectedExecutionEpoch)
-            .map(snapshot -> snapshot.policy().yoloEnabled())
+            .map(RuntimeConfigSnapshot::yoloEnabled)
             .orElse(defaultYolo);
     RuntimeConfigSnapshot frozen = configSource.resolveAgent(definitionId, yolo);
     return enqueue(

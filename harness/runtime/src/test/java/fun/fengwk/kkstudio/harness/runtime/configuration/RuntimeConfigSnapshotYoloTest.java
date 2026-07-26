@@ -17,13 +17,11 @@ class RuntimeConfigSnapshotYoloTest {
     RuntimeConfigSnapshot enabled = current.withYoloEnabled(true);
     RuntimeConfigSnapshot disabled = enabled.withYoloEnabled(false);
 
-    assertTrue(enabled.policy().yoloEnabled());
-    assertFalse(disabled.policy().yoloEnabled());
+    assertTrue(enabled.yoloEnabled());
+    assertFalse(disabled.yoloEnabled());
     assertEquals(current.agent(), enabled.agent());
     assertEquals(current.model(), enabled.model());
     assertEquals(current.tools(), enabled.tools());
     assertEquals(current.skills(), enabled.skills());
-    assertEquals(current.environment(), enabled.environment());
-    assertEquals(current.policy().maxTurns(), enabled.policy().maxTurns());
   }
 }

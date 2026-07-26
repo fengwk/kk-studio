@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
@@ -24,7 +23,6 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 class OpenAiProviderAdapterTest {
 
@@ -92,13 +90,8 @@ class OpenAiProviderAdapterTest {
             2L,
             ProviderType.OPENAI,
             "proxy-model",
-            "Proxy",
-            4096,
-            256,
-            Set.of(ModelInputModality.TEXT),
             true,
             reasoning,
-            List.of(variant),
             new ModelPricing(
                 "USD",
                 "tier-1",

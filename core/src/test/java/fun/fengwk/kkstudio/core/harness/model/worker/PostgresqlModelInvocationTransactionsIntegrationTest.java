@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
@@ -51,7 +50,6 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -1160,19 +1158,15 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
             1L,
             ProviderType.OPENAI,
             "acceptance-stub",
-            "Acceptance Stub",
-            32_768L,
-            4_096L,
-            EnumSet.of(ModelInputModality.TEXT),
             true,
             false,
-            List.of(
-                new ModelVariant("default", null, null, null, null, null, null, List.of(), null)),
             pricing,
             PromptCachePolicy.disabled());
+    ModelVariant variant =
+        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
     return new ProviderRequest(
         descriptor,
-        descriptor.variants().get(0),
+        variant,
         List.of(
             new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("hello")))),
         List.of(),

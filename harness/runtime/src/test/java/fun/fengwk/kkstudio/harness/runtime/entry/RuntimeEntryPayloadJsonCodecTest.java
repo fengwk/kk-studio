@@ -16,15 +16,12 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.configuration.AgentSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.EnvironmentSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.ExecutionPolicySnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.SkillSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -759,8 +756,7 @@ class RuntimeEntryPayloadJsonCodecTest {
             new ModelSnapshot(canonicalModelDescriptor(), canonicalModelVariant()),
             List.of(binding),
             List.of(new SkillSnapshot("code-review", "code review skill", "sandbox")),
-            new ExecutionPolicySnapshot(16, 8, 4, null, List.of("researcher", "writer"), false),
-            new EnvironmentSnapshot("sandbox", null));
+            false);
     assertNotNull(snapshot);
     return snapshot;
   }
@@ -771,13 +767,8 @@ class RuntimeEntryPayloadJsonCodecTest {
         8001L,
         ProviderType.OPENAI,
         "gpt-5-mini",
-        "GPT-5 Mini",
-        200000,
-        16384,
-        EnumSet.allOf(ModelInputModality.class),
         true,
         true,
-        List.of(canonicalModelVariant()),
         canonicalModelPricing(),
         canonicalPromptCachePolicy());
   }

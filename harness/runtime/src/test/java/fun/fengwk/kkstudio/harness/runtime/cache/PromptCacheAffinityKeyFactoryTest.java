@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
@@ -32,7 +31,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 /**
  * 关注：固定 pc1- 前缀、43 字符 Base64URL 无 padding 输出；动态 USER/ASSISTANT/TOOL history 不影响 key；资源标识或 stable
@@ -514,13 +512,8 @@ class PromptCacheAffinityKeyFactoryTest {
         modelId,
         type,
         apiModelId,
-        "Model",
-        1024,
-        256,
-        Set.of(ModelInputModality.TEXT),
         true,
         false,
-        List.of(variant),
         new ModelPricing(
             "USD",
             "tier-1",

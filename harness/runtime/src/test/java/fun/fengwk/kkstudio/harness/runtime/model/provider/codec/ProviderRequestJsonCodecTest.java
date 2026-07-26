@@ -12,7 +12,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
@@ -80,9 +79,7 @@ class ProviderRequestJsonCodecTest {
     assertEquals(request, decoded);
     assertEquals(encoded, codec.encode(decoded));
     assertEquals(request, codec.decodeNode(codec.encodeNode(request)));
-    assertEquals(
-        List.of("AUDIO", "DOCUMENT", "IMAGE", "TEXT", "VIDEO"),
-        textValues((ArrayNode) canonicalNode().path("model").path("inputModalities")));
+    assertEquals("gpt-5-mini", canonicalNode().path("model").path("modelId").asText());
     assertEquals(
         Set.of(
             ProviderTextBlock.class,
@@ -201,8 +198,8 @@ class ProviderRequestJsonCodecTest {
         root -> root.set("messages", NODES.objectNode()));
     assertStrictLayer(
         root -> model(root).put("extra", true),
-        root -> model(root).remove("displayName"),
-        root -> model(root).put("contextWindow", "200000"));
+        root -> model(root).remove("modelId"),
+        root -> model(root).put("tools", "true"));
     assertStrictLayer(
         root -> variant(root).put("extra", true),
         root -> variant(root).remove("id"),
@@ -249,9 +246,6 @@ class ProviderRequestJsonCodecTest {
   @Test
   void rejectsUnknownEnumsAndDiscriminators() {
     assertRejected(root -> model(root).put("providerType", "LEGACY"));
-    assertRejected(
-        root ->
-            ((ArrayNode) model(root).path("inputModalities")).set(0, NODES.textNode("HOLOGRAM")));
     assertRejected(root -> message(root, 0).put("role", "DEVELOPER"));
     assertRejected(root -> capability(root).put("mode", "MANUAL"));
     assertRejected(root -> policy(root).put("retention", "FOREVER"));
@@ -287,8 +281,6 @@ class ProviderRequestJsonCodecTest {
     assertThrows(NullPointerException.class, () -> codec.encode(null));
     assertThrows(NullPointerException.class, () -> codec.encodeNode(null));
 
-    assertRejected(
-        root -> ((ArrayNode) model(root).path("inputModalities")).set(0, NODES.numberNode(1)));
     assertRejected(root -> model(root).put("providerResourceId", 0));
     assertRejected(
         root ->
@@ -296,8 +288,6 @@ class ProviderRequestJsonCodecTest {
                 .set(
                     "providerResourceId",
                     NODES.numberNode(BigInteger.valueOf(Long.MAX_VALUE).add(BigInteger.ONE))));
-    assertRejected(root -> model(root).put("maxOutputTokens", 300000));
-    assertRejected(root -> ((ArrayNode) model(root).path("variants")).set(0, NODES.numberNode(1)));
     assertRejected(root -> variant(root).put("temperature", Double.NaN));
     assertRejected(root -> variant(root).put("temperature", "0.2"));
     assertRejected(
@@ -370,13 +360,8 @@ class ProviderRequestJsonCodecTest {
             2002,
             ProviderType.OPENAI,
             "gpt-5-mini",
-            "GPT-5 Mini",
-            200000,
-            16384,
-            EnumSet.allOf(ModelInputModality.class),
             true,
             true,
-            List.of(defaultVariant),
             canonicalPricing(),
             PromptCachePolicy.breakpointsShort(capability));
     ProviderToolCall call = new ProviderToolCall("call-1", "lookup", ARGUMENTS_JSON);
@@ -444,13 +429,8 @@ class ProviderRequestJsonCodecTest {
             model.modelResourceId(),
             model.providerType(),
             model.modelId(),
-            model.displayName(),
-            model.contextWindow(),
-            model.maxOutputTokens(),
-            model.inputModalities(),
             model.tools(),
             model.reasoning(),
-            model.variants(),
             model.pricing(),
             new PromptCachePolicy(cacheCase.capability(), cacheCase.retention()));
     return new ProviderRequest(

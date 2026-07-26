@@ -119,7 +119,13 @@ public record ContinuationRef(ExecutionTarget owner, ExecutionTarget blocker) {}
 
 ### 3.1 RuntimeConfigSnapshot
 
-完整、自足、不可变；不含 secret；credential 只使用稳定 reference；集合排序确定；Tool 非空时 Model 必须支持 Tool；ENVIRONMENT ToolBinding 与 Skill source 必须等于冻结 environment。每次配置命令写完整 snapshot。
+`RuntimeConfigSnapshot(AgentSnapshot agent, ModelSnapshot model, List<ToolBinding> tools, List<SkillSnapshot> skills, boolean yoloEnabled)`。
+
+- 完整、自足、不可变；不含 secret；credential 只使用稳定 reference（`ModelDescriptor.providerResourceId`）；集合排序确定。
+- `tools` 与 `skills` 做 defensive copy：`tools` Provider tool name 唯一并按 `(name, version, environmentName nullsFirst)` 排序；`skills` name 唯一并按 name 字典序。
+- `tools` 非空时 `model.descriptor().tools()` 必须为 true。
+- ENVIRONMENT 工具 binding 的 `environmentName` 与每个 `SkillSnapshot.sourceEnvironment()` 必须全部相等（PLATFORM 工具不参与）；`withYoloEnabled(boolean)` 仅替换顶层 `yoloEnabled`。
+- 每次配置命令写完整 snapshot。
 
 ### 3.2 Entry payload JSON
 

@@ -378,7 +378,7 @@ tokenReadRatio =
 - `defaultVariant`：字符串，必须命中 `variants[].id`。
 - `pricing.currency/pricingTier/serviceTier/serviceTierMultiplier/version` 全部非空且 `serviceTierMultiplier > 0`；六类每百万 token 单价 `inputPerMillionTokens/outputPerMillionTokens/cacheReadPerMillionTokens/cacheWritePerMillionTokens/cacheWriteLongPerMillionTokens/reasoningPerMillionTokens` 均为非负有限数。
 
-runtime 仅从 `config.abilities` 派生 `tools` / `reasoning` 与 `inputModalities`，并直接投影到 `ModelDescriptor`。
+runtime 仅从 `config.abilities` 派生 `tools` / `reasoning`，并直接投影到 `ModelDescriptor`；`inputModalities` 保留为 Model Definition 元数据，`variants` 仅用于 resolver 选择 effective variant，二者都不进入 runtime `ModelDescriptor`。
 
 ### API 契约
 
