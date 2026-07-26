@@ -14,14 +14,8 @@ public enum EntryType {
   MESSAGE,
   /** 由业务扩展注入的对话消息。 */
   CUSTOM_MESSAGE,
-  /** Context 压缩或合并产物。 */
-  COMPACTION,
   /** Provider/Assistant-side 错误审计。 */
-  ASSISTANT_ERROR,
-  /** 不投影到 Provider Context 的路径标签。 */
-  LABEL,
-  /** Branch 路径结束处的摘要。 */
-  BRANCH_SUMMARY;
+  ASSISTANT_ERROR;
 
   /** 是否为 Session Tree 的语义根。 */
   public boolean isRoot() {

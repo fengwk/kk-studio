@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSource;
 import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.RootEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
@@ -327,18 +326,10 @@ class ThreadCommandCoordinatorTest {
     Long lastHeadEntryId;
     Instant lastUpdateNow;
     final HarnessThread createdThread = new HarnessThread(1L, null, 0L, false, 0L, null, NOW, NOW);
-    final Session bootstrapSession = new Session(10L, "session", null, null, NOW, NOW);
-    final SessionEntry bootstrapRoot =
-        new SessionEntry(
-            11L, bootstrapSession.id(), null, EntryType.ROOT, new RootEntryPayload(), NOW);
+    final Session bootstrapSession = new Session(10L, "session", NOW);
+    final SessionEntry bootstrapRoot = new SessionEntry(11L, null, new RootEntryPayload());
     final SessionEntry bootstrapConfig =
-        new SessionEntry(
-            12L,
-            bootstrapSession.id(),
-            bootstrapRoot.id(),
-            EntryType.RUNTIME_CONFIG,
-            ReconcileTestSupport.configSnapshot(),
-            NOW);
+        new SessionEntry(12L, bootstrapRoot.id(), ReconcileTestSupport.configSnapshot());
     final HarnessThread bootstrapThread =
         new HarnessThread(1L, bootstrapConfig.id(), 0L, false, 5L, null, NOW, NOW);
     final HarnessThread updatedThread = new HarnessThread(1L, 99L, 0L, false, 5L, null, NOW, NOW);

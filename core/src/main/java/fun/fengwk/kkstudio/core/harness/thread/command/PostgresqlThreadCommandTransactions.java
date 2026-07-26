@@ -83,18 +83,9 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
             ENTRY_CODEC.encode(initialConfig),
             timestamp),
         "insert runtime config entry");
-    Session session = new Session(sessionId, title, null, null, persistedNow, persistedNow);
-    SessionEntry root =
-        new SessionEntry(
-            rootEntryId, sessionId, null, EntryType.ROOT, new RootEntryPayload(), persistedNow);
-    SessionEntry config =
-        new SessionEntry(
-            configEntryId,
-            sessionId,
-            rootEntryId,
-            EntryType.RUNTIME_CONFIG,
-            initialConfig,
-            persistedNow);
+    Session session = new Session(sessionId, title, persistedNow);
+    SessionEntry root = new SessionEntry(rootEntryId, null, new RootEntryPayload());
+    SessionEntry config = new SessionEntry(configEntryId, rootEntryId, initialConfig);
     return new SessionCreation(session, root, config);
   }
 

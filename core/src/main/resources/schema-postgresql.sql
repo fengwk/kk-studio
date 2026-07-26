@@ -192,7 +192,7 @@ create table harness_entry (
     constraint ck_harness_entry_type check (
         entry_type in (
             'ROOT', 'RUNTIME_CONFIG', 'MESSAGE', 'CUSTOM_MESSAGE',
-            'COMPACTION', 'ASSISTANT_ERROR', 'LABEL', 'BRANCH_SUMMARY'
+            'ASSISTANT_ERROR'
         )
     ),
     -- ROOT entries must have no parent; every other entry must have a parent.

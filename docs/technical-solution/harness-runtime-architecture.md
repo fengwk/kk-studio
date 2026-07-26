@@ -86,7 +86,7 @@ harness_model_usage
 
 ### 3.1 Session 与 Entry Tree
 
-Session 只组织一份 append-only Entry Tree，不持有 Thread。schema 允许 `parentSessionId`/`parentInvocationId` 表示父子 Session，但当前**未实现** Child Session / task 产品工作流。
+Session 只组织一份 append-only Entry Tree，不持有 Thread，也不形成父子层级。Runtime Session 只包含 `id`、`title`、`createdAt`。
 
 Entry 是 transcript 与运行配置的唯一语义事实，类型：
 
@@ -94,10 +94,7 @@ Entry 是 transcript 与运行配置的唯一语义事实，类型：
 - `RUNTIME_CONFIG`
 - `MESSAGE`
 - `CUSTOM_MESSAGE`
-- `COMPACTION`
 - `ASSISTANT_ERROR`
-- `LABEL`
-- `BRANCH_SUMMARY`
 
 `RUNTIME_CONFIG` 保存一次完整、不可变、已解析的有效运行快照：Agent identity、system prompt、effective model/variant、Tool descriptors/bindings、selected skills、execution/interaction policy、environment/workspace 引用。不保存 secret value；credential 只存稳定 reference。
 

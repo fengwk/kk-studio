@@ -5,12 +5,9 @@ import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.SkillSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.AssistantErrorEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSummaryEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.entry.CompactionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
-import fun.fengwk.kkstudio.harness.runtime.entry.LabelEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.RootEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -34,13 +31,10 @@ import java.util.Set;
 /**
  * 从完整 root-to-head Entry path 派生当前 response debt 对应的冻结 ModelInvocation plan。
  *
- * <p>planner 只读取传入值对象。发现 debt 后，请求只使用截至 debt Entry 的路径前缀；head 与 debt 之间的配置、标签或系统消息不能 反向改变该 response
+ * <p>planner 只读取传入值对象。发现 debt 后，请求只使用截至 debt Entry 的路径前缀；head 与 debt 之间的配置或系统消息不能 反向改变该 response
  * boundary。返回 plan 仍以实际 head 作为 source identity，由 Reconciler 在事务中创建 Invocation。
  */
 public final class ModelInvocationPlanner {
-
-  private static final String SESSION_SUMMARY_PREFIX = "Session summary:\n";
-  private static final String BRANCH_SUMMARY_PREFIX = "Branch summary:\n";
 
   private final ProviderMessageProjector messageProjector;
   private final ToolDescriptorJsonCodec toolDescriptorCodec;
@@ -75,7 +69,7 @@ public final class ModelInvocationPlanner {
     if (sourceHeadEntryId <= 0) {
       throw new IllegalArgumentException("sourceHeadEntryId must be positive");
     }
-    List<SessionEntry> path = validatePath(sessionId, sourceHeadEntryId, rootToHead);
+    List<SessionEntry> path = validatePath(sourceHeadEntryId, rootToHead);
     int debtIndex = findDebtIndex(path);
     if (debtIndex < 0) {
       return Optional.empty();
@@ -99,7 +93,7 @@ public final class ModelInvocationPlanner {
   }
 
   private static List<SessionEntry> validatePath(
-      long sessionId, long sourceHeadEntryId, List<SessionEntry> rootToHead) {
+      long sourceHeadEntryId, List<SessionEntry> rootToHead) {
     Objects.requireNonNull(rootToHead, "rootToHead");
     if (rootToHead.isEmpty()) {
       throw new IllegalArgumentException("rootToHead must not be empty");
@@ -109,15 +103,12 @@ public final class ModelInvocationPlanner {
     SessionEntry previous = null;
     for (int index = 0; index < path.size(); index++) {
       SessionEntry entry = Objects.requireNonNull(path.get(index), "rootToHead[]");
-      if (entry.sessionId() != sessionId) {
-        throw new IllegalArgumentException("entry sessionId must equal planner sessionId");
-      }
       if (!entryIds.add(entry.id())) {
         throw new IllegalArgumentException("rootToHead must not contain duplicate entry ids");
       }
       requireSupportedPayload(entry);
       if (index == 0) {
-        if (entry.type() != EntryType.ROOT || entry.parentEntryId() != null) {
+        if (entry.payload().type() != EntryType.ROOT || entry.parentEntryId() != null) {
           throw new IllegalArgumentException("rootToHead must start with ROOT without a parent");
         }
       } else if (!Objects.equals(entry.parentEntryId(), previous.id())) {
@@ -134,20 +125,17 @@ public final class ModelInvocationPlanner {
   private static void requireSupportedPayload(SessionEntry entry) {
     EntryPayload payload = entry.payload();
     boolean supported =
-        switch (entry.type()) {
+        switch (payload.type()) {
           case ROOT -> payload instanceof RootEntryPayload;
           case RUNTIME_CONFIG -> payload instanceof RuntimeConfigSnapshot;
           case MESSAGE -> payload instanceof MessageEntryPayload;
           case CUSTOM_MESSAGE -> payload instanceof CustomMessageEntryPayload;
-          case COMPACTION -> payload instanceof CompactionEntryPayload;
           case ASSISTANT_ERROR -> payload instanceof AssistantErrorEntryPayload;
-          case LABEL -> payload instanceof LabelEntryPayload;
-          case BRANCH_SUMMARY -> payload instanceof BranchSummaryEntryPayload;
         };
     if (!supported) {
       throw new IllegalArgumentException(
           "unsupported payload implementation for "
-              + entry.type()
+              + payload.type()
               + ": "
               + payload.getClass().getName());
     }
@@ -158,9 +146,6 @@ public final class ModelInvocationPlanner {
       EntryPayload payload = path.get(index).payload();
       if (payload instanceof AssistantErrorEntryPayload) {
         return -1;
-      }
-      if (payload instanceof CompactionEntryPayload) {
-        return index;
       }
       AgentMessage message = message(payload);
       if (message == null || message.role() == AgentMessageRole.SYSTEM) {
@@ -202,64 +187,15 @@ public final class ModelInvocationPlanner {
     if (!systemPrompt.isBlank()) {
       messages.add(AgentMessage.system(systemPrompt));
     }
-    for (SessionEntry entry : compactedEntries(debtPrefix)) {
+    for (SessionEntry entry : debtPrefix) {
       EntryPayload payload = entry.payload();
       if (payload instanceof MessageEntryPayload message) {
         messages.add(message.message());
       } else if (payload instanceof CustomMessageEntryPayload message) {
         messages.add(message.message());
-      } else if (payload instanceof CompactionEntryPayload compaction) {
-        messages.add(AgentMessage.system(SESSION_SUMMARY_PREFIX + compaction.summary()));
-      } else if (payload instanceof BranchSummaryEntryPayload summary) {
-        messages.add(AgentMessage.system(BRANCH_SUMMARY_PREFIX + summary.summary()));
       }
     }
     return List.copyOf(messages);
-  }
-
-  private static List<SessionEntry> compactedEntries(List<SessionEntry> path) {
-    int compactionIndex = lastEffectiveCompaction(path);
-    List<SessionEntry> selected = new ArrayList<>();
-    if (compactionIndex < 0) {
-      selected.addAll(path);
-    } else {
-      CompactionEntryPayload compaction =
-          (CompactionEntryPayload) path.get(compactionIndex).payload();
-      int firstKeptIndex = firstKeptIndex(path, compactionIndex, compaction.firstKeptEntryId());
-      selected.add(path.get(compactionIndex));
-      selected.addAll(path.subList(firstKeptIndex, compactionIndex));
-      selected.addAll(path.subList(compactionIndex + 1, path.size()));
-    }
-    selected.removeIf(
-        entry ->
-            entry.payload() instanceof CompactionEntryPayload
-                && !isEffectiveCompaction(path, path.indexOf(entry)));
-    return List.copyOf(selected);
-  }
-
-  private static int lastEffectiveCompaction(List<SessionEntry> path) {
-    for (int index = path.size() - 1; index >= 0; index--) {
-      if (isEffectiveCompaction(path, index)) {
-        return index;
-      }
-    }
-    return -1;
-  }
-
-  private static boolean isEffectiveCompaction(List<SessionEntry> path, int index) {
-    return index >= 0
-        && path.get(index).payload() instanceof CompactionEntryPayload compaction
-        && firstKeptIndex(path, index, compaction.firstKeptEntryId()) >= 0;
-  }
-
-  private static int firstKeptIndex(
-      List<SessionEntry> path, int compactionIndex, long firstKeptEntryId) {
-    for (int index = 0; index < compactionIndex; index++) {
-      if (path.get(index).id() == firstKeptEntryId) {
-        return index;
-      }
-    }
-    return -1;
   }
 
   private List<ProviderToolDefinition> providerTools(RuntimeConfigSnapshot config) {

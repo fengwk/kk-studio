@@ -25,18 +25,10 @@ public class HarnessSessionDtoConverter {
     HarnessSessionDTO target = new HarnessSessionDTO();
     target.setSessionId(HarnessIds.format(source.id()));
     target.setTitle(source.title());
-    target.setParentSessionId(
-        source.parentSessionId() == null ? null : HarnessIds.format(source.parentSessionId()));
-    target.setParentInvocationId(
-        source.parentInvocationId() == null
-            ? null
-            : HarnessIds.format(source.parentInvocationId()));
-    if (source.parentSessionId() == null) {
-      target.setRootSessionId(HarnessIds.format(source.id()));
-      target.setDepth(0);
-    }
+    target.setRootSessionId(HarnessIds.format(source.id()));
+    target.setDepth(0);
     target.setCreateTime(LocalDateTime.ofInstant(source.createdAt(), ZoneOffset.UTC));
-    target.setUpdateTime(LocalDateTime.ofInstant(source.updatedAt(), ZoneOffset.UTC));
+    target.setUpdateTime(LocalDateTime.ofInstant(source.createdAt(), ZoneOffset.UTC));
     return target;
   }
 
