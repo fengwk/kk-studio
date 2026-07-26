@@ -49,6 +49,10 @@ public record ThreadReconcileSnapshot(
     if (thread.id() != ownership.threadId()) {
       throw new IllegalArgumentException("thread.id must equal ownership.threadId");
     }
+    if (!thread.isBound()) {
+      throw new IllegalArgumentException("reconcile snapshot requires a bound thread");
+    }
+    thread.requireHeadEntryId();
     if (thread.executionEpoch() != ownership.executionEpoch()) {
       throw new IllegalArgumentException(
           "thread.executionEpoch must equal ownership.executionEpoch");
@@ -100,7 +104,7 @@ public record ThreadReconcileSnapshot(
       Optional<ModelInvocationPlan> value, HarnessThread thread) {
     value.ifPresent(
         plan -> {
-          if (plan.sourceHeadEntryId() != thread.headEntryId()) {
+          if (plan.sourceHeadEntryId() != thread.requireHeadEntryId()) {
             throw new IllegalArgumentException(
                 "modelInvocationPlan.sourceHeadEntryId must equal thread.headEntryId");
           }
