@@ -23,7 +23,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 
@@ -31,11 +30,10 @@ import java.util.List;
  * {@link RuntimeEntryPayload} 族的契约与构造校验测试。覆盖：
  *
  * <ul>
- *   <li>7 种 payload 类型的 {@link EntryType} 自报与 {@link EntryPayload} 契约；
- *   <li>{@link SessionEntry} 在 type/payload 一致性上的强制校验；
+ *   <li>4 种 runtime payload 类型的 {@link EntryType} 自报与 {@link EntryPayload} 契约；
+ *   <li>{@link SessionEntry} 根据 payload type 强制 parent 不变量；
  *   <li>assistant metadata 必须与 ASSISTANT role 一致；
  *   <li>tool-call 内容与 {@link ProviderStopReason#TOOL_CALLS} 严格一致；
- *   <li>compaction 数值与 detailsJson 约束；
  *   <li>assistant error 最小快照：仅 kind + message。
  * </ul>
  */
@@ -107,15 +105,7 @@ class RuntimeEntryPayloadTest {
 
   @Test
   void rootEntryPayloadTypeMatchesSessionEntry() {
-    SessionEntry entry =
-        new SessionEntry(
-            1L,
-            1L,
-            null,
-            EntryType.ROOT,
-            new RootEntryPayload(),
-            Instant.parse("2025-01-01T00:00:00Z"));
-    assertEquals(EntryType.ROOT, entry.type());
+    SessionEntry entry = new SessionEntry(1L, null, new RootEntryPayload());
     assertEquals(EntryType.ROOT, entry.payload().type());
   }
 
@@ -196,29 +186,8 @@ class RuntimeEntryPayloadTest {
   void messageEntryPayloadTypeMatchesSessionEntry() {
     SessionEntry entry =
         new SessionEntry(
-            2L,
-            1L,
-            1L,
-            EntryType.MESSAGE,
-            new MessageEntryPayload(assistantCompleted(), completedMetadata()),
-            Instant.parse("2025-01-01T00:00:00Z"));
-    assertEquals(EntryType.MESSAGE, entry.type());
+            2L, 1L, new MessageEntryPayload(assistantCompleted(), completedMetadata()));
     assertEquals(EntryType.MESSAGE, entry.payload().type());
-  }
-
-  @Test
-  void sessionEntryRejectsPayloadTypeMismatch() {
-    // Payload says MESSAGE but entry type is LABEL — must throw.
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new SessionEntry(
-                3L,
-                1L,
-                1L,
-                EntryType.LABEL,
-                new MessageEntryPayload(userMessage()),
-                Instant.parse("2025-01-01T00:00:00Z")));
   }
 
   // ---------- CUSTOM_MESSAGE ----------
@@ -232,46 +201,6 @@ class RuntimeEntryPayloadTest {
   @Test
   void customMessageRejectsNull() {
     assertThrows(NullPointerException.class, () -> new CustomMessageEntryPayload(null));
-  }
-
-  // ---------- COMPACTION ----------
-
-  @Test
-  void compactionPayload() {
-    CompactionEntryPayload payload = new CompactionEntryPayload("summary", 5L, 100, "{}");
-    assertEquals(EntryType.COMPACTION, payload.type());
-  }
-
-  @Test
-  void compactionRejectsBlankSummary() {
-    assertThrows(
-        IllegalArgumentException.class, () -> new CompactionEntryPayload("", 5L, 100, "{}"));
-    assertThrows(
-        IllegalArgumentException.class, () -> new CompactionEntryPayload(" ", 5L, 100, "{}"));
-    assertThrows(
-        IllegalArgumentException.class, () -> new CompactionEntryPayload(null, 5L, 100, "{}"));
-  }
-
-  @Test
-  void compactionRejectsNonPositiveFirstKeptEntryId() {
-    assertThrows(
-        IllegalArgumentException.class, () -> new CompactionEntryPayload("s", 0L, 100, "{}"));
-    assertThrows(
-        IllegalArgumentException.class, () -> new CompactionEntryPayload("s", -1L, 100, "{}"));
-  }
-
-  @Test
-  void compactionRejectsNegativeTokensBefore() {
-    assertThrows(
-        IllegalArgumentException.class, () -> new CompactionEntryPayload("s", 1L, -1, "{}"));
-  }
-
-  @Test
-  void compactionRejectsBlankDetailsJson() {
-    assertThrows(IllegalArgumentException.class, () -> new CompactionEntryPayload("s", 1L, 0, ""));
-    assertThrows(IllegalArgumentException.class, () -> new CompactionEntryPayload("s", 1L, 0, " "));
-    assertThrows(
-        IllegalArgumentException.class, () -> new CompactionEntryPayload("s", 1L, 0, null));
   }
 
   // ---------- ASSISTANT_ERROR ----------
@@ -302,50 +231,16 @@ class RuntimeEntryPayloadTest {
     assertThrows(NullPointerException.class, () -> new AssistantErrorEntryPayload(null));
   }
 
-  // ---------- LABEL ----------
-
-  @Test
-  void labelPayload() {
-    LabelEntryPayload payload = new LabelEntryPayload("checkpoint");
-    assertEquals(EntryType.LABEL, payload.type());
-  }
-
-  @Test
-  void labelRejectsBlank() {
-    assertThrows(IllegalArgumentException.class, () -> new LabelEntryPayload(""));
-    assertThrows(IllegalArgumentException.class, () -> new LabelEntryPayload(" "));
-    assertThrows(IllegalArgumentException.class, () -> new LabelEntryPayload(null));
-  }
-
-  // ---------- BRANCH_SUMMARY ----------
-
-  @Test
-  void branchSummaryPayload() {
-    BranchSummaryEntryPayload payload = new BranchSummaryEntryPayload("branch closed");
-    assertEquals(EntryType.BRANCH_SUMMARY, payload.type());
-  }
-
-  @Test
-  void branchSummaryRejectsBlank() {
-    assertThrows(IllegalArgumentException.class, () -> new BranchSummaryEntryPayload(""));
-    assertThrows(IllegalArgumentException.class, () -> new BranchSummaryEntryPayload(" "));
-    assertThrows(IllegalArgumentException.class, () -> new BranchSummaryEntryPayload(null));
-  }
-
   // ---------- Sealed root sanity ----------
 
-  /**
-   * sealed root 仅承担 Session Tree 的 7 个 message-bearing payload；RUNTIME_CONFIG 由
-   * RuntimeConfigSnapshot 自报。
-   */
+  /** sealed root 承担 4 个 runtime payload；RUNTIME_CONFIG 由 RuntimeConfigSnapshot 自报。 */
   @Test
   void sealedRootCoversSessionPayloads() {
-    // EntryType 一共 8 个：RUNTIME_CONFIG 由 RuntimeConfigSnapshot 直接实现，不在本 sealed root。
-    long sessionTypes =
+    long runtimeTypes =
         Arrays.stream(EntryType.values()).filter(t -> t != EntryType.RUNTIME_CONFIG).count();
-    assertEquals(7, sessionTypes);
+    assertEquals(4, runtimeTypes);
     assertTrue(RuntimeEntryPayload.class.isSealed());
-    assertEquals(7, RuntimeEntryPayload.class.getPermittedSubclasses().length);
+    assertEquals(4, RuntimeEntryPayload.class.getPermittedSubclasses().length);
   }
 
   @Test
@@ -353,17 +248,12 @@ class RuntimeEntryPayloadTest {
     RuntimeEntryPayload root = new RootEntryPayload();
     RuntimeEntryPayload msg = new MessageEntryPayload(userMessage());
     RuntimeEntryPayload custom = new CustomMessageEntryPayload(userMessage());
-    RuntimeEntryPayload compaction = new CompactionEntryPayload("s", 1L, 0, "{}");
     RuntimeEntryPayload error =
         new AssistantErrorEntryPayload(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "x"));
-    RuntimeEntryPayload label = new LabelEntryPayload("x");
-    RuntimeEntryPayload branch = new BranchSummaryEntryPayload("x");
 
-    // 不同 payload 自身 .equals 仅按 record 字段比较，这里只校验 type 互不相同。
     assertNotEquals(root.type(), msg.type());
     assertNotEquals(msg.type(), custom.type());
-    assertNotEquals(msg.type(), compaction.type());
     assertNotEquals(msg.type(), error.type());
-    assertNotEquals(label.type(), branch.type());
+    assertNotEquals(custom.type(), error.type());
   }
 }

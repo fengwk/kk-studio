@@ -9,68 +9,50 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
 
-import java.time.Instant;
-
 /** SessionEntry 字段约束、Entry parent 不变量测试。 */
 class SessionEntryTest {
-
-  private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
 
   /** 仅用于测试的最小 EntryPayload：固定类型。 */
   private record TestPayload(EntryType type) implements EntryPayload {}
 
   @Test
   void rootEntryHasNoParent() {
-    SessionEntry root =
-        new SessionEntry(1L, 10L, null, EntryType.ROOT, new TestPayload(EntryType.ROOT), NOW);
+    SessionEntry root = new SessionEntry(1L, null, new TestPayload(EntryType.ROOT));
 
     assertNull(root.parentEntryId());
-    assertEquals(EntryType.ROOT, root.type());
+    assertEquals(EntryType.ROOT, root.payload().type());
   }
 
   @Test
   void nonRootEntryRequiresParent() {
     EntryPayload payload = new TestPayload(EntryType.MESSAGE);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new SessionEntry(2L, 10L, null, EntryType.MESSAGE, payload, NOW));
+    assertThrows(IllegalArgumentException.class, () -> new SessionEntry(2L, null, payload));
   }
 
   @Test
   void rootEntryCannotHaveParent() {
     EntryPayload payload = new TestPayload(EntryType.ROOT);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new SessionEntry(1L, 10L, 100L, EntryType.ROOT, payload, NOW));
+    assertThrows(IllegalArgumentException.class, () -> new SessionEntry(1L, 100L, payload));
   }
 
   @Test
   void nonRootEntryAcceptsParent() {
     EntryPayload payload = new TestPayload(EntryType.MESSAGE);
-    SessionEntry entry = new SessionEntry(2L, 10L, 1L, EntryType.MESSAGE, payload, NOW);
+    SessionEntry entry = new SessionEntry(2L, 1L, payload);
 
     assertEquals(1L, entry.parentEntryId());
+    assertEquals(payload, entry.payload());
   }
 
   @Test
   void rejectsNonPositiveIds() {
     EntryPayload payload = new TestPayload(EntryType.MESSAGE);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new SessionEntry(0L, 10L, 1L, EntryType.MESSAGE, payload, NOW));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new SessionEntry(1L, 0L, 1L, EntryType.MESSAGE, payload, NOW));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new SessionEntry(1L, 10L, 0L, EntryType.MESSAGE, payload, NOW));
+    assertThrows(IllegalArgumentException.class, () -> new SessionEntry(0L, 1L, payload));
+    assertThrows(IllegalArgumentException.class, () -> new SessionEntry(1L, 0L, payload));
   }
 
   @Test
-  void rejectsPayloadTypeMismatch() {
-    EntryPayload payload = new TestPayload(EntryType.MESSAGE);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new SessionEntry(1L, 10L, 1L, EntryType.ROOT, payload, NOW));
+  void rejectsNullPayload() {
+    assertThrows(NullPointerException.class, () -> new SessionEntry(1L, null, null));
   }
 }

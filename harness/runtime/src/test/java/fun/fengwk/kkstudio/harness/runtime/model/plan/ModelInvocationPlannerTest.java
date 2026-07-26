@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.model.plan;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -16,12 +15,9 @@ import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.SkillSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.AssistantErrorEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSummaryEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.entry.CompactionEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
-import fun.fengwk.kkstudio.harness.runtime.entry.LabelEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.RootEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -56,7 +52,6 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.math.BigDecimal;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
@@ -110,7 +105,7 @@ class ModelInvocationPlannerTest {
   }
 
   @Test
-  void plansUserToolAndCompactionDebt() {
+  void plansUserAndToolDebt() {
     RuntimeConfigSnapshot config = config("model-a", "system", List.of(), List.of(), disabled());
 
     ModelInvocationPlan userPlan =
@@ -129,18 +124,6 @@ class ModelInvocationPlannerTest {
         List.of(
             ProviderMessageRole.SYSTEM, ProviderMessageRole.ASSISTANT, ProviderMessageRole.TOOL),
         roles(toolPlan));
-
-    ModelInvocationPlan compactionPlan =
-        plan(
-            path(
-                new RootEntryPayload(),
-                config,
-                message(user("kept")),
-                new CompactionEntryPayload("summary", 3, 12, "{}")));
-    assertEquals(
-        List.of(ProviderMessageRole.SYSTEM, ProviderMessageRole.SYSTEM, ProviderMessageRole.USER),
-        roles(compactionPlan));
-    assertEquals("Session summary:\nsummary", text(compactionPlan.request().messages().get(1)));
   }
 
   @Test
@@ -155,13 +138,11 @@ class ModelInvocationPlannerTest {
             oldConfig,
             message(user("question")),
             newConfig,
-            custom(new AgentMessage(AgentMessageRole.SYSTEM, text("late-system"))),
-            new LabelEntryPayload("late-label"),
-            new BranchSummaryEntryPayload("late-branch"));
+            custom(new AgentMessage(AgentMessageRole.SYSTEM, text("late-system"))));
 
-    ModelInvocationPlan plan = PLANNER.plan(SESSION_ID, 7, path).orElseThrow();
+    ModelInvocationPlan plan = PLANNER.plan(SESSION_ID, 5, path).orElseThrow();
 
-    assertEquals(7, plan.sourceHeadEntryId());
+    assertEquals(5, plan.sourceHeadEntryId());
     assertEquals(oldConfig, plan.configSnapshot());
     assertEquals("model-old", plan.request().model().modelId());
     assertEquals(List.of(ProviderMessageRole.SYSTEM, ProviderMessageRole.USER), roles(plan));
@@ -170,7 +151,7 @@ class ModelInvocationPlannerTest {
   }
 
   @Test
-  void usesLatestEarlierConfigAndProjectsCanonicalSkillsToolsAndBranchSummary() {
+  void usesLatestEarlierConfigAndProjectsCanonicalSkillsAndTools() {
     ToolDescriptor zeta = tool("zeta", "z input");
     ToolDescriptor alpha = tool("alpha", "a input");
     RuntimeConfigSnapshot first = config("model-first", "first", List.of(), List.of(), disabled());
@@ -185,75 +166,20 @@ class ModelInvocationPlannerTest {
             disabled());
 
     ModelInvocationPlan plan =
-        plan(
-            path(
-                new RootEntryPayload(),
-                first,
-                latest,
-                new BranchSummaryEntryPayload("branch"),
-                message(user("question"))));
+        plan(path(new RootEntryPayload(), first, latest, message(user("question"))));
 
     assertEquals("model-latest", plan.request().model().modelId());
-    assertEquals(
-        List.of(ProviderMessageRole.SYSTEM, ProviderMessageRole.SYSTEM, ProviderMessageRole.USER),
-        roles(plan));
+    assertEquals(List.of(ProviderMessageRole.SYSTEM, ProviderMessageRole.USER), roles(plan));
     String system = text(plan.request().messages().get(0));
     assertTrue(system.startsWith("base\n\nThe following skills"));
     assertTrue(system.indexOf("<name>a&lt;</name>") < system.indexOf("<name>z&amp;</name>"));
     assertTrue(system.contains("<description>angle &gt;</description>"));
     assertTrue(system.contains("<description>quote &quot; and &apos;</description>"));
-    assertEquals("Branch summary:\nbranch", text(plan.request().messages().get(1)));
     assertEquals(
         List.of("alpha", "zeta"), plan.request().tools().stream().map(t -> t.name()).toList());
     assertEquals(
         new ToolDescriptorJsonCodec().encodeInputSchema(alpha.inputSchema()),
         plan.request().tools().get(0).inputSchemaJson());
-  }
-
-  @Test
-  void appliesLastEffectiveCompactionRetainedRangeAndDropsInvalidCompactions() {
-    RuntimeConfigSnapshot config = config("model-a", "system", List.of(), List.of(), disabled());
-    ModelInvocationPlan effective =
-        plan(
-            path(
-                new RootEntryPayload(),
-                config,
-                message(user("discarded")),
-                custom(assistant("discarded-answer")),
-                message(user("kept")),
-                new CompactionEntryPayload("summary", 5, 100, "{}"),
-                custom(new AgentMessage(AgentMessageRole.SYSTEM, text("after"))),
-                message(user("latest"))));
-
-    assertEquals(
-        List.of(
-            ProviderMessageRole.SYSTEM,
-            ProviderMessageRole.SYSTEM,
-            ProviderMessageRole.USER,
-            ProviderMessageRole.SYSTEM,
-            ProviderMessageRole.USER),
-        roles(effective));
-    assertEquals("Session summary:\nsummary", text(effective.request().messages().get(1)));
-    assertEquals("kept", text(effective.request().messages().get(2)));
-    assertEquals("after", text(effective.request().messages().get(3)));
-    assertEquals("latest", text(effective.request().messages().get(4)));
-
-    ModelInvocationPlan invalid =
-        plan(
-            path(
-                new RootEntryPayload(),
-                config,
-                message(user("original")),
-                custom(assistant("answer")),
-                new CompactionEntryPayload("invalid", 999, 100, "{}")));
-    assertEquals(
-        List.of(
-            ProviderMessageRole.SYSTEM, ProviderMessageRole.USER, ProviderMessageRole.ASSISTANT),
-        roles(invalid));
-    assertFalse(
-        invalid.request().messages().stream()
-            .map(ModelInvocationPlannerTest::text)
-            .anyMatch(value -> value.contains("invalid")));
   }
 
   @Test
@@ -300,8 +226,7 @@ class ModelInvocationPlannerTest {
     assertTrue(affinityPlan.request().cacheControl().affinityKey().startsWith("pc1-"));
     ModelInvocationPlan otherSessionPlan =
         PLANNER
-            .plan(
-                42, 3, path(42, new RootEntryPayload(), affinityConfig, message(user("question"))))
+            .plan(42, 3, path(new RootEntryPayload(), affinityConfig, message(user("question"))))
             .orElseThrow();
     assertNotEquals(
         affinityPlan.request().cacheControl().affinityKey(),
@@ -343,16 +268,12 @@ class ModelInvocationPlannerTest {
     List<SessionEntry> wrongFirst = List.of(valid.get(1), valid.get(2));
     assertThrows(IllegalArgumentException.class, () -> PLANNER.plan(SESSION_ID, 3, wrongFirst));
 
-    List<SessionEntry> crossSession = new ArrayList<>(valid);
-    crossSession.set(2, entry(3, 99, 2L, message(user("question"))));
-    assertThrows(IllegalArgumentException.class, () -> PLANNER.plan(SESSION_ID, 3, crossSession));
-
     List<SessionEntry> broken = new ArrayList<>(valid);
-    broken.set(2, entry(3, SESSION_ID, 1L, message(user("question"))));
+    broken.set(2, entry(3, 1L, message(user("question"))));
     assertThrows(IllegalArgumentException.class, () -> PLANNER.plan(SESSION_ID, 3, broken));
 
     List<SessionEntry> duplicate = new ArrayList<>(valid);
-    duplicate.set(2, entry(2, SESSION_ID, 2L, message(user("question"))));
+    duplicate.set(2, entry(2, 2L, message(user("question"))));
     assertThrows(IllegalArgumentException.class, () -> PLANNER.plan(SESSION_ID, 2, duplicate));
   }
 
@@ -427,21 +348,16 @@ class ModelInvocationPlannerTest {
   }
 
   private static List<SessionEntry> path(EntryPayload... payloads) {
-    return path(SESSION_ID, payloads);
-  }
-
-  private static List<SessionEntry> path(long sessionId, EntryPayload... payloads) {
     List<SessionEntry> entries = new ArrayList<>(payloads.length);
     for (int index = 0; index < payloads.length; index++) {
       long id = index + 1L;
-      entries.add(entry(id, sessionId, index == 0 ? null : id - 1, payloads[index]));
+      entries.add(entry(id, index == 0 ? null : id - 1, payloads[index]));
     }
     return List.copyOf(entries);
   }
 
-  private static SessionEntry entry(long id, long sessionId, Long parentId, EntryPayload payload) {
-    return new SessionEntry(
-        id, sessionId, parentId, payload.type(), payload, Instant.EPOCH.plusSeconds(id));
+  private static SessionEntry entry(long id, Long parentId, EntryPayload payload) {
+    return new SessionEntry(id, parentId, payload);
   }
 
   private static RuntimeConfigSnapshot config(

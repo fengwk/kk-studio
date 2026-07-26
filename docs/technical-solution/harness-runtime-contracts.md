@@ -40,18 +40,12 @@ Java 内部使用 `long`，API 边界编码为十进制字符串。Runtime 不�
 public record Session(
     long id,
     String title,
-    Long parentSessionId,
-    Long parentInvocationId,
-    Instant createdAt,
-    Instant updatedAt) {}
+    Instant createdAt) {}
 
 public record SessionEntry(
     long id,
-    long sessionId,
     Long parentEntryId,
-    EntryType type,
-    EntryPayload payload,
-    Instant createdAt) {}
+    EntryPayload payload) {}
 ```
 
 `EntryPayload` 由 runtime entry 包定义；`RuntimeEntryPayloadJsonCodec` 是 durable JSON 边界。Session 不持有 Thread；已提交 Entry 不允许 update/delete。
@@ -129,7 +123,7 @@ public record ContinuationRef(ExecutionTarget owner, ExecutionTarget blocker) {}
 
 ### 3.2 Entry payload JSON
 
-`RuntimeEntryPayloadJsonCodec` 支持 `ROOT/RUNTIME_CONFIG/MESSAGE/CUSTOM_MESSAGE/COMPACTION/ASSISTANT_ERROR/LABEL/BRANCH_SUMMARY`。exact field set；String API 拒绝 duplicate field 与 trailing token。Message content discriminator：`text/image/audio/thinking/json/tool_call/tool_result/artifact`。
+`RuntimeEntryPayloadJsonCodec` 支持 `ROOT/RUNTIME_CONFIG/MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ERROR`。exact field set；String API 拒绝 duplicate field 与 trailing token。Message content discriminator：`text/image/audio/thinking/json/tool_call/tool_result/artifact`。
 
 ### 3.3 ModelInvocationPlanner
 

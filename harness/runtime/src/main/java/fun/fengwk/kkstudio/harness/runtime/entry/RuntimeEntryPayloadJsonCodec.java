@@ -38,12 +38,11 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 最终 8 类 Runtime Entry payload 的严格、确定性 JSON codec。
+ * 最终 5 类 Runtime Entry payload 的严格、确定性 JSON codec。
  *
  * <p>直接对应 {@link EntryType}，仅支持 {@link RootEntryPayload} / {@link RuntimeConfigSnapshot} / {@link
- * MessageEntryPayload} / {@link CustomMessageEntryPayload} / {@link CompactionEntryPayload} /
- * {@link AssistantErrorEntryPayload} / {@link LabelEntryPayload} / {@link
- * BranchSummaryEntryPayload}；其它 {@link EntryPayload} 实现显式拒绝。
+ * MessageEntryPayload} / {@link CustomMessageEntryPayload} / {@link AssistantErrorEntryPayload}；其它
+ * {@link EntryPayload} 实现显式拒绝。
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
@@ -62,11 +61,7 @@ public final class RuntimeEntryPayloadJsonCodec {
 
   private static final Set<String> MESSAGE_FIELDS = orderedSet("message", "assistantMetadata");
   private static final Set<String> CUSTOM_MESSAGE_FIELDS = orderedSet("message");
-  private static final Set<String> COMPACTION_FIELDS =
-      orderedSet("summary", "firstKeptEntryId", "tokensBefore", "detailsJson");
   private static final Set<String> ASSISTANT_ERROR_FIELDS = orderedSet("error");
-  private static final Set<String> LABEL_FIELDS = orderedSet("label");
-  private static final Set<String> BRANCH_SUMMARY_FIELDS = orderedSet("summary");
   private static final Set<String> ROOT_FIELDS = orderedSet();
 
   private static final Set<String> TEXT_CONTENT_FIELDS = orderedSet("type", "text");
@@ -135,17 +130,8 @@ public final class RuntimeEntryPayloadJsonCodec {
     if (payload instanceof CustomMessageEntryPayload value) {
       return encodeCustomMessagePayload(value);
     }
-    if (payload instanceof CompactionEntryPayload value) {
-      return encodeCompaction(value);
-    }
     if (payload instanceof AssistantErrorEntryPayload value) {
       return encodeAssistantError(value);
-    }
-    if (payload instanceof LabelEntryPayload value) {
-      return encodeLabel(value);
-    }
-    if (payload instanceof BranchSummaryEntryPayload value) {
-      return encodeBranchSummary(value);
     }
     throw new IllegalArgumentException(
         "unsupported entry payload: " + payload.getClass().getName());
@@ -176,10 +162,7 @@ public final class RuntimeEntryPayloadJsonCodec {
       case RUNTIME_CONFIG -> CONFIG_CODEC.decodeNode(value);
       case MESSAGE -> decodeMessagePayload(value);
       case CUSTOM_MESSAGE -> decodeCustomMessagePayload(value);
-      case COMPACTION -> decodeCompaction(value);
       case ASSISTANT_ERROR -> decodeAssistantError(value);
-      case LABEL -> decodeLabel(value);
-      case BRANCH_SUMMARY -> decodeBranchSummary(value);
     };
   }
 
@@ -202,31 +185,9 @@ public final class RuntimeEntryPayloadJsonCodec {
     return node;
   }
 
-  private static ObjectNode encodeCompaction(CompactionEntryPayload value) {
-    validateStrictJsonObject(value.detailsJson(), "COMPACTION.detailsJson");
-    ObjectNode node = NODES.objectNode();
-    node.put("summary", value.summary());
-    node.put("firstKeptEntryId", value.firstKeptEntryId());
-    node.put("tokensBefore", value.tokensBefore());
-    node.put("detailsJson", value.detailsJson());
-    return node;
-  }
-
   private static ObjectNode encodeAssistantError(AssistantErrorEntryPayload value) {
     ObjectNode node = NODES.objectNode();
     node.set("error", ERROR_CODEC.encodeNode(value.error()));
-    return node;
-  }
-
-  private static ObjectNode encodeLabel(LabelEntryPayload value) {
-    ObjectNode node = NODES.objectNode();
-    node.put("label", value.label());
-    return node;
-  }
-
-  private static ObjectNode encodeBranchSummary(BranchSummaryEntryPayload value) {
-    ObjectNode node = NODES.objectNode();
-    node.put("summary", value.summary());
     return node;
   }
 
@@ -256,35 +217,11 @@ public final class RuntimeEntryPayloadJsonCodec {
     return new CustomMessageEntryPayload(decodeMessage(node.get("message")));
   }
 
-  private static CompactionEntryPayload decodeCompaction(JsonNode value) {
-    ObjectNode node = requireObject(value, "COMPACTION");
-    requireExactFields(node, COMPACTION_FIELDS, "COMPACTION");
-    String summary = requiredText(node, "summary", "COMPACTION");
-    long firstKeptEntryId = requiredPositiveLong(node, "firstKeptEntryId", "COMPACTION");
-    int tokensBefore = requiredNonNegativeInt(node, "tokensBefore", "COMPACTION");
-    String detailsJson = requiredStrictJsonObjectString(node, "detailsJson", "COMPACTION");
-    return new CompactionEntryPayload(summary, firstKeptEntryId, tokensBefore, detailsJson);
-  }
-
   private static AssistantErrorEntryPayload decodeAssistantError(JsonNode value) {
     ObjectNode node = requireObject(value, "ASSISTANT_ERROR");
     requireExactFields(node, ASSISTANT_ERROR_FIELDS, "ASSISTANT_ERROR");
     ModelInvocationError error = ERROR_CODEC.decodeNode(node.get("error"));
     return new AssistantErrorEntryPayload(error);
-  }
-
-  private static LabelEntryPayload decodeLabel(JsonNode value) {
-    ObjectNode node = requireObject(value, "LABEL");
-    requireExactFields(node, LABEL_FIELDS, "LABEL");
-    String label = requiredText(node, "label", "LABEL");
-    return new LabelEntryPayload(label);
-  }
-
-  private static BranchSummaryEntryPayload decodeBranchSummary(JsonNode value) {
-    ObjectNode node = requireObject(value, "BRANCH_SUMMARY");
-    requireExactFields(node, BRANCH_SUMMARY_FIELDS, "BRANCH_SUMMARY");
-    String summary = requiredText(node, "summary", "BRANCH_SUMMARY");
-    return new BranchSummaryEntryPayload(summary);
   }
 
   // ---------- AgentMessage / content encoders & decoders ----------
@@ -591,22 +528,6 @@ public final class RuntimeEntryPayloadJsonCodec {
       throw new IllegalArgumentException(context + "." + field + " must be text");
     }
     return value.textValue();
-  }
-
-  private static long requiredPositiveLong(ObjectNode node, String field, String context) {
-    JsonNode value = node.get(field);
-    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() <= 0) {
-      throw new IllegalArgumentException(context + "." + field + " must be a positive integer");
-    }
-    return value.longValue();
-  }
-
-  private static int requiredNonNegativeInt(ObjectNode node, String field, String context) {
-    JsonNode value = node.get(field);
-    if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < 0) {
-      throw new IllegalArgumentException(context + "." + field + " must be a non-negative integer");
-    }
-    return value.intValue();
   }
 
   private static long requiredNonNegativeLong(ObjectNode node, String field, String context) {

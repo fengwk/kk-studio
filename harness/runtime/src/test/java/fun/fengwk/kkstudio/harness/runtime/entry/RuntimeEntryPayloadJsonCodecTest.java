@@ -68,11 +68,11 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 8 类最终 Runtime Entry payload 的契约与 codec 测试。覆盖：每类 canonical round-trip（含 message 含全部 content 类型与完整
+ * 5 类最终 Runtime Entry payload 的契约与 codec 测试。覆盖：每类 canonical round-trip（含 message 含全部 content 类型与完整
  * assistant metadata），encode/decode 严格对称（raw {@code argumentsJson} / {@code detailsJson} / {@code
  * json} 校验 + tool-result 嵌套拒绝），Node/ObjectMapper 严格拒绝路径（unknown / missing / wrong type / null /
  * trailing / duplicate / unknown enum / unknown discriminator），构造器不变量的传播（ASSISTANT role ↔ metadata
- * ↔ tool-call / TOOL_CALLS、compaction 数值、assistant-error kind+message），null guard。
+ * ↔ tool-call / TOOL_CALLS、assistant-error kind+message），null guard。
  */
 class RuntimeEntryPayloadJsonCodecTest {
 
@@ -80,8 +80,6 @@ class RuntimeEntryPayloadJsonCodecTest {
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
   private static final String MESSAGE_FIXTURE =
       "/fun/fengwk/kkstudio/harness/runtime/entry/runtime-entry-payload-message.json";
-  private static final String COMPACTION_FIXTURE =
-      "/fun/fengwk/kkstudio/harness/runtime/entry/runtime-entry-payload-compaction.json";
   private static final String ASSISTANT_ERROR_FIXTURE =
       "/fun/fengwk/kkstudio/harness/runtime/entry/runtime-entry-payload-assistant-error.json";
   private static final RuntimeConfigJsonCodec CONFIG_CODEC = new RuntimeConfigJsonCodec();
@@ -148,20 +146,6 @@ class RuntimeEntryPayloadJsonCodecTest {
   }
 
   @Test
-  void compactionCanonicalFixtureIsBitIdenticalAndRoundTrips() {
-    ObjectNode canonical = canonicalNode(COMPACTION_FIXTURE);
-    String expectedJson = canonical.toString();
-    CompactionEntryPayload payload =
-        (CompactionEntryPayload) codec.decodeNode(EntryType.COMPACTION, canonical);
-
-    assertEquals(expectedJson, codec.encode(payload));
-    assertEquals(payload, codec.decode(EntryType.COMPACTION, expectedJson));
-    assertEquals("budget summary", payload.summary());
-    assertEquals(42L, payload.firstKeptEntryId());
-    assertEquals(1024, payload.tokensBefore());
-  }
-
-  @Test
   void assistantErrorCanonicalShapeMatchesFixture() {
     ObjectNode canonical = canonicalNode(ASSISTANT_ERROR_FIXTURE);
     String expectedJson = canonical.toString();
@@ -180,22 +164,6 @@ class RuntimeEntryPayloadJsonCodecTest {
     assertTrue(canonical.has("error"));
     ObjectNode error = (ObjectNode) canonical.get("error");
     assertEquals(Set.of("kind", "message"), fieldNames(error));
-  }
-
-  @Test
-  void labelCanonicalIsSingleField() {
-    LabelEntryPayload payload = new LabelEntryPayload("checkpoint");
-    String canonical = "{\"label\":\"checkpoint\"}";
-    assertEquals(canonical, codec.encode(payload));
-    assertEquals(payload, codec.decode(EntryType.LABEL, canonical));
-  }
-
-  @Test
-  void branchSummaryCanonicalIsSingleField() {
-    BranchSummaryEntryPayload payload = new BranchSummaryEntryPayload("branch closed");
-    String canonical = "{\"summary\":\"branch closed\"}";
-    assertEquals(canonical, codec.encode(payload));
-    assertEquals(payload, codec.decode(EntryType.BRANCH_SUMMARY, canonical));
   }
 
   @Test
@@ -324,24 +292,10 @@ class RuntimeEntryPayloadJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class, () -> codec.decodeNode(EntryType.CUSTOM_MESSAGE, c));
 
-    ObjectNode compact = canonicalNode(COMPACTION_FIXTURE);
-    compact.put("foo", 1);
-    assertThrows(
-        IllegalArgumentException.class, () -> codec.decodeNode(EntryType.COMPACTION, compact));
-
     ObjectNode err = canonicalNode(ASSISTANT_ERROR_FIXTURE);
     err.put("retry", true);
     assertThrows(
         IllegalArgumentException.class, () -> codec.decodeNode(EntryType.ASSISTANT_ERROR, err));
-
-    ObjectNode label = NODES.objectNode().put("label", "x");
-    label.put("extra", "x");
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(EntryType.LABEL, label));
-
-    ObjectNode branch = NODES.objectNode().put("summary", "x");
-    branch.put("extra", 1);
-    assertThrows(
-        IllegalArgumentException.class, () -> codec.decodeNode(EntryType.BRANCH_SUMMARY, branch));
 
     ObjectNode root = NODES.objectNode().put("x", 1);
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(EntryType.ROOT, root));
@@ -485,24 +439,11 @@ class RuntimeEntryPayloadJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class, () -> codec.decodeNode(EntryType.MESSAGE, wrongDecimal));
 
-    ObjectNode longOverflow = canonicalNode(COMPACTION_FIXTURE);
-    longOverflow.put("firstKeptEntryId", new BigInteger("922337203685477580812345678901234567890"));
-    assertThrows(
-        IllegalArgumentException.class, () -> codec.decodeNode(EntryType.COMPACTION, longOverflow));
-
-    ObjectNode intOverflow = canonicalNode(COMPACTION_FIXTURE);
-    intOverflow.put("tokensBefore", Long.MAX_VALUE);
-    assertThrows(
-        IllegalArgumentException.class, () -> codec.decodeNode(EntryType.COMPACTION, intOverflow));
-
     ObjectNode usageOverflow = canonicalNode(MESSAGE_FIXTURE);
     ((ObjectNode) usageOverflow.get("assistantMetadata").get("usage"))
         .put("inputTokens", new BigInteger("922337203685477580812345678901234567890"));
     assertThrows(
         IllegalArgumentException.class, () -> codec.decodeNode(EntryType.MESSAGE, usageOverflow));
-
-    assertThrows(
-        IllegalArgumentException.class, () -> codec.decode(EntryType.LABEL, "{\"label\":1}"));
   }
 
   // ---------- Reject: raw JSON (argumentsJson / detailsJson / json) ----------
@@ -526,7 +467,7 @@ class RuntimeEntryPayloadJsonCodecTest {
   }
 
   @Test
-  void rejectsRawJsonWrongObjectTrailingDuplicateInToolResultAndCompaction() {
+  void rejectsRawJsonWrongObjectTrailingDuplicateInToolResult() {
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.encode(new MessageEntryPayload(toolMessageWithRawDetails("[]"))));
@@ -534,16 +475,6 @@ class RuntimeEntryPayloadJsonCodecTest {
         IllegalArgumentException.class,
         () ->
             codec.encode(new MessageEntryPayload(toolMessageWithRawDetails("{\"a\":1,\"a\":2}"))));
-
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(EntryType.COMPACTION, compactionJson("[]")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(EntryType.COMPACTION, compactionJson("{} extra")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(EntryType.COMPACTION, compactionJson("{\"a\":1,\"a\":2}")));
   }
 
   @Test
@@ -662,38 +593,13 @@ class RuntimeEntryPayloadJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(EntryType.MESSAGE, emptyTool));
   }
 
-  @Test
-  void rejectsCompactionInvariants() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(EntryType.COMPACTION, compactionJsonWithSummary("")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(EntryType.COMPACTION, compactionJsonWithFirstKept(0)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(EntryType.COMPACTION, compactionJsonWithTokens(-1)));
-  }
-
-  @Test
-  void rejectsLabelAndBranchSummaryBlank() {
-    assertThrows(
-        IllegalArgumentException.class, () -> codec.decode(EntryType.LABEL, "{\"label\":\"\"}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(EntryType.BRANCH_SUMMARY, "{\"summary\":\" \"}"));
-  }
-
   // ---------- Strict mapper enforcement ----------
 
   @Test
   void rejectsTopLevelTrailingAndDuplicateFields() {
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(EntryType.ROOT, "{} trailing"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(EntryType.LABEL, "{\"label\":\"x\"} trailing"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(EntryType.LABEL, "{\"label\":\"x\",\"label\":\"y\"}"));
+        IllegalArgumentException.class, () -> codec.decode(EntryType.ROOT, "{\"x\":1,\"x\":2}"));
 
     String nestedDup =
         "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"x\",\"text\":\"y\"}]},"
@@ -709,12 +615,12 @@ class RuntimeEntryPayloadJsonCodecTest {
 
   @Test
   void rejectsMalformedRootJson() {
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(EntryType.LABEL, ""));
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(EntryType.LABEL, "{"));
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(EntryType.LABEL, "[]"));
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(EntryType.LABEL, "null"));
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(EntryType.LABEL, "\"x\""));
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(EntryType.LABEL, "42"));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(EntryType.ROOT, ""));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(EntryType.ROOT, "{"));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(EntryType.ROOT, "[]"));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(EntryType.ROOT, "null"));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(EntryType.ROOT, "\"x\""));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(EntryType.ROOT, "42"));
     assertThrows(
         IllegalArgumentException.class, () -> codec.decodeNode(EntryType.ROOT, NODES.arrayNode()));
   }
@@ -726,9 +632,9 @@ class RuntimeEntryPayloadJsonCodecTest {
     assertThrows(NullPointerException.class, () -> codec.encode(null));
     assertThrows(NullPointerException.class, () -> codec.encodeNode(null));
     assertThrows(NullPointerException.class, () -> codec.decode(null, "{}"));
-    assertThrows(NullPointerException.class, () -> codec.decode(EntryType.LABEL, null));
+    assertThrows(NullPointerException.class, () -> codec.decode(EntryType.ROOT, null));
     assertThrows(NullPointerException.class, () -> codec.decodeNode(null, NODES.objectNode()));
-    assertThrows(NullPointerException.class, () -> codec.decodeNode(EntryType.LABEL, null));
+    assertThrows(NullPointerException.class, () -> codec.decodeNode(EntryType.ROOT, null));
   }
 
   // ---------- Determinism ----------
@@ -832,37 +738,6 @@ class RuntimeEntryPayloadJsonCodecTest {
         new ToolResultMessageContent(
             "c", "t", List.of(new TextMessageContent("x")), false, rawDetails);
     return new AgentMessage(AgentMessageRole.TOOL, List.of(result));
-  }
-
-  private static String compactionJson(String detailsJson) {
-    return "{\"summary\":\"s\",\"firstKeptEntryId\":1,\"tokensBefore\":0,"
-        + "\"detailsJson\":"
-        + quote(detailsJson)
-        + "}";
-  }
-
-  private static String compactionJsonWithSummary(String summary) {
-    return "{\"summary\":"
-        + quote(summary)
-        + ",\"firstKeptEntryId\":1,\"tokensBefore\":0,"
-        + "\"detailsJson\":\"{}\"}";
-  }
-
-  private static String compactionJsonWithFirstKept(long id) {
-    return "{\"summary\":\"s\",\"firstKeptEntryId\":"
-        + id
-        + ",\"tokensBefore\":0,"
-        + "\"detailsJson\":\"{}\"}";
-  }
-
-  private static String compactionJsonWithTokens(int tokens) {
-    return "{\"summary\":\"s\",\"firstKeptEntryId\":1,\"tokensBefore\":"
-        + tokens
-        + ",\"detailsJson\":\"{}\"}";
-  }
-
-  private static String quote(String value) {
-    return "\"" + value + "\"";
   }
 
   private static RuntimeConfigSnapshot canonicalConfig() {

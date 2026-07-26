@@ -7,7 +7,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSource;
-import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.entry.RootEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.reconcile.ReconcileTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
@@ -73,12 +72,9 @@ class SessionCommandCoordinatorTest {
       lastTitle = title;
       lastConfig = initialConfig;
       lastNow = now;
-      session = new Session(10L, title, null, null, now, now);
-      SessionEntry root =
-          new SessionEntry(11L, session.id(), null, EntryType.ROOT, new RootEntryPayload(), now);
-      SessionEntry config =
-          new SessionEntry(
-              12L, session.id(), root.id(), EntryType.RUNTIME_CONFIG, initialConfig, now);
+      session = new Session(10L, title, now);
+      SessionEntry root = new SessionEntry(11L, null, new RootEntryPayload());
+      SessionEntry config = new SessionEntry(12L, root.id(), initialConfig);
       return new SessionCreation(session, root, config);
     }
 

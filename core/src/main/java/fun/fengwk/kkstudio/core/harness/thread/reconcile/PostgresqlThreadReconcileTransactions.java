@@ -424,11 +424,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
             row ->
                 new SessionEntry(
                     row.getId(),
-                    row.getSessionId(),
                     row.getParentEntryId(),
-                    EntryType.valueOf(row.getEntryType()),
-                    ENTRY_CODEC.decode(EntryType.valueOf(row.getEntryType()), row.getPayloadJson()),
-                    row.getCreatedAt().toInstant()))
+                    ENTRY_CODEC.decode(
+                        EntryType.valueOf(row.getEntryType()), row.getPayloadJson())))
         .toList();
   }
 

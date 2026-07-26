@@ -1,12 +1,22 @@
 package fun.fengwk.kkstudio.harness.runtime.entry;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-/** EntryType ROOT 判定测试。 */
+import java.util.List;
+
+/** EntryType 集合与 ROOT 判定测试。 */
 class EntryTypeTest {
+
+  @Test
+  void containsOnlySupportedTypes() {
+    assertEquals(
+        List.of("ROOT", "RUNTIME_CONFIG", "MESSAGE", "CUSTOM_MESSAGE", "ASSISTANT_ERROR"),
+        List.of(EntryType.values()).stream().map(Enum::name).toList());
+  }
 
   @Test
   void rootHelper() {
