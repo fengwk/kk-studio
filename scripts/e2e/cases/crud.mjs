@@ -312,8 +312,8 @@ registerCase({
 registerCase({
   id: 'crud.chat.lifecycle',
   level: 'L1',
-  title: 'Chat 创建/更新/删除与 session attach/detach',
-  docs: `POST/PUT/DELETE chat；attach/detach session；删后 404`,
+  title: 'Chat 创建/更新/删除',
+  docs: `POST/PUT/DELETE chat；空白 title 400；删后 404。Chat 不持有 Session。`,
   async run(ctx) {
     const { json: agentsJson } = await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=10')
     const agent = pageResults(agentsJson)[0]
@@ -333,13 +333,6 @@ registerCase({
       { status: 400, messageIncludes: /title.*blank/i },
     )
 
-    const { json: sJson } = await ctx.call('POST', '/api/sessions', {})
-    const sessionId = String(envelopeData(sJson).sessionId)
-    await ctx.call('POST', `/api/chats/${chatId}/sessions`, { sessionId })
-    const { json: sessionsJson } = await ctx.call('GET', `/api/chats/${chatId}/sessions`)
-    const sessions = envelopeData(sessionsJson) || []
-    assert(sessions.some((s) => String(s.sessionId || s.id) === sessionId), JSON.stringify(sessions))
-    await ctx.call('DELETE', `/api/chats/${chatId}/sessions/${sessionId}`)
     await ctx.call('DELETE', `/api/chats/${chatId}`)
     await expectHttpError(() => ctx.call('GET', `/api/chats/${chatId}`), { status: 404 })
   },

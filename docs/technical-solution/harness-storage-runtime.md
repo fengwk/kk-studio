@@ -30,7 +30,7 @@ Durable entity id 使用 PostgreSQL sequence `kk_studio_id_seq`，由 Store/IdGe
 
 ### 4.1 `harness_session`
 
-`id`、`title`、`main_thread_id`、可选 `parent_session_id`/`parent_invocation_id`、时间戳。`parent_invocation_id` 非空时唯一。Child Session 产品工作流当前未实现。
+`id`、`title`、可选 `parent_session_id`/`parent_invocation_id`、时间戳。`parent_invocation_id` 非空时唯一。Session 只组织一份 Entry Tree，不持有 Thread。Child Session 产品工作流当前未实现。
 
 ### 4.2 `harness_entry`
 
@@ -43,25 +43,33 @@ Durable entity id 使用 PostgreSQL sequence `kk_studio_id_seq`，由 Store/IdGe
 
 ### 4.3 `harness_thread`
 
-`id`、`session_id`、`head_entry_id`、`input_sequence`、`runnable`、`execution_epoch`、`processor_token`/`processor_until`、时间戳。
+`id`、可空 `head_entry_id`、`input_sequence`、`runnable`、`execution_epoch`、`processor_token`/`processor_until`、时间戳。
 
-不保存 Agent/Model/Variant、YOLO、retry、waiting reason 或流式状态。
+`head_entry_id` 是指向全局 Entry id 空间的单列 FK，可空（UNBOUND）；跨 Session 归属由 Thread command 在上游校验。Thread 不保存 `session_id`：当前 Session 由 head Entry 派生。
+
+也不保存 Agent/Model/Variant、YOLO、retry、waiting reason 或流式状态。
 
 ### 4.4 `harness_thread_input`
 
 `id`、`thread_id`、`sequence`、`input_type`、`payload`、幂等键、`status`、时间。
 
-唯一：`(thread_id, sequence)`、幂等键。enqueue、sequence 分配与 `runnable=true` 同事务。
+唯一：`(thread_id, sequence)`、幂等键。enqueue、sequence 分配与 `runnable=true` 同事务；UNBOUND Thread 拒绝入队。
 
 ### 4.5 `harness_model_invocation`
 
 source head、execution epoch、完整 `ProviderRequest` snapshot、状态、worker lease、deadline/activity、retry、terminal response/error、`applied_at`。
 
+唯一 `(thread_id, source_head_entry_id, execution_epoch)`。
+
 ### 4.6 `harness_tool_invocation`
 
-Assistant Entry、ordinal、ToolCall、descriptor/arguments、`PLATFORM/ENVIRONMENT`、worker lease、deadline/retry、terminal result/error、`applied_at`。
+Assistant Entry、ordinal、ToolCall、descriptor/arguments、`PLATFORM/ENVIRONMENT`、execution epoch、worker lease、deadline/retry、terminal result/error、`applied_at`。
+
+唯一 `(thread_id, assistant_entry_id, execution_epoch, ordinal)`。
 
 不保存 permission 专用列；approval 走 `harness_interaction`。
+
+Model/Tool Invocation 与 `harness_model_usage` 的 Thread 归属都是单列 `thread_id` FK；同表的 `session_id` 只作为约束载体，保证所引用的 Entry 与其属于同一 Session。
 
 ### 4.7 `harness_interaction`
 
@@ -91,9 +99,25 @@ where id = :thread_id;
 
 Model/Tool retry 到期只 dispatch 对应 Invocation，terminal 前不必激活 Thread。
 
-Thread claim 条件：`runnable=true` 且 processor lease 为空/过期。claim 写新 token/until，不递增 `execution_epoch`。成功 suspend/create ModelInvocation/quiesce 时清 lease 并 `runnable=false`；异常 release 保留 `runnable=true`。
+Thread claim 条件：`runnable=true`、`head_entry_id is not null` 且 processor lease 为空/过期。claim 写新 token/until，不递增 `execution_epoch`。成功 suspend/create ModelInvocation/quiesce 时清 lease 并 `runnable=false`；异常 release 保留 `runnable=true`。
 
 quiesce 前锁 Thread 并 recheck：queued Input、terminal-unapplied Invocation、blocker、response debt。
+
+Stop 与 head 重定位（bootstrap / rebind / unbind）是仅有的两条递增 `execution_epoch` 的路径，均先锁 Thread 行并 CAS `expectedExecutionEpoch`：
+
+```sql
+update harness_thread
+set head_entry_id = :head_entry_id,
+    execution_epoch = :expected_epoch + 1,
+    processor_token = null,
+    processor_until = null,
+    runnable = false,
+    updated_at = greatest(updated_at, :now)
+where id = :thread_id
+  and execution_epoch = :expected_epoch;
+```
+
+head 重定位额外要求 Thread 逻辑静止：无有效 processor lease、`runnable=false`、无 QUEUED Input、当前 epoch 无非终态 Model/Tool Invocation、无相关 OPEN Interaction。Stop 会取消 queued Input、可安全取消的 Invocation 与该 Thread 的 OPEN Interaction，因此逻辑 stop 之后即满足上述条件。epoch 递增后，旧代际 worker 的 terminal 写入均因 epoch fencing 失败。
 
 ## 6. Redis Pub/Sub wake
 
@@ -184,7 +208,7 @@ Thread
 
 ## 11. Recovery
 
-1. 扫描 `runnable=true` 且 processor lease 为空/过期的 Thread
+1. 扫描 `runnable=true`、`head_entry_id is not null` 且 processor lease 为空/过期的 Thread
 2. 各 Invocation worker 扫描过期 lease、due retry 与 timeout
 3. 重新发布 Redis hint 或本地 schedule
 
@@ -200,7 +224,7 @@ Recovery SQL 不 join Interaction/Tool/Model 来推导 runnable；完成事务�
 | Model worker 在 Provider I/O 后失联 | RUNNING lease 过期后 `UNKNOWN` |
 | QUEUED/RETRY_WAIT signal 丢失 | due scan 重新 dispatch |
 | terminal callback 重复 | invocation token + terminal CAS |
-| Stop 与 terminal 并发 | execution epoch fencing |
+| Stop / head 重定位与 terminal 并发 | execution epoch fencing |
 | notify 先于 commit | 禁止；只允许 afterCommit |
 | realtime sink 失败 | 不影响 durable terminal |
 
@@ -214,7 +238,7 @@ Recovery SQL 不 join Interaction/Tool/Model 来推导 runnable；完成事务�
 ### 13.2 PostgreSQL Integration
 
 - Testcontainers PostgreSQL
-- recursive path、enqueue/quiesce、Stop epoch、recovery 查询
+- recursive path、enqueue/quiesce、Stop 与 head 重定位的 epoch CAS、recovery 查询
 
 ### 13.3 Redis Integration
 

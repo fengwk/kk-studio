@@ -70,12 +70,12 @@ frontend → web APIs (via shared/api)
 
 | 事实 | 职责 |
 | --- | --- |
-| **Chat** | 持久会话集合、可选默认 Agent；通过 `ChatSession` 关联 Session；不保存 Pane |
-| **Pane** | 浏览器本地 Chat 工作区姿势：布局、焦点与各面板 `threadId` 仅存 localStorage |
-| **Session** | 共享 append-only Entry Tree、稳定 `mainThreadId`；schema 可表达父子 Session，但 Child Session/task 产品工作流未实现 |
+| **Chat** | 持久 Chat 集合与可选默认 Agent；不持有 Session/Thread，也不保存 Pane |
+| **Pane** | 浏览器本地 Chat 工作区姿势：布局、焦点与各面板可空 `threadId` 仅存 localStorage |
+| **Session** | 共享 append-only Entry Tree 的边界，不持有 Thread；schema 可表达父子 Session，但 Child Session/task 产品工作流未实现 |
 | **Entry** | 语义持久真源：消息、`RUNTIME_CONFIG`、Tool Result、Compaction 等 |
-| **HarnessThread** | durable Branch actor：`sessionId`、`headEntryId`、input sequence、`runnable`、execution epoch、processor lease |
-| **Branch(thread)** | 由 root→`headEntryId` 路径派生，不独立持久化 |
+| **HarnessThread** | 可复用 durable runtime process：可空 `headEntryId`、input sequence、`runnable`、execution epoch、processor lease；当前 Session 由 head Entry 派生 |
+| **Branch(thread)** | 不是独立实体：把某个 Thread 的 head 重定位到历史 Entry 即继续该分支；路径由 root→`headEntryId` 派生 |
 | **ThreadInput** | 多生产者有序 mailbox：消息与配置命令；幂等键；TURN_BOUNDARY harvest |
 | **ModelInvocation** | 冻结 ProviderRequest 的 durable Provider 调用 |
 | **ToolInvocation** | 工具 lease、结果与终态；`PLATFORM`/`ENVIRONMENT` 路由；ID 是副作用幂等边界 |
@@ -84,7 +84,9 @@ frontend → web APIs (via shared/api)
 | **Usage / Cost** | 每 Assistant Entry 一条不可变账本（`harness_model_usage`） |
 | **Live Environment** | 当前 Daemon 连接发现的内存工具/Skill 元数据；按名称唯一，不持久化 |
 
-前端 AI 从 Chat 卡片进入本地 Pane 工作区。空 Pane 首发：`create Session -> attach Chat -> SET_AGENT -> USER_MESSAGE`。前端以 Thread 路径 Entries 为历史基线，未物化的 `USER_MESSAGE` / `CUSTOM_MESSAGE` inputs 为装饰队列；流式覆盖来自 Redis realtime SSE（事件名 `realtime`，stream-id cursor）。Session 入口始终打开稳定 Main Thread。
+前端 AI 从 Chat 卡片进入本地 Pane 工作区。空 Pane 首发：`createThread -> bootstrap -> USER_MESSAGE`。前端以 Thread 路径 Entries 为历史基线，未物化的 `USER_MESSAGE` / `CUSTOM_MESSAGE` inputs 为装饰队列；流式覆盖来自 Redis realtime SSE（事件名 `realtime`，stream-id cursor）。
+
+Thread head 的外部重定位（bootstrap / rebind / unbind）要求 Thread 逻辑静止，并以 `expectedExecutionEpoch` 做 CAS fencing：成功后 epoch+1 并清 lease/runnable，旧 epoch 的执行结果不再能写入。
 
 执行由 `ThreadReconciler` 推进 Entry/head；`ModelWorker` / 统一 `ToolWorker` 只写 Invocation 事实。提交、Stop、Interaction 解决、Invocation terminal 后 afterCommit wake；低频 recovery 扫描 `runnable` 与过期 lease。
 

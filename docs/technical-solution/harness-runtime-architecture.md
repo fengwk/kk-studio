@@ -86,7 +86,7 @@ harness_model_usage
 
 ### 3.1 Session 与 Entry Tree
 
-Session 是 append-only Entry Tree 的边界，持有稳定 `mainThreadId`。schema 允许 `parentSessionId`/`parentInvocationId` 表示父子 Session，但当前**未实现** Child Session / task 产品工作流。
+Session 只组织一份 append-only Entry Tree，不持有 Thread。schema 允许 `parentSessionId`/`parentInvocationId` 表示父子 Session，但当前**未实现** Child Session / task 产品工作流。
 
 Entry 是 transcript 与运行配置的唯一语义事实，类型：
 
@@ -105,27 +105,30 @@ Entry 是 transcript 与运行配置的唯一语义事实，类型：
 
 ### 3.2 Thread
 
-`HarnessThread` 是 Entry Tree 上某个 head 的 durable actor 控制面，只保存：
+`HarnessThread` 是可在 Session Entry Tree 之间复用的 durable runtime process，只保存：
 
-- Session 与当前 `headEntryId`
+- 可空 `headEntryId`
 - mailbox `inputSequence`
 - `runnable`
 - `executionEpoch`
 - processor lease（token/until）
 - 创建与更新时间
 
-不保存 Agent/Model 投影、system prompt、tools/skills、流式状态或组合运行态。
+Thread 不保存 Session 归属：当前 Session 由 head Entry 派生，`headEntryId` 为空即 UNBOUND。也不保存 Agent/Model 投影、system prompt、tools/skills、流式状态或组合运行态。
 
-展示状态由 query 从 durable facts 派生（`DerivedThreadStatus`），优先级固定为 `RUNNING > WAITING > RUNNABLE > IDLE`：
+展示状态由 query 从 durable facts 派生（`DerivedThreadStatus`），优先级固定为 `RUNNING > WAITING > RUNNABLE > UNBOUND/IDLE`：
 
 ```text
 有效 processor lease                                      -> RUNNING
 open Interaction / 同 epoch 非终态 Model|Tool / QUEUED input -> WAITING
 runnable=true 且非上述                                    -> RUNNABLE
+上述皆否且 headEntryId 为空                                -> UNBOUND
 其他                                                      -> IDLE
 ```
 
 Invocation 自动重试等待落在非终态 Model/Tool 事实内，因此 Thread 展示为 `WAITING`；重试细节从 Invocation facts 查询。
+
+Branch 不是独立实体：从历史 Entry 继续对话，就是把某个 Thread 的 head 重定位到该 Entry。
 
 ### 3.3 ThreadInput
 
@@ -190,14 +193,14 @@ Root activity 由 durable facts 即时查询投影。
 
 | 写者 | 可写 | 不可写 |
 | --- | --- | --- |
-| Session/Thread command coordinator | 新建 Session/Main Thread、初始 ROOT/RUNTIME_CONFIG Entry、Branch head 或 typed Input | 推进已有 Thread 的语义 head |
+| Session/Thread command coordinator | 新建 Session/Thread、初始 ROOT/RUNTIME_CONFIG Entry、静止 Thread 的 head 重定位、typed Input | 推进运行中 Thread 的语义 head |
 | `ThreadReconciler` | 已有 Thread 的 Entry/head 推进、Input apply、ModelInvocation 创建、ToolInvocation 创建、Usage apply 路径 | 外部 Provider/Tool I/O |
 | `ModelWorker` | ModelInvocation 状态 / lease / terminal / realtime | Entry/head |
 | `ToolWorker` | ToolInvocation 状态 / lease / terminal / realtime | Entry/head |
 | Interaction transaction | Interaction 与 owner dispatchable/runnable | 越权改 Entry |
-| Thread command transaction | Session 创建、Input enqueue、Stop epoch | 绕过 Reconciler 推进 head |
+| Thread command transaction | Session 创建、head rebind、Input enqueue、Stop epoch | 绕过 Reconciler 推进语义 head |
 
-Session/Branch command 只负责 bootstrap；`ThreadReconciler` 是已有 Thread 语义推进的唯一写者。一次 activation：
+command 侧只负责 bootstrap 与 head 重定位；`ThreadReconciler` 是执行过程中语义推进的唯一写者。一次 activation：
 
 1. claim Thread reconcile lease
 2. 校验 execution epoch 与 fencing token
@@ -273,18 +276,31 @@ sequenceDiagram
 
 resolution、owner 领域结果与 runnable 标记在同一 PostgreSQL 事务中完成。
 
-## 8. Stop 与 fencing
+## 8. Stop、rebind 与 fencing
 
 Stop 是立即控制面，不进入普通 mailbox：
 
-1. 锁 Thread
+1. 锁 Thread 并校验 `expectedExecutionEpoch`
 2. `executionEpoch++`
-3. 清 processor lease
-4. 取消旧 epoch 尚未开始的 Invocation；已开始执行只由 epoch fencing 拒绝 late callback
+3. 清 processor lease 与 `runnable`
+4. 取消旧 epoch 可安全取消的 Invocation；已开始执行只由 epoch fencing 拒绝 late callback
 5. 取消 queued Inputs
-6. afterCommit best-effort 取消本地 Provider/Tool/RPC handle
+6. 取消该 Thread 的 OPEN Interaction，使逻辑 stop 后不再被永不解决的 blocker 阻塞
+7. afterCommit best-effort 取消本地 Provider/Tool/RPC handle
 
-所有 Thread/Invocation terminal 写入携带创建时的 execution epoch 与 lease token；Stop 后 late callback 无法提交。
+head 重定位（bootstrap / rebind / unbind）是外部修改 head 的唯一入口，要求 Thread 当前逻辑静止：
+
+```text
+无有效 processor lease
+runnable = false
+无 QUEUED Input
+当前 epoch 无非终态 Model/Tool Invocation
+无相关 OPEN Interaction
+```
+
+满足后以 `expectedExecutionEpoch` CAS 写入新 head：成功则 `executionEpoch++` 并清 lease/`runnable`。因此 stop 之后 Thread 立即可 rebind。
+
+所有 Thread/Invocation terminal 写入携带创建时的 execution epoch 与 lease token；Stop 或 rebind 后旧 epoch 的 late callback 无法提交。
 
 ## 9. Redis
 
@@ -297,7 +313,7 @@ Stop 是立即控制面，不进入普通 mailbox：
 
 ## 10. 并发不变量
 
-1. Entry/head 只由持有有效 Thread token 的 Reconciler 写入。
+1. 执行过程中的 Entry/head 推进只由持有有效 Thread token 的 Reconciler 写入；外部改 head 必须走静止校验 + epoch CAS 的 rebind。
 2. Invocation result 只由持有有效 Invocation token 的 worker 写入。
 3. terminal result 与下一推进者的 durable runnable/dispatchable 同事务提交。
 4. Redis notify 只在 PostgreSQL commit 之后。

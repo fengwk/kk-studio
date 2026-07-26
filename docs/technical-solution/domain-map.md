@@ -6,7 +6,7 @@
 
 | 域 | 代码位置 | 职责 | 当前成熟度 |
 | --- | --- | --- | --- |
-| **Harness / AI** | `harness-tool` / `harness-runtime` / `harness-daemon` + `core.harness` + `features/ai` | Session Entry Tree、Main Thread、HarnessThread、Model/Tool Invocation、Interaction | 现行契约 |
+| **Harness / AI** | `harness-tool` / `harness-runtime` / `harness-daemon` + `core.harness` + `features/ai` | Session Entry Tree、可复用 HarnessThread、Model/Tool Invocation、Interaction | 现行契约 |
 | **Studio / Canvas** | `studio` + `core.studio` + `features/canvas` | 画布资源工作台、Function、Workflow | Canvas 最小持久化已落地；其余 Runtime 待补 |
 
 依赖：
@@ -56,9 +56,10 @@ Link ≠ Reference。演示层若只做连线，必须标注为 visibility。
 
 | 概念 | 含义 |
 | --- | --- |
-| Session | Entry Tree 边界与稳定 Main Thread |
+| Session | append-only Entry Tree 的边界；不持有 Thread |
 | Entry | append-only 语义事实（含 `RUNTIME_CONFIG`） |
-| HarnessThread | head / mailbox / lease / epoch 控制面 |
+| HarnessThread | 可跨 Session 复用的 durable runtime process：可空 head / mailbox / lease / epoch 控制面；当前 Session 由 head Entry 派生 |
+| Branch | 不是独立实体：把某个 Thread 的 head 重定位到历史 Entry |
 | ThreadInput | 有序 mailbox 命令 |
 | ModelInvocation | 冻结 ProviderRequest 的 durable Provider 调用 |
 | ToolInvocation | 单次 ToolCall 的 durable 执行事实 |
@@ -94,9 +95,10 @@ Link ≠ Reference。演示层若只做连线，必须标注为 visibility。
 | `POST /api/canvases` | 可用（创建 Canvas） |
 | `POST /api/canvases/{canvasId}/commands` | 可用（create text/generate-text/link、move、delete node） |
 | Workflow / FunctionRun 写路径 | `501 Studio feature not ready` |
-| Harness `/api/sessions` | 创建 Session 与 Main Thread、Session Tree/Entries/Threads 查询、从 Entry 创建 Secondary Thread |
-| Harness `/api/threads/{threadId}` | Thread 读取、mailbox 提交、Entries/Inputs、Redis realtime SSE、Stop；重试策略位于 `/api/harness/retry-policy` |
+| Harness `/api/sessions` | 创建 Session/ROOT/RUNTIME_CONFIG、Session 列表/详情与 Entry Tree 查询 |
+| Harness `/api/threads` | 全局 Thread 列表；创建 UNBOUND Thread |
+| Harness `/api/threads/{threadId}` | Thread 读取、bootstrap、`PUT /head` 重定位、mailbox 提交、Entries/Inputs、Redis realtime SSE、Stop；重试策略位于 `/api/harness/retry-policy` |
 
 ## 7. 实现进度一句话
 
-Harness 是以 Session Main Thread、Entry Tree、Thread mailbox、Model/Tool Invocation 与 Interaction 为基础的可恢复执行链；PostgreSQL 为 truth，Redis 为 lossy wake/realtime。Studio 的 Canvas、Resource、FunctionRun 与 Workflow 保持独立领域边界。
+Harness 是以 Session Entry Tree、可复用 Thread（可空 head + epoch fencing）、Thread mailbox、Model/Tool Invocation 与 Interaction 为基础的可恢复执行链；PostgreSQL 为 truth，Redis 为 lossy wake/realtime。Studio 的 Canvas、Resource、FunctionRun 与 Workflow 保持独立领域边界。

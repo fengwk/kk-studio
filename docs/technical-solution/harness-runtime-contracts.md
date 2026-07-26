@@ -39,7 +39,6 @@ Java 内部使用 `long`，API 边界编码为十进制字符串。Runtime 不�
 ```java
 public record Session(
     long id,
-    long mainThreadId,
     String title,
     Long parentSessionId,
     Long parentInvocationId,
@@ -55,15 +54,14 @@ public record SessionEntry(
     Instant createdAt) {}
 ```
 
-`EntryPayload` 由 runtime entry 包定义；`RuntimeEntryPayloadJsonCodec` 是 durable JSON 边界。已提交 Entry 不允许 update/delete。
+`EntryPayload` 由 runtime entry 包定义；`RuntimeEntryPayloadJsonCodec` 是 durable JSON 边界。Session 不持有 Thread；已提交 Entry 不允许 update/delete。
 
 ### 2.3 Thread
 
 ```java
 public record HarnessThread(
     long id,
-    long sessionId,
-    long headEntryId,
+    Long headEntryId,
     long inputSequence,
     boolean runnable,
     long executionEpoch,
@@ -74,7 +72,7 @@ public record HarnessThread(
 public record Lease(String token, Instant until) {}
 ```
 
-`processorLease == null` 不表示 Thread 必然 IDLE。
+Thread 是可跨 Session 复用的 durable runtime process，不保存 `sessionId`：当前 Session 由 head Entry 派生。`headEntryId == null` 表示 UNBOUND，此时拒绝 mailbox 输入且不可被 Reconciler claim。`processorLease == null` 不表示 Thread 必然 IDLE。
 
 ### 2.4 Input
 
@@ -216,7 +214,7 @@ public record ToolInvocation(
 
 约束：
 
-- `(threadId, assistantEntryId, ordinal)` 唯一
+- `(threadId, assistantEntryId, executionEpoch, ordinal)` 唯一
 - Tool worker 不写 Entry/head
 - sibling 全部 terminal 后，Reconciler 在一个事务中按 ordinal 写 Tool Result Entry，并设置所有 sibling `appliedAt`
 - ENVIRONMENT 必须有 environmentName，PLATFORM 必须没有
@@ -249,9 +247,23 @@ Handler 返回 deterministic resolution，由 Interaction transaction adapter �
 
 ### 3.7 Command coordinators
 
-- `SessionCommandCoordinator` 冻结 bootstrap Agent config，并通过 `ThreadCommandTransactions` 创建 Session/ROOT/RUNTIME_CONFIG/Main Thread；产品默认值由 Core 提供。
-- `ThreadCommandCoordinator` 拥有 typed payload 构造、消息/role 校验、idempotency short-circuit、当前 config 选择、SET_AGENT/SET_MODEL/SET_YOLO 完整快照和 Stop 调用；对 Core 返回 coordinator-owned result，不泄漏 transaction SPI result。
+- `SessionCommandCoordinator` 冻结 bootstrap Agent config，并通过 `ThreadCommandTransactions` 创建 Session/ROOT/RUNTIME_CONFIG；不创建 Thread。产品默认值由 Core 提供。
+- `ThreadCommandCoordinator` 拥有 UNBOUND Thread 创建、bootstrap、head 重定位、typed payload 构造、消息/role 校验、idempotency short-circuit、当前 config 选择、SET_AGENT/SET_MODEL/SET_YOLO 完整快照和 Stop 调用；对 Core 返回 coordinator-owned result，不泄漏 transaction SPI result。
 - `InteractionCoordinator` 拥有 handler lookup、projection、expiry 判定和 deterministic resolution。
+
+Thread command 入口：
+
+```java
+HarnessThread createThread();
+
+BootstrapResult bootstrapThread(
+    long threadId, long expectedExecutionEpoch,
+    String title, long agentDefinitionId, boolean yoloEnabled);
+
+HarnessThread updateHead(long threadId, long expectedExecutionEpoch, Long headEntryId);
+```
+
+`bootstrapThread` 只接受 UNBOUND Thread，在一个事务内创建 Session/ROOT/RUNTIME_CONFIG 并把 head 绑定到 `RUNTIME_CONFIG` Entry。`updateHead` 的 `headEntryId` 可空：非空为 bind/rebind，空为 unbind。二者与所有 mailbox 命令、Stop 一样，都必须携带 `expectedExecutionEpoch`。
 
 Coordinator 不依赖 Spring/DTO/HTTP；Core boundary 负责十进制字符串解析、Spring 外层事务、after-commit signal 与 DTO 映射。
 
@@ -341,11 +353,15 @@ Runtime 不在多个通用 Repository 之间自行拼事务。PostgreSQL adapter
 
 ### 5.1 ThreadCommandTransactions
 
-- 使用调用方已冻结的初始 `RuntimeConfigSnapshot` 创建 Session/Main Thread/ROOT/RUNTIME_CONFIG
-- 创建 Branch Thread
-- enqueue Input 并分配 sequence
-- Stop：epoch++、fence、取消 queued Input/Invocation
+- 创建 UNBOUND Thread
+- 使用调用方已冻结的初始 `RuntimeConfigSnapshot` 创建 Session/ROOT/RUNTIME_CONFIG
+- bootstrap：在同一事务内创建 Session 并把 UNBOUND Thread 的 head 绑定到 `RUNTIME_CONFIG` Entry
+- updateHead：静止校验通过后以 `expectedExecutionEpoch` CAS 写入可空 head，epoch++ 并清 lease/`runnable`
+- enqueue Input 并分配 sequence；UNBOUND Thread 拒绝入队
+- Stop：epoch++、fence、取消 queued Input、可安全取消的 Invocation 与该 Thread 的 OPEN Interaction
 - 成功事务返回 afterCommit notify targets
+
+head 重定位与 enqueue/Stop 都先锁 Thread 行并校验 `expectedExecutionEpoch`；epoch 不匹配即 stale，事务整体拒绝。
 
 ### 5.2 ThreadReconcileTransactions
 
@@ -436,7 +452,7 @@ THREAD signal/recovery
   -> quiesce
 ```
 
-- claim 要求 `runnable=true` 且 processor lease 为空/过期；不递增 stop 使用的 `execution_epoch`
+- claim 要求 `runnable=true`、`head_entry_id` 非空且 processor lease 为空/过期；不递增 stop/rebind 使用的 `execution_epoch`
 - terminal Model apply 从 immutable path 重新 planning，并要求重建 `ProviderRequest` 与 durable request 完全相等
 - Tool sibling 全部 terminal 且未 applied 才能批量 apply
 - 成功 suspend/create/quiesce 原子清 lease 并设 `runnable=false`；异常 release 保持 `runnable=true`
@@ -461,7 +477,7 @@ Web 只消费 Core application API 与 share DTO；不得直接导入 Harness do
 
 核心查询：
 
-- Session/Thread/Branch
+- Session 列表/详情、全局 Thread 列表与详情（Thread 的 `sessionId`/`sessionTitle` 由 head Entry LEFT JOIN 派生，UNBOUND Thread 仍必须出现在结果中）
 - Entry path
 - queued Inputs
 - Model/Tool Invocations
