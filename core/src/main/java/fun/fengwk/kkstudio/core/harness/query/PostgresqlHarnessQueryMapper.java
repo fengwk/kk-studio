@@ -15,8 +15,7 @@ import java.util.List;
 public interface PostgresqlHarnessQueryMapper extends BaseMapper {
 
   String SESSION_COLUMNS =
-      "s.id, s.title, s.main_thread_id, s.parent_session_id, s.parent_invocation_id,"
-          + " s.created_at, s.updated_at";
+      "s.id, s.title, s.parent_session_id, s.parent_invocation_id," + " s.created_at, s.updated_at";
 
   String ENTRY_COLUMNS =
       "e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload::text as payload_json,"
@@ -64,10 +63,16 @@ public interface PostgresqlHarnessQueryMapper extends BaseMapper {
       """;
 
   String THREAD_VIEW_COLUMNS =
-      "t.id, t.session_id, t.head_entry_id, t.input_sequence, t.runnable, t.execution_epoch,"
+      "t.id, head.session_id, t.head_entry_id, t.input_sequence, t.runnable, t.execution_epoch,"
           + " t.processor_token, t.processor_until, t.created_at, t.updated_at,"
           + " s.title as session_title, "
           + THREAD_WAITING_FLAGS;
+
+  /** Thread 的 Session 只由 head Entry 派生；UNBOUND Thread 仍必须出现在查询结果中，因此使用 LEFT JOIN。 */
+  String THREAD_VIEW_SOURCE =
+      " from harness_thread t"
+          + " left join harness_entry head on head.id = t.head_entry_id"
+          + " left join harness_session s on s.id = head.session_id";
 
   String INPUT_COLUMNS =
       "i.id, i.thread_id, i.sequence, i.input_type, i.payload::text as payload_json,"
@@ -79,7 +84,6 @@ public interface PostgresqlHarnessQueryMapper extends BaseMapper {
       value = {
         @Result(column = "id", property = "id"),
         @Result(column = "title", property = "title"),
-        @Result(column = "main_thread_id", property = "mainThreadId"),
         @Result(column = "parent_session_id", property = "parentSessionId"),
         @Result(column = "parent_invocation_id", property = "parentInvocationId"),
         @Result(column = "created_at", property = "createdAt"),
@@ -106,16 +110,16 @@ public interface PostgresqlHarnessQueryMapper extends BaseMapper {
   @Select(
       """
       with recursive tree as (
-        select s.id, s.title, s.main_thread_id, s.parent_session_id, s.parent_invocation_id,
+        select s.id, s.title, s.parent_session_id, s.parent_invocation_id,
                s.created_at, s.updated_at
         from harness_session s where s.id = #{rootSessionId}
         union all
-        select c.id, c.title, c.main_thread_id, c.parent_session_id, c.parent_invocation_id,
+        select c.id, c.title, c.parent_session_id, c.parent_invocation_id,
                c.created_at, c.updated_at
         from harness_session c
         join tree t on c.parent_session_id = t.id
       )
-      select id, title, main_thread_id, parent_session_id, parent_invocation_id, created_at, updated_at
+      select id, title, parent_session_id, parent_invocation_id, created_at, updated_at
       from tree
       order by id
       """)
@@ -157,11 +161,7 @@ public interface PostgresqlHarnessQueryMapper extends BaseMapper {
   List<HarnessQueryRow> loadPath(
       @Param("sessionId") long sessionId, @Param("headEntryId") long headEntryId);
 
-  @Select(
-      "select "
-          + THREAD_VIEW_COLUMNS
-          + " from harness_thread t join harness_session s on s.id = t.session_id"
-          + " where t.id = #{threadId}")
+  @Select("select " + THREAD_VIEW_COLUMNS + THREAD_VIEW_SOURCE + " where t.id = #{threadId}")
   @Results(
       id = "threadViewQueryMap",
       value = {
@@ -186,18 +186,19 @@ public interface PostgresqlHarnessQueryMapper extends BaseMapper {
   @Select(
       "select "
           + THREAD_VIEW_COLUMNS
-          + " from harness_thread t join harness_session s on s.id = t.session_id"
+          + THREAD_VIEW_SOURCE
           + " order by t.updated_at desc, t.id desc")
   @ResultMap("threadViewQueryMap")
   List<HarnessQueryRow> listAllThreadViews();
 
+  /** 当前 head Entry 落在指定 Session 的 Thread；仅用于按 Session 聚合的可观测性视图。 */
   @Select(
       "select "
           + THREAD_VIEW_COLUMNS
-          + " from harness_thread t join harness_session s on s.id = t.session_id"
-          + " where t.session_id = #{sessionId} order by t.updated_at desc, t.id desc")
+          + THREAD_VIEW_SOURCE
+          + " where head.session_id = #{sessionId} order by t.updated_at desc, t.id desc")
   @ResultMap("threadViewQueryMap")
-  List<HarnessQueryRow> listThreadViewsBySession(@Param("sessionId") long sessionId);
+  List<HarnessQueryRow> listThreadViewsAtSession(@Param("sessionId") long sessionId);
 
   @Select(
       "select "

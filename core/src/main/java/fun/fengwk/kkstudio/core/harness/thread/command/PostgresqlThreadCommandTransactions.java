@@ -62,10 +62,9 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
     long sessionId = idGenerator.nextSessionId();
     long rootEntryId = idGenerator.nextEntryId();
     long configEntryId = idGenerator.nextEntryId();
-    long threadId = idGenerator.nextThreadId();
     OffsetDateTime timestamp = offset(persistedNow);
 
-    requireAffected(mapper.insertSession(sessionId, title, threadId, timestamp), "insert session");
+    requireAffected(mapper.insertSession(sessionId, title, timestamp), "insert session");
     requireAffected(
         mapper.insertEntry(
             rootEntryId,
@@ -84,44 +83,121 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
             ENTRY_CODEC.encode(initialConfig),
             timestamp),
         "insert runtime config entry");
-    requireAffected(
-        mapper.insertThread(threadId, sessionId, configEntryId, timestamp), "insert main thread");
-    Session session =
-        new Session(sessionId, threadId, title, null, null, persistedNow, persistedNow);
+    Session session = new Session(sessionId, title, null, null, persistedNow, persistedNow);
     SessionEntry root =
         new SessionEntry(
             rootEntryId, sessionId, null, EntryType.ROOT, new RootEntryPayload(), persistedNow);
-    HarnessThread thread =
-        new HarnessThread(
-            threadId, sessionId, configEntryId, 0, false, 0, null, persistedNow, persistedNow);
-    return new SessionCreation(session, root, thread);
+    SessionEntry config =
+        new SessionEntry(
+            configEntryId,
+            sessionId,
+            rootEntryId,
+            EntryType.RUNTIME_CONFIG,
+            initialConfig,
+            persistedNow);
+    return new SessionCreation(session, root, config);
   }
 
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
-  public HarnessThread createBranch(long sessionId, long fromEntryId, Instant now) {
-    requirePositive(sessionId, "sessionId");
-    requirePositive(fromEntryId, "fromEntryId");
+  public HarnessThread createThread(Instant now) {
     Instant persistedNow = persistenceInstant(now);
-    if (mapper.findSession(sessionId) == null) {
-      throw new IllegalArgumentException("unknown session: " + sessionId);
-    }
-    if (mapper.findEntry(sessionId, fromEntryId) == null) {
-      throw new IllegalArgumentException(
-          "entry " + fromEntryId + " does not belong to session " + sessionId);
-    }
     long threadId = idGenerator.nextThreadId();
-    requireAffected(
-        mapper.insertThread(threadId, sessionId, fromEntryId, offset(persistedNow)),
-        "insert branch thread");
-    return new HarnessThread(
-        threadId, sessionId, fromEntryId, 0, false, 0, null, persistedNow, persistedNow);
+    requireAffected(mapper.insertThread(threadId, null, offset(persistedNow)), "insert thread");
+    return new HarnessThread(threadId, null, 0, false, 0, null, persistedNow, persistedNow);
   }
 
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
-  public Optional<RuntimeConfigSnapshot> lockAndFindCurrentConfig(long threadId) {
+  public ThreadCommandTransactions.BootstrapResult bootstrapThread(
+      long threadId,
+      long expectedExecutionEpoch,
+      String title,
+      RuntimeConfigSnapshot initialConfig,
+      Instant now) {
+    requirePositive(threadId, "threadId");
+    Objects.requireNonNull(initialConfig, "initialConfig");
+    Instant persistedNow = persistenceInstant(now);
+    ThreadCommandRow thread = lockRebindableThread(threadId, expectedExecutionEpoch, persistedNow);
+    if (thread.getHeadEntryId() != null) {
+      throw new IllegalStateException("thread is already bound: " + threadId);
+    }
+    SessionCreation created = createSession(title, initialConfig, persistedNow);
+    HarnessThread bound =
+        rebind(thread, expectedExecutionEpoch, created.configEntry().id(), persistedNow);
+    return new ThreadCommandTransactions.BootstrapResult(
+        created.session(), created.rootEntry(), created.configEntry(), bound);
+  }
+
+  @Override
+  @Transactional(isolation = Isolation.READ_COMMITTED)
+  public HarnessThread updateHead(
+      long threadId, long expectedExecutionEpoch, Long headEntryId, Instant now) {
+    requirePositive(threadId, "threadId");
+    Instant persistedNow = persistenceInstant(now);
+    ThreadCommandRow thread = lockRebindableThread(threadId, expectedExecutionEpoch, persistedNow);
+    if (headEntryId != null) {
+      requirePositive(headEntryId, "headEntryId");
+      if (mapper.findEntry(headEntryId) == null) {
+        throw new IllegalArgumentException("unknown entry: " + headEntryId);
+      }
+    }
+    return rebind(thread, expectedExecutionEpoch, headEntryId, persistedNow);
+  }
+
+  /**
+   * 锁定 Thread 并校验它当前逻辑静止：epoch 匹配、无有效 processor lease、无 queued Input，且当前 epoch 没有仍可提交结果的
+   * Invocation/Interaction。
+   */
+  private ThreadCommandRow lockRebindableThread(
+      long threadId, long expectedExecutionEpoch, Instant observedAt) {
     ThreadCommandRow thread = lockThread(threadId);
+    requireEpoch(thread, expectedExecutionEpoch);
+    if (thread.getProcessorUntil() != null
+        && thread.getProcessorUntil().toInstant().isAfter(observedAt)) {
+      throw new IllegalStateException("thread is processing: " + threadId);
+    }
+    if (Boolean.TRUE.equals(thread.getRunnable())) {
+      throw new IllegalStateException("thread has pending work: " + threadId);
+    }
+    if (!mapper.listQueuedInputsForUpdate(threadId).isEmpty()) {
+      throw new IllegalStateException("thread has queued inputs: " + threadId);
+    }
+    if (mapper.hasActiveExecution(threadId, expectedExecutionEpoch)) {
+      throw new IllegalStateException("thread has active execution: " + threadId);
+    }
+    return thread;
+  }
+
+  /** epoch fencing rebind：旧代际的外部完成不再能写入新的 head。 */
+  private HarnessThread rebind(
+      ThreadCommandRow thread,
+      long expectedExecutionEpoch,
+      Long headEntryId,
+      Instant persistedNow) {
+    long nextEpoch = Math.addExact(expectedExecutionEpoch, 1);
+    requireAffected(
+        mapper.rebindHead(
+            thread.getId(), expectedExecutionEpoch, nextEpoch, headEntryId, offset(persistedNow)),
+        "rebind thread head");
+    return new HarnessThread(
+        thread.getId(),
+        headEntryId,
+        thread.getInputSequence(),
+        false,
+        nextEpoch,
+        null,
+        thread.getCreatedAt().toInstant(),
+        persistedNow);
+  }
+
+  @Override
+  @Transactional(isolation = Isolation.READ_COMMITTED)
+  public Optional<RuntimeConfigSnapshot> lockAndFindCurrentConfig(
+      long threadId, long expectedExecutionEpoch) {
+    ThreadCommandRow thread = lockThread(threadId);
+    requireEpoch(thread, expectedExecutionEpoch);
+    if (thread.getHeadEntryId() == null) return Optional.empty();
     ThreadCommandRow row =
         mapper.findEffectiveRuntimeConfig(thread.getSessionId(), thread.getHeadEntryId(), threadId);
     return row == null ? Optional.empty() : Optional.of(CONFIG_CODEC.decode(row.getPayloadJson()));
@@ -144,12 +220,20 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
   public EnqueueResult enqueue(
-      long threadId, ThreadInputPayload payload, String idempotencyKey, Instant now) {
+      long threadId,
+      ThreadInputPayload payload,
+      String idempotencyKey,
+      long expectedExecutionEpoch,
+      Instant now) {
     requirePositive(threadId, "threadId");
     payload = Objects.requireNonNull(payload, "payload");
     requireNonBlank(idempotencyKey, "idempotencyKey");
     Instant persistedNow = persistenceInstant(now);
     ThreadCommandRow thread = lockThread(threadId);
+    requireEpoch(thread, expectedExecutionEpoch);
+    if (thread.getHeadEntryId() == null) {
+      throw new IllegalStateException("thread is unbound: " + threadId);
+    }
 
     ThreadCommandRow existing = mapper.findInputByKeyForUpdate(threadId, idempotencyKey);
     if (existing != null) {
@@ -187,10 +271,11 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
 
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
-  public StopResult stop(long threadId, Instant now) {
+  public StopResult stop(long threadId, long expectedExecutionEpoch, Instant now) {
     requirePositive(threadId, "threadId");
     Instant persistedNow = persistenceInstant(now);
     ThreadCommandRow thread = lockThread(threadId);
+    requireEpoch(thread, expectedExecutionEpoch);
     List<ThreadInput> cancelled =
         mapper.listQueuedInputsForUpdate(threadId).stream()
             .map(row -> toCancelledInput(row, persistedNow))
@@ -201,6 +286,9 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
     mapper.cancelQueuedInputs(threadId);
     mapper.cancelSafeModelInvocations(threadId, timestamp);
     mapper.cancelSafeToolInvocations(threadId, timestamp);
+    // Logical stop must also close open Interactions, otherwise the Thread stays
+    // ineligible for rebind while waiting on a blocker that can never resolve.
+    mapper.cancelOpenInteractions(threadId, timestamp);
     return new StopResult(nextEpoch, cancelled, threadTarget(threadId));
   }
 
@@ -251,6 +339,12 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
 
   private static OffsetDateTime offset(Instant value) {
     return OffsetDateTime.ofInstant(value, ZoneOffset.UTC);
+  }
+
+  private static void requireEpoch(ThreadCommandRow row, long expected) {
+    if (row.getExecutionEpoch() == null || row.getExecutionEpoch() != expected) {
+      throw new IllegalStateException("stale execution epoch");
+    }
   }
 
   private static void requirePositive(long value, String field) {

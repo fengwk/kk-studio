@@ -18,7 +18,8 @@ public interface ThreadReconcileMapper extends BaseMapper {
 
   @Select(
       "update harness_thread set processor_token = #{token}, processor_until = #{until}, updated_at = greatest(updated_at, #{now}) "
-          + "where id = #{threadId} and runnable and (processor_token is null or processor_until <= #{now}) returning execution_epoch")
+          + "where id = #{threadId} and runnable and head_entry_id is not null "
+          + "and (processor_token is null or processor_until <= #{now}) returning execution_epoch")
   Long claim(
       @Param("threadId") long threadId,
       @Param("token") String token,
@@ -36,8 +37,8 @@ public interface ThreadReconcileMapper extends BaseMapper {
       @Param("now") OffsetDateTime now);
 
   @Select(
-      "select id, session_id as sessionId, head_entry_id as headEntryId, input_sequence as inputSequence, runnable, execution_epoch as executionEpoch, processor_token as processorToken, processor_until as processorUntil, created_at as createdAt, updated_at as updatedAt "
-          + "from harness_thread where id = #{threadId} for update")
+      "select t.id, e.session_id as sessionId, t.head_entry_id as headEntryId, t.input_sequence as inputSequence, t.runnable, t.execution_epoch as executionEpoch, t.processor_token as processorToken, t.processor_until as processorUntil, t.created_at as createdAt, t.updated_at as updatedAt "
+          + "from harness_thread t join harness_entry e on e.id = t.head_entry_id where t.id = #{threadId} for no key update of t")
   ThreadReconcileRow lockThread(@Param("threadId") long threadId);
 
   @Select(
@@ -178,6 +179,6 @@ public interface ThreadReconcileMapper extends BaseMapper {
       @Param("now") OffsetDateTime now);
 
   @Select(
-      "select id from harness_thread where runnable and (processor_token is null or processor_until <= #{now}) order by id limit #{limit}")
+      "select id from harness_thread where runnable and head_entry_id is not null and (processor_token is null or processor_until <= #{now}) order by id limit #{limit}")
   List<Long> listRecoverableThreadIds(@Param("now") OffsetDateTime now, @Param("limit") int limit);
 }

@@ -131,7 +131,8 @@ class PostgresqlDurableFactsSchemaTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void usageLedgerKeepsThreadEntryOwnershipAndCostTotalConsistent() throws SQLException {
+  void usageLedgerAssistantEntryMustMatchCarrierSessionAndCostTotalStaysConsistent()
+      throws SQLException {
     ThreadFixture first = createThread();
     ThreadFixture second = createThread();
     long firstAssistant = appendAssistant(first);
@@ -141,11 +142,14 @@ class PostgresqlDurableFactsSchemaTest extends PostgresSchemaSupport {
       insertUsage(conn, first.sessionId, first.threadId, firstAssistant);
     }
 
+    // assistant_entry_id belongs to first.session but the carrier session_id is
+    // second.session, so (session_id, assistant_entry_id) cannot pair on
+    // harness_entry (session_id, id).
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "fk_harness_model_usage_thread",
-          () -> insertUsage(conn, second.sessionId, first.threadId, secondAssistant));
+          "fk_harness_model_usage_assistant_entry",
+          () -> insertUsage(conn, second.sessionId, second.threadId, firstAssistant));
     }
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(

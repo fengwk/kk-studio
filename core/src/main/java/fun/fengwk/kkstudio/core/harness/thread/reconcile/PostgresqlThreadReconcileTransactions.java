@@ -601,7 +601,6 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
             : new Lease(row.getProcessorToken(), row.getProcessorUntil().toInstant());
     return new HarnessThread(
         row.getId(),
-        row.getSessionId(),
         row.getHeadEntryId(),
         row.getInputSequence(),
         row.isRunnable(),

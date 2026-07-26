@@ -10,19 +10,19 @@ public class HarnessThreadDTO {
   /** Thread 主键。 */
   private String threadId;
 
-  /** 所属 Session 主键。 */
+  /** 当前 Session 主键（由 head Entry 派生，可空）。 */
   private String sessionId;
 
-  /** 所属 Session 标题（列表/卡片展示用）。 */
+  /** 当前 Session 标题（由 head Entry 派生，可空）。 */
   private String sessionTitle;
 
-  /** 当前 head Entry。 */
+  /** 当前 head Entry（可空）。 */
   private String headEntryId;
 
-  /**
-   * 展示状态（query 派生，非 durable 列）：{@code RUNNING > WAITING > RUNNABLE > IDLE}。 从不发出 Thread 级
-   * FAILED/RETRYING；invocation 重试等待落入 WAITING。
-   */
+  /** 当前 execution epoch。 */
+  private Long executionEpoch;
+
+  /** 展示状态（query 派生，非 durable 列）：{@code RUNNING > WAITING > RUNNABLE > UNBOUND/IDLE}。 */
   private String status;
 
   /** 已分配 input sequence 高水位。 */

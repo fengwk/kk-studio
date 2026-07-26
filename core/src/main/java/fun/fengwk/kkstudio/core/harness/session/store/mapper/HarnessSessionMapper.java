@@ -16,16 +16,15 @@ import java.util.List;
 /** final {@code harness_session} mapper。 */
 @Mapper
 public interface HarnessSessionMapper extends BaseMapper {
-  String COLUMNS =
-      "id, title, main_thread_id, parent_session_id, parent_invocation_id, created_at, updated_at";
+  String COLUMNS = "id, title, parent_session_id, parent_invocation_id, created_at, updated_at";
 
   @Insert(
       """
       insert into harness_session (
-          id, title, main_thread_id, parent_session_id, parent_invocation_id,
+          id, title, parent_session_id, parent_invocation_id,
           created_at, updated_at
       ) values (
-          #{id}, #{title}, #{mainThreadId}, #{parentSessionId}, #{parentInvocationId},
+          #{id}, #{title}, #{parentSessionId}, #{parentInvocationId},
           #{createdAt}, #{updatedAt}
       )
       """)
@@ -37,7 +36,6 @@ public interface HarnessSessionMapper extends BaseMapper {
       value = {
         @Result(column = "id", property = "id"),
         @Result(column = "title", property = "title"),
-        @Result(column = "main_thread_id", property = "mainThreadId"),
         @Result(column = "parent_session_id", property = "parentSessionId"),
         @Result(column = "parent_invocation_id", property = "parentInvocationId"),
         @Result(column = "created_at", property = "createdAt"),

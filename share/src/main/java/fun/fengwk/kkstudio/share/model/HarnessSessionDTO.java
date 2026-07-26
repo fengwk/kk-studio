@@ -9,7 +9,6 @@ import java.time.LocalDateTime;
 public class HarnessSessionDTO {
   private String sessionId;
   private String title;
-  private String mainThreadId;
   private String rootSessionId;
   private String parentSessionId;
   private String parentInvocationId;

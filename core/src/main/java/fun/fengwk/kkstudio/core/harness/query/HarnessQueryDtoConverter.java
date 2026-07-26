@@ -29,7 +29,6 @@ public class HarnessQueryDtoConverter {
     HarnessSessionDTO dto = new HarnessSessionDTO();
     dto.setSessionId(HarnessIds.format(row.getId()));
     dto.setTitle(row.getTitle());
-    dto.setMainThreadId(HarnessIds.format(row.getMainThreadId()));
     dto.setParentSessionId(formatNullable(row.getParentSessionId()));
     dto.setParentInvocationId(formatNullable(row.getParentInvocationId()));
     // final schema 不存储 root_session_id/depth；roots 为自身 id。
@@ -62,9 +61,10 @@ public class HarnessQueryDtoConverter {
     }
     HarnessThreadDTO dto = new HarnessThreadDTO();
     dto.setThreadId(HarnessIds.format(row.getId()));
-    dto.setSessionId(HarnessIds.format(row.getSessionId()));
+    dto.setSessionId(formatNullable(row.getSessionId()));
     dto.setSessionTitle(row.getSessionTitle());
-    dto.setHeadEntryId(HarnessIds.format(row.getHeadEntryId()));
+    dto.setHeadEntryId(formatNullable(row.getHeadEntryId()));
+    dto.setExecutionEpoch(row.getExecutionEpoch());
     dto.setStatus(DerivedThreadStatus.derive(row, now));
     dto.setInputSequence(row.getInputSequence());
     // RUNTIME_CONFIG 派生字段不在 final thread row；保持 null 而非假数据。

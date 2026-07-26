@@ -78,7 +78,7 @@ public interface PostgresqlToolInvocationMapper extends BaseMapper {
           + FIELDS
           + """
       from harness_tool_invocation ti
-      join harness_thread t on t.id = ti.thread_id and t.session_id = ti.session_id
+      join harness_thread t on t.id = ti.thread_id
       where ti.id = #{id}
         and t.execution_epoch = ti.execution_epoch
         and not exists (
@@ -99,7 +99,7 @@ public interface PostgresqlToolInvocationMapper extends BaseMapper {
           + FIELDS
           + """
       from harness_tool_invocation ti
-      join harness_thread t on t.id = ti.thread_id and t.session_id = ti.session_id
+      join harness_thread t on t.id = ti.thread_id
       where ti.location = #{location}
         and ti.environment_name is not distinct from #{environmentName}
         and t.execution_epoch = ti.execution_epoch
@@ -131,7 +131,7 @@ public interface PostgresqlToolInvocationMapper extends BaseMapper {
           + FIELDS
           + """
       from harness_tool_invocation ti
-      join harness_thread t on t.id = ti.thread_id and t.session_id = ti.session_id
+      join harness_thread t on t.id = ti.thread_id
       where ti.location = #{location}
         and t.execution_epoch = ti.execution_epoch
         and ti.status = 'RUNNING'

@@ -13,9 +13,6 @@ public class HarnessSessionDO {
   /** 会话标题。 */
   private String title;
 
-  /** 创建时原子生成且稳定不变的 Main Thread id。 */
-  private Long mainThreadId;
-
   /** 父 Session（子代理 child 时有值；根 Session 为空）。 */
   private Long parentSessionId;
 

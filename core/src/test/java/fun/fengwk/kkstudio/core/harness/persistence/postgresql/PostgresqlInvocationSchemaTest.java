@@ -43,14 +43,17 @@ class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void modelThreadAndSourceEntryMustShareSession() throws SQLException {
+  void modelInvocationHeadEntryMustBelongToCarrierSession() throws SQLException {
     ThreadFixture threadOwner = createThread();
-    ThreadFixture entryOwner = createThread();
+    ThreadFixture otherSession = createThread();
 
+    // Head Entry is in threadOwner.session but the carrier session_id is
+    // otherSession.session, so (session_id, source_head_entry_id) cannot pair
+    // on harness_entry (session_id, id).
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "fk_harness_model_invocation_thread",
+          "fk_harness_model_invocation_head",
           () -> {
             try (PreparedStatement ps =
                 conn.prepareStatement(
@@ -59,8 +62,8 @@ class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
                         + " values (?, ?, ?, ?, 1, '{}'::jsonb, 'QUEUED', 1)")) {
               ps.setLong(1, FIXTURE_IDS.incrementAndGet());
               ps.setLong(2, threadOwner.threadId);
-              ps.setLong(3, entryOwner.sessionId);
-              ps.setLong(4, entryOwner.rootEntryId);
+              ps.setLong(3, otherSession.sessionId);
+              ps.setLong(4, threadOwner.rootEntryId);
               ps.executeUpdate();
             }
           });
@@ -248,15 +251,18 @@ class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void toolThreadAndAssistantEntryMustShareSession() throws SQLException {
+  void toolInvocationAssistantEntryMustBelongToCarrierSession() throws SQLException {
     ThreadFixture threadOwner = createThread();
-    ThreadFixture entryOwner = createThread();
-    long assistantId = appendAssistant(entryOwner);
+    ThreadFixture otherSession = createThread();
+    long assistantId = appendAssistant(threadOwner);
 
+    // Assistant Entry is in threadOwner.session but the carrier session_id is
+    // otherSession.session, so (session_id, assistant_entry_id) cannot pair on
+    // harness_entry (session_id, id).
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "fk_harness_tool_invocation_thread",
+          "fk_harness_tool_invocation_assistant",
           () -> {
             try (PreparedStatement ps =
                 conn.prepareStatement(
@@ -267,7 +273,7 @@ class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
                         + " 'PLATFORM', null, 1, 'QUEUED', 1)")) {
               ps.setLong(1, FIXTURE_IDS.incrementAndGet());
               ps.setLong(2, threadOwner.threadId);
-              ps.setLong(3, entryOwner.sessionId);
+              ps.setLong(3, otherSession.sessionId);
               ps.setLong(4, assistantId);
               ps.executeUpdate();
             }

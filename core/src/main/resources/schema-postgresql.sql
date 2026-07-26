@@ -205,15 +205,6 @@ create table chat (
 
 create index idx_chat_modified on chat (updated_at, id);
 
-create table chat_session (
-    id          bigint        primary key default nextval('kk_studio_id_seq'),
-    chat_id     bigint        not null,
-    session_id  bigint        not null,
-    created_at  timestamptz(3) not null default current_timestamp
-);
-
-create index idx_chat_session_session on chat_session (session_id);
-
 ------------------------------------------------------------------------------
 -- 2. Harness durable facts (the Entry -> Session FK is appended later)
 ------------------------------------------------------------------------------
@@ -257,7 +248,6 @@ create index idx_harness_entry_parent
 create table harness_session (
     id                    bigint        primary key default nextval('kk_studio_id_seq'),
     title                 varchar(256),
-    main_thread_id        bigint,
     parent_session_id     bigint,
     parent_invocation_id  bigint,
     created_at            timestamptz(3) not null default current_timestamp,
@@ -286,8 +276,7 @@ create index idx_harness_session_parent
 
 create table harness_thread (
     id                bigint        primary key default nextval('kk_studio_id_seq'),
-    session_id        bigint        not null,
-    head_entry_id     bigint        not null,
+    head_entry_id     bigint,
     input_sequence    bigint        not null,
     runnable          boolean       not null,
     execution_epoch   bigint        not null,
@@ -295,14 +284,10 @@ create table harness_thread (
     processor_until   timestamptz(3),
     created_at        timestamptz(3) not null default current_timestamp,
     updated_at        timestamptz(3) not null default current_timestamp,
-    constraint uk_harness_thread_session_id unique (session_id, id),
-    -- Session must already be created.
-    constraint fk_harness_thread_session foreign key (session_id)
-        references harness_session (id),
-    -- head_entry_id belongs to the same session; deferred so one bootstrap
-    -- transaction can insert the Session, Main Thread and ROOT Entry.
-    constraint fk_harness_thread_head foreign key (session_id, head_entry_id)
-        references harness_entry (session_id, id)
+    -- head_entry_id is optional and stored as a single-column FK into the global
+    -- Entry id space (cross-session ownership is enforced upstream by commands).
+    constraint fk_harness_thread_head foreign key (head_entry_id)
+        references harness_entry (id)
         deferrable initially deferred,
     constraint ck_harness_thread_input_sequence_nonneg check (input_sequence >= 0),
     constraint ck_harness_thread_execution_epoch_nonneg check (execution_epoch >= 0),
@@ -387,10 +372,12 @@ create table harness_model_invocation (
     finished_at           timestamptz(3),
     constraint uk_harness_model_invocation_source
         unique (thread_id, source_head_entry_id, execution_epoch),
-    -- session_id is a constraint carrier: it keeps the owning Thread and source
-    -- Entry in the same Session without a trigger or independent runtime state.
-    constraint fk_harness_model_invocation_thread foreign key (session_id, thread_id)
-        references harness_thread (session_id, id),
+    -- Owning Thread is referenced by id only; the thread<->session relationship
+    -- is enforced upstream via harness_session.main_thread_id.
+    constraint fk_harness_model_invocation_thread foreign key (thread_id)
+        references harness_thread (id),
+    -- session_id stays as a constraint carrier so the source head Entry belongs
+    -- to the same Session as the carrier.
     constraint fk_harness_model_invocation_head foreign key (session_id, source_head_entry_id)
         references harness_entry (session_id, id),
     constraint ck_harness_model_invocation_status check (
@@ -552,12 +539,14 @@ create table harness_tool_invocation (
     started_at            timestamptz(3),
     finished_at           timestamptz(3),
     constraint uk_harness_tool_invocation_source
-        unique (thread_id, assistant_entry_id, ordinal),
+        unique (thread_id, assistant_entry_id, execution_epoch, ordinal),
     constraint uk_harness_tool_invocation_session_id unique (session_id, id),
-    -- As with ModelInvocation, session_id exists only to enforce that the
-    -- owning Thread and Assistant Entry belong to the same Session.
-    constraint fk_harness_tool_invocation_thread foreign key (session_id, thread_id)
-        references harness_thread (session_id, id),
+    -- Owning Thread is referenced by id only; the thread<->session relationship
+    -- is enforced upstream via harness_session.main_thread_id.
+    constraint fk_harness_tool_invocation_thread foreign key (thread_id)
+        references harness_thread (id),
+    -- session_id stays as a constraint carrier so the assistant Entry belongs
+    -- to the same Session as the carrier.
     constraint fk_harness_tool_invocation_assistant foreign key (session_id, assistant_entry_id)
         references harness_entry (session_id, id),
     constraint ck_harness_tool_invocation_location check (
@@ -852,8 +841,12 @@ create table harness_model_usage (
     raw_usage                          jsonb         not null,
     created_at                         timestamptz(3) not null default current_timestamp,
     constraint uk_harness_model_usage_assistant_entry unique (assistant_entry_id),
-    constraint fk_harness_model_usage_thread foreign key (session_id, thread_id)
-        references harness_thread (session_id, id),
+    -- Owning Thread is referenced by id only; the thread<->session relationship
+    -- is enforced upstream via harness_session.main_thread_id.
+    constraint fk_harness_model_usage_thread foreign key (thread_id)
+        references harness_thread (id),
+    -- session_id stays as a constraint carrier so the assistant Entry belongs
+    -- to the same Session as the carrier.
     constraint fk_harness_model_usage_assistant_entry
         foreign key (session_id, assistant_entry_id)
         references harness_entry (session_id, id),
@@ -905,23 +898,8 @@ create index idx_harness_model_usage_model
 -- 4. Forward FKs whose targets now exist
 ------------------------------------------------------------------------------
 
--- main_thread_id becomes NOT NULL after harness_thread exists and the FK is
--- attached. All historical rows written here are still empty because tables
--- are created on a fresh DB.
-alter table harness_session
-    alter column main_thread_id set not null;
-
--- harness_session.main_thread_id must reference a Thread whose session_id
--- equals this Session's own id. Deferred so a single transaction can insert
--- the Session, the Main Thread and the ROOT entry first.
-alter table harness_session
-    add constraint fk_harness_session_main_thread
-    foreign key (id, main_thread_id)
-    references harness_thread (session_id, id)
-    deferrable initially deferred;
-
--- The pair references the ToolInvocation that created this child Session and
--- proves that parent_session_id is that Invocation's owning Session.
+-- The pair references the ToolInvocation that created this child Session and proves
+-- that parent_session_id is that Invocation's owning Session.
 alter table harness_session
     add constraint fk_harness_session_parent_invocation
     foreign key (parent_session_id, parent_invocation_id)
@@ -936,7 +914,7 @@ alter table harness_entry
 -- harness_artifact immutable; no FK required.
 
 ------------------------------------------------------------------------------
--- 5. Canvas self-referencing and chat_session FKs added after targets exist.
+-- 5. Canvas self-referencing FKs added after targets exist.
 ------------------------------------------------------------------------------
 
 alter table canvas_node
@@ -961,13 +939,3 @@ alter table canvas_link
 alter table canvas_command
     add constraint fk_canvas_command_canvas foreign key (workspace_id, canvas_id)
     references canvas_document (workspace_id, id);
-
-alter table chat_session
-    add constraint fk_chat_session_chat foreign key (chat_id)
-    references chat (id);
-
-alter table chat_session
-    add constraint fk_chat_session_session foreign key (session_id)
-    references harness_session (id);
-
-create unique index uk_chat_session on chat_session (chat_id, session_id);

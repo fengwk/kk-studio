@@ -87,38 +87,6 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
     }
   }
 
-  @Test
-  void chatMembershipRequiresExistingChatAndSessionAndStaysUnique() throws SQLException {
-    long chatId = FIXTURE_IDS.incrementAndGet();
-    ThreadFixture session = ThreadFixture.insertFresh();
-    try (Connection conn = newConnection();
-        PreparedStatement ps =
-            conn.prepareStatement("insert into chat (id, title) values (?, 'schema-test')")) {
-      ps.setLong(1, chatId);
-      assertEquals(1, ps.executeUpdate());
-    }
-
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "fk_chat_session_chat",
-          () -> insertChatSession(conn, chatId + 1_000_000L, session.sessionId));
-    }
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "fk_chat_session_session",
-          () -> insertChatSession(conn, chatId, session.sessionId + 1_000_000L));
-    }
-    try (Connection conn = newConnection()) {
-      insertChatSession(conn, chatId, session.sessionId);
-    }
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn, "uk_chat_session", () -> insertChatSession(conn, chatId, session.sessionId));
-    }
-  }
-
   private void insertProvider(Connection conn, long id) throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
@@ -209,15 +177,6 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       ps.setString(1, "command-" + FIXTURE_IDS.incrementAndGet());
       ps.setLong(2, workspaceId);
       ps.setLong(3, canvasId);
-      assertEquals(1, ps.executeUpdate());
-    }
-  }
-
-  private void insertChatSession(Connection conn, long chatId, long sessionId) throws SQLException {
-    try (PreparedStatement ps =
-        conn.prepareStatement("insert into chat_session (chat_id, session_id) values (?, ?)")) {
-      ps.setLong(1, chatId);
-      ps.setLong(2, sessionId);
       assertEquals(1, ps.executeUpdate());
     }
   }

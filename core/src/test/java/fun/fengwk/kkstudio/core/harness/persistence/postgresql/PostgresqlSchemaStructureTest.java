@@ -40,7 +40,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "canvas_link",
           "canvas_command",
           "chat",
-          "chat_session",
           "harness_session",
           "harness_entry",
           "harness_thread",
@@ -64,7 +63,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "canvas_link",
           "canvas_command",
           "chat",
-          "chat_session",
           "harness_entry",
           "harness_session",
           "harness_thread",
@@ -198,7 +196,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "result",
         "created_at");
     assertColumns("chat", "id", "title", "default_agent_id", "created_at", "updated_at", "version");
-    assertColumns("chat_session", "id", "chat_id", "session_id", "created_at");
   }
 
   @Test
@@ -335,7 +332,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_canvas_node_canvas_id",
             "uk_canvas_link",
             "uk_canvas_command",
-            "uk_chat_session",
             "uk_harness_entry_session_id",
             "uk_harness_entry_single_root",
             "uk_harness_session_parent_invocation",
@@ -359,8 +355,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                     + " and conname in ('fk_agent_model_provider',"
                     + " 'fk_agent_definition_model', 'fk_canvas_node_canvas',"
                     + " 'fk_canvas_node_parent_group', 'fk_canvas_link_source',"
-                    + " 'fk_canvas_link_target', 'fk_canvas_command_canvas',"
-                    + " 'fk_chat_session_chat', 'fk_chat_session_session')")) {
+                    + " 'fk_canvas_link_target', 'fk_canvas_command_canvas')")) {
       while (rs.next()) {
         foreignKeys.add(rs.getString(1));
       }
@@ -373,9 +368,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_canvas_node_parent_group",
             "fk_canvas_link_source",
             "fk_canvas_link_target",
-            "fk_canvas_command_canvas",
-            "fk_chat_session_chat",
-            "fk_chat_session_session"),
+            "fk_canvas_command_canvas"),
         foreignKeys,
         "all non-Harness ownership relations must be enforced by PostgreSQL");
   }
