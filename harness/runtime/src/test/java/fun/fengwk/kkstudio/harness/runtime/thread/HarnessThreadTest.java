@@ -17,7 +17,7 @@ class HarnessThreadTest {
 
   @Test
   void nullLeaseMeansNoActiveProcessor() {
-    HarnessThread thread = new HarnessThread(1L, 10L, 1L, 0L, true, 0L, null, NOW, NOW);
+    HarnessThread thread = new HarnessThread(1L, 10L, 0L, true, 0L, null, NOW, NOW);
 
     assertFalse(thread.hasActiveProcessorAt(NOW));
     assertFalse(thread.hasActiveProcessorAt(NOW.plusSeconds(60)));
@@ -26,7 +26,7 @@ class HarnessThreadTest {
   @Test
   void leaseActiveBeforeUntil() {
     Lease lease = new Lease("token", NOW.plusSeconds(60));
-    HarnessThread thread = new HarnessThread(1L, 10L, 1L, 0L, false, 7L, lease, NOW, NOW);
+    HarnessThread thread = new HarnessThread(1L, 10L, 0L, false, 7L, lease, NOW, NOW);
 
     assertTrue(thread.hasActiveProcessorAt(NOW));
     assertTrue(thread.hasActiveProcessorAt(NOW.plusSeconds(59).plusMillis(999)));
@@ -37,32 +37,43 @@ class HarnessThreadTest {
   @Test
   void hasActiveProcessorAtRejectsNullObservedAt() {
     Lease lease = new Lease("token", NOW.plusSeconds(60));
-    HarnessThread thread = new HarnessThread(1L, 10L, 1L, 0L, false, 7L, lease, NOW, NOW);
+    HarnessThread thread = new HarnessThread(1L, 10L, 0L, false, 7L, lease, NOW, NOW);
 
     assertThrows(NullPointerException.class, () -> thread.hasActiveProcessorAt(null));
   }
 
   @Test
-  void rejectsNonPositiveIds() {
+  void supportsBoundAndUnboundHeads() {
+    HarnessThread unbound = new HarnessThread(1L, null, 0L, false, 0L, null, NOW, NOW);
+    HarnessThread bound = new HarnessThread(2L, 10L, 0L, false, 0L, null, NOW, NOW);
+
+    assertFalse(unbound.isBound());
+    assertThrows(IllegalStateException.class, unbound::requireHeadEntryId);
+    assertTrue(bound.isBound());
+    assertTrue(bound.requireHeadEntryId() == 10L);
+  }
+
+  @Test
+  void rejectsNonPositiveIdOrPresentHead() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new HarnessThread(0L, 10L, 1L, 0L, true, 0L, null, NOW, NOW));
+        () -> new HarnessThread(0L, 10L, 0L, true, 0L, null, NOW, NOW));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new HarnessThread(1L, 0L, 1L, 0L, true, 0L, null, NOW, NOW));
+        () -> new HarnessThread(1L, 0L, 0L, true, 0L, null, NOW, NOW));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new HarnessThread(1L, 10L, 0L, 0L, true, 0L, null, NOW, NOW));
+        () -> new HarnessThread(1L, -1L, 0L, true, 0L, null, NOW, NOW));
   }
 
   @Test
   void rejectsNegativeSequenceOrEpoch() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new HarnessThread(1L, 10L, 1L, -1L, true, 0L, null, NOW, NOW));
+        () -> new HarnessThread(1L, 10L, -1L, true, 0L, null, NOW, NOW));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new HarnessThread(1L, 10L, 1L, 0L, true, -1L, null, NOW, NOW));
+        () -> new HarnessThread(1L, 10L, 0L, true, -1L, null, NOW, NOW));
   }
 
   @Test
@@ -70,6 +81,6 @@ class HarnessThreadTest {
     Instant earlier = NOW.minusSeconds(1);
     assertThrows(
         IllegalArgumentException.class,
-        () -> new HarnessThread(1L, 10L, 1L, 0L, true, 0L, null, NOW, earlier));
+        () -> new HarnessThread(1L, 10L, 0L, true, 0L, null, NOW, earlier));
   }
 }

@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSource;
+import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
+import fun.fengwk.kkstudio.harness.runtime.entry.RootEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.reconcile.ReconcileTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
@@ -71,17 +73,39 @@ class SessionCommandCoordinatorTest {
       lastTitle = title;
       lastConfig = initialConfig;
       lastNow = now;
-      session = new Session(10L, 11L, title, null, null, now, now);
-      return new SessionCreation(session, null, null);
+      session = new Session(10L, title, null, null, now, now);
+      SessionEntry root =
+          new SessionEntry(11L, session.id(), null, EntryType.ROOT, new RootEntryPayload(), now);
+      SessionEntry config =
+          new SessionEntry(
+              12L, session.id(), root.id(), EntryType.RUNTIME_CONFIG, initialConfig, now);
+      return new SessionCreation(session, root, config);
     }
 
     @Override
-    public HarnessThread createBranch(long sessionId, long fromEntryId, Instant now) {
-      throw new UnsupportedOperationException();
+    public HarnessThread createThread(Instant now) {
+      return null;
     }
 
     @Override
-    public Optional<RuntimeConfigSnapshot> lockAndFindCurrentConfig(long threadId) {
+    public BootstrapResult bootstrapThread(
+        long threadId,
+        long expectedExecutionEpoch,
+        String title,
+        RuntimeConfigSnapshot initialConfig,
+        Instant now) {
+      return null;
+    }
+
+    @Override
+    public HarnessThread updateHead(
+        long threadId, long expectedExecutionEpoch, Long headEntryId, Instant now) {
+      return null;
+    }
+
+    @Override
+    public Optional<RuntimeConfigSnapshot> lockAndFindCurrentConfig(
+        long threadId, long expectedExecutionEpoch) {
       throw new UnsupportedOperationException();
     }
 
@@ -92,12 +116,16 @@ class SessionCommandCoordinatorTest {
 
     @Override
     public EnqueueResult enqueue(
-        long threadId, ThreadInputPayload payload, String idempotencyKey, Instant now) {
+        long threadId,
+        ThreadInputPayload payload,
+        String idempotencyKey,
+        long expectedExecutionEpoch,
+        Instant now) {
       throw new UnsupportedOperationException();
     }
 
     @Override
-    public StopResult stop(long threadId, Instant now) {
+    public StopResult stop(long threadId, long expectedExecutionEpoch, Instant now) {
       throw new UnsupportedOperationException();
     }
   }

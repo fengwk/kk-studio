@@ -4,14 +4,13 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * Session 聚合边界：共享一份 append-only Entry Tree 并指向稳定 Main Thread。
+ * Session 聚合边界：组织一份 append-only Entry Tree，不拥有 Thread。
  *
  * <p>{@code title} 为可空展示属性。{@code parentSessionId} 与 {@code parentInvocationId} 仅在 Child Session
  * 上有值，且必须同时存在。
  */
 public record Session(
     long id,
-    long mainThreadId,
     String title,
     Long parentSessionId,
     Long parentInvocationId,
@@ -19,8 +18,8 @@ public record Session(
     Instant updatedAt) {
 
   public Session {
-    if (id <= 0 || mainThreadId <= 0) {
-      throw new IllegalArgumentException("session and mainThread ids must be positive");
+    if (id <= 0) {
+      throw new IllegalArgumentException("session id must be positive");
     }
     if (parentSessionId != null && parentSessionId <= 0) {
       throw new IllegalArgumentException("parentSessionId must be positive when present");
@@ -42,7 +41,6 @@ public record Session(
     }
   }
 
-  /** 是否为根 Session（无父 Session）。 */
   public boolean isRoot() {
     return parentSessionId == null;
   }
