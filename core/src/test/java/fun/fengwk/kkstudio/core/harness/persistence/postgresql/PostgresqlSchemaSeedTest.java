@@ -5,19 +5,25 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.InputStream;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.util.Objects;
 
 /**
  * Verifies that the dev and e2e seeds are idempotent and the e2e seed never stores a real
  * credential. Re-application must not mutate row content for deterministic columns.
  */
 class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
+
+  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
   @BeforeEach
   void setup() throws Exception {
@@ -58,14 +64,14 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           nextSequenceValue() > sequenceBeforeReapply,
           "re-applying a seed must preserve sequence progress");
     }
-    // Sequence must advance past the largest explicit seed id (12 from agent_model,
+    // Sequence must advance past the largest explicit seed id (19 from agent_model,
     // also includes retry_policy and realtime_stream_policy id=1).
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
         ResultSet rs = st.executeQuery("select nextval('kk_studio_id_seq')")) {
       assertTrue(rs.next());
       long nextId = rs.getLong(1);
-      assertTrue(nextId > 12L, () -> "sequence must exceed the highest e2e seed id, got " + nextId);
+      assertTrue(nextId > 19L, () -> "sequence must exceed the highest e2e seed id, got " + nextId);
     }
     // Subsequent inserts must not collide with deterministic seed ids.
     assertDoesNotThrow(
@@ -87,9 +93,12 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       applyScript(conn, "data-e2e-postgresql.sql");
       try (Statement st = conn.createStatement()) {
         assertEquals(
-            "1:minimax,2:openai,3:xai,4:deepseek,5:google",
+            "1:minimax:openai_response,2:openai:openai_response,3:xai:openai_response,"
+                + "4:deepseek:openai,5:google:google,6:anthropic:anthropic,7:zai:openai",
             singleString(
-                st, "select string_agg(id || ':' || name, ',' order by id) from agent_provider"),
+                st,
+                "select string_agg(id || ':' || name || ':' || provider_type, ',' order by id)"
+                    + " from agent_provider"),
             "scripts/e2e/lib.sh addresses these deterministic provider ids");
       }
       long retryPolicyCount;
@@ -155,12 +164,48 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           rs.getLong(1),
           "no e2e provider may carry a credential; a real secret must never be checked in");
     }
-    assertSingleCount(conn, "agent_provider", 5L);
-    assertSingleCount(conn, "agent_model", 12L);
+    assertSingleCount(conn, "agent_provider", 7L);
+    assertSingleCount(conn, "agent_model", 19L);
     assertSingleCount(conn, "agent_definition", 1L);
     assertSingleCount(conn, "harness_realtime_stream_policy", 1L);
     assertSingleLong(
         conn, "select max_length from harness_realtime_stream_policy where id = 1", 5_000L);
+    try (Statement st = conn.createStatement()) {
+      assertEquals(
+          "1:MiniMax-M2.7:high",
+          singleString(
+              st,
+              "select a.model_id || ':' || m.name || ':' || a.variant"
+                  + " from agent_definition a"
+                  + " join agent_model m on m.id = a.model_id"
+                  + " where a.name = 'default-assistant'"),
+          "the default E2E agent must remain bound to MiniMax-M2.7");
+    }
+    assertPiModelCatalog(conn);
+  }
+
+  private static void assertPiModelCatalog(Connection conn) throws Exception {
+    try (InputStream input =
+            Objects.requireNonNull(
+                PostgresqlSchemaSeedTest.class.getResourceAsStream("pi-model-catalog.json"));
+        Statement st = conn.createStatement()) {
+      JsonNode expected = OBJECT_MAPPER.readTree(input);
+      JsonNode actual =
+          OBJECT_MAPPER.readTree(
+              singleString(
+                  st,
+                  "select jsonb_agg(jsonb_build_object("
+                      + "'id', m.id,"
+                      + "'providerId', m.provider_id,"
+                      + "'provider', p.name,"
+                      + "'name', m.name,"
+                      + "'description', m.description,"
+                      + "'config', m.config"
+                      + ") order by m.id)::text"
+                      + " from agent_model m"
+                      + " join agent_provider p on p.id = m.provider_id"));
+      assertEquals(expected, actual, "E2E models must match the effective Pi 0.82.1 catalog");
+    }
   }
 
   private static void assertSingleCount(Connection conn, String table, long expected)
@@ -234,14 +279,15 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       sb.append(
           singleString(
               st,
-              "select string_agg(id || '|' || name || '|' || coalesce(base_url, '') || '|' ||"
-                  + " coalesce(credential, '') || '|' || version, ';' order by id) from"
-                  + " agent_provider"));
+              "select string_agg(id || '|' || name || '|' || provider_type || '|' ||"
+                  + " coalesce(base_url, '') || '|' || coalesce(credential, '') || '|' ||"
+                  + " version, ';' order by id) from agent_provider"));
       sb.append('|');
       sb.append(
           singleString(
               st,
-              "select string_agg(id || '|' || name || '|' || version, ';' order by id) from"
+              "select string_agg(id || '|' || provider_id || '|' || name || '|' || description"
+                  + " || '|' || config::text || '|' || version, ';' order by id) from"
                   + " agent_model"));
       sb.append('|');
       sb.append(

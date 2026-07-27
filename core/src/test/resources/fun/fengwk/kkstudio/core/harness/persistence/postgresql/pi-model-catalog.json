@@ -1,0 +1,1046 @@
+[
+  {
+    "id": 1,
+    "providerId": 1,
+    "provider": "minimax",
+    "name": "MiniMax-M2.7",
+    "description": "MiniMax-M2.7 (Responses)",
+    "config": {
+      "limit": {
+        "context": 204800,
+        "output": 131072
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 0.3,
+        "outputPerMillionTokens": 1.2,
+        "cacheReadPerMillionTokens": 0.06,
+        "cacheWritePerMillionTokens": 0.375,
+        "cacheWriteLongPerMillionTokens": 0,
+        "reasoningPerMillionTokens": 1.2
+      },
+      "defaultVariant": "high",
+      "variants": [
+        {
+          "id": "off",
+          "reasoningEffort": "none"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        }
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "providerId": 1,
+    "provider": "minimax",
+    "name": "MiniMax-M3",
+    "description": "MiniMax-M3 (Responses)",
+    "config": {
+      "limit": {
+        "context": 450000,
+        "output": 128000
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT",
+          "IMAGE"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 0.3,
+        "outputPerMillionTokens": 1.2,
+        "cacheReadPerMillionTokens": 0.06,
+        "cacheWritePerMillionTokens": 0,
+        "cacheWriteLongPerMillionTokens": 0,
+        "reasoningPerMillionTokens": 1.2
+      },
+      "defaultVariant": "high",
+      "variants": [
+        {
+          "id": "off",
+          "reasoningEffort": "none"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        }
+      ]
+    }
+  },
+  {
+    "id": 3,
+    "providerId": 2,
+    "provider": "openai",
+    "name": "gpt-5.4",
+    "description": "GPT-5.4",
+    "config": {
+      "limit": {
+        "context": 272000,
+        "output": 128000
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT",
+          "IMAGE"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 2.5,
+        "outputPerMillionTokens": 15,
+        "cacheReadPerMillionTokens": 0.25,
+        "cacheWritePerMillionTokens": 0,
+        "cacheWriteLongPerMillionTokens": 0,
+        "reasoningPerMillionTokens": 15
+      },
+      "defaultVariant": "xhigh",
+      "variants": [
+        {
+          "id": "off",
+          "reasoningEffort": "none"
+        },
+        {
+          "id": "low",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "medium",
+          "reasoningEffort": "medium"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        },
+        {
+          "id": "xhigh",
+          "reasoningEffort": "xhigh"
+        }
+      ]
+    }
+  },
+  {
+    "id": 4,
+    "providerId": 2,
+    "provider": "openai",
+    "name": "gpt-5.5",
+    "description": "GPT-5.5",
+    "config": {
+      "limit": {
+        "context": 272000,
+        "output": 128000
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT",
+          "IMAGE"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 5,
+        "outputPerMillionTokens": 30,
+        "cacheReadPerMillionTokens": 0.5,
+        "cacheWritePerMillionTokens": 0,
+        "cacheWriteLongPerMillionTokens": 0,
+        "reasoningPerMillionTokens": 30
+      },
+      "defaultVariant": "xhigh",
+      "variants": [
+        {
+          "id": "off",
+          "reasoningEffort": "none"
+        },
+        {
+          "id": "low",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "medium",
+          "reasoningEffort": "medium"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        },
+        {
+          "id": "xhigh",
+          "reasoningEffort": "xhigh"
+        }
+      ]
+    }
+  },
+  {
+    "id": 5,
+    "providerId": 2,
+    "provider": "openai",
+    "name": "gpt-5.6-luna",
+    "description": "GPT-5.6 Luna",
+    "config": {
+      "limit": {
+        "context": 272000,
+        "output": 128000
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT",
+          "IMAGE"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 1,
+        "outputPerMillionTokens": 6,
+        "cacheReadPerMillionTokens": 0.1,
+        "cacheWritePerMillionTokens": 1.25,
+        "cacheWriteLongPerMillionTokens": 0,
+        "reasoningPerMillionTokens": 6
+      },
+      "defaultVariant": "max",
+      "variants": [
+        {
+          "id": "off",
+          "reasoningEffort": "none"
+        },
+        {
+          "id": "low",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "medium",
+          "reasoningEffort": "medium"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        },
+        {
+          "id": "xhigh",
+          "reasoningEffort": "xhigh"
+        },
+        {
+          "id": "max",
+          "reasoningEffort": "max"
+        }
+      ]
+    }
+  },
+  {
+    "id": 6,
+    "providerId": 2,
+    "provider": "openai",
+    "name": "gpt-5.6-sol",
+    "description": "GPT-5.6 Sol",
+    "config": {
+      "limit": {
+        "context": 272000,
+        "output": 128000
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT",
+          "IMAGE"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 5,
+        "outputPerMillionTokens": 30,
+        "cacheReadPerMillionTokens": 0.5,
+        "cacheWritePerMillionTokens": 6.25,
+        "cacheWriteLongPerMillionTokens": 0,
+        "reasoningPerMillionTokens": 30
+      },
+      "defaultVariant": "max",
+      "variants": [
+        {
+          "id": "off",
+          "reasoningEffort": "none"
+        },
+        {
+          "id": "low",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "medium",
+          "reasoningEffort": "medium"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        },
+        {
+          "id": "xhigh",
+          "reasoningEffort": "xhigh"
+        },
+        {
+          "id": "max",
+          "reasoningEffort": "max"
+        }
+      ]
+    }
+  },
+  {
+    "id": 7,
+    "providerId": 2,
+    "provider": "openai",
+    "name": "gpt-5.6-terra",
+    "description": "GPT-5.6 Terra",
+    "config": {
+      "limit": {
+        "context": 272000,
+        "output": 128000
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT",
+          "IMAGE"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 2.5,
+        "outputPerMillionTokens": 15,
+        "cacheReadPerMillionTokens": 0.25,
+        "cacheWritePerMillionTokens": 3.125,
+        "cacheWriteLongPerMillionTokens": 0,
+        "reasoningPerMillionTokens": 15
+      },
+      "defaultVariant": "max",
+      "variants": [
+        {
+          "id": "off",
+          "reasoningEffort": "none"
+        },
+        {
+          "id": "low",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "medium",
+          "reasoningEffort": "medium"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        },
+        {
+          "id": "xhigh",
+          "reasoningEffort": "xhigh"
+        },
+        {
+          "id": "max",
+          "reasoningEffort": "max"
+        }
+      ]
+    }
+  },
+  {
+    "id": 8,
+    "providerId": 3,
+    "provider": "xai",
+    "name": "grok-4.5",
+    "description": "Grok 4.5",
+    "config": {
+      "limit": {
+        "context": 500000,
+        "output": 500000
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT",
+          "IMAGE"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 2,
+        "outputPerMillionTokens": 6,
+        "cacheReadPerMillionTokens": 0.3,
+        "cacheWritePerMillionTokens": 0,
+        "cacheWriteLongPerMillionTokens": 0,
+        "reasoningPerMillionTokens": 6
+      },
+      "defaultVariant": "high",
+      "variants": [
+        {
+          "id": "low",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "medium",
+          "reasoningEffort": "medium"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        }
+      ]
+    }
+  },
+  {
+    "id": 9,
+    "providerId": 4,
+    "provider": "deepseek",
+    "name": "deepseek-v4-flash",
+    "description": "DeepSeek V4 Flash",
+    "config": {
+      "limit": {
+        "context": 272000,
+        "output": 128000
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 0.14,
+        "outputPerMillionTokens": 0.28,
+        "cacheReadPerMillionTokens": 0.0028,
+        "cacheWritePerMillionTokens": 0,
+        "cacheWriteLongPerMillionTokens": 0,
+        "reasoningPerMillionTokens": 0.28
+      },
+      "defaultVariant": "max",
+      "variants": [
+        {
+          "id": "off"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        },
+        {
+          "id": "max",
+          "reasoningEffort": "max"
+        }
+      ]
+    }
+  },
+  {
+    "id": 10,
+    "providerId": 4,
+    "provider": "deepseek",
+    "name": "deepseek-v4-pro",
+    "description": "DeepSeek V4 Pro",
+    "config": {
+      "limit": {
+        "context": 272000,
+        "output": 128000
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 0.435,
+        "outputPerMillionTokens": 0.87,
+        "cacheReadPerMillionTokens": 0.003625,
+        "cacheWritePerMillionTokens": 0,
+        "cacheWriteLongPerMillionTokens": 0,
+        "reasoningPerMillionTokens": 0.87
+      },
+      "defaultVariant": "max",
+      "variants": [
+        {
+          "id": "off"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        },
+        {
+          "id": "max",
+          "reasoningEffort": "max"
+        }
+      ]
+    }
+  },
+  {
+    "id": 11,
+    "providerId": 5,
+    "provider": "google",
+    "name": "gemini-3.5-flash",
+    "description": "Gemini 3.5 Flash",
+    "config": {
+      "limit": {
+        "context": 1048576,
+        "output": 65536
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT",
+          "IMAGE"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 1.5,
+        "outputPerMillionTokens": 9,
+        "cacheReadPerMillionTokens": 0.15,
+        "cacheWritePerMillionTokens": 0,
+        "cacheWriteLongPerMillionTokens": 0,
+        "reasoningPerMillionTokens": 9
+      },
+      "defaultVariant": "high",
+      "variants": [
+        {
+          "id": "minimal",
+          "reasoningEffort": "minimal"
+        },
+        {
+          "id": "low",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "medium",
+          "reasoningEffort": "medium"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        }
+      ]
+    }
+  },
+  {
+    "id": 12,
+    "providerId": 5,
+    "provider": "google",
+    "name": "gemini-3.6-flash",
+    "description": "Gemini 3.6 Flash",
+    "config": {
+      "limit": {
+        "context": 1048576,
+        "output": 65536
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT",
+          "IMAGE"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 1.5,
+        "outputPerMillionTokens": 7.5,
+        "cacheReadPerMillionTokens": 0.15,
+        "cacheWritePerMillionTokens": 0,
+        "cacheWriteLongPerMillionTokens": 0,
+        "reasoningPerMillionTokens": 7.5
+      },
+      "defaultVariant": "high",
+      "variants": [
+        {
+          "id": "minimal",
+          "reasoningEffort": "minimal"
+        },
+        {
+          "id": "low",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "medium",
+          "reasoningEffort": "medium"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        }
+      ]
+    }
+  },
+  {
+    "id": 13,
+    "providerId": 5,
+    "provider": "google",
+    "name": "gemini-3.1-pro-preview",
+    "description": "Gemini 3.1 Pro Preview",
+    "config": {
+      "limit": {
+        "context": 1048576,
+        "output": 65536
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT",
+          "IMAGE"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 2,
+        "outputPerMillionTokens": 12,
+        "cacheReadPerMillionTokens": 0.2,
+        "cacheWritePerMillionTokens": 0,
+        "cacheWriteLongPerMillionTokens": 0,
+        "reasoningPerMillionTokens": 12
+      },
+      "defaultVariant": "high",
+      "variants": [
+        {
+          "id": "low",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        }
+      ]
+    }
+  },
+  {
+    "id": 14,
+    "providerId": 6,
+    "provider": "anthropic",
+    "name": "claude-sonnet-4-6",
+    "description": "Claude Sonnet 4.6",
+    "config": {
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT",
+          "IMAGE"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 3,
+        "outputPerMillionTokens": 15,
+        "cacheReadPerMillionTokens": 0.3,
+        "cacheWritePerMillionTokens": 3.75,
+        "cacheWriteLongPerMillionTokens": 6,
+        "reasoningPerMillionTokens": 0
+      },
+      "defaultVariant": "max",
+      "variants": [
+        {
+          "id": "off"
+        },
+        {
+          "id": "minimal",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "low",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "medium",
+          "reasoningEffort": "medium"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        },
+        {
+          "id": "max",
+          "reasoningEffort": "max"
+        }
+      ]
+    }
+  },
+  {
+    "id": 15,
+    "providerId": 6,
+    "provider": "anthropic",
+    "name": "claude-opus-4-6",
+    "description": "Claude Opus 4.6",
+    "config": {
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT",
+          "IMAGE"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 5,
+        "outputPerMillionTokens": 25,
+        "cacheReadPerMillionTokens": 0.5,
+        "cacheWritePerMillionTokens": 6.25,
+        "cacheWriteLongPerMillionTokens": 10,
+        "reasoningPerMillionTokens": 0
+      },
+      "defaultVariant": "max",
+      "variants": [
+        {
+          "id": "off"
+        },
+        {
+          "id": "minimal",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "low",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "medium",
+          "reasoningEffort": "medium"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        },
+        {
+          "id": "max",
+          "reasoningEffort": "max"
+        }
+      ]
+    }
+  },
+  {
+    "id": 16,
+    "providerId": 6,
+    "provider": "anthropic",
+    "name": "claude-sonnet-5",
+    "description": "Claude Sonnet 5",
+    "config": {
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT",
+          "IMAGE"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 2,
+        "outputPerMillionTokens": 10,
+        "cacheReadPerMillionTokens": 0.2,
+        "cacheWritePerMillionTokens": 2.5,
+        "cacheWriteLongPerMillionTokens": 4,
+        "reasoningPerMillionTokens": 0
+      },
+      "defaultVariant": "max",
+      "variants": [
+        {
+          "id": "off"
+        },
+        {
+          "id": "minimal",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "low",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "medium",
+          "reasoningEffort": "medium"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        },
+        {
+          "id": "xhigh",
+          "reasoningEffort": "xhigh"
+        },
+        {
+          "id": "max",
+          "reasoningEffort": "max"
+        }
+      ]
+    }
+  },
+  {
+    "id": 17,
+    "providerId": 6,
+    "provider": "anthropic",
+    "name": "claude-opus-5",
+    "description": "Claude Opus 5",
+    "config": {
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT",
+          "IMAGE"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 5,
+        "outputPerMillionTokens": 25,
+        "cacheReadPerMillionTokens": 0.5,
+        "cacheWritePerMillionTokens": 6.25,
+        "cacheWriteLongPerMillionTokens": 10,
+        "reasoningPerMillionTokens": 0
+      },
+      "defaultVariant": "max",
+      "variants": [
+        {
+          "id": "off"
+        },
+        {
+          "id": "minimal",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "low",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "medium",
+          "reasoningEffort": "medium"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        },
+        {
+          "id": "xhigh",
+          "reasoningEffort": "xhigh"
+        },
+        {
+          "id": "max",
+          "reasoningEffort": "max"
+        }
+      ]
+    }
+  },
+  {
+    "id": 18,
+    "providerId": 6,
+    "provider": "anthropic",
+    "name": "claude-fable-5",
+    "description": "Claude Fable 5",
+    "config": {
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT",
+          "IMAGE"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 10,
+        "outputPerMillionTokens": 50,
+        "cacheReadPerMillionTokens": 1,
+        "cacheWritePerMillionTokens": 12.5,
+        "cacheWriteLongPerMillionTokens": 20,
+        "reasoningPerMillionTokens": 0
+      },
+      "defaultVariant": "max",
+      "variants": [
+        {
+          "id": "minimal",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "low",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "medium",
+          "reasoningEffort": "medium"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        },
+        {
+          "id": "xhigh",
+          "reasoningEffort": "xhigh"
+        },
+        {
+          "id": "max",
+          "reasoningEffort": "max"
+        }
+      ]
+    }
+  },
+  {
+    "id": 19,
+    "providerId": 7,
+    "provider": "zai",
+    "name": "glm-5.2",
+    "description": "GLM-5.2",
+    "config": {
+      "limit": {
+        "context": 200000,
+        "output": 128000
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 0,
+        "outputPerMillionTokens": 0,
+        "cacheReadPerMillionTokens": 0,
+        "cacheWritePerMillionTokens": 0,
+        "cacheWriteLongPerMillionTokens": 0,
+        "reasoningPerMillionTokens": 0
+      },
+      "defaultVariant": "max",
+      "variants": [
+        {
+          "id": "off"
+        },
+        {
+          "id": "low",
+          "reasoningEffort": "high"
+        },
+        {
+          "id": "medium",
+          "reasoningEffort": "high"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        },
+        {
+          "id": "max",
+          "reasoningEffort": "max"
+        }
+      ]
+    }
+  }
+]
