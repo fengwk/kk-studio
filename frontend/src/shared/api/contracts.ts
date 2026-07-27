@@ -361,6 +361,11 @@ export interface HarnessRetryPolicyDTO {
   maxDelayMillis: number
 }
 
+/** Global per-Thread Redis realtime Stream capacity policy. */
+export interface HarnessRealtimeStreamPolicyDTO {
+  maxLength: number
+}
+
 export type ThreadInputType =
   | 'USER_MESSAGE'
   | 'CUSTOM_MESSAGE'

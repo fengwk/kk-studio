@@ -80,6 +80,7 @@ owner reference、handler type、request/response jsonb、状态、deadline/vers
 | 表 | 职责 |
 | --- | --- |
 | `harness_retry_policy` | 全局自动重试策略（id=1 单行；不持久化时间戳） |
+| `harness_realtime_stream_policy` | 全局 Redis realtime Stream 容量策略（id=1 单行；`max_length > 0`；默认 5000） |
 | `harness_thread_goal` | Thread goal |
 | `harness_artifact` | 不可变 Tool 输出 |
 | `harness_model_usage` | Assistant 用量账本（持久化 token/pricing/created_at；`ModelCost` 由 `ModelCost.calculate(pricing, usage)` 重建） |
@@ -163,7 +164,8 @@ Runtime 不感知 wake transport 实现细节。
 
 - payload discriminator：`TEXT_DELTA` / `THINKING_DELTA` / `TOOL_CALL_DELTA`
 - 可重试 Invocation 必须携带 `attempt`
-- 每 Thread 独立 Stream，`XADD` 带 exact `MAXLEN`
+- 每 Thread 独立 Stream，`XADD` 带 exact `MAXLEN`；长度从全局 `harness_realtime_stream_policy.max_length` 读取
+- 策略保存后，本实例的既有与新建 Stream 都在下一次 `XADD` 使用新长度；其他实例最多在一秒缓存刷新后生效。调小在该次写入裁剪，调大不恢复已裁剪 event；空闲 Stream 不主动扫描或裁剪
 - Event 不用于状态恢复或业务审计
 - Redis 丢失后允许 in-flight 动画缺口；最终 Entry/Invocation 不受影响
 

@@ -49,6 +49,8 @@ describe('harnessService', () => {
       baseDelayMillis: 2_000,
       maxDelayMillis: 60_000,
     })
+    await service.getRealtimeStreamPolicy()
+    await service.updateRealtimeStreamPolicy({ maxLength: 5_000 })
 
     expect(client.post).not.toHaveBeenCalledWith('/sessions', expect.anything())
     expect(client.post).toHaveBeenNthCalledWith(1, '/threads/thread%20%2F1/messages', {
@@ -77,13 +79,15 @@ describe('harnessService', () => {
       clientMessageId: 'cid-agent',
       expectedExecutionEpoch: 4,
     })
-    expect(client.get).toHaveBeenLastCalledWith('/harness/retry-policy')
+    expect(client.get).toHaveBeenCalledWith('/harness/retry-policy')
+    expect(client.get).toHaveBeenLastCalledWith('/harness/realtime-stream-policy')
     expect(client.put).toHaveBeenNthCalledWith(4, '/harness/retry-policy', {
       maxRetries: 3,
       backoffStrategy: 'EXPONENTIAL',
       baseDelayMillis: 2_000,
       maxDelayMillis: 60_000,
     })
+    expect(client.put).toHaveBeenNthCalledWith(5, '/harness/realtime-stream-policy', { maxLength: 5_000 })
     expect(client.put).not.toHaveBeenCalledWith(expect.stringContaining('/toolset'), expect.anything())
     expect(client.post).not.toHaveBeenCalledWith(expect.stringContaining('/decision'), expect.anything())
     // Session-scoped Thread create/list are gone from the contract.
@@ -146,6 +150,8 @@ describe('harnessService', () => {
     expect(service.stopThread).toBeTypeOf('function')
     expect(service.getRetryPolicy).toBeTypeOf('function')
     expect(service.updateRetryPolicy).toBeTypeOf('function')
+    expect(service.getRealtimeStreamPolicy).toBeTypeOf('function')
+    expect(service.updateRealtimeStreamPolicy).toBeTypeOf('function')
     expect(service.listThreadEntries).toBeTypeOf('function')
     expect(service.listThreadInputs).toBeTypeOf('function')
     expect(service.listThreadToolInvocations).toBeTypeOf('function')

@@ -17,7 +17,6 @@ class HarnessRedisPropertiesTest {
     HarnessRedisProperties props = new HarnessRedisProperties();
     assertEquals("kk-studio:harness:signal", props.requireSignalChannel());
     assertEquals("kk-studio:harness:realtime:", props.requireRealtimeKeyPrefix());
-    assertEquals(1000L, props.requireRealtimeMaxLength());
   }
 
   @Test
@@ -42,15 +41,6 @@ class HarnessRedisPropertiesTest {
   }
 
   @Test
-  void nonPositiveMaxLengthIsRejected() {
-    HarnessRedisProperties props = new HarnessRedisProperties();
-    props.setRealtimeMaxLength(0);
-    assertThrows(IllegalArgumentException.class, props::requireRealtimeMaxLength);
-    props.setRealtimeMaxLength(-5);
-    assertThrows(IllegalArgumentException.class, props::requireRealtimeMaxLength);
-  }
-
-  @Test
   void realtimeKeyConcatenatesPrefixAndThreadId() {
     HarnessRedisProperties props = new HarnessRedisProperties();
     props.setRealtimeKeyPrefix("kk-studio:harness:realtime:");
@@ -65,7 +55,7 @@ class HarnessRedisPropertiesTest {
   }
 
   @Test
-  void adaptersSnapshotAndValidatePropertiesAtConstruction() {
+  void adaptersValidateRedisTransportPropertiesAtConstruction() {
     StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
     HarnessRedisProperties props = new HarnessRedisProperties();
     props.setSignalChannel(" ");
@@ -77,12 +67,8 @@ class HarnessRedisPropertiesTest {
     props.setRealtimeKeyPrefix("");
     assertThrows(
         IllegalArgumentException.class,
-        () -> new RedisRealtimeEventSink(redisTemplate, props, new RealtimeEventJsonCodec()));
-
-    props.setRealtimeKeyPrefix("kk-studio:harness:realtime:");
-    props.setRealtimeMaxLength(0L);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new RedisRealtimeEventSink(redisTemplate, props, new RealtimeEventJsonCodec()));
+        () ->
+            new RedisRealtimeEventSink(
+                () -> redisTemplate, props, new RealtimeEventJsonCodec(), () -> 5_000L));
   }
 }

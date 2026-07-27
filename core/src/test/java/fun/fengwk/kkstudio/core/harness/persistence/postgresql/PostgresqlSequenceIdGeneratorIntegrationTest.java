@@ -134,9 +134,9 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
   }
 
   /**
-   * After applying the e2e seed (provider ids 1..5, model ids 1..12, definition id 1, retry policy
-   * id 1), the seed script advances the sequence via {@code setval(..., true)} so no allocation can
-   * ever return a value within the seeded range.
+   * After applying the e2e seed (provider ids 1..5, model ids 1..12, definition id 1, retry and
+   * realtime Stream policy ids 1), the seed script advances the sequence via {@code setval(...,
+   * true)} so no allocation can ever return a value within the seeded range.
    */
   @Test
   void allocationsNeverReuseSeededDeterministicIds() throws Exception {
@@ -149,6 +149,7 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
                     + "coalesce((select max(id) from agent_provider), 0),"
                     + "coalesce((select max(id) from agent_model), 0),"
                     + "coalesce((select max(id) from agent_definition), 0),"
+                    + "coalesce((select max(id) from harness_realtime_stream_policy), 0),"
                     + "coalesce((select max(id) from harness_retry_policy), 0)"
                     + ")")) {
       assertTrue(rs.next());

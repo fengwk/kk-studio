@@ -46,7 +46,6 @@ class RedisUnavailableTest {
     properties = new HarnessRedisProperties();
     properties.setSignalChannel("kk-studio:harness:signal");
     properties.setRealtimeKeyPrefix("kk-studio:harness:realtime:");
-    properties.setRealtimeMaxLength(1000L);
 
     targetCodec = new ExecutionTargetJsonCodec();
     eventCodec = new RealtimeEventJsonCodec();
@@ -73,7 +72,7 @@ class RedisUnavailableTest {
   @Test
   void realtimeEventSinkPropagatesRedisException() {
     RedisRealtimeEventSink sink =
-        new RedisRealtimeEventSink(stringRedisTemplate, properties, eventCodec);
+        new RedisRealtimeEventSink(() -> stringRedisTemplate, properties, eventCodec, () -> 5_000L);
 
     RealtimeEvent.ModelDelta event =
         new RealtimeEvent.ModelDelta(
@@ -90,7 +89,8 @@ class RedisUnavailableTest {
   void missingRedisTemplateFailsOnlyWhenAdapterIsCalled() {
     RedisActivationNotifier notifier =
         new RedisActivationNotifier(() -> null, properties, targetCodec);
-    RedisRealtimeEventSink sink = new RedisRealtimeEventSink(() -> null, properties, eventCodec);
+    RedisRealtimeEventSink sink =
+        new RedisRealtimeEventSink(() -> null, properties, eventCodec, () -> 5_000L);
     ExecutionTarget target = new ExecutionTarget(ExecutionTargetKind.THREAD, 1L);
     RealtimeEvent.ModelDelta event =
         new RealtimeEvent.ModelDelta(

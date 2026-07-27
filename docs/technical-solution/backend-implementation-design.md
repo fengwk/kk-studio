@@ -41,6 +41,7 @@ flowchart LR
 | Thread realtime | `GET /api/threads/{id}/events/stream` | Redis-backed SSE，事件名 `realtime`，cursor 为 stream-id |
 | Thread 控制 | `POST /api/threads/{id}/stop` | epoch fencing 取消 queued Input、可安全取消的 Invocation 与 OPEN Interaction |
 | Retry policy | `GET` / `PUT /api/harness/retry-policy` | 全局持久化自动重试策略 |
+| Realtime Stream policy | `GET` / `PUT /api/harness/realtime-stream-policy` | 全局持久化 Redis Stream `maxLength` 策略 |
 | Tool | `GET /api/threads/{id}/tool-invocations`、`GET /api/tool-invocations/{id}` | Tool 状态查询 |
 | Interaction | `GET /api/interactions/{id}`、`GET /api/interactions/open`、`POST /api/interactions/{id}/response` | 通用 Interaction |
 | Artifact / Usage | `/api/artifacts/{id}`、`/api/usage/threads/{id}`、`/api/usage/sessions/{id}`、`/api/usage/models/{id}` | artifact bytes 与用量汇总 |
@@ -56,6 +57,7 @@ Model 与 Agent 的 `PUT` 接收完整 editable body。Provider credential 不�
 | --- | --- | --- |
 | `StudioHarnessThreadController` | `/api/threads` | Thread 列表/读取/创建、bootstrap、head 重定位、入队 202、Stop、entries/inputs、realtime SSE |
 | `StudioHarnessRetryPolicyController` | `/api/harness/retry-policy` | 自动重试策略 |
+| `StudioHarnessRealtimeStreamPolicyController` | `/api/harness/realtime-stream-policy` | realtime Stream 最大保留事件数策略 |
 | `StudioHarnessSessionController` | `/api/sessions` | Session 查询、Session Entries |
 | `StudioChatController` | `/api/chats` | Chat CRUD |
 | `StudioHarnessObservabilityController` | `/api` | tool/model invocations、open interactions、artifacts |
@@ -87,6 +89,7 @@ Java 领域类型使用 `HarnessThread`，避免与 `java.lang.Thread` 冲突。
 | `InteractionCoordinator` | harness-runtime 内 handler 投影、expiry、resolution |
 | `InteractionService` | Core 薄边界：decimal/DTO、notifier isolation |
 | `HarnessRetryPolicyService` | 全局自动重试策略 |
+| `HarnessRealtimeStreamPolicyService` | 全局 realtime Stream 容量策略；Redis sink 以短期缓存按写入解析 |
 | `HarnessThreadQueryService` | thread、路径 entries、inputs |
 | Thread command / reconcile transactions | PostgreSQL 原子事务适配 |
 | `HarnessSessionQueryService` | Session 只读；列表按 derived max-entry `updated_at` desc, id desc 排序 |
@@ -113,7 +116,7 @@ Java 领域类型使用 `HarnessThread`，避免与 `java.lang.Thread` 冲突。
 GET /api/threads/{id}/events/stream?afterEventId={redis-stream-id}
 ```
 
-事件名 `realtime`；SSE id 为 Redis stream-id（如 `ms-seq`）。
+事件名 `realtime`；SSE id 为 Redis stream-id（如 `ms-seq`）。每次 `XADD` 使用持久化全局策略的 `maxLength`；保存策略不会扫描既有 key，而是在其下一次写入时精确裁剪。
 
 ## Tool、Environment 与 Artifact
 

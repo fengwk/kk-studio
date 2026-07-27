@@ -48,6 +48,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_tool_invocation",
           "harness_interaction",
           "harness_retry_policy",
+          "harness_realtime_stream_policy",
           "harness_thread_goal",
           "harness_model_usage",
           "harness_artifact");
@@ -159,6 +160,18 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   @Test
   void harnessSessionExposesOnlyItsMinimalColumnContract() throws SQLException {
     assertColumns("harness_session", "id", "title", "created_at");
+  }
+
+  @Test
+  void harnessPolicyTablesExposeOnlyTheirMinimalColumnContracts() throws SQLException {
+    assertColumns(
+        "harness_retry_policy",
+        "id",
+        "max_retries",
+        "backoff_strategy",
+        "base_delay_millis",
+        "max_delay_millis");
+    assertColumns("harness_realtime_stream_policy", "id", "max_length");
   }
 
   @Test

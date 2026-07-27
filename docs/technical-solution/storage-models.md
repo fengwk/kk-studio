@@ -48,6 +48,7 @@ FUNCTION 节点当前唯一可持久化实例是 `system.generate-text` v1。
 | `harness_tool_invocation` | Tool 执行事实 | `(thread_id, assistant_entry_id, execution_epoch, ordinal)` 唯一；`PLATFORM/ENVIRONMENT` |
 | `harness_interaction` | 通用交互事实 | open owner 唯一约束 |
 | `harness_retry_policy` | 全局自动重试策略 | 单行策略 |
+| `harness_realtime_stream_policy` | 全局 Redis realtime Stream 容量策略 | 单行 `max_length`；默认 5000 |
 | `harness_thread_goal` | Thread 当前 goal | 主键 `thread_id` |
 | `harness_artifact` | 全局不可变 Tool 输出 | content bytea、media type、size、SHA-256 |
 | `harness_model_usage` | Assistant 用量账本 | 唯一 `assistant_entry_id` |

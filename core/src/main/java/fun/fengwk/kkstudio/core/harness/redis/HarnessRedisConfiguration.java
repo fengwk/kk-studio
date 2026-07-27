@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import fun.fengwk.kkstudio.core.harness.realtime.HarnessRealtimeEventTail;
+import fun.fengwk.kkstudio.core.harness.realtime.stream.HarnessRealtimeStreamPolicyService;
 import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
@@ -47,8 +48,13 @@ public class HarnessRedisConfiguration {
   public RealtimeEventSink redisRealtimeEventSink(
       ObjectProvider<StringRedisTemplate> stringRedisTemplate,
       HarnessRedisProperties properties,
-      RealtimeEventJsonCodec eventCodec) {
-    return new RedisRealtimeEventSink(stringRedisTemplate::getObject, properties, eventCodec);
+      RealtimeEventJsonCodec eventCodec,
+      HarnessRealtimeStreamPolicyService realtimeStreamPolicyService) {
+    return new RedisRealtimeEventSink(
+        stringRedisTemplate::getObject,
+        properties,
+        eventCodec,
+        realtimeStreamPolicyService::resolveMaxLength);
   }
 
   @Bean

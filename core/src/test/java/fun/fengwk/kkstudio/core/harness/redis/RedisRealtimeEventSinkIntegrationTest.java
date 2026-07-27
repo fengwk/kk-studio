@@ -11,12 +11,12 @@ import org.springframework.data.redis.connection.stream.ObjectRecord;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
-import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** RedisRealtimeEventSink 集成测试：append/read/trim/per-thread isolation/三种 delta。 */
 class RedisRealtimeEventSinkIntegrationTest extends RedisSpringTestSupport {
@@ -24,21 +24,23 @@ class RedisRealtimeEventSinkIntegrationTest extends RedisSpringTestSupport {
   @Autowired private StringRedisTemplate stringRedisTemplate;
   @Autowired private HarnessRedisProperties properties;
   @Autowired private RealtimeEventJsonCodec eventCodec;
-  @Autowired private RealtimeEventSink configuredSink;
 
   private RedisRealtimeEventSink sink;
+  private AtomicLong maxLength;
 
   @BeforeEach
   void setupSink() {
     properties.setRealtimeKeyPrefix("kk-studio:harness:realtime:");
-    properties.setRealtimeMaxLength(1000L);
+    maxLength = new AtomicLong(1_000L);
     stringRedisTemplate.delete(properties.realtimeKey(1L));
     stringRedisTemplate.delete(properties.realtimeKey(2L));
     stringRedisTemplate.delete(properties.realtimeKey(7L));
     stringRedisTemplate.delete(properties.realtimeKey(42L));
     stringRedisTemplate.delete("kk-studio:harness:realtime:trim:7");
     stringRedisTemplate.delete("kk-studio:harness:realtime:thread:42");
-    sink = (RedisRealtimeEventSink) configuredSink;
+    sink =
+        new RedisRealtimeEventSink(
+            () -> stringRedisTemplate, properties, eventCodec, maxLength::get);
   }
 
   @Test
@@ -89,9 +91,11 @@ class RedisRealtimeEventSinkIntegrationTest extends RedisSpringTestSupport {
 
   @Test
   void exactTrimKeepsLengthBounded() {
-    properties.setRealtimeMaxLength(3);
+    maxLength.set(3);
     properties.setRealtimeKeyPrefix("kk-studio:harness:realtime:trim:");
-    sink = new RedisRealtimeEventSink(stringRedisTemplate, properties, eventCodec);
+    sink =
+        new RedisRealtimeEventSink(
+            () -> stringRedisTemplate, properties, eventCodec, maxLength::get);
     stringRedisTemplate.delete(properties.realtimeKey(7L));
 
     Instant now = Instant.parse("2026-01-04T00:00:00Z");
@@ -113,6 +117,27 @@ class RedisRealtimeEventSinkIntegrationTest extends RedisSpringTestSupport {
     RealtimeEvent.ModelDelta last =
         (RealtimeEvent.ModelDelta) eventCodec.decode(records.get(records.size() - 1).getValue());
     assertEquals("frag-7", ((ProviderStreamEvent.TextDelta) last.delta()).text());
+  }
+
+  @Test
+  void changedPolicyAppliesToAnExistingStreamOnItsNextAppendWithoutRestoringTrimmedEvents() {
+    maxLength.set(5);
+    Instant now = Instant.parse("2026-01-04T01:00:00Z");
+    for (int i = 0; i < 5; i++) {
+      appendFragment(7L, i, now);
+    }
+
+    maxLength.set(3);
+    appendFragment(7L, 5, now);
+    String key = properties.realtimeKey(7L);
+    assertEquals(3L, stringRedisTemplate.opsForStream().size(key));
+
+    maxLength.set(6);
+    appendFragment(7L, 6, now);
+    assertEquals(
+        4L,
+        stringRedisTemplate.opsForStream().size(key),
+        "increasing max length affects later writes but cannot restore trimmed records");
   }
 
   @Test
@@ -147,7 +172,9 @@ class RedisRealtimeEventSinkIntegrationTest extends RedisSpringTestSupport {
   @Test
   void streamIsKeyedByPrefixAndDecimalThreadId() {
     properties.setRealtimeKeyPrefix("kk-studio:harness:realtime:thread:");
-    sink = new RedisRealtimeEventSink(stringRedisTemplate, properties, eventCodec);
+    sink =
+        new RedisRealtimeEventSink(
+            () -> stringRedisTemplate, properties, eventCodec, maxLength::get);
 
     Instant now = Instant.parse("2026-01-06T00:00:00Z");
     sink.append(
@@ -156,5 +183,15 @@ class RedisRealtimeEventSinkIntegrationTest extends RedisSpringTestSupport {
     String expected = "kk-studio:harness:realtime:thread:42";
     Long length = stringRedisTemplate.opsForStream().size(expected);
     assertEquals(1L, length);
+  }
+
+  private void appendFragment(long threadId, int index, Instant now) {
+    sink.append(
+        new RealtimeEvent.ModelDelta(
+            threadId,
+            100L + index,
+            1,
+            new ProviderStreamEvent.TextDelta("frag-" + index),
+            now.plusMillis(index)));
   }
 }

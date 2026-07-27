@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 describe('queryKeys', () => {
+  it('keeps global Harness policies in distinct cache scopes', () => {
+    expect(queryKeys.harness.retryPolicy).toEqual(['harness', 'retry-policy'])
+    expect(queryKeys.harness.realtimeStreamPolicy).toEqual(['harness', 'realtime-stream-policy'])
+  })
+
   it('creates stable usage keys with string ids', () => {
     // Exact tuples prevent scope collisions and prove numeric model ids are normalized before caching.
     expect(queryKeys.usage.thread('thread-1')).toEqual(['usage', 'threads', 'thread-1'])

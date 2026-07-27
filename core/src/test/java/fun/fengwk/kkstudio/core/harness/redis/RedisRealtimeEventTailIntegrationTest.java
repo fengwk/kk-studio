@@ -10,7 +10,6 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 
 import fun.fengwk.kkstudio.core.harness.realtime.HarnessRealtimeEventTail;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
-import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 
@@ -23,13 +22,15 @@ class RedisRealtimeEventTailIntegrationTest extends RedisSpringTestSupport {
 
   @Autowired private StringRedisTemplate stringRedisTemplate;
   @Autowired private HarnessRedisProperties properties;
-  @Autowired private RealtimeEventSink sink;
   @Autowired private RealtimeEventJsonCodec eventCodec;
   @Autowired private HarnessRealtimeEventTail tail;
+  private RedisRealtimeEventSink sink;
 
   @BeforeEach
   void clean() {
     stringRedisTemplate.delete(properties.realtimeKey(11L));
+    sink =
+        new RedisRealtimeEventSink(() -> stringRedisTemplate, properties, eventCodec, () -> 5_000L);
   }
 
   @Test

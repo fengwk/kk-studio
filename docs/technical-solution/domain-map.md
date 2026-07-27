@@ -88,7 +88,7 @@ FUNCTION 节点当前唯一实例是 `system.generate-text` v1。
 | `/api/functions`、`/api/workflows`、`/api/function-runs` 等 | 暂不暴露 |
 | Harness `/api/sessions` | 仅查询 Session 列表/详情与 Entry Tree；Session/ROOT/RUNTIME_CONFIG 只由 Thread bootstrap 原子创建 |
 | Harness `/api/threads` | 全局 Thread 列表；创建 UNBOUND Thread |
-| Harness `/api/threads/{threadId}` | Thread 读取、bootstrap、`PUT /head` 重定位、mailbox 提交、Entries/Inputs、Redis realtime SSE、Stop；重试策略位于 `/api/harness/retry-policy` |
+| Harness `/api/threads/{threadId}` | Thread 读取、bootstrap、`PUT /head` 重定位、mailbox 提交、Entries/Inputs、Redis realtime SSE、Stop；全局策略位于 `/api/harness/retry-policy` 与 `/api/harness/realtime-stream-policy` |
 
 ## 7. 实现进度一句话
 

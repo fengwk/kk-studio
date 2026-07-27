@@ -59,7 +59,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           "re-applying a seed must preserve sequence progress");
     }
     // Sequence must advance past the largest explicit seed id (12 from agent_model,
-    // also includes retry_policy id=1).
+    // also includes retry_policy and realtime_stream_policy id=1).
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
         ResultSet rs = st.executeQuery("select nextval('kk_studio_id_seq')")) {
@@ -99,6 +99,13 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
         retryPolicyCount = rs.getLong(1);
       }
       assertEquals(1L, retryPolicyCount, "exactly one retry_policy row from seed");
+      try (Statement st = conn.createStatement();
+          ResultSet rs =
+              st.executeQuery(
+                  "select max_length from harness_realtime_stream_policy where id = 1")) {
+        assertTrue(rs.next());
+        assertEquals(5_000L, rs.getLong(1), "seed must initialize realtime Stream capacity");
+      }
     }
   }
 
@@ -134,6 +141,8 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       assertTrue(rs.next());
       assertEquals(1L, rs.getLong(1));
     }
+    assertSingleLong(
+        conn, "select max_length from harness_realtime_stream_policy where id = 1", 5_000L);
   }
 
   private static void assertE2eSeedContent(Connection conn) throws Exception {
@@ -149,6 +158,9 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
     assertSingleCount(conn, "agent_provider", 5L);
     assertSingleCount(conn, "agent_model", 12L);
     assertSingleCount(conn, "agent_definition", 1L);
+    assertSingleCount(conn, "harness_realtime_stream_policy", 1L);
+    assertSingleLong(
+        conn, "select max_length from harness_realtime_stream_policy where id = 1", 5_000L);
   }
 
   private static void assertSingleCount(Connection conn, String table, long expected)
@@ -180,6 +192,12 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
               st,
               "select string_agg(name || '|' || coalesce(system_prompt, ''), ';' order by id)"
                   + " from agent_definition"));
+      sb.append('|');
+      sb.append(
+          singleString(
+              st,
+              "select string_agg(id || '|' || max_length, ';' order by id) from"
+                  + " harness_realtime_stream_policy"));
     }
     return sb.toString();
   }
@@ -237,6 +255,12 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
               st,
               "select string_agg(id || '|' || max_retries || '|' || backoff_strategy, ';' order"
                   + " by id) from harness_retry_policy"));
+      sb.append('|');
+      sb.append(
+          singleString(
+              st,
+              "select string_agg(id || '|' || max_length, ';' order by id) from"
+                  + " harness_realtime_stream_policy"));
     }
     return sb.toString();
   }
@@ -247,6 +271,15 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       String value = rs.getString(1);
       assertNotNull(value, "string aggregate unexpectedly null for " + sql);
       return value;
+    }
+  }
+
+  private static void assertSingleLong(Connection conn, String sql, long expected)
+      throws Exception {
+    try (Statement st = conn.createStatement();
+        ResultSet rs = st.executeQuery(sql)) {
+      assertTrue(rs.next());
+      assertEquals(expected, rs.getLong(1), sql);
     }
   }
 }
