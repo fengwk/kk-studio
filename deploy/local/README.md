@@ -85,7 +85,7 @@ docker compose -f deploy/local/compose.yaml down -v
   `data-dev-postgresql.sql` 是唯一事实源，**只在命名卷为空时执行一次**。
 - `data-dev-postgresql.sql` 写入的是 local-only 的 stub provider（`stub-key`），
   不携带任何真实凭证。
-- 真实 Provider（MiniMax / OpenAI / xAI / DeepSeek / Google）
+- 真实 Provider（OpenAI / Google / Anthropic / xAI / MiniMax / DeepSeek / ZAI）
   的 `credential` 必须通过 UI 的 Provider 页面或 `PUT /api/providers/{id}`
   接口在运行时注入，**绝不**写入镜像、SQL seed 或仓库。
 

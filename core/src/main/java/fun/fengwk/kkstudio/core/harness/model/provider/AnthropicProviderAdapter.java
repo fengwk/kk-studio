@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
+import java.util.Map;
 import java.util.Objects;
 
 /** Anthropic Provider adapter。 */
@@ -33,14 +34,22 @@ public final class AnthropicProviderAdapter implements ProviderAdapter {
       protected StreamingChatModel chatModel(ProviderRequest request) {
         CacheRequestValidator.AnthropicCacheFlags flags =
             CacheRequestValidator.requireAnthropicBreakpoints(request.cacheControl());
-        return AnthropicStreamingChatModel.builder()
-            .baseUrl(descriptor.endpoint())
-            .apiKey(apiKey)
-            .timeout(descriptor.modelCallTimeoutPolicy().modelCallTimeout())
-            .returnThinking(true)
-            .cacheSystemMessages(flags.cacheSystemMessages())
-            .cacheTools(flags.cacheTools())
-            .build();
+        AnthropicStreamingChatModel.AnthropicStreamingChatModelBuilder builder =
+            AnthropicStreamingChatModel.builder()
+                .baseUrl(descriptor.endpoint())
+                .apiKey(apiKey)
+                .timeout(descriptor.modelCallTimeoutPolicy().modelCallTimeout())
+                .returnThinking(true)
+                .cacheSystemMessages(flags.cacheSystemMessages())
+                .cacheTools(flags.cacheTools());
+        String reasoningEffort =
+            request.model().reasoning() ? request.variant().reasoningEffort() : null;
+        if (reasoningEffort != null) {
+          builder
+              .thinkingType("adaptive")
+              .customParameters(Map.of("output_config", Map.of("effort", reasoningEffort)));
+        }
+        return builder.build();
       }
 
       @Override

@@ -44,11 +44,13 @@ Environment:
   BACKEND_PORT=18080
   FRONTEND_PORT=5173
   SPRING_PROFILES_ACTIVE=e2e   # dev/e2e 均使用 PostgreSQL；dev=stub seed，e2e=real provider seed
-  MINIMAX_API_KEY / MINIMAX_BASE_URL
-  OPENAI_API_KEY / OPENAI_BASE_URL
-  XAI_API_KEY / XAI_BASE_URL
-  DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL
-  GEMINI_API_KEY / GOOGLE_BASE_URL
+  TEST_OPENAI_API_KEY / TEST_OPENAI_BASE_URL
+  TEST_GOOGLE_API_KEY / TEST_GOOGLE_BASE_URL
+  TEST_ANTHROPIC_API_KEY / TEST_ANTHROPIC_BASE_URL
+  TEST_XAI_API_KEY / TEST_XAI_BASE_URL
+  TEST_MINIMAX_API_KEY / TEST_MINIMAX_BASE_URL
+  TEST_DEEPSEEK_API_KEY / TEST_DEEPSEEK_BASE_URL
+  TEST_ZAI_API_KEY / TEST_ZAI_BASE_URL
   # e2e profile: only configured env vars are written into provider rows (no defaults)
   # OpenAI-compatible base URLs (openai / openai_response) get a trailing /v1 when set
   DEV_KILL_PORTS=true
@@ -91,21 +93,25 @@ sync_e2e_provider_credentials() {
   require_cmd python3
   step "Syncing e2e provider credentials from env (only set fields; secrets not printed)"
   BACKEND_URL="$BACKEND_URL" \
-  MINIMAX_API_KEY="${MINIMAX_API_KEY-}" MINIMAX_BASE_URL="${MINIMAX_BASE_URL-}" \
-  OPENAI_API_KEY="${OPENAI_API_KEY-}" OPENAI_BASE_URL="${OPENAI_BASE_URL-}" \
-  XAI_API_KEY="${XAI_API_KEY-}" XAI_BASE_URL="${XAI_BASE_URL-}" \
-  DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY-}" DEEPSEEK_BASE_URL="${DEEPSEEK_BASE_URL-}" \
-  GEMINI_API_KEY="${GEMINI_API_KEY-}" GOOGLE_BASE_URL="${GOOGLE_BASE_URL-}" \
+  TEST_OPENAI_API_KEY="${TEST_OPENAI_API_KEY-}" TEST_OPENAI_BASE_URL="${TEST_OPENAI_BASE_URL-}" \
+  TEST_GOOGLE_API_KEY="${TEST_GOOGLE_API_KEY-}" TEST_GOOGLE_BASE_URL="${TEST_GOOGLE_BASE_URL-}" \
+  TEST_ANTHROPIC_API_KEY="${TEST_ANTHROPIC_API_KEY-}" TEST_ANTHROPIC_BASE_URL="${TEST_ANTHROPIC_BASE_URL-}" \
+  TEST_XAI_API_KEY="${TEST_XAI_API_KEY-}" TEST_XAI_BASE_URL="${TEST_XAI_BASE_URL-}" \
+  TEST_MINIMAX_API_KEY="${TEST_MINIMAX_API_KEY-}" TEST_MINIMAX_BASE_URL="${TEST_MINIMAX_BASE_URL-}" \
+  TEST_DEEPSEEK_API_KEY="${TEST_DEEPSEEK_API_KEY-}" TEST_DEEPSEEK_BASE_URL="${TEST_DEEPSEEK_BASE_URL-}" \
+  TEST_ZAI_API_KEY="${TEST_ZAI_API_KEY-}" TEST_ZAI_BASE_URL="${TEST_ZAI_BASE_URL-}" \
   python3 - <<'PY'
 import json, os, urllib.request
 
 BACKEND = os.environ["BACKEND_URL"].rstrip("/")
 PROVIDERS = [
-    (1, "minimax", "MiniMax (OpenAI Responses).", "openai_response", "MINIMAX_BASE_URL", "MINIMAX_API_KEY"),
-    (2, "openai", "OpenAI (OpenAI Responses).", "openai_response", "OPENAI_BASE_URL", "OPENAI_API_KEY"),
-    (3, "xai", "xAI / Grok (OpenAI Responses).", "openai_response", "XAI_BASE_URL", "XAI_API_KEY"),
-    (4, "deepseek", "DeepSeek (OpenAI Chat Completions).", "openai", "DEEPSEEK_BASE_URL", "DEEPSEEK_API_KEY"),
-    (5, "google", "Google Gemini.", "google", "GOOGLE_BASE_URL", "GEMINI_API_KEY"),
+    (1, "minimax", "MiniMax (OpenAI Responses).", "openai_response", "TEST_MINIMAX_BASE_URL", "TEST_MINIMAX_API_KEY"),
+    (2, "openai", "OpenAI (OpenAI Responses).", "openai_response", "TEST_OPENAI_BASE_URL", "TEST_OPENAI_API_KEY"),
+    (3, "xai", "xAI / Grok (OpenAI Responses).", "openai_response", "TEST_XAI_BASE_URL", "TEST_XAI_API_KEY"),
+    (4, "deepseek", "DeepSeek (OpenAI Chat Completions).", "openai", "TEST_DEEPSEEK_BASE_URL", "TEST_DEEPSEEK_API_KEY"),
+    (5, "google", "Google Gemini.", "google", "TEST_GOOGLE_BASE_URL", "TEST_GOOGLE_API_KEY"),
+    (6, "anthropic", "Anthropic.", "anthropic", "TEST_ANTHROPIC_BASE_URL", "TEST_ANTHROPIC_API_KEY"),
+    (7, "zai", "ZAI (OpenAI Chat Completions).", "openai", "TEST_ZAI_BASE_URL", "TEST_ZAI_API_KEY"),
 ]
 
 def get(url):

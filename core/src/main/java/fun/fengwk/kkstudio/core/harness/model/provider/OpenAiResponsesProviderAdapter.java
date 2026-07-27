@@ -38,6 +38,11 @@ public final class OpenAiResponsesProviderAdapter implements ProviderAdapter {
                 .apiKey(apiKey)
                 .modelName(request.model().modelId())
                 .timeout(descriptor.modelCallTimeoutPolicy().modelCallTimeout());
+        String reasoningEffort =
+            request.model().reasoning() ? request.variant().reasoningEffort() : null;
+        if (reasoningEffort != null) {
+          builder.reasoningEffort(reasoningEffort);
+        }
         // SDK builder 不接受 null promptCacheKey，因此仅在非 NONE 时显式设置。
         if (key != null) {
           builder.promptCacheKey(key);

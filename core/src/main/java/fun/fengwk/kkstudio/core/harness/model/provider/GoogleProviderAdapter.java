@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.harness.model.provider;
 
 import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.googleai.GeminiThinkingConfig;
 import dev.langchain4j.model.googleai.GoogleAiGeminiStreamingChatModel;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
@@ -32,12 +33,22 @@ public final class GoogleProviderAdapter implements ProviderAdapter {
       @Override
       protected StreamingChatModel chatModel(ProviderRequest request) {
         // AUTOMATIC：忽略 cacheControl；harness 不发送任何 cached-content resource。
-        return GoogleAiGeminiStreamingChatModel.builder()
-            .baseUrl(descriptor.endpoint())
-            .apiKey(apiKey)
-            .timeout(descriptor.modelCallTimeoutPolicy().modelCallTimeout())
-            .returnThinking(true)
-            .build();
+        GoogleAiGeminiStreamingChatModel.GoogleAiGeminiStreamingChatModelBuilder builder =
+            GoogleAiGeminiStreamingChatModel.builder()
+                .baseUrl(descriptor.endpoint())
+                .apiKey(apiKey)
+                .timeout(descriptor.modelCallTimeoutPolicy().modelCallTimeout())
+                .returnThinking(true);
+        String reasoningEffort =
+            request.model().reasoning() ? request.variant().reasoningEffort() : null;
+        if (reasoningEffort != null) {
+          builder.thinkingConfig(
+              GeminiThinkingConfig.builder()
+                  .includeThoughts(true)
+                  .thinkingLevel(reasoningEffort)
+                  .build());
+        }
+        return builder.build();
       }
 
       @Override

@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { isDeepStrictEqual } from 'node:util'
+
 import { assert, envelopeData, expectHttpError, httpJson, pageResults, sleep, cid } from '../lib/http.mjs'
 import {
   bootstrapThread,
@@ -11,15 +14,52 @@ import {
 } from '../lib/harness.mjs'
 import { registerCase, getCase } from '../lib/registry.mjs'
 
+const PI_MODEL_CATALOG = JSON.parse(
+  readFileSync(
+    new URL(
+      '../../../core/src/test/resources/fun/fengwk/kkstudio/core/harness/persistence/postgresql/pi-model-catalog.json',
+      import.meta.url,
+    ),
+    'utf8',
+  ),
+)
+
 registerCase({
   id: 'seed.structured_model_config',
   level: 'L1',
-  title: 'Model 公开契约为结构化 config',
-  docs: 'GET /api/models：存在 config.defaultVariant；禁止 configJson/capabilitiesJson',
+  title: 'Model 公开契约与 Pi 默认目录一致',
+  docs: 'GET /api/models：19 个模型完整匹配 Pi 0.82.1 快照；xAI 仅保留 grok-4.5；禁止旧 JSON 字段',
   async run(ctx) {
     const { json } = await ctx.call('GET', '/api/models?pageNumber=1&pageSize=50')
     const models = pageResults(json)
-    assert(models.length > 0, 'no models seeded')
+    const { json: providersJson } = await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=50')
+    const providersById = new Map(
+      pageResults(providersJson).map((provider) => [String(provider.id), provider.name]),
+    )
+    const actualCatalog = models
+      .map((model) => ({
+        id: Number(model.id),
+        providerId: Number(model.providerId),
+        provider: providersById.get(String(model.providerId)),
+        name: model.name,
+        description: model.description,
+        config: model.config,
+      }))
+      .sort((left, right) => left.id - right.id)
+    assert(
+      actualCatalog.length === PI_MODEL_CATALOG.length,
+      `expected ${PI_MODEL_CATALOG.length} Pi models, got ${actualCatalog.length}`,
+    )
+    const mismatch = actualCatalog.findIndex(
+      (model, index) => !isDeepStrictEqual(model, PI_MODEL_CATALOG[index]),
+    )
+    assert(
+      mismatch === -1,
+      `Pi model catalog mismatch at index ${mismatch}: ${JSON.stringify({
+        expected: PI_MODEL_CATALOG[mismatch],
+        actual: actualCatalog[mismatch],
+      })}`,
+    )
     for (const model of models) {
       assert('config' in model, `missing config keys=${Object.keys(model)}`)
       assert(!('configJson' in model), 'legacy configJson must not be public')
@@ -27,8 +67,8 @@ registerCase({
       assert(model.config?.defaultVariant, JSON.stringify(model.config))
       assert(Array.isArray(model.config?.variants) && model.config.variants.length > 0, JSON.stringify(model.config))
       assert(Number(model.config?.limit?.context || 0) > 0, JSON.stringify(model.config))
-      ctx.vars.seedModel = model
     }
+    ctx.vars.seedModel = models.find((model) => Number(model.id) === 1)
   },
 })
 
@@ -36,7 +76,7 @@ registerCase({
   id: 'seed.agent_and_provider',
   level: 'L1',
   title: 'Agent/Provider seed 可用',
-  docs: 'seed agent 存在；provider.configured=true',
+  docs: 'seed agent 存在；七个 provider 及协议映射正确',
   async run(ctx) {
     const { json: agentsJson } = await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=50')
     const agents = pageResults(agentsJson)
@@ -46,8 +86,20 @@ registerCase({
     ctx.vars.agent = agent
     const { json: providersJson } = await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=50')
     const providers = pageResults(providersJson)
-    assert(providers[0]?.configured === true, JSON.stringify(providers[0]))
-    ctx.vars.provider = providers[0]
+    const expectedProviderTypes = new Map([
+      ['minimax', 'openai_response'],
+      ['openai', 'openai_response'],
+      ['xai', 'openai_response'],
+      ['deepseek', 'openai'],
+      ['google', 'google'],
+      ['anthropic', 'anthropic'],
+      ['zai', 'openai'],
+    ])
+    for (const [name, providerType] of expectedProviderTypes) {
+      const provider = providers.find((candidate) => candidate.name === name)
+      assert(provider?.providerType === providerType, JSON.stringify({ name, providerType, provider }))
+    }
+    ctx.vars.provider = providers.find((provider) => provider.name === 'minimax')
   },
 })
 

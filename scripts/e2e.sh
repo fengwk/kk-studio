@@ -4,7 +4,7 @@
 # 快速开始：
 #   ./scripts/e2e.sh                  # 复用已启动服务，跑 L1（免费）
 #   ./scripts/e2e.sh --rebuild        # 强制 Java 21 重打包并重启 backend/frontend
-#   ./scripts/e2e.sh --real           # + 真 MiniMax 文本轮次（需 MINIMAX_API_KEY）
+#   ./scripts/e2e.sh --real           # + 真 MiniMax 文本轮次（需 TEST_MINIMAX_*）
 #   ./scripts/e2e.sh --real --with-branch
 #   ./scripts/e2e.sh --real --with-tools
 #   ./scripts/e2e.sh --ui              # + Playwright UI smoke（截图进报告）
@@ -46,7 +46,7 @@ Usage: ./scripts/e2e.sh [options]
 
 Options:
   --rebuild         Force package backend + restart backend/frontend (+daemon if tools)
-  --real            Enable real provider cases (requires MINIMAX_API_KEY)
+  --real            Enable real provider cases (requires TEST_MINIMAX_BASE_URL/API_KEY)
   --with-tools      Enable daemon/tool cases (starts/reuses daemon)
   --with-branch     Enable branch usage cases (implies --real)
   --ui              Enable Playwright UI smoke (screenshots in report)
@@ -59,11 +59,13 @@ Options:
 Env:
   BACKEND_PORT=18081
   FRONTEND_PORT=5173
-  MINIMAX_API_KEY / MINIMAX_BASE_URL
-  OPENAI_API_KEY / OPENAI_BASE_URL
-  XAI_API_KEY / XAI_BASE_URL
-  DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL
-  GEMINI_API_KEY / GOOGLE_BASE_URL
+  TEST_OPENAI_API_KEY / TEST_OPENAI_BASE_URL
+  TEST_GOOGLE_API_KEY / TEST_GOOGLE_BASE_URL
+  TEST_ANTHROPIC_API_KEY / TEST_ANTHROPIC_BASE_URL
+  TEST_XAI_API_KEY / TEST_XAI_BASE_URL
+  TEST_MINIMAX_API_KEY / TEST_MINIMAX_BASE_URL
+  TEST_DEEPSEEK_API_KEY / TEST_DEEPSEEK_BASE_URL
+  TEST_ZAI_API_KEY / TEST_ZAI_BASE_URL
   # only set env vars are written into provider rows (no defaults)
   # openai/openai_response base URLs are normalized to end with /v1 when set
   JAVA_HOME_21=...
@@ -98,15 +100,15 @@ fi
 # 1) ensure stack
 ensure_stack "$REBUILD" "$WITH_TOOLS"
 
-# 2) inject any available provider env credentials; --real requires at least one configured provider
+# 2) inject available provider credentials; --real uses the seeded MiniMax model
 if [ "$REAL" = "true" ] || [ "$REBUILD" = "true" ]; then
   sync_e2e_provider_credentials
 fi
 if [ "$REAL" = "true" ]; then
-  configured=$(curl -fsS "$BACKEND_URL/api/providers?pageNumber=1&pageSize=20" \
-    | python3 -c 'import sys,json; d=json.load(sys.stdin); rows=((d.get("data") or {}).get("results") or []); print("1" if any(r.get("configured") for r in rows) else "0")')
-  if [ "$configured" != "1" ]; then
-    die "at least one provider credential env is required for --real"
+  minimax_ready=$(curl -fsS "$BACKEND_URL/api/providers?pageNumber=1&pageSize=20" \
+    | python3 -c 'import sys,json; d=json.load(sys.stdin); rows=((d.get("data") or {}).get("results") or []); p=next((r for r in rows if r.get("name")=="minimax"), {}); print("1" if p.get("configured") and p.get("baseUrl") else "0")')
+  if [ "$minimax_ready" != "1" ]; then
+    die "TEST_MINIMAX_BASE_URL and TEST_MINIMAX_API_KEY are required for --real"
   fi
 fi
 

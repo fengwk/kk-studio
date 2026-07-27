@@ -10,6 +10,10 @@ registerCase({
   docs: 'bootstrap 后发消息等到 IDLE；assistant entry；usage>0',
   async run(ctx) {
     await getCase('seed.agent_and_provider').run(ctx)
+    assert(
+      ctx.vars.provider?.configured && ctx.vars.provider?.baseUrl,
+      'minimax requires TEST_MINIMAX_BASE_URL and TEST_MINIMAX_API_KEY',
+    )
     const { session, thread } = await createBootstrappedThread(ctx, {
       agentDefinitionId: ctx.vars.agent.id,
       title: `e2e-real-${cid().slice(0, 8)}`,

@@ -99,6 +99,45 @@ class ProviderAdapterContractTest {
             + " probe\",\"status\":\"INVALID_ARGUMENT\"}}");
   }
 
+  @Test
+  @Timeout(30)
+  void mapsVariantReasoningEffortForEveryProviderProtocol() throws Exception {
+    JsonNode openAi =
+        reasoningBody(
+            ProviderType.OPENAI,
+            new OpenAiProviderAdapter("test-api-key"),
+            "/v1",
+            "{\"error\":{\"message\":\"probe\",\"type\":\"invalid_request_error\"}}");
+    assertEquals("high", openAi.path("reasoning_effort").asText());
+
+    JsonNode responses =
+        reasoningBody(
+            ProviderType.OPENAI_RESPONSES,
+            new OpenAiResponsesProviderAdapter("test-api-key"),
+            "/v1",
+            "{\"error\":{\"message\":\"probe\",\"type\":\"invalid_request_error\"}}");
+    assertEquals("high", responses.path("reasoning").path("effort").asText());
+
+    JsonNode anthropic =
+        reasoningBody(
+            ProviderType.ANTHROPIC,
+            new AnthropicProviderAdapter("test-api-key"),
+            "/v1",
+            "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"probe\"}}");
+    assertEquals("adaptive", anthropic.path("thinking").path("type").asText());
+    assertEquals("high", anthropic.path("output_config").path("effort").asText());
+
+    JsonNode google =
+        reasoningBody(
+            ProviderType.GOOGLE,
+            new GoogleProviderAdapter("test-api-key"),
+            "/v1beta",
+            "{\"error\":{\"code\":400,\"message\":\"probe\",\"status\":\"INVALID_ARGUMENT\"}}");
+    JsonNode thinking = google.path("generationConfig").path("thinkingConfig");
+    assertTrue(thinking.path("includeThoughts").asBoolean());
+    assertEquals("high", thinking.path("thinkingLevel").asText());
+  }
+
   /**
    * OpenAI Chat 在 SHORT + non-empty key 控制下应透传 {@code prompt_cache_key} custom 参数；NONE / LONG / 带
    * breakpoints 的 control 在请求边界 fail fast。
@@ -372,6 +411,24 @@ class ProviderAdapterContractTest {
     return new ModelCallTimeoutPolicy(totalTimeout, Duration.ofSeconds(1));
   }
 
+  private static JsonNode reasoningBody(
+      ProviderType type, ProviderAdapter adapter, String endpointPath, String response)
+      throws Exception {
+    try (ProbeServer server = new ProbeServer(response)) {
+      server.start();
+      ModelProvider provider =
+          adapter.create(
+              new ProviderDescriptor(
+                  "provider",
+                  type,
+                  server.endpoint(endpointPath),
+                  timeoutPolicy(Duration.ofSeconds(5))));
+      return jsonBody(
+          runAndAwait(
+              provider, request(ProviderCacheControl.none(), type, "high"), server, error -> {}));
+    }
+  }
+
   private static void assertPromptCacheKeyForControl(
       ProviderType modelType,
       ModelProvider provider,
@@ -566,8 +623,13 @@ class ProviderAdapterContractTest {
   }
 
   private static ProviderRequest request(ProviderCacheControl control, ProviderType modelType) {
+    return request(control, modelType, null);
+  }
+
+  private static ProviderRequest request(
+      ProviderCacheControl control, ProviderType modelType, String reasoningEffort) {
     ModelVariant variant =
-        new ModelVariant("default", 256, 0.0, null, null, null, null, List.of(), null);
+        new ModelVariant("default", 256, 0.0, null, null, null, null, List.of(), reasoningEffort);
     ModelDescriptor model =
         new ModelDescriptor(
             1L,

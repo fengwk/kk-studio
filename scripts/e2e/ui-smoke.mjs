@@ -13,6 +13,7 @@ import { createRequire } from 'node:module'
 import {
   existsSync,
   mkdirSync,
+  readFileSync,
   readdirSync,
   statSync,
   writeFileSync,
@@ -26,6 +27,15 @@ const requireFromFrontend = createRequire(
   path.resolve(__dirname, '../../frontend/package.json'),
 )
 const { chromium } = requireFromFrontend('@playwright/test')
+const PI_MODEL_NAMES = JSON.parse(
+  readFileSync(
+    path.resolve(
+      __dirname,
+      '../../core/src/test/resources/fun/fengwk/kkstudio/core/harness/persistence/postgresql/pi-model-catalog.json',
+    ),
+    'utf8',
+  ),
+).map((model) => model.name)
 
 function parseArgs(argv) {
   const args = {
@@ -196,12 +206,14 @@ async function main(argv) {
     await expectVisibleText(page, '新建 Chat')
   })
 
-  await run('ui.models.page_loads', 'Models 页渲染 seed 模型', async (caseArt) => {
+  await run('ui.models.page_loads', 'Models 页渲染全部 Pi seed 模型', async (caseArt) => {
     await goto('/models')
-    await shot(caseArt, 'models')
     expectNoFatal(pageErrors, consoleErrors)
     await expectVisibleText(page, '新建 Model')
-    await expectVisibleText(page, 'MiniMax')
+    for (const modelName of PI_MODEL_NAMES) {
+      await expectVisibleText(page, modelName)
+    }
+    await shot(caseArt, 'models')
   })
 
   await run('ui.models.open_create_modal', '点击新建 Model 打开编辑模态', async (caseArt) => {

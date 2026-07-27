@@ -15,7 +15,7 @@
 ```bash
 ./scripts/e2e.sh                         # 默认完整 L1 矩阵（免费）
 ./scripts/e2e.sh --rebuild               # 重打包并重启服务
-./scripts/e2e.sh --real                  # + 真 MiniMax 文本
+./scripts/e2e.sh --real                  # + 真 MiniMax 文本（需 TEST_MINIMAX_*）
 ./scripts/e2e.sh --real --with-branch
 ./scripts/e2e.sh --real --with-tools
 ./scripts/e2e.sh --ui                 # + Playwright UI smoke（截图进报告）
@@ -27,6 +27,41 @@ npm --prefix frontend run e2e:ui
 npm --prefix frontend run e2e:matrix
 npm --prefix frontend run e2e:list
 ```
+
+E2E 启动新后端以及执行 `--rebuild` / `--real` 时，会把当前进程中已设置的测试
+凭证写入对应 E2E seed Provider；未设置的 Provider 保持数据库原值，密钥不会写入
+仓库或报告。
+
+| Provider | 协议 | Base URL | API Key |
+| --- | --- | --- | --- |
+| OpenAI | OpenAI Responses | `TEST_OPENAI_BASE_URL` | `TEST_OPENAI_API_KEY` |
+| Google | Google | `TEST_GOOGLE_BASE_URL` | `TEST_GOOGLE_API_KEY` |
+| Anthropic | Anthropic | `TEST_ANTHROPIC_BASE_URL` | `TEST_ANTHROPIC_API_KEY` |
+| xAI | OpenAI Responses | `TEST_XAI_BASE_URL` | `TEST_XAI_API_KEY` |
+| MiniMax | OpenAI Responses | `TEST_MINIMAX_BASE_URL` | `TEST_MINIMAX_API_KEY` |
+| DeepSeek | OpenAI Chat Completions | `TEST_DEEPSEEK_BASE_URL` | `TEST_DEEPSEEK_API_KEY` |
+| ZAI | OpenAI Chat Completions | `TEST_ZAI_BASE_URL` | `TEST_ZAI_API_KEY` |
+
+当前默认 E2E Agent 使用 MiniMax 模型，因此 `--real` 必须同时提供
+`TEST_MINIMAX_BASE_URL` 和 `TEST_MINIMAX_API_KEY`。其他 Provider 凭证用于资源
+注入和手动切换模型；OpenAI 兼容协议的 Base URL 在缺少末尾 `/v1` 时自动补齐。
+
+E2E seed 固定包含 Pi 0.82.1 有效运行时中的 19 个模型：
+
+| Provider | 模型 |
+| --- | --- |
+| MiniMax | `MiniMax-M2.7`、`MiniMax-M3` |
+| OpenAI | `gpt-5.4`、`gpt-5.5`、`gpt-5.6-luna`、`gpt-5.6-sol`、`gpt-5.6-terra` |
+| xAI | `grok-4.5` |
+| DeepSeek | `deepseek-v4-flash`、`deepseek-v4-pro` |
+| Google | `gemini-3.5-flash`、`gemini-3.6-flash`、`gemini-3.1-pro-preview` |
+| Anthropic | `claude-sonnet-4-6`、`claude-opus-4-6`、`claude-sonnet-5`、`claude-opus-5`、`claude-fable-5` |
+| ZAI | `glm-5.2` |
+
+模型名称、上下文与输出上限、输入模态、基础价格及 Pi 支持的 thinking levels
+由快照整体校验。OpenAI 分档阈值等于当前 272000 context 上限，seed 使用可达区间的
+基础价格；Anthropic 1 小时缓存写价格按 Pi 规则使用 `2 * input`。默认 Agent 仍绑定
+`minimax/MiniMax-M2.7` 的 `high` variant。
 
 ## 实现结构
 
@@ -41,6 +76,7 @@ npm --prefix frontend run e2e:list
 | `scripts/e2e/lib/harness.mjs` | 共享 Thread 步骤：`createUnboundThread`、`bootstrapThread`、`createBootstrappedThread`、`updateThreadHead`、`waitForQuiescentThread`、`rebindWhenQuiescent` 与 Thread/Session 读取 |
 | `scripts/e2e/lib/registry.mjs` | case 注册表 |
 | `scripts/e2e/cases/*.mjs` | API 用例 |
+| `core/src/test/resources/.../pi-model-catalog.json` | Pi 0.82.1 有效模型目录快照 |
 | `reports/e2e/` | 报告与产物（gitignore） |
 
 ## 报告
@@ -76,8 +112,8 @@ API 矩阵注册 **57** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 
 | Case | 断言 |
 | --- | --- |
-| `seed.structured_model_config` | 公开 `config`，禁止 `configJson/capabilitiesJson` |
-| `seed.agent_and_provider` | seed agent；provider.configured |
+| `seed.structured_model_config` | 19 个模型完整匹配 Pi 快照；xAI 仅 `grok-4.5`；禁止旧 JSON 字段 |
+| `seed.agent_and_provider` | seed agent；七个 Provider 及协议映射 |
 | `thread.blank_first_send_order` | 首发顺序 `createThread -> bootstrap -> USER_MESSAGE`；bootstrap 的 `RUNTIME_CONFIG` 先在路径上，mailbox 只有 USER_MESSAGE 且被 APPLIED |
 | `usage.unknown_thread_404` | 未知 thread usage 404 |
 | `frontend.proxy_model_contract` | 5173 代理契约 |
@@ -164,7 +200,7 @@ API 矩阵注册 **57** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 | Case | 断言 |
 | --- | --- |
 | `ui.chats.page_loads` | `/chats` + 新建 Chat |
-| `ui.models.page_loads` | `/models` + MiniMax + 新建 Model |
+| `ui.models.page_loads` | `/models` 渲染全部 19 个 Pi seed 模型 + 新建 Model |
 | `ui.models.open_create_modal` | 点击新建 Model |
 | `ui.agents.page_loads` | `/agents` + default-assistant |
 | `ui.providers.page_loads` | `/providers` |
