@@ -4,11 +4,15 @@
 .gitattributes
 .workspace/
 
-# Maven build outputs (rebuilt inside the container)
+# Maven build outputs. Only the host-built Fat JAR is allowed into the context
+# (see deploy/local/Dockerfile); everything else under target/ is excluded.
 **/target/
+!web/target/
+web/target/**
+!web/target/kk-studio-web-1.0.0.jar
 **/.mvn/wrapper/maven-wrapper.jar
 
-# Frontend caches / outputs (rebuilt inside the container by frontend-maven-plugin)
+# Frontend caches / outputs (embedded into the Fat JAR by host distribution build)
 frontend/node_modules/
 frontend/dist/
 frontend/coverage/

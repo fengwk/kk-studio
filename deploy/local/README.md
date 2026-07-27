@@ -4,10 +4,10 @@
 
 默认 Compose 由仓库根目录构建：
 
-- `app` —— Spring Boot Fat JAR 镜像。构建时在容器内调用
-  `mvn -Pdistribution -pl web -am -DskipTests clean package`，把 React 产物
-  嵌入 `BOOT-INF/classes/static`，运行时由 Spring 直接服务 UI / API / SPA
-  fallback；不加 Nginx，也不另起前端容器。容器内端口固定为 `8080`。
+- `app` —— Spring Boot Fat JAR 镜像。先在宿主构建带 React 产物的 Fat JAR
+  （`mvn -Pdistribution`），再把 `web/target/kk-studio-web-1.0.0.jar` 复制进
+  轻量 JRE 镜像；运行时由 Spring 直接服务 UI / API / SPA fallback；不加
+  Nginx，也不另起前端容器。容器内端口固定为 `8080`。
 - `postgres:17-alpine` —— 唯一 durable 数据库，命名为 `kk_studio`，默认用户
   `kk_studio`。`schema-postgresql.sql` 与 `data-dev-postgresql.sql` 只读挂载到
   `/docker-entrypoint-initdb.d/01-schema.sql` 与 `02-data.sql`；空 volume 首次
@@ -19,6 +19,14 @@
 > Harness Daemon 不在当前栈内。
 
 ## 启动
+
+先在宿主构建可执行 Fat JAR（复用本地 `~/.m2` 与前端缓存）：
+
+```bash
+env JAVA_HOME=$JAVA_HOME_21 mvn -Pdistribution -pl web -am -DskipTests clean package
+```
+
+再启动栈：
 
 ```bash
 docker compose -f deploy/local/compose.yaml up -d --build --wait

@@ -1,30 +1,16 @@
 #
-# kk-studio app image.
+# kk-studio app image (runtime only).
 #
-# Builder: Maven 3.9.11 on Temurin JDK 21. Produces the Spring Boot Fat JAR for the
-# `web` module via the `distribution` profile, which installs Node 24 + npm 11 and
-# embeds the React build output into BOOT-INF/classes/static.
+# The Spring Boot Fat JAR is built on the host with the Maven `distribution`
+# profile so Node/npm reuse the host network and local frontend cache:
 #
-# Runtime: Temurin JRE 21 (Ubuntu 22.04 base). Only the Fat JAR ships in the image;
-# no Maven, no Node, no source. Healthcheck uses `curl` (already shipped in the
-# JRE base image) against `/actuator/health`. The JVM runs as a dedicated
-# unprivileged `kkstudio` user.
+#   env JAVA_HOME=$JAVA_HOME_21 mvn -Pdistribution -pl web -am -DskipTests clean package
+#
+# The image only ships Temurin JRE 21 + the Fat JAR. Healthcheck uses `curl`
+# (already present in the JRE base image) against `/actuator/health`. The JVM
+# runs as a dedicated unprivileged `kkstudio` user.
+#
 
-# ---------- builder ----------
-FROM maven:3.9.11-eclipse-temurin-21 AS builder
-
-WORKDIR /build
-
-# Copy the whole reactor. The tight `.dockerignore` excludes every output we do
-# not need (target dirs, frontend node_modules/dist, IDE files, secrets, etc.).
-COPY . .
-
-# Build the Fat JAR with embedded React assets. Tests are skipped on purpose:
-# the Fat JAR is a runtime artifact, and tests run in dedicated CI steps.
-RUN mvn -Pdistribution -pl web -am -DskipTests -B -ntp clean package \
-    && cp web/target/kk-studio-web-*.jar /build/app.jar
-
-# ---------- runtime ----------
 FROM eclipse-temurin:21.0.8_9-jre-jammy
 
 ENV LANG=C.UTF-8 \
@@ -48,7 +34,8 @@ RUN set -eux; \
 
 WORKDIR /app
 
-COPY --from=builder --chown=kkstudio:kkstudio /build/app.jar /app/app.jar
+# Host-built Fat JAR with embedded React assets under BOOT-INF/classes/static.
+COPY --chown=kkstudio:kkstudio web/target/kk-studio-web-1.0.0.jar /app/app.jar
 
 USER kkstudio
 
@@ -56,7 +43,7 @@ EXPOSE 8080
 
 # Healthcheck runs as the unprivileged user; `curl` is on PATH inside the JRE
 # image. Spring Boot exposes `/actuator/health` by default with the included
-# `spring-boot-starter-actuator` (or whichever starter convention4j pulls in).
+# actuator starter.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=6 \
     CMD curl -fsS http://127.0.0.1:8080/actuator/health || exit 1
 
