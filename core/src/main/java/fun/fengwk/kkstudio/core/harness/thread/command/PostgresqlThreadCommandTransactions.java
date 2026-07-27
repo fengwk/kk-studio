@@ -55,7 +55,54 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
 
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
-  public SessionCreation createSession(
+  public HarnessThread createThread(Instant now) {
+    Instant persistedNow = persistenceInstant(now);
+    long threadId = idGenerator.nextThreadId();
+    requireAffected(mapper.insertThread(threadId, null, offset(persistedNow)), "insert thread");
+    return new HarnessThread(threadId, null, 0, false, 0, null, persistedNow, persistedNow);
+  }
+
+  @Override
+  @Transactional(isolation = Isolation.READ_COMMITTED)
+  public ThreadCommandTransactions.BootstrapResult bootstrapThread(
+      long threadId,
+      long expectedExecutionEpoch,
+      String title,
+      RuntimeConfigSnapshot initialConfig,
+      Instant now) {
+    requirePositive(threadId, "threadId");
+    Objects.requireNonNull(initialConfig, "initialConfig");
+    Instant persistedNow = persistenceInstant(now);
+    ThreadCommandRow thread = lockRebindableThread(threadId, expectedExecutionEpoch, persistedNow);
+    if (thread.getHeadEntryId() != null) {
+      throw new IllegalStateException("thread is already bound: " + threadId);
+    }
+    SessionCreation created = createSession(title, initialConfig, persistedNow);
+    HarnessThread bound =
+        rebind(thread, expectedExecutionEpoch, created.configEntry().id(), persistedNow);
+    return new ThreadCommandTransactions.BootstrapResult(
+        created.session(), created.rootEntry(), created.configEntry(), bound);
+  }
+
+  /**
+   * Private bundle produced by the local {@link #createSession} helper below. Exists only so {@link
+   * #bootstrapThread} can express the three writes (Session / ROOT / RUNTIME_CONFIG) as one atomic
+   * mutation; it is not part of the public {@code ThreadCommandTransactions} SPI.
+   */
+  private record SessionCreation(
+      Session session, SessionEntry rootEntry, SessionEntry configEntry) {
+    private SessionCreation {
+      Objects.requireNonNull(session, "session");
+      Objects.requireNonNull(rootEntry, "rootEntry");
+      Objects.requireNonNull(configEntry, "configEntry");
+    }
+  }
+
+  /**
+   * Atomic Session bootstrap: append-only ROOT plus the frozen initial RUNTIME_CONFIG. Runs inside
+   * the bootstrap transaction.
+   */
+  private SessionCreation createSession(
       String title, RuntimeConfigSnapshot initialConfig, Instant now) {
     Objects.requireNonNull(initialConfig, "initialConfig");
     Instant persistedNow = persistenceInstant(now);
@@ -87,37 +134,6 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
     SessionEntry root = new SessionEntry(rootEntryId, null, new RootEntryPayload());
     SessionEntry config = new SessionEntry(configEntryId, rootEntryId, initialConfig);
     return new SessionCreation(session, root, config);
-  }
-
-  @Override
-  @Transactional(isolation = Isolation.READ_COMMITTED)
-  public HarnessThread createThread(Instant now) {
-    Instant persistedNow = persistenceInstant(now);
-    long threadId = idGenerator.nextThreadId();
-    requireAffected(mapper.insertThread(threadId, null, offset(persistedNow)), "insert thread");
-    return new HarnessThread(threadId, null, 0, false, 0, null, persistedNow, persistedNow);
-  }
-
-  @Override
-  @Transactional(isolation = Isolation.READ_COMMITTED)
-  public ThreadCommandTransactions.BootstrapResult bootstrapThread(
-      long threadId,
-      long expectedExecutionEpoch,
-      String title,
-      RuntimeConfigSnapshot initialConfig,
-      Instant now) {
-    requirePositive(threadId, "threadId");
-    Objects.requireNonNull(initialConfig, "initialConfig");
-    Instant persistedNow = persistenceInstant(now);
-    ThreadCommandRow thread = lockRebindableThread(threadId, expectedExecutionEpoch, persistedNow);
-    if (thread.getHeadEntryId() != null) {
-      throw new IllegalStateException("thread is already bound: " + threadId);
-    }
-    SessionCreation created = createSession(title, initialConfig, persistedNow);
-    HarnessThread bound =
-        rebind(thread, expectedExecutionEpoch, created.configEntry().id(), persistedNow);
-    return new ThreadCommandTransactions.BootstrapResult(
-        created.session(), created.rootEntry(), created.configEntry(), bound);
   }
 
   @Override

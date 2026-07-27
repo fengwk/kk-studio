@@ -77,8 +77,6 @@ function agent(id: string, modelId: string): AgentDefinitionDTO {
       environmentName: null,
       tools: [],
       skills: [],
-      allowedSubagents: [],
-      executionPolicy: {},
     },
     version: 1,
     createTime: null,

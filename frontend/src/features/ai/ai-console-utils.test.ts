@@ -158,8 +158,6 @@ describe('ai-console-utils', () => {
           environmentName: null,
           tools: ['search'],
           skills: [],
-          allowedSubagents: [],
-          executionPolicy: {},
         },
         version: 1,
         createTime: '2026-06-20T02:00:00',
@@ -247,13 +245,6 @@ describe('ai-console-utils', () => {
       environmentName: '',
       tools: [' search ', ''],
       skills: [],
-      allowedSubagents: [],
-      executionPolicy: {
-        maxTurns: '',
-        maxDepth: '',
-        maxDirectSubagents: '',
-        maxTotalSubagents: '',
-      },
     }
     const expectedAgent = {
       name: 'assistant',
@@ -265,27 +256,11 @@ describe('ai-console-utils', () => {
         environmentName: null,
         tools: ['search'],
         skills: [],
-        allowedSubagents: [],
-        executionPolicy: {
-          maxTurns: null,
-          maxDepth: null,
-          maxDirectSubagents: null,
-          maxTotalSubagents: null,
-        },
       },
     }
     expect(toEditableAgent(agentInput)).toEqual(expectedAgent)
     expect(toEditableAgentUpdate(agentInput)).toEqual(expectedAgent)
-    expect(() =>
-      toEditableAgent({
-        ...agentInput,
-        executionPolicy: { ...agentInput.executionPolicy, maxTurns: '1.5' },
-      }),
-    ).toThrow(/executionPolicy\.maxTurns must be a positive integer/)
     expect(toEditableAgent({ ...agentInput, variant: ' ' }).variant).toBeNull()
-    expect(() =>
-      toEditableAgent({ ...agentInput, allowedSubagents: ['reviewer', ' reviewer '] }),
-    ).toThrow(/allowedSubagents 不能重复/)
   })
 
   /** Search and presentation helpers cover structured model defaults. */
@@ -302,8 +277,6 @@ describe('ai-console-utils', () => {
           environmentName: null,
           tools: [],
           skills: [],
-          allowedSubagents: [],
-          executionPolicy: {},
         },
         version: 1,
         createTime: '2026-06-20T02:00:00',
@@ -421,8 +394,6 @@ describe('ai-console-utils', () => {
           environmentName: null,
           tools: [],
           skills: [],
-          allowedSubagents: [],
-          executionPolicy: {},
         },
         version: 1,
         createTime: '2026-06-20T02:00:00',

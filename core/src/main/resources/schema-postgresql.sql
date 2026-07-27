@@ -217,31 +217,11 @@ create index idx_harness_entry_parent
 create table harness_session (
     id                    bigint        primary key default nextval('kk_studio_id_seq'),
     title                 varchar(256),
-    parent_session_id     bigint,
-    parent_invocation_id  bigint,
     created_at            timestamptz(3) not null default current_timestamp,
-    updated_at            timestamptz(3) not null default current_timestamp,
     constraint ck_harness_session_title check (
         title is null or char_length(btrim(title)) > 0
-    ),
-    -- parent_session_id and parent_invocation_id are both null or both not null.
-    constraint ck_harness_session_parent_pair check (
-        (parent_session_id is null and parent_invocation_id is null)
-        or (parent_session_id is not null and parent_invocation_id is not null)
-    ),
-    constraint ck_harness_session_parent_not_self check (
-        parent_session_id is null or parent_session_id <> id
-    ),
-    constraint ck_harness_session_time_order check (
-        updated_at >= created_at
     )
 );
-
-create unique index uk_harness_session_parent_invocation
-    on harness_session (parent_invocation_id)
-    where parent_invocation_id is not null;
-create index idx_harness_session_parent
-    on harness_session (parent_session_id);
 
 create table harness_thread (
     id                bigint        primary key default nextval('kk_studio_id_seq'),
@@ -866,13 +846,6 @@ create index idx_harness_model_usage_model
 ------------------------------------------------------------------------------
 -- 4. Forward FKs whose targets now exist
 ------------------------------------------------------------------------------
-
--- The pair references the ToolInvocation that created this child Session and proves
--- that parent_session_id is that Invocation's owning Session.
-alter table harness_session
-    add constraint fk_harness_session_parent_invocation
-    foreign key (parent_session_id, parent_invocation_id)
-    references harness_tool_invocation (session_id, id);
 
 -- harness_entry.session_id references harness_session.
 alter table harness_entry

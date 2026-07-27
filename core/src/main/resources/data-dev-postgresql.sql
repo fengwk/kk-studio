@@ -33,7 +33,7 @@ insert into agent_definition (
     1, 'default-assistant', 'Acceptance stub agent for local studio pages.',
     'You are the local acceptance stub assistant for kk-studio.',
     1, 'default',
-    '{"tools":[],"skills":[],"allowedSubagents":[],"executionPolicy":{"maxTurns":32,"maxDepth":4,"maxDirectSubagents":4,"maxTotalSubagents":16}}',
+    '{"tools":[],"skills":[]}',
     current_timestamp, current_timestamp, 0
 )
 on conflict (id) do nothing;

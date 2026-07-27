@@ -51,13 +51,6 @@ function draft(overrides: Partial<AgentDraft> = {}): AgentDraft {
     environmentName: ' local ',
     tools: ['platform/read', 'local/bash'],
     skills: ['platform/dev'],
-    allowedSubagents: [' helper '],
-    executionPolicy: {
-      maxTurns: '10',
-      maxDepth: '2',
-      maxDirectSubagents: '3',
-      maxTotalSubagents: '4',
-    },
     ...overrides,
   }
 }
@@ -92,13 +85,6 @@ describe('ai-agent-draft-codec', () => {
         environmentName: null,
         tools: [' read ', ''],
         skills: [],
-        allowedSubagents: [' helper '],
-        executionPolicy: {
-          maxTurns: 10,
-          maxDepth: null,
-          maxDirectSubagents: 2,
-          maxTotalSubagents: 4,
-        },
       },
       version: 1,
       createTime: null,
@@ -114,25 +100,14 @@ describe('ai-agent-draft-codec', () => {
       environmentName: '',
       tools: ['read'],
       skills: [],
-      allowedSubagents: ['helper'],
-      executionPolicy: {
-        maxTurns: '10',
-        maxDepth: '',
-        maxDirectSubagents: '2',
-        maxTotalSubagents: '4',
-      },
     })
 
     expect(
       toAgentDraft({
         ...agent,
         variant: null,
-        config: {
-          ...agent.config,
-          executionPolicy: { ...agent.config.executionPolicy, maxDepth: 3 },
-        },
       }),
-    ).toMatchObject({ variant: '', executionPolicy: { maxDepth: '3' } })
+    ).toMatchObject({ variant: '' })
   })
 
   it('builds complete create and update bodies', () => {
@@ -146,19 +121,16 @@ describe('ai-agent-draft-codec', () => {
         environmentName: 'local',
         tools: ['read', 'bash'],
         skills: ['dev'],
-        allowedSubagents: ['helper'],
-        executionPolicy: {
-          maxTurns: 10,
-          maxDepth: 2,
-          maxDirectSubagents: 3,
-          maxTotalSubagents: 4,
-        },
       },
     }
     expect(toEditableAgent(draft())).toEqual(expected)
     expect(toEditableAgentUpdate(draft())).toEqual(expected)
 
-    expect(toEditableAgent(draft({ description: '', systemPrompt: '', environmentName: '' }))).toMatchObject({
+    expect(
+      toEditableAgent(
+        draft({ description: '', systemPrompt: '', environmentName: '' }),
+      ),
+    ).toMatchObject({
       description: null,
       systemPrompt: null,
       config: { environmentName: null },
@@ -169,34 +141,20 @@ describe('ai-agent-draft-codec', () => {
   it.each([
     [{ name: ' ' }, /name/],
     [{ modelId: ' ' }, /modelId/],
-    [{ executionPolicy: { ...draft().executionPolicy, maxTurns: '0' } }, /maxTurns/],
-    [{ executionPolicy: { ...draft().executionPolicy, maxDepth: '1.5' } }, /maxDepth/],
-    [{ executionPolicy: { ...draft().executionPolicy, maxDirectSubagents: '-1' } }, /maxDirectSubagents/],
-    [{ executionPolicy: { ...draft().executionPolicy, maxTotalSubagents: 'NaN' } }, /maxTotalSubagents/],
     [{ tools: ['one/read', 'two/read'] }, /tools/],
     [{ skills: ['one/dev', 'two/dev'] }, /skills/],
-    [{ allowedSubagents: ['helper', ' helper '] }, /allowedSubagents/],
-  ] as Array<[Partial<AgentDraft>, RegExp]>)('rejects invalid complete bodies %#', (patch, message) => {
-    expect(() => toEditableAgent(draft(patch))).toThrow(message)
-  })
+  ] as Array<[Partial<AgentDraft>, RegExp]>)(
+    'rejects invalid complete bodies %#',
+    (patch, message) => {
+      expect(() => toEditableAgent(draft(patch))).toThrow(message)
+    },
+  )
 
-  it('keeps omitted execution limits null', () => {
-    expect(
-      toEditableAgent(
-        draft({
-          executionPolicy: {
-            maxTurns: '',
-            maxDepth: ' ',
-            maxDirectSubagents: '',
-            maxTotalSubagents: '',
-          },
-        }),
-      ).config.executionPolicy,
-    ).toEqual({
-      maxTurns: null,
-      maxDepth: null,
-      maxDirectSubagents: null,
-      maxTotalSubagents: null,
+  it('omits an unset environmentName entirely from the wire payload', () => {
+    expect(toEditableAgent(draft({ environmentName: '' })).config).toEqual({
+      environmentName: null,
+      tools: ['read', 'bash'],
+      skills: ['dev'],
     })
   })
 })

@@ -23,7 +23,6 @@ const ENTRY_KIND_LABELS: Record<SessionEntryKind, string> = {
   assistant: '助手',
   tool: '工具',
   custom: '自定义',
-  label: '标签',
   other: '系统',
 }
 

@@ -5,8 +5,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { ThreadComposer } from '@/features/ai/thread-panel/ThreadComposer'
 import { ThreadCommandPalette } from '@/features/ai/thread-panel/ThreadCommandPalette'
 import { ThreadWidgetStack } from '@/features/ai/thread-panel/ThreadWidgetStack'
-import { ThreadSubagentWidget } from '@/features/ai/thread-panel/ThreadSubagentWidget'
-import { ThreadActivityWidget } from '@/features/ai/thread-panel/ThreadActivityWidget'
 import type { ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
 
 function ControlledComposer({
@@ -155,120 +153,23 @@ describe('ThreadCommandPalette', () => {
   })
 })
 
-describe('ThreadWidgetStack and SubagentWidget', () => {
-  it('renders working status and nested running/queued/waiting subagents', () => {
-    render(
+describe('ThreadWidgetStack', () => {
+  it('renders queued messages under the working zone and stays empty when idle', () => {
+    const { container, rerender } = render(
       <ThreadWidgetStack
         working
         queuedMessages={[
           { inputId: 'queued-1', role: 'user', text: '稍后处理这条', sequence: 1 },
         ]}
-      >
-        <ThreadSubagentWidget
-          taskTree={[
-            {
-              task: {
-                parentInvocationId: 't1',
-                parentSessionId: 's1',
-                parentThreadId: 'th1',
-                childSessionId: 's2',
-                childThreadId: 'th2',
-                targetAgent: 'worker',
-                workingCopyPolicy: 'SHARED',
-                workingCopyRevision: null,
-                maxTurns: 3,
-                status: 'RUNNING',
-                report: { finalReport: 'detail-text-here' } as never,
-                createTime: null,
-                updateTime: null,
-              },
-              children: [
-                {
-                  task: {
-                    parentInvocationId: 't2',
-                    parentSessionId: 's2',
-                    parentThreadId: 'th2',
-                    childSessionId: 's3',
-                    childThreadId: 'th3',
-                    targetAgent: '',
-                    workingCopyPolicy: 'SHARED',
-                    workingCopyRevision: null,
-                    maxTurns: 1,
-                    status: 'QUEUED',
-                    report: null,
-                    createTime: null,
-                    updateTime: null,
-                  },
-                  children: [
-                    {
-                      task: {
-                        parentInvocationId: '',
-                        parentSessionId: 's3',
-                        parentThreadId: 'th3',
-                        childSessionId: 's4',
-                        childThreadId: 'th4',
-                        targetAgent: '',
-                        workingCopyPolicy: 'SHARED',
-                        workingCopyRevision: null,
-                        maxTurns: 1,
-                        status: 'WAITING',
-                        report: null,
-                        createTime: null,
-                        updateTime: null,
-                      },
-                      children: [],
-                    },
-                  ],
-                },
-              ],
-            },
-            {
-              task: {
-                parentInvocationId: 'done',
-                parentSessionId: 's1',
-                parentThreadId: 'th1',
-                childSessionId: 'sd',
-                childThreadId: 'thd',
-                targetAgent: 'done-agent',
-                workingCopyPolicy: 'SHARED',
-                workingCopyRevision: null,
-                maxTurns: 1,
-                status: 'SUCCEEDED',
-                report: null,
-                createTime: null,
-                updateTime: null,
-              },
-              children: [],
-            },
-          ]}
-        />
-      </ThreadWidgetStack>,
+      />,
     )
     expect(screen.getByText('Working...')).toBeInTheDocument()
     expect(screen.getByText('稍后处理这条')).toBeInTheDocument()
-    const zoneText = screen.getByLabelText('会话组件区').textContent ?? ''
+    const zone = screen.getByLabelText('会话组件区')
+    const zoneText = zone.textContent ?? ''
     expect(zoneText.indexOf('Working...')).toBeLessThan(zoneText.indexOf('稍后处理这条'))
-    expect(screen.getByText(/worker/)).toBeInTheDocument()
-    expect(screen.getByText(/detail-text-here/)).toBeInTheDocument()
-    expect(screen.queryByText('done-agent')).not.toBeInTheDocument()
-  })
 
-  it('hides widget stack when idle and empty, and empty subagent widget', () => {
-    const { container } = render(<ThreadWidgetStack working={false} />)
-    expect(container).toBeEmptyDOMElement()
-    const empty = render(<ThreadSubagentWidget taskTree={[]} />)
-    expect(empty.container).toBeEmptyDOMElement()
-  })
-
-  it('collapses zone when children all render null (no residual height/border)', () => {
-    const { container } = render(
-      <ThreadWidgetStack working={false}>
-        <ThreadSubagentWidget taskTree={[]} />
-        <ThreadActivityWidget activities={[]} />
-      </ThreadWidgetStack>,
-    )
-    const zone = container.querySelector('.thread-widget-zone')
-    // 节点可存在，但 :empty → 高度/边框为 0；更常见是完全无可见内容
-    expect(zone == null || zone.childNodes.length === 0).toBe(true)
+    rerender(<ThreadWidgetStack working={false} />)
+    expect(container.querySelector('.thread-widget-zone')?.childNodes.length ?? 0).toBe(0)
   })
 })

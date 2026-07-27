@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.core.harness.query;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -13,6 +13,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import fun.fengwk.kkstudio.core.harness.observability.service.impl.HarnessObservabilityQueryServiceImpl;
 import fun.fengwk.kkstudio.core.harness.session.service.HarnessSessionQueryService;
 import fun.fengwk.kkstudio.core.harness.thread.command.TestRuntimeConfigs;
+import fun.fengwk.kkstudio.core.harness.thread.command.TestThreads;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadQueryService;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
@@ -20,7 +21,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeEntryInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
@@ -34,7 +34,6 @@ import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.InteractionDTO;
 import fun.fengwk.kkstudio.share.model.ModelInvocationDTO;
-import fun.fengwk.kkstudio.share.model.RootActivityDTO;
 import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
 
 import java.time.Duration;
@@ -70,119 +69,168 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
   @Autowired private JdbcTemplate jdbc;
 
   @Test
-  void readsRootChildSessionsBranchPathDerivedStatusAndSnapshots() {
-    ThreadCommandTransactions.SessionCreation root =
-        commandTransactions.createSession("root-session", TestRuntimeConfigs.bootstrap(), NOW);
-    String rootSessionId = Long.toString(root.session().id());
-    // Session creation no longer creates a Thread; bind a reusable Thread onto the ROOT entry.
-    HarnessThread created = commandTransactions.createThread(NOW);
-    long rootThread = created.id();
-    assertNull(created.headEntryId(), "new threads start UNBOUND");
-    assertEquals("UNBOUND", threadQueryService.getThread(Long.toString(rootThread)).getStatus());
-    HarnessThread bound =
-        commandTransactions.updateHead(
-            rootThread, created.executionEpoch(), root.rootEntry().id(), NOW);
-    long rootEpoch = bound.executionEpoch();
-    String rootThreadId = Long.toString(rootThread);
+  void sessionIsBootstrappedByThreadCommandWithoutChildSessions() {
+    TestThreads.Bootstrapped boot =
+        TestThreads.bootstrap(commandTransactions, "bootstrap-only", NOW);
+    String sessionId = Long.toString(boot.sessionId());
 
-    // child session under parent tool invocation
-    long assistantEntryId = root.rootEntry().id() + 10;
-    long toolInvocationId = rootThread + 50;
-    long childSessionId = root.session().id() + 100;
-    long childRootEntryId = root.rootEntry().id() + 100;
-    jdbc.update(
-        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
-            + " values (?, ?, ?, 'MESSAGE', '{}'::jsonb, ?)",
-        assistantEntryId,
-        root.session().id(),
-        root.rootEntry().id(),
-        OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
-    // parent tool for child session FK：用终态 CANCELLED，避免把 root thread 误判为 WAITING
-    jdbc.update(
-        "insert into harness_tool_invocation (id, thread_id, session_id, assistant_entry_id, ordinal,"
-            + " tool_call_id, descriptor, arguments, location, environment_name, execution_epoch,"
-            + " status, attempt, finished_at, created_at) values (?, ?, ?, ?, 0, 'call-1',"
-            + " cast(? as jsonb), '{}'::jsonb, 'PLATFORM', null, ?, 'CANCELLED', 1, ?, ?)",
-        toolInvocationId,
-        rootThread,
-        root.session().id(),
-        assistantEntryId,
-        TOOL_DESCRIPTOR_JSON,
-        rootEpoch,
-        OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC),
-        OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
-    OffsetDateTime childNow = OffsetDateTime.ofInstant(NOW.plusSeconds(1), ZoneOffset.UTC);
-    // Session/Entry no longer participate in a FK cycle with Thread, so plain inserts suffice.
-    jdbc.update(
-        "insert into harness_session (id, title, parent_session_id, parent_invocation_id,"
-            + " created_at, updated_at) values (?, 'child-session', ?, ?, ?, ?)",
-        childSessionId,
-        root.session().id(),
-        toolInvocationId,
-        childNow,
-        childNow);
-    jdbc.update(
-        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
-            + " values (?, ?, null, 'ROOT', '{}'::jsonb, ?)",
-        childRootEntryId,
-        childSessionId,
-        childNow);
-    HarnessThread childCreated = commandTransactions.createThread(NOW.plusSeconds(1));
-    long childThreadId = childCreated.id();
-    commandTransactions.updateHead(
-        childThreadId, childCreated.executionEpoch(), childRootEntryId, NOW.plusSeconds(1));
-
-    HarnessSessionDTO loadedRoot = sessionQueryService.getSession(rootSessionId);
-    assertEquals("root-session", loadedRoot.getTitle());
-    assertNull(loadedRoot.getParentSessionId());
-    assertEquals(rootSessionId, loadedRoot.getRootSessionId());
-    assertEquals(0, loadedRoot.getDepth());
+    HarnessSessionDTO loaded = sessionQueryService.getSession(sessionId);
+    assertEquals("bootstrap-only", loaded.getTitle());
+    assertNotNull(loaded.getCreateTime());
+    assertNotNull(loaded.getUpdateTime());
     assertTrue(
-        sessionQueryService.listRootSessions().stream()
-            .anyMatch(s -> rootSessionId.equals(s.getSessionId())));
+        sessionQueryService.listSessions().stream()
+            .anyMatch(s -> sessionId.equals(s.getSessionId())));
+  }
 
-    HarnessSessionDTO loadedChild = sessionQueryService.getSession(Long.toString(childSessionId));
-    assertEquals(rootSessionId, loadedChild.getParentSessionId());
-    assertEquals(Long.toString(toolInvocationId), loadedChild.getParentInvocationId());
-    assertNull(loadedChild.getRootSessionId());
-    assertNull(loadedChild.getDepth());
+  @Test
+  void updateTimeIsDerivedFromLatestEntryCreatedAt() {
+    TestThreads.Bootstrapped boot = TestThreads.bootstrap(commandTransactions, "update-time", NOW);
+    String sessionId = Long.toString(boot.sessionId());
 
-    // Bound Thread derives its Session from the head Entry.
-    HarnessThreadDTO boundView = threadQueryService.getThread(rootThreadId);
-    assertEquals(rootSessionId, boundView.getSessionId());
-    assertEquals("root-session", boundView.getSessionTitle());
+    HarnessSessionDTO baseline = sessionQueryService.getSession(sessionId);
+    assertEquals(
+        baseline.getCreateTime(),
+        baseline.getUpdateTime(),
+        "Session with no extra Entries reports updateTime == createTime");
 
-    // branch path: ROOT -> MESSAGE on root thread after advancing head
-    long leafEntryId = root.rootEntry().id() + 20;
+    long laterEntryId = boot.sessionId() + 9_000_000L;
+    OffsetDateTime later = OffsetDateTime.ofInstant(NOW.plusSeconds(60), ZoneOffset.UTC);
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
+            + " created_at) values (?, ?, ?, 'MESSAGE', '{}'::jsonb, ?)",
+        laterEntryId,
+        boot.sessionId(),
+        boot.configEntryId(),
+        later);
+
+    HarnessSessionDTO updated = sessionQueryService.getSession(sessionId);
+    assertEquals(
+        later.toInstant(),
+        updated.getUpdateTime().toInstant(ZoneOffset.UTC),
+        "derived updateTime must advance with the latest Entry");
+    assertEquals(
+        baseline.getCreateTime(),
+        updated.getCreateTime(),
+        "Session createTime must remain immutable");
+
+    // Locate this session in listSessions() and assert neighbour ordering around it.
+    List<HarnessSessionDTO> ordered = sessionQueryService.listSessions();
+    int idx = -1;
+    for (int i = 0; i < ordered.size(); i++) {
+      if (sessionId.equals(ordered.get(i).getSessionId())) {
+        idx = i;
+        break;
+      }
+    }
+    assertTrue(idx >= 0, "the bootstrapped session must appear in listSessions()");
+    if (idx > 0) {
+      assertTrue(
+          !ordered.get(idx - 1).getUpdateTime().isAfter(ordered.get(idx).getUpdateTime()),
+          "listSessions must be non-increasing by derived updateTime");
+    }
+    if (idx + 1 < ordered.size()) {
+      assertTrue(
+          !ordered.get(idx).getUpdateTime().isBefore(ordered.get(idx + 1).getUpdateTime()),
+          "listSessions must be non-increasing by derived updateTime");
+    }
+  }
+
+  @Test
+  void entryProjectionContainsTreeFieldsAndOmitsSessionId() {
+    TestThreads.Bootstrapped boot = TestThreads.bootstrap(commandTransactions, "entries", NOW);
+    long messageEntryId = boot.configEntryId() + 5;
+    OffsetDateTime at = OffsetDateTime.ofInstant(NOW.plusSeconds(2), ZoneOffset.UTC);
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
+            + " created_at) values (?, ?, ?, 'MESSAGE', '{\"k\":1}'::jsonb, ?)",
+        messageEntryId,
+        boot.sessionId(),
+        boot.configEntryId(),
+        at);
+
+    List<HarnessSessionEntryDTO> entries =
+        sessionQueryService.listEntries(Long.toString(boot.sessionId()));
+    assertTrue(
+        entries.size() >= 2,
+        "bootstrap bundle contributes ROOT + RUNTIME_CONFIG; an extra MESSAGE makes at least 3");
+    // The newly inserted MESSAGE must be the row at id = messageEntryId.
+    HarnessSessionEntryDTO message =
+        entries.stream()
+            .filter(e -> messageEntryId == Long.parseLong(e.getEntryId()))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("expected inserted MESSAGE not returned"));
+    assertEquals(Long.toString(boot.configEntryId()), message.getParentEntryId());
+    assertEquals("MESSAGE", message.getEntryType());
+    assertEquals("{\"k\": 1}", message.getPayloadJson());
+  }
+
+  @Test
+  void readsBranchPathDerivedStatusAndSnapshots() {
+    ThreadCommandTransactions.BootstrapResult bootstrap =
+        commandTransactions.bootstrapThread(
+            commandTransactions.createThread(NOW).id(),
+            0L,
+            "session",
+            TestRuntimeConfigs.bootstrap(),
+            NOW);
+    String sessionId = Long.toString(bootstrap.session().id());
+    String threadId = Long.toString(bootstrap.thread().id());
+    long executionEpoch = bootstrap.thread().executionEpoch();
+
+    // Branch path: ROOT -> MESSAGE after advancing the Thread head.
+    long assistantEntryId = bootstrap.rootEntry().id() + 10;
     jdbc.update(
         "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
             + " values (?, ?, ?, 'MESSAGE', '{\"kind\":\"leaf\"}'::jsonb, ?)",
+        assistantEntryId,
+        bootstrap.session().id(),
+        bootstrap.rootEntry().id(),
+        OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
+    long leafEntryId = bootstrap.rootEntry().id() + 20;
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
+            + " values (?, ?, ?, 'MESSAGE', '{\"kind\":\"leaf2\"}'::jsonb, ?)",
         leafEntryId,
-        root.session().id(),
+        bootstrap.session().id(),
         assistantEntryId,
         OffsetDateTime.ofInstant(NOW.plusSeconds(2), ZoneOffset.UTC));
     jdbc.update(
-        "update harness_thread set head_entry_id = ? where id = ?", leafEntryId, rootThread);
-    List<HarnessSessionEntryDTO> path = threadQueryService.listPathEntries(rootThreadId);
+        "update harness_thread set head_entry_id = ? where id = ?",
+        leafEntryId,
+        Long.parseLong(threadId));
+    List<HarnessSessionEntryDTO> path = threadQueryService.listPathEntries(threadId);
     assertEquals(
-        List.of(root.rootEntry().id(), assistantEntryId, leafEntryId),
+        List.of(bootstrap.rootEntry().id(), assistantEntryId, leafEntryId),
         path.stream().map(e -> Long.parseLong(e.getEntryId())).toList());
     assertEquals("ROOT", path.get(0).getEntryType());
     assertEquals("MESSAGE", path.get(2).getEntryType());
 
+    HarnessSessionDTO loaded = sessionQueryService.getSession(sessionId);
+    assertEquals("session", loaded.getTitle());
+
+    // Bound Thread derives its Session from the head Entry.
+    HarnessThreadDTO boundView = threadQueryService.getThread(threadId);
+    assertEquals(sessionId, boundView.getSessionId());
+    assertEquals("session", boundView.getSessionTitle());
+
     // IDLE by default
-    assertEquals("IDLE", threadQueryService.getThread(rootThreadId).getStatus());
+    assertEquals("IDLE", threadQueryService.getThread(threadId).getStatus());
 
     // RUNNABLE
-    jdbc.update("update harness_thread set runnable = true where id = ?", rootThread);
-    assertEquals("RUNNABLE", threadQueryService.getThread(rootThreadId).getStatus());
+    jdbc.update("update harness_thread set runnable = true where id = ?", Long.parseLong(threadId));
+    assertEquals("RUNNABLE", threadQueryService.getThread(threadId).getStatus());
 
     // WAITING via QUEUED input (overrides runnable)
     commandTransactions.enqueue(
-        rootThread, userPayload("hello"), "msg-1", rootEpoch, NOW.plusSeconds(3));
-    HarnessThreadDTO waiting = threadQueryService.getThread(rootThreadId);
+        Long.parseLong(threadId),
+        userPayload("hello"),
+        "msg-1",
+        executionEpoch,
+        NOW.plusSeconds(3));
+    HarnessThreadDTO waiting = threadQueryService.getThread(threadId);
     assertEquals("WAITING", waiting.getStatus());
-    List<HarnessThreadInputDTO> inputs = threadQueryService.listInputs(rootThreadId);
+    List<HarnessThreadInputDTO> inputs = threadQueryService.listInputs(threadId);
     assertEquals(1, inputs.size());
     assertEquals("USER_MESSAGE", inputs.get(0).getInputType());
     assertEquals("QUEUED", inputs.get(0).getStatus());
@@ -193,8 +241,8 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
     jdbc.update(
         "update harness_thread set processor_token = 'lease-1',"
             + " processor_until = current_timestamp + interval '1 hour' where id = ?",
-        rootThread);
-    HarnessThreadDTO running = threadQueryService.getThread(rootThreadId);
+        Long.parseLong(threadId));
+    HarnessThreadDTO running = threadQueryService.getThread(threadId);
     assertEquals("RUNNING", running.getStatus());
     assertTrue(Boolean.TRUE.equals(running.getProcessing()));
     assertNull(running.getActiveAgentDefinitionId());
@@ -202,52 +250,66 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
     assertNull(running.getYoloEnabled());
 
     // model + tool + open interaction snapshot
-    long modelInvocationId = rootThread + 70;
+    long modelInvocationId = Long.parseLong(threadId) + 70;
     jdbc.update(
         "insert into harness_model_invocation (id, thread_id, session_id, source_head_entry_id,"
             + " execution_epoch, request, status, attempt, created_at) values (?, ?, ?, ?, ?,"
             + " '{\"model\":\"stub\"}'::jsonb, 'QUEUED', 1, ?)",
         modelInvocationId,
-        rootThread,
-        root.session().id(),
+        Long.parseLong(threadId),
+        bootstrap.session().id(),
         leafEntryId,
-        rootEpoch,
+        executionEpoch,
         OffsetDateTime.ofInstant(NOW.plusSeconds(4), ZoneOffset.UTC));
-    long interactionId = rootThread + 80;
+    long interactionId = Long.parseLong(threadId) + 80;
     jdbc.update(
         "insert into harness_interaction (id, owner_kind, owner_id, handler_type, request, status,"
             + " version, created_at) values (?, 'THREAD', ?, 'ASK', '{\"q\":1}'::jsonb, 'OPEN', 0, ?)",
         interactionId,
-        rootThread,
+        Long.parseLong(threadId),
         OffsetDateTime.ofInstant(NOW.plusSeconds(5), ZoneOffset.UTC));
+    long toolInvocationId = Long.parseLong(threadId) + 50;
+    jdbc.update(
+        "insert into harness_tool_invocation (id, thread_id, session_id, assistant_entry_id, ordinal,"
+            + " tool_call_id, descriptor, arguments, location, environment_name, execution_epoch,"
+            + " status, attempt, finished_at, created_at) values (?, ?, ?, ?, 0, 'call-1',"
+            + " cast(? as jsonb), '{}'::jsonb, 'PLATFORM', null, ?, 'CANCELLED', 1, ?, ?)",
+        toolInvocationId,
+        Long.parseLong(threadId),
+        bootstrap.session().id(),
+        assistantEntryId,
+        TOOL_DESCRIPTOR_JSON,
+        executionEpoch,
+        OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC),
+        OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
 
-    List<ModelInvocationDTO> models = observabilityQueryService.listModelInvocations(rootThreadId);
+    List<ModelInvocationDTO> models = observabilityQueryService.listModelInvocations(threadId);
     assertEquals(1, models.size());
     assertEquals(Long.toString(modelInvocationId), models.get(0).getId());
     assertEquals("QUEUED", models.get(0).getStatus());
 
-    List<ToolInvocationDTO> tools = observabilityQueryService.listToolInvocations(rootThreadId);
+    List<ToolInvocationDTO> tools = observabilityQueryService.listToolInvocations(threadId);
     assertEquals(1, tools.size());
     assertEquals(Long.toString(toolInvocationId), tools.get(0).getId());
 
-    List<InteractionDTO> opens = observabilityQueryService.listOpenInteractions(rootThreadId);
+    List<InteractionDTO> opens = observabilityQueryService.listOpenInteractions(threadId);
     assertEquals(1, opens.size());
     assertEquals(Long.toString(interactionId), opens.get(0).getId());
     assertEquals("OPEN", opens.get(0).getStatus());
     assertEquals("THREAD", opens.get(0).getOwnerKind());
+  }
 
-    // Root activities: session tree + derived status projection
-    List<RootActivityDTO> activities =
-        observabilityQueryService.listRootActivities(rootSessionId, 0, 50);
-    assertFalse(activities.isEmpty());
-    assertTrue(activities.stream().anyMatch(a -> rootThreadId.equals(a.getThreadId())));
-    assertTrue(
-        activities.stream().anyMatch(a -> Long.toString(childThreadId).equals(a.getThreadId())));
-    assertNotNull(activities.get(0).getEventType());
-    assertNotNull(activities.get(0).getPayloadJson());
-
-    // child remains IDLE
-    assertEquals("IDLE", threadQueryService.getThread(Long.toString(childThreadId)).getStatus());
+  @Test
+  void unknownSessionAndEntryLookupsThrow() {
+    // A session id beyond the PostgreSQL bigint sequence is structurally unknown.
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> sessionQueryService.getSession(String.valueOf(Long.MAX_VALUE)));
+    // Blank / negative / non-decimal ids are rejected at the decimal boundary.
+    assertThrows(IllegalArgumentException.class, () -> sessionQueryService.getSession("abc"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> threadQueryService.listPathEntries(String.valueOf(Long.MAX_VALUE)));
   }
 
   private static RuntimeEntryInputPayload userPayload(String content) {

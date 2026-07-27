@@ -36,10 +36,6 @@ describe('performBlankPaneFirstSend', () => {
         session: {
           sessionId: 's1',
           title: null,
-          rootSessionId: 's1',
-          parentSessionId: null,
-          parentInvocationId: null,
-          depth: 0,
           createTime: null,
           updateTime: null,
         },
@@ -109,10 +105,6 @@ describe('performBlankPaneFirstSend', () => {
       session: {
         sessionId: 's7',
         title: 'Titled',
-        rootSessionId: 's7',
-        parentSessionId: null,
-        parentInvocationId: null,
-        depth: 0,
         createTime: null,
         updateTime: null,
       },

@@ -23,7 +23,6 @@ function toggleName(items: string[], name: string): string[] {
 export function AgentForm({
   draft,
   models,
-  agents = [],
   environments = [],
   fieldErrors = {},
   onChange,
@@ -54,8 +53,6 @@ export function AgentForm({
     buildCapabilityCandidates(environments, draft.environmentName, 'skills'),
     draft.skills,
   )
-  // Subagents 从当前已配置 Agent 勾选；允许选择自己。
-  const subagentNames = agents.map((agent) => agent.name).filter(Boolean)
 
   return (
     <>
@@ -154,122 +151,6 @@ export function AgentForm({
         />
         {fieldErrors.skills ? <span className="field-error">{fieldErrors.skills}</span> : null}
       </fieldset>
-
-      <fieldset
-        className={`form-group capability-picker${fieldErrors.allowedSubagents ? ' is-error' : ''}`}
-      >
-        <legend>Subagents</legend>
-        <div className="capability-options">
-          {subagentNames.map((name) => {
-            const checked = draft.allowedSubagents.includes(name)
-            return (
-              <label key={name} className={`capability-option${checked ? ' is-selected' : ''}`}>
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => onChange({ ...draft, allowedSubagents: toggleName(draft.allowedSubagents, name) })}
-                />
-                <span>{name}</span>
-              </label>
-            )
-          })}
-          {subagentNames.length === 0 && <div className="inline-hint">暂无其它 Agent 可选</div>}
-        </div>
-        {fieldErrors.allowedSubagents ? (
-          <span className="field-error">{fieldErrors.allowedSubagents}</span>
-        ) : null}
-      </fieldset>
-
-      <section
-        className={`structured-section${fieldErrors.executionPolicy ? ' is-error' : ''}`}
-        aria-labelledby="agent-policy-heading"
-      >
-        <div className="structured-section-head">
-          <h3 id="agent-policy-heading">Policy（执行策略）</h3>
-        </div>
-        <p className="inline-hint">
-          限制 agent / subagent 的运行边界。卡片上的 Policy 即这里的摘要；留空表示不限制。
-        </p>
-        {fieldErrors.executionPolicy ? (
-          <span className="field-error">{fieldErrors.executionPolicy}</span>
-        ) : null}
-        <div className="form-grid-2">
-          <label className="form-group">
-            <FieldLabel>maxTurns</FieldLabel>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={1}
-              step={1}
-              value={draft.executionPolicy.maxTurns}
-              onChange={(event) =>
-                onChange({
-                  ...draft,
-                  executionPolicy: { ...draft.executionPolicy, maxTurns: event.target.value },
-                })
-              }
-              placeholder="最多对话轮数"
-            />
-          </label>
-          <label className="form-group">
-            <FieldLabel>maxDepth</FieldLabel>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={1}
-              step={1}
-              value={draft.executionPolicy.maxDepth}
-              onChange={(event) =>
-                onChange({
-                  ...draft,
-                  executionPolicy: { ...draft.executionPolicy, maxDepth: event.target.value },
-                })
-              }
-              placeholder="subagent 最大嵌套深度"
-            />
-          </label>
-          <label className="form-group">
-            <FieldLabel>maxDirectSubagents</FieldLabel>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={1}
-              step={1}
-              value={draft.executionPolicy.maxDirectSubagents}
-              onChange={(event) =>
-                onChange({
-                  ...draft,
-                  executionPolicy: {
-                    ...draft.executionPolicy,
-                    maxDirectSubagents: event.target.value,
-                  },
-                })
-              }
-              placeholder="直接子 agent 上限"
-            />
-          </label>
-          <label className="form-group">
-            <FieldLabel>maxTotalSubagents</FieldLabel>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={1}
-              step={1}
-              value={draft.executionPolicy.maxTotalSubagents}
-              onChange={(event) =>
-                onChange({
-                  ...draft,
-                  executionPolicy: {
-                    ...draft.executionPolicy,
-                    maxTotalSubagents: event.target.value,
-                  },
-                })
-              }
-              placeholder="子 agent 总数上限"
-            />
-          </label>
-        </div>
-      </section>
 
       {models.length === 0 && (
         <div className="inline-hint" role="status">

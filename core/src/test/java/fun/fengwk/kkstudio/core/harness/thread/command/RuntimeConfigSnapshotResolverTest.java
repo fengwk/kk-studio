@@ -36,7 +36,6 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderType;
 
 import java.math.BigDecimal;
@@ -254,17 +253,10 @@ class RuntimeConfigSnapshotResolverTest {
 
   private static AgentDefinitionConfigDTO config(
       String environment, List<String> tools, List<String> skills) {
-    AgentExecutionPolicyDTO policy = new AgentExecutionPolicyDTO();
-    policy.setMaxTurns(3);
-    policy.setMaxDepth(2);
-    policy.setMaxDirectSubagents(1);
-    policy.setMaxTotalSubagents(2);
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setEnvironmentName(environment);
     config.setTools(tools);
     config.setSkills(skills);
-    config.setAllowedSubagents(List.of("helper"));
-    config.setExecutionPolicy(policy);
     return config;
   }
 

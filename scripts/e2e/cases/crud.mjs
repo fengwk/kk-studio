@@ -99,7 +99,7 @@ registerCase({
           systemPrompt: 's',
           modelId: String(model.id),
           variant: model.config.defaultVariant,
-          config: { tools: [], skills: [], allowedSubagents: [], executionPolicy: {} },
+          config: { tools: [], skills: [] },
         }),
       { status: 400, messageIncludes: /name|blank/i },
     )
@@ -122,7 +122,7 @@ registerCase({
           systemPrompt: 's',
           modelId: String(model.id),
           variant: '__missing_variant__',
-          config: { tools: [], skills: [], allowedSubagents: [], executionPolicy: {} },
+          config: { tools: [], skills: [] },
         }),
       { status: 400, messageIncludes: /variant/i },
     )
@@ -244,8 +244,6 @@ registerCase({
       config: {
         tools: [],
         skills: [],
-        allowedSubagents: [],
-        executionPolicy: { maxTurns: 3 },
       },
     }
     const { json: aJson } = await ctx.call('POST', '/api/agents', createBody)
@@ -262,15 +260,22 @@ registerCase({
       config: {
         tools: [],
         skills: [],
-        allowedSubagents: [],
-        executionPolicy: { maxTurns: 5, maxDepth: 1 },
       },
     })
     const updated = envelopeData(uJson)
     assert(updated.name === `e2e-agent-upd-${suffix}`, JSON.stringify(updated))
     assert(updated.systemPrompt === 'updated prompt', JSON.stringify(updated))
-    assert(updated.config?.executionPolicy?.maxTurns === 5, JSON.stringify(updated.config))
-    assert(Array.isArray(updated.config?.tools) && updated.config.tools.length === 0, JSON.stringify(updated.config))
+    const updatedConfig = updated.config || {}
+    assert(
+      Array.isArray(updatedConfig.tools)
+        && updatedConfig.tools.length === 0
+        && Array.isArray(updatedConfig.skills)
+        && updatedConfig.skills.length === 0
+        && updatedConfig.environmentName == null
+        && !('allowedSubagents' in updatedConfig)
+        && !('executionPolicy' in updatedConfig),
+      JSON.stringify(updatedConfig),
+    )
     ctx.writeArtifact('agent-updated.json', JSON.stringify(updated, null, 2))
 
     await ctx.call('DELETE', `/api/agents/${agentId}`)

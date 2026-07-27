@@ -33,15 +33,14 @@ public class HarnessSessionQueryServiceImpl implements HarnessSessionQueryServic
 
   @Override
   public List<HarnessSessionEntryDTO> listEntries(String sessionId) {
-    HarnessQueryRow session = requireSession(sessionId);
-    return queryMapper.listEntriesBySession(session.getId()).stream()
-        .map(converter::toEntry)
-        .toList();
+    long parsed = HarnessIds.parsePositive(sessionId, "sessionId");
+    requireSession(sessionId);
+    return queryMapper.listEntriesBySession(parsed).stream().map(converter::toEntry).toList();
   }
 
   @Override
-  public List<HarnessSessionDTO> listRootSessions() {
-    return queryMapper.listRootSessions().stream().map(converter::toSession).toList();
+  public List<HarnessSessionDTO> listSessions() {
+    return queryMapper.listSessions().stream().map(converter::toSession).toList();
   }
 
   private HarnessQueryRow requireSession(String sessionId) {

@@ -9,25 +9,6 @@ function formatAgentModelLabel(model: AgentModelView | undefined, modelId: strin
   return modelRef(model)
 }
 
-/** 卡片上的 Policy = 编辑页 executionPolicy（maxTurns/maxDepth/...）的紧凑摘要。 */
-function formatPolicy(agent: AgentDefinitionDTO): string {
-  const policy = agent.config.executionPolicy
-  const parts: string[] = []
-  if (policy.maxTurns != null) {
-    parts.push(`turns ${policy.maxTurns}`)
-  }
-  if (policy.maxDepth != null) {
-    parts.push(`depth ${policy.maxDepth}`)
-  }
-  if (policy.maxDirectSubagents != null) {
-    parts.push(`direct ${policy.maxDirectSubagents}`)
-  }
-  if (policy.maxTotalSubagents != null) {
-    parts.push(`total ${policy.maxTotalSubagents}`)
-  }
-  return parts.join(' · ')
-}
-
 export function AgentResourceCard({
   agent,
   models = [],
@@ -46,7 +27,6 @@ export function AgentResourceCard({
   const environmentName = agent.config.environmentName?.trim() || ''
   const tools = agent.config.tools
   const skills = agent.config.skills
-  const subagents = agent.config.allowedSubagents
 
   return (
     <ResourceCardLayout
@@ -59,8 +39,6 @@ export function AgentResourceCard({
         ['Env', environmentName],
         { label: 'Tools', tags: tools, limit: 2 },
         { label: 'Skills', tags: skills, limit: 2 },
-        { label: 'Subs', tags: subagents, limit: 2 },
-        ['Policy', formatPolicy(agent)],
       ]}
       onEdit={onEdit}
       onDelete={onDelete}

@@ -14,10 +14,6 @@ function session(id: string, updateTime: string, createTime = updateTime): Harne
   return {
     sessionId: id,
     title: id,
-    rootSessionId: id,
-    parentSessionId: null,
-    parentInvocationId: null,
-    depth: 0,
     createTime,
     updateTime,
   }

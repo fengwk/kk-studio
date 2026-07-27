@@ -39,7 +39,7 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
   @Autowired private JdbcTemplate jdbc;
 
   @Test
-  void createThreadProducesUnboundThreadAndCreateSessionCreatesNoThread() {
+  void createThreadProducesUnboundThreadAndBootstrapCreatesBundledSession() {
     HarnessThread thread = transactions.createThread(NOW);
     assertNull(thread.headEntryId(), "new Thread must be UNBOUND");
     assertFalse(thread.isBound());
@@ -53,12 +53,21 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
             "select head_entry_id from harness_thread where id = ?", Long.class, thread.id()));
 
     long threadsBefore = countThreads();
-    ThreadCommandTransactions.SessionCreation session =
-        transactions.createSession("pure-session", TestRuntimeConfigs.bootstrap(), NOW);
-    assertEquals(threadsBefore, countThreads(), "createSession must not create a Thread");
-    assertEquals("ROOT", entryType(session.rootEntry().id()));
-    assertEquals("RUNTIME_CONFIG", entryType(session.configEntry().id()));
-    assertEquals(session.rootEntry().id(), parentEntryId(session.configEntry().id()));
+    long sessionsBefore = countSessions();
+    ThreadCommandTransactions.BootstrapResult bootstrap =
+        transactions.bootstrapThread(
+            thread.id(),
+            thread.executionEpoch(),
+            "pure-session",
+            TestRuntimeConfigs.bootstrap(),
+            NOW);
+    assertEquals(
+        threadsBefore, countThreads(), "bootstrap must not allocate additional Thread rows");
+    assertEquals(
+        sessionsBefore + 1, countSessions(), "bootstrap must create exactly one new Session row");
+    assertEquals("ROOT", entryType(bootstrap.rootEntry().id()));
+    assertEquals("RUNTIME_CONFIG", entryType(bootstrap.configEntry().id()));
+    assertEquals(bootstrap.rootEntry().id(), parentEntryId(bootstrap.configEntry().id()));
   }
 
   @Test

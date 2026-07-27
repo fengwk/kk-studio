@@ -32,12 +32,6 @@ describe('ChatPanel', () => {
           yoloPending: false,
           setYolo: vi.fn(),
         }}
-        taskTimeline={{
-          activities: [],
-          taskTree: [],
-          taskTimelineError: null,
-          taskTimelineLoading: false,
-        }}
         onDraftChange={vi.fn()}
         onSubmit={vi.fn()}
         onCommand={vi.fn()}

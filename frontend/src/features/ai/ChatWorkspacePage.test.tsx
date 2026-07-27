@@ -35,8 +35,6 @@ vi.mock('@/shared/api/harness-service', () => ({
     listThreadInputs: vi.fn(),
     listThreadToolInvocations: vi.fn(),
     getThreadUsage: vi.fn(),
-    listRootActivities: vi.fn(),
-    listSessionTasks: vi.fn(),
     createThreadRealtimeStream: vi.fn(),
     setThreadAgent: vi.fn(),
     submitThreadMessage: vi.fn(),
@@ -83,8 +81,6 @@ describe('ChatWorkspacePage', () => {
             environmentName: null,
             tools: [],
             skills: [],
-            allowedSubagents: [],
-            executionPolicy: {},
           },
           createTime: null,
           updateTime: null,
@@ -137,12 +133,7 @@ describe('ChatWorkspacePage', () => {
     })
     vi.mocked(harnessService.getSession).mockResolvedValue({
       sessionId: 's1',
-      title: 's',
-      rootSessionId: 's1',
-      parentSessionId: null,
-      parentInvocationId: null,
-      depth: 0,
-      createTime: null,
+      title: 's',      createTime: null,
       updateTime: null,
     })
     vi.mocked(harnessService.listThreads).mockResolvedValue([])
@@ -169,8 +160,6 @@ describe('ChatWorkspacePage', () => {
       unamortizedCacheWriteTokens: 0,
       costs: [],
     })
-    vi.mocked(harnessService.listRootActivities).mockResolvedValue([])
-    vi.mocked(harnessService.listSessionTasks).mockResolvedValue([])
 
     renderWorkspace()
     expect(await screen.findByRole('heading', { name: 'Workspace' })).toBeInTheDocument()
@@ -229,12 +218,7 @@ describe('ChatWorkspacePage', () => {
       return {
         session: {
           sessionId: 's-new',
-          title: null,
-          rootSessionId: 's-new',
-          parentSessionId: null,
-          parentInvocationId: null,
-          depth: 0,
-          createTime: null,
+          title: null,          createTime: null,
           updateTime: null,
         },
         thread: {
@@ -289,12 +273,7 @@ describe('ChatWorkspacePage', () => {
     })
     vi.mocked(harnessService.getSession).mockResolvedValue({
       sessionId: 's-new',
-      title: null,
-      rootSessionId: 's-new',
-      parentSessionId: null,
-      parentInvocationId: null,
-      depth: 0,
-      createTime: null,
+      title: null,      createTime: null,
       updateTime: null,
     })
     vi.mocked(harnessService.listThreads).mockResolvedValue([])
@@ -321,8 +300,6 @@ describe('ChatWorkspacePage', () => {
       unamortizedCacheWriteTokens: 0,
       costs: [],
     })
-    vi.mocked(harnessService.listRootActivities).mockResolvedValue([])
-    vi.mocked(harnessService.listSessionTasks).mockResolvedValue([])
 
     renderWorkspace()
     const composer = await screen.findByLabelText('给 AI 发送消息')

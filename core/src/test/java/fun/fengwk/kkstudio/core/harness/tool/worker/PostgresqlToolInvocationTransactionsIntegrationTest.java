@@ -626,8 +626,8 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
       try {
         try (PreparedStatement statement =
             connection.prepareStatement(
-                "insert into harness_session (id, title, created_at, updated_at)"
-                    + " values (?, 'fixture', current_timestamp, current_timestamp)")) {
+                "insert into harness_session (id, title, created_at)"
+                    + " values (?, 'fixture', current_timestamp)")) {
           statement.setLong(1, sessionId);
           statement.executeUpdate();
         }

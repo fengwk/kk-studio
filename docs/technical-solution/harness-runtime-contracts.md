@@ -247,8 +247,8 @@ Handler 返回 deterministic resolution，由 Interaction transaction adapter �
 
 ### 3.7 Command coordinators
 
-- `SessionCommandCoordinator` 冻结 bootstrap Agent config，并通过 `ThreadCommandTransactions` 创建 Session/ROOT/RUNTIME_CONFIG；不创建 Thread。产品默认值由 Core 提供。
 - `ThreadCommandCoordinator` 拥有 UNBOUND Thread 创建、bootstrap、head 重定位、typed payload 构造、消息/role 校验、idempotency short-circuit、当前 config 选择、SET_AGENT/SET_MODEL/SET_YOLO 完整快照和 Stop 调用；对 Core 返回 coordinator-owned result，不泄漏 transaction SPI result。
+- Thread `bootstrapThread` 在同一事务内创建 Session / ROOT / `RUNTIME_CONFIG`，并将 Thread head 重定位到 `RUNTIME_CONFIG` Entry。Session / ROOT / `RUNTIME_CONFIG` 三件套仅由 `bootstrapThread` 内部私有 helper 落库，未公开为 Runtime SPI。
 - `InteractionCoordinator` 拥有 handler lookup、projection、expiry 判定和 deterministic resolution。
 
 Thread command 入口：
@@ -483,7 +483,6 @@ Web 只消费 Core application API 与 share DTO；不得直接导入 Harness do
 - Model/Tool Invocations
 - open Interactions
 - Usage/Artifact
-- Root activity（查询投影）
 
 客户端恢复：
 

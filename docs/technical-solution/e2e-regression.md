@@ -68,7 +68,7 @@ reports/e2e/LATEST_RUN.txt
 | L4 | `--with-tools` / `--real --with-tools` | daemon/真模型 | Environment READY、tool invocation |
 | L5 | `--ui` | 本地浏览器 | 页面可达、列表渲染、打开新建模态、无致命 pageerror；截图入报告 |
 
-API 矩阵注册 **53** 条（以 `./scripts/e2e.sh --list` 为准）。默认执行全部免费 L1（**49** 条）。`--ui` 额外 **13** 条 UI smoke（`--real` 时再 +1 真实首发）。
+API 矩阵注册 **55** 条（以 `./scripts/e2e.sh --list` 为准）。默认执行全部免费 L1（**51** 条）。`--ui` 额外 **13** 条 UI smoke（`--real` 时再 +1 真实首发）。
 
 ## L1 用例清单
 
@@ -137,12 +137,14 @@ API 矩阵注册 **53** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 
 | Case 后缀 | 期望 |
 | --- | --- |
-| `valid.empty_lists_and_policy` | 成功 |
-| `valid.positive_limits` | 成功 |
-| `valid.missing_executionPolicy_defaults` | 成功并默认 `{}` |
+| `valid.empty_lists` | 成功（空 `tools`/`skills`） |
+| `invalid.missing_tools` | 400（`tools` 必填） |
+| `invalid.missing_skills` | 400（`skills` 必填） |
+| `invalid.unready_environment` | 400（`environmentName` 不是 READY 环境） |
 | `invalid.unknown_tool` | 400 unknown agent tool |
 | `invalid.duplicate_skill` | 400 |
-| `invalid.non_positive_maxTurns` | 400 |
+| `invalid.blank_environment_name` | 400 environmentName blank |
+| `invalid.unknown_field_rejected` | 400（未知字段被严格 codec 拒绝） |
 
 另有 setup/teardown case 管理临时 provider/model。
 
@@ -209,7 +211,7 @@ GET  /api/models               # structured config only
 
 - 所有 UI 点击路径
 - 所有配置字段笛卡尔积
-- Canvas / ComfyUI / 权限弹窗 / Subagent 全量
+- Canvas / ComfyUI / 权限弹窗全量
 - 视觉回归与 Footer 像素级换行
 
 这些可后续作为独立层扩展（Playwright smoke、更多矩阵行），但仍应写入本文件与报告。

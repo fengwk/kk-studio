@@ -46,8 +46,7 @@ public class AgentDefinitionServiceImplTest {
     definition.setId(3L);
     definition.setModelId(2L);
     definition.setName("agent");
-    definition.setConfigJson(
-        "{\"tools\":[],\"skills\":[],\"allowedSubagents\":[],\"executionPolicy\":{}}");
+    definition.setConfigJson("{\"tools\":[],\"skills\":[]}");
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setModelId("2");
     when(factory.newAgent(2L, create)).thenReturn(definition);

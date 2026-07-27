@@ -28,8 +28,6 @@ vi.mock('@/shared/api/harness-service', () => ({
     listThreadInputs: vi.fn(),
     listThreadToolInvocations: vi.fn(),
     getThreadUsage: vi.fn(),
-    listRootActivities: vi.fn(),
-    listSessionTasks: vi.fn(),
     createThreadRealtimeStream: vi.fn(),
   },
 }))
@@ -72,8 +70,6 @@ const agents = [
       environmentName: null,
       tools: [],
       skills: [],
-      allowedSubagents: [],
-      executionPolicy: {},
     },
     createTime: null,
     updateTime: null,

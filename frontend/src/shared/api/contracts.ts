@@ -169,20 +169,11 @@ export interface AgentModelCreateDTO extends AgentModelEditablePropertiesDTO {
 
 export type AgentModelUpdateDTO = AgentModelEditablePropertiesDTO
 
-export interface AgentExecutionPolicyDTO {
-  maxTurns?: number | null
-  maxDepth?: number | null
-  maxDirectSubagents?: number | null
-  maxTotalSubagents?: number | null
-}
-
 export interface AgentDefinitionConfigDTO {
-  /** Optional live Environment name; blank/null means none. */
-  environmentName: string | null
+  /** Optional live Environment name; an omitted or null value means none. */
+  environmentName?: string | null
   tools: string[]
   skills: string[]
-  allowedSubagents: string[]
-  executionPolicy: AgentExecutionPolicyDTO
 }
 
 /** Public global Agent definition; model/variant + config are Thread-runtime inputs. */
@@ -215,22 +206,13 @@ export type AgentDefinitionCreateDTO = AgentDefinitionEditablePropertiesDTO
 
 export type AgentDefinitionUpdateDTO = AgentDefinitionEditablePropertiesDTO
 
-/** Session tree container; shared Entry root for Threads/tasks/activities. */
+/** Flat Session query projection; Sessions are only created as a side effect of Thread bootstrap. */
 export interface HarnessSessionDTO {
   sessionId: string
   title: string | null
-  rootSessionId: string
-  parentSessionId: string | null
-  parentInvocationId: string | null
-  depth: number
   createTime: BackendDateTime
+  /** Observable last-entry time; not a stored column. */
   updateTime: BackendDateTime
-}
-
-/** Agentless Session create; Agent is set later via Thread SET_AGENT. */
-export interface HarnessSessionCreateDTO {
-  title?: string
-  yoloEnabled?: boolean
 }
 
 /** Persistent Chat collection; defaultAgentId may be stale after Agent deletion. */
@@ -279,14 +261,10 @@ export type EntryType =
   | 'RUNTIME_CONFIG'
   | 'MESSAGE'
   | 'CUSTOM_MESSAGE'
-  | 'COMPACTION'
   | 'ASSISTANT_ERROR'
-  | 'LABEL'
-  | 'BRANCH_SUMMARY'
 
 export interface HarnessSessionEntryDTO {
   entryId: string
-  sessionId: string
   parentEntryId: string | null
   entryType: EntryType
   payloadJson: string
@@ -410,16 +388,6 @@ export interface HarnessThreadStopResultDTO {
   cancelledInputs: HarnessThreadInputDTO[]
 }
 
-export interface RootActivityDTO {
-  rootSessionId: string
-  sessionId: string
-  threadId: string
-  eventId: string
-  eventType: string
-  payloadJson: string
-  createTime: BackendDateTime
-}
-
 export interface ToolInvocationDTO {
   id: string
   threadId: string
@@ -450,34 +418,6 @@ export interface ToolArtifactRefDTO {
   artifactId: string
   mediaType: string
   sizeBytes: BackendLong
-}
-
-export interface SubagentTaskReportDTO {
-  childSessionId: string
-  childThreadId?: string
-  status: string
-  finalReport: string | null
-  artifacts: ToolArtifactRefDTO[]
-  turnCount: number | null
-  toolCount: number | null
-  workingCopyPolicy: string | null
-  workingCopyRevision: string | null
-}
-
-export interface SubagentTaskDTO {
-  parentInvocationId: string
-  parentSessionId: string
-  parentThreadId: string | null
-  childSessionId: string
-  childThreadId: string | null
-  targetAgent: string
-  workingCopyPolicy: string
-  workingCopyRevision: string | null
-  maxTurns: number
-  status: string
-  report: SubagentTaskReportDTO | null
-  createTime: BackendDateTime
-  updateTime: BackendDateTime
 }
 
 export type ComfyuiWorkflowId = string

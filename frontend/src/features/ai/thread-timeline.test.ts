@@ -271,7 +271,6 @@ describe('thread timeline', () => {
 function entry(entryId: string, entryType: EntryType, payload: Record<string, unknown>): HarnessSessionEntryDTO {
   return {
     entryId,
-    sessionId: '1',
     parentEntryId: null,
     entryType,
     payloadJson: JSON.stringify(payload),

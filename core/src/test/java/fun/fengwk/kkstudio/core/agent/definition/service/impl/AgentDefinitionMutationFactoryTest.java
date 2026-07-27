@@ -16,28 +16,20 @@ import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
-import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
 
-import java.util.Arrays;
 import java.util.List;
 
-/** Structured definition config is normalized before it is stored. */
+/** Structured definition config must be canonical before it is persisted. */
 public class AgentDefinitionMutationFactoryTest {
 
   @Test
-  public void shouldNormalizeListsAndPersistTypedPolicy() throws Exception {
+  public void shouldPersistCanonicalCapabilityListsAndEnvironmentName() throws Exception {
     ObjectMapper objectMapper = new ObjectMapper();
     AgentDefinitionMutationFactory factory = factory(objectMapper);
-    AgentExecutionPolicyDTO policy = new AgentExecutionPolicyDTO();
-    policy.setMaxTurns(8);
-    policy.setMaxDepth(3);
-    policy.setMaxDirectSubagents(4);
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setEnvironmentName(" local-dev ");
-    config.setTools(Arrays.asList(" browser ", "", null));
-    config.setSkills(Arrays.asList(" java ", "dev"));
-    config.setAllowedSubagents(List.of(" reviewer "));
-    config.setExecutionPolicy(policy);
+    config.setEnvironmentName("local-dev");
+    config.setTools(List.of("browser"));
+    config.setSkills(List.of("java", "dev"));
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setName("agent");
     create.setVariant("default");
@@ -50,35 +42,29 @@ public class AgentDefinitionMutationFactoryTest {
     assertEquals("local-dev", stored.getEnvironmentName());
     assertEquals(List.of("browser"), stored.getTools());
     assertEquals(List.of("java", "dev"), stored.getSkills());
-    assertEquals(List.of("reviewer"), stored.getAllowedSubagents());
-    assertEquals(8, stored.getExecutionPolicy().getMaxTurns());
-    assertEquals(3, stored.getExecutionPolicy().getMaxDepth());
-    assertEquals(4, stored.getExecutionPolicy().getMaxDirectSubagents());
   }
 
   @Test
-  public void shouldRejectDuplicateCapabilityAndSubagentNames() {
+  public void shouldRejectNonCanonicalCapabilityNames() {
     AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setSkills(Arrays.asList("java", " java "));
+    config.setTools(List.of());
+    config.setSkills(List.of("java", "java"));
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setName("agent");
     create.setVariant("default");
     create.setConfig(config);
     IllegalArgumentException error =
         assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
-    assertEquals("agent skills must not contain duplicates: java", error.getMessage());
+    assertEquals(
+        "agent definition config skills must not contain duplicates: java", error.getMessage());
 
     config.setSkills(List.of());
-    config.setTools(Arrays.asList("read", " read "));
-    error = assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
-    assertEquals("agent tools must not contain duplicates: read", error.getMessage());
-
-    config.setTools(List.of());
-    config.setAllowedSubagents(Arrays.asList("reviewer", " reviewer "));
+    config.setTools(List.of(" read "));
     error = assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
     assertEquals(
-        "agent allowedSubagents must not contain duplicates: reviewer", error.getMessage());
+        "agent definition config tools must not contain surrounding whitespace",
+        error.getMessage());
   }
 
   @Test
@@ -90,6 +76,9 @@ public class AgentDefinitionMutationFactoryTest {
     create.setName("agent");
     create.setVariant("quality");
     create.setConfig(config);
+    assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
+    config.setTools(List.of());
+    config.setSkills(List.of());
     AgentDefinition definition = factory.newAgent(2L, create);
     assertEquals("quality", definition.getVariant());
 
@@ -101,11 +90,11 @@ public class AgentDefinitionMutationFactoryTest {
     factory.update(definition, update);
     assertEquals("agent", definition.getName());
     assertEquals("quality", definition.getVariant());
-    assertEquals(
-        List.of(),
-        objectMapper
-            .readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class)
-            .getAllowedSubagents());
+    AgentDefinitionConfigDTO stored =
+        objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
+    assertEquals(List.of(), stored.getTools());
+    assertEquals(List.of(), stored.getSkills());
+    assertNull(stored.getEnvironmentName());
   }
 
   @Test
@@ -122,62 +111,49 @@ public class AgentDefinitionMutationFactoryTest {
     AgentDefinitionCreateDTO incomplete = new AgentDefinitionCreateDTO();
     incomplete.setName("agent");
     assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, incomplete));
-    incomplete.setConfig(new AgentDefinitionConfigDTO());
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setTools(List.of());
+    config.setSkills(List.of());
+    incomplete.setConfig(config);
     // Variant override is optional; null means use model.defaultVariant at apply/runtime.
     AgentDefinition allowedBlankVariant = factory.newAgent(2L, incomplete);
     assertNull(allowedBlankVariant.getVariant());
+  }
 
-    AgentExecutionPolicyDTO policy = new AgentExecutionPolicyDTO();
-    policy.setMaxTurns(0);
+  @Test
+  public void shouldRejectBlankOrWhitespaceEnvironmentName() {
+    AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setExecutionPolicy(policy);
+    config.setTools(List.of());
+    config.setSkills(List.of());
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setName("agent");
-    create.setVariant("default");
     create.setConfig(config);
+
+    config.setEnvironmentName(" ");
+    assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
+
+    config.setEnvironmentName(" local ");
     assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
   }
 
-  /** 执行策略边界字段可原样持久化。 */
   @Test
-  public void shouldPersistBoundedExecutionPolicy() throws Exception {
+  public void shouldPersistNullEnvironmentNameWithProjectJacksonConvention() throws Exception {
     ObjectMapper objectMapper = new ObjectMapper();
     AgentDefinitionMutationFactory factory = factory(objectMapper);
-    AgentExecutionPolicyDTO policy = new AgentExecutionPolicyDTO();
-    policy.setMaxTurns(8);
-    policy.setMaxDepth(2);
-    policy.setMaxDirectSubagents(3);
-    policy.setMaxTotalSubagents(9);
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setExecutionPolicy(policy);
+    config.setTools(List.of());
+    config.setSkills(List.of());
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setName("agent");
     create.setVariant("default");
     create.setConfig(config);
+
     AgentDefinition definition = factory.newAgent(2L, create);
 
     AgentDefinitionConfigDTO stored =
         objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
-    assertEquals(8, stored.getExecutionPolicy().getMaxTurns());
-    assertEquals(2, stored.getExecutionPolicy().getMaxDepth());
-    assertEquals(3, stored.getExecutionPolicy().getMaxDirectSubagents());
-    assertEquals(9, stored.getExecutionPolicy().getMaxTotalSubagents());
-  }
-
-  @Test
-  public void shouldRejectNonPositiveExecutionPolicyBounds() {
-    AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
-    AgentExecutionPolicyDTO policy = new AgentExecutionPolicyDTO();
-    policy.setMaxTurns(0);
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setExecutionPolicy(policy);
-    AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
-    create.setName("agent");
-    create.setVariant("default");
-    create.setConfig(config);
-    IllegalArgumentException exception =
-        assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
-    assertEquals("executionPolicy.maxTurns must be positive", exception.getMessage());
+    assertNull(stored.getEnvironmentName());
   }
 
   private AgentDefinitionMutationFactory factory(ObjectMapper objectMapper) {

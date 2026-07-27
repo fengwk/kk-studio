@@ -86,7 +86,7 @@ FUNCTION 节点当前唯一实例是 `system.generate-text` v1。
 | `POST /api/canvases` | 可用（body 仅 `{title}`，创建 Canvas） |
 | `POST /api/canvases/{canvasId}/commands` | 可用（create text/generate-text/link、move nodes、delete node；硬删除；按 `(canvas_id, command_id)` 幂等） |
 | `/api/functions`、`/api/workflows`、`/api/function-runs` 等 | 暂不暴露 |
-| Harness `/api/sessions` | 创建 Session/ROOT/RUNTIME_CONFIG、Session 列表/详情与 Entry Tree 查询 |
+| Harness `/api/sessions` | 仅查询 Session 列表/详情与 Entry Tree；Session/ROOT/RUNTIME_CONFIG 只由 Thread bootstrap 原子创建 |
 | Harness `/api/threads` | 全局 Thread 列表；创建 UNBOUND Thread |
 | Harness `/api/threads/{threadId}` | Thread 读取、bootstrap、`PUT /head` 重定位、mailbox 提交、Entries/Inputs、Redis realtime SSE、Stop；重试策略位于 `/api/harness/retry-policy` |
 

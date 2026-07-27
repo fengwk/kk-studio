@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.InteractionDTO;
 import fun.fengwk.kkstudio.share.model.ModelInvocationDTO;
-import fun.fengwk.kkstudio.share.model.RootActivityDTO;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -29,13 +28,6 @@ public class HarnessQueryDtoConverter {
     HarnessSessionDTO dto = new HarnessSessionDTO();
     dto.setSessionId(HarnessIds.format(row.getId()));
     dto.setTitle(row.getTitle());
-    dto.setParentSessionId(formatNullable(row.getParentSessionId()));
-    dto.setParentInvocationId(formatNullable(row.getParentInvocationId()));
-    // final schema 不存储 root_session_id/depth；roots 为自身 id。
-    if (row.getParentSessionId() == null) {
-      dto.setRootSessionId(HarnessIds.format(row.getId()));
-      dto.setDepth(0);
-    }
     dto.setCreateTime(toUtcLocal(row.getCreatedAt()));
     dto.setUpdateTime(toUtcLocal(row.getUpdatedAt()));
     return dto;
@@ -47,7 +39,6 @@ public class HarnessQueryDtoConverter {
     }
     HarnessSessionEntryDTO dto = new HarnessSessionEntryDTO();
     dto.setEntryId(HarnessIds.format(row.getId()));
-    dto.setSessionId(HarnessIds.format(row.getSessionId()));
     dto.setParentEntryId(formatNullable(row.getParentEntryId()));
     dto.setEntryType(row.getEntryType());
     dto.setPayloadJson(row.getPayloadJson());
@@ -142,29 +133,6 @@ public class HarnessQueryDtoConverter {
     return dto;
   }
 
-  public RootActivityDTO toRootActivity(long rootSessionId, HarnessQueryRow thread, Instant now) {
-    String status = DerivedThreadStatus.derive(thread, now);
-    RootActivityDTO dto = new RootActivityDTO();
-    dto.setRootSessionId(HarnessIds.format(rootSessionId));
-    dto.setSessionId(HarnessIds.format(thread.getSessionId()));
-    dto.setThreadId(HarnessIds.format(thread.getId()));
-    // Root activity 使用 thread id 作为稳定查询 cursor；Redis realtime 使用独立 stream id。
-    dto.setEventId(HarnessIds.format(thread.getId()));
-    dto.setEventType(status);
-    String title = thread.getSessionTitle() == null ? "" : thread.getSessionTitle();
-    dto.setPayloadJson(
-        "{\"status\":\""
-            + status
-            + "\",\"title\":"
-            + quoteJson(title)
-            + ",\"updatedAt\":\""
-            + (thread.getUpdatedAt() == null ? "" : thread.getUpdatedAt().toInstant())
-            + "\"}");
-    dto.setCreateTime(
-        toUtcLocal(thread.getUpdatedAt() != null ? thread.getUpdatedAt() : thread.getCreatedAt()));
-    return dto;
-  }
-
   private static String formatNullable(Long value) {
     return value == null ? null : HarnessIds.format(value);
   }
@@ -175,22 +143,5 @@ public class HarnessQueryDtoConverter {
 
   private static Instant toInstant(OffsetDateTime value) {
     return value == null ? null : value.toInstant();
-  }
-
-  private static String quoteJson(String value) {
-    StringBuilder out = new StringBuilder(value.length() + 2);
-    out.append('"');
-    for (int i = 0; i < value.length(); i++) {
-      char c = value.charAt(i);
-      if (c == '"' || c == '\\') {
-        out.append('\\').append(c);
-      } else if (c < 0x20) {
-        out.append(String.format("\\u%04x", (int) c));
-      } else {
-        out.append(c);
-      }
-    }
-    out.append('"');
-    return out.toString();
   }
 }

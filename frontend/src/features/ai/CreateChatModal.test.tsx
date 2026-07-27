@@ -14,8 +14,6 @@ const agent = {
     environmentName: null,
     tools: [],
     skills: [],
-    allowedSubagents: [],
-    executionPolicy: {},
   },
   version: 1,
   createTime: null,

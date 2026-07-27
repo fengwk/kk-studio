@@ -274,9 +274,7 @@ function agent() {
     config: {
       environmentName: null,
       tools: [],
-      skills: [],
-      allowedSubagents: [],
-      executionPolicy: {},
+      skills: []
     },
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',

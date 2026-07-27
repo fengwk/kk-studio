@@ -11,20 +11,6 @@ export function projectDurableEntry(
 ) {
   const payload = parsePayload(entry.payloadJson)
   const entryType = entry.entryType
-  if (entryType === 'COMPACTION') {
-    const summary = getString(payload.summary)
-    if (summary) {
-      messages.push({
-        id: entry.entryId,
-        role: 'system',
-        subjectEntryId: entry.entryId,
-        text: summary,
-        createdAt: entry.createTime,
-        status: 'done',
-      })
-    }
-    return
-  }
   if (entryType === 'ASSISTANT_ERROR') {
     const error = asRecord(payload.error)
     messages.push({

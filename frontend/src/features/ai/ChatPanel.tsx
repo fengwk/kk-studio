@@ -1,16 +1,9 @@
 import type { RefObject } from 'react'
 import { ThreadPanel } from '@/features/ai/thread-panel'
-import { ThreadActivityWidget } from '@/features/ai/thread-panel/ThreadActivityWidget'
 import { ThreadStatusFooter } from '@/features/ai/thread-panel/ThreadStatusFooter'
-import { ThreadSubagentWidget } from '@/features/ai/thread-panel/ThreadSubagentWidget'
 import type { ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
-import type { SubagentTaskNode } from '@/features/ai/subagent-task-tree'
 import type { ThreadTimeline } from '@/features/ai/thread-timeline'
-import type {
-  BackendLong,
-  ModelUsageSummaryDTO,
-  RootActivityDTO,
-} from '@/shared/api/contracts'
+import type { BackendLong, ModelUsageSummaryDTO } from '@/shared/api/contracts'
 
 /**
  * Pane-scoped Thread adapter over ThreadPanel.
@@ -27,7 +20,6 @@ export function ChatPanel({
   pending,
   disabled,
   observability,
-  taskTimeline,
   actionError,
   onDismissActionError,
   onDraftChange,
@@ -60,12 +52,6 @@ export function ChatPanel({
     yoloPending: boolean
     setYolo: (enabled: boolean, expectedExecutionEpoch: BackendLong) => void
   }
-  taskTimeline: {
-    activities: RootActivityDTO[]
-    taskTree: SubagentTaskNode[]
-    taskTimelineError: unknown
-    taskTimelineLoading: boolean
-  }
   actionError?: string | null
   onDismissActionError?: () => void
   onDraftChange: (draft: string) => void
@@ -93,12 +79,6 @@ export function ChatPanel({
       onSubmit={onSubmit}
       onCommand={onCommand}
       commands={commands}
-      widgets={
-        <>
-          <ThreadActivityWidget activities={taskTimeline.activities} />
-          <ThreadSubagentWidget taskTree={taskTimeline.taskTree} />
-        </>
-      }
       footer={
         <ThreadStatusFooter
           agentName={runtimeLabels?.agentName}

@@ -9,11 +9,12 @@ function createClient(): HttpClient {
 describe('harnessService', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('uses agentless Session create and Thread actor endpoints without toolset', async () => {
+  it('exposes flat Session read endpoints and Thread actor endpoints', async () => {
     const client = createClient()
     const service = createHarnessService(client)
-    await service.createSession({ title: 'Draft' })
     await service.getSession('session /1')
+    await service.listSessions()
+    await service.listSessionEntries('session /1')
     await service.submitThreadMessage('thread /1', {
       content: 'hello',
       clientMessageId: 'cid-1',
@@ -41,10 +42,6 @@ describe('harnessService', () => {
       clientMessageId: 'cid-agent',
       expectedExecutionEpoch: 4,
     })
-    await service.listSessions()
-    await service.listSessionEntries('session /1')
-    await service.listRootActivities('session /1', '9')
-    await service.listSessionTasks('session /1')
     await service.getRetryPolicy()
     await service.updateRetryPolicy({
       maxRetries: 3,
@@ -53,15 +50,17 @@ describe('harnessService', () => {
       maxDelayMillis: 60_000,
     })
 
-    expect(client.post).toHaveBeenNthCalledWith(1, '/sessions', { title: 'Draft' })
-    expect(client.get).toHaveBeenNthCalledWith(1, '/sessions/session%20%2F1')
-    expect(client.post).toHaveBeenNthCalledWith(2, '/threads/thread%20%2F1/messages', {
+    expect(client.post).not.toHaveBeenCalledWith('/sessions', expect.anything())
+    expect(client.post).toHaveBeenNthCalledWith(1, '/threads/thread%20%2F1/messages', {
       content: 'hello',
       clientMessageId: 'cid-1',
       expectedExecutionEpoch: 3,
     })
     // stop is no longer a bodyless POST: it carries the epoch fencing token too.
-    expect(client.post).toHaveBeenNthCalledWith(3, '/threads/thread%20%2F1/stop', { expectedExecutionEpoch: 4 })
+    expect(client.post).toHaveBeenNthCalledWith(2, '/threads/thread%20%2F1/stop', { expectedExecutionEpoch: 4 })
+    expect(client.get).toHaveBeenCalledWith('/sessions')
+    expect(client.get).toHaveBeenCalledWith('/sessions/session%20%2F1')
+    expect(client.get).toHaveBeenCalledWith('/sessions/session%20%2F1/entries')
     expect(client.put).toHaveBeenNthCalledWith(1, '/threads/thread%20%2F1/model', {
       modelId: 'model-1',
       variant: 'default',
@@ -132,10 +131,33 @@ describe('harnessService', () => {
     })
   })
 
-  it('exposes no session-scoped Thread create or list operations', () => {
-    const service = createHarnessService(createClient()) as Record<string, unknown>
-    expect(service.listSessionThreads).toBeUndefined()
-    expect(service.createSessionThread).toBeUndefined()
+  it('exposes the current flat Session and Thread command surface', async () => {
+    const client = createClient()
+    const service = createHarnessService(client)
+    expect(service.listThreads).toBeTypeOf('function')
+    expect(service.getThread).toBeTypeOf('function')
+    expect(service.createThread).toBeTypeOf('function')
+    expect(service.bootstrapThread).toBeTypeOf('function')
+    expect(service.updateThreadHead).toBeTypeOf('function')
+    expect(service.submitThreadMessage).toBeTypeOf('function')
+    expect(service.setThreadYolo).toBeTypeOf('function')
+    expect(service.setThreadAgent).toBeTypeOf('function')
+    expect(service.setThreadModel).toBeTypeOf('function')
+    expect(service.stopThread).toBeTypeOf('function')
+    expect(service.getRetryPolicy).toBeTypeOf('function')
+    expect(service.updateRetryPolicy).toBeTypeOf('function')
+    expect(service.listThreadEntries).toBeTypeOf('function')
+    expect(service.listThreadInputs).toBeTypeOf('function')
+    expect(service.listThreadToolInvocations).toBeTypeOf('function')
+    expect(service.getThreadUsage).toBeTypeOf('function')
+    expect(service.listSessions).toBeTypeOf('function')
+    expect(service.getSession).toBeTypeOf('function')
+    expect(service.listSessionEntries).toBeTypeOf('function')
+    expect(service.createThreadRealtimeStream).toBeTypeOf('function')
+
+    // End-to-end call shape for the Session entries endpoint.
+    await service.listSessionEntries('42')
+    expect(client.get).toHaveBeenLastCalledWith('/sessions/42/entries')
   })
 
   it('keeps Redis stream cursors as strings in SSE URLs', () => {

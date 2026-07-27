@@ -54,8 +54,8 @@ class PostgresqlInteractionTransactionsIntegrationTest extends PostgresSpringTes
       connection.setAutoCommit(false);
       statement.execute("set constraints all deferred");
       statement.executeUpdate(
-          "insert into harness_session (id, title, created_at, updated_at)"
-              + " values (600, 'test', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')");
+          "insert into harness_session (id, title, created_at)"
+              + " values (600, 'test', '2026-01-01T00:00:00Z')");
       statement.executeUpdate(
           "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
               + " values (601, 600, null, 'ROOT', '{}'::jsonb, '2026-01-01T00:00:00Z')");

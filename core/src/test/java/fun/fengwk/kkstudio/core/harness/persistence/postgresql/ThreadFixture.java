@@ -11,7 +11,7 @@ import java.util.Objects;
  * <p>Session and Thread are independent aggregates now: the Session/Entry rows are inserted first,
  * and the Thread only references the ROOT through the deferrable single-column {@code
  * head_entry_id} FK. Tests bootstrap by calling {@link #insertFresh()} or {@link
- * #insertAtomically(Connection)}. Child helpers keep fixture construction deterministic without
+ * #insertAtomically(Connection)}. Entry helpers keep fixture construction deterministic without
  * random ids or clock-derived values.
  */
 final class ThreadFixture {
@@ -51,8 +51,8 @@ final class ThreadFixture {
     try {
       try (PreparedStatement ps =
           conn.prepareStatement(
-              "insert into harness_session (id, title, created_at, updated_at)"
-                  + " values (?, 'fixture', current_timestamp, current_timestamp)")) {
+              "insert into harness_session (id, title, created_at)"
+                  + " values (?, 'fixture', current_timestamp)")) {
         ps.setLong(1, sessionId);
         ps.executeUpdate();
       }

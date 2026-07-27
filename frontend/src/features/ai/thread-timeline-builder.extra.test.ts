@@ -8,13 +8,11 @@ import type {
 import { buildThreadTimeline } from '@/features/ai/thread-timeline-builder'
 
 describe('thread timeline edge branches', () => {
-  it('projects compaction, system messages, empty user content, and tool artifacts', () => {
+  it('projects system messages, empty user content, tool artifacts, and assistant errors', () => {
     const timeline = buildThreadTimeline(
       [
-        entry('1', 'COMPACTION', { summary: '压缩摘要', firstKeptEntryId: 1, tokensBefore: 1, detailsJson: '{}' }),
         entry('2', 'MESSAGE', messagePayload('SYSTEM', [{ type: 'text', text: '系统提示' }])),
         entry('3', 'MESSAGE', messagePayload('USER', [])),
-        entry('4', 'LABEL', { label: 'ignored' }),
         entry(
           '5',
           'MESSAGE',
@@ -49,7 +47,6 @@ describe('thread timeline edge branches', () => {
       [input('set', 'SET_YOLO', { yoloEnabled: true }, false)],
     )
 
-    expect(timeline.messages.some((m) => m.role === 'system' && m.text === '压缩摘要')).toBe(true)
     expect(timeline.messages.some((m) => m.role === 'system' && m.text === '系统提示')).toBe(true)
     expect(timeline.messages.some((m) => m.role === 'assistant' && String(m.text).includes('boom'))).toBe(true)
     expect(timeline.messages.some((m) => m.role === 'tool' && m.status === 'error')).toBe(true)
@@ -165,7 +162,6 @@ describe('thread timeline edge branches', () => {
 function entry(entryId: string, entryType: EntryType, payload: Record<string, unknown>): HarnessSessionEntryDTO {
   return {
     entryId,
-    sessionId: '1',
     parentEntryId: null,
     entryType,
     payloadJson: JSON.stringify(payload),

@@ -72,15 +72,14 @@ frontend → web APIs (via shared/api)
 | --- | --- |
 | **Chat** | 持久 Chat 集合与可选默认 Agent；不持有 Session/Thread，也不保存 Pane |
 | **Pane** | 浏览器本地 Chat 工作区姿势：布局、焦点与各面板可空 `threadId` 仅存 localStorage |
-| **Session** | 共享 append-only Entry Tree 的边界，不持有 Thread；schema 可表达父子 Session，但 Child Session/task 产品工作流未实现 |
-| **Entry** | 语义持久真源：消息、`RUNTIME_CONFIG`、Tool Result、Compaction 等 |
+| **Session** | 共享 append-only Entry Tree 的边界，不持有 Thread；存储列只有 `id`、`title`、`created_at`；由 Thread `bootstrapThread` 在同一事务中创建 |
+| **Entry** | 语义持久真源：`ROOT`、`RUNTIME_CONFIG`、`MESSAGE`、`CUSTOM_MESSAGE`、`ASSISTANT_ERROR` |
 | **HarnessThread** | 可复用 durable runtime process：可空 `headEntryId`、input sequence、`runnable`、execution epoch、processor lease；当前 Session 由 head Entry 派生 |
 | **Branch(thread)** | 不是独立实体：把某个 Thread 的 head 重定位到历史 Entry 即继续该分支；路径由 root→`headEntryId` 派生 |
 | **ThreadInput** | 多生产者有序 mailbox：消息与配置命令；幂等键；TURN_BOUNDARY harvest |
 | **ModelInvocation** | 冻结 ProviderRequest 的 durable Provider 调用 |
 | **ToolInvocation** | 工具 lease、结果与终态；`PLATFORM`/`ENVIRONMENT` 路由；ID 是副作用幂等边界 |
 | **Interaction** | 通用 approval/clarification/external input |
-| **Root Activity** | 根 Session 树内查询投影（非独立写表） |
 | **Usage / Cost** | 每 Assistant Entry 一条不可变账本（`harness_model_usage`） |
 | **Live Environment** | 当前 Daemon 连接发现的内存工具/Skill 元数据；按名称唯一，不持久化 |
 

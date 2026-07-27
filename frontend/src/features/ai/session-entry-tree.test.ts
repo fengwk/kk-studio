@@ -18,27 +18,13 @@ const entries: HarnessSessionEntryDTO[] = [
   entry('assistant', 'user', 'MESSAGE', message('ASSISTANT', 'answer')),
   entry('tool', 'assistant', 'MESSAGE', message('TOOL', 'tool result')),
   entry('custom', 'assistant', 'CUSTOM_MESSAGE', message('SYSTEM', 'custom text')),
-  entry('label', 'assistant', 'LABEL', { label: 'checkpoint' }),
   entry('config', 'root', 'RUNTIME_CONFIG', {}),
 ]
 
 describe('Session Entry Tree', () => {
   it('walks the full parent tree in server child order and applies the two KISS views', () => {
     expect(buildSessionEntryTree(entries, 'conversation').map((item) => item.entry.entryId)).toEqual(['user', 'assistant', 'custom'])
-    expect(buildSessionEntryTree(entries, 'all').map((item) => item.entry.entryId)).toEqual(['root', 'user', 'assistant', 'tool', 'custom', 'label', 'config'])
-  })
-
-  it('treats an omitted root parentEntryId as null at the HTTP boundary', () => {
-    const rootWithoutParent = {
-      entryId: 'root-without-parent',
-      sessionId: 's1',
-      entryType: 'ROOT',
-      payloadJson: '{}',
-      createTime: null,
-    } as HarnessSessionEntryDTO
-    const user = entry('child', 'root-without-parent', 'MESSAGE', message('USER', 'child prompt'))
-
-    expect(buildSessionEntryTree([rootWithoutParent, user], 'conversation').map((item) => item.entry.entryId)).toEqual(['child'])
+    expect(buildSessionEntryTree(entries, 'all').map((item) => item.entry.entryId)).toEqual(['root', 'user', 'assistant', 'tool', 'custom', 'config'])
   })
 
   it('keeps linear chains compact: depth advances only on visible sibling splits', () => {
@@ -81,8 +67,8 @@ describe('Session Entry Tree', () => {
       { continues: false },
     ])
     expect(byEntryId.get('tool')?.isLastSibling).toBe(false)
-    expect(byEntryId.get('label')?.depth).toBe(3)
-    expect(byEntryId.get('label')?.isLastSibling).toBe(true)
+    expect(byEntryId.get('custom')?.depth).toBe(3)
+    expect(byEntryId.get('custom')?.isLastSibling).toBe(true)
     expect(byEntryId.get('config')?.depth).toBe(1)
     expect(byEntryId.get('config')?.isLastSibling).toBe(true)
   })
@@ -151,7 +137,6 @@ describe('Session Entry Tree', () => {
     expect(sessionEntryKind(entry('custom', null, 'CUSTOM_MESSAGE', {}))).toBe('custom')
     expect(matchesSessionTreeFilter('user', 'conversation')).toBe(true)
     expect(matchesSessionTreeFilter('tool', 'conversation')).toBe(false)
-    expect(matchesSessionTreeFilter('label', 'conversation')).toBe(false)
     expect(matchesSessionTreeFilter('other', 'conversation')).toBe(false)
     expect(matchesSessionTreeFilter('other', 'all')).toBe(true)
   })
@@ -169,18 +154,18 @@ describe('Session Entry Tree', () => {
     const fullDraft = '用户原始内容 '.repeat(40)
     const custom = entry('custom-draft', 'root', 'CUSTOM_MESSAGE', message('SYSTEM', fullDraft))
 
-    expect(sessionEntryPreview(assistant, 'assistant')).toBe('面向用户的正文')
+    expect(sessionEntryPreview(assistant)).toBe('面向用户的正文')
     expect(buildSessionEntryTree([assistant], 'all', parseHistorySearchTokens('内部计划'))).toEqual([])
     expect(branchTarget(custom).draft).toBe(fullDraft)
-    expect(sessionEntryPreview(custom, 'custom')).toHaveLength(220)
+    expect(sessionEntryPreview(custom)).toHaveLength(220)
   })
 
   it('flattens whitespace and truncates the projected preview to the configured limit', () => {
     const long = 'a'.repeat(500)
     const assistant = entry('long', null, 'MESSAGE', message('ASSISTANT', long))
-    expect(sessionEntryPreview(assistant, 'assistant')).toHaveLength(220)
+    expect(sessionEntryPreview(assistant)).toHaveLength(220)
     const compact = entry('compact', null, 'MESSAGE', message('ASSISTANT', 'line one\n\nline two'))
-    expect(sessionEntryPreview(compact, 'assistant')).toBe('line one line two')
+    expect(sessionEntryPreview(compact)).toBe('line one line two')
   })
 
   it('returns the active ancestry chain from a target back to the root in raw parent order', () => {
@@ -222,7 +207,7 @@ describe('Session Entry Tree', () => {
 })
 
 function entry(entryId: string, parentEntryId: string | null, entryType: EntryType, payload: unknown): HarnessSessionEntryDTO {
-  return { entryId, sessionId: 's1', parentEntryId, entryType, payloadJson: JSON.stringify(payload), createTime: null }
+  return { entryId, parentEntryId, entryType, payloadJson: JSON.stringify(payload), createTime: null }
 }
 
 function message(role: string, text: string) {

@@ -4,8 +4,6 @@ export { ThreadComposer } from '@/features/ai/thread-panel/ThreadComposer'
 export { ThreadErrorPanel } from '@/features/ai/thread-panel/ThreadErrorPanel'
 export { ThreadWorkingStatus } from '@/features/ai/thread-panel/ThreadWorkingStatus'
 export { ThreadWidgetStack } from '@/features/ai/thread-panel/ThreadWidgetStack'
-export { ThreadSubagentWidget } from '@/features/ai/thread-panel/ThreadSubagentWidget'
-export { ThreadActivityWidget } from '@/features/ai/thread-panel/ThreadActivityWidget'
 export { ThreadCommandPalette } from '@/features/ai/thread-panel/ThreadCommandPalette'
 export { ThreadStatusFooter } from '@/features/ai/thread-panel/ThreadStatusFooter'
 export {

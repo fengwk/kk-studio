@@ -74,9 +74,7 @@ describe('AiConsolePanels', () => {
               config: {
                 environmentName: 'local',
                 tools: ['bash'],
-                skills: [],
-                allowedSubagents: [],
-                executionPolicy: {},
+                skills: []
               },
               version: 1,
               createTime: null,

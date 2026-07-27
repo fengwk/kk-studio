@@ -26,8 +26,6 @@ vi.mock('@/shared/api/harness-service', () => ({
     listThreadInputs: vi.fn(),
     listThreadToolInvocations: vi.fn(),
     getThreadUsage: vi.fn(),
-    listRootActivities: vi.fn(),
-    listSessionTasks: vi.fn(),
     createThreadRealtimeStream: vi.fn(),
     updateThreadHead: vi.fn(),
     setThreadAgent: vi.fn(),
@@ -69,13 +67,11 @@ function thread(overrides: Partial<HarnessThreadDTO>): HarnessThreadDTO {
 function entry(
   entryId: string,
   parentEntryId: string | null,
-  sessionId: string,
   role: string,
   text: string,
 ): HarnessSessionEntryDTO {
   return {
     entryId,
-    sessionId,
     parentEntryId,
     entryType: 'MESSAGE',
     payloadJson: JSON.stringify({ message: { role, contents: [{ type: 'text', text }] } }),
@@ -88,14 +84,13 @@ function sessionEntries(sessionId: string): HarnessSessionEntryDTO[] {
   return [
     {
       entryId: `${sessionId}-root`,
-      sessionId,
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: '{}',
       createTime: null,
     },
-    entry(`${sessionId}-user`, `${sessionId}-root`, sessionId, 'USER', `${sessionId} prompt`),
-    entry(`${sessionId}-assistant`, `${sessionId}-user`, sessionId, 'ASSISTANT', `${sessionId} reply`),
+    entry(`${sessionId}-user`, `${sessionId}-root`, 'USER', `${sessionId} prompt`),
+    entry(`${sessionId}-assistant`, `${sessionId}-user`, 'ASSISTANT', `${sessionId} reply`),
   ]
 }
 
@@ -107,7 +102,7 @@ const agents = [
     systemPrompt: null,
     modelId: 'm1',
     variant: 'default',
-    config: { environmentName: null, tools: [], skills: [], allowedSubagents: [], executionPolicy: {} },
+    config: { environmentName: null, tools: [], skills: [] },
     createTime: null,
     updateTime: null,
   },
@@ -118,7 +113,7 @@ const agents = [
     systemPrompt: null,
     modelId: 'm1',
     variant: 'default',
-    config: { environmentName: null, tools: [], skills: [], allowedSubagents: [], executionPolicy: {} },
+    config: { environmentName: null, tools: [], skills: [] },
     createTime: null,
     updateTime: null,
   },
@@ -183,17 +178,14 @@ describe('ChatWorkspacePane commands', () => {
     vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(new FakeEventSource() as EventSource)
     vi.mocked(harnessService.getThread).mockResolvedValue(thread({}))
     vi.mocked(harnessService.getSession).mockResolvedValue({
-      sessionId: 's1', title: 'S1', rootSessionId: 's1', parentSessionId: null,
-      parentInvocationId: null, depth: 0, createTime: null, updateTime: null,
+      sessionId: 's1', title: 'S1', createTime: null, updateTime: null,
     })
     vi.mocked(harnessService.listSessions).mockResolvedValue([
       {
-        sessionId: 's1', title: 'S1', rootSessionId: 's1', parentSessionId: null,
-        parentInvocationId: null, depth: 0, createTime: '2026-01-01T00:00:00Z', updateTime: '2026-01-02T00:00:00Z',
+        sessionId: 's1', title: 'S1', createTime: '2026-01-01T00:00:00Z', updateTime: '2026-01-02T00:00:00Z',
       },
       {
-        sessionId: 's2', title: 'S2', rootSessionId: 's2', parentSessionId: null,
-        parentInvocationId: null, depth: 0, createTime: '2026-01-04T00:00:00Z', updateTime: '2026-01-01T00:00:00Z',
+        sessionId: 's2', title: 'S2', createTime: '2026-01-04T00:00:00Z', updateTime: '2026-01-01T00:00:00Z',
       },
     ])
     vi.mocked(harnessService.listThreads).mockResolvedValue([
@@ -215,8 +207,6 @@ describe('ChatWorkspacePane commands', () => {
       providerTotalTokens: 0, cacheEligibleRecordCount: 0, cacheHitRecordCount: 0, cacheHitRatio: 0,
       tokenReadRatio: 0, unamortizedCacheWriteTokens: 0, costs: [],
     })
-    vi.mocked(harnessService.listRootActivities).mockResolvedValue([])
-    vi.mocked(harnessService.listSessionTasks).mockResolvedValue([])
     vi.mocked(harnessService.updateThreadHead).mockResolvedValue(thread({ executionEpoch: 6 }))
     vi.mocked(harnessService.setThreadAgent).mockResolvedValue({
       inputId: 'i', threadId: 't1', sequence: 1, inputType: 'SET_AGENT', payloadJson: '{}',

@@ -12,6 +12,9 @@ public interface HarnessSessionQueryService {
 
   List<HarnessSessionEntryDTO> listEntries(String sessionId);
 
-  /** Lists all global root sessions ordered by recent update time. */
-  List<HarnessSessionDTO> listRootSessions();
+  /**
+   * Lists every Session, ordered by the derived last-Entry {@code updated_at} descending and then
+   * by id descending as a deterministic tie-breaker.
+   */
+  List<HarnessSessionDTO> listSessions();
 }

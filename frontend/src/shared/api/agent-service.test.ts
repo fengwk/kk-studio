@@ -75,9 +75,11 @@ describe('agentService', () => {
     }
     const agentBody = {
       name: 'default-assistant',
+      description: null,
+      systemPrompt: null,
       modelId: 'model-1',
       variant: 'default',
-      config: { tools: [], skills: [], allowedSubagents: [] },
+      config: { environmentName: null, tools: [], skills: [] },
     }
     const updateProviderBody = { description: 'updated' }
     const updateModelBody = {

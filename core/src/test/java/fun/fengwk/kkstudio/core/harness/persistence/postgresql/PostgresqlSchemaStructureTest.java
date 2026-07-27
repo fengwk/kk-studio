@@ -157,6 +157,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
+  void harnessSessionExposesOnlyItsMinimalColumnContract() throws SQLException {
+    assertColumns("harness_session", "id", "title", "created_at");
+  }
+
+  @Test
   void usesJsonbForStructuredPayloads() throws SQLException {
     assertColumnType("jsonb", "harness_entry", "payload");
     assertColumnType("jsonb", "harness_thread_input", "payload");
@@ -169,9 +174,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void usesTimestamptzForCreatedAtAndUpdatedAt() throws SQLException {
+  void usesTimestamptzForTemporalColumns() throws SQLException {
     assertColumnType("timestamp with time zone", "harness_session", "created_at");
-    assertColumnType("timestamp with time zone", "harness_session", "updated_at");
     assertColumnType("timestamp with time zone", "harness_entry", "created_at");
     assertColumnType("timestamp with time zone", "harness_thread", "processor_until");
     assertColumnType("timestamp with time zone", "harness_thread_input", "applied_at");
@@ -292,7 +296,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_canvas_link",
             "uk_harness_entry_session_id",
             "uk_harness_entry_single_root",
-            "uk_harness_session_parent_invocation",
             "uk_harness_thread_input_sequence",
             "uk_harness_thread_input_idempotency",
             "uk_harness_model_invocation_source",

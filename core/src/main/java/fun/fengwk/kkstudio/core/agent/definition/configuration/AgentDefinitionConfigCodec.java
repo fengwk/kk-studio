@@ -10,7 +10,6 @@ import com.fasterxml.jackson.databind.type.LogicalType;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
 
 import java.util.HashSet;
 import java.util.List;
@@ -72,17 +71,19 @@ public class AgentDefinitionConfigCodec {
     if (config == null) {
       throw new IllegalArgumentException("agent definition config is required");
     }
+    String environmentName = config.getEnvironmentName();
+    if (environmentName != null) {
+      if (environmentName.isBlank()) {
+        throw new IllegalArgumentException(
+            "agent definition config environmentName must not be blank when present");
+      }
+      if (!environmentName.equals(environmentName.trim())) {
+        throw new IllegalArgumentException(
+            "agent definition config environmentName must not contain surrounding whitespace");
+      }
+    }
     validateNames(config.getTools(), "tools");
     validateNames(config.getSkills(), "skills");
-    validateNames(config.getAllowedSubagents(), "allowedSubagents");
-    AgentExecutionPolicyDTO policy = config.getExecutionPolicy();
-    if (policy == null) {
-      throw new IllegalArgumentException("agent definition config executionPolicy is required");
-    }
-    requirePositive(policy.getMaxTurns(), "executionPolicy.maxTurns");
-    requirePositive(policy.getMaxDepth(), "executionPolicy.maxDepth");
-    requirePositive(policy.getMaxDirectSubagents(), "executionPolicy.maxDirectSubagents");
-    requirePositive(policy.getMaxTotalSubagents(), "executionPolicy.maxTotalSubagents");
   }
 
   private static void validateNames(List<String> values, String field) {
@@ -103,12 +104,6 @@ public class AgentDefinitionConfigCodec {
         throw new IllegalArgumentException(
             "agent definition config " + field + " must not contain duplicates: " + value);
       }
-    }
-  }
-
-  private static void requirePositive(Integer value, String field) {
-    if (value != null && value <= 0) {
-      throw new IllegalArgumentException("agent definition config " + field + " must be positive");
     }
   }
 }
