@@ -175,6 +175,44 @@ class CodingToolsTest {
     assertTrue(text(cancelled.result).contains("Operation cancelled"));
   }
 
+  @Test
+  void bashTimeoutParameterDefaultsAndNeverExceedsInvocationDeadline() throws Exception {
+    var missing = AbstractCodingTool.OBJECT_MAPPER.readTree("{\"command\":\"true\"}");
+    var explicit =
+        AbstractCodingTool.OBJECT_MAPPER.readTree("{\"command\":\"true\",\"timeout_seconds\":7}");
+    assertEquals(120, BashTool.requestedTimeoutSeconds(missing));
+    assertEquals(7, BashTool.requestedTimeoutSeconds(explicit));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            BashTool.requestedTimeoutSeconds(
+                AbstractCodingTool.OBJECT_MAPPER.readTree("{\"timeout_seconds\":0}")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            BashTool.requestedTimeoutSeconds(
+                AbstractCodingTool.OBJECT_MAPPER.readTree("{\"timeout_seconds\":3601}")));
+
+    assertEquals(
+        Duration.ofSeconds(120),
+        BashTool.effectiveProcessTimeout(Duration.ofHours(1), Duration.ofSeconds(120)));
+    assertEquals(
+        Duration.ofSeconds(2),
+        BashTool.effectiveProcessTimeout(Duration.ofSeconds(2), Duration.ofSeconds(120)));
+    assertEquals(
+        Duration.ofSeconds(7),
+        BashTool.effectiveProcessTimeout(Duration.ofSeconds(30), Duration.ofSeconds(7)));
+
+    // A short explicit timeout must terminate the command before the outer request deadline.
+    RecordingListener timed =
+        invokeAsync(
+            new BashTool(config()),
+            "{\"command\":\"sleep 2\",\"timeout_seconds\":1}",
+            Duration.ofSeconds(5));
+    assertTrue(timed.await());
+    assertTrue(text(timed.result).contains("Command timed out"));
+  }
+
   private CodingToolsConfig config() {
     return config(2000, 50 * 1024);
   }

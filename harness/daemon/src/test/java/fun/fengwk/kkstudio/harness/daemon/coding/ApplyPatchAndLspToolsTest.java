@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -23,6 +24,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -57,13 +59,26 @@ class ApplyPatchAndLspToolsTest {
     Tool apply = registry.find("apply_patch").orElseThrow();
     assertTrue(apply.descriptor().description().contains("*** Begin Patch"));
     assertEquals(Set.of("patchText"), apply.descriptor().inputSchema().required());
+    assertEquals(Set.of("patchText"), apply.descriptor().inputSchema().properties().keySet());
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolExecutionRequest(
                 apply.descriptor(),
-                new ToolCall("bad", "apply_patch", "{\"patchText\":1}"),
+                new ToolCall("bad", "apply_patch", "{\"patchText\":\"x\",\"workdir\":\".\"}"),
                 Duration.ZERO));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolExecutionRequest(
+                apply.descriptor(),
+                new ToolCall("bad-type", "apply_patch", "{\"patchText\":1}"),
+                Duration.ZERO));
+
+    Tool bash = registry.find("bash").orElseThrow();
+    assertEquals(Set.of("command"), bash.descriptor().inputSchema().required());
+    assertTrue(bash.descriptor().inputSchema().properties().containsKey("timeout_seconds"));
+    assertEquals(Duration.ofHours(1), bash.descriptor().timeout());
 
     Tool gotoDef = registry.find("lsp_goto_definition").orElseThrow();
     assertEquals(Set.of("path", "line"), gotoDef.descriptor().inputSchema().required());
@@ -79,7 +94,7 @@ class ApplyPatchAndLspToolsTest {
   }
 
   @Test
-  void applyPatchAddsUpdatesDeletesWithPreflightAtomicityAndRejectsMove() throws Exception {
+  void applyPatchAddsUpdatesDeletesWithPreflightAtomicityAndMoves() throws Exception {
     Files.writeString(environmentRoot.resolve("keep.txt"), "alpha\nbeta\n");
     Files.writeString(environmentRoot.resolve("gone.txt"), "remove-me\n");
     ApplyPatchTool tool = new ApplyPatchTool(config());
@@ -128,7 +143,7 @@ class ApplyPatchAndLspToolsTest {
     assertEquals("hello\nworld\n", Files.readString(environmentRoot.resolve("nested/new.txt")));
     assertEquals("alpha\ngamma\n", Files.readString(environmentRoot.resolve("keep.txt")));
 
-    ToolResult move =
+    ToolResult moved =
         invoke(
             tool,
             patchArgs(
@@ -141,10 +156,56 @@ class ApplyPatchAndLspToolsTest {
                 +delta
                 *** End Patch
                 """));
-    assertTrue(move.error());
-    assertTrue(text(move).contains("Move operations are not supported"));
-    assertEquals("alpha\ngamma\n", Files.readString(environmentRoot.resolve("keep.txt")));
+    assertFalse(moved.error(), text(moved));
+    assertEquals("alpha\ndelta\n", Files.readString(environmentRoot.resolve("moved.txt")));
+    assertFalse(Files.exists(environmentRoot.resolve("keep.txt")));
+
+    ToolResult renamed =
+        invoke(
+            tool,
+            patchArgs(
+                """
+                *** Begin Patch
+                *** Update File: moved.txt
+                *** Move to: renamed.txt
+                *** End Patch
+                """));
+    assertFalse(renamed.error(), text(renamed));
+    assertEquals("alpha\ndelta\n", Files.readString(environmentRoot.resolve("renamed.txt")));
     assertFalse(Files.exists(environmentRoot.resolve("moved.txt")));
+
+    Files.writeString(environmentRoot.resolve("destination.txt"), "old destination\n");
+    ToolResult overwritten =
+        invoke(
+            tool,
+            patchArgs(
+                """
+                *** Begin Patch
+                *** Update File: renamed.txt
+                *** Move to: destination.txt
+                *** End Patch
+                """));
+    assertFalse(overwritten.error(), text(overwritten));
+    assertEquals("alpha\ndelta\n", Files.readString(environmentRoot.resolve("destination.txt")));
+    assertFalse(Files.exists(environmentRoot.resolve("renamed.txt")));
+
+    byte[] bomSource =
+        new byte[] {(byte) 0xef, (byte) 0xbb, (byte) 0xbf, 'x', '\r', '\n', 'y', '\r', '\n'};
+    Files.write(environmentRoot.resolve("bom-source.txt"), bomSource);
+    ToolResult bomMoved =
+        invoke(
+            tool,
+            patchArgs(
+                """
+                *** Begin Patch
+                *** Update File: bom-source.txt
+                *** Move to: bom-destination.txt
+                *** End Patch
+                """));
+    assertFalse(bomMoved.error(), text(bomMoved));
+    assertArrayEquals(
+        bomSource, Files.readAllBytes(environmentRoot.resolve("bom-destination.txt")));
+    assertFalse(Files.exists(environmentRoot.resolve("bom-source.txt")));
   }
 
   @Test
@@ -213,6 +274,127 @@ class ApplyPatchAndLspToolsTest {
                 """));
     assertTrue(escape.error());
     assertTrue(text(escape).contains("environment root") || text(escape).contains("escapes"));
+  }
+
+  @Test
+  void applyPatchUsesHeaderWorkdirAndRejectsInvalidMoveTargetsWithoutMutation() throws Exception {
+    Path nested = Files.createDirectories(environmentRoot.resolve("nested-workdir"));
+    Files.writeString(nested.resolve("source.txt"), "source\n");
+    ApplyPatchTool tool = new ApplyPatchTool(config());
+
+    ToolResult workdir =
+        invoke(
+            tool,
+            patchArgs(
+                """
+                *** Begin Patch
+                *** Workdir: nested-workdir
+                *** Update File: source.txt
+                @@
+                -source
+                +updated
+                *** End Patch
+                """));
+    assertFalse(workdir.error(), text(workdir));
+    assertEquals("updated\n", Files.readString(nested.resolve("source.txt")));
+
+    Files.writeString(nested.resolve("source.txt"), "source\n");
+    ToolResult escapedSource =
+        invoke(
+            tool,
+            patchArgs(
+                """
+                *** Begin Patch
+                *** Workdir: nested-workdir
+                *** Add File: should-not-create.txt
+                +no
+                *** Update File: ../../outside.txt
+                *** Move to: destination.txt
+                *** End Patch
+                """));
+    assertTrue(escapedSource.error());
+    assertFalse(Files.exists(nested.resolve("should-not-create.txt")));
+    assertEquals("source\n", Files.readString(nested.resolve("source.txt")));
+
+    ToolResult escapedDestination =
+        invoke(
+            tool,
+            patchArgs(
+                """
+                *** Begin Patch
+                *** Workdir: nested-workdir
+                *** Update File: source.txt
+                *** Move to: ../../outside.txt
+                *** End Patch
+                """));
+    assertTrue(escapedDestination.error());
+    assertTrue(text(escapedDestination).contains("environment root"));
+    assertEquals("source\n", Files.readString(nested.resolve("source.txt")));
+
+    Files.createDirectory(nested.resolve("directory"));
+    ToolResult directoryDestination =
+        invoke(
+            tool,
+            patchArgs(
+                """
+                *** Begin Patch
+                *** Workdir: nested-workdir
+                *** Update File: source.txt
+                *** Move to: directory
+                *** End Patch
+                """));
+    assertTrue(directoryDestination.error());
+    assertTrue(text(directoryDestination).contains("not a regular file"));
+    assertEquals("source\n", Files.readString(nested.resolve("source.txt")));
+  }
+
+  @Test
+  void applyPatchRejectsDuplicateAndMisplacedWorkdirHeaders() {
+    assertEquals(
+        "nested",
+        ApplyPatchSupport.parse(
+                """
+                *** Begin Patch
+                *** Workdir: nested
+                *** Add File: file.txt
+                +ok
+                *** End Patch
+                """)
+            .workdir());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ApplyPatchSupport.parse(
+                """
+                *** Begin Patch
+                *** Workdir:
+                *** Add File: file.txt
+                +ok
+                *** End Patch
+                """));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ApplyPatchSupport.parse(
+                """
+                *** Begin Patch
+                *** Workdir: first
+                *** Workdir: second
+                *** Add File: file.txt
+                +ok
+                *** End Patch
+                """));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ApplyPatchSupport.parse(
+                """
+                *** Begin Patch
+                *** Add File: file.txt
+                +ok
+                *** Workdir: late
+                *** End Patch
+                """));
   }
 
   @Test
@@ -325,6 +507,95 @@ class ApplyPatchAndLspToolsTest {
   }
 
   @Test
+  void applyPatchRejectsStaleMoveDestinationAfterPreflight() throws Exception {
+    Path source = environmentRoot.resolve("source.txt");
+    Path destination = environmentRoot.resolve("destination.txt");
+    Files.writeString(source, "source\n");
+    Files.writeString(destination, "destination\n");
+    Path marker = pathWithDifferentStripe("stale-marker", destination);
+    ApplyPatchTool tool = new ApplyPatchTool(config());
+    var destinationLock = FileMutations.lock(destination);
+    RecordingListener listener;
+    try {
+      listener =
+          invokeAsync(
+              tool,
+              patchArgs(
+                  """
+                  *** Begin Patch
+                  *** Add File: %s
+                  +committed-before-move
+                  *** Update File: source.txt
+                  *** Move to: destination.txt
+                  *** End Patch
+                  """
+                      .formatted(marker.getFileName())));
+      assertTrue(waitForExists(marker));
+      Files.writeString(destination, "racer\n");
+    } finally {
+      destinationLock.unlock();
+    }
+
+    assertTrue(listener.await());
+    assertTrue(listener.result.error());
+    assertTrue(text(listener.result).contains("destination.txt changed after preflight"));
+    assertEquals("source\n", Files.readString(source));
+    assertEquals("racer\n", Files.readString(destination));
+    assertEquals("committed-before-move\n", Files.readString(marker));
+  }
+
+  @Test
+  void oppositeMovesAcquireSourceAndDestinationLocksWithoutDeadlock() throws Exception {
+    Path sourceA = environmentRoot.resolve("a.txt");
+    Path sourceB = environmentRoot.resolve("b.txt");
+    Files.writeString(sourceA, "a\n");
+    Files.writeString(sourceB, "b\n");
+    Path markerA = pathWithDifferentStripe("move-marker-a", sourceA, sourceB);
+    Path markerB = pathWithDifferentStripe("move-marker-b", sourceA, sourceB, markerA);
+    ApplyPatchTool tool = new ApplyPatchTool(config());
+    var heldLocks = FileMutations.lockAll(sourceA, sourceB);
+    RecordingListener first;
+    RecordingListener second;
+    try {
+      first =
+          invokeAsync(
+              tool,
+              patchArgs(
+                  """
+                  *** Begin Patch
+                  *** Add File: %s
+                  +first-preflight-complete
+                  *** Update File: a.txt
+                  *** Move to: b.txt
+                  *** End Patch
+                  """
+                      .formatted(markerA.getFileName())));
+      second =
+          invokeAsync(
+              tool,
+              patchArgs(
+                  """
+                  *** Begin Patch
+                  *** Add File: %s
+                  +second-preflight-complete
+                  *** Update File: b.txt
+                  *** Move to: a.txt
+                  *** End Patch
+                  """
+                      .formatted(markerB.getFileName())));
+      assertTrue(waitForExists(markerA));
+      assertTrue(waitForExists(markerB));
+    } finally {
+      FileMutations.unlockAll(heldLocks);
+    }
+
+    assertTrue(first.await());
+    assertTrue(second.await());
+    assertTrue(first.result.error() ^ second.result.error());
+    assertEquals(1, (Files.exists(sourceA) ? 1 : 0) + (Files.exists(sourceB) ? 1 : 0));
+  }
+
+  @Test
   void parserExposesDuplicateAndEmptyUpdateErrors() {
     assertThrows(
         IllegalArgumentException.class,
@@ -368,7 +639,29 @@ class ApplyPatchAndLspToolsTest {
         .toString();
   }
 
-  private ToolResult invoke(Tool tool, String arguments) throws Exception {
+  private Path pathWithDifferentStripe(String prefix, Path... reserved) {
+    for (int index = 0; index < 1000; index++) {
+      Path candidate = environmentRoot.resolve(prefix + "-" + index + ".txt");
+      boolean conflicts =
+          Arrays.stream(reserved)
+              .anyMatch(
+                  path -> FileMutations.stripeIndex(path) == FileMutations.stripeIndex(candidate));
+      if (!conflicts) {
+        return candidate;
+      }
+    }
+    throw new AssertionError("could not find an independent mutation stripe");
+  }
+
+  private boolean waitForExists(Path path) throws InterruptedException {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (!Files.exists(path) && System.nanoTime() < deadline) {
+      Thread.sleep(10);
+    }
+    return Files.exists(path);
+  }
+
+  private RecordingListener invokeAsync(Tool tool, String arguments) throws Exception {
     RecordingListener listener = new RecordingListener();
     tool.execute(
         new ToolExecutionRequest(
@@ -376,6 +669,11 @@ class ApplyPatchAndLspToolsTest {
             new ToolCall("call", tool.descriptor().name(), arguments),
             Duration.ZERO),
         listener);
+    return listener;
+  }
+
+  private ToolResult invoke(Tool tool, String arguments) throws Exception {
+    RecordingListener listener = invokeAsync(tool, arguments);
     assertTrue(listener.await());
     return listener.result;
   }

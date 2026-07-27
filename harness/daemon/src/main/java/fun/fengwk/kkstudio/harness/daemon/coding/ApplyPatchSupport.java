@@ -19,7 +19,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * Independent OpenCode-style {@code *** Begin Patch} parser and preflight/commit engine.
  *
  * <p>Protocol surface is aligned with pi-base/OpenCode docs; matching is exact-context only and
- * Move is rejected before any mutation.
+ * every mutation is planned before the first commit.
  */
 final class ApplyPatchSupport {
 
@@ -68,7 +68,7 @@ final class ApplyPatchSupport {
     }
   }
 
-  record ParsedPatch(List<FileOp> files) {}
+  record ParsedPatch(String workdir, List<FileOp> files) {}
 
   record FileResult(Operation operation, String path, Path absolutePath) {}
 
@@ -87,6 +87,11 @@ final class ApplyPatchSupport {
     List<FileOp> files = new ArrayList<>();
     Set<String> seenPaths = new HashSet<>();
     int index = 1;
+    String workdir = null;
+    if (index < lines.size() && lines.get(index).trim().startsWith("*** Workdir:")) {
+      workdir = requiredPath(lines.get(index).trim(), "*** Workdir:");
+      index++;
+    }
     boolean foundEnd = false;
 
     while (index < lines.size()) {
@@ -97,6 +102,10 @@ final class ApplyPatchSupport {
         break;
       }
       String directive = line.trim();
+      if (directive.startsWith("*** Workdir:")) {
+        throw new IllegalArgumentException(
+            "*** Workdir: is only allowed immediately after *** Begin Patch.");
+      }
       if (directive.startsWith("*** Add File:")) {
         String path = requiredPath(directive, "*** Add File:");
         assertUnique(path, seenPaths);
@@ -211,7 +220,7 @@ final class ApplyPatchSupport {
     if (files.isEmpty()) {
       throw new IllegalArgumentException("Patch must contain at least one file operation.");
     }
-    return new ParsedPatch(List.copyOf(files));
+    return new ParsedPatch(workdir, List.copyOf(files));
   }
 
   static ExecutionResult execute(
@@ -220,12 +229,6 @@ final class ApplyPatchSupport {
     Objects.requireNonNull(patch, "patch");
     Objects.requireNonNull(boundary, "boundary");
     Objects.requireNonNull(workdir, "workdir");
-    for (FileOp file : patch.files()) {
-      if (file instanceof UpdateFile update && update.moveTo() != null) {
-        throw new IllegalArgumentException(
-            "Move operations are not supported: " + update.path() + " -> " + update.moveTo() + ".");
-      }
-    }
 
     List<MutationPlan> plans = preflightAll(patch, boundary, workdir, cancelCheck);
     List<FileResult> results = new ArrayList<>();
@@ -287,7 +290,13 @@ final class ApplyPatchSupport {
   }
 
   private record UpdatePlan(
-      String path, Path absolutePath, byte[] expectedBytes, byte[] outputBytes)
+      String path,
+      Path absolutePath,
+      byte[] expectedBytes,
+      byte[] outputBytes,
+      String moveTo,
+      Path moveToAbsolutePath,
+      byte[] expectedMoveToBytes)
       implements MutationPlan {
     @Override
     public Operation operation() {
@@ -307,6 +316,7 @@ final class ApplyPatchSupport {
       ParsedPatch patch, EnvironmentPathBoundary boundary, Path workdir, Runnable cancelCheck)
       throws Exception {
     Map<String, String> seenAbsolute = new LinkedHashMap<>();
+    Map<String, String> outputPaths = new LinkedHashMap<>();
     List<ResolvedFile> resolved = new ArrayList<>();
     for (FileOp file : patch.files()) {
       cancelCheck.run();
@@ -314,21 +324,26 @@ final class ApplyPatchSupport {
           file.operation() == Operation.ADD
               ? boundary.writable(file.path(), workdir)
               : boundary.existing(file.path(), workdir);
-      String key = absoluteKey(absolute);
-      String previous = seenAbsolute.put(key, file.path());
-      if (previous != null) {
-        throw new IllegalArgumentException(
-            "Duplicate resolved patch path: " + previous + " and " + file.path() + ".");
+      rememberResolved(seenAbsolute, absolute, file.path());
+      Path moveToAbsolute = null;
+      if (file instanceof UpdateFile update && update.moveTo() != null) {
+        moveToAbsolute = boundary.writable(update.moveTo(), workdir);
+        rememberResolved(seenAbsolute, moveToAbsolute, update.moveTo());
+        outputPaths.put(absoluteKey(moveToAbsolute), update.moveTo());
+      } else if (file instanceof AddFile add) {
+        outputPaths.put(absoluteKey(absolute), add.path());
       }
-      resolved.add(new ResolvedFile(file, absolute));
+      resolved.add(new ResolvedFile(file, absolute, moveToAbsolute));
     }
+    assertNoHierarchicalOutputConflicts(outputPaths);
 
     List<MutationPlan> plans = new ArrayList<>();
     List<String> errors = new ArrayList<>();
     for (ResolvedFile item : resolved) {
       cancelCheck.run();
       try {
-        plans.add(preflight(item.file(), item.absolutePath(), cancelCheck));
+        plans.add(
+            preflight(item.file(), item.absolutePath(), item.moveToAbsolutePath(), cancelCheck));
       } catch (Exception error) {
         if (isCancellation(error)) {
           throw new InterruptedException();
@@ -343,9 +358,44 @@ final class ApplyPatchSupport {
     return plans;
   }
 
-  private record ResolvedFile(FileOp file, Path absolutePath) {}
+  private record ResolvedFile(FileOp file, Path absolutePath, Path moveToAbsolutePath) {}
 
-  private static MutationPlan preflight(FileOp file, Path absolutePath, Runnable cancelCheck)
+  private static void rememberResolved(
+      Map<String, String> seenAbsolute, Path absolutePath, String path) {
+    String previous = seenAbsolute.put(absoluteKey(absolutePath), path);
+    if (previous != null) {
+      throw new IllegalArgumentException(
+          "Duplicate resolved patch path: " + previous + " and " + path + ".");
+    }
+  }
+
+  private static void assertNoHierarchicalOutputConflicts(Map<String, String> outputPaths) {
+    List<Map.Entry<String, String>> entries = new ArrayList<>(outputPaths.entrySet());
+    for (Map.Entry<String, String> entry : entries) {
+      for (Map.Entry<String, String> other : entries) {
+        if (entry == other || !isPathAncestor(entry.getKey(), other.getKey())) {
+          continue;
+        }
+        throw new IllegalArgumentException(
+            "Conflicting patch output paths: "
+                + entry.getValue()
+                + " cannot be an ancestor of "
+                + other.getValue()
+                + ".");
+      }
+    }
+  }
+
+  private static boolean isPathAncestor(String ancestor, String child) {
+    if (ancestor.equals(child) || !child.startsWith(ancestor)) {
+      return false;
+    }
+    int length = ancestor.length();
+    return child.length() > length && (child.charAt(length) == '/' || child.charAt(length) == '\\');
+  }
+
+  private static MutationPlan preflight(
+      FileOp file, Path absolutePath, Path moveToAbsolutePath, Runnable cancelCheck)
       throws Exception {
     cancelCheck.run();
     if (file instanceof AddFile add) {
@@ -373,13 +423,50 @@ final class ApplyPatchSupport {
       return new DeletePlan(delete.path(), absolutePath, expectedBytes);
     }
     UpdateFile update = (UpdateFile) file;
-    String after = applyUpdate(update.path(), decoded.text(), update.chunks());
-    byte[] outputBytes = TextFileCodec.encode(after, decoded.charset(), decoded.bomLength());
-    return new UpdatePlan(update.path(), absolutePath, expectedBytes, outputBytes);
+    String after =
+        update.chunks().isEmpty()
+            ? decoded.text()
+            : applyUpdate(update.path(), decoded.text(), update.chunks());
+    byte[] outputBytes =
+        update.chunks().isEmpty()
+            ? expectedBytes
+            : TextFileCodec.encode(after, decoded.charset(), decoded.bomLength());
+    byte[] expectedMoveToBytes = null;
+    if (update.moveTo() != null) {
+      if (moveToAbsolutePath == null) {
+        throw new IllegalArgumentException(update.path() + ": Move destination path is missing.");
+      }
+      if (absoluteKey(absolutePath).equals(absoluteKey(moveToAbsolutePath))) {
+        throw new IllegalArgumentException(
+            update.path() + ": Move destination must differ from the source path.");
+      }
+      Path parent = moveToAbsolutePath.getParent();
+      if (parent != null && Files.exists(parent) && !Files.isDirectory(parent)) {
+        throw new IllegalArgumentException("Parent path is not a directory: " + parent + ".");
+      }
+      if (Files.exists(moveToAbsolutePath)) {
+        if (!Files.isRegularFile(moveToAbsolutePath)) {
+          throw new IllegalArgumentException(
+              update.moveTo() + ": Move destination exists and is not a regular file.");
+        }
+        expectedMoveToBytes = Files.readAllBytes(moveToAbsolutePath);
+      }
+    }
+    return new UpdatePlan(
+        update.path(),
+        absolutePath,
+        expectedBytes,
+        outputBytes,
+        update.moveTo(),
+        moveToAbsolutePath,
+        expectedMoveToBytes);
   }
 
   private static void commit(MutationPlan plan, Runnable cancelCheck) throws Exception {
-    ReentrantLock lock = FileMutations.lock(plan.absolutePath());
+    List<ReentrantLock> locks =
+        plan instanceof UpdatePlan update && update.moveToAbsolutePath() != null
+            ? FileMutations.lockAll(plan.absolutePath(), update.moveToAbsolutePath())
+            : FileMutations.lockAll(plan.absolutePath());
     try {
       cancelCheck.run();
       if (plan instanceof AddPlan add) {
@@ -413,10 +500,54 @@ final class ApplyPatchSupport {
       if (plan instanceof DeletePlan delete) {
         Files.delete(delete.absolutePath());
       } else {
-        Files.write(((UpdatePlan) plan).absolutePath(), ((UpdatePlan) plan).outputBytes());
+        UpdatePlan update = (UpdatePlan) plan;
+        if (update.moveToAbsolutePath() == null) {
+          Files.write(update.absolutePath(), update.outputBytes());
+          return;
+        }
+        Path destination = update.moveToAbsolutePath();
+        byte[] currentDestination =
+            Files.exists(destination) ? Files.readAllBytes(destination) : null;
+        if (update.expectedMoveToBytes() == null) {
+          if (currentDestination != null) {
+            throw new IllegalStateException(
+                update.moveTo() + " changed after preflight: path now exists.");
+          }
+        } else if (currentDestination == null) {
+          throw new IllegalStateException(
+              update.moveTo() + " changed after preflight: file no longer exists.");
+        } else if (!Arrays.equals(currentDestination, update.expectedMoveToBytes())) {
+          throw new IllegalStateException(
+              update.moveTo() + " changed after preflight; refusing to overwrite stale contents.");
+        }
+        Path parent = destination.getParent();
+        if (parent != null) {
+          Files.createDirectories(parent);
+        }
+        if (update.expectedMoveToBytes() == null) {
+          Files.write(
+              destination,
+              update.outputBytes(),
+              StandardOpenOption.CREATE_NEW,
+              StandardOpenOption.WRITE);
+        } else {
+          Files.write(destination, update.outputBytes());
+        }
+        // Keep the source until the destination write has completed successfully.
+        try {
+          Files.delete(update.absolutePath());
+        } catch (Exception error) {
+          throw new IllegalStateException(
+              "Move destination "
+                  + update.moveTo()
+                  + " was written, but source "
+                  + update.path()
+                  + " could not be deleted; both paths may remain.",
+              error);
+        }
       }
     } finally {
-      lock.unlock();
+      FileMutations.unlockAll(locks);
     }
   }
 
