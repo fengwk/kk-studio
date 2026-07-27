@@ -11,10 +11,7 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
-/**
- * Adapts {@link EnvironmentSkillLoader} for platform tools without creating a Spring cycle through
- * {@code HarnessExtensionHost}.
- */
+/** Adapts {@link EnvironmentSkillLoader} for platform tools. */
 @Component
 public final class EnvironmentSkillBodyLoader implements SkillBodyLoader {
   private final EnvironmentSkillLoader environmentSkillLoader;

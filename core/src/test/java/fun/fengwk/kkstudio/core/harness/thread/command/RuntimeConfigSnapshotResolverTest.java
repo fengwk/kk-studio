@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.harness.thread.command;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -23,18 +24,20 @@ import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
-import fun.fengwk.kkstudio.harness.runtime.extension.ProviderFactory;
-import fun.fengwk.kkstudio.harness.runtime.extension.ToolFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderType;
 
@@ -52,7 +55,8 @@ class RuntimeConfigSnapshotResolverTest {
   private AgentModelRepository models;
   private AgentProviderRepository providers;
   private AgentModelRuntimeConfigParser parser;
-  private HarnessExtensionHost extensions;
+  private ProviderFactories providerFactories;
+  private ToolFactories toolFactories;
   private LiveEnvironmentRegistry environments;
   private ProviderFactory providerFactory;
   private RuntimeConfigSnapshotResolver resolver;
@@ -64,15 +68,52 @@ class RuntimeConfigSnapshotResolverTest {
     models = mock(AgentModelRepository.class);
     providers = mock(AgentProviderRepository.class);
     parser = mock(AgentModelRuntimeConfigParser.class);
-    extensions = mock(HarnessExtensionHost.class);
     environments = mock(LiveEnvironmentRegistry.class);
     providerFactory = mock(ProviderFactory.class);
-    resolver =
-        new RuntimeConfigSnapshotResolver(
-            definitions, configs, models, providers, parser, extensions, environments);
-    when(extensions.providerFactory(ProviderType.OPENAI)).thenReturn(Optional.of(providerFactory));
+    when(providerFactory.providerType()).thenReturn(ProviderType.OPENAI);
     when(providerFactory.promptCacheCapability())
         .thenReturn(PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
+    providerFactories = new ProviderFactories(List.of(providerFactory));
+    toolFactories = new ToolFactories(List.of());
+    resolver =
+        new RuntimeConfigSnapshotResolver(
+            definitions,
+            configs,
+            models,
+            providers,
+            parser,
+            providerFactories,
+            toolFactories,
+            environments);
+  }
+
+  private void withTools(ToolDescriptor... descriptors) {
+    List<ToolDescriptor> list = List.of(descriptors);
+    this.toolFactories = new ToolFactories(list.stream().map(this::staticFactory).toList());
+    this.resolver =
+        new RuntimeConfigSnapshotResolver(
+            definitions,
+            configs,
+            models,
+            providers,
+            parser,
+            providerFactories,
+            this.toolFactories,
+            environments);
+  }
+
+  private ToolFactory staticFactory(ToolDescriptor descriptor) {
+    return new ToolFactory() {
+      @Override
+      public ToolDescriptor descriptor() {
+        return descriptor;
+      }
+
+      @Override
+      public Tool create() {
+        throw new UnsupportedOperationException();
+      }
+    };
   }
 
   @Test
@@ -86,11 +127,7 @@ class RuntimeConfigSnapshotResolverTest {
     ToolDescriptor shell = tool("shell", ToolExecutionLocation.ENVIRONMENT);
     ToolDescriptor createGoal = tool("create_goal", ToolExecutionLocation.PLATFORM);
     ToolDescriptor loadSkill = tool("load_skill", ToolExecutionLocation.PLATFORM);
-    ToolFactory readFactory = factory(read);
-    ToolFactory createGoalFactory = factory(createGoal);
-    ToolFactory loadSkillFactory = factory(loadSkill);
-    when(extensions.toolFactories())
-        .thenReturn(List.of(readFactory, createGoalFactory, loadSkillFactory));
+    withTools(read, createGoal, loadSkill);
     LiveEnvironment environment = mock(LiveEnvironment.class);
     when(environment.isReady()).thenReturn(true);
     when(environment.environmentName()).thenReturn("dev");
@@ -116,8 +153,7 @@ class RuntimeConfigSnapshotResolverTest {
     when(definitions.getById(1)).thenReturn(definition);
     when(configs.decode("definition-config")).thenReturn(config(null, List.of("read"), List.of()));
     ToolDescriptor read = tool("read", ToolExecutionLocation.PLATFORM);
-    ToolFactory readFactory = factory(read);
-    when(extensions.toolFactories()).thenReturn(List.of(readFactory));
+    withTools(read);
     model(2, true, "quality");
     RuntimeConfigSnapshot current = resolver.resolveAgent(1, false);
     model(3, true, "fast");
@@ -143,7 +179,7 @@ class RuntimeConfigSnapshotResolverTest {
 
     when(configs.decode("definition-config"))
         .thenReturn(config(null, List.of("missing"), List.of()));
-    when(extensions.toolFactories()).thenReturn(List.of());
+    withTools(); // no tools available
     assertThrows(IllegalArgumentException.class, () -> resolver.resolveAgent(1, false));
 
     when(configs.decode("definition-config"))
@@ -169,7 +205,7 @@ class RuntimeConfigSnapshotResolverTest {
 
     when(definitions.getById(1)).thenReturn(definition(1, 2, "missing"));
     when(configs.decode("definition-config")).thenReturn(config(null, List.of(), List.of()));
-    when(extensions.toolFactories()).thenReturn(List.of());
+    withTools();
     model(2, true, "quality");
     assertThrows(IllegalArgumentException.class, () -> resolver.resolveAgent(1, false));
 
@@ -188,11 +224,31 @@ class RuntimeConfigSnapshotResolverTest {
         IllegalArgumentException.class, () -> resolver.replaceModel(current, 9, "quality"));
 
     model(10, true, "quality");
-    when(extensions.providerFactory(ProviderType.OPENAI)).thenReturn(Optional.empty());
+    providerFactories = new ProviderFactories(List.of()); // no OPENAI provider
+    resolver =
+        new RuntimeConfigSnapshotResolver(
+            definitions,
+            configs,
+            models,
+            providers,
+            parser,
+            providerFactories,
+            toolFactories,
+            environments);
     assertThrows(
         IllegalArgumentException.class, () -> resolver.replaceModel(current, 10, "quality"));
 
-    when(extensions.providerFactory(ProviderType.OPENAI)).thenReturn(Optional.of(providerFactory));
+    providerFactories = new ProviderFactories(List.of(providerFactory));
+    resolver =
+        new RuntimeConfigSnapshotResolver(
+            definitions,
+            configs,
+            models,
+            providers,
+            parser,
+            providerFactories,
+            toolFactories,
+            environments);
     model(10, true, "quality");
     AgentProvider invalidProvider = new AgentProvider();
     invalidProvider.setId(7L);
@@ -200,6 +256,22 @@ class RuntimeConfigSnapshotResolverTest {
     assertThrows(
         IllegalArgumentException.class, () -> resolver.replaceModel(current, 10, "quality"));
     verify(providerFactory, never()).create(anyString(), anyString());
+  }
+
+  @Test
+  void rejectsDuplicateRegisteredPlatformToolKey() {
+    // Two ToolFactory beans claiming the same (name, version) is rejected at the ToolFactories
+    // boundary — the resolver never sees ambiguous tool descriptors.
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> {
+              ToolDescriptor descriptor = tool("dup", ToolExecutionLocation.PLATFORM);
+              List<ToolFactory> factories =
+                  List.of(staticFactory(descriptor), staticFactory(descriptor));
+              new ToolFactories(factories);
+            });
+    assertTrue(error.getMessage().contains("duplicate ToolFactory"));
   }
 
   private void model(long id, boolean tools, String variant) {
@@ -260,12 +332,6 @@ class RuntimeConfigSnapshotResolverTest {
     return config;
   }
 
-  private static ToolFactory factory(ToolDescriptor descriptor) {
-    ToolFactory factory = mock(ToolFactory.class);
-    when(factory.descriptor()).thenReturn(descriptor);
-    return factory;
-  }
-
   private static ToolDescriptor tool(String name, ToolExecutionLocation location) {
     ToolDescriptor descriptor = mock(ToolDescriptor.class);
     when(descriptor.name()).thenReturn(name);
@@ -278,7 +344,6 @@ class RuntimeConfigSnapshotResolverTest {
     when(definitions.getById(1)).thenReturn(definition);
     when(configs.decode("definition-config")).thenReturn(config(null, List.of(), List.of()));
     model(2, true, "quality");
-    when(extensions.toolFactories()).thenReturn(List.of());
     return resolver.resolveAgent(1, false);
   }
 }

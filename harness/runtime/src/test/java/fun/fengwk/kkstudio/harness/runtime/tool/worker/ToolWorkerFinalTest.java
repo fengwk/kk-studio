@@ -14,9 +14,6 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.ToolCompleted;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
@@ -202,7 +199,7 @@ class ToolWorkerFinalTest {
   }
 
   @Test
-  void defaultConstructorRunsWithoutLifecycleObservers() {
+  void constructorProcessesTerminalCompletion() {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
     ScheduledExecutorService scheduler = new ScheduledThreadPoolExecutor(2);
     schedulers.add(scheduler);
@@ -244,7 +241,6 @@ class ToolWorkerFinalTest {
     assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.terminalStatus);
     assertEquals("done", text(fixture.transactions.result));
     assertEquals(List.of(new ExecutionTarget(ExecutionTargetKind.THREAD, 2L)), fixture.activations);
-    assertCompletion(fixture, InvocationStatus.SUCCEEDED, null);
     assertFalse(fixture.tool.handle.cancelled);
   }
 
@@ -319,7 +315,6 @@ class ToolWorkerFinalTest {
     fixture.tool.listener.onComplete(result("done"));
 
     assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.terminalStatus);
-    assertCompletion(fixture, InvocationStatus.SUCCEEDED, null);
   }
 
   @Test
@@ -336,8 +331,6 @@ class ToolWorkerFinalTest {
         "Tool ownership was lost; execution result is unknown.",
         fixture.transactions.error.message());
     assertEquals(List.of(new ExecutionTarget(ExecutionTargetKind.THREAD, 2L)), fixture.activations);
-    assertCompletion(
-        fixture, InvocationStatus.UNKNOWN, "Tool ownership was lost; execution result is unknown.");
   }
 
   @Test
@@ -373,7 +366,6 @@ class ToolWorkerFinalTest {
     assertNull(fixture.transactions.terminalStatus);
     assertEquals(
         List.of(new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, 1L)), fixture.activations);
-    assertTrue(fixture.observations.isEmpty());
     assertTrue(fixture.tool.handle.cancelled);
   }
 
@@ -404,7 +396,6 @@ class ToolWorkerFinalTest {
 
     assertTrue(fixture.tool.handle.cancelled);
     assertTrue(fixture.activations.isEmpty());
-    assertTrue(fixture.observations.isEmpty());
     assertFalse(fixture.worker.hasActiveExecution());
   }
 
@@ -713,24 +704,12 @@ class ToolWorkerFinalTest {
         null);
   }
 
-  private static void assertCompletion(
-      Fixture fixture, InvocationStatus status, String errorMessage) {
-    assertEquals(1, fixture.observations.size());
-    ToolCompleted completed = (ToolCompleted) fixture.observations.get(0);
-    assertEquals(1L, completed.invocationId());
-    assertEquals(2L, completed.threadId());
-    assertEquals(status, completed.status());
-    assertEquals(errorMessage, completed.error());
-    assertEquals(NOW, completed.occurredAt());
-  }
-
   private final class Fixture {
     private final RecordingTransactions transactions;
     private final RecordingTool tool;
     private final MemoryArtifacts artifacts = new MemoryArtifacts();
     private final List<RealtimeEvent> realtimeEvents = new ArrayList<>();
     private final List<ExecutionTarget> activations = new ArrayList<>();
-    private final List<HarnessLifecycleObservation> observations = new ArrayList<>();
 
     private ToolInterceptorChain interceptorChain = new ToolInterceptorChain(List.of(), List.of());
     private Optional<RecordingTool> registryTool;
@@ -784,7 +763,6 @@ class ToolWorkerFinalTest {
               config,
               Clock.fixed(NOW, ZoneOffset.UTC),
               scheduler,
-              new HarnessLifecycleObservers(List.of(observations::add)),
               () -> "worker-token");
     }
   }

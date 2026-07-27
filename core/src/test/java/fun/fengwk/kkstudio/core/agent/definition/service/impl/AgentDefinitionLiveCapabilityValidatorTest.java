@@ -8,11 +8,9 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonConnection;
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtension;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionRegistry;
-import fun.fengwk.kkstudio.harness.runtime.extension.ToolFactory;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
@@ -121,6 +119,21 @@ class AgentDefinitionLiveCapabilityValidatorTest {
     }
   }
 
+  @Test
+  void rejectsDuplicatePlatformToolRegistration() {
+    // Two distinct factories claiming the same (name, version) is rejected at the ToolFactories
+    // construction boundary — the validator never sees ambiguous tool names.
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new ToolFactories(
+                    List.of(
+                        ToolFactory.singleton(cloudTool("dup", "1")),
+                        ToolFactory.singleton(cloudTool("dup", "1")))));
+    assertTrue(error.getMessage().contains("duplicate ToolFactory"));
+  }
+
   private static Tool cloudTool(String name, String version) {
     return tool(name, version, ToolExecutionLocation.PLATFORM);
   }
@@ -167,29 +180,12 @@ class AgentDefinitionLiveCapabilityValidatorTest {
   private static final class Fixture implements AutoCloseable {
     private final LiveEnvironmentRegistry environments =
         new LiveEnvironmentRegistry(new DaemonToolCapabilitiesCodec());
-    private final HarnessExtensionHost host;
+    private final ToolFactories toolFactories;
     private final AgentDefinitionLiveCapabilityValidator validator;
 
     private Fixture(List<Tool> tools) {
-      HarnessExtension extension =
-          new HarnessExtension() {
-            @Override
-            public String id() {
-              return "validator.test";
-            }
-
-            @Override
-            public int priority() {
-              return 0;
-            }
-
-            @Override
-            public void contribute(HarnessExtensionRegistry registry) {
-              tools.forEach(tool -> registry.addToolFactory(ToolFactory.singleton(tool)));
-            }
-          };
-      host = new HarnessExtensionHost(List.of(extension));
-      validator = new AgentDefinitionLiveCapabilityValidator(environments, host);
+      this.toolFactories = new ToolFactories(tools.stream().map(ToolFactory::singleton).toList());
+      this.validator = new AgentDefinitionLiveCapabilityValidator(environments, toolFactories);
     }
 
     private void readyEnvironment(
@@ -219,8 +215,6 @@ class AgentDefinitionLiveCapabilityValidatorTest {
     }
 
     @Override
-    public void close() {
-      host.close();
-    }
+    public void close() {}
   }
 }

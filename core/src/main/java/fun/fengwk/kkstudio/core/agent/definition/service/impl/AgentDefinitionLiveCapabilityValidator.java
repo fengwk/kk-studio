@@ -4,7 +4,7 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
@@ -19,18 +19,18 @@ import java.util.Set;
 
 /**
  * Validates Agent live Environment / short-name tool / skill selections against the current live
- * registry and registered platform tools from HarnessExtensionHost.
+ * registry and registered platform tools from {@link ToolFactories}.
  */
 @Component
 final class AgentDefinitionLiveCapabilityValidator {
 
   private final LiveEnvironmentRegistry environmentRegistry;
-  private final HarnessExtensionHost extensionHost;
+  private final ToolFactories toolFactories;
 
   AgentDefinitionLiveCapabilityValidator(
-      LiveEnvironmentRegistry environmentRegistry, HarnessExtensionHost extensionHost) {
+      LiveEnvironmentRegistry environmentRegistry, ToolFactories toolFactories) {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
-    this.extensionHost = Objects.requireNonNull(extensionHost, "extensionHost");
+    this.toolFactories = Objects.requireNonNull(toolFactories, "toolFactories");
   }
 
   void validate(AgentDefinitionConfigDTO config) {
@@ -96,20 +96,15 @@ final class AgentDefinitionLiveCapabilityValidator {
   }
 
   private Map<String, ToolDescriptor> platformToolsByName() {
-    Map<String, List<ToolDescriptor>> byName = new LinkedHashMap<>();
-    extensionHost
-        .toolFactories()
-        .forEach(
-            factory -> {
-              ToolDescriptor descriptor = factory.descriptor();
-              byName
-                  .computeIfAbsent(descriptor.name(), ignored -> new ArrayList<>())
-                  .add(descriptor);
-            });
     Map<String, ToolDescriptor> unique = new LinkedHashMap<>();
-    for (Map.Entry<String, List<ToolDescriptor>> entry : byName.entrySet()) {
-      if (entry.getValue().size() == 1) {
-        unique.put(entry.getKey(), entry.getValue().get(0));
+    Map<String, Integer> counts = new LinkedHashMap<>();
+    for (ToolDescriptor descriptor : toolFactories.descriptors()) {
+      counts.merge(descriptor.name(), 1, Integer::sum);
+    }
+    for (ToolDescriptor descriptor : toolFactories.descriptors()) {
+      Integer count = counts.get(descriptor.name());
+      if (count != null && count == 1) {
+        unique.putIfAbsent(descriptor.name(), descriptor);
       }
     }
     return unique;

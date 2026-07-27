@@ -19,10 +19,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.core.agent.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtension;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionRegistry;
-import fun.fengwk.kkstudio.harness.runtime.extension.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -37,6 +33,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
@@ -413,35 +411,17 @@ class DatabaseModelExecutionResolverTest {
   private static final class Fixture implements AutoCloseable {
 
     private final AgentProviderRepository providers = mock(AgentProviderRepository.class);
-    private final HarnessExtensionHost host;
     private final DatabaseProviderResolutionService resolution;
     private final ExecutorService executor;
     private final DatabaseModelExecutionResolver resolver;
 
     private Fixture(CapturingProviderFactory providerFactory) {
-      HarnessExtension extension =
-          new HarnessExtension() {
-            @Override
-            public String id() {
-              return "resolver.test";
-            }
-
-            @Override
-            public int priority() {
-              return 0;
-            }
-
-            @Override
-            public void contribute(HarnessExtensionRegistry registry) {
-              if (providerFactory != null) {
-                registry.addProviderFactory(providerFactory);
-              }
-            }
-          };
-      host = new HarnessExtensionHost(List.of(extension));
+      List<ProviderFactory> factories =
+          providerFactory == null ? List.of() : List.of(providerFactory);
+      ProviderFactories providerFactories = new ProviderFactories(factories);
       ObjectMapper objectMapper = new ObjectMapper();
       AgentProviderConfigurationCodec codec = new AgentProviderConfigurationCodec(objectMapper);
-      resolution = new DatabaseProviderResolutionService(providers, codec, host);
+      resolution = new DatabaseProviderResolutionService(providers, codec, providerFactories);
       executor = Executors.newSingleThreadExecutor();
       resolver = new DatabaseModelExecutionResolver(resolution, executor, Clock.systemUTC());
     }
@@ -452,7 +432,6 @@ class DatabaseModelExecutionResolverTest {
 
     @Override
     public void close() {
-      host.close();
       executor.shutdownNow();
     }
   }

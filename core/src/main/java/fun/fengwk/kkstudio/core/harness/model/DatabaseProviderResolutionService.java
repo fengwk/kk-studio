@@ -5,12 +5,12 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.core.agent.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
-import fun.fengwk.kkstudio.harness.runtime.extension.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.share.model.AgentProviderType;
@@ -18,8 +18,8 @@ import fun.fengwk.kkstudio.share.model.AgentProviderType;
 import java.util.Objects;
 
 /**
- * Default {@link ProviderResolutionService}: PostgreSQL-backed Provider row + Harness extension
- * adapter assembly.
+ * Default {@link ProviderResolutionService}: PostgreSQL-backed Provider row + Harness
+ * ProviderFactory assembly.
  *
  * <p>The service is the only place that resolves credential values from the stable Provider
  * reference. It freezes those values inside a short-lived adapter closure without exposing them
@@ -31,16 +31,16 @@ public class DatabaseProviderResolutionService implements ProviderResolutionServ
 
   private final AgentProviderRepository providerRepository;
   private final AgentProviderConfigurationCodec providerConfigurationCodec;
-  private final HarnessExtensionHost extensionHost;
+  private final ProviderFactories providerFactories;
 
   public DatabaseProviderResolutionService(
       AgentProviderRepository providerRepository,
       AgentProviderConfigurationCodec providerConfigurationCodec,
-      HarnessExtensionHost extensionHost) {
+      ProviderFactories providerFactories) {
     this.providerRepository = Objects.requireNonNull(providerRepository, "providerRepository");
     this.providerConfigurationCodec =
         Objects.requireNonNull(providerConfigurationCodec, "providerConfigurationCodec");
-    this.extensionHost = Objects.requireNonNull(extensionHost, "extensionHost");
+    this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
   }
 
   @Override
@@ -69,8 +69,8 @@ public class DatabaseProviderResolutionService implements ProviderResolutionServ
     }
 
     ProviderFactory providerFactory =
-        extensionHost
-            .providerFactory(frozenType)
+        providerFactories
+            .lookup(frozenType)
             .orElseThrow(
                 () ->
                     new IllegalArgumentException(

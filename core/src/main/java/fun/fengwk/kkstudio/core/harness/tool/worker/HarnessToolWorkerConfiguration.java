@@ -10,11 +10,10 @@ import org.springframework.context.annotation.Configuration;
 import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
 import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyResolver;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
@@ -45,10 +44,10 @@ public class HarnessToolWorkerConfiguration {
   }
 
   @Bean
-  @ConditionalOnBean(HarnessExtensionHost.class)
+  @ConditionalOnBean(ToolFactories.class)
   @ConditionalOnMissingBean
-  public ToolRegistry toolRegistry(HarnessExtensionHost host) {
-    return host::createTool;
+  public ToolRegistry toolRegistry(ToolFactories toolFactories) {
+    return toolFactories::find;
   }
 
   /**
@@ -77,8 +76,7 @@ public class HarnessToolWorkerConfiguration {
       ActivationNotifier activationNotifier,
       ToolWorkerConfig config,
       Clock clock,
-      @Qualifier("toolWorkerScheduler") ScheduledExecutorService toolWorkerScheduler,
-      HarnessLifecycleObservers lifecycleObservers) {
+      @Qualifier("toolWorkerScheduler") ScheduledExecutorService toolWorkerScheduler) {
     return new ToolWorker(
         transactions,
         registry,
@@ -91,7 +89,6 @@ public class HarnessToolWorkerConfiguration {
         config,
         clock,
         toolWorkerScheduler,
-        lifecycleObservers,
         () -> UUID.randomUUID().toString());
   }
 
