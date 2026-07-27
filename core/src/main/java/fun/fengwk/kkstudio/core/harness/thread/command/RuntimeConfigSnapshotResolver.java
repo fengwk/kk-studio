@@ -18,15 +18,15 @@ import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSource;
 import fun.fengwk.kkstudio.harness.runtime.configuration.SkillSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessExtensionHost;
-import fun.fengwk.kkstudio.harness.runtime.extension.ProviderFactory;
-import fun.fengwk.kkstudio.harness.runtime.extension.ToolFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderType;
@@ -43,9 +43,9 @@ import java.util.Set;
  * 仅用于命令提交时的 live resource -> immutable {@link RuntimeConfigSnapshot} 冻结器。
  *
  * <p>实现 runtime {@link RuntimeConfigSource}：可以读取 Definition、Model、Provider、ready Environment 和
- * extension descriptors，但严禁调用 {@link ProviderFactory#create(String, String)} 或任何 Provider
- * I/O。credential 不进入 descriptor；它只在后续 worker 依据 {@code providerResourceId} 短生命周期解析。纯 YOLO 替换由
- * runtime 编排侧的 {@link RuntimeConfigSnapshot#withYoloEnabled(boolean)} 完成。
+ * {@link ToolFactories} 暴露的 platform tool descriptors，但严禁调用 {@link ProviderFactory#create(String,
+ * String)} 或任何 Provider I/O。credential 不进入 descriptor；它只在后续 worker 依据 {@code providerResourceId}
+ * 短生命周期解析。纯 YOLO 替换由 runtime 编排侧的 {@link RuntimeConfigSnapshot#withYoloEnabled(boolean)} 完成。
  */
 @Component
 public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
@@ -55,7 +55,8 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
   private final AgentModelRepository modelRepository;
   private final AgentProviderRepository providerRepository;
   private final AgentModelRuntimeConfigParser modelConfigParser;
-  private final HarnessExtensionHost extensionHost;
+  private final ProviderFactories providerFactories;
+  private final ToolFactories toolFactories;
   private final LiveEnvironmentRegistry environmentRegistry;
 
   public RuntimeConfigSnapshotResolver(
@@ -64,7 +65,8 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
       AgentModelRepository modelRepository,
       AgentProviderRepository providerRepository,
       AgentModelRuntimeConfigParser modelConfigParser,
-      HarnessExtensionHost extensionHost,
+      ProviderFactories providerFactories,
+      ToolFactories toolFactories,
       LiveEnvironmentRegistry environmentRegistry) {
     this.definitionMapper = Objects.requireNonNull(definitionMapper, "definitionMapper");
     this.definitionConfigCodec =
@@ -72,7 +74,8 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
     this.modelRepository = Objects.requireNonNull(modelRepository, "modelRepository");
     this.providerRepository = Objects.requireNonNull(providerRepository, "providerRepository");
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
-    this.extensionHost = Objects.requireNonNull(extensionHost, "extensionHost");
+    this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
+    this.toolFactories = Objects.requireNonNull(toolFactories, "toolFactories");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
   }
 
@@ -133,8 +136,8 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
     }
     ProviderType providerType = providerType(provider.getProviderType());
     ProviderFactory factory =
-        extensionHost
-            .providerFactory(providerType)
+        providerFactories
+            .lookup(providerType)
             .orElseThrow(
                 () ->
                     new IllegalArgumentException(
@@ -231,8 +234,7 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
 
   private Map<String, ToolDescriptor> platformTools() {
     Map<String, ToolDescriptor> result = new HashMap<>();
-    for (ToolFactory factory : extensionHost.toolFactories()) {
-      ToolDescriptor descriptor = factory.descriptor();
+    for (ToolDescriptor descriptor : toolFactories.descriptors()) {
       ToolDescriptor prior = result.putIfAbsent(descriptor.name(), descriptor);
       if (prior != null) {
         throw new IllegalArgumentException(

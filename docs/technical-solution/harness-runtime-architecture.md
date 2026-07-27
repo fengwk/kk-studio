@@ -318,14 +318,12 @@ runnable = false
 6. Redis 可重复、乱序或丢失；每次 activation 从 PostgreSQL 重读事实。
 7. 外部副作用以 invocation id（及 attempt）为幂等键。
 
-## 11. 扩展点
+## 11. 能力装配
 
-当前实际贡献仅：
+当前直接装配的能力：
 
 - `BeforeToolCallInterceptor` / `AfterToolCallInterceptor`
-- `HarnessLifecycleObserver`
 - `ProviderFactory` / `ToolFactory`
-- disposer
 
 ## 12. 相关文档
 
@@ -333,6 +331,6 @@ runnable = false
 | --- | --- |
 | [harness-runtime-contracts.md](harness-runtime-contracts.md) | 类型、状态机、端口与事务契约 |
 | [harness-storage-runtime.md](harness-storage-runtime.md) | PostgreSQL / Redis / recovery |
-| [harness-extensions.md](harness-extensions.md) | 扩展注册表 |
+| [harness-capability-wiring.md](harness-capability-wiring.md) | 能力装配 |
 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Daemon 连接与远程 Tool |
 | [storage-models.md](storage-models.md) | 表结构摘要 |

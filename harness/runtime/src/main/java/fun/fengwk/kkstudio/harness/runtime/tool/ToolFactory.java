@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.runtime.extension;
+package fun.fengwk.kkstudio.harness.runtime.tool;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;

@@ -3,8 +3,6 @@ package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservation.ToolCompleted;
-import fun.fengwk.kkstudio.harness.runtime.extension.HarnessLifecycleObservers;
 import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
@@ -72,7 +70,6 @@ public final class ToolWorker {
   private final ToolWorkerConfig config;
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
-  private final HarnessLifecycleObservers lifecycleObservers;
   private final Supplier<String> workerTokenSupplier;
   private final ConcurrentHashMap<Long, Execution> executions = new ConcurrentHashMap<>();
   private final ConcurrentHashMap<String, Long> environmentActiveInvocations =
@@ -91,36 +88,6 @@ public final class ToolWorker {
       Clock clock,
       ScheduledExecutorService scheduler,
       Supplier<String> workerTokenSupplier) {
-    this(
-        transactions,
-        registry,
-        remoteTransport,
-        interceptorChain,
-        artifactStore,
-        retryPolicyResolver,
-        realtimeEventSink,
-        activationNotifier,
-        config,
-        clock,
-        scheduler,
-        new HarnessLifecycleObservers(List.of()),
-        workerTokenSupplier);
-  }
-
-  public ToolWorker(
-      ToolInvocationTransactions transactions,
-      ToolRegistry registry,
-      RemoteToolTransport remoteTransport,
-      ToolInterceptorChain interceptorChain,
-      ArtifactStore artifactStore,
-      InvocationRetryPolicyResolver retryPolicyResolver,
-      RealtimeEventSink realtimeEventSink,
-      ActivationNotifier activationNotifier,
-      ToolWorkerConfig config,
-      Clock clock,
-      ScheduledExecutorService scheduler,
-      HarnessLifecycleObservers lifecycleObservers,
-      Supplier<String> workerTokenSupplier) {
     this.transactions = Objects.requireNonNull(transactions, "transactions");
     this.registry = Objects.requireNonNull(registry, "registry");
     this.remoteTransport = Objects.requireNonNull(remoteTransport, "remoteTransport");
@@ -132,7 +99,6 @@ public final class ToolWorker {
     this.config = Objects.requireNonNull(config, "config");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
-    this.lifecycleObservers = Objects.requireNonNull(lifecycleObservers, "lifecycleObservers");
     this.workerTokenSupplier = Objects.requireNonNull(workerTokenSupplier, "workerTokenSupplier");
   }
 
@@ -429,7 +395,7 @@ public final class ToolWorker {
     if (outcome != ToolInvocationUpdateOutcome.APPLIED) {
       return false;
     }
-    publishTerminal(claimed, InvocationStatus.SUCCEEDED, null, now);
+    notifyThread(claimed);
     return true;
   }
 
@@ -465,7 +431,7 @@ public final class ToolWorker {
         != ToolInvocationUpdateOutcome.APPLIED) {
       return false;
     }
-    publishTerminal(claimed, InvocationStatus.FAILED, error.message(), now);
+    notifyThread(claimed);
     return true;
   }
 
@@ -475,7 +441,7 @@ public final class ToolWorker {
         != ToolInvocationUpdateOutcome.APPLIED) {
       return false;
     }
-    publishTerminal(claimed, InvocationStatus.CANCELLED, "Tool execution cancelled.", now);
+    notifyThread(claimed);
     return true;
   }
 
@@ -490,7 +456,7 @@ public final class ToolWorker {
         != ToolInvocationUpdateOutcome.APPLIED) {
       return false;
     }
-    publishTerminal(claimed, InvocationStatus.UNKNOWN, error.message(), now);
+    notifyThread(claimed);
     return true;
   }
 
@@ -522,19 +488,7 @@ public final class ToolWorker {
     }
   }
 
-  private void publishTerminal(
-      ClaimedToolInvocation claimed, InvocationStatus status, String errorMessage, Instant now) {
-    try {
-      lifecycleObservers.publish(
-          new ToolCompleted(
-              claimed.invocation().id(),
-              claimed.invocation().threadId(),
-              status,
-              errorMessage,
-              now));
-    } catch (RuntimeException error) {
-      LOGGER.log(System.Logger.Level.WARNING, "Tool lifecycle observation failed", error);
-    }
+  private void notifyThread(ClaimedToolInvocation claimed) {
     notifyTarget(new ExecutionTarget(ExecutionTargetKind.THREAD, claimed.invocation().threadId()));
   }
 

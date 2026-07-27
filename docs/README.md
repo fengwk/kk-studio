@@ -16,7 +16,7 @@ flowchart TD
     B --> E[backend-implementation-design.md]
     B --> F[storage-models.md]
     B --> G[frontend-implementation-design.md]
-    B --> H[harness-extensions.md]
+    B --> H[harness-capability-wiring.md]
     B --> N[prompt-cache-usage-cost.md]
     B --> O[prompt-to-artifact.md]
     B --> P[s3-presign.md]

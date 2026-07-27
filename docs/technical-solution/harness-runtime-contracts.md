@@ -21,7 +21,7 @@ harness-runtime
     ├── model/                                     # provider/model 契约、codec、ModelInvocation
     │   ├── provider/ cache/ codec/
     │   └── plan/ worker/
-    ├── realtime/ retry/ port/ extension/ configuration/
+    ├── realtime/ retry/ port/ configuration/
     └── permission/ skill/ goal/ usage/ cache/
 
 harness-daemon
@@ -345,7 +345,7 @@ public interface RuntimeConfigSource {
 }
 ```
 
-这是 command-time live resource 冻结 SPI。Core 实现可以读取 Definition、Model、Provider、ready Environment 与 extension descriptors，但不得发起 Provider I/O。纯 `SET_YOLO` 变换由 `RuntimeConfigSnapshot.withYoloEnabled` 完成。
+这是 command-time live resource 冻结 SPI。Core 实现可以读取 Definition、Model、Provider、ready Environment 与 `ToolFactories` 暴露的 platform Tool descriptors，但不得发起 Provider I/O。纯 `SET_YOLO` 变换由 `RuntimeConfigSnapshot.withYoloEnabled` 完成。
 
 ## 5. Transaction ports
 
@@ -489,17 +489,15 @@ Web 只消费 Core application API 与 share DTO；不得直接导入 Harness do
 1. REST snapshot
 2. SSE `realtime`（Redis stream-id cursor）
 
-## 9. 扩展贡献
+## 9. 能力装配
 
-仅允许：
+Spring 直接收集：
 
 | 贡献 | 用途 |
 | --- | --- |
 | `BeforeToolCallInterceptor` / `AfterToolCallInterceptor` | Tool 前后修改链（含 PermissionBoundary） |
-| `HarnessLifecycleObserver` | 提交后观测 |
 | `ProviderFactory` | ProviderType -> adapter |
 | `ToolFactory` | name@version -> Tool |
-| disposer | Host 关闭清理 |
 
 ## 10. 包级注释与公共类型
 

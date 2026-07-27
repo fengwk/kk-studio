@@ -43,7 +43,7 @@ flowchart LR
 
 ### Session Finalizer
 
-`PromptCacheRequestFinalizer` 是 `ModelInvocationPlanner` 冻结 `ProviderRequest` 时唯一可信的 cache control 生成点。它始终覆盖请求中已有的 control，且不经任何 extension hook：
+`PromptCacheRequestFinalizer` 是 `ModelInvocationPlanner` 冻结 `ProviderRequest` 时唯一可信的 cache control 生成点。它始终覆盖请求中已有的 control，并直接写入冻结请求：
 
 | Policy 状态 | 最终 control |
 | --- | --- |
@@ -398,7 +398,7 @@ runtime 仅从 `config.abilities` 派生 `tools` / `reasoning`，并直接投影
 
 ### Provider Factory 调用
 
-只通过 `HarnessExtensionHost.providerFactory(ProviderType)` 拉取可信工厂：
+只通过 `ProviderFactories.lookup(ProviderType)` 拉取可信工厂（[`ProviderFactories`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderFactories.java) 在 [`ModelExecutionConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/model/ModelExecutionConfiguration.java) 由 `ObjectProvider<ProviderFactory>` 装配）：
 
 - `ProviderFactory.create(credential, configJson)` 构造 `ProviderAdapter`
 - 工厂暴露的 `PromptCacheCapability` 决定 `PromptCachePolicy`；cache 事实由 `ProviderResponse` usage 归一化读取
@@ -423,7 +423,7 @@ Agent 配置中的 `tools` 仅为短名。platform-first：先匹配已注册 PL
 | --- | --- | --- |
 | Cache domain | capability、policy、最终 control | [`PromptCacheCapability.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/cache/PromptCacheCapability.java)、[`PromptCachePolicy.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/cache/PromptCachePolicy.java)、[`ProviderCacheControl.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/cache/ProviderCacheControl.java) |
 | Request freeze | Planner 冻结 request 与 finalizer | [`ModelInvocationPlanner.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/plan/ModelInvocationPlanner.java)、[`PromptCacheRequestFinalizer.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheRequestFinalizer.java)、[`PromptCacheAffinityKeyFactory.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheAffinityKeyFactory.java) |
-| Provider capability | Core factory 注册 | [`CoreHarnessExtension.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/extension/CoreHarnessExtension.java)、[`ProviderFactory.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/extension/ProviderFactory.java) |
+| Provider capability | Core factory 注册 | [`ModelExecutionConfiguration.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/model/ModelExecutionConfiguration.java)、[`ProviderFactory.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderFactory.java) |
 | Provider mapping | control 校验与 OpenAI、Anthropic、Google Adapter | [`CacheRequestValidator.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/model/provider/CacheRequestValidator.java)、[`OpenAiProviderAdapter.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/model/provider/OpenAiProviderAdapter.java)、[`OpenAiResponsesProviderAdapter.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/model/provider/OpenAiResponsesProviderAdapter.java)、[`AnthropicProviderAdapter.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/model/provider/AnthropicProviderAdapter.java)、[`GoogleProviderAdapter.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/model/provider/GoogleProviderAdapter.java) |
 | Usage normalization | 七类 usage、metadata、raw usage | [`ProviderUsageNormalizer.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/model/provider/ProviderUsageNormalizer.java)、[`ProviderResponse.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderResponse.java) |
 | Pricing/cost | 请求价格与成本快照 | [`ModelUsage.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/ModelUsage.java)、[`ModelPricing.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/ModelPricing.java)、[`ModelCost.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/ModelCost.java) |
@@ -440,7 +440,7 @@ Agent 配置中的 `tools` 仅为短名。platform-first：先匹配已注册 PL
 | Affinity key 格式、输入范围、动态历史排除、NUL 与字段边界 | [`PromptCacheAffinityKeyFactoryTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheAffinityKeyFactoryTest.java) |
 | Finalizer 覆盖 mode/retention、SYSTEM/TOOLS 交集 | [`PromptCacheRequestFinalizerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheRequestFinalizerTest.java) |
 | Planner 冻结 request 与 finalizer 行为 | [`ModelInvocationPlannerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/model/plan/ModelInvocationPlannerTest.java) |
-| Provider capability 与 HTTP cache 字段映射 | [`CoreHarnessExtensionTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/extension/CoreHarnessExtensionTest.java)、[`ProviderAdapterContractTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/model/provider/ProviderAdapterContractTest.java) |
+| Provider capability 与 HTTP cache 字段映射 | [`ProviderFactoriesTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderFactoriesTest.java)、[`ProviderAdapterContractTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/model/provider/ProviderAdapterContractTest.java) |
 | 七类 usage、provider total、raw usage 正文隔离 | [`ProviderUsageNormalizerTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/model/provider/ProviderUsageNormalizerTest.java) |
 | 六分项成本、multiplier、scale 与公共不变量 | [`ModelContractTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/model/ModelContractTest.java)、[`ModelUsageDraftTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageDraftTest.java) |
 | Model worker / reconcile 与 usage 提交路径 | [`ModelWorkerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/model/worker/ModelWorkerTest.java)、[`PostgresqlModelInvocationTransactionsIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/model/worker/PostgresqlModelInvocationTransactionsIntegrationTest.java)、[`PostgresqlThreadReconcileTransactionsIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/reconcile/PostgresqlThreadReconcileTransactionsIntegrationTest.java) |
