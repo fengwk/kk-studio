@@ -9,7 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/** 按 Extension Host 输入顺序执行，并把唯一 permission boundary 固定在末端。 */
+/** 按构造参数提供的固定顺序执行，并把唯一 permission boundary 固定在末端。 */
 public final class ToolInterceptorChain {
   private final List<BeforeToolCallInterceptor> beforeInterceptors;
   private final List<AfterToolCallInterceptor> afterInterceptors;

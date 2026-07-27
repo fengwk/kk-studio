@@ -68,7 +68,7 @@ reports/e2e/LATEST_RUN.txt
 | L4 | `--with-tools` / `--real --with-tools` | daemon/真模型 | Environment READY、tool invocation |
 | L5 | `--ui` | 本地浏览器 | 页面可达、列表渲染、打开新建模态、无致命 pageerror；截图入报告 |
 
-API 矩阵注册 **55** 条（以 `./scripts/e2e.sh --list` 为准）。默认执行全部免费 L1（**51** 条）。`--ui` 额外 **13** 条 UI smoke（`--real` 时再 +1 真实首发）。
+API 矩阵注册 **56** 条（以 `./scripts/e2e.sh --list` 为准）。默认执行全部免费 L1（**52** 条）。`--ui` 额外 **13** 条 UI smoke（`--real` 时再 +1 真实首发）。
 
 ## L1 用例清单
 
@@ -83,6 +83,7 @@ API 矩阵注册 **55** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 | `frontend.proxy_model_contract` | 5173 代理契约 |
 | `thread.commands_model_yolo` | SET_MODEL + SET_YOLO 应用 |
 | `thread.commands_model_invalid_variant_rejected` | 非法 Variant 在 SET_MODEL 入队前拒绝 |
+| `harness.retry_policy_round_trip` | GET original → PUT 合法差异策略 → GET 四字段一致；finally 恢复 original |
 
 ### Thread 生命周期与 head 重定位
 
