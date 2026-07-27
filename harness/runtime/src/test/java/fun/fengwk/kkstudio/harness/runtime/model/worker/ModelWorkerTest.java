@@ -271,6 +271,8 @@ class ModelWorkerTest {
 
     assertTrue(fixture.worker.dispatch(1L));
     await(fixture.transactions.renewed);
+    await(fixture.executor.handle.cancelledLatch);
+    awaitInactive(fixture.worker);
 
     assertTrue(fixture.executor.handle.isCancelled());
     assertFalse(fixture.worker.hasActiveExecution());
