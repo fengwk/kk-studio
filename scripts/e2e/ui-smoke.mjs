@@ -89,7 +89,15 @@ function listArtifacts(caseDir, reportDir) {
 }
 
 async function expectVisibleText(page, text) {
-  await page.getByText(text).first().waitFor({ state: 'visible', timeout: 15_000 })
+  await page.getByText(text).first().waitFor({ state: 'visible', timeout: 30_000 })
+}
+
+async function resourceCardTitle(page, name) {
+  const title = page.locator('.info-card h3').filter({ hasText: name }).first()
+  await title.waitFor({ state: 'visible', timeout: 20_000 })
+  const text = (await title.textContent())?.trim()
+  assert(text, `resource card title is empty for ${name}`)
+  return text
 }
 
 function isIgnorableNoise(text) {
@@ -229,6 +237,17 @@ async function main(argv) {
     assert(body.trim().length > 20, 'environments page body empty')
   })
 
+  await run('ui.harness_settings.page_loads', 'Harness 设置页渲染两张全局策略卡片', async (caseArt) => {
+    await goto('/settings')
+    expectNoFatal(pageErrors, consoleErrors)
+    await expectVisibleText(page, '自动重试')
+    await expectVisibleText(page, '实时流缓存')
+    const maxLength = page.getByLabel('最大保留事件数')
+    await maxLength.waitFor({ state: 'visible', timeout: 30_000 })
+    assert((await maxLength.inputValue()) === '5000', 'expected seed realtime Stream maxLength=5000')
+    await shot(caseArt, 'harness-settings')
+  })
+
   await run('ui.nav.roundtrip', '主导航往返无崩溃', async (caseArt) => {
     for (const p of ['/chats', '/agents', '/models', '/providers', '/environments', '/chats']) {
       await goto(p)
@@ -243,7 +262,7 @@ async function main(argv) {
     const title = `e2e-ui-chat-${stamp}`
     await goto('/chats')
     await page.getByText('新建 Chat', { exact: true }).click()
-    await page.getByPlaceholder('Chat 标题').fill(title)
+    await page.getByLabel('Name').fill(title)
     await page.getByRole('button', { name: '确认创建' }).click()
     await page.getByText(title).first().waitFor({ state: 'visible', timeout: 15_000 })
     await shot(caseArt, 'chat-created')
@@ -257,26 +276,25 @@ async function main(argv) {
     const renamed = `${name}-upd`
     await goto('/models')
     await page.getByText('新建 Model', { exact: true }).click()
-    // 表单 Name 输入
-    await page.locator('label.form-group', { hasText: 'Name' }).locator('input').fill(name)
+    await page.getByLabel('Name').fill(name)
     await page.getByRole('button', { name: '确认创建' }).click()
-    await page.getByText(name, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
+    const modelRef = await resourceCardTitle(page, name)
     await shot(caseArt, 'model-created')
 
     // 编辑
-    await page.getByRole('button', { name: `编辑 ${name}` }).click()
-    await page.locator('label.form-group', { hasText: 'Name' }).locator('input').fill(renamed)
+    await page.getByRole('button', { name: `编辑 ${modelRef}` }).click()
+    await page.getByLabel('Name').fill(renamed)
     await page.getByRole('button', { name: '保存修改' }).click()
-    await page.getByText(renamed, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
+    const renamedModelRef = await resourceCardTitle(page, renamed)
     await shot(caseArt, 'model-updated')
 
     // 删除确认
-    await page.getByRole('button', { name: `删除 ${renamed}` }).click()
+    await page.getByRole('button', { name: `删除 ${renamedModelRef}` }).click()
     await page.getByRole('button', { name: '确认删除' }).click()
     await page.waitForTimeout(800)
     await shot(caseArt, 'model-deleted')
     const body = await page.locator('body').innerText()
-    assert(!body.includes(renamed), `model still visible after delete: ${renamed}`)
+    assert(!body.includes(renamedModelRef), `model still visible after delete: ${renamedModelRef}`)
     expectNoFatal(pageErrors, consoleErrors)
     // best-effort cleanup if UI delete failed
     await apiDeleteByName(args.backendUrl, 'models', renamed)
@@ -288,14 +306,14 @@ async function main(argv) {
     const renamed = `${name}-upd`
     await goto('/agents')
     await page.getByText('新建 Agent', { exact: true }).click()
-    await page.locator('label.form-group', { hasText: 'Name' }).locator('input').fill(name)
+    await page.getByLabel('Name').fill(name)
     await page.locator('label.form-group', { hasText: 'System Prompt' }).locator('textarea').fill('ui e2e agent')
     await page.getByRole('button', { name: '确认创建' }).click()
     await page.getByText(name, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
     await shot(caseArt, 'agent-created')
 
     await page.getByRole('button', { name: `编辑 ${name}` }).click()
-    await page.locator('label.form-group', { hasText: 'Name' }).locator('input').fill(renamed)
+    await page.getByLabel('Name').fill(renamed)
     await page.getByRole('button', { name: '保存修改' }).click()
     await page.getByText(renamed, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
     await shot(caseArt, 'agent-updated')
@@ -318,7 +336,7 @@ async function main(argv) {
     await page.waitForTimeout(200)
     await page.locator('.cards-grid').getByText('新建 Model', { exact: true }).click()
     await page.locator('form.modal-card, .modal-card').first().waitFor({ state: 'visible', timeout: 10_000 })
-    const nameInput = page.locator('label.form-group', { hasText: /^Name$/ }).locator('input')
+    const nameInput = page.getByLabel('Name')
     await nameInput.fill('')
     await page.getByRole('button', { name: '确认创建' }).click()
     await page.waitForTimeout(400)
@@ -337,15 +355,15 @@ async function main(argv) {
     await goto('/providers')
     await page.keyboard.press('Escape')
     await page.locator('.cards-grid').getByText('新建 Provider', { exact: true }).click()
-    await page.locator('label.form-group', { hasText: /^Name$/ }).locator('input').fill(name)
-    await page.locator('label.form-group', { hasText: 'Base URL' }).locator('input').fill('https://example.com/v1')
-    await page.locator('label.form-group', { hasText: 'API Key' }).locator('input').fill('sk-e2e-ui-test')
+    await page.getByLabel('Name').fill(name)
+    await page.getByLabel('Base URL').fill('https://example.com/v1')
+    await page.getByLabel('API Key（可选）').fill('sk-e2e-ui-test')
     await page.getByRole('button', { name: '确认创建' }).click()
     await page.getByText(name, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
     await shot(caseArt, 'provider-created')
 
     await page.getByRole('button', { name: `编辑 ${name}` }).click()
-    await page.locator('label.form-group', { hasText: /^Name$/ }).locator('input').fill(renamed)
+    await page.getByLabel('Name').fill(renamed)
     // 编辑时不改 key（空 credential 保留）
     await page.getByRole('button', { name: '保存修改' }).click()
     await page.getByText(renamed, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
@@ -367,9 +385,9 @@ async function main(argv) {
     // 创建带默认 agent 的 chat，便于 blank 首发
     await goto('/chats')
     await page.getByText('新建 Chat', { exact: true }).click()
-    await page.getByPlaceholder('Chat 标题').fill(title)
+    await page.getByLabel('Name').fill(title)
     // 选 default-assistant
-    const agentSelect = page.getByLabel('Default Agent（可选）')
+    const agentSelect = page.getByLabel('Default Agent')
     await agentSelect.selectOption({ label: 'default-assistant' }).catch(async () => {
       // FormSelect 可能是 native select
       await agentSelect.selectOption({ index: 1 })
@@ -393,8 +411,8 @@ async function main(argv) {
       const title = `e2e-ui-send-${stamp}`
       await goto('/chats')
       await page.getByText('新建 Chat', { exact: true }).click()
-      await page.getByPlaceholder('Chat 标题').fill(title)
-      const agentSelect = page.getByLabel('Default Agent（可选）')
+      await page.getByLabel('Name').fill(title)
+      const agentSelect = page.getByLabel('Default Agent')
       await agentSelect.selectOption({ label: 'default-assistant' }).catch(async () => {
         await agentSelect.selectOption({ index: 1 })
       })

@@ -40,6 +40,34 @@ class PostgresqlDurableFactsSchemaTest extends PostgresSchemaSupport {
   }
 
   @Test
+  void realtimeStreamPolicyIsASingletonWithPositiveMaxLength() throws SQLException {
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_harness_realtime_stream_policy_singleton",
+          () -> {
+            try (PreparedStatement ps =
+                conn.prepareStatement(
+                    "insert into harness_realtime_stream_policy (id, max_length) values (2, 5000)")) {
+              ps.executeUpdate();
+            }
+          });
+    }
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_harness_realtime_stream_policy_max_length_pos",
+          () -> {
+            try (PreparedStatement ps =
+                conn.prepareStatement(
+                    "insert into harness_realtime_stream_policy (id, max_length) values (1, 0)")) {
+              ps.executeUpdate();
+            }
+          });
+    }
+  }
+
+  @Test
   void goalBudgetAndTerminalReasonMatchTheRuntimeContract() throws SQLException {
     ThreadFixture thread = createThread();
     try (Connection conn = newConnection();

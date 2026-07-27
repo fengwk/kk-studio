@@ -11,6 +11,7 @@ import type {
   HarnessThreadMessageCreateDTO,
   HarnessThreadModelSetDTO,
   HarnessRetryPolicyDTO,
+  HarnessRealtimeStreamPolicyDTO,
   HarnessThreadStopDTO,
   HarnessThreadStopResultDTO,
   HarnessThreadYoloSetDTO,
@@ -45,6 +46,12 @@ export function createHarnessService(client: HttpClient = apiClient) {
     getRetryPolicy: (): Promise<HarnessRetryPolicyDTO> => client.get('/harness/retry-policy'),
     updateRetryPolicy: (data: HarnessRetryPolicyDTO): Promise<HarnessRetryPolicyDTO> =>
       client.put('/harness/retry-policy', data),
+    getRealtimeStreamPolicy: (): Promise<HarnessRealtimeStreamPolicyDTO> =>
+      client.get('/harness/realtime-stream-policy'),
+    updateRealtimeStreamPolicy: (
+      data: HarnessRealtimeStreamPolicyDTO,
+    ): Promise<HarnessRealtimeStreamPolicyDTO> =>
+      client.put('/harness/realtime-stream-policy', data),
     listThreadEntries: (threadId: string): Promise<HarnessSessionEntryDTO[]> =>
       client.get(`/threads/${encodeURIComponent(threadId)}/entries`),
     listThreadInputs: (threadId: string): Promise<HarnessThreadInputDTO[]> =>

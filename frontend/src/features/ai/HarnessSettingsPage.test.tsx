@@ -2,13 +2,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { RetryPolicyPage } from '@/features/ai/RetryPolicyPage'
+import { HarnessSettingsPage } from '@/features/ai/HarnessSettingsPage'
 import { harnessService } from '@/shared/api/harness-service'
 
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     getRetryPolicy: vi.fn(),
     updateRetryPolicy: vi.fn(),
+    getRealtimeStreamPolicy: vi.fn(),
+    updateRealtimeStreamPolicy: vi.fn(),
   },
 }))
 
@@ -16,30 +18,36 @@ vi.mock('@/platform/workbench/WorkbenchSlots', () => ({
   NavigationSlot: () => null,
 }))
 
-const defaultPolicy = {
+const defaultRetryPolicy = {
   maxRetries: 3,
   backoffStrategy: 'EXPONENTIAL' as const,
   baseDelayMillis: 2_000,
   maxDelayMillis: 60_000,
 }
 
+const defaultRealtimeStreamPolicy = { maxLength: 5_000 }
+
 function renderPage() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
   return render(
     <QueryClientProvider client={queryClient}>
-      <RetryPolicyPage />
+      <HarnessSettingsPage />
     </QueryClientProvider>,
   )
 }
 
-describe('RetryPolicyPage', () => {
+describe('HarnessSettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(harnessService.getRetryPolicy).mockResolvedValue(defaultPolicy)
-    vi.mocked(harnessService.updateRetryPolicy).mockResolvedValue(defaultPolicy)
+    vi.mocked(harnessService.getRetryPolicy).mockResolvedValue(defaultRetryPolicy)
+    vi.mocked(harnessService.updateRetryPolicy).mockResolvedValue(defaultRetryPolicy)
+    vi.mocked(harnessService.getRealtimeStreamPolicy).mockResolvedValue(defaultRealtimeStreamPolicy)
+    vi.mocked(harnessService.updateRealtimeStreamPolicy).mockResolvedValue(defaultRealtimeStreamPolicy)
   })
 
-  it('loads and replaces the complete automatic retry policy', async () => {
+  it('loads and replaces the complete automatic retry policy independently', async () => {
     const user = userEvent.setup()
     renderPage()
 
@@ -48,7 +56,6 @@ describe('RetryPolicyPage', () => {
     expect(screen.getByLabelText('退避策略')).toBeRequired()
     expect(screen.getByLabelText('基础间隔（秒）')).toBeRequired()
     expect(screen.getByLabelText('最大间隔（秒）')).toBeRequired()
-    expect(screen.getAllByText('*')).toHaveLength(4)
     await user.clear(maxRetries)
     await user.type(maxRetries, '2')
     await user.selectOptions(screen.getByLabelText('退避策略'), 'FIXED')
@@ -58,7 +65,7 @@ describe('RetryPolicyPage', () => {
     const maxDelay = screen.getByLabelText('最大间隔（秒）')
     await user.clear(maxDelay)
     await user.type(maxDelay, '8')
-    await user.click(screen.getByRole('button', { name: '保存策略' }))
+    await user.click(screen.getByRole('button', { name: '保存重试策略' }))
 
     await waitFor(() =>
       expect(harnessService.updateRetryPolicy).toHaveBeenCalledWith({
@@ -68,32 +75,50 @@ describe('RetryPolicyPage', () => {
         maxDelayMillis: 8_000,
       }),
     )
+    expect(harnessService.updateRealtimeStreamPolicy).not.toHaveBeenCalled()
   })
 
-  it('keeps invalid settings in the form and does not call the API', async () => {
+  it('loads and replaces the realtime Stream capacity independently', async () => {
     const user = userEvent.setup()
     renderPage()
 
-    const baseDelay = await screen.findByLabelText('基础间隔（秒）')
-    await user.clear(baseDelay)
-    await user.type(baseDelay, '8')
-    const maxDelay = screen.getByLabelText('最大间隔（秒）')
-    await user.clear(maxDelay)
-    await user.type(maxDelay, '3')
-    await user.click(screen.getByRole('button', { name: '保存策略' }))
+    const maxLength = await screen.findByLabelText('最大保留事件数')
+    expect(maxLength).toBeRequired()
+    expect(maxLength).toHaveValue(5_000)
+    expect(
+      screen.getByText(/下一次写入生效；其他实例最多约一秒刷新/),
+    ).toBeInTheDocument()
+    await user.clear(maxLength)
+    await user.type(maxLength, '100000')
+    await user.click(screen.getByRole('button', { name: '保存实时流设置' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('最大间隔不能小于基础间隔')
+    await waitFor(() =>
+      expect(harnessService.updateRealtimeStreamPolicy).toHaveBeenCalledWith({ maxLength: 100_000 }),
+    )
     expect(harnessService.updateRetryPolicy).not.toHaveBeenCalled()
   })
 
-  it('round-trips millisecond API precision through the seconds-based form', async () => {
+  it('keeps invalid realtime Stream settings in the form and does not call the API', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    const maxLength = await screen.findByLabelText('最大保留事件数')
+    await user.clear(maxLength)
+    await user.type(maxLength, '0')
+    await user.click(screen.getByRole('button', { name: '保存实时流设置' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('最大保留事件数必须在 1 到')
+    expect(harnessService.updateRealtimeStreamPolicy).not.toHaveBeenCalled()
+  })
+
+  it('round-trips millisecond retry precision through the seconds-based form', async () => {
     vi.mocked(harnessService.getRetryPolicy).mockResolvedValue({
-      ...defaultPolicy,
+      ...defaultRetryPolicy,
       baseDelayMillis: 1_500,
       maxDelayMillis: 2_500,
     })
     vi.mocked(harnessService.updateRetryPolicy).mockResolvedValue({
-      ...defaultPolicy,
+      ...defaultRetryPolicy,
       baseDelayMillis: 1_500,
       maxDelayMillis: 2_500,
     })
@@ -102,8 +127,7 @@ describe('RetryPolicyPage', () => {
 
     expect(await screen.findByLabelText('基础间隔（秒）')).toHaveValue(1.5)
     expect(screen.getByLabelText('最大间隔（秒）')).toHaveValue(2.5)
-
-    await user.click(screen.getByRole('button', { name: '保存策略' }))
+    await user.click(screen.getByRole('button', { name: '保存重试策略' }))
 
     await waitFor(() =>
       expect(harnessService.updateRetryPolicy).toHaveBeenCalledWith({

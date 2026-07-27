@@ -38,6 +38,14 @@ insert into agent_definition (
 )
 on conflict (id) do nothing;
 
+-- Harness realtime stream policy singleton (id=1, default 5000).
+insert into harness_realtime_stream_policy (
+    id, max_length
+) values (
+    1, 5000
+)
+on conflict (id) do nothing;
+
 -- Harness retry policy singleton (id=1).
 insert into harness_retry_policy (
     id, max_retries, backoff_strategy, base_delay_millis, max_delay_millis
@@ -53,6 +61,7 @@ with seed_max(value) as (
         coalesce((select max(id) from agent_provider), 0),
         coalesce((select max(id) from agent_model), 0),
         coalesce((select max(id) from agent_definition), 0),
+        coalesce((select max(id) from harness_realtime_stream_policy), 0),
         coalesce((select max(id) from harness_retry_policy), 0)
     )
 )

@@ -4,11 +4,11 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * Redis adapter 配置：activation channel、realtime stream key 前缀、stream max length。
+ * Redis adapter 配置：activation channel 与 realtime stream key 前缀。
  *
  * <p>默认：{@code signalChannel=kk-studio:harness:signal}、{@code
- * realtimeKeyPrefix=kk-studio:harness:realtime:}、{@code realtimeMaxLength=1000}。channel 与 prefix
- * 不得为 blank，{@code realtimeMaxLength} 必须为正整数。
+ * realtimeKeyPrefix=kk-studio:harness:realtime:}。channel 与 prefix 不得为 blank；realtime Stream 的 max
+ * length 由全局数据库策略提供。
  */
 @Data
 @ConfigurationProperties(prefix = "kk-studio.harness.redis")
@@ -16,7 +16,6 @@ public class HarnessRedisProperties {
 
   private String signalChannel = "kk-studio:harness:signal";
   private String realtimeKeyPrefix = "kk-studio:harness:realtime:";
-  private long realtimeMaxLength = 1000L;
 
   public String requireSignalChannel() {
     if (signalChannel == null || signalChannel.isBlank()) {
@@ -32,14 +31,6 @@ public class HarnessRedisProperties {
           "kk-studio.harness.redis.realtime-key-prefix must not be blank");
     }
     return realtimeKeyPrefix;
-  }
-
-  public long requireRealtimeMaxLength() {
-    if (realtimeMaxLength <= 0) {
-      throw new IllegalArgumentException(
-          "kk-studio.harness.redis.realtime-max-length must be positive");
-    }
-    return realtimeMaxLength;
   }
 
   /** 拼接 realtime stream key：{@code prefix + threadId}。 */

@@ -7,9 +7,9 @@ import {
   ComfyuiWorkflowEditorDialog,
   CreateChatDialog,
   EnvironmentsRoute,
+  HarnessSettingsRoute,
   ModelsPage,
   ProvidersPage,
-  RetryPolicyRoute,
   ResourceDeleteDialog,
   ResourceEditorDialog,
 } from '@/features/ai/extensions/ai-extension'
@@ -25,7 +25,7 @@ export const aiExtension: TrustedReactExtension = {
     { id: 'ai.models', path: 'models', component: ModelsPage, priority: 100 },
     { id: 'ai.providers', path: 'providers', component: ProvidersPage, priority: 100 },
     { id: 'ai.environments', path: 'environments', component: EnvironmentsRoute, priority: 100 },
-    { id: 'ai.settings', path: 'settings', component: RetryPolicyRoute, priority: 100 },
+    { id: 'ai.settings', path: 'settings', component: HarnessSettingsRoute, priority: 100 },
     { id: 'ai.comfyui', path: 'comfyui', component: ComfyuiPage, priority: 100 },
   ],
   navigation: [

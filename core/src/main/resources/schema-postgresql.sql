@@ -691,6 +691,13 @@ create table harness_retry_policy (
     constraint ck_harness_retry_policy_max_delay_ge_base check (max_delay_millis >= base_delay_millis)
 );
 
+create table harness_realtime_stream_policy (
+    id              integer       primary key,
+    max_length       bigint        not null,
+    constraint ck_harness_realtime_stream_policy_singleton check (id = 1),
+    constraint ck_harness_realtime_stream_policy_max_length_pos check (max_length > 0)
+);
+
 create table harness_thread_goal (
     thread_id       bigint        primary key,
     objective       text          not null,

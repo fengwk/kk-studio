@@ -312,7 +312,7 @@ public interface RealtimeEventSink {
 }
 ```
 
-`RealtimeEventType`：`MODEL_DELTA`、`TOOL_PARTIAL`。sink 失败只记观测错误，不改变 Invocation terminal。可重试 Invocation 的 event 必须携带 attempt。
+`RealtimeEventType`：`MODEL_DELTA`、`TOOL_PARTIAL`。sink 失败只记观测错误，不改变 Invocation terminal。可重试 Invocation 的 event 必须携带 attempt。Core Redis adapter 在每次 append 时从持久化全局策略解析 `MAXLEN`，因此调整对既有 Stream 的下一次写入生效。
 
 ### 4.4 Model / Tool 执行
 

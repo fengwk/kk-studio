@@ -483,3 +483,30 @@ registerCase({
     }
   },
 })
+
+registerCase({
+  id: 'harness.realtime_stream_policy_round_trip',
+  level: 'L1',
+  title: 'Realtime Stream policy GET/PUT 往返',
+  docs: 'GET /api/harness/realtime-stream-policy 读 original；PUT 合法且可观察差异的 maxLength；再 GET 断言一致；finally 恢复 original',
+  async run(ctx) {
+    const { json: originalJson } = await ctx.call('GET', '/api/harness/realtime-stream-policy')
+    const original = envelopeData(originalJson)
+    assert(original && typeof original === 'object' && 'maxLength' in original, JSON.stringify(originalJson))
+    const originalMaxLength = Number(original.maxLength)
+    assert(Number.isSafeInteger(originalMaxLength) && originalMaxLength > 0, JSON.stringify(original))
+
+    const next = { maxLength: originalMaxLength === 5_000 ? 5_001 : 5_000 }
+    try {
+      const { json: putJson } = await ctx.call('PUT', '/api/harness/realtime-stream-policy', next)
+      const putData = envelopeData(putJson)
+      assert(Number(putData.maxLength) === next.maxLength, JSON.stringify(putData))
+
+      const { json: rereadJson } = await ctx.call('GET', '/api/harness/realtime-stream-policy')
+      const reread = envelopeData(rereadJson)
+      assert(Number(reread.maxLength) === next.maxLength, JSON.stringify(reread))
+    } finally {
+      await ctx.call('PUT', '/api/harness/realtime-stream-policy', { maxLength: originalMaxLength })
+    }
+  },
+})

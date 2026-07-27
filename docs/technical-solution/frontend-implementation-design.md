@@ -7,7 +7,7 @@
 | 主题 | 当前契约 |
 | --- | --- |
 | 工程与发布 | `frontend/` 保持独立 Vite 工程；Maven `distribution` 在 `prepare-package` 构建并嵌入 `web` Fat JAR 的 `classpath:/static` |
-| 页面范围 | Chat 卡片与本地 Pane 工作区、Provider/Model/Agent、只读 Environment Registry、ComfyUI |
+| 页面范围 | Chat 卡片与本地 Pane 工作区、Provider/Model/Agent、只读 Environment Registry、Harness 设置、ComfyUI |
 | 服务端状态 | React Query |
 | 本地状态 | `localStorage` 的 `ChatPaneState`（按 chatId） |
 | 资源 API | `/api/providers`、`/api/models`、`/api/agents`、`/api/environments` |
@@ -28,6 +28,7 @@
 | `/models` | Model 管理 | Model CRUD |
 | `/providers` | Provider 管理 | Provider CRUD |
 | `/environments` | Environment Registry | 只读 live registry |
+| `/settings` | Harness 设置 | 全局自动重试与 realtime Stream 容量策略 |
 | `/comfyui` | ComfyUI 工作流 | 独立工作流运行时 |
 
 ## Chat 工作区
@@ -96,8 +97,11 @@
 | `stopThread` | `POST .../stop` | Stop |
 | `listSessions` / `getSession` / `listSessionEntries` | `/api/sessions` | Session 列表、详情与 Entry Tree |
 | `getRetryPolicy` / `updateRetryPolicy` | `GET` / `PUT /api/harness/retry-policy` | 全局自动重试策略 |
+| `getRealtimeStreamPolicy` / `updateRealtimeStreamPolicy` | `GET` / `PUT /api/harness/realtime-stream-policy` | 全局 Redis realtime Stream 最大保留事件数 |
 
 所有 durable ID 在 TypeScript 中保持十进制字符串。`bootstrapThread`、`updateThreadHead`、`stopThread` 与全部 mailbox 请求体都带必填 `expectedExecutionEpoch`。
+
+`/settings` 的两张卡片独立加载、校验与保存。实时流容量调整在本实例影响既有和新建 Stream 的下一次写入，其他实例最多一秒刷新；调大不恢复已经裁剪的 event。
 
 ### Agent DTO
 

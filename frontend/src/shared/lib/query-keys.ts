@@ -19,6 +19,7 @@ export const queryKeys = {
   },
   harness: {
     retryPolicy: ['harness', 'retry-policy'] as const,
+    realtimeStreamPolicy: ['harness', 'realtime-stream-policy'] as const,
   },
   chats: {
     all: ['chats'] as const,
