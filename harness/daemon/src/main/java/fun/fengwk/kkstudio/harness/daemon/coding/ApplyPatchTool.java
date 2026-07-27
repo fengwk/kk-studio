@@ -32,11 +32,8 @@ public final class ApplyPatchTool extends AbstractCodingTool {
                 "ApplyPatch parameters",
                 Map.of(
                     "patchText",
-                        new ToolStringSchema(
-                            "Complete apply_patch protocol text from *** Begin Patch through *** End Patch."),
-                    "workdir",
-                        new ToolStringSchema(
-                            "Working directory for resolving relative patch paths. Defaults to the agent's current working directory.")),
+                    new ToolStringSchema(
+                        "Complete apply_patch protocol text from *** Begin Patch through *** End Patch. Optional first directive: *** Workdir: <path>.")),
                 Set.of("patchText"),
                 false),
             ToolSideEffect.NON_IDEMPOTENT,
@@ -47,8 +44,8 @@ public final class ApplyPatchTool extends AbstractCodingTool {
   ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     String patchText = string(args, "patchText");
-    Path workdir = boundary.workdir(optionalString(args, "workdir"));
     ApplyPatchSupport.ParsedPatch patch = ApplyPatchSupport.parse(patchText);
+    Path workdir = boundary.workdir(patch.workdir());
     ApplyPatchSupport.ExecutionResult result =
         ApplyPatchSupport.execute(
             patch,

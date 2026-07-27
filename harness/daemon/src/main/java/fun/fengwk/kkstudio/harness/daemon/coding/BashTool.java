@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
@@ -40,6 +41,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class BashTool implements Tool {
 
+  static final int DEFAULT_TIMEOUT_SECONDS = 120;
+  static final int MAX_TIMEOUT_SECONDS = 3600;
   private static final ExecutorService EXECUTOR =
       Executors.newCachedThreadPool(threadFactory("daemon-bash"));
   private static final ScheduledThreadPoolExecutor SCHEDULER = createScheduler();
@@ -54,18 +57,20 @@ public final class BashTool implements Tool {
         new ToolDescriptor(
             "bash",
             "1",
-            "Execute an already Platform-authorized bash command in a validated environment workdir.",
+            CodingToolPrompts.load("bash"),
             null,
             new ToolParamsSchema(
                 "Bash parameters",
                 Map.of(
                     "command", new ToolStringSchema("Platform-authorized shell command"),
-                    "workdir",
-                        new ToolStringSchema("Optional environment-root-relative directory")),
+                    "workdir", new ToolStringSchema("Optional environment-root-relative directory"),
+                    "timeout_seconds",
+                        new ToolIntegerSchema(
+                            "Optional timeout in seconds; defaults to 120 and must not exceed 3600")),
                 Set.of("command"),
                 false),
             ToolSideEffect.NON_IDEMPOTENT,
-            Duration.ofMinutes(5));
+            Duration.ofHours(1));
   }
 
   @Override
@@ -90,6 +95,9 @@ public final class BashTool implements Tool {
       JsonNode args = AbstractCodingTool.arguments(request);
       String command = AbstractCodingTool.string(args, "command");
       Path workdir = boundary.workdir(AbstractCodingTool.optionalString(args, "workdir"));
+      int timeoutSeconds = requestedTimeoutSeconds(args);
+      Duration processTimeout =
+          effectiveProcessTimeout(request.effectiveTimeout(), Duration.ofSeconds(timeoutSeconds));
       Process process =
           new ProcessBuilder(config.bashExecutable(), "-lc", command)
               .directory(workdir.toFile())
@@ -106,7 +114,7 @@ public final class BashTool implements Tool {
                   handle.stopProcessTree();
                 }
               },
-              request.effectiveTimeout().toMillis(),
+              processTimeout.toMillis(),
               TimeUnit.MILLISECONDS);
       if (handle.terminal.get()) {
         handle.timeoutFuture.cancel(false);
@@ -143,6 +151,19 @@ public final class BashTool implements Tool {
     } catch (Exception error) {
       handle.complete(listener, AbstractCodingTool.error(request.call().id(), error.getMessage()));
     }
+  }
+
+  static int requestedTimeoutSeconds(JsonNode args) {
+    return AbstractCodingTool.optionalPositiveInt(
+        args, "timeout_seconds", DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS);
+  }
+
+  static Duration effectiveProcessTimeout(Duration invocationTimeout, Duration requestedTimeout) {
+    Objects.requireNonNull(invocationTimeout, "invocationTimeout");
+    Objects.requireNonNull(requestedTimeout, "requestedTimeout");
+    return invocationTimeout.compareTo(requestedTimeout) <= 0
+        ? invocationTimeout
+        : requestedTimeout;
   }
 
   private static void emitPartial(
