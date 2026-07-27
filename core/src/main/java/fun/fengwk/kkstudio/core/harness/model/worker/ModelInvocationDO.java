@@ -14,7 +14,6 @@ public class ModelInvocationDO {
 
   private Long id;
   private Long threadId;
-  private Long sessionId;
   private Long sourceHeadEntryId;
   private Long executionEpoch;
   private String requestJson;

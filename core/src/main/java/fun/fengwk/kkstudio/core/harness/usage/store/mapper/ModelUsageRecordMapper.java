@@ -14,7 +14,8 @@ import fun.fengwk.kkstudio.core.harness.usage.store.model.ModelUsageRecordDO;
 import java.util.List;
 
 /**
- * harness_model_usage 行级 MyBatis 映射；幂等由 unique(assistant_entry_id) 与 unique(assistant_entry_id) 兜底。
+ * harness_model_usage 行级 MyBatis 映射；幂等由 unique(assistant_entry_id) 与外键兜底。cost 分项不在 持久层；读取账本时由
+ * {@code ModelCost.calculate(pricing, usage)} 重建。
  */
 @Mapper
 public interface ModelUsageRecordMapper extends BaseMapper {
@@ -27,8 +28,6 @@ public interface ModelUsageRecordMapper extends BaseMapper {
           + " usage_input_tokens, usage_output_tokens, usage_cache_read_tokens,"
           + " usage_cache_write_tokens, usage_cache_write_long_tokens, usage_reasoning_tokens,"
           + " usage_provider_total_tokens,"
-          + " cost_currency, cost_input, cost_output, cost_cache_read, cost_cache_write,"
-          + " cost_cache_write_long, cost_reasoning, cost_total,"
           + " pricing_currency, pricing_tier, pricing_service_tier,"
           + " pricing_service_tier_multiplier, pricing_version,"
           + " pricing_input_per_million_tokens, pricing_output_per_million_tokens,"
@@ -47,8 +46,6 @@ public interface ModelUsageRecordMapper extends BaseMapper {
           usage_input_tokens, usage_output_tokens, usage_cache_read_tokens,
           usage_cache_write_tokens, usage_cache_write_long_tokens, usage_reasoning_tokens,
           usage_provider_total_tokens,
-          cost_currency, cost_input, cost_output, cost_cache_read, cost_cache_write,
-          cost_cache_write_long, cost_reasoning, cost_total,
           pricing_currency, pricing_tier, pricing_service_tier,
           pricing_service_tier_multiplier, pricing_version,
           pricing_input_per_million_tokens, pricing_output_per_million_tokens,
@@ -64,8 +61,6 @@ public interface ModelUsageRecordMapper extends BaseMapper {
           #{usageInputTokens}, #{usageOutputTokens}, #{usageCacheReadTokens},
           #{usageCacheWriteTokens}, #{usageCacheWriteLongTokens}, #{usageReasoningTokens},
           #{usageProviderTotalTokens},
-          #{costCurrency}, #{costInput}, #{costOutput}, #{costCacheRead}, #{costCacheWrite},
-          #{costCacheWriteLong}, #{costReasoning}, #{costTotal},
           #{pricingCurrency}, #{pricingTier}, #{pricingServiceTier},
           #{pricingServiceTierMultiplier}, #{pricingVersion},
           #{pricingInputPerMillionTokens}, #{pricingOutputPerMillionTokens},
@@ -104,14 +99,6 @@ public interface ModelUsageRecordMapper extends BaseMapper {
         @Result(column = "usage_cache_write_long_tokens", property = "usageCacheWriteLongTokens"),
         @Result(column = "usage_reasoning_tokens", property = "usageReasoningTokens"),
         @Result(column = "usage_provider_total_tokens", property = "usageProviderTotalTokens"),
-        @Result(column = "cost_currency", property = "costCurrency"),
-        @Result(column = "cost_input", property = "costInput"),
-        @Result(column = "cost_output", property = "costOutput"),
-        @Result(column = "cost_cache_read", property = "costCacheRead"),
-        @Result(column = "cost_cache_write", property = "costCacheWrite"),
-        @Result(column = "cost_cache_write_long", property = "costCacheWriteLong"),
-        @Result(column = "cost_reasoning", property = "costReasoning"),
-        @Result(column = "cost_total", property = "costTotal"),
         @Result(column = "pricing_currency", property = "pricingCurrency"),
         @Result(column = "pricing_tier", property = "pricingTier"),
         @Result(column = "pricing_service_tier", property = "pricingServiceTier"),

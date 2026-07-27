@@ -43,13 +43,12 @@ class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void modelInvocationHeadEntryMustBelongToCarrierSession() throws SQLException {
+  void modelInvocationHeadEntryMustExist() throws SQLException {
     ThreadFixture threadOwner = createThread();
-    ThreadFixture otherSession = createThread();
 
-    // Head Entry is in threadOwner.session but the carrier session_id is
-    // otherSession.session, so (session_id, source_head_entry_id) cannot pair
-    // on harness_entry (session_id, id).
+    // The source_head_entry_id points at a globally-unknown entry id; the
+    // single-column FK on harness_entry(id) rejects the row.
+    long missingEntryId = FIXTURE_IDS.incrementAndGet() + 100_000_000L;
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
@@ -57,13 +56,12 @@ class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
           () -> {
             try (PreparedStatement ps =
                 conn.prepareStatement(
-                    "insert into harness_model_invocation (id, thread_id, session_id,"
+                    "insert into harness_model_invocation (id, thread_id,"
                         + " source_head_entry_id, execution_epoch, request, status, attempt)"
-                        + " values (?, ?, ?, ?, 1, '{}'::jsonb, 'QUEUED', 1)")) {
+                        + " values (?, ?, ?, 1, '{}'::jsonb, 'QUEUED', 1)")) {
               ps.setLong(1, FIXTURE_IDS.incrementAndGet());
               ps.setLong(2, threadOwner.threadId);
-              ps.setLong(3, otherSession.sessionId);
-              ps.setLong(4, threadOwner.rootEntryId);
+              ps.setLong(3, missingEntryId);
               ps.executeUpdate();
             }
           });

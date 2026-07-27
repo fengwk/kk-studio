@@ -9,7 +9,6 @@ import java.time.Instant;
 public class ModelInvocationDTO {
   private String id;
   private String threadId;
-  private String sessionId;
   private String sourceHeadEntryId;
   private Long executionEpoch;
   private String requestJson;

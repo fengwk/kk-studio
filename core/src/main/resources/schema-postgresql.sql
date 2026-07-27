@@ -302,7 +302,6 @@ create index idx_harness_thread_input_pending
 create table harness_model_invocation (
     id                    bigint        primary key default nextval('kk_studio_id_seq'),
     thread_id             bigint        not null,
-    session_id            bigint        not null,
     source_head_entry_id  bigint        not null,
     execution_epoch       bigint        not null,
     request               jsonb         not null,
@@ -325,10 +324,11 @@ create table harness_model_invocation (
     -- is enforced upstream by Thread commands via the head Entry.
     constraint fk_harness_model_invocation_thread foreign key (thread_id)
         references harness_thread (id),
-    -- session_id stays as a constraint carrier so the source head Entry belongs
-    -- to the same Session as the carrier.
-    constraint fk_harness_model_invocation_head foreign key (session_id, source_head_entry_id)
-        references harness_entry (session_id, id),
+    -- harness_entry.id is the global primary key, so the source head FK is a
+    -- single-column reference. The thread<->session consistency is enforced
+    -- upstream by Thread commands via the head Entry.
+    constraint fk_harness_model_invocation_head foreign key (source_head_entry_id)
+        references harness_entry (id),
     constraint ck_harness_model_invocation_status check (
         status in (
             'QUEUED', 'RUNNING', 'RETRY_WAIT',
@@ -455,8 +455,6 @@ create index idx_harness_model_invocation_worker_until
     on harness_model_invocation (worker_until, id) where status = 'RUNNING';
 create index idx_harness_model_invocation_deadline
     on harness_model_invocation (deadline_at, id) where status = 'RUNNING';
-create index idx_harness_model_invocation_head
-    on harness_model_invocation (session_id, source_head_entry_id);
 create index idx_harness_model_invocation_terminal_unapplied
     on harness_model_invocation (thread_id, id)
     where applied_at is null
@@ -684,8 +682,6 @@ create table harness_retry_policy (
     backoff_strategy    varchar(32)   not null,
     base_delay_millis   bigint        not null,
     max_delay_millis    bigint        not null,
-    created_at          timestamptz(3) not null default current_timestamp,
-    updated_at          timestamptz(3) not null default current_timestamp,
     constraint ck_harness_retry_policy_singleton check (id = 1),
     constraint ck_harness_retry_policy_max_retries_nonneg check (max_retries >= 0),
     constraint ck_harness_retry_policy_backoff check (
@@ -766,14 +762,6 @@ create table harness_model_usage (
     usage_cache_write_long_tokens      bigint        not null,
     usage_reasoning_tokens             bigint        not null,
     usage_provider_total_tokens        bigint        not null,
-    cost_currency                      varchar(16)   not null,
-    cost_input                         numeric(32,12) not null,
-    cost_output                        numeric(32,12) not null,
-    cost_cache_read                    numeric(32,12) not null,
-    cost_cache_write                   numeric(32,12) not null,
-    cost_cache_write_long              numeric(32,12) not null,
-    cost_reasoning                     numeric(32,12) not null,
-    cost_total                         numeric(32,12) not null,
     pricing_currency                   varchar(16)   not null,
     pricing_tier                       varchar(64)   not null,
     pricing_service_tier               varchar(64)   not null,
@@ -816,23 +804,6 @@ create table harness_model_usage (
         and pricing_cache_write_long_per_million_tokens >= 0
         and pricing_reasoning_per_million_tokens >= 0
         and pricing_service_tier_multiplier >= 0
-    ),
-    constraint ck_harness_model_usage_cost_nonneg check (
-        cost_input >= 0
-        and cost_output >= 0
-        and cost_cache_read >= 0
-        and cost_cache_write >= 0
-        and cost_cache_write_long >= 0
-        and cost_reasoning >= 0
-        and cost_total >= 0
-    ),
-    constraint ck_harness_model_usage_cost_total check (
-        cost_total = cost_input
-            + cost_output
-            + cost_cache_read
-            + cost_cache_write
-            + cost_cache_write_long
-            + cost_reasoning
     )
 );
 

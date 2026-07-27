@@ -16,14 +16,13 @@ final class InvocationFixture {
     try (Connection conn = PostgresSchemaSupport.newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
-                "insert into harness_model_invocation (id, thread_id, session_id,"
+                "insert into harness_model_invocation (id, thread_id,"
                     + " source_head_entry_id, execution_epoch, request, status, attempt) values"
-                    + " (?, ?, ?, ?, ?, '{\"model\":\"stub\"}'::jsonb, 'QUEUED', 1)")) {
+                    + " (?, ?, ?, ?, '{\"model\":\"stub\"}'::jsonb, 'QUEUED', 1)")) {
       ps.setLong(1, invocationId);
       ps.setLong(2, thread.threadId);
-      ps.setLong(3, thread.sessionId);
-      ps.setLong(4, thread.rootEntryId);
-      ps.setLong(5, executionEpoch);
+      ps.setLong(3, thread.rootEntryId);
+      ps.setLong(4, executionEpoch);
       assertEquals(1, ps.executeUpdate());
     }
     return invocationId;

@@ -363,7 +363,6 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     if (mapper.insertModelInvocation(
             id,
             thread.getId(),
-            thread.getSessionId(),
             thread.getHeadEntryId(),
             ownership.executionEpoch(),
             REQUEST_CODEC.encode(plan.request()),

@@ -61,9 +61,9 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
     insertEntry(sessionId, rootEntryId, 91_001L);
     insertEntry(sessionId, rootEntryId, 91_002L);
     insertEntry(sessionId, rootEntryId, 91_003L);
-    insertModel(modelQueued, threadId, sessionId, 91_001L, epoch, "QUEUED");
-    insertModel(modelRetry, threadId, sessionId, 91_002L, epoch, "RETRY_WAIT");
-    insertModel(modelRunning, threadId, sessionId, 91_003L, epoch, "RUNNING");
+    insertModel(modelQueued, threadId, 91_001L, epoch, "QUEUED");
+    insertModel(modelRetry, threadId, 91_002L, epoch, "RETRY_WAIT");
+    insertModel(modelRunning, threadId, 91_003L, epoch, "RUNNING");
 
     long assistantEntryId = 92_001L;
     insertEntry(sessionId, rootEntryId, assistantEntryId);
@@ -193,20 +193,18 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
   }
 
   private static void insertModel(
-      long id, long threadId, long sessionId, long sourceEntryId, long epoch, String status)
-      throws SQLException {
+      long id, long threadId, long sourceEntryId, long epoch, String status) throws SQLException {
     try (Connection connection = newConnection();
         PreparedStatement statement =
             connection.prepareStatement(
-                "insert into harness_model_invocation (id, thread_id, session_id,"
+                "insert into harness_model_invocation (id, thread_id,"
                     + " source_head_entry_id, execution_epoch, request, status, attempt, created_at)"
-                    + " values (?, ?, ?, ?, ?, '{}'::jsonb, 'QUEUED', 1, ?)")) {
+                    + " values (?, ?, ?, ?, '{}'::jsonb, 'QUEUED', 1, ?)")) {
       statement.setLong(1, id);
       statement.setLong(2, threadId);
-      statement.setLong(3, sessionId);
-      statement.setLong(4, sourceEntryId);
-      statement.setLong(5, epoch);
-      statement.setTimestamp(6, Timestamp.from(BASE));
+      statement.setLong(3, sourceEntryId);
+      statement.setLong(4, epoch);
+      statement.setTimestamp(5, Timestamp.from(BASE));
       assertEquals(1, statement.executeUpdate());
     }
     transitionInvocation("harness_model_invocation", id, status, "model-running");

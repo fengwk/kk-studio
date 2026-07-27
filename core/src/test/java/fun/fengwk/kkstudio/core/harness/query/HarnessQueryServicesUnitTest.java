@@ -119,7 +119,6 @@ class HarnessQueryServicesUnitTest {
     ModelInvocationDO model = new ModelInvocationDO();
     model.setId(7L);
     model.setThreadId(21L);
-    model.setSessionId(1L);
     model.setSourceHeadEntryId(10L);
     model.setExecutionEpoch(0L);
     model.setStatus("QUEUED");

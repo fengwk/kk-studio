@@ -24,7 +24,7 @@ public interface ModelInvocationMapper extends BaseMapper {
 
   String SELECT_FIELDS =
       """
-       mi.id as id, mi.thread_id as thread_id, mi.session_id as session_id,
+       mi.id as id, mi.thread_id as thread_id,
       mi.source_head_entry_id as source_head_entry_id, mi.execution_epoch as execution_epoch,
       mi.request as request, mi.status as status, mi.attempt as attempt,
       mi.next_attempt_at as next_attempt_at, mi.worker_token as worker_token,
@@ -52,7 +52,6 @@ public interface ModelInvocationMapper extends BaseMapper {
       value = {
         @Result(column = "id", property = "id"),
         @Result(column = "thread_id", property = "threadId"),
-        @Result(column = "session_id", property = "sessionId"),
         @Result(column = "source_head_entry_id", property = "sourceHeadEntryId"),
         @Result(column = "execution_epoch", property = "executionEpoch"),
         @Result(column = "request", property = "requestJson"),

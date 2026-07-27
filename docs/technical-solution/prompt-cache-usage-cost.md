@@ -223,7 +223,7 @@ Draft 从最终 `ProviderRequest` 读取 model、cache mode、最终 retention �
 id, sessionId, threadId, assistantEntryId, createdAt
 ```
 
-Assistant Entry 的 `AssistantMessageMetadata` 同时保存 `stopReason`、`ModelUsage` 和 `ModelCost`。Assistant metadata 必须且只能出现在 ASSISTANT message 中；账本通过 `assistantEntryId` 与该 Entry 一一关联。
+Assistant Entry 的 `AssistantMessageMetadata` 同时保存 `stopReason` 和 `ModelUsage`；`ModelCost` 在读账本时由 `ModelCost.calculate(ModelPricing, ModelUsage)` 重建，不在 Entry payload 中持久化。Assistant metadata 必须且只能出现在 ASSISTANT message 中；账本通过 `assistantEntryId` 与该 Entry 一一关联。
 
 Model terminal 由 worker 写入 `harness_model_invocation`；Assistant/账本物化由 Reconciler apply 事务提交：
 
@@ -273,10 +273,11 @@ lock Thread and verify processor token + execution epoch
 | Usage | `usage_cache_write_long_tokens` | `bigint` |
 | Usage | `usage_reasoning_tokens` | `bigint` |
 | Usage | `usage_provider_total_tokens` | `bigint` |
-| Cost | `cost_*` | `numeric(32,12)` |
 | Pricing | `pricing_*` | `varchar` / `numeric(32,12)` |
 | Provider metadata | `request_id` / `reported_service_tier` / `raw_usage` | 可空 varchar / jsonb |
 | 时间 | `created_at` | `timestamptz(3)` |
+
+成本分项 `ModelCost` **不在物理层持久化** —— 读取账本时由 `ModelCost.calculate(pricing, usage)` 重建；API 与聚合 response shape 不变。
 
 约束与查询索引：
 

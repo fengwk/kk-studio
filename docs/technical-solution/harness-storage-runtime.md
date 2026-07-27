@@ -69,7 +69,7 @@ Assistant Entry、ordinal、ToolCall、descriptor/arguments、`PLATFORM/ENVIRONM
 
 不保存 permission 专用列；approval 走 `harness_interaction`。
 
-Model/Tool Invocation 与 `harness_model_usage` 的 Thread 归属都是单列 `thread_id` FK；同表的 `session_id` 只作为约束载体，保证所引用的 Entry 与其属于同一 Session。
+Model/Tool Invocation 与 `harness_model_usage` 的 Thread 归属都是单列 `thread_id` FK。`harness_model_invocation` 不持有 `session_id`，`source_head_entry_id` 单列 FK 到 `harness_entry(id)`；`harness_tool_invocation` 与 `harness_model_usage` 的 `session_id` 仍作为约束载体，保证所引用的 Entry 与其属于同一 Session。
 
 ### 4.7 `harness_interaction`
 
@@ -79,10 +79,10 @@ owner reference、handler type、request/response jsonb、状态、deadline/vers
 
 | 表 | 职责 |
 | --- | --- |
-| `harness_retry_policy` | 全局自动重试策略 |
+| `harness_retry_policy` | 全局自动重试策略（id=1 单行；不持久化时间戳） |
 | `harness_thread_goal` | Thread goal |
 | `harness_artifact` | 不可变 Tool 输出 |
-| `harness_model_usage` | Assistant 用量账本 |
+| `harness_model_usage` | Assistant 用量账本（持久化 token/pricing/created_at；`ModelCost` 由 `ModelCost.calculate(pricing, usage)` 重建） |
 
 ## 5. Runnable 与 activation
 

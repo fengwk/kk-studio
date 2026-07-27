@@ -63,7 +63,6 @@ public class PostgresqlModelUsageRecordStore implements ModelUsageRecordStore {
   static ModelUsageRecordDO toDO(ModelUsageRecord record) {
     ModelUsageDraft draft = record.draft();
     ModelUsage usage = draft.usage();
-    ModelCost cost = draft.cost();
     ModelPricing pricing = draft.pricing();
 
     ModelUsageRecordDO target = new ModelUsageRecordDO();
@@ -87,14 +86,6 @@ public class PostgresqlModelUsageRecordStore implements ModelUsageRecordStore {
     target.setUsageCacheWriteLongTokens(usage.cacheWriteLongTokens());
     target.setUsageReasoningTokens(usage.reasoningTokens());
     target.setUsageProviderTotalTokens(usage.providerTotalTokens());
-    target.setCostCurrency(cost.currency());
-    target.setCostInput(cost.input());
-    target.setCostOutput(cost.output());
-    target.setCostCacheRead(cost.cacheRead());
-    target.setCostCacheWrite(cost.cacheWrite());
-    target.setCostCacheWriteLong(cost.cacheWriteLong());
-    target.setCostReasoning(cost.reasoning());
-    target.setCostTotal(cost.total());
     target.setPricingCurrency(pricing.currency());
     target.setPricingTier(pricing.pricingTier());
     target.setPricingServiceTier(pricing.serviceTier());
@@ -123,16 +114,6 @@ public class PostgresqlModelUsageRecordStore implements ModelUsageRecordStore {
             source.getUsageCacheWriteLongTokens(),
             source.getUsageReasoningTokens(),
             source.getUsageProviderTotalTokens());
-    ModelCost cost =
-        new ModelCost(
-            source.getCostCurrency(),
-            source.getCostInput(),
-            source.getCostOutput(),
-            source.getCostCacheRead(),
-            source.getCostCacheWrite(),
-            source.getCostCacheWriteLong(),
-            source.getCostReasoning(),
-            source.getCostTotal());
     ModelPricing pricing =
         new ModelPricing(
             source.getPricingCurrency(),
@@ -146,6 +127,7 @@ public class PostgresqlModelUsageRecordStore implements ModelUsageRecordStore {
             source.getPricingCacheWritePerMillionTokens(),
             source.getPricingCacheWriteLongPerMillionTokens(),
             source.getPricingReasoningPerMillionTokens());
+    ModelCost cost = ModelCost.calculate(pricing, usage);
     ModelUsageDraft draft =
         new ModelUsageDraft(
             source.getProviderResourceId(),

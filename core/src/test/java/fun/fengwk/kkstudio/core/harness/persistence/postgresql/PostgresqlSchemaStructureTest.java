@@ -162,6 +162,25 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
+  void harnessEntryDoesNotExposeLegacyVersionColumn() throws SQLException {
+    Set<String> columns = new TreeSet<>();
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "select column_name from information_schema.columns"
+                    + " where table_schema = 'public' and table_name = 'harness_entry'")) {
+      try (ResultSet rs = ps.executeQuery()) {
+        while (rs.next()) {
+          columns.add(rs.getString(1));
+        }
+      }
+    }
+    assertTrue(
+        !columns.contains("version"),
+        () -> "harness_entry must not declare a legacy version column; found=" + columns);
+  }
+
+  @Test
   void usesJsonbForStructuredPayloads() throws SQLException {
     assertColumnType("jsonb", "harness_entry", "payload");
     assertColumnType("jsonb", "harness_thread_input", "payload");
