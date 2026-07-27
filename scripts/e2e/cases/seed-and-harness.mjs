@@ -427,3 +427,59 @@ registerCase({
     assert((await listThreadInputs(ctx, thread.threadId)).length === 0, 'rejected command must not enqueue input')
   },
 })
+
+registerCase({
+  id: 'harness.retry_policy_round_trip',
+  level: 'L1',
+  title: 'Retry policy GET/PUT 全量替换往返',
+  docs: 'GET /api/harness/retry-policy 读 original；PUT 合法且可观察差异的策略；再 GET 断言四字段一致；finally 恢复 original',
+  async run(ctx) {
+    const { json: originalJson } = await ctx.call('GET', '/api/harness/retry-policy')
+    const original = envelopeData(originalJson)
+    assert(original && typeof original === 'object', JSON.stringify(originalJson))
+    assert(
+      ['maxRetries', 'backoffStrategy', 'baseDelayMillis', 'maxDelayMillis'].every((k) => k in original),
+      JSON.stringify(original),
+    )
+
+    const next = {
+      maxRetries: Number(original.maxRetries) === 2 ? 4 : 2,
+      backoffStrategy: original.backoffStrategy === 'FIXED' ? 'EXPONENTIAL' : 'FIXED',
+      baseDelayMillis: Number(original.baseDelayMillis) === 4000 ? 3000 : 4000,
+      maxDelayMillis: Number(original.maxDelayMillis) === 8000 ? 10000 : 8000,
+    }
+    if (next.maxDelayMillis < next.baseDelayMillis) {
+      next.maxDelayMillis = next.baseDelayMillis
+    }
+    assert(
+      next.maxRetries !== Number(original.maxRetries) ||
+        next.backoffStrategy !== original.backoffStrategy ||
+        next.baseDelayMillis !== Number(original.baseDelayMillis) ||
+        next.maxDelayMillis !== Number(original.maxDelayMillis),
+      `next policy must differ from original: ${JSON.stringify({ original, next })}`,
+    )
+
+    try {
+      const { json: putJson } = await ctx.call('PUT', '/api/harness/retry-policy', next)
+      const putData = envelopeData(putJson)
+      assert(Number(putData.maxRetries) === next.maxRetries, JSON.stringify(putData))
+      assert(putData.backoffStrategy === next.backoffStrategy, JSON.stringify(putData))
+      assert(Number(putData.baseDelayMillis) === next.baseDelayMillis, JSON.stringify(putData))
+      assert(Number(putData.maxDelayMillis) === next.maxDelayMillis, JSON.stringify(putData))
+
+      const { json: rereadJson } = await ctx.call('GET', '/api/harness/retry-policy')
+      const reread = envelopeData(rereadJson)
+      assert(Number(reread.maxRetries) === next.maxRetries, JSON.stringify(reread))
+      assert(reread.backoffStrategy === next.backoffStrategy, JSON.stringify(reread))
+      assert(Number(reread.baseDelayMillis) === next.baseDelayMillis, JSON.stringify(reread))
+      assert(Number(reread.maxDelayMillis) === next.maxDelayMillis, JSON.stringify(reread))
+    } finally {
+      await ctx.call('PUT', '/api/harness/retry-policy', {
+        maxRetries: original.maxRetries,
+        backoffStrategy: original.backoffStrategy,
+        baseDelayMillis: original.baseDelayMillis,
+        maxDelayMillis: original.maxDelayMillis,
+      })
+    }
+  },
+})
