@@ -7,7 +7,6 @@ import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSource;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionHandlerRegistry;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionTransactions;
-import fun.fengwk.kkstudio.harness.runtime.session.SessionCommandCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
 
@@ -24,12 +23,6 @@ public class HarnessCommandConfiguration {
   public ThreadCommandCoordinator threadCommandCoordinator(
       ThreadCommandTransactions transactions, RuntimeConfigSource configSource, Clock clock) {
     return new ThreadCommandCoordinator(transactions, configSource, clock);
-  }
-
-  @Bean
-  public SessionCommandCoordinator sessionCommandCoordinator(
-      ThreadCommandTransactions transactions, RuntimeConfigSource configSource, Clock clock) {
-    return new SessionCommandCoordinator(transactions, configSource, clock);
   }
 
   @Bean

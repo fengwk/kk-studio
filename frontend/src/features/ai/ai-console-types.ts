@@ -83,13 +83,6 @@ export interface ModelDraft {
   pricing: ModelPricingDraft
 }
 
-export interface AgentExecutionPolicyDraft {
-  maxTurns: string
-  maxDepth: string
-  maxDirectSubagents: string
-  maxTotalSubagents: string
-}
-
 export interface AgentDraft {
   name: string
   description: string
@@ -99,8 +92,6 @@ export interface AgentDraft {
   environmentName: string
   tools: string[]
   skills: string[]
-  allowedSubagents: string[]
-  executionPolicy: AgentExecutionPolicyDraft
 }
 
 export interface ConfirmModalState {

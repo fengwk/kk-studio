@@ -17,8 +17,7 @@ import java.util.List;
 public interface ThreadCommandMapper extends BaseMapper {
 
   @Insert(
-      "insert into harness_session (id, title, created_at, updated_at) "
-          + "values (#{id}, #{title}, #{now}, #{now})")
+      "insert into harness_session (id, title, created_at) " + "values (#{id}, #{title}, #{now})")
   int insertSession(
       @Param("id") long id, @Param("title") String title, @Param("now") OffsetDateTime now);
 
@@ -40,17 +39,6 @@ public interface ThreadCommandMapper extends BaseMapper {
       @Param("id") long id,
       @Param("headEntryId") Long headEntryId,
       @Param("now") OffsetDateTime now);
-
-  @Select("select id, title, created_at, updated_at from harness_session where id = #{sessionId}")
-  @Results(
-      id = "sessionResultMap",
-      value = {
-        @Result(column = "id", property = "id"),
-        @Result(column = "title", property = "title"),
-        @Result(column = "created_at", property = "createdAt"),
-        @Result(column = "updated_at", property = "updatedAt")
-      })
-  ThreadCommandRow findSession(@Param("sessionId") long sessionId);
 
   @Select(
       "select id, session_id, parent_entry_id, entry_type, payload::text as payload_json, created_at "

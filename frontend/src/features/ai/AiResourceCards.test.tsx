@@ -52,13 +52,6 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
       environmentName: 'local',
       tools: ['read', 'bash', 'grep'],
       skills: ['dev'],
-      allowedSubagents: ['helper'],
-      executionPolicy: {
-        maxTurns: 10,
-        maxDepth: 2,
-        maxDirectSubagents: 3,
-        maxTotalSubagents: 4,
-      },
     },
     version: 1,
     createTime: null,
@@ -100,7 +93,7 @@ describe('AI resource cards', () => {
     )
 
     expect(screen.getByText('minimax/MiniMax')).toBeInTheDocument()
-    expect(screen.getByText('turns 10 · depth 2 · direct 3 · total 4')).toBeInTheDocument()
+    // Card shows tools and skills truncated; remaining tools (3 of 2) roll up to +1.
     expect(screen.getByText('+1')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '编辑 assistant' }))
     await user.click(screen.getByRole('button', { name: '删除 assistant' }))
@@ -118,8 +111,6 @@ describe('AI resource cards', () => {
             environmentName: null,
             tools: [],
             skills: [],
-            allowedSubagents: [],
-            executionPolicy: {},
           },
         })}
         models={[]}

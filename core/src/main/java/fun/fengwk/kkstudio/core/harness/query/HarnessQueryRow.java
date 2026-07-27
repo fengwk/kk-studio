@@ -11,8 +11,6 @@ public class HarnessQueryRow {
   private Long sessionId;
   private Long threadId;
   private String title;
-  private Long parentSessionId;
-  private Long parentInvocationId;
   private Long parentEntryId;
   private String entryType;
   private String payloadJson;

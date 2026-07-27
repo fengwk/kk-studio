@@ -3,7 +3,7 @@ import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/
 
 export type SessionTreeFilter = 'conversation' | 'all'
 
-export type SessionEntryKind = 'user' | 'assistant' | 'tool' | 'custom' | 'label' | 'other'
+export type SessionEntryKind = 'user' | 'assistant' | 'tool' | 'custom' | 'other'
 
 export interface SessionTreeEntry {
   entry: HarnessSessionEntryDTO
@@ -53,7 +53,7 @@ export function buildSessionEntryTree(
   const entriesById = new Map(entries.map((entry) => [entry.entryId, entry]))
   const visibleEntries = entries.filter((entry) => {
     const kind = sessionEntryKind(entry)
-    return matchesSessionTreeFilter(kind, filter) && matchesSessionTreeEntrySearch(entry, kind, searchTokens)
+    return matchesSessionTreeFilter(kind, filter) && matchesSessionTreeEntrySearch(entry, searchTokens)
   })
   const visibleIds = new Set(visibleEntries.map((entry) => entry.entryId))
   const visibleParentById = new Map<string, string | null>()
@@ -113,7 +113,7 @@ export function buildSessionEntryTree(
       entry,
       kind: sessionEntryKind(entry),
       depth,
-      preview: sessionEntryPreview(entry, sessionEntryKind(entry)),
+      preview: sessionEntryPreview(entry),
       isBranchPoint,
       hasBranchConnector,
       isLastSibling,
@@ -176,21 +176,17 @@ function connectorsAtDepth(connectors: SessionTreeConnector[], depth: number): S
 
 function matchesSessionTreeEntrySearch(
   entry: HarnessSessionEntryDTO,
-  kind: SessionEntryKind,
   tokens: string[],
 ): boolean {
   if (tokens.length === 0) {
     return true
   }
-  const haystack = sessionEntrySearchText(entry, kind)
+  const haystack = sessionEntrySearchText(entry)
   return tokens.every((token) => haystack.includes(token))
 }
 
 export function sessionEntryKind(entry: HarnessSessionEntryDTO): SessionEntryKind {
   const entryType = entry.entryType
-  if (entryType === 'LABEL') {
-    return 'label'
-  }
   if (entryType === 'CUSTOM_MESSAGE') {
     return 'custom'
   }
@@ -238,23 +234,13 @@ export function sessionEntryText(entry: HarnessSessionEntryDTO): string {
 }
 
 /** Single-line preview used by the tree row. Explicit `thinking` blocks are excluded. */
-export function sessionEntryPreview(
-  entry: HarnessSessionEntryDTO,
-  kind: SessionEntryKind,
-  limit: number = PROJECTED_PREVIEW_LIMIT,
-): string {
-  if (kind === 'label') {
-    return truncatePreview(flattenVisibleText(getString(parsePayload(entry.payloadJson).label)), limit) || '无标签'
-  }
+export function sessionEntryPreview(entry: HarnessSessionEntryDTO, limit: number = PROJECTED_PREVIEW_LIMIT): string {
   const flat = flattenVisibleText(sessionEntryVisibleText(entry))
   return flat ? truncatePreview(flat, limit) : '无正文'
 }
 
 /** Lower-cased visible text used for keyword matching. Preview limits never apply to search. */
-export function sessionEntrySearchText(entry: HarnessSessionEntryDTO, kind: SessionEntryKind): string {
-  if (kind === 'label') {
-    return flattenVisibleText(getString(parsePayload(entry.payloadJson).label)).toLowerCase()
-  }
+export function sessionEntrySearchText(entry: HarnessSessionEntryDTO): string {
   return flattenVisibleText(sessionEntryVisibleText(entry)).toLowerCase()
 }
 

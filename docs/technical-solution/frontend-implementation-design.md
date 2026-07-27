@@ -107,8 +107,7 @@ AgentDefinitionDTO {
   modelId, variant,
   config: {
     environmentName: string | null,
-    tools[], skills[], allowedSubagents[],
-    executionPolicy: { maxTurns?, maxDepth?, maxDirectSubagents?, maxTotalSubagents? }
+    tools[], skills[]
   }
 }
 ```
@@ -131,8 +130,7 @@ decoration queue =
 
 | 来源 | 前端行为 |
 | --- | --- |
-| `message` / `compaction` / `custom_message` / `assistant_error` Entry | 稳定对话气泡与路径语义基线 |
-| `agent_change` / `model_change` Entry | meta 气泡 |
+| `MESSAGE` / `CUSTOM_MESSAGE` / `ASSISTANT_ERROR` Entry | 稳定对话气泡与路径语义基线 |
 | `RUNTIME_CONFIG` Entry | 配置快照事实；不渲染完整配置气泡 |
 | QUEUED `user_message` / `custom_message` input | 不进入 transcript；显示在 Working 装饰栏 |
 | APPLIED input | 不渲染；Entry 与 apply 同事务，Entries 为唯一 transcript 权威 |

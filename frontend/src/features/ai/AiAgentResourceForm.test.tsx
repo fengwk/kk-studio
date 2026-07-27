@@ -45,7 +45,7 @@ function modelWithVariants(): AgentModelView {
 }
 
 describe('AgentForm current contracts', () => {
-  it('selects model/variant/environment and marks invalid tools', async () => {
+  it('selects model/variant/environment and toggles tools', async () => {
     const user = userEvent.setup()
     function Harness() {
       const [draft, setDraft] = useState<AgentDraft>({
@@ -57,26 +57,6 @@ describe('AgentForm current contracts', () => {
         <AgentForm
           draft={draft}
           models={[modelWithVariants()]}
-          agents={[
-            {
-              id: 'a2',
-              name: 'researcher',
-              description: null,
-              systemPrompt: null,
-              modelId: 'm1',
-              variant: 'default',
-              config: {
-                environmentName: null,
-                tools: [],
-                skills: [],
-                allowedSubagents: [],
-                executionPolicy: {},
-              },
-              version: 1,
-              createTime: null,
-              updateTime: null,
-            },
-          ]}
           environments={[
             {
               name: 'platform',
@@ -107,12 +87,10 @@ describe('AgentForm current contracts', () => {
     expect(missingTool).not.toBeChecked()
     await user.selectOptions(screen.getByLabelText('Environment'), 'local')
     await user.click(screen.getByLabelText(/bash/))
-    await user.click(screen.getByLabelText(/researcher/))
     expect(screen.getByLabelText(/bash/)).toBeChecked()
-    expect(screen.getByLabelText(/researcher/)).toBeChecked()
   })
 
-  it('renders field-level errors for structured Agent settings', () => {
+  it('renders field-level errors for tools, skills, and environmentName', () => {
     render(
       <AgentForm
         draft={emptyAgentDraft(modelWithVariants())}
@@ -121,8 +99,7 @@ describe('AgentForm current contracts', () => {
           variant: '请选择 Variant',
           tools: 'Tools 冲突',
           skills: 'Skills 冲突',
-          allowedSubagents: 'Subagents 冲突',
-          executionPolicy: 'Policy 非法',
+          environmentName: 'Env 缺失',
         }}
         onChange={() => undefined}
       />,
@@ -131,7 +108,6 @@ describe('AgentForm current contracts', () => {
     expect(screen.getByText('请选择 Variant')).toBeInTheDocument()
     expect(screen.getByText('Tools 冲突')).toBeInTheDocument()
     expect(screen.getByText('Skills 冲突')).toBeInTheDocument()
-    expect(screen.getByText('Subagents 冲突')).toBeInTheDocument()
-    expect(screen.getByText('Policy 非法')).toBeInTheDocument()
+    expect(screen.getByText('Env 缺失')).toBeInTheDocument()
   })
 })

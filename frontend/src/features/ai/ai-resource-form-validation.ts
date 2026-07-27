@@ -24,8 +24,6 @@ export type ResourceFieldKey =
   | 'environmentName'
   | 'tools'
   | 'skills'
-  | 'allowedSubagents'
-  | 'executionPolicy'
   | 'general'
 
 export interface ResourceFormValidationResult {
@@ -75,8 +73,6 @@ export function toUserFacingErrorMessage(error: unknown): string {
     { match: /baseUrl/i, message: '请填写 Base URL' },
     { match: /tools.*重名|tools/i, message: 'Tools 名称冲突，请检查勾选项' },
     { match: /skills.*重名|skills/i, message: 'Skills 名称冲突，请检查勾选项' },
-    { match: /allowedSubagents/i, message: 'Subagents 不能重复' },
-    { match: /executionPolicy/i, message: '执行策略限制必须为正整数' },
     { match: /Network Error|Failed to fetch|ECONNREFUSED|timeout/i, message: '网络异常，请稍后重试' },
     { match: /401|Unauthorized/i, message: '没有权限执行此操作' },
     { match: /403|Forbidden/i, message: '没有权限执行此操作' },
@@ -151,12 +147,6 @@ function mapError(error: unknown): ResourceFormValidationResult {
   }
   if (/skills/i.test(raw)) {
     return { ok: false, message, fields: { skills: message } }
-  }
-  if (/allowedSubagents/i.test(raw)) {
-    return { ok: false, message, fields: { allowedSubagents: message } }
-  }
-  if (/executionPolicy/i.test(raw)) {
-    return { ok: false, message, fields: { executionPolicy: message } }
   }
   if (/name/i.test(raw) && !/variant/i.test(raw)) {
     return { ok: false, message, fields: { name: message } }

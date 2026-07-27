@@ -79,8 +79,6 @@ describe('ai-resource-form-validation additional branches', () => {
     ['baseUrl is invalid', /Base URL/],
     ['tools 去前缀后存在重名', /Tools/],
     ['skills 去前缀后存在重名', /Skills/],
-    ['allowedSubagents cannot repeat', /Subagents/],
-    ['executionPolicy.maxTurns must be positive', /执行策略/],
     ['Network Error', /网络异常/],
     ['401 Unauthorized', /没有权限/],
     ['403 Forbidden', /没有权限/],
@@ -161,16 +159,6 @@ describe('ai-resource-form-validation additional branches', () => {
     // empty variant is a valid "use model default" override
     [agent({ tools: ['one/read', 'two/read'] }), 'tools'],
     [agent({ skills: ['one/dev', 'two/dev'] }), 'skills'],
-    [agent({ allowedSubagents: ['helper', 'helper'] }), 'allowedSubagents'],
-    [
-      agent({
-        executionPolicy: {
-          ...agent().executionPolicy,
-          maxTurns: '0',
-        },
-      }),
-      'executionPolicy',
-    ],
   ] as Array<[AgentDraft, string]>)('maps invalid agent body %# to %s', (agentDraft, field) => {
     const result = validate({ kind: 'agent', mode: 'create' }, { agentDraft })
     expect(result.ok).toBe(false)

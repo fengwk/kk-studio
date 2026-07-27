@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.harness.query;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -22,7 +23,6 @@ import fun.fengwk.kkstudio.core.harness.tool.worker.PostgresqlToolInvocationMapp
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.share.model.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
-import fun.fengwk.kkstudio.share.model.RootActivityDTO;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -60,33 +60,30 @@ class HarnessQueryServicesUnitTest {
             interactionMapper,
             mock(ArtifactStore.class),
             converter,
-            new HarnessObservabilityDtoConverter(),
-            CLOCK);
+            new HarnessObservabilityDtoConverter());
   }
 
   @Test
-  void sessionQueryLoadsRootsEntriesAndRejectsMissing() {
-    HarnessQueryRow root = session(1L, null, "root");
-    when(queryMapper.findSession(1L)).thenReturn(root);
-    when(queryMapper.listRootSessions()).thenReturn(List.of(root));
+  void sessionQueryLoadsSessionsEntriesAndRejectsMissing() {
+    HarnessQueryRow session = session(1L, "root");
+    when(queryMapper.findSession(1L)).thenReturn(session);
+    when(queryMapper.listSessions()).thenReturn(List.of(session));
     when(queryMapper.listEntriesBySession(1L)).thenReturn(List.of(entry(10L, 1L, null, "ROOT")));
 
     HarnessSessionDTO dto = sessionQuery.getSession("1");
     assertEquals("1", dto.getSessionId());
-    assertEquals("1", dto.getRootSessionId());
-    assertEquals(0, dto.getDepth());
-    assertEquals(1, sessionQuery.listRootSessions().size());
+    assertEquals(1, sessionQuery.listSessions().size());
     assertEquals(1, sessionQuery.listEntries("1").size());
     assertThrows(IllegalArgumentException.class, () -> sessionQuery.getSession("2"));
     assertThrows(IllegalArgumentException.class, () -> sessionQuery.listEntries("abc"));
   }
 
   @Test
-  void threadQueryDerivesStatusListsPathInputsAndDisablesEvents() {
+  void threadQueryDerivesStatusListsPathInputs() {
     HarnessQueryRow thread = thread(21L, 1L, 10L, true, false);
     thread.setHasQueuedInput(true);
     when(queryMapper.findThreadView(21L)).thenReturn(thread);
-    when(queryMapper.findSession(1L)).thenReturn(session(1L, null, "root"));
+    when(queryMapper.findSession(1L)).thenReturn(session(1L, "root"));
     when(queryMapper.listAllThreadViews()).thenReturn(List.of(thread));
     when(queryMapper.loadPath(1L, 10L)).thenReturn(List.of(entry(10L, 1L, null, "ROOT")));
     when(queryMapper.listInputsByThread(21L))
@@ -117,7 +114,7 @@ class HarnessQueryServicesUnitTest {
   }
 
   @Test
-  void observabilityProjectsModelInteractionsAndRootActivities() {
+  void observabilityProjectsModelInteractionsAndRejectsUnknownInputs() {
     when(queryMapper.findThreadView(21L)).thenReturn(thread(21L, 1L, 10L, false, false));
     ModelInvocationDO model = new ModelInvocationDO();
     model.setId(7L);
@@ -141,53 +138,33 @@ class HarnessQueryServicesUnitTest {
 
     assertEquals(1, observabilityQuery.listModelInvocations("21").size());
     assertEquals(1, observabilityQuery.listOpenInteractions("21").size());
-    assertTrue(observabilityQuery.listSessionTasks("1").isEmpty());
     assertThrows(
         IllegalArgumentException.class, () -> observabilityQuery.listModelInvocations("9"));
-
-    HarnessQueryRow root = session(1L, null, "root");
-    when(queryMapper.findSession(1L)).thenReturn(root);
-    when(queryMapper.listSessionTree(1L)).thenReturn(List.of(root));
-    HarnessQueryRow thr = thread(21L, 1L, 10L, false, true);
-    thr.setSessionTitle("root");
-    when(queryMapper.listThreadViewsAtSession(1L)).thenReturn(List.of(thr));
-    List<RootActivityDTO> activities = observabilityQuery.listRootActivities("1", 0, 10);
-    assertEquals(1, activities.size());
-    assertEquals("RUNNABLE", activities.get(0).getEventType());
-
-    // child session resolves up to root for activities
-    HarnessQueryRow child = session(2L, 1L, "child");
-    when(queryMapper.findSession(2L)).thenReturn(child);
-    when(queryMapper.findSession(1L)).thenReturn(root);
-    when(queryMapper.listSessionTree(1L)).thenReturn(List.of(root, child));
-    when(queryMapper.listThreadViewsAtSession(2L)).thenReturn(List.of());
-    assertEquals(1, observabilityQuery.listRootActivities("2", 0, 10).size());
     assertThrows(
         IllegalArgumentException.class, () -> observabilityQuery.getArtifact("not-a-number"));
     assertThrows(IllegalArgumentException.class, () -> observabilityQuery.getToolInvocation("0"));
   }
 
   @Test
-  void converterHandlesNullsAndChildSession() {
+  void converterHandlesNulls() {
     assertNull(converter.toSession(null));
     assertNull(converter.toEntry(null));
     assertNull(converter.toThread(null, NOW));
     assertNull(converter.toInput(null));
     assertNull(converter.toInteraction(null));
     assertNull(converter.toModelInvocation(null));
-    HarnessQueryRow child = session(2L, 1L, "child");
-    child.setParentInvocationId(9L);
-    HarnessSessionDTO dto = converter.toSession(child);
-    assertEquals("1", dto.getParentSessionId());
-    assertNull(dto.getRootSessionId());
-    assertNull(dto.getDepth());
+    HarnessQueryRow session = session(2L, "simple");
+    HarnessSessionDTO dto = converter.toSession(session);
+    assertEquals("2", dto.getSessionId());
+    assertEquals("simple", dto.getTitle());
+    assertNotNull(dto.getCreateTime());
+    assertNotNull(dto.getUpdateTime());
   }
 
-  private static HarnessQueryRow session(long id, Long parent, String title) {
+  private static HarnessQueryRow session(long id, String title) {
     HarnessQueryRow row = new HarnessQueryRow();
     row.setId(id);
     row.setTitle(title);
-    row.setParentSessionId(parent);
     row.setCreatedAt(OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
     row.setUpdatedAt(OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
     return row;

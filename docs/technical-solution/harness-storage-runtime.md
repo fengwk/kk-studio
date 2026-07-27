@@ -30,7 +30,7 @@ Durable entity id 使用 PostgreSQL sequence `kk_studio_id_seq`，由 Store/IdGe
 
 ### 4.1 `harness_session`
 
-`id`、`title`、可选 `parent_session_id`/`parent_invocation_id`、时间戳。`parent_invocation_id` 非空时唯一。Session 只组织一份 Entry Tree，不持有 Thread。Child Session 产品工作流当前未实现。
+`id`、`title`、`created_at`（`timestamptz(3)`）。Session 只组织一份 append-only Entry Tree，不持有 Thread 也不持有 Thread 归属。Session 由 Thread `bootstrapThread` 内部私有 helper 与 ROOT / `RUNTIME_CONFIG` Entry 一起原子创建。Session DTO `updateTime` 为 derived observable：列表查询按 `max(entry.created_at)` 派生，没有 stored `updated_at` 列。
 
 ### 4.2 `harness_entry`
 

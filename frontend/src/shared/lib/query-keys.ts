@@ -39,8 +39,6 @@ export const queryKeys = {
     list: ['sessions', 'list'] as const,
     detail: (sessionId: string) => ['sessions', 'detail', sessionId] as const,
     entries: (sessionId: string) => ['sessions', 'detail', sessionId, 'entries'] as const,
-    activities: (sessionId: string) => ['sessions', 'detail', sessionId, 'activities'] as const,
-    taskTree: (sessionId: string) => ['sessions', 'detail', sessionId, 'task-tree'] as const,
   },
   usage: {
     all: ['usage'] as const,

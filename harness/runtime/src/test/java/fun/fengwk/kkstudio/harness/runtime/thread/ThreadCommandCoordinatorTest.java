@@ -342,12 +342,6 @@ class ThreadCommandCoordinatorTest {
     }
 
     @Override
-    public SessionCreation createSession(
-        String title, RuntimeConfigSnapshot initialConfig, Instant now) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
     public BootstrapResult bootstrapThread(
         long threadId,
         long expectedExecutionEpoch,

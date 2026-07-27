@@ -282,14 +282,12 @@ AI Chat 现有模块：
 
 ```text
 ChatPanel
-├── ChatSidebar
-├── ChatRuntimeBar
-├── ChatObservabilityPanel
-├── TaskTimelinePanel
-├── ChatTranscript
-│   └── ChatMessageBubble
-│       └── ChatToolMessage
-└── ChatComposer
+└── ThreadPanel
+    ├── ThreadTranscript
+    ├── ThreadWidgetStack
+    ├── ThreadErrorPanel
+    ├── ThreadComposer
+    └── ThreadStatusFooter
 ```
 
 Canvas Agent 现有模块：

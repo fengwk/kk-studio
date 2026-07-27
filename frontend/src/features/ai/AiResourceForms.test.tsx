@@ -140,13 +140,6 @@ describe('AiResourceForms', () => {
           environmentName: '',
           tools: [],
           skills: [],
-          allowedSubagents: [],
-          executionPolicy: {
-            maxTurns: '',
-            maxDepth: '',
-            maxDirectSubagents: '',
-            maxTotalSubagents: '',
-          },
         }}
         models={[]}
         onChange={() => undefined}
@@ -209,13 +202,6 @@ function AgentFormHarness() {
     environmentName: '',
     tools: [],
     skills: [],
-    allowedSubagents: [],
-    executionPolicy: {
-      maxTurns: '',
-      maxDepth: '',
-      maxDirectSubagents: '',
-      maxTotalSubagents: '',
-    },
   })
   return (
     <AgentForm

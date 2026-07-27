@@ -18,7 +18,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
-import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelAbilitiesDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
@@ -113,10 +112,6 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of());
-    config.setAllowedSubagents(List.of("reviewer"));
-    AgentExecutionPolicyDTO policy = new AgentExecutionPolicyDTO();
-    policy.setMaxTurns(8);
-    config.setExecutionPolicy(policy);
     AgentDefinitionCreateDTO agent = new AgentDefinitionCreateDTO();
     agent.setName("agent-" + suffix);
     agent.setModelId(modelId);
@@ -135,8 +130,6 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
                 .andExpect(jsonPath("$.data.modelId").value(modelId))
                 .andExpect(jsonPath("$.data.config.tools").isEmpty())
                 .andExpect(jsonPath("$.data.config.skills").isEmpty())
-                .andExpect(jsonPath("$.data.config.allowedSubagents[0]").value("reviewer"))
-                .andExpect(jsonPath("$.data.config.executionPolicy.maxTurns").value(8))
                 .andReturn()
                 .getResponse()
                 .getContentAsString());
@@ -206,6 +199,47 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
     mockMvc.perform(get("/api/workspaces")).andExpect(status().isNotFound());
     mockMvc.perform(get("/api/workspaces/1")).andExpect(status().isNotFound());
     mockMvc.perform(get("/api/workspaces/1/agents")).andExpect(status().isNotFound());
+  }
+
+  @Test
+  public void shouldRejectInvalidOrUnknownAgentConfigFields() throws Exception {
+    String namePrefix = "agent-config-" + System.nanoTime();
+
+    mockMvc
+        .perform(
+            post("/api/agents")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"name":"%s-unknown","modelId":"1","variant":"default",
+                    "config":{"tools":[],"skills":[],"unexpected":true}}
+                    """
+                        .formatted(namePrefix)))
+        .andExpect(status().isBadRequest());
+
+    mockMvc
+        .perform(
+            post("/api/agents")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"name":"%s-blank","modelId":"1","variant":"default",
+                    "config":{"environmentName":" ","tools":[],"skills":[]}}
+                    """
+                        .formatted(namePrefix)))
+        .andExpect(status().isBadRequest());
+
+    mockMvc
+        .perform(
+            post("/api/agents")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"name":"%s-unready","modelId":"1","variant":"default",
+                    "config":{"environmentName":"preview","tools":[],"skills":[]}}
+                    """
+                        .formatted(namePrefix)))
+        .andExpect(status().isBadRequest());
   }
 
   private String id(String response) throws Exception {

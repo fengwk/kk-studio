@@ -3,7 +3,6 @@ import type {
   AgentDefinitionCreateDTO,
   AgentDefinitionDTO,
   AgentDefinitionUpdateDTO,
-  AgentExecutionPolicyDTO,
   AgentModelDTO,
 } from '@/shared/api/contracts'
 import type { AgentDraft } from '@/features/ai/ai-console-types'
@@ -14,21 +13,6 @@ function normalizeNames(items: string[] | null | undefined): string[] {
     return []
   }
   return items.map((item) => item.trim()).filter(Boolean)
-}
-
-function normalizeUniqueNames(
-  items: string[] | null | undefined,
-  field: string,
-): string[] {
-  const names = normalizeNames(items)
-  const seen = new Set<string>()
-  for (const name of names) {
-    if (seen.has(name)) {
-      throw new Error(`${field} 不能重复：${name}`)
-    }
-    seen.add(name)
-  }
-  return names
 }
 
 /** UI 可展示为 env/name；持久化给 Agent 时去掉前缀，只保留短名。 */
@@ -68,46 +52,11 @@ export function normalizeCapabilityShortNames(
   return shortNames
 }
 
-function normalizePolicy(policy: AgentExecutionPolicyDTO | null | undefined): AgentDraft['executionPolicy'] {
-  return {
-    maxTurns: policy?.maxTurns != null ? String(policy.maxTurns) : '',
-    maxDepth: policy?.maxDepth != null ? String(policy.maxDepth) : '',
-    maxDirectSubagents: policy?.maxDirectSubagents != null ? String(policy.maxDirectSubagents) : '',
-    maxTotalSubagents: policy?.maxTotalSubagents != null ? String(policy.maxTotalSubagents) : '',
-  }
-}
-
-function parseOptionalPositiveInt(value: string, field: string): number | null {
-  const trimmed = value.trim()
-  if (!trimmed) {
-    return null
-  }
-  const parsed = Number(trimmed)
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${field} must be a positive integer`)
-  }
-  return parsed
-}
-
 function toConfig(draft: AgentDraft): AgentDefinitionConfigDTO {
-  const executionPolicy: AgentExecutionPolicyDTO = {
-    maxTurns: parseOptionalPositiveInt(draft.executionPolicy.maxTurns, 'executionPolicy.maxTurns'),
-    maxDepth: parseOptionalPositiveInt(draft.executionPolicy.maxDepth, 'executionPolicy.maxDepth'),
-    maxDirectSubagents: parseOptionalPositiveInt(
-      draft.executionPolicy.maxDirectSubagents,
-      'executionPolicy.maxDirectSubagents',
-    ),
-    maxTotalSubagents: parseOptionalPositiveInt(
-      draft.executionPolicy.maxTotalSubagents,
-      'executionPolicy.maxTotalSubagents',
-    ),
-  }
   return {
     environmentName: trimToNull(draft.environmentName),
     tools: normalizeCapabilityShortNames(draft.tools, 'tools'),
     skills: normalizeCapabilityShortNames(draft.skills, 'skills'),
-    allowedSubagents: normalizeUniqueNames(draft.allowedSubagents, 'allowedSubagents'),
-    executionPolicy,
   }
 }
 
@@ -122,13 +71,6 @@ export function emptyAgentDraft(model?: AgentModelDTO): AgentDraft {
     environmentName: '',
     tools: [],
     skills: [],
-    allowedSubagents: [],
-    executionPolicy: {
-      maxTurns: '',
-      maxDepth: '',
-      maxDirectSubagents: '',
-      maxTotalSubagents: '',
-    },
   }
 }
 
@@ -143,8 +85,6 @@ export function toAgentDraft(agent: AgentDefinitionDTO): AgentDraft {
     environmentName: config.environmentName || '',
     tools: normalizeNames(config.tools),
     skills: normalizeNames(config.skills),
-    allowedSubagents: normalizeNames(config.allowedSubagents),
-    executionPolicy: normalizePolicy(config.executionPolicy),
   }
 }
 

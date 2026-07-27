@@ -35,7 +35,7 @@ final class AgentDefinitionLiveCapabilityValidator {
 
   void validate(AgentDefinitionConfigDTO config) {
     Objects.requireNonNull(config, "config");
-    String environmentName = blankToNull(config.getEnvironmentName());
+    String environmentName = config.getEnvironmentName();
     LiveEnvironment selectedEnvironment = null;
     if (environmentName != null) {
       selectedEnvironment = requireReadyEnvironment(environmentName);
@@ -164,9 +164,5 @@ final class AgentDefinitionLiveCapabilityValidator {
         && value.indexOf('/') < 0
         && value.indexOf('@') < 0
         && value.indexOf('\\') < 0;
-  }
-
-  private static String blankToNull(String value) {
-    return value == null || value.isBlank() ? null : value;
   }
 }

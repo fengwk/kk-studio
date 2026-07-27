@@ -24,8 +24,6 @@ vi.mock('@/shared/api/harness-service', () => ({
     listThreadInputs: vi.fn(),
     submitThreadMessage: vi.fn(),
     createThreadRealtimeStream: vi.fn(),
-    listRootActivities: vi.fn(),
-    listSessionTasks: vi.fn(),
     setThreadYolo: vi.fn(),
     getThreadUsage: vi.fn(),
     listThreadToolInvocations: vi.fn(),
@@ -63,9 +61,7 @@ describe('useAgentThreadController', () => {
           config: {
             environmentName: null,
             tools: [],
-            skills: [],
-            allowedSubagents: [],
-            executionPolicy: {},
+            skills: []
           },
           createTime: null,
           updateTime: null,
@@ -129,10 +125,6 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.getSession).mockResolvedValue({
       sessionId: 's1',
       title: 'title',
-      rootSessionId: 's1',
-      parentSessionId: null,
-      parentInvocationId: null,
-      depth: 0,
       createTime: null,
       updateTime: null,
     })
@@ -140,8 +132,6 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.getThread).mockResolvedValue(thread)
     vi.mocked(harnessService.listThreadEntries).mockResolvedValue([])
     vi.mocked(harnessService.listThreadInputs).mockResolvedValue([])
-    vi.mocked(harnessService.listRootActivities).mockResolvedValue([])
-    vi.mocked(harnessService.listSessionTasks).mockResolvedValue([])
     vi.mocked(harnessService.getThreadUsage).mockResolvedValue({
       scopeType: 'thread',
       scopeId: '1',

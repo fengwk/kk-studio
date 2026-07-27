@@ -1,7 +1,6 @@
 import { apiBaseUrl, apiClient, type HttpClient } from '@/shared/api/client'
 import type {
   HarnessSessionDTO,
-  HarnessSessionCreateDTO,
   HarnessSessionEntryDTO,
   HarnessThreadAgentSetDTO,
   HarnessThreadBootstrapDTO,
@@ -16,8 +15,6 @@ import type {
   HarnessThreadStopResultDTO,
   HarnessThreadYoloSetDTO,
   ModelUsageSummaryDTO,
-  RootActivityDTO,
-  SubagentTaskDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts'
 
@@ -57,16 +54,10 @@ export function createHarnessService(client: HttpClient = apiClient) {
     getThreadUsage: (threadId: string): Promise<ModelUsageSummaryDTO> =>
       client.get(`/usage/threads/${encodeURIComponent(threadId)}`),
     listSessions: (): Promise<HarnessSessionDTO[]> => client.get('/sessions'),
-    createSession: (data: HarnessSessionCreateDTO = {}): Promise<HarnessSessionDTO> =>
-      client.post('/sessions', data),
     getSession: (sessionId: string): Promise<HarnessSessionDTO> =>
       client.get(`/sessions/${encodeURIComponent(sessionId)}`),
     listSessionEntries: (sessionId: string): Promise<HarnessSessionEntryDTO[]> =>
       client.get(`/sessions/${encodeURIComponent(sessionId)}/entries`),
-    listRootActivities: (sessionId: string, afterEventId = '0'): Promise<RootActivityDTO[]> =>
-      client.get(`/sessions/${encodeURIComponent(sessionId)}/activities`, { params: { afterEventId } }),
-    listSessionTasks: (sessionId: string): Promise<SubagentTaskDTO[]> =>
-      client.get(`/sessions/${encodeURIComponent(sessionId)}/tasks`),
     /** Redis-backed realtime SSE tail. Cursor is a Redis stream id (`ms-seq`). */
     createThreadRealtimeStream: (threadId: string, afterStreamId = '0-0'): EventSource => {
       const query = new URLSearchParams({ afterEventId: afterStreamId })

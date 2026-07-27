@@ -178,9 +178,8 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
 
   private static String definitionConfig() {
     return """
-        {"tools":[],"skills":[],"allowedSubagents":[],"executionPolicy":{"maxTurns":8,"maxDepth":3,"maxDirectSubagents":2,"maxTotalSubagents":4}}
-        """
-        .trim();
+        {"tools":[],"skills":[]}
+        """.trim();
   }
 
   private static String modelConfig(String defaultVariant) {

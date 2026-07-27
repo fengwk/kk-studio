@@ -3,15 +3,16 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { HistoryBranchPanel } from '@/features/ai/HistoryBranchPanel'
+import type { HarnessSessionEntryDTO } from '@/shared/api/contracts'
 
-const branchEntries = [
-  { entryId: 'root', sessionId: 's', parentEntryId: null, entryType: 'ROOT', payloadJson: '{}', createTime: null },
-  { entryId: 'user', sessionId: 's', parentEntryId: 'root', entryType: 'MESSAGE', payloadJson: '{"message":{"role":"USER","contents":[{"type":"text","text":"user prompt"}]}}', createTime: null },
-  { entryId: 'assistant', sessionId: 's', parentEntryId: 'user', entryType: 'MESSAGE', payloadJson: '{"message":{"role":"ASSISTANT","contents":[{"type":"text","text":"assistant reply"}]}}', createTime: null },
-  { entryId: 'tool', sessionId: 's', parentEntryId: 'assistant', entryType: 'MESSAGE', payloadJson: '{"message":{"role":"TOOL","contents":[{"type":"text","text":"tool result"}]}}', createTime: null },
-  { entryId: 'tool2', sessionId: 's', parentEntryId: 'assistant', entryType: 'MESSAGE', payloadJson: '{"message":{"role":"TOOL","contents":[{"type":"text","text":"another tool result"}]}}', createTime: null },
-  { entryId: 'follow-up', sessionId: 's', parentEntryId: 'tool', entryType: 'MESSAGE', payloadJson: '{"message":{"role":"ASSISTANT","contents":[{"type":"text","text":"follow up"}]}}', createTime: null },
-  { entryId: 'follow-up-2', sessionId: 's', parentEntryId: 'tool2', entryType: 'MESSAGE', payloadJson: '{"message":{"role":"ASSISTANT","contents":[{"type":"text","text":"follow up two"}]}}', createTime: null },
+const branchEntries: HarnessSessionEntryDTO[] = [
+  { entryId: 'root', parentEntryId: null, entryType: 'ROOT', payloadJson: '{}', createTime: null },
+  { entryId: 'user', parentEntryId: 'root', entryType: 'MESSAGE', payloadJson: '{"message":{"role":"USER","contents":[{"type":"text","text":"user prompt"}]}}', createTime: null },
+  { entryId: 'assistant', parentEntryId: 'user', entryType: 'MESSAGE', payloadJson: '{"message":{"role":"ASSISTANT","contents":[{"type":"text","text":"assistant reply"}]}}', createTime: null },
+  { entryId: 'tool', parentEntryId: 'assistant', entryType: 'MESSAGE', payloadJson: '{"message":{"role":"TOOL","contents":[{"type":"text","text":"tool result"}]}}', createTime: null },
+  { entryId: 'tool2', parentEntryId: 'assistant', entryType: 'MESSAGE', payloadJson: '{"message":{"role":"TOOL","contents":[{"type":"text","text":"another tool result"}]}}', createTime: null },
+  { entryId: 'follow-up', parentEntryId: 'tool', entryType: 'MESSAGE', payloadJson: '{"message":{"role":"ASSISTANT","contents":[{"type":"text","text":"follow up"}]}}', createTime: null },
+  { entryId: 'follow-up-2', parentEntryId: 'tool2', entryType: 'MESSAGE', payloadJson: '{"message":{"role":"ASSISTANT","contents":[{"type":"text","text":"follow up two"}]}}', createTime: null },
 ]
 
 describe('HistoryBranchPanel', () => {
@@ -95,9 +96,8 @@ describe('HistoryBranchPanel', () => {
 
   it('renders a tree projection that fits within a single line and trims long previews with ellipsis', () => {
     const longText = 'very long message '.repeat(50).trim()
-    const longEntry = {
+    const longEntry: HarnessSessionEntryDTO = {
       entryId: 'long-entry',
-      sessionId: 's',
       parentEntryId: 'user',
       entryType: 'MESSAGE',
       payloadJson: JSON.stringify({ message: { role: 'ASSISTANT', contents: [{ type: 'text', text: longText }] } }),

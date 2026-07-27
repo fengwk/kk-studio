@@ -56,7 +56,7 @@ Model 契约收敛在 runtime 模块的 `harness.runtime.model` 子树；LangCha
 web -> Core application API / share DTO
 
 Core composition root -> Runtime inbound API
-  ThreadCommandCoordinator / SessionCommandCoordinator / InteractionCoordinator
+  ThreadCommandCoordinator / InteractionCoordinator
   ThreadReconciler / ModelWorker / ToolWorker
 
 Runtime -> outbound SPI <- Core adapters
@@ -184,18 +184,18 @@ Approval、clarification、resource selection 与 external callback 都是 Inter
 | Artifact | `harness_artifact` | 全局不可变 Tool 输出 bytes |
 | Retry policy | `harness_retry_policy` | 全局自动重试策略 |
 
-Root activity 由 durable facts 即时查询投影。
+Thread active 视图由 durable facts 即时查询投影。
 
 ## 4. 写者边界
 
 | 写者 | 可写 | 不可写 |
 | --- | --- | --- |
-| Session/Thread command coordinator | 新建 Session/Thread、初始 ROOT/RUNTIME_CONFIG Entry、静止 Thread 的 head 重定位、typed Input | 推进运行中 Thread 的语义 head |
+| Thread command coordinator | 新建 Thread；`bootstrapThread` 内部创建 Session / 初始 ROOT/RUNTIME_CONFIG Entry、静止 Thread 的 head 重定位、typed Input | 推进运行中 Thread 的语义 head |
 | `ThreadReconciler` | 已有 Thread 的 Entry/head 推进、Input apply、ModelInvocation 创建、ToolInvocation 创建、Usage apply 路径 | 外部 Provider/Tool I/O |
 | `ModelWorker` | ModelInvocation 状态 / lease / terminal / realtime | Entry/head |
 | `ToolWorker` | ToolInvocation 状态 / lease / terminal / realtime | Entry/head |
 | Interaction transaction | Interaction 与 owner dispatchable/runnable | 越权改 Entry |
-| Thread command transaction | Session 创建、head rebind、Input enqueue、Stop epoch | 绕过 Reconciler 推进语义 head |
+| Thread command transaction | Thread 创建、Session 私有 bootstrap bundle、head rebind、Input enqueue、Stop epoch | 绕过 Reconciler 推进语义 head |
 
 command 侧只负责 bootstrap 与 head 重定位；`ThreadReconciler` 是执行过程中语义推进的唯一写者。一次 activation：
 

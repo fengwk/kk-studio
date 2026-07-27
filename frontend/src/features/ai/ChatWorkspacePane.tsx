@@ -8,7 +8,7 @@ import {
   sortWithRunningFirst,
   type ChatPane,
   type PaneSortPreference,
-  } from '@/features/ai/chat-pane-state'
+} from '@/features/ai/chat-pane-state'
 import {
   canRebindThread,
   isRunningThread,
@@ -498,7 +498,6 @@ function BoundThreadPane({
         pending={controller.pending}
         disabled={controller.disabled}
         observability={controller.observability}
-        taskTimeline={controller.taskTimeline}
         actionError={rebindBlockedReason ?? controller.actionError}
         onDismissActionError={() => {
           setRebindBlockedReason(null)

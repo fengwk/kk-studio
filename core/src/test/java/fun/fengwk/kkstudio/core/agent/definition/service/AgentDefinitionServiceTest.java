@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
-import fun.fengwk.kkstudio.share.model.AgentExecutionPolicyDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
@@ -42,8 +41,6 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     AgentDefinitionDTO definition = agentDefinitionService.createAgent(agent(model.getId(), name));
     assertEquals(List.of(), definition.getConfig().getTools());
     assertEquals(List.of(), definition.getConfig().getSkills());
-    assertEquals(List.of("reviewer"), definition.getConfig().getAllowedSubagents());
-    assertEquals(8, definition.getConfig().getExecutionPolicy().getMaxTurns());
     assertThrows(
         IllegalArgumentException.class,
         () -> agentDefinitionService.createAgent(agent(model.getId(), name)));
@@ -128,10 +125,6 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     // tools/skills require live capability validation; keep empty for basic CRUD coverage
     config.setTools(List.of());
     config.setSkills(List.of());
-    config.setAllowedSubagents(List.of("reviewer"));
-    AgentExecutionPolicyDTO policy = new AgentExecutionPolicyDTO();
-    policy.setMaxTurns(8);
-    config.setExecutionPolicy(policy);
     AgentDefinitionCreateDTO dto = new AgentDefinitionCreateDTO();
     dto.setName(name);
     dto.setModelId(modelId);

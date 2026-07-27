@@ -87,10 +87,21 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     assertEquals("1", epoch);
     String configEntryId = boot.path("thread").path("headEntryId").asText();
 
+    // Session has no standalone creation endpoint; it only exists through Thread bootstrap.
+    mockMvc
+        .perform(
+            post("/api/sessions")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"title\":\"standalone\"}"))
+        .andExpect(status().isMethodNotAllowed());
     mockMvc
         .perform(get("/api/sessions/{id}", sessionId))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.sessionId").value(sessionId));
+        .andExpect(jsonPath("$.data.sessionId").value(sessionId))
+        .andExpect(jsonPath("$.data.rootSessionId").doesNotExist())
+        .andExpect(jsonPath("$.data.parentSessionId").doesNotExist())
+        .andExpect(jsonPath("$.data.parentInvocationId").doesNotExist())
+        .andExpect(jsonPath("$.data.depth").doesNotExist());
     mockMvc
         .perform(get("/api/threads/{id}", threadId))
         .andExpect(status().isOk())
@@ -100,6 +111,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.inputSequence").value(0));
     JsonNode entries = readData(get("/api/sessions/{id}/entries", sessionId));
     assertEquals(2, entries.size());
+    assertTrue(entries.get(0).path("sessionId").isMissingNode());
     String rootEntryId = entries.get(0).path("entryId").asText();
 
     // A bootstrap replay on an already bound Thread is a 409.

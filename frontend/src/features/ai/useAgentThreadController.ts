@@ -11,7 +11,6 @@ import { useAgentThreadQueries } from '@/features/ai/useAgentThreadQueries'
 import { useChatTranscriptAutoScroll } from '@/features/ai/useChatTranscriptAutoScroll'
 import { useHarnessThreadRealtime } from '@/features/ai/useHarnessThreadRealtime'
 import { useHarnessThreadObservability } from '@/features/ai/useHarnessThreadObservability'
-import { useHarnessTaskTimeline } from '@/features/ai/useHarnessTaskTimeline'
 import { isConflictError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import { formatModelRef, type AgentModelView } from '@/features/ai/AgentModelView'
@@ -67,7 +66,6 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
     : undefined
   const runtimeLabels = resolveRuntimeLabels(thread, currentAgent, models, providers)
   const observability = useHarnessThreadObservability(threadId, working)
-  const taskTimeline = useHarnessTaskTimeline(sessionId, threadQuery.isSuccess && Boolean(sessionId))
 
   useChatTranscriptAutoScroll(
     bodyRef,
@@ -287,7 +285,6 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
       ...observability,
       yolo: { enabled: Boolean(thread?.yoloEnabled) },
     },
-    taskTimeline,
     actionError,
     dismissActionError: () => setActionError(null),
     setDraft,

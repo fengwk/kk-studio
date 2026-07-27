@@ -102,9 +102,9 @@ class StudioModelUsageControllerTest extends WebPostgresTestSupport {
               connection.setAutoCommit(false);
               try (var st = connection.createStatement()) {
                 st.execute(
-                    "insert into harness_session (id, title, created_at, updated_at) values ("
+                    "insert into harness_session (id, title, created_at) values ("
                         + LARGE_ID
-                        + ", 'usage-test', now(), now())");
+                        + ", 'usage-test', now())");
                 st.execute(
                     "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
                         + " values ("

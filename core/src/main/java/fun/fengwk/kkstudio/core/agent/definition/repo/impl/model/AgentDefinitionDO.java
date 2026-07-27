@@ -26,7 +26,7 @@ public class AgentDefinitionDO {
   /** 覆盖 model.defaultVariant；null/blank 表示使用模型默认。 */
   private String variant;
 
-  /** Agent 配置 JSON（tools/skills/executionPolicy 等）。 */
+  /** Agent 配置 JSON（tools/skills/environmentName 等）。 */
   private String configJson;
 
   /** 乐观锁行版本。 */

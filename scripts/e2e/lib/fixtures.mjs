@@ -189,47 +189,45 @@ export function modelConfigMatrix() {
 export function agentConfigMatrix() {
   return [
     {
-      id: 'valid.empty_lists_and_policy',
+      id: 'valid.empty_lists',
       ok: true,
-      title: '空 tools/skills/subagents + 空 policy',
+      title: '空 tools/skills',
       build: () => ({
         tools: [],
         skills: [],
-        allowedSubagents: [],
-        executionPolicy: {},
       }),
     },
     {
-      id: 'valid.positive_limits',
-      ok: true,
-      title: 'executionPolicy 正整数上限',
+      id: 'invalid.missing_tools',
+      ok: false,
+      expectStatus: 400,
+      messageIncludes: /tools.*required/i,
+      title: 'tools 必填',
       build: () => ({
-        // tools 必须是当前 live registry/platform 可解析名称；此处不依赖具体 tool
-        tools: [],
         skills: [],
-        allowedSubagents: [],
-        executionPolicy: {
-          maxTurns: 8,
-          maxDepth: 2,
-          maxDirectSubagents: 1,
-          maxTotalSubagents: 2,
-        },
       }),
     },
     {
-      id: 'valid.missing_executionPolicy_defaults',
-      ok: true,
-      title: '缺 executionPolicy 时默认 {}',
+      id: 'invalid.missing_skills',
+      ok: false,
+      expectStatus: 400,
+      messageIncludes: /skills.*required/i,
+      title: 'skills 必填',
+      build: () => ({
+        tools: [],
+      }),
+    },
+    {
+      id: 'invalid.unready_environment',
+      ok: false,
+      expectStatus: 400,
+      messageIncludes: /environment.*READY/i,
+      title: 'environmentName 必须是 READY 环境',
       build: () => ({
         tools: [],
         skills: [],
-        allowedSubagents: [],
+        environmentName: `e2e-unready-${crypto.randomUUID()}`,
       }),
-      assertCreated: (agent) => {
-        if (!agent?.config?.executionPolicy || typeof agent.config.executionPolicy !== 'object') {
-          throw new Error(`expected default executionPolicy object, got ${JSON.stringify(agent?.config)}`)
-        }
-      },
     },
     {
       id: 'invalid.unknown_tool',
@@ -240,8 +238,6 @@ export function agentConfigMatrix() {
       build: () => ({
         tools: ['definitely-not-a-real-tool'],
         skills: [],
-        allowedSubagents: [],
-        executionPolicy: {},
       }),
     },
     {
@@ -253,21 +249,30 @@ export function agentConfigMatrix() {
       build: () => ({
         tools: [],
         skills: ['a', 'a'],
-        allowedSubagents: [],
-        executionPolicy: {},
       }),
     },
     {
-      id: 'invalid.non_positive_maxTurns',
+      id: 'invalid.blank_environment_name',
       ok: false,
       expectStatus: 400,
-      messageIncludes: /maxTurns|positive/i,
-      title: 'maxTurns <= 0',
+      messageIncludes: /environmentName|blank/i,
+      title: 'environmentName 空白',
       build: () => ({
         tools: [],
         skills: [],
-        allowedSubagents: [],
-        executionPolicy: { maxTurns: 0 },
+        environmentName: ' ',
+      }),
+    },
+    {
+      id: 'invalid.unknown_field_rejected',
+      ok: false,
+      expectStatus: 400,
+      messageIncludes: /Failed to read request|Bad Request/i,
+      title: '未知字段 rejected',
+      build: () => ({
+        tools: [],
+        skills: [],
+        unexpected: true,
       }),
     },
   ]

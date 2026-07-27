@@ -19,8 +19,6 @@ import java.util.Optional;
 public interface ThreadCommandTransactions {
   HarnessThread createThread(Instant now);
 
-  SessionCreation createSession(String title, RuntimeConfigSnapshot initialConfig, Instant now);
-
   BootstrapResult bootstrapThread(
       long threadId,
       long expectedExecutionEpoch,
@@ -44,14 +42,6 @@ public interface ThreadCommandTransactions {
       Instant now);
 
   StopResult stop(long threadId, long expectedExecutionEpoch, Instant now);
-
-  record SessionCreation(Session session, SessionEntry rootEntry, SessionEntry configEntry) {
-    public SessionCreation {
-      Objects.requireNonNull(session, "session");
-      Objects.requireNonNull(rootEntry, "rootEntry");
-      Objects.requireNonNull(configEntry, "configEntry");
-    }
-  }
 
   record BootstrapResult(
       Session session, SessionEntry rootEntry, SessionEntry configEntry, HarnessThread thread) {

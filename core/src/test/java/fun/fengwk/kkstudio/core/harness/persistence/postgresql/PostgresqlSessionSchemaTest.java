@@ -48,10 +48,13 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
     }
   }
 
-  /** Session 只组织 Entry Tree：不再存 main_thread_id，Thread 也不再存 session_id，chat_session 已删除。 */
+  /** Session 只组织 Entry Tree；Thread 通过 head Entry 推导 Session。 */
   @Test
   void sessionAndThreadNoLongerCarryEachOthersIdentity() throws SQLException {
     assertFalse(columnExists("harness_session", "main_thread_id"));
+    assertFalse(columnExists("harness_session", "parent_session_id"));
+    assertFalse(columnExists("harness_session", "parent_invocation_id"));
+    assertFalse(columnExists("harness_session", "updated_at"));
     assertFalse(columnExists("harness_thread", "session_id"));
     assertFalse(tableExists("chat_session"));
   }
@@ -180,62 +183,6 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
       thread.insertChildEntry(conn, siblingId, "MESSAGE");
     }
     assertEquals(2L, countEntries(thread.sessionId));
-  }
-
-  @Test
-  void childSessionParentFieldsAreOneConsistentRelation() throws SQLException {
-    ThreadFixture parent = createThread();
-    ThreadFixture child = createThread();
-    ThreadFixture other = createThread();
-    long assistantId = FIXTURE_IDS.incrementAndGet();
-    try (Connection conn = newConnection()) {
-      parent.insertChildEntry(conn, assistantId, "MESSAGE");
-    }
-    long toolId =
-        InvocationFixture.insertQueuedTool(
-            parent, assistantId, 0, "task-call", "PLATFORM", null, 1L);
-
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_harness_session_parent_pair",
-          () -> {
-            try (PreparedStatement ps =
-                conn.prepareStatement(
-                    "update harness_session set parent_session_id = ? where id = ?")) {
-              ps.setLong(1, parent.sessionId);
-              ps.setLong(2, child.sessionId);
-              ps.executeUpdate();
-            }
-          });
-    }
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "fk_harness_session_parent_invocation",
-          () -> {
-            try (PreparedStatement ps =
-                conn.prepareStatement(
-                    "update harness_session set parent_session_id = ?, parent_invocation_id = ?"
-                        + " where id = ?")) {
-              ps.setLong(1, child.sessionId);
-              ps.setLong(2, toolId);
-              ps.setLong(3, other.sessionId);
-              ps.executeUpdate();
-            }
-          });
-    }
-
-    try (Connection conn = newConnection();
-        PreparedStatement ps =
-            conn.prepareStatement(
-                "update harness_session set parent_session_id = ?, parent_invocation_id = ?"
-                    + " where id = ?")) {
-      ps.setLong(1, parent.sessionId);
-      ps.setLong(2, toolId);
-      ps.setLong(3, child.sessionId);
-      assertEquals(1, ps.executeUpdate());
-    }
   }
 
   @Test

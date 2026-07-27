@@ -8,7 +8,6 @@ import java.time.LocalDateTime;
 @Data
 public class HarnessSessionEntryDTO {
   private String entryId;
-  private String sessionId;
   private String parentEntryId;
   private String entryType;
   private String payloadJson;

@@ -1,8 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import static fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits.normalizeLimit;
-import static fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits.requireNonNegativeCursor;
-
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.core.io.ByteArrayResource;
@@ -14,22 +11,18 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.core.harness.observability.service.HarnessObservabilityQueryService;
-import fun.fengwk.kkstudio.core.harness.observability.service.ObservabilityLimits;
 import fun.fengwk.kkstudio.core.harness.observability.service.model.ArtifactContent;
 import fun.fengwk.kkstudio.share.model.InteractionDTO;
 import fun.fengwk.kkstudio.share.model.ModelInvocationDTO;
-import fun.fengwk.kkstudio.share.model.RootActivityDTO;
-import fun.fengwk.kkstudio.share.model.SubagentTaskDTO;
 import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
 
 import java.util.List;
 
-/** Harness observability：Thread tool invocations、activities、artifacts。 */
+/** Harness observability：Thread tool/model/interaction 投影和 artifact 下载。 */
 @RestController
 @RequestMapping("/api")
 public class StudioHarnessObservabilityController {
@@ -39,21 +32,6 @@ public class StudioHarnessObservabilityController {
   public StudioHarnessObservabilityController(
       HarnessObservabilityQueryService observabilityService) {
     this.observabilityService = observabilityService;
-  }
-
-  @GetMapping("/sessions/{id}/activities")
-  public Result<List<RootActivityDTO>> listRootActivities(
-      @PathVariable("id") String id,
-      @RequestParam(value = "afterEventId", required = false) Long afterEventId,
-      @RequestParam(value = "limit", required = false) Integer limit) {
-    long cursor = afterEventId == null ? 0L : afterEventId;
-    requireNonNegativeCursor(cursor, "afterEventId");
-    int bounded = normalizeLimit(limit, ObservabilityLimits.DEFAULT_LIMIT);
-    try {
-      return Results.ok(observabilityService.listRootActivities(id, cursor, bounded));
-    } catch (IllegalArgumentException error) {
-      throw translate(error);
-    }
   }
 
   @GetMapping("/threads/{id}/tool-invocations")
@@ -87,15 +65,6 @@ public class StudioHarnessObservabilityController {
   public Result<List<InteractionDTO>> listOpenInteractions(@PathVariable("id") String id) {
     try {
       return Results.ok(observabilityService.listOpenInteractions(id));
-    } catch (IllegalArgumentException error) {
-      throw translate(error);
-    }
-  }
-
-  @GetMapping("/sessions/{id}/tasks")
-  public Result<List<SubagentTaskDTO>> listSessionTasks(@PathVariable("id") String id) {
-    try {
-      return Results.ok(observabilityService.listSessionTasks(id));
     } catch (IllegalArgumentException error) {
       throw translate(error);
     }

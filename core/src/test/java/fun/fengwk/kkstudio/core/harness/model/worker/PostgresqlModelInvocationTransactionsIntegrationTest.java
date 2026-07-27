@@ -970,8 +970,8 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
       try {
         try (PreparedStatement ps =
             conn.prepareStatement(
-                "insert into harness_session (id, title, created_at, updated_at)"
-                    + " values (?, 'fixture', current_timestamp, current_timestamp)")) {
+                "insert into harness_session (id, title, created_at)"
+                    + " values (?, 'fixture', current_timestamp)")) {
           ps.setLong(1, sessionId);
           ps.executeUpdate();
         }

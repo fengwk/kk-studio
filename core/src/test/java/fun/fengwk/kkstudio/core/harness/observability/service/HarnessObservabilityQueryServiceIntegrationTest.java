@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.core.harness.observability.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -14,7 +13,6 @@ import fun.fengwk.kkstudio.core.harness.model.worker.ModelInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.observability.service.impl.HarnessObservabilityDtoConverter;
 import fun.fengwk.kkstudio.core.harness.observability.service.impl.HarnessObservabilityQueryServiceImpl;
 import fun.fengwk.kkstudio.core.harness.query.HarnessQueryDtoConverter;
-import fun.fengwk.kkstudio.core.harness.query.HarnessQueryRow;
 import fun.fengwk.kkstudio.core.harness.query.PostgresqlHarnessQueryMapper;
 import fun.fengwk.kkstudio.core.harness.tool.worker.PostgresqlToolInvocationMapper;
 import fun.fengwk.kkstudio.core.harness.tool.worker.ToolInvocationDO;
@@ -26,10 +24,8 @@ import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
 
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -68,8 +64,7 @@ class HarnessObservabilityQueryServiceIntegrationTest {
             interactionMapper,
             artifactStore,
             new HarnessQueryDtoConverter(),
-            new HarnessObservabilityDtoConverter(),
-            Clock.fixed(NOW, ZoneOffset.UTC));
+            new HarnessObservabilityDtoConverter());
   }
 
   @Test
@@ -110,18 +105,6 @@ class HarnessObservabilityQueryServiceIntegrationTest {
     assertEquals("QUEUED", listed.get(0).getStatus());
     assertEquals("bash", service.getToolInvocation(Long.toString(row.getId())).getToolName());
     assertEquals(2, service.getArtifact("9001").sizeBytes());
-    assertTrue(service.listSessionTasks("1").isEmpty());
-  }
-
-  @Test
-  void requiresKnownSessionForRootActivities() {
-    when(queryMapper.findSession(1L)).thenReturn(null);
-    assertThrows(IllegalArgumentException.class, () -> service.listRootActivities("1", 0, 10));
-    HarnessQueryRow session = new HarnessQueryRow();
-    session.setId(2L);
-    when(queryMapper.findSession(2L)).thenReturn(session);
-    when(queryMapper.listSessionTree(2L)).thenReturn(List.of(session));
-    when(queryMapper.listThreadViewsAtSession(2L)).thenReturn(List.of());
-    assertTrue(service.listRootActivities("2", 0, 10).isEmpty());
+    assertTrue(listed.stream().allMatch(dto -> dto.getSessionId() != null));
   }
 }
