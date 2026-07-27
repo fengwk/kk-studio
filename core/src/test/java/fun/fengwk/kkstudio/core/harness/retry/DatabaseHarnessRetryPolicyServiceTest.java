@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.core.harness.retry;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -28,9 +27,9 @@ class DatabaseHarnessRetryPolicyServiceTest {
   }
 
   @Test
-  void persistsACompleteValidPolicy() {
+  void upsertsACompleteValidPolicy() {
     HarnessRetryPolicyMapper mapper = mock(HarnessRetryPolicyMapper.class);
-    when(mapper.insert(any(HarnessRetryPolicyDO.class))).thenReturn(1);
+    when(mapper.upsert(anyInt(), anyString(), anyLong(), anyLong())).thenReturn(1);
     DatabaseHarnessRetryPolicyService service = new DatabaseHarnessRetryPolicyService(mapper);
 
     HarnessRetryPolicyDTO saved = service.updateRetryPolicy(policy(2, "FIXED", 3_000L, 3_000L));
@@ -38,7 +37,7 @@ class DatabaseHarnessRetryPolicyServiceTest {
     assertEquals(2, saved.getMaxRetries());
     assertEquals("FIXED", saved.getBackoffStrategy());
     assertEquals(3_000L, saved.getBaseDelayMillis());
-    verify(mapper).insert(any(HarnessRetryPolicyDO.class));
+    verify(mapper).upsert(2, "FIXED", 3_000L, 3_000L);
   }
 
   @Test
@@ -62,17 +61,14 @@ class DatabaseHarnessRetryPolicyServiceTest {
   }
 
   @Test
-  void replacesAnExistingSingletonRow() {
+  void replacesAnExistingSingletonRowThroughUpsert() {
     HarnessRetryPolicyMapper mapper = mock(HarnessRetryPolicyMapper.class);
-    HarnessRetryPolicyDO current = new HarnessRetryPolicyDO();
-    current.setId(1);
-    when(mapper.findForUpdate()).thenReturn(current);
-    when(mapper.update(anyInt(), anyString(), anyLong(), anyLong(), any())).thenReturn(1);
+    when(mapper.upsert(anyInt(), anyString(), anyLong(), anyLong())).thenReturn(1);
     DatabaseHarnessRetryPolicyService service = new DatabaseHarnessRetryPolicyService(mapper);
 
     service.updateRetryPolicy(policy(1, "EXPONENTIAL", 1_000L, 8_000L));
 
-    verify(mapper).update(eq(1), eq("EXPONENTIAL"), eq(1_000L), eq(8_000L), any());
+    verify(mapper).upsert(eq(1), eq("EXPONENTIAL"), eq(1_000L), eq(8_000L));
   }
 
   private static HarnessRetryPolicyDTO policy(

@@ -180,9 +180,9 @@ Approval、clarification、resource selection 与 external callback 都是 Inter
 | 事实 | 表 | 说明 |
 | --- | --- | --- |
 | Thread Goal | `harness_thread_goal` | 按 thread 持久 objective/status；平台 Tool 读写 |
-| Usage | `harness_model_usage` | 每个 Assistant Entry 一条不可变账本 |
+| Usage | `harness_model_usage` | 每个 Assistant Entry 一条不可变账本（持久 token/pricing/created_at；`ModelCost` 由 `ModelCost.calculate(pricing, usage)` 重建） |
 | Artifact | `harness_artifact` | 全局不可变 Tool 输出 bytes |
-| Retry policy | `harness_retry_policy` | 全局自动重试策略 |
+| Retry policy | `harness_retry_policy` | 全局自动重试策略（id=1 单行；不持久化时间戳） |
 
 Thread active 视图由 durable facts 即时查询投影。
 

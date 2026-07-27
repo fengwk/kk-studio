@@ -997,16 +997,15 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
         OffsetDateTime createdOffset = OffsetDateTime.ofInstant(createdAt, ZoneOffset.UTC);
         try (PreparedStatement ps =
             conn.prepareStatement(
-                "insert into harness_model_invocation (id, thread_id, session_id,"
+                "insert into harness_model_invocation (id, thread_id,"
                     + " source_head_entry_id, execution_epoch, request, status, attempt,"
-                    + " created_at) values (?, ?, ?, ?, ?, cast(? as jsonb), 'QUEUED', 1, ?)")) {
+                    + " created_at) values (?, ?, ?, ?, cast(? as jsonb), 'QUEUED', 1, ?)")) {
           ps.setLong(1, invocationId);
           ps.setLong(2, threadId);
-          ps.setLong(3, sessionId);
-          ps.setLong(4, rootEntryId);
-          ps.setLong(5, executionEpoch);
-          ps.setString(6, REQUEST_CODEC.encode(sampleRequest()));
-          ps.setObject(7, createdOffset);
+          ps.setLong(3, rootEntryId);
+          ps.setLong(4, executionEpoch);
+          ps.setString(5, REQUEST_CODEC.encode(sampleRequest()));
+          ps.setObject(6, createdOffset);
           ps.executeUpdate();
         }
         conn.commit();
@@ -1076,7 +1075,7 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
-                "select id, thread_id, session_id, source_head_entry_id, execution_epoch,"
+                "select id, thread_id, source_head_entry_id, execution_epoch,"
                     + " request as request, status, attempt, next_attempt_at, worker_token,"
                     + " worker_until, deadline_at, last_activity_at, result as result,"
                     + " error as error, applied_at, created_at, started_at, finished_at"
@@ -1118,7 +1117,6 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     ModelInvocationDO row = new ModelInvocationDO();
     row.setId(rs.getLong("id"));
     row.setThreadId(rs.getLong("thread_id"));
-    row.setSessionId(rs.getLong("session_id"));
     row.setSourceHeadEntryId(rs.getLong("source_head_entry_id"));
     row.setExecutionEpoch(rs.getLong("execution_epoch"));
     row.setRequestJson(rs.getString("request"));

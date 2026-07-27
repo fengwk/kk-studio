@@ -82,11 +82,9 @@ insert into agent_definition (
 on conflict (id) do nothing;
 
 insert into harness_retry_policy (
-    id, max_retries, backoff_strategy, base_delay_millis, max_delay_millis,
-    created_at, updated_at
+    id, max_retries, backoff_strategy, base_delay_millis, max_delay_millis
 ) values (
-    1, 3, 'EXPONENTIAL', 2000, 60000,
-    current_timestamp, current_timestamp
+    1, 3, 'EXPONENTIAL', 2000, 60000
 )
 on conflict (id) do nothing;
 

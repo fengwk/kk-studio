@@ -442,12 +442,11 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
       TestThreads.Bootstrapped boot, long epoch, long sourceEntryId, String status) {
     long id = nextId();
     jdbc.update(
-        "insert into harness_model_invocation (id, thread_id, session_id, source_head_entry_id,"
-            + " execution_epoch, request, status, attempt, created_at) values (?, ?, ?, ?, ?,"
+        "insert into harness_model_invocation (id, thread_id, source_head_entry_id,"
+            + " execution_epoch, request, status, attempt, created_at) values (?, ?, ?, ?,"
             + " '{}'::jsonb, ?, 1, ?)",
         id,
         boot.threadId(),
-        boot.sessionId(),
         sourceEntryId,
         epoch,
         status,

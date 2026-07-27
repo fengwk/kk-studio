@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.core.harness.retry;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.core.harness.retry.mapper.HarnessRetryPolicyMapper;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
@@ -9,8 +8,6 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.share.model.HarnessRetryPolicyDTO;
 
 import java.time.Duration;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.Objects;
 
 /** 数据库支持的全局 retry policy；schema 必须初始化单例持久行。 */
@@ -41,28 +38,18 @@ public class DatabaseHarnessRetryPolicyService implements HarnessRetryPolicyServ
   }
 
   @Override
-  @Transactional
   public HarnessRetryPolicyDTO updateRetryPolicy(HarnessRetryPolicyDTO retryPolicy) {
     if (retryPolicy == null) {
       throw new IllegalArgumentException("retryPolicy must not be null");
     }
     InvocationRetryPolicy policy = toPolicy(retryPolicy);
-    OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-    HarnessRetryPolicyDO existing = mapper.findForUpdate();
-    if (existing == null) {
-      HarnessRetryPolicyDO row = toDO(policy, now);
-      if (mapper.insert(row) == 1) {
-        return toDto(policy);
-      }
-    }
-    if (mapper.update(
+    if (mapper.upsert(
             policy.maxRetries(),
             policy.backoffStrategy().name(),
             policy.baseDelay().toMillis(),
-            policy.maxDelay().toMillis(),
-            now)
+            policy.maxDelay().toMillis())
         != 1) {
-      throw new IllegalStateException("update harness retry policy failed");
+      throw new IllegalStateException("upsert harness retry policy failed");
     }
     return toDto(policy);
   }
@@ -111,18 +98,6 @@ public class DatabaseHarnessRetryPolicyService implements HarnessRetryPolicyServ
               + " milliseconds");
     }
     return value;
-  }
-
-  private static HarnessRetryPolicyDO toDO(InvocationRetryPolicy policy, OffsetDateTime now) {
-    HarnessRetryPolicyDO row = new HarnessRetryPolicyDO();
-    row.setId(1);
-    row.setMaxRetries(policy.maxRetries());
-    row.setBackoffStrategy(policy.backoffStrategy().name());
-    row.setBaseDelayMillis(policy.baseDelay().toMillis());
-    row.setMaxDelayMillis(policy.maxDelay().toMillis());
-    row.setCreateTime(now);
-    row.setUpdateTime(now);
-    return row;
   }
 
   private static HarnessRetryPolicyDTO toDto(InvocationRetryPolicy policy) {

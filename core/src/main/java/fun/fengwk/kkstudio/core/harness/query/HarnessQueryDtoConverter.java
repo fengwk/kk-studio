@@ -114,7 +114,6 @@ public class HarnessQueryDtoConverter {
     ModelInvocationDTO dto = new ModelInvocationDTO();
     dto.setId(HarnessIds.format(row.getId()));
     dto.setThreadId(HarnessIds.format(row.getThreadId()));
-    dto.setSessionId(HarnessIds.format(row.getSessionId()));
     dto.setSourceHeadEntryId(HarnessIds.format(row.getSourceHeadEntryId()));
     dto.setExecutionEpoch(row.getExecutionEpoch());
     dto.setRequestJson(row.getRequestJson());

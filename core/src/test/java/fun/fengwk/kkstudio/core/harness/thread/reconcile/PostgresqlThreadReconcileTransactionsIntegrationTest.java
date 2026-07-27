@@ -273,7 +273,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     assertEquals("UNSUPPORTED", scalar("select prompt_cache_mode from harness_model_usage"));
     assertEquals("NONE", scalar("select prompt_cache_retention from harness_model_usage"));
     assertEquals("TOOL_CALLS", scalar("select stop_reason from harness_model_usage"));
-    assertEquals("USD", scalar("select cost_currency from harness_model_usage"));
+    assertEquals("USD", scalar("select pricing_currency from harness_model_usage"));
     assertEquals("tier", scalar("select pricing_tier from harness_model_usage"));
     assertEquals("request", scalar("select request_id from harness_model_usage"));
     assertEquals("tier", scalar("select reported_service_tier from harness_model_usage"));

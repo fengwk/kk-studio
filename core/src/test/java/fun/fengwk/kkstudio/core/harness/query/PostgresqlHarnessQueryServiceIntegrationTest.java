@@ -252,12 +252,11 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
     // model + tool + open interaction snapshot
     long modelInvocationId = Long.parseLong(threadId) + 70;
     jdbc.update(
-        "insert into harness_model_invocation (id, thread_id, session_id, source_head_entry_id,"
-            + " execution_epoch, request, status, attempt, created_at) values (?, ?, ?, ?, ?,"
+        "insert into harness_model_invocation (id, thread_id, source_head_entry_id,"
+            + " execution_epoch, request, status, attempt, created_at) values (?, ?, ?, ?,"
             + " '{\"model\":\"stub\"}'::jsonb, 'QUEUED', 1, ?)",
         modelInvocationId,
         Long.parseLong(threadId),
-        bootstrap.session().id(),
         leafEntryId,
         executionEpoch,
         OffsetDateTime.ofInstant(NOW.plusSeconds(4), ZoneOffset.UTC));

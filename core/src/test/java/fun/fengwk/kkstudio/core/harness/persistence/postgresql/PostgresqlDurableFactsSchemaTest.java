@@ -131,8 +131,7 @@ class PostgresqlDurableFactsSchemaTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void usageLedgerAssistantEntryMustMatchCarrierSessionAndCostTotalStaysConsistent()
-      throws SQLException {
+  void usageLedgerAssistantEntryMustMatchCarrierSession() throws SQLException {
     ThreadFixture first = createThread();
     ThreadFixture second = createThread();
     long firstAssistant = appendAssistant(first);
@@ -160,19 +159,6 @@ class PostgresqlDurableFactsSchemaTest extends PostgresSchemaSupport {
           "uk_harness_model_usage_assistant_entry",
           () -> insertUsage(conn, first.sessionId, second.threadId, firstAssistant));
     }
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_harness_model_usage_cost_total",
-          () -> {
-            try (PreparedStatement ps =
-                conn.prepareStatement(
-                    "update harness_model_usage set cost_input = 1 where assistant_entry_id = ?")) {
-              ps.setLong(1, firstAssistant);
-              ps.executeUpdate();
-            }
-          });
-    }
   }
 
   private ThreadFixture createThread() throws SQLException {
@@ -185,6 +171,7 @@ class PostgresqlDurableFactsSchemaTest extends PostgresSchemaSupport {
 
   private void insertUsage(Connection conn, long sessionId, long threadId, long assistantEntryId)
       throws SQLException {
+    // cost_* columns are no longer physical; only pricing/usage/session are persisted.
     try (PreparedStatement ps =
         conn.prepareStatement(
             "insert into harness_model_usage (session_id, thread_id, assistant_entry_id,"
@@ -192,18 +179,17 @@ class PostgresqlDurableFactsSchemaTest extends PostgresSchemaSupport {
                 + " prompt_cache_mode, prompt_cache_retention, cache_eligible, stop_reason,"
                 + " usage_input_tokens, usage_output_tokens, usage_cache_read_tokens,"
                 + " usage_cache_write_tokens, usage_cache_write_long_tokens,"
-                + " usage_reasoning_tokens, usage_provider_total_tokens, cost_currency,"
-                + " cost_input, cost_output, cost_cache_read, cost_cache_write,"
-                + " cost_cache_write_long, cost_reasoning, cost_total, pricing_currency,"
-                + " pricing_tier, pricing_service_tier, pricing_service_tier_multiplier,"
-                + " pricing_version, pricing_input_per_million_tokens,"
-                + " pricing_output_per_million_tokens, pricing_cache_read_per_million_tokens,"
+                + " usage_reasoning_tokens, usage_provider_total_tokens,"
+                + " pricing_currency, pricing_tier, pricing_service_tier,"
+                + " pricing_service_tier_multiplier, pricing_version,"
+                + " pricing_input_per_million_tokens, pricing_output_per_million_tokens,"
+                + " pricing_cache_read_per_million_tokens,"
                 + " pricing_cache_write_per_million_tokens,"
                 + " pricing_cache_write_long_per_million_tokens,"
-                + " pricing_reasoning_per_million_tokens, raw_usage) values"
+                + " pricing_reasoning_per_million_tokens, raw_usage, created_at) values"
                 + " (?, ?, ?, 1, 1, 'openai', 'stub-model', 'NONE', 'NONE', false, 'STOP',"
-                + " 0, 0, 0, 0, 0, 0, 0, 'USD', 0, 0, 0, 0, 0, 0, 0, 'USD', 'test',"
-                + " 'default', 1, 'v1', 0, 0, 0, 0, 0, 0, '{}'::jsonb)")) {
+                + " 0, 0, 0, 0, 0, 0, 0, 'USD', 'test', 'default', 1, 'v1', 0, 0, 0, 0, 0, 0,"
+                + " '{}'::jsonb, current_timestamp)")) {
       ps.setLong(1, sessionId);
       ps.setLong(2, threadId);
       ps.setLong(3, assistantEntryId);

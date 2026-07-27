@@ -5,7 +5,7 @@ import lombok.Data;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
-/** {@code model_usage_record} 行映射：一次 Assistant Entry 的模型用量账本。 */
+/** {@code harness_model_usage} 行映射：一次 Assistant Entry 的模型用量账本。 */
 @Data
 public class ModelUsageRecordDO {
   /** 业务主键。 */
@@ -67,30 +67,6 @@ public class ModelUsageRecordDO {
 
   /** Provider 报告总 tokens。 */
   private Long usageProviderTotalTokens;
-
-  /** 成本币种。 */
-  private String costCurrency;
-
-  /** 输入 token 成本。 */
-  private BigDecimal costInput;
-
-  /** 输出 token 成本。 */
-  private BigDecimal costOutput;
-
-  /** 缓存读取 token 成本。 */
-  private BigDecimal costCacheRead;
-
-  /** 短期缓存写入 token 成本。 */
-  private BigDecimal costCacheWrite;
-
-  /** 长期缓存写入 token 成本。 */
-  private BigDecimal costCacheWriteLong;
-
-  /** 推理 token 成本。 */
-  private BigDecimal costReasoning;
-
-  /** 本次 Assistant Entry 总成本。 */
-  private BigDecimal costTotal;
 
   /** 计价快照币种。 */
   private String pricingCurrency;

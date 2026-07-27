@@ -5,70 +5,45 @@ import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
-import org.apache.ibatis.annotations.Update;
 
 import fun.fengwk.kkstudio.core.harness.retry.HarnessRetryPolicyDO;
-
-import java.time.OffsetDateTime;
 
 /** 单例 Harness retry policy 的最小持久化映射。 */
 @Mapper
 public interface HarnessRetryPolicyMapper extends BaseMapper {
+
   @Select(
       """
       select id,
              max_retries as maxRetries,
              backoff_strategy as backoffStrategy,
              base_delay_millis as baseDelayMillis,
-             max_delay_millis as maxDelayMillis,
-             created_at as createTime,
-             updated_at as updateTime
+             max_delay_millis as maxDelayMillis
       from harness_retry_policy
       where id = 1
       """)
   HarnessRetryPolicyDO find();
 
-  @Select(
-      """
-      select id,
-             max_retries as maxRetries,
-             backoff_strategy as backoffStrategy,
-             base_delay_millis as baseDelayMillis,
-             max_delay_millis as maxDelayMillis,
-             created_at as createTime,
-             updated_at as updateTime
-      from harness_retry_policy
-      where id = 1
-      for update
-      """)
-  HarnessRetryPolicyDO findForUpdate();
-
+  /**
+   * 单例 id=1 的原子 upsert。{@code insert} 与 {@code update} 在同一语句内合并，不读取当前行；失败原因 （例如 constraint 违反）会直接以
+   * JDBC 异常抛出。
+   */
   @Insert(
       """
       insert into harness_retry_policy (
-          id, max_retries, backoff_strategy, base_delay_millis, max_delay_millis,
-          created_at, updated_at
+          id, max_retries, backoff_strategy, base_delay_millis, max_delay_millis
       ) values (
-          1, #{maxRetries}, #{backoffStrategy}, #{baseDelayMillis}, #{maxDelayMillis},
-          #{createTime}, #{updateTime}
+          1, #{maxRetries}, #{backoffStrategy}, #{baseDelayMillis}, #{maxDelayMillis}
       )
+      on conflict (id) do update set
+          max_retries = excluded.max_retries,
+          backoff_strategy = excluded.backoff_strategy,
+          base_delay_millis = excluded.base_delay_millis,
+          max_delay_millis = excluded.max_delay_millis
       """)
-  int insert(HarnessRetryPolicyDO policy);
-
-  @Update(
-      """
-      update harness_retry_policy
-      set max_retries = #{maxRetries},
-          backoff_strategy = #{backoffStrategy},
-          base_delay_millis = #{baseDelayMillis},
-          max_delay_millis = #{maxDelayMillis},
-          updated_at = #{updateTime}
-      where id = 1
-      """)
-  int update(
+  int upsert(
       @Param("maxRetries") int maxRetries,
       @Param("backoffStrategy") String backoffStrategy,
       @Param("baseDelayMillis") long baseDelayMillis,
-      @Param("maxDelayMillis") long maxDelayMillis,
-      @Param("updateTime") OffsetDateTime updateTime);
+      @Param("maxDelayMillis") long maxDelayMillis);
 }
