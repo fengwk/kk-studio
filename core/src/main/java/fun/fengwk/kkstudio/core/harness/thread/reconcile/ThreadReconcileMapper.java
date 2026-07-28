@@ -39,22 +39,22 @@ public interface ThreadReconcileMapper extends BaseMapper {
   @Select(
       "select t.id, e.session_id as sessionId, t.head_entry_id as headEntryId, t.input_sequence as inputSequence, t.runnable, t.execution_epoch as executionEpoch, t.processor_token as processorToken, t.processor_until as processorUntil, t.created_at as createdAt, t.updated_at as updatedAt "
           + "from harness_thread t join harness_entry e on e.id = t.head_entry_id where t.id = #{threadId} for no key update of t")
-  ThreadReconcileRow lockThread(@Param("threadId") long threadId);
+  OwnedThreadRow lockThread(@Param("threadId") long threadId);
 
   @Select(
-      "select id, thread_id as threadId, source_head_entry_id as sourceHeadEntryId, execution_epoch as executionEpoch, request::text as requestJson, status, result::text as resultJson, error::text as errorJson, finished_at as finishedAt "
+      "select id, source_head_entry_id as sourceHeadEntryId, request::text as requestJson, status, result::text as resultJson, error::text as errorJson "
           + "from harness_model_invocation where thread_id = #{threadId} and source_head_entry_id = #{sourceHeadEntryId} and execution_epoch = #{epoch} and applied_at is null "
           + "and status in ('SUCCEEDED','FAILED','CANCELLED','UNKNOWN') order by id limit 1 for update")
-  ThreadReconcileRow findTerminalModel(
+  TerminalModelInvocationRow findTerminalModel(
       @Param("threadId") long threadId,
       @Param("sourceHeadEntryId") long sourceHeadEntryId,
       @Param("epoch") long epoch);
 
   @Select(
-      "select id, thread_id as threadId, assistant_entry_id as headEntryId, execution_epoch as executionEpoch, ordinal, tool_call_id as toolCallId, descriptor::text as descriptorJson, applied_at as appliedAt, "
-          + "result::text as resultJson, error::text as errorJson, status, finished_at as finishedAt from harness_tool_invocation "
+      "select tool_call_id as toolCallId, descriptor::text as descriptorJson, applied_at as appliedAt, result::text as resultJson, error::text as errorJson, status "
+          + "from harness_tool_invocation "
           + "where thread_id = #{threadId} and assistant_entry_id = #{headEntryId} and execution_epoch = #{epoch} order by ordinal")
-  List<ThreadReconcileRow> listToolSiblings(
+  List<ToolInvocationRow> listToolSiblings(
       @Param("threadId") long threadId,
       @Param("headEntryId") long headEntryId,
       @Param("epoch") long epoch);
@@ -62,23 +62,23 @@ public interface ThreadReconcileMapper extends BaseMapper {
   @Select(
       "select id, thread_id as threadId, sequence, input_type as inputType, payload::text as payloadJson, idempotency_key as idempotencyKey, status, created_at as createdAt, applied_at as appliedAt "
           + "from harness_thread_input where thread_id = #{threadId} and status = 'QUEUED' order by sequence")
-  List<ThreadReconcileRow> listQueuedInputs(@Param("threadId") long threadId);
+  List<QueuedThreadInputRow> listQueuedInputs(@Param("threadId") long threadId);
 
   @Select(
-      "with recursive path as (select id, session_id, parent_entry_id, entry_type, payload, created_at, 0 as depth from harness_entry where session_id = #{sessionId} and id = #{headEntryId} union all select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at, p.depth + 1 from harness_entry e join path p on p.parent_entry_id = e.id and p.session_id = e.session_id) select id, session_id as sessionId, parent_entry_id as parentEntryId, entry_type as entryType, payload::text as payloadJson, created_at as createdAt from path order by depth desc")
-  List<ThreadReconcileRow> loadPath(
+      "with recursive path as (select id, session_id, parent_entry_id, entry_type, payload, created_at, 0 as depth from harness_entry where session_id = #{sessionId} and id = #{headEntryId} union all select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at, p.depth + 1 from harness_entry e join path p on p.parent_entry_id = e.id and p.session_id = e.session_id) select id, parent_entry_id as parentEntryId, entry_type as entryType, payload::text as payloadJson from path order by depth desc")
+  List<SessionEntryPathRow> loadPath(
       @Param("sessionId") long sessionId, @Param("headEntryId") long headEntryId);
 
   @Select(
-      "select id, source_head_entry_id as sourceHeadEntryId, execution_epoch as executionEpoch, status from harness_model_invocation where thread_id = #{threadId} and source_head_entry_id = #{headEntryId} and execution_epoch = #{epoch} and status not in ('SUCCEEDED','FAILED','CANCELLED','UNKNOWN') order by id limit 1")
-  ThreadReconcileRow findModelBlocker(
+      "select id from harness_model_invocation where thread_id = #{threadId} and source_head_entry_id = #{headEntryId} and execution_epoch = #{epoch} and status not in ('SUCCEEDED','FAILED','CANCELLED','UNKNOWN') order by id limit 1")
+  InvocationBlockerRow findModelBlocker(
       @Param("threadId") long threadId,
       @Param("headEntryId") long headEntryId,
       @Param("epoch") long epoch);
 
   @Select(
-      "select id, execution_epoch as executionEpoch, status from harness_tool_invocation where thread_id = #{threadId} and assistant_entry_id = #{headEntryId} and execution_epoch = #{epoch} and status not in ('SUCCEEDED','FAILED','CANCELLED','UNKNOWN') order by ordinal limit 1")
-  ThreadReconcileRow findToolBlocker(
+      "select id from harness_tool_invocation where thread_id = #{threadId} and assistant_entry_id = #{headEntryId} and execution_epoch = #{epoch} and status not in ('SUCCEEDED','FAILED','CANCELLED','UNKNOWN') order by ordinal limit 1")
+  InvocationBlockerRow findToolBlocker(
       @Param("threadId") long threadId,
       @Param("headEntryId") long headEntryId,
       @Param("epoch") long epoch);
