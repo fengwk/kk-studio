@@ -1,10 +1,10 @@
 package fun.fengwk.kkstudio.core.environment.gateway;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.SmartLifecycle;
 
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 
-import java.lang.System.Logger.Level;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.ScheduledExecutorService;
@@ -13,10 +13,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Polls ready Environment connections for durable dispatch, cancellation, and lease recovery. */
+@Slf4j
 public final class EnvironmentDaemonGatewayLifecycle implements SmartLifecycle {
-
-  private static final System.Logger LOGGER =
-      System.getLogger(EnvironmentDaemonGatewayLifecycle.class.getName());
 
   private final Runnable pollAction;
   private final Duration pollInterval;
@@ -97,7 +95,7 @@ public final class EnvironmentDaemonGatewayLifecycle implements SmartLifecycle {
     try {
       pollAction.run();
     } catch (RuntimeException error) {
-      LOGGER.log(Level.WARNING, "Environment daemon gateway poll failed", error);
+      log.warn("Environment daemon gateway poll failed", error);
     }
   }
 }

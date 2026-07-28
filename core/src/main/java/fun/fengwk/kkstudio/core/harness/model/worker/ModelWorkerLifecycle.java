@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.harness.model.worker;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.SmartLifecycle;
 
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
@@ -12,10 +13,9 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /** Runs bounded PostgreSQL Model Invocation recovery scans while workers are enabled. */
+@Slf4j
 public final class ModelWorkerLifecycle implements SmartLifecycle {
 
-  private static final System.Logger LOGGER =
-      System.getLogger(ModelWorkerLifecycle.class.getName());
   private static final int PHASE = Integer.MAX_VALUE - 80;
 
   private final HarnessRuntimeProperties properties;
@@ -71,7 +71,7 @@ public final class ModelWorkerLifecycle implements SmartLifecycle {
       } catch (RuntimeException error) {
         running = false;
         future = null;
-        LOGGER.log(System.Logger.Level.WARNING, "model recovery schedule failed", error);
+        log.warn("model recovery schedule failed", error);
         throw error;
       }
     }
@@ -147,7 +147,7 @@ public final class ModelWorkerLifecycle implements SmartLifecycle {
     try {
       scanWhileRunning();
     } catch (RuntimeException error) {
-      LOGGER.log(System.Logger.Level.WARNING, "model recovery scan failed", error);
+      log.warn("model recovery scan failed", error);
     }
   }
 }
