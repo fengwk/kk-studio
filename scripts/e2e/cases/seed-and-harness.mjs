@@ -446,17 +446,22 @@ registerCase({
       await sleep(250)
     }
     assert(
-      inputs.some((x) => x.inputType === 'SET_AGENT'),
+      inputs.some((input) => input.inputType === 'SET_AGENT' && input.status === 'APPLIED'),
       JSON.stringify({ th, inputs }),
     )
     assert(
-      inputs.some((x) => String(x.inputType || '').includes('MODEL')),
+      inputs.some((input) => String(input.inputType || '').includes('MODEL') && input.status === 'APPLIED'),
       JSON.stringify({ th, inputs }),
     )
     assert(
-      inputs.some((x) => String(x.inputType || '').includes('YOLO')),
+      inputs.some((input) => String(input.inputType || '').includes('YOLO') && input.status === 'APPLIED'),
       JSON.stringify({ th, inputs }),
     )
+    assert(String(th?.activeAgentDefinitionId) === String(ctx.vars.agent.id), JSON.stringify({ th, inputs }))
+    assert(th?.activeAgentName === ctx.vars.agent.name, JSON.stringify({ th, inputs }))
+    assert(String(th?.modelId) === String(model.id), JSON.stringify({ th, inputs }))
+    assert(th?.variant === variant, JSON.stringify({ th, inputs }))
+    assert(th?.yoloEnabled === true, JSON.stringify({ th, inputs }))
   },
 })
 
