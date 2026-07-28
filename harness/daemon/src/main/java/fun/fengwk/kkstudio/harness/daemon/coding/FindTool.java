@@ -24,11 +24,14 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /** Finds gitignore-respecting environment-root-relative paths through configurable fd or fdfind. */
 public final class FindTool extends AbstractCodingTool {
+
+  static final int MAX_TIMEOUT_SECONDS = 3600;
 
   public FindTool(CodingToolsConfig config) {
     super(
@@ -36,7 +39,7 @@ public final class FindTool extends AbstractCodingTool {
         new ToolDescriptor(
             "find",
             "1",
-            "Find files under an environment root path using fd while respecting .gitignore.",
+            CodingToolPrompts.load("find"),
             null,
             new ToolParamsSchema(
                 "Find parameters",
@@ -49,7 +52,7 @@ public final class FindTool extends AbstractCodingTool {
                 Set.of("pattern", "path"),
                 false),
             ToolSideEffect.READ_ONLY,
-            Duration.ofSeconds(15)));
+            Duration.ofHours(1)));
   }
 
   @Override
@@ -61,7 +64,7 @@ public final class FindTool extends AbstractCodingTool {
       throw new IllegalArgumentException("path must be a directory");
     }
     int limit = optionalPositiveInt(args, "limit", 1000, 100_000);
-    int timeout = optionalPositiveInt(args, "timeout_seconds", 15, 3600);
+    Duration timeout = effectiveProcessTimeout(request.effectiveTimeout(), args);
     String pattern = string(args, "pattern");
     List<String> command = new ArrayList<>();
     command.add(config.fdExecutable());
@@ -88,10 +91,11 @@ public final class FindTool extends AbstractCodingTool {
     reader.setDaemon(true);
     reader.start();
     try {
-      if (!process.waitFor(timeout, TimeUnit.SECONDS)) {
+      if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
         terminate(process);
         reader.join();
-        throw new IllegalArgumentException("find timed out after " + timeout + " seconds");
+        throw new IllegalArgumentException(
+            "find timed out after " + timeout.toMillis() + " milliseconds");
       }
       reader.join();
     } catch (InterruptedException error) {
@@ -151,6 +155,17 @@ public final class FindTool extends AbstractCodingTool {
                     String.join("\n", completeLines).getBytes(StandardCharsets.UTF_8),
                     "text/plain")));
     return new ToolResult(request.call().id(), contents, false, "{}", false);
+  }
+
+  static Duration effectiveProcessTimeout(Duration invocationTimeout, JsonNode args) {
+    Objects.requireNonNull(invocationTimeout, "invocationTimeout");
+    Duration outerTimeout = invocationTimeout.isZero() ? Duration.ofHours(1) : invocationTimeout;
+    if (!args.has("timeout_seconds")) {
+      return outerTimeout;
+    }
+    Duration requestedTimeout =
+        Duration.ofSeconds(optionalPositiveInt(args, "timeout_seconds", 1, MAX_TIMEOUT_SECONDS));
+    return outerTimeout.compareTo(requestedTimeout) > 0 ? requestedTimeout : outerTimeout;
   }
 
   private static void copy(InputStream input, ByteArrayOutputStream output) {

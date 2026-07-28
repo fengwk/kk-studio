@@ -23,6 +23,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -34,6 +35,8 @@ import java.util.regex.Pattern;
 public final class GrepTool extends AbstractCodingTool {
 
   private static final int MAX_DISPLAY_LINE_CHARS = 500;
+  static final int DEFAULT_TIMEOUT_SECONDS = 15;
+  static final int MAX_TIMEOUT_SECONDS = 3600;
   private static final Pattern LOCATION_PATTERN = Pattern.compile("^(.*?):(\\d+):(.*)$");
 
   public GrepTool(CodingToolsConfig config) {
@@ -42,7 +45,7 @@ public final class GrepTool extends AbstractCodingTool {
         new ToolDescriptor(
             "grep",
             "1",
-            "Search text files under an environment root path using ripgrep.",
+            CodingToolPrompts.load("grep"),
             null,
             new ToolParamsSchema(
                 "Grep parameters",
@@ -59,7 +62,7 @@ public final class GrepTool extends AbstractCodingTool {
                 Set.of("pattern", "path"),
                 false),
             ToolSideEffect.READ_ONLY,
-            Duration.ofSeconds(15)));
+            Duration.ofHours(1)));
   }
 
   @Override
@@ -69,7 +72,8 @@ public final class GrepTool extends AbstractCodingTool {
     Path workdir = boundary.workdir(optionalString(args, "workdir"));
     Path path = boundary.existing(string(args, "path"), workdir);
     int limit = optionalPositiveInt(args, "limit", 100, 100_000);
-    int timeout = optionalPositiveInt(args, "timeout_seconds", 15, 3600);
+    Duration timeout =
+        effectiveProcessTimeout(request.effectiveTimeout(), requestedTimeoutSeconds(args));
     List<String> command = new ArrayList<>();
     command.add(config.rgExecutable());
     command.add("--line-number");
@@ -108,10 +112,11 @@ public final class GrepTool extends AbstractCodingTool {
     reader.setDaemon(true);
     reader.start();
     try {
-      if (!process.waitFor(timeout, TimeUnit.SECONDS)) {
+      if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
         terminate(process);
         reader.join();
-        throw new IllegalArgumentException("grep timed out after " + timeout + " seconds");
+        throw new IllegalArgumentException(
+            "grep timed out after " + timeout.toMillis() + " milliseconds");
       }
       reader.join();
     } catch (InterruptedException error) {
@@ -168,6 +173,19 @@ public final class GrepTool extends AbstractCodingTool {
           new ArtifactToolContent(config.artifactSink().store(completeBytes, "text/plain")));
     }
     return new ToolResult(request.call().id(), contents, false, "{}", false);
+  }
+
+  static int requestedTimeoutSeconds(JsonNode args) {
+    return optionalPositiveInt(
+        args, "timeout_seconds", DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS);
+  }
+
+  static Duration effectiveProcessTimeout(Duration invocationTimeout, int requestedTimeoutSeconds) {
+    Objects.requireNonNull(invocationTimeout, "invocationTimeout");
+    Duration requestedTimeout = Duration.ofSeconds(requestedTimeoutSeconds);
+    return invocationTimeout.isZero() || invocationTimeout.compareTo(requestedTimeout) > 0
+        ? requestedTimeout
+        : invocationTimeout;
   }
 
   private String normalizeLine(String line, Path workdir) {

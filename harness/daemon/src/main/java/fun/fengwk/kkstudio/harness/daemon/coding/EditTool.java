@@ -28,7 +28,7 @@ public final class EditTool extends AbstractCodingTool {
         new ToolDescriptor(
             "edit",
             "1",
-            "Replace exact text in an existing file inside the environment root.",
+            CodingToolPrompts.load("edit"),
             null,
             new ToolParamsSchema(
                 "Edit parameters",

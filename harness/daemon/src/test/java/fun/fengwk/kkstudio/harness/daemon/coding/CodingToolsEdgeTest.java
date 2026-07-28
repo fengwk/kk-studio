@@ -438,6 +438,11 @@ class CodingToolsEdgeTest {
         new GrepTool(config(2000, 50 * 1024, new InMemoryArtifactSink(), sleeper, sleeper));
     ToolResult timedOut = invoke(grep, "{\"pattern\":\"x\",\"path\":\".\",\"timeout_seconds\":1}");
     assertTrue(text(timedOut).contains("timed out"));
+    FindTool find =
+        new FindTool(config(2000, 50 * 1024, new InMemoryArtifactSink(), sleeper, sleeper));
+    ToolResult findTimedOut =
+        invoke(find, "{\"pattern\":\"*\",\"path\":\".\",\"timeout_seconds\":1}");
+    assertTrue(text(findTimedOut).contains("timed out"));
 
     RecordingListener listener =
         invokeAsync(
