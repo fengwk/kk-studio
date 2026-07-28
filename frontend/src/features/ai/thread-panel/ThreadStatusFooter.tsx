@@ -1,5 +1,23 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ModelUsageSummaryDTO } from '@/shared/api/contracts'
+
+export type ThreadUsageNumber = number | string
+
+export interface ThreadUsageCost {
+  total: ThreadUsageNumber
+}
+
+/** Stable footer input contract; callers adapt backend usage DTOs outside the panel. */
+export interface ThreadUsageSummary {
+  inputTokens?: ThreadUsageNumber
+  outputTokens?: ThreadUsageNumber
+  cacheReadTokens?: ThreadUsageNumber
+  cacheWriteTokens?: ThreadUsageNumber
+  cacheWriteLongTokens?: ThreadUsageNumber
+  cacheEligibleRecordCount?: ThreadUsageNumber
+  cacheHitRecordCount?: ThreadUsageNumber
+  cacheHitRatio?: ThreadUsageNumber
+  costs?: readonly ThreadUsageCost[]
+}
 
 type StatusSegment = {
   key: string
@@ -36,7 +54,7 @@ export function ThreadStatusFooter({
   modelName?: string
   variantName?: string
   yoloEnabled?: boolean
-  usage?: ModelUsageSummaryDTO
+  usage?: ThreadUsageSummary
   contextWindow?: number
   onAgentClick?: () => void
   onModelClick?: () => void
@@ -262,7 +280,7 @@ function sameRows(left: number[][], right: number[][]): boolean {
 }
 
 function resolveCacheHitPercent(
-  usage: ModelUsageSummaryDTO | undefined,
+  usage: ThreadUsageSummary | undefined,
   cacheRead: number,
   input: number,
 ): number {

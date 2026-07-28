@@ -4,7 +4,7 @@ import { ThreadErrorPanel } from '@/features/ai/thread-panel/ThreadErrorPanel'
 import { ThreadTranscript } from '@/features/ai/thread-panel/ThreadTranscript'
 import { ThreadWidgetStack } from '@/features/ai/thread-panel/ThreadWidgetStack'
 import type { ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
-import type { DialogueMessage, QueuedThreadMessage } from '@/features/ai/thread-timeline'
+import type { DialogueMessage, QueuedThreadMessage } from '@/features/ai/thread-timeline-types'
 
 /**
  * Full-bleed thread panel:

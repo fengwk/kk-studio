@@ -1,4 +1,4 @@
-import type { TextDialogueMessage } from '@/features/ai/thread-timeline'
+import type { TextDialogueMessage } from '@/features/ai/thread-timeline-types'
 
 /** Full-width user content block (role conveyed by surface style, no title). */
 export function UserMessageBlock({ message }: { message: TextDialogueMessage }) {

@@ -13,22 +13,15 @@ describe('ThreadStatusFooter', () => {
         yoloEnabled
         contextWindow={100000}
         usage={{
-          scopeType: 'thread',
-          scopeId: '1',
-          recordCount: 2,
           inputTokens: 1500,
           outputTokens: 2500,
           cacheReadTokens: 1000,
           cacheWriteTokens: 200,
           cacheWriteLongTokens: 50,
-          reasoningTokens: 0,
-          providerTotalTokens: 5000,
           cacheEligibleRecordCount: 2,
           cacheHitRecordCount: 1,
           cacheHitRatio: '0.5',
-          tokenReadRatio: '0.2',
-          unamortizedCacheWriteTokens: 0,
-          costs: [{ currency: 'USD', input: '0.1', output: '0.2', cacheRead: '0', cacheWrite: '0', cacheWriteLong: '0', reasoning: '0', total: '0.3' }],
+          costs: [{ total: '0.3' }],
         }}
       />,
     )
@@ -69,21 +62,14 @@ describe('ThreadStatusFooter', () => {
     render(
       <ThreadStatusFooter
         usage={{
-          scopeType: 'thread',
-          scopeId: '1',
-          recordCount: 1,
           inputTokens: 12_000,
           outputTokens: 2_000_000,
           cacheReadTokens: 3000,
           cacheWriteTokens: 0,
           cacheWriteLongTokens: 0,
-          reasoningTokens: 0,
-          providerTotalTokens: 0,
           cacheEligibleRecordCount: 0,
           cacheHitRecordCount: 0,
           cacheHitRatio: 0,
-          tokenReadRatio: 0,
-          unamortizedCacheWriteTokens: 0,
           costs: [],
         }}
       />,
@@ -97,22 +83,15 @@ describe('ThreadStatusFooter', () => {
     const { rerender } = render(
       <ThreadStatusFooter
         usage={{
-          scopeType: 'thread',
-          scopeId: '1',
-          recordCount: 1,
           inputTokens: 'bad' as never,
           outputTokens: 12_000_000,
           cacheReadTokens: -20,
           cacheWriteTokens: 0,
           cacheWriteLongTokens: 0,
-          reasoningTokens: 0,
-          providerTotalTokens: 0,
           cacheEligibleRecordCount: 4,
           cacheHitRecordCount: 1,
           cacheHitRatio: 75,
-          tokenReadRatio: 0,
-          unamortizedCacheWriteTokens: 0,
-          costs: [{ currency: 'USD', input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteLong: '0', reasoning: '0', total: 'bad' }],
+          costs: [{ total: 'bad' }],
         }}
         contextWindow={-1}
       />,
@@ -126,21 +105,14 @@ describe('ThreadStatusFooter', () => {
     rerender(
       <ThreadStatusFooter
         usage={{
-          scopeType: 'thread',
-          scopeId: '1',
-          recordCount: 4,
           inputTokens: 10,
           outputTokens: 1,
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           cacheWriteLongTokens: 0,
-          reasoningTokens: 0,
-          providerTotalTokens: 11,
           cacheEligibleRecordCount: 4,
           cacheHitRecordCount: 1,
           cacheHitRatio: 0,
-          tokenReadRatio: 0,
-          unamortizedCacheWriteTokens: 0,
           costs: [],
         }}
       />,

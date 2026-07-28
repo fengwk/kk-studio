@@ -6,6 +6,11 @@ export { ThreadWorkingStatus } from '@/features/ai/thread-panel/ThreadWorkingSta
 export { ThreadWidgetStack } from '@/features/ai/thread-panel/ThreadWidgetStack'
 export { ThreadCommandPalette } from '@/features/ai/thread-panel/ThreadCommandPalette'
 export { ThreadStatusFooter } from '@/features/ai/thread-panel/ThreadStatusFooter'
+export type {
+  ThreadUsageCost,
+  ThreadUsageNumber,
+  ThreadUsageSummary,
+} from '@/features/ai/thread-panel/ThreadStatusFooter'
 export {
   THREAD_COMMANDS,
   filterThreadCommands,
@@ -21,3 +26,19 @@ export { SystemMessageBlock } from '@/features/ai/thread-panel/messages/SystemMe
 export { ToolMessageBlock } from '@/features/ai/thread-panel/messages/ToolMessageBlock'
 export { ThinkingBlock } from '@/features/ai/thread-panel/messages/ThinkingBlock'
 export { isVisibleDialogueMessage } from '@/features/ai/thread-panel/visibility'
+export type {
+  DialogueMessage,
+  DialogueRole,
+  DialogueStatus,
+  DialogueTimestamp,
+  EntryEventDialogueMessage,
+  EntryEventKind,
+  MetaDialogueMessage,
+  MetaMessageKind,
+  QueuedThreadMessage,
+  TextDialogueMessage,
+  ThreadTimeline,
+  ToolAttachment,
+  ToolAttachmentType,
+  ToolDialogueMessage,
+} from '@/features/ai/thread-timeline-types'

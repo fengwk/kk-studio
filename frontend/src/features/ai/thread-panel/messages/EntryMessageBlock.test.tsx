@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { EntryMessageBlock } from '@/features/ai/thread-panel/messages/EntryMessageBlock'
-import type { EntryEventDialogueMessage } from '@/features/ai/thread-timeline'
+import type { EntryEventDialogueMessage } from '@/features/ai/thread-timeline-types'
 
 function event(
   kind: EntryEventDialogueMessage['kind'],

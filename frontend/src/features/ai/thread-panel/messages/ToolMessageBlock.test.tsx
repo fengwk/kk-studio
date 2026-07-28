@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { ToolDialogueMessage } from '@/features/ai/thread-timeline'
+import type { ToolDialogueMessage } from '@/features/ai/thread-timeline-types'
 import { ToolMessageBlock } from '@/features/ai/thread-panel/messages/ToolMessageBlock'
 import {
   clearToolRenderers,

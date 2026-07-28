@@ -1,4 +1,4 @@
-import type { TextDialogueMessage } from '@/features/ai/thread-timeline'
+import type { TextDialogueMessage } from '@/features/ai/thread-timeline-types'
 
 export function SystemMessageBlock({ message }: { message: TextDialogueMessage }) {
   return (

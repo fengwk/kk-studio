@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { ThreadWorkingStatus } from '@/features/ai/thread-panel/ThreadWorkingStatus'
-import type { QueuedThreadMessage } from '@/features/ai/thread-timeline'
+import type { QueuedThreadMessage } from '@/features/ai/thread-timeline-types'
 
 /**
  * Component zone under the dialogue transcript.
