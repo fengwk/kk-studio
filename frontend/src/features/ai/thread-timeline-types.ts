@@ -1,10 +1,17 @@
 import type { BackendDateTime } from '@/shared/api/contracts'
 
-export type DialogueRole = 'user' | 'assistant' | 'system' | 'tool' | 'meta'
+export type DialogueRole = 'user' | 'assistant' | 'system' | 'tool' | 'meta' | 'entry'
 export type DialogueStatus = 'streaming' | 'done' | 'error'
 export type ToolAttachmentType = 'image' | 'audio' | 'video' | 'file'
 /** 控制面/回合摘要等特殊消息，与 user/assistant/tool 正文区分 */
 export type MetaMessageKind = 'turn_usage'
+/** Durable Entry 的非对话审计事件；未知值也必须留在时间线中。 */
+export type EntryEventKind =
+  | 'root'
+  | 'runtime_config'
+  | 'empty_message'
+  | 'unsupported_message'
+  | 'unknown_entry'
 
 export interface ToolAttachment {
   type: ToolAttachmentType
@@ -33,6 +40,7 @@ export interface TextDialogueMessage extends BaseDialogueMessage {
 
 export interface ToolDialogueMessage extends BaseDialogueMessage {
   role: 'tool'
+  phase: 'call' | 'result'
   text: string
   toolCallId: string
   toolName: string
@@ -49,7 +57,25 @@ export interface MetaDialogueMessage extends BaseDialogueMessage {
   details?: Record<string, unknown>
 }
 
-export type DialogueMessage = TextDialogueMessage | ToolDialogueMessage | MetaDialogueMessage
+/**
+ * A standalone projection of a durable Entry whose semantics are not a dialogue turn.
+ *
+ * Keeping this shape independent of Harness DTOs makes the transcript reusable by any caller that
+ * can provide the stable timeline contract.
+ */
+export interface EntryEventDialogueMessage extends BaseDialogueMessage {
+  role: 'entry'
+  kind: EntryEventKind
+  title: string
+  text: string
+  rawPayloadJson: string
+}
+
+export type DialogueMessage =
+  | TextDialogueMessage
+  | ToolDialogueMessage
+  | MetaDialogueMessage
+  | EntryEventDialogueMessage
 
 export interface QueuedThreadMessage {
   inputId: string

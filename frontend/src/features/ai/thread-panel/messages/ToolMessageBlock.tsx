@@ -23,28 +23,35 @@ export function ToolMessageBlock({ message }: { message: ToolDialogueMessage }) 
   const renderer = getToolRenderer(context.toolName)
   const callNode = renderer?.renderCall?.(context)
   const resultNode = renderer?.renderResult?.(context)
+  const call = message.phase === 'call'
 
   return (
     <div className={`thread-turn thread-turn-tool ${message.status === 'error' ? 'error' : ''}`}>
-      <section className="thread-block thread-block-tool-call">
-        <div className="thread-block-label">
-          tool call ·
-          {' '}
-          {context.toolName}
-          <span className={`thread-tool-status ${message.status ?? 'done'}`}>
-            {formatToolStatus(message.status)}
-          </span>
-        </div>
-        <div className="thread-block-body">{callNode ?? <DefaultToolCall context={context} />}</div>
-      </section>
-      <section className="thread-block thread-block-tool-result">
-        <div className="thread-block-label">
-          tool result ·
-          {' '}
-          {context.toolName}
-        </div>
-        <div className="thread-block-body">{resultNode ?? <DefaultToolResult context={context} />}</div>
-      </section>
+      {call ? (
+        <section className="thread-block thread-block-tool-call">
+          <div className="thread-block-label">
+            tool call ·
+            {' '}
+            {context.toolName}
+            <span className={`thread-tool-status ${message.status ?? 'done'}`}>
+              {formatToolStatus(message.status)}
+            </span>
+          </div>
+          <div className="thread-block-body">{callNode ?? <DefaultToolCall context={context} />}</div>
+        </section>
+      ) : (
+        <section className="thread-block thread-block-tool-result">
+          <div className="thread-block-label">
+            tool result ·
+            {' '}
+            {context.toolName}
+            <span className={`thread-tool-status ${message.status ?? 'done'}`}>
+              {formatToolStatus(message.status)}
+            </span>
+          </div>
+          <div className="thread-block-body">{resultNode ?? <DefaultToolResult context={context} />}</div>
+        </section>
+      )}
     </div>
   )
 }
