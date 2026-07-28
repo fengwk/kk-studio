@@ -14,6 +14,7 @@ function message(overrides: Partial<ToolDialogueMessage> = {}): ToolDialogueMess
     subjectEntryId: null,
     createdAt: null,
     status: 'done',
+    phase: 'result',
     text: '',
     toolCallId: 'call-1',
     toolName: 'read',
@@ -26,16 +27,16 @@ function message(overrides: Partial<ToolDialogueMessage> = {}): ToolDialogueMess
 describe('ToolMessageBlock', () => {
   afterEach(clearToolRenderers)
 
-  it('renders streaming placeholders and a fallback tool name', () => {
-    render(<ToolMessageBlock message={message({ toolName: '', status: 'streaming' })} />)
+  it('renders a call placeholder and a fallback tool name', () => {
+    render(<ToolMessageBlock message={message({ phase: 'call', toolName: '', status: 'streaming' })} />)
 
-    expect(screen.getAllByText(/Tool/)).toHaveLength(2)
+    expect(screen.getByText(/Tool/)).toBeInTheDocument()
     expect(screen.getByText('running')).toBeInTheDocument()
     expect(screen.getByText('（无参数）')).toBeInTheDocument()
-    expect(screen.getByText('等待工具结果…')).toBeInTheDocument()
+    expect(screen.queryByText('等待工具结果…')).not.toBeInTheDocument()
   })
 
-  it('renders arguments, text, and a distinct error message', () => {
+  it('renders a result and a distinct error message', () => {
     const { container, rerender } = render(
       <ToolMessageBlock
         message={message({
@@ -49,7 +50,7 @@ describe('ToolMessageBlock', () => {
 
     expect(container.firstElementChild).toHaveClass('error')
     expect(screen.getByText('error')).toBeInTheDocument()
-    expect(screen.getByText('{"path":"missing"}')).toBeInTheDocument()
+    expect(screen.queryByText('{"path":"missing"}')).not.toBeInTheDocument()
     expect(screen.getByText('read failed')).toBeInTheDocument()
     expect(screen.getByText('file not found')).toBeInTheDocument()
 
@@ -59,6 +60,18 @@ describe('ToolMessageBlock', () => {
       />,
     )
     expect(screen.getAllByText('same error')).toHaveLength(1)
+  })
+
+  it('renders streaming and completed empty result placeholders without call duplication', () => {
+    const { rerender } = render(
+      <ToolMessageBlock message={message({ phase: 'result', status: 'streaming' })} />,
+    )
+
+    expect(screen.getByText('等待工具结果…')).toBeInTheDocument()
+    expect(screen.queryByText('tool call ·')).not.toBeInTheDocument()
+
+    rerender(<ToolMessageBlock message={message({ phase: 'result', status: 'done' })} />)
+    expect(screen.getByText('无文本输出')).toBeInTheDocument()
   })
 
   it('renders image, linked file, and attachment fallbacks', () => {
@@ -83,22 +96,24 @@ describe('ToolMessageBlock', () => {
     expect(screen.getAllByRole('link', { name: '打开原始内容' })).toHaveLength(2)
   })
 
-  it('uses registered call/result renderers and covers the completed empty result', () => {
+  it('uses the renderer for the durable phase and covers the completed empty result', () => {
     registerToolRenderer('read', {
       renderCall: (context) => <strong>call:{context.arguments}</strong>,
       renderResult: (context) => <strong>result:{context.text}</strong>,
     })
     const { rerender } = render(
-      <ToolMessageBlock message={message({ arguments: 'custom', text: 'rendered' })} />,
+      <ToolMessageBlock message={message({ phase: 'call', arguments: 'custom', text: 'rendered' })} />,
     )
 
     expect(screen.getByText('call:custom')).toBeInTheDocument()
-    expect(screen.getByText('result:rendered')).toBeInTheDocument()
+    expect(screen.queryByText('result:rendered')).not.toBeInTheDocument()
     expect(screen.queryByText('无文本输出')).not.toBeInTheDocument()
 
+    rerender(<ToolMessageBlock message={message({ phase: 'result', text: 'rendered' })} />)
+    expect(screen.getByText('result:rendered')).toBeInTheDocument()
+
     clearToolRenderers()
-    rerender(<ToolMessageBlock message={message()} />)
-    expect(screen.getByText('done')).toBeInTheDocument()
+    rerender(<ToolMessageBlock message={message({ phase: 'result' })} />)
     expect(screen.getByText('无文本输出')).toBeInTheDocument()
   })
 })

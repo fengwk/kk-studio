@@ -2,6 +2,13 @@ import type { HarnessSessionEntryDTO } from '@/shared/api/contracts'
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/payload-json'
 import type { DialogueMessage, ToolDialogueMessage } from '@/features/ai/thread-timeline-types'
 import { contentText, toArtifactAttachment } from '@/features/ai/thread-timeline/content-utils'
+import {
+  projectEmptyMessageEntry,
+  projectRootEntry,
+  projectRuntimeConfigEntry,
+  projectUnknownEntry,
+  projectUnsupportedMessageEntry,
+} from '@/features/ai/thread-timeline/entry-event-projection'
 import { projectTurnUsageFromAssistantMetadata } from '@/features/ai/thread-timeline/meta-projection'
 
 export function projectDurableEntry(
@@ -11,6 +18,14 @@ export function projectDurableEntry(
 ) {
   const payload = parsePayload(entry.payloadJson)
   const entryType = entry.entryType
+  if (entryType === 'ROOT') {
+    messages.push(projectRootEntry(entry))
+    return
+  }
+  if (entryType === 'RUNTIME_CONFIG') {
+    messages.push(projectRuntimeConfigEntry(entry, payload))
+    return
+  }
   if (entryType === 'ASSISTANT_ERROR') {
     const error = asRecord(payload.error)
     messages.push({
@@ -24,6 +39,7 @@ export function projectDurableEntry(
     return
   }
   if (entryType !== 'MESSAGE' && entryType !== 'CUSTOM_MESSAGE') {
+    messages.push(projectUnknownEntry(entry))
     return
   }
 
@@ -41,11 +57,14 @@ export function projectDurableEntry(
         createdAt: entry.createTime,
         status: 'done',
       })
+    } else {
+      messages.push(projectEmptyMessageEntry(entry, role))
     }
     return
   }
   if (role === 'ASSISTANT') {
-    for (const content of contents.filter((candidate) => getString(candidate.type) === 'tool_call')) {
+    const toolCalls = contents.filter((candidate) => getString(candidate.type) === 'tool_call')
+    for (const content of toolCalls) {
       const key = toolCallKey(getString(content.toolCallId))
       if (!key) {
         continue
@@ -67,6 +86,12 @@ export function projectDurableEntry(
         status: 'done',
       })
     }
+    toolCalls.forEach((content, index) => {
+      messages.push(projectToolCall(entry, content, index))
+    })
+    if (!text && !thinking && toolCalls.length === 0) {
+      messages.push(projectEmptyMessageEntry(entry, role))
+    }
     const metadata = asRecord(payload.assistantMetadata)
     const turnUsage = projectTurnUsageFromAssistantMetadata(
       entry.entryId,
@@ -79,15 +104,41 @@ export function projectDurableEntry(
     return
   }
   if (role === 'TOOL') {
-    for (const content of contents.filter((candidate) => getString(candidate.type) === 'tool_result')) {
+    const toolResults = contents.filter((candidate) => getString(candidate.type) === 'tool_result')
+    toolResults.forEach((content, index) => {
       const key = toolCallKey(getString(content.toolCallId))
       const argumentsQueue = durableToolArguments.get(key) ?? []
       const argumentsJson = argumentsQueue.shift() ?? ''
       if (argumentsQueue.length === 0) {
         durableToolArguments.delete(key)
       }
-      messages.push(projectToolResult(entry, content, argumentsJson))
+      messages.push(projectToolResult(entry, content, argumentsJson, index))
+    })
+    if (toolResults.length === 0) {
+      messages.push(projectEmptyMessageEntry(entry, role))
     }
+    return
+  }
+  messages.push(projectUnsupportedMessageEntry(entry, role))
+}
+
+function projectToolCall(
+  entry: HarnessSessionEntryDTO,
+  content: Record<string, unknown>,
+  ordinal: number,
+): ToolDialogueMessage {
+  return {
+    id: `${entry.entryId}:tool-call:${toolCallIdentity(content, ordinal)}`,
+    role: 'tool',
+    phase: 'call',
+    subjectEntryId: entry.entryId,
+    toolCallId: getString(content.toolCallId),
+    toolName: getString(content.toolName),
+    arguments: getString(content.argumentsJson),
+    text: '',
+    attachments: [],
+    createdAt: entry.createTime,
+    status: 'done',
   }
 }
 
@@ -95,12 +146,14 @@ function projectToolResult(
   entry: HarnessSessionEntryDTO,
   content: Record<string, unknown>,
   argumentsJson: string,
+  ordinal: number,
 ): ToolDialogueMessage {
   const contents = getRecordList(content.contents)
   const error = content.error === true
   return {
-    id: `${entry.entryId}:${getString(content.toolCallId)}`,
+    id: `${entry.entryId}:tool-result:${toolCallIdentity(content, ordinal)}`,
     role: 'tool',
+    phase: 'result',
     subjectEntryId: entry.entryId,
     toolCallId: getString(content.toolCallId),
     toolName: getString(content.toolName),
@@ -111,6 +164,10 @@ function projectToolResult(
     createdAt: entry.createTime,
     status: error ? 'error' : 'done',
   }
+}
+
+function toolCallIdentity(content: Record<string, unknown>, ordinal: number): string {
+  return `${getString(content.toolCallId) || 'unknown'}:${ordinal}`
 }
 
 function toolCallKey(toolCallId: string): string {

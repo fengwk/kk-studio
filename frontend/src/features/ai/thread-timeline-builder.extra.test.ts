@@ -154,6 +154,7 @@ describe('thread timeline edge branches', () => {
     const timeline = buildThreadTimeline([entry('tool-only', 'MESSAGE', payload)], [])
 
     expect(timeline.messages).toMatchObject([
+      { role: 'tool', phase: 'call', toolName: 'read', subjectEntryId: 'tool-only' },
       { role: 'meta', kind: 'turn_usage', subjectEntryId: 'tool-only' },
     ])
   })

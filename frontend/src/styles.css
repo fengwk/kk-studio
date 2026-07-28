@@ -1864,6 +1864,82 @@ div.is-error {
   color: var(--fg-muted);
 }
 
+.thread-block-entry {
+  padding: 8px 12px;
+  border-left: 2px solid var(--line-strong);
+  background: var(--scrim);
+}
+
+.thread-entry-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.thread-entry-icon {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin-top: 2px;
+  place-items: center;
+  color: var(--fg-dim);
+}
+
+.thread-entry-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.thread-entry-content {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.thread-entry-title {
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.thread-entry-text {
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.thread-entry-payload {
+  margin-top: 5px;
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
+.thread-entry-payload summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.thread-entry-payload pre {
+  max-height: 240px;
+  margin: 6px 0 0;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.thread-block-entry.kind-runtime_config {
+  border-left-color: var(--green-primary);
+}
+
 /* 长会话离屏消息降耗：不裁切布局，浏览器可跳过绘制 */
 .thread-turn {
   content-visibility: auto;

@@ -1,0 +1,44 @@
+import { render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { EntryMessageBlock } from '@/features/ai/thread-panel/messages/EntryMessageBlock'
+import type { EntryEventDialogueMessage } from '@/features/ai/thread-timeline'
+
+function event(
+  kind: EntryEventDialogueMessage['kind'],
+  title: string,
+): EntryEventDialogueMessage {
+  return {
+    id: `entry-${kind}`,
+    role: 'entry',
+    kind,
+    title,
+    text: `${title} 的摘要`,
+    rawPayloadJson: '{"entry":true}',
+    subjectEntryId: `entry-${kind}`,
+    createdAt: null,
+    status: 'done',
+  }
+}
+
+describe('EntryMessageBlock', () => {
+  it('renders semantic Entry variants through the portable timeline contract', () => {
+    const { container } = render(
+      <>
+        <EntryMessageBlock message={event('root', '会话开始')} />
+        <EntryMessageBlock message={event('runtime_config', '运行配置已记录')} />
+        <EntryMessageBlock message={event('unsupported_message', '无法识别消息 Entry')} />
+        <EntryMessageBlock message={event('unknown_entry', '未识别 Entry')} />
+      </>,
+    )
+
+    expect(screen.getByText('会话开始')).toBeInTheDocument()
+    expect(screen.getByText('运行配置已记录')).toBeInTheDocument()
+    expect(screen.getByText('无法识别消息 Entry')).toBeInTheDocument()
+    expect(screen.getByText('未识别 Entry')).toBeInTheDocument()
+    expect(screen.getAllByText('查看原始 Entry')).toHaveLength(4)
+    expect(container.querySelector('[data-entry-kind="root"] svg')).toBeInTheDocument()
+    expect(container.querySelector('[data-entry-kind="runtime_config"] svg')).toBeInTheDocument()
+    expect(container.querySelector('[data-entry-kind="unsupported_message"] svg')).toBeInTheDocument()
+    expect(container.querySelector('[data-entry-kind="unknown_entry"] svg')).toBeInTheDocument()
+  })
+})

@@ -1,4 +1,5 @@
 import { AssistantMessageBlock } from '@/features/ai/thread-panel/messages/AssistantMessageBlock'
+import { EntryMessageBlock } from '@/features/ai/thread-panel/messages/EntryMessageBlock'
 import { MetaMessageBlock } from '@/features/ai/thread-panel/messages/MetaMessageBlock'
 import { SystemMessageBlock } from '@/features/ai/thread-panel/messages/SystemMessageBlock'
 import { ToolMessageBlock } from '@/features/ai/thread-panel/messages/ToolMessageBlock'
@@ -21,6 +22,8 @@ export function MessageList({ messages }: { messages: DialogueMessage[] }) {
             return <ToolMessageBlock key={message.id} message={message} />
           case 'meta':
             return <MetaMessageBlock key={message.id} message={message} />
+          case 'entry':
+            return <EntryMessageBlock key={message.id} message={message} />
           default:
             return null
         }
