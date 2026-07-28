@@ -1,4 +1,11 @@
 export { ThreadPanel } from '@/features/ai/thread-panel/ThreadPanel'
+export type {
+  ThreadPanelActivityInput,
+  ThreadPanelComposerInput,
+  ThreadPanelProps,
+  ThreadPanelSlots,
+  ThreadPanelTranscriptInput,
+} from '@/features/ai/thread-panel/ThreadPanel'
 export { ThreadTranscript } from '@/features/ai/thread-panel/ThreadTranscript'
 export { ThreadComposer } from '@/features/ai/thread-panel/ThreadComposer'
 export { ThreadErrorPanel } from '@/features/ai/thread-panel/ThreadErrorPanel'
@@ -10,7 +17,7 @@ export type {
   ThreadUsageCost,
   ThreadUsageNumber,
   ThreadUsageSummary,
-} from '@/features/ai/thread-panel/ThreadStatusFooter'
+} from '@/features/ai/thread-panel/thread-status-types'
 export {
   THREAD_COMMANDS,
   filterThreadCommands,
@@ -25,6 +32,19 @@ export { UserMessageBlock } from '@/features/ai/thread-panel/messages/UserMessag
 export { SystemMessageBlock } from '@/features/ai/thread-panel/messages/SystemMessageBlock'
 export { ToolMessageBlock } from '@/features/ai/thread-panel/messages/ToolMessageBlock'
 export { ThinkingBlock } from '@/features/ai/thread-panel/messages/ThinkingBlock'
+export {
+  clearToolRenderers,
+  getToolRenderer,
+  registerToolRenderer,
+  unregisterToolRenderer,
+  type ToolRenderer,
+  type ToolRenderContext,
+} from '@/features/ai/thread-panel/tool-renderers'
+export {
+  formatToolAttachmentFallback,
+  getToolAttachmentLabel,
+  toToolAttachmentSrc,
+} from '@/features/ai/thread-panel/tool-attachments'
 export { isVisibleDialogueMessage } from '@/features/ai/thread-panel/visibility'
 export type {
   DialogueMessage,

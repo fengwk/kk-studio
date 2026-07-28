@@ -2,7 +2,7 @@ import {
   formatToolAttachmentFallback,
   getToolAttachmentLabel,
   toToolAttachmentSrc,
-} from '@/features/ai/tool-attachments'
+} from '@/features/ai/thread-panel/tool-attachments'
 import { getToolRenderer, type ToolRenderContext } from '@/features/ai/thread-panel/tool-renderers'
 import type { ToolAttachment, ToolDialogueMessage } from '@/features/ai/thread-timeline-types'
 
