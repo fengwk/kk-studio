@@ -61,6 +61,23 @@ services:
     init: true
     environment:
       SPRING_PROFILES_ACTIVE: ${KK_STUDIO_SPRING_PROFILES_ACTIVE:-dev}
+      # The E2E profile opt-in prevents Maven/Testcontainers from consuming host TEST_* values.
+      # Compose enables it; the runner ignores blank or incomplete provider pairs.
+      KK_STUDIO_E2E_PROVIDER_SYNC_ENABLED: ${KK_STUDIO_E2E_PROVIDER_SYNC_ENABLED:-true}
+      TEST_MINIMAX_BASE_URL: ${TEST_MINIMAX_BASE_URL:-}
+      TEST_MINIMAX_API_KEY: ${TEST_MINIMAX_API_KEY:-}
+      TEST_OPENAI_BASE_URL: ${TEST_OPENAI_BASE_URL:-}
+      TEST_OPENAI_API_KEY: ${TEST_OPENAI_API_KEY:-}
+      TEST_XAI_BASE_URL: ${TEST_XAI_BASE_URL:-}
+      TEST_XAI_API_KEY: ${TEST_XAI_API_KEY:-}
+      TEST_DEEPSEEK_BASE_URL: ${TEST_DEEPSEEK_BASE_URL:-}
+      TEST_DEEPSEEK_API_KEY: ${TEST_DEEPSEEK_API_KEY:-}
+      TEST_GOOGLE_BASE_URL: ${TEST_GOOGLE_BASE_URL:-}
+      TEST_GOOGLE_API_KEY: ${TEST_GOOGLE_API_KEY:-}
+      TEST_ANTHROPIC_BASE_URL: ${TEST_ANTHROPIC_BASE_URL:-}
+      TEST_ANTHROPIC_API_KEY: ${TEST_ANTHROPIC_API_KEY:-}
+      TEST_ZAI_BASE_URL: ${TEST_ZAI_BASE_URL:-}
+      TEST_ZAI_API_KEY: ${TEST_ZAI_API_KEY:-}
       # Schema is already initialized by the postgres entrypoint above. Keep
       # Spring's classpath-based init disabled so restarts do not re-run it.
       SPRING_SQL_INIT_MODE: never

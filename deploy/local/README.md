@@ -79,6 +79,38 @@ docker compose -f deploy/local/compose.yaml down -v
 | `KK_STUDIO_PG_PASSWORD` | `kk_studio` | 初始密码 |
 | `KK_STUDIO_SPRING_PROFILES_ACTIVE` | `dev` | 传递给 `SPRING_PROFILES_ACTIVE` |
 
+## E2E 多模型 Provider 环境注入
+
+E2E seed 的 7 个 Provider 与 19 个 Pi 模型不含任何真实凭证。Compose 会将全部
+`TEST_*_BASE_URL` / `TEST_*_API_KEY` 传给 app；仅当 app 运行在 `e2e` profile
+且 `KK_STUDIO_E2E_PROVIDER_SYNC_ENABLED=true` 时，启动期同步器才会把**成对的非空**
+Base URL 与 API Key 写入对应 Provider。空值或不完整对会被忽略，且不会输出密钥。
+
+| Provider | Base URL | API Key |
+| --- | --- | --- |
+| MiniMax | `TEST_MINIMAX_BASE_URL` | `TEST_MINIMAX_API_KEY` |
+| OpenAI | `TEST_OPENAI_BASE_URL` | `TEST_OPENAI_API_KEY` |
+| xAI | `TEST_XAI_BASE_URL` | `TEST_XAI_API_KEY` |
+| DeepSeek | `TEST_DEEPSEEK_BASE_URL` | `TEST_DEEPSEEK_API_KEY` |
+| Google | `TEST_GOOGLE_BASE_URL` | `TEST_GOOGLE_API_KEY` |
+| Anthropic | `TEST_ANTHROPIC_BASE_URL` | `TEST_ANTHROPIC_API_KEY` |
+| ZAI | `TEST_ZAI_BASE_URL` | `TEST_ZAI_API_KEY` |
+
+同步使用持久化 Provider 配置，而非让模型调用直接读取环境变量。OpenAI 兼容
+Provider 的 Base URL 在缺少末尾 `/v1` 时自动补齐。Compose 仅在容器创建或重建时
+读取宿主环境；修改 `TEST_*` 后需重建 app。凭证会存在于 app 容器运行时环境，
+因此仅应在受控的本地 E2E 环境使用，并限制 Docker 管理面访问：
+
+```bash
+KK_STUDIO_SPRING_PROFILES_ACTIVE=e2e \
+KK_STUDIO_PG_DATABASE=kk_studio_e2e \
+docker compose -f deploy/local/compose.yaml up -d --build --no-deps --force-recreate app
+```
+
+上述命令要求 PostgreSQL 中已有由 `schema-postgresql.sql` 与
+`data-e2e-postgresql.sql` 初始化的 `kk_studio_e2e` 数据库。常规 dev 栈不会同步
+Provider 凭证；真实凭证不会写入镜像、SQL seed 或仓库。
+
 数据库首次初始化的约束：
 
 - `core/src/main/resources/schema-postgresql.sql` 和
@@ -86,8 +118,8 @@ docker compose -f deploy/local/compose.yaml down -v
 - `data-dev-postgresql.sql` 写入的是 local-only 的 stub provider（`stub-key`），
   不携带任何真实凭证。
 - 真实 Provider（OpenAI / Google / Anthropic / xAI / MiniMax / DeepSeek / ZAI）
-  的 `credential` 必须通过 UI 的 Provider 页面或 `PUT /api/providers/{id}`
-  接口在运行时注入，**绝不**写入镜像、SQL seed 或仓库。
+  的 `credential` 必须通过 UI、`PUT /api/providers/{id}` 或 E2E profile 的环境同步器
+  在运行时注入，**绝不**写入镜像、SQL seed 或仓库。
 
 ## 清理宿主网络监听
 
