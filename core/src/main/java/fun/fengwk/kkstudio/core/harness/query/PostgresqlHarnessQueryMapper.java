@@ -67,14 +67,32 @@ public interface PostgresqlHarnessQueryMapper extends BaseMapper {
   String THREAD_VIEW_COLUMNS =
       "t.id, head.session_id, t.head_entry_id, t.input_sequence, t.runnable, t.execution_epoch,"
           + " t.processor_token, t.processor_until, t.created_at, t.updated_at,"
-          + " s.title as session_title, "
+          + " s.title as session_title, config.runtime_config_json, "
           + THREAD_WAITING_FLAGS;
 
   /** Thread 的 Session 只由 head Entry 派生；UNBOUND Thread 仍必须出现在查询结果中，因此使用 LEFT JOIN。 */
   String THREAD_VIEW_SOURCE =
-      " from harness_thread t"
-          + " left join harness_entry head on head.id = t.head_entry_id"
-          + " left join harness_session s on s.id = head.session_id";
+      """
+      from harness_thread t
+      left join harness_entry head on head.id = t.head_entry_id
+      left join harness_session s on s.id = head.session_id
+      left join lateral (
+        with recursive runtime_path as (
+          select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, 0 as depth
+          from harness_entry e
+          where e.id = t.head_entry_id
+          union all
+          select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, p.depth + 1
+          from harness_entry e
+          join runtime_path p on p.parent_entry_id = e.id and p.session_id = e.session_id
+        )
+        select p.payload::text as runtime_config_json
+        from runtime_path p
+        where p.entry_type = 'RUNTIME_CONFIG'
+        order by p.depth
+        limit 1
+      ) config on true
+      """;
 
   String INPUT_COLUMNS =
       "i.id, i.thread_id, i.sequence, i.input_type, i.payload::text as payload_json,"
@@ -149,6 +167,7 @@ public interface PostgresqlHarnessQueryMapper extends BaseMapper {
         @Result(column = "created_at", property = "createdAt"),
         @Result(column = "updated_at", property = "updatedAt"),
         @Result(column = "session_title", property = "sessionTitle"),
+        @Result(column = "runtime_config_json", property = "runtimeConfigJson"),
         @Result(column = "has_queued_input", property = "hasQueuedInput"),
         @Result(column = "has_active_model", property = "hasActiveModel"),
         @Result(column = "has_active_tool", property = "hasActiveTool"),

@@ -86,6 +86,19 @@ async function apiDeleteByName(backendUrl, resource, name) {
   return true
 }
 
+async function requireRealMiniMaxM27(backendUrl) {
+  const { json: agentsJson } = await apiJson(backendUrl, 'GET', '/api/agents?pageNumber=1&pageSize=50')
+  const { json: modelsJson } = await apiJson(backendUrl, 'GET', '/api/models?pageNumber=1&pageSize=50')
+  const agents = agentsJson?.data?.results || []
+  const models = modelsJson?.data?.results || []
+  const agent = agents.find((candidate) => candidate.name === 'default-assistant')
+  const model = models.find((candidate) => Number(candidate.id) === 1)
+  assert(
+    model?.name === 'MiniMax-M2.7' && String(agent?.modelId) === String(model.id),
+    `real UI test must use default-assistant with minimax/MiniMax-M2.7: ${JSON.stringify({ agent, model })}`,
+  )
+}
+
 function assert(cond, msg) {
   if (!cond) throw new Error(msg || 'assertion failed')
 }
@@ -136,6 +149,7 @@ async function main(argv) {
   const artRoot = path.join(reportDir, 'artifacts')
   mkdirSync(path.join(reportDir, 'cases'), { recursive: true })
   mkdirSync(artRoot, { recursive: true })
+  if (args.real) await requireRealMiniMaxM27(args.backendUrl)
 
   const browser = await chromium.launch({ headless: !args.headed })
   const context = await browser.newContext({ viewport: { width: 1440, height: 960 } })
@@ -435,14 +449,28 @@ async function main(argv) {
       await page.getByRole('button', { name: '发送消息' }).click()
       // 用户消息应进入 timeline；assistant 成功与否取决于 Provider
       await page.getByText('只回复单词 OK，不要调用工具。').first().waitFor({ state: 'visible', timeout: 30_000 })
+      const status = page.getByLabel('会话状态')
+      await status.getByText('agent:default-assistant', { exact: true }).waitFor({ state: 'visible', timeout: 30_000 })
+      await status.getByText('minimax/MiniMax-M2.7 · high', { exact: true }).waitFor({ state: 'visible', timeout: 30_000 })
       await shot(caseArt, 'first-send-user')
       // 等待一轮结束（最长 90s）
+      let assistantText = ''
       for (let i = 0; i < 90; i++) {
-        const body = await page.locator('body').innerText()
-        if (/\bOK\b/i.test(body) || body.includes('FAILED') || body.includes('失败')) break
+        const assistantTurns = page.locator('.thread-turn-assistant')
+        const count = await assistantTurns.count()
+        if (count > 0) {
+          assistantText = (await assistantTurns.last().innerText()).trim()
+          if (/\bOK\b/i.test(assistantText)) {
+            break
+          }
+          if (/助手回复失败|FAILED|失败/i.test(assistantText)) {
+            throw new Error(`real assistant response failed: ${assistantText}`)
+          }
+        }
         await page.waitForTimeout(1000)
       }
       await shot(caseArt, 'first-send-done')
+      assert(/\bOK\b/i.test(assistantText), `expected assistant reply containing OK, got: ${assistantText || '(empty)'}`)
       expectNoFatal(pageErrors, consoleErrors)
       await apiDeleteByName(args.backendUrl, 'chats', title)
     })

@@ -42,7 +42,7 @@ E2E 启动新后端以及执行 `--rebuild` / `--real` 时，会把当前进程�
 | DeepSeek | OpenAI Chat Completions | `TEST_DEEPSEEK_BASE_URL` | `TEST_DEEPSEEK_API_KEY` |
 | ZAI | OpenAI Chat Completions | `TEST_ZAI_BASE_URL` | `TEST_ZAI_API_KEY` |
 
-当前默认 E2E Agent 使用 MiniMax 模型，因此 `--real` 必须同时提供
+当前默认 E2E Agent 固定使用 `minimax/MiniMax-M2.7`，因此 `--real` 必须同时提供
 `TEST_MINIMAX_BASE_URL` 和 `TEST_MINIMAX_API_KEY`。其他 Provider 凭证用于资源
 注入和手动切换模型；OpenAI 兼容协议的 Base URL 在缺少末尾 `/v1` 时自动补齐。
 
@@ -99,9 +99,9 @@ reports/e2e/LATEST_RUN.txt
 | 层级 | 开关 | 成本 | 覆盖 |
 | --- | --- | --- | --- |
 | L1 | 默认 | 免费 | seed 契约、CRUD、配置校验、Thread 生命周期与 head 重定位、usage 404、proxy |
-| L2 | `--real` | 真模型 | 文本轮次 + usage 入账 |
-| L3 | `--real --with-branch` | 真模型 | rebind 到历史 Entry 后的分支路径 usage |
-| L4 | `--with-tools` / `--real --with-tools` | daemon/真模型 | Environment READY、tool invocation |
+| L2 | `--real` | `minimax/MiniMax-M2.7` | 文本轮次 + usage 入账 |
+| L3 | `--real --with-branch` | `minimax/MiniMax-M2.7` | rebind 到历史 Entry 后的分支路径 usage |
+| L4 | `--with-tools` / `--real --with-tools` | daemon / `minimax/MiniMax-M2.7` | Environment READY、tool invocation |
 | L5 | `--ui` | 本地浏览器 | 页面可达、列表渲染、打开新建模态、无致命 pageerror；截图入报告 |
 
 API 矩阵注册 **57** 条（以 `./scripts/e2e.sh --list` 为准）。默认执行全部免费 L1（**53** 条）。`--ui` 额外 **14** 条 UI smoke（`--real` 时再 +1 真实首发）。
@@ -212,7 +212,7 @@ API 矩阵注册 **57** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 | `ui.model.validation_empty_name` | 空名称前端校验错误展示 |
 | `ui.provider.create_edit_delete_flow` | UI 创建/编辑/删除 Provider |
 | `ui.chat.blank_workspace_shell` | 进入空白工作区，校验 blank pane + composer |
-| `ui.chat.blank_first_send_real` | （`--real`）blank 首发真实消息 |
+| `ui.chat.blank_first_send_real` | （`--real`）blank 首发真实消息；断言冻结 Agent/Model/Variant footer 与 assistant 的 `OK` 回复 |
 
 截图：`reports/e2e/latest/artifacts/ui_*/`；汇总：`ui-report.md` / `ui-summary.json`。
 

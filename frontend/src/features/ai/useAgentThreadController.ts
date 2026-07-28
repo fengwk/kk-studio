@@ -58,7 +58,8 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
   const bound = Boolean(thread && thread.status !== 'UNBOUND')
   const executionEpoch = thread?.executionEpoch
   const createMessageMutation = useAgentThreadMessageMutation(threadId)
-  const timeline = buildThreadTimeline(entries, inputs)
+  const modelStream = useHarnessThreadRealtime(threadId, Boolean(threadId) && entriesQuery.isSuccess, entries)
+  const timeline = buildThreadTimeline(entries, inputs, modelStream)
   const working = isThreadWorking(thread, timeline)
   const agentsById = new Map(agents.map((agent) => [String(agent.id), agent]))
   const currentAgent = thread?.activeAgentDefinitionId
@@ -72,7 +73,6 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
     timeline.messages.length,
     entries.length + inputs.length,
   )
-  useHarnessThreadRealtime(threadId, Boolean(threadId))
 
   useEffect(() => {
     setDraftState(initialDraft)

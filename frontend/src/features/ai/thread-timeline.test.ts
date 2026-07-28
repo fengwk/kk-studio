@@ -5,6 +5,7 @@ import type {
   HarnessThreadInputDTO,
   ThreadInputType,
 } from '@/shared/api/contracts'
+import type { RealtimeModelStream } from '@/features/ai/thread-realtime-state'
 import { buildThreadTimeline, isThreadWorking } from '@/features/ai/thread-timeline'
 
 describe('thread timeline', () => {
@@ -27,6 +28,38 @@ describe('thread timeline', () => {
     ])
     expect(timeline.queuedMessages).toEqual([])
     expect(timeline.hasPendingInputs).toBe(false)
+  })
+
+  it('adds a transient assistant overlay until the matching durable response is available', () => {
+    const stream: RealtimeModelStream = {
+      threadId: 'thread-1',
+      invocationId: 'model-1',
+      attempt: 1,
+      text: '正在输出',
+      thinking: '正在思考',
+      createdAt: '2026-07-28T10:00:00Z',
+    }
+    const live = buildThreadTimeline([], [], stream)
+    const durable = buildThreadTimeline(
+      [
+        {
+          ...entry(
+            '2',
+            'MESSAGE',
+            messagePayload('ASSISTANT', [{ type: 'text', text: '正在输出' }]),
+          ),
+          createTime: '2026-07-28T10:00:01',
+        },
+      ],
+      [],
+      stream,
+    )
+
+    expect(live.messages).toMatchObject([
+      { role: 'assistant', text: '正在输出', thinking: '正在思考', status: 'streaming' },
+    ])
+    expect(durable.messages).toMatchObject([{ role: 'assistant', text: '正在输出', status: 'done' }])
+    expect(durable.messages).toHaveLength(1)
   })
 
   it('does not normalize non-canonical lowercase Entry types', () => {

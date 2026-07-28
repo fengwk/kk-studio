@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.core.harness.thread.command.TestRuntimeConfigs;
 import fun.fengwk.kkstudio.core.harness.thread.command.TestThreads;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadQueryService;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
+import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -51,6 +52,7 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
 
   private static final Instant NOW = Instant.parse("2026-07-24T10:00:00Z");
   private static final ToolDescriptorJsonCodec DESCRIPTOR_CODEC = new ToolDescriptorJsonCodec();
+  private static final RuntimeConfigJsonCodec RUNTIME_CONFIG_CODEC = new RuntimeConfigJsonCodec();
   private static final String TOOL_DESCRIPTOR_JSON =
       DESCRIPTOR_CODEC.encode(
           new ToolDescriptor(
@@ -296,6 +298,45 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
     assertEquals(Long.toString(interactionId), opens.get(0).getId());
     assertEquals("OPEN", opens.get(0).getStatus());
     assertEquals("THREAD", opens.get(0).getOwnerKind());
+  }
+
+  @Test
+  void projectsFrozenRuntimeConfigFromTheCurrentHeadPath() {
+    TestThreads.Bootstrapped boot =
+        TestThreads.bootstrap(
+            commandTransactions,
+            "runtime-config",
+            TestRuntimeConfigs.config("frozen-agent", true),
+            NOW);
+    long replacementConfigEntryId = boot.configEntryId() + 1_000_000L;
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
+            + " values (?, ?, ?, 'RUNTIME_CONFIG', cast(? as jsonb), ?)",
+        replacementConfigEntryId,
+        boot.sessionId(),
+        boot.configEntryId(),
+        RUNTIME_CONFIG_CODEC.encode(TestRuntimeConfigs.config("nearest-agent", false)),
+        OffsetDateTime.ofInstant(NOW.plusMillis(500), ZoneOffset.UTC));
+    long messageEntryId = replacementConfigEntryId + 1;
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
+            + " values (?, ?, ?, 'MESSAGE', '{}'::jsonb, ?)",
+        messageEntryId,
+        boot.sessionId(),
+        replacementConfigEntryId,
+        OffsetDateTime.ofInstant(NOW.plusSeconds(1), ZoneOffset.UTC));
+    jdbc.update(
+        "update harness_thread set head_entry_id = ? where id = ?",
+        messageEntryId,
+        boot.threadId());
+
+    HarnessThreadDTO projected = threadQueryService.getThread(Long.toString(boot.threadId()));
+
+    assertEquals("1", projected.getActiveAgentDefinitionId());
+    assertEquals("nearest-agent", projected.getActiveAgentName());
+    assertEquals("2", projected.getModelId());
+    assertEquals("default", projected.getVariant());
+    assertEquals(false, projected.getYoloEnabled());
   }
 
   @Test

@@ -21,7 +21,7 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
 
   return (
     <div className={`thread-turn thread-turn-assistant ${message.status === 'error' ? 'error' : ''}`}>
-      <ThinkingBlock thinking={thinking} streaming={streaming && !hasText} />
+      <ThinkingBlock thinking={thinking} streaming={streaming} />
       {hasText ? (
         <section className="thread-block thread-block-assistant thread-assistant-shell">
           <CopyButton source={text} className="thread-assistant-copy" label="复制全文" />
