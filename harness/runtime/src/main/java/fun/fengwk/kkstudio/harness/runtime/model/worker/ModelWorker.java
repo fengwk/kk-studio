@@ -775,8 +775,8 @@ public final class ModelWorker {
 
     private Completion complete(ProviderResponse response) {
       List<ProviderStreamEvent> gaps = new ArrayList<>();
-      appendTextGap(gaps, text, response.text(), true);
-      boolean thinkingGapEmitted = appendThinkingGap(gaps, thinking, response.thinking());
+      appendTextGap(gaps, text, response.text());
+      appendThinkingGap(gaps, thinking, response.thinking());
       if (partialToolCalls.keySet().stream()
           .anyMatch(index -> index >= response.toolCalls().size())) {
         throw new IllegalArgumentException("final response omits a streamed tool call");
@@ -792,7 +792,7 @@ public final class ModelWorker {
         }
       }
       ProviderResponse durableResponse = response;
-      if (!thinkingGapEmitted && thinking.length() > 0) {
+      if (response.thinking().isEmpty() && thinking.length() > 0) {
         durableResponse = withThinking(response, thinking.toString());
       }
       return new Completion(durableResponse, List.copyOf(gaps));
@@ -831,28 +831,18 @@ public final class ModelWorker {
     }
 
     private static void appendTextGap(
-        List<ProviderStreamEvent> gaps,
-        StringBuilder received,
-        String complete,
-        boolean textContent) {
+        List<ProviderStreamEvent> gaps, StringBuilder received, String complete) {
       String finalValue = complete == null ? "" : complete;
       String partial = received.toString();
-      if (!textContent && finalValue.isEmpty()) {
-        return;
-      }
       if (!finalValue.startsWith(partial)) {
-        throw new IllegalArgumentException(
-            "final response conflicts with streamed " + (textContent ? "text" : "thinking"));
+        throw new IllegalArgumentException("final response conflicts with streamed text");
       }
       if (finalValue.length() <= received.length()) {
         return;
       }
       String gap = finalValue.substring(received.length());
       received.append(gap);
-      gaps.add(
-          textContent
-              ? new ProviderStreamEvent.TextDelta(gap)
-              : new ProviderStreamEvent.ThinkingDelta(gap));
+      gaps.add(new ProviderStreamEvent.TextDelta(gap));
     }
 
     /** Holds the effective final response and the trailing SSE gaps to publish. */
