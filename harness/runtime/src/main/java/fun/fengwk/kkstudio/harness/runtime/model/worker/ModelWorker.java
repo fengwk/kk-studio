@@ -406,14 +406,14 @@ public final class ModelWorker {
           persistCancelled();
           return;
         }
-        List<ProviderStreamEvent> finalGaps;
+        ModelStreamAccumulator.Completion completion;
         Instant completedAt;
         synchronized (this) {
-          finalGaps = streamAccumulator.complete(response);
-          ModelResponseValidator.validate(claimed.invocation().request(), response);
+          completion = streamAccumulator.complete(response);
+          ModelResponseValidator.validate(claimed.invocation().request(), completion.response());
           completedAt = clock.instant();
         }
-        persistSuccess(response, finalGaps, completedAt);
+        persistSuccess(completion.response(), completion.gaps(), completedAt);
       } catch (RuntimeException failure) {
         persistFailure(
             new ProviderException(
@@ -773,10 +773,10 @@ public final class ModelWorker {
       }
     }
 
-    private List<ProviderStreamEvent> complete(ProviderResponse response) {
+    private Completion complete(ProviderResponse response) {
       List<ProviderStreamEvent> gaps = new ArrayList<>();
       appendTextGap(gaps, text, response.text(), true);
-      appendTextGap(gaps, thinking, response.thinking(), false);
+      boolean thinkingGapEmitted = appendThinkingGap(gaps, thinking, response.thinking());
       if (partialToolCalls.keySet().stream()
           .anyMatch(index -> index >= response.toolCalls().size())) {
         throw new IllegalArgumentException("final response omits a streamed tool call");
@@ -791,7 +791,43 @@ public final class ModelWorker {
           gaps.add(gap);
         }
       }
-      return List.copyOf(gaps);
+      ProviderResponse durableResponse = response;
+      if (!thinkingGapEmitted && thinking.length() > 0) {
+        durableResponse = withThinking(response, thinking.toString());
+      }
+      return new Completion(durableResponse, List.copyOf(gaps));
+    }
+
+    private static boolean appendThinkingGap(
+        List<ProviderStreamEvent> gaps, StringBuilder received, String complete) {
+      String finalValue = complete == null ? "" : complete;
+      String partial = received.toString();
+      if (finalValue.isEmpty()) {
+        return false;
+      }
+      if (!finalValue.startsWith(partial)) {
+        throw new IllegalArgumentException("final response conflicts with streamed thinking");
+      }
+      if (finalValue.length() <= received.length()) {
+        return false;
+      }
+      String gap = finalValue.substring(received.length());
+      received.append(gap);
+      gaps.add(new ProviderStreamEvent.ThinkingDelta(gap));
+      return true;
+    }
+
+    private static ProviderResponse withThinking(ProviderResponse response, String thinking) {
+      return new ProviderResponse(
+          response.text(),
+          thinking,
+          response.toolCalls(),
+          response.stopReason(),
+          response.usage(),
+          response.cost(),
+          response.requestId(),
+          response.serviceTier(),
+          response.rawUsageJson());
     }
 
     private static void appendTextGap(
@@ -817,6 +853,25 @@ public final class ModelWorker {
           textContent
               ? new ProviderStreamEvent.TextDelta(gap)
               : new ProviderStreamEvent.ThinkingDelta(gap));
+    }
+
+    /** Holds the effective final response and the trailing SSE gaps to publish. */
+    static final class Completion {
+      private final ProviderResponse response;
+      private final List<ProviderStreamEvent> gaps;
+
+      Completion(ProviderResponse response, List<ProviderStreamEvent> gaps) {
+        this.response = response;
+        this.gaps = gaps;
+      }
+
+      ProviderResponse response() {
+        return response;
+      }
+
+      List<ProviderStreamEvent> gaps() {
+        return gaps;
+      }
     }
   }
 
