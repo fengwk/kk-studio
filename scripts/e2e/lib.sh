@@ -151,77 +151,7 @@ sync_e2e_provider_credentials() {
   TEST_MINIMAX_API_KEY="${TEST_MINIMAX_API_KEY-}" TEST_MINIMAX_BASE_URL="${TEST_MINIMAX_BASE_URL-}" \
   TEST_DEEPSEEK_API_KEY="${TEST_DEEPSEEK_API_KEY-}" TEST_DEEPSEEK_BASE_URL="${TEST_DEEPSEEK_BASE_URL-}" \
   TEST_ZAI_API_KEY="${TEST_ZAI_API_KEY-}" TEST_ZAI_BASE_URL="${TEST_ZAI_BASE_URL-}" \
-  python3 - <<'PY'
-import json, os, urllib.request
-
-BACKEND = os.environ["BACKEND_URL"].rstrip("/")
-PROVIDERS = [
-    (1, "minimax", "MiniMax (OpenAI Responses).", "openai_response", "TEST_MINIMAX_BASE_URL", "TEST_MINIMAX_API_KEY"),
-    (2, "openai", "OpenAI (OpenAI Responses).", "openai_response", "TEST_OPENAI_BASE_URL", "TEST_OPENAI_API_KEY"),
-    (3, "xai", "xAI / Grok (OpenAI Responses).", "openai_response", "TEST_XAI_BASE_URL", "TEST_XAI_API_KEY"),
-    (4, "deepseek", "DeepSeek (OpenAI Chat Completions).", "openai", "TEST_DEEPSEEK_BASE_URL", "TEST_DEEPSEEK_API_KEY"),
-    (5, "google", "Google Gemini.", "google", "TEST_GOOGLE_BASE_URL", "TEST_GOOGLE_API_KEY"),
-    (6, "anthropic", "Anthropic.", "anthropic", "TEST_ANTHROPIC_BASE_URL", "TEST_ANTHROPIC_API_KEY"),
-    (7, "zai", "ZAI (OpenAI Chat Completions).", "openai", "TEST_ZAI_BASE_URL", "TEST_ZAI_API_KEY"),
-]
-
-def get(url):
-    with urllib.request.urlopen(url, timeout=30) as resp:
-        return json.load(resp)
-
-def put(url, payload):
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
-        method="PUT",
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.load(resp)
-
-def normalize_openai_compatible_base_url(base, provider_type):
-    """When env already sets a base URL, ensure OpenAI-compatible hosts end with /v1.
-    Never invent a default host; google and blank values are left unchanged.
-    """
-    if not base:
-        return base
-    if provider_type not in ("openai", "openai_response"):
-        return base
-    cleaned = base.rstrip("/")
-    if cleaned.endswith("/v1"):
-        return cleaned
-    return cleaned + "/v1"
-
-listed = get(f"{BACKEND}/api/providers?pageNumber=1&pageSize=50")
-rows = ((listed.get("data") or {}).get("results") or [])
-by_id = {str(r.get("id")): r for r in rows}
-
-for provider_id, name, description, provider_type, base_env, key_env in PROVIDERS:
-    base = (os.environ.get(base_env) or "").strip() or None
-    key = (os.environ.get(key_env) or "").strip() or None
-    if base is None and key is None:
-        print(f"provider {name}: skip (no {base_env}/{key_env})")
-        continue
-    if base is not None:
-        normalized = normalize_openai_compatible_base_url(base, provider_type)
-        if normalized != base:
-            print(f"provider {name}: normalize baseUrl {base} -> {normalized}")
-        base = normalized
-    current = by_id.get(str(provider_id)) or {}
-    payload = {
-        "name": name,
-        "description": description,
-        "providerType": provider_type,
-        "baseUrl": base if base is not None else current.get("baseUrl"),
-        "modelCallTimeoutMillis": int(current.get("modelCallTimeoutMillis") or 1800000),
-        "modelCallIdleTimeoutMillis": int(current.get("modelCallIdleTimeoutMillis") or 120000),
-    }
-    if key is not None:
-        payload["credential"] = key
-    body = put(f"{BACKEND}/api/providers/{provider_id}", payload)
-    data = body.get("data") or {}
-    print(f"provider {name}: configured={data.get('configured')} baseUrl_set={bool(data.get('baseUrl'))}")
-PY
+  python3 "$REPO_ROOT/scripts/e2e/sync_provider_credentials.py" --backend-url "$BACKEND_URL"
 }
 
 start_frontend() {
