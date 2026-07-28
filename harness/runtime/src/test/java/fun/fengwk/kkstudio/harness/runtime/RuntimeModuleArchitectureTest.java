@@ -30,6 +30,7 @@ class RuntimeModuleArchitectureTest {
       List.of(
           "java.",
           "javax.",
+          "lombok.",
           "com.fasterxml.jackson.",
           "fun.fengwk.kkstudio.harness.runtime.",
           "fun.fengwk.kkstudio.harness.tool.");
@@ -79,7 +80,8 @@ class RuntimeModuleArchitectureTest {
         harnessRoot.resolve("runtime/pom.xml"),
         Set.of(
             "com.fasterxml.jackson.core:jackson-databind",
-            "fun.fengwk.kk-studio:kk-studio-harness-tool"));
+            "fun.fengwk.kk-studio:kk-studio-harness-tool",
+            "org.slf4j:slf4j-api"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("daemon/pom.xml"),
         Set.of(

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.harness.thread.worker;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.SmartLifecycle;
 
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
@@ -23,9 +24,8 @@ import java.util.concurrent.TimeUnit;
  * payload、不执行状态机，也不持有 Thread ownership。重复或丢失的 wake 因此是安全的：最终由数据库 claim/fencing 决定哪一个 activation
  * 可以推进。
  */
+@Slf4j
 public final class ThreadRecoveryLifecycle implements SmartLifecycle {
-  private static final System.Logger LOGGER =
-      System.getLogger(ThreadRecoveryLifecycle.class.getName());
   private static final int PHASE = Integer.MAX_VALUE - 70;
 
   private final HarnessRuntimeProperties properties;
@@ -84,7 +84,7 @@ public final class ThreadRecoveryLifecycle implements SmartLifecycle {
       } catch (RuntimeException error) {
         running = false;
         future = null;
-        LOGGER.log(System.Logger.Level.WARNING, "thread recovery schedule failed", error);
+        log.warn("thread recovery schedule failed", error);
         throw error;
       }
     }
@@ -150,8 +150,7 @@ public final class ThreadRecoveryLifecycle implements SmartLifecycle {
             threadKick.kick(threadId);
             dispatched++;
           } catch (RejectedExecutionException rejected) {
-            LOGGER.log(
-                System.Logger.Level.WARNING, "recovery kick rejected for " + threadId, rejected);
+            log.warn("recovery kick rejected for {}", threadId, rejected);
           }
         }
       }
@@ -163,7 +162,7 @@ public final class ThreadRecoveryLifecycle implements SmartLifecycle {
     try {
       scanWhileRunning();
     } catch (RuntimeException error) {
-      LOGGER.log(System.Logger.Level.WARNING, "thread recovery scan failed", error);
+      log.warn("thread recovery scan failed", error);
     }
   }
 

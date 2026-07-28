@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.harness.tool.worker;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.SmartLifecycle;
 
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
@@ -14,8 +15,8 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /** Runs bounded PostgreSQL ToolInvocation recovery for PLATFORM and READY ENVIRONMENT work. */
+@Slf4j
 public final class ToolWorkerLifecycle implements SmartLifecycle {
-  private static final System.Logger LOGGER = System.getLogger(ToolWorkerLifecycle.class.getName());
   private static final int PHASE = Integer.MAX_VALUE - 70;
 
   private final HarnessRuntimeProperties properties;
@@ -152,7 +153,7 @@ public final class ToolWorkerLifecycle implements SmartLifecycle {
     try {
       scanOnce();
     } catch (RuntimeException error) {
-      LOGGER.log(System.Logger.Level.WARNING, "tool recovery scan failed", error);
+      log.warn("tool recovery scan failed", error);
     }
   }
 }

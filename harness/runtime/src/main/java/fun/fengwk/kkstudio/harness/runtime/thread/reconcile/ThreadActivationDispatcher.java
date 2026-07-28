@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.thread.reconcile;
 
+import lombok.extern.slf4j.Slf4j;
+
 import fun.fengwk.kkstudio.harness.runtime.execution.StepResult;
 import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
@@ -28,6 +30,7 @@ import java.util.concurrent.RejectedExecutionException;
  * {@link ConcurrentHashMap#compute(Object, java.util.function.BiFunction)} 原子决定继续或移除，避免退出窗口丢失新
  * kick。 跨节点唯一性、lease 与 fencing 始终以数据库 claim 为权威；通知丢失或重复仅影响延迟，由 durable recovery 补偿。
  */
+@Slf4j
 public final class ThreadActivationDispatcher implements ThreadKick {
 
   /** 单次 activation 的同步 reconcile 入口。 */
@@ -35,9 +38,6 @@ public final class ThreadActivationDispatcher implements ThreadKick {
   public interface ReconcileRunner {
     StepResult reconcile(long threadId, String processorToken);
   }
-
-  private static final System.Logger LOGGER =
-      System.getLogger(ThreadActivationDispatcher.class.getName());
 
   private final ReconcileRunner reconcileRunner;
   private final Executor executor;
@@ -107,19 +107,13 @@ public final class ThreadActivationDispatcher implements ThreadKick {
           try {
             activationNotifier.notifyAfterCommit(suspended.continuation().blocker());
           } catch (RuntimeException notificationFailure) {
-            LOGGER.log(
-                System.Logger.Level.WARNING,
-                "thread activation notification failed for " + threadId,
-                notificationFailure);
+            log.warn("thread activation notification failed for {}", threadId, notificationFailure);
           }
         } else if (result instanceof StepResult.Failed failed) {
-          LOGGER.log(
-              System.Logger.Level.WARNING,
-              "thread reconcile failed for " + threadId + ": " + failed.failure().code());
+          log.warn("thread reconcile failed for {}: {}", threadId, failed.failure().code());
         }
       } catch (RuntimeException failure) {
-        LOGGER.log(
-            System.Logger.Level.WARNING, "thread activation crashed for " + threadId, failure);
+        log.warn("thread activation crashed for {}", threadId, failure);
       }
       rerun =
           inFlightByThreadId.compute(

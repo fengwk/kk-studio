@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 
+import lombok.extern.slf4j.Slf4j;
+
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
@@ -55,8 +57,8 @@ import java.util.function.Supplier;
  * semantics for both PLATFORM and ENVIRONMENT. Local tools resolve from {@link ToolRegistry};
  * ENVIRONMENT tools resolve to transport-backed {@link RemoteTool}.
  */
+@Slf4j
 public final class ToolWorker {
-  private static final System.Logger LOGGER = System.getLogger(ToolWorker.class.getName());
   private static final Duration DEFAULT_EXECUTION_TIMEOUT = Duration.ofMinutes(5);
 
   private final ToolInvocationTransactions transactions;
@@ -483,7 +485,7 @@ public final class ToolWorker {
         activationNotifier.notifyAfterCommit(
             new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, claimed.invocation().id()));
       } catch (RuntimeException error) {
-        LOGGER.log(System.Logger.Level.WARNING, "Tool unstarted release activation failed", error);
+        log.warn("Tool unstarted release activation failed", error);
       }
     }
   }
@@ -496,7 +498,7 @@ public final class ToolWorker {
     try {
       activationNotifier.notifyAfterCommit(target);
     } catch (RuntimeException error) {
-      LOGGER.log(System.Logger.Level.WARNING, "Tool activation notification failed", error);
+      log.warn("Tool activation notification failed", error);
     }
   }
 
@@ -740,7 +742,7 @@ public final class ToolWorker {
                   partial,
                   activityAt));
         } catch (RuntimeException error) {
-          LOGGER.log(System.Logger.Level.WARNING, "Tool realtime projection failed", error);
+          log.warn("Tool realtime projection failed", error);
         }
       }
     }

@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.model.worker;
 
+import lombok.extern.slf4j.Slf4j;
+
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
@@ -45,9 +47,8 @@ import java.util.function.Supplier;
  * late CAS only tears down the process-local handle. The worker never writes Entry/head/Usage
  * directly. {@code workerTokenSupplier} must return a fresh non-blank token for every claim.
  */
+@Slf4j
 public final class ModelWorker {
-
-  private static final System.Logger LOGGER = System.getLogger(ModelWorker.class.getName());
 
   private final ModelInvocationTransactions transactions;
   private final ModelExecutionResolver executionResolver;
@@ -193,8 +194,9 @@ public final class ModelWorker {
         notifyThread(claimed.invocation().threadId());
       }
     } catch (RuntimeException failure) {
-      log(
-          "cannot persist UNKNOWN for recovered model invocation " + claimed.invocation().id(),
+      log.warn(
+          "cannot persist UNKNOWN for recovered model invocation {}",
+          claimed.invocation().id(),
           failure);
     }
   }
@@ -212,8 +214,9 @@ public final class ModelWorker {
         notifyThread(claimed.invocation().threadId());
       }
     } catch (RuntimeException terminalFailure) {
-      log(
-          "cannot persist model execution setup failure for " + claimed.invocation().id(),
+      log.warn(
+          "cannot persist model execution setup failure for {}",
+          claimed.invocation().id(),
           terminalFailure);
     }
   }
@@ -234,7 +237,7 @@ public final class ModelWorker {
           notifyThread(claimed.invocation().threadId());
         }
       } catch (RuntimeException failure) {
-        log("cannot persist conflicting local model execution", failure);
+        log.warn("cannot persist conflicting local model execution", failure);
       }
       return;
     }
@@ -253,7 +256,7 @@ public final class ModelWorker {
     try {
       activationNotifier.notifyAfterCommit(target);
     } catch (RuntimeException failure) {
-      log("activation notification failed for " + target, failure);
+      log.warn("activation notification failed for {}", target, failure);
     }
   }
 
@@ -264,7 +267,8 @@ public final class ModelWorker {
           new RealtimeEvent.ModelDelta(
               invocation.threadId(), invocation.id(), invocation.attempt(), event, createdAt));
     } catch (RuntimeException failure) {
-      log("realtime model delta projection failed for invocation " + invocation.id(), failure);
+      log.warn(
+          "realtime model delta projection failed for invocation {}", invocation.id(), failure);
     }
   }
 
@@ -273,12 +277,8 @@ public final class ModelWorker {
     try {
       scheduler.schedule(() -> notifyInvocation(invocationId), delayMillis, TimeUnit.MILLISECONDS);
     } catch (RejectedExecutionException failure) {
-      log("cannot schedule model retry signal for " + invocationId, failure);
+      log.warn("cannot schedule model retry signal for {}", invocationId, failure);
     }
-  }
-
-  private static void log(String message, RuntimeException failure) {
-    LOGGER.log(System.Logger.Level.WARNING, message, failure);
   }
 
   private static String message(Throwable failure, String fallback) {
@@ -394,9 +394,8 @@ public final class ModelWorker {
                 // unlocked before we touch the Provider handle or remove ourselves from the
                 // executions map. Subsequent Provider callbacks will observe terminal == true
                 // and be dropped without being projected as additional deltas.
-                log(
-                    "safe stream snapshot fenced out for invocation " + claimed.invocation().id(),
-                    null);
+                log.warn(
+                    "safe stream snapshot fenced out for invocation {}", claimed.invocation().id());
                 decision = FenceDecision.ABANDON;
                 return;
               }
@@ -503,9 +502,9 @@ public final class ModelWorker {
               transactions.recordSafeStreamSnapshot(
                   claimed, finalSnapshot, completedAt, clock.instant());
           if (snapshotOutcome != ModelInvocationUpdateOutcome.APPLIED) {
-            log(
-                "final safe stream snapshot fenced out for invocation " + claimed.invocation().id(),
-                null);
+            log.warn(
+                "final safe stream snapshot fenced out for invocation {}",
+                claimed.invocation().id());
           }
         }
         if (transactions.completeSuccess(
@@ -518,7 +517,7 @@ public final class ModelWorker {
           cancel = false;
         }
       } catch (RuntimeException failure) {
-        log("cannot persist model success for " + claimed.invocation().id(), failure);
+        log.warn("cannot persist model success for {}", claimed.invocation().id(), failure);
       } finally {
         finishLocal(cancel);
       }
@@ -560,7 +559,7 @@ public final class ModelWorker {
               scheduleRetrySignal(claimed.invocation().id(), retryAt);
             }
           } catch (RuntimeException failure) {
-            log("cannot persist model retry for " + claimed.invocation().id(), failure);
+            log.warn("cannot persist model retry for {}", claimed.invocation().id(), failure);
           } finally {
             finishLocal(true);
           }
@@ -580,7 +579,7 @@ public final class ModelWorker {
           notifyThread(claimed.invocation().threadId());
         }
       } catch (RuntimeException failure) {
-        log("cannot persist model failure for " + claimed.invocation().id(), failure);
+        log.warn("cannot persist model failure for {}", claimed.invocation().id(), failure);
       } finally {
         finishLocal(true);
       }
@@ -593,7 +592,7 @@ public final class ModelWorker {
           notifyThread(claimed.invocation().threadId());
         }
       } catch (RuntimeException failure) {
-        log("cannot persist model cancellation for " + claimed.invocation().id(), failure);
+        log.warn("cannot persist model cancellation for {}", claimed.invocation().id(), failure);
       } finally {
         finishLocal(true);
       }
@@ -637,7 +636,7 @@ public final class ModelWorker {
       try {
         return scheduler.schedule(task, delayMillis, TimeUnit.MILLISECONDS);
       } catch (RejectedExecutionException failure) {
-        log("cannot schedule " + description + " for " + claimed.invocation().id(), failure);
+        log.warn("cannot schedule {} for {}", description, claimed.invocation().id(), failure);
         abandon();
         return null;
       }
@@ -675,7 +674,7 @@ public final class ModelWorker {
           abandon();
         }
       } catch (RuntimeException failure) {
-        log("cannot renew model worker lease for " + claimed.invocation().id(), failure);
+        log.warn("cannot renew model worker lease for {}", claimed.invocation().id(), failure);
         abandon();
       }
     }
@@ -696,7 +695,7 @@ public final class ModelWorker {
           return;
         }
       } catch (RuntimeException failure) {
-        log("cannot record model activity for " + claimed.invocation().id(), failure);
+        log.warn("cannot record model activity for {}", claimed.invocation().id(), failure);
         abandon();
         return;
       }
@@ -803,7 +802,10 @@ public final class ModelWorker {
       try {
         handle.cancel();
       } catch (RuntimeException failure) {
-        log("cannot cancel local model execution handle for " + claimed.invocation().id(), failure);
+        log.warn(
+            "cannot cancel local model execution handle for {}",
+            claimed.invocation().id(),
+            failure);
       }
     }
 
