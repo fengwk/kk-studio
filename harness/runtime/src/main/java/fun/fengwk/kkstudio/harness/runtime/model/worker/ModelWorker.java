@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
@@ -355,8 +356,10 @@ public final class ModelWorker {
       if (terminal.get()) {
         return;
       }
+      FenceDecision decision = FenceDecision.SKIP;
       try {
         ProviderException timeout;
+        SafeStreamSnapshot pendingSnapshot = null;
         synchronized (this) {
           if (terminal.get()) {
             return;
@@ -367,12 +370,38 @@ public final class ModelWorker {
             streamAccumulator.append(delta);
             lastObservedActivityAt = activityAt;
             pendingActivityAt = activityAt;
+            // 仅当本次 delta 携带可发布的安全内容（text/thinking）时才在 fenced write 之前准备快照。
+            // tool-call fragment 永远不进入 safe_stream_snapshot；这里静默跳过持久化但不阻塞 SSE。
+            if (delta instanceof ProviderStreamEvent.TextDelta
+                || delta instanceof ProviderStreamEvent.ThinkingDelta) {
+              pendingSnapshot = streamAccumulator.snapshotSafe();
+            }
             if (!scheduleActivityFlushLocked()) {
               return;
             }
             if (!scheduleIdleTimeoutLocked()) {
               return;
             }
+            if (pendingSnapshot != null) {
+              Instant persistAt = activityAt;
+              ModelInvocationUpdateOutcome outcome =
+                  transactions.recordSafeStreamSnapshot(
+                      claimed, pendingSnapshot, persistAt, clock.instant());
+              if (outcome != ModelInvocationUpdateOutcome.APPLIED) {
+                // Fenced snapshot write lost ownership of the row — do NOT publish this delta.
+                // The adapter has already returned, so we exit the synchronized block and run
+                // abandon() from the finally clause below; that keeps the Execution monitor
+                // unlocked before we touch the Provider handle or remove ourselves from the
+                // executions map. Subsequent Provider callbacks will observe terminal == true
+                // and be dropped without being projected as additional deltas.
+                log(
+                    "safe stream snapshot fenced out for invocation " + claimed.invocation().id(),
+                    null);
+                decision = FenceDecision.ABANDON;
+                return;
+              }
+            }
+            decision = FenceDecision.PUBLISH_DELTA;
             appendDelta(claimed.invocation(), delta, activityAt);
             return;
           }
@@ -384,7 +413,24 @@ public final class ModelWorker {
                 ProviderErrorKind.INVALID_REQUEST,
                 "invalid provider stream event: " + message(failure, "unknown event failure"),
                 failure));
+      } finally {
+        // 离开 synchronized 块后再调用可能回调 Provider/transport 的 abandon，避免重入同一 Execution 的 monitor。
+        if (decision == FenceDecision.ABANDON) {
+          abandon();
+        }
       }
+    }
+
+    /**
+     * {@code onDelta} 在 synchronized 块内只能决定是否 abandon；具体清理延迟到块外以避免重入 monitor 与持有 Thread 锁的
+     * transport cancel 调用发生死锁。{@link #SKIP} 表示 timeout/error 已接管或该 delta 不带可发布内容； {@link
+     * #PUBLISH_DELTA} 表示 snapshot fence 成功，已 SSE publish；{@link #ABANDON} 表示 fence LOST， 必须本地
+     * abandon。
+     */
+    private enum FenceDecision {
+      SKIP,
+      PUBLISH_DELTA,
+      ABANDON
     }
 
     @Override
@@ -449,6 +495,19 @@ public final class ModelWorker {
         ProviderResponse response, List<ProviderStreamEvent> finalGaps, Instant completedAt) {
       boolean cancel = true;
       try {
+        // 在 finalize 之前先把 final response 内的 text/thinking 写入 snapshot，确保 stop 与
+        // terminal/apply 并发时也能读到完整 SSE 累积。
+        SafeStreamSnapshot finalSnapshot = streamAccumulator.snapshotSafe();
+        if (finalSnapshot.hasContent()) {
+          ModelInvocationUpdateOutcome snapshotOutcome =
+              transactions.recordSafeStreamSnapshot(
+                  claimed, finalSnapshot, completedAt, clock.instant());
+          if (snapshotOutcome != ModelInvocationUpdateOutcome.APPLIED) {
+            log(
+                "final safe stream snapshot fenced out for invocation " + claimed.invocation().id(),
+                null);
+          }
+        }
         if (transactions.completeSuccess(
                 claimed, response, lastObservedActivityAt(), clock.instant())
             == ModelInvocationUpdateOutcome.APPLIED) {
@@ -771,6 +830,11 @@ public final class ModelWorker {
             .computeIfAbsent(delta.index(), ignored -> new PartialToolCall())
             .append(delta);
       }
+    }
+
+    /** 返回当前已累积的 text + thinking 安全快照；tool-call fragment 永远不参与。 */
+    private SafeStreamSnapshot snapshotSafe() {
+      return new SafeStreamSnapshot(text.toString(), thinking.toString());
     }
 
     private Completion complete(ProviderResponse response) {

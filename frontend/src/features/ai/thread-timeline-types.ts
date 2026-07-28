@@ -34,6 +34,13 @@ export interface TextDialogueMessage extends BaseDialogueMessage {
   // emitted thinking during this attempt; absent for plain text responses and
   // for non-assistant roles.
   thinking?: string
+  /**
+   * True for assistant turns that the user explicitly stopped via /stop; their
+   * text/thinking reflect the snapshot at stop time and remain visible after a
+   * refresh, but the UI should render an "已停止" affordance and suppress the
+   * realtime overlay.
+   */
+  aborted?: boolean
   metadata?: Record<string, unknown>
 }
 

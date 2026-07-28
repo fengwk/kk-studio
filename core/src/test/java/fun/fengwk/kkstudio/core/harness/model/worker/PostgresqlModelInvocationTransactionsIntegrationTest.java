@@ -23,6 +23,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshotJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -749,6 +751,7 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
                 null,
                 now.minus(Duration.ofMinutes(1)),
                 ownership.invocation().startedAt(),
+                null,
                 null),
             false);
 
@@ -867,6 +870,7 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
                 null,
                 now.minus(Duration.ofMinutes(1)),
                 ownership.invocation().startedAt(),
+                null,
                 null),
             false);
     ModelInvocationUpdateOutcome out =
@@ -891,11 +895,139 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
         claimable.isEmpty(), "findClaimable must filter out when Thread epoch != Invocation epoch");
   }
 
+  // ---------- safe stream snapshot path ----------
+
+  /**
+   * The fenced snapshot write is persisted as JSON and is readable from the row; a second extending
+   * write uses prefix-monotone merge so the stored snapshot grows monotonically.
+   */
+  @Test
+  void recordSafeStreamSnapshotFencedWriteExtendsAndIsReadable() throws Exception {
+    Fixture fx = newQueued();
+    Instant now = now();
+    Optional<ClaimedModelInvocation> claimed =
+        transactions.claim(
+            fx.invocationId, "tok-safe", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
+    assertTrue(claimed.isPresent());
+
+    SafeStreamSnapshot first = new SafeStreamSnapshot("hello", "");
+    ModelInvocationUpdateOutcome firstOutcome =
+        transactions.recordSafeStreamSnapshot(claimed.get(), first, now.plusMillis(10), now);
+    assertSame(ModelInvocationUpdateOutcome.APPLIED, firstOutcome);
+    ModelInvocationDO rowAfterFirst = rowFor(fx.invocationId);
+    assertEquals(
+        first, new SafeStreamSnapshotJsonCodec().decode(rowAfterFirst.getSafeStreamSnapshotJson()));
+
+    SafeStreamSnapshot extending = new SafeStreamSnapshot("hello world", "thinking");
+    ModelInvocationUpdateOutcome secondOutcome =
+        transactions.recordSafeStreamSnapshot(claimed.get(), extending, now.plusMillis(20), now);
+    assertSame(ModelInvocationUpdateOutcome.APPLIED, secondOutcome);
+    ModelInvocationDO rowAfterSecond = rowFor(fx.invocationId);
+    assertEquals(
+        extending,
+        new SafeStreamSnapshotJsonCodec().decode(rowAfterSecond.getSafeStreamSnapshotJson()));
+  }
+
+  /**
+   * Snapshot fence never overwrites a longer durable snapshot with a shorter incoming prefix; the
+   * durable side wins when it strictly extends the incoming side.
+   */
+  @Test
+  void recordSafeStreamSnapshotKeepsLongerDurableOverShorterIncoming() throws Exception {
+    Fixture fx = newQueued();
+    Instant now = now();
+    Optional<ClaimedModelInvocation> claimed =
+        transactions.claim(
+            fx.invocationId, "tok-longer", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
+    assertTrue(claimed.isPresent());
+
+    SafeStreamSnapshot durable = new SafeStreamSnapshot("hello world", "reasoning");
+    assertSame(
+        ModelInvocationUpdateOutcome.APPLIED,
+        transactions.recordSafeStreamSnapshot(claimed.get(), durable, now.plusMillis(10), now));
+
+    SafeStreamSnapshot older = new SafeStreamSnapshot("hel", "rea");
+    assertSame(
+        ModelInvocationUpdateOutcome.APPLIED,
+        transactions.recordSafeStreamSnapshot(claimed.get(), older, now.plusMillis(20), now));
+
+    ModelInvocationDO row = rowFor(fx.invocationId);
+    SafeStreamSnapshot stored =
+        new SafeStreamSnapshotJsonCodec().decode(row.getSafeStreamSnapshotJson());
+    assertEquals(durable, stored);
+  }
+
+  /**
+   * Snapshot fork in a single field is treated as an illegal invocation state; the partial abort
+   * path is expected to bubble this up as a fatal error rather than silently overwriting.
+   */
+  @Test
+  void recordSafeStreamSnapshotForkIsIllegalInvocationState() throws Exception {
+    Fixture fx = newQueued();
+    Instant now = now();
+    Optional<ClaimedModelInvocation> claimed =
+        transactions.claim(
+            fx.invocationId, "tok-fork", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
+    assertTrue(claimed.isPresent());
+
+    assertSame(
+        ModelInvocationUpdateOutcome.APPLIED,
+        transactions.recordSafeStreamSnapshot(
+            claimed.get(), new SafeStreamSnapshot("left", ""), now.plusMillis(10), now));
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            transactions.recordSafeStreamSnapshot(
+                claimed.get(), new SafeStreamSnapshot("right", ""), now.plusMillis(20), now));
+  }
+
+  /**
+   * A retry claim from RETRY_WAIT must clear the prior attempt's safe stream snapshot so the next
+   * attempt's Provider context is not polluted by partial fragments of the aborted attempt.
+   */
+  @Test
+  void retryClaimClearsPriorAttemptSafeStreamSnapshot() throws Exception {
+    Fixture fx = newQueued();
+    Instant now = now();
+    Optional<ClaimedModelInvocation> first =
+        transactions.claim(
+            fx.invocationId, "tok-retry-A", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
+    assertTrue(first.isPresent());
+
+    assertSame(
+        ModelInvocationUpdateOutcome.APPLIED,
+        transactions.recordSafeStreamSnapshot(
+            first.get(), new SafeStreamSnapshot("first attempt", ""), now.plusMillis(10), now));
+    ModelInvocationDO afterFirstDelta = rowFor(fx.invocationId);
+    assertNotNull(afterFirstDelta.getSafeStreamSnapshotJson());
+
+    Instant retryAt = now.plus(Duration.ofSeconds(1));
+    assertSame(
+        ModelInvocationUpdateOutcome.APPLIED,
+        transactions.scheduleRetry(first.get(), retryAt, now, now));
+
+    Optional<ClaimedModelInvocation> second =
+        transactions.claim(
+            fx.invocationId,
+            "tok-retry-B",
+            ModelCallTimeoutPolicy.DEFAULT,
+            LONG_LEASE,
+            retryAt.plusMillis(50));
+    assertTrue(second.isPresent());
+    ModelInvocationDO row = rowFor(fx.invocationId);
+    assertEquals(2, row.getAttempt());
+    assertNull(
+        row.getSafeStreamSnapshotJson(),
+        "retry claim must drop previous attempt's safe stream snapshot");
+  }
+
   // ---------- invariant breaches ----------
 
   /** Thread runnable 更新被数据库拒绝时，terminal Invocation 必须随同一事务一起回滚。 */
   @Test
   void terminalRollsBackWhenRunnableUpdateCannotBeApplied() throws Exception {
+
     Fixture fx = newQueued();
     Instant now = now();
     Optional<ClaimedModelInvocation> claimed =
@@ -1078,7 +1210,8 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
                 "select id, thread_id, source_head_entry_id, execution_epoch,"
                     + " request as request, status, attempt, next_attempt_at, worker_token,"
                     + " worker_until, deadline_at, last_activity_at, result as result,"
-                    + " error as error, applied_at, created_at, started_at, finished_at"
+                    + " error as error, applied_at, created_at, started_at, finished_at,"
+                    + " safe_stream_snapshot::text as safe_stream_snapshot"
                     + " from harness_model_invocation where id = ?")) {
       ps.setLong(1, invocationId);
       try (ResultSet rs = ps.executeQuery()) {
@@ -1133,6 +1266,7 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     row.setCreatedAt(rs.getObject("created_at", OffsetDateTime.class));
     row.setStartedAt(rs.getObject("started_at", OffsetDateTime.class));
     row.setFinishedAt(rs.getObject("finished_at", OffsetDateTime.class));
+    row.setSafeStreamSnapshotJson(rs.getString("safe_stream_snapshot"));
     return row;
   }
 

@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheAffinityKeyFactory;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.SkillSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.entry.AssistantAbortedEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.AssistantErrorEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
@@ -131,6 +132,7 @@ public final class ModelInvocationPlanner {
           case MESSAGE -> payload instanceof MessageEntryPayload;
           case CUSTOM_MESSAGE -> payload instanceof CustomMessageEntryPayload;
           case ASSISTANT_ERROR -> payload instanceof AssistantErrorEntryPayload;
+          case ASSISTANT_ABORTED -> payload instanceof AssistantAbortedEntryPayload;
         };
     if (!supported) {
       throw new IllegalArgumentException(
@@ -145,6 +147,10 @@ public final class ModelInvocationPlanner {
     for (int index = path.size() - 1; index >= 0; index--) {
       EntryPayload payload = path.get(index).payload();
       if (payload instanceof AssistantErrorEntryPayload) {
+        return -1;
+      }
+      if (payload instanceof AssistantAbortedEntryPayload) {
+        // Aborted assistant turn 视为完整 Provider semantic assistant turn：关闭 debt barrier。
         return -1;
       }
       AgentMessage message = message(payload);
@@ -166,6 +172,9 @@ public final class ModelInvocationPlanner {
       return message.message();
     }
     if (payload instanceof CustomMessageEntryPayload message) {
+      return message.message();
+    }
+    if (payload instanceof AssistantAbortedEntryPayload message) {
       return message.message();
     }
     return null;
@@ -192,6 +201,9 @@ public final class ModelInvocationPlanner {
       if (payload instanceof MessageEntryPayload message) {
         messages.add(message.message());
       } else if (payload instanceof CustomMessageEntryPayload message) {
+        messages.add(message.message());
+      } else if (payload instanceof AssistantAbortedEntryPayload message) {
+        // Aborted assistant turn 的 text/thinking 必须作为 Provider 上下文的完整 assistant turn。
         messages.add(message.message());
       }
     }

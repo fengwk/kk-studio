@@ -41,10 +41,10 @@ FUNCTION 节点当前唯一可持久化实例是 `system.generate-text` v1。
 | --- | --- | --- |
 | `chat` | 持久 Chat 集合与默认 Agent | `default_agent_id` 可空；不关联 Session/Thread |
 | `harness_session` | Entry Tree 容器 | `id`、`title`、`created_at`；仅与 append-only Entry Tree 关联，存储上不持有 Thread |
-| `harness_entry` | append-only 语义历史 | `session_id`、`parent_entry_id`、`entry_type`、`payload` jsonb；类型为 `ROOT/RUNTIME_CONFIG/MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ERROR` |
+| `harness_entry` | append-only 语义历史 | `session_id`、`parent_entry_id`、`entry_type`、`payload` jsonb；类型为 `ROOT/RUNTIME_CONFIG/MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED`（`ASSISTANT_ABORTED` 仅承载安全 text/thinking） |
 | `harness_thread` | 可复用 durable runtime process | 可空 `head_entry_id`（单列 FK）、`input_sequence`、`runnable`、`execution_epoch`、`processor_token`/`processor_until` |
 | `harness_thread_input` | 有序 mailbox | `(thread_id, sequence)` 与幂等键唯一；`QUEUED/APPLIED/CANCELLED` |
-| `harness_model_invocation` | 冻结 Provider 调用 | `(thread_id, source_head_entry_id, execution_epoch)` 唯一；request/result jsonb；`source_head_entry_id` 单列 FK 到 `harness_entry(id)` |
+| `harness_model_invocation` | 冻结 Provider 调用 | `(thread_id, source_head_entry_id, execution_epoch)` 唯一；request/result jsonb；`source_head_entry_id` 单列 FK 到 `harness_entry(id)`；`safe_stream_snapshot` jsonb 仅 text/thinking，fenced-write 在每次 SSE 发布前，retry-attempt CAS 中重置 |
 | `harness_tool_invocation` | Tool 执行事实 | `(thread_id, assistant_entry_id, execution_epoch, ordinal)` 唯一；`PLATFORM/ENVIRONMENT` |
 | `harness_interaction` | 通用交互事实 | open owner 唯一约束 |
 | `harness_retry_policy` | 全局自动重试策略 | 单行策略 |
@@ -55,7 +55,9 @@ FUNCTION 节点当前唯一可持久化实例是 `system.generate-text` v1。
 
 Chat 不保存 Pane；Pane 仅在浏览器 localStorage。Session **不**保存 Thread、Branch 或完整 Agent 配置副本。Thread 行不保存 `session_id`，也不保存 Agent/model 当前列：当前 Session 由 `head_entry_id` 派生，配置以 `RUNTIME_CONFIG` Entry 为权威。
 
-Model/Tool Invocation 与 Usage 的 Thread 归属均为单列 `thread_id` FK。`harness_model_invocation.source_head_entry_id` 单列 FK 到 `harness_entry(id)`，thread↔session 一致性由上游 Thread 命令通过 head Entry 维护；`harness_tool_invocation` 与 `harness_model_usage` 的 `session_id` 仍作为约束载体，保证所引用的 Entry 与账本/调用属于同一 Session。head 重定位与 stop 通过递增 `execution_epoch` 隔离旧代际，因此 tool invocation 的来源唯一键含 `execution_epoch`。
+Model/Tool Invocation 与 Usage 的 Thread 归属均为单列 `thread_id` FK。`harness_model_invocation.source_head_entry_id` 单列 FK 到 `harness_entry(id)`，thread↔session 一致性由上游 Thread 命令通过 head Entry 维护；`harness_tool_invocation` 与 `harness_model_usage` 的 `session_id` 仍作为约束载体，保证所引用的 Entry 与账本/调用属于同一 Session。head 重定位通过递增 `execution_epoch` 隔离旧代际，因此 tool invocation 的来源唯一键含 `execution_epoch`。
+
+`/stop` 在 Thread 行锁内原子完成：判定当前 head 是否仍有未终结 response debt（沿用 Reconciler 的 `ModelInvocationPlanner`，旧代际的 invocation 不参与）。若存在 response debt 且当前 head 存在 matching `safe_stream_snapshot is not null AND applied_at is null` 行，则追加 `ASSISTANT_ABORTED`（仅含 text/thinking）并把 head 重新指向它；否则追加 `ASSISTANT_ERROR(CANCELLED)` barrier。Stop 不修改已 RUNNING/SUCCEEDED 的 invocation 行——它只是一道 epoch fence，旧 generation 的 `completeSuccess/completeFailure/completeCancelled` 在新 epoch 下都会被 CAS 拒绝。Tool/empty partial 不会让 stop 物化 `ToolInvocation` 或写入含 tool fragment 的 aborted entry。
 
 ## Usage 与成本
 

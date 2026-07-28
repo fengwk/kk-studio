@@ -38,6 +38,28 @@ export function projectDurableEntry(
     })
     return
   }
+  if (entryType === 'ASSISTANT_ABORTED') {
+    const message = asRecord(payload.message)
+    const contents = getRecordList(message.contents)
+    const text = contents.filter((content) => getString(content.type) === 'text').map(contentText).join('')
+    const thinking = contents
+      .filter((content) => getString(content.type) === 'thinking')
+      .map(contentText)
+      .join('')
+    if (text || thinking) {
+      messages.push({
+        id: entry.entryId,
+        role: 'assistant',
+        subjectEntryId: entry.entryId,
+        text,
+        thinking: thinking || undefined,
+        createdAt: entry.createTime,
+        status: 'done',
+        aborted: true,
+      })
+    }
+    return
+  }
   if (entryType !== 'MESSAGE' && entryType !== 'CUSTOM_MESSAGE') {
     messages.push(projectUnknownEntry(entry))
     return

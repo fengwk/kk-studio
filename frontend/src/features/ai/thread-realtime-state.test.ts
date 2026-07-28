@@ -63,6 +63,20 @@ describe('thread realtime state', () => {
     expect(isRealtimeModelStreamCommitted(stream, [earlierAssistant])).toBe(false)
     expect(isRealtimeModelStreamCommitted(stream, [durableAssistant])).toBe(true)
   })
+
+  it('commits the realtime stream as soon as an ASSISTANT_ABORTED barrier lands', () => {
+    // /stop emits ASSISTANT_ABORTED when the partial has safe content; from the realtime overlay
+    // perspective this is a durable terminal outcome and the transient deltas must be cleared
+    // so the aborted affordance becomes the visible state.
+    const stream = reduceRealtimeModelStream(
+      null,
+      parseRealtimeModelDelta(event('1', 'TEXT_DELTA', 'partial'))!,
+    )
+    const aborted = abortedEntry('2026-07-28T10:00:01')
+    const earlierAssistant = entry('2026-07-28T09:59:59', 'ASSISTANT')
+    expect(isRealtimeModelStreamCommitted(stream, [earlierAssistant])).toBe(false)
+    expect(isRealtimeModelStreamCommitted(stream, [aborted])).toBe(true)
+  })
 })
 
 function event(attempt: string, kind: 'TEXT_DELTA' | 'THINKING_DELTA', text: string): string {
@@ -83,6 +97,21 @@ function entry(createTime: string, role: string): HarnessSessionEntryDTO {
     parentEntryId: null,
     entryType: 'MESSAGE',
     payloadJson: JSON.stringify({ message: { role, contents: [] }, assistantMetadata: null }),
+    createTime,
+  }
+}
+
+function abortedEntry(createTime: string): HarnessSessionEntryDTO {
+  return {
+    entryId: 'e-aborted',
+    parentEntryId: null,
+    entryType: 'ASSISTANT_ABORTED',
+    payloadJson: JSON.stringify({
+      message: {
+        role: 'ASSISTANT',
+        contents: [{ type: 'text', text: 'partial' }],
+      },
+    }),
     createTime,
   }
 }

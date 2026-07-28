@@ -142,7 +142,11 @@ public class StudioHarnessThreadController {
         withMissingResourceTranslation(() -> commandService.queueModel(threadId, request)));
   }
 
-  /** 停止 Thread：递增 executionEpoch，取消尚未处理的输入与 OPEN Interaction。 */
+  /**
+   * 原子停止 Thread：当前 head 仍有 response debt 时，安全的 text/thinking stream snapshot 持久化为 {@code
+   * ASSISTANT_ABORTED}；快照不存在、为空或不安全时写入 {@code ASSISTANT_ERROR(CANCELLED)} barrier。随后递增
+   * executionEpoch，并取消尚未处理的输入、可安全取消的 Invocation 与 OPEN Interaction。
+   */
   @PostMapping("/threads/{threadId}/stop")
   public Result<HarnessThreadStopResultDTO> stop(
       @PathVariable String threadId, @RequestBody HarnessThreadStopDTO request) {

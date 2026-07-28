@@ -1,16 +1,25 @@
 package fun.fengwk.kkstudio.core.harness.thread.command;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.entry.AssistantAbortedEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.entry.AssistantErrorEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.entry.RootEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.RuntimeEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshotJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlanner;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.port.HarnessIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
@@ -26,6 +35,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -43,14 +53,28 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
       new RuntimeEntryPayloadJsonCodec();
   private static final RuntimeConfigJsonCodec CONFIG_CODEC = new RuntimeConfigJsonCodec();
   private static final ThreadInputPayloadJsonCodec INPUT_CODEC = new ThreadInputPayloadJsonCodec();
+  private static final SafeStreamSnapshotJsonCodec SNAPSHOT_CODEC =
+      new SafeStreamSnapshotJsonCodec();
 
   private final ThreadCommandMapper mapper;
   private final HarnessIdGenerator idGenerator;
+  private final ModelInvocationPlanner planner;
 
+  @Autowired
   public PostgresqlThreadCommandTransactions(
       ThreadCommandMapper mapper, HarnessIdGenerator idGenerator) {
+    this(mapper, idGenerator, new ModelInvocationPlanner());
+  }
+
+  /**
+   * Package-private test ctor: lets a deterministic {@link ModelInvocationPlanner} be injected
+   * without widening the production Spring wiring graph.
+   */
+  PostgresqlThreadCommandTransactions(
+      ThreadCommandMapper mapper, HarnessIdGenerator idGenerator, ModelInvocationPlanner planner) {
     this.mapper = Objects.requireNonNull(mapper, "mapper");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
+    this.planner = Objects.requireNonNull(planner, "planner");
   }
 
   @Override
@@ -283,13 +307,64 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
     Instant persistedNow = persistenceInstant(now);
     ThreadCommandRow thread = lockThread(threadId);
     requireEpoch(thread, expectedExecutionEpoch);
+    OffsetDateTime timestamp = offset(persistedNow);
+    Long headEntryId = thread.getHeadEntryId();
+    Long sessionId = thread.getSessionId();
+
+    // 1) 用 canonical planner 判定当前 head 的 response debt（沿用 planner 的债务判定，不复制）。
+    boolean hasDebt = false;
+    if (headEntryId != null && sessionId != null) {
+      List<SessionEntry> path = loadPathAsSessionEntries(sessionId, headEntryId);
+      hasDebt = !planner.plan(sessionId, headEntryId, path).isEmpty();
+    }
+
+    // 2) 仅在 head 有 response debt 时才尝试读取该 head 的安全流快照；快照来源必须限制在当前 head 与 epoch。
+    SafeStreamSnapshot safeSnapshot = SafeStreamSnapshot.EMPTY;
+    boolean safeSnapshotEligible = false;
+    if (hasDebt && headEntryId != null) {
+      String snapshotJson =
+          mapper.findSafeStreamSnapshotByHead(threadId, expectedExecutionEpoch, headEntryId);
+      if (snapshotJson != null) {
+        safeSnapshot = SNAPSHOT_CODEC.decode(snapshotJson);
+        safeSnapshotEligible = true;
+      }
+    }
+
+    // 3) 按 (debt, safeSnapshot.hasContent) 决定 barrier 类型；只有 durable assistant execution 阶段
+    //    (hasDebt == false) 或没有该 head 的快照时不追加 aborted entry。无快照/空快照时只落 cancellation barrier；
+    //    永远不物化 tool fragment，绝不创建 ToolInvocation，绝不重建旧 debt 的 ModelInvocation。
+    if (hasDebt && sessionId != null && headEntryId != null) {
+      EntryPayload barrierPayload;
+      if (safeSnapshotEligible && safeSnapshot.hasContent()) {
+        barrierPayload =
+            AssistantAbortedEntryPayload.ofTextAndThinking(
+                safeSnapshot.text(), safeSnapshot.thinking());
+      } else {
+        barrierPayload =
+            new AssistantErrorEntryPayload(
+                new ModelInvocationError(
+                    ProviderErrorKind.CANCELLED, "model invocation cancelled"));
+      }
+      EntryType barrierType = barrierPayload.type();
+      String payloadJson = ENTRY_CODEC.encode(barrierPayload);
+      long barrierEntryId = idGenerator.nextEntryId();
+      requireAffected(
+          mapper.insertEntry(
+              barrierEntryId, sessionId, headEntryId, barrierType.name(), payloadJson, timestamp),
+          "insert aborted barrier entry");
+      requireAffected(
+          mapper.rebindHead(
+              threadId, expectedExecutionEpoch, expectedExecutionEpoch, barrierEntryId, timestamp),
+          "rebind head after aborted barrier");
+    }
+
+    // 4) 终止排队/安全的 inputs 与 invocations，并 fence epoch。
+    long nextEpoch = Math.addExact(expectedExecutionEpoch, 1);
+    requireAffected(mapper.fenceAndStopThread(threadId, nextEpoch, timestamp), "fence thread");
     List<ThreadInput> cancelled =
         mapper.listQueuedInputsForUpdate(threadId).stream()
             .map(row -> toCancelledInput(row, persistedNow))
             .toList();
-    long nextEpoch = Math.addExact(thread.getExecutionEpoch(), 1);
-    OffsetDateTime timestamp = offset(persistedNow);
-    requireAffected(mapper.fenceAndStopThread(threadId, nextEpoch, timestamp), "fence thread");
     mapper.cancelQueuedInputs(threadId);
     mapper.cancelSafeModelInvocations(threadId, timestamp);
     mapper.cancelSafeToolInvocations(threadId, timestamp);
@@ -297,6 +372,22 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
     // ineligible for rebind while waiting on a blocker that can never resolve.
     mapper.cancelOpenInteractions(threadId, timestamp);
     return new StopResult(nextEpoch, cancelled, threadTarget(threadId));
+  }
+
+  /**
+   * 把 {@code harness_entry} 路径还原成 {@link SessionEntry}（仅用于 planner，不被持久化）。 复用了 {@code
+   * ThreadCommandMapper.findEffectiveRuntimeConfig} 中已存在的 recursive CTE 模式； 本地再声明一份以避免引入额外的 query
+   * mapper 依赖。
+   */
+  private List<SessionEntry> loadPathAsSessionEntries(long sessionId, long headEntryId) {
+    List<ThreadCommandRow> rows = mapper.findEntryPathForPlanner(sessionId, headEntryId);
+    List<SessionEntry> entries = new ArrayList<>(rows.size());
+    for (ThreadCommandRow row : rows) {
+      EntryPayload payload =
+          ENTRY_CODEC.decode(EntryType.valueOf(row.getEntryType()), row.getPayloadJson());
+      entries.add(new SessionEntry(row.getId(), row.getParentEntryId(), payload));
+    }
+    return entries;
   }
 
   private ThreadCommandRow lockThread(long threadId) {

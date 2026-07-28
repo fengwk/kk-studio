@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.entry;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -19,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 
@@ -231,16 +234,123 @@ class RuntimeEntryPayloadTest {
     assertThrows(NullPointerException.class, () -> new AssistantErrorEntryPayload(null));
   }
 
+  // ---------- ASSISTANT_ABORTED ----------
+
+  @Test
+  void assistantAbortedPayloadType() {
+    AssistantAbortedEntryPayload payload =
+        AssistantAbortedEntryPayload.ofTextAndThinking("hello", "");
+    assertEquals(EntryType.ASSISTANT_ABORTED, payload.type());
+    assertEquals(AgentMessageRole.ASSISTANT, payload.message().role());
+  }
+
+  @Test
+  void assistantAbortedRejectsNonAssistantRole() {
+    AgentMessage user =
+        new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hi")));
+    assertThrows(IllegalArgumentException.class, () -> new AssistantAbortedEntryPayload(user));
+  }
+
+  @Test
+  void assistantAbortedRejectsEmptyContentsPrecondition() {
+    // AgentMessage 不允许空 contents，因此"空 contents"路径在 construction 之前就被拒绝；
+    // AssistantAbortedEntryPayload 的两层 rejection 仍保持显式语义。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AgentMessage(AgentMessageRole.ASSISTANT, List.of()));
+  }
+
+  @Test
+  void assistantAbortedRejectsToolCallContent() {
+    AgentMessage toolCallAssistant =
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(
+                new TextMessageContent("preamble"),
+                new ToolCallMessageContent("call-1", "search", "{}")));
+    assertThrows(
+        IllegalArgumentException.class, () -> new AssistantAbortedEntryPayload(toolCallAssistant));
+  }
+
+  @Test
+  void assistantAbortedRejectsToolResultRolePrecondition() {
+    // AgentMessage 不允许 tool_result 在 ASSISTANT role 上构造；AssistantAbortedEntryPayload
+    // 的类型 invariant 永远不需要在这个非法组合上运行。
+    AgentMessage toolAssistant =
+        new AgentMessage(
+            AgentMessageRole.TOOL,
+            List.of(
+                new ToolResultMessageContent(
+                    "call-1", "search", List.of(new TextMessageContent("ok")), false, "{}")));
+    assertThrows(
+        IllegalArgumentException.class, () -> new AssistantAbortedEntryPayload(toolAssistant));
+  }
+
+  @Test
+  void assistantAbortedRejectsAllEmptyTextAndThinking() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> AssistantAbortedEntryPayload.ofTextAndThinking("", ""));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> AssistantAbortedEntryPayload.ofTextAndThinking(null, ""));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> AssistantAbortedEntryPayload.ofTextAndThinking("", null));
+  }
+
+  @Test
+  void assistantAbortedRejectsAllEmptyTextAndThinkingConstructedDirectly() {
+    AgentMessage emptyTextOnly =
+        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("")));
+    assertThrows(
+        IllegalArgumentException.class, () -> new AssistantAbortedEntryPayload(emptyTextOnly));
+
+    AgentMessage emptyThinkingOnly =
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(new TextMessageContent(""), new ThinkingMessageContent("")));
+    assertThrows(
+        IllegalArgumentException.class, () -> new AssistantAbortedEntryPayload(emptyThinkingOnly));
+
+    AgentMessage whitespaceOnly =
+        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("   ")));
+    // 'isEmpty' (not isBlank): real whitespace content is preserved so partial thinking
+    // recorded as `" "` round-trips back through Planner.
+    AssistantAbortedEntryPayload payload =
+        assertDoesNotThrow(() -> new AssistantAbortedEntryPayload(whitespaceOnly));
+    assertEquals(1, payload.contents().size());
+  }
+
+  @Test
+  void assistantAbortedOfTextAndThinkingAcceptsEither() {
+    AssistantAbortedEntryPayload textOnly =
+        AssistantAbortedEntryPayload.ofTextAndThinking("hello", "");
+    assertEquals(1, textOnly.contents().size());
+    assertInstanceOf(TextMessageContent.class, textOnly.contents().get(0));
+
+    AssistantAbortedEntryPayload thinkingOnly =
+        AssistantAbortedEntryPayload.ofTextAndThinking("", "thinking");
+    assertEquals(1, thinkingOnly.contents().size());
+    assertInstanceOf(ThinkingMessageContent.class, thinkingOnly.contents().get(0));
+
+    AssistantAbortedEntryPayload both =
+        AssistantAbortedEntryPayload.ofTextAndThinking("hello", "thinking");
+    assertEquals(2, both.contents().size());
+    assertEquals("hello", ((TextMessageContent) both.contents().get(0)).text());
+    assertEquals("thinking", ((ThinkingMessageContent) both.contents().get(1)).text());
+  }
+
   // ---------- Sealed root sanity ----------
 
-  /** sealed root 承担 4 个 runtime payload；RUNTIME_CONFIG 由 RuntimeConfigSnapshot 自报。 */
+  /** sealed root 承担 5 个 runtime payload；RUNTIME_CONFIG 由 RuntimeConfigSnapshot 自报。 */
   @Test
   void sealedRootCoversSessionPayloads() {
     long runtimeTypes =
         Arrays.stream(EntryType.values()).filter(t -> t != EntryType.RUNTIME_CONFIG).count();
-    assertEquals(4, runtimeTypes);
+    assertEquals(5, runtimeTypes);
     assertTrue(RuntimeEntryPayload.class.isSealed());
-    assertEquals(4, RuntimeEntryPayload.class.getPermittedSubclasses().length);
+    assertEquals(5, RuntimeEntryPayload.class.getPermittedSubclasses().length);
   }
 
   @Test
@@ -250,10 +360,16 @@ class RuntimeEntryPayloadTest {
     RuntimeEntryPayload custom = new CustomMessageEntryPayload(userMessage());
     RuntimeEntryPayload error =
         new AssistantErrorEntryPayload(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "x"));
+    RuntimeEntryPayload aborted = AssistantAbortedEntryPayload.ofTextAndThinking("hello", "");
+    assertEquals(EntryType.ASSISTANT_ABORTED, aborted.type());
 
     assertNotEquals(root.type(), msg.type());
     assertNotEquals(msg.type(), custom.type());
     assertNotEquals(msg.type(), error.type());
     assertNotEquals(custom.type(), error.type());
+    assertNotEquals(root.type(), aborted.type());
+    assertNotEquals(msg.type(), aborted.type());
+    assertNotEquals(custom.type(), aborted.type());
+    assertNotEquals(error.type(), aborted.type());
   }
 }

@@ -135,6 +135,7 @@ decoration queue =
 | 来源 | 前端行为 |
 | --- | --- |
 | `MESSAGE` / `CUSTOM_MESSAGE` / `ASSISTANT_ERROR` Entry | 稳定对话气泡与路径语义基线 |
+| `ASSISTANT_ABORTED` Entry | 持久化 partial assistant turn：投影为 assistant `TextDialogueMessage`（`aborted: true`），渲染“已停止”标识；只保留 text/thinking 内容，不带 tool fragment |
 | `RUNTIME_CONFIG` Entry | 配置快照事实；不渲染完整配置气泡 |
 | QUEUED `user_message` / `custom_message` input | 不进入 transcript；显示在 Working 装饰栏 |
 | APPLIED input | 不渲染；Entry 与 apply 同事务，Entries 为唯一 transcript 权威 |
@@ -147,7 +148,7 @@ Timeline 以 Entries/Inputs snapshot 为权威基线。
 
 - `/tree` 按需查询 Session Entry Tree；确认后 `PUT /threads/:id/head` 把当前 Thread 的 head 重定位到所选 Entry，pane 绑定不变，并把该 Entry 的用户文本回填为草稿。
 - `/session` 先选 Session，再由其 Entry Tree 提供新 head，同样走 `PUT /head`。
-- `/stop` 携带当前 `executionEpoch`；成功后仅清理本地 message replay identity，并 invalidate Thread/Entries/Inputs 等 snapshot query。不回填 Composer。stop 后 Thread 立即可重定位。
+- `/stop` 携带当前 `executionEpoch`；服务端原子追加 `ASSISTANT_ABORTED`（仅 text/thinking）或 `ASSISTANT_ERROR(CANCELLED)` barrier 并 epoch fence。前端在 snapshot invalidate 后，durable `ASSISTANT_ABORTED` 投影为 assistant `TextDialogueMessage`（`aborted: true`）并渲染“已停止”标识；realtime SSE delta 仍然落到当前 invocation overlay，但只要 durable aborted/cancellation 落库就视为该 overlay committed 并被覆盖。成功后前端仅清理本地 message replay identity 并 invalidate Thread/Entries/Inputs 等 snapshot query。不回填 Composer。stop 后 Thread 立即可重定位。
 - 派生状态按 `RUNNING > WAITING > RUNNABLE > UNBOUND/IDLE` 驱动 UI 指示与 query 轮询；`RUNNABLE` 视为 active/working，避免丢失 Redis wake 后 UI 卡住；invocation 重试等待归入 `WAITING`。
 
 ### Realtime cursor 恢复

@@ -9,10 +9,10 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * Immutable durable aggregate mirroring the {@code harness_model_invocation} row in {@code
- * schema-postgresql.sql} (lines 368-513). The aggregate enforces every lifecycle, time-order,
- * lease, payload and {@code appliedAt} invariant declared by the schema at the constructor boundary
- * so callers cannot construct an invalid state.
+ * Immutable durable aggregate mirroring the {@code harness_model_invocation} row in the
+ * authoritative {@code schema-postgresql.sql} DDL. The aggregate enforces every lifecycle,
+ * time-order, lease, payload and {@code appliedAt} invariant declared by the schema at the
+ * constructor boundary so callers cannot construct an invalid state.
  *
  * <p>The lifecycle {@link InvocationStatus} and worker {@link Lease} are imported directly from the
  * shared runtime execution types so this slice does not redefine them. {@code sessionId} is
@@ -42,7 +42,8 @@ public record ModelInvocation(
     Instant appliedAt,
     Instant createdAt,
     Instant startedAt,
-    Instant finishedAt) {
+    Instant finishedAt,
+    SafeStreamSnapshot safeStreamSnapshot) {
 
   public ModelInvocation {
     if (id <= 0) {
@@ -63,6 +64,9 @@ public record ModelInvocation(
       throw new IllegalArgumentException("attempt must be positive");
     }
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
+    if (status == InvocationStatus.QUEUED && safeStreamSnapshot != null) {
+      throw new IllegalArgumentException("QUEUED must not carry safe stream snapshot");
+    }
     validateShape(
         status,
         nextAttemptAt,

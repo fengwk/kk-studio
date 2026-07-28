@@ -73,7 +73,7 @@ E2E seed 固定包含 Pi 0.82.1 有效运行时中的 19 个模型：
 | `scripts/e2e/ui-smoke.mjs` | Playwright UI smoke（L5） |
 | `scripts/e2e/lib/http.mjs` | fetch/断言 |
 | `scripts/e2e/lib/fixtures.mjs` | 合法体与配置矩阵行 |
-| `scripts/e2e/lib/harness.mjs` | 共享 Thread 步骤：`createUnboundThread`、`bootstrapThread`、`createBootstrappedThread`、`updateThreadHead`、`waitForQuiescentThread`、`rebindWhenQuiescent` 与 Thread/Session 读取 |
+| `scripts/e2e/lib/harness.mjs` | 共享 Thread 步骤：创建/引导/重绑、Thread/Session 读取、等待静止，以及先连接 SSE 再等待严格模型文本 delta 的 stop 时机 helper |
 | `scripts/e2e/lib/registry.mjs` | case 注册表 |
 | `scripts/e2e/cases/*.mjs` | API 用例 |
 | `core/src/test/resources/.../pi-model-catalog.json` | Pi 0.82.1 有效模型目录快照 |
@@ -99,12 +99,12 @@ reports/e2e/LATEST_RUN.txt
 | 层级 | 开关 | 成本 | 覆盖 |
 | --- | --- | --- | --- |
 | L1 | 默认 | 免费 | seed 契约、CRUD、配置校验、Thread 生命周期与 head 重定位、usage 404、proxy |
-| L2 | `--real` | `minimax/MiniMax-M2.7` | 文本轮次 + usage 入账 |
+| L2 | `--real` | `minimax/MiniMax-M2.7` | 文本轮次 + usage 入账；流式 `/stop` 持久化 partial assistant barrier，并在其后继续 follow-up |
 | L3 | `--real --with-branch` | `minimax/MiniMax-M2.7` | rebind 到历史 Entry 后的分支路径 usage |
 | L4 | `--with-tools` / `--real --with-tools` | daemon / `minimax/MiniMax-M2.7` | Environment READY、tool invocation |
 | L5 | `--ui` | 本地浏览器 | 页面可达、列表渲染、打开新建模态、无致命 pageerror；截图入报告 |
 
-API 矩阵注册 **57** 条（以 `./scripts/e2e.sh --list` 为准）。默认执行全部免费 L1（**53** 条）。`--ui` 额外 **14** 条 UI smoke（`--real` 时再 +1 真实首发）。
+API 矩阵注册 **58** 条（以 `./scripts/e2e.sh --list` 为准）。默认执行全部免费 L1（**53** 条）。`--ui` 额外 **14** 条 UI smoke（`--real` 时再 +1 真实首发）。
 
 ## L1 用例清单
 
@@ -133,7 +133,7 @@ API 矩阵注册 **57** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 | `thread.rebind_same_session` | `PUT /head` 指向同 Session 的 ROOT => head 更新、epoch+1、`sessionId` 不变，路径 Entries 跟随新 head |
 | `thread.rebind_cross_session` | `PUT /head` 指向另一 Session 的 Entry => `threadId` 不变，派生 `sessionId` 切换 |
 | `thread.unbind_head` | `headEntryId=null` => `status=UNBOUND`、`sessionId`/`headEntryId` 为空、无路径 Entry；未知 Entry => 404 |
-| `thread.stop_then_rebind` | stop 递增 epoch 并取消 queued Input 与 OPEN Interaction；随后 `PUT /head` 成功且再次 epoch+1 |
+| `thread.stop_then_rebind` | 免费覆盖 stop 的 epoch/cancel/rebind：递增 epoch、取消 queued Input 与 OPEN Interaction，随后 `PUT /head` 成功；不生成真实流式 partial |
 
 ### CRUD
 
@@ -191,6 +191,7 @@ API 矩阵注册 **57** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 | Case | 开关 | 断言 |
 | --- | --- | --- |
 | `real.text_turn` | `--real` | 真实 Provider 文本轮次成功并记账 |
+| `real.stop_partial_continue` | `--real` | 首个非空文本 delta 后 stop；durable `ASSISTANT_ABORTED` 仅含安全 text/thinking；follow-up 位于 barrier 后，旧 debt 不重派 |
 | `branch.path_usage` | `--real --with-branch` | 另一条 Thread rebind 到历史 assistant Entry 后再发一轮；session 去重 vs thread 可重复计共享前缀 |
 | `daemon.ready` | `--with-tools` | Daemon Environment READY |
 | `tool.read_turn` | `--real --with-tools` | YOLO 下 tool invocation |

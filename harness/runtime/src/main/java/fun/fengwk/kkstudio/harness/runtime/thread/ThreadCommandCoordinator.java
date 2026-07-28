@@ -198,7 +198,14 @@ public final class ThreadCommandCoordinator {
         expectedExecutionEpoch);
   }
 
-  /** Epoch-fencing stop of the thread. */
+  /**
+   * /stop 完整语义：原子发现当前 epoch 的可 partial durable 状态，按 canonical planner 判定 response debt，决定是否追加
+   * {@code ASSISTANT_ABORTED} 终止 entry（仅含安全 text/thinking）或 {@code ASSISTANT_ERROR} cancellation
+   * barrier，再 fence epoch 与清理 queued inputs/safe invocations。
+   *
+   * <p>该方法实现 Pi abort/continue partial 语义：safe text/thinking 持久化为 durable assistant turn， tool-call
+   * fragment 永远不进入 durable Entry 或 ToolInvocation，follow-up 不会重建旧 debt。
+   */
   public StopResult stop(long threadId, long expectedExecutionEpoch) {
     ThreadCommandTransactions.StopResult result =
         transactions.stop(threadId, expectedExecutionEpoch, clock.instant());

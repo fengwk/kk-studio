@@ -61,6 +61,8 @@ source head、execution epoch、完整 `ProviderRequest` snapshot、状态、wor
 
 唯一 `(thread_id, source_head_entry_id, execution_epoch)`。
 
+`safe_stream_snapshot` jsonb 仅在 RUNNING/RETRY_WAIT/终态下保存 text/thinking 累积；每次 text/thinking SSE delta 之前 `recordSafeStreamSnapshot` 必须以 Thread + Invocation 锁 fenced 写入。新 retry attempt 在 CAS 中由 `safe_stream_snapshot = null` 重置，确保旧 attempt 的 partial 不会跨 attempt 污染下一轮的 Provider 上下文。`/stop` 通过 `(threadId, executionEpoch, sourceHeadEntryId)` 加 `safe_stream_snapshot is not null AND applied_at is null` 的 head-scoped 谓词读取该列，包括已经 `SUCCEEDED` 但 `applied_at is null` 的窗口，使得 partial 输出不被 stop 丢失。
+
 ### 4.6 `harness_tool_invocation`
 
 Assistant Entry、ordinal、ToolCall、descriptor/arguments、`PLATFORM/ENVIRONMENT`、execution epoch、worker lease、deadline/retry、terminal result/error、`applied_at`。
@@ -119,6 +121,8 @@ where id = :thread_id
 ```
 
 head 重定位额外要求 Thread 逻辑静止：无有效 processor lease、`runnable=false`、无 QUEUED Input、当前 epoch 无非终态 Model/Tool Invocation、无相关 OPEN Interaction。Stop 会取消 queued Input、可安全取消的 Invocation 与该 Thread 的 OPEN Interaction，因此逻辑 stop 之后即满足上述条件。epoch 递增后，旧代际 worker 的 terminal 写入均因 epoch fencing 失败。
+
+`/stop` 还要求沿用 Reconciler 的 `ModelInvocationPlanner` 判定当前 head 是否仍有未终结 response debt；若存在 response debt，原子追加 `ASSISTANT_ABORTED`（仅 text/thinking，head-scoped `findSafeStreamSnapshotByHead(threadId, epoch, sourceHeadEntryId)` 拿到的快照）或 `ASSISTANT_ERROR(CANCELLED)` barrier 并 fence epoch。Stop 自身只是一道 epoch fence，不修改已 RUNNING/SUCCEEDED 的 invocation 行；tool/空 partial 不物化 `ToolInvocation` 或 tool fragment。
 
 ## 6. Redis Pub/Sub wake
 

@@ -34,4 +34,5 @@ public class ModelInvocationDO {
   private OffsetDateTime createdAt;
   private OffsetDateTime startedAt;
   private OffsetDateTime finishedAt;
+  private String safeStreamSnapshotJson;
 }

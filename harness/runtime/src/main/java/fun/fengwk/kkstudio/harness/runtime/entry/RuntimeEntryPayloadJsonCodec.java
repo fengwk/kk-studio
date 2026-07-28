@@ -38,17 +38,17 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 最终 5 类 Runtime Entry payload 的严格、确定性 JSON codec。
- *
- * <p>直接对应 {@link EntryType}，仅支持 {@link RootEntryPayload} / {@link RuntimeConfigSnapshot} / {@link
- * MessageEntryPayload} / {@link CustomMessageEntryPayload} / {@link AssistantErrorEntryPayload}；其它
+ * 最终 6 类 Runtime Entry payload 的严格、确定性 JSON codec：{@link RootEntryPayload} / {@link
+ * RuntimeConfigSnapshot} / {@link MessageEntryPayload} / {@link CustomMessageEntryPayload} / {@link
+ * AssistantErrorEntryPayload} / {@link AssistantAbortedEntryPayload}。直接对应 {@link EntryType}； 其它
  * {@link EntryPayload} 实现显式拒绝。
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
  * {@link JsonParser.Feature#STRICT_DUPLICATE_DETECTION}）；未知枚举；未知 content discriminator；raw {@code
  * argumentsJson} / {@code detailsJson} 非单一 JSON object；raw {@code json} 非单一 JSON value；{@code
- * tool_result} 嵌套 {@code tool_call} 或 {@code tool_result}。字段顺序固定；{@link BigDecimal} 字段以 {@code
+ * tool_result} 嵌套 {@code tool_call} 或 {@code tool_result}；{@link AssistantAbortedEntryPayload} 必须仅含
+ * text/thinking content 且不能全为空，否则进入取消 barrier 而非空 aborted turn。字段顺序固定；{@link BigDecimal} 字段以 {@code
  * toPlainString()} 字符串输出；list 顺序保留。
  *
  * <p>{@link RuntimeConfigSnapshot} 子树直接委派 {@link RuntimeConfigJsonCodec} 的 node API；{@code
@@ -62,6 +62,7 @@ public final class RuntimeEntryPayloadJsonCodec {
   private static final Set<String> MESSAGE_FIELDS = orderedSet("message", "assistantMetadata");
   private static final Set<String> CUSTOM_MESSAGE_FIELDS = orderedSet("message");
   private static final Set<String> ASSISTANT_ERROR_FIELDS = orderedSet("error");
+  private static final Set<String> ASSISTANT_ABORTED_FIELDS = orderedSet("message");
   private static final Set<String> ROOT_FIELDS = orderedSet();
 
   private static final Set<String> TEXT_CONTENT_FIELDS = orderedSet("type", "text");
@@ -109,7 +110,11 @@ public final class RuntimeEntryPayloadJsonCodec {
 
   public RuntimeEntryPayloadJsonCodec() {}
 
-  /** 把 {@link EntryPayload} 编码为 canonical JSON 文本；仅支持最终 8 类，其它实现显式拒绝。 */
+  /**
+   * 把 {@link EntryPayload} 编码为 canonical JSON 文本；仅支持最终 6 类（{@link RootEntryPayload} / {@link
+   * RuntimeConfigSnapshot} / {@link MessageEntryPayload} / {@link CustomMessageEntryPayload} /
+   * {@link AssistantErrorEntryPayload} / {@link AssistantAbortedEntryPayload}），其它实现显式拒绝。
+   */
   public String encode(EntryPayload payload) {
     Objects.requireNonNull(payload, "payload");
     return write(encodeNode(payload));
@@ -132,6 +137,9 @@ public final class RuntimeEntryPayloadJsonCodec {
     }
     if (payload instanceof AssistantErrorEntryPayload value) {
       return encodeAssistantError(value);
+    }
+    if (payload instanceof AssistantAbortedEntryPayload value) {
+      return encodeAssistantAborted(value);
     }
     throw new IllegalArgumentException(
         "unsupported entry payload: " + payload.getClass().getName());
@@ -163,6 +171,7 @@ public final class RuntimeEntryPayloadJsonCodec {
       case MESSAGE -> decodeMessagePayload(value);
       case CUSTOM_MESSAGE -> decodeCustomMessagePayload(value);
       case ASSISTANT_ERROR -> decodeAssistantError(value);
+      case ASSISTANT_ABORTED -> decodeAssistantAborted(value);
     };
   }
 
@@ -188,6 +197,12 @@ public final class RuntimeEntryPayloadJsonCodec {
   private static ObjectNode encodeAssistantError(AssistantErrorEntryPayload value) {
     ObjectNode node = NODES.objectNode();
     node.set("error", ERROR_CODEC.encodeNode(value.error()));
+    return node;
+  }
+
+  private static ObjectNode encodeAssistantAborted(AssistantAbortedEntryPayload value) {
+    ObjectNode node = NODES.objectNode();
+    node.set("message", encodeMessage(value.message()));
     return node;
   }
 
@@ -222,6 +237,13 @@ public final class RuntimeEntryPayloadJsonCodec {
     requireExactFields(node, ASSISTANT_ERROR_FIELDS, "ASSISTANT_ERROR");
     ModelInvocationError error = ERROR_CODEC.decodeNode(node.get("error"));
     return new AssistantErrorEntryPayload(error);
+  }
+
+  private static AssistantAbortedEntryPayload decodeAssistantAborted(JsonNode value) {
+    ObjectNode node = requireObject(value, "ASSISTANT_ABORTED");
+    requireExactFields(node, ASSISTANT_ABORTED_FIELDS, "ASSISTANT_ABORTED");
+    AgentMessage message = decodeMessage(node.get("message"));
+    return new AssistantAbortedEntryPayload(message);
   }
 
   // ---------- AgentMessage / content encoders & decoders ----------

@@ -262,6 +262,7 @@ export type EntryType =
   | 'MESSAGE'
   | 'CUSTOM_MESSAGE'
   | 'ASSISTANT_ERROR'
+  | 'ASSISTANT_ABORTED'
 
 export interface HarnessSessionEntryDTO {
   entryId: string

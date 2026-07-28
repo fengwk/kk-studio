@@ -73,7 +73,7 @@ frontend → web APIs (via shared/api)
 | **Chat** | 持久 Chat 集合与可选默认 Agent；不持有 Session/Thread，也不保存 Pane |
 | **Pane** | 浏览器本地 Chat 工作区姿势：布局、焦点与各面板可空 `threadId` 仅存 localStorage |
 | **Session** | 共享 append-only Entry Tree 的边界，不持有 Thread；存储列只有 `id`、`title`、`created_at`；由 Thread `bootstrapThread` 在同一事务中创建 |
-| **Entry** | 语义持久真源：`ROOT`、`RUNTIME_CONFIG`、`MESSAGE`、`CUSTOM_MESSAGE`、`ASSISTANT_ERROR` |
+| **Entry** | 语义持久真源：`ROOT`、`RUNTIME_CONFIG`、`MESSAGE`、`CUSTOM_MESSAGE`、`ASSISTANT_ERROR`、`ASSISTANT_ABORTED`（用户 `/stop` 持久化的 partial assistant turn，仅含安全 text/thinking） |
 | **HarnessThread** | 可复用 durable runtime process：可空 `headEntryId`、input sequence、`runnable`、execution epoch、processor lease；当前 Session 由 head Entry 派生 |
 | **Branch(thread)** | 不是独立实体：把某个 Thread 的 head 重定位到历史 Entry 即继续该分支；路径由 root→`headEntryId` 派生 |
 | **ThreadInput** | 多生产者有序 mailbox：消息与配置命令；幂等键；TURN_BOUNDARY harvest |
@@ -88,6 +88,8 @@ frontend → web APIs (via shared/api)
 Thread head 的外部重定位（bootstrap / rebind / unbind）要求 Thread 逻辑静止，并以 `expectedExecutionEpoch` 做 CAS fencing：成功后 epoch+1 并清 lease/runnable，旧 epoch 的执行结果不再能写入。
 
 执行由 `ThreadReconciler` 推进 Entry/head；`ModelWorker` / 统一 `ToolWorker` 只写 Invocation 事实。提交、Stop、Interaction 解决、Invocation terminal 后 afterCommit wake；低频 recovery 扫描 `runnable` 与过期 lease。
+
+`Stop` 走 Thread command transaction 而非 mailbox，沿用 `ModelInvocationPlanner` 判定当前 head 是否仍有 response debt，并在 epoch 内原子追加 `ASSISTANT_ABORTED`（仅 text/thinking）或 `ASSISTANT_ERROR(CANCELLED)` barrier 后 fence 旧 generation 的 terminal CAS。`ModelWorker` 在每次 text/thinking SSE delta 之前以 Thread + Invocation 锁 fenced 写入 `safe_stream_snapshot`；fence LOST 时 worker 端立即 `abandon()` 本地 handle，不再发布该 delta。Retry 走 `safe_stream_snapshot = null` 的 CAS 重置，避免旧 attempt partial 污染下一轮 Provider 上下文。
 
 ComfyUI Run 独立于 Harness Thread 模型。
 

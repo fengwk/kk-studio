@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.worker.ClaimedModelInvocation;
@@ -342,6 +343,58 @@ public class PostgresqlModelInvocationTransactions implements ModelInvocationTra
             claimed.invocation().workerLease().token(),
             ModelInvocationRowConverter.toUtcOffsetDateTime(observedActivity),
             ModelInvocationRowConverter.toUtcOffsetDateTime(persistedNextAttemptAt),
+            ModelInvocationRowConverter.toUtcOffsetDateTime(now));
+    return updated == 1
+        ? ModelInvocationUpdateOutcome.APPLIED
+        : ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
+  }
+
+  @Override
+  @Transactional(isolation = Isolation.READ_COMMITTED)
+  public ModelInvocationUpdateOutcome recordSafeStreamSnapshot(
+      ClaimedModelInvocation claimed,
+      SafeStreamSnapshot snapshot,
+      Instant activityAt,
+      Instant now) {
+    Objects.requireNonNull(claimed, "claimed");
+    Objects.requireNonNull(snapshot, "snapshot");
+    Objects.requireNonNull(activityAt, "activityAt");
+    Objects.requireNonNull(now, "now");
+    if (claimed.invocation().status() != InvocationStatus.RUNNING) {
+      return ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
+    }
+    ModelInvocationDO row = lockAndValidateOwned(claimed, now);
+    if (row == null) {
+      return ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
+    }
+    // 在 Thread + Invocation 行锁内读取当前 durable 快照，按 prefix-单调判定输入：延长用输入、旧输入保留 durable、
+    // 分叉视为非法 invocation state 而显式拒绝；任何情形下都不允许较短 snapshot 覆盖较长 durable snapshot。
+    SafeStreamSnapshot durableSnapshot =
+        row.getSafeStreamSnapshotJson() == null
+            ? SafeStreamSnapshot.EMPTY
+            : ModelInvocationRowConverter.decodeSnapshot(row.getSafeStreamSnapshotJson());
+    SafeStreamSnapshot effectiveSnapshot;
+    try {
+      effectiveSnapshot = SafeStreamSnapshotMonotonicity.merge(durableSnapshot, snapshot);
+    } catch (SafeStreamSnapshotMonotonicity.IllegalSnapshotForkException error) {
+      throw new IllegalStateException(
+          "safe stream snapshot fork for invocation " + claimed.invocation().id(), error);
+    }
+    // SQL CAS 已校验 RUNNING + attempt + lease；防止同一 attempt 内的 race，再补一层单调检查。
+    Instant persistedActivity = ModelInvocationRowConverter.toPersistenceInstant(activityAt);
+    Instant durableActivity =
+        Objects.requireNonNull(row.getLastActivityAt(), "lastActivityAt").toInstant();
+    Instant effectiveActivity =
+        durableActivity.isAfter(persistedActivity) ? durableActivity : persistedActivity;
+    int updated =
+        invocationMapper.recordSafeStreamSnapshot(
+            claimed.invocation().id(),
+            claimed.invocation().threadId(),
+            claimed.invocation().executionEpoch(),
+            claimed.invocation().attempt(),
+            claimed.invocation().workerLease().token(),
+            ModelInvocationRowConverter.encodeSnapshot(effectiveSnapshot),
+            ModelInvocationRowConverter.toUtcOffsetDateTime(effectiveActivity),
             ModelInvocationRowConverter.toUtcOffsetDateTime(now));
     return updated == 1
         ? ModelInvocationUpdateOutcome.APPLIED

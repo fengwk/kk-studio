@@ -95,6 +95,7 @@ Entry 是 transcript 与运行配置的唯一语义事实，类型：
 - `MESSAGE`
 - `CUSTOM_MESSAGE`
 - `ASSISTANT_ERROR`
+- `ASSISTANT_ABORTED`（用户 `/stop` 触发，仅含安全 text/thinking，是 Provider 上下文中完整的 partial assistant turn 与 debt barrier）
 
 `RUNTIME_CONFIG` 保存一次完整、不可变、已解析的有效运行快照：Agent identity、system prompt、effective model/variant、Tool descriptors/bindings、selected skills 与 yolo 开关。不保存 secret value；credential 只存稳定 reference。
 
@@ -279,12 +280,16 @@ resolution、owner 领域结果与 runnable 标记在同一 PostgreSQL 事务中
 Stop 是立即控制面，不进入普通 mailbox：
 
 1. 锁 Thread 并校验 `expectedExecutionEpoch`
-2. `executionEpoch++`
-3. 清 processor lease 与 `runnable`
-4. 取消旧 epoch 可安全取消的 Invocation；已开始执行只由 epoch fencing 拒绝 late callback
-5. 取消 queued Inputs
-6. 取消该 Thread 的 OPEN Interaction，使逻辑 stop 后不再被永不解决的 blocker 阻塞
-7. afterCommit best-effort 取消本地 Provider/Tool/RPC handle
+2. 沿用 Reconciler 的 `ModelInvocationPlanner` 判定当前 head 是否仍有未终结 response debt
+3. 若存在 response debt 且 head-scoped `findSafeStreamSnapshotByHead(threadId, epoch, sourceHeadEntryId)` 在 `safe_stream_snapshot is not null AND applied_at is null` 谓词下读出该 invocation 的安全快照：写仅含 text/thinking 的 `ASSISTANT_ABORTED` Entry 并 rebind head 上去，否则写 `ASSISTANT_ERROR(CANCELLED)` barrier
+4. `executionEpoch++`
+5. 清 processor lease 与 `runnable`
+6. 取消旧 epoch 可安全取消的 Invocation；已开始执行只由 epoch fencing 拒绝 late callback
+7. 取消 queued Inputs
+8. 取消该 Thread 的 OPEN Interaction，使逻辑 stop 后不再被永不解决的 blocker 阻塞
+9. afterCommit wake Thread + Reconciliation（让 Reconciler 立刻 harvest 新 head/新 epoch）
+
+`ASSISTANT_ABORTED` 与 `ASSISTANT_ERROR` 共享 barrier contract：都是当前 epoch 内追加的 terminal Entry，不会让 pre-existing `RUNNING`/`SUCCEEDED` invocation 转 CANCELLED。Tool/empty partial 不进入 `ASSISTANT_ABORTED`。`ModelWorker.Execution.onDelta` 在 fence 写入 `safe_stream_snapshot` 返回 `LOST_OWNERSHIP` 时，离开 Execution monitor 之后本地 `abandon()` 释放 handle 并清 timers / map，后续 Provider 回调不再被 publish；该释放属于 worker 进程本地清理，与 stop transaction 内的 epoch fence 是两个独立步骤。
 
 head 重定位（bootstrap / rebind / unbind）是外部修改 head 的唯一入口，要求 Thread 当前逻辑静止：
 
