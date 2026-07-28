@@ -11,7 +11,8 @@
  * <p>Delta is a bounded realtime projection only. Worker lease heartbeat and real Provider activity
  * are deliberately separate: only Provider delta is eligible to advance {@code lastActivityAt}. A
  * reclaimed RUNNING lease is marked UNKNOWN rather than replaying an unconfirmed Provider call.
- * This package depends only on runtime domain types, Model API, Runtime ports/retry contracts and
- * java.base/Jackson, never Spring, JDBC, Redis, HTTP or a Provider SDK.
+ * This package depends only on runtime domain types, Model API, Runtime ports/retry contracts,
+ * java.base/Jackson and the SLF4J API; it never depends on Spring, JDBC, Redis, HTTP or a Provider
+ * SDK.
  */
 package fun.fengwk.kkstudio.harness.runtime.model.worker;

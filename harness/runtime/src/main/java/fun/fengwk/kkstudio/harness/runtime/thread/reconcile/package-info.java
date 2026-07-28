@@ -17,8 +17,9 @@
  *       Tree 或推进 Thread head。
  * </ul>
  *
- * <p>外部依赖仅为 {@code harness.runtime.execution/continuation/thread/session}、{@code
- * harness.runtime.model}（ProviderRequest）与 {@code java.base}。激活循环的可观察不变量：
+ * <p>运行时依赖仅为 {@code harness.runtime.execution/continuation/thread/session}、{@code
+ * harness.runtime.model}（ProviderRequest）、{@code java.base} 与告警输出使用的 SLF4J API；Lombok 只在编译期生成
+ * logger 字段。激活循环的可观察不变量：
  *
  * <ul>
  *   <li>每次 mutation 携带 {@link fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadOwnership}
