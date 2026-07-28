@@ -68,7 +68,8 @@ E2E seed 固定包含 Pi 0.82.1 有效运行时中的 19 个模型：
 | 路径 | 职责 |
 | --- | --- |
 | `scripts/e2e.sh` | 环境准备 + 调用矩阵 |
-| `scripts/e2e/lib.sh` | backend/frontend/daemon 启停、credential 注入 |
+| `scripts/e2e/lib.sh` | backend/frontend/daemon 启停、credential 注入（依赖 Python 同步器） |
+| `scripts/e2e/sync_provider_credentials.py` | 将环境变量 Provider 凭证注入后端 API；可独立执行与单元测试 |
 | `scripts/e2e/run-matrix.mjs` | Node API 矩阵 runner、报告输出 |
 | `scripts/e2e/ui-smoke.mjs` | Playwright UI smoke（L5） |
 | `scripts/e2e/lib/http.mjs` | fetch/断言 |
