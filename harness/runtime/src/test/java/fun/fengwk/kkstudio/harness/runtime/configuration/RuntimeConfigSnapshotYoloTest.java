@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.reconcile.ReconcileTestSupport;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ReconcileTestSupport;
 
 /** Pure YOLO snapshot replacement stays in runtime configuration domain. */
 class RuntimeConfigSnapshotYoloTest {

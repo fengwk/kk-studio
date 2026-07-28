@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.runtime.reconcile;
+package fun.fengwk.kkstudio.harness.runtime.thread.reconcile;
 
 import fun.fengwk.kkstudio.harness.runtime.configuration.AgentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
@@ -61,7 +61,7 @@ public final class ReconcileTestSupport {
         null);
   }
 
-  static ProviderRequest providerRequest() {
+  public static ProviderRequest providerRequest() {
     BigDecimal one = new BigDecimal("1");
     ModelPricing pricing =
         new ModelPricing(

@@ -9,9 +9,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.harness.runtime.reconcile.ThreadActivationDispatcher;
-import fun.fengwk.kkstudio.harness.runtime.reconcile.ThreadReconciler;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadActivationDispatcher;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconciler;
 
 /** 生产 composition root 只暴露 final Reconciler/dispatcher/recovery 资源。 */
 class HarnessThreadWorkerWiringTest extends PostgresSpringTestSupport {

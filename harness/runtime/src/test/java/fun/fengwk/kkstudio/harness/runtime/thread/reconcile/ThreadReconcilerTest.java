@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.runtime.reconcile;
+package fun.fengwk.kkstudio.harness.runtime.thread.reconcile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.Failure;
 import fun.fengwk.kkstudio.harness.runtime.execution.StepResult;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 

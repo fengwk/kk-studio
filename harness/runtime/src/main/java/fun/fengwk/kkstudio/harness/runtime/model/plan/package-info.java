@@ -1,6 +1,7 @@
 /**
  * 纯 {@code ModelInvocationPlanner}：根据 head entry path 与最近 {@code RuntimeConfigSnapshot} 派生 {@code
- * ModelInvocationPlan}（frozen {@code ProviderRequest}）。
+ * ModelInvocationPlan}（frozen {@code ProviderRequest}）。本包拥有 plan 输出类型 {@link
+ * fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan}。
  *
  * <p>职责：
  *
