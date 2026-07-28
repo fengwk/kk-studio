@@ -674,7 +674,11 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
 
   private static void completeModel(long id, String status, ProviderResponse result, String error) {
     execute(
-        "update harness_model_invocation set status = ?, result = cast(? as jsonb), error = cast(? as jsonb), started_at = current_timestamp, deadline_at = current_timestamp + interval '1 minute', last_activity_at = current_timestamp, finished_at = current_timestamp where id = ?",
+        "update harness_model_invocation set status = ?, result = cast(? as jsonb), error = cast(? as jsonb),"
+            + " started_at = greatest(current_timestamp, created_at),"
+            + " deadline_at = greatest(current_timestamp, created_at) + interval '1 minute',"
+            + " last_activity_at = greatest(current_timestamp, created_at),"
+            + " finished_at = greatest(current_timestamp, created_at) where id = ?",
         status,
         result == null ? null : RESPONSE_CODEC.encode(result),
         error,
@@ -683,7 +687,11 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
 
   private static void completeTool(long id, String status, String result, String error) {
     execute(
-        "update harness_tool_invocation set status = ?, result = cast(? as jsonb), error = cast(? as jsonb), started_at = current_timestamp, deadline_at = current_timestamp + interval '1 minute', last_activity_at = current_timestamp, finished_at = current_timestamp where id = ?",
+        "update harness_tool_invocation set status = ?, result = cast(? as jsonb), error = cast(? as jsonb),"
+            + " started_at = greatest(current_timestamp, created_at),"
+            + " deadline_at = greatest(current_timestamp, created_at) + interval '1 minute',"
+            + " last_activity_at = greatest(current_timestamp, created_at),"
+            + " finished_at = greatest(current_timestamp, created_at) where id = ?",
         status,
         result,
         error,
