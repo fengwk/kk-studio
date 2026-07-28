@@ -151,13 +151,14 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   @Transactional(isolation = Isolation.READ_COMMITTED)
   public Optional<ThreadReconcileSnapshot> loadOwnedSnapshot(
       ThreadOwnership ownership, Instant now) {
-    ThreadReconcileRow thread = owned(ownership, now);
+    OwnedThreadRow thread = owned(ownership, now);
     if (thread == null) return Optional.empty();
-    ThreadReconcileRow terminal =
+    TerminalModelInvocationRow terminal =
         mapper.findTerminalModel(
             thread.getId(), thread.getHeadEntryId(), ownership.executionEpoch());
-    Optional<Long> terminalId = Optional.ofNullable(terminal).map(ThreadReconcileRow::getId);
-    List<ThreadReconcileRow> siblings =
+    Optional<Long> terminalId =
+        Optional.ofNullable(terminal).map(TerminalModelInvocationRow::getId);
+    List<ToolInvocationRow> siblings =
         terminal == null
             ? mapper.listToolSiblings(
                 thread.getId(), thread.getHeadEntryId(), ownership.executionEpoch())
@@ -193,9 +194,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   @Transactional(isolation = Isolation.READ_COMMITTED)
   public ApplyOutcome applyTerminalModel(
       ThreadOwnership ownership, long modelInvocationId, Instant now) {
-    ThreadReconcileRow thread = owned(ownership, now);
+    OwnedThreadRow thread = owned(ownership, now);
     if (thread == null) return ApplyOutcome.LOST_OWNERSHIP;
-    ThreadReconcileRow invocation =
+    TerminalModelInvocationRow invocation =
         mapper.findTerminalModel(
             thread.getId(), thread.getHeadEntryId(), ownership.executionEpoch());
     if (invocation == null || invocation.getId() != modelInvocationId)
@@ -247,10 +248,10 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   @Transactional(isolation = Isolation.READ_COMMITTED)
   public ApplyOutcome applyTerminalToolResults(
       ThreadOwnership ownership, long assistantEntryId, Instant now) {
-    ThreadReconcileRow thread = owned(ownership, now);
+    OwnedThreadRow thread = owned(ownership, now);
     if (thread == null || thread.getHeadEntryId() != assistantEntryId)
       return ApplyOutcome.LOST_OWNERSHIP;
-    List<ThreadReconcileRow> tools =
+    List<ToolInvocationRow> tools =
         mapper.listToolSiblings(thread.getId(), assistantEntryId, ownership.executionEpoch());
     if (tools.isEmpty()) return ApplyOutcome.LOST_OWNERSHIP;
     boolean someToolsApplied = tools.stream().anyMatch(tool -> tool.getAppliedAt() != null);
@@ -262,7 +263,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     }
     if (tools.stream().anyMatch(tool -> !terminal(tool))) return ApplyOutcome.LOST_OWNERSHIP;
     long parent = assistantEntryId;
-    for (ThreadReconcileRow tool : tools) {
+    for (ToolInvocationRow tool : tools) {
       ToolDescriptor descriptor = TOOL_DESCRIPTOR_CODEC.decode(tool.getDescriptorJson());
       ToolResultMessageContent content = toolResult(tool, descriptor);
       long entryId = ids.nextEntryId();
@@ -295,7 +296,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   @Transactional(isolation = Isolation.READ_COMMITTED)
   public SuspendOutcome suspendAndRecheck(
       ThreadOwnership ownership, ContinuationRef expectedBlocker, Instant now) {
-    ThreadReconcileRow thread = owned(ownership, now);
+    OwnedThreadRow thread = owned(ownership, now);
     if (thread == null) return SuspendOutcome.LOST_OWNERSHIP;
     Optional<ContinuationRef> current = blocker(thread, ownership.executionEpoch());
     // The expected blocker is not immediate work by itself. Only its replacement/disappearance,
@@ -313,7 +314,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   @Transactional(isolation = Isolation.READ_COMMITTED)
   public ApplyOutcome harvestBoundary(
       ThreadOwnership ownership, TurnBoundary boundary, Instant now) {
-    ThreadReconcileRow thread = owned(ownership, now);
+    OwnedThreadRow thread = owned(ownership, now);
     if (thread == null) return ApplyOutcome.LOST_OWNERSHIP;
     List<ThreadInput> durable = toInputs(mapper.listQueuedInputs(thread.getId()));
     if (!sameBoundary(boundary, durable)) return ApplyOutcome.LOST_OWNERSHIP;
@@ -348,7 +349,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   @Transactional(isolation = Isolation.READ_COMMITTED)
   public ModelCreationOutcome createModelInvocationAndRelease(
       ThreadOwnership ownership, ModelInvocationPlan plan, Instant now) {
-    ThreadReconcileRow thread = owned(ownership, now);
+    OwnedThreadRow thread = owned(ownership, now);
     if (thread == null || thread.getHeadEntryId() != plan.sourceHeadEntryId()) {
       return new ModelCreationOutcome.LostOwnership();
     }
@@ -379,7 +380,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
   public QuiesceOutcome quiesceAndRecheck(ThreadOwnership ownership, Instant now) {
-    ThreadReconcileRow thread = owned(ownership, now);
+    OwnedThreadRow thread = owned(ownership, now);
     if (thread == null) return QuiesceOutcome.LOST_OWNERSHIP;
     if (hasAnyWork(thread) || plan(thread).isPresent()) return QuiesceOutcome.WORK_AVAILABLE;
     return release(ownership, false, now)
@@ -396,9 +397,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     }
   }
 
-  private ThreadReconcileRow owned(ThreadOwnership ownership, Instant now) {
+  private OwnedThreadRow owned(ThreadOwnership ownership, Instant now) {
     Objects.requireNonNull(ownership, "ownership");
-    ThreadReconcileRow thread = mapper.lockThread(ownership.threadId());
+    OwnedThreadRow thread = mapper.lockThread(ownership.threadId());
     if (thread == null
         || !thread.isRunnable()
         || thread.getExecutionEpoch() != ownership.executionEpoch()
@@ -408,11 +409,11 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     return thread;
   }
 
-  private Optional<ModelInvocationPlan> plan(ThreadReconcileRow thread) {
+  private Optional<ModelInvocationPlan> plan(OwnedThreadRow thread) {
     return planAt(thread, thread.getHeadEntryId());
   }
 
-  private Optional<ModelInvocationPlan> planAt(ThreadReconcileRow thread, long headEntryId) {
+  private Optional<ModelInvocationPlan> planAt(OwnedThreadRow thread, long headEntryId) {
     return planner.plan(
         thread.getSessionId(), headEntryId, path(thread.getSessionId(), headEntryId));
   }
@@ -429,19 +430,19 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         .toList();
   }
 
-  private Optional<ContinuationRef> blocker(ThreadReconcileRow thread, long epoch) {
-    ThreadReconcileRow model =
+  private Optional<ContinuationRef> blocker(OwnedThreadRow thread, long epoch) {
+    InvocationBlockerRow model =
         mapper.findModelBlocker(thread.getId(), thread.getHeadEntryId(), epoch);
     if (model != null)
       return Optional.of(ref(thread.getId(), ExecutionTargetKind.MODEL_INVOCATION, model.getId()));
-    ThreadReconcileRow tool =
+    InvocationBlockerRow tool =
         mapper.findToolBlocker(thread.getId(), thread.getHeadEntryId(), epoch);
     return tool == null
         ? Optional.empty()
         : Optional.of(ref(thread.getId(), ExecutionTargetKind.TOOL_INVOCATION, tool.getId()));
   }
 
-  private boolean hasAnyWork(ThreadReconcileRow thread) {
+  private boolean hasAnyWork(OwnedThreadRow thread) {
     return mapper.findTerminalModel(
                 thread.getId(), thread.getHeadEntryId(), thread.getExecutionEpoch())
             != null
@@ -453,11 +454,11 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         || !mapper.listQueuedInputs(thread.getId()).isEmpty();
   }
 
-  private boolean hasWorkExceptExpected(ThreadReconcileRow thread, ContinuationRef expected) {
+  private boolean hasWorkExceptExpected(OwnedThreadRow thread, ContinuationRef expected) {
     if (mapper.findTerminalModel(
             thread.getId(), thread.getHeadEntryId(), thread.getExecutionEpoch())
         != null) return true;
-    List<ThreadReconcileRow> siblings =
+    List<ToolInvocationRow> siblings =
         mapper.listToolSiblings(
             thread.getId(), thread.getHeadEntryId(), thread.getExecutionEpoch());
     if (!siblings.isEmpty()
@@ -467,7 +468,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   }
 
   private void materializeTools(
-      ThreadReconcileRow thread,
+      OwnedThreadRow thread,
       long assistantEntryId,
       long epoch,
       ProviderResponse response,
@@ -517,7 +518,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         new AssistantMessageMetadata(response.stopReason(), response.usage(), response.cost()));
   }
 
-  private static ModelInvocationError modelError(ThreadReconcileRow invocation) {
+  private static ModelInvocationError modelError(TerminalModelInvocationRow invocation) {
     if ("CANCELLED".equals(invocation.getStatus()))
       return new ModelInvocationError(ProviderErrorKind.CANCELLED, "model invocation cancelled");
     return MODEL_ERROR_CODEC.decode(
@@ -525,7 +526,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   }
 
   private static ToolResultMessageContent toolResult(
-      ThreadReconcileRow row, ToolDescriptor descriptor) {
+      ToolInvocationRow row, ToolDescriptor descriptor) {
     if ("SUCCEEDED".equals(row.getStatus())) {
       ToolResult result = ToolResultJsonCodec.decode(row.getResultJson());
       if (!row.getToolCallId().equals(result.toolCallId())) {
@@ -566,11 +567,11 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     return mapped.isEmpty() ? List.of(new TextMessageContent("")) : List.copyOf(mapped);
   }
 
-  private static List<ThreadInput> toInputs(List<ThreadReconcileRow> rows) {
+  private static List<ThreadInput> toInputs(List<QueuedThreadInputRow> rows) {
     return rows.stream().map(PostgresqlThreadReconcileTransactions::toInput).toList();
   }
 
-  private static ThreadInput toInput(ThreadReconcileRow row) {
+  private static ThreadInput toInput(QueuedThreadInputRow row) {
     ThreadInputType type = ThreadInputType.valueOf(row.getInputType());
     return new ThreadInput(
         row.getId(),
@@ -591,7 +592,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         "unsupported typed input payload: " + input.payload().getClass());
   }
 
-  private static HarnessThread toThread(ThreadReconcileRow row) {
+  private static HarnessThread toThread(OwnedThreadRow row) {
     Lease lease =
         row.getProcessorToken() == null
             ? null
@@ -607,7 +608,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         row.getUpdatedAt().toInstant());
   }
 
-  private void insertEntry(ThreadReconcileRow thread, long id, EntryPayload payload, Instant now) {
+  private void insertEntry(OwnedThreadRow thread, long id, EntryPayload payload, Instant now) {
     if (mapper.insertEntry(
             id,
             thread.getSessionId(),
@@ -619,7 +620,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   }
 
   private void insertUsage(
-      ThreadReconcileRow thread, long assistantEntryId, ModelUsageDraft draft, Instant now) {
+      OwnedThreadRow thread, long assistantEntryId, ModelUsageDraft draft, Instant now) {
     if (mapper.insertModelUsage(
             thread.getSessionId(), thread.getId(), assistantEntryId, draft, timestamp(now))
         != 1) {
@@ -628,7 +629,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   }
 
   private void advance(
-      ThreadReconcileRow thread, ThreadOwnership ownership, long newHead, Instant now) {
+      OwnedThreadRow thread, ThreadOwnership ownership, long newHead, Instant now) {
     if (mapper.advanceHead(
             thread.getId(),
             thread.getHeadEntryId(),
@@ -649,7 +650,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         == 1;
   }
 
-  private static boolean terminal(ThreadReconcileRow row) {
+  private static boolean terminal(ToolInvocationRow row) {
     return switch (row.getStatus()) {
       case "SUCCEEDED", "FAILED", "CANCELLED", "UNKNOWN" -> true;
       default -> false;
