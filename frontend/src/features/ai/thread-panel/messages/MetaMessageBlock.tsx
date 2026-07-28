@@ -1,5 +1,5 @@
 import { Coins } from 'lucide-react'
-import type { MetaDialogueMessage } from '@/features/ai/thread-timeline'
+import type { MetaDialogueMessage } from '@/features/ai/thread-timeline-types'
 
 /**
  * 特殊 entry / 回合摘要：左对齐，与正文同列，用图标区分。

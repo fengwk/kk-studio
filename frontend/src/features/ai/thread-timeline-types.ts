@@ -1,7 +1,6 @@
-import type { BackendDateTime } from '@/shared/api/contracts'
-
 export type DialogueRole = 'user' | 'assistant' | 'system' | 'tool' | 'meta' | 'entry'
 export type DialogueStatus = 'streaming' | 'done' | 'error'
+export type DialogueTimestamp = string | readonly number[] | null
 export type ToolAttachmentType = 'image' | 'audio' | 'video' | 'file'
 /** 控制面/回合摘要等特殊消息，与 user/assistant/tool 正文区分 */
 export type MetaMessageKind = 'turn_usage'
@@ -24,7 +23,7 @@ interface BaseDialogueMessage {
   id: string
   role: DialogueRole
   subjectEntryId: string | null
-  createdAt: BackendDateTime
+  createdAt: DialogueTimestamp
   status?: DialogueStatus
 }
 

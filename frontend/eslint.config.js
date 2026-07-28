@@ -24,6 +24,44 @@ export default tseslint.config(
     },
   },
   {
+    files: [
+      'src/features/ai/thread-panel/**/*.{ts,tsx}',
+      'src/features/ai/thread-timeline-types.ts',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@tanstack/react-query',
+              message: 'Portable thread presentation must receive data through props.',
+            },
+            {
+              name: '@/features/ai/thread-timeline',
+              message: 'Import the pure thread-timeline-types contract instead of the Harness adapter barrel.',
+            },
+          ],
+          patterns: [
+            {
+              group: [
+                '@/shared/api',
+                '@/shared/api/**',
+                '@/features/ai/payload-json',
+                '@/features/ai/thread-realtime-state*',
+                '@/features/ai/thread-timeline/**',
+                '@/features/ai/thread-timeline-builder*',
+                '@/features/ai/useAgentThreadController',
+                '@/features/ai/useHarness*',
+              ],
+              message: 'Keep API, query, controller, realtime, and Entry projection concerns outside the portable thread presentation layer.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['src/shared/api/**/*.ts'],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',

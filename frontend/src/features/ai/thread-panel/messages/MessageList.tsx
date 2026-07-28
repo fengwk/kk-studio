@@ -4,7 +4,7 @@ import { MetaMessageBlock } from '@/features/ai/thread-panel/messages/MetaMessag
 import { SystemMessageBlock } from '@/features/ai/thread-panel/messages/SystemMessageBlock'
 import { ToolMessageBlock } from '@/features/ai/thread-panel/messages/ToolMessageBlock'
 import { UserMessageBlock } from '@/features/ai/thread-panel/messages/UserMessageBlock'
-import type { DialogueMessage } from '@/features/ai/thread-timeline'
+import type { DialogueMessage } from '@/features/ai/thread-timeline-types'
 
 /** Dispatches each dialogue message to a dedicated block component (pi per-message-type). */
 export function MessageList({ messages }: { messages: DialogueMessage[] }) {

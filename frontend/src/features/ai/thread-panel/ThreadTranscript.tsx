@@ -2,7 +2,7 @@ import { MessageSquare } from 'lucide-react'
 import type { RefObject } from 'react'
 import { MessageList } from '@/features/ai/thread-panel/messages/MessageList'
 import { isVisibleDialogueMessage } from '@/features/ai/thread-panel/visibility'
-import type { DialogueMessage } from '@/features/ai/thread-timeline'
+import type { DialogueMessage } from '@/features/ai/thread-timeline-types'
 
 /** Dialogue zone: full-height scroll, block transcript. */
 export function ThreadTranscript({

@@ -1,5 +1,5 @@
 import { CircleDot, FileWarning, Settings2 } from 'lucide-react'
-import type { EntryEventDialogueMessage } from '@/features/ai/thread-timeline'
+import type { EntryEventDialogueMessage } from '@/features/ai/thread-timeline-types'
 
 /**
  * Portable durable-Entry audit block. It receives the stable timeline contract rather than

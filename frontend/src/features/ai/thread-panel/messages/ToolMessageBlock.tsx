@@ -4,7 +4,7 @@ import {
   toToolAttachmentSrc,
 } from '@/features/ai/tool-attachments'
 import { getToolRenderer, type ToolRenderContext } from '@/features/ai/thread-panel/tool-renderers'
-import type { ToolAttachment, ToolDialogueMessage } from '@/features/ai/thread-timeline'
+import type { ToolAttachment, ToolDialogueMessage } from '@/features/ai/thread-timeline-types'
 
 /**
  * Tool turn as separate full-width call/result blocks.

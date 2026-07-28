@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { SendIcon } from '@/features/canvas/icons'
+import { ArrowUp } from 'lucide-react'
 import {
   ThreadCommandPalette,
 } from '@/features/ai/thread-panel/ThreadCommandPalette'
@@ -192,7 +192,7 @@ export function ThreadComposer({
           }}
           disabled={!canSend}
         >
-          <SendIcon />
+          <ArrowUp className="send-icon" aria-hidden="true" />
         </button>
       </div>
     </div>

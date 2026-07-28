@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { DialogueStatus, ToolAttachment } from '@/features/ai/thread-timeline'
+import type { DialogueStatus, ToolAttachment } from '@/features/ai/thread-timeline-types'
 
 export interface ToolRenderContext {
   toolName: string
