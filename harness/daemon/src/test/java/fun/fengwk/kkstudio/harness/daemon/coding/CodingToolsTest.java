@@ -213,6 +213,49 @@ class CodingToolsTest {
     assertTrue(text(timed.result).contains("Command timed out"));
   }
 
+  /** grep 保持 15 秒默认值；find 只受调用 deadline 或显式 timeout 约束。 */
+  @Test
+  void searchTimeoutsMatchPiDefaultsAndRespectInvocationDeadlines() throws Exception {
+    var absent = AbstractCodingTool.OBJECT_MAPPER.readTree("{}");
+    var explicit = AbstractCodingTool.OBJECT_MAPPER.readTree("{\"timeout_seconds\":7}");
+
+    assertEquals(Duration.ofHours(1), new GrepTool(config()).descriptor().timeout());
+    assertEquals(Duration.ofHours(1), new FindTool(config()).descriptor().timeout());
+    assertEquals(15, GrepTool.requestedTimeoutSeconds(absent));
+    assertEquals(7, GrepTool.requestedTimeoutSeconds(explicit));
+    assertEquals(
+        Duration.ofSeconds(15),
+        GrepTool.effectiveProcessTimeout(
+            Duration.ofHours(1), GrepTool.requestedTimeoutSeconds(absent)));
+    assertEquals(
+        Duration.ofSeconds(2),
+        GrepTool.effectiveProcessTimeout(
+            Duration.ofSeconds(2), GrepTool.requestedTimeoutSeconds(absent)));
+    assertEquals(
+        Duration.ofSeconds(7),
+        GrepTool.effectiveProcessTimeout(
+            Duration.ofSeconds(30), GrepTool.requestedTimeoutSeconds(explicit)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            GrepTool.requestedTimeoutSeconds(
+                AbstractCodingTool.OBJECT_MAPPER.readTree("{\"timeout_seconds\":3601}")));
+
+    assertEquals(Duration.ofHours(1), FindTool.effectiveProcessTimeout(Duration.ZERO, absent));
+    assertEquals(
+        Duration.ofMinutes(2), FindTool.effectiveProcessTimeout(Duration.ofMinutes(2), absent));
+    assertEquals(
+        Duration.ofSeconds(7), FindTool.effectiveProcessTimeout(Duration.ofMinutes(2), explicit));
+    assertEquals(
+        Duration.ofSeconds(2), FindTool.effectiveProcessTimeout(Duration.ofSeconds(2), explicit));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            FindTool.effectiveProcessTimeout(
+                Duration.ofMinutes(2),
+                AbstractCodingTool.OBJECT_MAPPER.readTree("{\"timeout_seconds\":0}")));
+  }
+
   private CodingToolsConfig config() {
     return config(2000, 50 * 1024);
   }

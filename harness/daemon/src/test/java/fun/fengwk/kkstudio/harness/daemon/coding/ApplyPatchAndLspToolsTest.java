@@ -620,6 +620,171 @@ class ApplyPatchAndLspToolsTest {
                 """));
   }
 
+  /** Parser 必须在提交前拒绝每种结构歧义，避免协议文本被静默解释成其他文件操作。 */
+  @Test
+  void parserRejectsMalformedBodiesAndTerminalStructure() {
+    assertThrows(IllegalArgumentException.class, () -> ApplyPatchSupport.parse(" \n"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ApplyPatchSupport.parse(
+                """
+                *** Begin Patch
+                *** Delete File: a.txt
+                +unexpected body
+                *** End Patch
+                """));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ApplyPatchSupport.parse(
+                """
+                *** Begin Patch
+                *** Update File: a.txt
+                not a chunk
+                *** End Patch
+                """));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ApplyPatchSupport.parse(
+                """
+                *** Begin Patch
+                *** Update File: a.txt
+                @@
+                *** End Patch
+                """));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ApplyPatchSupport.parse(
+                """
+                *** Begin Patch
+                *** Update File: a.txt
+                @@
+                -old
+                +new
+                *** End of File
+                 trailing body
+                *** End Patch
+                """));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ApplyPatchSupport.parse(
+                """
+                *** Begin Patch
+                *** Update File: a.txt
+                @@
+                !invalid line
+                *** End Patch
+                """));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ApplyPatchSupport.parse(
+                """
+                *** Begin Patch
+                unknown directive
+                *** End Patch
+                """));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ApplyPatchSupport.parse(
+                """
+                *** Begin Patch
+                *** Add File: a.txt
+                +content
+                """));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ApplyPatchSupport.parse(
+                """
+                *** Begin Patch
+                *** Add File: a.txt
+                +content
+                *** End Patch
+                trailing text
+                """));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ApplyPatchSupport.parse(
+                """
+                *** Begin Patch
+                *** End Patch
+                """));
+    assertEquals(
+        1,
+        ApplyPatchSupport.parse(
+                """
+                  *** Begin Patch
+                *** Add File: padded.txt
+                +content
+                \t*** End Patch
+                """)
+            .files()
+            .size());
+  }
+
+  @Test
+  void applyPatchRejectsHierarchicalOutputConflictsBeforeMutation() throws Exception {
+    ApplyPatchTool tool = new ApplyPatchTool(config());
+
+    ToolResult result =
+        invoke(
+            tool,
+            patchArgs(
+                """
+                *** Begin Patch
+                *** Add File: generated
+                +file
+                *** Add File: generated/child.txt
+                +child
+                *** End Patch
+                """));
+
+    assertTrue(result.error());
+    assertTrue(text(result).contains("Conflicting patch output paths"));
+    assertFalse(Files.exists(environmentRoot.resolve("generated")));
+  }
+
+  @Test
+  void applyPatchRejectsNonMutatingUpdates() throws Exception {
+    Files.writeString(environmentRoot.resolve("unchanged.txt"), "same\n");
+    ApplyPatchTool tool = new ApplyPatchTool(config());
+
+    ToolResult contextOnly =
+        invoke(
+            tool,
+            patchArgs(
+                """
+                *** Begin Patch
+                *** Update File: unchanged.txt
+                @@
+                 same
+                *** End Patch
+                """));
+    ToolResult semanticNoOp =
+        invoke(
+            tool,
+            patchArgs(
+                """
+                *** Begin Patch
+                *** Update File: unchanged.txt
+                @@
+                -same
+                +same
+                *** End Patch
+                """));
+
+    assertTrue(contextOnly.error());
+    assertTrue(semanticNoOp.error());
+    assertEquals("same\n", Files.readString(environmentRoot.resolve("unchanged.txt")));
+  }
+
   private CodingToolsConfig config() {
     return new CodingToolsConfig(
         environmentRoot,

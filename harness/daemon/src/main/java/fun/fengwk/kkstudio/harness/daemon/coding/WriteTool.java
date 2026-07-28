@@ -26,7 +26,7 @@ public final class WriteTool extends AbstractCodingTool {
         new ToolDescriptor(
             "write",
             "1",
-            "Create or intentionally overwrite a file inside the environment root.",
+            CodingToolPrompts.load("write"),
             null,
             new ToolParamsSchema(
                 "Write parameters",

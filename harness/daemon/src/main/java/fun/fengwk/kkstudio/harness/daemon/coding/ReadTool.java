@@ -33,7 +33,7 @@ public final class ReadTool extends AbstractCodingTool {
         new ToolDescriptor(
             "read",
             "1",
-            "Read a file or directory inside the environment root.",
+            CodingToolPrompts.load("read"),
             null,
             new ToolParamsSchema(
                 "Read parameters",

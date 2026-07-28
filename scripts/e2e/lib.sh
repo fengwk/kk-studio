@@ -97,6 +97,15 @@ package_backend() {
   )
 }
 
+package_daemon() {
+  local java_home=$1
+  step "Packaging daemon (Java 21, offline, skipTests)"
+  (
+    cd "$REPO_ROOT"
+    env JAVA_HOME="$java_home" mvn -o -pl harness/daemon -am -DskipTests package
+  )
+}
+
 build_daemon_classpath() {
   local java_home=$1
   mkdir -p "$WORK_DIR"
@@ -239,6 +248,7 @@ start_daemon() {
   local java_home=$1
   mkdir -p "$WORK_DIR" "$DAEMON_ENV_ROOT"
   kill_daemon
+  package_daemon "$java_home"
   build_daemon_classpath "$java_home"
   : >"$WORK_DIR/daemon.log"
   local cp

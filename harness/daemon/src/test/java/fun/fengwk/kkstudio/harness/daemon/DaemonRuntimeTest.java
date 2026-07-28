@@ -374,6 +374,37 @@ class DaemonRuntimeTest {
     assertEquals(0, tool.executions.get());
   }
 
+  /** pi-base 的 filePath 别名必须在 strict descriptor 校验前归一化为 path。 */
+  @Test
+  void normalizesPiFilePathAliasBeforeStrictPathToolValidation() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool =
+        new TestTool(
+            "read",
+            new ToolParamsSchema(
+                "read arguments",
+                Map.of("path", new ToolStringSchema("path")),
+                Set.of("path"),
+                false));
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.receive(
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION_1,
+            DaemonMessageType.INVOKE,
+            "environment",
+            "file-path-alias",
+            1,
+            "{\"toolName\":\"read\",\"toolVersion\":\"1.0.0\","
+                + "\"arguments\":{\"filePath\":\"src/App.java\"},\"timeoutMillis\":1000}"));
+
+    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    assertEquals("{\"path\":\"src/App.java\"}", tool.request.call().argumentsJson());
+  }
+
   /** 重复 INVOKE 仅重放 STARTED 或终态，不得再次调用本地 Tool。 */
   @Test
   void deduplicatesRunningInvocationAndReplaysTerminalAfterReconnect() throws InterruptedException {
@@ -1151,19 +1182,27 @@ class DaemonRuntimeTest {
 
   private static final class TestTool implements Tool {
 
-    private final ToolDescriptor descriptor =
-        new ToolDescriptor(
-            "test",
-            "1.0.0",
-            "test tool",
-            null,
-            new ToolParamsSchema("test arguments", Map.of(), Set.of(), false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofSeconds(10));
+    private final ToolDescriptor descriptor;
     private final AtomicInteger executions = new AtomicInteger();
     private final TestHandle handle = new TestHandle();
     private volatile ToolExecutionListener listener;
     private volatile ToolExecutionRequest request;
+
+    private TestTool() {
+      this("test", new ToolParamsSchema("test arguments", Map.of(), Set.of(), false));
+    }
+
+    private TestTool(String name, ToolParamsSchema schema) {
+      descriptor =
+          new ToolDescriptor(
+              name,
+              "1.0.0",
+              name + " tool",
+              null,
+              schema,
+              ToolSideEffect.READ_ONLY,
+              Duration.ofSeconds(10));
+    }
 
     @Override
     public ToolDescriptor descriptor() {
