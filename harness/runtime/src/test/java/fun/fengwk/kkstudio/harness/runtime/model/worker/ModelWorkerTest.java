@@ -619,10 +619,33 @@ class ModelWorkerTest {
         response("", "thinking", List.of(), ProviderStopReason.COMPLETED));
 
     assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.current.status());
+    assertEquals("thinking", fixture.transactions.current.result().thinking());
     assertEquals(
         List.of(
             new ProviderStreamEvent.ThinkingDelta("thin"),
             new ProviderStreamEvent.ThinkingDelta("king")),
+        modelDeltas(fixture.sink.events));
+  }
+
+  /**
+   * When the final Provider response omits thinking, already streamed deltas are merged into the
+   * durable response without re-emitting them as a trailing SSE gap.
+   */
+  @Test
+  void persistsStreamedThinkingWhenFinalResponseOmitsThinking() {
+    Fixture fixture = fixture();
+
+    assertTrue(fixture.worker.dispatch(1L));
+    fixture.executor.listener.onDelta(new ProviderStreamEvent.ThinkingDelta("hidden"));
+    fixture.executor.listener.onComplete(response("answer", ProviderStopReason.COMPLETED));
+
+    assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.current.status());
+    assertEquals("answer", fixture.transactions.current.result().text());
+    assertEquals("hidden", fixture.transactions.current.result().thinking());
+    assertEquals(
+        List.of(
+            new ProviderStreamEvent.ThinkingDelta("hidden"),
+            new ProviderStreamEvent.TextDelta("answer")),
         modelDeltas(fixture.sink.events));
   }
 
