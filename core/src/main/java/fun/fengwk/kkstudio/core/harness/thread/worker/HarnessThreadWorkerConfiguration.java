@@ -22,7 +22,14 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-/** final ThreadReconciler、activation dispatcher 和恢复扫描的生产 wiring。 */
+/**
+ * Thread activation 的生产 wiring。
+ *
+ * <p>协作路径为：PostgreSQL recovery scan -> {@link ThreadKick} -> {@link ThreadActivationDispatcher} ->
+ * bounded reconcile executor -> {@link ThreadReconciler} -> {@link
+ * ThreadReconcileTransactions}。Dispatcher 在 Reconciler 交还 blocker 后经 {@link ActivationNotifier} 发送
+ * best-effort wake；跨节点所有权仍只由 PostgreSQL lease/fencing 决定。
+ */
 @Configuration
 @EnableConfigurationProperties(HarnessRuntimeProperties.class)
 public class HarnessThreadWorkerConfiguration {

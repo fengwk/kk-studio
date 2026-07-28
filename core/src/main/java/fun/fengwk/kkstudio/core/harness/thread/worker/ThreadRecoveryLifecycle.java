@@ -16,7 +16,13 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
-/** Thread 恢复：仅根据 durable 可恢复事实 kick，不替代主事件循环；DB processor fencing 仍为权威。 */
+/**
+ * Thread durable recovery scanner，也是生产环境本地 {@link ThreadKick} 的来源。
+ *
+ * <p>它只扫描 PostgreSQL 中 runnable 且 lease 可接管的 Thread，随后请求 Dispatcher 本地 reconcile；不读取 Redis
+ * payload、不执行状态机，也不持有 Thread ownership。重复或丢失的 wake 因此是安全的：最终由数据库 claim/fencing 决定哪一个 activation
+ * 可以推进。
+ */
 public final class ThreadRecoveryLifecycle implements SmartLifecycle {
   private static final System.Logger LOGGER =
       System.getLogger(ThreadRecoveryLifecycle.class.getName());
