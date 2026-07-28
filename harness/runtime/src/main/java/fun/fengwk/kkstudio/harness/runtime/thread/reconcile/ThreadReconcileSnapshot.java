@@ -1,7 +1,8 @@
-package fun.fengwk.kkstudio.harness.runtime.reconcile;
+package fun.fengwk.kkstudio.harness.runtime.thread.reconcile;
 
 import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
 import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.InputStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;

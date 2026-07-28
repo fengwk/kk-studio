@@ -1,10 +1,10 @@
 /**
- * 纯 Runtime 协调器与 Thread reconcile 契约。
+ * 纯 Runtime Thread 协调器：一次 activation 内的所有权、状态机与事务契约。
  *
- * <p>本包是 Session Tree 写者、Head 推进者与 Response debt 协调者。一次 activation 仅收敛 durable facts，不等待任何外部
- * I/O，也不承担 Provider/Tool 执行。所有持久化副作用通过 {@link
- * fun.fengwk.kkstudio.harness.runtime.reconcile.ThreadReconcileTransactions} 端口暴露给 PostgreSQL
- * adapter；本包不引用 Spring、MyBatis、Redis、JSON 或具体 Thread/Model/Tool 行类型之外的业务概念。
+ * <p>本包是 Session Tree 写者、Head 推进者与 Response debt 协调者，属于 Thread reconcile 子域。一次 activation 仅收敛
+ * durable facts，不等待任何外部 I/O，也不承担 Provider/Tool 执行。所有持久化副作用通过 {@link
+ * fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileTransactions} 端口暴露给
+ * PostgreSQL adapter；本包不引用 Spring、MyBatis、Redis、JSON 或具体 Thread/Model/Tool 行类型之外的业务概念。
  *
  * <p>协作角色严格分离：
  *
@@ -21,7 +21,7 @@
  * harness.runtime.model}（ProviderRequest）与 {@code java.base}。激活循环的可观察不变量：
  *
  * <ul>
- *   <li>每次 mutation 携带 {@link fun.fengwk.kkstudio.harness.runtime.reconcile.ThreadOwnership}
+ *   <li>每次 mutation 携带 {@link fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadOwnership}
  *       （threadId + executionEpoch + processorToken）作为 fencing identity；
  *   <li>terminal ModelInvocation apply 优先于 terminal Tool sibling apply；
  *   <li>Tool apply 优先于 durable blocker suspend；
@@ -35,4 +35,4 @@
  *       creation；其余事务的意外 RuntimeException 由适配器向上抛出，Reconciler best-effort release 后重新抛出。
  * </ul>
  */
-package fun.fengwk.kkstudio.harness.runtime.reconcile;
+package fun.fengwk.kkstudio.harness.runtime.thread.reconcile;

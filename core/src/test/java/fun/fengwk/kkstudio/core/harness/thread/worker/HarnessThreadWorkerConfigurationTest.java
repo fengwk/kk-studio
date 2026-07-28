@@ -9,9 +9,9 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.core.harness.thread.reconcile.ThreadReconcileMapper;
-import fun.fengwk.kkstudio.harness.runtime.reconcile.ThreadActivationDispatcher;
-import fun.fengwk.kkstudio.harness.runtime.reconcile.ThreadReconcileTransactions;
-import fun.fengwk.kkstudio.harness.runtime.reconcile.ThreadReconciler;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadActivationDispatcher;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileTransactions;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconciler;
 
 import java.time.Duration;
 import java.util.concurrent.ExecutorService;
