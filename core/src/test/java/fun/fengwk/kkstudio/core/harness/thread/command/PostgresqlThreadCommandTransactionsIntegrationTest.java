@@ -13,11 +13,24 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
+import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.entry.AssistantAbortedEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.entry.AssistantErrorEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.entry.RuntimeEntryPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlanner;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.runtime.reconcile.ModelInvocationPlan;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeConfigInputPayload;
@@ -399,6 +412,183 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
             assistantEntryId));
   }
 
+  // ---------- /stop atomic partial abort path ----------
+
+  /**
+   * Real {@code transactions.stop} over a RUNNING partial invocation with a populated safe stream
+   * snapshot must persist an {@code ASSISTANT_ABORTED} entry that carries the assistant text and
+   * rebinds the head; the pre-existing RUNNING row stays RUNNING because stop is an epoch fence,
+   * not a lifecycle change — any subsequent completeSuccess/completeFailure/completeCancelled CAS
+   * from the prior generation is now rejected by the (thread, epoch, attempt, token) tuple.
+   */
+  @Test
+  void stopBuildsAssistantAbortedHeadFromRunningSafeSnapshot() {
+    TestThreads.Bootstrapped boot = TestThreads.bootstrap(transactions, "abort-running", NOW);
+    long userMessageId = appendUserMessageUnderConfig(boot, "question");
+    HarnessThread rebounded =
+        transactions.updateHead(boot.threadId(), boot.executionEpoch(), userMessageId, NOW);
+    long headEpoch = rebounded.executionEpoch();
+    long invocationId = insertRunningModelInvocation(boot, userMessageId, headEpoch, "partial");
+    Instant completion = NOW.plusSeconds(1);
+
+    ThreadCommandTransactions.StopResult stopped =
+        transactions.stop(boot.threadId(), headEpoch, completion);
+    assertEquals(headEpoch + 1, stopped.executionEpoch());
+
+    Long abortedEntryId = headEntryId(boot.threadId());
+    assertNotNull(abortedEntryId);
+    assertEquals("ASSISTANT_ABORTED", entryType(abortedEntryId));
+    AssistantAbortedEntryPayload aborted = readAssistantAborted(abortedEntryId);
+    assertEquals("partial", ((TextMessageContent) aborted.contents().get(0)).text());
+    // Use the runtime strict codec to avoid hand-rolled JSON parsing; verify the message really
+    // survives shape round-trip via decode/encode symmetry for downstream Planner.
+    String abortedJson =
+        jdbc.queryForObject(
+            "select payload::text from harness_entry where id = ?", String.class, abortedEntryId);
+    assertEquals(
+        aborted,
+        new RuntimeEntryPayloadJsonCodec().decode(EntryType.ASSISTANT_ABORTED, abortedJson));
+
+    // The pre-existing RUNNING invocation is the epoch-predecessor; stop is a fence, not a
+    // lifecycle change, so its status remains RUNNING and the worker token is left untouched
+    // until the lease recovery path decides the outcome.
+    assertEquals(
+        "RUNNING",
+        jdbc.queryForObject(
+            "select status from harness_model_invocation where id = ?",
+            String.class,
+            invocationId));
+
+    // Stop never fabricates a ToolInvocation; the partial assistant turn is text-only and the
+    // durable aborted entry is the only new persisted artifact.
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "select count(*) from harness_tool_invocation where thread_id = ?",
+            Integer.class,
+            boot.threadId()));
+  }
+
+  /**
+   * Stop on a head whose only current epoch invocation has no safe stream snapshot must write a
+   * cancellation barrier ({@code ASSISTANT_ERROR} with {@code CANCELLED}) rather than fabricate
+   * tool fragments or a tool fragment-style aborted entry.
+   */
+  @Test
+  void stopWithEmptySnapshotWritesAssistantErrorCancellationBarrier() {
+    TestThreads.Bootstrapped boot = TestThreads.bootstrap(transactions, "abort-empty", NOW);
+    long userMessageId = appendUserMessageUnderConfig(boot, "question");
+    HarnessThread rebounded =
+        transactions.updateHead(boot.threadId(), boot.executionEpoch(), userMessageId, NOW);
+    long headEpoch = rebounded.executionEpoch();
+    insertRunningModelInvocationNoSnapshot(boot, userMessageId, headEpoch);
+
+    ThreadCommandTransactions.StopResult stopped =
+        transactions.stop(boot.threadId(), headEpoch, NOW.plusSeconds(1));
+    assertEquals(headEpoch + 1, stopped.executionEpoch());
+
+    Long barrierEntryId = headEntryId(boot.threadId());
+    assertNotNull(barrierEntryId);
+    assertEquals("ASSISTANT_ERROR", entryType(barrierEntryId));
+    // Decode the barrier through the strict codec; the assistant_error payload wraps a
+    // ModelInvocationError(kind=CANCELLED) and must NOT carry any text/thinking content.
+    String payloadJson =
+        jdbc.queryForObject(
+            "select payload::text from harness_entry where id = ?", String.class, barrierEntryId);
+    AssistantErrorEntryPayload barrier =
+        (AssistantErrorEntryPayload)
+            new RuntimeEntryPayloadJsonCodec().decode(EntryType.ASSISTANT_ERROR, payloadJson);
+    assertEquals(ProviderErrorKind.CANCELLED, barrier.error().kind());
+    assertFalse(payloadJson.contains("\"text\""));
+  }
+
+  /**
+   * A Row that already reached {@code SUCCEEDED} but still has a non-null safe stream snapshot and
+   * {@code applied_at is null} must still contribute its snapshot to the {@code ASSISTANT_ABORTED}
+   * barrier on the next stop; this preserves already-written Provider output across the stop
+   * transition.
+   */
+  @Test
+  void stopReusesSucceededUnappliedSnapshot() {
+    TestThreads.Bootstrapped boot = TestThreads.bootstrap(transactions, "abort-succeeded", NOW);
+    long userMessageId = appendUserMessageUnderConfig(boot, "question");
+    HarnessThread rebounded =
+        transactions.updateHead(boot.threadId(), boot.executionEpoch(), userMessageId, NOW);
+    long headEpoch = rebounded.executionEpoch();
+    long invocationId =
+        insertSucceededUnappliedModelInvocation(boot, userMessageId, headEpoch, "stale-safe");
+
+    ThreadCommandTransactions.StopResult stopped =
+        transactions.stop(boot.threadId(), headEpoch, NOW.plusSeconds(1));
+    assertEquals(headEpoch + 1, stopped.executionEpoch());
+
+    Long abortedEntryId = headEntryId(boot.threadId());
+    assertNotNull(abortedEntryId);
+    assertEquals("ASSISTANT_ABORTED", entryType(abortedEntryId));
+    AssistantAbortedEntryPayload aborted = readAssistantAborted(abortedEntryId);
+    assertEquals("stale-safe", ((TextMessageContent) aborted.contents().get(0)).text());
+    // The pre-existing succeeded invocation must remain SUCCEEDED and the stop must not rewrite
+    // it with a stale partial.
+    assertEquals(
+        "SUCCEEDED",
+        jdbc.queryForObject(
+            "select status from harness_model_invocation where id = ?",
+            String.class,
+            invocationId));
+  }
+
+  /**
+   * A follow-up USER message after the partial abort must rebuild debt for the NEW turn only. The
+   * persisted root-to-followup-user Entry path is read back through the runtime strict codec and
+   * fed to {@link ModelInvocationPlanner}; the resulting plan must carry the partial assistant text
+   * AND the follow-up USER verbatim, in that order — but NOT as a fresh re-run of the original debt
+   * (which is closed by the {@code ASSISTANT_ABORTED} barrier).
+   */
+  @Test
+  void stopFollowUpUserDebtIncorporatesPartialAssistantContext() {
+    TestThreads.Bootstrapped boot = TestThreads.bootstrap(transactions, "abort-continue", NOW);
+    long firstUserId = appendUserMessageUnderConfig(boot, "first-question");
+    HarnessThread rebounded =
+        transactions.updateHead(boot.threadId(), boot.executionEpoch(), firstUserId, NOW);
+    long headEpoch = rebounded.executionEpoch();
+    insertRunningModelInvocation(boot, firstUserId, headEpoch, "half-answer");
+    Instant completion = NOW.plusSeconds(1);
+    transactions.stop(boot.threadId(), headEpoch, completion);
+
+    long abortedEntryId = headEntryId(boot.threadId());
+    assertNotNull(abortedEntryId);
+    assertEquals("ASSISTANT_ABORTED", entryType(abortedEntryId));
+
+    long secondUserId = appendUserMessage(boot.sessionId(), abortedEntryId, "second-question");
+    assertEquals("MESSAGE", entryType(secondUserId));
+    assertEquals(abortedEntryId, parentEntryId(secondUserId));
+
+    // Read the root-to-followup-user path back from the DB so the planner sees exactly what the
+    // runtime would see when the reconciler next picks up the thread.
+    List<SessionEntry> path = loadEntryPathAsSessionEntries(boot.sessionId(), secondUserId);
+
+    ModelInvocationPlanner planner = new ModelInvocationPlanner();
+    ModelInvocationPlan followupPlan =
+        planner.plan(boot.sessionId(), secondUserId, path).orElseThrow();
+
+    // The plan must carry exactly one SYSTEM (composed from the active RUNTIME_CONFIG), the first
+    // USER, the partial ASSISTANT turn, and the follow-up USER. A regression that re-derives the
+    // first USER as a fresh assistant debt would surface here as either a missing partial reply
+    // or a duplicated USER message.
+    ProviderMessage systemMsg = followupPlan.request().messages().get(0);
+    ProviderMessage firstUserMsg = followupPlan.request().messages().get(1);
+    ProviderMessage partialAssistantMsg = followupPlan.request().messages().get(2);
+    ProviderMessage followupUserMsg = followupPlan.request().messages().get(3);
+
+    assertEquals(ProviderMessageRole.SYSTEM, systemMsg.role());
+    assertEquals(ProviderMessageRole.USER, firstUserMsg.role());
+    assertEquals("first-question", ((ProviderTextBlock) firstUserMsg.contents().get(0)).text());
+    assertEquals(ProviderMessageRole.ASSISTANT, partialAssistantMsg.role());
+    assertEquals("half-answer", ((ProviderTextBlock) partialAssistantMsg.contents().get(0)).text());
+    assertEquals(ProviderMessageRole.USER, followupUserMsg.role());
+    assertEquals("second-question", ((ProviderTextBlock) followupUserMsg.contents().get(0)).text());
+  }
+
   private static void assertNotEquals(long unexpected, long actual) {
     assertFalse(unexpected == actual, "expected different ids but both were " + actual);
   }
@@ -499,5 +689,187 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
             new AgentMessage(
                 AgentMessageRole.USER,
                 List.<AgentMessageContent>of(new TextMessageContent(content)))));
+  }
+
+  // ---------- /stop fixture helpers ----------
+
+  /**
+   * RUNNING model invocation with a populated safe stream snapshot containing the supplied text.
+   * Used as the canonical "partial stopped" precondition.
+   */
+  private long insertRunningModelInvocation(
+      TestThreads.Bootstrapped boot, long sourceEntryId, long epoch, String safeText) {
+    long id = nextId();
+    OffsetDateTime now = OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC);
+    OffsetDateTime deadline = now.plusSeconds(30);
+    OffsetDateTime leaseUntil = now.plusSeconds(15);
+    String snapshotJson =
+        "{\"text\":\""
+            + safeText.replace("\\", "\\\\").replace("\"", "\\\"")
+            + "\",\"thinking\":\"\"}";
+    jdbc.update(
+        "insert into harness_model_invocation (id, thread_id, source_head_entry_id,"
+            + " execution_epoch, request, status, attempt, worker_token, worker_until,"
+            + " started_at, deadline_at, last_activity_at, created_at,"
+            + " safe_stream_snapshot) values (?, ?, ?, ?, '{}'::jsonb, 'RUNNING', 1,"
+            + " 'tok-stop-partial', ?, ?, ?, ?, ?, cast(? as jsonb))",
+        id,
+        boot.threadId(),
+        sourceEntryId,
+        epoch,
+        leaseUntil,
+        now,
+        deadline,
+        now,
+        now,
+        snapshotJson);
+    return id;
+  }
+
+  /**
+   * RUNNING model invocation with a deliberately empty safe stream snapshot. Stop on this row must
+   * fall back to the cancellation barrier rather than fabricating an aborted entry with empty text.
+   */
+  private long insertRunningModelInvocationNoSnapshot(
+      TestThreads.Bootstrapped boot, long sourceEntryId, long epoch) {
+    long id = nextId();
+    OffsetDateTime now = OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC);
+    OffsetDateTime deadline = now.plusSeconds(30);
+    OffsetDateTime leaseUntil = now.plusSeconds(15);
+    jdbc.update(
+        "insert into harness_model_invocation (id, thread_id, source_head_entry_id,"
+            + " execution_epoch, request, status, attempt, worker_token, worker_until,"
+            + " started_at, deadline_at, last_activity_at, created_at) values (?, ?, ?, ?,"
+            + " '{}'::jsonb, 'RUNNING', 1, 'tok-stop-empty', ?, ?, ?, ?, ?)",
+        id,
+        boot.threadId(),
+        sourceEntryId,
+        epoch,
+        leaseUntil,
+        now,
+        deadline,
+        now,
+        now);
+    return id;
+  }
+
+  /**
+   * SUCCEEDED model invocation with non-null safe_stream_snapshot and applied_at is null; mimics
+   * the small window between completeSuccess and Reconciler apply where the partial snapshot is
+   * still authoritative.
+   */
+  private long insertSucceededUnappliedModelInvocation(
+      TestThreads.Bootstrapped boot, long sourceEntryId, long epoch, String safeText) {
+    long id = nextId();
+    OffsetDateTime now = OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC);
+    String snapshotJson =
+        "{\"text\":\""
+            + safeText.replace("\\", "\\\\").replace("\"", "\\\"")
+            + "\",\"thinking\":\"\"}";
+    jdbc.update(
+        "insert into harness_model_invocation (id, thread_id, source_head_entry_id,"
+            + " execution_epoch, request, status, attempt, started_at, deadline_at,"
+            + " last_activity_at, finished_at, result, created_at, safe_stream_snapshot) values"
+            + " (?, ?, ?, ?, '{}'::jsonb, 'SUCCEEDED', 1, ?, ?, ?, ?,"
+            + " '{}'::jsonb, ?, cast(? as jsonb))",
+        id,
+        boot.threadId(),
+        sourceEntryId,
+        epoch,
+        now,
+        now.plusSeconds(30),
+        now,
+        now,
+        now,
+        snapshotJson);
+    return id;
+  }
+
+  private long appendUserMessage(long sessionId, long parentEntryId, String content) {
+    long entryId = nextId();
+    String payload =
+        "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\""
+            + content
+            + "\"}]},\"assistantMetadata\":null}";
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
+            + " created_at) values (?, ?, ?, 'MESSAGE', cast(? as jsonb), ?)",
+        entryId,
+        sessionId,
+        parentEntryId,
+        payload,
+        OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
+    return entryId;
+  }
+
+  /**
+   * Append a USER message under the bootstrap's RUNTIME_CONFIG entry so the resulting root-to-head
+   * path preserves the canonical {@code ROOT -> RUNTIME_CONFIG -> USER -> ...} chain that {@link
+   * ModelInvocationPlanner#plan} expects.
+   */
+  private long appendUserMessageUnderConfig(TestThreads.Bootstrapped boot, String content) {
+    return appendUserMessage(boot.sessionId(), boot.configEntryId(), content);
+  }
+
+  private Long headEntryId(long threadId) {
+    return jdbc.queryForObject(
+        "select head_entry_id from harness_thread where id = ?", Long.class, threadId);
+  }
+
+  /**
+   * Decode an {@code ASSISTANT_ABORTED} Entry's payload through the runtime strict codec so the
+   * assertion exercise matches what {@link ModelInvocationPlanner} and downstream consumers
+   * actually see — no hand-rolled JSON slicing.
+   */
+  private AssistantAbortedEntryPayload readAssistantAborted(long entryId) {
+    RuntimeEntryPayloadJsonCodec codec = new RuntimeEntryPayloadJsonCodec();
+    String payloadJson =
+        jdbc.queryForObject(
+            "select payload::text from harness_entry where id = ?", String.class, entryId);
+    AssistantAbortedEntryPayload payload =
+        (AssistantAbortedEntryPayload) codec.decode(EntryType.ASSISTANT_ABORTED, payloadJson);
+    assertEquals(EntryType.ASSISTANT_ABORTED, payload.type());
+    return payload;
+  }
+
+  /**
+   * Read the root-to-head Entry path as {@link SessionEntry}s using the runtime strict codec. Tests
+   * that exercise {@link ModelInvocationPlanner#plan} against persisted state must build the plan
+   * input from durable rows, not from in-memory fakes, so any codec/decoder divergence surfaces
+   * here instead of at reconcile time.
+   */
+  private List<SessionEntry> loadEntryPathAsSessionEntries(long sessionId, long headEntryId) {
+    RuntimeEntryPayloadJsonCodec codec = new RuntimeEntryPayloadJsonCodec();
+    RuntimeConfigJsonCodec configCodec = new RuntimeConfigJsonCodec();
+    return jdbc.query(
+        """
+        with recursive path (id, parent_entry_id, depth, entry_type) as (
+          select e.id, e.parent_entry_id, 0, e.entry_type from harness_entry e
+          where e.session_id = ? and e.id = ?
+          union all
+          select e.id, e.parent_entry_id, p.depth + 1, e.entry_type
+          from harness_entry e join path p on p.parent_entry_id = e.id
+          where e.session_id = ?
+        )
+        select p.id, p.parent_entry_id, p.entry_type, e.payload::text as payload_json
+        from path p
+        join harness_entry e on e.id = p.id
+        order by depth desc
+        """,
+        (rs, i) -> {
+          long id = rs.getLong("id");
+          Long parent = rs.getObject("parent_entry_id", Long.class);
+          EntryType type = EntryType.valueOf(rs.getString("entry_type"));
+          EntryPayload payload;
+          if (type == EntryType.RUNTIME_CONFIG) {
+            payload = configCodec.decode(rs.getString("payload_json"));
+          } else {
+            payload = codec.decode(type, rs.getString("payload_json"));
+          }
+          return new SessionEntry(id, parent, payload);
+        },
+        sessionId,
+        headEntryId,
+        sessionId);
   }
 }

@@ -444,6 +444,7 @@ class ModelInvocationTest {
     private Instant createdAt = CREATED;
     private Instant startedAt;
     private Instant finishedAt;
+    private SafeStreamSnapshot safeStreamSnapshot;
 
     private InvocationBuilder attempt(int value) {
       attempt = value;
@@ -474,6 +475,7 @@ class ModelInvocationTest {
       copy.createdAt = createdAt;
       copy.startedAt = startedAt;
       copy.finishedAt = finishedAt;
+      copy.safeStreamSnapshot = safeStreamSnapshot;
       return copy;
     }
 
@@ -495,7 +497,8 @@ class ModelInvocationTest {
           appliedAt,
           createdAt,
           startedAt,
-          finishedAt);
+          finishedAt,
+          safeStreamSnapshot);
     }
   }
 }

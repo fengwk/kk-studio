@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.configuration.AgentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.SkillSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.entry.AssistantAbortedEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.AssistantErrorEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
@@ -30,6 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.reconcile.ModelInvocationPlan;
@@ -297,6 +299,83 @@ class ModelInvocationPlannerTest {
     assertEquals(before, mutable);
     mutable.clear();
     assertEquals("question", text(plan.request().messages().get(1)));
+  }
+
+  // ---------- ASSISTANT_ABORTED barrier ----------
+
+  @Test
+  void assistantAbortedClosesDebt() {
+    RuntimeConfigSnapshot config = config("model-a", "system", List.of(), List.of(), disabled());
+    AssistantAbortedEntryPayload aborted = AssistantAbortedEntryPayload.ofTextAndThinking("hi", "");
+    // debt was already closed; further USER inputs must re-open debt and use the aborted text
+    // as prior semantic assistant turn context, not as a fresh assistant turn.
+    ModelInvocationPlan followup =
+        plan(
+            path(
+                new RootEntryPayload(),
+                config,
+                message(user("question")),
+                aborted,
+                message(user("continue"))));
+    assertEquals(
+        List.of(
+            ProviderMessageRole.SYSTEM,
+            ProviderMessageRole.USER,
+            ProviderMessageRole.ASSISTANT,
+            ProviderMessageRole.USER),
+        roles(followup));
+    assertEquals("hi", text(followup.request().messages().get(2)));
+  }
+
+  @Test
+  void assistantAbortedWithThinkingKeepsBothContents() {
+    RuntimeConfigSnapshot config = config("model-a", "system", List.of(), List.of(), disabled());
+    AssistantAbortedEntryPayload aborted =
+        AssistantAbortedEntryPayload.ofTextAndThinking("answer", "reason");
+    ModelInvocationPlan plan =
+        PLANNER
+            .plan(
+                SESSION_ID,
+                5,
+                path(
+                    new RootEntryPayload(),
+                    config,
+                    message(user("question")),
+                    aborted,
+                    message(user("continue"))))
+            .orElseThrow();
+    ProviderMessage assistantMsg = plan.request().messages().get(2);
+    assertEquals(ProviderMessageRole.ASSISTANT, assistantMsg.role());
+    assertEquals(2, assistantMsg.contents().size());
+    assertEquals("answer", ((ProviderTextBlock) assistantMsg.contents().get(0)).text());
+    assertEquals("reason", ((ProviderThinkingBlock) assistantMsg.contents().get(1)).thinking());
+  }
+
+  @Test
+  void assistantAbortedIsBarrierAndDoesNotRevisitEarlierUserDebt() {
+    RuntimeConfigSnapshot config = config("model-a", "system", List.of(), List.of(), disabled());
+    // The first USER was already covered by the partial aborted turn.
+    List<SessionEntry> entries =
+        path(
+            new RootEntryPayload(),
+            config,
+            message(user("first")),
+            AssistantAbortedEntryPayload.ofTextAndThinking("partial", ""));
+    assertTrue(PLANNER.plan(SESSION_ID, 4, entries).isEmpty());
+
+    // Continuing after the barrier must rebuild debt for the second USER and prepend the aborted
+    // assistant turn + first USER verbatim in Provider context.
+    List<SessionEntry> followup =
+        path(
+            new RootEntryPayload(),
+            config,
+            message(user("first")),
+            AssistantAbortedEntryPayload.ofTextAndThinking("partial", ""),
+            message(user("second")));
+    ModelInvocationPlan plan = PLANNER.plan(SESSION_ID, 5, followup).orElseThrow();
+    assertEquals("first", text(plan.request().messages().get(1)));
+    assertEquals("partial", text(plan.request().messages().get(2)));
+    assertEquals("second", text(plan.request().messages().get(3)));
   }
 
   private static ModelInvocationPlan plan(List<SessionEntry> path) {

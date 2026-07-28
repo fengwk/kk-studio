@@ -192,7 +192,7 @@ create table harness_entry (
     constraint ck_harness_entry_type check (
         entry_type in (
             'ROOT', 'RUNTIME_CONFIG', 'MESSAGE', 'CUSTOM_MESSAGE',
-            'ASSISTANT_ERROR'
+            'ASSISTANT_ERROR', 'ASSISTANT_ABORTED'
         )
     ),
     -- ROOT entries must have no parent; every other entry must have a parent.
@@ -318,6 +318,9 @@ create table harness_model_invocation (
     created_at            timestamptz(3) not null default current_timestamp,
     started_at            timestamptz(3),
     finished_at           timestamptz(3),
+    -- 跨节点持久化的安全流快照（仅 text + thinking）。每次 text/thinking delta 在 SSE 前 fenced
+    -- 写入；tool-call fragment 永远不进入该列。新 retry attempt 在 CAS 中重置该列。
+    safe_stream_snapshot  jsonb,
     constraint uk_harness_model_invocation_source
         unique (thread_id, source_head_entry_id, execution_epoch),
     -- Owning Thread is referenced by id only; the thread<->session relationship
@@ -428,6 +431,11 @@ create table harness_model_invocation (
                 or (started_at is not null
                     and deadline_at is not null
                     and last_activity_at is not null)))
+    ),
+    -- 安全流快照仅在 RUNNING / RETRY_WAIT / 终态保留；QUEUED 不携带任何 Provider 进展。
+    -- 终态 SUCCEEDED/FAILED/CANCELLED/UNKNOWN 可保留快照（审计用），但不再作为 live 实时来源。
+    constraint ck_harness_model_invocation_safe_stream_snapshot check (
+        status <> 'QUEUED' or safe_stream_snapshot is null
     ),
     constraint ck_harness_model_invocation_time_order check (
         (started_at is null or started_at >= created_at)

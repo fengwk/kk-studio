@@ -18,9 +18,19 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
   const streaming = message.status === 'streaming'
   const hasText = text.length > 0
   const hasThinking = thinking.trim().length > 0
+  const aborted = message.aborted === true
 
   return (
-    <div className={`thread-turn thread-turn-assistant ${message.status === 'error' ? 'error' : ''}`}>
+    <div
+      className={`thread-turn thread-turn-assistant ${message.status === 'error' ? 'error' : ''} ${
+        aborted ? 'aborted' : ''
+      }`}
+    >
+      {aborted ? (
+        <div className="thread-block thread-block-assistant thread-assistant-aborted-tag">
+          <div className="thread-block-body">已停止</div>
+        </div>
+      ) : null}
       <ThinkingBlock thinking={thinking} streaming={streaming} />
       {hasText ? (
         <section className="thread-block thread-block-assistant thread-assistant-shell">
@@ -50,5 +60,11 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
 }, (prev, next) => {
   const a = prev.message
   const b = next.message
-  return a.id === b.id && a.status === b.status && a.text === b.text && a.thinking === b.thinking
+  return (
+    a.id === b.id
+    && a.status === b.status
+    && a.text === b.text
+    && a.thinking === b.thinking
+    && a.aborted === b.aborted
+  )
 })

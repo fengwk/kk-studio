@@ -8,4 +8,5 @@ public sealed interface RuntimeEntryPayload extends EntryPayload
     permits RootEntryPayload,
         MessageEntryPayload,
         CustomMessageEntryPayload,
-        AssistantErrorEntryPayload {}
+        AssistantErrorEntryPayload,
+        AssistantAbortedEntryPayload {}

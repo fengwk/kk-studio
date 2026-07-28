@@ -5,6 +5,8 @@ import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshotJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
@@ -26,6 +28,8 @@ final class ModelInvocationRowConverter {
   private static final ProviderResponseJsonCodec RESPONSE_CODEC = new ProviderResponseJsonCodec();
   private static final ModelInvocationErrorJsonCodec ERROR_CODEC =
       new ModelInvocationErrorJsonCodec();
+  private static final SafeStreamSnapshotJsonCodec SNAPSHOT_CODEC =
+      new SafeStreamSnapshotJsonCodec();
 
   private ModelInvocationRowConverter() {}
 
@@ -43,6 +47,10 @@ final class ModelInvocationRowConverter {
         row.getResultJson() == null ? null : RESPONSE_CODEC.decode(row.getResultJson());
     ModelInvocationError error =
         row.getErrorJson() == null ? null : ERROR_CODEC.decode(row.getErrorJson());
+    SafeStreamSnapshot snapshot =
+        row.getSafeStreamSnapshotJson() == null
+            ? null
+            : SNAPSHOT_CODEC.decode(row.getSafeStreamSnapshotJson());
     return new ModelInvocation(
         row.getId(),
         row.getThreadId(),
@@ -60,7 +68,8 @@ final class ModelInvocationRowConverter {
         instantOrNull(row.getAppliedAt()),
         Objects.requireNonNull(row.getCreatedAt(), "createdAt").toInstant(),
         instantOrNull(row.getStartedAt()),
-        instantOrNull(row.getFinishedAt()));
+        instantOrNull(row.getFinishedAt()),
+        snapshot);
   }
 
   static OffsetDateTime toUtcOffsetDateTime(Instant instant) {
@@ -87,6 +96,15 @@ final class ModelInvocationRowConverter {
 
   static String encodeError(ModelInvocationError error) {
     return ERROR_CODEC.encode(Objects.requireNonNull(error, "error"));
+  }
+
+  static String encodeSnapshot(SafeStreamSnapshot snapshot) {
+    return SNAPSHOT_CODEC.encode(Objects.requireNonNull(snapshot, "snapshot"));
+  }
+
+  static SafeStreamSnapshot decodeSnapshot(String json) {
+    Objects.requireNonNull(json, "json");
+    return SNAPSHOT_CODEC.decode(json);
   }
 
   private static Instant instantOrNull(OffsetDateTime value) {

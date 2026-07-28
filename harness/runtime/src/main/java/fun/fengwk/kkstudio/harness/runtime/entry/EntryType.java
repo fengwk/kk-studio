@@ -15,7 +15,12 @@ public enum EntryType {
   /** 由业务扩展注入的对话消息。 */
   CUSTOM_MESSAGE,
   /** Provider/Assistant-side 错误审计。 */
-  ASSISTANT_ERROR;
+  ASSISTANT_ERROR,
+  /**
+   * 用户主动 stop 的 assistant turn：仅保存安全 text/thinking，绝不含 tool call；作为 ModelInvocationPlanner 的 debt
+   * barrier。
+   */
+  ASSISTANT_ABORTED;
 
   /** 是否为 Session Tree 的语义根。 */
   public boolean isRoot() {

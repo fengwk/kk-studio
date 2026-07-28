@@ -129,7 +129,7 @@ public record ContinuationRef(ExecutionTarget owner, ExecutionTarget blocker) {}
 
 ### 3.2 Entry payload JSON
 
-`RuntimeEntryPayloadJsonCodec` 支持 `ROOT/RUNTIME_CONFIG/MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ERROR`。exact field set；String API 拒绝 duplicate field 与 trailing token。Message content discriminator：`text/image/audio/thinking/json/tool_call/tool_result/artifact`。
+`RuntimeEntryPayloadJsonCodec` 支持 `ROOT/RUNTIME_CONFIG/MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED`。`ASSISTANT_ABORTED` 仅承载安全 text/thinking content；空 text/thinking 全部为空时停止路径必须改走 `ASSISTANT_ERROR(CANCELLED)` barrier，绝不物化空 aborted turn。exact field set；String API 拒绝 duplicate field 与 trailing token。Message content discriminator：`text/image/audio/thinking/json/tool_call/tool_result/artifact`。
 
 ### 3.3 ModelInvocationPlanner
 
@@ -165,7 +165,8 @@ public record ModelInvocation(
     Instant appliedAt,
     Instant createdAt,
     Instant startedAt,
-    Instant finishedAt) {}
+    Instant finishedAt,
+    SafeStreamSnapshot safeStreamSnapshot) {}
 ```
 
 约束：
@@ -178,6 +179,7 @@ public record ModelInvocation(
 - worker terminal 事务只写 Invocation terminal 并原子设置 Thread `runnable=true`
 - Reconciler apply 成功时写 Assistant/AssistantError Entry、Usage、ToolInvocations、head 和 `appliedAt`
 - Provider 执行只使用冻结 `ProviderRequest` 的 providerType/providerResourceId/model
+- `safeStreamSnapshot` 仅承载 text/thinking 累积；SSE 前以 Thread + Invocation 锁 fenced 写入；retry-attempt CAS 重置；`/stop` 读取 `(threadId, executionEpoch, sourceHeadEntryId)` 且 `safe_stream_snapshot is not null AND applied_at is null` 的未应用行，保留已经写入的部分输出到 `ASSISTANT_ABORTED`
 
 ### 3.5 ToolInvocation
 
@@ -358,7 +360,7 @@ Runtime 不在多个通用 Repository 之间自行拼事务。PostgreSQL adapter
 - bootstrap：在同一事务内创建 Session 并把 UNBOUND Thread 的 head 绑定到 `RUNTIME_CONFIG` Entry
 - updateHead：静止校验通过后以 `expectedExecutionEpoch` CAS 写入可空 head，epoch++ 并清 lease/`runnable`
 - enqueue Input 并分配 sequence；UNBOUND Thread 拒绝入队
-- Stop：epoch++、fence、取消 queued Input、可安全取消的 Invocation 与该 Thread 的 OPEN Interaction
+- Stop：原子 epoch fence + 持久化 `ASSISTANT_ABORTED` 或 `ASSISTANT_ERROR(CANCELLED)` barrier + 取消 queued Input、可安全取消的 Invocation 与该 Thread 的 OPEN Interaction。Stop 必须沿用 Reconciler 的 `ModelInvocationPlanner` 判定当前 head 是否仍有未终结 response debt；若存在 response debt 且 `(threadId, epoch, sourceHeadEntryId)` 下存在 `safe_stream_snapshot is not null AND applied_at is null` 行，则把该快照追加为仅含 text/thinking 的 `ASSISTANT_ABORTED` Entry 并把 head rebind 上去；否则写 `ASSISTANT_ERROR(CANCELLED)`。Stop 不修改已 RUNNING/SUCCEEDED 的 invocation 行——它只是 epoch fence，旧 generation 的 terminal CAS 在新 epoch 下被拒绝。
 - 成功事务返回 afterCommit notify targets
 
 head 重定位与 enqueue/Stop 都先锁 Thread 行并校验 `expectedExecutionEpoch`；epoch 不匹配即 stale，事务整体拒绝。

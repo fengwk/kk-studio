@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.model.worker;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 
@@ -97,4 +98,14 @@ public interface ModelInvocationTransactions {
       Instant nextAttemptAt,
       Instant lastObservedActivityAt,
       Instant now);
+
+  /**
+   * 原子 fenced 写入跨节点安全流快照（仅 text + thinking）；CAS 校验完整 fence，绝不更新 lease 与 deadline。
+   *
+   * <p>实现必须以当前 durable 快照与入参较大者落库（不允许倒退），且绝不发布 realtime delta 直到本次 mutation 返回 {@link
+   * ModelInvocationUpdateOutcome#APPLIED}。仅允许在持有 claim 的 RUNNING Invocation 上调用；其他 status 一律返回
+   * {@link ModelInvocationUpdateOutcome#LOST_OWNERSHIP}。tool-call fragment 永远不进入该方法。
+   */
+  ModelInvocationUpdateOutcome recordSafeStreamSnapshot(
+      ClaimedModelInvocation claimed, SafeStreamSnapshot snapshot, Instant activityAt, Instant now);
 }

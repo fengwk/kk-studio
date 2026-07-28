@@ -120,6 +120,9 @@ function isDurableModelOutcome(entry: HarnessSessionEntryDTO): boolean {
   if (entry.entryType === 'ASSISTANT_ERROR') {
     return true
   }
+  if (entry.entryType === 'ASSISTANT_ABORTED') {
+    return true
+  }
   if (entry.entryType !== 'MESSAGE') {
     return false
   }

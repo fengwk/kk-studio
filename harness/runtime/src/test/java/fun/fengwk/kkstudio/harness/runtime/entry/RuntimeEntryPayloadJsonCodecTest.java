@@ -164,6 +164,175 @@ class RuntimeEntryPayloadJsonCodecTest {
   }
 
   @Test
+  void assistantAbortedTextOnlyRoundTrips() {
+    AgentMessage message =
+        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("hi")));
+    AssistantAbortedEntryPayload payload = new AssistantAbortedEntryPayload(message);
+    String canonical =
+        "{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"hi\"}]}}";
+    assertEquals(canonical, codec.encode(payload));
+    EntryPayload decoded = codec.decode(EntryType.ASSISTANT_ABORTED, canonical);
+    assertEquals(payload, decoded);
+    assertEquals(EntryType.ASSISTANT_ABORTED, decoded.type());
+  }
+
+  @Test
+  void assistantAbortedTextAndThinkingRoundTrips() {
+    AgentMessage message =
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(new TextMessageContent("answer"), new ThinkingMessageContent("reason")));
+    AssistantAbortedEntryPayload payload = new AssistantAbortedEntryPayload(message);
+    String canonical =
+        "{\"message\":{\"role\":\"ASSISTANT\",\"contents\":"
+            + "[{\"type\":\"text\",\"text\":\"answer\"},"
+            + "{\"type\":\"thinking\",\"text\":\"reason\"}]}}";
+    assertEquals(canonical, codec.encode(payload));
+    EntryPayload decoded = codec.decode(EntryType.ASSISTANT_ABORTED, canonical);
+    assertEquals(payload, decoded);
+  }
+
+  @Test
+  void assistantAbortedShapeIsWrapperAroundMessage() {
+    AgentMessage message =
+        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("hi")));
+    AssistantAbortedEntryPayload payload = new AssistantAbortedEntryPayload(message);
+    ObjectNode canonical = codec.encodeNode(payload);
+    assertEquals(Set.of("message"), fieldNames(canonical));
+  }
+
+  @Test
+  void assistantAbortedDecodeNodeMatchesString() {
+    AgentMessage message =
+        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("hi")));
+    AssistantAbortedEntryPayload expected = new AssistantAbortedEntryPayload(message);
+    String canonical = codec.encode(expected);
+    JsonNode parsed;
+    try {
+      parsed = MAPPER.readTree(canonical);
+    } catch (JsonProcessingException error) {
+      throw new IllegalStateException("invalid canonical fixture", error);
+    }
+    assertEquals(expected, codec.decodeNode(EntryType.ASSISTANT_ABORTED, parsed));
+  }
+
+  @Test
+  void assistantAbortedRejectsNonAssistantRole() {
+    ObjectNode bad = NODES.objectNode();
+    ObjectNode message = NODES.objectNode();
+    message.put("role", "USER");
+    message.putArray("contents").add(textContentNode("hi"));
+    bad.set("message", message);
+    assertThrows(
+        IllegalArgumentException.class, () -> codec.decodeNode(EntryType.ASSISTANT_ABORTED, bad));
+  }
+
+  @Test
+  void assistantAbortedRejectsEmptyContents() {
+    ObjectNode bad = NODES.objectNode();
+    ObjectNode message = NODES.objectNode();
+    message.put("role", "ASSISTANT");
+    message.putArray("contents");
+    bad.set("message", message);
+    assertThrows(
+        IllegalArgumentException.class, () -> codec.decodeNode(EntryType.ASSISTANT_ABORTED, bad));
+  }
+
+  @Test
+  void assistantAbortedRejectsToolCallContent() {
+    ObjectNode bad = NODES.objectNode();
+    ObjectNode message = NODES.objectNode();
+    message.put("role", "ASSISTANT");
+    ObjectNode toolCall = NODES.objectNode();
+    toolCall.put("type", "tool_call");
+    toolCall.put("toolCallId", "call-1");
+    toolCall.put("toolName", "search");
+    toolCall.put("argumentsJson", "{}");
+    message.putArray("contents").add(toolCall);
+    bad.set("message", message);
+    assertThrows(
+        IllegalArgumentException.class, () -> codec.decodeNode(EntryType.ASSISTANT_ABORTED, bad));
+  }
+
+  @Test
+  void assistantAbortedRejectsToolResultContent() {
+    ObjectNode bad = NODES.objectNode();
+    ObjectNode message = NODES.objectNode();
+    message.put("role", "ASSISTANT");
+    ObjectNode toolResult = NODES.objectNode();
+    toolResult.put("type", "tool_result");
+    toolResult.put("toolCallId", "call-1");
+    toolResult.put("toolName", "search");
+    ObjectNode childText = NODES.objectNode();
+    childText.put("type", "text");
+    childText.put("text", "ok");
+    toolResult.putArray("contents").add(childText);
+    toolResult.put("error", false);
+    toolResult.put("detailsJson", "{}");
+    message.putArray("contents").add(toolResult);
+    bad.set("message", message);
+    assertThrows(
+        IllegalArgumentException.class, () -> codec.decodeNode(EntryType.ASSISTANT_ABORTED, bad));
+  }
+
+  @Test
+  void assistantAbortedRejectsUnknownAndMissingFields() {
+    ObjectNode extra = NODES.objectNode();
+    ObjectNode message = NODES.objectNode();
+    message.put("role", "ASSISTANT");
+    message.putArray("contents").add(textContentNode("hi"));
+    extra.set("message", message);
+    extra.put("assistantMetadata", "x");
+    assertThrows(
+        IllegalArgumentException.class, () -> codec.decodeNode(EntryType.ASSISTANT_ABORTED, extra));
+
+    ObjectNode missing = NODES.objectNode();
+    ObjectNode msg2 = NODES.objectNode();
+    msg2.put("role", "ASSISTANT");
+    msg2.putArray("contents").add(textContentNode("hi"));
+    missing.set("message", msg2);
+    ObjectNode mutated = (ObjectNode) missing.get("message");
+    mutated.remove("contents");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decodeNode(EntryType.ASSISTANT_ABORTED, missing));
+  }
+
+  @Test
+  void assistantAbortedDecoderRejectsAllEmptyTextAndThinking() {
+    ObjectNode emptyTextOnly = NODES.objectNode();
+    ObjectNode m1 = NODES.objectNode();
+    m1.put("role", "ASSISTANT");
+    m1.putArray("contents").add(textContentNode(""));
+    emptyTextOnly.set("message", m1);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decodeNode(EntryType.ASSISTANT_ABORTED, emptyTextOnly));
+
+    ObjectNode emptyThinkingOnly = NODES.objectNode();
+    ObjectNode m2 = NODES.objectNode();
+    m2.put("role", "ASSISTANT");
+    m2.putArray("contents").add(textContentNode("hi"));
+    ObjectNode thinking = NODES.objectNode();
+    thinking.put("type", "thinking");
+    thinking.put("text", "");
+    m2.putArray("contents").add(thinking);
+    emptyThinkingOnly.set("message", m2);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decodeNode(EntryType.ASSISTANT_ABORTED, emptyThinkingOnly));
+  }
+
+  @Test
+  void assistantAbortedEncodeAcceptsValidPayload() {
+    AssistantAbortedEntryPayload aborted = AssistantAbortedEntryPayload.ofTextAndThinking("hi", "");
+    assertEquals(EntryType.ASSISTANT_ABORTED, aborted.type());
+    String encoded = codec.encode(aborted);
+    EntryPayload decoded = codec.decode(EntryType.ASSISTANT_ABORTED, encoded);
+    assertEquals(aborted, decoded);
+  }
+
+  @Test
   void runtimeConfigDelegatesToConfigCodec() {
     RuntimeConfigSnapshot snapshot = canonicalConfig();
     String configEncoded = CONFIG_CODEC.encode(snapshot);

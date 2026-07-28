@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -233,6 +234,89 @@ class ModelWorkerTest {
   }
 
   /**
+   * Each text/thinking delta must fence-write its safe snapshot BEFORE the realtime delta is
+   * published; tool-call fragments must never enter the snapshot.
+   */
+  @Test
+  void persistsSafeStreamSnapshotBeforePublishingEachTextAndThinkingDelta() {
+    Fixture fixture = fixture();
+
+    assertTrue(fixture.worker.dispatch(1L));
+    fixture.executor.listener.onDelta(new ProviderStreamEvent.ThinkingDelta("thin"));
+    fixture.executor.listener.onDelta(new ProviderStreamEvent.TextDelta("answer"));
+    fixture.executor.listener.onComplete(response("answer", ProviderStopReason.COMPLETED));
+
+    // 2 fenced deltas + 1 final-snapshot persistence before completeSuccess fence.
+    assertEquals(3, fixture.transactions.recordSafeStreamSnapshotCalls);
+    assertEquals(new SafeStreamSnapshot("answer", "thin"), fixture.transactions.lastSnapshot);
+    assertEquals(
+        List.of(
+            new ProviderStreamEvent.ThinkingDelta("thin"),
+            new ProviderStreamEvent.TextDelta("answer")),
+        modelDeltas(fixture.sink.events));
+  }
+
+  @Test
+  void toolCallFragmentNeverEntersSnapshot() {
+    Fixture fixture = fixture();
+    fixture.transactions.current = queued(requestWithTool(), NOW.minusSeconds(1));
+
+    assertTrue(fixture.worker.dispatch(1L));
+    fixture.executor.listener.onDelta(
+        new ProviderStreamEvent.ToolCallDelta(0, "call", "to", "{\"a\":"));
+    fixture.executor.listener.onDelta(new ProviderStreamEvent.TextDelta("partial"));
+    fixture.executor.listener.onComplete(
+        response(
+            "",
+            "",
+            List.of(new ProviderToolCall("call-1", "tool", "{\"a\":1}")),
+            ProviderStopReason.TOOL_CALLS));
+
+    assertEquals(1, fixture.transactions.recordSafeStreamSnapshotCalls);
+    assertEquals(new SafeStreamSnapshot("partial", ""), fixture.transactions.lastSnapshot);
+  }
+
+  /**
+   * Fence LOST abandons the local execution immediately, never publishes the delta, and never
+   * carries on into stale terminal mutations.
+   */
+  @Test
+  void abandonsLocalExecutionWhenSafeStreamSnapshotFenceIsLost() {
+    Fixture fixture = fixture();
+    fixture.transactions.snapshotOutcome = ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
+
+    assertTrue(fixture.worker.dispatch(1L));
+    fixture.executor.listener.onDelta(new ProviderStreamEvent.TextDelta("answer"));
+
+    assertEquals(1, fixture.transactions.recordSafeStreamSnapshotCalls);
+    assertTrue(fixture.sink.events.isEmpty());
+    assertTrue(fixture.executor.handle.isCancelled());
+    assertFalse(fixture.worker.hasActiveExecution());
+    assertEquals(0, fixture.transactions.terminalCalls);
+    assertTrue(fixture.notifier.targets.isEmpty());
+  }
+
+  /**
+   * Success persistence carries the accumulated text/thinking snapshot into the durable row so stop
+   * or reconcile running concurrently sees the full SSE prefix.
+   */
+  @Test
+  void finalSnapshotWrittenBeforeSuccessFenceIsApplied() {
+    Fixture fixture = fixture();
+
+    assertTrue(fixture.worker.dispatch(1L));
+    fixture.executor.listener.onDelta(new ProviderStreamEvent.ThinkingDelta("a "));
+    fixture.executor.listener.onDelta(new ProviderStreamEvent.TextDelta("answer"));
+    fixture.executor.listener.onComplete(
+        response("answer", "a ", List.of(), ProviderStopReason.COMPLETED));
+
+    assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.current.status());
+    // 2 fenced deltas + 1 final-snapshot persistence before completeSuccess fence.
+    assertEquals(3, fixture.transactions.recordSafeStreamSnapshotCalls);
+    assertEquals(new SafeStreamSnapshot("answer", "a "), fixture.transactions.lastSnapshot);
+  }
+
+  /**
    * Local shutdown only releases the process handle; durable lease recovery remains authoritative.
    */
   @Test
@@ -347,13 +431,18 @@ class ModelWorkerTest {
 
     assertTrue(fixture.worker.dispatch(1L));
     Instant deltaAt = NOW.plusSeconds(1);
+    Instant completedAt = NOW.plusSeconds(2);
     clock.set(deltaAt);
     fixture.executor.listener.onDelta(new ProviderStreamEvent.TextDelta("answer"));
-    clock.set(NOW.plusSeconds(2));
+    clock.set(completedAt);
     fixture.executor.listener.onComplete(response("answer", ProviderStopReason.COMPLETED));
 
     assertEquals(0, fixture.transactions.recordActivityCalls);
-    assertEquals(deltaAt, fixture.transactions.current.lastActivityAt());
+    // The fenced snapshot write also touches last_activity_at so the post-commit handler that
+    // re-runs
+    // the snapshot can see the latest Provider progress; the durable row reflects the completion
+    // tick because persistSuccess writes a final snapshot before terminal CAS.
+    assertEquals(completedAt, fixture.transactions.current.lastActivityAt());
   }
 
   /**
@@ -1494,6 +1583,9 @@ class ModelWorkerTest {
     private int completeFailureCalls;
     private int completeUnknownCalls;
     private int scheduleRetryCalls;
+    private int recordSafeStreamSnapshotCalls;
+    private ModelInvocationUpdateOutcome snapshotOutcome = ModelInvocationUpdateOutcome.APPLIED;
+    private SafeStreamSnapshot lastSnapshot;
 
     private RecordingTransactions(ProviderRequest request, Instant createdAt) {
       current = queued(request, createdAt);
@@ -1706,6 +1798,33 @@ class ModelWorkerTest {
       return ModelInvocationUpdateOutcome.APPLIED;
     }
 
+    @Override
+    public synchronized ModelInvocationUpdateOutcome recordSafeStreamSnapshot(
+        ClaimedModelInvocation claimed,
+        SafeStreamSnapshot snapshot,
+        Instant activityAt,
+        Instant now) {
+      recordSafeStreamSnapshotCalls++;
+      lastSnapshot = snapshot;
+      if (snapshotOutcome != ModelInvocationUpdateOutcome.APPLIED) {
+        return snapshotOutcome;
+      }
+      current =
+          copy(
+              current,
+              current.status(),
+              current.attempt(),
+              current.nextAttemptAt(),
+              current.workerLease(),
+              current.deadlineAt(),
+              latestActivity(current.lastActivityAt(), activityAt),
+              current.result(),
+              current.error(),
+              current.startedAt(),
+              current.finishedAt());
+      return ModelInvocationUpdateOutcome.APPLIED;
+    }
+
     private ModelInvocationUpdateOutcome terminal(
         InvocationStatus status,
         ProviderResponse result,
@@ -1885,6 +2004,7 @@ class ModelWorkerTest {
         null,
         createdAt,
         null,
+        null,
         null);
   }
 
@@ -1917,6 +2037,7 @@ class ModelWorkerTest {
         null,
         source.createdAt(),
         startedAt,
-        finishedAt);
+        finishedAt,
+        null);
   }
 }

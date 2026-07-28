@@ -31,7 +31,8 @@ public interface ModelInvocationMapper extends BaseMapper {
       mi.worker_until as worker_until, mi.deadline_at as deadline_at,
       mi.last_activity_at as last_activity_at, mi.result as result, mi.error as error,
       mi.applied_at as applied_at, mi.created_at as created_at,
-      mi.started_at as started_at, mi.finished_at as finished_at
+      mi.started_at as started_at, mi.finished_at as finished_at,
+      mi.safe_stream_snapshot as safe_stream_snapshot
       """;
 
   /**
@@ -67,7 +68,8 @@ public interface ModelInvocationMapper extends BaseMapper {
         @Result(column = "applied_at", property = "appliedAt"),
         @Result(column = "created_at", property = "createdAt"),
         @Result(column = "started_at", property = "startedAt"),
-        @Result(column = "finished_at", property = "finishedAt")
+        @Result(column = "finished_at", property = "finishedAt"),
+        @Result(column = "safe_stream_snapshot", property = "safeStreamSnapshotJson")
       })
   ModelInvocationDO findForUpdate(@Param("id") long id, @Param("threadId") long threadId);
 
@@ -174,7 +176,8 @@ public interface ModelInvocationMapper extends BaseMapper {
 
   /**
    * due RETRY_WAIT -> RUNNING：保留首次 started_at/deadline_at；attempt+1；用本次 attempt 开始时刻单调 刷新
-   * last_activity_at；CAS 校验 epoch/attempt/next_attempt_at <= now。
+   * last_activity_at；CAS 校验 epoch/attempt/next_attempt_at <= now。同时清空旧 attempt 的 safe stream
+   * snapshot，避免旧 attempt 的 partial 跨 attempt 泄漏到新 attempt 的 Provider 上下文。
    */
   @Update(
       """
@@ -184,7 +187,8 @@ public interface ModelInvocationMapper extends BaseMapper {
           worker_token = #{workerToken},
           worker_until = #{leaseUntil},
           last_activity_at = greatest(last_activity_at, #{lastActivityAt}),
-          next_attempt_at = null
+          next_attempt_at = null,
+          safe_stream_snapshot = null
       where id = #{id}
         and thread_id = #{threadId}
         and execution_epoch = #{executionEpoch}
@@ -424,5 +428,29 @@ public interface ModelInvocationMapper extends BaseMapper {
       @Param("expectedToken") String expectedToken,
       @Param("lastObserved") OffsetDateTime lastObserved,
       @Param("nextAttemptAt") OffsetDateTime nextAttemptAt,
+      @Param("now") OffsetDateTime now);
+
+  /** 仅在 RUNNING invocation 上 fenced 写安全流快照；CAS 校验完整 fence。仅修改 last_activity_at 与快照，不影响 lease。 */
+  @Update(
+      """
+      update harness_model_invocation
+      set safe_stream_snapshot = cast(#{snapshotJson} as jsonb),
+          last_activity_at = greatest(last_activity_at, #{activityAt})
+      where id = #{id}
+        and thread_id = #{threadId}
+        and execution_epoch = #{executionEpoch}
+        and status = 'RUNNING'
+        and attempt = #{expectedAttempt}
+        and worker_token = #{expectedToken}
+        and worker_until > #{now}
+      """)
+  int recordSafeStreamSnapshot(
+      @Param("id") long id,
+      @Param("threadId") long threadId,
+      @Param("executionEpoch") long executionEpoch,
+      @Param("expectedAttempt") int expectedAttempt,
+      @Param("expectedToken") String expectedToken,
+      @Param("snapshotJson") String snapshotJson,
+      @Param("activityAt") OffsetDateTime activityAt,
       @Param("now") OffsetDateTime now);
 }
