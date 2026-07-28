@@ -7,9 +7,9 @@ registerCase({
   level: 'L2',
   title: '真实 Provider 文本轮次成功并记账',
   requires: ['real'],
-  docs: 'bootstrap 后发消息等到 IDLE；assistant entry；usage>0',
+  docs: '仅 minimax/MiniMax-M2.7：bootstrap 后发消息等到 IDLE；assistant entry；usage>0',
   async run(ctx) {
-    await getCase('seed.agent_and_provider').run(ctx)
+    await requireRealMiniMaxM27(ctx)
     assert(
       ctx.vars.provider?.configured && ctx.vars.provider?.baseUrl,
       'minimax requires TEST_MINIMAX_BASE_URL and TEST_MINIMAX_API_KEY',
@@ -36,7 +36,7 @@ registerCase({
     const { json: entriesJson } = await ctx.call('GET', `/api/threads/${tid}/entries`)
     const assistantEntries = []
     for (const entry of envelopeData(entriesJson) || []) {
-      if (entry.entryType !== 'message') continue
+      if (String(entry.entryType || '').toUpperCase() !== 'MESSAGE') continue
       const payload = JSON.parse(entry.payloadJson || '{}')
       if (String(payload.message?.role || '').toUpperCase() === 'ASSISTANT') assistantEntries.push(entry)
     }
@@ -116,10 +116,10 @@ registerCase({
   level: 'L4',
   title: 'YOLO 下 tool invocation',
   requires: ['real', 'tools'],
-  docs: '要求 read；tool-invocations 非空',
+  docs: '仅 minimax/MiniMax-M2.7：要求 read；tool-invocations 非空',
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
-    await getCase('seed.agent_and_provider').run(ctx)
+    await requireRealMiniMaxM27(ctx)
     const { thread } = await createBootstrappedThread(ctx, {
       agentDefinitionId: ctx.vars.agent.id,
       title: `e2e-tool-${cid().slice(0, 8)}`,
@@ -144,6 +144,23 @@ registerCase({
     assert(inv.length > 0, `no tool invocations; status=${finalStatus}`)
   },
 })
+
+async function requireRealMiniMaxM27(ctx) {
+  if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
+  if (!ctx.vars.agent || !ctx.vars.provider) await getCase('seed.agent_and_provider').run(ctx)
+  const model = ctx.vars.seedModel
+  const agent = ctx.vars.agent
+  const provider = ctx.vars.provider
+  assert(provider?.name === 'minimax', `real provider must be minimax: ${JSON.stringify(provider)}`)
+  assert(
+    Number(model?.id) === 1 && model?.name === 'MiniMax-M2.7',
+    `real model must be minimax/MiniMax-M2.7: ${JSON.stringify(model)}`,
+  )
+  assert(
+    String(agent?.modelId) === String(model.id),
+    `real agent must use minimax/MiniMax-M2.7: ${JSON.stringify({ agent, model })}`,
+  )
+}
 
 // silence unused
 void pageResults

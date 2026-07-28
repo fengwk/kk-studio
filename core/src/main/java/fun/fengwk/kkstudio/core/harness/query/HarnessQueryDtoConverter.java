@@ -5,6 +5,8 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.core.harness.interaction.store.model.InteractionDO;
 import fun.fengwk.kkstudio.core.harness.model.worker.ModelInvocationDO;
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
+import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.share.model.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
@@ -20,6 +22,8 @@ import java.time.ZoneOffset;
 /** final schema query rows → share DTO 投影。 */
 @Component
 public class HarnessQueryDtoConverter {
+
+  private static final RuntimeConfigJsonCodec RUNTIME_CONFIG_CODEC = new RuntimeConfigJsonCodec();
 
   public HarnessSessionDTO toSession(HarnessQueryRow row) {
     if (row == null) {
@@ -58,17 +62,29 @@ public class HarnessQueryDtoConverter {
     dto.setExecutionEpoch(row.getExecutionEpoch());
     dto.setStatus(DerivedThreadStatus.derive(row, now));
     dto.setInputSequence(row.getInputSequence());
-    // RUNTIME_CONFIG 派生字段不在 final thread row；保持 null 而非假数据。
-    dto.setActiveAgentDefinitionId(null);
-    dto.setActiveAgentName(null);
-    dto.setModelId(null);
-    dto.setVariant(null);
-    dto.setYoloEnabled(null);
+    projectRuntimeConfig(dto, row.getRuntimeConfigJson());
     dto.setProcessing(
         DerivedThreadStatus.isProcessing(row.getProcessorToken(), row.getProcessorUntil(), now));
     dto.setCreateTime(toUtcLocal(row.getCreatedAt()));
     dto.setUpdateTime(toUtcLocal(row.getUpdatedAt()));
     return dto;
+  }
+
+  /**
+   * Thread 的运行配置来自 current head 的祖先 RUNTIME_CONFIG Entry，而非 live Agent 定义。
+   *
+   * <p>因此查询投影稳定反映当前 Thread 的冻结执行配置；UNBOUND Thread 和没有配置祖先的异常历史路径保持 nullable。
+   */
+  private static void projectRuntimeConfig(HarnessThreadDTO dto, String runtimeConfigJson) {
+    if (runtimeConfigJson == null) {
+      return;
+    }
+    RuntimeConfigSnapshot config = RUNTIME_CONFIG_CODEC.decode(runtimeConfigJson);
+    dto.setActiveAgentDefinitionId(HarnessIds.format(config.agent().definitionId()));
+    dto.setActiveAgentName(config.agent().name());
+    dto.setModelId(HarnessIds.format(config.model().descriptor().modelResourceId()));
+    dto.setVariant(config.model().variant().id());
+    dto.setYoloEnabled(config.yoloEnabled());
   }
 
   public HarnessThreadInputDTO toInput(HarnessQueryRow row) {

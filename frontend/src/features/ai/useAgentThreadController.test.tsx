@@ -34,9 +34,24 @@ vi.mock('@/shared/api/harness-service', () => ({
 }))
 
 class FakeEventSource {
-  addEventListener() {}
+  private readonly listeners = new Map<string, EventListener[]>()
+
+  addEventListener(type: string, listener: EventListener) {
+    const existing = this.listeners.get(type) ?? []
+    existing.push(listener)
+    this.listeners.set(type, existing)
+  }
+
+  emitRealtime(data: string) {
+    for (const listener of this.listeners.get('realtime') ?? []) {
+      listener({ data } as MessageEvent<string>)
+    }
+  }
+
   close() {}
 }
+
+let realtimeSource: FakeEventSource
 
 function wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -46,6 +61,7 @@ function wrapper({ children }: { children: ReactNode }) {
 describe('useAgentThreadController', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    realtimeSource = new FakeEventSource()
     vi.mocked(agentService.listAgents).mockResolvedValue({
       pageNumber: 1,
       pageSize: 50,
@@ -151,7 +167,7 @@ describe('useAgentThreadController', () => {
       costs: [],
     })
     vi.mocked(harnessService.listThreadToolInvocations).mockResolvedValue([])
-    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(new FakeEventSource() as EventSource)
+    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(realtimeSource as EventSource)
     vi.mocked(harnessService.submitThreadMessage).mockResolvedValue({
       inputId: 'i1',
       threadId: '1',
@@ -512,6 +528,62 @@ describe('useAgentThreadController', () => {
     expect(result.current.runtimeLabels.providerName).toBe('minimax')
     expect(result.current.runtimeLabels.contextWindow).toBe(128000)
     expect(result.current.runtimeLabels.modelName).not.toBe('unknown-model')
+  })
+
+  it('projects model text and thinking deltas as a transient streaming assistant message', async () => {
+    const { result } = renderHook(() => useAgentThreadController('1'), { wrapper })
+    await waitFor(() => expect(harnessService.createThreadRealtimeStream).toHaveBeenCalled())
+
+    act(() => {
+      realtimeSource.emitRealtime(
+        '{"threadId":"1","subjectKind":"MODEL_INVOCATION","subjectId":"42","attempt":1,'
+          + '"type":"MODEL_DELTA","payload":{"kind":"THINKING_DELTA","text":"先分析。"},'
+          + '"createdAt":"2026-07-28T10:00:00Z"}',
+      )
+      realtimeSource.emitRealtime(
+        '{"threadId":"1","subjectKind":"MODEL_INVOCATION","subjectId":"42","attempt":1,'
+          + '"type":"MODEL_DELTA","payload":{"kind":"TEXT_DELTA","text":"这是答案。"},'
+          + '"createdAt":"2026-07-28T10:00:01Z"}',
+      )
+    })
+
+    await waitFor(() =>
+      expect(result.current.timeline.messages).toMatchObject([
+        {
+          role: 'assistant',
+          text: '这是答案。',
+          thinking: '先分析。',
+          status: 'streaming',
+        },
+      ]),
+    )
+  })
+
+  it('does not carry a transient stream into a newly selected Thread', async () => {
+    const { result, rerender } = renderHook(
+      ({ threadId }) => useAgentThreadController(threadId),
+      { initialProps: { threadId: '1' }, wrapper },
+    )
+    await waitFor(() => expect(harnessService.createThreadRealtimeStream).toHaveBeenCalledWith('1', '0-0'))
+
+    act(() => {
+      realtimeSource.emitRealtime(
+        '{"threadId":"1","subjectKind":"MODEL_INVOCATION","subjectId":"42","attempt":1,'
+          + '"type":"MODEL_DELTA","payload":{"kind":"TEXT_DELTA","text":"旧 Thread 输出"},'
+          + '"createdAt":"2026-07-28T10:00:00Z"}',
+      )
+    })
+    await waitFor(() =>
+      expect(result.current.timeline.messages).toEqual(
+        expect.arrayContaining([expect.objectContaining({ status: 'streaming', text: '旧 Thread 输出' })]),
+      ),
+    )
+
+    rerender({ threadId: '2' })
+
+    expect(result.current.timeline.messages).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ status: 'streaming' })]),
+    )
   })
 
   it('surfaces submit errors and ignores slash drafts', async () => {

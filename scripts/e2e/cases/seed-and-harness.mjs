@@ -165,6 +165,11 @@ registerCase({
     // Session is derived from the head Entry on the query side, not stored on the Thread row.
     const view = await getThread(ctx, thread.threadId)
     assert(view.sessionId === session.sessionId, JSON.stringify(view))
+    assert(String(view.activeAgentDefinitionId) === String(ctx.vars.agent.id), JSON.stringify(view))
+    assert(view.activeAgentName === ctx.vars.agent.name, JSON.stringify(view))
+    assert(String(view.modelId) === String(ctx.vars.agent.modelId), JSON.stringify(view))
+    assert(view.variant === ctx.vars.agent.variant, JSON.stringify(view))
+    assert(view.yoloEnabled === false, JSON.stringify(view))
     ctx.vars.boundThread = view
     ctx.vars.boundSession = session
     ctx.vars.boundRootEntryId = entries[0].entryId
@@ -422,16 +427,19 @@ registerCase({
     let inputs = []
     for (let i = 0; i < 60; i++) {
       inputs = await listThreadInputs(ctx, tid)
-      const queuedOrApplied = inputs.map((x) => x.inputType)
+      const applied = inputs.filter((input) => input.status === 'APPLIED').map((input) => input.inputType)
       th = await getThread(ctx, tid)
-      // final Thread DTO derives agent/model/yolo from the RUNTIME_CONFIG path (may be null on row);
-      // command success is authoritative via durable mailbox inputs.
       if (
-        queuedOrApplied.includes('SET_AGENT') &&
-        queuedOrApplied.some((t) => String(t).includes('MODEL')) &&
-        queuedOrApplied.some((t) => String(t).includes('YOLO')) &&
+        applied.includes('SET_AGENT') &&
+        applied.some((type) => String(type).includes('MODEL')) &&
+        applied.some((type) => String(type).includes('YOLO')) &&
         !th.processing
       ) {
+        assert(String(th.activeAgentDefinitionId) === String(ctx.vars.agent.id), JSON.stringify({ th, inputs }))
+        assert(th.activeAgentName === ctx.vars.agent.name, JSON.stringify({ th, inputs }))
+        assert(String(th.modelId) === String(model.id), JSON.stringify({ th, inputs }))
+        assert(th.variant === variant, JSON.stringify({ th, inputs }))
+        assert(th.yoloEnabled === true, JSON.stringify({ th, inputs }))
         ctx.writeArtifact('thread-after-commands.json', JSON.stringify({ th, inputs }, null, 2))
         return
       }

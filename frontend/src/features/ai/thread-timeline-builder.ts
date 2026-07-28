@@ -1,5 +1,9 @@
 import type { HarnessSessionEntryDTO, HarnessThreadInputDTO } from '@/shared/api/contracts'
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/payload-json'
+import {
+  isRealtimeModelStreamCommitted,
+  type RealtimeModelStream,
+} from '@/features/ai/thread-realtime-state'
 import type {
   DialogueMessage,
   QueuedThreadMessage,
@@ -16,6 +20,7 @@ import { contentText } from '@/features/ai/thread-timeline/content-utils'
 export function buildThreadTimeline(
   entries: HarnessSessionEntryDTO[],
   inputs: HarnessThreadInputDTO[],
+  modelStream: RealtimeModelStream | null = null,
 ): ThreadTimeline {
   const messages: DialogueMessage[] = []
   const queuedMessages: QueuedThreadMessage[] = []
@@ -43,6 +48,18 @@ export function buildThreadTimeline(
       sequence: input.sequence,
     })
     hasPendingInputs = true
+  }
+
+  if (modelStream != null && !isRealtimeModelStreamCommitted(modelStream, entries)) {
+    messages.push({
+      id: `realtime:model:${modelStream.invocationId}:${modelStream.attempt}`,
+      role: 'assistant',
+      subjectEntryId: null,
+      text: modelStream.text,
+      thinking: modelStream.thinking || undefined,
+      createdAt: modelStream.createdAt,
+      status: 'streaming',
+    })
   }
 
   return {
