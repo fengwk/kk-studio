@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { clearToolRenderers, getToolRenderer, registerToolRenderer, unregisterToolRenderer } from '@/features/ai/thread-panel/tool-renderers'
+import {
+  clearToolRenderers,
+  getToolRenderer,
+  registerToolRenderer,
+  unregisterToolRenderer,
+} from '@/features/ai/thread-panel'
 
 describe('tool renderer registry', () => {
   afterEach(clearToolRenderers)

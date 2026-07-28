@@ -1,98 +1,104 @@
 import type { RefObject } from 'react'
-import { ThreadPanel } from '@/features/ai/thread-panel'
-import { ThreadStatusFooter } from '@/features/ai/thread-panel/ThreadStatusFooter'
-import type { ThreadCommand } from '@/features/ai/thread-panel/thread-commands'
-import type { ThreadTimeline } from '@/features/ai/thread-timeline'
-import type { BackendLong, ModelUsageSummaryDTO } from '@/shared/api/contracts'
+import {
+  ThreadPanel,
+  ThreadStatusFooter,
+  type ThreadPanelActivityInput,
+  type ThreadPanelComposerInput,
+  type ThreadPanelTranscriptInput,
+  type ThreadUsageSummary,
+} from '@/features/ai/thread-panel'
+import type { DialogueMessage, QueuedThreadMessage } from '@/features/ai/thread-timeline-types'
 
-/**
- * Pane-scoped Thread adapter over ThreadPanel.
- * No permanent Session/Thread sidebar; agent/model labels come from Thread DTO.
- */
-export function ChatPanel({
-  timeline,
-  runtimeLabels,
-  working,
-  messagesLoading,
-  messagesError,
-  bodyRef,
-  draft,
-  pending,
-  disabled,
-  observability,
-  actionError,
-  onDismissActionError,
-  onDraftChange,
-  onSubmit,
-  onCommand,
-  commands,
-  onAgentClick,
-  onModelClick,
-  onVariantClick,
-}: {
-  timeline: ThreadTimeline
-  runtimeLabels?: {
-    agentName: string
-    providerName: string
-    modelName: string
-    variantName: string
-    contextWindow?: number
+/** Stable runtime/model identity surfaced in the footer; all fields optional for unbound panes. */
+export interface ChatPanelLabels {
+  agentName?: string
+  providerName?: string
+  modelName?: string
+  variantName?: string
+  contextWindow?: number
+}
+
+/** Transcript (durable timeline + live mailbox) plus loading/error state. */
+export interface ChatPanelTranscriptInput {
+  timeline: {
+    messages: DialogueMessage[]
+    queuedMessages: QueuedThreadMessage[]
+    hasPendingInputs: boolean
   }
-  working: boolean
-  messagesLoading: boolean
-  messagesError: unknown
   bodyRef: RefObject<HTMLDivElement | null>
-  draft: string
-  pending: boolean
-  disabled: boolean
-  observability: {
-    yolo?: { enabled: boolean }
-    usage?: ModelUsageSummaryDTO
-    observabilityError: unknown
-    yoloPending: boolean
-    setYolo: (enabled: boolean, expectedExecutionEpoch: BackendLong) => void
-  }
-  actionError?: string | null
-  onDismissActionError?: () => void
-  onDraftChange: (draft: string) => void
-  onSubmit: () => void
-  onCommand: (command: ThreadCommand) => void
-  commands?: ThreadCommand[]
+  loading: boolean
+  error: unknown
+}
+
+/** Composer call sites and forwarded callbacks. */
+export type ChatPanelComposerInput = ThreadPanelComposerInput
+
+/** Narrow footer data; callers adapt backend DTOs into ThreadUsageSummary outside the panel. */
+export interface ChatPanelFooterInput {
+  yoloEnabled?: boolean
+  usage?: ThreadUsageSummary
   onAgentClick?: () => void
   onModelClick?: () => void
   onVariantClick?: () => void
+}
+
+/** Work state and dismissible feedback shown above the composer. */
+export interface ChatPanelActivityInput {
+  working: boolean
+  actionError?: string | null
+  onDismissActionError?: () => void
+}
+
+/**
+ * Pane-scoped Thread adapter over ThreadPanel. No permanent Session/Thread sidebar; runtime
+ * labels come from the controller but never as backend DTOs.
+ */
+export function ChatPanel({
+  labels,
+  transcript,
+  composer,
+  footer,
+  activity,
+}: {
+  labels: ChatPanelLabels
+  transcript: ChatPanelTranscriptInput
+  composer: ChatPanelComposerInput
+  footer: ChatPanelFooterInput
+  activity: ChatPanelActivityInput
 }) {
+  const threadPanelTranscript: ThreadPanelTranscriptInput = {
+    messages: transcript.timeline.messages,
+    queuedMessages: transcript.timeline.queuedMessages,
+    loading: transcript.loading,
+    error: transcript.error,
+    bodyRef: transcript.bodyRef,
+  }
+  const panelActivity: ThreadPanelActivityInput = {
+    working: activity.working,
+    actionError: activity.actionError ?? null,
+    onDismissActionError: activity.onDismissActionError,
+  }
   return (
     <ThreadPanel
-      messages={timeline.messages}
-      queuedMessages={timeline.queuedMessages}
-      messagesLoading={messagesLoading}
-      messagesError={messagesError}
-      bodyRef={bodyRef}
-      draft={draft}
-      composerDisabled={disabled}
-      composerPending={pending}
-      working={working}
-      actionError={actionError}
-      onDismissActionError={onDismissActionError}
-      onDraftChange={onDraftChange}
-      onSubmit={onSubmit}
-      onCommand={onCommand}
-      commands={commands}
-      footer={
-        <ThreadStatusFooter
-          agentName={runtimeLabels?.agentName}
-          providerName={runtimeLabels?.providerName}
-          modelName={runtimeLabels?.modelName}
-          variantName={runtimeLabels?.variantName}
-          contextWindow={runtimeLabels?.contextWindow}
-          yoloEnabled={observability.yolo?.enabled}
-          usage={observability.usage}
-          onAgentClick={onAgentClick}
-          onModelClick={onModelClick}
-          onVariantClick={onVariantClick}
-        />
-      }
+      transcript={threadPanelTranscript}
+      composer={composer}
+      activity={panelActivity}
+      slots={{
+        footer: (
+          <ThreadStatusFooter
+            agentName={labels.agentName}
+            providerName={labels.providerName}
+            modelName={labels.modelName}
+            variantName={labels.variantName}
+            contextWindow={labels.contextWindow}
+            yoloEnabled={footer.yoloEnabled}
+            usage={footer.usage}
+            onAgentClick={footer.onAgentClick}
+            onModelClick={footer.onModelClick}
+            onVariantClick={footer.onVariantClick}
+          />
+        ),
+      }}
     />
   )
 }

@@ -7,34 +7,32 @@ describe('ChatPanel', () => {
   it('renders thread transcript footer without sidebar or tool-approval UX', () => {
     render(
       <ChatPanel
-        timeline={{
-          messages: [{ id: 'm1', role: 'user', text: 'hello', subjectEntryId: 'e1', createdAt: null }],
-          queuedMessages: [],
-          hasPendingInputs: false,
-        }}
-        runtimeLabels={{
+        labels={{
           agentName: 'assistant',
           providerName: 'minimax',
           modelName: 'MiniMax',
           variantName: 'default',
         }}
-        working={false}
-        messagesLoading={false}
-        messagesError={null}
-        bodyRef={createRef<HTMLDivElement>()}
-        draft=""
-        pending={false}
-        disabled={false}
-        observability={{
-          yolo: { enabled: true },
-          usage: undefined,
-          observabilityError: null,
-          yoloPending: false,
-          setYolo: vi.fn(),
+        transcript={{
+          timeline: {
+            messages: [{ id: 'm1', role: 'user', text: 'hello', subjectEntryId: 'e1', createdAt: null }],
+            queuedMessages: [],
+            hasPendingInputs: false,
+          },
+          bodyRef: createRef<HTMLDivElement>(),
+          loading: false,
+          error: null,
         }}
-        onDraftChange={vi.fn()}
-        onSubmit={vi.fn()}
-        onCommand={vi.fn()}
+        composer={{
+          draft: '',
+          pending: false,
+          disabled: false,
+          onDraftChange: vi.fn(),
+          onSubmit: vi.fn(),
+          onCommand: vi.fn(),
+        }}
+        footer={{ yoloEnabled: true, usage: undefined }}
+        activity={{ working: false }}
       />,
     )
     expect(screen.getByText('hello')).toBeInTheDocument()

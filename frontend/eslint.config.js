@@ -45,16 +45,46 @@ export default tseslint.config(
           patterns: [
             {
               group: [
-                '@/shared/api',
-                '@/shared/api/**',
-                '@/features/ai/payload-json',
-                '@/features/ai/thread-realtime-state*',
-                '@/features/ai/thread-timeline/**',
-                '@/features/ai/thread-timeline-builder*',
-                '@/features/ai/useAgentThreadController',
-                '@/features/ai/useHarness*',
+                '@tanstack/react-query/*',
+                '@/features/canvas',
+                '@/features/canvas/*',
               ],
-              message: 'Keep API, query, controller, realtime, and Entry projection concerns outside the portable thread presentation layer.',
+              message:
+                'Portable thread presentation must not depend on query infrastructure or another feature presentation layer.',
+            },
+            {
+              group: [
+                // Backend/Harness API surface — including the raw client + service modules.
+                '@/shared/api',
+                '@/shared/api/*',
+                // Catch-all: any feature dependency (ignore treats `*` as matching `/`).
+                // Allowed local presentation modules are restored by the leading `!` patterns.
+                '@/features/*',
+                '!@/features/ai',
+                // Allowed: local thread-panel + the pure thread-timeline-types contract.
+                '!@/features/ai/thread-panel',
+                '!@/features/ai/thread-panel/*',
+                '!@/features/ai/thread-timeline-types',
+              ],
+              message:
+                'Portable thread panel must consume only thread-timeline-types and local thread-panel modules; API, query, controller, realtime, and Entry projection concerns stay outside.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/features/ai/thread-timeline-types.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['*'],
+              message:
+                'thread-timeline-types is the portable contract root and must remain import-free.',
             },
           ],
         },

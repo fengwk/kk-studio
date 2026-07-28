@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatToolAttachmentFallback, getToolAttachmentLabel, toToolAttachmentSrc } from '@/features/ai/tool-attachments'
+import { formatToolAttachmentFallback, getToolAttachmentLabel, toToolAttachmentSrc } from '@/features/ai/thread-panel/tool-attachments'
 
 describe('tool-attachments', () => {
   it('builds data urls for base64 payloads', () => {

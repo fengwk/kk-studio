@@ -1,4 +1,4 @@
-import type { ToolAttachment } from '@/features/ai/thread-timeline'
+import type { ToolAttachment } from '@/features/ai/thread-timeline-types'
 
 export function getToolAttachmentLabel(attachment: ToolAttachment): string {
   return attachment.name || attachment.mime || `${attachment.type} attachment`
