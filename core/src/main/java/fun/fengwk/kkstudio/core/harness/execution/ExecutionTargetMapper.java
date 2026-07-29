@@ -44,11 +44,28 @@ public interface ExecutionTargetMapper extends BaseMapper {
       """
       select target_kind, target_id, route_key, available_at
       from harness_execution_target
-      where target_kind = #{kind} and target_id = #{id} and available_at <= #{now}
+      where target_kind = #{kind} and target_id = #{id}
       for update
       """)
   @Results(
       id = "executionTargetRowLockResultMap",
+      value = {
+        @Result(column = "target_kind", property = "targetKind"),
+        @Result(column = "target_id", property = "targetId"),
+        @Result(column = "route_key", property = "routeKey"),
+        @Result(column = "available_at", property = "availableAt")
+      })
+  ExecutionTargetDO lockForUpdate(@Param("kind") String kind, @Param("id") long id);
+
+  @Select(
+      """
+      select target_kind, target_id, route_key, available_at
+      from harness_execution_target
+      where target_kind = #{kind} and target_id = #{id} and available_at <= #{now}
+      for update
+      """)
+  @Results(
+      id = "executionTargetRowDueLockResultMap",
       value = {
         @Result(column = "target_kind", property = "targetKind"),
         @Result(column = "target_id", property = "targetId"),

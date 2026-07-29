@@ -4,7 +4,6 @@ import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSource;
 import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -25,7 +24,7 @@ import java.util.Optional;
  * replacement via {@link RuntimeConfigSource}, and durable {@link ThreadCommandTransactions} calls.
  * Outbound transaction nested types are mapped to coordinator-owned inbound results so command
  * facades never need to import the transaction SPI. Callers remain responsible for outer
- * transactions, decimal/DTO boundaries and after-commit activation.
+ * transactions and decimal/DTO boundaries.
  *
  * <p>Idempotent retries always short-circuit through {@link #findExistingInput(long, String)}
  * before any live resource resolution or payload validation that depends on changed request fields.
@@ -209,7 +208,7 @@ public final class ThreadCommandCoordinator {
   public StopResult stop(long threadId, long expectedExecutionEpoch) {
     ThreadCommandTransactions.StopResult result =
         transactions.stop(threadId, expectedExecutionEpoch, clock.instant());
-    return new StopResult(result.executionEpoch(), result.cancelledInputs(), result.target());
+    return new StopResult(result.executionEpoch(), result.cancelledInputs());
   }
 
   private EnqueueResult enqueue(
@@ -223,7 +222,7 @@ public final class ThreadCommandCoordinator {
   }
 
   private EnqueueResult toEnqueueResult(ThreadCommandTransactions.EnqueueResult result) {
-    return new EnqueueResult(result.input(), result.target());
+    return new EnqueueResult(result.input());
   }
 
   private static String requireContent(String content) {
@@ -249,10 +248,7 @@ public final class ThreadCommandCoordinator {
     return role;
   }
 
-  /**
-   * Inbound enqueue outcome for command facades: persisted input plus the next best-effort
-   * activation target.
-   */
+  /** Inbound enqueue outcome for command facades: the persisted input. */
   public record BootstrapResult(
       Session session, SessionEntry rootEntry, SessionEntry configEntry, HarnessThread thread) {
     public BootstrapResult {
@@ -263,22 +259,16 @@ public final class ThreadCommandCoordinator {
     }
   }
 
-  public record EnqueueResult(ThreadInput input, ExecutionTarget target) {
+  public record EnqueueResult(ThreadInput input) {
     public EnqueueResult {
       Objects.requireNonNull(input, "input");
-      Objects.requireNonNull(target, "target");
     }
   }
 
-  /**
-   * Inbound stop outcome for command facades: fenced epoch, cancelled inputs, and next activation
-   * target.
-   */
-  public record StopResult(
-      long executionEpoch, List<ThreadInput> cancelledInputs, ExecutionTarget target) {
+  /** Inbound stop outcome for command facades: fenced epoch and cancelled inputs. */
+  public record StopResult(long executionEpoch, List<ThreadInput> cancelledInputs) {
     public StopResult {
       cancelledInputs = List.copyOf(Objects.requireNonNull(cancelledInputs, "cancelledInputs"));
-      Objects.requireNonNull(target, "target");
     }
   }
 }

@@ -1,17 +1,12 @@
 package fun.fengwk.kkstudio.core.harness.thread.service.impl;
 
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import fun.fengwk.kkstudio.core.harness.session.service.impl.HarnessSessionDtoConverter;
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadCommandService;
 import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProvider;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator.EnqueueResult;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator.StopResult;
@@ -31,30 +26,23 @@ import fun.fengwk.kkstudio.share.model.HarnessThreadYoloSetDTO;
 import java.util.Objects;
 import java.util.Optional;
 
-/**
- * Thin Core Thread command boundary: decimal/DTO parse, product defaults, Spring transaction and
- * after-commit activation. Runtime orchestration lives in {@link ThreadCommandCoordinator}.
- */
-@Slf4j
+/** Thin Core Thread command boundary: decimal/DTO parse and product defaults. */
 @Service
 public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandService {
 
   private final ThreadCommandCoordinator coordinator;
   private final ToolSettingsProvider toolSettingsProvider;
-  private final ActivationNotifier activationNotifier;
   private final HarnessThreadDtoConverter converter;
   private final HarnessSessionDtoConverter sessionConverter;
 
   public HarnessThreadCommandServiceImpl(
       ThreadCommandCoordinator coordinator,
       ToolSettingsProvider toolSettingsProvider,
-      ActivationNotifier activationNotifier,
       HarnessThreadDtoConverter converter,
       HarnessSessionDtoConverter sessionConverter) {
     this.coordinator = Objects.requireNonNull(coordinator, "coordinator");
     this.toolSettingsProvider =
         Objects.requireNonNull(toolSettingsProvider, "toolSettingsProvider");
-    this.activationNotifier = Objects.requireNonNull(activationNotifier, "activationNotifier");
     this.converter = Objects.requireNonNull(converter, "converter");
     this.sessionConverter = Objects.requireNonNull(sessionConverter, "sessionConverter");
   }
@@ -115,12 +103,14 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
       String threadId, HarnessThreadMessageCreateDTO createDTO) {
     Objects.requireNonNull(createDTO, "createDTO");
     long id = HarnessIds.parsePositive(threadId, "threadId");
-    return convertAndNotify(
-        coordinator.submitUserMessage(
-            id,
-            createDTO.getContent(),
-            createDTO.getClientMessageId(),
-            requireExpectedEpoch(createDTO.getExpectedExecutionEpoch())));
+    return converter.convert(
+        coordinator
+            .submitUserMessage(
+                id,
+                createDTO.getContent(),
+                createDTO.getClientMessageId(),
+                requireExpectedEpoch(createDTO.getExpectedExecutionEpoch()))
+            .input());
   }
 
   @Override
@@ -129,13 +119,15 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
       String threadId, HarnessThreadCustomMessageCreateDTO createDTO) {
     Objects.requireNonNull(createDTO, "createDTO");
     long id = HarnessIds.parsePositive(threadId, "threadId");
-    return convertAndNotify(
-        coordinator.submitCustomMessage(
-            id,
-            createDTO.getRole(),
-            createDTO.getContent(),
-            createDTO.getClientMessageId(),
-            requireExpectedEpoch(createDTO.getExpectedExecutionEpoch())));
+    return converter.convert(
+        coordinator
+            .submitCustomMessage(
+                id,
+                createDTO.getRole(),
+                createDTO.getContent(),
+                createDTO.getClientMessageId(),
+                requireExpectedEpoch(createDTO.getExpectedExecutionEpoch()))
+            .input());
   }
 
   @Override
@@ -146,17 +138,19 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     Optional<EnqueueResult> existing =
         coordinator.findExistingInput(id, request.getClientMessageId());
     if (existing.isPresent()) {
-      return convertAndNotify(existing.get());
+      return converter.convert(existing.get().input());
     }
     if (request.getYoloEnabled() == null) {
       throw new IllegalArgumentException("yoloEnabled must not be null");
     }
-    return convertAndNotify(
-        coordinator.queueYolo(
-            id,
-            Boolean.TRUE.equals(request.getYoloEnabled()),
-            request.getClientMessageId(),
-            requireExpectedEpoch(request.getExpectedExecutionEpoch())));
+    return converter.convert(
+        coordinator
+            .queueYolo(
+                id,
+                Boolean.TRUE.equals(request.getYoloEnabled()),
+                request.getClientMessageId(),
+                requireExpectedEpoch(request.getExpectedExecutionEpoch()))
+            .input());
   }
 
   @Override
@@ -169,17 +163,19 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     Optional<EnqueueResult> existing =
         coordinator.findExistingInput(id, request.getClientMessageId());
     if (existing.isPresent()) {
-      return convertAndNotify(existing.get());
+      return converter.convert(existing.get().input());
     }
     long definitionId =
         HarnessIds.parsePositive(request.getAgentDefinitionId(), "agentDefinitionId");
-    return convertAndNotify(
-        coordinator.queueAgent(
-            id,
-            definitionId,
-            toolSettingsProvider.get().defaultYolo(),
-            request.getClientMessageId(),
-            requireExpectedEpoch(request.getExpectedExecutionEpoch())));
+    return converter.convert(
+        coordinator
+            .queueAgent(
+                id,
+                definitionId,
+                toolSettingsProvider.get().defaultYolo(),
+                request.getClientMessageId(),
+                requireExpectedEpoch(request.getExpectedExecutionEpoch()))
+            .input());
   }
 
   @Override
@@ -190,16 +186,18 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     Optional<EnqueueResult> existing =
         coordinator.findExistingInput(id, request.getClientMessageId());
     if (existing.isPresent()) {
-      return convertAndNotify(existing.get());
+      return converter.convert(existing.get().input());
     }
     long modelId = HarnessIds.parsePositive(request.getModelId(), "modelId");
-    return convertAndNotify(
-        coordinator.queueModel(
-            id,
-            modelId,
-            request.getVariant(),
-            request.getClientMessageId(),
-            requireExpectedEpoch(request.getExpectedExecutionEpoch())));
+    return converter.convert(
+        coordinator
+            .queueModel(
+                id,
+                modelId,
+                request.getVariant(),
+                request.getClientMessageId(),
+                requireExpectedEpoch(request.getExpectedExecutionEpoch()))
+            .input());
   }
 
   @Override
@@ -209,37 +207,9 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     long id = HarnessIds.parsePositive(threadId, "threadId");
     StopResult result =
         coordinator.stop(id, requireExpectedEpoch(request.getExpectedExecutionEpoch()));
-    afterCommitNotify(result.target());
     HarnessThreadStopResultDTO dto = new HarnessThreadStopResultDTO();
     dto.setExecutionEpoch(result.executionEpoch());
     dto.setCancelledInputs(result.cancelledInputs().stream().map(converter::convert).toList());
     return dto;
-  }
-
-  private HarnessThreadInputDTO convertAndNotify(EnqueueResult result) {
-    afterCommitNotify(result.target());
-    return converter.convert(result.input());
-  }
-
-  private void afterCommitNotify(ExecutionTarget target) {
-    Runnable notify =
-        () -> {
-          try {
-            activationNotifier.notifyAfterCommit(target);
-          } catch (RuntimeException error) {
-            log.warn("best-effort activation notification failed for {}", target, error);
-          }
-        };
-    if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-      notify.run();
-      return;
-    }
-    TransactionSynchronizationManager.registerSynchronization(
-        new TransactionSynchronization() {
-          @Override
-          public void afterCommit() {
-            notify.run();
-          }
-        });
   }
 }

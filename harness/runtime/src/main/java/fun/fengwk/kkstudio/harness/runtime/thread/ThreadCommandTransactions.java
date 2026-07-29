@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 
@@ -10,12 +9,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/**
- * Thread command 用例的原子持久化端口。
- *
- * <p>实现只把 {@link ExecutionTarget} 当作提交后的 best-effort activation 信号。Redis/dispatcher 失败绝不回滚已提交的
- * durable mutation。
- */
+/** Thread command 用例的原子持久化端口。 */
 public interface ThreadCommandTransactions {
   HarnessThread createThread(Instant now);
 
@@ -61,8 +55,7 @@ public interface ThreadCommandTransactions {
     }
   }
 
-  record EnqueueResult(ThreadInput input, ExecutionTarget target) {}
+  record EnqueueResult(ThreadInput input) {}
 
-  record StopResult(
-      long executionEpoch, List<ThreadInput> cancelledInputs, ExecutionTarget target) {}
+  record StopResult(long executionEpoch, List<ThreadInput> cancelledInputs) {}
 }

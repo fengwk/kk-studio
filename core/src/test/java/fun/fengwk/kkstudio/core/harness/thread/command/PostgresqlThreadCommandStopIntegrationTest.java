@@ -73,6 +73,12 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
     insertTool(toolQueued, threadId, sessionId, assistantEntryId, 0, epoch, "QUEUED");
     insertTool(toolRetry, threadId, sessionId, assistantEntryId, 1, epoch, "RETRY_WAIT");
     insertTool(toolRunning, threadId, sessionId, assistantEntryId, 2, epoch, "RUNNING");
+    insertTarget("MODEL_INVOCATION", modelQueued);
+    insertTarget("MODEL_INVOCATION", modelRetry);
+    insertTarget("MODEL_INVOCATION", modelRunning);
+    insertTarget("TOOL_INVOCATION", toolQueued);
+    insertTarget("TOOL_INVOCATION", toolRetry);
+    insertTarget("TOOL_INVOCATION", toolRunning);
 
     ThreadCommandTransactions.StopResult result =
         transactions.stop(threadId, epoch, BASE.plusSeconds(4));
@@ -91,6 +97,13 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
     assertSafelyCancelled(toolState(toolQueued));
     assertSafelyCancelled(toolState(toolRetry));
     assertStillRunning(toolState(toolRunning), "tool-running");
+    assertEquals(0L, targetCount("THREAD", threadId));
+    assertEquals(0L, targetCount("MODEL_INVOCATION", modelQueued));
+    assertEquals(0L, targetCount("MODEL_INVOCATION", modelRetry));
+    assertEquals(0L, targetCount("MODEL_INVOCATION", modelRunning));
+    assertEquals(0L, targetCount("TOOL_INVOCATION", toolQueued));
+    assertEquals(0L, targetCount("TOOL_INVOCATION", toolRetry));
+    assertEquals(0L, targetCount("TOOL_INVOCATION", toolRunning));
   }
 
   /** Input insert 被数据库拒绝时，先发生的 sequence/runnable 更新必须一起回滚。 */
@@ -127,6 +140,7 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
     assertEquals(0L, thread.inputSequence());
     assertFalse(thread.runnable());
     assertEquals(0L, inputCount(threadId));
+    assertEquals(0L, targetCount("THREAD", threadId));
   }
 
   /** 不存在的 idempotency key 也必须持有 Thread 行锁，串行化随后 live snapshot resolve。 */
@@ -173,6 +187,19 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
                     + " processor_until = ? where id = ?")) {
       statement.setTimestamp(1, Timestamp.from(BASE.plusSeconds(30)));
       statement.setLong(2, threadId);
+      assertEquals(1, statement.executeUpdate());
+    }
+  }
+
+  private static void insertTarget(String kind, long id) throws SQLException {
+    try (Connection connection = newConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "insert into harness_execution_target (target_kind, target_id, available_at)"
+                    + " values (?, ?, ?)")) {
+      statement.setString(1, kind);
+      statement.setLong(2, id);
+      statement.setTimestamp(3, Timestamp.from(BASE));
       assertEquals(1, statement.executeUpdate());
     }
   }
@@ -302,6 +329,20 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
             connection.prepareStatement(
                 "select count(*) from harness_thread_input where thread_id = ?")) {
       statement.setLong(1, threadId);
+      try (ResultSet result = statement.executeQuery()) {
+        assertTrue(result.next());
+        return result.getLong(1);
+      }
+    }
+  }
+
+  private static long targetCount(String kind, long id) throws SQLException {
+    try (Connection connection = newConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "select count(*) from harness_execution_target where target_kind = ? and target_id = ?")) {
+      statement.setString(1, kind);
+      statement.setLong(2, id);
       try (ResultSet result = statement.executeQuery()) {
         assertTrue(result.next());
         return result.getLong(1);

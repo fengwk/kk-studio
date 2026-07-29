@@ -88,6 +88,9 @@ public interface ThreadReconcileTransactions {
    */
   QuiesceOutcome quiesceAndRecheck(ThreadOwnership ownership, Instant now);
 
-  /** best-effort 释放 lease：用于 typed failure、step-limit 失败或意外 RuntimeException 之后的兜底清理；适配器应吞掉内部异常。 */
+  /**
+   * 释放 lease 并重新暴露 durable Thread target：用于 typed failure、step-limit 失败或意外 RuntimeException
+   * 后的清理。调用方必须吞掉异常，避免清理失败覆盖原始错误；适配器应让异常逃逸以保证事务回滚。
+   */
   void bestEffortRelease(ThreadOwnership ownership, Instant now);
 }

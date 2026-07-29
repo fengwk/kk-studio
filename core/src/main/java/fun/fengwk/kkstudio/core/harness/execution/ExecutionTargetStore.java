@@ -36,6 +36,12 @@ public interface ExecutionTargetStore {
   int schedule(ExecutionTargetKind kind, long id, String routeKey, Instant availableAt);
 
   /**
+   * Acquire a row-level lock on {@code (kind, id)} regardless of its due time. Used by an existing
+   * owner to renew or release its watchdog target.
+   */
+  Optional<ExecutionTargetRow> lock(ExecutionTargetKind kind, long id);
+
+  /**
    * Acquire a row-level lock on {@code (kind, id)} and return the row iff it currently exists and
    * its {@code availableAt} is at or before {@code now}. The caller MUST advance the row in the
    * same transaction via {@link #rescheduleLocked(ExecutionTargetKind, long, String, Instant)} or

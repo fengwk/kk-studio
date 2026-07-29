@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.core.harness.execution.ExecutionTargetStore;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.AssistantAbortedEntryPayload;
@@ -13,7 +14,6 @@ import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.entry.RootEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.RuntimeEntryPayloadJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshot;
@@ -59,22 +59,27 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
   private final ThreadCommandMapper mapper;
   private final HarnessIdGenerator idGenerator;
   private final ModelInvocationPlanner planner;
+  private final ExecutionTargetStore executionTargetStore;
 
   @Autowired
   public PostgresqlThreadCommandTransactions(
-      ThreadCommandMapper mapper, HarnessIdGenerator idGenerator) {
-    this(mapper, idGenerator, new ModelInvocationPlanner());
+      ThreadCommandMapper mapper,
+      HarnessIdGenerator idGenerator,
+      ExecutionTargetStore executionTargetStore) {
+    this(mapper, idGenerator, new ModelInvocationPlanner(), executionTargetStore);
   }
 
-  /**
-   * Package-private test ctor: lets a deterministic {@link ModelInvocationPlanner} be injected
-   * without widening the production Spring wiring graph.
-   */
+  /** Package-private test ctor for deterministic planner and durable target wiring. */
   PostgresqlThreadCommandTransactions(
-      ThreadCommandMapper mapper, HarnessIdGenerator idGenerator, ModelInvocationPlanner planner) {
+      ThreadCommandMapper mapper,
+      HarnessIdGenerator idGenerator,
+      ModelInvocationPlanner planner,
+      ExecutionTargetStore executionTargetStore) {
     this.mapper = Objects.requireNonNull(mapper, "mapper");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
     this.planner = Objects.requireNonNull(planner, "planner");
+    this.executionTargetStore =
+        Objects.requireNonNull(executionTargetStore, "executionTargetStore");
   }
 
   @Override
@@ -207,6 +212,7 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
       Long headEntryId,
       Instant persistedNow) {
     long nextEpoch = Math.addExact(expectedExecutionEpoch, 1);
+    executionTargetStore.deleteIfExists(ExecutionTargetKind.THREAD, thread.getId());
     requireAffected(
         mapper.rebindHead(
             thread.getId(), expectedExecutionEpoch, nextEpoch, headEntryId, offset(persistedNow)),
@@ -245,9 +251,7 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
     // outer transaction serializes the retry check with live snapshot resolution and enqueue.
     lockThread(threadId);
     ThreadCommandRow existing = mapper.findInputByKeyForUpdate(threadId, idempotencyKey);
-    return existing == null
-        ? Optional.empty()
-        : Optional.of(new EnqueueResult(toInput(existing), threadTarget(threadId)));
+    return existing == null ? Optional.empty() : Optional.of(new EnqueueResult(toInput(existing)));
   }
 
   @Override
@@ -270,7 +274,7 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
 
     ThreadCommandRow existing = mapper.findInputByKeyForUpdate(threadId, idempotencyKey);
     if (existing != null) {
-      return new EnqueueResult(toInput(existing), threadTarget(threadId));
+      return new EnqueueResult(toInput(existing));
     }
 
     long sequence = Math.addExact(thread.getInputSequence(), 1);
@@ -299,7 +303,8 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
             InputStatus.QUEUED,
             persistedNow,
             null);
-    return new EnqueueResult(input, threadTarget(threadId));
+    ensureThreadTarget(thread, persistedNow);
+    return new EnqueueResult(input);
   }
 
   @Override
@@ -373,7 +378,23 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
     // Logical stop must also close open Interactions, otherwise the Thread stays
     // ineligible for rebind while waiting on a blocker that can never resolve.
     mapper.cancelOpenInteractions(threadId, timestamp);
-    return new StopResult(nextEpoch, cancelled, threadTarget(threadId));
+    mapper.deleteExecutionTargetsForStoppedThread(threadId);
+    return new StopResult(nextEpoch, cancelled);
+  }
+
+  private void ensureThreadTarget(ThreadCommandRow thread, Instant now) {
+    boolean activeProcessor =
+        thread.getProcessorToken() != null
+            && thread.getProcessorUntil() != null
+            && thread.getProcessorUntil().toInstant().isAfter(now);
+    if (activeProcessor) {
+      if (executionTargetStore.lock(ExecutionTargetKind.THREAD, thread.getId()).isEmpty()) {
+        throw new IllegalStateException(
+            "active thread processor is missing its watchdog target: " + thread.getId());
+      }
+      return;
+    }
+    executionTargetStore.schedule(ExecutionTargetKind.THREAD, thread.getId(), null, now);
   }
 
   /**
@@ -427,10 +448,6 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
         InputStatus.CANCELLED,
         row.getCreatedAt().toInstant(),
         null);
-  }
-
-  private static ExecutionTarget threadTarget(long threadId) {
-    return new ExecutionTarget(ExecutionTargetKind.THREAD, threadId);
   }
 
   private static Instant persistenceInstant(Instant value) {
