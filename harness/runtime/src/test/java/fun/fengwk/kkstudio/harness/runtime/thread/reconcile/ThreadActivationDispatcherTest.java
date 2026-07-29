@@ -30,8 +30,12 @@ class ThreadActivationDispatcherTest {
     AtomicInteger thread12 = new AtomicInteger();
     ThreadActivationDispatcher.ReconcileRunner reconcile =
         (threadId, ignored) -> {
-          if (threadId == 11L) thread11.incrementAndGet();
-          if (threadId == 12L) thread12.incrementAndGet();
+          if (threadId == 11L) {
+            thread11.incrementAndGet();
+          }
+          if (threadId == 12L) {
+            thread12.incrementAndGet();
+          }
           return new StepResult.Quiescent();
         };
     Queue<Runnable> tasks = new ArrayDeque<>();

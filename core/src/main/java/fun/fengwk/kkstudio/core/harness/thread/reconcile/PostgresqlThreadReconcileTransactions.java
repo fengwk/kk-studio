@@ -157,7 +157,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   public Optional<ThreadReconcileSnapshot> loadOwnedSnapshot(
       ThreadOwnership ownership, Instant now) {
     OwnedThreadRow thread = owned(ownership, now);
-    if (thread == null) return Optional.empty();
+    if (thread == null) {
+      return Optional.empty();
+    }
     TerminalModelInvocationRow terminal =
         mapper.findTerminalModel(
             thread.getId(), thread.getHeadEntryId(), ownership.executionEpoch());
@@ -207,12 +209,15 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   public ApplyOutcome applyTerminalModel(
       ThreadOwnership ownership, long modelInvocationId, Instant now) {
     OwnedThreadRow thread = owned(ownership, now);
-    if (thread == null) return ApplyOutcome.LOST_OWNERSHIP;
+    if (thread == null) {
+      return ApplyOutcome.LOST_OWNERSHIP;
+    }
     TerminalModelInvocationRow invocation =
         mapper.findTerminalModel(
             thread.getId(), thread.getHeadEntryId(), ownership.executionEpoch());
-    if (invocation == null || invocation.getId() != modelInvocationId)
+    if (invocation == null || invocation.getId() != modelInvocationId) {
       return ApplyOutcome.LOST_OWNERSHIP;
+    }
     EntryPayload payload;
     long sourceHeadEntryId = invocation.getSourceHeadEntryId();
     long entryId;
@@ -261,11 +266,14 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   public ApplyOutcome applyTerminalToolResults(
       ThreadOwnership ownership, long assistantEntryId, Instant now) {
     OwnedThreadRow thread = owned(ownership, now);
-    if (thread == null || thread.getHeadEntryId() != assistantEntryId)
+    if (thread == null || thread.getHeadEntryId() != assistantEntryId) {
       return ApplyOutcome.LOST_OWNERSHIP;
+    }
     List<ToolInvocationRow> tools =
         mapper.listToolSiblings(thread.getId(), assistantEntryId, ownership.executionEpoch());
-    if (tools.isEmpty()) return ApplyOutcome.LOST_OWNERSHIP;
+    if (tools.isEmpty()) {
+      return ApplyOutcome.LOST_OWNERSHIP;
+    }
     boolean someToolsApplied = tools.stream().anyMatch(tool -> tool.getAppliedAt() != null);
     if (someToolsApplied) {
       if (tools.stream().allMatch(tool -> tool.getAppliedAt() != null)) {
@@ -273,7 +281,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
       }
       throw new IllegalStateException("tool sibling batch has partially applied terminal state");
     }
-    if (tools.stream().anyMatch(tool -> !terminal(tool))) return ApplyOutcome.LOST_OWNERSHIP;
+    if (tools.stream().anyMatch(tool -> !terminal(tool))) {
+      return ApplyOutcome.LOST_OWNERSHIP;
+    }
     long parent = assistantEntryId;
     for (ToolInvocationRow tool : tools) {
       ToolDescriptor descriptor = TOOL_DESCRIPTOR_CODEC.decode(tool.getDescriptorJson());
@@ -288,7 +298,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
               payload.type().name(),
               ENTRY_CODEC.encode(payload),
               timestamp(now))
-          != 1) throw new IllegalStateException("cannot insert tool result entry");
+          != 1) {
+        throw new IllegalStateException("cannot insert tool result entry");
+      }
       parent = entryId;
     }
     advance(thread, ownership, parent, now);
@@ -299,8 +311,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
             ownership.executionEpoch(),
             ownership.processorToken(),
             timestamp(now))
-        != tools.size())
+        != tools.size()) {
       throw new IllegalStateException("terminal tool siblings changed while applying");
+    }
     return ApplyOutcome.PROGRESSED;
   }
 
@@ -309,7 +322,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   public SuspendOutcome suspendAndRecheck(
       ThreadOwnership ownership, ContinuationRef expectedBlocker, Instant now) {
     OwnedThreadRow thread = owned(ownership, now);
-    if (thread == null) return SuspendOutcome.LOST_OWNERSHIP;
+    if (thread == null) {
+      return SuspendOutcome.LOST_OWNERSHIP;
+    }
     Optional<ContinuationRef> current = blocker(thread, ownership.executionEpoch());
     // The expected blocker is not immediate work by itself. Only its replacement/disappearance,
     // terminal siblings, or new mailbox work means this activation must continue.
@@ -327,9 +342,13 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   public ApplyOutcome harvestBoundary(
       ThreadOwnership ownership, TurnBoundary boundary, Instant now) {
     OwnedThreadRow thread = owned(ownership, now);
-    if (thread == null) return ApplyOutcome.LOST_OWNERSHIP;
+    if (thread == null) {
+      return ApplyOutcome.LOST_OWNERSHIP;
+    }
     List<ThreadInput> durable = toInputs(mapper.listQueuedInputs(thread.getId()));
-    if (!sameBoundary(boundary, durable)) return ApplyOutcome.LOST_OWNERSHIP;
+    if (!sameBoundary(boundary, durable)) {
+      return ApplyOutcome.LOST_OWNERSHIP;
+    }
     long parent = thread.getHeadEntryId();
     for (ThreadInput input : boundary.inputs()) {
       EntryPayload payload = inputPayload(input);
@@ -383,8 +402,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         != 1) {
       throw new IllegalStateException("cannot create model invocation");
     }
-    if (!release(ownership, false, now))
+    if (!release(ownership, false, now)) {
       throw new IllegalStateException("cannot release created model invocation");
+    }
     return new ModelCreationOutcome.Created(
         new ExecutionTarget(ExecutionTargetKind.MODEL_INVOCATION, id));
   }
@@ -393,8 +413,12 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   @Transactional(isolation = Isolation.READ_COMMITTED)
   public QuiesceOutcome quiesceAndRecheck(ThreadOwnership ownership, Instant now) {
     OwnedThreadRow thread = owned(ownership, now);
-    if (thread == null) return QuiesceOutcome.LOST_OWNERSHIP;
-    if (hasAnyWork(thread) || plan(thread).isPresent()) return QuiesceOutcome.WORK_AVAILABLE;
+    if (thread == null) {
+      return QuiesceOutcome.LOST_OWNERSHIP;
+    }
+    if (hasAnyWork(thread) || plan(thread).isPresent()) {
+      return QuiesceOutcome.WORK_AVAILABLE;
+    }
     return release(ownership, false, now)
         ? QuiesceOutcome.QUIESCENT
         : QuiesceOutcome.LOST_OWNERSHIP;
@@ -417,7 +441,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         || thread.getExecutionEpoch() != ownership.executionEpoch()
         || !ownership.processorToken().equals(thread.getProcessorToken())
         || thread.getProcessorUntil() == null
-        || !thread.getProcessorUntil().isAfter(timestamp(now))) return null;
+        || !thread.getProcessorUntil().isAfter(timestamp(now))) {
+      return null;
+    }
     return thread;
   }
 
@@ -445,8 +471,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   private Optional<ContinuationRef> blocker(OwnedThreadRow thread, long epoch) {
     InvocationBlockerRow model =
         mapper.findModelBlocker(thread.getId(), thread.getHeadEntryId(), epoch);
-    if (model != null)
+    if (model != null) {
       return Optional.of(ref(thread.getId(), ExecutionTargetKind.MODEL_INVOCATION, model.getId()));
+    }
     InvocationBlockerRow tool =
         mapper.findToolBlocker(thread.getId(), thread.getHeadEntryId(), epoch);
     return tool == null
@@ -469,13 +496,17 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   private boolean hasWorkExceptExpected(OwnedThreadRow thread, ContinuationRef expected) {
     if (mapper.findTerminalModel(
             thread.getId(), thread.getHeadEntryId(), thread.getExecutionEpoch())
-        != null) return true;
+        != null) {
+      return true;
+    }
     List<ToolInvocationRow> siblings =
         mapper.listToolSiblings(
             thread.getId(), thread.getHeadEntryId(), thread.getExecutionEpoch());
     if (!siblings.isEmpty()
         && siblings.stream().allMatch(PostgresqlThreadReconcileTransactions::terminal)
-        && siblings.stream().anyMatch(sibling -> sibling.getAppliedAt() == null)) return true;
+        && siblings.stream().anyMatch(sibling -> sibling.getAppliedAt() == null)) {
+      return true;
+    }
     return !expected.equals(blocker(thread, thread.getExecutionEpoch()).orElse(null));
   }
 
@@ -515,24 +546,30 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
 
   private static EntryPayload assistantPayload(ProviderResponse response) {
     List<AgentMessageContent> contents = new ArrayList<>();
-    if (!response.thinking().isEmpty())
+    if (!response.thinking().isEmpty()) {
       contents.add(new ThinkingMessageContent(response.thinking()));
-    if (!response.text().isEmpty()) contents.add(new TextMessageContent(response.text()));
+    }
+    if (!response.text().isEmpty()) {
+      contents.add(new TextMessageContent(response.text()));
+    }
     response
         .toolCalls()
         .forEach(
             call ->
                 contents.add(
                     new ToolCallMessageContent(call.id(), call.name(), call.argumentsJson())));
-    if (contents.isEmpty()) contents.add(new TextMessageContent(""));
+    if (contents.isEmpty()) {
+      contents.add(new TextMessageContent(""));
+    }
     return new MessageEntryPayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, contents),
         new AssistantMessageMetadata(response.stopReason(), response.usage(), response.cost()));
   }
 
   private static ModelInvocationError modelError(TerminalModelInvocationRow invocation) {
-    if ("CANCELLED".equals(invocation.getStatus()))
+    if ("CANCELLED".equals(invocation.getStatus())) {
       return new ModelInvocationError(ProviderErrorKind.CANCELLED, "model invocation cancelled");
+    }
     return MODEL_ERROR_CODEC.decode(
         Objects.requireNonNull(invocation.getErrorJson(), "terminal model error"));
   }
@@ -567,14 +604,17 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   private static List<AgentMessageContent> contents(List<ToolContent> contents) {
     List<AgentMessageContent> mapped = new ArrayList<>();
     for (ToolContent content : contents) {
-      if (content instanceof TextToolContent text) mapped.add(new TextMessageContent(text.text()));
-      else if (content instanceof JsonToolContent json)
+      if (content instanceof TextToolContent text) {
+        mapped.add(new TextMessageContent(text.text()));
+      } else if (content instanceof JsonToolContent json) {
         mapped.add(new JsonMessageContent(json.json()));
-      else if (content instanceof ArtifactToolContent artifact)
+      } else if (content instanceof ArtifactToolContent artifact) {
         mapped.add(
             new ArtifactMessageContent(
                 artifact.artifact().artifactId(), artifact.artifact().mediaType(), null));
-      else throw new IllegalArgumentException("unsupported tool content: " + content.getClass());
+      } else {
+        throw new IllegalArgumentException("unsupported tool content: " + content.getClass());
+      }
     }
     return mapped.isEmpty() ? List.of(new TextMessageContent("")) : List.copyOf(mapped);
   }
@@ -598,8 +638,12 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   }
 
   private static EntryPayload inputPayload(ThreadInput input) {
-    if (input.payload() instanceof RuntimeConfigInputPayload config) return config.snapshot();
-    if (input.payload() instanceof RuntimeEntryInputPayload entry) return entry.payload();
+    if (input.payload() instanceof RuntimeConfigInputPayload config) {
+      return config.snapshot();
+    }
+    if (input.payload() instanceof RuntimeEntryInputPayload entry) {
+      return entry.payload();
+    }
     throw new IllegalArgumentException(
         "unsupported typed input payload: " + input.payload().getClass());
   }
@@ -628,7 +672,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
             payload.type().name(),
             ENTRY_CODEC.encode(payload),
             timestamp(now))
-        != 1) throw new IllegalStateException("cannot insert entry");
+        != 1) {
+      throw new IllegalStateException("cannot insert entry");
+    }
   }
 
   private void insertUsage(
@@ -649,7 +695,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
             ownership.executionEpoch(),
             ownership.processorToken(),
             timestamp(now))
-        != 1) throw new IllegalStateException("cannot advance fenced thread head");
+        != 1) {
+      throw new IllegalStateException("cannot advance fenced thread head");
+    }
   }
 
   private boolean release(ThreadOwnership ownership, boolean runnable, Instant now) {
@@ -675,13 +723,17 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   }
 
   private static boolean sameBoundary(TurnBoundary expected, List<ThreadInput> actual) {
-    if (expected.threadId() <= 0 || actual.size() < expected.inputs().size()) return false;
+    if (expected.threadId() <= 0 || actual.size() < expected.inputs().size()) {
+      return false;
+    }
     for (int index = 0; index < expected.inputs().size(); index++) {
       ThreadInput expectedInput = expected.inputs().get(index);
       ThreadInput actualInput = actual.get(index);
       if (expectedInput.threadId() != expected.threadId()
           || actualInput.threadId() != expected.threadId()
-          || !expectedInput.equals(actualInput)) return false;
+          || !expectedInput.equals(actualInput)) {
+        return false;
+      }
     }
     return true;
   }
@@ -692,11 +744,14 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   }
 
   private static void requirePositive(long value, String name) {
-    if (value <= 0) throw new IllegalArgumentException(name + " must be positive");
+    if (value <= 0) {
+      throw new IllegalArgumentException(name + " must be positive");
+    }
   }
 
   private static void requireToken(String value) {
-    if (value == null || value.isBlank() || value.length() > 128)
+    if (value == null || value.isBlank() || value.length() > 128) {
       throw new IllegalArgumentException("processor token must be non-blank and <= 128 chars");
+    }
   }
 }

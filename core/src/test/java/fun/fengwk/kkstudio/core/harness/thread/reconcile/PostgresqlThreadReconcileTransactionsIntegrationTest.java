@@ -712,8 +712,9 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
   private static void execute(String sql, Object... values) {
     try (Connection connection = newConnection();
         PreparedStatement statement = connection.prepareStatement(sql)) {
-      for (int index = 0; index < values.length; index++)
+      for (int index = 0; index < values.length; index++) {
         statement.setObject(index + 1, values[index]);
+      }
       assertEquals(1, statement.executeUpdate());
     } catch (SQLException exception) {
       throw new AssertionError(exception);
@@ -755,7 +756,9 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
         PreparedStatement statement = connection.prepareStatement(sql);
         ResultSet result = statement.executeQuery()) {
       ArrayList<Long> ids = new ArrayList<>();
-      while (result.next()) ids.add(result.getLong(1));
+      while (result.next()) {
+        ids.add(result.getLong(1));
+      }
       return ids;
     } catch (SQLException exception) {
       throw new AssertionError(exception);
@@ -774,7 +777,9 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
       statement.setLong(1, assistantEntryId);
       try (ResultSet result = statement.executeQuery()) {
         ArrayList<String> payloads = new ArrayList<>();
-        while (result.next()) payloads.add(result.getString(1));
+        while (result.next()) {
+          payloads.add(result.getString(1));
+        }
         return payloads;
       }
     } catch (SQLException exception) {
