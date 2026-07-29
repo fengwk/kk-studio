@@ -50,6 +50,11 @@ import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.QuiesceOutcome;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.SuspendOutcome;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadOwnership;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalModel;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalToolBatch;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.SuspendForBlocker;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.TurnBoundary;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
@@ -156,13 +161,28 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     TerminalModelInvocationRow terminal =
         mapper.findTerminalModel(
             thread.getId(), thread.getHeadEntryId(), ownership.executionEpoch());
-    Optional<Long> terminalId =
-        Optional.ofNullable(terminal).map(TerminalModelInvocationRow::getId);
+    Optional<PrimaryWork> primaryWork;
+    if (terminal != null) {
+      primaryWork = Optional.of(new ApplyTerminalModel(terminal.getId()));
+    } else {
+      primaryWork = loadReadyToolsOrBlockerOrPlan(thread, ownership);
+    }
+    List<ThreadInput> queued = toInputs(mapper.listQueuedInputs(thread.getId()));
+    return Optional.of(
+        new ThreadReconcileSnapshot(ownership, toThread(thread), primaryWork, queued));
+  }
+
+  /**
+   * 在没有 terminal Model 时，按工具批次、blocker、模型计划的顺序选择唯一主要动作。
+   *
+   * <p>仅当 terminal model 不存在时调用。工具批次检查同前逻辑：全部 terminal 且未 applied 时为 ready-to-apply batch；否则检查
+   * blocker；均不存在时检查 plan。
+   */
+  private Optional<PrimaryWork> loadReadyToolsOrBlockerOrPlan(
+      OwnedThreadRow thread, ThreadOwnership ownership) {
     List<ToolInvocationRow> siblings =
-        terminal == null
-            ? mapper.listToolSiblings(
-                thread.getId(), thread.getHeadEntryId(), ownership.executionEpoch())
-            : List.of();
+        mapper.listToolSiblings(
+            thread.getId(), thread.getHeadEntryId(), ownership.executionEpoch());
     boolean someToolsApplied =
         siblings.stream().anyMatch(sibling -> sibling.getAppliedAt() != null);
     if (someToolsApplied && siblings.stream().anyMatch(sibling -> sibling.getAppliedAt() == null)) {
@@ -172,22 +192,14 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         !siblings.isEmpty()
             && !someToolsApplied
             && siblings.stream().allMatch(PostgresqlThreadReconcileTransactions::terminal);
-    Optional<ContinuationRef> blocker =
-        terminal == null && !readyTools
-            ? blocker(thread, ownership.executionEpoch())
-            : Optional.empty();
-    List<ThreadInput> queued = toInputs(mapper.listQueuedInputs(thread.getId()));
-    Optional<ModelInvocationPlan> plan =
-        terminal == null && !readyTools && blocker.isEmpty() ? plan(thread) : Optional.empty();
-    return Optional.of(
-        new ThreadReconcileSnapshot(
-            ownership,
-            toThread(thread),
-            terminalId,
-            readyTools ? Optional.of(thread.getHeadEntryId()) : Optional.empty(),
-            blocker,
-            queued,
-            plan));
+    if (readyTools) {
+      return Optional.of(new ApplyTerminalToolBatch(thread.getHeadEntryId()));
+    }
+    Optional<ContinuationRef> blocker = blocker(thread, ownership.executionEpoch());
+    if (blocker.isPresent()) {
+      return Optional.of(new SuspendForBlocker(blocker.get()));
+    }
+    return plan(thread).map(CreateModelInvocation::new);
   }
 
   @Override

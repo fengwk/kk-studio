@@ -44,6 +44,9 @@ import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.QuiesceOutcome;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.SuspendOutcome;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadOwnership;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalToolBatch;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.SuspendForBlocker;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.TurnBoundary;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
@@ -205,7 +208,9 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
             ownership, new TurnBoundary(threadId, queued.queuedInputs()), now));
 
     ThreadReconcileSnapshot snapshot = transactions.loadOwnedSnapshot(ownership, now).orElseThrow();
-    ModelInvocationPlan plan = snapshot.modelInvocationPlan().orElseThrow();
+    CreateModelInvocation cmi =
+        assertInstanceOf(CreateModelInvocation.class, snapshot.primaryWork().orElseThrow());
+    ModelInvocationPlan plan = cmi.plan();
     assertEquals(frozenConfig.snapshot(), plan.configSnapshot());
 
     commands.enqueue(threadId, config(List.of()), "later-config", epoch, now.plusSeconds(1));
@@ -213,7 +218,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
         transactions
             .loadOwnedSnapshot(ownership, now.plusSeconds(1))
             .orElseThrow()
-            .modelInvocationPlan()
+            .primaryWork()
             .isPresent());
     assertThrows(
         IllegalStateException.class,
@@ -371,12 +376,13 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     assertTrue(payloads.get(1).contains("\\\"kind\\\":\\\"IO\\\""));
     assertTrue(payloads.get(2).contains("\\\"kind\\\":\\\"CANCELLED\\\""));
     assertTrue(payloads.get(3).contains("\\\"kind\\\":\\\"UNKNOWN_STATE\\\""));
-    assertTrue(
+    assertFalse(
         transactions
             .loadOwnedSnapshot(modelOwner, Instant.now())
             .orElseThrow()
-            .readyToolAssistantEntryId()
-            .isEmpty());
+            .primaryWork()
+            .filter(ApplyTerminalToolBatch.class::isInstance)
+            .isPresent());
 
     Prepared partial = prepareDebt(Instant.now(), List.of(platformTool(), environmentTool()));
     long partialModel = createInvocation(partial, Instant.now());
@@ -435,7 +441,9 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
         transactions
             .loadOwnedSnapshot(owner, Instant.now())
             .orElseThrow()
-            .blockerContinuation()
+            .primaryWork()
+            .map(SuspendForBlocker.class::cast)
+            .map(SuspendForBlocker::blocker)
             .orElseThrow();
     assertEquals(
         SuspendOutcome.SUSPENDED, transactions.suspendAndRecheck(owner, blocker, Instant.now()));
@@ -577,9 +585,12 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
   private long createInvocation(Prepared prepared, Instant now) {
     ThreadReconcileSnapshot snapshot =
         transactions.loadOwnedSnapshot(prepared.ownership(), now).orElseThrow();
+    ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation cmi =
+        assertInstanceOf(
+            ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation.class,
+            snapshot.primaryWork().orElseThrow());
     ModelCreationOutcome outcome =
-        transactions.createModelInvocationAndRelease(
-            prepared.ownership(), snapshot.modelInvocationPlan().orElseThrow(), now);
+        transactions.createModelInvocationAndRelease(prepared.ownership(), cmi.plan(), now);
     return ((ModelCreationOutcome.Created) outcome).target().id();
   }
 

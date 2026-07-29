@@ -37,8 +37,11 @@ public interface ThreadReconcileTransactions {
   boolean renew(ThreadOwnership ownership, Instant now);
 
   /**
-   * 在持有 ownership 时读取一致的 reconcile snapshot，包含 terminal-unapplied ModelInvocation、ready-to-apply
-   * Tool 批次、durable blocker、queued Inputs 与 ModelInvocationPlan。
+   * 在持有 ownership 时读取下一步的 reconcile 决策快照。
+   *
+   * <p>Snapshot 包含当前 Thread 上下文、零或一个 {@link ThreadReconcileSnapshot.PrimaryWork} 与有序的 queued
+   * Inputs。适配器必须按固定顺序选择主要动作：terminal Model、ready Tool sibling batch、未完成 blocker、response debt 的
+   * ModelInvocationPlan；仅当没有主要动作时，queued Inputs 才可由 Reconciler harvest。
    *
    * <p>fencing 失败或 Thread 已不存在时返回 empty。
    */
