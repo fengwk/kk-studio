@@ -9,5 +9,6 @@
             <property name="ignoreComments" value="true"/>
             <property name="message" value="Use imports instead of fully qualified class names in code body."/>
         </module>
+        <module name="NeedBraces"/>
     </module>
 </module>

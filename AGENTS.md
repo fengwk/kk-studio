@@ -16,6 +16,7 @@
 
 - 全仓权威格式工具是 Spotless：Google Java Format `1.18.0`（GOOGLE）+ `removeUnusedImports` + importOrder `#,,fun.fengwk.kkstudio,javax,java`。
 - 根 POM 在 `validate` 阶段对所有模块执行 `spotless:check`；格式不通过则构建失败。
+- Java 的所有控制流分支体（`if` / `else` / `for` / `while` / `do`）必须显式使用 `{}`；仓库级 Checkstyle 在 `validate` 阶段检查 main 和 test 源码。
 - 提交前只格式化本切片实际改动的 Java 文件：`env JAVA_HOME=$JAVA_HOME_21 mvn -pl <module> spotless:apply`。
 - 禁止顺手全仓格式化无关历史文件；全仓对齐仅在独立格式化切片中进行。
 

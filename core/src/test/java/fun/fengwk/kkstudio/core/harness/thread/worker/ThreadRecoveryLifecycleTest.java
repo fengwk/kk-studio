@@ -50,7 +50,9 @@ class ThreadRecoveryLifecycleTest {
     AtomicInteger kicks = new AtomicInteger();
     ThreadKick kick =
         threadId -> {
-          if (threadId == 11L) throw new RejectedExecutionException("full");
+          if (threadId == 11L) {
+            throw new RejectedExecutionException("full");
+          }
           kicks.addAndGet((int) threadId);
         };
     ThreadRecoveryLifecycle lifecycle =

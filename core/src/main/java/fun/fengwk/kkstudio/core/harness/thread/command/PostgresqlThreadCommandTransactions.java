@@ -228,7 +228,9 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
       long threadId, long expectedExecutionEpoch) {
     ThreadCommandRow thread = lockThread(threadId);
     requireEpoch(thread, expectedExecutionEpoch);
-    if (thread.getHeadEntryId() == null) return Optional.empty();
+    if (thread.getHeadEntryId() == null) {
+      return Optional.empty();
+    }
     ThreadCommandRow row =
         mapper.findEffectiveRuntimeConfig(thread.getSessionId(), thread.getHeadEntryId(), threadId);
     return row == null ? Optional.empty() : Optional.of(CONFIG_CODEC.decode(row.getPayloadJson()));
