@@ -110,40 +110,6 @@ public interface ModelInvocationMapper extends BaseMapper {
   ModelInvocationDO findClaimable(@Param("id") long id, @Param("now") OffsetDateTime now);
 
   /**
-   * findNext 顺序：expired RUNNING -> due RETRY_WAIT -> QUEUED，再按各自边界时间/id 排序。 同样要求 Thread 当前
-   * executionEpoch 与 invocation 的匹配。
-   */
-  @Select(
-      """
-      select """
-          + SELECT_FIELDS
-          + """
-      from harness_model_invocation mi
-      join harness_thread t on t.id = mi.thread_id
-      where t.execution_epoch = mi.execution_epoch
-        and (
-          (mi.status = 'RUNNING' and mi.worker_until <= #{now})
-          or (mi.status = 'RETRY_WAIT' and mi.next_attempt_at <= #{now})
-          or mi.status = 'QUEUED'
-        )
-      order by
-        case
-          when mi.status = 'RUNNING' then 0
-          when mi.status = 'RETRY_WAIT' then 1
-          else 2
-        end,
-        case
-          when mi.status = 'RUNNING' then mi.worker_until
-          when mi.status = 'RETRY_WAIT' then mi.next_attempt_at
-          else mi.created_at
-        end,
-        mi.id
-      limit 1
-      """)
-  @ResultMap("modelInvocationResultMap")
-  ModelInvocationDO findNextClaimable(@Param("now") OffsetDateTime now);
-
-  /**
    * QUEUED -> RUNNING：建立 started_at/deadline_at/last_activity_at 与新 lease；保留 attempt。 CAS：QUEUED
    * 且执行 epoch 匹配。
    */

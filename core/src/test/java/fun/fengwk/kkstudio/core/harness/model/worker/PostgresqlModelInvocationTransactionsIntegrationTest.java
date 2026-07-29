@@ -596,63 +596,6 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
   // ---------- due scan order ----------
 
   /** expired RUNNING > due RETRY_WAIT > QUEUED。每次 pick 之后调用方都 claim 该行，模拟 worker 真实节奏。 */
-  @Test
-  void findNextClaimablePicksExpiredRunningBeforeDueRetryBeforeQueued() throws Exception {
-    Instant base = now();
-    Fixture expired = newQueued(base);
-    Optional<ClaimedModelInvocation> firstExpired =
-        transactions.claim(
-            expired.invocationId, "tok-expired", ModelCallTimeoutPolicy.DEFAULT, SHORT_LEASE, base);
-    assertTrue(firstExpired.isPresent());
-
-    Fixture retryFixture = newQueued(base);
-    Instant retryFirstNow = base.plus(Duration.ofMillis(5));
-    Optional<ClaimedModelInvocation> firstRetry =
-        transactions.claim(
-            retryFixture.invocationId,
-            "tok-retry-1",
-            ModelCallTimeoutPolicy.DEFAULT,
-            LONG_LEASE,
-            retryFirstNow);
-    assertTrue(firstRetry.isPresent());
-    Instant retryNextAt = retryFirstNow.plus(Duration.ofSeconds(1));
-    transactions.scheduleRetry(
-        firstRetry.get(),
-        retryNextAt,
-        firstRetry.get().invocation().lastActivityAt(),
-        retryFirstNow);
-
-    Fixture queuedFixture = newQueued(base);
-
-    Instant now = base.plus(Duration.ofSeconds(3));
-
-    // 1st pick: expired RUNNING
-    Optional<ModelInvocation> first = transactions.findNextClaimable(now);
-    assertTrue(first.isPresent());
-    assertEquals(
-        expired.invocationId, first.get().id(), "expired RUNNING must win over due RETRY_WAIT");
-    transactions.claim(
-        expired.invocationId, "tok-take-1", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
-
-    // 2nd pick: due RETRY_WAIT
-    Optional<ModelInvocation> second = transactions.findNextClaimable(now);
-    assertTrue(second.isPresent());
-    assertEquals(retryFixture.invocationId, second.get().id(), "due RETRY_WAIT must come next");
-    transactions.claim(
-        retryFixture.invocationId, "tok-take-2", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
-
-    // 3rd pick: QUEUED
-    Optional<ModelInvocation> third = transactions.findNextClaimable(now);
-    assertTrue(third.isPresent());
-    assertEquals(queuedFixture.invocationId, third.get().id(), "QUEUED must come last");
-    transactions.claim(
-        queuedFixture.invocationId, "tok-take-3", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
-
-    // 4th pick: empty
-    Optional<ModelInvocation> fourth = transactions.findNextClaimable(now);
-    assertTrue(fourth.isEmpty(), "no more claimable work");
-  }
-
   // ---------- fence negatives ----------
 
   /** Thread executionEpoch 被并发推进后 claim 返回 empty；持有旧 claim 的 mutation 返回 LOST_OWNERSHIP。 */

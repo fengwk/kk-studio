@@ -137,24 +137,6 @@ public class EnvironmentDaemonGateway
     }
   }
 
-  /**
-   * Notifies the READY listener for each READY environment. Durable recovery remains in ToolWorker;
-   * retained for lifecycle scheduling and deterministic tests.
-   */
-  public void pollOnce() {
-    List<String> ready;
-    synchronized (this) {
-      ready =
-          environmentConnections.values().stream()
-              .filter(ConnectionState::isReady)
-              .map(state -> state.environmentName)
-              .toList();
-    }
-    for (String environmentName : ready) {
-      notifyEnvironmentReady(environmentName);
-    }
-  }
-
   @Override
   public ToolExecutionHandle invoke(
       String environmentName, ToolExecutionRequest request, ToolExecutionListener listener) {
@@ -641,7 +623,7 @@ public class EnvironmentDaemonGateway
     try {
       environmentReadyListener.onEnvironmentReady(environmentName);
     } catch (RuntimeException ignored) {
-      // Listener failures must not re-enter protocol state. Durable polling remains authoritative.
+      // Listener failures must not re-enter protocol state.
     }
   }
 

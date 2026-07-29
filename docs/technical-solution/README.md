@@ -11,7 +11,7 @@ flowchart TD
     A --> O[domain-map.md<br/>领域词汇与映射]
     A --> Q[harness-runtime-architecture.md<br/>Harness Runtime 架构]
     A --> X[harness-runtime-contracts.md<br/>Runtime 公共契约]
-    A --> S[harness-storage-runtime.md<br/>PostgreSQL、Redis 与恢复]
+    A --> S[harness-storage-runtime.md<br/>PostgreSQL、Redis 与 activation]
     A --> D[backend-implementation-design.md<br/>后端实现]
     A --> E[storage-models.md<br/>存储模型]
     A --> F[frontend-implementation-design.md<br/>前端实现]
@@ -32,7 +32,7 @@ flowchart TD
 | 2 | [domain-map.md](domain-map.md) | Harness/Studio 词汇与前后端映射 | 统一命名与对接 |
 | 3 | [harness-runtime-architecture.md](harness-runtime-architecture.md) | Runtime、Invocation、Interaction 与 durable actor 边界 | Harness 核心执行架构 |
 | 4 | [harness-runtime-contracts.md](harness-runtime-contracts.md) | 核心类型、状态机、端口与事务契约 | 编写 Runtime 和 Adapter |
-| 5 | [harness-storage-runtime.md](harness-storage-runtime.md) | PostgreSQL、Redis、通知、实时流、恢复 | 实现持久化与事件驱动基础设施 |
+| 5 | [harness-storage-runtime.md](harness-storage-runtime.md) | PostgreSQL、Redis、通知、实时流、activation | 实现持久化与事件驱动基础设施 |
 | 6 | [backend-implementation-design.md](backend-implementation-design.md) | `share` / `core` / `web` 的 HTTP、SSE 和 WebSocket 边界 | 修改后端控制面 |
 | 7 | [storage-models.md](storage-models.md) | 表结构、资源文件、seed 语义 | 调整存储或初始化脚本 |
 | 8 | [frontend-implementation-design.md](frontend-implementation-design.md) | 路由、状态管理、测试边界；视觉约定见 [前端设计规范](../product-design/frontend-design-system.md) | 修改前端页面或 API 适配 |
@@ -52,7 +52,7 @@ flowchart TD
 | 领域词汇与映射 | [domain-map.md](domain-map.md) |
 | Harness Runtime 架构 | [harness-runtime-architecture.md](harness-runtime-architecture.md) |
 | Runtime 公共契约 | [harness-runtime-contracts.md](harness-runtime-contracts.md) |
-| PostgreSQL、Redis 与恢复 | [harness-storage-runtime.md](harness-storage-runtime.md) |
+| PostgreSQL、Redis 与 activation | [harness-storage-runtime.md](harness-storage-runtime.md) |
 | 后端实现 | [backend-implementation-design.md](backend-implementation-design.md) |
 | 存储模型 | [storage-models.md](storage-models.md) |
 | 前端实现 | [frontend-implementation-design.md](frontend-implementation-design.md) |

@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.core.harness.model.worker;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import org.junit.jupiter.api.Test;
@@ -11,19 +10,17 @@ import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelWorker;
 import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelWorkerConfig;
 
 /**
- * Verifies disabled test deployment composes Model worker infrastructure without invoking adapters.
+ * Verifies disabled test deployment composes Model worker infrastructure without consuming Redis
+ * activation messages.
  */
 class ModelWorkerWiringTest extends PostgresSpringTestSupport {
 
   @Autowired private ModelWorker modelWorker;
   @Autowired private ModelWorkerConfig modelWorkerConfig;
-  @Autowired private ModelWorkerLifecycle modelWorkerLifecycle;
 
   @Test
   void composesModelWorkerInfrastructureWhileWorkersAreDisabled() {
     assertNotNull(modelWorker);
     assertNotNull(modelWorkerConfig);
-    assertNotNull(modelWorkerLifecycle);
-    assertFalse(modelWorkerLifecycle.isRunning());
   }
 }

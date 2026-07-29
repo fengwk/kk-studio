@@ -80,8 +80,7 @@ public class InteractionServiceImpl implements InteractionService {
     try {
       activationNotifier.notifyAfterCommit(target);
     } catch (RuntimeException ignored) {
-      // Recovery scans durable facts; Redis notification failure never reverses a committed
-      // response.
+      // Redis notification failure never reverses a committed response.
     }
   }
 

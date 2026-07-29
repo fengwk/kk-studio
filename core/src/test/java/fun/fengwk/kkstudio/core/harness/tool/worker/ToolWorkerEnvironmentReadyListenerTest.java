@@ -17,10 +17,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
 
-/**
- * Production READY bridge must leave the WebSocket stack via the tool-worker executor and still
- * dispatch when that executor rejects work.
- */
+/** Production READY bridge must leave the WebSocket stack via the tool-worker executor. */
 class ToolWorkerEnvironmentReadyListenerTest {
 
   @Test
@@ -40,7 +37,7 @@ class ToolWorkerEnvironmentReadyListenerTest {
   }
 
   @Test
-  void fallsBackToDirectDispatchWhenExecutorRejects() {
+  void isolatesExecutorRejectionWithoutDirectDispatch() {
     ToolWorker worker = mock(ToolWorker.class);
     @SuppressWarnings("unchecked")
     ObjectProvider<ToolWorker> provider = mock(ObjectProvider.class);
@@ -52,7 +49,7 @@ class ToolWorkerEnvironmentReadyListenerTest {
 
     new ToolWorkerEnvironmentReadyListener(provider, rejecting).onEnvironmentReady("env-b");
 
-    verify(worker).dispatchNext(ToolExecutionLocation.ENVIRONMENT, "env-b");
+    verify(worker, never()).dispatchNext(ToolExecutionLocation.ENVIRONMENT, "env-b");
   }
 
   @Test

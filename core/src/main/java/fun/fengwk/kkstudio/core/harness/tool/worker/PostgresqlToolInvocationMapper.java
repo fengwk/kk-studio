@@ -126,27 +126,6 @@ public interface PostgresqlToolInvocationMapper extends BaseMapper {
       @Param("environmentName") String environmentName,
       @Param("now") OffsetDateTime now);
 
-  @Select(
-      "select "
-          + FIELDS
-          + """
-      from harness_tool_invocation ti
-      join harness_thread t on t.id = ti.thread_id
-      where ti.location = #{location}
-        and t.execution_epoch = ti.execution_epoch
-        and ti.status = 'RUNNING'
-        and ti.worker_until <= #{now}
-        and not exists (
-          select 1 from harness_interaction i
-          where i.owner_kind = 'TOOL_INVOCATION' and i.owner_id = ti.id and i.status = 'OPEN'
-        )
-      order by ti.worker_until, ti.id
-      limit 1
-      """)
-  @ResultMap("toolInvocationResultMap")
-  ToolInvocationDO findNextExpiredRunning(
-      @Param("location") String location, @Param("now") OffsetDateTime now);
-
   @Update(
       """
       update harness_tool_invocation

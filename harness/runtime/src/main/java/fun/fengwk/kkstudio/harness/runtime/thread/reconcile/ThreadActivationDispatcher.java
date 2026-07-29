@@ -18,7 +18,7 @@ import java.util.concurrent.RejectedExecutionException;
  * <p>它将 {@link ThreadKick} 合并为本 JVM 中有限的 executor task；不持有 durable 工作队列、Thread 状态机或跨节点锁。生产协作链为：
  *
  * <ol>
- *   <li>Core recovery scanner 根据 PostgreSQL runnable/lease 事实调用 {@link #kick(long)}；
+ *   <li>Core Redis activation subscriber 调用 {@link #kick(long)}；
  *   <li>本类按 Thread id 合并并发 kick，并把一次 activation 交给 {@link Executor}；
  *   <li>生产 wiring 将 {@link ReconcileRunner} 绑定到 {@link ThreadReconciler#reconcile(long, String)}，由
  *       Reconciler 经事务端口推进 durable facts；
@@ -28,7 +28,7 @@ import java.util.concurrent.RejectedExecutionException;
  *
  * <p>同一 Thread 在本进程内同时最多运行一个 reconcile pass。执行期间的多个 kick 只保留一个 boolean rerunRequested edge；完成时以
  * {@link ConcurrentHashMap#compute(Object, java.util.function.BiFunction)} 原子决定继续或移除，避免退出窗口丢失新
- * kick。 跨节点唯一性、lease 与 fencing 始终以数据库 claim 为权威；通知丢失或重复仅影响延迟，由 durable recovery 补偿。
+ * kick。 跨节点唯一性、lease 与 fencing 始终以数据库 claim 为权威；通知丢失或重复不会改变 durable facts。
  */
 @Slf4j
 public final class ThreadActivationDispatcher implements ThreadKick {

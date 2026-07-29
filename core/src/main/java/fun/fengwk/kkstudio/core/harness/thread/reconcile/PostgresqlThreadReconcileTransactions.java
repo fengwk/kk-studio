@@ -429,7 +429,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     try {
       release(Objects.requireNonNull(ownership, "ownership"), true, now);
     } catch (RuntimeException ignored) {
-      // Explicitly best-effort; the expiry/recovery path remains available.
+      // Explicitly best-effort; a later durable transition may emit a fresh activation target.
     }
   }
 

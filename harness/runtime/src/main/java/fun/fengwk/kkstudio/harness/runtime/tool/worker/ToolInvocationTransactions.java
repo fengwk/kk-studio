@@ -22,8 +22,6 @@ public interface ToolInvocationTransactions {
   Optional<ToolInvocation> findNextClaimable(
       ToolExecutionLocation location, String environmentName, Instant now);
 
-  Optional<ToolInvocation> findNextExpiredRunning(ToolExecutionLocation location, Instant now);
-
   Optional<ClaimedToolInvocation> claim(
       long invocationId,
       String workerToken,

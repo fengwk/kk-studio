@@ -62,17 +62,6 @@ public class PostgresqlModelInvocationTransactions implements ModelInvocationTra
         : Optional.of(ModelInvocationRowConverter.toAggregate(row));
   }
 
-  @Override
-  @Transactional(readOnly = true)
-  public Optional<ModelInvocation> findNextClaimable(Instant now) {
-    Objects.requireNonNull(now, "now");
-    ModelInvocationDO row =
-        invocationMapper.findNextClaimable(ModelInvocationRowConverter.toUtcOffsetDateTime(now));
-    return row == null
-        ? Optional.empty()
-        : Optional.of(ModelInvocationRowConverter.toAggregate(row));
-  }
-
   // ---------- claim ----------
 
   @Override

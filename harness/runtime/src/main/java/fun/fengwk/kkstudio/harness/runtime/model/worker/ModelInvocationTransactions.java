@@ -31,11 +31,6 @@ public interface ModelInvocationTransactions {
   Optional<ModelInvocation> findClaimable(long invocationId, Instant now);
 
   /**
-   * 为 recovery/polling 读取一个可 claim Invocation。选择顺序由 adapter 定义，但不得返回拥有有效 worker lease 的 RUNNING 行。
-   */
-  Optional<ModelInvocation> findNextClaimable(Instant now);
-
-  /**
    * 原子 claim Invocation。
    *
    * <p>QUEUED 首次进入 RUNNING 时建立 {@code startedAt/deadlineAt/lastActivityAt}；RETRY_WAIT 保留首次 建立的

@@ -20,7 +20,7 @@ import java.util.Optional;
  *
  * <p>它不是常驻 Java 线程。用户 Input、Tool 终态、Interaction 与 Model 完成先在各自事务中提交 durable facts，再于提交后 best-effort
  * 发出 activation 信号；HTTP/SSE/Provider 回调本身都不是待执行工作队列。跨节点单飞由数据库 processor lease + fencing token
- * 保证；丢失的 kick 由 runnable 扫描 / recovery 补偿。
+ * 保证；丢失的 kick 不会改变 durable facts。
  *
  * <p>严格按以下优先级推进 owned Thread，之间用 bounded step loop 防止死循环：
  *
@@ -130,7 +130,7 @@ public final class ThreadReconciler {
     }
 
     // 达到上限代表每轮都“有进展”却始终无法稳定，通常是状态机或 transaction 实现错误。
-    // 主动释放 lease，让 recovery 或后续 reconcile 处理，而不是无限占住这条 Thread。
+    // 主动释放 lease，让后续 activation 处理，而不是无限占住这条 Thread。
     bestEffortRelease(ownership);
     return new StepResult.Failed(
         new Failure(

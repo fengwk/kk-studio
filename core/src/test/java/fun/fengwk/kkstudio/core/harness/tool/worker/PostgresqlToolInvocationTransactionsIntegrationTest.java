@@ -151,28 +151,6 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
   }
 
   @Test
-  void globalExpiredRunningScanFindsOnlyRequestedLocation() throws Exception {
-    Fixture environment =
-        newQueued(ToolExecutionLocation.ENVIRONMENT, "env-a", ToolSideEffect.READ_ONLY, 1L);
-    claim(environment, "expired-environment", BASE, SHORT_LEASE);
-    Instant scanAt = BASE.plusMillis(80);
-
-    assertEquals(
-        environment.invocationId,
-        transactions
-            .findNextExpiredRunning(ToolExecutionLocation.ENVIRONMENT, scanAt)
-            .orElseThrow()
-            .id());
-    assertTrue(
-        transactions.findNextExpiredRunning(ToolExecutionLocation.PLATFORM, scanAt).isEmpty());
-
-    long interactionId = insertOpenInteraction(environment.invocationId);
-    assertTrue(
-        transactions.findNextExpiredRunning(ToolExecutionLocation.ENVIRONMENT, scanAt).isEmpty());
-    resolveInteraction(interactionId);
-  }
-
-  @Test
   void openInteractionBlocksClaimUntilInteractionIsResolved() throws Exception {
     Fixture fixture = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
     long interactionId = insertOpenInteraction(fixture.invocationId);

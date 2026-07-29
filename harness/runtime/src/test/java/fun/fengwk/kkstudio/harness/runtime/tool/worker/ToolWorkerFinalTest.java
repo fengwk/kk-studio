@@ -93,6 +93,35 @@ class ToolWorkerFinalTest {
     assertEquals(1, fixture.transactions.releaseUnstartedCalls);
     assertNull(fixture.transactions.terminalStatus);
     assertEquals(0, fixture.tool.executions);
+    assertTrue(fixture.activations.isEmpty());
+  }
+
+  @Test
+  void dueEnvironmentRetryWaitUnavailabilityReschedulesSameInvocationSignal()
+      throws InterruptedException {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.candidate = retryWaiting(environmentDescriptor(), "env-a");
+    fixture.transactions.descriptor = environmentDescriptor();
+    fixture.rebuildWorkerWithTransport(
+        (environmentName, request, listener) -> {
+          throw new RemoteToolUnavailableException(environmentName + " offline");
+        });
+
+    assertTrue(fixture.transactions.candidate.isDispatchableAt(NOW));
+    assertTrue(fixture.worker.dispatch(fixture.transactions.candidate.id()));
+
+    assertEquals(1, fixture.transactions.releaseUnstartedCalls);
+    assertEquals(InvocationStatus.RETRY_WAIT, fixture.transactions.releasedStatus);
+    assertEquals(
+        NOW.plus(ToolWorkerConfig.DEFAULT.unavailableRetryDelay()),
+        fixture.transactions.releasedNextAttemptAt);
+    assertEquals(0, fixture.transactions.retryCalls);
+    assertTrue(fixture.activations.isEmpty());
+    assertTrue(
+        fixture.activationSignal.await(5, TimeUnit.SECONDS),
+        "timed out waiting for the rescheduled retry activation signal");
+    assertEquals(
+        List.of(new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, 1L)), fixture.activations);
   }
 
   @Test
@@ -351,7 +380,7 @@ class ToolWorkerFinalTest {
   }
 
   @Test
-  void idempotentFailureSchedulesRetryAndSignalsInvocationInsteadOfThread() {
+  void idempotentFailureSignalsInvocationOnlyWhenRetryIsDue() throws InterruptedException {
     Fixture fixture = fixture(ToolSideEffect.IDEMPOTENT);
     fixture.retryPolicy =
         new InvocationRetryPolicy(
@@ -364,6 +393,10 @@ class ToolWorkerFinalTest {
     assertEquals(1, fixture.transactions.retryCalls);
     assertEquals(NOW.plusSeconds(2), fixture.transactions.nextAttemptAt);
     assertNull(fixture.transactions.terminalStatus);
+    assertTrue(fixture.activations.isEmpty());
+    assertTrue(
+        fixture.activationSignal.await(5, TimeUnit.SECONDS),
+        "timed out waiting for the retry activation signal");
     assertEquals(
         List.of(new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, 1L)), fixture.activations);
     assertTrue(fixture.tool.handle.cancelled);
@@ -518,80 +551,6 @@ class ToolWorkerFinalTest {
   }
 
   @Test
-  void dispatchNextUsesRecoveryQueryAndStopOnlyAbandonsProcessLocalHandle() {
-    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
-
-    assertTrue(fixture.worker.dispatchNext());
-    assertEquals(ToolExecutionLocation.PLATFORM, fixture.transactions.queriedLocation);
-    assertNull(fixture.transactions.queriedEnvironmentName);
-    assertFalse(fixture.worker.dispatchNext());
-    assertEquals(1, fixture.transactions.findNextCalls);
-    fixture.worker.stop();
-
-    assertTrue(fixture.tool.handle.cancelled);
-    assertNull(fixture.transactions.terminalStatus);
-    assertFalse(fixture.worker.hasActiveExecution());
-  }
-
-  @Test
-  void recoverNextExpiredFencesStalePlatformHandleAndIgnoresLateComplete() {
-    Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT);
-    assertTrue(fixture.worker.dispatch(1));
-    assertTrue(fixture.worker.hasActiveExecution());
-
-    fixture.transactions.recoveredLease = true;
-    fixture.transactions.expiredCandidate =
-        running(descriptor(ToolSideEffect.NON_IDEMPOTENT), "old");
-    assertTrue(fixture.worker.recoverNextExpired(ToolExecutionLocation.PLATFORM));
-
-    assertEquals(InvocationStatus.UNKNOWN, fixture.transactions.terminalStatus);
-    assertEquals("LEASE_EXPIRED", fixture.transactions.error.kind());
-    assertTrue(fixture.tool.handle.cancelled);
-    assertFalse(fixture.worker.hasActiveExecution());
-
-    fixture.transactions.terminalStatus = null;
-    fixture.tool.listener.onComplete(result("late"));
-    assertNull(fixture.transactions.terminalStatus);
-  }
-
-  @Test
-  void recoverNextExpiredFencesStaleEnvironmentHandleAndClearsSlot() {
-    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
-    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
-    fixture.transactions.descriptor = environmentDescriptor();
-    AtomicReference<ToolExecutionListener> remoteListener = new AtomicReference<>();
-    fixture.rebuildWorkerWithTransport(
-        (environmentName, request, listener) -> {
-          remoteListener.set(listener);
-          return new ToolExecutionHandle() {
-            private boolean cancelled;
-
-            @Override
-            public void cancel() {
-              cancelled = true;
-            }
-
-            @Override
-            public boolean isCancelled() {
-              return cancelled;
-            }
-          };
-        });
-
-    assertTrue(fixture.worker.dispatch(1));
-    assertTrue(fixture.worker.hasActiveExecution("env-a"));
-
-    fixture.transactions.recoveredLease = true;
-    fixture.transactions.expiredCandidate = running(environmentDescriptor(), "old");
-    assertTrue(fixture.worker.recoverNextExpired(ToolExecutionLocation.ENVIRONMENT));
-
-    assertEquals(InvocationStatus.UNKNOWN, fixture.transactions.terminalStatus);
-    assertFalse(fixture.worker.hasActiveExecution("env-a"));
-    remoteListener.get().onComplete(result("late-remote"));
-    assertEquals(InvocationStatus.UNKNOWN, fixture.transactions.terminalStatus);
-  }
-
-  @Test
   void localConflictAbandonsStaleHandleAndUnknownsNewClaimWithoutRerunningTool() {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
     assertTrue(fixture.worker.dispatch(1));
@@ -673,6 +632,32 @@ class ToolWorkerFinalTest {
         null);
   }
 
+  private static ToolInvocation retryWaiting(ToolDescriptor descriptor, String environmentName) {
+    return new ToolInvocation(
+        1L,
+        2L,
+        3L,
+        0,
+        "call-1",
+        descriptor,
+        "{}",
+        ToolExecutionLocation.ENVIRONMENT,
+        environmentName,
+        7L,
+        InvocationStatus.RETRY_WAIT,
+        2,
+        NOW,
+        null,
+        NOW.plusSeconds(30),
+        NOW.minusSeconds(1),
+        null,
+        null,
+        null,
+        NOW.minusSeconds(2),
+        NOW.minusSeconds(1),
+        null);
+  }
+
   private static ToolInvocation running(ToolDescriptor descriptor, String token) {
     String environmentName = descriptor.name().startsWith("environment") ? "env-a" : null;
     ToolExecutionLocation location =
@@ -710,6 +695,7 @@ class ToolWorkerFinalTest {
     private final MemoryArtifacts artifacts = new MemoryArtifacts();
     private final List<RealtimeEvent> realtimeEvents = new ArrayList<>();
     private final List<ExecutionTarget> activations = new ArrayList<>();
+    private final CountDownLatch activationSignal = new CountDownLatch(1);
 
     private ToolInterceptorChain interceptorChain = new ToolInterceptorChain(List.of(), List.of());
     private Optional<RecordingTool> registryTool;
@@ -759,6 +745,7 @@ class ToolWorkerFinalTest {
                   throw new IllegalStateException("signal unavailable");
                 }
                 activations.add(target);
+                activationSignal.countDown();
               },
               config,
               Clock.fixed(NOW, ZoneOffset.UTC),
@@ -769,7 +756,6 @@ class ToolWorkerFinalTest {
 
   private static final class RecordingTransactions implements ToolInvocationTransactions {
     private ToolInvocation candidate;
-    private ToolInvocation expiredCandidate;
     private ToolDescriptor descriptor;
     private boolean recoveredLease;
     private boolean forceLocalConflict;
@@ -785,6 +771,8 @@ class ToolWorkerFinalTest {
     private final List<Instant> activities = new ArrayList<>();
     private int retryCalls;
     private int releaseUnstartedCalls;
+    private InvocationStatus releasedStatus;
+    private Instant releasedNextAttemptAt;
     private Instant nextAttemptAt;
     private InvocationStatus terminalStatus;
     private ToolResult result;
@@ -810,15 +798,6 @@ class ToolWorkerFinalTest {
               && Objects.equals(candidate.environmentName(), environmentName)
           ? Optional.of(candidate)
           : Optional.empty();
-    }
-
-    @Override
-    public Optional<ToolInvocation> findNextExpiredRunning(
-        ToolExecutionLocation location, Instant now) {
-      if (expiredCandidate != null && expiredCandidate.location() == location) {
-        return Optional.of(expiredCandidate);
-      }
-      return Optional.empty();
     }
 
     @Override
@@ -862,6 +841,8 @@ class ToolWorkerFinalTest {
         Instant nextAttemptAt,
         Instant now) {
       releaseUnstartedCalls++;
+      releasedStatus = previousStatus;
+      releasedNextAttemptAt = nextAttemptAt;
       return ToolInvocationUpdateOutcome.APPLIED;
     }
 

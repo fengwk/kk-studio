@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.harness.tool.worker;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentReadyListener;
@@ -11,10 +12,11 @@ import java.util.concurrent.Executor;
 
 /**
  * Production READY bridge: schedules {@link ToolWorker#dispatchNext} off the WebSocket receive
- * stack using the tool-worker executor, with direct fallback when the executor rejects work.
+ * stack using the tool-worker executor.
  *
  * <p>{@link ToolWorker} is resolved lazily so Gateway construction does not create a bean cycle.
  */
+@Slf4j
 final class ToolWorkerEnvironmentReadyListener implements EnvironmentReadyListener {
 
   private final ObjectProvider<ToolWorker> toolWorker;
@@ -30,9 +32,10 @@ final class ToolWorkerEnvironmentReadyListener implements EnvironmentReadyListen
   @Override
   public void onEnvironmentReady(String environmentName) {
     try {
-      readyDispatchExecutor.execute(() -> dispatchSafely(environmentName));
-    } catch (RuntimeException rejected) {
-      dispatchSafely(environmentName);
+      String readyEnvironmentName = Objects.requireNonNull(environmentName, "environmentName");
+      readyDispatchExecutor.execute(() -> dispatchSafely(readyEnvironmentName));
+    } catch (RuntimeException error) {
+      log.warn("Environment READY dispatch scheduling failed", error);
     }
   }
 
@@ -43,7 +46,7 @@ final class ToolWorkerEnvironmentReadyListener implements EnvironmentReadyListen
         worker.dispatchNext(ToolExecutionLocation.ENVIRONMENT, environmentName);
       }
     } catch (RuntimeException ignored) {
-      // Durable polling remains authoritative when the routing hint fails.
+      log.warn("Environment READY dispatch failed for {}", environmentName, ignored);
     }
   }
 }

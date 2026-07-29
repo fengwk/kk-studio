@@ -1,13 +1,11 @@
 package fun.fengwk.kkstudio.core.harness.thread.worker;
 
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.core.harness.thread.reconcile.ThreadReconcileMapper;
 import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadActivationDispatcher;
@@ -17,16 +15,14 @@ import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconciler;
 import java.time.Clock;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
  * Thread activation 的生产 wiring。
  *
- * <p>协作路径为：PostgreSQL recovery scan -> {@link ThreadKick} -> {@link ThreadActivationDispatcher} ->
- * bounded reconcile executor -> {@link ThreadReconciler} -> {@link
+ * <p>协作路径为：Redis activation subscriber -> {@link ThreadKick} -> {@link ThreadActivationDispatcher}
+ * -> bounded reconcile executor -> {@link ThreadReconciler} -> {@link
  * ThreadReconcileTransactions}。Dispatcher 在 Reconciler 交还 blocker 后经 {@link ActivationNotifier} 发送
  * best-effort wake；跨节点所有权仍只由 PostgreSQL lease/fencing 决定。
  */
@@ -54,18 +50,6 @@ public class HarnessThreadWorkerConfiguration {
         new ThreadPoolExecutor.AbortPolicy());
   }
 
-  @Bean(name = "harnessWorkerScheduler", destroyMethod = "shutdown")
-  @ConditionalOnMissingBean(name = "harnessWorkerScheduler")
-  public ScheduledExecutorService harnessWorkerScheduler() {
-    return Executors.newScheduledThreadPool(
-        2,
-        r -> {
-          Thread t = new Thread(r, "harness-worker");
-          t.setDaemon(true);
-          return t;
-        });
-  }
-
   @Bean
   public ThreadReconciler threadReconciler(
       ThreadReconcileTransactions transactions, HarnessRuntimeProperties properties) {
@@ -83,20 +67,5 @@ public class HarnessThreadWorkerConfiguration {
       ActivationNotifier activationNotifier) {
     return new ThreadActivationDispatcher(
         reconciler::reconcile, threadReconcileExecutor, activationNotifier);
-  }
-
-  @Bean
-  public ThreadRecoveryLifecycle threadRecoveryLifecycle(
-      HarnessRuntimeProperties properties,
-      ThreadReconcileMapper threadMapper,
-      ThreadKick threadKick,
-      @Qualifier("harnessWorkerScheduler") ScheduledExecutorService harnessWorkerScheduler) {
-    return new ThreadRecoveryLifecycle(
-        properties,
-        threadMapper,
-        threadKick,
-        harnessWorkerScheduler,
-        properties.getThreadRecoveryInterval(),
-        properties.getThreadRecoveryBatchSize());
   }
 }

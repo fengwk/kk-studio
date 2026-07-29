@@ -8,8 +8,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentReadyListener;
-import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
-import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyResolver;
@@ -62,7 +60,7 @@ public class HarnessToolWorkerConfiguration {
     return new ToolWorkerEnvironmentReadyListener(toolWorker, toolWorkerScheduler);
   }
 
-  @Bean
+  @Bean(destroyMethod = "stop")
   @ConditionalOnBean({ToolRegistry.class, RemoteToolTransport.class})
   @ConditionalOnMissingBean
   public ToolWorker toolWorker(
@@ -90,20 +88,5 @@ public class HarnessToolWorkerConfiguration {
         clock,
         toolWorkerScheduler,
         () -> UUID.randomUUID().toString());
-  }
-
-  @Bean
-  public ToolWorkerLifecycle toolWorkerLifecycle(
-      HarnessRuntimeProperties properties,
-      ToolWorker worker,
-      LiveEnvironmentRegistry environmentRegistry,
-      @Qualifier("toolWorkerScheduler") ScheduledExecutorService scheduler) {
-    return new ToolWorkerLifecycle(
-        properties,
-        worker,
-        environmentRegistry,
-        scheduler,
-        properties.getToolRecoveryInterval(),
-        properties.getToolRecoveryBatchSize());
   }
 }
