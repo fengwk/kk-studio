@@ -178,14 +178,22 @@ public final class ThreadReconciler {
     if (primaryWork.isPresent()) {
       // Snapshot 只携带已经选出的一个主要动作；switch 不重新选择优先级，只负责映射到对应事务。
       return switch (primaryWork.get()) {
+        case ApplyTerminalModel model -> {
           // 1. 先写入模型终态，才能让后续工具调用和新的 head 变得可见。
-        case ApplyTerminalModel w -> applyTerminalModel(ownership, w.modelInvocationId());
+          yield applyTerminalModel(ownership, model.modelInvocationId());
+        }
+        case ApplyTerminalToolBatch toolBatch -> {
           // 2. 再整体写入已结束的 Tool sibling，避免下一次模型回复缺少工具结果。
-        case ApplyTerminalToolBatch w -> applyTerminalToolResults(ownership, w.assistantEntryId());
+          yield applyTerminalToolResults(ownership, toolBatch.assistantEntryId());
+        }
+        case SuspendForBlocker suspension -> {
           // 3. 仍有外部工作未结束时暂停；不能越过它接收更晚的 mailbox 输入。
-        case SuspendForBlocker w -> suspendForBlocker(ownership, w.blocker());
+          yield suspendForBlocker(ownership, suspension.blocker());
+        }
+        case CreateModelInvocation creation -> {
           // 4. 当前回合已欠模型回复时先创建调用，避免后续 Input 污染冻结的 ProviderRequest。
-        case CreateModelInvocation w -> createModelInvocation(ownership, w.plan());
+          yield createModelInvocation(ownership, creation.plan());
+        }
       };
     }
 
