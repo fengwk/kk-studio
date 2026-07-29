@@ -147,8 +147,14 @@ class ThreadReconcilerTest {
   @Test
   void terminalModelApplyRunsBeforeToolApply() {
     FakeTransactions txs = new FakeTransactions();
-    txs.queueSnapshot(b -> b.terminalModelId = Optional.of(11L));
-    txs.queueSnapshot(b -> b.readyToolAssistantId = Optional.of(22L));
+    txs.queueSnapshot(
+        b ->
+            b.primaryWork =
+                Optional.of(new ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalModel(11L)));
+    txs.queueSnapshot(
+        b ->
+            b.primaryWork =
+                Optional.of(new ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalToolBatch(22L)));
     txs.queueSnapshot(b -> {});
     txs.applyTerminalModelOutcome = ApplyOutcome.PROGRESSED;
     txs.applyTerminalToolOutcome = ApplyOutcome.PROGRESSED;
@@ -168,7 +174,10 @@ class ThreadReconcilerTest {
   @Test
   void terminalToolApplyRunsBeforeSuspend() {
     FakeTransactions txs = new FakeTransactions();
-    txs.queueSnapshot(b -> b.readyToolAssistantId = Optional.of(22L));
+    txs.queueSnapshot(
+        b ->
+            b.primaryWork =
+                Optional.of(new ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalToolBatch(22L)));
     txs.queueSnapshot(b -> {});
     txs.applyTerminalToolOutcome = ApplyOutcome.PROGRESSED;
     txs.quiesceOutcome = QuiesceOutcome.QUIESCENT;
@@ -189,7 +198,10 @@ class ThreadReconcilerTest {
         new ContinuationRef(
             new ExecutionTarget(ExecutionTargetKind.THREAD, THREAD_ID),
             new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, 33L));
-    txs.queueSnapshot(b -> b.blockerContinuation = Optional.of(blocker));
+    txs.queueSnapshot(
+        b ->
+            b.primaryWork =
+                Optional.of(new ThreadReconcileSnapshot.PrimaryWork.SuspendForBlocker(blocker)));
     txs.suspendOutcome = SuspendOutcome.SUSPENDED;
 
     StepResult.Suspended result =
@@ -208,7 +220,8 @@ class ThreadReconcilerTest {
             1L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
     txs.queueSnapshot(
         b -> {
-          b.modelInvocationPlan = Optional.of(plan);
+          b.primaryWork =
+              Optional.of(new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan));
           b.queuedInputs.add(
               ReconcileTestSupport.input(THREAD_ID, 1L, ThreadInputType.USER_MESSAGE));
         });
@@ -282,13 +295,14 @@ class ThreadReconcilerTest {
     txs.harvestOutcome = ApplyOutcome.PROGRESSED;
     txs.queueSnapshot(
         b -> {
-          b.headEntryId = 2L;
-          b.modelInvocationPlan =
+          b.primaryWork =
               Optional.of(
-                  new ModelInvocationPlan(
-                      2L,
-                      ReconcileTestSupport.providerRequest(),
-                      ReconcileTestSupport.configSnapshot()));
+                  new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(
+                      new ModelInvocationPlan(
+                          2L,
+                          ReconcileTestSupport.providerRequest(),
+                          ReconcileTestSupport.configSnapshot())));
+          b.headEntryId = 2L;
           b.queuedInputs.add(later);
         });
     txs.createOutcome =
@@ -326,8 +340,9 @@ class ThreadReconcilerTest {
             2L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
     txs.queueSnapshot(
         b -> {
+          b.primaryWork =
+              Optional.of(new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan));
           b.headEntryId = 2L;
-          b.modelInvocationPlan = Optional.of(plan);
           b.queuedInputs.add(later);
         });
     txs.createOutcome =
@@ -362,7 +377,10 @@ class ThreadReconcilerTest {
             new ExecutionTarget(ExecutionTargetKind.THREAD, THREAD_ID),
             new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, 33L));
 
-    txs.queueSnapshot(b -> b.blockerContinuation = Optional.of(blocker));
+    txs.queueSnapshot(
+        b ->
+            b.primaryWork =
+                Optional.of(new ThreadReconcileSnapshot.PrimaryWork.SuspendForBlocker(blocker)));
     txs.queueSnapshot(b -> {});
     txs.suspendOutcome = SuspendOutcome.WORK_AVAILABLE;
     txs.quiesceOutcome = QuiesceOutcome.QUIESCENT;
@@ -418,7 +436,10 @@ class ThreadReconcilerTest {
   @Test
   void lostOwnershipOnApplyReturnsLostOwnership() {
     FakeTransactions txs = new FakeTransactions();
-    txs.queueSnapshot(b -> b.terminalModelId = Optional.of(99L));
+    txs.queueSnapshot(
+        b ->
+            b.primaryWork =
+                Optional.of(new ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalModel(99L)));
     txs.applyTerminalModelOutcome = ApplyOutcome.LOST_OWNERSHIP;
 
     StepResult result = new ThreadReconciler(txs, CLOCK).reconcile(THREAD_ID, TOKEN);
@@ -429,7 +450,10 @@ class ThreadReconcilerTest {
   @Test
   void lostOwnershipOnToolApplyReturnsLostOwnership() {
     FakeTransactions txs = new FakeTransactions();
-    txs.queueSnapshot(b -> b.readyToolAssistantId = Optional.of(33L));
+    txs.queueSnapshot(
+        b ->
+            b.primaryWork =
+                Optional.of(new ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalToolBatch(33L)));
     txs.applyTerminalToolOutcome = ApplyOutcome.LOST_OWNERSHIP;
 
     StepResult result = new ThreadReconciler(txs, CLOCK).reconcile(THREAD_ID, TOKEN);
@@ -443,7 +467,10 @@ class ThreadReconcilerTest {
     ModelInvocationPlan plan =
         new ModelInvocationPlan(
             1L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
-    txs.queueSnapshot(b -> b.modelInvocationPlan = Optional.of(plan));
+    txs.queueSnapshot(
+        b ->
+            b.primaryWork =
+                Optional.of(new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan)));
     txs.createOutcome = new ModelCreationOutcome.LostOwnership();
 
     StepResult result = new ThreadReconciler(txs, CLOCK).reconcile(THREAD_ID, TOKEN);
@@ -458,7 +485,10 @@ class ThreadReconcilerTest {
         new ContinuationRef(
             new ExecutionTarget(ExecutionTargetKind.THREAD, THREAD_ID),
             new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, 33L));
-    txs.queueSnapshot(b -> b.blockerContinuation = Optional.of(blocker));
+    txs.queueSnapshot(
+        b ->
+            b.primaryWork =
+                Optional.of(new ThreadReconcileSnapshot.PrimaryWork.SuspendForBlocker(blocker)));
     txs.suspendOutcome = SuspendOutcome.LOST_OWNERSHIP;
 
     StepResult result = new ThreadReconciler(txs, CLOCK).reconcile(THREAD_ID, TOKEN);
@@ -500,7 +530,10 @@ class ThreadReconcilerTest {
         new ModelInvocationPlan(
             1L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
     Failure failure = new Failure("CREATE_FAIL", "boom");
-    txs.queueSnapshot(b -> b.modelInvocationPlan = Optional.of(plan));
+    txs.queueSnapshot(
+        b ->
+            b.primaryWork =
+                Optional.of(new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan)));
     txs.createOutcome = new ModelCreationOutcome.Failed(failure);
 
     StepResult.Failed result =
@@ -597,7 +630,10 @@ class ThreadReconcilerTest {
     ReconcileTestSupport.MutableClock localClock =
         new ReconcileTestSupport.MutableClock(ReconcileTestSupport.NOW, Duration.ofMillis(7));
     FakeTransactions txs = new FakeTransactions();
-    txs.queueSnapshot(b -> b.terminalModelId = Optional.of(7L));
+    txs.queueSnapshot(
+        b ->
+            b.primaryWork =
+                Optional.of(new ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalModel(7L)));
     txs.queueSnapshot(b -> {});
     txs.applyTerminalModelOutcome = ApplyOutcome.PROGRESSED;
     txs.quiesceOutcome = QuiesceOutcome.QUIESCENT;
@@ -617,11 +653,8 @@ class ThreadReconcilerTest {
     long threadId;
     String token;
     long headEntryId = 1L;
-    Optional<Long> terminalModelId = Optional.empty();
-    Optional<Long> readyToolAssistantId = Optional.empty();
-    Optional<ContinuationRef> blockerContinuation = Optional.empty();
+    Optional<ThreadReconcileSnapshot.PrimaryWork> primaryWork = Optional.empty();
     List<ThreadInput> queuedInputs = new ArrayList<>();
-    Optional<ModelInvocationPlan> modelInvocationPlan = Optional.empty();
 
     SnapshotBuilder(long threadId, String token) {
       this.threadId = threadId;
@@ -633,11 +666,8 @@ class ThreadReconcilerTest {
       return new ThreadReconcileSnapshot(
           ownership,
           ReconcileTestSupport.thread(threadId, 0L, token, headEntryId),
-          terminalModelId,
-          readyToolAssistantId,
-          blockerContinuation,
-          queuedInputs,
-          modelInvocationPlan);
+          primaryWork,
+          queuedInputs);
     }
   }
 

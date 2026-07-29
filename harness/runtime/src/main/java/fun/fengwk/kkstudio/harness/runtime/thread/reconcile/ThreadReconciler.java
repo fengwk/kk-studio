@@ -4,6 +4,11 @@ import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
 import fun.fengwk.kkstudio.harness.runtime.execution.Failure;
 import fun.fengwk.kkstudio.harness.runtime.execution.StepResult;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalModel;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalToolBatch;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.SuspendForBlocker;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -150,39 +155,48 @@ public final class ThreadReconciler {
   }
 
   /**
-   * 按固定优先级选择并执行一个状态转换。
+   * 推进 snapshot 选出的一个状态转换。
    *
-   * <p>优先级必须集中保留在本方法中，便于审计因果顺序；各分支只把具体事务及 outcome 映射委托给命名方法：
+   * <p>{@link ThreadReconcileTransactions#loadOwnedSnapshot(ThreadOwnership, Instant)} 返回的 Snapshot
+   * 由“一个主要动作 + 后续输入”组成。主要动作（当前回合必须先完成的工作）已按以下固定优先级选出；本方法只用穷尽 switch 将它映射到对应事务：
    *
    * <ol>
-   *   <li>materialize terminal Model；
-   *   <li>materialize terminal Tool sibling batch；
-   *   <li>suspend/recheck 未完成的 Model/Tool blocker；
-   *   <li>为既有 response debt 创建 ModelInvocation；
-   *   <li>harvest 一个 TURN_BOUNDARY；
-   *   <li>quiesce/recheck。
+   *   <li>{@link ApplyTerminalModel}：将已结束的模型调用写成 Assistant/AssistantError Entry，并按需创建工具调用；
+   *   <li>{@link ApplyTerminalToolBatch}：将同一 Assistant 的整组已结束工具调用按 ordinal 写成 Tool Result Entry；
+   *   <li>{@link SuspendForBlocker}：当前回合仍在等待模型或工具时，释放 lease 并等待外部 continuation；
+   *   <li>{@link CreateModelInvocation}：当前 Entry Tree 已欠一次模型回复时，冻结请求并创建 ModelInvocation。
    * </ol>
+   *
+   * <p>只有没有主要动作时，才可从 {@code queuedInputs} 中接收下一个 TURN_BOUNDARY。这样上一回合产生的 response debt 总会先于更晚的
+   * Input 被处理。
+   *
+   * <p>密封类型 {@link PrimaryWork} 的穷尽 switch 确保新增主要动作时，编译器会强制补齐分派。
    */
   private IterationOutcome advanceOneStep(
       ThreadOwnership ownership, ThreadReconcileSnapshot snapshot) {
-    if (snapshot.terminalModelInvocationId().isPresent()) {
-      return applyTerminalModel(ownership, snapshot.terminalModelInvocationId().get());
-    }
-    if (snapshot.readyToolAssistantEntryId().isPresent()) {
-      return applyTerminalToolResults(ownership, snapshot.readyToolAssistantEntryId().get());
-    }
-    if (snapshot.blockerContinuation().isPresent()) {
-      return suspendForBlocker(ownership, snapshot.blockerContinuation().get());
-    }
-    if (snapshot.modelInvocationPlan().isPresent()) {
-      return createModelInvocation(ownership, snapshot.modelInvocationPlan().get());
+    Optional<PrimaryWork> primaryWork = snapshot.primaryWork();
+    if (primaryWork.isPresent()) {
+      // Snapshot 只携带已经选出的一个主要动作；switch 不重新选择优先级，只负责映射到对应事务。
+      return switch (primaryWork.get()) {
+          // 1. 先写入模型终态，才能让后续工具调用和新的 head 变得可见。
+        case ApplyTerminalModel w -> applyTerminalModel(ownership, w.modelInvocationId());
+          // 2. 再整体写入已结束的 Tool sibling，避免下一次模型回复缺少工具结果。
+        case ApplyTerminalToolBatch w -> applyTerminalToolResults(ownership, w.assistantEntryId());
+          // 3. 仍有外部工作未结束时暂停；不能越过它接收更晚的 mailbox 输入。
+        case SuspendForBlocker w -> suspendForBlocker(ownership, w.blocker());
+          // 4. 当前回合已欠模型回复时先创建调用，避免后续 Input 污染冻结的 ProviderRequest。
+        case CreateModelInvocation w -> createModelInvocation(ownership, w.plan());
+      };
     }
 
+    // 5. 仅在当前回合没有主工作时，才接收 mailbox 中下一条回合边界。
     Optional<TurnBoundary> boundary =
         TurnBoundarySelector.select(ownership, snapshot.queuedInputs());
     if (boundary.isPresent()) {
       return harvestBoundary(ownership, boundary.get());
     }
+
+    // 6. 空 snapshot 也不能直接认定空闲；事务会在释放 lease 前二次检查并发到达的事实。
     return quiesce(ownership);
   }
 

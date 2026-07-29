@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime.thread.reconcile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -19,44 +21,105 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * {@link ThreadReconcileSnapshot} 构造约束：ownership / thread 一致性、primary debt/action 互斥、 阻塞 owner 与
- * kind、plan head 一致性、queued inputs 严格递增等不变量。
+ * {@link ThreadReconcileSnapshot} 构造约束：ownership / thread 一致性、{@link
+ * ThreadReconcileSnapshot.PrimaryWork} 四种变体各自正确、blocker owner/kind 不变量、plan head 一致性、queued inputs
+ * 严格 递增等不变量的测试。
  */
 class ThreadReconcileSnapshotTest {
 
   @Test
-  void constructsWithEmptyPrimaryActions() {
+  void constructsWithEmptyPrimaryWork() {
     ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
     HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok");
 
     ThreadReconcileSnapshot snapshot =
-        new ThreadReconcileSnapshot(
-            ownership,
-            thread,
-            Optional.empty(),
-            Optional.empty(),
-            Optional.empty(),
-            List.of(),
-            Optional.empty());
+        new ThreadReconcileSnapshot(ownership, thread, Optional.empty(), List.of());
 
     assertEquals(ownership, snapshot.ownership());
     assertEquals(thread, snapshot.thread());
+    assertTrue(snapshot.primaryWork().isEmpty());
   }
 
   @Test
-  void constructsWhenOnlyTerminalModelIdIsPresent() {
+  void constructsWithApplyTerminalModel() {
     ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
     HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok");
+    ThreadReconcileSnapshot.PrimaryWork work =
+        new ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalModel(99L);
+
     ThreadReconcileSnapshot snapshot =
-        new ThreadReconcileSnapshot(
-            ownership,
-            thread,
-            Optional.of(99L),
-            Optional.empty(),
-            Optional.empty(),
-            List.of(),
-            Optional.empty());
-    assertEquals(Optional.of(99L), snapshot.terminalModelInvocationId());
+        new ThreadReconcileSnapshot(ownership, thread, Optional.of(work), List.of());
+
+    assertTrue(snapshot.primaryWork().isPresent());
+    assertInstanceOf(
+        ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalModel.class, snapshot.primaryWork().get());
+    assertEquals(
+        99L,
+        ((ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalModel) snapshot.primaryWork().get())
+            .modelInvocationId());
+  }
+
+  @Test
+  void constructsWithApplyTerminalToolBatch() {
+    ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
+    HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok");
+    ThreadReconcileSnapshot.PrimaryWork work =
+        new ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalToolBatch(55L);
+
+    ThreadReconcileSnapshot snapshot =
+        new ThreadReconcileSnapshot(ownership, thread, Optional.of(work), List.of());
+
+    assertTrue(snapshot.primaryWork().isPresent());
+    assertInstanceOf(
+        ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalToolBatch.class,
+        snapshot.primaryWork().get());
+    assertEquals(
+        55L,
+        ((ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalToolBatch) snapshot.primaryWork().get())
+            .assistantEntryId());
+  }
+
+  @Test
+  void constructsWithSuspendForBlocker() {
+    ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
+    HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok");
+    ContinuationRef blocker =
+        new ContinuationRef(
+            ownership.threadTarget(),
+            new ExecutionTarget(ExecutionTargetKind.MODEL_INVOCATION, 7L));
+    ThreadReconcileSnapshot.PrimaryWork work =
+        new ThreadReconcileSnapshot.PrimaryWork.SuspendForBlocker(blocker);
+
+    ThreadReconcileSnapshot snapshot =
+        new ThreadReconcileSnapshot(ownership, thread, Optional.of(work), List.of());
+
+    assertTrue(snapshot.primaryWork().isPresent());
+    ThreadReconcileSnapshot.PrimaryWork.SuspendForBlocker sb =
+        assertInstanceOf(
+            ThreadReconcileSnapshot.PrimaryWork.SuspendForBlocker.class,
+            snapshot.primaryWork().get());
+    assertEquals(blocker, sb.blocker());
+  }
+
+  @Test
+  void constructsWithCreateModelInvocation() {
+    ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
+    HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok", 1L);
+    ModelInvocationPlan plan =
+        new ModelInvocationPlan(
+            1L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
+    ThreadReconcileSnapshot.PrimaryWork work =
+        new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan);
+
+    ThreadReconcileSnapshot snapshot =
+        new ThreadReconcileSnapshot(ownership, thread, Optional.of(work), List.of());
+
+    assertTrue(snapshot.primaryWork().isPresent());
+    ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation cmi =
+        assertInstanceOf(
+            ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation.class,
+            snapshot.primaryWork().get());
+    assertEquals(plan, cmi.plan());
   }
 
   @Test
@@ -65,15 +128,7 @@ class ThreadReconcileSnapshotTest {
     HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok");
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ThreadReconcileSnapshot(
-                ownership,
-                thread,
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                List.of(),
-                Optional.empty()));
+        () -> new ThreadReconcileSnapshot(ownership, thread, Optional.empty(), List.of()));
   }
 
   @Test
@@ -92,15 +147,7 @@ class ThreadReconcileSnapshotTest {
 
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ThreadReconcileSnapshot(
-                ownership,
-                thread,
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                List.of(),
-                Optional.empty()));
+        () -> new ThreadReconcileSnapshot(ownership, thread, Optional.empty(), List.of()));
   }
 
   @Test
@@ -109,15 +156,7 @@ class ThreadReconcileSnapshotTest {
     HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok");
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ThreadReconcileSnapshot(
-                ownership,
-                thread,
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                List.of(),
-                Optional.empty()));
+        () -> new ThreadReconcileSnapshot(ownership, thread, Optional.empty(), List.of()));
   }
 
   @Test
@@ -126,49 +165,35 @@ class ThreadReconcileSnapshotTest {
     HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok-b");
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ThreadReconcileSnapshot(
-                ownership,
-                thread,
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                List.of(),
-                Optional.empty()));
+        () -> new ThreadReconcileSnapshot(ownership, thread, Optional.empty(), List.of()));
   }
 
   @Test
-  void rejectsNonPositiveTerminalModelId() {
-    ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
-    HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok");
+  void rejectsNonPositiveApplyTerminalModelId() {
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ThreadReconcileSnapshot(
-                ownership,
-                thread,
-                Optional.of(0L),
-                Optional.empty(),
-                Optional.empty(),
-                List.of(),
-                Optional.empty()));
+        () -> new ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalModel(0L));
   }
 
   @Test
-  void rejectsNonPositiveReadyToolAssistantId() {
-    ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
-    HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok");
+  void rejectsNonPositiveApplyTerminalToolBatchId() {
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ThreadReconcileSnapshot(
-                ownership,
-                thread,
-                Optional.empty(),
-                Optional.of(-1L),
-                Optional.empty(),
-                List.of(),
-                Optional.empty()));
+        () -> new ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalToolBatch(-1L));
+  }
+
+  @Test
+  void rejectsNullBlocker() {
+    assertThrows(
+        NullPointerException.class,
+        () -> new ThreadReconcileSnapshot.PrimaryWork.SuspendForBlocker(null));
+  }
+
+  @Test
+  void rejectsNullPlan() {
+    assertThrows(
+        NullPointerException.class,
+        () -> new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(null));
   }
 
   @Test
@@ -179,17 +204,11 @@ class ThreadReconcileSnapshotTest {
         new ContinuationRef(
             new ExecutionTarget(ExecutionTargetKind.THREAD, 999L),
             new ExecutionTarget(ExecutionTargetKind.MODEL_INVOCATION, 7L));
+    ThreadReconcileSnapshot.PrimaryWork work =
+        new ThreadReconcileSnapshot.PrimaryWork.SuspendForBlocker(wrongOwner);
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ThreadReconcileSnapshot(
-                ownership,
-                thread,
-                Optional.empty(),
-                Optional.empty(),
-                Optional.of(wrongOwner),
-                List.of(),
-                Optional.empty()));
+        () -> new ThreadReconcileSnapshot(ownership, thread, Optional.of(work), List.of()));
   }
 
   @Test
@@ -199,17 +218,11 @@ class ThreadReconcileSnapshotTest {
     ContinuationRef threadBlocker =
         new ContinuationRef(
             ownership.threadTarget(), new ExecutionTarget(ExecutionTargetKind.THREAD, 9L));
+    ThreadReconcileSnapshot.PrimaryWork work =
+        new ThreadReconcileSnapshot.PrimaryWork.SuspendForBlocker(threadBlocker);
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ThreadReconcileSnapshot(
-                ownership,
-                thread,
-                Optional.empty(),
-                Optional.empty(),
-                Optional.of(threadBlocker),
-                List.of(),
-                Optional.empty()));
+        () -> new ThreadReconcileSnapshot(ownership, thread, Optional.of(work), List.of()));
   }
 
   @Test
@@ -220,16 +233,17 @@ class ThreadReconcileSnapshotTest {
         new ContinuationRef(
             ownership.threadTarget(),
             new ExecutionTarget(ExecutionTargetKind.MODEL_INVOCATION, 7L));
+    ThreadReconcileSnapshot.PrimaryWork work =
+        new ThreadReconcileSnapshot.PrimaryWork.SuspendForBlocker(blocker);
     ThreadReconcileSnapshot snapshot =
-        new ThreadReconcileSnapshot(
-            ownership,
-            thread,
-            Optional.empty(),
-            Optional.empty(),
-            Optional.of(blocker),
-            List.of(),
-            Optional.empty());
-    assertEquals(Optional.of(blocker), snapshot.blockerContinuation());
+        new ThreadReconcileSnapshot(ownership, thread, Optional.of(work), List.of());
+
+    assertTrue(snapshot.primaryWork().isPresent());
+    ThreadReconcileSnapshot.PrimaryWork.SuspendForBlocker sb =
+        assertInstanceOf(
+            ThreadReconcileSnapshot.PrimaryWork.SuspendForBlocker.class,
+            snapshot.primaryWork().get());
+    assertEquals(blocker, sb.blocker());
   }
 
   @Test
@@ -239,38 +253,15 @@ class ThreadReconcileSnapshotTest {
     ModelInvocationPlan plan =
         new ModelInvocationPlan(
             999L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
+    ThreadReconcileSnapshot.PrimaryWork work =
+        new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan);
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ThreadReconcileSnapshot(
-                ownership,
-                thread,
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                List.of(),
-                Optional.of(plan)));
+        () -> new ThreadReconcileSnapshot(ownership, thread, Optional.of(work), List.of()));
   }
 
-  @Test
-  void rejectsMultiplePrimaryDebts() {
-    ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
-    HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok", 1L);
-    ModelInvocationPlan plan =
-        new ModelInvocationPlan(
-            1L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ThreadReconcileSnapshot(
-                ownership,
-                thread,
-                Optional.of(7L),
-                Optional.empty(),
-                Optional.empty(),
-                List.of(),
-                Optional.of(plan)));
-  }
+  // 类型系统保证至多一项 PrimaryWork，因此不再需要运行时"至少多于一项"的校验。
+  // 以下测试专注于 queuedInputs 不变量。
 
   @Test
   void rejectsQueuedInputsWithDifferentThreadId() {
@@ -280,15 +271,7 @@ class ThreadReconcileSnapshotTest {
         List.of(ReconcileTestSupport.input(2L, 1L, ThreadInputType.USER_MESSAGE));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ThreadReconcileSnapshot(
-                ownership,
-                thread,
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                inputs,
-                Optional.empty()));
+        () -> new ThreadReconcileSnapshot(ownership, thread, Optional.empty(), inputs));
   }
 
   @Test
@@ -298,15 +281,7 @@ class ThreadReconcileSnapshotTest {
     ThreadInput applied = appliedInput();
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ThreadReconcileSnapshot(
-                ownership,
-                thread,
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                List.of(applied),
-                Optional.empty()));
+        () -> new ThreadReconcileSnapshot(ownership, thread, Optional.empty(), List.of(applied)));
   }
 
   @Test
@@ -319,15 +294,38 @@ class ThreadReconcileSnapshotTest {
             ReconcileTestSupport.input(1L, 1L, ThreadInputType.USER_MESSAGE));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ThreadReconcileSnapshot(
-                ownership,
-                thread,
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                inputs,
-                Optional.empty()));
+        () -> new ThreadReconcileSnapshot(ownership, thread, Optional.empty(), inputs));
+  }
+
+  @Test
+  void emptyPrimaryWorkCanBeHarvestedOrQuiesced() {
+    // 验证 empty primaryWork 时 snapshot 正常构造，可直接用于 harvest/quiesce 路径
+    ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
+    HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok");
+    List<ThreadInput> inputs =
+        List.of(ReconcileTestSupport.input(1L, 1L, ThreadInputType.USER_MESSAGE));
+
+    ThreadReconcileSnapshot snapshot =
+        new ThreadReconcileSnapshot(ownership, thread, Optional.empty(), inputs);
+
+    assertTrue(snapshot.primaryWork().isEmpty());
+    assertEquals(1, snapshot.queuedInputs().size());
+  }
+
+  @Test
+  void planPrimaryWorkRequiresMatchingHead() {
+    // plan 的 sourceHeadEntryId 必须等于 thread head，否则构造失败
+    ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
+    HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok", 5L);
+    ModelInvocationPlan plan =
+        new ModelInvocationPlan(
+            5L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
+    ThreadReconcileSnapshot.PrimaryWork work =
+        new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan);
+    // 匹配 head：5L == 5L，应成功
+    ThreadReconcileSnapshot snapshot =
+        new ThreadReconcileSnapshot(ownership, thread, Optional.of(work), List.of());
+    assertTrue(snapshot.primaryWork().isPresent());
   }
 
   private static ThreadInput appliedInput() {
