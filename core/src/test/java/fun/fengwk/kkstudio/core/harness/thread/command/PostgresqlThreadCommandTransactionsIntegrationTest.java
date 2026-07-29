@@ -345,7 +345,23 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
             boot.threadId(), userPayload("different retry body"), "message-1", epoch, NOW);
     assertEquals(1, first.input().sequence());
     assertEquals(first.input(), retry.input());
-    assertEquals(boot.threadId(), first.target().id());
+    OffsetDateTime movedAt = NOW.plusSeconds(30).atOffset(ZoneOffset.UTC);
+    assertEquals(
+        1,
+        jdbc.update(
+            "update harness_execution_target set available_at = ? where target_kind = 'THREAD' and target_id = ?",
+            movedAt,
+            boot.threadId()));
+    ThreadCommandTransactions.EnqueueResult unchangedRetry =
+        transactions.enqueue(
+            boot.threadId(), userPayload("third retry body"), "message-1", epoch, NOW);
+    assertEquals(first.input(), unchangedRetry.input());
+    assertEquals(
+        movedAt,
+        jdbc.queryForObject(
+            "select available_at from harness_execution_target where target_kind = 'THREAD' and target_id = ?",
+            OffsetDateTime.class,
+            boot.threadId()));
 
     ThreadCommandTransactions.EnqueueResult second =
         transactions.enqueue(boot.threadId(), userPayload("second"), "message-2", epoch, NOW);

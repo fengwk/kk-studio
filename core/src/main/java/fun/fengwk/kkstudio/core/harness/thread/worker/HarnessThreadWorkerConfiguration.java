@@ -6,7 +6,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadActivationDispatcher;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileTransactions;
@@ -21,10 +20,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * Thread activation 的生产 wiring。
  *
- * <p>协作路径为：Redis activation subscriber -> {@link ThreadKick} -> {@link ThreadActivationDispatcher}
- * -> bounded reconcile executor -> {@link ThreadReconciler} -> {@link
- * ThreadReconcileTransactions}。Dispatcher 在 Reconciler 交还 blocker 后经 {@link ActivationNotifier} 发送
- * best-effort wake；跨节点所有权仍只由 PostgreSQL lease/fencing 决定。
+ * <p>协作路径为：durable execution-target dispatcher -> {@link ThreadKick} -> {@link
+ * ThreadActivationDispatcher} -> bounded reconcile executor -> {@link ThreadReconciler} -> {@link
+ * ThreadReconcileTransactions}。跨节点所有权与唤醒事实均由 PostgreSQL durable target 决定。
  */
 @Configuration
 @EnableConfigurationProperties(HarnessRuntimeProperties.class)
@@ -63,9 +61,7 @@ public class HarnessThreadWorkerConfiguration {
   @Bean
   public ThreadKick threadKick(
       ThreadReconciler reconciler,
-      @Qualifier("threadReconcileExecutor") ExecutorService threadReconcileExecutor,
-      ActivationNotifier activationNotifier) {
-    return new ThreadActivationDispatcher(
-        reconciler::reconcile, threadReconcileExecutor, activationNotifier);
+      @Qualifier("threadReconcileExecutor") ExecutorService threadReconcileExecutor) {
+    return new ThreadActivationDispatcher(reconciler::reconcile, threadReconcileExecutor);
   }
 }

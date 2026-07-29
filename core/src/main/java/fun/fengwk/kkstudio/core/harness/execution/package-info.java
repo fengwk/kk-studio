@@ -8,8 +8,9 @@
  *   <li>{@link fun.fengwk.kkstudio.core.harness.execution.ExecutionTargetRow} — immutable row
  *       projection handed to handlers.
  *   <li>{@link fun.fengwk.kkstudio.core.harness.execution.ExecutionTargetStore} — narrow port:
- *       {@code schedule}, {@code lockDue}, {@code rescheduleLocked}, {@code deleteLocked}, {@code
- *       deleteIfExists}, {@code activateOldestEnvironment}, plus the dispatcher's lock-free reads.
+ *       {@code schedule}, {@code lock}, {@code lockDue}, {@code rescheduleLocked}, {@code
+ *       deleteLocked}, {@code deleteIfExists}, {@code activateOldestEnvironment}, plus the
+ *       dispatcher's lock-free reads.
  *   <li>{@link fun.fengwk.kkstudio.core.harness.execution.ExecutionTargetHandler} — synchronous
  *       per-row handler invoked outside any transaction. Returning {@code false} reports a stale
  *       snapshot.

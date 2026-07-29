@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.runtime.thread.reconcile;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.runtime.execution.StepResult;
-import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
 
 import java.util.Objects;
@@ -22,8 +21,7 @@ import java.util.concurrent.RejectedExecutionException;
  *   <li>本类按 Thread id 合并并发 kick，并把一次 activation 交给 {@link Executor}；
  *   <li>生产 wiring 将 {@link ReconcileRunner} 绑定到 {@link ThreadReconciler#reconcile(long, String)}，由
  *       Reconciler 经事务端口推进 durable facts；
- *   <li>Reconciler 返回 {@link StepResult.Suspended} 时，本类通过 {@link ActivationNotifier} 为其 durable
- *       blocker 对应执行目标发送 best-effort wake hint。
+ *   <li>Typed reconcile failures 只记录日志；durable target lifecycle 由 Reconciler 事务维护。
  * </ol>
  *
  * <p>同一 Thread 在本进程内同时最多运行一个 reconcile pass。执行期间的多个 kick 只保留一个 boolean rerunRequested edge；完成时以
@@ -41,17 +39,14 @@ public final class ThreadActivationDispatcher implements ThreadKick {
 
   private final ReconcileRunner reconcileRunner;
   private final Executor executor;
-  private final ActivationNotifier activationNotifier;
 
   /** 仅用于进程内按 Thread 合并的 transient 状态，不是 distributed lock 或 durable queue。 */
   private final ConcurrentHashMap<Long, InFlightActivation> inFlightByThreadId =
       new ConcurrentHashMap<>();
 
-  public ThreadActivationDispatcher(
-      ReconcileRunner reconcileRunner, Executor executor, ActivationNotifier activationNotifier) {
+  public ThreadActivationDispatcher(ReconcileRunner reconcileRunner, Executor executor) {
     this.reconcileRunner = Objects.requireNonNull(reconcileRunner, "reconcileRunner");
     this.executor = Objects.requireNonNull(executor, "executor");
-    this.activationNotifier = Objects.requireNonNull(activationNotifier, "activationNotifier");
   }
 
   /**
@@ -103,13 +98,7 @@ public final class ThreadActivationDispatcher implements ThreadKick {
     do {
       try {
         StepResult result = reconcileRunner.reconcile(threadId, UUID.randomUUID().toString());
-        if (result instanceof StepResult.Suspended suspended) {
-          try {
-            activationNotifier.notifyAfterCommit(suspended.continuation().blocker());
-          } catch (RuntimeException notificationFailure) {
-            log.warn("thread activation notification failed for {}", threadId, notificationFailure);
-          }
-        } else if (result instanceof StepResult.Failed failed) {
+        if (result instanceof StepResult.Failed failed) {
           log.warn("thread reconcile failed for {}: {}", threadId, failed.failure().code());
         }
       } catch (RuntimeException failure) {

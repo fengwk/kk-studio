@@ -15,10 +15,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.harness.session.service.impl.HarnessSessionDtoConverter;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
-import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
@@ -48,8 +45,8 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Thin Core wrapper preserves idempotent short-circuit before parsing live definition ids, and
- * isolates after-commit notifier from durable result mapping.
+ * Thin Core wrapper preserves idempotent short-circuit before parsing live definition ids and maps
+ * durable results without activation side effects.
  */
 class HarnessThreadCommandServiceImplTest {
 
@@ -66,7 +63,6 @@ class HarnessThreadCommandServiceImplTest {
         new HarnessThreadCommandServiceImpl(
             coordinator,
             () -> ToolSettings.DEFAULT,
-            mock(ActivationNotifier.class),
             converter,
             mock(HarnessSessionDtoConverter.class));
 
@@ -92,11 +88,7 @@ class HarnessThreadCommandServiceImplTest {
     when(converter.convert(thread)).thenReturn(threadDTO);
     HarnessThreadCommandServiceImpl service =
         new HarnessThreadCommandServiceImpl(
-            coordinator,
-            () -> ToolSettings.DEFAULT,
-            mock(ActivationNotifier.class),
-            converter,
-            sessionConverter);
+            coordinator, () -> ToolSettings.DEFAULT, converter, sessionConverter);
     HarnessThreadBootstrapDTO request = new HarnessThreadBootstrapDTO();
     request.setTitle("title");
     request.setAgentDefinitionId("11");
@@ -126,7 +118,6 @@ class HarnessThreadCommandServiceImplTest {
         new HarnessThreadCommandServiceImpl(
             coordinator,
             () -> ToolSettings.DEFAULT,
-            mock(ActivationNotifier.class),
             converter,
             mock(HarnessSessionDtoConverter.class));
     HarnessThreadHeadUpdateDTO bind = new HarnessThreadHeadUpdateDTO();
@@ -143,13 +134,11 @@ class HarnessThreadCommandServiceImplTest {
   @Test
   void submitsMessagesAndStopsThread() {
     ThreadCommandCoordinator coordinator = mock(ThreadCommandCoordinator.class);
-    ActivationNotifier notifier = mock(ActivationNotifier.class);
     HarnessThreadDtoConverter converter = mock(HarnessThreadDtoConverter.class);
     HarnessThreadCommandServiceImpl service =
         new HarnessThreadCommandServiceImpl(
             coordinator,
             () -> ToolSettings.DEFAULT,
-            notifier,
             converter,
             mock(HarnessSessionDtoConverter.class));
     ThreadInput userInput = mock(ThreadInput.class);
@@ -158,15 +147,11 @@ class HarnessThreadCommandServiceImplTest {
     HarnessThreadInputDTO userDTO = new HarnessThreadInputDTO();
     HarnessThreadInputDTO customDTO = new HarnessThreadInputDTO();
     HarnessThreadInputDTO cancelledDTO = new HarnessThreadInputDTO();
-    ExecutionTarget userTarget = new ExecutionTarget(ExecutionTargetKind.THREAD, 5L);
-    ExecutionTarget customTarget = new ExecutionTarget(ExecutionTargetKind.THREAD, 6L);
-    ExecutionTarget stopTarget = new ExecutionTarget(ExecutionTargetKind.THREAD, 7L);
     when(coordinator.submitUserMessage(5L, "hello", "user-key", 3L))
-        .thenReturn(new EnqueueResult(userInput, userTarget));
+        .thenReturn(new EnqueueResult(userInput));
     when(coordinator.submitCustomMessage(5L, "system", "rules", "custom-key", 3L))
-        .thenReturn(new EnqueueResult(customInput, customTarget));
-    when(coordinator.stop(5L, 3L))
-        .thenReturn(new StopResult(4L, List.of(cancelledInput), stopTarget));
+        .thenReturn(new EnqueueResult(customInput));
+    when(coordinator.stop(5L, 3L)).thenReturn(new StopResult(4L, List.of(cancelledInput)));
     when(converter.convert(userInput)).thenReturn(userDTO);
     when(converter.convert(customInput)).thenReturn(customDTO);
     when(converter.convert(cancelledInput)).thenReturn(cancelledDTO);
@@ -188,21 +173,16 @@ class HarnessThreadCommandServiceImplTest {
 
     assertEquals(4L, stopped.getExecutionEpoch());
     assertEquals(List.of(cancelledDTO), stopped.getCancelledInputs());
-    verify(notifier).notifyAfterCommit(userTarget);
-    verify(notifier).notifyAfterCommit(customTarget);
-    verify(notifier).notifyAfterCommit(stopTarget);
   }
 
   @Test
   void configRetryReturnsPersistedInputWithoutResolvingDeletedDefinition() {
     ThreadCommandCoordinator coordinator = mock(ThreadCommandCoordinator.class);
-    ActivationNotifier notifier = mock(ActivationNotifier.class);
     HarnessThreadDtoConverter converter = mock(HarnessThreadDtoConverter.class);
     HarnessThreadCommandServiceImpl service =
         new HarnessThreadCommandServiceImpl(
             coordinator,
             () -> ToolSettings.DEFAULT,
-            notifier,
             converter,
             mock(HarnessSessionDtoConverter.class));
     ThreadInputPayload configPayload = mock(ThreadInputPayload.class);
@@ -218,10 +198,9 @@ class HarnessThreadCommandServiceImplTest {
             InputStatus.QUEUED,
             Instant.parse("2026-07-24T00:00:00Z"),
             null);
-    ExecutionTarget target = new ExecutionTarget(ExecutionTargetKind.THREAD, 1);
     HarnessThreadInputDTO expected = new HarnessThreadInputDTO();
     when(coordinator.findExistingInput(1, "same-key"))
-        .thenReturn(Optional.of(new EnqueueResult(persisted, target)));
+        .thenReturn(Optional.of(new EnqueueResult(persisted)));
     when(converter.convert(persisted)).thenReturn(expected);
 
     HarnessThreadAgentSetDTO retry = new HarnessThreadAgentSetDTO();
@@ -232,7 +211,6 @@ class HarnessThreadCommandServiceImplTest {
     assertSame(expected, service.queueAgent("1", retry));
     verify(coordinator, never())
         .queueAgent(anyLong(), anyLong(), anyBoolean(), anyString(), anyLong());
-    verify(notifier).notifyAfterCommit(target);
   }
 
   /** Invalid decimal model ids are rejected at the Core boundary before runtime orchestration. */
@@ -244,7 +222,6 @@ class HarnessThreadCommandServiceImplTest {
         new HarnessThreadCommandServiceImpl(
             coordinator,
             () -> ToolSettings.DEFAULT,
-            mock(ActivationNotifier.class),
             mock(HarnessThreadDtoConverter.class),
             mock(HarnessSessionDtoConverter.class));
     HarnessThreadModelSetDTO request = new HarnessThreadModelSetDTO();
@@ -264,7 +241,6 @@ class HarnessThreadCommandServiceImplTest {
         new HarnessThreadCommandServiceImpl(
             coordinator,
             () -> ToolSettings.DEFAULT,
-            mock(ActivationNotifier.class),
             mock(HarnessThreadDtoConverter.class),
             mock(HarnessSessionDtoConverter.class));
 
@@ -287,7 +263,6 @@ class HarnessThreadCommandServiceImplTest {
         new HarnessThreadCommandServiceImpl(
             coordinator,
             () -> ToolSettings.DEFAULT,
-            mock(ActivationNotifier.class),
             mock(HarnessThreadDtoConverter.class),
             mock(HarnessSessionDtoConverter.class));
 

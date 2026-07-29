@@ -51,7 +51,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_realtime_stream_policy",
           "harness_thread_goal",
           "harness_model_usage",
-          "harness_artifact");
+          "harness_artifact",
+          "harness_execution_target");
 
   private static final Set<String> SEQUENCE_BACKED_TABLES =
       Set.of(
@@ -175,6 +176,12 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
+  void harnessExecutionTargetExposesOnlyItsDurableQueueContract() throws SQLException {
+    assertColumns(
+        "harness_execution_target", "target_kind", "target_id", "route_key", "available_at");
+  }
+
+  @Test
   void harnessEntryDoesNotExposeLegacyVersionColumn() throws SQLException {
     Set<String> columns = new TreeSet<>();
     try (Connection conn = newConnection();
@@ -212,6 +219,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("timestamp with time zone", "harness_thread", "processor_until");
     assertColumnType("timestamp with time zone", "harness_thread_input", "applied_at");
     assertColumnType("timestamp with time zone", "harness_thread_input", "created_at");
+    assertColumnType("timestamp with time zone", "harness_execution_target", "available_at");
   }
 
   @Test

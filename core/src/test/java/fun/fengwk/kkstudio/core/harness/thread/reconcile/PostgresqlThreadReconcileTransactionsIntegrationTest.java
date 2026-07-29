@@ -4,6 +4,7 @@ import static fun.fengwk.kkstudio.core.harness.persistence.postgresql.PostgresSc
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -98,7 +99,11 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     commands.enqueue(threadId, user("lease"), "lease", boot.executionEpoch(), now);
 
     ThreadOwnership ownership = transactions.claim(threadId, "one", now).orElseThrow();
+    assertEquals(
+        now.plusSeconds(30).toEpochMilli(), targetAvailableAt("THREAD", threadId).toEpochMilli());
     assertTrue(transactions.renew(ownership, now.plusSeconds(1)));
+    assertEquals(
+        now.plusSeconds(31).toEpochMilli(), targetAvailableAt("THREAD", threadId).toEpochMilli());
     assertFalse(
         transactions.renew(
             new ThreadOwnership(ownership.threadId(), ownership.executionEpoch(), "other"),
@@ -230,9 +235,15 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
                 now.plusSeconds(1)));
     ModelCreationOutcome outcome =
         transactions.createModelInvocationAndRelease(ownership, plan, now.plusSeconds(1));
-    assertTrue(outcome instanceof ModelCreationOutcome.Created);
+    ModelCreationOutcome.Created created =
+        assertInstanceOf(ModelCreationOutcome.Created.class, outcome);
     assertEquals(1, count("select count(*) from harness_model_invocation"));
     assertEquals(1, count("select count(*) from harness_thread_input where status = 'QUEUED'"));
+    assertEquals(0, targetCount("THREAD", threadId));
+    assertEquals(1, targetCount("MODEL_INVOCATION", created.target().id()));
+    assertEquals(
+        now.plusSeconds(1).toEpochMilli(),
+        targetAvailableAt("MODEL_INVOCATION", created.target().id()).toEpochMilli());
   }
 
   @Test
@@ -270,6 +281,11 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
         scalar("select environment_name from harness_tool_invocation where ordinal = 1"));
     assertEquals(
         1, count("select count(*) from harness_model_invocation where applied_at is not null"));
+    List<Long> toolIds = ids("select id from harness_tool_invocation order by ordinal");
+    assertEquals(1, targetCount("TOOL_INVOCATION", toolIds.get(0)));
+    assertEquals(1, targetCount("TOOL_INVOCATION", toolIds.get(1)));
+    assertNull(targetRouteKey("TOOL_INVOCATION", toolIds.get(0)));
+    assertEquals("environment", targetRouteKey("TOOL_INVOCATION", toolIds.get(1)));
     assertEquals(7L, longScalar("select usage_provider_total_tokens from harness_model_usage"));
     assertEquals(1L, longScalar("select provider_resource_id from harness_model_usage"));
     assertEquals(2L, longScalar("select model_resource_id from harness_model_usage"));
@@ -507,6 +523,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
         longScalar(
             "select case when runnable then 1 else 0 end from harness_thread where id = "
                 + quiescentThread));
+    assertEquals(0, targetCount("THREAD", quiescentThread));
   }
 
   @Test
@@ -558,6 +575,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
                     + threadId
                     + " and status = 'QUEUED'"));
         transactions.bestEffortRelease(ownership, Instant.now());
+        assertEquals(1, targetCount("THREAD", threadId));
       }
     }
   }
@@ -723,10 +741,58 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
 
   private static void wake(long threadId) {
     execute("update harness_thread set runnable = true where id = ?", threadId);
+    execute(
+        "insert into harness_execution_target(target_kind, target_id, route_key, available_at)"
+            + " values ('THREAD', ?, null, current_timestamp)"
+            + " on conflict (target_kind, target_id) do update"
+            + " set available_at = least(harness_execution_target.available_at, excluded.available_at)",
+        threadId);
   }
 
   private static int count(String sql) {
     return Math.toIntExact(longScalar(sql));
+  }
+
+  private static int targetCount(String kind, long id) {
+    return count(
+        "select count(*) from harness_execution_target where target_kind = '"
+            + kind
+            + "' and target_id = "
+            + id);
+  }
+
+  private static Instant targetAvailableAt(String kind, long id) {
+    try (Connection connection = newConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "select available_at from harness_execution_target"
+                    + " where target_kind = ? and target_id = ?")) {
+      statement.setString(1, kind);
+      statement.setLong(2, id);
+      try (ResultSet result = statement.executeQuery()) {
+        assertTrue(result.next());
+        return result.getTimestamp(1).toInstant();
+      }
+    } catch (SQLException exception) {
+      throw new AssertionError(exception);
+    }
+  }
+
+  private static String targetRouteKey(String kind, long id) {
+    try (Connection connection = newConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "select route_key from harness_execution_target"
+                    + " where target_kind = ? and target_id = ?")) {
+      statement.setString(1, kind);
+      statement.setLong(2, id);
+      try (ResultSet result = statement.executeQuery()) {
+        assertTrue(result.next());
+        return result.getString(1);
+      }
+    } catch (SQLException exception) {
+      throw new AssertionError(exception);
+    }
   }
 
   private static long longScalar(String sql) {

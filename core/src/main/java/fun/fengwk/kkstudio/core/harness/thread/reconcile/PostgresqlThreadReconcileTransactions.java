@@ -6,6 +6,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
+import fun.fengwk.kkstudio.core.harness.execution.ExecutionTargetStore;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
 import fun.fengwk.kkstudio.harness.runtime.entry.AssistantErrorEntryPayload;
@@ -105,22 +106,34 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   private final HarnessIdGenerator ids;
   private final ModelInvocationPlanner planner;
   private final Duration leaseDuration;
+  private final ExecutionTargetStore executionTargetStore;
 
   @Autowired
   public PostgresqlThreadReconcileTransactions(
-      ThreadReconcileMapper mapper, HarnessIdGenerator ids, HarnessRuntimeProperties properties) {
-    this(mapper, ids, new ModelInvocationPlanner(), properties.getThreadReconcileLeaseDuration());
+      ThreadReconcileMapper mapper,
+      HarnessIdGenerator ids,
+      HarnessRuntimeProperties properties,
+      ExecutionTargetStore executionTargetStore) {
+    this(
+        mapper,
+        ids,
+        new ModelInvocationPlanner(),
+        properties.getThreadReconcileLeaseDuration(),
+        executionTargetStore);
   }
 
   PostgresqlThreadReconcileTransactions(
       ThreadReconcileMapper mapper,
       HarnessIdGenerator ids,
       ModelInvocationPlanner planner,
-      Duration leaseDuration) {
+      Duration leaseDuration,
+      ExecutionTargetStore executionTargetStore) {
     this.mapper = Objects.requireNonNull(mapper, "mapper");
     this.ids = Objects.requireNonNull(ids, "ids");
     this.planner = Objects.requireNonNull(planner, "planner");
     this.leaseDuration = Objects.requireNonNull(leaseDuration, "leaseDuration");
+    this.executionTargetStore =
+        Objects.requireNonNull(executionTargetStore, "executionTargetStore");
     if (leaseDuration.isZero() || leaseDuration.isNegative()) {
       throw new IllegalArgumentException("thread reconcile lease duration must be positive");
     }
@@ -131,25 +144,55 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   public Optional<ThreadOwnership> claim(long threadId, String processorToken, Instant now) {
     requirePositive(threadId, "threadId");
     requireToken(processorToken);
-    OffsetDateTime timestamp = timestamp(now);
+    Instant observedAt = persisted(now);
+    OwnedThreadRow thread = mapper.lockThread(threadId);
+    if (!claimable(thread, observedAt)) {
+      return Optional.empty();
+    }
+    if (executionTargetStore.lockDue(ExecutionTargetKind.THREAD, threadId, observedAt).isEmpty()) {
+      return Optional.empty();
+    }
+    Instant leaseUntil = observedAt.plus(leaseDuration);
     Long epoch =
-        mapper.claim(threadId, processorToken, timestamp(now.plus(leaseDuration)), timestamp);
-    return epoch == null
-        ? Optional.empty()
-        : Optional.of(new ThreadOwnership(threadId, epoch, processorToken));
+        mapper.claim(threadId, processorToken, timestamp(leaseUntil), timestamp(observedAt));
+    if (epoch == null) {
+      return Optional.empty();
+    }
+    requireTargetAffected(
+        executionTargetStore.rescheduleLocked(
+            ExecutionTargetKind.THREAD, threadId, null, leaseUntil),
+        "reschedule thread watchdog");
+    return Optional.of(new ThreadOwnership(threadId, epoch, processorToken));
   }
 
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
   public boolean renew(ThreadOwnership ownership, Instant now) {
     Objects.requireNonNull(ownership, "ownership");
-    return mapper.renew(
+    Instant observedAt = persisted(now);
+    OwnedThreadRow thread = mapper.lockThread(ownership.threadId());
+    if (!ownedBy(thread, ownership, observedAt)) {
+      return false;
+    }
+    Instant leaseUntil = observedAt.plus(leaseDuration);
+    if (executionTargetStore.lock(ExecutionTargetKind.THREAD, ownership.threadId()).isEmpty()) {
+      throw new IllegalStateException(
+          "owned thread is missing its watchdog target: " + ownership.threadId());
+    }
+    if (mapper.renew(
             ownership.threadId(),
             ownership.executionEpoch(),
             ownership.processorToken(),
-            timestamp(now.plus(leaseDuration)),
-            timestamp(now))
-        == 1;
+            timestamp(leaseUntil),
+            timestamp(observedAt))
+        != 1) {
+      return false;
+    }
+    requireTargetAffected(
+        executionTargetStore.rescheduleLocked(
+            ExecutionTargetKind.THREAD, ownership.threadId(), null, leaseUntil),
+        "reschedule thread watchdog");
+    return true;
   }
 
   @Override
@@ -402,6 +445,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         != 1) {
       throw new IllegalStateException("cannot create model invocation");
     }
+    executionTargetStore.schedule(ExecutionTargetKind.MODEL_INVOCATION, id, null, persisted(now));
     if (!release(ownership, false, now)) {
       throw new IllegalStateException("cannot release created model invocation");
     }
@@ -425,26 +469,16 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   }
 
   @Override
+  @Transactional(isolation = Isolation.READ_COMMITTED)
   public void bestEffortRelease(ThreadOwnership ownership, Instant now) {
-    try {
-      release(Objects.requireNonNull(ownership, "ownership"), true, now);
-    } catch (RuntimeException ignored) {
-      // Explicitly best-effort; a later durable transition may emit a fresh activation target.
-    }
+    release(Objects.requireNonNull(ownership, "ownership"), true, now);
   }
 
   private OwnedThreadRow owned(ThreadOwnership ownership, Instant now) {
     Objects.requireNonNull(ownership, "ownership");
+    Instant observedAt = persisted(now);
     OwnedThreadRow thread = mapper.lockThread(ownership.threadId());
-    if (thread == null
-        || !thread.isRunnable()
-        || thread.getExecutionEpoch() != ownership.executionEpoch()
-        || !ownership.processorToken().equals(thread.getProcessorToken())
-        || thread.getProcessorUntil() == null
-        || !thread.getProcessorUntil().isAfter(timestamp(now))) {
-      return null;
-    }
-    return thread;
+    return ownedBy(thread, ownership, observedAt) ? thread : null;
   }
 
   private Optional<ModelInvocationPlan> plan(OwnedThreadRow thread) {
@@ -525,8 +559,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
               .findFirst()
               .orElseThrow(
                   () -> new IllegalStateException("model called an unbound tool: " + call.name()));
+      long invocationId = ids.nextToolInvocationId();
       if (mapper.insertToolInvocation(
-              ids.nextToolInvocationId(),
+              invocationId,
               thread.getId(),
               thread.getSessionId(),
               assistantEntryId,
@@ -541,6 +576,13 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
           != 1) {
         throw new IllegalStateException("cannot materialize tool invocation");
       }
+      requireTargetAffected(
+          executionTargetStore.schedule(
+              ExecutionTargetKind.TOOL_INVOCATION,
+              invocationId,
+              binding.environmentName(),
+              persisted(now)),
+          "schedule tool invocation");
     }
   }
 
@@ -701,13 +743,49 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   }
 
   private boolean release(ThreadOwnership ownership, boolean runnable, Instant now) {
-    return mapper.release(
+    Instant observedAt = persisted(now);
+    if (executionTargetStore.lock(ExecutionTargetKind.THREAD, ownership.threadId()).isEmpty()) {
+      throw new IllegalStateException(
+          "owned thread is missing its watchdog target: " + ownership.threadId());
+    }
+    if (mapper.release(
             ownership.threadId(),
             ownership.executionEpoch(),
             ownership.processorToken(),
             runnable,
-            timestamp(now))
-        == 1;
+            timestamp(observedAt))
+        != 1) {
+      return false;
+    }
+    if (runnable) {
+      requireTargetAffected(
+          executionTargetStore.rescheduleLocked(
+              ExecutionTargetKind.THREAD, ownership.threadId(), null, observedAt),
+          "reactivate thread target");
+    } else {
+      requireTargetAffected(
+          executionTargetStore.deleteLocked(ExecutionTargetKind.THREAD, ownership.threadId()),
+          "delete thread target");
+    }
+    return true;
+  }
+
+  private static boolean claimable(OwnedThreadRow thread, Instant now) {
+    return thread != null
+        && thread.isRunnable()
+        && thread.getHeadEntryId() > 0
+        && (thread.getProcessorToken() == null
+            || (thread.getProcessorUntil() != null
+                && !thread.getProcessorUntil().isAfter(timestamp(now))));
+  }
+
+  private static boolean ownedBy(OwnedThreadRow thread, ThreadOwnership ownership, Instant now) {
+    return thread != null
+        && thread.isRunnable()
+        && thread.getExecutionEpoch() == ownership.executionEpoch()
+        && ownership.processorToken().equals(thread.getProcessorToken())
+        && thread.getProcessorUntil() != null
+        && thread.getProcessorUntil().isAfter(timestamp(now));
   }
 
   private static boolean terminal(ToolInvocationRow row) {
@@ -738,9 +816,18 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     return true;
   }
 
+  private static Instant persisted(Instant instant) {
+    return Objects.requireNonNull(instant, "now").truncatedTo(ChronoUnit.MILLIS);
+  }
+
   private static OffsetDateTime timestamp(Instant instant) {
-    return OffsetDateTime.ofInstant(
-        Objects.requireNonNull(instant, "now").truncatedTo(ChronoUnit.MILLIS), ZoneOffset.UTC);
+    return OffsetDateTime.ofInstant(persisted(instant), ZoneOffset.UTC);
+  }
+
+  private static void requireTargetAffected(int affected, String operation) {
+    if (affected != 1) {
+      throw new IllegalStateException(operation + " affected " + affected + " rows");
+    }
   }
 
   private static void requirePositive(long value, String name) {

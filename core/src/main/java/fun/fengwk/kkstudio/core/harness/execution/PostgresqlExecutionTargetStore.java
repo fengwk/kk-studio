@@ -49,6 +49,17 @@ public class PostgresqlExecutionTargetStore implements ExecutionTargetStore {
   }
 
   @Override
+  public Optional<ExecutionTargetRow> lock(ExecutionTargetKind kind, long id) {
+    requireActiveTransaction();
+    Objects.requireNonNull(kind, "kind");
+    if (id <= 0) {
+      throw new IllegalArgumentException("id must be positive");
+    }
+    ExecutionTargetDO row = mapper.lockForUpdate(kind.name(), id);
+    return row == null ? Optional.empty() : Optional.of(toRow(row));
+  }
+
+  @Override
   public Optional<ExecutionTargetRow> lockDue(ExecutionTargetKind kind, long id, Instant now) {
     requireActiveTransaction();
     Objects.requireNonNull(kind, "kind");

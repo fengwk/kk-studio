@@ -13,8 +13,6 @@ import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSource;
 import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.RootEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
@@ -38,7 +36,6 @@ class ThreadCommandCoordinatorTest {
 
   private static final Instant NOW = Instant.parse("2026-07-24T00:00:00Z");
   private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
-  private static final ExecutionTarget TARGET = new ExecutionTarget(ExecutionTargetKind.THREAD, 1L);
 
   private FakeTransactions transactions;
   private FakeConfigSource configSource;
@@ -66,8 +63,7 @@ class ThreadCommandCoordinatorTest {
             InputStatus.QUEUED,
             NOW,
             null);
-    transactions.existing.put(
-        "1:same-key", new ThreadCommandTransactions.EnqueueResult(persisted, TARGET));
+    transactions.existing.put("1:same-key", new ThreadCommandTransactions.EnqueueResult(persisted));
 
     ThreadCommandCoordinator.EnqueueResult result =
         coordinator.queueAgent(1L, 99L, false, "same-key", 0L);
@@ -271,8 +267,7 @@ class ThreadCommandCoordinatorTest {
             InputStatus.QUEUED,
             NOW,
             null);
-    transactions.existing.put(
-        "1:" + key, new ThreadCommandTransactions.EnqueueResult(input, TARGET));
+    transactions.existing.put("1:" + key, new ThreadCommandTransactions.EnqueueResult(input));
     return input;
   }
 
@@ -399,13 +394,13 @@ class ThreadCommandCoordinatorTest {
               InputStatus.QUEUED,
               now,
               null);
-      return new EnqueueResult(input, TARGET);
+      return new EnqueueResult(input);
     }
 
     @Override
     public StopResult stop(long threadId, long expectedExecutionEpoch, Instant now) {
       lastStopNow = now;
-      return new StopResult(1L, List.of(), TARGET);
+      return new StopResult(1L, List.of());
     }
   }
 }

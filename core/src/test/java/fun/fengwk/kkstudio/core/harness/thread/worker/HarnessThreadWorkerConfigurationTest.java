@@ -34,8 +34,7 @@ class HarnessThreadWorkerConfigurationTest {
       ThreadReconciler reconciler =
           configuration.threadReconciler(mock(ThreadReconcileTransactions.class), properties);
       assertInstanceOf(
-          ThreadActivationDispatcher.class,
-          configuration.threadKick(reconciler, executor, ignored -> {}));
+          ThreadActivationDispatcher.class, configuration.threadKick(reconciler, executor));
     } finally {
       executor.shutdownNow();
     }

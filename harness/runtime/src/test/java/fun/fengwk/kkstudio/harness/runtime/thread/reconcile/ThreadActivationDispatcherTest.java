@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.thread.reconcile;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -12,7 +11,6 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.Failure;
 import fun.fengwk.kkstudio.harness.runtime.execution.StepResult;
-import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 
 import java.util.ArrayDeque;
 import java.util.Queue;
@@ -39,8 +37,7 @@ class ThreadActivationDispatcherTest {
           return new StepResult.Quiescent();
         };
     Queue<Runnable> tasks = new ArrayDeque<>();
-    ThreadActivationDispatcher dispatcher =
-        new ThreadActivationDispatcher(reconcile, tasks::add, ignored -> {});
+    ThreadActivationDispatcher dispatcher = new ThreadActivationDispatcher(reconcile, tasks::add);
 
     dispatcher.kick(11L);
     dispatcher.kick(11L);
@@ -69,8 +66,7 @@ class ThreadActivationDispatcherTest {
           }
           return new StepResult.Quiescent();
         };
-    ThreadActivationDispatcher dispatcher =
-        new ThreadActivationDispatcher(reconcile, tasks::add, ignored -> {});
+    ThreadActivationDispatcher dispatcher = new ThreadActivationDispatcher(reconcile, tasks::add);
     dispatcherRef.set(dispatcher);
 
     dispatcher.kick(21L);
@@ -81,35 +77,21 @@ class ThreadActivationDispatcherTest {
   }
 
   @Test
-  void suspendedResultNotifiesBlockerAndNotificationFailureIsIsolated() {
-    ContinuationRef continuation =
-        new ContinuationRef(
-            new ExecutionTarget(ExecutionTargetKind.THREAD, 31L),
-            new ExecutionTarget(ExecutionTargetKind.MODEL_INVOCATION, 32L));
-    AtomicReference<ExecutionTarget> notified = new AtomicReference<>();
-    ActivationNotifier notifier =
-        target -> {
-          notified.set(target);
-          throw new IllegalStateException("redis unavailable");
-        };
+  void suspendedResultDoesNotTriggerBlockerRenotification() {
+    AtomicInteger calls = new AtomicInteger();
     ThreadActivationDispatcher dispatcher =
         new ThreadActivationDispatcher(
-            (ignoredThread, ignoredToken) -> new StepResult.Suspended(continuation),
-            Runnable::run,
-            notifier);
+            (ignoredThread, ignoredToken) -> {
+              calls.incrementAndGet();
+              return new StepResult.Suspended(
+                  new ContinuationRef(
+                      new ExecutionTarget(ExecutionTargetKind.THREAD, 31L),
+                      new ExecutionTarget(ExecutionTargetKind.MODEL_INVOCATION, 32L)));
+            },
+            Runnable::run);
 
     assertDoesNotThrow(() -> dispatcher.kick(31L));
-
-    assertSame(continuation.blocker(), notified.get());
-
-    AtomicReference<ExecutionTarget> successfulNotification = new AtomicReference<>();
-    ThreadActivationDispatcher successful =
-        new ThreadActivationDispatcher(
-            (ignoredThread, ignoredToken) -> new StepResult.Suspended(continuation),
-            Runnable::run,
-            successfulNotification::set);
-    successful.kick(31L);
-    assertSame(continuation.blocker(), successfulNotification.get());
+    assertEquals(1, calls.get());
   }
 
   @Test
@@ -123,7 +105,7 @@ class ThreadActivationDispatcherTest {
               default -> new StepResult.Quiescent();
             };
     ThreadActivationDispatcher dispatcher =
-        new ThreadActivationDispatcher(reconcile, Runnable::run, ignored -> {});
+        new ThreadActivationDispatcher(reconcile, Runnable::run);
 
     assertDoesNotThrow(() -> dispatcher.kick(41L));
     assertDoesNotThrow(() -> dispatcher.kick(41L));
@@ -149,8 +131,7 @@ class ThreadActivationDispatcherTest {
               calls.incrementAndGet();
               return new StepResult.Quiescent();
             },
-            executor,
-            ignored -> {});
+            executor);
 
     assertThrows(RejectedExecutionException.class, () -> dispatcher.kick(51L));
     assertDoesNotThrow(() -> dispatcher.kick(51L));
@@ -167,9 +148,7 @@ class ThreadActivationDispatcherTest {
         };
     ThreadActivationDispatcher retryable =
         new ThreadActivationDispatcher(
-            (ignoredThread, ignoredToken) -> new StepResult.Quiescent(),
-            runtimeFailure,
-            ignored -> {});
+            (ignoredThread, ignoredToken) -> new StepResult.Quiescent(), runtimeFailure);
     assertThrows(IllegalStateException.class, () -> retryable.kick(52L));
     assertDoesNotThrow(() -> retryable.kick(52L));
   }
@@ -178,22 +157,16 @@ class ThreadActivationDispatcherTest {
   void validatesConstructionAndThreadIdentity() {
     ThreadActivationDispatcher.ReconcileRunner reconcile =
         (ignoredThread, ignoredToken) -> new StepResult.Quiescent();
-    ActivationNotifier notifier = ignored -> {};
 
     assertThrows(
         NullPointerException.class,
         () ->
             new ThreadActivationDispatcher(
-                (ThreadActivationDispatcher.ReconcileRunner) null, Runnable::run, notifier));
-    assertThrows(
-        NullPointerException.class,
-        () -> new ThreadActivationDispatcher(reconcile, null, notifier));
-    assertThrows(
-        NullPointerException.class,
-        () -> new ThreadActivationDispatcher(reconcile, Runnable::run, null));
+                (ThreadActivationDispatcher.ReconcileRunner) null, Runnable::run));
+    assertThrows(NullPointerException.class, () -> new ThreadActivationDispatcher(reconcile, null));
 
     ThreadActivationDispatcher dispatcher =
-        new ThreadActivationDispatcher(reconcile, Runnable::run, notifier);
+        new ThreadActivationDispatcher(reconcile, Runnable::run);
     assertThrows(IllegalArgumentException.class, () -> dispatcher.kick(0L));
   }
 }

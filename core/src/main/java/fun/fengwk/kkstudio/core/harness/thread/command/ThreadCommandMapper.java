@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.harness.thread.command;
 
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -265,6 +266,25 @@ public interface ThreadCommandMapper extends BaseMapper {
   @Update(
       "update harness_thread_input set status = 'CANCELLED' where thread_id = #{threadId} and status = 'QUEUED'")
   int cancelQueuedInputs(@Param("threadId") long threadId);
+
+  @Delete(
+      """
+      delete from harness_execution_target target
+      where (target.target_kind = 'THREAD' and target.target_id = #{threadId})
+         or (target.target_kind = 'MODEL_INVOCATION' and exists (
+               select 1
+               from harness_model_invocation invocation
+               where invocation.id = target.target_id
+                 and invocation.thread_id = #{threadId}
+             ))
+         or (target.target_kind = 'TOOL_INVOCATION' and exists (
+               select 1
+               from harness_tool_invocation invocation
+               where invocation.id = target.target_id
+                 and invocation.thread_id = #{threadId}
+             ))
+      """)
+  int deleteExecutionTargetsForStoppedThread(@Param("threadId") long threadId);
 
   @Select(
       "select id, thread_id, sequence, input_type, payload::text as payload_json, idempotency_key, status, created_at, applied_at "
