@@ -19,7 +19,7 @@ import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
-/** Spring composition for the durable Model worker and its isolated recovery scheduler. */
+/** Spring composition for the durable Model worker and its execution scheduler. */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(HarnessRuntimeProperties.class)
 public class HarnessModelWorkerConfiguration {
@@ -38,7 +38,7 @@ public class HarnessModelWorkerConfiguration {
         properties.getModelWorkerActivityFlushInterval());
   }
 
-  @Bean
+  @Bean(destroyMethod = "stop")
   public ModelWorker modelWorker(
       ModelInvocationTransactions transactions,
       ModelExecutionResolver executionResolver,
@@ -58,18 +58,5 @@ public class HarnessModelWorkerConfiguration {
         clock,
         modelWorkerScheduler,
         () -> UUID.randomUUID().toString());
-  }
-
-  @Bean
-  public ModelWorkerLifecycle modelWorkerLifecycle(
-      HarnessRuntimeProperties properties,
-      ModelWorker modelWorker,
-      @Qualifier("modelWorkerScheduler") ScheduledExecutorService modelWorkerScheduler) {
-    return new ModelWorkerLifecycle(
-        properties,
-        modelWorker,
-        modelWorkerScheduler,
-        properties.getModelRecoveryInterval(),
-        properties.getModelRecoveryBatchSize());
   }
 }

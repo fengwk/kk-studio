@@ -99,18 +99,6 @@ public final class ModelWorker {
         .orElse(false);
   }
 
-  /**
-   * Processes at most one durable due Invocation for recovery/polling.
-   *
-   * @return {@code true} only when a candidate was successfully claimed
-   */
-  public boolean dispatchNext() {
-    return transactions
-        .findNextClaimable(clock.instant())
-        .map(this::claimAndDispatch)
-        .orElse(false);
-  }
-
   /** Returns whether this JVM currently owns a local external Model execution handle. */
   public boolean hasActiveExecution() {
     return !executions.isEmpty();
@@ -118,7 +106,7 @@ public final class ModelWorker {
 
   /**
    * Cancels only process-local handles during shutdown. Durable rows remain RUNNING until their
-   * lease recovery path decides the outcome.
+   * durable state remains unchanged after the process-local handle is abandoned.
    */
   public void stop() {
     List.copyOf(executions.values()).forEach(Execution::abandon);

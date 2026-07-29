@@ -1,15 +1,15 @@
 # Harness Runtime 架构
 
-本文是当前已落地的 Harness 执行架构事实源。只描述现行模块、durable 事实、写者边界与恢复协议。
+本文是当前已落地的 Harness 执行架构事实源。只描述现行模块、durable 事实、写者边界与 activation 协议。
 
 ## 1. 目标
 
-Harness 是 PostgreSQL 持久化、可恢复、可水平扩展的 Agent 执行 runtime：
+Harness 是 PostgreSQL 持久化、可水平扩展的 Agent 执行 runtime：
 
-- 任意应用实例退出后，其他实例仅依赖 PostgreSQL durable facts 恢复执行。
+- PostgreSQL 是唯一 durable truth；Redis activation signal 只负责唤醒本地 worker。
 - Thread 内 Entry/head 推进严格串行；Model、Tool、Interaction 可独立并发。
 - Thread activation 只做短时状态收敛，不在 activation 内等待外部 I/O。
-- Redis 只提供可丢失的低延迟 wake 与有界 realtime projection；Redis 全部丢失不影响 durable 正确性。
+- Redis 只提供可丢失的低延迟 wake 与有界 realtime projection；Redis 全部丢失时 PostgreSQL durable state 保留，但没有自动 activation replay。
 - Runtime domain 不包含 Spring、数据库、Redis、HTTP、WebSocket、Provider SDK 或业务 Tool 实现。
 
 ## 2. 模块与依赖
@@ -43,7 +43,7 @@ flowchart TB
 | `harness-tool` | `ToolDescriptor`、异步 `Tool` API、schema、`RemoteTool`、transport-neutral Daemon wire | Runtime 状态机、Session/Thread、Spring |
 | `harness-runtime` | Session/Entry/HarnessThread/ThreadInput、execution 类型、Reconciler、Model/Tool Invocation、Interaction、retry/realtime ports；Model/provider 契约与 codec（包 `fun.fengwk.kkstudio.harness.runtime.model`） | Provider SDK、Spring、MyBatis、HTTP |
 | `harness-daemon` | Environment 进程：连接、本地 Tool 执行、invocation journal、coding tools | 依赖 runtime / core / Spring |
-| `core` | 薄 application boundary、Spring composition、PostgreSQL/Redis adapter、worker lifecycle、LangChain4j Provider adapter、业务扩展 | 第二套领域状态机 |
+| `core` | 薄 application boundary、Spring composition、PostgreSQL/Redis adapter、activation dispatcher、LangChain4j Provider adapter、业务扩展 | 第二套领域状态机 |
 | `web` | HTTP / SSE / WebSocket 适配，只消费 Core API 与 share DTO | Harness 类型和领域状态机 |
 
 Model 契约收敛在 runtime 模块的 `harness.runtime.model` 子树；LangChain4j adapter 与 SDK 依赖位于 `core`。
@@ -309,7 +309,7 @@ runnable = false
 
 | 通道 | 用途 | 丢失后果 |
 | --- | --- | --- |
-| Pub/Sub wake | `THREAD` / `MODEL_INVOCATION` / `TOOL_INVOCATION` 提示 | recovery 按 PostgreSQL 扫描补偿 |
+| Pub/Sub wake | `THREAD` / `MODEL_INVOCATION` / `TOOL_INVOCATION` 提示 | durable facts 不变；不做 scan/replay 补偿 |
 | Streams realtime | Model delta / Tool partial 有界投影 | 客户端重新 REST snapshot |
 
 客户端顺序：REST snapshot（Thread/Entries/Inputs/Invocations/Interactions）→ SSE 事件名 `realtime`，cursor 为 Redis stream-id。realtime 失败不改变 durable outcome。
@@ -336,7 +336,7 @@ runnable = false
 | 文档 | 用途 |
 | --- | --- |
 | [harness-runtime-contracts.md](harness-runtime-contracts.md) | 类型、状态机、端口与事务契约 |
-| [harness-storage-runtime.md](harness-storage-runtime.md) | PostgreSQL / Redis / recovery |
+| [harness-storage-runtime.md](harness-storage-runtime.md) | PostgreSQL / Redis / activation |
 | [harness-capability-wiring.md](harness-capability-wiring.md) | 能力装配 |
 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Daemon 连接与远程 Tool |
 | [storage-models.md](storage-models.md) | 表结构摘要 |

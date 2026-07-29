@@ -176,8 +176,4 @@ public interface ThreadReconcileMapper extends BaseMapper {
       @Param("token") String token,
       @Param("runnable") boolean runnable,
       @Param("now") OffsetDateTime now);
-
-  @Select(
-      "select id from harness_thread where runnable and head_entry_id is not null and (processor_token is null or processor_until <= #{now}) order by id limit #{limit}")
-  List<Long> listRecoverableThreadIds(@Param("now") OffsetDateTime now, @Param("limit") int limit);
 }

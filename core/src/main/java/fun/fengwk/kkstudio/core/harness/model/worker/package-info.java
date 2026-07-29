@@ -10,9 +10,8 @@
  * {@code execution_epoch}, {@code attempt}, {@code worker_token}, {@code worker_until > now}) in
  * the SQL itself so the database is the final authority on ownership.
  *
- * <p>{@link HarnessModelWorkerConfiguration} composes the durable {@code ModelWorker}, its
- * dedicated scheduler, and PostgreSQL recovery lifecycle. {@link
- * HarnessModelInvocationThreadMapper} is a narrow mapper covering only the Thread columns this
- * adapter needs.
+ * <p>{@link HarnessModelWorkerConfiguration} composes the durable {@code ModelWorker} 及其 dedicated
+ * scheduler。{@link HarnessModelInvocationThreadMapper} is a narrow mapper covering only the Thread
+ * columns this adapter needs.
  */
 package fun.fengwk.kkstudio.core.harness.model.worker;

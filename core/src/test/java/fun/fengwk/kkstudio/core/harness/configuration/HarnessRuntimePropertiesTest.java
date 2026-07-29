@@ -10,21 +10,17 @@ import java.time.Duration;
 
 class HarnessRuntimePropertiesTest {
 
-  /** Deployment defaults keep the durable Model worker's leases and recovery polling bounded. */
+  /** Deployment defaults keep durable worker leases, timers, and Thread concurrency bounded. */
   @Test
   void providesModelWorkerDeploymentDefaults() {
     HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
 
-    assertEquals(Duration.ofSeconds(1), properties.getThreadRecoveryInterval());
-    assertEquals(100, properties.getThreadRecoveryBatchSize());
     assertEquals(Duration.ofSeconds(30), properties.getThreadReconcileLeaseDuration());
     assertEquals(8, properties.getThreadWorkerConcurrency());
     assertEquals(16, properties.getThreadReconcilerMaxSteps());
     assertEquals(Duration.ofSeconds(30), properties.getModelWorkerLeaseDuration());
     assertEquals(Duration.ofSeconds(10), properties.getModelWorkerHeartbeatInterval());
     assertEquals(Duration.ofMillis(100), properties.getModelWorkerActivityFlushInterval());
-    assertEquals(Duration.ofSeconds(1), properties.getModelRecoveryInterval());
-    assertEquals(100, properties.getModelRecoveryBatchSize());
   }
 
   /** Relative workdirs resolve under environmentRoot while traversal and absolute escapes fail. */

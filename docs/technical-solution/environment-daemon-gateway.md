@@ -68,13 +68,9 @@ GET /api/environments
 
 Gateway 可按需通过 `LOAD_SKILL` 请求完整 skill 正文。PLATFORM 工具 `load_skill` 将其暴露给已选择 Skills 的 Agent。
 
-## Invocation 分发与恢复
+## Invocation 分发
 
-`harness_tool_invocation.environment_name` 冻结实时环境名。统一 `ToolWorker` 领取 `ENVIRONMENT` due Invocation，经 `RemoteTool` 与 Gateway transport 分发。若目标 Environment 不在 live registry 或未 READY，则立即收敛为确定性 `FAILED`：
-
-```text
-<environment> is offline; <tool> is unavailable
-```
+`harness_tool_invocation.environment_name` 冻结实时环境名。统一 `ToolWorker` 通过 `TOOL_INVOCATION` target 分发指定 Invocation；对应 Environment READY event 则通过 `dispatchNext(ENVIRONMENT, name)` 领取一个 due Invocation。两者都经 `RemoteTool` 与 Gateway transport 分发。发送前发现 Environment unavailable 时，worker 释放未开始的 claim 并保留 `QUEUED`；它不立即重发 Redis target，而是等待下一次该 Environment 的 READY event。
 
 ```mermaid
 sequenceDiagram
@@ -108,9 +104,9 @@ Wire `invocationId` 始终是持久 Invocation ID 的十进制字符串。`INVOK
 3. frozen arguments 是 JSON object
 4. recovered lease 的非幂等调用保守收敛为 `UNKNOWN`，不重发
 
-连接丢失或发送失败只丢弃瞬时 active handle，不伪造终态。持久 lease 到期后由 recovery/claim 接管。
+连接丢失或发送失败只丢弃瞬时 active handle，不伪造终态。持久 lease 与 fencing 仍由 PostgreSQL claim 约束。
 
-Gateway 构造时注入不可变 `EnvironmentReadyListener`，不持有 ToolWorker，也不暴露 mutable handler/executor setter。`HarnessToolWorkerConfiguration` 只按 `RemoteToolTransport` SPI 构造 ToolWorker；listener 使用 lazy ToolWorker provider 与 tool-worker scheduler，调度失败时 best-effort 直调。Gateway `pollOnce` 复用同一 listener，保证 READY hint 丢失后仍可恢复。
+Gateway 构造时注入不可变 `EnvironmentReadyListener`，不持有 ToolWorker，也不暴露 mutable handler/executor setter。`HarnessToolWorkerConfiguration` 只按 `RemoteToolTransport` SPI 构造 ToolWorker；listener 使用 lazy ToolWorker provider 与 tool-worker scheduler，将 READY event 异步桥接为 `dispatchNext(ENVIRONMENT, name)`。scheduler 拒绝或 worker dispatch 失败只记录并隔离，不在 WebSocket caller thread 直调，也不轮询 READY 连接。
 
 ## 回调、结果与 Artifact
 

@@ -3,8 +3,8 @@ package fun.fengwk.kkstudio.core.environment.gateway;
 /**
  * Immutable READY bridge for Environment daemon connections.
  *
- * <p>Invoked after protocol locks are released when a daemon becomes READY, and during gateway poll
- * recovery for each currently READY environment. Implementations own any off-stack scheduling.
+ * <p>Invoked after protocol locks are released when a daemon becomes READY. Implementations own any
+ * off-stack scheduling.
  */
 @FunctionalInterface
 public interface EnvironmentReadyListener {

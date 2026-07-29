@@ -304,7 +304,7 @@ public enum ExecutionTargetKind {
 public record ExecutionTarget(ExecutionTargetKind kind, long id) {}
 ```
 
-Notifier 失败不得回滚已提交业务事务；Recovery 补偿。
+Notifier 失败不得回滚已提交业务事务；Redis Pub/Sub signal 不提供 replay 或 scan 补偿。
 
 ### 4.3 RealtimeEventSink
 
@@ -418,8 +418,8 @@ head 重定位与 enqueue/Stop 都先锁 Thread 行并校验 `expectedExecutionE
 ### 7.1 ModelWorker
 
 ```text
-signal/recovery
-  -> find claimable ModelInvocation
+MODEL_INVOCATION signal
+  -> find specified claimable ModelInvocation
   -> resolve frozen request 的短生命周期执行资源（仅 QUEUED/RETRY_WAIT）
   -> claim（写入 lease/fencing）
   -> execute Provider
@@ -444,7 +444,7 @@ transient failure
 ### 7.2 ThreadReconciler
 
 ```text
-THREAD signal/recovery
+THREAD signal
   -> claim runnable Thread reconcile lease
   -> terminal Model apply
   -> terminal Tool sibling apply
@@ -462,8 +462,8 @@ THREAD signal/recovery
 ### 7.3 ToolWorker
 
 ```text
-signal/recovery
-  -> claim ToolInvocation
+TOOL_INVOCATION signal
+  -> claim specified ToolInvocation
   -> check unresolved Interaction
   -> execute PLATFORM Tool 或 ENVIRONMENT RemoteTool
   -> partial to RealtimeEventSink

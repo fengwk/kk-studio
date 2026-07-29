@@ -45,6 +45,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -115,11 +116,6 @@ public final class ToolWorker {
         .orElse(false);
   }
 
-  /** Claims and dispatches at most one due PLATFORM invocation for recovery. */
-  public boolean dispatchNext() {
-    return dispatchNext(ToolExecutionLocation.PLATFORM, null);
-  }
-
   /**
    * Claims and dispatches at most one due invocation for the given location/environment.
    *
@@ -130,7 +126,7 @@ public final class ToolWorker {
     Objects.requireNonNull(location, "location");
     if (location == ToolExecutionLocation.ENVIRONMENT) {
       if (environmentName == null || environmentName.isBlank()) {
-        throw new IllegalArgumentException("ENVIRONMENT scan requires environmentName");
+        throw new IllegalArgumentException("ENVIRONMENT dispatch requires environmentName");
       }
       if (environmentActiveInvocations.containsKey(environmentName)) {
         return false;
@@ -144,44 +140,6 @@ public final class ToolWorker {
         .orElse(false);
   }
 
-  /** Recovers one expired RUNNING lease for the given location as UNKNOWN when reclaim succeeds. */
-  public boolean recoverNextExpired(ToolExecutionLocation location) {
-    Objects.requireNonNull(location, "location");
-    Instant now = clock.instant();
-    Optional<ToolInvocation> candidate = transactions.findNextExpiredRunning(location, now);
-    if (candidate.isEmpty()) {
-      return false;
-    }
-    ToolInvocation invocation = candidate.get();
-    String token = nextWorkerToken();
-    Duration executionTimeout =
-        invocation.descriptor().timeout().isZero()
-            ? DEFAULT_EXECUTION_TIMEOUT
-            : invocation.descriptor().timeout();
-    Optional<ClaimedToolInvocation> claimed =
-        transactions.claim(invocation.id(), token, executionTimeout, config.leaseDuration(), now);
-    if (claimed.isEmpty()) {
-      return false;
-    }
-    ClaimedToolInvocation ownership = claimed.orElseThrow();
-    if (!ownership.invocation().workerLease().token().equals(token)) {
-      throw new IllegalStateException("claim returned an unexpected worker token");
-    }
-    if (!ownership.recoveredLease()) {
-      // Fresh claim of a non-expired row should not happen via expired query; abandon safely.
-      releaseUnstarted(ownership, InvocationStatus.QUEUED, now);
-      return false;
-    }
-    // Fence any process-local stale handle so late callbacks cannot mutate durable state.
-    abandonStaleLocalExecution(invocation.id());
-    clearEnvironmentSlot(invocation);
-    completeUnknown(
-        ownership,
-        new ToolInvocationError(
-            "LEASE_EXPIRED", "Tool ownership was lost; execution result is unknown."));
-    return true;
-  }
-
   /** Process-local gate: any in-flight handle. */
   public boolean hasActiveExecution() {
     return !executions.isEmpty();
@@ -191,10 +149,7 @@ public final class ToolWorker {
     return environmentName != null && environmentActiveInvocations.containsKey(environmentName);
   }
 
-  /**
-   * Stops process-local handles without changing durable invocation state; lease recovery stays in
-   * DB.
-   */
+  /** Stops process-local handles without changing durable invocation state. */
   public void stop() {
     executions.values().forEach(Execution::abandon);
   }
@@ -481,11 +436,9 @@ public final class ToolWorker {
     }
     if (transactions.releaseUnstarted(claimed, releaseTo, nextAttemptAt, now)
         == ToolInvocationUpdateOutcome.APPLIED) {
-      try {
-        activationNotifier.notifyAfterCommit(
-            new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, claimed.invocation().id()));
-      } catch (RuntimeException error) {
-        log.warn("Tool unstarted release activation failed", error);
+      if (releaseTo == InvocationStatus.RETRY_WAIT) {
+        scheduleRetrySignal(
+            claimed.invocation().id(), Objects.requireNonNull(nextAttemptAt, "nextAttemptAt"));
       }
     }
   }
@@ -499,6 +452,19 @@ public final class ToolWorker {
       activationNotifier.notifyAfterCommit(target);
     } catch (RuntimeException error) {
       log.warn("Tool activation notification failed", error);
+    }
+  }
+
+  private void scheduleRetrySignal(long invocationId, Instant retryAt) {
+    long delayMillis = Math.max(1L, Duration.between(clock.instant(), retryAt).toMillis() + 1L);
+    try {
+      scheduler.schedule(
+          () ->
+              notifyTarget(new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, invocationId)),
+          delayMillis,
+          TimeUnit.MILLISECONDS);
+    } catch (RejectedExecutionException error) {
+      log.warn("cannot schedule tool retry signal for {}", invocationId, error);
     }
   }
 
@@ -818,8 +784,7 @@ public final class ToolWorker {
         if (retryable
             && transactions.scheduleRetry(claimed, nextAttemptAt, lastObservedActivityAt, now)
                 == ToolInvocationUpdateOutcome.APPLIED) {
-          notifyTarget(
-              new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, claimed.invocation().id()));
+          scheduleRetrySignal(claimed.invocation().id(), nextAttemptAt);
           return;
         }
         completeFailure(claimed, new ToolInvocationError(kind, message), lastObservedActivityAt);

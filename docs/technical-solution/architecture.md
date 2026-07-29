@@ -87,7 +87,7 @@ frontend → web APIs (via shared/api)
 
 Thread head 的外部重定位（bootstrap / rebind / unbind）要求 Thread 逻辑静止，并以 `expectedExecutionEpoch` 做 CAS fencing：成功后 epoch+1 并清 lease/runnable，旧 epoch 的执行结果不再能写入。
 
-执行由 `ThreadReconciler` 推进 Entry/head；`ModelWorker` / 统一 `ToolWorker` 只写 Invocation 事实。提交、Stop、Interaction 解决、Invocation terminal 后 afterCommit wake；低频 recovery 扫描 `runnable` 与过期 lease。
+执行由 `ThreadReconciler` 推进 Entry/head；`ModelWorker` / 统一 `ToolWorker` 只写 Invocation 事实。提交、Stop、Interaction 解决、Invocation terminal 后 afterCommit 发布 Redis `ExecutionTarget`；生产 subscriber 只将 target 投递到对应本地 dispatcher，不做周期 recovery scan。
 
 `Stop` 走 Thread command transaction 而非 mailbox，沿用 `ModelInvocationPlanner` 判定当前 head 是否仍有 response debt，并在 epoch 内原子追加 `ASSISTANT_ABORTED`（仅 text/thinking）或 `ASSISTANT_ERROR(CANCELLED)` barrier 后 fence 旧 generation 的 terminal CAS。`ModelWorker` 在每次 text/thinking SSE delta 之前以 Thread + Invocation 锁 fenced 写入 `safe_stream_snapshot`；fence LOST 时 worker 端立即 `abandon()` 本地 handle，不再发布该 delta。Retry 走 `safe_stream_snapshot = null` 的 CAS 重置，避免旧 attempt partial 污染下一轮 Provider 上下文。
 

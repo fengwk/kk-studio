@@ -573,17 +573,6 @@ class ModelWorkerTest {
     assertEquals(0, fixture.transactions.findClaimableCalls);
   }
 
-  /** Recovery dispatch uses the same fencing and asynchronous execution path as a direct signal. */
-  @Test
-  void dispatchesOneDueInvocationForRecoveryPolling() {
-    Fixture fixture = fixture();
-
-    assertTrue(fixture.worker.dispatchNext());
-
-    assertEquals(1, fixture.executor.executeCalls);
-    fixture.worker.stop();
-  }
-
   /** A no-work read and a lost claim are ordinary no-op outcomes rather than worker failures. */
   @Test
   void returnsFalseWhenNoCandidateOrClaimIsAvailable() {
@@ -591,8 +580,6 @@ class ModelWorkerTest {
     fixture.transactions.candidateAvailable = false;
 
     assertFalse(fixture.worker.dispatch(1L));
-    assertFalse(fixture.worker.dispatchNext());
-
     fixture.transactions.candidateAvailable = true;
     fixture.transactions.claimOutcome = ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
     assertFalse(fixture.worker.dispatch(1L));
@@ -1598,11 +1585,6 @@ class ModelWorkerTest {
         return Optional.empty();
       }
       return Optional.of(current);
-    }
-
-    @Override
-    public synchronized Optional<ModelInvocation> findNextClaimable(Instant now) {
-      return candidateAvailable ? Optional.of(current) : Optional.empty();
     }
 
     @Override

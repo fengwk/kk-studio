@@ -54,25 +54,14 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
       ToolExecutionLocation location, String environmentName, Instant now) {
     Objects.requireNonNull(location, "location");
     if (location == ToolExecutionLocation.PLATFORM && environmentName != null) {
-      throw new IllegalArgumentException("PLATFORM scan must not specify environmentName");
+      throw new IllegalArgumentException("PLATFORM dispatch must not specify environmentName");
     }
     if (location == ToolExecutionLocation.ENVIRONMENT
         && (environmentName == null || environmentName.isBlank())) {
-      throw new IllegalArgumentException("ENVIRONMENT scan requires environmentName");
+      throw new IllegalArgumentException("ENVIRONMENT dispatch requires environmentName");
     }
     ToolInvocationDO row =
         invocationMapper.findNextClaimable(location.name(), environmentName, offset(now));
-    return row == null
-        ? Optional.empty()
-        : Optional.of(ToolInvocationRowConverter.toAggregate(row));
-  }
-
-  @Override
-  @Transactional(readOnly = true)
-  public Optional<ToolInvocation> findNextExpiredRunning(
-      ToolExecutionLocation location, Instant now) {
-    Objects.requireNonNull(location, "location");
-    ToolInvocationDO row = invocationMapper.findNextExpiredRunning(location.name(), offset(now));
     return row == null
         ? Optional.empty()
         : Optional.of(ToolInvocationRowConverter.toAggregate(row));

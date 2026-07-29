@@ -14,7 +14,7 @@ Redis Streams
   -> 可丢失、有界、短期可重放的 realtime projection
 ```
 
-Redis 重启、清空或网络隔离后，只允许实时体验下降，不允许丢失用户 Input、Entry/head、Invocation terminal 或永久卡死推进。
+Redis 重启、清空或网络隔离不会丢失 PostgreSQL 中的用户 Input、Entry/head、Invocation terminal 等 durable facts；但 Pub/Sub signal 丢失不会自动重放，相关 activation 可以保持未唤醒状态。
 
 ## 2. PostgreSQL-only
 
@@ -141,7 +141,7 @@ kk-studio:harness:signal
 }
 ```
 
-`targetKind`：`THREAD` / `MODEL_INVOCATION` / `TOOL_INVOCATION`。发布必须 afterCommit。重复调度由 PostgreSQL lease/fencing 合并。Pub/Sub 丢失不丢工作；recovery 扫描 `runnable=true` 或过期 lease。
+`targetKind`：`THREAD` / `MODEL_INVOCATION` / `TOOL_INVOCATION`。发布必须 afterCommit。生产 subscriber 严格解码 UTF-8 JSON，并将 target 分发给 `ThreadKick` 或对应 worker scheduler；重复调度由 PostgreSQL lease/fencing 合并。Pub/Sub 丢失不改变 durable facts，也不提供 scan、outbox、Stream consumer group 或其他补偿路径。
 
 Runtime 不感知 wake transport 实现细节。
 
@@ -212,23 +212,19 @@ Thread
   -> Entry/Input append
 ```
 
-## 11. Recovery
+## 11. Activation
 
-1. 扫描 `runnable=true`、`head_entry_id is not null` 且 processor lease 为空/过期的 Thread
-2. 各 Invocation worker 扫描过期 lease、due retry 与 timeout
-3. 重新发布 Redis hint 或本地 schedule
-
-Recovery SQL 不 join Interaction/Tool/Model 来推导 runnable；完成事务负责写 `runnable=true`。
+PostgreSQL 事务提交后通过 `ActivationNotifier` 发布对应 `ExecutionTarget`。生产 Redis subscriber 不在 listener thread 执行 Model 或 Tool 外部 I/O：Model/Tool target 分别投递到既有 worker scheduler，Thread target 交给 `ThreadKick` 的 reconcile executor。已开始执行的 heartbeat、deadline、idle 与 retry timer 仍是 worker 的局部执行控制，不构成 PostgreSQL 周期扫描调度。
 
 ## 12. 故障语义
 
 | 故障 | 处理 |
 | --- | --- |
-| Redis Pub/Sub 丢消息 | PostgreSQL runnable recovery |
+| Redis Pub/Sub 丢消息 | durable row 保持不变；不做 signal-loss 补偿 |
 | Redis Streams 清空 | 客户端 snapshot reload |
-| Runtime 进程退出 | processor lease 过期后接管 |
+| Runtime 进程退出 | 已提交 durable row 保持不变 |
 | Model worker 在 Provider I/O 后失联 | RUNNING lease 过期后 `UNKNOWN` |
-| QUEUED/RETRY_WAIT signal 丢失 | due scan 重新 dispatch |
+| QUEUED/RETRY_WAIT signal 丢失 | durable row 保持不变；不做 due scan |
 | terminal callback 重复 | invocation token + terminal CAS |
 | Stop / head 重定位与 terminal 并发 | execution epoch fencing |
 | notify 先于 commit | 禁止；只允许 afterCommit |
@@ -244,11 +240,11 @@ Recovery SQL 不 join Interaction/Tool/Model 来推导 runnable；完成事务�
 ### 13.2 PostgreSQL Integration
 
 - Testcontainers PostgreSQL
-- recursive path、enqueue/quiesce、Stop 与 head 重定位的 epoch CAS、recovery 查询
+- recursive path、enqueue/quiesce、Stop 与 head 重定位的 epoch CAS、指定 target claim 查询
 
 ### 13.3 Redis Integration
 
-- Pub/Sub wake、Streams cursor/trim、Redis loss 后 PostgreSQL recovery、snapshot-first SSE
+- Pub/Sub wake 的严格 decode/dispatch、Streams cursor/trim、snapshot-first SSE
 
 ### 13.4 E2E
 

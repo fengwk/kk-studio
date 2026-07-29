@@ -95,7 +95,7 @@ Java 领域类型使用 `HarnessThread`，避免与 `java.lang.Thread` 冲突。
 | `HarnessSessionQueryService` | Session 只读；列表按 derived max-entry `updated_at` desc, id desc 排序 |
 | `HarnessObservabilityQueryService` | tool / model invocations、interactions、artifacts 查询投影 |
 | `ModelUsageAggregationService` | 账本聚合 |
-| Thread / Model / Tool recovery lifecycles | 低频 recoverable scan |
+| Redis activation subscriber / dispatcher | strict target decode 与本地 Thread/Model/Tool 投递 |
 
 ## 事务与锁
 
@@ -127,7 +127,7 @@ GET /api/threads/{id}/events/stream?afterEventId={redis-stream-id}
 
 Gateway 只管理连接与协议，不是第二套 durable 状态机。Environment 不提供 REST CRUD；`GET /api/environments` 投影当前连接 Daemon 的内存 Registry。协议细节见 [environment-daemon-gateway.md](environment-daemon-gateway.md)。
 
-WebSocket handler 只依赖 Core `EnvironmentDaemonEndpoint`；Gateway 以 `RemoteToolTransport` SPI 接入统一 `ToolWorker`。Daemon READY hint 通过不可变 listener bridge 离开 WebSocket 栈后调度，低频 `pollOnce` 仍负责丢失 hint 的恢复。
+WebSocket handler 只依赖 Core `EnvironmentDaemonEndpoint`；Gateway 以 `RemoteToolTransport` SPI 接入统一 `ToolWorker`。Daemon READY event 通过不可变 listener bridge 离开 WebSocket 栈后异步调度；没有 `pollOnce` 或 caller-thread fallback。
 
 `GET /api/artifacts/{id}` 返回原始 bytes 与有效 media type；异常 media 降级为 `application/octet-stream`，并附加 `X-Content-Type-Options: nosniff` 与 `Content-Security-Policy: sandbox`。
 
