@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.harness.persistence.postgresql;
 
 import org.postgresql.util.PSQLException;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.support.EncodedResource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
@@ -44,12 +45,31 @@ public abstract class PostgresSchemaSupport {
 
   /** Apply the authoritative PostgreSQL schema. */
   public static void applySchema(Connection conn) {
-    ScriptUtils.executeSqlScript(conn, new ClassPathResource("schema-postgresql.sql"));
+    // Use the EOF separator so PL/pgSQL bodies (e.g. trigger notify
+    // functions) survive ScriptUtils' default ';' splitter. The PostgreSQL
+    // JDBC driver accepts the whole script as a single execute() call.
+    ScriptUtils.executeSqlScript(
+        conn,
+        new EncodedResource(new ClassPathResource("schema-postgresql.sql")),
+        false,
+        false,
+        ScriptUtils.DEFAULT_COMMENT_PREFIX,
+        ScriptUtils.EOF_STATEMENT_SEPARATOR,
+        ScriptUtils.DEFAULT_BLOCK_COMMENT_START_DELIMITER,
+        ScriptUtils.DEFAULT_BLOCK_COMMENT_END_DELIMITER);
   }
 
   /** Apply a SQL classpath resource. */
   public static void applyScript(Connection conn, String classpathLocation) {
-    ScriptUtils.executeSqlScript(conn, new ClassPathResource(classpathLocation));
+    ScriptUtils.executeSqlScript(
+        conn,
+        new EncodedResource(new ClassPathResource(classpathLocation)),
+        false,
+        false,
+        ScriptUtils.DEFAULT_COMMENT_PREFIX,
+        ScriptUtils.EOF_STATEMENT_SEPARATOR,
+        ScriptUtils.DEFAULT_BLOCK_COMMENT_START_DELIMITER,
+        ScriptUtils.DEFAULT_BLOCK_COMMENT_END_DELIMITER);
   }
 
   /** Drop every object in the public schema, leaving an empty database for the next test. */

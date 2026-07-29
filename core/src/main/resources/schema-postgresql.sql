@@ -753,6 +753,71 @@ create table harness_artifact (
 );
 
 ------------------------------------------------------------------------------
+-- 2.5 Harness durable execution target (sole activation queue)
+--
+-- A target row persists for the entire work lifecycle and acts as the only
+-- activation queue. NULL route_key targets are eligible on every node;
+-- non-NULL route_key targets are eligible only on a node whose route
+-- eligibility snapshot contains that key (for example, ENVIRONMENT Tool
+-- invocations are route_key=environmentName and only dispatchable when
+-- that environment is locally READY). Insert and the strictly-earlier
+-- update of available_at must trigger a transactional NOTIFY so the
+-- in-process LISTEN loop wakes the drainer without periodic scans or
+-- per-invocation timers. Lease-extending updates do NOT notify.
+------------------------------------------------------------------------------
+
+create table harness_execution_target (
+    target_kind    varchar(32)  not null,
+    target_id      bigint       not null,
+    route_key      varchar(128),
+    available_at   timestamptz(3) not null,
+    constraint pk_harness_execution_target primary key (target_kind, target_id),
+    constraint ck_harness_execution_target_kind check (
+        target_kind in ('THREAD', 'MODEL_INVOCATION', 'TOOL_INVOCATION')
+    ),
+    constraint ck_harness_execution_target_id_pos check (target_id > 0),
+    constraint ck_harness_execution_target_route_key check (
+        route_key is null or char_length(btrim(route_key)) > 0
+    )
+);
+
+create index idx_harness_execution_target_due
+    on harness_execution_target (available_at, target_kind, target_id);
+
+create index idx_harness_execution_target_route
+    on harness_execution_target (route_key, available_at)
+    where route_key is not null;
+
+-- INSERT always notifies; the row is new and must wake every node that
+-- might be eligible.
+create or replace function harness_execution_target_notify_insert()
+returns trigger language plpgsql as $$
+begin
+    perform pg_notify('harness_execution_target', '');
+    return null;
+end $$;
+
+create trigger trg_harness_execution_target_notify_insert
+    after insert on harness_execution_target
+    for each row execute function harness_execution_target_notify_insert();
+
+-- UPDATE OF available_at notifies ONLY when the new value is strictly
+-- earlier than the old value. Lease extensions (new > old) and idempotent
+-- rewrites (new == old) do not wake any node.
+create or replace function harness_execution_target_notify_update()
+returns trigger language plpgsql as $$
+begin
+    if new.available_at < old.available_at then
+        perform pg_notify('harness_execution_target', '');
+    end if;
+    return new;
+end $$;
+
+create trigger trg_harness_execution_target_notify_update
+    after update of available_at on harness_execution_target
+    for each row execute function harness_execution_target_notify_update();
+
+------------------------------------------------------------------------------
 -- 3. Harness model_usage ledger (depends on harness_* framework)
 ------------------------------------------------------------------------------
 
