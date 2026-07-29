@@ -17,13 +17,14 @@ import fun.fengwk.kkstudio.harness.runtime.thread.InputStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 /**
  * {@link ThreadReconcileSnapshot} 构造约束：ownership / thread 一致性、{@link
  * ThreadReconcileSnapshot.PrimaryWork} 四种变体各自正确、blocker owner/kind 不变量、plan head 一致性、queued inputs
- * 严格 递增等不变量的测试。
+ * 严格递增等不变量的测试。
  */
 class ThreadReconcileSnapshotTest {
 
@@ -38,6 +39,45 @@ class ThreadReconcileSnapshotTest {
     assertEquals(ownership, snapshot.ownership());
     assertEquals(thread, snapshot.thread());
     assertTrue(snapshot.primaryWork().isEmpty());
+  }
+
+  @Test
+  void rejectsNullComponents() {
+    ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
+    HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok");
+
+    assertThrows(
+        NullPointerException.class,
+        () -> new ThreadReconcileSnapshot(null, thread, Optional.empty(), List.of()));
+    assertThrows(
+        NullPointerException.class,
+        () -> new ThreadReconcileSnapshot(ownership, null, Optional.empty(), List.of()));
+    assertThrows(
+        NullPointerException.class,
+        () -> new ThreadReconcileSnapshot(ownership, thread, null, List.of()));
+    assertThrows(
+        NullPointerException.class,
+        () -> new ThreadReconcileSnapshot(ownership, thread, Optional.empty(), null));
+  }
+
+  @Test
+  void defensivelyCopiesQueuedInputsIntoFinalComponent() {
+    ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
+    HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok");
+    List<ThreadInput> source =
+        new ArrayList<>(List.of(ReconcileTestSupport.input(1L, 1L, ThreadInputType.USER_MESSAGE)));
+
+    ThreadReconcileSnapshot snapshot =
+        new ThreadReconcileSnapshot(ownership, thread, Optional.empty(), source);
+    source.clear();
+
+    assertEquals(1, snapshot.queuedInputs().size());
+    assertThrows(
+        UnsupportedOperationException.class,
+        () ->
+            snapshot
+                .queuedInputs()
+                .add(ReconcileTestSupport.input(1L, 2L, ThreadInputType.USER_MESSAGE)));
   }
 
   @Test
@@ -260,7 +300,7 @@ class ThreadReconcileSnapshotTest {
         () -> new ThreadReconcileSnapshot(ownership, thread, Optional.of(work), List.of()));
   }
 
-  // 类型系统保证至多一项 PrimaryWork，因此不再需要运行时"至少多于一项"的校验。
+  // Optional<PrimaryWork> 的结构保证至多一个主要动作，因此不再需要运行时“多于一项”的校验。
   // 以下测试专注于 queuedInputs 不变量。
 
   @Test

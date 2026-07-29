@@ -46,33 +46,42 @@ public record ThreadReconcileSnapshot(
     Optional<PrimaryWork> primaryWork,
     List<ThreadInput> queuedInputs) {
 
-  public ThreadReconcileSnapshot {
-    ownership = Objects.requireNonNull(ownership, "ownership");
-    thread = Objects.requireNonNull(thread, "thread");
-    primaryWork = Objects.requireNonNull(primaryWork, "primaryWork");
-    queuedInputs = List.copyOf(Objects.requireNonNull(queuedInputs, "queuedInputs"));
+  /**
+   * 显式 canonical constructor：每个 {@code this.xxx} 都是最终写入不可变 Snapshot 的组件值。
+   *
+   * <p>这里不使用 compact constructor 的参数重写，避免读者需要知道编译器会在构造器体结束后隐式赋值。
+   */
+  public ThreadReconcileSnapshot(
+      ThreadOwnership ownership,
+      HarnessThread thread,
+      Optional<PrimaryWork> primaryWork,
+      List<ThreadInput> queuedInputs) {
+    this.ownership = Objects.requireNonNull(ownership, "ownership");
+    this.thread = Objects.requireNonNull(thread, "thread");
+    this.primaryWork = Objects.requireNonNull(primaryWork, "primaryWork");
+    this.queuedInputs = List.copyOf(Objects.requireNonNull(queuedInputs, "queuedInputs"));
 
-    if (thread.id() != ownership.threadId()) {
+    if (this.thread.id() != this.ownership.threadId()) {
       throw new IllegalArgumentException("thread.id must equal ownership.threadId");
     }
-    if (!thread.isBound()) {
+    if (!this.thread.isBound()) {
       throw new IllegalArgumentException("reconcile snapshot requires a bound thread");
     }
-    thread.requireHeadEntryId();
-    if (thread.executionEpoch() != ownership.executionEpoch()) {
+    this.thread.requireHeadEntryId();
+    if (this.thread.executionEpoch() != this.ownership.executionEpoch()) {
       throw new IllegalArgumentException(
           "thread.executionEpoch must equal ownership.executionEpoch");
     }
-    if (thread.processorLease() == null
-        || !ownership.processorToken().equals(thread.processorLease().token())) {
+    if (this.thread.processorLease() == null
+        || !this.ownership.processorToken().equals(this.thread.processorLease().token())) {
       throw new IllegalArgumentException(
           "thread.processorLease.token must equal ownership.processorToken");
     }
 
-    if (primaryWork.isPresent()) {
-      validatePrimaryWork(primaryWork.get(), ownership, thread);
+    if (this.primaryWork.isPresent()) {
+      validatePrimaryWork(this.primaryWork.get(), this.ownership, this.thread);
     }
-    requireQueuedInputsMonotonic(queuedInputs, ownership);
+    requireQueuedInputsMonotonic(this.queuedInputs, this.ownership);
   }
 
   /**
