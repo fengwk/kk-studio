@@ -293,11 +293,11 @@ index (model_resource_id, id)
 
 ### Endpoint
 
-三个查询都接受正 `long` 路径参数并返回 `Result<ModelUsageSummaryDTO>`：
+Session 与 Model 聚合 API 接受正 `long` 路径参数并返回 `Result<ModelUsageSummaryDTO>`；Thread usage
+只作为 `GET /api/threads/{threadId}/snapshot` 的 `usage` 字段返回，以保持 chat runtime 的单一一致投影。
 
 | Scope | Endpoint | Store 查询 | `scopeType` |
 | --- | --- | --- | --- |
-| Thread | `GET /api/usage/threads/{threadId}` | 当前 head 路径 root→head 上的 Assistant 账本（共享前缀计入、旁枝不计；Thread 不存在时拒绝查询） | `thread` |
 | Session | `GET /api/usage/sessions/{sessionId}` | `listBySessionId` | `session` |
 | Model | `GET /api/usage/models/{modelId}` | `listByModelResourceId` | `model` |
 

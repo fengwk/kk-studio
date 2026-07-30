@@ -7,8 +7,6 @@ import { harnessService } from '@/shared/api/harness-service'
 
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
-    getThreadUsage: vi.fn(),
-    listThreadToolInvocations: vi.fn(),
     setThreadYolo: vi.fn(),
   },
 }))
@@ -21,15 +19,16 @@ function wrapper({ children }: { children: ReactNode }) {
 describe('useHarnessThreadObservability', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(harnessService.getThreadUsage).mockResolvedValue({} as never)
-    vi.mocked(harnessService.listThreadToolInvocations).mockResolvedValue([])
   })
 
   it('reuses one generated clientMessageId and body for an automatic YOLO retry', async () => {
     vi.mocked(harnessService.setThreadYolo)
       .mockRejectedValueOnce(new Error('temporary network failure'))
       .mockResolvedValueOnce({} as never)
-    const { result } = renderHook(() => useHarnessThreadObservability('thread-1', false), { wrapper })
+    const { result } = renderHook(
+      () => useHarnessThreadObservability('thread-1', undefined, []),
+      { wrapper },
+    )
 
     act(() => result.current.setYolo(true, 4))
 

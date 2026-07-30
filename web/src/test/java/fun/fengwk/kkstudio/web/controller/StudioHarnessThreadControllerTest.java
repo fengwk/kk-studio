@@ -45,11 +45,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     String epoch = data(createdThread).path("executionEpoch").asText();
     assertEquals("0", epoch);
 
-    // UNBOUND Thread has no path entries and refuses mailbox input (409).
-    mockMvc
-        .perform(get("/api/threads/{id}/entries", threadId))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.length()").value(0));
+    // UNBOUND Thread refuses mailbox input (409).
     mockMvc
         .perform(
             post("/api/threads/{id}/messages", threadId)
@@ -200,14 +196,6 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
                         + "\"clientMessageId\":\"model-1\",\"expectedExecutionEpoch\":1}"))
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.data.inputType").value("SET_MODEL"));
-
-    mockMvc
-        .perform(get("/api/threads/{id}/inputs", threadId))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.length()").value(5))
-        .andExpect(jsonPath("$.data[0].inputId").value(inputId))
-        .andExpect(jsonPath("$.data[0].sequence").value(1))
-        .andExpect(jsonPath("$.data[4].sequence").value(5));
 
     // A stale expectedExecutionEpoch is a 409 for every external mutation.
     mockMvc

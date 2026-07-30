@@ -51,14 +51,20 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
     entries,
     inputs,
     session,
-    threadQuery,
-    entriesQuery,
+    snapshotQuery,
+    toolInvocations,
+    usage,
   } = useAgentThreadQueries(threadId)
   // UNBOUND Threads accept bind/bootstrap only; every mailbox mutation needs a bound head.
   const bound = Boolean(thread && thread.status !== 'UNBOUND')
   const executionEpoch = thread?.executionEpoch
   const createMessageMutation = useAgentThreadMessageMutation(threadId)
-  const modelStream = useHarnessThreadRealtime(threadId, Boolean(threadId) && entriesQuery.isSuccess, entries)
+  const modelStream = useHarnessThreadRealtime(
+    threadId,
+    Boolean(threadId) && snapshotQuery.isSuccess,
+    thread?.revision,
+    entries,
+  )
   const timeline = buildThreadTimeline(entries, inputs, modelStream)
   const working = isThreadWorking(thread, timeline)
   const agentsById = new Map(agents.map((agent) => [String(agent.id), agent]))
@@ -66,7 +72,7 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
     ? agentsById.get(String(thread.activeAgentDefinitionId))
     : undefined
   const runtimeLabels = resolveRuntimeLabels(thread, currentAgent, models, providers)
-  const observability = useHarnessThreadObservability(threadId, working)
+  const observability = useHarnessThreadObservability(threadId, usage, toolInvocations)
 
   useChatTranscriptAutoScroll(
     bodyRef,
@@ -92,8 +98,7 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
         expectedExecutionEpoch: payload.expectedExecutionEpoch,
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) })
-      await queryClient.invalidateQueries({ queryKey: queryKeys.threads.inputs(threadId) })
+      await queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
     },
   })
   const setModelMutation = useMutation({
@@ -109,8 +114,7 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
         expectedExecutionEpoch: payload.expectedExecutionEpoch,
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) })
-      await queryClient.invalidateQueries({ queryKey: queryKeys.threads.inputs(threadId) })
+      await queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
     },
   })
 
@@ -121,7 +125,7 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
   function reportMutationError(error: unknown, fallbackPrefix: string) {
     if (isConflictError(error)) {
       setActionError(`${fallbackPrefix}：Thread 状态已变化（${errorMessage(error)}），已刷新，请重试`)
-      void queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
       return
     }
     setActionError(errorMessage(error))
@@ -224,9 +228,7 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
         clientMessageIdRef.current = null
         replayContentRef.current = null
         await Promise.all([
-          queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) }),
-          queryClient.invalidateQueries({ queryKey: queryKeys.threads.entries(threadId) }),
-          queryClient.invalidateQueries({ queryKey: queryKeys.threads.inputs(threadId) }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
           queryClient.invalidateQueries({ queryKey: queryKeys.threads.list }),
         ])
       })
@@ -268,13 +270,13 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
     providers,
     thread,
     bound,
-    title: session?.title || thread?.sessionTitle || thread?.threadId || 'Chat',
+    title: thread?.sessionTitle || thread?.threadId || 'Chat',
     agent: currentAgent,
     timeline,
     runtimeLabels,
     working,
-    messagesLoading: threadQuery.isLoading || entriesQuery.isLoading,
-    messagesError: threadQuery.error || entriesQuery.error,
+    messagesLoading: snapshotQuery.isLoading,
+    messagesError: snapshotQuery.error,
     bodyRef,
     draft,
     // Overlapping submits keep pending accurate via local count, not mutation observer alone.

@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -79,38 +78,29 @@ class HarnessQueryServicesUnitTest {
   }
 
   @Test
-  void threadQueryDerivesStatusListsPathInputs() {
+  void threadQueryDerivesStatusAndListsThreads() {
     HarnessQueryRow thread = thread(21L, 1L, 10L, true, false);
     thread.setHasQueuedInput(true);
     when(queryMapper.findThreadView(21L)).thenReturn(thread);
     when(queryMapper.findSession(1L)).thenReturn(session(1L, "root"));
     when(queryMapper.listAllThreadViews()).thenReturn(List.of(thread));
-    when(queryMapper.loadPath(1L, 10L)).thenReturn(List.of(entry(10L, 1L, null, "ROOT")));
-    when(queryMapper.listInputsByThread(21L))
-        .thenReturn(List.of(input(100L, 21L, 1L, "USER_MESSAGE", "QUEUED")));
-
     HarnessThreadDTO dto = threadQuery.getThread("21");
     assertEquals("WAITING", dto.getStatus());
     assertEquals(1, threadQuery.listAll().size());
-    assertEquals(1, threadQuery.listPathEntries("21").size());
-    assertEquals(1, threadQuery.listInputs("21").size());
     assertThrows(IllegalArgumentException.class, () -> threadQuery.getThread("999"));
   }
 
   @Test
-  void unboundThreadIsVisibleAndReportsEmptyPath() {
+  void unboundThreadIsVisible() {
     HarnessQueryRow unbound = thread(31L, null, null, false, false);
     when(queryMapper.findThreadView(31L)).thenReturn(unbound);
     when(queryMapper.listAllThreadViews()).thenReturn(List.of(unbound));
-    when(queryMapper.listInputsByThread(31L)).thenReturn(List.of());
 
     HarnessThreadDTO dto = threadQuery.getThread("31");
     assertEquals("UNBOUND", dto.getStatus());
     assertNull(dto.getSessionId());
     assertNull(dto.getHeadEntryId());
     assertEquals(1, threadQuery.listAll().size());
-    assertTrue(threadQuery.listPathEntries("31").isEmpty(), "UNBOUND thread has no path entries");
-    assertTrue(threadQuery.listInputs("31").isEmpty());
   }
 
   @Test

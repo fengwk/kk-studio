@@ -9,7 +9,7 @@ function createClient(): HttpClient {
 describe('harnessService', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('exposes flat Session read endpoints and Thread actor endpoints', async () => {
+  it('exposes flat Session read endpoints and the snapshot-first Thread command surface', async () => {
     const client = createClient()
     const service = createHarnessService(client)
     await service.getSession('session /1')
@@ -27,11 +27,7 @@ describe('harnessService', () => {
       clientMessageId: 'cid-model',
       expectedExecutionEpoch: 4,
     })
-    await service.getThread('thread /1')
-    await service.listThreadEntries('thread /1')
-    await service.listThreadInputs('thread /1')
-    await service.listThreadToolInvocations('thread /1')
-    await service.getThreadUsage('thread /1')
+    await service.getThreadSnapshot('thread /1')
     await service.setThreadYolo('thread /1', {
       yoloEnabled: true,
       clientMessageId: 'cid-yolo',
@@ -63,6 +59,7 @@ describe('harnessService', () => {
     expect(client.get).toHaveBeenCalledWith('/sessions')
     expect(client.get).toHaveBeenCalledWith('/sessions/session%20%2F1')
     expect(client.get).toHaveBeenCalledWith('/sessions/session%20%2F1/entries')
+    expect(client.get).toHaveBeenCalledWith('/threads/thread%20%2F1/snapshot')
     expect(client.put).toHaveBeenNthCalledWith(1, '/threads/thread%20%2F1/model', {
       modelId: 'model-1',
       variant: 'default',
@@ -135,11 +132,11 @@ describe('harnessService', () => {
     })
   })
 
-  it('exposes the current flat Session and Thread command surface', async () => {
+  it('exposes the current snapshot-first Session and Thread command surface', async () => {
     const client = createClient()
     const service = createHarnessService(client)
     expect(service.listThreads).toBeTypeOf('function')
-    expect(service.getThread).toBeTypeOf('function')
+    expect(service.getThreadSnapshot).toBeTypeOf('function')
     expect(service.createThread).toBeTypeOf('function')
     expect(service.bootstrapThread).toBeTypeOf('function')
     expect(service.updateThreadHead).toBeTypeOf('function')
@@ -152,10 +149,6 @@ describe('harnessService', () => {
     expect(service.updateRetryPolicy).toBeTypeOf('function')
     expect(service.getRealtimeStreamPolicy).toBeTypeOf('function')
     expect(service.updateRealtimeStreamPolicy).toBeTypeOf('function')
-    expect(service.listThreadEntries).toBeTypeOf('function')
-    expect(service.listThreadInputs).toBeTypeOf('function')
-    expect(service.listThreadToolInvocations).toBeTypeOf('function')
-    expect(service.getThreadUsage).toBeTypeOf('function')
     expect(service.listSessions).toBeTypeOf('function')
     expect(service.getSession).toBeTypeOf('function')
     expect(service.listSessionEntries).toBeTypeOf('function')
@@ -166,10 +159,10 @@ describe('harnessService', () => {
     expect(client.get).toHaveBeenLastCalledWith('/sessions/42/entries')
   })
 
-  it('keeps Redis stream cursors as strings in SSE URLs', () => {
+  it('uses the durable revision as the SSE resume cursor', () => {
     const eventSource = vi.fn()
     vi.stubGlobal('EventSource', eventSource)
-    createHarnessService(createClient()).createThreadRealtimeStream('1', '9007199254740993-0')
-    expect(eventSource).toHaveBeenCalledWith('/api/threads/1/events/stream?afterEventId=9007199254740993-0')
+    createHarnessService(createClient()).createThreadRealtimeStream('1', '9007199254740993')
+    expect(eventSource).toHaveBeenCalledWith('/api/threads/1/events/stream?afterRevision=9007199254740993')
   })
 })

@@ -29,6 +29,21 @@ describe('thread realtime state', () => {
           + '"createdAt":"not-a-date"}',
       ),
     ).toBeNull()
+    expect(parseRealtimeModelDelta({ type: 'MODEL_DELTA' })).toBeNull()
+    expect(
+      parseRealtimeModelDelta(
+        '{"threadId":"7","subjectKind":"MODEL_INVOCATION","subjectId":"9","attempt":1,'
+          + '"type":"MODEL_DELTA","payload":{"kind":"IMAGE_DELTA","text":"hello"},'
+          + '"createdAt":"2026-07-28T10:00:00Z"}',
+      ),
+    ).toBeNull()
+    expect(
+      parseRealtimeModelDelta(
+        '{"threadId":"7","subjectKind":"MODEL_INVOCATION","subjectId":"9","attempt":1,'
+          + '"type":"MODEL_DELTA","payload":{"kind":"TEXT_DELTA","text":42},'
+          + '"createdAt":"2026-07-28T10:00:00Z"}',
+      ),
+    ).toBeNull()
   })
 
   it('accumulates one attempt and resets the transient response for a retry', () => {
@@ -76,6 +91,19 @@ describe('thread realtime state', () => {
     const earlierAssistant = entry('2026-07-28T09:59:59', 'ASSISTANT')
     expect(isRealtimeModelStreamCommitted(stream, [earlierAssistant])).toBe(false)
     expect(isRealtimeModelStreamCommitted(stream, [aborted])).toBe(true)
+  })
+
+  it('keeps the transient response for malformed timestamps and malformed durable messages', () => {
+    const stream = reduceRealtimeModelStream(
+      null,
+      parseRealtimeModelDelta(event('1', 'TEXT_DELTA', 'partial'))!,
+    )
+    expect(isRealtimeModelStreamCommitted({ ...stream, createdAt: 'not-a-date' }, [])).toBe(false)
+    expect(
+      isRealtimeModelStreamCommitted(stream, [
+        { ...entry('2026-07-28T10:00:01', 'ASSISTANT'), payloadJson: '{' },
+      ]),
+    ).toBe(false)
   })
 })
 

@@ -29,11 +29,7 @@ export const queryKeys = {
   threads: {
     all: ['threads'] as const,
     list: ['threads', 'list'] as const,
-    detail: (threadId: string) => ['threads', 'detail', threadId] as const,
-    entries: (threadId: string) => ['threads', 'detail', threadId, 'entries'] as const,
-    inputs: (threadId: string) => ['threads', 'detail', threadId, 'inputs'] as const,
-    events: (threadId: string) => ['threads', 'detail', threadId, 'events'] as const,
-    toolInvocations: (threadId: string) => ['threads', 'detail', threadId, 'tool-invocations'] as const,
+    snapshot: (threadId: string) => ['threads', 'snapshot', threadId] as const,
   },
   sessions: {
     all: ['sessions'] as const,
@@ -43,7 +39,6 @@ export const queryKeys = {
   },
   usage: {
     all: ['usage'] as const,
-    thread: (threadId: string) => ['usage', 'threads', threadId] as const,
     session: (sessionId: string) => ['usage', 'sessions', sessionId] as const,
     model: (modelId: AgentResourceId) => ['usage', 'models', String(modelId)] as const,
   },

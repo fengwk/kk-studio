@@ -12,8 +12,8 @@
 | 本地状态 | `localStorage` 的 `ChatPaneState`（按 chatId） |
 | 资源 API | `/api/providers`、`/api/models`、`/api/agents`、`/api/environments` |
 | Chat API | `/api/chats` |
-| Harness API | `/api/threads`、`/api/threads/{threadId}`、`/api/sessions`、`/api/tool-invocations`、`/api/usage`、`/api/interactions` |
-| 实时通道 | snapshot-first + Redis-backed SSE（事件名 `realtime`，stream-id cursor） |
+| Harness API | `/api/threads`、`/api/threads/{threadId}/snapshot`、`/api/sessions`、`/api/tool-invocations`、`/api/usage`、`/api/interactions` |
+| 实时通道 | snapshot-first + durable revision SSE；无 id 的 Redis `realtime` 仅作临时 overlay |
 | 浏览器路由 | `BrowserRouter`；Spring 对非 API/Actuator、无扩展名且不存在的 GET 路径回退到 `index.html` |
 | 视觉实现 | 全局 token 见 [前端设计规范](../product-design/frontend-design-system.md) |
 
@@ -89,11 +89,10 @@
 | `createThread` | `POST /api/threads` | 创建 UNBOUND Thread（无 body） |
 | `bootstrapThread` | `POST /api/threads/{id}/bootstrap` | 创建 Session 并绑定 head，返回 `{session, thread}` |
 | `updateThreadHead` | `PUT /api/threads/{id}/head` | bind / 跨 Session rebind / unbind（`headEntryId` 可为 `null`） |
-| `getThread` | `GET /api/threads/{id}` | Thread 视图（含派生 status、可空 `sessionId`、`executionEpoch`） |
+| `getThreadSnapshot` | `GET /api/threads/{id}/snapshot` | 唯一 chat-runtime 投影：revision、Thread、Entries、Inputs、invocations、open interactions 与 usage |
 | `submitThreadMessage` | `POST /api/threads/{id}/messages` | 入队用户消息（202） |
 | `setThreadAgent` / `setThreadModel` / `setThreadYolo` | `PUT /api/threads/{id}/agent`、`/model`、`/yolo` | 入队配置命令（202） |
-| `listThreadEntries` / `inputs` | `GET /api/threads/{id}/entries`、`/inputs` | 路径 Entries 与 mailbox |
-| `createThreadRealtimeStream` | `GET /api/threads/{id}/events/stream` | Redis SSE（`afterEventId` = stream-id） |
+| `createThreadRealtimeStream` | `GET /api/threads/{id}/events/stream?afterRevision={revision}` | revision/resync invalidation 与无 id 的 Redis realtime overlay |
 | `stopThread` | `POST .../stop` | Stop |
 | `listSessions` / `getSession` / `listSessionEntries` | `/api/sessions` | Session 列表、详情与 Entry Tree |
 | `getRetryPolicy` / `updateRetryPolicy` | `GET` / `PUT /api/harness/retry-policy` | 全局自动重试策略 |
@@ -140,23 +139,24 @@ decoration queue =
 | QUEUED `user_message` / `custom_message` input | 不进入 transcript；显示在 Working 装饰栏 |
 | APPLIED input | 不渲染；Entry 与 apply 同事务，Entries 为唯一 transcript 权威 |
 | Tool Result artifact | 映射 `/api/artifacts/{artifactId}` |
-| Redis SSE `/events/stream` (`realtime`) | 仅 invalidate Entries/Inputs/Thread 等 snapshot query，不投影正文 |
+| revision / resync SSE | 仅 invalidate `threads.snapshot(threadId)` |
+| Redis SSE `/events/stream` (`realtime`) | 临时模型 text/thinking overlay；不使业务 query 失效 |
 
-Timeline 以 Entries/Inputs snapshot 为权威基线。
+Timeline 以单一 Thread snapshot 的 Entries/Inputs 为权威基线。
 
 ### 历史重定位与 Stop
 
 - `/tree` 按需查询 Session Entry Tree；确认后 `PUT /threads/:id/head` 把当前 Thread 的 head 重定位到所选 Entry，pane 绑定不变，并把该 Entry 的用户文本回填为草稿。
 - `/session` 先选 Session，再由其 Entry Tree 提供新 head，同样走 `PUT /head`。
-- `/stop` 携带当前 `executionEpoch`；服务端原子追加 `ASSISTANT_ABORTED`（仅 text/thinking）或 `ASSISTANT_ERROR(CANCELLED)` barrier 并 epoch fence。前端在 snapshot invalidate 后，durable `ASSISTANT_ABORTED` 投影为 assistant `TextDialogueMessage`（`aborted: true`）并渲染“已停止”标识；realtime SSE delta 仍然落到当前 invocation overlay，但只要 durable aborted/cancellation 落库就视为该 overlay committed 并被覆盖。成功后前端仅清理本地 message replay identity 并 invalidate Thread/Entries/Inputs 等 snapshot query。不回填 Composer。stop 后 Thread 立即可重定位。
-- 派生状态按 `RUNNING > WAITING > RUNNABLE > UNBOUND/IDLE` 驱动 UI 指示与 query 轮询；`RUNNABLE` 视为 active/working；invocation 重试等待归入 `WAITING`。
+- `/stop` 携带当前 `executionEpoch`；服务端原子追加 `ASSISTANT_ABORTED`（仅 text/thinking）或 `ASSISTANT_ERROR(CANCELLED)` barrier 并 epoch fence。前端在 snapshot invalidate 后，durable `ASSISTANT_ABORTED` 投影为 assistant `TextDialogueMessage`（`aborted: true`）并渲染“已停止”标识；realtime SSE delta 仍然落到当前 invocation overlay，但只要 durable aborted/cancellation 落库就视为该 overlay committed 并被覆盖。成功后前端仅清理本地 message replay identity 并 invalidate `threads.snapshot`。不回填 Composer。stop 后 Thread 立即可重定位。
+- 派生状态按 `RUNNING > WAITING > RUNNABLE > UNBOUND/IDLE` 驱动 UI 指示；`RUNNABLE` 视为 active/working；invocation 重试等待归入 `WAITING`。业务状态不使用周期轮询。
 
 ### Realtime cursor 恢复
 
-1. REST 加载 Thread / Entries / Inputs / Invocations
-2. 以 Redis stream-id（默认 `0-0`）打开 EventSource
-3. stream-id 以字符串比较，**绝不**转为 JavaScript number
-4. 终态与配置推进会使 entries/inputs/tool/usage/thread detail query 失效
+1. REST 加载单一 Thread snapshot
+2. 以 snapshot 的十进制 revision 打开 EventSource
+3. `revision` 的 SSE id 只作为 durable cursor；Redis realtime 没有 id，重新连接从 live edge 开始
+4. revision/resync 只使 `threads.snapshot` 失效
 
 ## 工程结构
 
@@ -184,7 +184,7 @@ frontend/src
 └── styles.css
 ```
 
-`queryKeys.chats.*` 覆盖 Chat；`queryKeys.environments.list` 覆盖 live registry；`queryKeys.threads.list` 覆盖全局 Thread 列表；`queryKeys.sessions.*` / `queryKeys.threads.detail(...)` 覆盖 Session/Thread 观测。head 重定位成功后同时失效 `threads.detail/entries/inputs` 与 `threads.list`。
+`queryKeys.chats.*` 覆盖 Chat；`queryKeys.environments.list` 覆盖 live registry；`queryKeys.threads.list` 覆盖全局 Thread 列表；`queryKeys.threads.snapshot(...)` 是 chat runtime 的唯一 Thread 业务状态。head 重定位成功后失效 snapshot 与 `threads.list`。
 
 ## 验证
 

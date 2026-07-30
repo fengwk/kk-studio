@@ -2,7 +2,8 @@ import { assert, envelopeData, pageResults, sleep, cid } from '../lib/http.mjs'
 import {
   createBootstrappedThread,
   getThread,
-  listThreadEntries,
+  getThreadSnapshot,
+  snapshotEntries,
   rebindWhenQuiescent,
   waitForModelTextDeltaAfterSseConnected,
   waitForQuiescentThread,
@@ -40,16 +41,15 @@ registerCase({
       await sleep(1000)
     }
     assert(finalStatus === 'IDLE', `expected IDLE, got ${finalStatus}`)
-    const { json: entriesJson } = await ctx.call('GET', `/api/threads/${tid}/entries`)
+    const threadSnapshot = await getThreadSnapshot(ctx, tid)
     const assistantEntries = []
-    for (const entry of envelopeData(entriesJson) || []) {
+    for (const entry of threadSnapshot.entries || []) {
       if (String(entry.entryType || '').toUpperCase() !== 'MESSAGE') continue
       const payload = JSON.parse(entry.payloadJson || '{}')
       if (String(payload.message?.role || '').toUpperCase() === 'ASSISTANT') assistantEntries.push(entry)
     }
     assert(assistantEntries.length > 0, 'no assistant entry')
-    const { json: usageJson } = await ctx.call('GET', `/api/usage/threads/${tid}`)
-    const usage = envelopeData(usageJson)
+    const usage = threadSnapshot.usage
     assert(Number(usage.recordCount || 0) >= 1, JSON.stringify(usage))
     ctx.vars.realThreadId = tid
     ctx.vars.realSessionId = session.sessionId
@@ -116,7 +116,7 @@ registerCase({
     )
 
     const stopped = await getThread(ctx, tid)
-    const entriesAfterStop = await listThreadEntries(ctx, tid)
+    const entriesAfterStop = await snapshotEntries(ctx, tid)
     const abortedEntries = entriesAfterStop.filter(
       (entry) => String(entry.entryType || '').toUpperCase() === 'ASSISTANT_ABORTED',
     )
@@ -160,7 +160,7 @@ registerCase({
       timeoutMs: 120_000,
       intervalMs: 500,
     })
-    const finalEntries = await listThreadEntries(ctx, tid)
+    const finalEntries = await snapshotEntries(ctx, tid)
     const finalAbortedEntries = finalEntries.filter(
       (entry) => String(entry.entryType || '').toUpperCase() === 'ASSISTANT_ABORTED',
     )
@@ -239,8 +239,8 @@ registerCase({
       await sleep(1000)
     }
     assert(finalStatus === 'IDLE', `branch expected IDLE, got ${finalStatus}`)
-    const mainU = envelopeData((await ctx.call('GET', `/api/usage/threads/${mainTid}`)).json)
-    const branchU = envelopeData((await ctx.call('GET', `/api/usage/threads/${branchTid}`)).json)
+    const mainU = (await getThreadSnapshot(ctx, mainTid)).usage
+    const branchU = (await getThreadSnapshot(ctx, branchTid)).usage
     const sessionU = envelopeData((await ctx.call('GET', `/api/usage/sessions/${sessionId}`)).json)
     const mainN = Number(mainU.recordCount || 0)
     const branchN = Number(branchU.recordCount || 0)
@@ -295,7 +295,7 @@ registerCase({
       if ((finalStatus === 'IDLE' || finalStatus === 'FAILED') && !thread.processing) break
       await sleep(1000)
     }
-    const inv = envelopeData((await ctx.call('GET', `/api/threads/${tid}/tool-invocations`)).json) || []
+    const inv = (await getThreadSnapshot(ctx, tid)).toolInvocations || []
     ctx.writeArtifact('tool-invocations.json', JSON.stringify(inv, null, 2))
     assert(inv.length > 0, `no tool invocations; status=${finalStatus}`)
   },

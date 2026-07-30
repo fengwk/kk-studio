@@ -130,9 +130,7 @@ export function BoundThreadPane({
     onSuccess: async (_thread, entry) => {
       setHistorySessionId(null)
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.entries(threadId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.inputs(threadId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.threads.list }),
       ])
       setBranchDraft(branchTarget(entry).draft)
@@ -319,7 +317,7 @@ export function BoundThreadPane({
         onSelect={(agentId) => {
           setAgentModalOpen(false)
           void controller.setThreadAgent(agentId).then(async () => {
-            await queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) })
+            await queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
           })
         }}
       />

@@ -27,9 +27,7 @@ export function useAgentThreadMessageMutation(threadId: string) {
       }),
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.entries(threadId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.inputs(threadId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all }),
       ])
     },

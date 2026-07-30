@@ -17,15 +17,10 @@ vi.mock('@/shared/api/agent-service', () => ({
 }))
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
-    getThread: vi.fn(),
-    getSession: vi.fn(),
+    getThreadSnapshot: vi.fn(),
     listSessions: vi.fn(),
     listThreads: vi.fn(),
     listSessionEntries: vi.fn(),
-    listThreadEntries: vi.fn(),
-    listThreadInputs: vi.fn(),
-    listThreadToolInvocations: vi.fn(),
-    getThreadUsage: vi.fn(),
     createThreadRealtimeStream: vi.fn(),
     updateThreadHead: vi.fn(),
     setThreadAgent: vi.fn(),
@@ -52,6 +47,7 @@ function thread(overrides: Partial<HarnessThreadDTO>): HarnessThreadDTO {
     executionEpoch: 5,
     status: 'IDLE',
     inputSequence: 1,
+    revision: '0',
     activeAgentDefinitionId: 'a1',
     activeAgentName: 'assistant',
     modelId: 'm1',
@@ -61,6 +57,36 @@ function thread(overrides: Partial<HarnessThreadDTO>): HarnessThreadDTO {
     createTime: '2026-01-01T00:00:00Z',
     updateTime: '2026-01-02T00:00:00Z',
     ...overrides,
+  }
+}
+
+function snapshot(currentThread: HarnessThreadDTO) {
+  return {
+    revision: currentThread.revision,
+    thread: currentThread,
+    entries: [],
+    inputs: [],
+    modelInvocations: [],
+    toolInvocations: [],
+    openInteractions: [],
+    usage: {
+      scopeType: 'thread',
+      scopeId: currentThread.threadId,
+      recordCount: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      cacheWriteLongTokens: 0,
+      reasoningTokens: 0,
+      providerTotalTokens: 0,
+      cacheEligibleRecordCount: 0,
+      cacheHitRecordCount: 0,
+      cacheHitRatio: 0,
+      tokenReadRatio: 0,
+      unamortizedCacheWriteTokens: 0,
+      costs: [],
+    },
   }
 }
 
@@ -176,10 +202,7 @@ describe('ChatWorkspacePane commands', () => {
       modelCallTimeoutMillis: 1, modelCallIdleTimeoutMillis: 1, createTime: null, updateTime: null,
     }]))
     vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(new FakeEventSource() as EventSource)
-    vi.mocked(harnessService.getThread).mockResolvedValue(thread({}))
-    vi.mocked(harnessService.getSession).mockResolvedValue({
-      sessionId: 's1', title: 'S1', createTime: null, updateTime: null,
-    })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread({})))
     vi.mocked(harnessService.listSessions).mockResolvedValue([
       {
         sessionId: 's1', title: 'S1', createTime: '2026-01-01T00:00:00Z', updateTime: '2026-01-02T00:00:00Z',
@@ -198,15 +221,6 @@ describe('ChatWorkspacePane commands', () => {
     vi.mocked(harnessService.listSessionEntries).mockImplementation(async (sessionId: string) =>
       sessionEntries(sessionId),
     )
-    vi.mocked(harnessService.listThreadEntries).mockResolvedValue([])
-    vi.mocked(harnessService.listThreadInputs).mockResolvedValue([])
-    vi.mocked(harnessService.listThreadToolInvocations).mockResolvedValue([])
-    vi.mocked(harnessService.getThreadUsage).mockResolvedValue({
-      scopeType: 'thread', scopeId: 't1', recordCount: 0, inputTokens: 0, outputTokens: 0,
-      cacheReadTokens: 0, cacheWriteTokens: 0, cacheWriteLongTokens: 0, reasoningTokens: 0,
-      providerTotalTokens: 0, cacheEligibleRecordCount: 0, cacheHitRecordCount: 0, cacheHitRatio: 0,
-      tokenReadRatio: 0, unamortizedCacheWriteTokens: 0, costs: [],
-    })
     vi.mocked(harnessService.updateThreadHead).mockResolvedValue(thread({ executionEpoch: 6 }))
     vi.mocked(harnessService.setThreadAgent).mockResolvedValue({
       inputId: 'i', threadId: 't1', sequence: 1, inputType: 'SET_AGENT', payloadJson: '{}',
@@ -340,7 +354,9 @@ describe('ChatWorkspacePane commands', () => {
 
   it('refuses to open /session or /tree while the Thread is ACTIVE', async () => {
     const user = userEvent.setup()
-    vi.mocked(harnessService.getThread).mockResolvedValue(thread({ status: 'RUNNING', processing: true }))
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({ status: 'RUNNING', processing: true })),
+    )
     renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
 

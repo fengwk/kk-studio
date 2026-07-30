@@ -127,19 +127,16 @@ describe('agentService', () => {
     expect(client.delete).toHaveBeenNthCalledWith(3, '/agents/303', { params: { expectedVersion: '11' } })
   })
 
-  it('maps usage summaries to encoded thread, session and model endpoints', async () => {
-    // Explicit promise annotations keep all three service return contracts tied to the backend summary DTO.
+  it('maps usage summaries to encoded session and model endpoints', async () => {
     const client = createClient()
     const service = createAgentService(client)
 
-    const threadUsage: Promise<ModelUsageSummaryDTO> = service.getThreadUsage('thread /1')
     const sessionUsage: Promise<ModelUsageSummaryDTO> = service.getSessionUsage('session /2')
     const modelUsage: Promise<ModelUsageSummaryDTO> = service.getModelUsage('model /3')
-    await Promise.all([threadUsage, sessionUsage, modelUsage])
+    await Promise.all([sessionUsage, modelUsage])
 
-    expect(client.get).toHaveBeenNthCalledWith(1, '/usage/threads/thread%20%2F1')
-    expect(client.get).toHaveBeenNthCalledWith(2, '/usage/sessions/session%20%2F2')
-    expect(client.get).toHaveBeenNthCalledWith(3, '/usage/models/model%20%2F3')
+    expect(client.get).toHaveBeenNthCalledWith(1, '/usage/sessions/session%20%2F2')
+    expect(client.get).toHaveBeenNthCalledWith(2, '/usage/models/model%20%2F3')
   })
 
 })

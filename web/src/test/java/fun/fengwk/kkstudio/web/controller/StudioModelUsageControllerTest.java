@@ -50,13 +50,13 @@ class StudioModelUsageControllerTest extends WebPostgresTestSupport {
   }
 
   @Test
-  void exposesThreadSessionAndModelPathsWithStringLargeIds() throws Exception {
+  void exposesSessionAndModelPathsWithStringLargeIds() throws Exception {
     insertThreadPath();
     recordStore.insert(
         new ModelUsageRecord(
             recordIds.newModelUsageRecordId(), LARGE_ID, LARGE_ID, LARGE_ID, draft(LARGE_ID), NOW));
 
-    for (String scope : List.of("threads", "sessions", "models")) {
+    for (String scope : List.of("sessions", "models")) {
       String scopeType = scope.substring(0, scope.length() - 1);
       mockMvc
           .perform(get("/api/usage/{scope}/{id}", scope, Long.toString(LARGE_ID)))
@@ -75,18 +75,9 @@ class StudioModelUsageControllerTest extends WebPostgresTestSupport {
     }
   }
 
-  /** 孤立账本不能替代 Thread 元数据：没有 Thread 行时查询直接 404。 */
-  @Test
-  void rejectsUnknownThreadEvenWhenLedgerRowsExist() throws Exception {
-    // final schema FKs prevent orphan ledger rows; unknown Thread remains 404 without inserts.
-    mockMvc
-        .perform(get("/api/usage/threads/{id}", Long.toString(LARGE_ID)))
-        .andExpect(status().isNotFound());
-  }
-
   @Test
   void rejectsInvalidIdsOnAllPaths() throws Exception {
-    for (String scope : List.of("threads", "sessions", "models")) {
+    for (String scope : List.of("sessions", "models")) {
       for (String invalid : List.of("abc", "0", "-1", "9223372036854775808")) {
         mockMvc
             .perform(get("/api/usage/{scope}/{id}", scope, invalid))

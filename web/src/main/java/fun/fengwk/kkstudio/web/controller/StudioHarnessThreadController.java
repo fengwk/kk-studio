@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.core.harness.realtime.HarnessRealtimeEventTail;
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadCommandService;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadQueryService;
-import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadAgentSetDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadBootstrapDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadBootstrapResultDTO;
@@ -42,7 +41,7 @@ import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 
 /**
- * Thread API：查询、typed mailbox 输入、路径 entries、inputs 与 Redis realtime SSE。
+ * Thread API：快照查询、typed mailbox 输入与 Redis realtime SSE。
  *
  * <p>统一返回 {@link Result}，HTTP 状态由 convention4j {@code ResultResponseBodyAdvice} 按 {@code
  * result.status} 对齐；入队类接口使用 {@link Results#accepted}（202）。
@@ -161,18 +160,6 @@ public class StudioHarnessThreadController {
   public Result<HarnessThreadStopResultDTO> stop(
       @PathVariable String threadId, @RequestBody HarnessThreadStopDTO request) {
     return Results.ok(withMissingResourceTranslation(() -> commandService.stop(threadId, request)));
-  }
-
-  /** 查询当前 branch path 上的持久化 Session Entry。 */
-  @GetMapping("/threads/{threadId}/entries")
-  public Result<List<HarnessSessionEntryDTO>> listPathEntries(@PathVariable String threadId) {
-    return Results.ok(withMissingResourceTranslation(() -> queryService.listPathEntries(threadId)));
-  }
-
-  /** 查询 Thread mailbox 中的输入及其处理状态。 */
-  @GetMapping("/threads/{threadId}/inputs")
-  public Result<List<HarnessThreadInputDTO>> listInputs(@PathVariable String threadId) {
-    return Results.ok(withMissingResourceTranslation(() -> queryService.listInputs(threadId)));
   }
 
   /**
