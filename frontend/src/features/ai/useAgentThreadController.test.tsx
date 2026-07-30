@@ -498,17 +498,22 @@ describe('useAgentThreadController', () => {
   })
 
   it('projects model text and thinking deltas as a transient streaming assistant message', async () => {
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshotWithRunningModel(thread),
+    )
     const { result } = renderHook(() => useAgentThreadController('1'), { wrapper })
     await waitFor(() => expect(harnessService.createThreadRealtimeStream).toHaveBeenCalled())
 
     act(() => {
       realtimeSource.emitRealtime(
         '{"threadId":"1","subjectKind":"MODEL_INVOCATION","subjectId":"42","attempt":1,'
+          + '"sequence":1,'
           + '"type":"MODEL_DELTA","payload":{"kind":"THINKING_DELTA","text":"先分析。"},'
           + '"createdAt":"2026-07-28T10:00:00Z"}',
       )
       realtimeSource.emitRealtime(
         '{"threadId":"1","subjectKind":"MODEL_INVOCATION","subjectId":"42","attempt":1,'
+          + '"sequence":2,'
           + '"type":"MODEL_DELTA","payload":{"kind":"TEXT_DELTA","text":"这是答案。"},'
           + '"createdAt":"2026-07-28T10:00:01Z"}',
       )
@@ -527,6 +532,11 @@ describe('useAgentThreadController', () => {
   })
 
   it('does not carry a transient stream into a newly selected Thread', async () => {
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId) =>
+      threadId === '1'
+        ? snapshotWithRunningModel(thread)
+        : snapshot({ ...thread, threadId, sessionId: 's2', headEntryId: 'h2' }),
+    )
     const { result, rerender } = renderHook(
       ({ threadId }) => useAgentThreadController(threadId),
       { initialProps: { threadId: '1' }, wrapper },
@@ -536,6 +546,7 @@ describe('useAgentThreadController', () => {
     act(() => {
       realtimeSource.emitRealtime(
         '{"threadId":"1","subjectKind":"MODEL_INVOCATION","subjectId":"42","attempt":1,'
+          + '"sequence":1,'
           + '"type":"MODEL_DELTA","payload":{"kind":"TEXT_DELTA","text":"旧 Thread 输出"},'
           + '"createdAt":"2026-07-28T10:00:00Z"}',
       )
@@ -768,5 +779,33 @@ function snapshot(threadValue: HarnessThreadDTO) {
       unamortizedCacheWriteTokens: 0,
       costs: [],
     },
+  }
+}
+
+function snapshotWithRunningModel(threadValue: HarnessThreadDTO) {
+  return {
+    ...snapshot(threadValue),
+    modelInvocations: [
+      {
+        id: '42',
+        threadId: threadValue.threadId,
+        sourceHeadEntryId: threadValue.headEntryId ?? 'h1',
+        executionEpoch: threadValue.executionEpoch,
+        requestJson: '{}',
+        status: 'RUNNING' as const,
+        attempt: 1,
+        nextAttemptAt: null,
+        workerUntil: null,
+        deadlineAt: null,
+        lastActivityAt: null,
+        resultJson: null,
+        errorJson: null,
+        appliedAt: null,
+        createdAt: '2026-07-28T10:00:00Z',
+        startedAt: '2026-07-28T10:00:00Z',
+        finishedAt: null,
+        safeStreamSnapshotJson: '{"text":"","thinking":"","sequence":0}',
+      },
+    ],
   }
 }

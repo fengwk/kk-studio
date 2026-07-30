@@ -875,16 +875,21 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
         transactions.claim(
             fx.invocationId, "tok-safe", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
     assertTrue(claimed.isPresent());
+    long revisionAfterClaim = threadRevision(fx.threadId);
 
-    SafeStreamSnapshot first = new SafeStreamSnapshot("hello", "");
+    SafeStreamSnapshot first = new SafeStreamSnapshot("hello", "", 1L);
     ModelInvocationUpdateOutcome firstOutcome =
         transactions.recordSafeStreamSnapshot(claimed.get(), first, now.plusMillis(10), now);
     assertSame(ModelInvocationUpdateOutcome.APPLIED, firstOutcome);
     ModelInvocationDO rowAfterFirst = rowFor(fx.invocationId);
     assertEquals(
         first, new SafeStreamSnapshotJsonCodec().decode(rowAfterFirst.getSafeStreamSnapshotJson()));
+    assertEquals(
+        revisionAfterClaim,
+        threadRevision(fx.threadId),
+        "safe snapshot recovery writes must not drive Thread snapshot refetches");
 
-    SafeStreamSnapshot extending = new SafeStreamSnapshot("hello world", "thinking");
+    SafeStreamSnapshot extending = new SafeStreamSnapshot("hello world", "thinking", 2L);
     ModelInvocationUpdateOutcome secondOutcome =
         transactions.recordSafeStreamSnapshot(claimed.get(), extending, now.plusMillis(20), now);
     assertSame(ModelInvocationUpdateOutcome.APPLIED, secondOutcome);
@@ -892,6 +897,15 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     assertEquals(
         extending,
         new SafeStreamSnapshotJsonCodec().decode(rowAfterSecond.getSafeStreamSnapshotJson()));
+    assertEquals(revisionAfterClaim, threadRevision(fx.threadId));
+
+    Instant retryAt = now.plusSeconds(1);
+    assertSame(
+        ModelInvocationUpdateOutcome.APPLIED,
+        transactions.scheduleRetry(claimed.get(), retryAt, now.plusMillis(20), now));
+    assertTrue(
+        threadRevision(fx.threadId) > revisionAfterClaim,
+        "snapshot-visible invocation status changes must advance Thread revision");
   }
 
   /**
@@ -907,12 +921,12 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
             fx.invocationId, "tok-longer", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
     assertTrue(claimed.isPresent());
 
-    SafeStreamSnapshot durable = new SafeStreamSnapshot("hello world", "reasoning");
+    SafeStreamSnapshot durable = new SafeStreamSnapshot("hello world", "reasoning", 2L);
     assertSame(
         ModelInvocationUpdateOutcome.APPLIED,
         transactions.recordSafeStreamSnapshot(claimed.get(), durable, now.plusMillis(10), now));
 
-    SafeStreamSnapshot older = new SafeStreamSnapshot("hel", "rea");
+    SafeStreamSnapshot older = new SafeStreamSnapshot("hel", "rea", 1L);
     assertSame(
         ModelInvocationUpdateOutcome.APPLIED,
         transactions.recordSafeStreamSnapshot(claimed.get(), older, now.plusMillis(20), now));
@@ -939,13 +953,13 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     assertSame(
         ModelInvocationUpdateOutcome.APPLIED,
         transactions.recordSafeStreamSnapshot(
-            claimed.get(), new SafeStreamSnapshot("left", ""), now.plusMillis(10), now));
+            claimed.get(), new SafeStreamSnapshot("left", "", 1L), now.plusMillis(10), now));
 
     assertThrows(
         IllegalStateException.class,
         () ->
             transactions.recordSafeStreamSnapshot(
-                claimed.get(), new SafeStreamSnapshot("right", ""), now.plusMillis(20), now));
+                claimed.get(), new SafeStreamSnapshot("right", "", 2L), now.plusMillis(20), now));
   }
 
   /**
@@ -964,7 +978,7 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     assertSame(
         ModelInvocationUpdateOutcome.APPLIED,
         transactions.recordSafeStreamSnapshot(
-            first.get(), new SafeStreamSnapshot("first attempt", ""), now.plusMillis(10), now));
+            first.get(), new SafeStreamSnapshot("first attempt", "", 1L), now.plusMillis(10), now));
     ModelInvocationDO afterFirstDelta = rowFor(fx.invocationId);
     assertNotNull(afterFirstDelta.getSafeStreamSnapshotJson());
 
@@ -1245,7 +1259,7 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
 
     ModelInvocationUpdateOutcome snap =
         transactions.recordSafeStreamSnapshot(
-            claimed.get(), new SafeStreamSnapshot("hello", ""), now.plusMillis(20), now);
+            claimed.get(), new SafeStreamSnapshot("hello", "", 1L), now.plusMillis(20), now);
     assertSame(ModelInvocationUpdateOutcome.APPLIED, snap);
     assertEquals(
         beforeTarget,
@@ -1482,6 +1496,22 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
       }
     } catch (SQLException ex) {
       throw new IllegalStateException(ex);
+    }
+  }
+
+  private static long threadRevision(long threadId) {
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement("select revision from harness_thread where id = ?")) {
+      ps.setLong(1, threadId);
+      try (ResultSet rs = ps.executeQuery()) {
+        if (!rs.next()) {
+          throw new IllegalStateException("thread " + threadId + " missing");
+        }
+        return rs.getLong(1);
+      }
+    } catch (SQLException error) {
+      throw new IllegalStateException(error);
     }
   }
 

@@ -37,16 +37,18 @@ class RedisRealtimeEventTailIntegrationTest extends RedisSpringTestSupport {
   void readsOnlyRecordsAfterCursor() {
     Instant now = Instant.parse("2026-07-24T00:00:00Z");
     sink.append(
-        new RealtimeEvent.ModelDelta(11L, 1L, 1, new ProviderStreamEvent.TextDelta("one"), now));
+        new RealtimeEvent.ModelDelta(
+            11L, 1L, 1, 1L, new ProviderStreamEvent.TextDelta("one"), now));
     sink.append(
-        new RealtimeEvent.ModelDelta(11L, 1L, 1, new ProviderStreamEvent.TextDelta("two"), now));
+        new RealtimeEvent.ModelDelta(
+            11L, 1L, 1, 2L, new ProviderStreamEvent.TextDelta("two"), now));
 
     List<HarnessRealtimeEventTail.Record> firstPage = tail.readAfter(11L, "0-0", 10, Duration.ZERO);
     assertEquals(2, firstPage.size());
     assertEquals(
         eventCodec.encode(
             new RealtimeEvent.ModelDelta(
-                11L, 1L, 1, new ProviderStreamEvent.TextDelta("one"), now)),
+                11L, 1L, 1, 1L, new ProviderStreamEvent.TextDelta("one"), now)),
         firstPage.get(0).payloadJson());
 
     List<HarnessRealtimeEventTail.Record> secondPage =

@@ -44,6 +44,12 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     assertTrue(threadId.matches("\\d+"));
     String epoch = data(createdThread).path("executionEpoch").asText();
     assertEquals("0", epoch);
+    mockMvc
+        .perform(get("/api/threads/{id}/events/stream", threadId).param("afterRevision", " 0 "))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(get("/api/threads/{id}/events/stream", threadId).header("Last-Event-ID", " 1 "))
+        .andExpect(status().isBadRequest());
 
     // UNBOUND Thread refuses mailbox input (409).
     mockMvc

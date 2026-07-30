@@ -18,7 +18,7 @@ class SafeStreamSnapshotJsonCodecTest {
 
   @Test
   void roundTripsCanonicalTextAndThinkingSnapshot() {
-    SafeStreamSnapshot snapshot = new SafeStreamSnapshot("hello", "thought");
+    SafeStreamSnapshot snapshot = new SafeStreamSnapshot("hello", "thought", 7L);
     String expected = canonicalJson();
 
     assertEquals(expected, codec.encode(snapshot));
@@ -29,20 +29,22 @@ class SafeStreamSnapshotJsonCodecTest {
   @Test
   void allowsEmptyTextAndEmptyThinking() {
     // Pure-thought stream: text is the empty string, thinking carries real content.
-    SafeStreamSnapshot thoughtOnly = new SafeStreamSnapshot("", "reasoning");
-    String thoughtOnlyJson = "{\"text\":\"\",\"thinking\":\"reasoning\"}";
+    SafeStreamSnapshot thoughtOnly = new SafeStreamSnapshot("", "reasoning", 3L);
+    String thoughtOnlyJson = "{\"text\":\"\",\"thinking\":\"reasoning\",\"sequence\":3}";
     assertEquals(thoughtOnly, codec.decode(thoughtOnlyJson));
     assertEquals(thoughtOnlyJson, codec.encode(thoughtOnly));
 
     // Pure-text stream: thinking is the empty string.
-    SafeStreamSnapshot textOnly = new SafeStreamSnapshot("answer", "");
-    String textOnlyJson = "{\"text\":\"answer\",\"thinking\":\"\"}";
+    SafeStreamSnapshot textOnly = new SafeStreamSnapshot("answer", "", 4L);
+    String textOnlyJson = "{\"text\":\"answer\",\"thinking\":\"\",\"sequence\":4}";
     assertEquals(textOnly, codec.decode(textOnlyJson));
     assertEquals(textOnlyJson, codec.encode(textOnly));
 
     // EMPTY sentinel must round-trip and the encoded form must remain canonical.
-    assertEquals("{\"text\":\"\",\"thinking\":\"\"}", codec.encode(SafeStreamSnapshot.EMPTY));
-    assertEquals(SafeStreamSnapshot.EMPTY, codec.decode("{\"text\":\"\",\"thinking\":\"\"}"));
+    assertEquals(
+        "{\"text\":\"\",\"thinking\":\"\",\"sequence\":0}", codec.encode(SafeStreamSnapshot.EMPTY));
+    assertEquals(
+        SafeStreamSnapshot.EMPTY, codec.decode("{\"text\":\"\",\"thinking\":\"\",\"sequence\":0}"));
   }
 
   @Test
@@ -50,6 +52,7 @@ class SafeStreamSnapshotJsonCodecTest {
     ObjectNode extra = NODES.objectNode();
     extra.put("text", "x");
     extra.put("thinking", "y");
+    extra.put("sequence", 1);
     extra.put("extra", 1);
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(extra));
 
@@ -60,6 +63,10 @@ class SafeStreamSnapshotJsonCodecTest {
     ObjectNode missingThinking = canonicalNode();
     missingThinking.remove("thinking");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(missingThinking));
+
+    ObjectNode missingSequence = canonicalNode();
+    missingSequence.remove("sequence");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(missingSequence));
   }
 
   @Test
@@ -79,6 +86,10 @@ class SafeStreamSnapshotJsonCodecTest {
     ObjectNode thinkingIsNull = canonicalNode();
     thinkingIsNull.putNull("thinking");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(thinkingIsNull));
+
+    ObjectNode negativeSequence = canonicalNode();
+    negativeSequence.put("sequence", -1);
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(negativeSequence));
   }
 
   @Test
@@ -121,6 +132,7 @@ class SafeStreamSnapshotJsonCodecTest {
     ObjectNode node = NODES.objectNode();
     node.put("text", "hello");
     node.put("thinking", "thought");
+    node.put("sequence", 7);
     return node;
   }
 

@@ -32,10 +32,10 @@ class RealtimeEventJsonCodecTest {
   void textDeltaRoundTrips() {
     Instant now = Instant.parse("2026-01-01T00:00:00Z");
     RealtimeEvent.ModelDelta event =
-        new RealtimeEvent.ModelDelta(7L, 42L, 3, new ProviderStreamEvent.TextDelta("hi"), now);
+        new RealtimeEvent.ModelDelta(7L, 42L, 3, 5L, new ProviderStreamEvent.TextDelta("hi"), now);
     String canonical =
         "{\"threadId\":\"7\",\"subjectKind\":\"MODEL_INVOCATION\",\"subjectId\":\"42\","
-            + "\"attempt\":3,\"type\":\"MODEL_DELTA\","
+            + "\"attempt\":3,\"sequence\":5,\"type\":\"MODEL_DELTA\","
             + "\"payload\":{\"kind\":\"TEXT_DELTA\",\"text\":\"hi\"},"
             + "\"createdAt\":\"2026-01-01T00:00:00Z\"}";
     assertEquals(canonical, codec.encode(event));
@@ -46,10 +46,11 @@ class RealtimeEventJsonCodecTest {
   void thinkingDeltaRoundTrips() {
     Instant now = Instant.parse("2026-01-02T01:02:03Z");
     RealtimeEvent.ModelDelta event =
-        new RealtimeEvent.ModelDelta(8L, 9L, 1, new ProviderStreamEvent.ThinkingDelta("plan"), now);
+        new RealtimeEvent.ModelDelta(
+            8L, 9L, 1, 1L, new ProviderStreamEvent.ThinkingDelta("plan"), now);
     String canonical =
         "{\"threadId\":\"8\",\"subjectKind\":\"MODEL_INVOCATION\",\"subjectId\":\"9\","
-            + "\"attempt\":1,\"type\":\"MODEL_DELTA\","
+            + "\"attempt\":1,\"sequence\":1,\"type\":\"MODEL_DELTA\","
             + "\"payload\":{\"kind\":\"THINKING_DELTA\",\"text\":\"plan\"},"
             + "\"createdAt\":\"2026-01-02T01:02:03Z\"}";
     assertEquals(canonical, codec.encode(event));
@@ -61,10 +62,10 @@ class RealtimeEventJsonCodecTest {
     Instant now = Instant.parse("2026-01-03T03:04:05Z");
     ProviderStreamEvent.ToolCallDelta delta =
         new ProviderStreamEvent.ToolCallDelta(0, null, null, "{\"a\":");
-    RealtimeEvent.ModelDelta event = new RealtimeEvent.ModelDelta(10L, 11L, 1, delta, now);
+    RealtimeEvent.ModelDelta event = new RealtimeEvent.ModelDelta(10L, 11L, 1, 1L, delta, now);
     String canonical =
         "{\"threadId\":\"10\",\"subjectKind\":\"MODEL_INVOCATION\",\"subjectId\":\"11\","
-            + "\"attempt\":1,\"type\":\"MODEL_DELTA\","
+            + "\"attempt\":1,\"sequence\":1,\"type\":\"MODEL_DELTA\","
             + "\"payload\":{\"kind\":\"TOOL_CALL_DELTA\",\"index\":0,\"id\":null,\"name\":null,"
             + "\"argumentsJson\":\"{\\\"a\\\":\"},"
             + "\"createdAt\":\"2026-01-03T03:04:05Z\"}";
@@ -79,7 +80,7 @@ class RealtimeEventJsonCodecTest {
     String rawFragment = "  broken: not json  ";
     ProviderStreamEvent.ToolCallDelta delta =
         new ProviderStreamEvent.ToolCallDelta(2, "call-1", "read", rawFragment);
-    RealtimeEvent.ModelDelta event = new RealtimeEvent.ModelDelta(1L, 2L, 1, delta, now);
+    RealtimeEvent.ModelDelta event = new RealtimeEvent.ModelDelta(1L, 2L, 1, 1L, delta, now);
     String encoded = codec.encode(event);
     assertEquals(event, codec.decode(encoded));
     RealtimeEvent.ModelDelta decoded = (RealtimeEvent.ModelDelta) codec.decode(encoded);
@@ -130,7 +131,7 @@ class RealtimeEventJsonCodecTest {
     ProviderStreamEvent.ToolCallDelta valid =
         new ProviderStreamEvent.ToolCallDelta(0, "c", null, null);
     RealtimeEvent.ModelDelta event =
-        new RealtimeEvent.ModelDelta(1L, 2L, 1, valid, Instant.parse("2026-01-04T01:00:00Z"));
+        new RealtimeEvent.ModelDelta(1L, 2L, 1, 1L, valid, Instant.parse("2026-01-04T01:00:00Z"));
     assertEquals(event, codec.decode(codec.encode(event)));
   }
 
@@ -148,6 +149,10 @@ class RealtimeEventJsonCodecTest {
     ObjectNode node = canonicalTextDeltaNode();
     node.remove("attempt");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(node));
+
+    ObjectNode missingType = canonicalTextDeltaNode();
+    missingType.remove("type");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(missingType));
   }
 
   @Test
@@ -364,7 +369,8 @@ class RealtimeEventJsonCodecTest {
   void encodingIsDeterministic() {
     Instant now = Instant.parse("2026-01-01T00:00:00Z");
     RealtimeEvent.ModelDelta event =
-        new RealtimeEvent.ModelDelta(1L, 2L, 1, new ProviderStreamEvent.TextDelta("hello"), now);
+        new RealtimeEvent.ModelDelta(
+            1L, 2L, 1, 1L, new ProviderStreamEvent.TextDelta("hello"), now);
     assertEquals(codec.encode(event), codec.encode(event));
   }
 
@@ -376,6 +382,7 @@ class RealtimeEventJsonCodecTest {
     node.put("subjectKind", "MODEL_INVOCATION");
     node.put("subjectId", "42");
     node.put("attempt", 3);
+    node.put("sequence", 5);
     node.put("type", "MODEL_DELTA");
     ObjectNode payload = NODES.objectNode();
     payload.put("kind", "TEXT_DELTA");

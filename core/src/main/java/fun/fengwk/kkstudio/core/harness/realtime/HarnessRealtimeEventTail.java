@@ -36,22 +36,21 @@ public interface HarnessRealtimeEventTail {
   /**
    * Normalizes SSE resume cursors to the canonical realtime stream cursor form {@code ms-seq}.
    *
-   * <p>Blank, null, or {@code "0"} become {@code "0-0"} (start of retained window). Any other value
-   * must already be a non-negative decimal pair separated by {@code '-'}.
+   * <p>Null, the empty string, or {@code "0"} become {@code "0-0"} (start of retained window). Any
+   * other value must already be a non-negative decimal pair separated by {@code '-'}.
    */
   static String normalizeAfterId(String afterId) {
-    if (afterId == null || afterId.isBlank() || "0".equals(afterId.trim())) {
+    if (afterId == null || afterId.isEmpty() || "0".equals(afterId)) {
       return "0-0";
     }
-    String trimmed = afterId.trim();
-    if ("$".equals(trimmed)) {
-      return trimmed;
+    if ("$".equals(afterId)) {
+      return afterId;
     }
-    if (!trimmed.matches("\\d+-\\d+")) {
+    if (!afterId.matches("\\d+-\\d+")) {
       throw new IllegalArgumentException(
           "afterStreamId must be a realtime stream cursor (ms-seq) or 0: " + afterId);
     }
-    return trimmed;
+    return afterId;
   }
 
   /** One retained realtime event and its stream/cursor id. */

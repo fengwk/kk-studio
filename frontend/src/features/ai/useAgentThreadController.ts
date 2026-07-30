@@ -52,6 +52,7 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
     inputs,
     session,
     snapshotQuery,
+    modelInvocations,
     toolInvocations,
     usage,
   } = useAgentThreadQueries(threadId)
@@ -63,7 +64,7 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
     threadId,
     Boolean(threadId) && snapshotQuery.isSuccess,
     thread?.revision,
-    entries,
+    modelInvocations,
   )
   const timeline = buildThreadTimeline(entries, inputs, modelStream)
   const working = isThreadWorking(thread, timeline)

@@ -1,145 +1,123 @@
 import { describe, expect, it } from 'vitest'
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts'
 import {
-  isRealtimeModelStreamCommitted,
+  isRealtimeModelDeltaGap,
   parseRealtimeModelDelta,
+  parseSafeStreamSnapshot,
   reduceRealtimeModelStream,
+  snapshotModelStream,
 } from '@/features/ai/thread-realtime-state'
 
 describe('thread realtime state', () => {
-  it('parses model text and thinking deltas but rejects unrelated envelopes', () => {
-    expect(
-      parseRealtimeModelDelta(
-        '{"threadId":"7","subjectKind":"MODEL_INVOCATION","subjectId":"9","attempt":1,'
-          + '"type":"MODEL_DELTA","payload":{"kind":"TEXT_DELTA","text":"hello"},'
-          + '"createdAt":"2026-07-28T10:00:00Z"}',
-      ),
-    ).toMatchObject({ threadId: '7', invocationId: '9', kind: 'TEXT_DELTA', text: 'hello' })
-    expect(
-      parseRealtimeModelDelta(
-        '{"threadId":"7","subjectKind":"TOOL_INVOCATION","subjectId":"9","attempt":1,'
-          + '"type":"TOOL_PARTIAL","payload":{},"createdAt":"2026-07-28T10:00:00Z"}',
-      ),
-    ).toBeNull()
-    expect(parseRealtimeModelDelta('not-json')).toBeNull()
-    expect(
-      parseRealtimeModelDelta(
-        '{"threadId":"7","subjectKind":"MODEL_INVOCATION","subjectId":"9","attempt":1,'
-          + '"type":"MODEL_DELTA","payload":{"kind":"TEXT_DELTA","text":"hello"},'
-          + '"createdAt":"not-a-date"}',
-      ),
-    ).toBeNull()
-    expect(parseRealtimeModelDelta({ type: 'MODEL_DELTA' })).toBeNull()
-    expect(
-      parseRealtimeModelDelta(
-        '{"threadId":"7","subjectKind":"MODEL_INVOCATION","subjectId":"9","attempt":1,'
-          + '"type":"MODEL_DELTA","payload":{"kind":"IMAGE_DELTA","text":"hello"},'
-          + '"createdAt":"2026-07-28T10:00:00Z"}',
-      ),
-    ).toBeNull()
-    expect(
-      parseRealtimeModelDelta(
-        '{"threadId":"7","subjectKind":"MODEL_INVOCATION","subjectId":"9","attempt":1,'
-          + '"type":"MODEL_DELTA","payload":{"kind":"TEXT_DELTA","text":42},'
-          + '"createdAt":"2026-07-28T10:00:00Z"}',
-      ),
-    ).toBeNull()
-  })
-
-  it('accumulates one attempt and resets the transient response for a retry', () => {
-    const first = parseRealtimeModelDelta(event('1', 'TEXT_DELTA', 'old text'))!
-    const thinking = parseRealtimeModelDelta(event('1', 'THINKING_DELTA', 'old thought'))!
-    const retry = parseRealtimeModelDelta(event('2', 'TEXT_DELTA', 'new text'))!
-
-    const initial = reduceRealtimeModelStream(null, first)
-    const withThinking = reduceRealtimeModelStream(initial, thinking)
-    const retried = reduceRealtimeModelStream(withThinking, retry)
-
-    expect(withThinking).toMatchObject({ text: 'old text', thinking: 'old thought', attempt: 1 })
-    expect(retried).toMatchObject({ text: 'new text', thinking: '', attempt: 2 })
-    expect(reduceRealtimeModelStream(retried, first)).toBe(retried)
-
-    const anotherThread = parseRealtimeModelDelta(
-      event('1', 'TEXT_DELTA', 'other thread').replace('"threadId":"7"', '"threadId":"8"'),
-    )!
-    expect(reduceRealtimeModelStream(retried, anotherThread)).toMatchObject({
-      threadId: '8',
-      text: 'other thread',
-      thinking: '',
+  it('parses only sequenced model deltas', () => {
+    expect(parseRealtimeModelDelta(event(1, 'TEXT_DELTA', 'hello'))).toMatchObject({
+      threadId: '7',
+      invocationId: '9',
       attempt: 1,
+      sequence: 1,
+      text: 'hello',
     })
+    expect(parseRealtimeModelDelta(event(0, 'TEXT_DELTA', 'hello'))).toBeNull()
+    expect(parseRealtimeModelDelta('not-json')).toBeNull()
   })
 
-  it('removes a transient response only after its durable assistant outcome arrives', () => {
-    const stream = reduceRealtimeModelStream(null, parseRealtimeModelDelta(event('1', 'TEXT_DELTA', 'hi'))!)
-    const earlierAssistant = entry('2026-07-28T09:59:59', 'ASSISTANT')
-    const durableAssistant = entry('2026-07-28T10:00:01', 'ASSISTANT')
+  it('applies only the next sequence and detects a missing delta', () => {
+    const first = parseRealtimeModelDelta(event(1, 'TEXT_DELTA', 'one'))!
+    const second = parseRealtimeModelDelta(event(2, 'THINKING_DELTA', 'plan'))!
+    const gap = parseRealtimeModelDelta(event(4, 'TEXT_DELTA', 'four'))!
+    const stream = reduceRealtimeModelStream(null, first)
+    const advanced = reduceRealtimeModelStream(stream, second)
 
-    expect(isRealtimeModelStreamCommitted(stream, [earlierAssistant])).toBe(false)
-    expect(isRealtimeModelStreamCommitted(stream, [durableAssistant])).toBe(true)
+    expect(advanced).toMatchObject({ text: 'one', thinking: 'plan', sequence: 2 })
+    expect(isRealtimeModelDeltaGap(advanced, gap)).toBe(true)
+    expect(reduceRealtimeModelStream(advanced, gap)).toBe(advanced)
+    expect(reduceRealtimeModelStream(advanced, first)).toBe(advanced)
   })
 
-  it('commits the realtime stream as soon as an ASSISTANT_ABORTED barrier lands', () => {
-    // /stop emits ASSISTANT_ABORTED when the partial has safe content; from the realtime overlay
-    // perspective this is a durable terminal outcome and the transient deltas must be cleared
-    // so the aborted affordance becomes the visible state.
-    const stream = reduceRealtimeModelStream(
-      null,
-      parseRealtimeModelDelta(event('1', 'TEXT_DELTA', 'partial'))!,
-    )
-    const aborted = abortedEntry('2026-07-28T10:00:01')
-    const earlierAssistant = entry('2026-07-28T09:59:59', 'ASSISTANT')
-    expect(isRealtimeModelStreamCommitted(stream, [earlierAssistant])).toBe(false)
-    expect(isRealtimeModelStreamCommitted(stream, [aborted])).toBe(true)
+  it('advances sequence across tool-call deltas without creating transcript text', () => {
+    const text = parseRealtimeModelDelta(event(1, 'TEXT_DELTA', 'one'))!
+    const toolCall = parseRealtimeModelDelta(event(2, 'TOOL_CALL_DELTA', ''))!
+    const thinking = parseRealtimeModelDelta(event(3, 'THINKING_DELTA', 'plan'))!
+
+    const afterText = reduceRealtimeModelStream(null, text)
+    const afterToolCall = reduceRealtimeModelStream(afterText, toolCall)
+    const complete = reduceRealtimeModelStream(afterToolCall, thinking)
+
+    expect(afterToolCall).toMatchObject({ sequence: 2, text: 'one', thinking: '' })
+    expect(complete).toMatchObject({ sequence: 3, text: 'one', thinking: 'plan' })
   })
 
-  it('keeps the transient response for malformed timestamps and malformed durable messages', () => {
-    const stream = reduceRealtimeModelStream(
-      null,
-      parseRealtimeModelDelta(event('1', 'TEXT_DELTA', 'partial'))!,
-    )
-    expect(isRealtimeModelStreamCommitted({ ...stream, createdAt: 'not-a-date' }, [])).toBe(false)
-    expect(
-      isRealtimeModelStreamCommitted(stream, [
-        { ...entry('2026-07-28T10:00:01', 'ASSISTANT'), payloadJson: '{' },
-      ]),
-    ).toBe(false)
+  it('strictly parses the durable safe stream snapshot', () => {
+    expect(parseSafeStreamSnapshot('{"text":"answer","thinking":"plan","sequence":2}')).toEqual({
+      text: 'answer',
+      thinking: 'plan',
+      sequence: 2,
+    })
+    expect(parseSafeStreamSnapshot('{"text":"","thinking":"","sequence":0}')).not.toBeNull()
+    expect(parseSafeStreamSnapshot('{"text":"answer","thinking":"","sequence":-1}')).toBeNull()
+    expect(parseSafeStreamSnapshot('{"text":"answer","thinking":""}')).toBeNull()
+    expect(parseSafeStreamSnapshot('{"text":"answer","thinking":"","sequence":1,"extra":true}')).toBeNull()
+  })
+
+  it('selects the newest decimal invocation id without Number precision loss', () => {
+    const base = {
+      threadId: '7',
+      sourceHeadEntryId: '1',
+      executionEpoch: '1',
+      requestJson: '{}',
+      status: 'RUNNING',
+      attempt: 1,
+      nextAttemptAt: null,
+      workerUntil: null,
+      deadlineAt: null,
+      lastActivityAt: null,
+      resultJson: null,
+      errorJson: null,
+      appliedAt: null,
+      createdAt: '2026-07-28T10:00:00Z',
+      startedAt: '2026-07-28T10:00:00Z',
+      finishedAt: null,
+    }
+    const stream = snapshotModelStream('7', [
+      {
+        ...base,
+        id: '9007199254740993',
+        safeStreamSnapshotJson: '{"text":"old","thinking":"","sequence":1}',
+      },
+      {
+        ...base,
+        id: '9007199254740995',
+        safeStreamSnapshotJson: '{"text":"new","thinking":"","sequence":2}',
+      },
+    ])
+
+    expect(stream).toMatchObject({
+      invocationId: '9007199254740995',
+      text: 'new',
+      sequence: 2,
+    })
+    expect(snapshotModelStream('7', [
+      {
+        ...base,
+        id: '9007199254740997',
+        safeStreamSnapshotJson: '{"text":"invalid","thinking":""}',
+      },
+    ])).toBeNull()
   })
 })
 
-function event(attempt: string, kind: 'TEXT_DELTA' | 'THINKING_DELTA', text: string): string {
+function event(
+  sequence: number,
+  kind: 'TEXT_DELTA' | 'THINKING_DELTA' | 'TOOL_CALL_DELTA',
+  text: string,
+): string {
   return JSON.stringify({
     threadId: '7',
     subjectKind: 'MODEL_INVOCATION',
     subjectId: '9',
-    attempt: Number(attempt),
+    attempt: 1,
+    sequence,
     type: 'MODEL_DELTA',
-    payload: { kind, text },
+    payload: kind === 'TOOL_CALL_DELTA' ? { kind, index: 0 } : { kind, text },
     createdAt: '2026-07-28T10:00:00Z',
   })
-}
-
-function entry(createTime: string, role: string): HarnessSessionEntryDTO {
-  return {
-    entryId: 'e1',
-    parentEntryId: null,
-    entryType: 'MESSAGE',
-    payloadJson: JSON.stringify({ message: { role, contents: [] }, assistantMetadata: null }),
-    createTime,
-  }
-}
-
-function abortedEntry(createTime: string): HarnessSessionEntryDTO {
-  return {
-    entryId: 'e-aborted',
-    parentEntryId: null,
-    entryType: 'ASSISTANT_ABORTED',
-    payloadJson: JSON.stringify({
-      message: {
-        role: 'ASSISTANT',
-        contents: [{ type: 'text', text: 'partial' }],
-      },
-    }),
-    createTime,
-  }
 }

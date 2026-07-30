@@ -320,8 +320,8 @@ create table harness_model_invocation (
     created_at            timestamptz(3) not null default current_timestamp,
     started_at            timestamptz(3),
     finished_at           timestamptz(3),
-    -- 跨节点持久化的安全流快照（仅 text + thinking）。每次 text/thinking delta 在 SSE 前 fenced
-    -- 写入；tool-call fragment 永远不进入该列。新 retry attempt 在 CAS 中重置该列。
+    -- 跨节点持久化的安全流快照（text + thinking + attempt-local sequence）。每次流 delta 在 SSE 前
+    -- fenced 写入；tool-call fragment 只推进 sequence，不进入文本。新 retry attempt 在 CAS 中重置该列。
     safe_stream_snapshot  jsonb,
     constraint uk_harness_model_invocation_source
         unique (thread_id, source_head_entry_id, execution_epoch),
@@ -1008,7 +1008,7 @@ create trigger trg_harness_model_invocation_revision_insert_delete
     for each row execute function harness_thread_revision_from_child();
 create trigger trg_harness_model_invocation_revision_update
     after update of status, attempt, next_attempt_at, deadline_at, result, error, applied_at,
-        started_at, finished_at, safe_stream_snapshot on harness_model_invocation
+        started_at, finished_at on harness_model_invocation
     for each row
     execute function harness_thread_revision_from_child();
 create trigger trg_harness_tool_invocation_revision_insert_delete

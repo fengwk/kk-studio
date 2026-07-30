@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.core.harness.realtime.HarnessRealtimeEventTail;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
@@ -15,6 +16,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -42,25 +44,21 @@ final class StudioHarnessThreadSseEmitter {
     AtomicReference<String> cursor =
         new AtomicReference<>(HarnessRealtimeEventTail.normalizeAfterId(afterStreamId));
     AtomicReference<Future<?>> futureRef = new AtomicReference<>();
-    AtomicReference<ThreadRevisionEventSource.Event> revisionEvent = new AtomicReference<>();
+    AtomicBoolean resyncPending = new AtomicBoolean(false);
+    AtomicBoolean revisionPending = new AtomicBoolean(false);
+    AtomicLong latestRevision = new AtomicLong(afterRevision);
     AutoCloseable subscription =
         revisionHub.subscribe(
             threadId,
             afterRevision,
-            event ->
-                revisionEvent.accumulateAndGet(
-                    event,
-                    (current, incoming) ->
-                        current == null
-                            ? incoming
-                            : incoming.resync()
-                                ? incoming
-                                : current.resync()
-                                    ? current
-                                    : Long.parseLong(incoming.revision())
-                                            > Long.parseLong(current.revision())
-                                        ? incoming
-                                        : current));
+            event -> {
+              if (event.resync()) {
+                resyncPending.set(true);
+              } else {
+                latestRevision.accumulateAndGet(Long.parseLong(event.revision()), Math::max);
+                revisionPending.set(true);
+              }
+            });
     Runnable close =
         () -> {
           closed.set(true);
@@ -80,17 +78,20 @@ final class StudioHarnessThreadSseEmitter {
     Runnable work =
         () -> {
           try {
+            long sentRevision = afterRevision;
             while (!closed.get() && !Thread.currentThread().isInterrupted()) {
-              ThreadRevisionEventSource.Event revision = revisionEvent.getAndSet(null);
-              if (revision != null) {
-                if (revision.resync()) {
-                  emitter.send(SseEmitter.event().name("resync").data("{}"));
-                } else {
+              if (resyncPending.getAndSet(false)) {
+                emitter.send(SseEmitter.event().name("resync").data(Map.of()));
+              }
+              if (revisionPending.getAndSet(false)) {
+                long revision = latestRevision.get();
+                if (revision > sentRevision) {
                   emitter.send(
                       SseEmitter.event()
-                          .id(revision.revision())
+                          .id(Long.toString(revision))
                           .name("revision")
-                          .data("{\"revision\":\"" + revision.revision() + "\"}"));
+                          .data(Map.of("revision", Long.toString(revision))));
+                  sentRevision = revision;
                 }
               }
               List<HarnessRealtimeEventTail.Record> batch =

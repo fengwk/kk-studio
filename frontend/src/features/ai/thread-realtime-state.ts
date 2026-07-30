@@ -1,10 +1,11 @@
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts'
+import type { ModelInvocationDTO } from '@/shared/api/contracts'
 
 export interface RealtimeModelDelta {
   threadId: string
   invocationId: string
   attempt: number
-  kind: 'TEXT_DELTA' | 'THINKING_DELTA'
+  sequence: number
+  kind: 'TEXT_DELTA' | 'THINKING_DELTA' | 'TOOL_CALL_DELTA'
   text: string
   createdAt: string
 }
@@ -13,6 +14,7 @@ export interface RealtimeModelStream {
   threadId: string
   invocationId: string
   attempt: number
+  sequence: number
   text: string
   thinking: string
   createdAt: string
@@ -42,6 +44,7 @@ export function parseRealtimeModelDelta(data: unknown): RealtimeModelDelta | nul
     || !isNonBlankString(envelope.threadId)
     || !isNonBlankString(envelope.subjectId)
     || !isPositiveInteger(envelope.attempt)
+    || !isPositiveInteger(envelope.sequence)
     || !isNonBlankString(envelope.createdAt)
     || toEpochMillis(envelope.createdAt) == null
     || !isRecord(envelope.payload)
@@ -49,15 +52,24 @@ export function parseRealtimeModelDelta(data: unknown): RealtimeModelDelta | nul
     return null
   }
   const kind = envelope.payload.kind
-  if ((kind !== 'TEXT_DELTA' && kind !== 'THINKING_DELTA') || typeof envelope.payload.text !== 'string') {
+  if (
+    kind !== 'TEXT_DELTA'
+    && kind !== 'THINKING_DELTA'
+    && kind !== 'TOOL_CALL_DELTA'
+  ) {
+    return null
+  }
+  const text = kind === 'TOOL_CALL_DELTA' ? '' : envelope.payload.text
+  if (typeof text !== 'string') {
     return null
   }
   return {
     threadId: envelope.threadId,
     invocationId: envelope.subjectId,
     attempt: envelope.attempt,
+    sequence: envelope.sequence,
     kind,
-    text: envelope.payload.text,
+    text,
     createdAt: envelope.createdAt,
   }
 }
@@ -74,86 +86,95 @@ export function reduceRealtimeModelStream(
     current == null
     || current.threadId !== delta.threadId
     || current.invocationId !== delta.invocationId
-    || delta.attempt > current.attempt
+    || current.attempt !== delta.attempt
   ) {
     return {
       threadId: delta.threadId,
       invocationId: delta.invocationId,
       attempt: delta.attempt,
+      sequence: delta.sequence,
       text: delta.kind === 'TEXT_DELTA' ? delta.text : '',
       thinking: delta.kind === 'THINKING_DELTA' ? delta.text : '',
       createdAt: delta.createdAt,
     }
   }
-  if (delta.attempt < current.attempt) {
+  if (delta.sequence <= current.sequence || delta.sequence !== current.sequence + 1) {
     return current
   }
   return {
     ...current,
+    sequence: delta.sequence,
     text: delta.kind === 'TEXT_DELTA' ? current.text + delta.text : current.text,
     thinking: delta.kind === 'THINKING_DELTA' ? current.thinking + delta.text : current.thinking,
   }
 }
 
-/**
- * The durable path is authoritative. Once it contains an assistant outcome created after the
- * transient stream began, retaining the overlay would duplicate that turn.
- */
-export function isRealtimeModelStreamCommitted(
-  stream: RealtimeModelStream,
-  entries: HarnessSessionEntryDTO[],
+export function isRealtimeModelDeltaGap(
+  current: RealtimeModelStream | null,
+  delta: RealtimeModelDelta,
 ): boolean {
-  const streamTime = toEpochMillis(stream.createdAt)
-  if (streamTime == null) {
-    return false
-  }
-  return entries.some((entry) => {
-    if (!isDurableModelOutcome(entry)) {
-      return false
-    }
-    const entryTime = toEpochMillis(entry.createTime)
-    return entryTime != null && entryTime >= streamTime
-  })
+  return current != null
+    && current.threadId === delta.threadId
+    && current.invocationId === delta.invocationId
+    && current.attempt === delta.attempt
+    && delta.sequence > current.sequence + 1
 }
 
-function isDurableModelOutcome(entry: HarnessSessionEntryDTO): boolean {
-  if (entry.entryType === 'ASSISTANT_ERROR') {
-    return true
+export function snapshotModelStream(
+  threadId: string,
+  invocations: ModelInvocationDTO[],
+): RealtimeModelStream | null {
+  const invocation = invocations
+    .filter(
+      (item) =>
+        item.threadId === threadId
+        && item.appliedAt == null
+        && (item.status === 'RUNNING' || item.status === 'SUCCEEDED'),
+    )
+    .sort((left, right) => compareDecimalIdsDescending(left.id, right.id))[0]
+  if (invocation == null) {
+    return null
   }
-  if (entry.entryType === 'ASSISTANT_ABORTED') {
-    return true
+  const snapshot = parseSafeStreamSnapshot(invocation.safeStreamSnapshotJson)
+  if (
+    snapshot == null
+    && (invocation.safeStreamSnapshotJson != null || invocation.status !== 'RUNNING')
+  ) {
+    return null
   }
-  if (entry.entryType !== 'MESSAGE') {
-    return false
+  return {
+    threadId,
+    invocationId: invocation.id,
+    attempt: invocation.attempt,
+    sequence: snapshot?.sequence ?? 0,
+    text: snapshot?.text ?? '',
+    thinking: snapshot?.thinking ?? '',
+    createdAt: timestampString(invocation.startedAt) || timestampString(invocation.createdAt),
+  }
+}
+
+export function parseSafeStreamSnapshot(
+  json: string | null,
+): { text: string; thinking: string; sequence: number } | null {
+  if (json == null) {
+    return null
   }
   try {
-    const payload: unknown = JSON.parse(entry.payloadJson)
-    return isRecord(payload) && isRecord(payload.message) && payload.message.role === 'ASSISTANT'
-  } catch {
-    return false
-  }
-}
-
-function toEpochMillis(value: unknown): number | null {
-  if (Array.isArray(value)) {
-    const [year, month, day, hour = 0, minute = 0, second = 0, nanos = 0] = value
+    const value: unknown = JSON.parse(json)
+    if (!isRecord(value) || !hasExactKeys(value, ['text', 'thinking', 'sequence'])) {
+      return null
+    }
     if (
-      ![year, month, day, hour, minute, second, nanos].every(
-        (part) => typeof part === 'number' && Number.isFinite(part),
-      )
+      typeof value.text !== 'string'
+      || typeof value.thinking !== 'string'
+      || !isNonNegativeInteger(value.sequence)
     ) {
       return null
     }
-    return Date.UTC(year, month - 1, day, hour, minute, second, Math.floor(nanos / 1_000_000))
-  }
-  if (typeof value !== 'string' || !value.trim()) {
+    return { text: value.text, thinking: value.thinking, sequence: value.sequence }
+  } catch {
     return null
   }
-  // Spring serializes the PostgreSQL UTC LocalDateTime without an offset. Interpret that wire
-  // value as UTC instead of the browser's local zone before comparing it to event Instants.
-  const normalized = /(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ? value : `${value}Z`
-  const parsed = Date.parse(normalized)
-  return Number.isFinite(parsed) ? parsed : null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -164,6 +185,33 @@ function isNonBlankString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
 }
 
+function toEpochMillis(value: unknown): number | null {
+  if (typeof value !== 'string' || !value.trim()) {
+    return null
+  }
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: string[]): boolean {
+  const keys = Object.keys(value)
+  return keys.length === expected.length && expected.every((key) => key in value)
+}
+
+function compareDecimalIdsDescending(left: string, right: string): number {
+  const leftId = BigInt(left)
+  const rightId = BigInt(right)
+  return leftId === rightId ? 0 : leftId > rightId ? -1 : 1
+}
+
+function timestampString(value: unknown): string {
+  return typeof value === 'string' ? value : ''
 }
