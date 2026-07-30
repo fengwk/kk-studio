@@ -120,8 +120,6 @@ public class AgentModelServiceImpl implements AgentModelService {
             expectedVersion,
             CatalogVersions.format(reread.getVersion()));
       }
-    } catch (DuplicateKeyException error) {
-      throw error;
     } catch (DataIntegrityViolationException error) {
       if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
         throw new AiInUseException(RESOURCE, RESOURCE + " in use by agents: " + id, error);

@@ -47,7 +47,7 @@ public final class AgentEditableSupport {
 
   /** Rejects values that exceed the current PostgreSQL schema column limit after normalization. */
   public void validateMaxLength(String resource, String field, String value, int maxLength) {
-    if (value != null && value.length() > maxLength) {
+    if (value != null && value.codePointCount(0, value.length()) > maxLength) {
       throw new AiValidationException(
           resource, field + " must not exceed " + maxLength + " characters");
     }
