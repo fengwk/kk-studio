@@ -81,10 +81,11 @@ docker compose -f deploy/local/compose.yaml down -v
 
 数据库首次初始化的约束：
 
-- `core/src/main/resources/schema-postgresql.sql` 与 `data-dev-postgresql.sql`
-  由 PostgreSQL 入口脚本在**空 volume**时执行一次；之后重启不重复执行，
-  `SPRING_SQL_INIT_MODE=never` 关闭 Spring 的 classpath 兜底 init。
-- `data-dev-postgresql.sql` 只写入 local-only 的 stub provider（`stub-key`），
+- 应用通过 Flyway 执行
+  [`V1__schema.sql`](core/src/main/resources/db/migration/V1__schema.sql) 与
+  [`V2__dev_seed.sql`](core/src/main/resources/db/seed/dev/V2__dev_seed.sql)；
+  `flyway_schema_history` 确保重启不会重复迁移。
+- `V2__dev_seed.sql` 只写入 local-only 的 stub provider（`stub-key`），
   不携带任何真实凭证。
 - 真实 Provider 的 `credential` 必须通过 UI 的 Provider 页面或
   `PUT /api/ai/catalog/providers/{id}` 在运行时注入，**绝不**写入镜像或仓库。

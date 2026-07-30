@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.core.ai.runtime.execution;
 
 import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.POSTGRES;
-import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.applySchema;
+import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.applyBaseline;
 import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.newConnection;
 import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.resetDatabase;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -45,7 +45,7 @@ import java.util.List;
  */
 @SpringBootTest(
     classes = CoreTestApplication.class,
-    properties = {"kk-studio.harness.runtime.workers-enabled=true", "spring.sql.init.mode=never"})
+    properties = {"kk-studio.harness.runtime.workers-enabled=true", "spring.flyway.enabled=false"})
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class HarnessExecutionTargetProductionWiringIntegrationTest {
 
@@ -120,7 +120,7 @@ class HarnessExecutionTargetProductionWiringIntegrationTest {
   private static void resetSchema() {
     try (Connection connection = newConnection()) {
       resetDatabase(connection);
-      applySchema(connection);
+      applyBaseline(connection);
     } catch (Exception error) {
       throw new ExceptionInInitializerError(error);
     }

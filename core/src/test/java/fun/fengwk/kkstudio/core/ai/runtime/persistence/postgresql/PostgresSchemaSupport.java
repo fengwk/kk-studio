@@ -1,9 +1,8 @@
 package fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql;
 
+import org.flywaydb.core.Flyway;
 import org.postgresql.util.PSQLException;
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.core.io.support.EncodedResource;
-import org.springframework.jdbc.datasource.init.ScriptUtils;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
@@ -17,9 +16,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * Shared support base for the PostgreSQL final-schema tests.
  *
  * <p>Starts one process-wide {@code postgres:17-alpine} Testcontainers instance and exposes the
- * JDBC URL plus helpers that apply the authoritative {@code schema-postgresql.sql}. Keeping one
- * stable container allows schema tests and cached Spring contexts to share the same JDBC endpoint.
- * Docker must be available, otherwise class initialization fails rather than silently skipping.
+ * JDBC URL plus Flyway helpers for the baseline and profile seeds. Keeping one stable container
+ * allows schema tests and cached Spring contexts to share the same JDBC endpoint. Docker must be
+ * available, otherwise class initialization fails rather than silently skipping.
  */
 public abstract class PostgresSchemaSupport {
 
@@ -43,33 +42,29 @@ public abstract class PostgresSchemaSupport {
         POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
   }
 
-  /** Apply the authoritative PostgreSQL schema. */
-  public static void applySchema(Connection conn) {
-    // Use the EOF separator so PL/pgSQL bodies (e.g. trigger notify
-    // functions) survive ScriptUtils' default ';' splitter. The PostgreSQL
-    // JDBC driver accepts the whole script as a single execute() call.
-    ScriptUtils.executeSqlScript(
-        conn,
-        new EncodedResource(new ClassPathResource("schema-postgresql.sql")),
-        false,
-        false,
-        ScriptUtils.DEFAULT_COMMENT_PREFIX,
-        ScriptUtils.EOF_STATEMENT_SEPARATOR,
-        ScriptUtils.DEFAULT_BLOCK_COMMENT_START_DELIMITER,
-        ScriptUtils.DEFAULT_BLOCK_COMMENT_END_DELIMITER);
+  /** Migrate the baseline schema on the caller-owned connection. */
+  public static void applyBaseline(Connection conn) {
+    migrate(conn, "classpath:db/migration");
   }
 
-  /** Apply a SQL classpath resource. */
-  public static void applyScript(Connection conn, String classpathLocation) {
-    ScriptUtils.executeSqlScript(
-        conn,
-        new EncodedResource(new ClassPathResource(classpathLocation)),
-        false,
-        false,
-        ScriptUtils.DEFAULT_COMMENT_PREFIX,
-        ScriptUtils.EOF_STATEMENT_SEPARATOR,
-        ScriptUtils.DEFAULT_BLOCK_COMMENT_START_DELIMITER,
-        ScriptUtils.DEFAULT_BLOCK_COMMENT_END_DELIMITER);
+  /** Migrate the baseline schema and the dev seed on the caller-owned connection. */
+  public static void applyDevDatabase(Connection conn) {
+    migrate(conn, "classpath:db/migration", "classpath:db/seed/dev");
+  }
+
+  /** Migrate the baseline schema and the e2e seed on the caller-owned connection. */
+  public static void applyE2eDatabase(Connection conn) {
+    migrate(conn, "classpath:db/migration", "classpath:db/seed/e2e");
+  }
+
+  private static void migrate(Connection conn, String... locations) {
+    Flyway.configure()
+        // suppressClose preserves the connection lifecycle for the caller.
+        .dataSource(new SingleConnectionDataSource(conn, true))
+        .locations(locations)
+        .validateMigrationNaming(true)
+        .load()
+        .migrate();
   }
 
   /** Drop every object in the public schema, leaving an empty database for the next test. */

@@ -249,7 +249,7 @@ lock Thread and verify processor token + execution epoch
 
 ## `harness_model_usage` Schema
 
-权威 DDL 见 `schema-postgresql.sql`。除可空 cache/request metadata 字段外，归属与用量主字段均为 `NOT NULL`。
+权威 DDL 见 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)。除可空 cache/request metadata 字段外，归属与用量主字段均为 `NOT NULL`。
 
 | 分组 | 字段 | PostgreSQL 类型 |
 | --- | --- | --- |
@@ -430,7 +430,7 @@ Agent 配置中的 `tools` 仅为短名。platform-first：先匹配已注册 PL
 | Pricing/cost | 请求价格与成本快照 | [`ModelUsage.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/ModelUsage.java)、[`ModelPricing.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/ModelPricing.java)、[`ModelCost.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/ModelCost.java) |
 | Ledger domain | Draft、Record、Store port | [`ModelUsageDraft.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageDraft.java)、[`ModelUsageRecord.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageRecord.java)、[`ModelUsageRecordStore.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageRecordStore.java) |
 | Ledger persistence | PostgreSQL MyBatis | [`PostgresqlModelUsageRecordStore.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/usage/store/PostgresqlModelUsageRecordStore.java)、[`ModelUsageRecordMapper.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/usage/store/mapper/ModelUsageRecordMapper.java) |
-| Schema | PostgreSQL DDL | [`schema-postgresql.sql`](../../core/src/main/resources/schema-postgresql.sql) |
+| Schema | PostgreSQL DDL | [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql) |
 | Aggregation/API | scope 聚合、Controller、DTO | [`ModelUsageAggregationServiceImpl.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/usage/service/impl/ModelUsageAggregationServiceImpl.java)、[`StudioModelUsageController.java`](../../web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioModelUsageController.java)、[`ModelUsageSummaryDTO.java`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/ModelUsageSummaryDTO.java) |
 | Frontend contract | Thread snapshot API client 与 usage 展示适配 | [`contracts.ts`](../../frontend/src/shared/api/contracts.ts)、[`harness-service.ts`](../../frontend/src/shared/api/harness-service.ts)、[`usage-adapter.ts`](../../frontend/src/features/ai/chat/chat-workspace-pane/usage-adapter.ts) |
 

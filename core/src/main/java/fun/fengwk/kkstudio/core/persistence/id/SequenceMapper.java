@@ -9,8 +9,7 @@ import org.apache.ibatis.annotations.Select;
  * Narrow MyBatis mapper for the shared PostgreSQL sequence.
  *
  * <p>The single operation reads the next value from {@code kk_studio_id_seq} so the same physical
- * sequence backs every durable id allocation. The sequence is declared by {@code
- * schema-postgresql.sql}.
+ * sequence backs every durable id allocation. The sequence is declared by {@code V1__schema.sql}.
  *
  * @author fengwk
  */

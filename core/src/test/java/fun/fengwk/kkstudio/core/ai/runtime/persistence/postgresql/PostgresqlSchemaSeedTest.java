@@ -29,7 +29,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
   void setup() throws Exception {
     try (Connection conn = newConnection()) {
       resetDatabase(conn);
-      applySchema(conn);
+      applyBaseline(conn);
     }
   }
 
@@ -52,14 +52,16 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
   @Test
   void e2eSeedStoresNoCredentialsAndIsIdempotent() throws Exception {
     try (Connection conn = newConnection()) {
-      applyScript(conn, "data-e2e-postgresql.sql");
+      applyE2eDatabase(conn);
       assertE2eSeedContent(conn);
-      // Re-apply and assert that nothing in the deterministic columns changed.
+      assertProfileMigrationRecorded(conn, "e2e seed");
+      // Re-run the profile migration and assert that deterministic columns do not change.
       String before = e2eFingerprint();
       long sequenceBeforeReapply = nextSequenceValue();
-      applyScript(conn, "data-e2e-postgresql.sql");
+      applyE2eDatabase(conn);
       assertEquals(before, e2eFingerprint(), "e2e seed must be idempotent");
       assertE2eSeedContent(conn);
+      assertProfileMigrationRecorded(conn, "e2e seed");
       assertTrue(
           nextSequenceValue() > sequenceBeforeReapply,
           "re-applying a seed must preserve sequence progress");
@@ -90,7 +92,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
   @Test
   void e2eProviderIdsMatchCredentialInjectionContract() throws Exception {
     try (Connection conn = newConnection()) {
-      applyScript(conn, "data-e2e-postgresql.sql");
+      applyE2eDatabase(conn);
       try (Statement st = conn.createStatement()) {
         assertEquals(
             "1:minimax:openai_response,2:openai:openai_response,3:xai:openai_response,"
@@ -120,8 +122,9 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
 
   private static void applyAndAssertDevSeed() throws Exception {
     try (Connection conn = newConnection()) {
-      applyScript(conn, "data-dev-postgresql.sql");
+      applyDevDatabase(conn);
       assertDevSeedPresent(conn);
+      assertProfileMigrationRecorded(conn, "dev seed");
     }
   }
 
@@ -327,5 +330,16 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       assertTrue(rs.next());
       assertEquals(expected, rs.getLong(1), sql);
     }
+  }
+
+  private static void assertProfileMigrationRecorded(Connection conn, String description)
+      throws Exception {
+    assertSingleLong(
+        conn,
+        "select count(*) from flyway_schema_history"
+            + " where version = '2' and description = '"
+            + description
+            + "' and success = true",
+        1L);
   }
 }

@@ -9,10 +9,10 @@
   嵌入 `BOOT-INF/classes/static`，运行时由 Spring 直接服务 UI / API / SPA
   fallback；不加 Nginx，也不另起前端容器。容器内端口固定为 `8080`。
 - `postgres:17-alpine` —— 唯一 durable 数据库，命名为 `kk_studio`，默认用户
-  `kk_studio`。`schema-postgresql.sql` 与 `data-dev-postgresql.sql` 只读挂载到
-  `/docker-entrypoint-initdb.d/01-schema.sql` 与 `02-data.sql`；空 volume 首次
-  `up` 时执行一次，之后由 `application-dev.yml` 的 `spring.sql.init.mode` 经
-  环境变量 `SPRING_SQL_INIT_MODE=never` 跳过，避免重复执行。
+  `kk_studio`。空库由 app 在 `dev` profile 通过 Flyway 执行
+  [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql) 和
+  [`V2__dev_seed.sql`](../../core/src/main/resources/db/seed/dev/V2__dev_seed.sql)；
+  已执行版本由 `flyway_schema_history` 记录。
 - `redis:7.4-alpine` —— `Harness` 的 lossy realtime projection；
   `--save "" --appendonly no`，纯内存使用，重启即清空。
 
@@ -54,7 +54,7 @@ docker compose -f deploy/local/compose.yaml logs -f postgres
 # 停止：删除容器与宿主端口映射，仅 PostgreSQL 命名卷 kk-studio-postgres 保留。
 docker compose -f deploy/local/compose.yaml down
 
-# 彻底清理：额外删除命名卷，回到空数据库；下次 up 会重新执行 schema/data-dev。
+# 彻底清理：额外删除命名卷，回到空数据库；下次 app 启动会重新执行 Flyway migrations。
 docker compose -f deploy/local/compose.yaml down -v
 ```
 
@@ -107,15 +107,17 @@ KK_STUDIO_PG_DATABASE=kk_studio_e2e \
 docker compose -f deploy/local/compose.yaml up -d --build --no-deps --force-recreate app
 ```
 
-上述命令要求 PostgreSQL 中已有由 `schema-postgresql.sql` 与
-`data-e2e-postgresql.sql` 初始化的 `kk_studio_e2e` 数据库。常规 dev 栈不会同步
+上述命令由 `e2e` profile 通过 Flyway 执行
+[`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql) 和
+[`V2__e2e_seed.sql`](../../core/src/main/resources/db/seed/e2e/V2__e2e_seed.sql)，初始化空的
+`kk_studio_e2e` 数据库。常规 dev 栈不会同步
 Provider 凭证；真实凭证不会写入镜像、SQL seed 或仓库。
 
 数据库首次初始化的约束：
 
-- `core/src/main/resources/schema-postgresql.sql` 和
-  `data-dev-postgresql.sql` 是唯一事实源，**只在命名卷为空时执行一次**。
-- `data-dev-postgresql.sql` 写入的是 local-only 的 stub provider（`stub-key`），
+- `V1__schema.sql` 和 `V2__dev_seed.sql` 是 `dev` profile 的唯一 bootstrap 来源；
+  Flyway 仅执行 `flyway_schema_history` 尚未记录的版本。
+- `V2__dev_seed.sql` 写入的是 local-only 的 stub provider（`stub-key`），
   不携带任何真实凭证。
 - 真实 Provider（OpenAI / Google / Anthropic / xAI / MiniMax / DeepSeek / ZAI）
   的 `credential` 必须通过 UI、`PUT /api/ai/catalog/providers/{id}` 或 E2E profile 的环境同步器

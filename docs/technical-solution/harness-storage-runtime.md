@@ -18,7 +18,7 @@ Redis 重启、清空或网络隔离不会丢失 PostgreSQL 中的用户 Input�
 
 项目只保留 PostgreSQL schema、driver、seed 与集成测试。所有持久化集成测试运行在真实 PostgreSQL 上。
 
-权威 DDL：`core/src/main/resources/schema-postgresql.sql`。
+权威 DDL：[`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)，由 Flyway 执行。
 
 ## 3. ID 生成
 
@@ -263,4 +263,4 @@ Thread
 
 ## 14. 本地运行
 
-`deploy/local/compose.yaml` 一键启动内嵌 React 的 Spring Boot `app`、PostgreSQL 与 Redis。PostgreSQL 只在空命名卷首次创建时执行 `schema-postgresql.sql` 与 `data-dev-postgresql.sql`；`app` 设置 `SPRING_SQL_INIT_MODE=never`，重启不重复初始化 schema。Harness Daemon 不属于默认 Compose 栈。
+`deploy/local/compose.yaml` 一键启动内嵌 React 的 Spring Boot `app`、PostgreSQL 与 Redis。`app` 在 `dev` profile 通过 Flyway 执行 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql) 和 [`V2__dev_seed.sql`](../../core/src/main/resources/db/seed/dev/V2__dev_seed.sql)；`flyway_schema_history` 使重启成为安全 no-op。Harness Daemon 不属于默认 Compose 栈。

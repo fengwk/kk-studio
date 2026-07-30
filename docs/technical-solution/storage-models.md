@@ -1,14 +1,14 @@
 # 存储模型
 
-PostgreSQL 是 Harness 执行恢复与 Canvas 最小持久化的事实源。权威 DDL 为 `core/src/main/resources/schema-postgresql.sql`。S3 只保存 ComfyUI 对象和浏览器直传对象，不承担 Harness 或 Canvas 事务状态。Redis 不保存 durable truth。
+PostgreSQL 是 Harness 执行恢复与 Canvas 最小持久化的事实源。权威 DDL 为 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)，由 Flyway 执行。S3 只保存 ComfyUI 对象和浏览器直传对象，不承担 Harness 或 Canvas 事务状态。Redis 不保存 durable truth。
 
 ## 资源文件
 
 | 文件 | 用途 |
 | --- | --- |
-| `schema-postgresql.sql` | PostgreSQL 完整表结构 |
-| `data-dev-postgresql.sql` | `dev` profile 最小 seed |
-| `data-e2e-postgresql.sql` | `e2e` profile seed |
+| [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql) | Flyway PostgreSQL 基线 |
+| [`V2__dev_seed.sql`](../../core/src/main/resources/db/seed/dev/V2__dev_seed.sql) | `dev` profile seed |
+| [`V2__e2e_seed.sql`](../../core/src/main/resources/db/seed/e2e/V2__e2e_seed.sql) | `e2e` profile seed |
 
 ## 全局资源与实时注册表
 

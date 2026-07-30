@@ -1,12 +1,11 @@
 package fun.fengwk.kkstudio.web;
 
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.postgresql.Driver;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.core.io.support.EncodedResource;
-import org.springframework.jdbc.datasource.init.ScriptUtils;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -20,13 +19,13 @@ import java.sql.Statement;
  * Shared PostgreSQL support for web module SpringBoot tests.
  *
  * <p>Uses a process-level singleton container (not {@code @Container}) so the JDBC URL stays stable
- * for the cached Spring context across test classes. Each test resets {@code public} and re-applies
- * {@code schema-postgresql.sql} plus the dev seed.
+ * for the cached Spring context across test classes. Each test resets {@code public} and migrates
+ * the baseline plus the dev seed explicitly.
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, classes = WebTestApplication.class)
 public abstract class WebPostgresTestSupport {
 
-  private static final String SQL_INIT_NEVER = "never";
+  private static final String FLYWAY_DISABLED = "false";
   private static final String WORKERS_DISABLED = "false";
 
   @SuppressWarnings("resource")
@@ -43,7 +42,7 @@ public abstract class WebPostgresTestSupport {
     registry.add("spring.datasource.multi.primary.url", POSTGRES::getJdbcUrl);
     registry.add("spring.datasource.multi.primary.username", POSTGRES::getUsername);
     registry.add("spring.datasource.multi.primary.password", POSTGRES::getPassword);
-    registry.add("spring.sql.init.mode", () -> SQL_INIT_NEVER);
+    registry.add("spring.flyway.enabled", () -> FLYWAY_DISABLED);
     registry.add("kk-studio.harness.runtime.workers-enabled", () -> WORKERS_DISABLED);
   }
 
@@ -56,8 +55,7 @@ public abstract class WebPostgresTestSupport {
         st.execute("drop schema public cascade");
         st.execute("create schema public");
       }
-      applySchema(conn);
-      ScriptUtils.executeSqlScript(conn, new ClassPathResource("data-dev-postgresql.sql"));
+      migrateDevDatabase(conn);
       try (Statement st = conn.createStatement();
           ResultSet rs = st.executeQuery("select count(*) from agent_definition where id = 1")) {
         if (!rs.next() || rs.getLong(1) != 1L) {
@@ -67,17 +65,13 @@ public abstract class WebPostgresTestSupport {
     }
   }
 
-  private static void applySchema(Connection conn) {
-    // The durable-target triggers contain PL/pgSQL bodies, so the schema must reach PostgreSQL as
-    // one script rather than being split on the function-body semicolons.
-    ScriptUtils.executeSqlScript(
-        conn,
-        new EncodedResource(new ClassPathResource("schema-postgresql.sql")),
-        false,
-        false,
-        ScriptUtils.DEFAULT_COMMENT_PREFIX,
-        ScriptUtils.EOF_STATEMENT_SEPARATOR,
-        ScriptUtils.DEFAULT_BLOCK_COMMENT_START_DELIMITER,
-        ScriptUtils.DEFAULT_BLOCK_COMMENT_END_DELIMITER);
+  private static void migrateDevDatabase(Connection conn) {
+    Flyway.configure()
+        // suppressClose preserves the caller-managed JDBC connection.
+        .dataSource(new SingleConnectionDataSource(conn, true))
+        .locations("classpath:db/migration", "classpath:db/seed/dev")
+        .validateMigrationNaming(true)
+        .load()
+        .migrate();
   }
 }

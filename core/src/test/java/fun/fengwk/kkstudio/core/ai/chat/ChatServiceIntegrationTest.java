@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.ai.chat;
 
+import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.applyDevDatabase;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -18,9 +19,7 @@ import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 
-import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
-import java.sql.Statement;
 import java.util.List;
 
 /** PostgreSQL-backed Chat service coverage: CRUD, unknown ids, and default Agent validation. */
@@ -29,21 +28,8 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
   @Autowired private ChatService chatService;
 
   @Override
-  protected void applySeed(Connection conn) {
-    try {
-      String seed =
-          new String(
-              ChatServiceIntegrationTest.class
-                  .getClassLoader()
-                  .getResourceAsStream("data-dev-postgresql.sql")
-                  .readAllBytes(),
-              StandardCharsets.UTF_8);
-      try (Statement st = conn.createStatement()) {
-        st.execute(seed);
-      }
-    } catch (Exception error) {
-      throw new IllegalStateException("failed to seed agent definition for chat tests", error);
-    }
+  protected void migrateDatabase(Connection conn) {
+    applyDevDatabase(conn);
   }
 
   @Test
