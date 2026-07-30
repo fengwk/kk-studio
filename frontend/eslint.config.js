@@ -25,8 +25,8 @@ export default tseslint.config(
   },
   {
     files: [
-      'src/features/ai/thread-panel/**/*.{ts,tsx}',
-      'src/features/ai/thread-timeline-types.ts',
+      'src/features/ai/runtime/thread-panel/**/*.{ts,tsx}',
+      'src/features/ai/runtime/thread-timeline-types.ts',
     ],
     rules: {
       'no-restricted-imports': [
@@ -38,7 +38,7 @@ export default tseslint.config(
               message: 'Portable thread presentation must receive data through props.',
             },
             {
-              name: '@/features/ai/thread-timeline',
+              name: '@/features/ai/runtime/thread-timeline',
               message: 'Import the pure thread-timeline-types contract instead of the Harness adapter barrel.',
             },
           ],
@@ -62,9 +62,9 @@ export default tseslint.config(
                 '@/features/*',
                 '!@/features/ai',
                 // Allowed: local thread-panel + the pure thread-timeline-types contract.
-                '!@/features/ai/thread-panel',
-                '!@/features/ai/thread-panel/*',
-                '!@/features/ai/thread-timeline-types',
+                '!@/features/ai/runtime/thread-panel',
+                '!@/features/ai/runtime/thread-panel/*',
+                '!@/features/ai/runtime/thread-timeline-types',
               ],
               message:
                 'Portable thread panel must consume only thread-timeline-types and local thread-panel modules; API, query, controller, realtime, and Entry projection concerns stay outside.',
@@ -75,7 +75,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/features/ai/thread-timeline-types.ts'],
+    files: ['src/features/ai/runtime/thread-timeline-types.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
