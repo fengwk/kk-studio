@@ -20,7 +20,10 @@ export function resolveChatDefaultAgentId(
   return ''
 }
 
-export function useChatListController(agents: AgentDefinitionDTO[]) {
+export function useChatListController(
+  agents: AgentDefinitionDTO[],
+  enabled: boolean,
+) {
   const navigate = useNavigate()
   const [modalOpen, setModalOpen] = useState(false)
   const [selectedAgentId, setSelectedAgentId] = useState('')
@@ -31,6 +34,7 @@ export function useChatListController(agents: AgentDefinitionDTO[]) {
   const chatsQuery = useQuery({
     queryKey: queryKeys.chats.list,
     queryFn: () => chatService.listChats(),
+    enabled,
   })
 
   const createChatMutation = useInvalidateMutation({

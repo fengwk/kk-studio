@@ -129,7 +129,12 @@ describe('useAiConsoleResourceController', () => {
 })
 
 function ResourceControllerHarness() {
-  const controller = useAiConsoleResourceController()
+  const controller = useAiConsoleResourceController({
+    providers: true,
+    models: true,
+    agents: true,
+    environments: true,
+  })
   const modal = controller.resourceEditorModal.modal
   const ready = !controller.providersQuery.isLoading && !controller.modelsQuery.isLoading && !controller.agentsQuery.isLoading
 

@@ -4,6 +4,7 @@ import {
   useAiConsoleResourceController,
   type AgentModelView,
 } from '@/features/ai/catalog'
+import type { AiConsoleResourceQueryEnabled } from '@/features/ai/catalog/useAiConsoleResourceQueries'
 import {
   filterAgents,
   filterModels,
@@ -18,12 +19,46 @@ import type {
   ChatDTO,
 } from '@/shared/api/contracts'
 
-export function useAiConsoleController() {
+export type AiConsolePageScope = 'chats' | 'agents' | 'models' | 'providers'
+
+const resourceQueryEnabledByScope: Record<
+  AiConsolePageScope,
+  AiConsoleResourceQueryEnabled
+> = {
+  chats: {
+    providers: false,
+    models: false,
+    agents: true,
+    environments: false,
+  },
+  agents: {
+    providers: true,
+    models: true,
+    agents: true,
+    environments: true,
+  },
+  models: {
+    providers: true,
+    models: true,
+    agents: false,
+    environments: false,
+  },
+  providers: {
+    providers: true,
+    models: false,
+    agents: false,
+    environments: false,
+  },
+}
+
+export function useAiConsoleController(scope: AiConsolePageScope) {
   const [search, setSearch] = useState('')
   const deferredSearch = useDeferredValue(search.trim().toLowerCase())
 
-  const resourceController = useAiConsoleResourceController()
-  const chatController = useChatListController(resourceController.agents)
+  const resourceQueryEnabled = resourceQueryEnabledByScope[scope]
+  const chatsEnabled = scope === 'chats'
+  const resourceController = useAiConsoleResourceController(resourceQueryEnabled)
+  const chatController = useChatListController(resourceController.agents, chatsEnabled)
 
   const filteredChats = useMemo(
     () => filterChats(chatController.chats, deferredSearch),
@@ -43,11 +78,13 @@ export function useAiConsoleController() {
   )
 
   const queryResults = [
-    resourceController.providersQuery,
-    resourceController.modelsQuery,
-    resourceController.agentsQuery,
-    resourceController.environmentsQuery,
-    chatController.chatsQuery,
+    ...(resourceQueryEnabled.providers ? [resourceController.providersQuery] : []),
+    ...(resourceQueryEnabled.models ? [resourceController.modelsQuery] : []),
+    ...(resourceQueryEnabled.agents ? [resourceController.agentsQuery] : []),
+    ...(resourceQueryEnabled.environments
+      ? [resourceController.environmentsQuery]
+      : []),
+    ...(chatsEnabled ? [chatController.chatsQuery] : []),
   ]
   const resourceModalOpen = Boolean(resourceController.resourceEditorModal.modal)
   // 资源编辑模态打开时：本地校验/API 错误都只在模态内展示，页面外层不重复报错。

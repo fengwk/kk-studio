@@ -15,25 +15,38 @@ export interface AiConsoleResourceQueries {
   environments: Awaited<ReturnType<typeof environmentService.listEnvironments>>
 }
 
-export function useAiConsoleResourceQueries(): AiConsoleResourceQueries {
+export interface AiConsoleResourceQueryEnabled {
+  providers: boolean
+  models: boolean
+  agents: boolean
+  environments: boolean
+}
+
+export function useAiConsoleResourceQueries(
+  enabled: AiConsoleResourceQueryEnabled,
+): AiConsoleResourceQueries {
   const providersQuery = useQuery({
     queryKey: queryKeys.providers.list,
     queryFn: () => agentService.listProviders(),
+    enabled: enabled.providers,
   })
 
   const modelsQuery = useQuery({
     queryKey: queryKeys.models.list,
     queryFn: () => agentService.listModels(),
+    enabled: enabled.models,
   })
 
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents.list,
     queryFn: () => agentService.listAgents(),
+    enabled: enabled.agents,
   })
 
   const environmentsQuery = useQuery({
     queryKey: queryKeys.environments.list,
     queryFn: () => environmentService.listEnvironments(),
+    enabled: enabled.environments,
   })
 
   return {
