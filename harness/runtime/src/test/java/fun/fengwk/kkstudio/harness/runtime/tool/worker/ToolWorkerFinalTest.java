@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -39,6 +40,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolCancelledException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolSendUncertainException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
@@ -61,6 +63,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -800,6 +803,300 @@ class ToolWorkerFinalTest {
     assertEquals(InvocationStatus.FAILED, fixture.transactions.terminalStatus);
   }
 
+  // ---- explicit Environment Tool lifecycle coverage ----
+
+  @Test
+  void remoteCancellationReleasesEnvironmentSlotAndPersistsCancelled() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.descriptor = environmentDescriptor();
+    AtomicReference<ToolExecutionListener> remoteListener = new AtomicReference<>();
+    fixture.rebuildWorkerWithTransport(
+        (environmentName, request, listener) -> {
+          remoteListener.set(listener);
+          return new ToolExecutionHandle() {
+            @Override
+            public void cancel() {}
+
+            @Override
+            public boolean isCancelled() {
+              return false;
+            }
+          };
+        });
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertTrue(fixture.worker.hasActiveExecution("env-a"));
+    assertTrue(fixture.worker.hasActiveExecution());
+
+    remoteListener.get().onError(new RemoteToolCancelledException("daemon asked to cancel"));
+
+    assertEquals(InvocationStatus.CANCELLED, fixture.transactions.terminalStatus);
+    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    assertFalse(fixture.worker.hasActiveExecution());
+    // Cancellation must not be retried even when the descriptor is idempotent.
+    assertEquals(0, fixture.transactions.retryCalls);
+  }
+
+  @Test
+  void environmentSlotLifecycleAdmitsFreshDispatchAfterTerminal() {
+    // Each in-flight ENVIRONMENT execution occupies exactly one environment slot via
+    // hasActiveExecution(name). Once the execution reaches a terminal state the slot is released
+    // and a new dispatch (different environment, different invocation id) is admitted without
+    // any leaked slot from the previous run. The gateway's "one active per environment" rule is
+    // enforced at the transport layer; here we prove the ToolWorker's process-local map releases
+    // the slot deterministically across completion, failure, and disconnect paths.
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    AtomicReference<ToolExecutionListener> listenerA = new AtomicReference<>();
+    AtomicReference<ToolExecutionListener> listenerB = new AtomicReference<>();
+    AtomicReference<ToolExecutionListener> listenerC = new AtomicReference<>();
+    AtomicInteger pending = new AtomicInteger();
+    fixture.rebuildWorkerWithTransport(
+        (environmentName, request, listener) -> {
+          pending.incrementAndGet();
+          switch (environmentName) {
+            case "env-a":
+              listenerA.set(listener);
+              break;
+            case "env-b":
+              listenerB.set(listener);
+              break;
+            case "env-c":
+              listenerC.set(listener);
+              break;
+            default:
+              throw new IllegalStateException("unexpected environment " + environmentName);
+          }
+          return new ToolExecutionHandle() {
+            @Override
+            public void cancel() {}
+
+            @Override
+            public boolean isCancelled() {
+              return false;
+            }
+          };
+        });
+
+    // 1) Dispatch env-a; the slot is held while the daemon run is in-flight.
+    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.descriptor = environmentDescriptor();
+    assertTrue(fixture.worker.dispatch(101));
+    assertTrue(fixture.worker.hasActiveExecution("env-a"));
+    assertTrue(fixture.worker.hasActiveExecution());
+
+    // 2) Completion releases the env-a slot and clears the global hasActiveExecution gate.
+    listenerA.get().onComplete(result("done-a"));
+    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    assertFalse(fixture.worker.hasActiveExecution());
+
+    // 3) After terminal convergence the slot is reusable: env-b is admitted independently.
+    fixture.transactions.candidate = queued(environmentDescriptor(), "env-b");
+    fixture.transactions.descriptor = environmentDescriptor();
+    assertTrue(fixture.worker.dispatch(102));
+    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    assertTrue(fixture.worker.hasActiveExecution("env-b"));
+
+    // 4) Failure releases the env-b slot exactly like completion.
+    listenerB.get().onError(new RuntimeException("env-b blew up"));
+    assertFalse(fixture.worker.hasActiveExecution("env-b"));
+    assertFalse(fixture.worker.hasActiveExecution());
+
+    // 5) Disconnect (uncertain send) releases the env-c slot exactly like completion.
+    fixture.transactions.candidate = queued(environmentDescriptor(), "env-c");
+    fixture.transactions.descriptor = environmentDescriptor();
+    assertTrue(fixture.worker.dispatch(103));
+    assertTrue(fixture.worker.hasActiveExecution("env-c"));
+    listenerC.get().onError(new RemoteToolSendUncertainException("env-c dropped"));
+    assertFalse(fixture.worker.hasActiveExecution("env-c"));
+    assertFalse(fixture.worker.hasActiveExecution());
+
+    // The transport has been invoked exactly three times (one per dispatched invocation) and each
+    // listener was recorded.
+    assertEquals(3, pending.get());
+    assertNotNull(listenerA.get());
+    assertNotNull(listenerB.get());
+    assertNotNull(listenerC.get());
+  }
+
+  @Test
+  void lostOwnershipTerminalWriteDoesNotInvokeToolExecute() {
+    // When the durable permission ALLOW write is rejected (e.g. the row's lease expired between
+    // claim and persistPermissionAllowed), no Tool.execute may run and the row converges to
+    // terminal FAILED with PERMISSION_BOUNDARY_MISSING. This proves the worker fails closed on
+    // ownership loss during the post-claim permission transition.
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.candidate = pending(descriptor(ToolSideEffect.READ_ONLY), null);
+    fixture.transactions.descriptor = descriptor(ToolSideEffect.READ_ONLY);
+    fixture.transactions.claimPending = true;
+    fixture.transactions.allowOutcome = ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
+    fixture.interceptorChain =
+        chainWithBoundary(new AllowingBoundary(new PermissionPromptPreview("tool", "/work", "{}")));
+    fixture.rebuildWorker();
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertEquals(1, fixture.transactions.persistedAllowCalls);
+    assertEquals(0, fixture.tool.executions);
+    assertEquals(InvocationStatus.FAILED, fixture.transactions.terminalStatus);
+    assertEquals("PERMISSION_BOUNDARY_MISSING", fixture.transactions.error.kind());
+    assertFalse(fixture.worker.hasActiveExecution());
+  }
+
+  @Test
+  void lostOwnershipAwaitPermissionDoesNotInvokeToolExecute() {
+    // Mirror of the ALLOW lost-ownership test for the ASK branch: durable state must converge
+    // without any external Tool I/O when the awaitPermission write is rejected.
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.candidate = pending(descriptor(ToolSideEffect.READ_ONLY), null);
+    fixture.transactions.descriptor = descriptor(ToolSideEffect.READ_ONLY);
+    fixture.transactions.claimPending = true;
+    fixture.transactions.askOutcome = ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
+    fixture.interceptorChain =
+        chainWithBoundary(new AskingBoundary(new PermissionPromptPreview("tool", "/work", "{}")));
+    fixture.rebuildWorker();
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertEquals(1, fixture.transactions.awaitCalls);
+    assertEquals(0, fixture.tool.executions);
+    assertEquals(InvocationStatus.FAILED, fixture.transactions.terminalStatus);
+    assertEquals("PERMISSION_BOUNDARY_MISSING", fixture.transactions.error.kind());
+    assertFalse(fixture.worker.hasActiveExecution());
+  }
+
+  @Test
+  void lostOwnershipDenyPermissionDoesNotInvokeToolExecute() {
+    // Mirror of the ASK/ALLOW lost-ownership tests for the DENY branch.
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.candidate = pending(descriptor(ToolSideEffect.READ_ONLY), null);
+    fixture.transactions.descriptor = descriptor(ToolSideEffect.READ_ONLY);
+    fixture.transactions.claimPending = true;
+    fixture.transactions.denyOutcome = ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
+    fixture.interceptorChain =
+        chainWithBoundary(new DenyingBoundary(new PermissionPromptPreview("tool", "/work", "{}")));
+    fixture.rebuildWorker();
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertEquals(1, fixture.transactions.denyCalls);
+    assertEquals(0, fixture.tool.executions);
+    assertEquals(InvocationStatus.FAILED, fixture.transactions.terminalStatus);
+    assertEquals("PERMISSION_BOUNDARY_MISSING", fixture.transactions.error.kind());
+    assertFalse(fixture.worker.hasActiveExecution());
+  }
+
+  @Test
+  void deadlineExceededBeforeExecutionConvergesToFailedWithoutToolSideEffect() {
+    // A claim whose durable deadline is already in the past must converge to FAILED without ever
+    // constructing an ExecutionCallback or invoking external Tool I/O. The process-local slot
+    // stays empty so the FIFO head is durable-only.
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.pastDeadline = true;
+    fixture.interceptorChain = new ToolInterceptorChain(List.of(), List.of());
+    fixture.rebuildWorker();
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertEquals(0, fixture.tool.executions);
+    assertEquals(InvocationStatus.FAILED, fixture.transactions.terminalStatus);
+    assertEquals("TIMEOUT", fixture.transactions.error.kind());
+    assertFalse(fixture.worker.hasActiveExecution());
+  }
+
+  @Test
+  void recoveredLeaseDoesNotInvokeToolAndPersistsUnknown() {
+    // Belt-and-suspenders companion to the existing recoveredLease test: prove that even when
+    // the durable recoveredLease flag is set, no external Tool I/O runs and the slot is empty.
+    Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT);
+    fixture.transactions.recoveredLease = true;
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertEquals(0, fixture.tool.executions);
+    assertEquals(InvocationStatus.UNKNOWN, fixture.transactions.terminalStatus);
+    assertEquals("LEASE_EXPIRED", fixture.transactions.error.kind());
+    assertFalse(fixture.worker.hasActiveExecution());
+    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+  }
+
+  @Test
+  void externalDisconnectDuringRemoteRunConvergesToUnknownAndReleasesSlot() {
+    // The async onError path with a RemoteToolSendUncertainException is the production
+    // disconnect signal: the active slot must be released and the row must converge to UNKNOWN
+    // (never FAILED, never retried) so a later FIFO sibling can be admitted by the gateway.
+    Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT);
+    fixture.retryPolicy =
+        new InvocationRetryPolicy(
+            5, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(1), Duration.ofSeconds(1));
+    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.descriptor = environmentDescriptor();
+    AtomicReference<ToolExecutionListener> remoteListener = new AtomicReference<>();
+    fixture.rebuildWorkerWithTransport(
+        (environmentName, request, listener) -> {
+          remoteListener.set(listener);
+          return new ToolExecutionHandle() {
+            @Override
+            public void cancel() {}
+
+            @Override
+            public boolean isCancelled() {
+              return false;
+            }
+          };
+        });
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertTrue(fixture.worker.hasActiveExecution("env-a"));
+    remoteListener.get().onError(new RemoteToolSendUncertainException("socket closed mid-invoke"));
+
+    assertEquals(InvocationStatus.UNKNOWN, fixture.transactions.terminalStatus);
+    assertEquals("REMOTE_UNCERTAIN", fixture.transactions.error.kind());
+    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    assertFalse(fixture.worker.hasActiveExecution());
+    assertEquals(0, fixture.transactions.retryCalls);
+  }
+
+  @Test
+  void repeatedDispatchOfSameInvocationAdmitsFreshExecutionAfterTerminal() {
+    // After an invocation reaches a terminal state, dispatching it again (e.g. after durable
+    // retry/re-dispatch) must construct a fresh ExecutionCallback and run a fresh tool.execute;
+    // the previous terminal convergence must not leak the process-local slot or short-circuit
+    // the next attempt.
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.descriptor = environmentDescriptor();
+    AtomicReference<ToolExecutionListener> firstListener = new AtomicReference<>();
+    AtomicReference<ToolExecutionListener> secondListener = new AtomicReference<>();
+    AtomicInteger dispatched = new AtomicInteger();
+    fixture.rebuildWorkerWithTransport(
+        (environmentName, request, listener) -> {
+          if (dispatched.incrementAndGet() == 1) {
+            firstListener.set(listener);
+          } else {
+            secondListener.set(listener);
+          }
+          return new ToolExecutionHandle() {
+            @Override
+            public void cancel() {}
+
+            @Override
+            public boolean isCancelled() {
+              return false;
+            }
+          };
+        });
+
+    assertTrue(fixture.worker.dispatch(1));
+    firstListener.get().onComplete(result("first"));
+    assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.terminalStatus);
+    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertTrue(fixture.worker.hasActiveExecution("env-a"));
+    secondListener.get().onComplete(result("second"));
+    assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.terminalStatus);
+    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    assertEquals(2, dispatched.get());
+    assertEquals(2, fixture.transactions.claimCalls);
+  }
+
   private static ToolInterceptorChain chainWithBoundary(PermissionBoundaryInterceptor boundary) {
     return new ToolInterceptorChain(List.of(boundary), List.of());
   }
@@ -1033,7 +1330,11 @@ class ToolWorkerFinalTest {
   }
 
   private static ToolInvocation running(ToolDescriptor descriptor, String token) {
-    String environmentName = descriptor.name().startsWith("environment") ? "env-a" : null;
+    return running(descriptor, token, descriptor.name().startsWith("environment") ? "env-a" : null);
+  }
+
+  private static ToolInvocation running(
+      ToolDescriptor descriptor, String token, String environmentName) {
     ToolExecutionLocation location =
         environmentName == null
             ? ToolExecutionLocation.PLATFORM
@@ -1060,6 +1361,49 @@ class ToolWorkerFinalTest {
         null,
         NOW.minusSeconds(1),
         NOW,
+        null,
+        ToolPermissionState.ALLOWED,
+        false);
+  }
+
+  private static ToolInvocation runningWithPastDeadline(ToolDescriptor descriptor, String token) {
+    return runningWithPastDeadline(
+        descriptor, token, descriptor.name().startsWith("environment") ? "env-a" : null);
+  }
+
+  private static ToolInvocation runningWithPastDeadline(
+      ToolDescriptor descriptor, String token, String environmentName) {
+    ToolExecutionLocation location =
+        environmentName == null
+            ? ToolExecutionLocation.PLATFORM
+            : ToolExecutionLocation.ENVIRONMENT;
+    Instant createdAt = NOW.minusSeconds(10);
+    Instant startedAt = NOW.minusSeconds(5);
+    Instant pastDeadline = NOW.minusSeconds(3);
+    Instant lastActivityAt = NOW.minusSeconds(4);
+    Instant leaseUntil = NOW.minusSeconds(1);
+    return new ToolInvocation(
+        1L,
+        2L,
+        3L,
+        0,
+        "call-1",
+        descriptor,
+        "{}",
+        location,
+        environmentName,
+        7L,
+        InvocationStatus.RUNNING,
+        1,
+        null,
+        new Lease(token, leaseUntil),
+        pastDeadline,
+        lastActivityAt,
+        null,
+        null,
+        null,
+        createdAt,
+        startedAt,
         null,
         ToolPermissionState.ALLOWED,
         false);
@@ -1144,6 +1488,8 @@ class ToolWorkerFinalTest {
     private ToolInvocationUpdateOutcome retryOutcome = ToolInvocationUpdateOutcome.APPLIED;
     private ToolInvocationUpdateOutcome allowOutcome = ToolInvocationUpdateOutcome.APPLIED;
     private ToolInvocationUpdateOutcome askOutcome = ToolInvocationUpdateOutcome.APPLIED;
+    private ToolInvocationUpdateOutcome denyOutcome = ToolInvocationUpdateOutcome.APPLIED;
+    private boolean pastDeadline;
     private final CountDownLatch renewed = new CountDownLatch(1);
     private final List<Instant> activities = new ArrayList<>();
     private int retryCalls;
@@ -1172,7 +1518,6 @@ class ToolWorkerFinalTest {
     public Optional<ClaimedToolInvocation> claim(
         long invocationId, String workerToken, Duration workerLeaseDuration, Instant now) {
       claimCalls++;
-      assertEquals(1L, invocationId);
       assertEquals("worker-token", workerToken);
       assertTrue(workerLeaseDuration.isPositive());
       boolean recovered = recoveredLease || forceLocalConflict;
@@ -1181,12 +1526,16 @@ class ToolWorkerFinalTest {
         recovered = false;
       }
       ToolInvocation claimed;
+      String environmentName = candidate.environmentName();
       if (claimAsked) {
-        claimed = waiting(descriptor, candidate.environmentName());
+        claimed = waiting(descriptor, environmentName);
       } else if (claimPending) {
-        claimed = pending(descriptor, candidate.environmentName());
+        claimed = pending(descriptor, environmentName);
       } else {
-        claimed = running(descriptor, workerToken);
+        claimed =
+            pastDeadline
+                ? runningWithPastDeadline(descriptor, workerToken, environmentName)
+                : running(descriptor, workerToken, environmentName);
       }
       return Optional.of(new ClaimedToolInvocation(claimed, candidate.status(), recovered));
     }
@@ -1297,7 +1646,7 @@ class ToolWorkerFinalTest {
     @Override
     public ToolInvocationUpdateOutcome denyPermission(ClaimedToolInvocation claimed, Instant now) {
       denyCalls++;
-      return ToolInvocationUpdateOutcome.APPLIED;
+      return denyOutcome;
     }
   }
 
