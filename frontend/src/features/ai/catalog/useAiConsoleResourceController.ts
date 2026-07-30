@@ -9,9 +9,14 @@ import {
 import type { AgentResourceId } from '@/shared/api/contracts'
 import { useAiConsoleResourceEditorState } from '@/features/ai/catalog/useAiConsoleResourceEditorState'
 import { useAiConsoleResourceMutations } from '@/features/ai/catalog/useAiConsoleResourceMutations'
-import { useAiConsoleResourceQueries } from '@/features/ai/catalog/useAiConsoleResourceQueries'
+import {
+  useAiConsoleResourceQueries,
+  type AiConsoleResourceQueryEnabled,
+} from '@/features/ai/catalog/useAiConsoleResourceQueries'
 
-export function useAiConsoleResourceController() {
+export function useAiConsoleResourceController(
+  enabled: AiConsoleResourceQueryEnabled,
+) {
   const [deleteConfirm, setDeleteConfirm] = useState<ConfirmModalState | null>(null)
   const [formError, setFormError] = useState<string>('')
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<ResourceFieldKey, string>>>({})
@@ -24,7 +29,7 @@ export function useAiConsoleResourceController() {
     models,
     agents,
     environments,
-  } = useAiConsoleResourceQueries()
+  } = useAiConsoleResourceQueries(enabled)
   const editorState = useAiConsoleResourceEditorState({ providers, models, agents })
   const closeDeleteConfirm = () => setDeleteConfirm(null)
   const mutations = useAiConsoleResourceMutations({

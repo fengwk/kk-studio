@@ -44,6 +44,14 @@ describe('AI extension composition architecture', () => {
     const aiDefinition = source('features/ai/extensions/ai-extension.definition.ts')
     const aiExtension = source('features/ai/extensions/ai-extension.tsx')
     expect(`${aiDefinition}\n${aiExtension}`).not.toMatch(/comfyui/i)
+    expect(productionSourceTree('features/ai')).not.toContain(
+      'useAiConsoleController()',
+    )
+    expect(aiExtension).toContain('useAiConsoleController(scope)')
+    expect(aiExtension).toContain('<AiConsoleRuntime scope="chats">')
+    expect(aiExtension).toContain('<AiConsoleRuntime scope="agents">')
+    expect(aiExtension).toContain('<AiConsoleRuntime scope="models">')
+    expect(aiExtension).toContain('<AiConsoleRuntime scope="providers">')
 
     expect(productionSourceTree('features/comfyui')).not.toContain('@/features/ai/')
 

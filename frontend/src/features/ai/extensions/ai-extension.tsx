@@ -17,15 +17,21 @@ import {
   StateBlock,
 } from '@/shared/ui/console/AiConsoleCommonCards'
 import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
-import { useAiConsoleController } from '@/features/ai/extensions/useAiConsoleController'
+import {
+  useAiConsoleController,
+  type AiConsolePageScope,
+} from '@/features/ai/extensions/useAiConsoleController'
 import type { ExtensionComponentProps } from '@/platform/extensions/types'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 
 type AiConsoleController = ReturnType<typeof useAiConsoleController>
 const AiConsoleContext = createContext<AiConsoleController | null>(null)
 
-function AiConsoleRuntime({ children }: PropsWithChildren) {
-  const controller = useAiConsoleController()
+function AiConsoleRuntime({
+  scope,
+  children,
+}: PropsWithChildren<{ scope: AiConsolePageScope }>) {
+  const controller = useAiConsoleController(scope)
   return <AiConsoleContext.Provider value={controller}>{children}</AiConsoleContext.Provider>
 }
 
@@ -72,7 +78,7 @@ function AiConsoleFrame({ content, children }: ExtensionComponentProps & { conte
 
 export function ChatsPage({ children }: ExtensionComponentProps) {
   return (
-    <AiConsoleRuntime>
+    <AiConsoleRuntime scope="chats">
       <AiConsoleFrame content={<ChatsPanel />}>
         {children}
       </AiConsoleFrame>
@@ -87,7 +93,7 @@ function ChatsPanel() {
 
 export function AgentsPage({ children }: ExtensionComponentProps) {
   return (
-    <AiConsoleRuntime>
+    <AiConsoleRuntime scope="agents">
       <AiConsoleFrame content={<AgentsResourcePanel />}>
         {children}
       </AiConsoleFrame>
@@ -102,7 +108,7 @@ function AgentsResourcePanel() {
 
 export function ModelsPage({ children }: ExtensionComponentProps) {
   return (
-    <AiConsoleRuntime>
+    <AiConsoleRuntime scope="models">
       <AiConsoleFrame content={<ModelsResourcePanel />}>
         {children}
       </AiConsoleFrame>
@@ -117,7 +123,7 @@ function ModelsResourcePanel() {
 
 export function ProvidersPage({ children }: ExtensionComponentProps) {
   return (
-    <AiConsoleRuntime>
+    <AiConsoleRuntime scope="providers">
       <AiConsoleFrame content={<ProvidersResourcePanel />}>
         {children}
       </AiConsoleFrame>

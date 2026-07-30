@@ -51,7 +51,7 @@ describe('useChatListController', () => {
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
-    const { result } = renderHook(() => useChatListController(agents), { wrapper })
+    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
     act(() => result.current.openCreateChat('a1'))
     expect(result.current.createChatModal.open).toBe(true)
