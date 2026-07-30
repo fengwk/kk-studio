@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.agent.model.service.impl;
 
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -23,6 +24,8 @@ import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelUpdateDTO;
+
+import java.sql.SQLException;
 
 /** Atomic CAS failure must surface as the typed {@link AiVersionConflictException}. */
 public class AgentModelServiceImplTest {
@@ -49,7 +52,7 @@ public class AgentModelServiceImplTest {
 
     when(repository.create(model)).thenThrow(new DuplicateKeyException("dup"));
     assertThrows(AiDuplicateException.class, () -> service.createModel(create));
-    doThrow(new DataIntegrityViolationException("provider deleted")).when(repository).create(model);
+    doThrow(integrityFailure("23503")).when(repository).create(model);
     assertThrows(AiResourceNotFoundException.class, () -> service.createModel(create));
 
     AgentModelUpdateDTO update = new AgentModelUpdateDTO();
@@ -78,9 +81,14 @@ public class AgentModelServiceImplTest {
     assertThrows(AiVersionConflictException.class, () -> service.deleteModel(2L, "0"));
 
     model.setVersion(0L);
-    when(repository.deleteById(eq(2L), anyLong()))
-        .thenThrow(new DataIntegrityViolationException("model still referenced"));
+    when(repository.deleteById(eq(2L), anyLong())).thenThrow(integrityFailure("23503"));
     assertThrows(AiInUseException.class, () -> service.deleteModel(2L, "0"));
+
+    DataIntegrityViolationException nonForeignKey = integrityFailure("22001");
+    doThrow(nonForeignKey).when(repository).create(model);
+    assertSame(
+        nonForeignKey,
+        assertThrows(DataIntegrityViolationException.class, () -> service.createModel(create)));
   }
 
   @Test
@@ -109,5 +117,10 @@ public class AgentModelServiceImplTest {
     doThrow(new AiInUseException("agent_model", "in use")).when(resolver).ensureDeletable(2L);
     assertThrows(AiVersionConflictException.class, () -> service.deleteModel(2L, "0"));
     verify(resolver, never()).ensureDeletable(2L);
+  }
+
+  private static DataIntegrityViolationException integrityFailure(String sqlState) {
+    return new DataIntegrityViolationException(
+        "database integrity failure", new SQLException("database failure", sqlState));
   }
 }

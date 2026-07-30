@@ -4,6 +4,7 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
+import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.model.AgentModelConfigDTO;
@@ -14,13 +15,18 @@ import fun.fengwk.kkstudio.share.model.AgentModelEditablePropertiesDTO;
 final class AgentModelMutationFactory {
 
   private static final String RESOURCE = "agent_model";
+  private static final int NAME_MAX_LENGTH = 128;
+  private static final int DESCRIPTION_MAX_LENGTH = 512;
 
+  private final AgentEditableSupport editableSupport;
   private final AgentModelRuntimeConfigParser runtimeConfigParser;
   private final PostgresqlSequenceIdGenerator idGenerator;
 
   AgentModelMutationFactory(
+      AgentEditableSupport editableSupport,
       AgentModelRuntimeConfigParser runtimeConfigParser,
       PostgresqlSequenceIdGenerator idGenerator) {
+    this.editableSupport = editableSupport;
     this.runtimeConfigParser = runtimeConfigParser;
     this.idGenerator = idGenerator;
   }
@@ -51,10 +57,13 @@ final class AgentModelMutationFactory {
     if (properties == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
     }
-    String name = trimToNull(properties.getName());
+    String name = editableSupport.trimToNull(properties.getName());
     if (name == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
     }
+    String description = editableSupport.trimToNull(properties.getDescription());
+    editableSupport.validateMaxLength(RESOURCE, "name", name, NAME_MAX_LENGTH);
+    editableSupport.validateMaxLength(RESOURCE, "description", description, DESCRIPTION_MAX_LENGTH);
     AgentModelConfigDTO config = properties.getConfig();
     if (config == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " config must not be null");
@@ -65,15 +74,7 @@ final class AgentModelMutationFactory {
     } catch (IllegalArgumentException error) {
       throw new AiValidationException(RESOURCE, error.getMessage(), error);
     }
-    return new Mutation(name, trimToNull(properties.getDescription()), configJson);
-  }
-
-  private static String trimToNull(String value) {
-    if (value == null) {
-      return null;
-    }
-    String trimmed = value.trim();
-    return trimmed.isEmpty() ? null : trimmed;
+    return new Mutation(name, description, configJson);
   }
 
   record Mutation(String name, String description, String configJson) {}

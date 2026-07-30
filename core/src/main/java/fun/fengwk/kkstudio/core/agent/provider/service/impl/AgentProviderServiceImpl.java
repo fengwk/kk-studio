@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.core.ai.error.CatalogVersions;
+import fun.fengwk.kkstudio.core.persistence.PostgresqlIntegrityViolationClassifier;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
@@ -106,9 +107,12 @@ public class AgentProviderServiceImpl implements AgentProviderService {
             CatalogVersions.format(reread.getVersion()));
       }
     } catch (DuplicateKeyException error) {
-      throw new AiInUseException(RESOURCE, RESOURCE + " in use by models: " + id);
+      throw error;
     } catch (DataIntegrityViolationException error) {
-      throw new AiInUseException(RESOURCE, RESOURCE + " in use by models: " + id);
+      if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
+        throw new AiInUseException(RESOURCE, RESOURCE + " in use by models: " + id, error);
+      }
+      throw error;
     }
   }
 

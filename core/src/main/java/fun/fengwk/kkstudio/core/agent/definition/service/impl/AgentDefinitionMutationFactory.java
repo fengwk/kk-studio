@@ -19,6 +19,9 @@ import fun.fengwk.kkstudio.share.model.AgentDefinitionEditablePropertiesDTO;
 final class AgentDefinitionMutationFactory {
 
   private static final String RESOURCE = "agent_definition";
+  private static final int NAME_MAX_LENGTH = 64;
+  private static final int DESCRIPTION_MAX_LENGTH = 512;
+  private static final int VARIANT_MAX_LENGTH = 64;
 
   private final AgentEditableSupport editableSupport;
   private final AgentDefinitionConfigCodec configCodec;
@@ -65,6 +68,13 @@ final class AgentDefinitionMutationFactory {
     if (name == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
     }
+    String description = editableSupport.trimToNull(properties.getDescription());
+    String systemPrompt = editableSupport.trimToNull(properties.getSystemPrompt());
+    // null/blank = no override; runtime/thread apply resolves model.defaultVariant.
+    String variant = editableSupport.trimToNull(properties.getVariant());
+    editableSupport.validateMaxLength(RESOURCE, "name", name, NAME_MAX_LENGTH);
+    editableSupport.validateMaxLength(RESOURCE, "description", description, DESCRIPTION_MAX_LENGTH);
+    editableSupport.validateMaxLength(RESOURCE, "variant", variant, VARIANT_MAX_LENGTH);
     AgentDefinitionConfigDTO config = properties.getConfig();
     if (config == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " config must not be null");
@@ -75,14 +85,7 @@ final class AgentDefinitionMutationFactory {
     } catch (IllegalArgumentException error) {
       throw new AiValidationException(RESOURCE, error.getMessage(), error);
     }
-    // null/blank = no override; runtime/thread apply resolves model.defaultVariant.
-    String variant = editableSupport.trimToNull(properties.getVariant());
-    return new Mutation(
-        name,
-        editableSupport.trimToNull(properties.getDescription()),
-        editableSupport.trimToNull(properties.getSystemPrompt()),
-        variant,
-        configJson);
+    return new Mutation(name, description, systemPrompt, variant, configJson);
   }
 
   record Mutation(

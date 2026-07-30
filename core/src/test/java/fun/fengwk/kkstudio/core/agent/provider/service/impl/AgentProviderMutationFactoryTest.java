@@ -11,6 +11,7 @@ import org.mockito.Mockito;
 import fun.fengwk.kkstudio.core.agent.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
+import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderType;
@@ -61,18 +62,42 @@ public class AgentProviderMutationFactoryTest {
   @Test
   public void shouldRejectInvalidProviderConfiguration() {
     AgentProviderMutationFactory factory = factory();
-    assertThrows(IllegalArgumentException.class, () -> factory.newProvider(null));
+    assertThrows(AiValidationException.class, () -> factory.newProvider(null));
 
     AgentProviderCreateDTO blank = provider(" ", null);
-    assertThrows(IllegalArgumentException.class, () -> factory.newProvider(blank));
+    assertThrows(AiValidationException.class, () -> factory.newProvider(blank));
 
     AgentProviderCreateDTO unsupported = provider("provider", null);
     unsupported.setProviderType("missing");
-    assertThrows(IllegalArgumentException.class, () -> factory.newProvider(unsupported));
+    assertThrows(AiValidationException.class, () -> factory.newProvider(unsupported));
 
     AgentProviderCreateDTO invalidTimeout = provider("provider", null);
     invalidTimeout.setModelCallIdleTimeoutMillis(0L);
-    assertThrows(IllegalArgumentException.class, () -> factory.newProvider(invalidTimeout));
+    assertThrows(AiValidationException.class, () -> factory.newProvider(invalidTimeout));
+  }
+
+  @Test
+  public void shouldEnforceProviderSchemaStringLimitsAfterNormalization() {
+    AgentProviderMutationFactory factory = factory();
+    AgentProviderCreateDTO accepted = provider(" " + "n".repeat(64) + " ", "c".repeat(512));
+    accepted.setDescription("d".repeat(512));
+    accepted.setBaseUrl("u".repeat(512));
+    AgentProvider persisted = factory.newProvider(accepted);
+    assertEquals("n".repeat(64), persisted.getName());
+    assertEquals("d".repeat(512), persisted.getDescription());
+    assertEquals("u".repeat(512), persisted.getBaseUrl());
+    assertEquals("c".repeat(512), persisted.getCredential());
+
+    AgentProviderCreateDTO oversizedName = provider("n".repeat(65), null);
+    assertThrows(AiValidationException.class, () -> factory.newProvider(oversizedName));
+    AgentProviderCreateDTO oversizedDescription = provider("provider", null);
+    oversizedDescription.setDescription("d".repeat(513));
+    assertThrows(AiValidationException.class, () -> factory.newProvider(oversizedDescription));
+    AgentProviderCreateDTO oversizedBaseUrl = provider("provider", null);
+    oversizedBaseUrl.setBaseUrl("u".repeat(513));
+    assertThrows(AiValidationException.class, () -> factory.newProvider(oversizedBaseUrl));
+    AgentProviderCreateDTO oversizedCredential = provider("provider", "c".repeat(513));
+    assertThrows(AiValidationException.class, () -> factory.newProvider(oversizedCredential));
   }
 
   private AgentProviderCreateDTO provider(String name, String credential) {

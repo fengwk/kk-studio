@@ -12,6 +12,8 @@ import org.mockito.Mockito;
 import fun.fengwk.kkstudio.core.agent.model.AgentModelTestData;
 import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
+import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
+import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.model.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
@@ -37,11 +39,11 @@ public class AgentModelMutationFactoryTest {
     AgentModelCreateDTO create = new AgentModelCreateDTO();
     create.setName("model");
 
-    assertThrows(IllegalArgumentException.class, () -> factory.newModel(2L, create));
+    assertThrows(AiValidationException.class, () -> factory.newModel(2L, create));
     AgentModel existing = new AgentModel();
     existing.setName("existing");
     assertThrows(
-        IllegalArgumentException.class, () -> factory.update(existing, new AgentModelUpdateDTO()));
+        AiValidationException.class, () -> factory.update(existing, new AgentModelUpdateDTO()));
 
     AgentModelConfigDTO config = validConfig();
     create.setConfig(config);
@@ -55,9 +57,9 @@ public class AgentModelMutationFactoryTest {
         AgentModelTestData.buildConfig(
             32768, 4096, true, false, "standard", "v1", List.of(), "missing");
     create.setConfig(invalid);
-    assertThrows(IllegalArgumentException.class, () -> factory.newModel(2L, create));
-    assertThrows(IllegalArgumentException.class, () -> factory.newModel(0L, create));
-    assertThrows(IllegalArgumentException.class, () -> factory.newModel(2L, null));
+    assertThrows(AiValidationException.class, () -> factory.newModel(2L, create));
+    assertThrows(AiValidationException.class, () -> factory.newModel(0L, create));
+    assertThrows(AiValidationException.class, () -> factory.newModel(2L, null));
   }
 
   /**
@@ -131,6 +133,28 @@ public class AgentModelMutationFactoryTest {
         List.of(AgentModelInputModality.TEXT), persisted.getAbilities().getInputModalities());
   }
 
+  @Test
+  public void shouldEnforceModelSchemaStringLimitsAfterNormalization() {
+    AgentModelMutationFactory factory = factory();
+    AgentModelCreateDTO accepted = create("n".repeat(128), "d".repeat(512));
+    AgentModel persisted = factory.newModel(2L, accepted);
+    assertEquals("n".repeat(128), persisted.getName());
+    assertEquals("d".repeat(512), persisted.getDescription());
+
+    assertThrows(
+        AiValidationException.class, () -> factory.newModel(2L, create("n".repeat(129), null)));
+    assertThrows(
+        AiValidationException.class, () -> factory.newModel(2L, create("model", "d".repeat(513))));
+  }
+
+  private static AgentModelCreateDTO create(String name, String description) {
+    AgentModelCreateDTO create = new AgentModelCreateDTO();
+    create.setName(name);
+    create.setDescription(description);
+    create.setConfig(validConfig());
+    return create;
+  }
+
   private static String serialize(AgentModelConfigDTO config) {
     try {
       return new ObjectMapper().writeValueAsString(config);
@@ -143,6 +167,8 @@ public class AgentModelMutationFactoryTest {
     PostgresqlSequenceIdGenerator idGenerator = Mockito.mock(PostgresqlSequenceIdGenerator.class);
     when(idGenerator.next()).thenReturn(202L);
     return new AgentModelMutationFactory(
-        new AgentModelRuntimeConfigParser(new ObjectMapper()), idGenerator);
+        new AgentEditableSupport(new ObjectMapper()),
+        new AgentModelRuntimeConfigParser(new ObjectMapper()),
+        idGenerator);
   }
 }

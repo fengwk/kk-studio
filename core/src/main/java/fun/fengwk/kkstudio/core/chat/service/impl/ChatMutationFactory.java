@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.share.model.ChatUpdateDTO;
 public class ChatMutationFactory {
 
   private static final String RESOURCE = "chat";
+  private static final int TITLE_MAX_LENGTH = 256;
 
   private final AgentEditableSupport editableSupport;
   private final PostgresqlSequenceIdGenerator idGenerator;
@@ -42,6 +43,7 @@ public class ChatMutationFactory {
     if (title == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " title must not be blank");
     }
+    editableSupport.validateMaxLength(RESOURCE, "title", title, TITLE_MAX_LENGTH);
     chat.setTitle(title);
     chat.setDefaultAgentId(parseOptionalAgentId(createDTO.getDefaultAgentId()));
     return chat;
@@ -59,6 +61,7 @@ public class ChatMutationFactory {
       if (title == null) {
         throw new AiValidationException(RESOURCE, RESOURCE + " title must not be blank");
       }
+      editableSupport.validateMaxLength(RESOURCE, "title", title, TITLE_MAX_LENGTH);
       chat.setTitle(title);
     }
     if (updateDTO.getDefaultAgentId() != null) {

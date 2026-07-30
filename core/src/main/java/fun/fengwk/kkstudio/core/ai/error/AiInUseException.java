@@ -6,4 +6,8 @@ public class AiInUseException extends AiDomainException {
   public AiInUseException(String resource, String message) {
     super(DomainErrorCode.IN_USE, resource, message);
   }
+
+  public AiInUseException(String resource, String message, Throwable cause) {
+    super(DomainErrorCode.IN_USE, resource, message, cause);
+  }
 }
