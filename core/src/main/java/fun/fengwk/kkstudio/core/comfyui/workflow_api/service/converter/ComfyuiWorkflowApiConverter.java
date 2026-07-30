@@ -4,7 +4,7 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.ComfyuiWorkflowApiIds;
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.model.ComfyuiWorkflowApi;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiDTO;
 
 /**
  * @author fengwk

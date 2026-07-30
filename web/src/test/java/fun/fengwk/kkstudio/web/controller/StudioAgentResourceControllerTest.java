@@ -15,19 +15,19 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
-import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
-import fun.fengwk.kkstudio.share.model.AgentModelAbilitiesDTO;
-import fun.fengwk.kkstudio.share.model.AgentModelConfigDTO;
-import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentModelInputModality;
-import fun.fengwk.kkstudio.share.model.AgentModelLimitDTO;
-import fun.fengwk.kkstudio.share.model.AgentModelPricingDTO;
-import fun.fengwk.kkstudio.share.model.AgentModelUpdateDTO;
-import fun.fengwk.kkstudio.share.model.AgentModelVariantDTO;
-import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.math.BigDecimal;

@@ -7,7 +7,7 @@ import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
 import org.springframework.web.socket.server.standard.ServletServerContainerFactoryBean;
 
-import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentGatewayProperties;
+import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 
 /**
  * WebSocket transport registration for the Daemon v1 Environment gateway.

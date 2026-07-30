@@ -10,9 +10,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import fun.fengwk.kkstudio.core.harness.session.service.HarnessSessionQueryService;
-import fun.fengwk.kkstudio.share.model.HarnessSessionDTO;
-import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
+import fun.fengwk.kkstudio.core.ai.runtime.session.service.HarnessSessionQueryService;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO;
 
 import java.util.List;
 import java.util.function.Supplier;

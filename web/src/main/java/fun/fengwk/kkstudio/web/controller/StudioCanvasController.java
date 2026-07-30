@@ -12,10 +12,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import fun.fengwk.kkstudio.share.model.studio.ApplyCanvasCommandsRequestDTO;
-import fun.fengwk.kkstudio.share.model.studio.CanvasDocumentDTO;
-import fun.fengwk.kkstudio.share.model.studio.CanvasSnapshotDTO;
-import fun.fengwk.kkstudio.share.model.studio.CreateCanvasRequestDTO;
+import fun.fengwk.kkstudio.share.studio.ApplyCanvasCommandsRequestDTO;
+import fun.fengwk.kkstudio.share.studio.CanvasDocumentDTO;
+import fun.fengwk.kkstudio.share.studio.CanvasSnapshotDTO;
+import fun.fengwk.kkstudio.share.studio.CreateCanvasRequestDTO;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.web.studio.StudioWebMapper;

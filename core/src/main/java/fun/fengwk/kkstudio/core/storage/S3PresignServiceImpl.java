@@ -13,7 +13,7 @@ import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequ
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import fun.fengwk.kkstudio.core.storage.configuration.S3StorageProperties;
-import fun.fengwk.kkstudio.share.model.S3PresignedResponseDTO;
+import fun.fengwk.kkstudio.share.storage.S3PresignedResponseDTO;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;

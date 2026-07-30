@@ -14,9 +14,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import fun.fengwk.kkstudio.core.harness.observability.service.HarnessObservabilityQueryService;
-import fun.fengwk.kkstudio.core.harness.observability.service.model.ArtifactContent;
-import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
+import fun.fengwk.kkstudio.core.ai.runtime.observability.service.HarnessObservabilityQueryService;
+import fun.fengwk.kkstudio.core.ai.runtime.observability.service.model.ArtifactContent;
+import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
 
 /** Harness observability：单个 ToolInvocation 与 artifact 下载。 */
 @RestController

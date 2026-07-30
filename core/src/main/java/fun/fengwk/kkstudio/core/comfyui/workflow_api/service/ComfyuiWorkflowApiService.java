@@ -3,9 +3,9 @@ package fun.fengwk.kkstudio.core.comfyui.workflow_api.service;
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
 
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiCreateDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiUpdateDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiCreateDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiUpdateDTO;
 
 /**
  * 卡片写路径以正的十进制字符串 ID 暴露给 HTTP / DTO 边界（PostgreSQL sequence 分配）；持久层在内部转换为 {@code long} 后再访问数据库。

@@ -20,8 +20,8 @@ import org.springframework.http.MediaType;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 
-import fun.fengwk.kkstudio.share.model.studio.ApplyCanvasCommandsRequestDTO;
-import fun.fengwk.kkstudio.share.model.studio.CreateCanvasRequestDTO;
+import fun.fengwk.kkstudio.share.studio.ApplyCanvasCommandsRequestDTO;
+import fun.fengwk.kkstudio.share.studio.CreateCanvasRequestDTO;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.studio.canvas.CanvasLink;

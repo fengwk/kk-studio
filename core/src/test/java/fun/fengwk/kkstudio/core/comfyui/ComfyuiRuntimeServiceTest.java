@@ -34,10 +34,10 @@ import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWork
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiLookupService;
 import fun.fengwk.kkstudio.core.storage.S3ObjectContent;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowJobDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunFileDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunRequestDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowJobDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunFileDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunRequestDTO;
 
 import java.time.Duration;
 import java.util.Map;

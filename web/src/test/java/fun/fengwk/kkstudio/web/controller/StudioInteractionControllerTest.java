@@ -15,8 +15,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import fun.fengwk.kkstudio.core.harness.interaction.service.InteractionService;
-import fun.fengwk.kkstudio.share.model.InteractionDTO;
+import fun.fengwk.kkstudio.core.ai.runtime.interaction.service.InteractionService;
+import fun.fengwk.kkstudio.share.ai.runtime.InteractionDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 /** HTTP coverage for generic Interaction lookup, owner lookup, response, and conflict semantics. */

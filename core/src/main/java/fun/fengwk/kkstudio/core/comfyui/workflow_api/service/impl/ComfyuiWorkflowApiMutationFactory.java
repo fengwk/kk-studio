@@ -5,9 +5,9 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.model.ComfyuiWorkflowApi;
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiBindingsParser;
 import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiCreateDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiEditablePropertiesDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiUpdateDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiCreateDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiEditablePropertiesDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiUpdateDTO;
 
 import java.util.regex.Pattern;
 

@@ -24,11 +24,11 @@ import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWork
 import fun.fengwk.kkstudio.core.storage.S3ObjectContent;
 import fun.fengwk.kkstudio.core.storage.S3ObjectKeyNormalizer;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowCancelDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowJobDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunFileDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunRequestDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowCancelDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowJobDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunFileDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunRequestDTO;
 
 import java.net.URLConnection;
 import java.net.URLEncoder;

@@ -12,9 +12,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import fun.fengwk.kkstudio.core.harness.interaction.service.InteractionService;
-import fun.fengwk.kkstudio.share.model.InteractionDTO;
-import fun.fengwk.kkstudio.share.model.InteractionResponseDTO;
+import fun.fengwk.kkstudio.core.ai.runtime.interaction.service.InteractionService;
+import fun.fengwk.kkstudio.share.ai.runtime.InteractionDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.InteractionResponseDTO;
 
 import java.util.Objects;
 import java.util.function.Supplier;

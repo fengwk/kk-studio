@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.web.studio;
 
-import fun.fengwk.kkstudio.share.model.studio.CanvasDocumentDTO;
-import fun.fengwk.kkstudio.share.model.studio.CanvasLinkDTO;
-import fun.fengwk.kkstudio.share.model.studio.CanvasNodeDTO;
-import fun.fengwk.kkstudio.share.model.studio.CanvasSnapshotDTO;
+import fun.fengwk.kkstudio.share.studio.CanvasDocumentDTO;
+import fun.fengwk.kkstudio.share.studio.CanvasLinkDTO;
+import fun.fengwk.kkstudio.share.studio.CanvasNodeDTO;
+import fun.fengwk.kkstudio.share.studio.CanvasSnapshotDTO;
 import fun.fengwk.kkstudio.studio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.studio.canvas.CanvasLink;
 import fun.fengwk.kkstudio.studio.canvas.CanvasNode;

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.core.storage;
 
-import fun.fengwk.kkstudio.share.model.S3PresignedResponseDTO;
+import fun.fengwk.kkstudio.share.storage.S3PresignedResponseDTO;
 
 /**
  * S3 预签名服务：仅为上传或下载生成预签名 URL，不读写对象字节。
