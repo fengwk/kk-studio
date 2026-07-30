@@ -4,7 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelWorker;
 import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelWorkerConfig;
@@ -14,6 +16,10 @@ import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelWorkerConfig;
  * activation messages.
  */
 class ModelWorkerWiringTest extends PostgresSpringTestSupport {
+
+  // The unrelated tool slice owns the production {@link EnvironmentReadyListener} bean; this test
+  // only verifies the Model worker wiring, so the listener dependency is satisfied with a mock.
+  @MockitoBean private EnvironmentReadyListener environmentReadyListener;
 
   @Autowired private ModelWorker modelWorker;
   @Autowired private ModelWorkerConfig modelWorkerConfig;

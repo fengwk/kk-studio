@@ -11,7 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
@@ -76,6 +78,10 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
   private static final Duration SHORT_LEASE = Duration.ofMillis(50);
 
   @Autowired private PostgresqlModelInvocationTransactions transactions;
+
+  // The unrelated tool slice owns the production {@link EnvironmentReadyListener} bean; this model
+  // integration test does not exercise that path, so the dependency is satisfied with a mock.
+  @MockitoBean private EnvironmentReadyListener environmentReadyListener;
 
   private final AtomicLong ids = new AtomicLong(20_000_000L);
 
@@ -297,7 +303,7 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
 
   // ---------- renew / activity ----------
 
-  /** renew 延长时间且不改 last_activity_at；调用方持有的 ClaimedModelInvocation 不变（renew 不重发）。 */
+  /** renew 不得缩短 lease 或 watchdog target，且不改 last_activity_at。 */
   @Test
   void renewMonotonicExtensionLeavesActivityUntouched() throws Exception {
     Fixture fx = newQueued();
@@ -313,6 +319,19 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     Instant firstDeadline = ownership.invocation().deadlineAt();
 
     Instant renewNow = now.plus(Duration.ofMillis(10));
+    ModelInvocationUpdateOutcome shortRenew =
+        transactions.renew(ownership, Duration.ofMillis(1), renewNow);
+    assertSame(ModelInvocationUpdateOutcome.APPLIED, shortRenew);
+    assertEquals(
+        firstLease.until().truncatedTo(ChronoUnit.MILLIS),
+        rowFor(fx.invocationId).getWorkerUntil().toInstant().truncatedTo(ChronoUnit.MILLIS),
+        "renew must not shorten the durable lease");
+    assertEquals(
+        firstLease.until().truncatedTo(ChronoUnit.MILLIS),
+        targetAvailableAt("MODEL_INVOCATION", fx.invocationId).truncatedTo(ChronoUnit.MILLIS),
+        "watchdog target must match the durable lease after a non-extending renew");
+
+    renewNow = now.plus(Duration.ofMillis(20));
     ModelInvocationUpdateOutcome out =
         transactions.renew(ownership, Duration.ofMinutes(3), renewNow);
     assertSame(ModelInvocationUpdateOutcome.APPLIED, out);
@@ -322,6 +341,10 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
         row.getWorkerUntil().toInstant().isAfter(firstLease.until()),
         "renew must extend lease beyond original until");
     assertTrue(row.getWorkerUntil().toInstant().isAfter(renewNow));
+    assertEquals(
+        row.getWorkerUntil().toInstant().truncatedTo(ChronoUnit.MILLIS),
+        targetAvailableAt("MODEL_INVOCATION", fx.invocationId).truncatedTo(ChronoUnit.MILLIS),
+        "watchdog target must match the durable lease after an extending renew");
     assertEquals(
         firstActivity,
         row.getLastActivityAt().toInstant(),
@@ -1019,6 +1042,287 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     assertFalse(threadRow(fx.threadId).getRunnable(), "Thread must remain non-runnable");
   }
 
+  // ---------- single-path execution-target wiring ----------
+
+  /**
+   * claim 必须 lockDue(MODEL_INVOCATION) → CAS → reschedule 到 lease until，目标行从 due-now 推进到 lease
+   * 之后；不留下任何早于 lease 的 available_at。
+   */
+  @Test
+  void claimReschedulesModelInvocationTargetToWorkerLease() throws Exception {
+    Fixture fx = newQueued();
+    Instant now = now();
+    Optional<ClaimedModelInvocation> claimed =
+        transactions.claim(
+            fx.invocationId, "tok-watch", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
+    assertTrue(claimed.isPresent());
+
+    Instant availableAt = targetAvailableAt("MODEL_INVOCATION", fx.invocationId);
+    Instant leaseUntil = claimed.get().invocation().workerLease().until();
+    assertEquals(
+        leaseUntil,
+        availableAt,
+        "claim must reschedule MODEL_INVOCATION target to the worker lease deadline");
+  }
+
+  /**
+   * claim 在 due target 缺失时必须直接返回 empty，绝不动 invocation：execution_epoch/status/attempt/ worker_token
+   * 全部保持 QUEUED 初始值。
+   */
+  @Test
+  void claimReturnsEmptyWhenModelInvocationTargetMissing() throws Exception {
+    Fixture fx = newQueued();
+    deleteTarget("MODEL_INVOCATION", fx.invocationId);
+    Instant now = now();
+
+    Optional<ClaimedModelInvocation> claimed =
+        transactions.claim(
+            fx.invocationId, "tok-missing", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
+    assertTrue(claimed.isEmpty(), "missing target must not yield a claim");
+
+    ModelInvocationDO row = rowFor(fx.invocationId);
+    assertEquals("QUEUED", row.getStatus());
+    assertNull(row.getWorkerToken());
+    assertNull(row.getWorkerUntil());
+    assertNull(row.getStartedAt());
+  }
+
+  /** 远期 not-due 目标：claim 同样返回 empty。available_at 保持原值，invocation 不被修改。 */
+  @Test
+  void claimReturnsEmptyWhenModelInvocationTargetNotDue() throws Exception {
+    Fixture fx = newQueued();
+    Instant future = now().plus(Duration.ofMinutes(5));
+    rescheduleTarget("MODEL_INVOCATION", fx.invocationId, future);
+
+    Optional<ClaimedModelInvocation> claimed =
+        transactions.claim(
+            fx.invocationId, "tok-future", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now());
+    assertTrue(claimed.isEmpty(), "future-due target must not yield a claim");
+    assertEquals(
+        future.truncatedTo(ChronoUnit.MILLIS),
+        targetAvailableAt("MODEL_INVOCATION", fx.invocationId),
+        "not-due target must keep its original available_at");
+
+    ModelInvocationDO row = rowFor(fx.invocationId);
+    assertEquals("QUEUED", row.getStatus());
+    assertNull(row.getWorkerToken());
+  }
+
+  /**
+   * renew 必须 lock + reschedule MODEL_INVOCATION target 到新 lease until；任何一次 renew 都同步刷新 目标行；目标消失属于
+   * invariant breach。
+   */
+  @Test
+  void renewReschedulesModelInvocationTargetToExtendedLease() throws Exception {
+    Fixture fx = newQueued();
+    Instant now = Instant.now();
+    Optional<ClaimedModelInvocation> claimed =
+        transactions.claim(
+            fx.invocationId,
+            "tok-renew",
+            ModelCallTimeoutPolicy.DEFAULT,
+            Duration.ofSeconds(2),
+            now);
+    assertTrue(claimed.isPresent());
+    Instant firstLease = claimed.get().invocation().workerLease().until();
+
+    Instant renewNow = now.plus(Duration.ofMillis(50));
+    ModelInvocationUpdateOutcome out =
+        transactions.renew(claimed.get(), Duration.ofMinutes(3), renewNow);
+    assertSame(ModelInvocationUpdateOutcome.APPLIED, out);
+
+    Instant targetAt = targetAvailableAt("MODEL_INVOCATION", fx.invocationId);
+    assertTrue(
+        targetAt.isAfter(firstLease),
+        "renew must push MODEL_INVOCATION target past the prior lease deadline");
+    assertTrue(
+        targetAt.isAfter(renewNow),
+        "renew must push MODEL_INVOCATION target past the renewal instant");
+  }
+
+  /** renew 在 owned mutation 中目标行消失：抛 IllegalStateException 让 Spring 回滚 invocation lease 写入。 */
+  @Test
+  void renewRollsBackWhenModelInvocationTargetIsMissing() throws Exception {
+    Fixture fx = newQueued();
+    Instant now = Instant.now();
+    Optional<ClaimedModelInvocation> claimed =
+        transactions.claim(
+            fx.invocationId,
+            "tok-renew",
+            ModelCallTimeoutPolicy.DEFAULT,
+            Duration.ofSeconds(2),
+            now);
+    assertTrue(claimed.isPresent());
+    Instant leaseBefore = claimed.get().invocation().workerLease().until();
+
+    deleteTarget("MODEL_INVOCATION", fx.invocationId);
+
+    IllegalStateException ex =
+        assertThrows(
+            IllegalStateException.class,
+            () -> transactions.renew(claimed.get(), Duration.ofMinutes(2), now.plusSeconds(1)));
+    assertTrue(
+        ex.getMessage() != null && ex.getMessage().contains("watchdog target"),
+        "missing watchdog target must surface the invariant breach");
+    // lease 不能被延长（renew 整事务回滚）
+    ModelInvocationDO row = rowFor(fx.invocationId);
+    assertEquals(
+        leaseBefore.truncatedTo(ChronoUnit.MILLIS),
+        row.getWorkerUntil().toInstant().truncatedTo(ChronoUnit.MILLIS),
+        "renew must roll back the worker_until extension");
+  }
+
+  /**
+   * scheduleRetry 在 owned mutation 中：把 MODEL_INVOCATION target reschedule 到 nextAttemptAt；目标
+   * 缺失抛异常回滚 RETRY_WAIT 写入。
+   */
+  @Test
+  void scheduleRetryReschedulesModelInvocationTargetToNextAttempt() throws Exception {
+    Fixture fx = newQueued();
+    Instant now = Instant.now();
+    Optional<ClaimedModelInvocation> claimed =
+        transactions.claim(
+            fx.invocationId, "tok-retry", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
+    assertTrue(claimed.isPresent());
+
+    Instant nextAttemptAt = now.plus(Duration.ofMinutes(2));
+    Instant observed = now.plus(Duration.ofMillis(500));
+    ModelInvocationUpdateOutcome out =
+        transactions.scheduleRetry(claimed.get(), nextAttemptAt, observed, observed);
+    assertSame(ModelInvocationUpdateOutcome.APPLIED, out);
+
+    assertEquals(
+        nextAttemptAt.truncatedTo(ChronoUnit.MILLIS),
+        targetAvailableAt("MODEL_INVOCATION", fx.invocationId),
+        "retry must reschedule MODEL_INVOCATION target to nextAttemptAt");
+  }
+
+  /** scheduleRetry 在目标行消失时必须抛 IllegalStateException 并完整回滚 RETRY_WAIT 写入。 */
+  @Test
+  void scheduleRetryRollsBackWhenModelInvocationTargetIsMissing() throws Exception {
+    Fixture fx = newQueued();
+    Instant now = Instant.now();
+    Optional<ClaimedModelInvocation> claimed =
+        transactions.claim(
+            fx.invocationId, "tok-retry", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
+    assertTrue(claimed.isPresent());
+
+    deleteTarget("MODEL_INVOCATION", fx.invocationId);
+
+    Instant nextAttemptAt = now.plus(Duration.ofMinutes(2));
+    IllegalStateException ex =
+        assertThrows(
+            IllegalStateException.class,
+            () -> transactions.scheduleRetry(claimed.get(), nextAttemptAt, now, now));
+    assertTrue(ex.getMessage() != null && ex.getMessage().contains("watchdog target"));
+
+    ModelInvocationDO row = rowFor(fx.invocationId);
+    assertEquals(
+        "RUNNING", row.getStatus(), "scheduleRetry must roll back the RETRY_WAIT transition");
+    assertNotNull(row.getWorkerToken(), "lease must be restored by rollback");
+  }
+
+  /**
+   * recordActivity 与 recordSafeStreamSnapshot 都不能触碰 MODEL_INVOCATION target 行：available_at 必须保持原值。
+   */
+  @Test
+  void recordActivityAndSafeStreamSnapshotDoNotTouchModelInvocationTarget() throws Exception {
+    Fixture fx = newQueued();
+    Instant now = Instant.now();
+    Optional<ClaimedModelInvocation> claimed =
+        transactions.claim(
+            fx.invocationId, "tok-act", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
+    assertTrue(claimed.isPresent());
+    Instant beforeTarget = targetAvailableAt("MODEL_INVOCATION", fx.invocationId);
+
+    ModelInvocationUpdateOutcome act =
+        transactions.recordActivity(claimed.get(), now.plus(Duration.ofMinutes(2)), now);
+    assertSame(ModelInvocationUpdateOutcome.APPLIED, act);
+    assertEquals(
+        beforeTarget,
+        targetAvailableAt("MODEL_INVOCATION", fx.invocationId),
+        "recordActivity must not move the MODEL_INVOCATION target row");
+
+    ModelInvocationUpdateOutcome snap =
+        transactions.recordSafeStreamSnapshot(
+            claimed.get(), new SafeStreamSnapshot("hello", ""), now.plusMillis(20), now);
+    assertSame(ModelInvocationUpdateOutcome.APPLIED, snap);
+    assertEquals(
+        beforeTarget,
+        targetAvailableAt("MODEL_INVOCATION", fx.invocationId),
+        "recordSafeStreamSnapshot must not move the MODEL_INVOCATION target row");
+  }
+
+  /**
+   * terminal success 必须同一事务内 deleteLocked(MODEL_INVOCATION) + markRunnable(Thread) +
+   * schedule(THREAD, threadId, null, now)：MODEL_INVOCATION 目标消失，THREAD 目标出现且最早为 now。
+   */
+  @Test
+  void completeSuccessAtomicallyDeletesModelTargetAndSchedulesThreadTarget() throws Exception {
+    Fixture fx = newQueued();
+    Instant now = now();
+    Optional<ClaimedModelInvocation> claimed =
+        transactions.claim(
+            fx.invocationId, "tok-term", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
+    assertTrue(claimed.isPresent());
+
+    ProviderResponse response = sampleResponse();
+    Instant finishedInstant = now.plus(Duration.ofSeconds(3));
+    Instant lastObserved = now.plus(Duration.ofSeconds(2));
+    ModelInvocationUpdateOutcome out =
+        transactions.completeSuccess(claimed.get(), response, lastObserved, finishedInstant);
+    assertSame(ModelInvocationUpdateOutcome.APPLIED, out);
+
+    assertEquals(
+        0,
+        targetCount("MODEL_INVOCATION", fx.invocationId),
+        "terminal success must delete the MODEL_INVOCATION target row");
+    assertTrue(
+        targetCount("THREAD", fx.threadId) >= 1,
+        "terminal success must schedule the THREAD target row");
+    Instant threadAvailableAt = targetAvailableAt("THREAD", fx.threadId);
+    assertTrue(
+        !threadAvailableAt.isAfter(finishedInstant),
+        "THREAD target.available_at must be no later than finishedInstant");
+    assertTrue(threadRow(fx.threadId).getRunnable(), "Thread must be marked runnable");
+  }
+
+  /**
+   * 终态在目标行已不存在时：owned target lock 返回 empty → IllegalStateException → 整个事务回滚，invocation 必须仍是
+   * RUNNING、Thread 不可 runnable、THREAD target 也没有被新建。
+   */
+  @Test
+  void completeSuccessRollsBackWhenModelInvocationTargetIsMissing() throws Exception {
+    Fixture fx = newQueued();
+    Instant now = now();
+    Optional<ClaimedModelInvocation> claimed =
+        transactions.claim(
+            fx.invocationId, "tok-roll", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
+    assertTrue(claimed.isPresent());
+    int threadTargetsBefore = targetCount("THREAD", fx.threadId);
+
+    deleteTarget("MODEL_INVOCATION", fx.invocationId);
+
+    IllegalStateException ex =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                transactions.completeSuccess(
+                    claimed.get(), sampleResponse(), now.plusSeconds(1), now.plusSeconds(2)));
+    assertTrue(
+        ex.getMessage() != null && ex.getMessage().contains("missing its watchdog target"),
+        "missing owned target must surface the invariant breach");
+
+    ModelInvocationDO row = rowFor(fx.invocationId);
+    assertEquals("RUNNING", row.getStatus(), "terminal success must be rolled back");
+    assertEquals("tok-roll", row.getWorkerToken(), "worker lease must be restored by rollback");
+    assertFalse(threadRow(fx.threadId).getRunnable(), "Thread must remain non-runnable");
+    assertEquals(
+        threadTargetsBefore,
+        targetCount("THREAD", fx.threadId),
+        "THREAD target must not be created on rollback");
+  }
+
   // ---------- helpers ----------
 
   private Fixture newQueued(Instant createdAt) throws SQLException {
@@ -1081,6 +1385,19 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
           ps.setLong(4, executionEpoch);
           ps.setString(5, REQUEST_CODEC.encode(sampleRequest()));
           ps.setObject(6, createdOffset);
+          ps.executeUpdate();
+        }
+        // Always seed a due MODEL_INVOCATION target so claim/renew/retry/terminal flows exercise
+        // the
+        // single-path target wiring. The fixture's "due" instant mirrors createdAt, which is
+        // already
+        // truncated to millis.
+        try (PreparedStatement ps =
+            conn.prepareStatement(
+                "insert into harness_execution_target (target_kind, target_id, available_at)"
+                    + " values ('MODEL_INVOCATION', ?, ?)")) {
+          ps.setLong(1, invocationId);
+          ps.setObject(2, createdOffset);
           ps.executeUpdate();
         }
         conn.commit();
@@ -1253,6 +1570,66 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     ModelCost cost = ModelCost.calculate(samplePricing(), usage);
     return new ProviderResponse(
         "done", "", List.of(), ProviderStopReason.COMPLETED, usage, cost, "req-1", null, "{}");
+  }
+
+  // ---------- target inspection helpers ----------
+
+  private static int targetCount(String kind, long id) throws SQLException {
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "select count(*) from harness_execution_target"
+                    + " where target_kind = ? and target_id = ?")) {
+      ps.setString(1, kind);
+      ps.setLong(2, id);
+      try (ResultSet rs = ps.executeQuery()) {
+        assertTrue(rs.next());
+        return rs.getInt(1);
+      }
+    }
+  }
+
+  private static Instant targetAvailableAt(String kind, long id) throws SQLException {
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "select available_at from harness_execution_target"
+                    + " where target_kind = ? and target_id = ?")) {
+      ps.setString(1, kind);
+      ps.setLong(2, id);
+      try (ResultSet rs = ps.executeQuery()) {
+        assertTrue(rs.next(), "target row must exist: " + kind + "/" + id);
+        return rs.getTimestamp(1).toInstant();
+      }
+    }
+  }
+
+  private static void deleteTarget(String kind, long id) throws SQLException {
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "delete from harness_execution_target"
+                    + " where target_kind = ? and target_id = ?")) {
+      ps.setString(1, kind);
+      ps.setLong(2, id);
+      ps.executeUpdate();
+    }
+  }
+
+  private static void rescheduleTarget(String kind, long id, Instant availableAt)
+      throws SQLException {
+    OffsetDateTime ts =
+        OffsetDateTime.ofInstant(availableAt.truncatedTo(ChronoUnit.MILLIS), ZoneOffset.UTC);
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "update harness_execution_target set available_at = ?"
+                    + " where target_kind = ? and target_id = ?")) {
+      ps.setObject(1, ts);
+      ps.setString(2, kind);
+      ps.setLong(3, id);
+      ps.executeUpdate();
+    }
   }
 
   private static ModelPricing samplePricing() {

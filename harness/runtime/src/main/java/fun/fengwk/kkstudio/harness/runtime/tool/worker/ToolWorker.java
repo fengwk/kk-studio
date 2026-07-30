@@ -2,10 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
@@ -45,23 +42,23 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
- * Location-agnostic durable Tool worker.
+ * Location-agnostic durable Tool worker driven by the single harness_execution_target queue.
  *
- * <p>Owns claim/lease/heartbeat/timeout/partial/retry/terminal/UNKNOWN/artifact/after-hook/wake
- * semantics for both PLATFORM and ENVIRONMENT. Local tools resolve from {@link ToolRegistry};
- * ENVIRONMENT tools resolve to transport-backed {@link RemoteTool}.
+ * <p>Process-local gate: each in-flight handle is keyed by invocation id and reports active
+ * execution for both PLATFORM and ENVIRONMENT via {@link #hasActiveExecution()} / {@link
+ * #hasActiveExecution(String)}. Durable dispatch is owned by the ExecutionTarget dispatcher; this
+ * worker is invoked when a {@link
+ * fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind#TOOL_INVOCATION} target has
+ * already been locked due by the worker transaction.
  */
 @Slf4j
 public final class ToolWorker {
-  private static final Duration DEFAULT_EXECUTION_TIMEOUT = Duration.ofMinutes(5);
-
   private final ToolInvocationTransactions transactions;
   private final ToolRegistry registry;
   private final RemoteToolTransport remoteTransport;
@@ -69,14 +66,11 @@ public final class ToolWorker {
   private final ArtifactStore artifactStore;
   private final InvocationRetryPolicyResolver retryPolicyResolver;
   private final RealtimeEventSink realtimeEventSink;
-  private final ActivationNotifier activationNotifier;
   private final ToolWorkerConfig config;
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
   private final Supplier<String> workerTokenSupplier;
   private final ConcurrentHashMap<Long, Execution> executions = new ConcurrentHashMap<>();
-  private final ConcurrentHashMap<String, Long> environmentActiveInvocations =
-      new ConcurrentHashMap<>();
 
   public ToolWorker(
       ToolInvocationTransactions transactions,
@@ -86,7 +80,6 @@ public final class ToolWorker {
       ArtifactStore artifactStore,
       InvocationRetryPolicyResolver retryPolicyResolver,
       RealtimeEventSink realtimeEventSink,
-      ActivationNotifier activationNotifier,
       ToolWorkerConfig config,
       Clock clock,
       ScheduledExecutorService scheduler,
@@ -98,46 +91,32 @@ public final class ToolWorker {
     this.artifactStore = Objects.requireNonNull(artifactStore, "artifactStore");
     this.retryPolicyResolver = Objects.requireNonNull(retryPolicyResolver, "retryPolicyResolver");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
-    this.activationNotifier = Objects.requireNonNull(activationNotifier, "activationNotifier");
     this.config = Objects.requireNonNull(config, "config");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.workerTokenSupplier = Objects.requireNonNull(workerTokenSupplier, "workerTokenSupplier");
   }
 
-  /** Processes one signal for a specified durable invocation of any location. */
+  /**
+   * Process a single durable ToolInvocation dispatch. The worker transaction locks and advances the
+   * due TOOL_INVOCATION target before external execution begins.
+   */
   public boolean dispatch(long invocationId) {
     if (invocationId <= 0) {
       throw new IllegalArgumentException("invocationId must be positive");
     }
-    return transactions
-        .findClaimable(invocationId, clock.instant())
-        .map(this::claimAndDispatch)
-        .orElse(false);
-  }
-
-  /**
-   * Claims and dispatches at most one due invocation for the given location/environment.
-   *
-   * <p>ENVIRONMENT requires a non-blank environmentName and enforces one active execution per
-   * environment.
-   */
-  public boolean dispatchNext(ToolExecutionLocation location, String environmentName) {
-    Objects.requireNonNull(location, "location");
-    if (location == ToolExecutionLocation.ENVIRONMENT) {
-      if (environmentName == null || environmentName.isBlank()) {
-        throw new IllegalArgumentException("ENVIRONMENT dispatch requires environmentName");
-      }
-      if (environmentActiveInvocations.containsKey(environmentName)) {
-        return false;
-      }
-    } else if (location == ToolExecutionLocation.PLATFORM && hasActivePlatformExecution()) {
+    String workerToken = nextWorkerToken();
+    Optional<ClaimedToolInvocation> claimed =
+        transactions.claim(invocationId, workerToken, config.leaseDuration(), clock.instant());
+    if (claimed.isEmpty()) {
       return false;
     }
-    return transactions
-        .findNextClaimable(location, environmentName, clock.instant())
-        .map(this::claimAndDispatch)
-        .orElse(false);
+    ClaimedToolInvocation ownership = claimed.orElseThrow();
+    if (!workerToken.equals(ownership.invocation().workerLease().token())) {
+      throw new IllegalStateException("claim returned an unexpected worker token");
+    }
+    dispatchClaimed(ownership);
+    return true;
   }
 
   /** Process-local gate: any in-flight handle. */
@@ -145,8 +124,19 @@ public final class ToolWorker {
     return !executions.isEmpty();
   }
 
+  /**
+   * Process-local gate: an in-flight handle for the given ENVIRONMENT name. PLATFORM handles are
+   * matched by location instead.
+   */
   public boolean hasActiveExecution(String environmentName) {
-    return environmentName != null && environmentActiveInvocations.containsKey(environmentName);
+    if (environmentName == null || environmentName.isBlank()) {
+      return false;
+    }
+    return executions.values().stream()
+        .anyMatch(
+            execution ->
+                execution.binding.location() == ToolExecutionLocation.ENVIRONMENT
+                    && environmentName.equals(execution.binding.environmentName()));
   }
 
   /** Stops process-local handles without changing durable invocation state. */
@@ -154,51 +144,7 @@ public final class ToolWorker {
     executions.values().forEach(Execution::abandon);
   }
 
-  private boolean hasActivePlatformExecution() {
-    return executions.values().stream()
-        .anyMatch(execution -> execution.binding.location() == ToolExecutionLocation.PLATFORM);
-  }
-
-  private boolean claimAndDispatch(ToolInvocation candidate) {
-    boolean environmentSlotHeld = false;
-    if (candidate.location() == ToolExecutionLocation.ENVIRONMENT) {
-      String environmentName = candidate.environmentName();
-      Long existing = environmentActiveInvocations.putIfAbsent(environmentName, candidate.id());
-      if (existing != null) {
-        return false;
-      }
-      environmentSlotHeld = true;
-    }
-    try {
-      String token = nextWorkerToken();
-      Duration executionTimeout =
-          candidate.descriptor().timeout().isZero()
-              ? DEFAULT_EXECUTION_TIMEOUT
-              : candidate.descriptor().timeout();
-      Optional<ClaimedToolInvocation> claimed =
-          transactions.claim(
-              candidate.id(), token, executionTimeout, config.leaseDuration(), clock.instant());
-      if (claimed.isEmpty()) {
-        return false;
-      }
-      ClaimedToolInvocation ownership = claimed.orElseThrow();
-      if (!ownership.invocation().workerLease().token().equals(token)) {
-        throw new IllegalStateException("claim returned an unexpected worker token");
-      }
-      dispatchClaimed(ownership, candidate.status());
-      return true;
-    } finally {
-      // Exceptional paths that never registered an Execution must release the environment slot.
-      if (environmentSlotHeld
-          && !executions.containsKey(candidate.id())
-          && Objects.equals(
-              environmentActiveInvocations.get(candidate.environmentName()), candidate.id())) {
-        clearEnvironmentSlot(candidate);
-      }
-    }
-  }
-
-  private void dispatchClaimed(ClaimedToolInvocation claimed, InvocationStatus previousStatus) {
+  private void dispatchClaimed(ClaimedToolInvocation claimed) {
     ToolInvocation invocation = claimed.invocation();
     if (claimed.recoveredLease()) {
       abandonStaleLocalExecution(invocation.id());
@@ -206,33 +152,28 @@ public final class ToolWorker {
           claimed,
           new ToolInvocationError(
               "LEASE_EXPIRED", "Tool ownership was lost; execution result is unknown."));
-      clearEnvironmentSlot(invocation);
       return;
     }
     if (!clock.instant().isBefore(invocation.deadlineAt())) {
       fail(claimed, "Tool execution deadline exceeded.");
-      clearEnvironmentSlot(invocation);
       return;
     }
     ToolBinding binding = bindingFor(invocation);
     ResolvedTool resolved = resolveTool(binding, invocation);
     if (resolved.failureMessage() != null) {
       fail(claimed, resolved.failureMessage());
-      clearEnvironmentSlot(invocation);
       return;
     }
     Tool tool = resolved.tool();
     ToolCall call =
         new ToolCall(invocation.toolCallId(), invocation.toolName(), invocation.argumentsJson());
-    Execution execution = new Execution(claimed, binding, call, previousStatus);
+    Execution execution = new Execution(claimed, binding, call);
     Execution previous = executions.putIfAbsent(invocation.id(), execution);
     if (previous != null) {
       // A process-local handle already exists for this invocation id (typically a stale handle
-      // after
-      // lease loss / double dispatch). Abandon and fence the stale handle so late callbacks cannot
-      // mutate durable state. Converge the newly claimed ownership to UNKNOWN without re-executing.
-      // abandonStaleLocal clears the environment slot only for this invocation id; a different
-      // surviving execution id keeps its own slot.
+      // after lease loss / double dispatch). Abandon and fence the stale handle so late callbacks
+      // cannot mutate durable state. Converge the newly claimed ownership to UNKNOWN without
+      // re-executing.
       previous.abandonStaleLocal();
       completeUnknown(
           claimed,
@@ -256,9 +197,8 @@ public final class ToolWorker {
     } catch (RemoteToolUnavailableException unavailable) {
       execution.markTerminalLocal();
       try {
-        releaseUnstarted(claimed, previousStatus, clock.instant());
+        releaseUnstarted(claimed, clock.instant());
       } finally {
-        clearEnvironmentSlot(invocation);
         executions.remove(invocation.id(), execution);
         execution.cancelSchedulersOnly();
       }
@@ -274,7 +214,6 @@ public final class ToolWorker {
                     uncertain, "Remote tool send outcome is uncertain; result is unknown.")),
             claimed.invocation().lastActivityAt());
       } finally {
-        clearEnvironmentSlot(invocation);
         executions.remove(invocation.id(), execution);
         execution.cancelSchedulersOnly();
       }
@@ -284,7 +223,8 @@ public final class ToolWorker {
       } finally {
         // error() stops and clears on success; if it aborted early, still free the slot.
         if (!executions.containsKey(invocation.id())) {
-          clearEnvironmentSlot(invocation);
+          executions.remove(invocation.id(), execution);
+          execution.cancelSchedulersOnly();
         }
       }
     }
@@ -349,11 +289,7 @@ public final class ToolWorker {
               failureMessage(error, "Tool result persistence failed.")),
           lastObservedActivityAt);
     }
-    if (outcome != ToolInvocationUpdateOutcome.APPLIED) {
-      return false;
-    }
-    notifyThread(claimed);
-    return true;
+    return outcome == ToolInvocationUpdateOutcome.APPLIED;
   }
 
   private ToolResult prepareTerminalResult(
@@ -384,22 +320,14 @@ public final class ToolWorker {
   private boolean completeFailure(
       ClaimedToolInvocation claimed, ToolInvocationError error, Instant lastObservedActivityAt) {
     Instant now = clock.instant();
-    if (transactions.completeFailure(claimed, error, lastObservedActivityAt, now)
-        != ToolInvocationUpdateOutcome.APPLIED) {
-      return false;
-    }
-    notifyThread(claimed);
-    return true;
+    return transactions.completeFailure(claimed, error, lastObservedActivityAt, now)
+        == ToolInvocationUpdateOutcome.APPLIED;
   }
 
   private boolean completeCancelled(ClaimedToolInvocation claimed, Instant lastObservedActivityAt) {
     Instant now = clock.instant();
-    if (transactions.completeCancelled(claimed, lastObservedActivityAt, now)
-        != ToolInvocationUpdateOutcome.APPLIED) {
-      return false;
-    }
-    notifyThread(claimed);
-    return true;
+    return transactions.completeCancelled(claimed, lastObservedActivityAt, now)
+        == ToolInvocationUpdateOutcome.APPLIED;
   }
 
   private boolean completeUnknown(ClaimedToolInvocation claimed, ToolInvocationError error) {
@@ -409,22 +337,14 @@ public final class ToolWorker {
   private boolean completeUnknown(
       ClaimedToolInvocation claimed, ToolInvocationError error, Instant lastObservedActivityAt) {
     Instant now = clock.instant();
-    if (transactions.completeUnknown(claimed, error, lastObservedActivityAt, now)
-        != ToolInvocationUpdateOutcome.APPLIED) {
-      return false;
-    }
-    notifyThread(claimed);
-    return true;
+    return transactions.completeUnknown(claimed, error, lastObservedActivityAt, now)
+        == ToolInvocationUpdateOutcome.APPLIED;
   }
 
-  private void releaseUnstarted(
-      ClaimedToolInvocation claimed, InvocationStatus previousStatus, Instant now) {
+  private void releaseUnstarted(ClaimedToolInvocation claimed, Instant now) {
+    InvocationStatus previousStatus = claimed.previousStatus();
     Instant nextAttemptAt = null;
-    InvocationStatus releaseTo =
-        previousStatus == InvocationStatus.RETRY_WAIT
-            ? InvocationStatus.RETRY_WAIT
-            : InvocationStatus.QUEUED;
-    if (releaseTo == InvocationStatus.RETRY_WAIT) {
+    if (previousStatus == InvocationStatus.RETRY_WAIT) {
       nextAttemptAt = now.plus(config.unavailableRetryDelay());
       if (!nextAttemptAt.isBefore(claimed.invocation().deadlineAt())) {
         completeFailure(
@@ -433,46 +353,11 @@ public final class ToolWorker {
                 "EXECUTION_FAILED", "Environment was unavailable before the Tool deadline."));
         return;
       }
+    } else if (previousStatus != InvocationStatus.QUEUED) {
+      throw new IllegalStateException(
+          "unstarted release requires a QUEUED or RETRY_WAIT claim, but was " + previousStatus);
     }
-    if (transactions.releaseUnstarted(claimed, releaseTo, nextAttemptAt, now)
-        == ToolInvocationUpdateOutcome.APPLIED) {
-      if (releaseTo == InvocationStatus.RETRY_WAIT) {
-        scheduleRetrySignal(
-            claimed.invocation().id(), Objects.requireNonNull(nextAttemptAt, "nextAttemptAt"));
-      }
-    }
-  }
-
-  private void notifyThread(ClaimedToolInvocation claimed) {
-    notifyTarget(new ExecutionTarget(ExecutionTargetKind.THREAD, claimed.invocation().threadId()));
-  }
-
-  private void notifyTarget(ExecutionTarget target) {
-    try {
-      activationNotifier.notifyAfterCommit(target);
-    } catch (RuntimeException error) {
-      log.warn("Tool activation notification failed", error);
-    }
-  }
-
-  private void scheduleRetrySignal(long invocationId, Instant retryAt) {
-    long delayMillis = Math.max(1L, Duration.between(clock.instant(), retryAt).toMillis() + 1L);
-    try {
-      scheduler.schedule(
-          () ->
-              notifyTarget(new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, invocationId)),
-          delayMillis,
-          TimeUnit.MILLISECONDS);
-    } catch (RejectedExecutionException error) {
-      log.warn("cannot schedule tool retry signal for {}", invocationId, error);
-    }
-  }
-
-  private void clearEnvironmentSlot(ToolInvocation invocation) {
-    if (invocation.location() == ToolExecutionLocation.ENVIRONMENT
-        && invocation.environmentName() != null) {
-      environmentActiveInvocations.remove(invocation.environmentName(), invocation.id());
-    }
+    transactions.releaseUnstarted(claimed, nextAttemptAt, now);
   }
 
   private void abandonStaleLocalExecution(long invocationId) {
@@ -556,7 +441,6 @@ public final class ToolWorker {
     private final ClaimedToolInvocation claimed;
     private final ToolBinding binding;
     private final ToolCall call;
-    private final InvocationStatus previousStatus;
     private final List<ToolResult> pending = new ArrayList<>();
     private ToolExecutionHandle handle;
     private boolean terminal;
@@ -567,15 +451,10 @@ public final class ToolWorker {
     private ScheduledFuture<?> timeout;
     private ScheduledFuture<?> partialFlush;
 
-    private Execution(
-        ClaimedToolInvocation claimed,
-        ToolBinding binding,
-        ToolCall call,
-        InvocationStatus previousStatus) {
+    private Execution(ClaimedToolInvocation claimed, ToolBinding binding, ToolCall call) {
       this.claimed = claimed;
       this.binding = binding;
       this.call = call;
-      this.previousStatus = previousStatus;
       this.lastObservedActivityAt = claimed.invocation().lastActivityAt();
     }
 
@@ -784,7 +663,6 @@ public final class ToolWorker {
         if (retryable
             && transactions.scheduleRetry(claimed, nextAttemptAt, lastObservedActivityAt, now)
                 == ToolInvocationUpdateOutcome.APPLIED) {
-          scheduleRetrySignal(claimed.invocation().id(), nextAttemptAt);
           return;
         }
         completeFailure(claimed, new ToolInvocationError(kind, message), lastObservedActivityAt);
@@ -820,7 +698,6 @@ public final class ToolWorker {
       cancelHandle();
       cancelSchedulersOnly();
       executions.remove(claimed.invocation().id(), this);
-      clearEnvironmentSlot(claimed.invocation());
     }
 
     private synchronized void cancelHandle() {
@@ -845,7 +722,6 @@ public final class ToolWorker {
     private synchronized void stop() {
       cancelSchedulersOnly();
       executions.remove(claimed.invocation().id(), this);
-      clearEnvironmentSlot(claimed.invocation());
     }
   }
 
