@@ -1,4 +1,4 @@
-import type { AgentResourceId } from '@/shared/api/contracts'
+import type { AgentResourceId, CatalogVersion } from '@/shared/api/contracts'
 import type { AgentModelInputModality } from '@/shared/api/contracts'
 
 export interface ComfyuiWorkflowDraft {
@@ -103,8 +103,11 @@ export interface ConfirmModalState {
 }
 
 export type ResourceModal =
-  | { kind: 'provider'; mode: 'create' | 'edit'; id?: AgentResourceId }
-  | { kind: 'model'; mode: 'create' | 'edit'; id?: AgentResourceId }
-  | { kind: 'agent'; mode: 'create' | 'edit'; id?: AgentResourceId }
+  | { kind: 'provider'; mode: 'create' }
+  | { kind: 'provider'; mode: 'edit'; id: AgentResourceId; expectedVersion: CatalogVersion }
+  | { kind: 'model'; mode: 'create' }
+  | { kind: 'model'; mode: 'edit'; id: AgentResourceId; expectedVersion: CatalogVersion }
+  | { kind: 'agent'; mode: 'create' }
+  | { kind: 'agent'; mode: 'edit'; id: AgentResourceId; expectedVersion: CatalogVersion }
 
 export const providerTypes = ['openai', 'openai_response', 'anthropic', 'google']

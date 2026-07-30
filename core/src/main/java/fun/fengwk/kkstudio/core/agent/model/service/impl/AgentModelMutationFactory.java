@@ -4,6 +4,7 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
+import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.model.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelEditablePropertiesDTO;
@@ -11,6 +12,8 @@ import fun.fengwk.kkstudio.share.model.AgentModelEditablePropertiesDTO;
 /** Normalizes mutable model configuration through the shared typed config codec. */
 @Component
 final class AgentModelMutationFactory {
+
+  private static final String RESOURCE = "agent_model";
 
   private final AgentModelRuntimeConfigParser runtimeConfigParser;
   private final PostgresqlSequenceIdGenerator idGenerator;
@@ -24,7 +27,7 @@ final class AgentModelMutationFactory {
 
   AgentModel newModel(long providerId, AgentModelEditablePropertiesDTO properties) {
     if (providerId <= 0) {
-      throw new IllegalArgumentException("providerId must be positive");
+      throw new AiValidationException(RESOURCE, "providerId must be positive");
     }
     Mutation mutation = newMutation(properties);
     AgentModel model = new AgentModel();
@@ -46,17 +49,22 @@ final class AgentModelMutationFactory {
 
   private Mutation newMutation(AgentModelEditablePropertiesDTO properties) {
     if (properties == null) {
-      throw new IllegalArgumentException("agent model body must not be null");
+      throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
     }
     String name = trimToNull(properties.getName());
     if (name == null) {
-      throw new IllegalArgumentException("agent model name must not be blank");
+      throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
     }
     AgentModelConfigDTO config = properties.getConfig();
     if (config == null) {
-      throw new IllegalArgumentException("agent model config must not be null");
+      throw new AiValidationException(RESOURCE, RESOURCE + " config must not be null");
     }
-    String configJson = runtimeConfigParser.encode(config);
+    String configJson;
+    try {
+      configJson = runtimeConfigParser.encode(config);
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException(RESOURCE, error.getMessage(), error);
+    }
     return new Mutation(name, trimToNull(properties.getDescription()), configJson);
   }
 

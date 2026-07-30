@@ -11,9 +11,6 @@ import fun.fengwk.kkstudio.core.agent.definition.repo.impl.mapper.AgentDefinitio
 import fun.fengwk.kkstudio.core.agent.definition.repo.impl.model.AgentDefinitionDO;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 
-import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 
 /** PostgreSQL-backed global Agent definition repository. */
@@ -47,13 +44,13 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
   }
 
   @Override
-  public boolean updateById(AgentDefinition agentDefinition) {
-    return agentDefinitionMapper.updateById(convert(agentDefinition)) == 1;
+  public boolean updateById(AgentDefinition agentDefinition, long expectedVersion) {
+    return agentDefinitionMapper.updateById(convert(agentDefinition), expectedVersion) == 1;
   }
 
   @Override
-  public boolean deleteById(long id) {
-    return agentDefinitionMapper.deleteById(id) == 1;
+  public boolean deleteById(long id, long expectedVersion) {
+    return agentDefinitionMapper.deleteById(id, expectedVersion) == 1;
   }
 
   private AgentDefinitionDO convert(AgentDefinition definition) {
@@ -84,12 +81,8 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
     result.setVariant(definition.getVariant());
     result.setConfigJson(definition.getConfigJson());
     result.setVersion(definition.getVersion());
-    result.setCreateTime(toLocalDateTime(definition.getCreateTime()));
-    result.setUpdateTime(toLocalDateTime(definition.getUpdateTime()));
+    result.setCreateTime(definition.getCreateTime());
+    result.setUpdateTime(definition.getUpdateTime());
     return result;
-  }
-
-  private static LocalDateTime toLocalDateTime(OffsetDateTime value) {
-    return value == null ? null : value.withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime();
   }
 }

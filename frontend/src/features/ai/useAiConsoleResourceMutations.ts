@@ -29,7 +29,8 @@ export function useAiConsoleResourceMutations({
     onSuccess: onResourceSaved,
   })
   const deleteProviderMutation = useInvalidateMutation({
-    mutationFn: (id: AgentResourceId) => agentService.deleteProvider(id),
+    mutationFn: ({ id, expectedVersion }: { id: AgentResourceId; expectedVersion: string }) =>
+      agentService.deleteProvider(id, expectedVersion),
     invalidateQueryKeys: [queryKeys.providers.list, queryKeys.models.list, queryKeys.agents.list],
     onSuccess: onDeleteCompleted,
   })
@@ -44,7 +45,8 @@ export function useAiConsoleResourceMutations({
     onSuccess: onResourceSaved,
   })
   const deleteModelMutation = useInvalidateMutation({
-    mutationFn: (id: AgentResourceId) => agentService.deleteModel(id),
+    mutationFn: ({ id, expectedVersion }: { id: AgentResourceId; expectedVersion: string }) =>
+      agentService.deleteModel(id, expectedVersion),
     invalidateQueryKeys: [queryKeys.models.list, queryKeys.agents.list],
     onSuccess: onDeleteCompleted,
   })
@@ -59,7 +61,8 @@ export function useAiConsoleResourceMutations({
     onSuccess: onResourceSaved,
   })
   const deleteAgentMutation = useInvalidateMutation({
-    mutationFn: (id: AgentResourceId) => agentService.deleteAgent(id),
+    mutationFn: ({ id, expectedVersion }: { id: AgentResourceId; expectedVersion: string }) =>
+      agentService.deleteAgent(id, expectedVersion),
     invalidateQueryKeys: [queryKeys.agents.list, queryKeys.sessions.all],
     onSuccess: onDeleteCompleted,
   })
@@ -79,12 +82,15 @@ export function useAiConsoleResourceMutations({
     deleteConfirmPending: deleteProviderMutation.isPending || deleteModelMutation.isPending || deleteAgentMutation.isPending,
     createProvider: (data: AgentProviderCreateDTO) => createProviderMutation.mutate(data),
     updateProvider: (id: AgentResourceId, data: AgentProviderUpdateDTO) => updateProviderMutation.mutate({ id, data }),
-    deleteProvider: (id: AgentResourceId) => deleteProviderMutation.mutate(id),
+    deleteProvider: (id: AgentResourceId, expectedVersion: string) =>
+      deleteProviderMutation.mutate({ id, expectedVersion }),
     createModel: (data: AgentModelCreateDTO) => createModelMutation.mutate(data),
     updateModel: (id: AgentResourceId, data: AgentModelUpdateDTO) => updateModelMutation.mutate({ id, data }),
-    deleteModel: (id: AgentResourceId) => deleteModelMutation.mutate(id),
+    deleteModel: (id: AgentResourceId, expectedVersion: string) =>
+      deleteModelMutation.mutate({ id, expectedVersion }),
     createAgent: (data: AgentDefinitionCreateDTO) => createAgentMutation.mutate(data),
     updateAgent: (id: AgentResourceId, data: AgentDefinitionUpdateDTO) => updateAgentMutation.mutate({ id, data }),
-    deleteAgent: (id: AgentResourceId) => deleteAgentMutation.mutate(id),
+    deleteAgent: (id: AgentResourceId, expectedVersion: string) =>
+      deleteAgentMutation.mutate({ id, expectedVersion }),
   }
 }

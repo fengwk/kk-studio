@@ -115,8 +115,8 @@ class DatabaseModelExecutionResolverTest {
       // Other AgentProviderRepository methods must never be called from this slice.
       verify(fixture.providers, never()).page(any());
       verify(fixture.providers, never()).create(any());
-      verify(fixture.providers, never()).updateById(any());
-      verify(fixture.providers, never()).deleteById(anyLong());
+      verify(fixture.providers, never()).updateById(any(), anyLong());
+      verify(fixture.providers, never()).deleteById(anyLong(), anyLong());
       verify(fixture.providers, never()).hasModels(anyLong());
     }
   }

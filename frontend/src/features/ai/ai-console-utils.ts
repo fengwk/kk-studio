@@ -4,6 +4,7 @@ import type {
   AgentProviderDTO,
   BackendDateTime,
   ChatDTO,
+  InstantTimestamp,
   LiveEnvironmentDTO,
 } from '@/shared/api/contracts'
 import type { ResourceModal } from '@/features/ai/ai-console-types'
@@ -86,7 +87,7 @@ export function includesSearch(value: string, search: string): boolean {
   return !needle || value.toLowerCase().includes(needle)
 }
 
-export function formatBackendDate(value: BackendDateTime): string {
+export function formatBackendDate(value: BackendDateTime | InstantTimestamp): string {
   if (!value) {
     return '-'
   }
@@ -96,6 +97,10 @@ export function formatBackendDate(value: BackendDateTime): string {
       return '-'
     }
     return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+  }
+  if (typeof value === 'number') {
+    const milliseconds = Math.abs(value) < 100_000_000_000 ? value * 1000 : value
+    return new Date(milliseconds).toISOString().replace('T', ' ').slice(0, 16)
   }
   return value.replace('T', ' ').slice(0, 16)
 }

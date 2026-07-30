@@ -33,7 +33,7 @@ export function editProviderEditorPlan(
   }
   return {
     kind: 'provider',
-    modal: { kind: 'provider', mode: 'edit', id: provider.id },
+    modal: { kind: 'provider', mode: 'edit', id: provider.id, expectedVersion: provider.version },
     providerDraft: toProviderDraft(provider),
   }
 }
@@ -58,7 +58,7 @@ export function editModelEditorPlan(
   }
   return {
     kind: 'model',
-    modal: { kind: 'model', mode: 'edit', id: model.id },
+    modal: { kind: 'model', mode: 'edit', id: model.id, expectedVersion: model.version },
     modelDraft: normalizeModelDraftDefaultVariant(toModelDraft(model)),
   }
 }
@@ -84,7 +84,7 @@ export function editAgentEditorPlan(
   }
   return {
     kind: 'agent',
-    modal: { kind: 'agent', mode: 'edit', id: agent.id },
+    modal: { kind: 'agent', mode: 'edit', id: agent.id, expectedVersion: agent.version },
     agentDraft: normalizeAgentDraftDefaultVariant(toAgentDraft(agent), models),
   }
 }

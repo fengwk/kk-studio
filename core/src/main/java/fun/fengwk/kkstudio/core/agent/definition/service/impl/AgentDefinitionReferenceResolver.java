@@ -7,11 +7,16 @@ import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
+import fun.fengwk.kkstudio.core.ai.error.AiDuplicateException;
+import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 
 /** Resolves global Agent definition and model references. */
 @AllArgsConstructor
 @Component
 final class AgentDefinitionReferenceResolver {
+
+  private static final String DEFINITION_RESOURCE = "agent_definition";
+  private static final String MODEL_RESOURCE = "agent_model";
 
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentModelRepository agentModelRepository;
@@ -19,7 +24,8 @@ final class AgentDefinitionReferenceResolver {
   AgentDefinition requireAgent(long id) {
     AgentDefinition definition = agentDefinitionRepository.getById(id);
     if (definition == null) {
-      throw new IllegalArgumentException("agent definition not found: " + id);
+      throw new AiResourceNotFoundException(
+          DEFINITION_RESOURCE, DEFINITION_RESOURCE + " not found: " + id);
     }
     return definition;
   }
@@ -27,14 +33,15 @@ final class AgentDefinitionReferenceResolver {
   AgentModel requireModel(long id) {
     AgentModel model = agentModelRepository.getById(id);
     if (model == null) {
-      throw new IllegalArgumentException("agent model not found: " + id);
+      throw new AiResourceNotFoundException(MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + id);
     }
     return model;
   }
 
   void ensureNameAvailable(String name) {
     if (agentDefinitionRepository.getByName(name) != null) {
-      throw new IllegalArgumentException("agent definition name already exists: " + name);
+      throw new AiDuplicateException(
+          DEFINITION_RESOURCE, DEFINITION_RESOURCE + " name already exists: " + name);
     }
   }
 

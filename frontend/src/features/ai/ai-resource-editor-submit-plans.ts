@@ -18,12 +18,12 @@ export function buildResourceSubmitPlan(
   },
 ): ResourceSubmitPlan {
   if (modal.kind === 'provider') {
-    if (modal.mode === 'edit' && modal.id !== undefined) {
+    if (modal.mode === 'edit') {
       return {
         kind: 'provider',
         mode: 'edit',
         id: modal.id,
-        data: toEditableProviderUpdate(drafts.providerDraft),
+        data: { ...toEditableProviderUpdate(drafts.providerDraft), expectedVersion: modal.expectedVersion },
       }
     }
     return {
@@ -34,12 +34,12 @@ export function buildResourceSubmitPlan(
   }
 
   if (modal.kind === 'model') {
-    if (modal.mode === 'edit' && modal.id !== undefined) {
+    if (modal.mode === 'edit') {
       return {
         kind: 'model',
         mode: 'edit',
         id: modal.id,
-        data: toEditableModelUpdate(drafts.modelDraft),
+        data: { ...toEditableModelUpdate(drafts.modelDraft), expectedVersion: modal.expectedVersion },
       }
     }
     return {
@@ -49,12 +49,12 @@ export function buildResourceSubmitPlan(
     }
   }
 
-  if (modal.mode === 'edit' && modal.id !== undefined) {
+  if (modal.mode === 'edit') {
     return {
       kind: 'agent',
       mode: 'edit',
       id: modal.id,
-      data: toEditableAgentUpdate(drafts.agentDraft),
+      data: { ...toEditableAgentUpdate(drafts.agentDraft), expectedVersion: modal.expectedVersion },
     }
   }
   return {

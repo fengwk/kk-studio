@@ -4,6 +4,8 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
+import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
+import fun.fengwk.kkstudio.core.ai.error.CatalogVersions;
 import fun.fengwk.kkstudio.share.model.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelDTO;
 
@@ -31,7 +33,7 @@ public class AgentModelConverter {
     dto.setName(model.getName());
     dto.setDescription(model.getDescription());
     dto.setConfig(decodeConfig(model));
-    dto.setVersion(model.getVersion());
+    dto.setVersion(CatalogVersions.format(model.getVersion()));
     dto.setCreateTime(model.getCreateTime());
     dto.setUpdateTime(model.getUpdateTime());
     return dto;
@@ -40,7 +42,8 @@ public class AgentModelConverter {
   private AgentModelConfigDTO decodeConfig(AgentModel model) {
     String configJson = model.getConfigJson();
     if (configJson == null || configJson.isBlank()) {
-      throw new IllegalStateException("agent model config is required: " + model.getId());
+      throw new AiValidationException(
+          "agent_model", "agent model config is required: " + model.getId());
     }
     return runtimeConfigParser.decode(configJson);
   }

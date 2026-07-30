@@ -5,25 +5,30 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.core.ai.error.AiDuplicateException;
+import fun.fengwk.kkstudio.core.ai.error.AiInUseException;
+import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 
 /** Provider lookup, global uniqueness and deletion checks. */
 @AllArgsConstructor
 @Component
 final class AgentProviderGuard {
 
+  private static final String RESOURCE = "agent_provider";
+
   private final AgentProviderRepository agentProviderRepository;
 
   AgentProvider requireProvider(long id) {
     AgentProvider provider = agentProviderRepository.getById(id);
     if (provider == null) {
-      throw new IllegalArgumentException("agent provider not found: " + id);
+      throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
     }
     return provider;
   }
 
   void ensureNameAvailable(String name) {
     if (agentProviderRepository.getByName(name) != null) {
-      throw new IllegalArgumentException("agent provider name already exists: " + name);
+      throw new AiDuplicateException(RESOURCE, RESOURCE + " name already exists: " + name);
     }
   }
 
@@ -35,7 +40,7 @@ final class AgentProviderGuard {
 
   void ensureDeletable(long id) {
     if (agentProviderRepository.hasModels(id)) {
-      throw new IllegalStateException("agent provider in use by models: " + id);
+      throw new AiInUseException(RESOURCE, RESOURCE + " in use by models: " + id);
     }
   }
 }

@@ -8,7 +8,8 @@ export function createChatService(client: HttpClient = apiClient) {
     getChat: (chatId: string): Promise<ChatDTO> => client.get(`/chats/${encodeURIComponent(chatId)}`),
     updateChat: (chatId: string, data: ChatUpdateDTO): Promise<ChatDTO> =>
       client.put(`/chats/${encodeURIComponent(chatId)}`, data),
-    deleteChat: (chatId: string): Promise<void> => client.delete(`/chats/${encodeURIComponent(chatId)}`),
+    deleteChat: (chatId: string, expectedVersion: string): Promise<void> =>
+      client.delete(`/chats/${encodeURIComponent(chatId)}`, { params: { expectedVersion } }),
   }
 }
 

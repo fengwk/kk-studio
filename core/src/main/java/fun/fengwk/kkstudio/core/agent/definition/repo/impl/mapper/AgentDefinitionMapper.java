@@ -72,10 +72,11 @@ public interface AgentDefinitionMapper extends BaseMapper {
           system_prompt = #{agent.systemPrompt}, model_id = #{agent.modelId},
           variant = #{agent.variant}, config = cast(#{agent.configJson} as jsonb),
           updated_at = current_timestamp, version = version + 1
-      where id = #{agent.id}
+      where id = #{agent.id} and version = #{expectedVersion}
       """)
-  int updateById(@Param("agent") AgentDefinitionDO agent);
+  int updateById(
+      @Param("agent") AgentDefinitionDO agent, @Param("expectedVersion") long expectedVersion);
 
-  @Delete("delete from agent_definition where id = #{id}")
-  int deleteById(@Param("id") long id);
+  @Delete("delete from agent_definition where id = #{id} and version = #{expectedVersion}")
+  int deleteById(@Param("id") long id, @Param("expectedVersion") long expectedVersion);
 }

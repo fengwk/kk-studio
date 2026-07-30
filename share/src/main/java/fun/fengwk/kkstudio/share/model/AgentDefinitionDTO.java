@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.share.model;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 /** Public global Agent definition representation. */
 @Data
@@ -15,7 +15,10 @@ public class AgentDefinitionDTO {
   private String modelId;
   private String variant;
   private AgentDefinitionConfigDTO config;
-  private Long version;
-  private LocalDateTime createTime;
-  private LocalDateTime updateTime;
+
+  /** Non-negative decimal string version; clients must echo on every update. */
+  private String version;
+
+  private Instant createTime;
+  private Instant updateTime;
 }

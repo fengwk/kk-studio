@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.web.controller;
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
 import lombok.AllArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -11,8 +10,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.core.chat.service.ChatService;
 import fun.fengwk.kkstudio.share.model.ChatCreateDTO;
@@ -20,15 +19,12 @@ import fun.fengwk.kkstudio.share.model.ChatDTO;
 import fun.fengwk.kkstudio.share.model.ChatUpdateDTO;
 
 import java.util.List;
-import java.util.NoSuchElementException;
 
 /**
  * Chat collection CRUD API.
  *
- * <p>所有路径 / DTO 边界上的 id 都是正的十进制字符串（PostgreSQL sequence）。错误映射：malformed / non-positive id 与非法
- * defaultAgentId → 400；找不到 Chat → 404；其它状态冲突 → 409。
- *
- * <p>Agent 删除后 Chat 可保留陈旧 defaultAgentId，不建立外键。
+ * <p>所有路径 / DTO 边界上的 id 都是正的十进制字符串（PostgreSQL sequence）。PUT 请求体与 DELETE 查询参数都要求必填的非负十进制字符串 {@code
+ * expectedVersion}；stale 版本由中央 {@code RestControllerAdvice} 翻译为 HTTP 409，缺失资源为 404，其它失败为 400。
  */
 @AllArgsConstructor
 @RequestMapping("/api/chats")
@@ -50,32 +46,19 @@ public class StudioChatController {
 
   @GetMapping("/{id}")
   public Result<ChatDTO> getChat(@PathVariable("id") String id) {
-    try {
-      return Results.ok(chatService.getChat(id));
-    } catch (NoSuchElementException error) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
-    }
+    return Results.ok(chatService.getChat(id));
   }
 
   @PutMapping("/{id}")
   public Result<ChatDTO> updateChat(
       @PathVariable("id") String id, @RequestBody ChatUpdateDTO updateDTO) {
-    try {
-      return Results.ok(chatService.updateChat(id, updateDTO));
-    } catch (NoSuchElementException error) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
-    }
+    return Results.ok(chatService.updateChat(id, updateDTO));
   }
 
   @DeleteMapping("/{id}")
-  public Result<Void> deleteChat(@PathVariable("id") String id) {
-    try {
-      chatService.deleteChat(id);
-      return Results.noContent();
-    } catch (NoSuchElementException error) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
-    } catch (IllegalStateException error) {
-      throw new ResponseStatusException(HttpStatus.CONFLICT, error.getMessage(), error);
-    }
+  public Result<Void> deleteChat(
+      @PathVariable("id") String id, @RequestParam("expectedVersion") String expectedVersion) {
+    chatService.deleteChat(id, expectedVersion);
+    return Results.noContent();
   }
 }

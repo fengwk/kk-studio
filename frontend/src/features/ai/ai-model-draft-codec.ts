@@ -9,9 +9,9 @@ import type {
   AgentModelConfigDTO,
   AgentModelCreateDTO,
   AgentModelDTO,
+  AgentModelEditablePropertiesDTO,
   AgentModelInputModality,
   AgentModelPricingDTO,
-  AgentModelUpdateDTO,
   AgentModelVariantDTO,
   AgentResourceId,
 } from '@/shared/api/contracts'
@@ -360,7 +360,7 @@ export function toEditableModel(draft: ModelDraft): AgentModelCreateDTO {
   }
 }
 
-export function toEditableModelUpdate(draft: ModelDraft): AgentModelUpdateDTO {
+export function toEditableModelUpdate(draft: ModelDraft): AgentModelEditablePropertiesDTO {
   const name = draft.name.trim()
   if (!name) {
     throw new Error('name must not be blank')

@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.share.model;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 /** Public provider representation without credentials. */
 @Data
@@ -16,7 +16,10 @@ public class AgentProviderDTO {
   private boolean configured;
   private Long modelCallTimeoutMillis;
   private Long modelCallIdleTimeoutMillis;
-  private Long version;
-  private LocalDateTime createTime;
-  private LocalDateTime updateTime;
+
+  /** Non-negative decimal string version; clients must echo on every update. */
+  private String version;
+
+  private Instant createTime;
+  private Instant updateTime;
 }

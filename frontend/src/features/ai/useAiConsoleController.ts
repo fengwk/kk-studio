@@ -74,7 +74,8 @@ export function useAiConsoleController() {
       deletePending: resourceController.agentDeletePending,
       onCreate: resourceController.openCreateAgent,
       onEdit: (agent: AgentDefinitionDTO) => resourceController.openEditAgent(agent.id),
-      onDelete: (agent: AgentDefinitionDTO) => resourceController.deleteAgent(agent.name, agent.id),
+      onDelete: (agent: AgentDefinitionDTO) =>
+        resourceController.deleteAgent(agent.name, agent.id, agent.version),
     },
     modelPanelProps: {
       models: filteredModels,
@@ -86,6 +87,7 @@ export function useAiConsoleController() {
           model.providerName || String(model.providerId),
           modelRef(model),
           model.id,
+          model.version,
         ),
     },
     providerPanelProps: {
@@ -93,7 +95,8 @@ export function useAiConsoleController() {
       deletePending: resourceController.providerDeletePending,
       onCreate: resourceController.openCreateProvider,
       onEdit: (provider: AgentProviderDTO) => resourceController.openEditProvider(provider.id),
-      onDelete: (provider: AgentProviderDTO) => resourceController.deleteProvider(provider.name, provider.id),
+      onDelete: (provider: AgentProviderDTO) =>
+        resourceController.deleteProvider(provider.name, provider.id, provider.version),
     },
     createChatModal: chatController.createChatModal,
     resourceEditorModal: resourceController.resourceEditorModal,

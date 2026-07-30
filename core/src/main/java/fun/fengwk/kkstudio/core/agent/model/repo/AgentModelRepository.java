@@ -17,9 +17,11 @@ public interface AgentModelRepository {
 
   boolean create(AgentModel model);
 
-  boolean updateById(AgentModel model);
+  /** Atomic CAS update on (id, expectedVersion). */
+  boolean updateById(AgentModel model, long expectedVersion);
 
-  boolean deleteById(long id);
+  /** Atomic CAS delete on (id, expectedVersion). */
+  boolean deleteById(long id, long expectedVersion);
 
   boolean hasAgents(long modelId);
 }

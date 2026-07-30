@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.chat.service.impl;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
+import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.chat.service.ChatIds;
 import fun.fengwk.kkstudio.core.chat.service.model.Chat;
 import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
@@ -20,6 +21,8 @@ import fun.fengwk.kkstudio.share.model.ChatUpdateDTO;
 @Component
 public class ChatMutationFactory {
 
+  private static final String RESOURCE = "chat";
+
   private final AgentEditableSupport editableSupport;
   private final PostgresqlSequenceIdGenerator idGenerator;
 
@@ -31,13 +34,13 @@ public class ChatMutationFactory {
 
   public Chat newChat(ChatCreateDTO createDTO) {
     if (createDTO == null) {
-      throw new IllegalArgumentException("chat body must not be null");
+      throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
     }
     Chat chat = new Chat();
     chat.setId(idGenerator.next());
     String title = editableSupport.trimToNull(createDTO.getTitle());
     if (title == null) {
-      throw new IllegalArgumentException("chat title must not be blank");
+      throw new AiValidationException(RESOURCE, RESOURCE + " title must not be blank");
     }
     chat.setTitle(title);
     chat.setDefaultAgentId(parseOptionalAgentId(createDTO.getDefaultAgentId()));
@@ -46,15 +49,15 @@ public class ChatMutationFactory {
 
   public void apply(Chat chat, ChatUpdateDTO updateDTO) {
     if (chat == null) {
-      throw new IllegalArgumentException("chat must not be null");
+      throw new AiValidationException(RESOURCE, RESOURCE + " must not be null");
     }
     if (updateDTO == null) {
-      throw new IllegalArgumentException("chat body must not be null");
+      throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
     }
     if (updateDTO.getTitle() != null) {
       String title = editableSupport.trimToNull(updateDTO.getTitle());
       if (title == null) {
-        throw new IllegalArgumentException("chat title must not be blank");
+        throw new AiValidationException(RESOURCE, RESOURCE + " title must not be blank");
       }
       chat.setTitle(title);
     }

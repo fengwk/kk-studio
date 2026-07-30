@@ -12,6 +12,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import fun.fengwk.kkstudio.core.agent.model.service.AgentModelService;
 import fun.fengwk.kkstudio.core.agent.provider.service.AgentProviderService;
+import fun.fengwk.kkstudio.core.ai.error.AiDuplicateException;
+import fun.fengwk.kkstudio.core.ai.error.AiInUseException;
+import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
+import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
@@ -41,11 +46,12 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     AgentDefinitionDTO definition = agentDefinitionService.createAgent(agent(model.getId(), name));
     assertEquals(List.of(), definition.getConfig().getTools());
     assertEquals(List.of(), definition.getConfig().getSkills());
+    assertEquals("0", definition.getVersion());
     assertThrows(
-        IllegalArgumentException.class,
+        AiDuplicateException.class,
         () -> agentDefinitionService.createAgent(agent(model.getId(), name)));
     assertThrows(
-        IllegalStateException.class, () -> agentModelService.deleteModel(id(model.getId())));
+        AiInUseException.class, () -> agentModelService.deleteModel(id(model.getId()), "0"));
 
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
     update.setName(definition.getName());
@@ -54,18 +60,30 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     update.setModelId(definition.getModelId());
     update.setVariant(definition.getVariant());
     update.setConfig(definition.getConfig());
+    update.setExpectedVersion(definition.getVersion());
     AgentDefinitionDTO updated = agentDefinitionService.updateAgent(id(definition.getId()), update);
     assertEquals("updated", updated.getDescription());
+    assertEquals("1", updated.getVersion());
     assertTrue(
         agentDefinitionService.pageAgents(new PageQuery(1, 100)).getResults().stream()
             .anyMatch(candidate -> candidate.getId().equals(definition.getId())));
 
-    agentDefinitionService.deleteAgent(id(definition.getId()));
+    AgentDefinitionUpdateDTO stale = new AgentDefinitionUpdateDTO();
+    stale.setName(definition.getName());
+    stale.setDescription("stale");
+    stale.setModelId(definition.getModelId());
+    stale.setConfig(definition.getConfig());
+    stale.setExpectedVersion(definition.getVersion());
     assertThrows(
-        IllegalArgumentException.class,
-        () -> agentDefinitionService.deleteAgent(id(definition.getId())));
-    agentModelService.deleteModel(id(model.getId()));
-    agentProviderService.deleteProvider(id(provider.getId()));
+        AiVersionConflictException.class,
+        () -> agentDefinitionService.updateAgent(id(definition.getId()), stale));
+
+    agentDefinitionService.deleteAgent(id(definition.getId()), updated.getVersion());
+    assertThrows(
+        AiResourceNotFoundException.class,
+        () -> agentDefinitionService.deleteAgent(id(definition.getId()), "0"));
+    agentModelService.deleteModel(id(model.getId()), model.getVersion());
+    agentProviderService.deleteProvider(id(provider.getId()), provider.getVersion());
   }
 
   @Test
@@ -77,8 +95,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     invalid.setVariant("missing");
 
     try {
-      assertThrows(
-          IllegalArgumentException.class, () -> agentDefinitionService.createAgent(invalid));
+      assertThrows(AiValidationException.class, () -> agentDefinitionService.createAgent(invalid));
 
       AgentDefinitionCreateDTO defaultVariant =
           agent(model.getId(), "agent-valid-variant-" + suffix);
@@ -93,15 +110,16 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
         invalidUpdate.setModelId(model.getId());
         invalidUpdate.setVariant("missing");
         invalidUpdate.setConfig(created.getConfig());
+        invalidUpdate.setExpectedVersion(created.getVersion());
         assertThrows(
-            IllegalArgumentException.class,
+            AiValidationException.class,
             () -> agentDefinitionService.updateAgent(id(created.getId()), invalidUpdate));
       } finally {
-        agentDefinitionService.deleteAgent(id(created.getId()));
+        agentDefinitionService.deleteAgent(id(created.getId()), created.getVersion());
       }
     } finally {
-      agentModelService.deleteModel(id(model.getId()));
-      agentProviderService.deleteProvider(id(provider.getId()));
+      agentModelService.deleteModel(id(model.getId()), model.getVersion());
+      agentProviderService.deleteProvider(id(provider.getId()), provider.getVersion());
     }
   }
 

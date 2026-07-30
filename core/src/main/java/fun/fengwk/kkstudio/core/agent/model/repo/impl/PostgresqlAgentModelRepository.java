@@ -11,9 +11,6 @@ import fun.fengwk.kkstudio.core.agent.model.repo.impl.mapper.AgentModelMapper;
 import fun.fengwk.kkstudio.core.agent.model.repo.impl.model.AgentModelDO;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 
-import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 
 /** PostgreSQL-backed global model repository. */
@@ -47,13 +44,13 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
   }
 
   @Override
-  public boolean updateById(AgentModel model) {
-    return agentModelMapper.updateById(convert(model)) == 1;
+  public boolean updateById(AgentModel model, long expectedVersion) {
+    return agentModelMapper.updateById(convert(model), expectedVersion) == 1;
   }
 
   @Override
-  public boolean deleteById(long id) {
-    return agentModelMapper.deleteById(id) == 1;
+  public boolean deleteById(long id, long expectedVersion) {
+    return agentModelMapper.deleteById(id, expectedVersion) == 1;
   }
 
   @Override
@@ -85,12 +82,8 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
     result.setDescription(model.getDescription());
     result.setConfigJson(model.getConfigJson());
     result.setVersion(model.getVersion());
-    result.setCreateTime(toLocalDateTime(model.getCreateTime()));
-    result.setUpdateTime(toLocalDateTime(model.getUpdateTime()));
+    result.setCreateTime(model.getCreateTime());
+    result.setUpdateTime(model.getUpdateTime());
     return result;
-  }
-
-  private static LocalDateTime toLocalDateTime(OffsetDateTime value) {
-    return value == null ? null : value.withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime();
   }
 }

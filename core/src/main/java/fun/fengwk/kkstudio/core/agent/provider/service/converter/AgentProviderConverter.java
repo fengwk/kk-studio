@@ -4,6 +4,7 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.agent.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.core.ai.error.CatalogVersions;
 import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
 
 /** Converts providers to credential-free public DTOs. */
@@ -30,7 +31,7 @@ public class AgentProviderConverter {
     var timeoutPolicy = configurationCodec.readTimeoutPolicy(provider.getConfigJson());
     dto.setModelCallTimeoutMillis(timeoutPolicy.modelCallTimeout().toMillis());
     dto.setModelCallIdleTimeoutMillis(timeoutPolicy.modelCallIdleTimeout().toMillis());
-    dto.setVersion(provider.getVersion());
+    dto.setVersion(CatalogVersions.format(provider.getVersion()));
     dto.setCreateTime(provider.getCreateTime());
     dto.setUpdateTime(provider.getUpdateTime());
     return dto;

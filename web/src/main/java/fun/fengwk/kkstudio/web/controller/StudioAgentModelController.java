@@ -47,8 +47,9 @@ public class StudioAgentModelController {
   }
 
   @DeleteMapping("/{id}")
-  public Result<Void> deleteModel(@PathVariable long id) {
-    agentModelService.deleteModel(id);
+  public Result<Void> deleteModel(
+      @PathVariable long id, @RequestParam("expectedVersion") String expectedVersion) {
+    agentModelService.deleteModel(id, expectedVersion);
     return Results.noContent();
   }
 }
