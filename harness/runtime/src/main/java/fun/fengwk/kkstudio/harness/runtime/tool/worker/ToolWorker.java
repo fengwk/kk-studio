@@ -3,94 +3,78 @@ package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
-import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
-import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
-import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
-import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyResolver;
-import fun.fengwk.kkstudio.harness.runtime.tool.AfterToolCallContext;
-import fun.fengwk.kkstudio.harness.runtime.tool.BeforeToolCallResult;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
-import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
-import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
-import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteTool;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolCancelledException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolSendUncertainException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
 
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 /**
  * Location-agnostic durable Tool worker driven by the single harness_execution_target queue.
  *
- * <p>Process-local gate: each in-flight handle is keyed by invocation id and reports active
- * execution for both PLATFORM and ENVIRONMENT via {@link #hasActiveExecution()} / {@link
- * #hasActiveExecution(String)}. Durable dispatch is owned by the ExecutionTarget dispatcher; this
- * worker is invoked when a {@link
- * fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind#TOOL_INVOCATION} target has
- * already been locked due by the worker transaction.
+ * <p>The worker is the small orchestration entry point of the Tool execution lifecycle. The three
+ * cohesive responsibilities are delegated to package-private collaborators:
  *
- * <p>Threading: {@link #dispatch(long)} retains the single public entry and runs the durable {@code
- * transactions.claim(...)} on the caller (the future PostgreSQL execution-target dispatcher
- * thread). All post-claim external Tool execution ({@code dispatchClaimed}, including {@link
- * fun.fengwk.kkstudio.harness.tool.execution.Tool#execute} / remote send) is handed off to a
- * dedicated injected {@link Executor}; watchdogs (heartbeat / deadline / partial flush) remain on
- * the {@link ScheduledExecutorService scheduler} so that the caller never blocks on external Tool
- * I/O after a successful claim.
+ * <ul>
+ *   <li>{@link PermissionResolver} owns the durable permission transition and produces the final
+ *       {@link ExecutablePlan} that must match the row.
+ *   <li>{@link TerminalCompleter} owns {@code SUCCEEDED} result preparation (after interceptor +
+ *       {@link ArtifactStore} externalization) plus the four terminal transitions ({@code SUCCEEDED
+ *       / FAILED / CANCELLED / UNKNOWN}) and the unstarted-claim release path.
+ *   <li>{@link ExecutionCallback} owns in-flight {@link
+ *       fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener} callbacks, the heartbeat
+ *       / deadline / partial-flush watchdogs, partial-result batching, and the per-callback release
+ *       of the owner's process-local slot.
+ * </ul>
  *
- * <p>Pending-dispatch fence: each submitted post-claim Runnable carries a per-invocation ticket
- * registered just before executor submission. The Runnable atomically removes its own ticket as the
- * gate to entering {@code dispatchClaimed} — if the conditional removal succeeds, the ticket was
- * current and execution is admitted; if it fails, the ticket was either cleared by {@link #stop()}
- * or superseded by a later claim for the same invocation id and the Runnable returns without
- * invoking external Tool I/O. Tickets persist only until execution admission; admitted tasks
- * release their fence immediately so the transient map cannot leak per invocation. The fence is
- * purely process-local — it is not durable state, a queue, a route slot, or a retry mechanism.
+ * <p>The worker itself keeps four process-local concerns:
+ *
+ * <ol>
+ *   <li>The synchronous durable claim in {@link #dispatch(long)}: the caller (the future PostgreSQL
+ *       execution-target dispatcher thread) runs {@code transactions.claim(...)}.
+ *   <li>The post-claim hand-off to the injected {@link Executor}: the caller never blocks on
+ *       external Tool I/O after a successful claim.
+ *   <li>The per-invocation pending-dispatch ticket fence: the conditional-remove gate around {@code
+ *       dispatchClaimed} ensures {@link #stop()} and superseding claims prevent any
+ *       no-longer-current Runnable from performing external Tool I/O.
+ *   <li>The process-local active-execution map: {@link #hasActiveExecution()} / {@link
+ *       #hasActiveExecution(String)} expose the in-flight gate so the environment slot is
+ *       observable until every callback has terminated.
+ * </ol>
+ *
+ * <p>Threading: durable claim on the caller; external Tool execution on {@code executor}; watchdogs
+ * on {@code scheduler}; realtime projections are best-effort. The owner's map is the sole
+ * process-local gate for {@code hasActiveExecution}; the durable FIFO gate remains the PostgreSQL
+ * {@code harness_execution_target} queue.
  */
 @Slf4j
 public final class ToolWorker {
   private final ToolInvocationTransactions transactions;
-  private final ToolRegistry registry;
-  private final RemoteToolTransport remoteTransport;
-  private final ToolInterceptorChain interceptorChain;
-  private final ArtifactStore artifactStore;
+  private final PermissionResolver permissionResolver;
+  private final TerminalCompleter terminalCompleter;
   private final InvocationRetryPolicyResolver retryPolicyResolver;
   private final RealtimeEventSink realtimeEventSink;
   private final ToolWorkerConfig config;
@@ -98,10 +82,7 @@ public final class ToolWorker {
   private final ScheduledExecutorService scheduler;
   private final Executor executor;
   private final Supplier<String> workerTokenSupplier;
-  private final ToolSettingsProvider toolSettingsProvider;
-  private final Path workdir;
-  private final Path environmentRoot;
-  private final ConcurrentHashMap<Long, Execution> executions = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<Long, ExecutionCallback> executions = new ConcurrentHashMap<>();
   // Per-invocation id: the most recently registered ticket for a deferred dispatch that has not
   // yet been admitted into dispatchClaimed. The Runnable uses conditional remove(id, ticket) as
   // the admission gate; the entry is released on admission so the map cannot leak. stop() clears
@@ -127,10 +108,6 @@ public final class ToolWorker {
       Path workdir,
       Path environmentRoot) {
     this.transactions = Objects.requireNonNull(transactions, "transactions");
-    this.registry = Objects.requireNonNull(registry, "registry");
-    this.remoteTransport = Objects.requireNonNull(remoteTransport, "remoteTransport");
-    this.interceptorChain = Objects.requireNonNull(interceptorChain, "interceptorChain");
-    this.artifactStore = Objects.requireNonNull(artifactStore, "artifactStore");
     this.retryPolicyResolver = Objects.requireNonNull(retryPolicyResolver, "retryPolicyResolver");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
     this.config = Objects.requireNonNull(config, "config");
@@ -138,11 +115,21 @@ public final class ToolWorker {
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.executor = Objects.requireNonNull(executor, "executor");
     this.workerTokenSupplier = Objects.requireNonNull(workerTokenSupplier, "workerTokenSupplier");
-    this.toolSettingsProvider =
-        Objects.requireNonNull(toolSettingsProvider, "toolSettingsProvider");
-    this.workdir = Objects.requireNonNull(workdir, "workdir").toAbsolutePath().normalize();
-    this.environmentRoot =
-        Objects.requireNonNull(environmentRoot, "environmentRoot").toAbsolutePath().normalize();
+    Objects.requireNonNull(toolSettingsProvider, "toolSettingsProvider");
+    Objects.requireNonNull(workdir, "workdir");
+    Objects.requireNonNull(environmentRoot, "environmentRoot");
+    this.permissionResolver =
+        new PermissionResolver(
+            transactions,
+            interceptorChain,
+            toolSettingsProvider,
+            registry,
+            remoteTransport,
+            clock,
+            workdir,
+            environmentRoot);
+    this.terminalCompleter =
+        new TerminalCompleter(transactions, interceptorChain, artifactStore, config, clock);
   }
 
   /**
@@ -223,7 +210,7 @@ public final class ToolWorker {
       return;
     }
     try {
-      releaseUnstarted(ownership, clock.instant());
+      terminalCompleter.releaseUnstarted(ownership, clock.instant());
     } catch (RuntimeException releaseError) {
       // Do not attempt a second terminal mutation with potentially unknown ownership; the existing
       // heartbeat/deadline/re-dispatch recovery will fence and re-route the row once the lease
@@ -251,8 +238,8 @@ public final class ToolWorker {
     return executions.values().stream()
         .anyMatch(
             execution ->
-                execution.binding.location() == ToolExecutionLocation.ENVIRONMENT
-                    && environmentName.equals(execution.binding.environmentName()));
+                execution.binding().location() == ToolExecutionLocation.ENVIRONMENT
+                    && environmentName.equals(execution.binding().environmentName()));
   }
 
   /**
@@ -262,192 +249,58 @@ public final class ToolWorker {
    */
   public void stop() {
     pendingTickets.clear();
-    executions.values().forEach(Execution::abandon);
+    executions.values().forEach(ExecutionCallback::abandon);
   }
 
   private void dispatchClaimed(ClaimedToolInvocation claimed) {
     ToolInvocation invocation = claimed.invocation();
-    if (invocation.permissionState() == ToolPermissionState.ASKED
-        || invocation.permissionState() == ToolPermissionState.DENIED) {
-      throw new IllegalStateException(
-          "Tool invocation "
-              + invocation.id()
-              + " reached a claimed worker with permissionState="
-              + invocation.permissionState());
-    }
     if (claimed.recoveredLease()) {
-      abandonStaleLocalExecution(invocation.id());
-      completeUnknown(
+      ExecutionCallback stale = executions.get(invocation.id());
+      if (stale != null) {
+        // Fence the stale process-local handle: its callbacks must become no-ops while the
+        // recovering claim path owns durable state.
+        stale.abandonStaleLocal();
+      }
+      terminalCompleter.completeUnknown(
           claimed,
           new ToolInvocationError(
-              "LEASE_EXPIRED", "Tool ownership was lost; execution result is unknown."));
+              "LEASE_EXPIRED", "Tool ownership was lost; execution result is unknown."),
+          claimed.invocation().lastActivityAt());
       return;
     }
     if (!clock.instant().isBefore(invocation.deadlineAt())) {
-      fail(claimed, "Tool execution deadline exceeded.");
+      terminalCompleter.completeFailure(
+          claimed,
+          new ToolInvocationError("TIMEOUT", "Tool execution deadline exceeded."),
+          claimed.invocation().lastActivityAt());
       return;
     }
-    // Durable Tool permission gate. Runs strictly before any resolveTool / Execution / Tool.execute
-    // I/O. A PENDING row is the only case where the chain must be evaluated; ALLOWED has a final
-    // plan already persisted on the row and bypasses the chain; ASKED / DENIED reaching a claimed
-    // worker is an invariant violation and must never reach this point.
-    ToolBinding binding = bindingFor(invocation);
-    ToolCall originalCall =
-        new ToolCall(invocation.toolCallId(), invocation.toolName(), invocation.argumentsJson());
-    ToolBinding executeBinding;
-    ToolCall executeCall;
-    if (invocation.permissionState() == ToolPermissionState.PENDING) {
-      BeforeToolCallResult decision;
-      try {
-        decision = evaluatePermission(binding, originalCall, invocation);
-      } catch (RuntimeException boundaryError) {
-        // Boundary failed (no boundary, threw, or returned a malformed result): fail closed with
-        // a terminal FAILED, no Tool I/O. The dispatch context is still owned; completeFailure
-        // walks the standard terminal path.
-        completeFailure(
-            claimed,
-            new ToolInvocationError(
-                "PERMISSION_BOUNDARY_MISSING",
-                "Tool permission boundary did not produce a decision: "
-                    + boundaryError.getMessage()),
-            claimed.invocation().lastActivityAt());
-        return;
-      }
-      PermissionAction action = decision.permissionAction();
-      PermissionPromptPreview preview = decision.permissionPromptPreview();
-      if (action == null) {
-        completeFailure(
-            claimed,
-            new ToolInvocationError(
-                "PERMISSION_BOUNDARY_MISSING", "Tool permission boundary returned a null action."),
-            claimed.invocation().lastActivityAt());
-        return;
-      }
-      if (action == PermissionAction.ASK && preview == null) {
-        completeFailure(
-            claimed,
-            new ToolInvocationError(
-                "PERMISSION_BOUNDARY_MISSING",
-                "Tool permission boundary returned ASK without a prompt preview."),
-            claimed.invocation().lastActivityAt());
-        return;
-      }
-      // Route stability: the permission boundary must not silently move an active target across
-      // ENVIRONMENT routes. PLATFORM (null route) is preserved. Descriptor/arguments may change.
-      if (decision.binding().location() != binding.location()
-          || !Objects.equals(decision.binding().environmentName(), binding.environmentName())) {
-        completeFailure(
-            claimed,
-            new ToolInvocationError(
-                "PERMISSION_BOUNDARY_MISSING",
-                "Tool permission boundary attempted to change execution route from "
-                    + binding.location()
-                    + "/"
-                    + binding.environmentName()
-                    + " to "
-                    + decision.binding().location()
-                    + "/"
-                    + decision.binding().environmentName()),
-            claimed.invocation().lastActivityAt());
-        return;
-      }
-      switch (action) {
-        case ALLOW -> {
-          ToolInvocationUpdateOutcome allowOutcome =
-              transactions.persistPermissionAllowed(
-                  claimed, decision.binding(), decision.argumentsJson(), clock.instant());
-          if (allowOutcome != ToolInvocationUpdateOutcome.APPLIED) {
-            // Lost ownership between claim and persistence: the durable row has moved on (e.g.
-            // expired lease recovery). Fail closed with no external I/O.
-            completeFailure(
-                claimed,
-                new ToolInvocationError(
-                    "PERMISSION_BOUNDARY_MISSING",
-                    "Tool permission boundary did not converge; ownership was lost."),
-                claimed.invocation().lastActivityAt());
-            return;
-          }
-          executeBinding = decision.binding();
-          // The final ToolCall must use the decision's arguments JSON so that the actually
-          // executed plan matches the persisted final plan. tool name and call id are immutable.
-          executeCall =
-              new ToolCall(
-                  originalCall.id(),
-                  decision.binding().descriptor().name(),
-                  decision.argumentsJson());
-        }
-        case DENY -> {
-          ToolInvocationUpdateOutcome denyOutcome =
-              transactions.denyPermission(claimed, clock.instant());
-          if (denyOutcome != ToolInvocationUpdateOutcome.APPLIED) {
-            completeFailure(
-                claimed,
-                new ToolInvocationError(
-                    "PERMISSION_BOUNDARY_MISSING",
-                    "Tool permission boundary did not converge; ownership was lost."),
-                claimed.invocation().lastActivityAt());
-          }
-          return;
-        }
-        case ASK -> {
-          ToolInvocationUpdateOutcome askOutcome =
-              transactions.awaitPermission(
-                  claimed, decision.binding(), decision.argumentsJson(), preview, clock.instant());
-          if (askOutcome != ToolInvocationUpdateOutcome.APPLIED) {
-            completeFailure(
-                claimed,
-                new ToolInvocationError(
-                    "PERMISSION_BOUNDARY_MISSING",
-                    "Tool permission boundary did not converge; ownership was lost."),
-                claimed.invocation().lastActivityAt());
-            return;
-          }
-          return;
-        }
-        default -> {
-          completeFailure(
-              claimed,
-              new ToolInvocationError(
-                  "PERMISSION_BOUNDARY_MISSING",
-                  "Tool permission boundary returned an unsupported action: " + action),
-              claimed.invocation().lastActivityAt());
-          return;
-        }
-      }
-    } else if (invocation.permissionState() == ToolPermissionState.ALLOWED) {
-      // Already approved: skip the chain and use the persisted final plan (descriptor, arguments,
-      // location, environment name are all already in the row). The ToolCall is reconstructed
-      // from the persisted arguments, not the original frozen provider call.
-      executeBinding = binding;
-      executeCall =
-          new ToolCall(originalCall.id(), binding.descriptor().name(), invocation.argumentsJson());
-    } else {
-      // ASKED / DENIED are non-claimable; the durable row is in a state the worker must never
-      // execute. The dispatcher claim precondition already filters these, so reaching this
-      // branch is an invariant breach. Throw to surface the bug rather than fabricate a
-      // terminal row: the existing lease will expire and the durable row's state machine
-      // (recoverExpired for ALLOWED, lease-expiry scan for others) re-routes correctly.
-      throw new IllegalStateException(
-          "Tool invocation "
-              + invocation.id()
-              + " reached a claimed worker with permissionState="
-              + invocation.permissionState());
-    }
-    ResolvedTool resolved = resolveTool(executeBinding, invocation);
-    if (resolved.failureMessage() != null) {
-      fail(claimed, resolved.failureMessage());
+    PermissionResolution resolution = permissionResolver.resolve(claimed);
+    if (!(resolution instanceof PermissionResolution.Resolved resolved)) {
+      // ASK / DENY / TERMINAL_FAILED: every durable mutation is already persisted by the
+      // resolver; the process-local slot stays empty so the durable FIFO gate can advance.
       return;
     }
-    Tool tool = resolved.tool();
-    Execution execution = new Execution(claimed, executeBinding, executeCall);
-    Execution previous = executions.putIfAbsent(invocation.id(), execution);
+    Optional<Tool> tool = permissionResolver.resolveTool(resolved.plan().binding());
+    if (tool.isEmpty()) {
+      terminalCompleter.completeFailure(
+          claimed,
+          new ToolInvocationError(
+              "EXECUTION_FAILED", permissionResolver.toolMissingFailure(resolved.plan().binding())),
+          claimed.invocation().lastActivityAt());
+      return;
+    }
+    ToolBinding executeBinding = resolved.plan().binding();
+    ToolCall executeCall = resolved.plan().call();
+    ExecutionCallback execution = newExecutionCallback(claimed, executeBinding, executeCall);
+    ExecutionCallback previous = executions.putIfAbsent(invocation.id(), execution);
     if (previous != null) {
       // A process-local handle already exists for this invocation id (typically a stale handle
       // after lease loss / double dispatch). Abandon and fence the stale handle so late callbacks
       // cannot mutate durable state. Converge the newly claimed ownership to UNKNOWN without
       // re-executing.
       previous.abandonStaleLocal();
-      completeUnknown(
+      terminalCompleter.completeUnknown(
           claimed,
           new ToolInvocationError(
               "LOCAL_CONFLICT",
@@ -458,27 +311,28 @@ public final class ToolWorker {
     execution.schedule();
     try {
       ToolExecutionHandle handle =
-          tool.execute(
-              new ToolExecutionRequest(
-                  tool.descriptor(),
-                  executeCall,
-                  Duration.between(clock.instant(), invocation.deadlineAt()),
-                  new ToolExecutionContext(invocation.id(), invocation.threadId())),
-              execution);
+          tool.get()
+              .execute(
+                  new ToolExecutionRequest(
+                      tool.get().descriptor(),
+                      executeCall,
+                      Duration.between(clock.instant(), invocation.deadlineAt()),
+                      new ToolExecutionContext(invocation.id(), invocation.threadId())),
+                  execution);
       execution.setHandle(handle);
     } catch (RemoteToolUnavailableException unavailable) {
       execution.markTerminalLocal();
       try {
-        releaseUnstarted(claimed, clock.instant());
+        terminalCompleter.releaseUnstarted(claimed, clock.instant());
       } finally {
-        executions.remove(invocation.id(), execution);
         execution.cancelSchedulersOnly();
+        executions.remove(invocation.id(), execution);
       }
     } catch (RemoteToolSendUncertainException uncertain) {
       // Synchronous send uncertainty: side effects may have begun; converge immediately to UNKNOWN.
       execution.markTerminalLocal();
       try {
-        completeUnknown(
+        terminalCompleter.completeUnknown(
             claimed,
             new ToolInvocationError(
                 "REMOTE_UNCERTAIN",
@@ -486,12 +340,12 @@ public final class ToolWorker {
                     uncertain, "Remote tool send outcome is uncertain; result is unknown.")),
             claimed.invocation().lastActivityAt());
       } finally {
-        executions.remove(invocation.id(), execution);
         execution.cancelSchedulersOnly();
+        executions.remove(invocation.id(), execution);
       }
     } catch (RuntimeException error) {
       try {
-        execution.error(error);
+        execution.onError(error);
       } finally {
         // error() stops and clears on success; if it aborted early, still free the slot.
         if (!executions.containsKey(invocation.id())) {
@@ -499,167 +353,6 @@ public final class ToolWorker {
           execution.cancelSchedulersOnly();
         }
       }
-    }
-  }
-
-  private BeforeToolCallResult evaluatePermission(
-      ToolBinding binding, ToolCall originalCall, ToolInvocation invocation) {
-    if (!interceptorChain.hasPermissionBoundary()) {
-      throw new IllegalStateException(
-          "Tool interceptor chain is missing a permission boundary for invocation "
-              + invocation.id());
-    }
-    ToolSettings settings = toolSettingsProvider.get();
-    try {
-      return interceptorChain.before(
-          binding, originalCall, settings, invocation.yoloEnabled(), workdir, environmentRoot);
-    } catch (RuntimeException error) {
-      throw new IllegalStateException(
-          "Tool permission boundary threw for invocation " + invocation.id(), error);
-    }
-  }
-
-  private ToolBinding bindingFor(ToolInvocation invocation) {
-    if (invocation.location() == ToolExecutionLocation.ENVIRONMENT) {
-      return ToolBinding.of(invocation.descriptor(), invocation.environmentName());
-    }
-    return ToolBinding.of(invocation.descriptor());
-  }
-
-  /**
-   * Resolve the {@link Tool} that will execute the persisted final plan. The registry lookup and
-   * {@link RemoteTool} construction MUST use the {@link ToolBinding#descriptor() final binding
-   * descriptor} (which is what {@code transactions.persistPermissionAllowed} wrote to the row)
-   * rather than the {@code invocation.descriptor()} (which is the original frozen provider call).
-   * The persisted final plan and the actually executed plan must be identical.
-   */
-  private ResolvedTool resolveTool(ToolBinding binding, ToolInvocation invocation) {
-    if (binding.location() == ToolExecutionLocation.PLATFORM) {
-      Optional<Tool> resolved =
-          registry.find(binding.descriptor().name(), binding.descriptor().version());
-      if (resolved.isEmpty() || !descriptorMatches(binding, resolved.get())) {
-        return ResolvedTool.failure(
-            "Frozen tool "
-                + binding.descriptor().name()
-                + "@"
-                + binding.descriptor().version()
-                + " is unavailable.");
-      }
-      return ResolvedTool.success(resolved.get());
-    }
-    Tool remote = new RemoteTool(binding.descriptor(), binding.environmentName(), remoteTransport);
-    return ResolvedTool.success(remote);
-  }
-
-  private boolean descriptorMatches(ToolBinding binding, Tool tool) {
-    return tool.descriptor().equals(binding.descriptor());
-  }
-
-  private void fail(ClaimedToolInvocation claimed, String message) {
-    completeFailure(claimed, new ToolInvocationError("EXECUTION_FAILED", message));
-  }
-
-  private boolean completeSuccess(
-      ClaimedToolInvocation claimed,
-      ToolBinding binding,
-      ToolCall call,
-      ToolResult result,
-      Instant lastObservedActivityAt) {
-    Instant now = clock.instant();
-    ToolInvocationUpdateOutcome outcome;
-    try {
-      outcome =
-          transactions.completeSuccess(
-              claimed,
-              () -> prepareTerminalResult(claimed, binding, call, result),
-              lastObservedActivityAt,
-              now);
-    } catch (TerminalResultPreparationException error) {
-      return completeFailure(
-          claimed, new ToolInvocationError(error.kind, error.getMessage()), lastObservedActivityAt);
-    } catch (RuntimeException error) {
-      return completeFailure(
-          claimed,
-          new ToolInvocationError(
-              "RESULT_PERSISTENCE_FAILED",
-              failureMessage(error, "Tool result persistence failed.")),
-          lastObservedActivityAt);
-    }
-    return outcome == ToolInvocationUpdateOutcome.APPLIED;
-  }
-
-  private ToolResult prepareTerminalResult(
-      ClaimedToolInvocation claimed, ToolBinding binding, ToolCall call, ToolResult result) {
-    ToolResult intercepted;
-    try {
-      intercepted =
-          interceptorChain.after(
-              new AfterToolCallContext(claimed.invocation().id(), binding, call, result));
-    } catch (RuntimeException error) {
-      throw new TerminalResultPreparationException(
-          "AFTER_INTERCEPTOR_FAILED", afterInterceptorFailure(error), error);
-    }
-    try {
-      return externalize(intercepted);
-    } catch (RuntimeException error) {
-      throw new TerminalResultPreparationException(
-          "RESULT_PERSISTENCE_FAILED",
-          failureMessage(error, "Tool result persistence failed."),
-          error);
-    }
-  }
-
-  private boolean completeFailure(ClaimedToolInvocation claimed, ToolInvocationError error) {
-    return completeFailure(claimed, error, claimed.invocation().lastActivityAt());
-  }
-
-  private boolean completeFailure(
-      ClaimedToolInvocation claimed, ToolInvocationError error, Instant lastObservedActivityAt) {
-    Instant now = clock.instant();
-    return transactions.completeFailure(claimed, error, lastObservedActivityAt, now)
-        == ToolInvocationUpdateOutcome.APPLIED;
-  }
-
-  private boolean completeCancelled(ClaimedToolInvocation claimed, Instant lastObservedActivityAt) {
-    Instant now = clock.instant();
-    return transactions.completeCancelled(claimed, lastObservedActivityAt, now)
-        == ToolInvocationUpdateOutcome.APPLIED;
-  }
-
-  private boolean completeUnknown(ClaimedToolInvocation claimed, ToolInvocationError error) {
-    return completeUnknown(claimed, error, claimed.invocation().lastActivityAt());
-  }
-
-  private boolean completeUnknown(
-      ClaimedToolInvocation claimed, ToolInvocationError error, Instant lastObservedActivityAt) {
-    Instant now = clock.instant();
-    return transactions.completeUnknown(claimed, error, lastObservedActivityAt, now)
-        == ToolInvocationUpdateOutcome.APPLIED;
-  }
-
-  private void releaseUnstarted(ClaimedToolInvocation claimed, Instant now) {
-    InvocationStatus previousStatus = claimed.previousStatus();
-    Instant nextAttemptAt = null;
-    if (previousStatus == InvocationStatus.RETRY_WAIT) {
-      nextAttemptAt = now.plus(config.unavailableRetryDelay());
-      if (!nextAttemptAt.isBefore(claimed.invocation().deadlineAt())) {
-        completeFailure(
-            claimed,
-            new ToolInvocationError(
-                "EXECUTION_FAILED", "Environment was unavailable before the Tool deadline."));
-        return;
-      }
-    } else if (previousStatus != InvocationStatus.QUEUED) {
-      throw new IllegalStateException(
-          "unstarted release requires a QUEUED or RETRY_WAIT claim, but was " + previousStatus);
-    }
-    transactions.releaseUnstarted(claimed, nextAttemptAt, now);
-  }
-
-  private void abandonStaleLocalExecution(long invocationId) {
-    Execution stale = executions.get(invocationId);
-    if (stale != null) {
-      stale.abandonStaleLocal();
     }
   }
 
@@ -671,381 +364,30 @@ public final class ToolWorker {
     return token;
   }
 
-  private ToolResult externalize(ToolResult result) {
-    List<ToolContent> contents = new ArrayList<>();
-    for (ToolContent content : result.contents()) {
-      if (content instanceof BinaryToolContent binary) {
-        byte[] bytes = binary.content();
-        ArtifactRef artifact = artifactStore.save(binary.mediaType(), "identity", bytes);
-        contents.add(new ArtifactToolContent(artifact));
-        continue;
-      }
-      if (content instanceof ArtifactToolContent) {
-        contents.add(content);
-        continue;
-      }
-      byte[] bytes = bytes(content);
-      if (bytes.length <= config.inlineResultBytes()) {
-        contents.add(content);
-        continue;
-      }
-      String mediaType = content instanceof JsonToolContent ? "application/json" : "text/plain";
-      // The terminal transaction invokes this method only after validating and locking ownership.
-      ArtifactRef artifact = artifactStore.save(mediaType, "utf-8", bytes);
-      contents.add(new TextToolContent(preview(bytes)));
-      contents.add(new ArtifactToolContent(artifact));
-    }
-    if (contents.isEmpty()) {
-      contents.add(new TextToolContent(""));
-    }
-    return new ToolResult(
-        result.toolCallId(), contents, result.error(), result.detailsJson(), false);
-  }
-
-  private byte[] bytes(ToolContent content) {
-    if (content instanceof TextToolContent text) {
-      return text.text().getBytes(StandardCharsets.UTF_8);
-    }
-    if (content instanceof JsonToolContent json) {
-      return json.json().getBytes(StandardCharsets.UTF_8);
-    }
-    return new byte[0];
-  }
-
-  private String preview(byte[] bytes) {
-    if (bytes.length <= config.previewBytes()) {
-      return new String(bytes, StandardCharsets.UTF_8);
-    }
-    String value = new String(bytes, StandardCharsets.UTF_8);
-    StringBuilder prefix = new StringBuilder();
-    int previewBytes = 0;
-    for (int offset = 0; offset < value.length(); ) {
-      int codePoint = value.codePointAt(offset);
-      int codePointBytes =
-          new String(Character.toChars(codePoint)).getBytes(StandardCharsets.UTF_8).length;
-      if (previewBytes + codePointBytes > config.previewBytes()) {
-        break;
-      }
-      prefix.appendCodePoint(codePoint);
-      previewBytes += codePointBytes;
-      offset += Character.charCount(codePoint);
-    }
-    return prefix + "\n[full output stored as artifact]";
-  }
-
-  private final class Execution implements ToolExecutionListener {
-    private final ClaimedToolInvocation claimed;
-    private final ToolBinding binding;
-    private final ToolCall call;
-    private final List<ToolResult> pending = new ArrayList<>();
-    private ToolExecutionHandle handle;
-    private boolean terminal;
-    private boolean cancelHandleOnAttach;
-    private int pendingBytes;
-    private Instant lastObservedActivityAt;
-    private ScheduledFuture<?> heartbeat;
-    private ScheduledFuture<?> timeout;
-    private ScheduledFuture<?> partialFlush;
-
-    private Execution(ClaimedToolInvocation claimed, ToolBinding binding, ToolCall call) {
-      this.claimed = claimed;
-      this.binding = binding;
-      this.call = call;
-      this.lastObservedActivityAt = claimed.invocation().lastActivityAt();
-    }
-
-    private synchronized void schedule() {
-      heartbeat =
-          scheduler.scheduleAtFixedRate(
-              this::heartbeat,
-              config.heartbeatInterval().toMillis(),
-              config.heartbeatInterval().toMillis(),
-              TimeUnit.MILLISECONDS);
-      timeout =
-          scheduler.schedule(
-              this::timeout,
-              Math.max(
-                  0,
-                  Duration.between(clock.instant(), claimed.invocation().deadlineAt()).toMillis()),
-              TimeUnit.MILLISECONDS);
-      partialFlush =
-          scheduler.scheduleAtFixedRate(
-              this::flush,
-              config.partialFlushInterval().toMillis(),
-              config.partialFlushInterval().toMillis(),
-              TimeUnit.MILLISECONDS);
-    }
-
-    private synchronized void setHandle(ToolExecutionHandle value) {
-      handle = Objects.requireNonNull(value, "tool execution handle");
-      if (cancelHandleOnAttach) {
-        handle.cancel();
-      }
-    }
-
-    private synchronized void markTerminalLocal() {
-      terminal = true;
-    }
-
-    @Override
-    public void onPartial(ToolResult partial) {
-      for (ToolContent content : partial.contents()) {
-        if (content instanceof BinaryToolContent || content instanceof ArtifactToolContent) {
-          error(new IllegalArgumentException("PARTIAL result must not contain artifact content"));
-          return;
-        }
-      }
-      synchronized (this) {
-        if (terminal) {
-          return;
-        }
-        pending.add(partial);
-        pendingBytes += ToolResultJsonCodec.encode(partial).length();
-        if (pendingBytes >= config.partialBatchBytes()) {
-          flush();
-        }
-      }
-    }
-
-    @Override
-    public void onComplete(ToolResult result) {
-      completeSuccessResult(result);
-    }
-
-    @Override
-    public void onError(Throwable error) {
-      if (error instanceof RemoteToolCancelledException cancelled) {
-        completeCancelledResult(cancelled.getMessage());
-        return;
-      }
-      if (error instanceof RemoteToolSendUncertainException uncertain) {
-        // Async disconnect / uncertain delivery: never fail or retry; converge to UNKNOWN.
-        completeUnknownResult(
-            "REMOTE_UNCERTAIN",
-            failureMessage(
-                uncertain, "Remote tool outcome is uncertain; side effect result is unknown."));
-        return;
-      }
-      error(error);
-    }
-
-    private void error(Throwable error) {
-      String message =
-          error == null || error.getMessage() == null
-              ? "Tool execution failed."
-              : error.getMessage();
-      completeFailureOrRetry("EXECUTION_FAILED", message);
-    }
-
-    private void timeout() {
-      if (binding.location() == ToolExecutionLocation.ENVIRONMENT) {
-        // Remote deadline: side effects may have run; converge conservatively to UNKNOWN.
-        completeUnknownResult(
-            "LEASE_EXPIRED", "Tool deadline elapsed; remote side effect result is unknown.");
-        return;
-      }
-      completeFailureOrRetry("TIMEOUT", "Tool execution deadline exceeded.");
-    }
-
-    private void heartbeat() {
-      if (transactions.renew(claimed, config.leaseDuration(), clock.instant())
-          != ToolInvocationUpdateOutcome.APPLIED) {
-        cancelHandle();
-        stop();
-      }
-    }
-
-    private void flush() {
-      List<ToolResult> batch;
-      synchronized (this) {
-        if (pending.isEmpty()) {
-          return;
-        }
-        batch = List.copyOf(pending);
-        pending.clear();
-        pendingBytes = 0;
-      }
-      Instant activityAt = clock.instant();
-      if (transactions.recordActivity(claimed, activityAt, activityAt)
-          != ToolInvocationUpdateOutcome.APPLIED) {
-        cancelHandle();
-        stop();
-        return;
-      }
-      lastObservedActivityAt = activityAt;
-      for (ToolResult partial : batch) {
-        try {
-          realtimeEventSink.append(
-              new RealtimeEvent.ToolPartial(
-                  claimed.invocation().threadId(),
-                  claimed.invocation().id(),
-                  claimed.invocation().attempt(),
-                  partial,
-                  activityAt));
-        } catch (RuntimeException error) {
-          log.warn("Tool realtime projection failed", error);
-        }
-      }
-    }
-
-    private void completeSuccessResult(ToolResult result) {
-      synchronized (this) {
-        if (terminal) {
-          return;
-        }
-        terminal = true;
-      }
-      boolean terminalPersisted = false;
-      try {
-        flush();
-        terminalPersisted = completeSuccess(claimed, binding, call, result, lastObservedActivityAt);
-      } finally {
-        if (!terminalPersisted) {
-          cancelHandle();
-        }
-        stop();
-      }
-    }
-
-    private void completeCancelledResult(String message) {
-      synchronized (this) {
-        if (terminal) {
-          return;
-        }
-        terminal = true;
-      }
-      try {
-        flush();
-        completeCancelled(claimed, lastObservedActivityAt);
-      } finally {
-        cancelHandle();
-        stop();
-      }
-    }
-
-    private void completeUnknownResult(String kind, String message) {
-      synchronized (this) {
-        if (terminal) {
-          return;
-        }
-        terminal = true;
-      }
-      try {
-        flush();
-        completeUnknown(claimed, new ToolInvocationError(kind, message), lastObservedActivityAt);
-      } finally {
-        cancelHandle();
-        stop();
-      }
-    }
-
-    private void completeFailureOrRetry(String kind, String message) {
-      synchronized (this) {
-        if (terminal) {
-          return;
-        }
-        terminal = true;
-      }
-      try {
-        flush();
-        InvocationRetryPolicy policy = retryPolicyResolver.resolve();
-        int retryOrdinal = claimed.invocation().attempt();
-        Instant now = clock.instant();
-        Instant nextAttemptAt = now.plus(policy.delayBeforeRetry(retryOrdinal));
-        boolean retryable =
-            claimed.invocation().descriptor().sideEffect() == ToolSideEffect.IDEMPOTENT
-                && policy.allowsRetry(retryOrdinal)
-                && nextAttemptAt.isBefore(claimed.invocation().deadlineAt());
-        if (retryable
-            && transactions.scheduleRetry(claimed, nextAttemptAt, lastObservedActivityAt, now)
-                == ToolInvocationUpdateOutcome.APPLIED) {
-          return;
-        }
-        completeFailure(claimed, new ToolInvocationError(kind, message), lastObservedActivityAt);
-      } finally {
-        cancelHandle();
-        stop();
-      }
-    }
-
-    private void abandon() {
-      synchronized (this) {
-        if (terminal) {
-          return;
-        }
-        terminal = true;
-      }
-      cancelHandle();
-      stop();
-    }
-
-    /**
-     * Fences a process-local handle after lease recovery/conflict. Late callbacks become no-ops;
-     * durable state is owned by the recovering claim path.
-     */
-    private void abandonStaleLocal() {
-      synchronized (this) {
-        if (terminal) {
-          executions.remove(claimed.invocation().id(), this);
-          return;
-        }
-        terminal = true;
-      }
-      cancelHandle();
-      cancelSchedulersOnly();
-      executions.remove(claimed.invocation().id(), this);
-    }
-
-    private synchronized void cancelHandle() {
-      cancelHandleOnAttach = true;
-      if (handle != null && !handle.isCancelled()) {
-        handle.cancel();
-      }
-    }
-
-    private synchronized void cancelSchedulersOnly() {
-      if (heartbeat != null) {
-        heartbeat.cancel(false);
-      }
-      if (timeout != null) {
-        timeout.cancel(false);
-      }
-      if (partialFlush != null) {
-        partialFlush.cancel(false);
-      }
-    }
-
-    private synchronized void stop() {
-      cancelSchedulersOnly();
-      executions.remove(claimed.invocation().id(), this);
-    }
+  private ExecutionCallback newExecutionCallback(
+      ClaimedToolInvocation claimed, ToolBinding executeBinding, ToolCall executeCall) {
+    long invocationId = claimed.invocation().id();
+    ExecutionCallback[] holder = new ExecutionCallback[1];
+    Runnable ownerRelease = () -> executions.remove(invocationId, holder[0]);
+    ExecutionCallback execution =
+        new ExecutionCallback(
+            claimed,
+            executeBinding,
+            executeCall,
+            transactions,
+            retryPolicyResolver,
+            terminalCompleter,
+            realtimeEventSink::append,
+            config,
+            clock,
+            scheduler,
+            ownerRelease);
+    holder[0] = execution;
+    return execution;
   }
 
   private static String failureMessage(Throwable error, String fallback) {
     String message = error.getMessage();
     return message == null || message.isBlank() ? fallback : message;
-  }
-
-  private static String afterInterceptorFailure(RuntimeException error) {
-    return failureMessage(error, "afterToolCall interceptor failed.");
-  }
-
-  private static final class TerminalResultPreparationException extends RuntimeException {
-    private final String kind;
-
-    private TerminalResultPreparationException(String kind, String message, Throwable cause) {
-      super(message, cause);
-      this.kind = kind;
-    }
-  }
-
-  private record ResolvedTool(Tool tool, String failureMessage) {
-    static ResolvedTool success(Tool tool) {
-      return new ResolvedTool(Objects.requireNonNull(tool, "tool"), null);
-    }
-
-    static ResolvedTool failure(String message) {
-      return new ResolvedTool(null, Objects.requireNonNull(message, "message"));
-    }
   }
 }
