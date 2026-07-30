@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.agent.provider.service.impl;
 
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -23,6 +24,8 @@ import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
+
+import java.sql.SQLException;
 
 /** Atomic CAS failure must surface as the typed {@link AiVersionConflictException}. */
 public class AgentProviderServiceImplTest {
@@ -74,9 +77,14 @@ public class AgentProviderServiceImplTest {
     assertThrows(AiVersionConflictException.class, () -> service.deleteProvider(1L, "0"));
 
     provider.setVersion(0L);
-    when(repository.deleteById(eq(1L), anyLong()))
-        .thenThrow(new DataIntegrityViolationException("provider still referenced"));
+    when(repository.deleteById(eq(1L), anyLong())).thenThrow(integrityFailure("23503"));
     assertThrows(AiInUseException.class, () -> service.deleteProvider(1L, "0"));
+
+    DataIntegrityViolationException nonForeignKey = integrityFailure("22001");
+    doThrow(nonForeignKey).when(repository).deleteById(eq(1L), anyLong());
+    assertSame(
+        nonForeignKey,
+        assertThrows(DataIntegrityViolationException.class, () -> service.deleteProvider(1L, "0")));
   }
 
   @Test
@@ -104,5 +112,10 @@ public class AgentProviderServiceImplTest {
     doThrow(new AiInUseException("agent_provider", "in use")).when(guard).ensureDeletable(1L);
     assertThrows(AiVersionConflictException.class, () -> service.deleteProvider(1L, "0"));
     verify(guard, never()).ensureDeletable(1L);
+  }
+
+  private static DataIntegrityViolationException integrityFailure(String sqlState) {
+    return new DataIntegrityViolationException(
+        "database integrity failure", new SQLException("database failure", sqlState));
   }
 }

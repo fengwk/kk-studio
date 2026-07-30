@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.core.ai.error.CatalogVersions;
+import fun.fengwk.kkstudio.core.persistence.PostgresqlIntegrityViolationClassifier;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionDTO;
@@ -62,8 +63,11 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
       throw new AiDuplicateException(
           RESOURCE, "agent definition name already exists: " + definition.getName(), error);
     } catch (DataIntegrityViolationException error) {
-      throw new AiResourceNotFoundException(
-          MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + modelId);
+      if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
+        throw new AiResourceNotFoundException(
+            MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + modelId, error);
+      }
+      throw error;
     }
     AgentDefinition loaded = agentDefinitionRepository.getById(definition.getId());
     return agentDefinitionConverter.convert(loaded);
@@ -100,8 +104,11 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
       throw new AiDuplicateException(
           RESOURCE, "agent definition name already exists: " + definition.getName(), error);
     } catch (DataIntegrityViolationException error) {
-      throw new AiResourceNotFoundException(
-          MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + modelId);
+      if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
+        throw new AiResourceNotFoundException(
+            MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + modelId, error);
+      }
+      throw error;
     }
     AgentDefinition reloaded = agentDefinitionRepository.getById(id);
     return agentDefinitionConverter.convert(reloaded);

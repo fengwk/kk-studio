@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.core.agent.support;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
+
 import java.io.IOException;
 
 /**
@@ -41,6 +43,14 @@ public final class AgentEditableSupport {
       }
     }
     return null;
+  }
+
+  /** Rejects values that exceed the current PostgreSQL schema column limit after normalization. */
+  public void validateMaxLength(String resource, String field, String value, int maxLength) {
+    if (value != null && value.length() > maxLength) {
+      throw new AiValidationException(
+          resource, field + " must not exceed " + maxLength + " characters");
+    }
   }
 
   public void validateJsonArray(String json, String fieldName) {

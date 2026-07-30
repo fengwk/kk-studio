@@ -15,6 +15,10 @@ import fun.fengwk.kkstudio.share.model.AgentProviderType;
 final class AgentProviderMutationFactory {
 
   private static final String RESOURCE = "agent_provider";
+  private static final int NAME_MAX_LENGTH = 64;
+  private static final int DESCRIPTION_MAX_LENGTH = 512;
+  private static final int BASE_URL_MAX_LENGTH = 512;
+  private static final int CREDENTIAL_MAX_LENGTH = 512;
 
   private final AgentEditableSupport editableSupport;
   private final AgentProviderConfigurationCodec configurationCodec;
@@ -78,6 +82,12 @@ final class AgentProviderMutationFactory {
     if (!creating && credential == null) {
       credential = existingCredential;
     }
+    String description = editableSupport.trimToNull(properties.getDescription());
+    String baseUrl = editableSupport.trimToNull(properties.getBaseUrl());
+    editableSupport.validateMaxLength(RESOURCE, "name", name, NAME_MAX_LENGTH);
+    editableSupport.validateMaxLength(RESOURCE, "description", description, DESCRIPTION_MAX_LENGTH);
+    editableSupport.validateMaxLength(RESOURCE, "baseUrl", baseUrl, BASE_URL_MAX_LENGTH);
+    editableSupport.validateMaxLength(RESOURCE, "credential", credential, CREDENTIAL_MAX_LENGTH);
     try {
       String configJson =
           configurationCodec.mergeTimeoutPolicy(
@@ -86,9 +96,9 @@ final class AgentProviderMutationFactory {
               properties.getModelCallIdleTimeoutMillis());
       return new Mutation(
           name,
-          editableSupport.trimToNull(properties.getDescription()),
+          description,
           AgentProviderType.valueOf(providerType),
-          editableSupport.trimToNull(properties.getBaseUrl()),
+          baseUrl,
           credential,
           configJson);
     } catch (IllegalArgumentException error) {

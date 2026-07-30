@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.agent.definition.service.impl;
 
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -27,6 +28,8 @@ import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
+
+import java.sql.SQLException;
 
 /** Atomic CAS failure must surface as the typed {@link AiVersionConflictException}. */
 public class AgentDefinitionServiceImplTest {
@@ -67,9 +70,7 @@ public class AgentDefinitionServiceImplTest {
 
     when(repository.create(definition)).thenThrow(new DuplicateKeyException("dup"));
     assertThrows(AiDuplicateException.class, () -> service.createAgent(create));
-    doThrow(new DataIntegrityViolationException("model deleted"))
-        .when(repository)
-        .create(definition);
+    doThrow(integrityFailure("23503")).when(repository).create(definition);
     assertThrows(AiResourceNotFoundException.class, () -> service.createAgent(create));
 
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
@@ -91,10 +92,14 @@ public class AgentDefinitionServiceImplTest {
 
     when(repository.updateById(definition, 0L)).thenThrow(new DuplicateKeyException("dup"));
     assertThrows(AiDuplicateException.class, () -> service.updateAgent(3L, update));
-    doThrow(new DataIntegrityViolationException("model deleted"))
-        .when(repository)
-        .updateById(definition, 0L);
+    doThrow(integrityFailure("23503")).when(repository).updateById(definition, 0L);
     assertThrows(AiResourceNotFoundException.class, () -> service.updateAgent(3L, update));
+
+    DataIntegrityViolationException nonForeignKey = integrityFailure("22001");
+    doThrow(nonForeignKey).when(repository).updateById(definition, 0L);
+    assertSame(
+        nonForeignKey,
+        assertThrows(DataIntegrityViolationException.class, () -> service.updateAgent(3L, update)));
 
     when(repository.deleteById(eq(3L), anyLong())).thenReturn(false);
     when(repository.getById(3L)).thenReturn(null);
@@ -135,5 +140,10 @@ public class AgentDefinitionServiceImplTest {
 
     assertThrows(AiVersionConflictException.class, () -> service.updateAgent(3L, update));
     verify(resolver, never()).requireModel(2L);
+  }
+
+  private static DataIntegrityViolationException integrityFailure(String sqlState) {
+    return new DataIntegrityViolationException(
+        "database integrity failure", new SQLException("database failure", sqlState));
   }
 }

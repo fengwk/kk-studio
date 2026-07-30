@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.core.ai.error.CatalogVersions;
+import fun.fengwk.kkstudio.core.persistence.PostgresqlIntegrityViolationClassifier;
 import fun.fengwk.kkstudio.share.model.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelDTO;
 import fun.fengwk.kkstudio.share.model.AgentModelUpdateDTO;
@@ -57,8 +58,11 @@ public class AgentModelServiceImpl implements AgentModelService {
           RESOURCE + " name already exists under this provider: " + model.getName(),
           error);
     } catch (DataIntegrityViolationException error) {
-      throw new AiResourceNotFoundException(
-          PROVIDER_RESOURCE, PROVIDER_RESOURCE + " not found: " + providerId);
+      if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
+        throw new AiResourceNotFoundException(
+            PROVIDER_RESOURCE, PROVIDER_RESOURCE + " not found: " + providerId, error);
+      }
+      throw error;
     }
     AgentModel loaded = agentModelRepository.getById(model.getId());
     return agentModelConverter.convert(loaded);
@@ -117,9 +121,12 @@ public class AgentModelServiceImpl implements AgentModelService {
             CatalogVersions.format(reread.getVersion()));
       }
     } catch (DuplicateKeyException error) {
-      throw new AiInUseException(RESOURCE, RESOURCE + " in use by agents: " + id);
+      throw error;
     } catch (DataIntegrityViolationException error) {
-      throw new AiInUseException(RESOURCE, RESOURCE + " in use by agents: " + id);
+      if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
+        throw new AiInUseException(RESOURCE, RESOURCE + " in use by agents: " + id, error);
+      }
+      throw error;
     }
   }
 

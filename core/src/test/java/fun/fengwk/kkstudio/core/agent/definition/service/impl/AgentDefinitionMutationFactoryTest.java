@@ -12,6 +12,7 @@ import org.mockito.Mockito;
 import fun.fengwk.kkstudio.core.agent.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
+import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
@@ -54,14 +55,14 @@ public class AgentDefinitionMutationFactoryTest {
     create.setName("agent");
     create.setVariant("default");
     create.setConfig(config);
-    IllegalArgumentException error =
-        assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
+    AiValidationException error =
+        assertThrows(AiValidationException.class, () -> factory.newAgent(2L, create));
     assertEquals(
         "agent definition config skills must not contain duplicates: java", error.getMessage());
 
     config.setSkills(List.of());
     config.setTools(List.of(" read "));
-    error = assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
+    error = assertThrows(AiValidationException.class, () -> factory.newAgent(2L, create));
     assertEquals(
         "agent definition config tools must not contain surrounding whitespace",
         error.getMessage());
@@ -76,7 +77,7 @@ public class AgentDefinitionMutationFactoryTest {
     create.setName("agent");
     create.setVariant("quality");
     create.setConfig(config);
-    assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
+    assertThrows(AiValidationException.class, () -> factory.newAgent(2L, create));
     config.setTools(List.of());
     config.setSkills(List.of());
     AgentDefinition definition = factory.newAgent(2L, create);
@@ -101,16 +102,16 @@ public class AgentDefinitionMutationFactoryTest {
   public void shouldRejectInvalidDefinitionConfiguration() {
     AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
     assertThrows(
-        IllegalArgumentException.class, () -> factory.newAgent(0L, new AgentDefinitionCreateDTO()));
-    assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, null));
+        AiValidationException.class, () -> factory.newAgent(0L, new AgentDefinitionCreateDTO()));
+    assertThrows(AiValidationException.class, () -> factory.newAgent(2L, null));
 
     AgentDefinitionCreateDTO blank = new AgentDefinitionCreateDTO();
     blank.setName(" ");
-    assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, blank));
+    assertThrows(AiValidationException.class, () -> factory.newAgent(2L, blank));
 
     AgentDefinitionCreateDTO incomplete = new AgentDefinitionCreateDTO();
     incomplete.setName("agent");
-    assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, incomplete));
+    assertThrows(AiValidationException.class, () -> factory.newAgent(2L, incomplete));
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of());
@@ -131,10 +132,10 @@ public class AgentDefinitionMutationFactoryTest {
     create.setConfig(config);
 
     config.setEnvironmentName(" ");
-    assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
+    assertThrows(AiValidationException.class, () -> factory.newAgent(2L, create));
 
     config.setEnvironmentName(" local ");
-    assertThrows(IllegalArgumentException.class, () -> factory.newAgent(2L, create));
+    assertThrows(AiValidationException.class, () -> factory.newAgent(2L, create));
   }
 
   @Test
@@ -154,6 +155,38 @@ public class AgentDefinitionMutationFactoryTest {
     AgentDefinitionConfigDTO stored =
         objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
     assertNull(stored.getEnvironmentName());
+  }
+
+  @Test
+  public void shouldEnforceAgentSchemaStringLimitsAfterNormalization() {
+    AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
+    AgentDefinitionCreateDTO accepted = create("n".repeat(64), "d".repeat(512), "v".repeat(64));
+    AgentDefinition persisted = factory.newAgent(2L, accepted);
+    assertEquals("n".repeat(64), persisted.getName());
+    assertEquals("d".repeat(512), persisted.getDescription());
+    assertEquals("v".repeat(64), persisted.getVariant());
+
+    assertThrows(
+        AiValidationException.class,
+        () -> factory.newAgent(2L, create("n".repeat(65), null, null)));
+    assertThrows(
+        AiValidationException.class,
+        () -> factory.newAgent(2L, create("agent", "d".repeat(513), null)));
+    assertThrows(
+        AiValidationException.class,
+        () -> factory.newAgent(2L, create("agent", null, "v".repeat(65))));
+  }
+
+  private static AgentDefinitionCreateDTO create(String name, String description, String variant) {
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setTools(List.of());
+    config.setSkills(List.of());
+    AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
+    create.setName(name);
+    create.setDescription(description);
+    create.setVariant(variant);
+    create.setConfig(config);
+    return create;
   }
 
   private AgentDefinitionMutationFactory factory(ObjectMapper objectMapper) {
