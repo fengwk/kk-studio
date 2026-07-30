@@ -69,12 +69,13 @@ import java.util.function.Supplier;
  * I/O after a successful claim.
  *
  * <p>Pending-dispatch fence: each submitted post-claim Runnable carries a per-invocation ticket
- * registered just before executor submission. The Runnable checks that its exact ticket is still
- * current before entering {@code dispatchClaimed}; {@link #stop()} invalidates all pending tickets
- * before abandoning active executions, and a later claim for the same invocation id supersedes an
- * older ticket. Pending tasks therefore never invoke external Tool I/O after stop or after a
- * superseding claim. The fence is purely process-local — it is not durable state, a queue, a route
- * slot, or a retry mechanism.
+ * registered just before executor submission. The Runnable atomically removes its own ticket as the
+ * gate to entering {@code dispatchClaimed} — if the conditional removal succeeds, the ticket was
+ * current and execution is admitted; if it fails, the ticket was either cleared by {@link #stop()}
+ * or superseded by a later claim for the same invocation id and the Runnable returns without
+ * invoking external Tool I/O. Tickets persist only until execution admission; admitted tasks
+ * release their fence immediately so the transient map cannot leak per invocation. The fence is
+ * purely process-local — it is not durable state, a queue, a route slot, or a retry mechanism.
  */
 @Slf4j
 public final class ToolWorker {
@@ -91,9 +92,11 @@ public final class ToolWorker {
   private final Executor executor;
   private final Supplier<String> workerTokenSupplier;
   private final ConcurrentHashMap<Long, Execution> executions = new ConcurrentHashMap<>();
-  // Per-invocation id: the most recently registered ticket for a deferred dispatch. The Runnable
-  // checks its own ticket against this map before entering post-claim execution. Cleared by
-  // stop() and superseded by a later claim for the same invocation id. Process-local only.
+  // Per-invocation id: the most recently registered ticket for a deferred dispatch that has not
+  // yet been admitted into dispatchClaimed. The Runnable uses conditional remove(id, ticket) as
+  // the admission gate; the entry is released on admission so the map cannot leak. stop() clears
+  // the map and a later claim for the same invocation id overwrites the entry, both of which
+  // cause the in-flight conditional remove to fail and the Runnable to no-op. Process-local only.
   private final ConcurrentHashMap<Long, Long> pendingTickets = new ConcurrentHashMap<>();
   private final AtomicLong ticketSeq = new AtomicLong();
 
@@ -163,12 +166,13 @@ public final class ToolWorker {
 
   private void runClaimedIfTicketCurrent(
       long invocationId, long ticket, ClaimedToolInvocation ownership) {
-    Long current = pendingTickets.get(invocationId);
-    if (current == null || current.longValue() != ticket) {
-      // Either stop() cleared the fence, or a later claim for the same invocation id superseded
-      // this ticket. Either way this Runnable must not enter post-claim execution: the
-      // superseding claim owns the durable lease and any active handle; durable recovery will
-      // re-route the work without any external Tool I/O from this process.
+    // Atomic admission gate: conditional remove succeeds iff our ticket is still the current
+    // entry. Either failure mode means this Runnable must not enter post-claim execution —
+    // stop() cleared the fence, or a later claim for the same invocation id superseded this
+    // ticket — and the durable recovery path will re-route the work without any external Tool
+    // I/O from this process. Successful remove also releases the transient fence so the map
+    // cannot leak per invocation.
+    if (!pendingTickets.remove(invocationId, ticket)) {
       return;
     }
     dispatchClaimed(ownership);

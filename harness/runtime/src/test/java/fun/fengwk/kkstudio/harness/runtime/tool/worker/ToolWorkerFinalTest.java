@@ -644,6 +644,33 @@ class ToolWorkerFinalTest {
     assertFalse(fixture.worker.hasActiveExecution());
   }
 
+  @Test
+  void admittedDeferredDispatchReleasesTicketBeforeNextDispatch() {
+    // After admission, the conditional-remove gate releases the transient fence, so a later
+    // dispatch for the same invocation id must be able to admit its own ticket without being
+    // fenced out by an orphaned previous entry.
+    DeferredExecutor deferred = new DeferredExecutor();
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.rebuildWorkerWithExecutor(deferred);
+
+    // First dispatch admits its ticket, runs, completes, and releases the fence.
+    assertTrue(fixture.worker.dispatch(1));
+    deferred.runPending();
+    fixture.tool.listener.onComplete(result("first"));
+    assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.terminalStatus);
+    assertFalse(fixture.worker.hasActiveExecution());
+    assertEquals(1, fixture.tool.executions);
+
+    // Second dispatch for the same invocation id must run a fresh tool.execute — an orphaned
+    // ticket from the first dispatch must not fence out the second admission.
+    assertTrue(fixture.worker.dispatch(1));
+    deferred.runPending();
+    assertEquals(2, fixture.tool.executions);
+    fixture.tool.listener.onComplete(result("second"));
+    assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.terminalStatus);
+    assertFalse(fixture.worker.hasActiveExecution());
+  }
+
   private Fixture fixture(ToolSideEffect sideEffect) {
     Fixture fixture = new Fixture(sideEffect);
     fixture.rebuildWorker();
