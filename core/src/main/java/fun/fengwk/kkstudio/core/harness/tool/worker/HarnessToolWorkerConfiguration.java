@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
 
 import java.time.Clock;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -36,6 +37,19 @@ public class HarnessToolWorkerConfiguration {
   public ScheduledExecutorService toolWorkerScheduler() {
     return Executors.newScheduledThreadPool(
         2, Thread.ofPlatform().name("tool-worker-", 0L).daemon(true).factory());
+  }
+
+  /**
+   * Dedicated executor for post-claim external Tool execution. Kept separate from {@link
+   * #toolWorkerScheduler()} so watchdogs (heartbeat / deadline / partial flush) are not coupled to
+   * potentially long-running blocking Tool I/O. Java 21 virtual threads are a natural fit for
+   * blocking remote Tool sends; {@code destroyMethod = "shutdown"} keeps in-flight tasks owned by
+   * Spring lifecycle but does not wait, matching the existing scheduler wiring.
+   */
+  @Bean(destroyMethod = "shutdown")
+  @ConditionalOnMissingBean(name = "toolWorkerExecutor")
+  public ExecutorService toolWorkerExecutor() {
+    return Executors.newVirtualThreadPerTaskExecutor();
   }
 
   @Bean
@@ -58,7 +72,8 @@ public class HarnessToolWorkerConfiguration {
       RealtimeEventSink realtimeEventSink,
       ToolWorkerConfig config,
       Clock clock,
-      @Qualifier("toolWorkerScheduler") ScheduledExecutorService toolWorkerScheduler) {
+      @Qualifier("toolWorkerScheduler") ScheduledExecutorService toolWorkerScheduler,
+      @Qualifier("toolWorkerExecutor") ExecutorService toolWorkerExecutor) {
     return new ToolWorker(
         transactions,
         registry,
@@ -70,6 +85,7 @@ public class HarnessToolWorkerConfiguration {
         config,
         clock,
         toolWorkerScheduler,
+        toolWorkerExecutor,
         () -> UUID.randomUUID().toString());
   }
 }

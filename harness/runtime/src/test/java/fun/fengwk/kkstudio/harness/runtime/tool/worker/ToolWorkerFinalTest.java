@@ -47,6 +47,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -233,6 +235,7 @@ class ToolWorkerFinalTest {
             ToolWorkerConfig.DEFAULT,
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
+            Runnable::run,
             () -> "worker-token");
 
     assertTrue(worker.dispatch(1));
@@ -545,6 +548,71 @@ class ToolWorkerFinalTest {
     assertFalse(fixture.worker.hasActiveExecution());
   }
 
+  @Test
+  void dispatchReturnsBeforeExternalToolExecutionOnCallerThread() throws Exception {
+    // Deferred executor proves dispatch() must NOT call Tool.execute on the caller thread.
+    DeferredExecutor deferred = new DeferredExecutor();
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.rebuildWorkerWithExecutor(deferred);
+
+    // Caller thread (test thread) - dispatch must return without invoking external Tool.execute.
+    assertTrue(fixture.worker.dispatch(1));
+    assertEquals(1, fixture.transactions.claimCalls);
+    assertEquals(0, fixture.tool.executions);
+    assertFalse(fixture.worker.hasActiveExecution());
+    assertTrue(deferred.hasPending());
+
+    // Drive the executor; Tool.execute must now run on the executor, not the caller.
+    deferred.runPending();
+    assertEquals(1, fixture.tool.executions);
+    assertTrue(fixture.worker.hasActiveExecution());
+
+    // Complete the tool call; existing terminal path remains correct under async launch.
+    fixture.tool.listener.onComplete(result("done"));
+    assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.terminalStatus);
+    assertFalse(fixture.worker.hasActiveExecution());
+  }
+
+  @Test
+  void submissionRejectionReleasesClaimWithoutExternalToolExecution() {
+    Executor rejecting =
+        command -> {
+          throw new RejectedExecutionException("test executor is shut down");
+        };
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.rebuildWorkerWithExecutor(rejecting);
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertEquals(1, fixture.transactions.claimCalls);
+    assertEquals(1, fixture.transactions.releaseUnstartedCalls);
+    assertEquals(InvocationStatus.QUEUED, fixture.transactions.releasedStatus);
+    assertNull(fixture.transactions.releasedNextAttemptAt);
+    assertNull(fixture.transactions.terminalStatus);
+    assertEquals(0, fixture.tool.executions);
+    assertFalse(fixture.worker.hasActiveExecution());
+  }
+
+  @Test
+  void submissionRejectionOnRetryWaitReschedulesAtUnavailableRetryDelay() {
+    Executor rejecting =
+        command -> {
+          throw new RejectedExecutionException("test executor is shut down");
+        };
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.candidate = retryWaiting(environmentDescriptor(), "env-a");
+    fixture.transactions.descriptor = environmentDescriptor();
+    fixture.rebuildWorkerWithExecutor(rejecting);
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertEquals(1, fixture.transactions.releaseUnstartedCalls);
+    assertEquals(InvocationStatus.RETRY_WAIT, fixture.transactions.releasedStatus);
+    assertEquals(
+        NOW.plus(ToolWorkerConfig.DEFAULT.unavailableRetryDelay()),
+        fixture.transactions.releasedNextAttemptAt);
+    assertNull(fixture.transactions.terminalStatus);
+    assertEquals(0, fixture.tool.executions);
+  }
+
   private Fixture fixture(ToolSideEffect sideEffect) {
     Fixture fixture = new Fixture(sideEffect);
     fixture.rebuildWorker();
@@ -680,6 +748,7 @@ class ToolWorkerFinalTest {
     private boolean realtimeFailure;
     private ToolWorker worker;
     private RemoteToolTransport transport = noopTransport();
+    private Executor dispatchExecutor = Runnable::run;
 
     private Fixture(ToolSideEffect sideEffect) {
       ToolDescriptor descriptor = descriptor(sideEffect);
@@ -694,6 +763,11 @@ class ToolWorkerFinalTest {
 
     private void rebuildWorkerWithTransport(RemoteToolTransport transport) {
       this.transport = transport;
+      rebuildWorker(ToolWorkerConfig.DEFAULT);
+    }
+
+    private void rebuildWorkerWithExecutor(Executor executor) {
+      this.dispatchExecutor = executor;
       rebuildWorker(ToolWorkerConfig.DEFAULT);
     }
 
@@ -717,6 +791,7 @@ class ToolWorkerFinalTest {
               config,
               Clock.fixed(NOW, ZoneOffset.UTC),
               scheduler,
+              dispatchExecutor,
               () -> "worker-token");
     }
   }
@@ -900,6 +975,30 @@ class ToolWorkerFinalTest {
     @Override
     public Optional<Artifact> find(String artifactId) {
       return Optional.empty();
+    }
+  }
+
+  /**
+   * Executor that captures submitted Runnables without executing them, for async-dispatch tests.
+   */
+  private static final class DeferredExecutor implements Executor {
+    private final List<Runnable> pending = new ArrayList<>();
+
+    @Override
+    public synchronized void execute(Runnable command) {
+      pending.add(command);
+    }
+
+    synchronized boolean hasPending() {
+      return !pending.isEmpty();
+    }
+
+    synchronized void runPending() {
+      List<Runnable> snapshot = new ArrayList<>(pending);
+      pending.clear();
+      for (Runnable runnable : snapshot) {
+        runnable.run();
+      }
     }
   }
 }
