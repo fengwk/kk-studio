@@ -77,6 +77,7 @@ harness_thread
 harness_thread_input
 harness_model_invocation
 harness_tool_invocation
+harness_execution_target
 harness_interaction
 harness_retry_policy
 harness_thread_goal
@@ -169,6 +170,13 @@ ENVIRONMENT
 ```
 
 Gateway 只拥有连接与协议，不是第二套 durable 状态机。
+
+`harness_execution_target` 为每个 durable Thread/Model/Tool target 保留唯一队列行，并以
+`dispatch_enabled` 作为显式 gate。PLATFORM Tool target 由 `schedule` 创建为 enabled；ENVIRONMENT
+Tool target 由 Reconciler materialization 先 `park`，同一事务完成后只 enable 每个 route 的 oldest
+queued head。route FIFO 使用 Tool invocation 的 `created_at, assistant_entry_id, ordinal, id`，
+RUNNING、RETRY_WAIT 和未来的 WAITING_INTERACTION head 会阻塞后续 sibling。due/nearest dispatcher
+查询忽略 disabled row，但 inspection/ownership `findAll` 与 `lock` 仍可见 parked state。
 
 ### 3.6 Interaction
 

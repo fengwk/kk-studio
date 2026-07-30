@@ -59,6 +59,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnaps
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.TurnBoundary;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolResultJsonCodec;
@@ -77,6 +78,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -551,6 +553,8 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
       ProviderResponse response,
       RuntimeConfigSnapshot config,
       Instant now) {
+    Instant persistedNow = persisted(now);
+    LinkedHashSet<String> environmentRoutes = new LinkedHashSet<>();
     for (int ordinal = 0; ordinal < response.toolCalls().size(); ordinal++) {
       var call = response.toolCalls().get(ordinal);
       ToolBinding binding =
@@ -576,13 +580,24 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
           != 1) {
         throw new IllegalStateException("cannot materialize tool invocation");
       }
-      requireTargetAffected(
-          executionTargetStore.schedule(
-              ExecutionTargetKind.TOOL_INVOCATION,
-              invocationId,
-              binding.environmentName(),
-              persisted(now)),
-          "schedule tool invocation");
+      if (binding.location() == ToolExecutionLocation.ENVIRONMENT) {
+        requireTargetAffected(
+            executionTargetStore.park(
+                ExecutionTargetKind.TOOL_INVOCATION,
+                invocationId,
+                binding.environmentName(),
+                persistedNow),
+            "park tool invocation");
+        environmentRoutes.add(binding.environmentName());
+      } else {
+        requireTargetAffected(
+            executionTargetStore.schedule(
+                ExecutionTargetKind.TOOL_INVOCATION, invocationId, null, persistedNow),
+            "schedule tool invocation");
+      }
+    }
+    for (String routeKey : environmentRoutes) {
+      executionTargetStore.activateOldestEnvironment(routeKey, persistedNow);
     }
   }
 

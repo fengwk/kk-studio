@@ -5,9 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 
@@ -40,6 +42,7 @@ class PostgresqlExecutionTargetListenerIntegrationTest extends PostgresSpringTes
   @Autowired private PostgresqlExecutionTargetStore store;
   @Autowired private DataSource dataSource;
   @Autowired private PlatformTransactionManager txm;
+  @MockitoBean private EnvironmentReadyListener environmentReadyListener;
 
   @Test
   void notifyReachesDispatcherAndWakesIt() throws Exception {

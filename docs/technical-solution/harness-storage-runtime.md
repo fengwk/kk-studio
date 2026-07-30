@@ -102,6 +102,15 @@ where id = :thread_id;
 
 Model/Tool retry 到期只 dispatch 对应 Invocation，terminal 前不必激活 Thread。
 
+`harness_execution_target` 是唯一 durable activation queue：每个 `(target_kind, target_id)` 只有一行，
+`dispatch_enabled` 是显式 dispatch gate。`lock` 与 `findAll` 可见 disabled parked row，但 `lockDue`、due
+扫描和 nearest-due timer 只读取 enabled row。PLATFORM target 通过 `schedule` 正常启用；ENVIRONMENT
+Tool target 先通过 `park` 写入 disabled row，完成同一批 materialization 后按 route 激活 oldest queued
+head。route FIFO 顺序固定为 joined Tool invocation 的 `created_at, assistant_entry_id, ordinal, id`；
+RUNNING、RETRY_WAIT 或未来的 WAITING_INTERACTION head 都阻塞后续 sibling。Tool terminal 删除当前
+target、调度 owning Thread 后，在同一事务中激活下一 route head。启用插入、enable transition 和
+enabled row 的严格提前会触发 PostgreSQL NOTIFY；parked/disabled row rewrite 与 lease extension 不会。
+
 Thread claim 条件：`runnable=true`、`head_entry_id is not null` 且 processor lease 为空/过期。claim 写新 token/until，不递增 `execution_epoch`。成功 suspend/create ModelInvocation/quiesce 时清 lease 并 `runnable=false`；异常 release 保留 `runnable=true`。
 
 quiesce 前锁 Thread 并 recheck：queued Input、terminal-unapplied Invocation、blocker、response debt。

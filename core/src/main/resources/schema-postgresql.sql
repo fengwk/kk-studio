@@ -618,6 +618,10 @@ create table harness_tool_invocation (
 
 create index idx_harness_tool_invocation_location_claim
     on harness_tool_invocation (location, environment_name, status, next_attempt_at, id);
+create index idx_harness_tool_invocation_environment_queue
+    on harness_tool_invocation (environment_name, created_at, assistant_entry_id, ordinal, id)
+    where location = 'ENVIRONMENT'
+      and status in ('QUEUED', 'RUNNING', 'RETRY_WAIT', 'WAITING_INTERACTION');
 create index idx_harness_tool_invocation_status
     on harness_tool_invocation (status, id);
 create index idx_harness_tool_invocation_worker_until
@@ -755,22 +759,25 @@ create table harness_artifact (
 ------------------------------------------------------------------------------
 -- 2.5 Harness durable execution target (sole activation queue)
 --
--- A target row persists for the entire work lifecycle and acts as the only
--- activation queue. NULL route_key targets are eligible on every node;
--- non-NULL route_key targets are eligible only on a node whose route
--- eligibility snapshot contains that key (for example, ENVIRONMENT Tool
--- invocations are route_key=environmentName and only dispatchable when
--- that environment is locally READY). Insert and the strictly-earlier
--- update of available_at must trigger a transactional NOTIFY so the
--- in-process LISTEN loop wakes the drainer without periodic scans or
--- per-invocation timers. Lease-extending updates do NOT notify.
+-- A single target row persists for the entire work lifecycle and is the only
+-- durable activation queue. dispatch_enabled is the explicit gate: disabled
+-- rows remain visible to ownership/reconciliation inspection but are excluded
+-- from due scans and nearest-due timing. NULL route_key targets are eligible
+-- on every node; non-NULL route_key targets are eligible only on a node whose
+-- route eligibility snapshot contains that key. ENVIRONMENT Tool targets are
+-- initially parked and only the FIFO route head is enabled. FIFO order is the
+-- owning Tool invocation's created_at, assistant_entry_id, ordinal, id.
+-- An enabled insert, an enable transition, or a strictly-earlier move of an
+-- enabled row triggers transactional NOTIFY; lease extensions and disabled-row
+-- rewrites do not.
 ------------------------------------------------------------------------------
 
 create table harness_execution_target (
-    target_kind    varchar(32)  not null,
-    target_id      bigint       not null,
-    route_key      varchar(128),
-    available_at   timestamptz(3) not null,
+    target_kind     varchar(32)  not null,
+    target_id       bigint       not null,
+    route_key       varchar(128),
+    dispatch_enabled boolean      not null default true,
+    available_at    timestamptz(3) not null,
     constraint pk_harness_execution_target primary key (target_kind, target_id),
     constraint ck_harness_execution_target_kind check (
         target_kind in ('THREAD', 'MODEL_INVOCATION', 'TOOL_INVOCATION')
@@ -782,39 +789,49 @@ create table harness_execution_target (
 );
 
 create index idx_harness_execution_target_due
-    on harness_execution_target (available_at, target_kind, target_id);
+    on harness_execution_target (available_at, target_kind, target_id)
+    where dispatch_enabled;
 
 create index idx_harness_execution_target_route
     on harness_execution_target (route_key, available_at)
-    where route_key is not null;
+    where dispatch_enabled and route_key is not null;
 
--- INSERT always notifies; the row is new and must wake every node that
--- might be eligible.
+-- The activation query must see parked rows as well as enabled rows. Keep this
+-- route queue index non-partial; dispatcher scans use the partial indexes above.
+create index idx_harness_execution_target_route_queue
+    on harness_execution_target (route_key, target_kind, target_id);
+
+-- Only an enabled insertion wakes a dispatcher. Parked rows are durable but
+-- cannot be dispatched until the route head is activated.
 create or replace function harness_execution_target_notify_insert()
 returns trigger language plpgsql as $$
 begin
-    perform pg_notify('harness_execution_target', '');
-    return null;
+    if new.dispatch_enabled then
+        perform pg_notify('harness_execution_target', '');
+    end if;
+    return new;
 end $$;
 
 create trigger trg_harness_execution_target_notify_insert
     after insert on harness_execution_target
     for each row execute function harness_execution_target_notify_insert();
 
--- UPDATE OF available_at notifies ONLY when the new value is strictly
--- earlier than the old value. Lease extensions (new > old) and idempotent
--- rewrites (new == old) do not wake any node.
+-- Wake when a row becomes enabled or an enabled row moves strictly earlier.
+-- Lease extension, equal-time rewrites, and all disabled-row rewrites stay
+-- silent. Keep dispatch_enabled in the UPDATE OF list so an enable transition
+-- invokes this function.
 create or replace function harness_execution_target_notify_update()
 returns trigger language plpgsql as $$
 begin
-    if new.available_at < old.available_at then
+    if new.dispatch_enabled
+       and (not old.dispatch_enabled or new.available_at < old.available_at) then
         perform pg_notify('harness_execution_target', '');
     end if;
     return new;
 end $$;
 
 create trigger trg_harness_execution_target_notify_update
-    after update of available_at on harness_execution_target
+    after update of dispatch_enabled, available_at on harness_execution_target
     for each row execute function harness_execution_target_notify_update();
 
 ------------------------------------------------------------------------------

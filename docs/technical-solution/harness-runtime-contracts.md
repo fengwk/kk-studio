@@ -306,6 +306,11 @@ public record ExecutionTarget(ExecutionTargetKind kind, long id) {}
 
 Notifier 失败不得回滚已提交业务事务；Redis Pub/Sub signal 不提供 replay 或 scan 补偿。
 
+Core 的 PostgreSQL target store 为每个 `(kind, id)` 保留唯一 durable row，并以 `dispatch_enabled` 作为
+显式 gate。`schedule` 创建/启用普通 target；ENVIRONMENT Tool materialization 使用 `park` 创建 disabled
+row，随后按 `created_at, assistant_entry_id, ordinal, id` 只启用 route FIFO head。`lockDue`、due scan 和
+nearest-due timing 忽略 disabled row，`lock`/`findAll` 仍可观察 parked row。
+
 ### 4.3 RealtimeEventSink
 
 ```java

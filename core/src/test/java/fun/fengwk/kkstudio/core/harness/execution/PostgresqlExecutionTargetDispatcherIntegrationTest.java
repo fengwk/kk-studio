@@ -6,9 +6,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 
@@ -43,6 +45,7 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
 
   @Autowired private PostgresqlExecutionTargetStore store;
   @Autowired private PlatformTransactionManager txm;
+  @MockitoBean private EnvironmentReadyListener environmentReadyListener;
 
   @Test
   void startupDrainProcessesPreExistingDueTargets() throws Exception {
@@ -120,6 +123,51 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
           firstReady.await(5, TimeUnit.SECONDS),
           "READY must allow the durable target to be claimed");
       assertEquals(List.of(10L), handler.handled);
+    } finally {
+      dispatcher.stop();
+      shutdown(drain);
+      shutdown(wake);
+    }
+  }
+
+  @Test
+  void parkedTargetIsInvisibleToDispatcherUntilNormalSchedulingEnablesIt() throws Exception {
+    store.park(
+        ExecutionTargetKind.TOOL_INVOCATION, 11L, "env-a", BASE.minus(Duration.ofMinutes(1)));
+
+    RecordingHandler handler = new RecordingHandler(new TransactionTemplate(txm), store);
+    CountDownLatch processed = new CountDownLatch(1);
+    ScheduledExecutorService drain = singleThread("dispatcher-parked-drain");
+    ScheduledExecutorService wake = singleThread("dispatcher-parked-wake");
+    PostgresqlExecutionTargetDispatcher dispatcher =
+        new PostgresqlExecutionTargetDispatcher(
+            store,
+            ExecutionTargetRouteEligibility.of(Set.of("env-a")),
+            handler.wrap(processed),
+            Clock.fixed(BASE, ZoneOffset.UTC),
+            drain,
+            wake);
+    try {
+      dispatcher.start();
+      assertFalse(
+          processed.await(500, TimeUnit.MILLISECONDS),
+          "disabled target must not reach the dispatcher");
+      assertFalse(
+          store.findAll().stream()
+              .filter(row -> row.targetId() == 11L)
+              .findFirst()
+              .orElseThrow()
+              .dispatchEnabled());
+
+      assertEquals(
+          1,
+          store.schedule(
+              ExecutionTargetKind.TOOL_INVOCATION,
+              11L,
+              "env-a",
+              BASE.minus(Duration.ofMinutes(1))));
+      dispatcher.wake();
+      assertTrue(processed.await(5, TimeUnit.SECONDS), "enabled target must be dispatched");
     } finally {
       dispatcher.stop();
       shutdown(drain);

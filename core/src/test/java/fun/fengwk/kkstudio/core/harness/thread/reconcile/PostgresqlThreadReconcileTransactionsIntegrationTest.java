@@ -10,7 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.harness.thread.command.TestThreads;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.configuration.AgentSnapshot;
@@ -90,6 +92,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
 
   @Autowired private ThreadReconcileTransactions transactions;
   @Autowired private ThreadCommandTransactions commands;
+  @MockitoBean private EnvironmentReadyListener environmentReadyListener;
 
   @Test
   void claimsRenewsAndFencesExpiredTokenAndEpoch() {
@@ -284,6 +287,8 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     List<Long> toolIds = ids("select id from harness_tool_invocation order by ordinal");
     assertEquals(1, targetCount("TOOL_INVOCATION", toolIds.get(0)));
     assertEquals(1, targetCount("TOOL_INVOCATION", toolIds.get(1)));
+    assertTrue(targetDispatchEnabled("TOOL_INVOCATION", toolIds.get(0)));
+    assertTrue(targetDispatchEnabled("TOOL_INVOCATION", toolIds.get(1)));
     assertNull(targetRouteKey("TOOL_INVOCATION", toolIds.get(0)));
     assertEquals("environment", targetRouteKey("TOOL_INVOCATION", toolIds.get(1)));
     assertEquals(7L, longScalar("select usage_provider_total_tokens from harness_model_usage"));
@@ -305,6 +310,38 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
             "select count(*) from harness_thread_input where thread_id = "
                 + prepared.threadId()
                 + " and status = 'QUEUED'"));
+  }
+
+  @Test
+  void materializesEnvironmentRouteWithOnlyOldestSiblingDispatchEnabled() {
+    Instant now = Instant.now();
+    Prepared prepared = prepareDebt(now, List.of(environmentTool()));
+    long modelId = createInvocation(prepared, now);
+    completeModel(
+        modelId,
+        "SUCCEEDED",
+        response(
+            List.of(
+                new ProviderToolCall("environment-one", "environmentTool", "{}"),
+                new ProviderToolCall("environment-two", "environmentTool", "{}"))),
+        null);
+
+    wake(prepared.threadId());
+    ThreadOwnership owner =
+        transactions.claim(prepared.threadId(), "environment-queue", Instant.now()).orElseThrow();
+    assertEquals(
+        ApplyOutcome.PROGRESSED, transactions.applyTerminalModel(owner, modelId, Instant.now()));
+
+    List<Long> toolIds =
+        ids(
+            "select id from harness_tool_invocation where thread_id = "
+                + prepared.threadId()
+                + " order by ordinal");
+    assertEquals(2, toolIds.size());
+    assertTrue(targetDispatchEnabled("TOOL_INVOCATION", toolIds.get(0)));
+    assertFalse(targetDispatchEnabled("TOOL_INVOCATION", toolIds.get(1)));
+    assertEquals("environment", targetRouteKey("TOOL_INVOCATION", toolIds.get(0)));
+    assertEquals("environment", targetRouteKey("TOOL_INVOCATION", toolIds.get(1)));
   }
 
   @Test
@@ -776,6 +813,16 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     } catch (SQLException exception) {
       throw new AssertionError(exception);
     }
+  }
+
+  private static boolean targetDispatchEnabled(String kind, long id) {
+    return longScalar(
+            "select case when dispatch_enabled then 1 else 0 end"
+                + " from harness_execution_target where target_kind = '"
+                + kind
+                + "' and target_id = "
+                + id)
+        == 1L;
   }
 
   private static String targetRouteKey(String kind, long id) {

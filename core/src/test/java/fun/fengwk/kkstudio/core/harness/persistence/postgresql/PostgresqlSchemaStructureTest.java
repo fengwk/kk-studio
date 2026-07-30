@@ -178,7 +178,32 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   @Test
   void harnessExecutionTargetExposesOnlyItsDurableQueueContract() throws SQLException {
     assertColumns(
-        "harness_execution_target", "target_kind", "target_id", "route_key", "available_at");
+        "harness_execution_target",
+        "target_kind",
+        "target_id",
+        "route_key",
+        "dispatch_enabled",
+        "available_at");
+  }
+
+  @Test
+  void executionTargetRouteQueueIndexIncludesParkedRows() throws SQLException {
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "select indexdef from pg_indexes where schemaname = 'public'"
+                    + " and indexname = 'idx_harness_execution_target_route_queue'")) {
+      try (ResultSet rs = ps.executeQuery()) {
+        assertTrue(rs.next(), "route queue index must exist");
+        String indexDefinition = rs.getString(1).toLowerCase();
+        assertTrue(
+            indexDefinition.contains("(route_key, target_kind, target_id)"),
+            () -> "route queue index columns mismatch: " + indexDefinition);
+        assertTrue(
+            !indexDefinition.contains(" where "),
+            () -> "route queue index must be non-partial: " + indexDefinition);
+      }
+    }
   }
 
   @Test
@@ -230,6 +255,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   @Test
   void usesNativeBooleanForFlags() throws SQLException {
     assertColumnType("boolean", "harness_thread", "runnable");
+    assertColumnType("boolean", "harness_execution_target", "dispatch_enabled");
     assertColumnType("boolean", "harness_model_usage", "cache_eligible");
   }
 
