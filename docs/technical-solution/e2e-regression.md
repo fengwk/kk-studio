@@ -99,7 +99,7 @@ reports/e2e/LATEST_RUN.txt
 
 | 层级 | 开关 | 成本 | 覆盖 |
 | --- | --- | --- | --- |
-| L1 | 默认 | 免费 | seed 契约、CRUD、配置校验、Thread 生命周期与 head 重定位、usage 404、proxy |
+| L1 | 默认 | 免费 | seed 契约、CRUD、配置校验、Thread 生命周期与 head 重定位、Thread snapshot 404、proxy |
 | L2 | `--real` | `minimax/MiniMax-M2.7` | 文本轮次 + usage 入账；流式 `/stop` 持久化 partial assistant barrier，并在其后继续 follow-up |
 | L3 | `--real --with-branch` | `minimax/MiniMax-M2.7` | rebind 到历史 Entry 后的分支路径 usage |
 | L4 | `--with-tools` / `--real --with-tools` | daemon / `minimax/MiniMax-M2.7` | Environment READY、tool invocation |
@@ -116,7 +116,7 @@ API 矩阵注册 **58** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 | `seed.structured_model_config` | 19 个模型完整匹配 Pi 快照；xAI 仅 `grok-4.5`；禁止旧 JSON 字段 |
 | `seed.agent_and_provider` | seed agent；七个 Provider 及协议映射 |
 | `thread.blank_first_send_order` | 首发顺序 `createThread -> bootstrap -> USER_MESSAGE`；bootstrap 的 `RUNTIME_CONFIG` 先在路径上，mailbox 只有 USER_MESSAGE 且被 APPLIED |
-| `usage.unknown_thread_404` | 未知 thread usage 404 |
+| `thread_snapshot.unknown_thread_404` | 未知 Thread snapshot 404 |
 | `frontend.proxy_model_contract` | 5173 代理契约 |
 | `thread.commands_model_yolo` | SET_MODEL + SET_YOLO 应用 |
 | `thread.commands_model_invalid_variant_rejected` | 非法 Variant 在 SET_MODEL 入队前拒绝 |
@@ -231,11 +231,16 @@ PUT  /api/threads/{id}/head           # headEntryId 可为 null
 POST /api/threads/{id}/stop
 PUT  /api/threads/{id}/agent|model|yolo
 POST /api/threads/{id}/messages
-GET  /api/usage/threads/{id}   # unknown => 404
+GET  /api/threads/{id}/snapshot # unknown => 404; one coherent Thread/entries/inputs/invocations/interactions/usage projection
+GET  /api/threads/{id}/events/stream?afterRevision={revision}
 GET  /api/models               # structured config only
 ```
 
 上述 Thread 写接口的请求体均含必填 `expectedExecutionEpoch`：epoch 过期或 Thread 非静止 => `409`，未知资源 => `404`。
+
+Thread snapshot 的 `revision` 是十进制字符串的 durable cursor；SSE 的 `revision` 帧携带同一
+durable id，`resync` 提示客户端重新加载 snapshot。Redis `realtime` 增量无 SSE id，仅用于
+瞬态输出，不能替代 durable snapshot。
 
 Catalog（Provider / Model / Agent / Chat）响应中的 `version` 是十进制字符串，`createTime` /
 `updateTime` 是 Instant 时间戳。每次成功更新版本递增；PUT 的 `expectedVersion` 或 DELETE

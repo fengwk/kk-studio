@@ -297,6 +297,8 @@ export interface HarnessThreadDTO {
   headEntryId: string | null
   /** CAS fencing token; every external mutation must echo the currently known value. */
   executionEpoch: BackendLong
+  /** PostgreSQL durable snapshot cursor, always a decimal bigint string. */
+  revision: string
   /** Derived display status: RUNNING > WAITING > RUNNABLE > UNBOUND/IDLE. */
   status: ThreadStatus
   inputSequence: BackendLong
@@ -432,6 +434,53 @@ export interface ToolInvocationDTO {
   startedAt: BackendDateTime
   finishedAt: BackendDateTime
   updateTime: BackendDateTime
+}
+
+export interface ModelInvocationDTO {
+  id: string
+  threadId: string
+  sourceHeadEntryId: string
+  executionEpoch: BackendLong
+  requestJson: string
+  status: string
+  attempt: number
+  nextAttemptAt: InstantTimestamp
+  workerUntil: InstantTimestamp
+  deadlineAt: InstantTimestamp
+  lastActivityAt: InstantTimestamp
+  resultJson: string | null
+  errorJson: string | null
+  appliedAt: InstantTimestamp
+  createdAt: InstantTimestamp
+  startedAt: InstantTimestamp
+  finishedAt: InstantTimestamp
+  safeStreamSnapshotJson: string | null
+}
+
+export interface InteractionDTO {
+  id: string
+  ownerKind: string
+  ownerId: string
+  handlerType: string
+  projectionJson: string
+  status: string
+  responseJson: string | null
+  expiresAt: InstantTimestamp
+  version: string
+  createdAt: InstantTimestamp
+  resolvedAt: InstantTimestamp
+}
+
+/** Coherent PostgreSQL Thread projection used as the sole chat-runtime query. */
+export interface HarnessThreadSnapshotDTO {
+  revision: string
+  thread: HarnessThreadDTO
+  entries: HarnessSessionEntryDTO[]
+  inputs: HarnessThreadInputDTO[]
+  modelInvocations: ModelInvocationDTO[]
+  toolInvocations: ToolInvocationDTO[]
+  openInteractions: InteractionDTO[]
+  usage: ModelUsageSummaryDTO
 }
 
 export interface ToolArtifactRefDTO {

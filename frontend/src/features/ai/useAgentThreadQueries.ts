@@ -17,43 +17,14 @@ export function useAgentThreadQueries(threadId: string) {
     queryKey: queryKeys.providers.list,
     queryFn: () => agentService.listProviders(),
   })
-  const threadQuery = useQuery({
-    queryKey: queryKeys.threads.detail(threadId),
-    queryFn: () => harnessService.getThread(threadId),
+  const snapshotQuery = useQuery({
+    queryKey: queryKeys.threads.snapshot(threadId),
+    queryFn: () => harnessService.getThreadSnapshot(threadId),
     enabled: Boolean(threadId),
-    refetchInterval: (query) => {
-      const thread = query.state.data
-      return isThreadActive(thread?.status) ? 1200 : false
-    },
   })
-  const thread = threadQuery.data
-  // Pane only stores threadId; the Session is derived from the Thread head and is null when UNBOUND.
+  const snapshot = snapshotQuery.data
+  const thread = snapshot?.thread
   const sessionId = thread?.sessionId ?? ''
-  const sessionQuery = useQuery({
-    queryKey: queryKeys.sessions.detail(sessionId),
-    queryFn: () => harnessService.getSession(sessionId),
-    enabled: Boolean(sessionId),
-  })
-  const inputsQuery = useQuery({
-    queryKey: queryKeys.threads.inputs(threadId),
-    queryFn: () => harnessService.listThreadInputs(threadId),
-    enabled: Boolean(threadId),
-    refetchInterval: (query) => {
-      const inputs = query.state.data ?? []
-      return inputs.some((input) => input.status === 'QUEUED') || isThreadActive(thread?.status) ? 1000 : false
-    },
-  })
-  const inputs = inputsQuery.data ?? []
-  const workingHint =
-    isThreadActive(thread?.status)
-    || inputs.some((input) => input.status === 'QUEUED')
-
-  const entriesQuery = useQuery({
-    queryKey: queryKeys.threads.entries(threadId),
-    queryFn: () => harnessService.listThreadEntries(threadId),
-    enabled: Boolean(threadId),
-    refetchInterval: workingHint ? 1000 : false,
-  })
 
   // Mirror the console join so the thread panel surfaces the same enriched label without leaking
   // the join field through the wire contract.
@@ -66,22 +37,18 @@ export function useAgentThreadQueries(threadId: string) {
     agentsQuery,
     modelsQuery,
     providersQuery,
-    sessionQuery,
-    threadQuery,
-    entriesQuery,
-    inputsQuery,
+    snapshotQuery,
     agents: agentsQuery.data?.results ?? [],
     models,
     providers,
-    session: sessionQuery.data,
+    session: undefined,
     thread,
     sessionId,
-    entries: entriesQuery.data ?? [],
-    inputs,
+    entries: snapshot?.entries ?? [],
+    inputs: snapshot?.inputs ?? [],
+    modelInvocations: snapshot?.modelInvocations ?? [],
+    toolInvocations: snapshot?.toolInvocations ?? [],
+    openInteractions: snapshot?.openInteractions ?? [],
+    usage: snapshot?.usage,
   }
-}
-
-/** RUNNING / WAITING / RUNNABLE remain polled until the Thread settles to IDLE. */
-export function isThreadActive(status: string | undefined): boolean {
-  return status === 'RUNNING' || status === 'WAITING' || status === 'RUNNABLE'
 }

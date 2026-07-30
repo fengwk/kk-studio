@@ -12,9 +12,7 @@ import fun.fengwk.kkstudio.core.harness.query.PostgresqlHarnessQueryMapper;
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadQueryService;
 import fun.fengwk.kkstudio.core.harness.usage.service.ModelUsageAggregationService;
-import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
-import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.share.model.ModelUsageSummaryDTO;
 
@@ -63,23 +61,6 @@ public class HarnessThreadQueryServiceImpl implements HarnessThreadQueryService 
     return queryMapper.listAllThreadViews().stream()
         .map(row -> converter.toThread(row, now))
         .toList();
-  }
-
-  @Override
-  public List<HarnessSessionEntryDTO> listPathEntries(String threadId) {
-    HarnessQueryRow thread = requireThread(threadId);
-    if (thread.getHeadEntryId() == null) {
-      return List.of();
-    }
-    return queryMapper.loadPath(thread.getSessionId(), thread.getHeadEntryId()).stream()
-        .map(converter::toEntry)
-        .toList();
-  }
-
-  @Override
-  public List<HarnessThreadInputDTO> listInputs(String threadId) {
-    HarnessQueryRow thread = requireThread(threadId);
-    return queryMapper.listInputsByThread(thread.getId()).stream().map(converter::toInput).toList();
   }
 
   /**

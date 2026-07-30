@@ -6,6 +6,7 @@ import { useAgentThreadController } from '@/features/ai/useAgentThreadController
 import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
+import type { HarnessThreadDTO } from '@/shared/api/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -17,16 +18,10 @@ vi.mock('@/shared/api/agent-service', () => ({
 
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
-    getSession: vi.fn(),
-    listSessionEntries: vi.fn(),
-    getThread: vi.fn(),
-    listThreadEntries: vi.fn(),
-    listThreadInputs: vi.fn(),
+    getThreadSnapshot: vi.fn(),
     submitThreadMessage: vi.fn(),
     createThreadRealtimeStream: vi.fn(),
     setThreadYolo: vi.fn(),
-    getThreadUsage: vi.fn(),
-    listThreadToolInvocations: vi.fn(),
     setThreadAgent: vi.fn(),
     setThreadModel: vi.fn(),
     stopThread: vi.fn(),
@@ -138,35 +133,7 @@ describe('useAgentThreadController', () => {
         },
       ],
     })
-    vi.mocked(harnessService.getSession).mockResolvedValue({
-      sessionId: 's1',
-      title: 'title',
-      createTime: null,
-      updateTime: null,
-    })
-    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
-    vi.mocked(harnessService.getThread).mockResolvedValue(thread)
-    vi.mocked(harnessService.listThreadEntries).mockResolvedValue([])
-    vi.mocked(harnessService.listThreadInputs).mockResolvedValue([])
-    vi.mocked(harnessService.getThreadUsage).mockResolvedValue({
-      scopeType: 'thread',
-      scopeId: '1',
-      recordCount: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      cacheWriteLongTokens: 0,
-      reasoningTokens: 0,
-      providerTotalTokens: 0,
-      cacheEligibleRecordCount: 0,
-      cacheHitRecordCount: 0,
-      cacheHitRatio: 0,
-      tokenReadRatio: 0,
-      unamortizedCacheWriteTokens: 0,
-      costs: [],
-    })
-    vi.mocked(harnessService.listThreadToolInvocations).mockResolvedValue([])
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread))
     vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(realtimeSource as EventSource)
     vi.mocked(harnessService.submitThreadMessage).mockResolvedValue({
       inputId: 'i1',
@@ -564,7 +531,7 @@ describe('useAgentThreadController', () => {
       ({ threadId }) => useAgentThreadController(threadId),
       { initialProps: { threadId: '1' }, wrapper },
     )
-    await waitFor(() => expect(harnessService.createThreadRealtimeStream).toHaveBeenCalledWith('1', '0-0'))
+    await waitFor(() => expect(harnessService.createThreadRealtimeStream).toHaveBeenCalledWith('1', '0'))
 
     act(() => {
       realtimeSource.emitRealtime(
@@ -654,7 +621,7 @@ describe('useAgentThreadController', () => {
   })
 
   it('surfaces stop failures without draft rewrite, then clears message replay identity on success', async () => {
-    vi.mocked(harnessService.getThread).mockResolvedValue({ ...thread, status: 'RUNNING' } as never)
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot({ ...thread, status: 'RUNNING' }))
     vi.mocked(harnessService.stopThread)
       .mockRejectedValueOnce(new Error('network unavailable'))
       .mockResolvedValueOnce({ executionEpoch: 8, cancelledInputs: [] })
@@ -671,13 +638,15 @@ describe('useAgentThreadController', () => {
   })
 
   it('treats an UNBOUND Thread as a legal but non-writable state', async () => {
-    vi.mocked(harnessService.getThread).mockResolvedValue({
-      ...thread,
-      sessionId: null,
-      sessionTitle: null,
-      headEntryId: null,
-      status: 'UNBOUND',
-    } as never)
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot({
+        ...thread,
+        sessionId: null,
+        sessionTitle: null,
+        headEntryId: null,
+        status: 'UNBOUND',
+      }),
+    )
     const { result } = renderHook(() => useAgentThreadController('1'), { wrapper })
     await waitFor(() => expect(result.current.thread?.status).toBe('UNBOUND'))
 
@@ -708,7 +677,7 @@ describe('useAgentThreadController', () => {
     )
     const { result } = renderHook(() => useAgentThreadController('1'), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
-    const threadCallsBefore = vi.mocked(harnessService.getThread).mock.calls.length
+    const snapshotCallsBefore = vi.mocked(harnessService.getThreadSnapshot).mock.calls.length
 
     act(() => result.current.setDraft('stale message'))
     await act(async () => { await result.current.submitMessage() })
@@ -716,9 +685,9 @@ describe('useAgentThreadController', () => {
     expect(result.current.actionError).toContain('Thread 状态已变化')
     expect(result.current.actionError).toContain('expected execution epoch mismatch')
     expect(result.current.actionError).toContain('请重试')
-    // The Thread detail query is invalidated so the retry carries the fresh epoch.
+    // The Thread snapshot is invalidated so the retry carries the fresh epoch.
     await waitFor(() =>
-      expect(vi.mocked(harnessService.getThread).mock.calls.length).toBeGreaterThan(threadCallsBefore),
+      expect(vi.mocked(harnessService.getThreadSnapshot).mock.calls.length).toBeGreaterThan(snapshotCallsBefore),
     )
     // The failed draft is still restored for an explicit retry.
     expect(result.current.draft).toBe('stale message')
@@ -761,6 +730,7 @@ const thread = {
   executionEpoch: 7,
   status: 'IDLE' as const,
   inputSequence: 0,
+  revision: '0',
   activeAgentDefinitionId: 'agent-1',
   activeAgentName: 'assistant',
   modelId: 'm1',
@@ -769,4 +739,34 @@ const thread = {
   processing: false,
   createTime: null,
   updateTime: null,
+}
+
+function snapshot(threadValue: HarnessThreadDTO) {
+  return {
+    revision: threadValue.revision,
+    thread: threadValue,
+    entries: [],
+    inputs: [],
+    modelInvocations: [],
+    toolInvocations: [],
+    openInteractions: [],
+    usage: {
+      scopeType: 'thread',
+      scopeId: threadValue.threadId,
+      recordCount: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      cacheWriteLongTokens: 0,
+      reasoningTokens: 0,
+      providerTotalTokens: 0,
+      cacheEligibleRecordCount: 0,
+      cacheHitRecordCount: 0,
+      cacheHitRatio: 0,
+      tokenReadRatio: 0,
+      unamortizedCacheWriteTokens: 0,
+      costs: [],
+    },
+  }
 }

@@ -55,7 +55,7 @@ describe('useAgentThreadMessageMutation', () => {
       expectedExecutionEpoch: 2,
     })
     await waitFor(() => expect(invalidateSpy).toHaveBeenCalled())
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.threads.detail('t1') })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.threads.snapshot('t1') })
   })
 
   it('reuses the same clientMessageId for retries of one submission attempt', async () => {

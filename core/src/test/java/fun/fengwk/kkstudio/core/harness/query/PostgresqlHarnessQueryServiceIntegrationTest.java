@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.share.model.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.share.model.InteractionDTO;
 import fun.fengwk.kkstudio.share.model.ModelInvocationDTO;
 import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
@@ -201,7 +202,8 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
         "update harness_thread set head_entry_id = ? where id = ?",
         leafEntryId,
         Long.parseLong(threadId));
-    List<HarnessSessionEntryDTO> path = threadQueryService.listPathEntries(threadId);
+    HarnessThreadSnapshotDTO pathSnapshot = threadQueryService.getSnapshot(threadId);
+    List<HarnessSessionEntryDTO> path = pathSnapshot.getEntries();
     assertEquals(
         List.of(bootstrap.rootEntry().id(), assistantEntryId, leafEntryId),
         path.stream().map(e -> Long.parseLong(e.getEntryId())).toList());
@@ -232,7 +234,7 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
         NOW.plusSeconds(3));
     HarnessThreadDTO waiting = threadQueryService.getThread(threadId);
     assertEquals("WAITING", waiting.getStatus());
-    List<HarnessThreadInputDTO> inputs = threadQueryService.listInputs(threadId);
+    List<HarnessThreadInputDTO> inputs = threadQueryService.getSnapshot(threadId).getInputs();
     assertEquals(1, inputs.size());
     assertEquals("USER_MESSAGE", inputs.get(0).getInputType());
     assertEquals("QUEUED", inputs.get(0).getStatus());
@@ -349,7 +351,7 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
     assertThrows(IllegalArgumentException.class, () -> sessionQueryService.getSession("abc"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> threadQueryService.listPathEntries(String.valueOf(Long.MAX_VALUE)));
+        () -> threadQueryService.getSnapshot(String.valueOf(Long.MAX_VALUE)));
   }
 
   private static RuntimeEntryInputPayload userPayload(String content) {

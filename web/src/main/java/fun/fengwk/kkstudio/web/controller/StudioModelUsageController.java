@@ -3,36 +3,21 @@ package fun.fengwk.kkstudio.web.controller;
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
 import lombok.AllArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.core.harness.usage.service.ModelUsageAggregationService;
 import fun.fengwk.kkstudio.share.model.ModelUsageSummaryDTO;
 
-/** 模型调用账本的 Thread、Session 与 Model 聚合 API。 */
+/** 模型调用账本的 Session 与 Model 聚合 API；Thread usage belongs to its snapshot. */
 @AllArgsConstructor
 @RequestMapping("/api/usage")
 @RestController
 public class StudioModelUsageController {
 
   private final ModelUsageAggregationService aggregationService;
-
-  @GetMapping("/threads/{threadId}")
-  public Result<ModelUsageSummaryDTO> summarizeThread(@PathVariable("threadId") String threadId) {
-    try {
-      return Results.ok(
-          aggregationService.summarizeThread(parsePositiveLong(threadId, "threadId")));
-    } catch (IllegalArgumentException error) {
-      if (error.getMessage() != null && error.getMessage().startsWith("unknown thread:")) {
-        throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
-      }
-      throw error;
-    }
-  }
 
   @GetMapping("/sessions/{sessionId}")
   public Result<ModelUsageSummaryDTO> summarizeSession(

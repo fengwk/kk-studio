@@ -1,39 +1,33 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createClientMessageId } from '@/features/ai/useAgentThreadMessageMutation'
 import { harnessService } from '@/shared/api/harness-service'
-import type { BackendLong, HarnessThreadYoloSetDTO } from '@/shared/api/contracts'
+import type {
+  BackendLong,
+  HarnessThreadYoloSetDTO,
+  ModelUsageSummaryDTO,
+  ToolInvocationDTO,
+} from '@/shared/api/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
 
-export function useHarnessThreadObservability(threadId: string, working: boolean) {
+export function useHarnessThreadObservability(
+  threadId: string,
+  usage: ModelUsageSummaryDTO | undefined,
+  toolInvocations: ToolInvocationDTO[],
+) {
   const queryClient = useQueryClient()
-  const usageQuery = useQuery({
-    queryKey: queryKeys.usage.thread(threadId),
-    queryFn: () => harnessService.getThreadUsage(threadId),
-    enabled: Boolean(threadId),
-    refetchInterval: working ? 2000 : false,
-  })
-  const toolInvocationsQuery = useQuery({
-    queryKey: queryKeys.threads.toolInvocations(threadId),
-    queryFn: () => harnessService.listThreadToolInvocations(threadId),
-    enabled: Boolean(threadId),
-    refetchInterval: working ? 1200 : false,
-  })
   const setYoloMutation = useMutation({
     mutationFn: (data: HarnessThreadYoloSetDTO) => harnessService.setThreadYolo(threadId, data),
     retry: 2,
     retryDelay: 0,
     onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.inputs(threadId) }),
-      ])
+      await queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
     },
   })
 
   return {
-    usage: usageQuery.data,
-    toolInvocations: toolInvocationsQuery.data ?? [],
-    observabilityError: usageQuery.error || toolInvocationsQuery.error,
+    usage,
+    toolInvocations,
+    observabilityError: null,
     yoloPending: setYoloMutation.isPending,
     setYolo: (enabled: boolean, expectedExecutionEpoch: BackendLong) =>
       setYoloMutation.mutate({

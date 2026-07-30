@@ -13,14 +13,15 @@ import type { HarnessSessionEntryDTO } from '@/shared/api/contracts'
 /**
  * Snapshot-first realtime subscription.
  *
- * 1) Refresh authoritative PostgreSQL snapshot queries.
- * 2) Tail Redis-backed SSE (`realtime` events on `/events/stream`). Text/thinking deltas are
+ * 1) Load an authoritative PostgreSQL snapshot.
+ * 2) Listen after its durable revision. Redis-backed {@code realtime} text/thinking deltas are
  *    rendered as a transient overlay until the durable Entry arrives; PostgreSQL remains
  *    authoritative after reconnects and stream loss.
  */
 export function useHarnessThreadRealtime(
   threadId: string,
   enabled: boolean,
+  revision: string | undefined,
   entries: HarnessSessionEntryDTO[],
 ): RealtimeModelStream | null {
   const queryClient = useQueryClient()
@@ -35,31 +36,41 @@ export function useHarnessThreadRealtime(
   }, [entries])
 
   useEffect(() => {
-    if (!threadId || !enabled) {
+    if (!threadId || !enabled || revision == null) {
       setModelStream(null)
       return undefined
     }
 
-    const invalidateSnapshots = () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(threadId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.entries(threadId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.inputs(threadId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.toolInvocations(threadId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.usage.thread(threadId) }),
-      ])
-    void invalidateSnapshots()
-
-    const eventSource = harnessService.createThreadRealtimeStream(threadId, '0-0')
-    let refreshTimer: ReturnType<typeof setTimeout> | null = null
-    const scheduleSnapshotRefresh = () => {
-      if (refreshTimer != null) {
+    const invalidateSnapshot = () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
+    let eventSource: EventSource | null = null
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+    let reconnectAttempts = 0
+    let disposed = false
+    const connect = () => {
+      if (disposed) {
         return
       }
-      refreshTimer = setTimeout(() => {
-        refreshTimer = null
-        void invalidateSnapshots()
-      }, 250)
+      eventSource?.close()
+      eventSource = harnessService.createThreadRealtimeStream(threadId, revision)
+      eventSource.addEventListener('revision', invalidateSnapshot as EventListener)
+      eventSource.addEventListener('resync', invalidateSnapshot as EventListener)
+      eventSource.addEventListener('realtime', handleRealtime as EventListener)
+      eventSource.onerror = () => {
+        eventSource?.close()
+        if (retryTimer != null) {
+          return
+        }
+        if (reconnectAttempts >= 3) {
+          void invalidateSnapshot()
+          return
+        }
+        reconnectAttempts += 1
+        retryTimer = setTimeout(() => {
+          retryTimer = null
+          connect()
+        }, reconnectAttempts * 250)
+      }
     }
     const handleRealtime = (event: Event) => {
       const delta = parseRealtimeModelDelta((event as MessageEvent<string>).data)
@@ -80,23 +91,18 @@ export function useHarnessThreadRealtime(
       ) {
         setModelStream((current) => reduceRealtimeModelStream(current, delta))
       }
-      // Redis is a lossy projection. Coalesce REST reloads so token-sized deltas do not trigger
-      // one HTTP round trip each while still converging statuses, usage, and durable entries.
-      scheduleSnapshotRefresh()
     }
 
     setModelStream(null)
-    eventSource.addEventListener('realtime', handleRealtime as EventListener)
-    eventSource.onerror = () => {
-      // Redis/SSE is best-effort; snapshot queries remain authoritative.
-    }
+    connect()
     return () => {
-      if (refreshTimer != null) {
-        clearTimeout(refreshTimer)
+      disposed = true
+      if (retryTimer != null) {
+        clearTimeout(retryTimer)
       }
-      eventSource.close()
+      eventSource?.close()
     }
-  }, [enabled, queryClient, threadId])
+  }, [enabled, queryClient, revision, threadId])
 
   return modelStream?.threadId === threadId ? modelStream : null
 }

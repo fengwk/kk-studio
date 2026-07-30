@@ -47,6 +47,7 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
             .andExpect(jsonPath("$.data.id").isString())
             .andExpect(jsonPath("$.data.title").value("web-chat"))
             .andExpect(jsonPath("$.data.defaultAgentId").value("1"))
+            .andExpect(jsonPath("$.data.version").value("0"))
             .andReturn();
 
     String chatId =
@@ -56,6 +57,12 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
             .get("id")
             .asText();
     assertTrue(chatId.matches("\\d+"));
+    String version =
+        objectMapper
+            .readTree(createResult.getResponse().getContentAsString())
+            .get("data")
+            .get("version")
+            .asText();
 
     try {
       mockMvc
@@ -71,6 +78,7 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
 
       ChatUpdateDTO update = new ChatUpdateDTO();
       update.setTitle("web-chat-renamed");
+      update.setExpectedVersion(version);
       mockMvc
           .perform(
               put("/api/chats/" + chatId)
@@ -83,7 +91,9 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
       // Chat↔Session membership routes no longer exist.
       mockMvc.perform(get("/api/chats/" + chatId + "/sessions")).andExpect(status().isNotFound());
     } finally {
-      mockMvc.perform(delete("/api/chats/" + chatId)).andExpect(status().isNoContent());
+      mockMvc
+          .perform(delete("/api/chats/" + chatId).param("expectedVersion", "1"))
+          .andExpect(status().isNoContent());
     }
   }
 
@@ -101,12 +111,16 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
                 .content(objectMapper.writeValueAsString(unknownAgent)))
         .andExpect(status().isBadRequest());
 
+    ChatUpdateDTO unknownChatUpdate = new ChatUpdateDTO();
+    unknownChatUpdate.setExpectedVersion("0");
     mockMvc
         .perform(
             put("/api/chats/999999999999")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(new ChatUpdateDTO())))
+                .content(objectMapper.writeValueAsString(unknownChatUpdate)))
         .andExpect(status().isNotFound());
-    mockMvc.perform(delete("/api/chats/999999999999")).andExpect(status().isNotFound());
+    mockMvc
+        .perform(delete("/api/chats/999999999999").param("expectedVersion", "0"))
+        .andExpect(status().isNotFound());
   }
 }

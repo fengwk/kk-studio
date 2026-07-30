@@ -52,9 +52,6 @@ export function createAgentService(client: HttpClient = apiClient) {
     deleteAgent: (id: AgentResourceId, expectedVersion: string): Promise<void> =>
       client.delete(`/agents/${encodeURIComponent(id)}`, { params: { expectedVersion } }),
 
-    getThreadUsage: (threadId: string): Promise<ModelUsageSummaryDTO> =>
-      client.get(`/usage/threads/${encodeURIComponent(threadId)}`),
-
     getSessionUsage: (sessionId: string): Promise<ModelUsageSummaryDTO> =>
       client.get(`/usage/sessions/${encodeURIComponent(sessionId)}`),
 

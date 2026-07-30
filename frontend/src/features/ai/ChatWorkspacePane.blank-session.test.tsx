@@ -20,14 +20,6 @@ vi.mock('@/shared/api/harness-service', () => ({
     createThread: vi.fn(),
     bootstrapThread: vi.fn(),
     submitThreadMessage: vi.fn(),
-    getThread: vi.fn(),
-    getSession: vi.fn(),
-    listSessions: vi.fn(),
-    listSessionEntries: vi.fn(),
-    listThreadEntries: vi.fn(),
-    listThreadInputs: vi.fn(),
-    listThreadToolInvocations: vi.fn(),
-    getThreadUsage: vi.fn(),
     createThreadRealtimeStream: vi.fn(),
   },
 }))
@@ -40,6 +32,7 @@ class FakeEventSource {
 function thread(overrides: Partial<HarnessThreadDTO>): HarnessThreadDTO {
   return {
     threadId: 't1',
+    revision: '0',
     sessionId: null,
     sessionTitle: null,
     headEntryId: null,

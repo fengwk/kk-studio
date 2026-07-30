@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.core.agent.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.model.repo.AgentModelRepository;
+import fun.fengwk.kkstudio.core.ai.error.AiDuplicateException;
+import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 
 /** Missing and duplicate global Agent references fail before persistence changes. */
 public class AgentDefinitionReferenceResolverTest {
@@ -20,11 +22,11 @@ public class AgentDefinitionReferenceResolverTest {
     AgentDefinitionReferenceResolver resolver =
         new AgentDefinitionReferenceResolver(definitions, models);
 
-    assertThrows(IllegalArgumentException.class, () -> resolver.requireAgent(1L));
-    assertThrows(IllegalArgumentException.class, () -> resolver.requireModel(2L));
+    assertThrows(AiResourceNotFoundException.class, () -> resolver.requireAgent(1L));
+    assertThrows(AiResourceNotFoundException.class, () -> resolver.requireModel(2L));
 
     when(definitions.getByName("duplicate")).thenReturn(new AgentDefinition());
-    assertThrows(IllegalArgumentException.class, () -> resolver.ensureNameAvailable("duplicate"));
+    assertThrows(AiDuplicateException.class, () -> resolver.ensureNameAvailable("duplicate"));
     resolver.ensureNameAvailable("same", "same");
   }
 }

@@ -34,17 +34,16 @@ flowchart LR
 | Provider / Model / Agent | `/api/providers`、`/api/models`、`/api/agents` | 全局 Agent 资源 CRUD |
 | Chat | `/api/chats` | 持久 Chat CRUD；Chat 不持有 Session/Thread |
 | Session | `GET /api/sessions`、`GET /api/sessions/{sessionId}`、`/entries` | flat Session 查询与 Session Entry Tree；Session 仅由 Thread bootstrap 创建 |
-| Thread | `GET /api/threads`、`POST /api/threads`、`GET /api/threads/{threadId}` | 全局 Thread 列表；创建 UNBOUND Thread（201，无 body）；读取 Thread（展示状态由 durable facts 派生） |
+| Thread | `GET /api/threads`、`POST /api/threads`、`GET /api/threads/{threadId}`、`GET /api/threads/{threadId}/snapshot` | 全局 Thread 列表；创建 UNBOUND Thread（201，无 body）；单一 chat-runtime snapshot 含 revision、状态、entries、inputs、invocations、open interactions 和 usage |
 | Thread head | `POST /api/threads/{id}/bootstrap`、`PUT /api/threads/{id}/head` | bootstrap 创建 Session 并绑定 head（201 `{session, thread}`）；`PUT /head` 做 bind/rebind/unbind |
 | Thread 输入（202） | `POST /api/threads/{id}/messages`、`/messages/custom`、`PUT .../agent`、`/model`、`/yolo` | mailbox 入队 |
-| Thread 投影 | `GET /api/threads/{id}/entries`、`/inputs` | 路径 Entries 与 inputs |
-| Thread realtime | `GET /api/threads/{id}/events/stream` | Redis-backed SSE，事件名 `realtime`，cursor 为 stream-id |
+| Thread realtime | `GET /api/threads/{id}/events/stream` | durable `revision`/`resync` SSE 加上无 id 的 lossy Redis `realtime`；`afterRevision` 与 `Last-Event-ID` 只表示 revision |
 | Thread 控制 | `POST /api/threads/{id}/stop` | epoch fencing 取消 queued Input、可安全取消的 Invocation 与 OPEN Interaction |
 | Retry policy | `GET` / `PUT /api/harness/retry-policy` | 全局持久化自动重试策略 |
 | Realtime Stream policy | `GET` / `PUT /api/harness/realtime-stream-policy` | 全局持久化 Redis Stream `maxLength` 策略 |
-| Tool | `GET /api/threads/{id}/tool-invocations`、`GET /api/tool-invocations/{id}` | Tool 状态查询 |
+| Tool | `GET /api/tool-invocations/{id}` | 单个 Tool 状态查询；Thread 集合投影位于 snapshot |
 | Interaction | `GET /api/interactions/{id}`、`GET /api/interactions/open`、`POST /api/interactions/{id}/response` | 通用 Interaction |
-| Artifact / Usage | `/api/artifacts/{id}`、`/api/usage/threads/{id}`、`/api/usage/sessions/{id}`、`/api/usage/models/{id}` | artifact bytes 与用量汇总 |
+| Artifact / Usage | `/api/artifacts/{id}`、`/api/usage/sessions/{id}`、`/api/usage/models/{id}` | artifact bytes 与 session/model 用量汇总；Thread usage 位于 snapshot |
 | Environment | `GET /api/environments`、`/api/environments/daemon/v1` | 只读实时 Registry 与 daemon WebSocket |
 
 Model 与 Agent 的 `PUT` 接收完整 editable body。Provider credential 不回显；空 credential 表示保留当前密钥。
@@ -55,12 +54,12 @@ Model 与 Agent 的 `PUT` 接收完整 editable body。Provider credential 不�
 
 | Controller | 路径前缀 | 职责 |
 | --- | --- | --- |
-| `StudioHarnessThreadController` | `/api/threads` | Thread 列表/读取/创建、bootstrap、head 重定位、入队 202、Stop、entries/inputs、realtime SSE |
+| `StudioHarnessThreadController` | `/api/threads` | Thread 列表/读取/创建、snapshot、bootstrap、head 重定位、入队 202、Stop、realtime SSE |
 | `StudioHarnessRetryPolicyController` | `/api/harness/retry-policy` | 自动重试策略 |
 | `StudioHarnessRealtimeStreamPolicyController` | `/api/harness/realtime-stream-policy` | realtime Stream 最大保留事件数策略 |
 | `StudioHarnessSessionController` | `/api/sessions` | Session 查询、Session Entries |
 | `StudioChatController` | `/api/chats` | Chat CRUD |
-| `StudioHarnessObservabilityController` | `/api` | tool/model invocations、open interactions、artifacts |
+| `StudioHarnessObservabilityController` | `/api` | 单个 tool invocation、artifacts；Thread 集合事实位于 snapshot |
 | `StudioInteractionController` | `/api/interactions` | Interaction 查询与响应 |
 | `StudioModelUsageController` | `/api/usage` | 聚合 |
 | `StudioToolEnvironmentController` | `/api/environments` | 只读 live Environment Registry |
@@ -75,7 +74,7 @@ Session 只组织 Entry Tree，不持有 Thread；Thread 是可跨 Session 复�
 
 用户消息与设置变更只进入 `ThreadInput` mailbox，不直接写 Entry；UNBOUND Thread 拒绝入队。`ThreadReconciler` 按 TURN_BOUNDARY harvest、追加 `RUNTIME_CONFIG`/消息 Entry，并在 response debt 时创建冻结 `ModelInvocation`。
 
-查询：`GET /api/threads` 返回全局 Thread 列表，`sessionId`/`sessionTitle`/`headEntryId` 均可空，DTO 附带当前 `executionEpoch`。Thread Entries 按 root→`headEntryId` 父链返回（UNBOUND 为空），inputs 按 `sequence ASC`。`createTime` 只用于展示；不得用墙钟重排因果顺序。
+查询：`GET /api/threads` 返回全局 Thread 列表，`sessionId`/`sessionTitle`/`headEntryId` 均可空，DTO 附带当前 `executionEpoch`。`GET /api/threads/{id}/snapshot` 在 REPEATABLE READ 下返回 revision 与 root→head Entries（UNBOUND 为空）、按 `sequence ASC` 的 inputs、invocations、open interactions 和 usage。`createTime` 只用于展示；不得用墙钟重排因果顺序。
 
 Java 领域类型使用 `HarnessThread`，避免与 `java.lang.Thread` 冲突。
 
@@ -90,7 +89,7 @@ Java 领域类型使用 `HarnessThread`，避免与 `java.lang.Thread` 冲突。
 | `InteractionService` | Core 薄边界：decimal/DTO |
 | `HarnessRetryPolicyService` | 全局自动重试策略 |
 | `HarnessRealtimeStreamPolicyService` | 全局 realtime Stream 容量策略；Redis sink 以短期缓存按写入解析 |
-| `HarnessThreadQueryService` | thread、路径 entries、inputs |
+| `HarnessThreadQueryService` | thread 列表与一致 snapshot |
 | Thread command / reconcile transactions | PostgreSQL 原子事务适配 |
 | `HarnessSessionQueryService` | Session 只读；列表按 derived max-entry `updated_at` desc, id desc 排序 |
 | `HarnessObservabilityQueryService` | tool / model invocations、interactions、artifacts 查询投影 |
@@ -110,13 +109,13 @@ Java 领域类型使用 `HarnessThread`，避免与 `java.lang.Thread` 冲突。
 
 ## SSE 与 snapshot-first 投影
 
-客户端先读取 PostgreSQL REST snapshot，再打开 Redis realtime SSE：
+客户端先读取 PostgreSQL REST snapshot，再按 snapshot revision 打开 SSE：
 
 ```text
-GET /api/threads/{id}/events/stream?afterEventId={redis-stream-id}
+GET /api/threads/{id}/events/stream?afterRevision={revision}
 ```
 
-事件名 `realtime`；SSE id 为 Redis stream-id（如 `ms-seq`）。每次 `XADD` 使用持久化全局策略的 `maxLength`；保存策略不会扫描既有 key，而是在其下一次写入时精确裁剪。
+`revision` 事件以 revision 为 SSE id；`resync` 与 `realtime` 没有 SSE id。Redis delta 只做临时 text/thinking overlay，重新连接从 `$` live edge 开始；每次 `XADD` 使用持久化全局策略的 `maxLength`，保存策略不会扫描既有 key，而是在其下一次写入时精确裁剪。
 
 ## Tool、Environment 与 Artifact
 

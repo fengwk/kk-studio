@@ -117,7 +117,7 @@ export function BlankComposerPane({
         queryClient.invalidateQueries({ queryKey: queryKeys.threads.list }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sessions.list }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sessions.detail(result.sessionId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.detail(result.thread.threadId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(result.thread.threadId) }),
       ])
       setDraft('')
       setPendingContent(null)

@@ -8,8 +8,8 @@ import {
   createUnboundThread,
   getThread,
   listSessionEntries,
-  listThreadEntries,
-  listThreadInputs,
+  snapshotEntries,
+  snapshotInputs,
   updateThreadHead,
 } from '../lib/harness.mjs'
 import { registerCase, getCase } from '../lib/registry.mjs'
@@ -111,7 +111,7 @@ registerCase({
   async run(ctx) {
     const thread = await createUnboundThread(ctx)
     assert(Number(thread.executionEpoch) === 0, JSON.stringify(thread))
-    assert((await listThreadEntries(ctx, thread.threadId)).length === 0, 'unbound thread must have no path entries')
+    assert((await snapshotEntries(ctx, thread.threadId)).length === 0, 'unbound thread must have no path entries')
     const listed = envelopeData((await ctx.call('GET', '/api/threads')).json) || []
     assert(listed.some((t) => t.threadId === thread.threadId), 'created thread missing from global list')
     ctx.vars.unboundThread = thread
@@ -135,7 +135,7 @@ registerCase({
         }),
       { status: 409, messageIncludes: /unbound/i },
     )
-    assert((await listThreadInputs(ctx, thread.threadId)).length === 0, 'rejected input must not be persisted')
+    assert((await snapshotInputs(ctx, thread.threadId)).length === 0, 'rejected input must not be persisted')
   },
 })
 
@@ -205,7 +205,7 @@ registerCase({
     const after = await getThread(ctx, thread.threadId)
     assert(after.headEntryId === thread.headEntryId, JSON.stringify(after))
     assert(Number(after.executionEpoch) === Number(thread.executionEpoch), JSON.stringify(after))
-    assert((await listThreadInputs(ctx, thread.threadId)).length === 0, 'stale mutation must not enqueue input')
+    assert((await snapshotInputs(ctx, thread.threadId)).length === 0, 'stale mutation must not enqueue input')
   },
 })
 
@@ -231,7 +231,7 @@ registerCase({
     assert(view.sessionId === session.sessionId, JSON.stringify(view))
     assert(view.status === 'IDLE', JSON.stringify(view))
     // Path entries follow the new head: ROOT only.
-    const path = await listThreadEntries(ctx, thread.threadId)
+    const path = await snapshotEntries(ctx, thread.threadId)
     assert(path.length === 1 && path[0].entryId === rootEntryId, JSON.stringify(path))
     ctx.vars.rebindThread = view
   },
@@ -275,7 +275,7 @@ registerCase({
 
     const view = await getThread(ctx, thread.threadId)
     assert(!view.sessionId && !view.headEntryId, JSON.stringify(view))
-    assert((await listThreadEntries(ctx, thread.threadId)).length === 0, 'unbound thread must have no path entries')
+    assert((await snapshotEntries(ctx, thread.threadId)).length === 0, 'unbound thread must have no path entries')
 
     await expectHttpError(
       () =>
@@ -349,7 +349,7 @@ registerCase({
 
     let inputs = []
     for (let i = 0; i < 40; i++) {
-      inputs = await listThreadInputs(ctx, thread.threadId)
+      inputs = await snapshotInputs(ctx, thread.threadId)
       if (inputs.some((x) => x.status === 'APPLIED')) break
       await sleep(250)
     }
@@ -360,12 +360,12 @@ registerCase({
 })
 
 registerCase({
-  id: 'usage.unknown_thread_404',
+  id: 'thread_snapshot.unknown_thread_404',
   level: 'L1',
-  title: '未知 Thread usage 404',
-  docs: 'GET /api/usage/threads/999999999 => 404 unknown thread',
+  title: '未知 Thread snapshot 404',
+  docs: 'GET /api/threads/999999999/snapshot => 404 unknown thread',
   async run(ctx) {
-    await expectHttpError(() => ctx.call('GET', '/api/usage/threads/999999999'), {
+    await expectHttpError(() => ctx.call('GET', '/api/threads/999999999/snapshot'), {
       status: 404,
       messageIncludes: /unknown thread/,
     })
@@ -426,7 +426,7 @@ registerCase({
     let th = null
     let inputs = []
     for (let i = 0; i < 60; i++) {
-      inputs = await listThreadInputs(ctx, tid)
+      inputs = await snapshotInputs(ctx, tid)
       const applied = inputs.filter((input) => input.status === 'APPLIED').map((input) => input.inputType)
       th = await getThread(ctx, tid)
       if (
@@ -489,7 +489,7 @@ registerCase({
         }),
       { status: 400, messageIncludes: /variant/i },
     )
-    assert((await listThreadInputs(ctx, thread.threadId)).length === 0, 'rejected command must not enqueue input')
+    assert((await snapshotInputs(ctx, thread.threadId)).length === 0, 'rejected command must not be persisted')
   },
 })
 

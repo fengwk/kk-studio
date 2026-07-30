@@ -16,13 +16,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.core.harness.observability.service.HarnessObservabilityQueryService;
 import fun.fengwk.kkstudio.core.harness.observability.service.model.ArtifactContent;
-import fun.fengwk.kkstudio.share.model.InteractionDTO;
-import fun.fengwk.kkstudio.share.model.ModelInvocationDTO;
 import fun.fengwk.kkstudio.share.model.ToolInvocationDTO;
 
-import java.util.List;
-
-/** Harness observability：Thread tool/model/interaction 投影和 artifact 下载。 */
+/** Harness observability：单个 ToolInvocation 与 artifact 下载。 */
 @RestController
 @RequestMapping("/api")
 public class StudioHarnessObservabilityController {
@@ -34,37 +30,10 @@ public class StudioHarnessObservabilityController {
     this.observabilityService = observabilityService;
   }
 
-  @GetMapping("/threads/{id}/tool-invocations")
-  public Result<List<ToolInvocationDTO>> listToolInvocations(@PathVariable("id") String id) {
-    try {
-      return Results.ok(observabilityService.listToolInvocations(id));
-    } catch (IllegalArgumentException error) {
-      throw translate(error);
-    }
-  }
-
   @GetMapping("/tool-invocations/{id}")
   public Result<ToolInvocationDTO> getToolInvocation(@PathVariable("id") String id) {
     try {
       return Results.ok(observabilityService.getToolInvocation(id));
-    } catch (IllegalArgumentException error) {
-      throw translate(error);
-    }
-  }
-
-  @GetMapping("/threads/{id}/model-invocations")
-  public Result<List<ModelInvocationDTO>> listModelInvocations(@PathVariable("id") String id) {
-    try {
-      return Results.ok(observabilityService.listModelInvocations(id));
-    } catch (IllegalArgumentException error) {
-      throw translate(error);
-    }
-  }
-
-  @GetMapping("/threads/{id}/interactions/open")
-  public Result<List<InteractionDTO>> listOpenInteractions(@PathVariable("id") String id) {
-    try {
-      return Results.ok(observabilityService.listOpenInteractions(id));
     } catch (IllegalArgumentException error) {
       throw translate(error);
     }

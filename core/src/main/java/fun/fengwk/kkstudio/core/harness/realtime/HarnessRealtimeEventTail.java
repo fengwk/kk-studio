@@ -49,7 +49,7 @@ public interface HarnessRealtimeEventTail {
     }
     if (!trimmed.matches("\\d+-\\d+")) {
       throw new IllegalArgumentException(
-          "afterEventId must be a realtime stream cursor (ms-seq) or 0: " + afterId);
+          "afterStreamId must be a realtime stream cursor (ms-seq) or 0: " + afterId);
     }
     return trimmed;
   }
