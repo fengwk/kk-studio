@@ -17,6 +17,7 @@ public record HarnessThread(
     long inputSequence,
     boolean runnable,
     long executionEpoch,
+    long revision,
     Lease processorLease,
     Instant createdAt,
     Instant updatedAt) {
@@ -34,11 +35,36 @@ public record HarnessThread(
     if (executionEpoch < 0) {
       throw new IllegalArgumentException("executionEpoch must not be negative");
     }
+    if (revision < 0) {
+      throw new IllegalArgumentException("revision must not be negative");
+    }
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
     updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
     if (updatedAt.isBefore(createdAt)) {
       throw new IllegalArgumentException("updatedAt must not precede createdAt");
     }
+  }
+
+  /** Compatibility constructor for command callers that do not materialize the read revision. */
+  public HarnessThread(
+      long id,
+      Long headEntryId,
+      long inputSequence,
+      boolean runnable,
+      long executionEpoch,
+      Lease processorLease,
+      Instant createdAt,
+      Instant updatedAt) {
+    this(
+        id,
+        headEntryId,
+        inputSequence,
+        runnable,
+        executionEpoch,
+        0,
+        processorLease,
+        createdAt,
+        updatedAt);
   }
 
   public boolean isBound() {

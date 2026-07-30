@@ -22,6 +22,9 @@ public class HarnessThreadDTO {
   /** 当前 execution epoch。 */
   private Long executionEpoch;
 
+  /** PostgreSQL authoritative durable projection cursor (decimal bigint string). */
+  private String revision;
+
   /** 展示状态（query 派生，非 durable 列）：{@code RUNNING > WAITING > RUNNABLE > UNBOUND/IDLE}。 */
   private String status;
 

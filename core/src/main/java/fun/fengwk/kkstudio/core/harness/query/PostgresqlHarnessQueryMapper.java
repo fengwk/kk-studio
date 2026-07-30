@@ -65,7 +65,7 @@ public interface PostgresqlHarnessQueryMapper extends BaseMapper {
       """;
 
   String THREAD_VIEW_COLUMNS =
-      "t.id, head.session_id, t.head_entry_id, t.input_sequence, t.runnable, t.execution_epoch,"
+      "t.id, head.session_id, t.head_entry_id, t.input_sequence, t.runnable, t.execution_epoch, t.revision,"
           + " t.processor_token, t.processor_until, t.created_at, t.updated_at,"
           + " s.title as session_title, config.runtime_config_json, "
           + THREAD_WAITING_FLAGS;
@@ -162,6 +162,7 @@ public interface PostgresqlHarnessQueryMapper extends BaseMapper {
         @Result(column = "input_sequence", property = "inputSequence"),
         @Result(column = "runnable", property = "runnable"),
         @Result(column = "execution_epoch", property = "executionEpoch"),
+        @Result(column = "revision", property = "revision"),
         @Result(column = "processor_token", property = "processorToken"),
         @Result(column = "processor_until", property = "processorUntil"),
         @Result(column = "created_at", property = "createdAt"),

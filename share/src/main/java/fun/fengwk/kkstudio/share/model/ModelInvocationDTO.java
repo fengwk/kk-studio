@@ -24,4 +24,7 @@ public class ModelInvocationDTO {
   private Instant createdAt;
   private Instant startedAt;
   private Instant finishedAt;
+
+  /** Durable safe text/thinking stream projection for snapshot loss recovery. */
+  private String safeStreamSnapshotJson;
 }

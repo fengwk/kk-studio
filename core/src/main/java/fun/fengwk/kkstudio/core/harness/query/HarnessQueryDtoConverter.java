@@ -60,6 +60,7 @@ public class HarnessQueryDtoConverter {
     dto.setSessionTitle(row.getSessionTitle());
     dto.setHeadEntryId(formatNullable(row.getHeadEntryId()));
     dto.setExecutionEpoch(row.getExecutionEpoch());
+    dto.setRevision(row.getRevision() == null ? null : Long.toString(row.getRevision()));
     dto.setStatus(DerivedThreadStatus.derive(row, now));
     dto.setInputSequence(row.getInputSequence());
     projectRuntimeConfig(dto, row.getRuntimeConfigJson());
@@ -145,6 +146,7 @@ public class HarnessQueryDtoConverter {
     dto.setCreatedAt(toInstant(row.getCreatedAt()));
     dto.setStartedAt(toInstant(row.getStartedAt()));
     dto.setFinishedAt(toInstant(row.getFinishedAt()));
+    dto.setSafeStreamSnapshotJson(row.getSafeStreamSnapshotJson());
     return dto;
   }
 
