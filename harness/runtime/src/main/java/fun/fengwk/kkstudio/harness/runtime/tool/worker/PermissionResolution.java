@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 
 import java.util.Objects;
-import java.util.Optional;
 
 /**
  * Outcome of one permission transition evaluated against a freshly claimed Tool invocation.
@@ -38,12 +37,4 @@ sealed interface PermissionResolution {
    * worker must not run any external Tool I/O for this invocation.
    */
   final class TerminalFailed implements PermissionResolution {}
-
-  /** Convenience: empty when no resolution is present. */
-  static Optional<ExecutablePlan> planOf(PermissionResolution resolution) {
-    if (resolution instanceof Resolved resolved) {
-      return Optional.of(resolved.plan());
-    }
-    return Optional.empty();
-  }
 }
