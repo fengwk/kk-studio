@@ -327,14 +327,13 @@ public final class ToolWorker {
       terminalCompleter.releaseUnstarted(claimed, clock.instant());
     } catch (RemoteToolSendUncertainException uncertain) {
       // Synchronous send uncertainty: side effects may have begun; converge immediately to UNKNOWN.
-      execution.forceTerminal();
-      terminalCompleter.completeUnknown(
-          claimed,
-          new ToolInvocationError(
-              "REMOTE_UNCERTAIN",
-              failureMessage(
-                  uncertain, "Remote tool send outcome is uncertain; result is unknown.")),
-          claimed.invocation().lastActivityAt());
+      try {
+        execution.completeUnknown(
+            "REMOTE_UNCERTAIN",
+            failureMessage(uncertain, "Remote tool send outcome is uncertain; result is unknown."));
+      } finally {
+        execution.forceTerminal();
+      }
     } catch (RuntimeException error) {
       // onError may throw before reaching a terminal path. forceTerminal is idempotent so an
       // unconditional call after onError guarantees the owner slot and all scheduler futures are
