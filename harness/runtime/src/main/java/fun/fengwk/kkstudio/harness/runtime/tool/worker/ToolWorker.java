@@ -47,6 +47,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 /**
@@ -66,6 +67,14 @@ import java.util.function.Supplier;
  * dedicated injected {@link Executor}; watchdogs (heartbeat / deadline / partial flush) remain on
  * the {@link ScheduledExecutorService scheduler} so that the caller never blocks on external Tool
  * I/O after a successful claim.
+ *
+ * <p>Pending-dispatch fence: each submitted post-claim Runnable carries a per-invocation ticket
+ * registered just before executor submission. The Runnable checks that its exact ticket is still
+ * current before entering {@code dispatchClaimed}; {@link #stop()} invalidates all pending tickets
+ * before abandoning active executions, and a later claim for the same invocation id supersedes an
+ * older ticket. Pending tasks therefore never invoke external Tool I/O after stop or after a
+ * superseding claim. The fence is purely process-local — it is not durable state, a queue, a route
+ * slot, or a retry mechanism.
  */
 @Slf4j
 public final class ToolWorker {
@@ -82,6 +91,11 @@ public final class ToolWorker {
   private final Executor executor;
   private final Supplier<String> workerTokenSupplier;
   private final ConcurrentHashMap<Long, Execution> executions = new ConcurrentHashMap<>();
+  // Per-invocation id: the most recently registered ticket for a deferred dispatch. The Runnable
+  // checks its own ticket against this map before entering post-claim execution. Cleared by
+  // stop() and superseded by a later claim for the same invocation id. Process-local only.
+  private final ConcurrentHashMap<Long, Long> pendingTickets = new ConcurrentHashMap<>();
+  private final AtomicLong ticketSeq = new AtomicLong();
 
   public ToolWorker(
       ToolInvocationTransactions transactions,
@@ -134,12 +148,30 @@ public final class ToolWorker {
     if (!workerToken.equals(ownership.invocation().workerLease().token())) {
       throw new IllegalStateException("claim returned an unexpected worker token");
     }
+    long ticket = ticketSeq.incrementAndGet();
+    pendingTickets.put(invocationId, ticket);
     try {
-      executor.execute(() -> dispatchClaimed(ownership));
+      executor.execute(() -> runClaimedIfTicketCurrent(invocationId, ticket, ownership));
     } catch (RejectedExecutionException rejected) {
+      // Drop our ticket before invoking the durable release logic so the rejected attempt never
+      // appears as a live pending task and cannot race a later superseding claim.
+      pendingTickets.remove(invocationId, ticket);
       handleSubmissionRejection(ownership, rejected);
     }
     return true;
+  }
+
+  private void runClaimedIfTicketCurrent(
+      long invocationId, long ticket, ClaimedToolInvocation ownership) {
+    Long current = pendingTickets.get(invocationId);
+    if (current == null || current.longValue() != ticket) {
+      // Either stop() cleared the fence, or a later claim for the same invocation id superseded
+      // this ticket. Either way this Runnable must not enter post-claim execution: the
+      // superseding claim owns the durable lease and any active handle; durable recovery will
+      // re-route the work without any external Tool I/O from this process.
+      return;
+    }
+    dispatchClaimed(ownership);
   }
 
   /**
@@ -200,8 +232,13 @@ public final class ToolWorker {
                     && environmentName.equals(execution.binding.environmentName()));
   }
 
-  /** Stops process-local handles without changing durable invocation state. */
+  /**
+   * Stops process-local handles without changing durable invocation state. Invalidate pending
+   * dispatch tickets before abandoning active executions so any Runnable already submitted to the
+   * executor but not yet running becomes a no-op instead of invoking external Tool I/O.
+   */
   public void stop() {
+    pendingTickets.clear();
     executions.values().forEach(Execution::abandon);
   }
 
