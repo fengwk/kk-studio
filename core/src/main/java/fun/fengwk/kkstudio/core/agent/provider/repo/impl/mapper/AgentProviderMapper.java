@@ -69,7 +69,7 @@ public interface AgentProviderMapper extends BaseMapper {
       set name = #{provider.name}, description = #{provider.description},
           provider_type = #{provider.providerType}, base_url = #{provider.baseUrl},
           credential = #{provider.credential}, config = cast(#{provider.configJson} as jsonb),
-          updated_at = current_timestamp, version = version + 1
+          updated_at = greatest(updated_at, current_timestamp), version = version + 1
       where id = #{provider.id} and version = #{expectedVersion}
       """)
   int updateById(

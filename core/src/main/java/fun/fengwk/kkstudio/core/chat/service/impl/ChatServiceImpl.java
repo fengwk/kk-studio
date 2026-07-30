@@ -73,6 +73,7 @@ public class ChatServiceImpl implements ChatService {
     }
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
     Chat existing = guard.requireChat(id);
+    ensureExpectedVersion(existing, id, rawExpected, expected);
     mutationFactory.apply(existing, updateDTO);
     guard.ensureDefaultAgentExistsIfPresent(existing.getDefaultAgentId());
     if (!repository.updateById(existing, expected)) {
@@ -92,6 +93,7 @@ public class ChatServiceImpl implements ChatService {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
     long parsed = ChatIds.parsePositive(id, "id");
     Chat existing = guard.requireChat(parsed);
+    ensureExpectedVersion(existing, id, expectedVersion, expected);
     if (!repository.deleteById(existing.getId(), expected)) {
       Chat reread = repository.getById(parsed);
       if (reread == null) {
@@ -99,6 +101,14 @@ public class ChatServiceImpl implements ChatService {
       }
       throw new AiVersionConflictException(
           RESOURCE, id, expectedVersion, CatalogVersions.format(reread.getVersion()));
+    }
+  }
+
+  private static void ensureExpectedVersion(
+      Chat chat, String id, String expectedVersion, long expected) {
+    if (chat.getVersion() != expected) {
+      throw new AiVersionConflictException(
+          RESOURCE, id, expectedVersion, CatalogVersions.format(chat.getVersion()));
     }
   }
 }

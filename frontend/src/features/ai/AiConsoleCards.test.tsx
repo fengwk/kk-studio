@@ -37,7 +37,7 @@ function chat() {
     id: 'chat-1',
     title: 'Draft',
     defaultAgentId: null,
-    version: 1,
+    version: '1',
     createTime: null,
     updateTime: null,
   }

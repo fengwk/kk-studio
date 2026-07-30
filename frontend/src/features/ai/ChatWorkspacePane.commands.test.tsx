@@ -127,7 +127,7 @@ function renderBoundPane(overrides?: { onThreadChange?: (threadId: string | null
   render(
     <QueryClientProvider client={queryClient}>
       <ChatWorkspacePane
-        chat={{ id: 'chat-1', title: 'C', defaultAgentId: 'a1', version: 1, createTime: null, updateTime: null }}
+        chat={{ id: 'chat-1', title: 'C', defaultAgentId: 'a1', version: '1', createTime: null, updateTime: null }}
         agents={agents}
         pane={{ id: 'pane-1', threadId: 't1' }}
         focused

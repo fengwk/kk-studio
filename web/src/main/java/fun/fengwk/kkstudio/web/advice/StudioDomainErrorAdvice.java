@@ -16,8 +16,13 @@ import fun.fengwk.kkstudio.core.ai.error.AiInUseException;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.web.controller.StudioAgentDefinitionController;
+import fun.fengwk.kkstudio.web.controller.StudioAgentModelController;
+import fun.fengwk.kkstudio.web.controller.StudioAgentProviderController;
+import fun.fengwk.kkstudio.web.controller.StudioChatController;
 
-import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Single web translator for the AI catalog domain error model.
@@ -38,7 +43,13 @@ import java.util.Collections;
  * services wrap {@link org.springframework.dao.DuplicateKeyException} and report the typed error
  * themselves so unrelated controllers are not affected by a global advice.
  */
-@RestControllerAdvice
+@RestControllerAdvice(
+    assignableTypes = {
+      StudioAgentProviderController.class,
+      StudioAgentModelController.class,
+      StudioAgentDefinitionController.class,
+      StudioChatController.class
+    })
 public class StudioDomainErrorAdvice {
 
   @ExceptionHandler(AiValidationException.class)
@@ -85,9 +96,15 @@ public class StudioDomainErrorAdvice {
   }
 
   private static ResponseEntity<Result<Void>> build(HttpStatus status, AiDomainException error) {
+    Map<String, Object> errorContext = new LinkedHashMap<>();
+    errorContext.put("resource", error.resource());
+    if (error instanceof AiVersionConflictException versionConflict) {
+      errorContext.put("expectedVersion", versionConflict.expectedVersion());
+      errorContext.put("actualVersion", versionConflict.actualVersion());
+    }
     ImmutableConventionErrorCode code =
         new ImmutableConventionErrorCode(
-            status.getStatus(), error.code().code(), error.getMessage(), Collections.emptyMap());
+            status.getStatus(), error.code().code(), error.getMessage(), errorContext);
     return ResponseEntity.status(status.getStatus()).body(Results.error(code));
   }
 }

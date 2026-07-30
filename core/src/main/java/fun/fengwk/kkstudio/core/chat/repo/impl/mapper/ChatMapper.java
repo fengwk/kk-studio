@@ -55,7 +55,7 @@ public interface ChatMapper extends BaseMapper {
       """
       update chat
       set title = #{chat.title}, default_agent_id = #{chat.defaultAgentId},
-          updated_at = current_timestamp, version = version + 1
+          updated_at = greatest(updated_at, current_timestamp), version = version + 1
       where id = #{chat.id} and version = #{expectedVersion}
       """)
   int updateById(@Param("chat") ChatDO chat, @Param("expectedVersion") long expectedVersion);

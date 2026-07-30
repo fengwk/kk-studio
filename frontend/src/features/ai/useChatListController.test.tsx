@@ -13,7 +13,7 @@ vi.mock('@/shared/api/chat-service', () => ({
       id: 'c1',
       title: 'T',
       defaultAgentId: 'a1',
-      version: 1,
+      version: '1',
       createTime: null,
       updateTime: null,
     })),

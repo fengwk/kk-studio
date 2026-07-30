@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.agent.provider.service.impl;
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import lombok.AllArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,6 +13,7 @@ import fun.fengwk.kkstudio.core.agent.provider.service.AgentProviderService;
 import fun.fengwk.kkstudio.core.agent.provider.service.converter.AgentProviderConverter;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.ai.error.AiDuplicateException;
+import fun.fengwk.kkstudio.core.ai.error.AiInUseException;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
@@ -63,6 +65,7 @@ public class AgentProviderServiceImpl implements AgentProviderService {
     }
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
     AgentProvider provider = providerGuard.requireProvider(id);
+    ensureExpectedVersion(provider, id, rawExpected, expected);
     String currentName = provider.getName();
     providerMutationFactory.update(provider, updateDTO);
     providerGuard.ensureNameAvailable(currentName, provider.getName());
@@ -87,18 +90,36 @@ public class AgentProviderServiceImpl implements AgentProviderService {
   @Transactional
   public void deleteProvider(long id, String expectedVersion) {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
-    providerGuard.requireProvider(id);
+    AgentProvider provider = providerGuard.requireProvider(id);
+    ensureExpectedVersion(provider, id, expectedVersion, expected);
     providerGuard.ensureDeletable(id);
-    if (!agentProviderRepository.deleteById(id, expected)) {
-      AgentProvider reread = agentProviderRepository.getById(id);
-      if (reread == null) {
-        throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+    try {
+      if (!agentProviderRepository.deleteById(id, expected)) {
+        AgentProvider reread = agentProviderRepository.getById(id);
+        if (reread == null) {
+          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+        }
+        throw new AiVersionConflictException(
+            RESOURCE,
+            Long.toString(id),
+            expectedVersion,
+            CatalogVersions.format(reread.getVersion()));
       }
+    } catch (DuplicateKeyException error) {
+      throw new AiInUseException(RESOURCE, RESOURCE + " in use by models: " + id);
+    } catch (DataIntegrityViolationException error) {
+      throw new AiInUseException(RESOURCE, RESOURCE + " in use by models: " + id);
+    }
+  }
+
+  private static void ensureExpectedVersion(
+      AgentProvider provider, long id, String expectedVersion, long expected) {
+    if (provider.getVersion() != expected) {
       throw new AiVersionConflictException(
           RESOURCE,
           Long.toString(id),
           expectedVersion,
-          CatalogVersions.format(reread.getVersion()));
+          CatalogVersions.format(provider.getVersion()));
     }
   }
 }

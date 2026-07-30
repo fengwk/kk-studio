@@ -21,23 +21,29 @@ public final class CatalogVersions {
       throw new AiValidationException(
           field, field + " must not be null (expectedVersion is required)");
     }
-    String trimmed = value.trim();
-    if (trimmed.isEmpty()) {
+    if (!value.equals(value.trim())) {
+      throw new AiValidationException(
+          field, field + " must be a canonical non-negative decimal string: " + value);
+    }
+    if (value.isEmpty()) {
       throw new AiValidationException(field, field + " must not be blank");
     }
-    if (!DECIMAL.matcher(trimmed).matches()) {
+    if (!DECIMAL.matcher(value).matches()) {
       throw new AiValidationException(
           field, field + " must be a non-negative decimal string: " + value);
     }
     try {
-      return Long.parseLong(trimmed);
+      return Long.parseLong(value);
     } catch (NumberFormatException error) {
       throw new AiValidationException(field, field + " exceeds long range: " + value, error);
     }
   }
 
-  /** Formats a long version as a decimal string. Negative values map to "0". */
+  /** Formats a non-negative internal version as its canonical decimal string. */
   public static String format(long value) {
-    return Long.toString(Math.max(0L, value));
+    if (value < 0) {
+      throw new IllegalStateException("catalog version must not be negative: " + value);
+    }
+    return Long.toString(value);
   }
 }

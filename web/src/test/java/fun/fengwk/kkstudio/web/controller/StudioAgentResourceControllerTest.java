@@ -80,7 +80,8 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(duplicateProvider)))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("duplicate"));
+        .andExpect(jsonPath("$.code").value("duplicate"))
+        .andExpect(jsonPath("$.errors.resource").value("agent_provider"));
 
     AgentModelCreateDTO model = new AgentModelCreateDTO();
     model.setName("model-" + suffix);
@@ -120,11 +121,15 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(providerUpdate)))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("version_conflict"));
+        .andExpect(jsonPath("$.code").value("version_conflict"))
+        .andExpect(jsonPath("$.errors.resource").value("agent_provider"))
+        .andExpect(jsonPath("$.errors.expectedVersion").value("0"))
+        .andExpect(jsonPath("$.errors.actualVersion").value("1"));
     mockMvc
         .perform(delete("/api/providers/{id}", providerId).param("expectedVersion", "1"))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("in_use"));
+        .andExpect(jsonPath("$.code").value("in_use"))
+        .andExpect(jsonPath("$.errors.resource").value("agent_provider"));
 
     AgentModelUpdateDTO modelUpdate = new AgentModelUpdateDTO();
     modelUpdate.setName(model.getName());

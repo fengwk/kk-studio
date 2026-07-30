@@ -35,7 +35,7 @@ function model(): AgentModelDTO {
       defaultVariant: 'quality',
       variants: [{ id: 'quality' }],
     },
-    version: 1,
+    version: '1',
     createTime: null,
     updateTime: null,
   }
@@ -86,7 +86,7 @@ describe('ai-agent-draft-codec', () => {
         tools: [' read ', ''],
         skills: [],
       },
-      version: 1,
+      version: '1',
       createTime: null,
       updateTime: null,
     }

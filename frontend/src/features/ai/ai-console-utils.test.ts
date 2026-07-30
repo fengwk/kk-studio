@@ -69,7 +69,7 @@ function model(overrides: Partial<AgentModelDTO> = {}): AgentModelDTO {
     name: 'MiniMax-M2.7',
     description: 'Chat model',
     config: fullConfig(),
-    version: 1,
+    version: '1',
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
     ...overrides,
@@ -159,7 +159,7 @@ describe('ai-console-utils', () => {
           tools: ['search'],
           skills: [],
         },
-        version: 1,
+        version: '1',
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       }),
@@ -278,7 +278,7 @@ describe('ai-console-utils', () => {
           tools: [],
           skills: [],
         },
-        version: 1,
+        version: '1',
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       },
@@ -297,7 +297,7 @@ describe('ai-console-utils', () => {
         configured: true,
         modelCallTimeoutMillis: 1800000,
         modelCallIdleTimeoutMillis: 120000,
-        version: 1,
+        version: '1',
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       },
@@ -310,7 +310,7 @@ describe('ai-console-utils', () => {
         configured: true,
         modelCallTimeoutMillis: 1800000,
         modelCallIdleTimeoutMillis: 120000,
-        version: 1,
+        version: '1',
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       },
@@ -332,13 +332,13 @@ describe('ai-console-utils', () => {
     expect(
       filterChats(
         [
-          { id: '2', title: 'beta', defaultAgentId: null, version: 1, createTime: '2026-06-21T00:00:00', updateTime: '2026-06-21T00:00:00' },
-          { id: '1', title: 'alpha', defaultAgentId: null, version: 1, createTime: '2026-06-22T00:00:00', updateTime: '2026-06-20T00:00:00' },
+          { id: '2', title: 'beta', defaultAgentId: null, version: '1', createTime: '2026-06-21T00:00:00', updateTime: '2026-06-21T00:00:00' },
+          { id: '1', title: 'alpha', defaultAgentId: null, version: '1', createTime: '2026-06-22T00:00:00', updateTime: '2026-06-20T00:00:00' },
         ],
         '',
       ).map((item) => item.title),
     ).toEqual(['alpha', 'beta'])
-    expect(filterChats([{ id: '1', title: 'alpha', defaultAgentId: null, version: 1, createTime: null, updateTime: null }], 'alp')).toHaveLength(1)
+    expect(filterChats([{ id: '1', title: 'alpha', defaultAgentId: null, version: '1', createTime: null, updateTime: null }], 'alp')).toHaveLength(1)
     expect(naturalNameCompare('m2', 'm10')).toBeLessThan(0)
     expect(includesSearch('MiniMax', 'mini')).toBe(true)
     expect(includesSearch('MiniMax', '')).toBe(true)
@@ -397,7 +397,7 @@ describe('ai-console-utils', () => {
           tools: [],
           skills: [],
         },
-        version: 1,
+        version: '1',
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
       }),

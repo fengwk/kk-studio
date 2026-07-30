@@ -15,7 +15,7 @@ const agent = {
     tools: [],
     skills: [],
   },
-  version: 1,
+  version: '1',
   createTime: null,
   updateTime: null,
 }

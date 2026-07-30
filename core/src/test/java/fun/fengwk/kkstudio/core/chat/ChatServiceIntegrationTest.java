@@ -98,6 +98,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
 
       ChatUpdateDTO stale = new ChatUpdateDTO();
       stale.setExpectedVersion("0");
+      stale.setDefaultAgentId("999999999999");
       assertThrows(AiVersionConflictException.class, () -> chatService.updateChat(chatId, stale));
 
       ChatCreateDTO newer = new ChatCreateDTO();

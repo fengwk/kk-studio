@@ -68,7 +68,7 @@ function model(configOverride?: AgentModelConfigDTO): AgentModelDTO {
     name: 'model-a',
     description: 'desc',
     config: configOverride ?? fullConfig(),
-    version: 1,
+    version: '1',
     createTime: null,
     updateTime: null,
   }

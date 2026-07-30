@@ -93,7 +93,7 @@ function renderBlankPane(overrides?: {
           id: 'chat-1',
           title: 'C',
           defaultAgentId: overrides?.defaultAgentId === undefined ? 'a1' : overrides.defaultAgentId,
-          version: 1,
+          version: '1',
           createTime: null,
           updateTime: null,
         }}

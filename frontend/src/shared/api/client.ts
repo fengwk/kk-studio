@@ -13,17 +13,26 @@ export const apiBaseUrl = '/api'
 /** Transport/envelope failure carrying the backend HTTP status so callers can branch on 409. */
 export class ApiError extends Error {
   readonly status?: number
+  readonly code?: string
+  readonly errors?: Record<string, unknown>
 
-  constructor(message: string, status?: number) {
+  constructor(message: string, status?: number, code?: string, errors?: Record<string, unknown>) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.code = code
+    this.errors = errors
   }
 }
 
 /** Stale executionEpoch or a non-quiescent Thread; the caller must refresh before retrying. */
 export function isConflictError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 409
+}
+
+/** Catalog CAS conflicts are a specific subset of generic HTTP 409 conflicts. */
+export function isVersionConflictError(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'version_conflict'
 }
 
 const axiosClient = axios.create({
@@ -38,13 +47,18 @@ axiosClient.interceptors.response.use(
       return response.data
     }
     if (envelope.status < 200 || envelope.status >= 300) {
-      return Promise.reject(new ApiError(envelope.message || '请求失败', envelope.status))
+      return Promise.reject(
+        new ApiError(envelope.message || '请求失败', envelope.status, envelope.code, envelope.errors),
+      )
     }
     return envelope.data
   },
   (error) => {
-    const message = error?.response?.data?.message || error?.message || '请求失败'
-    return Promise.reject(new ApiError(message, error?.response?.status))
+    const envelope = error?.response?.data as Partial<ResultEnvelope<unknown>> | undefined
+    const message = envelope?.message || error?.message || '请求失败'
+    return Promise.reject(
+      new ApiError(message, error?.response?.status, envelope?.code, envelope?.errors),
+    )
   },
 )
 

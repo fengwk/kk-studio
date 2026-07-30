@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.agent.model.service.impl;
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import lombok.AllArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,6 +13,7 @@ import fun.fengwk.kkstudio.core.agent.model.service.AgentModelService;
 import fun.fengwk.kkstudio.core.agent.model.service.converter.AgentModelConverter;
 import fun.fengwk.kkstudio.core.agent.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.ai.error.AiDuplicateException;
+import fun.fengwk.kkstudio.core.ai.error.AiInUseException;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
@@ -26,6 +28,7 @@ import fun.fengwk.kkstudio.share.model.AgentModelUpdateDTO;
 public class AgentModelServiceImpl implements AgentModelService {
 
   private static final String RESOURCE = "agent_model";
+  private static final String PROVIDER_RESOURCE = "agent_provider";
 
   private final AgentModelRepository agentModelRepository;
   private final AgentModelConverter agentModelConverter;
@@ -53,6 +56,9 @@ public class AgentModelServiceImpl implements AgentModelService {
           RESOURCE,
           RESOURCE + " name already exists under this provider: " + model.getName(),
           error);
+    } catch (DataIntegrityViolationException error) {
+      throw new AiResourceNotFoundException(
+          PROVIDER_RESOURCE, PROVIDER_RESOURCE + " not found: " + providerId);
     }
     AgentModel loaded = agentModelRepository.getById(model.getId());
     return agentModelConverter.convert(loaded);
@@ -67,6 +73,7 @@ public class AgentModelServiceImpl implements AgentModelService {
     }
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
     AgentModel model = referenceResolver.requireModel(id);
+    ensureExpectedVersion(model, id, rawExpected, expected);
     String currentName = model.getName();
     modelMutationFactory.update(model, updateDTO);
     // provider_id is immutable on update; uniqueness is still scoped to the owning provider.
@@ -94,18 +101,33 @@ public class AgentModelServiceImpl implements AgentModelService {
   @Transactional
   public void deleteModel(long id, String expectedVersion) {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
-    referenceResolver.requireModel(id);
+    AgentModel model = referenceResolver.requireModel(id);
+    ensureExpectedVersion(model, id, expectedVersion, expected);
     referenceResolver.ensureDeletable(id);
-    if (!agentModelRepository.deleteById(id, expected)) {
-      AgentModel reread = agentModelRepository.getById(id);
-      if (reread == null) {
-        throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+    try {
+      if (!agentModelRepository.deleteById(id, expected)) {
+        AgentModel reread = agentModelRepository.getById(id);
+        if (reread == null) {
+          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+        }
+        throw new AiVersionConflictException(
+            RESOURCE,
+            Long.toString(id),
+            expectedVersion,
+            CatalogVersions.format(reread.getVersion()));
       }
+    } catch (DuplicateKeyException error) {
+      throw new AiInUseException(RESOURCE, RESOURCE + " in use by agents: " + id);
+    } catch (DataIntegrityViolationException error) {
+      throw new AiInUseException(RESOURCE, RESOURCE + " in use by agents: " + id);
+    }
+  }
+
+  private static void ensureExpectedVersion(
+      AgentModel model, long id, String expectedVersion, long expected) {
+    if (model.getVersion() != expected) {
       throw new AiVersionConflictException(
-          RESOURCE,
-          Long.toString(id),
-          expectedVersion,
-          CatalogVersions.format(reread.getVersion()));
+          RESOURCE, Long.toString(id), expectedVersion, CatalogVersions.format(model.getVersion()));
     }
   }
 
