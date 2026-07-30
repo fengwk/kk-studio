@@ -37,18 +37,20 @@ class StudioInteractionControllerTest extends WebPostgresTestSupport {
     when(interactionService.respond(eq(LARGE_ID), any())).thenReturn(dto);
 
     mockMvc
-        .perform(get("/api/interactions/{id}", LARGE_ID))
+        .perform(get("/api/ai/runtime/interactions/{id}", LARGE_ID))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.id").value(LARGE_ID))
         .andExpect(jsonPath("$.data.version").value("7"));
     mockMvc
         .perform(
-            get("/api/interactions/open").param("ownerKind", "THREAD").param("ownerId", LARGE_ID))
+            get("/api/ai/runtime/interactions/open")
+                .param("ownerKind", "THREAD")
+                .param("ownerId", LARGE_ID))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.ownerId").value(LARGE_ID));
     mockMvc
         .perform(
-            post("/api/interactions/{id}/response", LARGE_ID)
+            post("/api/ai/runtime/interactions/{id}/response", LARGE_ID)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"7\",\"responseJson\":\"{\\\"yes\\\":true}\"}"))
         .andExpect(status().isOk())
@@ -63,10 +65,12 @@ class StudioInteractionControllerTest extends WebPostgresTestSupport {
     when(interactionService.respond(eq(LARGE_ID), any()))
         .thenThrow(new IllegalStateException("interaction is not open"));
 
-    mockMvc.perform(get("/api/interactions/{id}", LARGE_ID)).andExpect(status().isNotFound());
+    mockMvc
+        .perform(get("/api/ai/runtime/interactions/{id}", LARGE_ID))
+        .andExpect(status().isNotFound());
     mockMvc
         .perform(
-            post("/api/interactions/{id}/response", LARGE_ID)
+            post("/api/ai/runtime/interactions/{id}/response", LARGE_ID)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"7\",\"responseJson\":\"true\"}"))
         .andExpect(status().isConflict());

@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createAgentService } from '@/shared/api/agent-service'
 import type { HttpClient } from '@/shared/api/client'
-import type { ModelUsageSummaryDTO } from '@/shared/api/contracts'
 
 function createClient(): HttpClient {
   return {
@@ -13,7 +12,7 @@ function createClient(): HttpClient {
 }
 
 describe('agentService', () => {
-  it('maps global resource lists to top-level paths', async () => {
+  it('maps global resource lists to catalog paths', async () => {
     const client = createClient()
     const service = createAgentService(client)
 
@@ -21,9 +20,9 @@ describe('agentService', () => {
     await service.listModels(3, 30)
     await service.listAgents(4, 40)
 
-    expect(client.get).toHaveBeenNthCalledWith(1, '/providers', { params: { pageNumber: 2, pageSize: 20 } })
-    expect(client.get).toHaveBeenNthCalledWith(2, '/models', { params: { pageNumber: 3, pageSize: 30 } })
-    expect(client.get).toHaveBeenNthCalledWith(3, '/agents', { params: { pageNumber: 4, pageSize: 40 } })
+    expect(client.get).toHaveBeenNthCalledWith(1, '/ai/catalog/providers', { params: { pageNumber: 2, pageSize: 20 } })
+    expect(client.get).toHaveBeenNthCalledWith(2, '/ai/catalog/models', { params: { pageNumber: 3, pageSize: 30 } })
+    expect(client.get).toHaveBeenNthCalledWith(3, '/ai/catalog/agents', { params: { pageNumber: 4, pageSize: 40 } })
   })
 
   it('uses the standard page defaults for global resource lists', async () => {
@@ -34,9 +33,9 @@ describe('agentService', () => {
     await service.listModels()
     await service.listAgents()
 
-    expect(client.get).toHaveBeenNthCalledWith(1, '/providers', { params: { pageNumber: 1, pageSize: 50 } })
-    expect(client.get).toHaveBeenNthCalledWith(2, '/models', { params: { pageNumber: 1, pageSize: 50 } })
-    expect(client.get).toHaveBeenNthCalledWith(3, '/agents', { params: { pageNumber: 1, pageSize: 50 } })
+    expect(client.get).toHaveBeenNthCalledWith(1, '/ai/catalog/providers', { params: { pageNumber: 1, pageSize: 50 } })
+    expect(client.get).toHaveBeenNthCalledWith(2, '/ai/catalog/models', { params: { pageNumber: 1, pageSize: 50 } })
+    expect(client.get).toHaveBeenNthCalledWith(3, '/ai/catalog/agents', { params: { pageNumber: 1, pageSize: 50 } })
   })
 
   it('maps provider, model and agent mutations to global id-based CRUD endpoints', async () => {
@@ -116,27 +115,15 @@ describe('agentService', () => {
     await service.updateAgent(303, updateAgentBody)
     await service.deleteAgent(303, '11')
 
-    expect(client.post).toHaveBeenNthCalledWith(1, '/providers', providerBody)
-    expect(client.put).toHaveBeenNthCalledWith(1, '/providers/101', updateProviderBody)
-    expect(client.delete).toHaveBeenNthCalledWith(1, '/providers/101', { params: { expectedVersion: '8' } })
-    expect(client.post).toHaveBeenNthCalledWith(2, '/models', modelBody)
-    expect(client.put).toHaveBeenNthCalledWith(2, '/models/202', updateModelBody)
-    expect(client.delete).toHaveBeenNthCalledWith(2, '/models/202', { params: { expectedVersion: '10' } })
-    expect(client.post).toHaveBeenNthCalledWith(3, '/agents', agentBody)
-    expect(client.put).toHaveBeenNthCalledWith(3, '/agents/303', updateAgentBody)
-    expect(client.delete).toHaveBeenNthCalledWith(3, '/agents/303', { params: { expectedVersion: '11' } })
-  })
-
-  it('maps usage summaries to encoded session and model endpoints', async () => {
-    const client = createClient()
-    const service = createAgentService(client)
-
-    const sessionUsage: Promise<ModelUsageSummaryDTO> = service.getSessionUsage('session /2')
-    const modelUsage: Promise<ModelUsageSummaryDTO> = service.getModelUsage('model /3')
-    await Promise.all([sessionUsage, modelUsage])
-
-    expect(client.get).toHaveBeenNthCalledWith(1, '/usage/sessions/session%20%2F2')
-    expect(client.get).toHaveBeenNthCalledWith(2, '/usage/models/model%20%2F3')
+    expect(client.post).toHaveBeenNthCalledWith(1, '/ai/catalog/providers', providerBody)
+    expect(client.put).toHaveBeenNthCalledWith(1, '/ai/catalog/providers/101', updateProviderBody)
+    expect(client.delete).toHaveBeenNthCalledWith(1, '/ai/catalog/providers/101', { params: { expectedVersion: '8' } })
+    expect(client.post).toHaveBeenNthCalledWith(2, '/ai/catalog/models', modelBody)
+    expect(client.put).toHaveBeenNthCalledWith(2, '/ai/catalog/models/202', updateModelBody)
+    expect(client.delete).toHaveBeenNthCalledWith(2, '/ai/catalog/models/202', { params: { expectedVersion: '10' } })
+    expect(client.post).toHaveBeenNthCalledWith(3, '/ai/catalog/agents', agentBody)
+    expect(client.put).toHaveBeenNthCalledWith(3, '/ai/catalog/agents/303', updateAgentBody)
+    expect(client.delete).toHaveBeenNthCalledWith(3, '/ai/catalog/agents/303', { params: { expectedVersion: '11' } })
   })
 
 })

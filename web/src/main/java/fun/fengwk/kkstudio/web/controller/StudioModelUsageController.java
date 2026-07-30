@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.ModelUsageSummaryDTO;
 
 /** 模型调用账本的 Session 与 Model 聚合 API；Thread usage belongs to its snapshot. */
 @AllArgsConstructor
-@RequestMapping("/api/usage")
+@RequestMapping("/api/ai/runtime/usage")
 @RestController
 public class StudioModelUsageController {
 

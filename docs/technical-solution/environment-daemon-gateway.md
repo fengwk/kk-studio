@@ -8,11 +8,11 @@ Environment 是**服务器内存**中的实时资源，按非空 `environmentNam
 
 | 层 | 职责 |
 | --- | --- |
-| `core/environment` | LiveEnvironmentRegistry、Daemon endpoint/Gateway、RemoteToolTransport、load_skill 端口 |
+| `core/ai/environment` | LiveEnvironmentRegistry、Daemon endpoint/Gateway、RemoteToolTransport、load_skill 端口 |
 | `harness-tool` | location-neutral Tool API、RemoteTool、Daemon v1 envelope/capabilities/result codec |
 | `harness-daemon` | 独立 Daemon 连接、重连、本地工具执行与 invocation journal |
 | `harness-runtime` | 统一 `ToolWorker`、ToolInvocation durable 状态、`ToolExecutionLocation` 路由 |
-| `web` | 通过 Core endpoint/query API 提供 `/api/environments/daemon/v1` WebSocket 文本帧与只读 `GET /api/environments`；不直接消费 Harness 类型 |
+| `web` | 通过 Core endpoint/query API 提供 `/api/ai/environment/daemon/v1` WebSocket 文本帧与只读 `GET /api/ai/environment`；不直接消费 Harness 类型 |
 
 数据库是 ToolInvocation 状态、lease、终态结果、所属 Thread runnable 与全局 Artifact 的唯一来源。partial 进度进入 Redis realtime projection。Gateway 拥有连接与协议，不是第二套 durable 状态机。
 
@@ -36,7 +36,7 @@ Daemon 以 CLI 参数启动：
 ```text
 java ... DaemonMain \
   --environment-name local-dev \
-  --gateway-uri wss://studio.example/api/environments/daemon/v1 \
+  --gateway-uri wss://studio.example/api/ai/environment/daemon/v1 \
   --gateway-token ${KK_STUDIO_DAEMON_TOKEN} \
   --skill-dir ~/.agents/skills \
   --daemon-id optional-stable-daemon-name
@@ -59,7 +59,7 @@ HELLO -> CAPABILITIES -> READY {"pull":true}
 只读查询：
 
 ```text
-GET /api/environments
+GET /api/ai/environment
 ```
 
 返回 `name` / `status` / `lastSeen` / `tools` / `skills`。无 create/update/delete API。

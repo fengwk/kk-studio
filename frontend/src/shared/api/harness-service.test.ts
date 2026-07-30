@@ -48,49 +48,49 @@ describe('harnessService', () => {
     await service.getRealtimeStreamPolicy()
     await service.updateRealtimeStreamPolicy({ maxLength: 5_000 })
 
-    expect(client.post).not.toHaveBeenCalledWith('/sessions', expect.anything())
-    expect(client.post).toHaveBeenNthCalledWith(1, '/threads/thread%20%2F1/messages', {
+    expect(client.post).not.toHaveBeenCalledWith('/ai/runtime/sessions', expect.anything())
+    expect(client.post).toHaveBeenNthCalledWith(1, '/ai/runtime/threads/thread%20%2F1/messages', {
       content: 'hello',
       clientMessageId: 'cid-1',
       expectedExecutionEpoch: 3,
     })
     // stop is no longer a bodyless POST: it carries the epoch fencing token too.
-    expect(client.post).toHaveBeenNthCalledWith(2, '/threads/thread%20%2F1/stop', { expectedExecutionEpoch: 4 })
-    expect(client.get).toHaveBeenCalledWith('/sessions')
-    expect(client.get).toHaveBeenCalledWith('/sessions/session%20%2F1')
-    expect(client.get).toHaveBeenCalledWith('/sessions/session%20%2F1/entries')
-    expect(client.get).toHaveBeenCalledWith('/threads/thread%20%2F1/snapshot')
-    expect(client.put).toHaveBeenNthCalledWith(1, '/threads/thread%20%2F1/model', {
+    expect(client.post).toHaveBeenNthCalledWith(2, '/ai/runtime/threads/thread%20%2F1/stop', { expectedExecutionEpoch: 4 })
+    expect(client.get).toHaveBeenCalledWith('/ai/runtime/sessions')
+    expect(client.get).toHaveBeenCalledWith('/ai/runtime/sessions/session%20%2F1')
+    expect(client.get).toHaveBeenCalledWith('/ai/runtime/sessions/session%20%2F1/entries')
+    expect(client.get).toHaveBeenCalledWith('/ai/runtime/threads/thread%20%2F1/snapshot')
+    expect(client.put).toHaveBeenNthCalledWith(1, '/ai/runtime/threads/thread%20%2F1/model', {
       modelId: 'model-1',
       variant: 'default',
       clientMessageId: 'cid-model',
       expectedExecutionEpoch: 4,
     })
-    expect(client.put).toHaveBeenNthCalledWith(2, '/threads/thread%20%2F1/yolo', {
+    expect(client.put).toHaveBeenNthCalledWith(2, '/ai/runtime/threads/thread%20%2F1/yolo', {
       yoloEnabled: true,
       clientMessageId: 'cid-yolo',
       expectedExecutionEpoch: 4,
     })
-    expect(client.put).toHaveBeenNthCalledWith(3, '/threads/thread%20%2F1/agent', {
+    expect(client.put).toHaveBeenNthCalledWith(3, '/ai/runtime/threads/thread%20%2F1/agent', {
       agentDefinitionId: 'agent-1',
       clientMessageId: 'cid-agent',
       expectedExecutionEpoch: 4,
     })
-    expect(client.get).toHaveBeenCalledWith('/harness/retry-policy')
-    expect(client.get).toHaveBeenLastCalledWith('/harness/realtime-stream-policy')
-    expect(client.put).toHaveBeenNthCalledWith(4, '/harness/retry-policy', {
+    expect(client.get).toHaveBeenCalledWith('/ai/runtime/settings/retry-policy')
+    expect(client.get).toHaveBeenLastCalledWith('/ai/runtime/settings/realtime-stream-policy')
+    expect(client.put).toHaveBeenNthCalledWith(4, '/ai/runtime/settings/retry-policy', {
       maxRetries: 3,
       backoffStrategy: 'EXPONENTIAL',
       baseDelayMillis: 2_000,
       maxDelayMillis: 60_000,
     })
-    expect(client.put).toHaveBeenNthCalledWith(5, '/harness/realtime-stream-policy', { maxLength: 5_000 })
+    expect(client.put).toHaveBeenNthCalledWith(5, '/ai/runtime/settings/realtime-stream-policy', { maxLength: 5_000 })
     expect(client.put).not.toHaveBeenCalledWith(expect.stringContaining('/toolset'), expect.anything())
     expect(client.post).not.toHaveBeenCalledWith(expect.stringContaining('/decision'), expect.anything())
     // Session-scoped Thread create/list are gone from the contract.
-    expect(client.get).not.toHaveBeenCalledWith(expect.stringContaining('/sessions/session%20%2F1/threads'))
+    expect(client.get).not.toHaveBeenCalledWith(expect.stringContaining('/ai/runtime/sessions/session%20%2F1/threads'))
     expect(client.post).not.toHaveBeenCalledWith(
-      expect.stringContaining('/sessions/session%20%2F1/threads'),
+      expect.stringContaining('/ai/runtime/sessions/session%20%2F1/threads'),
       expect.anything(),
     )
   })
@@ -113,20 +113,20 @@ describe('harnessService', () => {
     // A null headEntryId clears the head back to UNBOUND.
     await service.updateThreadHead('thread /1', { headEntryId: null, expectedExecutionEpoch: 2 })
 
-    expect(client.get).toHaveBeenNthCalledWith(1, '/threads')
-    // POST /threads takes no body.
-    expect(client.post).toHaveBeenNthCalledWith(1, '/threads')
-    expect(client.post).toHaveBeenNthCalledWith(2, '/threads/thread%20%2F1/bootstrap', {
+    expect(client.get).toHaveBeenNthCalledWith(1, '/ai/runtime/threads')
+    // POST /ai/runtime/threads takes no body.
+    expect(client.post).toHaveBeenNthCalledWith(1, '/ai/runtime/threads')
+    expect(client.post).toHaveBeenNthCalledWith(2, '/ai/runtime/threads/thread%20%2F1/bootstrap', {
       title: 'First',
       agentDefinitionId: 'agent-1',
       yoloEnabled: false,
       expectedExecutionEpoch: 0,
     })
-    expect(client.put).toHaveBeenNthCalledWith(1, '/threads/thread%20%2F1/head', {
+    expect(client.put).toHaveBeenNthCalledWith(1, '/ai/runtime/threads/thread%20%2F1/head', {
       headEntryId: '9007199254740993',
       expectedExecutionEpoch: 1,
     })
-    expect(client.put).toHaveBeenNthCalledWith(2, '/threads/thread%20%2F1/head', {
+    expect(client.put).toHaveBeenNthCalledWith(2, '/ai/runtime/threads/thread%20%2F1/head', {
       headEntryId: null,
       expectedExecutionEpoch: 2,
     })
@@ -156,13 +156,13 @@ describe('harnessService', () => {
 
     // End-to-end call shape for the Session entries endpoint.
     await service.listSessionEntries('42')
-    expect(client.get).toHaveBeenLastCalledWith('/sessions/42/entries')
+    expect(client.get).toHaveBeenLastCalledWith('/ai/runtime/sessions/42/entries')
   })
 
   it('uses the durable revision as the SSE resume cursor', () => {
     const eventSource = vi.fn()
     vi.stubGlobal('EventSource', eventSource)
     createHarnessService(createClient()).createThreadRealtimeStream('1', '9007199254740993')
-    expect(eventSource).toHaveBeenCalledWith('/api/threads/1/events/stream?afterRevision=9007199254740993')
+    expect(eventSource).toHaveBeenCalledWith('/api/ai/runtime/threads/1/events/stream?afterRevision=9007199254740993')
   })
 })

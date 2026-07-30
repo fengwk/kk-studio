@@ -59,7 +59,7 @@ public interface ProviderFactory {
 
 ### Core composition
 
-[`ModelExecutionConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/model/ModelExecutionConfiguration.java) 暴露四个 named `ProviderFactory` bean：
+[`ModelExecutionConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/model/ModelExecutionConfiguration.java) 暴露四个 named `ProviderFactory` bean：
 
 | Bean name | ProviderType | Cache capability |
 | --- | --- | --- |
@@ -77,7 +77,7 @@ public interface ProviderFactory {
 `ModelExecutionConfiguration` 通过 `ObjectProvider<ProviderFactory>` 收集 Spring 容器中的所有 `ProviderFactory` bean 并装配到 `ProviderFactories`。
 
 消费方：
-- [`DatabaseProviderResolutionService`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/model/DatabaseProviderResolutionService.java) 用 `ProviderFactories.lookup(ProviderType)` 解析持久化 Provider 行对应的 adapter。
+- [`DatabaseProviderResolutionService`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/model/DatabaseProviderResolutionService.java) 用 `ProviderFactories.lookup(ProviderType)` 解析持久化 Provider 行对应的 adapter。
 
 ## ToolFactory
 
@@ -96,7 +96,7 @@ public interface ToolFactory {
 
 ### Core composition
 
-[`PlatformToolsConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/tool/PlatformToolsConfiguration.java) 暴露 4 个具体 `Tool` bean（`CreateGoalTool` / `GetGoalTool` / `UpdateGoalTool` / `LoadSkillTool`）以及对应的 `ToolFactory` bean（`createGoalToolFactory` / `getGoalToolFactory` / `updateGoalToolFactory` / `loadSkillToolFactory`）。
+[`PlatformToolsConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/tool/PlatformToolsConfiguration.java) 暴露 4 个具体 `Tool` bean（`CreateGoalTool` / `GetGoalTool` / `UpdateGoalTool` / `LoadSkillTool`）以及对应的 `ToolFactory` bean（`createGoalToolFactory` / `getGoalToolFactory` / `updateGoalToolFactory` / `loadSkillToolFactory`）。
 
 ### `ToolFactories`
 
@@ -110,15 +110,15 @@ public interface ToolFactory {
 `PlatformToolsConfiguration` 通过 `ObjectProvider<ToolFactory>` 装配。
 
 消费方：
-- [`AgentDefinitionLiveCapabilityValidator`](../../core/src/main/java/fun/fengwk/kkstudio/core/agent/definition/service/impl/AgentDefinitionLiveCapabilityValidator.java) 通过 `ToolFactories.descriptors()` 列出 platform tool name。
-- [`RuntimeConfigSnapshotResolver`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/thread/command/RuntimeConfigSnapshotResolver.java) 同上。
-- [`HarnessToolWorkerConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/tool/worker/HarnessToolWorkerConfiguration.java) 把 `ToolFactories.find(name, version)` 暴露为 `ToolRegistry` bean。
+- [`AgentDefinitionLiveCapabilityValidator`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/catalog/definition/service/impl/AgentDefinitionLiveCapabilityValidator.java) 通过 `ToolFactories.descriptors()` 列出 platform tool name。
+- [`RuntimeConfigSnapshotResolver`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/thread/command/RuntimeConfigSnapshotResolver.java) 同上。
+- [`HarnessToolWorkerConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/tool/worker/HarnessToolWorkerConfiguration.java) 把 `ToolFactories.find(name, version)` 暴露为 `ToolRegistry` bean。
 
 ## ToolInterceptorChain
 
 [`ToolInterceptorChain`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/tool/ToolInterceptorChain.java) 按输入顺序执行 before / after interceptor，并把唯一的 `PermissionBoundaryInterceptor` 移到 before 链末尾。
 
-[`HarnessToolConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/harness/tool/service/HarnessToolConfiguration.java) 通过 `ObjectProvider<BeforeToolCallInterceptor>` / `ObjectProvider<AfterToolCallInterceptor>` 直接装配：
+[`HarnessToolConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/tool/service/HarnessToolConfiguration.java) 通过 `ObjectProvider<BeforeToolCallInterceptor>` / `ObjectProvider<AfterToolCallInterceptor>` 直接装配：
 
 ```java
 @Bean
@@ -136,6 +136,6 @@ public ToolInterceptorChain toolInterceptorChain(
 
 - [`ProviderFactoriesTest`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderFactoriesTest.java)：重复 provider type、null ctor、adapter type mismatch、cache capability 透传、create 一次性调用。
 - [`ToolFactoriesTest`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/tool/ToolFactoriesTest.java)：重复 (name, version) 拒绝、descriptor 顺序、find 命中/缺席、descriptor mismatch 与 singleton descriptor 漂移拒绝。
-- [`ModelExecutionConfigurationTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/model/ModelExecutionConfigurationTest.java)：四个 named ProviderFactory bean 全部进入 `ProviderFactories`，并创建各自对应的 adapter。
-- [`PlatformToolsWiringTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/tool/PlatformToolsWiringTest.java)：四个 platform Tool 全部可经 `ToolFactories.find` 解析。
-- [`AgentDefinitionLiveCapabilityValidatorTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/agent/definition/service/impl/AgentDefinitionLiveCapabilityValidatorTest.java) / [`RuntimeConfigSnapshotResolverTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/thread/command/RuntimeConfigSnapshotResolverTest.java) / [`DatabaseModelExecutionResolverTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/harness/model/DatabaseModelExecutionResolverTest.java)：consumer 切换到 typed collection 后行为保持。
+- [`ModelExecutionConfigurationTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/model/ModelExecutionConfigurationTest.java)：四个 named ProviderFactory bean 全部进入 `ProviderFactories`，并创建各自对应的 adapter。
+- [`PlatformToolsWiringTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/tool/PlatformToolsWiringTest.java)：四个 platform Tool 全部可经 `ToolFactories.find` 解析。
+- [`AgentDefinitionLiveCapabilityValidatorTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/catalog/definition/service/impl/AgentDefinitionLiveCapabilityValidatorTest.java) / [`RuntimeConfigSnapshotResolverTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/thread/command/RuntimeConfigSnapshotResolverTest.java) / [`DatabaseModelExecutionResolverTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/model/DatabaseModelExecutionResolverTest.java)：consumer 切换到 typed collection 后行为保持。

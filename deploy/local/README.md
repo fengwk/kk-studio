@@ -40,7 +40,7 @@ docker compose -f deploy/local/compose.yaml logs -f postgres
 | 资源 | 地址 |
 | --- | --- |
 | Web UI | <http://localhost:8080/> |
-| Harness API | <http://localhost:8080/api/threads> 等 |
+| Harness API | <http://localhost:8080/api/ai/runtime/threads> 等 |
 | Health | <http://localhost:8080/actuator/health> |
 | PostgreSQL | `jdbc:postgresql://localhost:5432/kk_studio`（用户 / 密码：`kk_studio`） |
 | Redis | `redis://localhost:6379` |
@@ -118,7 +118,7 @@ Provider 凭证；真实凭证不会写入镜像、SQL seed 或仓库。
 - `data-dev-postgresql.sql` 写入的是 local-only 的 stub provider（`stub-key`），
   不携带任何真实凭证。
 - 真实 Provider（OpenAI / Google / Anthropic / xAI / MiniMax / DeepSeek / ZAI）
-  的 `credential` 必须通过 UI、`PUT /api/providers/{id}` 或 E2E profile 的环境同步器
+  的 `credential` 必须通过 UI、`PUT /api/ai/catalog/providers/{id}` 或 E2E profile 的环境同步器
   在运行时注入，**绝不**写入镜像、SQL seed 或仓库。
 
 ## 清理宿主网络监听

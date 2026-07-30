@@ -40,7 +40,7 @@ export function toArtifactAttachment(content: Record<string, unknown>): ToolAtta
   if (!artifactId) {
     return []
   }
-  return [{ type, name: artifactId, mime: mediaType, data: `/api/artifacts/${encodeURIComponent(artifactId)}` }]
+  return [{ type, name: artifactId, mime: mediaType, data: `/api/ai/runtime/artifacts/${encodeURIComponent(artifactId)}` }]
 }
 
 export function artifactType(mediaType: string): ToolAttachmentType {

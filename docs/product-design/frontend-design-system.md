@@ -230,7 +230,7 @@ Shell 约定：
 
 | 项 | 路由 | 状态 |
 | --- | --- | --- |
-| AI | `/sessions` 等 | 已落地 |
+| AI | `/chats`、`/agents`、`/models`、`/providers`、`/environments`、`/settings` | 已落地 |
 | 画布 | `/canvas` | 已落地 |
 | 资产 | 预留 disabled | 后续开放 |
 

@@ -127,9 +127,9 @@ API 矩阵注册 **58** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 
 | Case | 断言 |
 | --- | --- |
-| `thread.unbound_create` | `POST /api/threads` 无 body => 201；`status=UNBOUND`，`headEntryId`/`sessionId` 为空，`executionEpoch=0`，无路径 Entry，且出现在 `GET /api/threads` |
+| `thread.unbound_create` | `POST /api/ai/runtime/threads` 无 body => 201；`status=UNBOUND`，`headEntryId`/`sessionId` 为空，`executionEpoch=0`，无路径 Entry，且出现在 `GET /api/ai/runtime/threads` |
 | `thread.unbound_message_rejected` | UNBOUND Thread 入队消息 => 409 thread is unbound；不写入 Input |
-| `thread.bootstrap_binds_session` | `POST /api/threads/{id}/bootstrap` => 201 `{session, thread}`；复用同一 Thread，epoch+1，head 指向 `RUNTIME_CONFIG`，Session 由 head Entry 派生 |
+| `thread.bootstrap_binds_session` | `POST /api/ai/runtime/threads/{id}/bootstrap` => 201 `{session, thread}`；复用同一 Thread，epoch+1，head 指向 `RUNTIME_CONFIG`，Session 由 head Entry 派生 |
 | `thread.stale_epoch_rejected` | message 与 `PUT /head` 携带过期 `expectedExecutionEpoch` => 409 stale execution epoch；head、epoch 与 mailbox 均不变 |
 | `thread.rebind_same_session` | `PUT /head` 指向同 Session 的 ROOT => head 更新、epoch+1、`sessionId` 不变，路径 Entries 跟随新 head |
 | `thread.rebind_cross_session` | `PUT /head` 指向另一 Session 的 Entry => `threadId` 不变，派生 `sessionId` 切换 |
@@ -221,19 +221,35 @@ API 矩阵注册 **58** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 ## 关键契约锚点
 
 ```text
-POST /api/providers|models|agents|chats
-PUT  /api/providers|models|agents|chats/{id}              # body.expectedVersion 必填十进制字符串
-DELETE /api/providers|models|agents|chats/{id}?expectedVersion={version}
-GET  /api/threads                     # 全局 Thread 列表
-POST /api/threads                     # 无 body => 201 UNBOUND Thread
-POST /api/threads/{id}/bootstrap      # => 201 {session, thread}
-PUT  /api/threads/{id}/head           # headEntryId 可为 null
-POST /api/threads/{id}/stop
-PUT  /api/threads/{id}/agent|model|yolo
-POST /api/threads/{id}/messages
-GET  /api/threads/{id}/snapshot # unknown => 404; one coherent Thread/entries/inputs/invocations/interactions/usage projection
-GET  /api/threads/{id}/events/stream?afterRevision={revision}
-GET  /api/models               # structured config only
+GET|POST /api/ai/catalog/providers
+GET|POST /api/ai/catalog/models
+GET|POST /api/ai/catalog/agents
+PUT|DELETE /api/ai/catalog/{providers,models,agents}/{id}            # expectedVersion 必填十进制字符串
+GET|POST /api/ai/chat
+GET|PUT|DELETE /api/ai/chat/{id}                                     # PUT/DELETE 的 expectedVersion 必填
+GET|POST /api/ai/runtime/threads                                    # POST 无 body => 201 UNBOUND Thread
+GET /api/ai/runtime/threads/{id}
+POST /api/ai/runtime/threads/{id}/bootstrap                          # => 201 {session, thread}
+PUT /api/ai/runtime/threads/{id}/head                                # headEntryId 可为 null
+POST /api/ai/runtime/threads/{id}/messages
+POST /api/ai/runtime/threads/{id}/messages/custom
+PUT /api/ai/runtime/threads/{id}/{agent,model,yolo}
+POST /api/ai/runtime/threads/{id}/stop
+GET /api/ai/runtime/threads/{id}/snapshot                            # unknown => 404
+GET /api/ai/runtime/threads/{id}/events/stream?afterRevision={revision}
+GET /api/ai/runtime/sessions
+GET /api/ai/runtime/sessions/{id}
+GET /api/ai/runtime/sessions/{id}/entries
+GET /api/ai/runtime/interactions/{id}
+GET /api/ai/runtime/interactions/open
+POST /api/ai/runtime/interactions/{id}/response
+GET /api/ai/runtime/tool-invocations/{id}
+GET /api/ai/runtime/artifacts/{id}
+GET /api/ai/runtime/usage/{sessions,models}/{id}
+GET|PUT /api/ai/runtime/settings/retry-policy
+GET|PUT /api/ai/runtime/settings/realtime-stream-policy
+GET /api/ai/environment
+WebSocket /api/ai/environment/daemon/v1
 ```
 
 上述 Thread 写接口的请求体均含必填 `expectedExecutionEpoch`：epoch 过期或 Thread 非静止 => `409`，未知资源 => `404`。
@@ -242,7 +258,7 @@ Thread snapshot 的 `revision` 是十进制字符串的 durable cursor；SSE 的
 durable id，`resync` 提示客户端重新加载 snapshot。Redis `realtime` 增量无 SSE id，仅用于
 瞬态输出，不能替代 durable snapshot。
 
-Catalog（Provider / Model / Agent / Chat）响应中的 `version` 是十进制字符串，`createTime` /
+Catalog（Provider / Model / Agent）与 Chat 响应中的 `version` 是十进制字符串，`createTime` /
 `updateTime` 是 Instant 时间戳。每次成功更新版本递增；PUT 的 `expectedVersion` 或 DELETE
 查询参数过期时返回 `409 version_conflict`，资源不存在时返回 `404 resource_not_found`。
 

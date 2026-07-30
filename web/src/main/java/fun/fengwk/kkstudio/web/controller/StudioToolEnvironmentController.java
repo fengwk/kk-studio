@@ -20,7 +20,7 @@ import java.util.List;
  * controller depends only on application DTOs.
  */
 @AllArgsConstructor
-@RequestMapping("/api/environments")
+@RequestMapping("/api/ai/environment")
 @RestController
 public class StudioToolEnvironmentController {
 

@@ -59,7 +59,7 @@ class StudioModelUsageControllerTest extends WebPostgresTestSupport {
     for (String scope : List.of("sessions", "models")) {
       String scopeType = scope.substring(0, scope.length() - 1);
       mockMvc
-          .perform(get("/api/usage/{scope}/{id}", scope, Long.toString(LARGE_ID)))
+          .perform(get("/api/ai/runtime/usage/{scope}/{id}", scope, Long.toString(LARGE_ID)))
           .andExpect(status().isOk())
           .andExpect(jsonPath("$.data.scopeType").value(scopeType))
           .andExpect(jsonPath("$.data.scopeId").value(Long.toString(LARGE_ID)))
@@ -80,7 +80,7 @@ class StudioModelUsageControllerTest extends WebPostgresTestSupport {
     for (String scope : List.of("sessions", "models")) {
       for (String invalid : List.of("abc", "0", "-1", "9223372036854775808")) {
         mockMvc
-            .perform(get("/api/usage/{scope}/{id}", scope, invalid))
+            .perform(get("/api/ai/runtime/usage/{scope}/{id}", scope, invalid))
             .andExpect(status().isBadRequest());
       }
     }

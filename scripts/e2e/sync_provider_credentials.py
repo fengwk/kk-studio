@@ -100,7 +100,7 @@ def get_providers(backend_url, urlopen=None):
     if urlopen is None:
         urlopen = _default_urlopen
     return urlopen(
-        f"{backend_url}/api/providers?pageNumber=1&pageSize=50")
+        f"{backend_url}/api/ai/catalog/providers?pageNumber=1&pageSize=50")
 
 
 def put_provider(backend_url, provider_id, payload, urlopen=None):
@@ -110,7 +110,7 @@ def put_provider(backend_url, provider_id, payload, urlopen=None):
     data = json.dumps(payload).encode()
     headers = {"Content-Type": "application/json"}
     return urlopen(
-        f"{backend_url}/api/providers/{provider_id}",
+        f"{backend_url}/api/ai/catalog/providers/{provider_id}",
         data=data, headers=headers)
 
 

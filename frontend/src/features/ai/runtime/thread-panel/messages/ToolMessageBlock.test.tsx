@@ -80,7 +80,7 @@ describe('ToolMessageBlock', () => {
         message={message({
           attachments: [
             { type: 'image', name: 'preview.png', mime: 'image/png', data: 'aGVsbG8=' },
-            { type: 'file', name: 'result.json', mime: 'application/json', data: '/api/artifacts/1' },
+            { type: 'file', name: 'result.json', mime: 'application/json', data: '/api/ai/runtime/artifacts/1' },
             { type: 'audio', name: '', mime: 'audio/mpeg', data: '' },
           ],
         })}

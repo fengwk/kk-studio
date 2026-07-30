@@ -6,7 +6,7 @@
 
 | 域 | 代码位置 | 职责 | 当前成熟度 |
 | --- | --- | --- | --- |
-| **Harness / AI** | `harness-tool` / `harness-runtime` / `harness-daemon` + `core.harness` + `features/ai` | Session Entry Tree、可复用 HarnessThread、Model/Tool Invocation、Interaction | 现行契约 |
+| **Harness / AI** | `harness-tool` / `harness-runtime` / `harness-daemon` + `core.ai.runtime` + `features/ai` | Session Entry Tree、可复用 HarnessThread、Model/Tool Invocation、Interaction | 现行契约 |
 | **Studio / Canvas** | `studio` + `core.studio` + `features/canvas` | 全局单实例持久化画布（document / node / link / command-dedup） | 现行契约 |
 
 依赖：
@@ -86,9 +86,9 @@ FUNCTION 节点当前唯一实例是 `system.generate-text` v1。
 | `POST /api/canvases` | 可用（body 仅 `{title}`，创建 Canvas） |
 | `POST /api/canvases/{canvasId}/commands` | 可用（create text/generate-text/link、move nodes、delete node；硬删除；按 `(canvas_id, command_id)` 幂等） |
 | `/api/functions`、`/api/workflows`、`/api/function-runs` 等 | 暂不暴露 |
-| Harness `/api/sessions` | 仅查询 Session 列表/详情与 Entry Tree；Session/ROOT/RUNTIME_CONFIG 只由 Thread bootstrap 原子创建 |
-| Harness `/api/threads` | 全局 Thread 列表；创建 UNBOUND Thread |
-| Harness `/api/threads/{threadId}` | Thread 读取、bootstrap、`PUT /head` 重定位、mailbox 提交、Entries/Inputs、Redis realtime SSE、Stop；全局策略位于 `/api/harness/retry-policy` 与 `/api/harness/realtime-stream-policy` |
+| Harness `/api/ai/runtime/sessions` | 仅查询 Session 列表/详情与 Entry Tree；Session/ROOT/RUNTIME_CONFIG 只由 Thread bootstrap 原子创建 |
+| Harness `/api/ai/runtime/threads` | 全局 Thread 列表；创建 UNBOUND Thread |
+| Harness `/api/ai/runtime/threads/{threadId}` | Thread 读取、bootstrap、`PUT /head` 重定位、mailbox 提交、Entries/Inputs、Redis realtime SSE、Stop；全局策略位于 `/api/ai/runtime/settings/retry-policy` 与 `/api/ai/runtime/settings/realtime-stream-policy` |
 
 ## 7. 实现进度一句话
 

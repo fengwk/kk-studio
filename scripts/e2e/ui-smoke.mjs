@@ -31,7 +31,7 @@ const PI_MODEL_NAMES = JSON.parse(
   readFileSync(
     path.resolve(
       __dirname,
-      '../../core/src/test/resources/fun/fengwk/kkstudio/core/harness/persistence/postgresql/pi-model-catalog.json',
+      '../../core/src/test/resources/fun/fengwk/kkstudio/core/ai/runtime/persistence/postgresql/pi-model-catalog.json',
     ),
     'utf8',
   ),
@@ -75,20 +75,20 @@ async function apiJson(backendUrl, method, requestPath, body) {
 }
 
 async function apiDeleteByName(backendUrl, resource, name) {
-  const listPath =
-    resource === 'chats' ? '/api/chats' : `/api/${resource}?pageNumber=1&pageSize=100`
+  const resourcePath = resource === 'chats' ? '/api/ai/chat' : `/api/ai/catalog/${resource}`
+  const listPath = resource === 'chats' ? resourcePath : `${resourcePath}?pageNumber=1&pageSize=100`
   const { json } = await apiJson(backendUrl, 'GET', listPath)
   const list = json?.data?.results || json?.data || []
   const key = resource === 'chats' ? 'title' : 'name'
   const hit = list.find((item) => item[key] === name)
   if (!hit) return false
-  await apiJson(backendUrl, 'DELETE', `/api/${resource}/${hit.id}`)
+  await apiJson(backendUrl, 'DELETE', `${resourcePath}/${hit.id}`)
   return true
 }
 
 async function requireRealMiniMaxM27(backendUrl) {
-  const { json: agentsJson } = await apiJson(backendUrl, 'GET', '/api/agents?pageNumber=1&pageSize=50')
-  const { json: modelsJson } = await apiJson(backendUrl, 'GET', '/api/models?pageNumber=1&pageSize=50')
+  const { json: agentsJson } = await apiJson(backendUrl, 'GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=50')
+  const { json: modelsJson } = await apiJson(backendUrl, 'GET', '/api/ai/catalog/models?pageNumber=1&pageSize=50')
   const agents = agentsJson?.data?.results || []
   const models = modelsJson?.data?.results || []
   const agent = agents.find((candidate) => candidate.name === 'default-assistant')

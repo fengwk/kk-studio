@@ -183,7 +183,7 @@ class TestSyncAll(unittest.TestCase):
         self.assertTrue(any("configured" in l for l in lines))
         self.assertEqual(len(put_log), 1)
         url, payload = put_log[0]
-        self.assertIn("/api/providers/2", url)
+        self.assertIn("/api/ai/catalog/providers/2", url)
         self.assertEqual(payload["baseUrl"], "https://api.openai.com/v1")
         self.assertEqual(payload["credential"], "sk-key")
 
@@ -288,7 +288,7 @@ class TestSyncAll(unittest.TestCase):
         self.assertEqual(len(put_log), len(PROVIDERS))
         for idx, spec in enumerate(PROVIDERS):
             url, _ = put_log[idx]
-            self.assertIn(f"/api/providers/{spec.provider_id}", url)
+            self.assertIn(f"/api/ai/catalog/providers/{spec.provider_id}", url)
 
 
 if __name__ == "__main__":

@@ -22,32 +22,32 @@ class StudioHarnessRealtimeStreamPolicyControllerTest extends WebPostgresTestSup
   @Test
   void readsReplacesAndValidatesTheGlobalPolicy() throws Exception {
     mockMvc
-        .perform(get("/api/harness/realtime-stream-policy"))
+        .perform(get("/api/ai/runtime/settings/realtime-stream-policy"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.maxLength").value(5_000));
 
     mockMvc
         .perform(
-            put("/api/harness/realtime-stream-policy")
+            put("/api/ai/runtime/settings/realtime-stream-policy")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"maxLength\":100000}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.maxLength").value(100_000));
 
     mockMvc
-        .perform(get("/api/harness/realtime-stream-policy"))
+        .perform(get("/api/ai/runtime/settings/realtime-stream-policy"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.maxLength").value(100_000));
 
     mockMvc
         .perform(
-            put("/api/harness/realtime-stream-policy")
+            put("/api/ai/runtime/settings/realtime-stream-policy")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"maxLength\":0}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/harness/realtime-stream-policy")
+            put("/api/ai/runtime/settings/realtime-stream-policy")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}"))
         .andExpect(status().isBadRequest());

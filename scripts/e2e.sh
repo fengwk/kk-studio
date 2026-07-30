@@ -105,7 +105,7 @@ if [ "$REAL" = "true" ] || [ "$REBUILD" = "true" ]; then
   sync_e2e_provider_credentials
 fi
 if [ "$REAL" = "true" ]; then
-  minimax_ready=$(curl -fsS "$BACKEND_URL/api/providers?pageNumber=1&pageSize=20" \
+  minimax_ready=$(curl -fsS "$BACKEND_URL/api/ai/catalog/providers?pageNumber=1&pageSize=20" \
     | python3 -c 'import sys,json; d=json.load(sys.stdin); rows=((d.get("data") or {}).get("results") or []); p=next((r for r in rows if r.get("name")=="minimax"), {}); print("1" if p.get("configured") and p.get("baseUrl") else "0")')
   if [ "$minimax_ready" != "1" ]; then
     die "TEST_MINIMAX_BASE_URL and TEST_MINIMAX_API_KEY are required for --real"

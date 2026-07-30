@@ -17,7 +17,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessRealtimeStreamPolicyDTO;
 /** 全局 Harness realtime Stream 保留策略 API。 */
 @AllArgsConstructor
 @RestController
-@RequestMapping("/api/harness/realtime-stream-policy")
+@RequestMapping("/api/ai/runtime/settings/realtime-stream-policy")
 public class StudioHarnessRealtimeStreamPolicyController {
   private final HarnessRealtimeStreamPolicyService realtimeStreamPolicyService;
 

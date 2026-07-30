@@ -3,7 +3,7 @@ import type { LiveEnvironmentDTO } from '@/shared/api/contracts'
 
 export function createEnvironmentService(client: HttpClient = apiClient) {
   return {
-    listEnvironments: (): Promise<LiveEnvironmentDTO[]> => client.get('/environments'),
+    listEnvironments: (): Promise<LiveEnvironmentDTO[]> => client.get('/ai/environment'),
   }
 }
 

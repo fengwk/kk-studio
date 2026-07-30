@@ -3,13 +3,13 @@ import type { ChatCreateDTO, ChatDTO, ChatUpdateDTO } from '@/shared/api/contrac
 
 export function createChatService(client: HttpClient = apiClient) {
   return {
-    listChats: (): Promise<ChatDTO[]> => client.get('/chats'),
-    createChat: (data: ChatCreateDTO = {}): Promise<ChatDTO> => client.post('/chats', data),
-    getChat: (chatId: string): Promise<ChatDTO> => client.get(`/chats/${encodeURIComponent(chatId)}`),
+    listChats: (): Promise<ChatDTO[]> => client.get('/ai/chat'),
+    createChat: (data: ChatCreateDTO = {}): Promise<ChatDTO> => client.post('/ai/chat', data),
+    getChat: (chatId: string): Promise<ChatDTO> => client.get(`/ai/chat/${encodeURIComponent(chatId)}`),
     updateChat: (chatId: string, data: ChatUpdateDTO): Promise<ChatDTO> =>
-      client.put(`/chats/${encodeURIComponent(chatId)}`, data),
+      client.put(`/ai/chat/${encodeURIComponent(chatId)}`, data),
     deleteChat: (chatId: string, expectedVersion: string): Promise<void> =>
-      client.delete(`/chats/${encodeURIComponent(chatId)}`, { params: { expectedVersion } }),
+      client.delete(`/ai/chat/${encodeURIComponent(chatId)}`, { params: { expectedVersion } }),
   }
 }
 

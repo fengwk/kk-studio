@@ -40,7 +40,7 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
     MvcResult createResult =
         mockMvc
             .perform(
-                post("/api/chats")
+                post("/api/ai/chat")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(create)))
             .andExpect(status().isCreated())
@@ -66,12 +66,12 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
 
     try {
       mockMvc
-          .perform(get("/api/chats"))
+          .perform(get("/api/ai/chat"))
           .andExpect(status().isOk())
           .andExpect(jsonPath("$.data[?(@.id=='" + chatId + "')]").exists());
 
       mockMvc
-          .perform(get("/api/chats/" + chatId))
+          .perform(get("/api/ai/chat/" + chatId))
           .andExpect(status().isOk())
           .andExpect(jsonPath("$.data.id").value(chatId))
           .andExpect(jsonPath("$.data.title").value("web-chat"));
@@ -81,7 +81,7 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
       update.setExpectedVersion(version);
       mockMvc
           .perform(
-              put("/api/chats/" + chatId)
+              put("/api/ai/chat/" + chatId)
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(objectMapper.writeValueAsString(update)))
           .andExpect(status().isOk())
@@ -89,24 +89,24 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
           .andExpect(jsonPath("$.data.defaultAgentId").value("1"));
 
       // Chat↔Session membership routes no longer exist.
-      mockMvc.perform(get("/api/chats/" + chatId + "/sessions")).andExpect(status().isNotFound());
+      mockMvc.perform(get("/api/ai/chat/" + chatId + "/sessions")).andExpect(status().isNotFound());
     } finally {
       mockMvc
-          .perform(delete("/api/chats/" + chatId).param("expectedVersion", "1"))
+          .perform(delete("/api/ai/chat/" + chatId).param("expectedVersion", "1"))
           .andExpect(status().isNoContent());
     }
   }
 
   @Test
   public void shouldRejectUnknownIdsAndInvalidDefaultAgent() throws Exception {
-    mockMvc.perform(get("/api/chats/999999999999")).andExpect(status().isNotFound());
-    mockMvc.perform(get("/api/chats/not-a-number")).andExpect(status().isBadRequest());
+    mockMvc.perform(get("/api/ai/chat/999999999999")).andExpect(status().isNotFound());
+    mockMvc.perform(get("/api/ai/chat/not-a-number")).andExpect(status().isBadRequest());
 
     ChatCreateDTO unknownAgent = new ChatCreateDTO();
     unknownAgent.setDefaultAgentId("999999999999");
     mockMvc
         .perform(
-            post("/api/chats")
+            post("/api/ai/chat")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(unknownAgent)))
         .andExpect(status().isBadRequest());
@@ -115,12 +115,12 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
     unknownChatUpdate.setExpectedVersion("0");
     mockMvc
         .perform(
-            put("/api/chats/999999999999")
+            put("/api/ai/chat/999999999999")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(unknownChatUpdate)))
         .andExpect(status().isNotFound());
     mockMvc
-        .perform(delete("/api/chats/999999999999").param("expectedVersion", "0"))
+        .perform(delete("/api/ai/chat/999999999999").param("expectedVersion", "0"))
         .andExpect(status().isNotFound());
   }
 }

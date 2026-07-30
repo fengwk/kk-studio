@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 
 /** Global Agent definition CRUD API. */
 @AllArgsConstructor
-@RequestMapping("/api/agents")
+@RequestMapping("/api/ai/catalog/agents")
 @RestController
 public class StudioAgentDefinitionController {
 

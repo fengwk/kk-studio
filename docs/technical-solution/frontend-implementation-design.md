@@ -10,9 +10,9 @@
 | 页面范围 | Chat 卡片与本地 Pane 工作区、Provider/Model/Agent、只读 Environment Registry、Harness 设置、ComfyUI |
 | 服务端状态 | React Query |
 | 本地状态 | `localStorage` 的 `ChatPaneState`（按 chatId） |
-| 资源 API | `/api/providers`、`/api/models`、`/api/agents`、`/api/environments` |
-| Chat API | `/api/chats` |
-| Harness API | `/api/threads`、`/api/threads/{threadId}/snapshot`、`/api/sessions`、`/api/tool-invocations`、`/api/usage`、`/api/interactions` |
+| 资源 API | `/api/ai/catalog/providers`、`/api/ai/catalog/models`、`/api/ai/catalog/agents`、`/api/ai/environment` |
+| Chat API | `/api/ai/chat` |
+| Harness API | `/api/ai/runtime/threads`、`/api/ai/runtime/threads/{threadId}/snapshot`、`/api/ai/runtime/sessions`、`/api/ai/runtime/tool-invocations`、`/api/ai/runtime/usage`、`/api/ai/runtime/interactions` |
 | 实时通道 | snapshot-first + durable revision SSE；无 id 的 Redis `realtime` 仅作临时 overlay |
 | 浏览器路由 | `BrowserRouter`；Spring 对非 API/Actuator、无扩展名且不存在的 GET 路径回退到 `index.html` |
 | 视觉实现 | 全局 token 见 [前端设计规范](../product-design/frontend-design-system.md) |
@@ -35,7 +35,7 @@
 
 ### Chat 卡片
 
-- `GET/POST /api/chats` 列表/创建；title 与 defaultAgent 均可空。
+- `GET/POST /api/ai/chat` 列表/创建；title 与 defaultAgent 均可空。
 - 进入 Chat 打开 `/chats/:chatId`。
 - Chat.defaultAgentId 在 Agent 查询中缺失时前端视为 none。
 - Chat 只提供默认 Agent 与本地 Pane 布局的入口，不持有 Session/Thread。
@@ -58,16 +58,16 @@
 1. Footer 显示 Agent：空 Pane 用 Chat default；已绑定 Pane 用 Thread DTO。
 2. 无可用 Agent 时打开选择器。
 3. 首发顺序（`chat-first-send.ts`）：
-   - `POST /threads`（UNBOUND Thread）
-   - `POST /threads/:id/bootstrap`（默认 Agent + yolo，带 `expectedExecutionEpoch`；返回 `{session, thread}`）
-   - `POST /threads/:id/messages`（USER_MESSAGE，带 bootstrap 返回的 `executionEpoch`）
+   - `POST /api/ai/runtime/threads`（UNBOUND Thread）
+   - `POST /api/ai/runtime/threads/:id/bootstrap`（默认 Agent + yolo，带 `expectedExecutionEpoch`；返回 `{session, thread}`）
+   - `POST /api/ai/runtime/threads/:id/messages`（USER_MESSAGE，带 bootstrap 返回的 `executionEpoch`）
    - 将 `pane.threadId` 设为该 Thread
 
 ### Slash 命令
 
 | 命令 | 行为 |
 | --- | --- |
-| `/session` | 列出全部 Session；选中后从其 Entry Tree 选目标 head，`PUT /threads/:id/head` 重定位当前 Thread |
+| `/session` | 列出全部 Session；选中后从其 Entry Tree 选目标 head，`PUT /api/ai/runtime/threads/:id/head` 重定位当前 Thread |
 | `/thread` | 列出全部 Thread；只替换 pane 的 `threadId`，不修改任何 Thread |
 | `/agent` `/model` `/variant` | 入队 SET_AGENT / SET_MODEL |
 | `/tree` | 打开历史面板，把当前 Thread 的 head 重定位到所选 Entry |
@@ -83,20 +83,20 @@
 
 | Service | HTTP 接口 | 用途 |
 | --- | --- | --- |
-| Chat CRUD | `/api/chats` | Chat 列表与 CRUD |
-| Environments | `GET /api/environments` | 只读 live registry |
-| `listThreads` | `GET /api/threads` | 全局 Thread 列表（`/thread` 与 `/session` 的运行态来源） |
-| `createThread` | `POST /api/threads` | 创建 UNBOUND Thread（无 body） |
-| `bootstrapThread` | `POST /api/threads/{id}/bootstrap` | 创建 Session 并绑定 head，返回 `{session, thread}` |
-| `updateThreadHead` | `PUT /api/threads/{id}/head` | bind / 跨 Session rebind / unbind（`headEntryId` 可为 `null`） |
-| `getThreadSnapshot` | `GET /api/threads/{id}/snapshot` | 唯一 chat-runtime 投影：revision、Thread、Entries、Inputs、invocations、open interactions 与 usage |
-| `submitThreadMessage` | `POST /api/threads/{id}/messages` | 入队用户消息（202） |
-| `setThreadAgent` / `setThreadModel` / `setThreadYolo` | `PUT /api/threads/{id}/agent`、`/model`、`/yolo` | 入队配置命令（202） |
-| `createThreadRealtimeStream` | `GET /api/threads/{id}/events/stream?afterRevision={revision}` | revision/resync invalidation 与无 id 的 Redis realtime overlay |
+| Chat CRUD | `/api/ai/chat` | Chat 列表与 CRUD |
+| Environments | `GET /api/ai/environment` | 只读 live registry |
+| `listThreads` | `GET /api/ai/runtime/threads` | 全局 Thread 列表（`/thread` 与 `/session` 的运行态来源） |
+| `createThread` | `POST /api/ai/runtime/threads` | 创建 UNBOUND Thread（无 body） |
+| `bootstrapThread` | `POST /api/ai/runtime/threads/{id}/bootstrap` | 创建 Session 并绑定 head，返回 `{session, thread}` |
+| `updateThreadHead` | `PUT /api/ai/runtime/threads/{id}/head` | bind / 跨 Session rebind / unbind（`headEntryId` 可为 `null`） |
+| `getThreadSnapshot` | `GET /api/ai/runtime/threads/{id}/snapshot` | 唯一 chat-runtime 投影：revision、Thread、Entries、Inputs、invocations、open interactions 与 usage |
+| `submitThreadMessage` | `POST /api/ai/runtime/threads/{id}/messages` | 入队用户消息（202） |
+| `setThreadAgent` / `setThreadModel` / `setThreadYolo` | `PUT /api/ai/runtime/threads/{id}/agent`、`/model`、`/yolo` | 入队配置命令（202） |
+| `createThreadRealtimeStream` | `GET /api/ai/runtime/threads/{id}/events/stream?afterRevision={revision}` | revision/resync invalidation 与无 id 的 Redis realtime overlay |
 | `stopThread` | `POST .../stop` | Stop |
-| `listSessions` / `getSession` / `listSessionEntries` | `/api/sessions` | Session 列表、详情与 Entry Tree |
-| `getRetryPolicy` / `updateRetryPolicy` | `GET` / `PUT /api/harness/retry-policy` | 全局自动重试策略 |
-| `getRealtimeStreamPolicy` / `updateRealtimeStreamPolicy` | `GET` / `PUT /api/harness/realtime-stream-policy` | 全局 Redis realtime Stream 最大保留事件数 |
+| `listSessions` / `getSession` / `listSessionEntries` | `/api/ai/runtime/sessions` | Session 列表、详情与 Entry Tree |
+| `getRetryPolicy` / `updateRetryPolicy` | `GET` / `PUT /api/ai/runtime/settings/retry-policy` | 全局自动重试策略 |
+| `getRealtimeStreamPolicy` / `updateRealtimeStreamPolicy` | `GET` / `PUT /api/ai/runtime/settings/realtime-stream-policy` | 全局 Redis realtime Stream 最大保留事件数 |
 
 所有 durable ID 在 TypeScript 中保持十进制字符串。`bootstrapThread`、`updateThreadHead`、`stopThread` 与全部 mailbox 请求体都带必填 `expectedExecutionEpoch`。
 
@@ -138,7 +138,7 @@ decoration queue =
 | `RUNTIME_CONFIG` Entry | 配置快照事实；不渲染完整配置气泡 |
 | QUEUED `user_message` / `custom_message` input | 不进入 transcript；显示在 Working 装饰栏 |
 | APPLIED input | 不渲染；Entry 与 apply 同事务，Entries 为唯一 transcript 权威 |
-| Tool Result artifact | 映射 `/api/artifacts/{artifactId}` |
+| Tool Result artifact | 映射 `/api/ai/runtime/artifacts/{artifactId}` |
 | revision / resync SSE | 仅 invalidate `threads.snapshot(threadId)` |
 | Redis SSE `/events/stream` (`realtime`) | 临时模型 text/thinking overlay；不使业务 query 失效 |
 
@@ -146,7 +146,7 @@ Timeline 以单一 Thread snapshot 的 Entries/Inputs 为权威基线。
 
 ### 历史重定位与 Stop
 
-- `/tree` 按需查询 Session Entry Tree；确认后 `PUT /threads/:id/head` 把当前 Thread 的 head 重定位到所选 Entry，pane 绑定不变，并把该 Entry 的用户文本回填为草稿。
+- `/tree` 按需查询 Session Entry Tree；确认后 `PUT /api/ai/runtime/threads/:id/head` 把当前 Thread 的 head 重定位到所选 Entry，pane 绑定不变，并把该 Entry 的用户文本回填为草稿。
 - `/session` 先选 Session，再由其 Entry Tree 提供新 head，同样走 `PUT /head`。
 - `/stop` 携带当前 `executionEpoch`；服务端原子追加 `ASSISTANT_ABORTED`（仅 text/thinking）或 `ASSISTANT_ERROR(CANCELLED)` barrier 并 epoch fence。前端在 snapshot invalidate 后，durable `ASSISTANT_ABORTED` 投影为 assistant `TextDialogueMessage`（`aborted: true`）并渲染“已停止”标识；realtime SSE delta 仍然落到当前 invocation overlay，但只要 durable aborted/cancellation 落库就视为该 overlay committed 并被覆盖。成功后前端仅清理本地 message replay identity 并 invalidate `threads.snapshot`。不回填 Composer。stop 后 Thread 立即可重定位。
 - 派生状态按 `RUNNING > WAITING > RUNNABLE > UNBOUND/IDLE` 驱动 UI 指示；`RUNNABLE` 视为 active/working；invocation 重试等待归入 `WAITING`。业务状态不使用周期轮询。

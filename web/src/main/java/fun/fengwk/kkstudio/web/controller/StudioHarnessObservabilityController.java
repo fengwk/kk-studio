@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
 
 /** Harness observability：单个 ToolInvocation 与 artifact 下载。 */
 @RestController
-@RequestMapping("/api")
+@RequestMapping("/api/ai/runtime")
 public class StudioHarnessObservabilityController {
 
   private final HarnessObservabilityQueryService observabilityService;
