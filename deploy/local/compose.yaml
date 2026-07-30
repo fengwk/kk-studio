@@ -56,23 +56,6 @@ services:
     init: true
     environment:
       SPRING_PROFILES_ACTIVE: ${KK_STUDIO_SPRING_PROFILES_ACTIVE:-dev}
-      # The E2E profile opt-in prevents Maven/Testcontainers from consuming host TEST_* values.
-      # Compose enables it; the runner ignores blank or incomplete provider pairs.
-      KK_STUDIO_E2E_PROVIDER_SYNC_ENABLED: ${KK_STUDIO_E2E_PROVIDER_SYNC_ENABLED:-true}
-      TEST_MINIMAX_BASE_URL: ${TEST_MINIMAX_BASE_URL:-}
-      TEST_MINIMAX_API_KEY: ${TEST_MINIMAX_API_KEY:-}
-      TEST_OPENAI_BASE_URL: ${TEST_OPENAI_BASE_URL:-}
-      TEST_OPENAI_API_KEY: ${TEST_OPENAI_API_KEY:-}
-      TEST_XAI_BASE_URL: ${TEST_XAI_BASE_URL:-}
-      TEST_XAI_API_KEY: ${TEST_XAI_API_KEY:-}
-      TEST_DEEPSEEK_BASE_URL: ${TEST_DEEPSEEK_BASE_URL:-}
-      TEST_DEEPSEEK_API_KEY: ${TEST_DEEPSEEK_API_KEY:-}
-      TEST_GOOGLE_BASE_URL: ${TEST_GOOGLE_BASE_URL:-}
-      TEST_GOOGLE_API_KEY: ${TEST_GOOGLE_API_KEY:-}
-      TEST_ANTHROPIC_BASE_URL: ${TEST_ANTHROPIC_BASE_URL:-}
-      TEST_ANTHROPIC_API_KEY: ${TEST_ANTHROPIC_API_KEY:-}
-      TEST_ZAI_BASE_URL: ${TEST_ZAI_BASE_URL:-}
-      TEST_ZAI_API_KEY: ${TEST_ZAI_API_KEY:-}
       KK_STUDIO_DB_URL: jdbc:postgresql://postgres:5432/${KK_STUDIO_PG_DATABASE:-kk_studio}
       KK_STUDIO_DB_USER: ${KK_STUDIO_PG_USER:-kk_studio}
       KK_STUDIO_DB_PASSWORD: ${KK_STUDIO_PG_PASSWORD:-kk_studio}

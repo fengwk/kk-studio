@@ -33,7 +33,7 @@ usage() {
 Usage: $0 {start|stop|restart|status|logs|tail}
 
 Commands:
-  start    Package backend, optionally sync e2e provider credentials, then start backend and frontend.
+  start    Package backend, optionally sync the MiniMax E2E credential pair, then start backend and frontend.
   stop     Stop managed dev servers and, by default, listeners on dev ports.
   restart  Stop then start.
   status   Print process status and URLs.
@@ -44,15 +44,9 @@ Environment:
   BACKEND_PORT=18080
   FRONTEND_PORT=5173
   SPRING_PROFILES_ACTIVE=e2e   # dev/e2e 均使用 PostgreSQL；dev=stub seed，e2e=real provider seed
-  TEST_OPENAI_API_KEY / TEST_OPENAI_BASE_URL
-  TEST_GOOGLE_API_KEY / TEST_GOOGLE_BASE_URL
-  TEST_ANTHROPIC_API_KEY / TEST_ANTHROPIC_BASE_URL
-  TEST_XAI_API_KEY / TEST_XAI_BASE_URL
   TEST_MINIMAX_API_KEY / TEST_MINIMAX_BASE_URL
-  TEST_DEEPSEEK_API_KEY / TEST_DEEPSEEK_BASE_URL
-  TEST_ZAI_API_KEY / TEST_ZAI_BASE_URL
-  # e2e profile: only configured env vars are written into provider rows (no defaults)
-  # OpenAI-compatible base URLs (openai / openai_response) get a trailing /v1 when set
+  # e2e profile: the complete MiniMax pair is written to seed provider id=1 after backend readiness
+  # the base URL is normalized to end with /v1
   DEV_KILL_PORTS=true
   DEV_SKIP_PACKAGE=false
   DEV_SKIP_NPM_INSTALL=false
@@ -88,18 +82,12 @@ profile_enabled() {
   esac
 }
 
-# Write only env-provided baseUrl/credential into a seeded provider row. Missing env => leave DB null/unchanged.
+# Synchronize the complete MiniMax credential pair into the seeded provider after backend readiness.
 sync_e2e_provider_credentials() {
   require_cmd python3
-  step "Syncing e2e provider credentials from env (only set fields; secrets not printed)"
+  step "Syncing MiniMax E2E credentials from env (secrets not printed)"
   BACKEND_URL="$BACKEND_URL" \
-  TEST_OPENAI_API_KEY="${TEST_OPENAI_API_KEY-}" TEST_OPENAI_BASE_URL="${TEST_OPENAI_BASE_URL-}" \
-  TEST_GOOGLE_API_KEY="${TEST_GOOGLE_API_KEY-}" TEST_GOOGLE_BASE_URL="${TEST_GOOGLE_BASE_URL-}" \
-  TEST_ANTHROPIC_API_KEY="${TEST_ANTHROPIC_API_KEY-}" TEST_ANTHROPIC_BASE_URL="${TEST_ANTHROPIC_BASE_URL-}" \
-  TEST_XAI_API_KEY="${TEST_XAI_API_KEY-}" TEST_XAI_BASE_URL="${TEST_XAI_BASE_URL-}" \
   TEST_MINIMAX_API_KEY="${TEST_MINIMAX_API_KEY-}" TEST_MINIMAX_BASE_URL="${TEST_MINIMAX_BASE_URL-}" \
-  TEST_DEEPSEEK_API_KEY="${TEST_DEEPSEEK_API_KEY-}" TEST_DEEPSEEK_BASE_URL="${TEST_DEEPSEEK_BASE_URL-}" \
-  TEST_ZAI_API_KEY="${TEST_ZAI_API_KEY-}" TEST_ZAI_BASE_URL="${TEST_ZAI_BASE_URL-}" \
   python3 "$APP_HOME/scripts/e2e/sync_provider_credentials.py" --backend-url "$BACKEND_URL"
 }
 

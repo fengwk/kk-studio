@@ -1,294 +1,219 @@
-"""Tests for sync_provider_credentials.py using fakes for HTTP calls."""
+"""Tests for MiniMax-only E2E credential synchronization."""
 
 import json
 import unittest
 
 from scripts.e2e.sync_provider_credentials import (
-    PROVIDERS,
+    DEFAULT_MODEL_CALL_IDLE_TIMEOUT_MILLIS,
+    DEFAULT_MODEL_CALL_TIMEOUT_MILLIS,
     build_payload,
-    normalize_openai_compatible_base_url,
-    sync_all,
+    normalize_minimax_base_url,
+    sync_minimax,
 )
 
 
-def _make_get_providers(fake_rows):
-    """Return a urlopen-like function that returns fake providers."""
+def minimax_row(**overrides):
+    """Return the deterministic MiniMax seed provider representation."""
+    row = {
+        "id": "1",
+        "name": "minimax",
+        "description": "MiniMax (OpenAI Responses).",
+        "providerType": "openai_response",
+        "baseUrl": None,
+        "version": "0",
+        "modelCallTimeoutMillis": 1800000,
+        "modelCallIdleTimeoutMillis": 120000,
+    }
+    row.update(overrides)
+    return row
 
-    def fake(_):
-        return {"data": {"results": fake_rows}}
 
-    return fake
-
-
-def _make_put_logger(log):
-    """Return a urlopen-like function that records PUT (url, payload) pairs."""
+def routed_http(rows, calls):
+    """Return a urlopen-compatible fake recording each GET or PUT."""
 
     def fake(url, data=None, timeout=30, headers=None):
-        payload = json.loads(data) if data else {}
-        log.append((url, payload))
-        return {"data": payload}
+        payload = json.loads(data) if data is not None else None
+        calls.append((url, payload, headers))
+        if payload is None:
+            return {"data": {"results": rows}}
+        return {"data": {"configured": True, "baseUrl": payload["baseUrl"]}}
 
     return fake
 
 
-def _make_router(get_fn, put_log):
-    """Return a urlopen-like callable that routes GET/PUT."""
-    put_fn = _make_put_logger(put_log)
+class TestNormalizeMiniMaxBaseUrl(unittest.TestCase):
+    """MiniMax endpoint normalization always uses exactly one /v1 suffix."""
 
-    def router(url, data=None, timeout=30, headers=None):
-        if data is None:
-            return get_fn(url)
-        return put_fn(url, data=data, timeout=timeout, headers=headers)
-
-    return router
-
-
-class TestNormalizeOpenaiCompatibleBaseUrl(unittest.TestCase):
-    """OpenAI-compatible base URL /v1 normalization."""
-
-    def test_openai_response_appends_v1(self):
-        result = normalize_openai_compatible_base_url(
-            "https://api.minimax.com", "openai_response")
-        self.assertEqual(result, "https://api.minimax.com/v1")
-
-    def test_openai_appends_v1(self):
-        result = normalize_openai_compatible_base_url(
-            "https://api.deepseek.com", "openai")
-        self.assertEqual(result, "https://api.deepseek.com/v1")
-
-    def test_openai_already_ends_with_v1(self):
-        result = normalize_openai_compatible_base_url(
-            "https://api.openai.com/v1", "openai")
-        self.assertEqual(result, "https://api.openai.com/v1")
-
-    def test_openai_keeps_v1_with_trailing_slash(self):
-        result = normalize_openai_compatible_base_url(
-            "https://api.openai.com/v1/", "openai")
-        self.assertEqual(result, "https://api.openai.com/v1")
-
-    def test_google_unchanged(self):
-        result = normalize_openai_compatible_base_url(
-            "https://generativelanguage.googleapis.com", "google")
+    def test_removes_trailing_slashes_and_appends_v1(self):
         self.assertEqual(
-            result, "https://generativelanguage.googleapis.com")
+            "https://api.minimax.example/v1",
+            normalize_minimax_base_url("https://api.minimax.example///"),
+        )
 
-    def test_anthropic_unchanged(self):
-        result = normalize_openai_compatible_base_url(
-            "https://api.anthropic.com", "anthropic")
-        self.assertEqual(result, "https://api.anthropic.com")
-
-    def test_empty_base_returns_empty(self):
-        result = normalize_openai_compatible_base_url("", "openai")
-        self.assertEqual(result, "")
-
-    def test_none_base_returns_none(self):
-        result = normalize_openai_compatible_base_url(None, "openai")
-        self.assertIsNone(result)
+    def test_keeps_existing_v1_after_trailing_slashes_are_removed(self):
+        self.assertEqual(
+            "https://api.minimax.example/v1",
+            normalize_minimax_base_url("https://api.minimax.example/v1///"),
+        )
 
 
 class TestBuildPayload(unittest.TestCase):
-    """Provider update payload construction."""
+    """The update preserves seed semantics and current timeout configuration."""
 
-    def test_base_and_key_set(self):
-        current = {
-            "baseUrl": "http://old",
-            "modelCallTimeoutMillis": 1800000,
-            "modelCallIdleTimeoutMillis": 120000,
-        }
+    def test_inherits_current_timeouts(self):
         payload = build_payload(
-            PROVIDERS[0], "https://minimax.com/v1", "sk-test-key", current)
-        self.assertEqual(payload["name"], "minimax")
-        self.assertEqual(payload["baseUrl"], "https://minimax.com/v1")
-        self.assertEqual(payload["credential"], "sk-test-key")
-        self.assertEqual(payload["modelCallTimeoutMillis"], 1800000)
-        self.assertEqual(payload["modelCallIdleTimeoutMillis"], 120000)
+            "https://api.minimax.example/v1",
+            "test-secret",
+            {
+                "modelCallTimeoutMillis": 600000,
+                "modelCallIdleTimeoutMillis": 50000,
+                "version": "7",
+            },
+        )
 
-    def test_only_key_set_keeps_current_base(self):
-        current = {
-            "baseUrl": "http://existing",
-            "modelCallTimeoutMillis": 300000,
-            "modelCallIdleTimeoutMillis": 60000,
-        }
+        self.assertEqual("7", payload["expectedVersion"])
+        self.assertEqual(600000, payload["modelCallTimeoutMillis"])
+        self.assertEqual(50000, payload["modelCallIdleTimeoutMillis"])
+
+    def test_defaults_missing_timeouts(self):
         payload = build_payload(
-            PROVIDERS[1], None, "sk-key", current)
-        self.assertEqual(payload["baseUrl"], "http://existing")
-        self.assertEqual(payload["credential"], "sk-key")
+            "https://api.minimax.example/v1",
+            "test-secret",
+            {"version": 3},
+        )
 
-    def test_only_base_set_no_credential_in_payload(self):
-        current = {
-            "baseUrl": "http://old",
-            "modelCallTimeoutMillis": 1800000,
-            "modelCallIdleTimeoutMillis": 120000,
-        }
-        payload = build_payload(
-            PROVIDERS[2], "https://x.ai/v1", None, current)
-        self.assertEqual(payload["baseUrl"], "https://x.ai/v1")
-        self.assertNotIn("credential", payload)
-
-    def test_timeout_defaults_when_missing(self):
-        current = {}
-        payload = build_payload(PROVIDERS[3], None, None, current)
-        self.assertEqual(payload["modelCallTimeoutMillis"], 1800000)
-        self.assertEqual(payload["modelCallIdleTimeoutMillis"], 120000)
-
-    def test_timeout_inherits_from_current(self):
-        current = {
-            "modelCallTimeoutMillis": 600000,
-            "modelCallIdleTimeoutMillis": 50000,
-        }
-        payload = build_payload(
-            PROVIDERS[4], "https://google.com", None, current)
-        self.assertEqual(payload["modelCallTimeoutMillis"], 600000)
-        self.assertEqual(payload["modelCallIdleTimeoutMillis"], 50000)
-
-
-class TestSyncAll(unittest.TestCase):
-    """End-to-end sync logic with fake HTTP callbacks."""
-
-    def test_no_env_vars_all_skip(self):
-        """When no env vars are set, every provider is skipped."""
-        env = {}
-        fake_rows = []
-        get_fn = _make_get_providers(fake_rows)
-        put_log = []
-
-        lines = sync_all(
-            "http://localhost", env=env,
-            urlopen=_make_router(get_fn, put_log))
-        self.assertEqual(len(lines), len(PROVIDERS))
-        for line in lines:
-            self.assertIn("skip", line)
-        self.assertEqual(put_log, [])
-
-    def test_openai_compatible_base_gets_v1(self):
-        """OpenAI-compatible base without /v1 gets normalized."""
-        env = {
-            "TEST_OPENAI_BASE_URL": "https://api.openai.com",
-            "TEST_OPENAI_API_KEY": "sk-key",
-        }
-        row = {
-            "id": "2", "name": "openai", "description": "...",
-            "providerType": "openai_response",
-            "baseUrl": None,
-            "modelCallTimeoutMillis": 1800000,
-            "modelCallIdleTimeoutMillis": 120000,
-        }
-        get_fn = _make_get_providers([row])
-        put_log = []
-
-        lines = sync_all(
-            "http://localhost", env=env,
-            urlopen=_make_router(get_fn, put_log))
-        self.assertTrue(any("normalize" in l for l in lines))
-        self.assertTrue(any("configured" in l for l in lines))
-        self.assertEqual(len(put_log), 1)
-        url, payload = put_log[0]
-        self.assertIn("/api/ai/catalog/providers/2", url)
-        self.assertEqual(payload["baseUrl"], "https://api.openai.com/v1")
-        self.assertEqual(payload["credential"], "sk-key")
-
-    def test_non_openai_base_unchanged(self):
-        """Google base URL is not modified."""
-        env = {
-            "TEST_GOOGLE_BASE_URL":
-                "https://generativelanguage.googleapis.com",
-            "TEST_GOOGLE_API_KEY": "g-key",
-        }
-        row = {
-            "id": "5", "name": "google", "description": "...",
-            "providerType": "google",
-            "baseUrl": None,
-            "modelCallTimeoutMillis": 1800000,
-            "modelCallIdleTimeoutMillis": 120000,
-        }
-        get_fn = _make_get_providers([row])
-        put_log = []
-
-        lines = sync_all(
-            "http://localhost", env=env,
-            urlopen=_make_router(get_fn, put_log))
-        self.assertFalse(any("normalize" in l for l in lines))
-        self.assertEqual(len(put_log), 1)
-        _, payload = put_log[0]
+        self.assertEqual("3", payload["expectedVersion"])
         self.assertEqual(
-            payload["baseUrl"],
-            "https://generativelanguage.googleapis.com")
-
-    def test_only_key_set_with_current_base(self):
-        """When only key is set, baseUrl defaults from current provider."""
-        env = {"TEST_ANTHROPIC_API_KEY": "sk-ant-key"}
-        row = {
-            "id": "6", "name": "anthropic", "description": "...",
-            "providerType": "anthropic",
-            "baseUrl": "https://api.anthropic.com",
-            "modelCallTimeoutMillis": 1800000,
-            "modelCallIdleTimeoutMillis": 120000,
-        }
-        get_fn = _make_get_providers([row])
-        put_log = []
-
-        lines = sync_all(
-            "http://localhost", env=env,
-            urlopen=_make_router(get_fn, put_log))
-        self.assertEqual(len(put_log), 1)
-        _, payload = put_log[0]
-        self.assertEqual(payload["baseUrl"], "https://api.anthropic.com")
-        self.assertEqual(payload["credential"], "sk-ant-key")
-
-    def test_no_secret_in_output(self):
-        """Ensure credential values never appear in printed lines."""
-        env = {
-            "TEST_DEEPSEEK_BASE_URL": "https://api.deepseek.com",
-            "TEST_DEEPSEEK_API_KEY": "sk-very-secret-value",
-        }
-        row = {
-            "id": "4", "name": "deepseek", "description": "...",
-            "providerType": "openai",
-            "baseUrl": None,
-            "modelCallTimeoutMillis": 1800000,
-            "modelCallIdleTimeoutMillis": 120000,
-        }
-        get_fn = _make_get_providers([row])
-        put_log = []
-
-        lines = sync_all(
-            "http://localhost", env=env,
-            urlopen=_make_router(get_fn, put_log))
-        output = "\n".join(lines)
-        self.assertNotIn("sk-very-secret-value", output)
-
-    def test_all_seven_providers_processed(self):
-        """When every env is set, all 7 providers are updated."""
-        env = {}
-        row_template = {
-            "baseUrl": None,
-            "modelCallTimeoutMillis": 1800000,
-            "modelCallIdleTimeoutMillis": 120000,
-        }
-        rows = []
-        for spec in PROVIDERS:
-            env[spec.base_url_env] = f"https://{spec.name}.com"
-            env[spec.api_key_env] = f"key-{spec.name}"
-            rows.append({
-                "id": str(spec.provider_id),
-                "name": spec.name,
-                "description": spec.description,
-                "providerType": spec.provider_type,
-                **row_template,
-            })
-        get_fn = _make_get_providers(rows)
-        put_log = []
-
-        lines = sync_all(
-            "http://localhost", env=env,
-            urlopen=_make_router(get_fn, put_log))
+            DEFAULT_MODEL_CALL_TIMEOUT_MILLIS, payload["modelCallTimeoutMillis"]
+        )
         self.assertEqual(
-            len([l for l in lines if "configured" in l]),
-            len(PROVIDERS))
-        self.assertEqual(len(put_log), len(PROVIDERS))
-        for idx, spec in enumerate(PROVIDERS):
-            url, _ = put_log[idx]
-            self.assertIn(f"/api/ai/catalog/providers/{spec.provider_id}", url)
+            DEFAULT_MODEL_CALL_IDLE_TIMEOUT_MILLIS,
+            payload["modelCallIdleTimeoutMillis"],
+        )
+
+
+class TestSyncMiniMax(unittest.TestCase):
+    """Credential pair validation happens before any backend request."""
+
+    def test_no_env_skips_without_http(self):
+        calls = []
+
+        lines = sync_minimax(
+            "http://backend", env={}, urlopen=routed_http([], calls)
+        )
+
+        self.assertEqual(["minimax: skip (no credential pair)"], lines)
+        self.assertEqual([], calls)
+
+    def test_incomplete_pair_fails_without_http(self):
+        for env in (
+            {"TEST_MINIMAX_BASE_URL": "https://api.minimax.example"},
+            {"TEST_MINIMAX_API_KEY": "test-secret"},
+        ):
+            with self.subTest(env=env):
+                calls = []
+
+                with self.assertRaisesRegex(ValueError, "TEST_MINIMAX_BASE_URL"):
+                    sync_minimax(
+                        "http://backend",
+                        env=env,
+                        urlopen=routed_http([], calls),
+                    )
+
+                self.assertEqual([], calls)
+
+    def test_complete_pair_updates_only_provider_one(self):
+        calls = []
+        secret = "test-minimax-secret"
+
+        lines = sync_minimax(
+            "http://backend/",
+            env={
+                "TEST_MINIMAX_BASE_URL": "https://api.minimax.example/",
+                "TEST_MINIMAX_API_KEY": secret,
+            },
+            urlopen=routed_http([minimax_row()], calls),
+        )
+
+        self.assertEqual(2, len(calls))
+        self.assertTrue(calls[0][0].endswith("/api/ai/catalog/providers?pageNumber=1&pageSize=50"))
+        put_url, payload, headers = calls[1]
+        self.assertEqual("http://backend/api/ai/catalog/providers/1", put_url)
+        self.assertEqual("application/json", headers["Content-Type"])
+        self.assertEqual("minimax", payload["name"])
+        self.assertEqual("openai_response", payload["providerType"])
+        self.assertEqual("https://api.minimax.example/v1", payload["baseUrl"])
+        self.assertEqual(secret, payload["credential"])
+        self.assertEqual("0", payload["expectedVersion"])
+        self.assertEqual(
+            ["minimax: configured=True baseUrl_set=True"],
+            lines,
+        )
+
+    def test_missing_seed_provider_fails_without_put(self):
+        for row in (minimax_row(id="2"), minimax_row(name="unexpected")):
+            with self.subTest(row=row):
+                calls = []
+
+                with self.assertRaisesRegex(RuntimeError, "id=1 name=minimax"):
+                    sync_minimax(
+                        "http://backend",
+                        env={
+                            "TEST_MINIMAX_BASE_URL": "https://api.minimax.example",
+                            "TEST_MINIMAX_API_KEY": "test-secret",
+                        },
+                        urlopen=routed_http([row], calls),
+                    )
+
+                self.assertEqual(1, len(calls))
+                self.assertIsNone(calls[0][1])
+
+    def test_missing_seed_version_fails_without_put(self):
+        calls = []
+
+        with self.assertRaisesRegex(RuntimeError, "required version"):
+            sync_minimax(
+                "http://backend",
+                env={
+                    "TEST_MINIMAX_BASE_URL": "https://api.minimax.example",
+                    "TEST_MINIMAX_API_KEY": "test-secret",
+                },
+                urlopen=routed_http([minimax_row(version=None)], calls),
+            )
+
+        self.assertEqual(1, len(calls))
+        self.assertIsNone(calls[0][1])
+
+    def test_status_output_never_contains_secret(self):
+        calls = []
+        secret = "test-secret-must-not-appear"
+
+        lines = sync_minimax(
+            "http://backend",
+            env={
+                "TEST_MINIMAX_BASE_URL": "https://api.minimax.example",
+                "TEST_MINIMAX_API_KEY": secret,
+            },
+            urlopen=routed_http([minimax_row()], calls),
+        )
+
+        self.assertNotIn(secret, "\n".join(lines))
+
+    def test_old_openai_environment_has_no_effect_or_http(self):
+        """Legacy provider variables are intentionally ignored."""
+        calls = []
+
+        lines = sync_minimax(
+            "http://backend",
+            env={
+                "TEST_OPENAI_BASE_URL": "https://api.openai.example",
+                "TEST_OPENAI_API_KEY": "test-openai-secret",
+            },
+            urlopen=routed_http([], calls),
+        )
+
+        self.assertEqual(["minimax: skip (no credential pair)"], lines)
+        self.assertEqual([], calls)
 
 
 if __name__ == "__main__":

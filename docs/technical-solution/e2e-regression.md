@@ -28,23 +28,16 @@ npm --prefix frontend run e2e:matrix
 npm --prefix frontend run e2e:list
 ```
 
-E2E 启动新后端以及执行 `--rebuild` / `--real` 时，会把当前进程中已设置的测试
-凭证写入对应 E2E seed Provider；未设置的 Provider 保持数据库原值，密钥不会写入
-仓库或报告。
+执行 `--rebuild` / `--real` 时，E2E runner 在 backend ready 后调用唯一的 Python API
+同步器。app 和 Compose 不读取真实 Provider 凭证，密钥不会写入仓库或报告。
 
 | Provider | 协议 | Base URL | API Key |
 | --- | --- | --- | --- |
-| OpenAI | OpenAI Responses | `TEST_OPENAI_BASE_URL` | `TEST_OPENAI_API_KEY` |
-| Google | Google | `TEST_GOOGLE_BASE_URL` | `TEST_GOOGLE_API_KEY` |
-| Anthropic | Anthropic | `TEST_ANTHROPIC_BASE_URL` | `TEST_ANTHROPIC_API_KEY` |
-| xAI | OpenAI Responses | `TEST_XAI_BASE_URL` | `TEST_XAI_API_KEY` |
 | MiniMax | OpenAI Responses | `TEST_MINIMAX_BASE_URL` | `TEST_MINIMAX_API_KEY` |
-| DeepSeek | OpenAI Chat Completions | `TEST_DEEPSEEK_BASE_URL` | `TEST_DEEPSEEK_API_KEY` |
-| ZAI | OpenAI Chat Completions | `TEST_ZAI_BASE_URL` | `TEST_ZAI_API_KEY` |
 
 当前默认 E2E Agent 固定使用 `minimax/MiniMax-M2.7`，因此 `--real` 必须同时提供
-`TEST_MINIMAX_BASE_URL` 和 `TEST_MINIMAX_API_KEY`。其他 Provider 凭证用于资源
-注入和手动切换模型；OpenAI 兼容协议的 Base URL 在缺少末尾 `/v1` 时自动补齐。
+`TEST_MINIMAX_BASE_URL` 和 `TEST_MINIMAX_API_KEY`。这是唯一真实 credential 输入；同步器
+仅更新确定性 MiniMax Provider `id=1`，并将 Base URL 去尾斜杠后补为 `/v1`。
 
 E2E seed 固定包含 Pi 0.82.1 有效运行时中的 19 个模型：
 
@@ -68,8 +61,8 @@ E2E seed 固定包含 Pi 0.82.1 有效运行时中的 19 个模型：
 | 路径 | 职责 |
 | --- | --- |
 | `scripts/e2e.sh` | 环境准备 + 调用矩阵 |
-| `scripts/e2e/lib.sh` | backend/frontend/daemon 启停、credential 注入（依赖 Python 同步器） |
-| `scripts/e2e/sync_provider_credentials.py` | 将环境变量 Provider 凭证注入后端 API；可独立执行与单元测试 |
+| `scripts/e2e/lib.sh` | backend/frontend/daemon 启停、MiniMax credential 同步（依赖 Python 同步器） |
+| `scripts/e2e/sync_provider_credentials.py` | 唯一 MiniMax credential 同步来源：通过后端 API 更新 seed Provider `id=1`；可独立执行与单元测试 |
 | `scripts/e2e/run-matrix.mjs` | Node API 矩阵 runner、报告输出 |
 | `scripts/e2e/ui-smoke.mjs` | Playwright UI smoke（L5） |
 | `scripts/e2e/lib/http.mjs` | fetch/断言 |
