@@ -59,15 +59,9 @@ Options:
 Env:
   BACKEND_PORT=18081
   FRONTEND_PORT=5173
-  TEST_OPENAI_API_KEY / TEST_OPENAI_BASE_URL
-  TEST_GOOGLE_API_KEY / TEST_GOOGLE_BASE_URL
-  TEST_ANTHROPIC_API_KEY / TEST_ANTHROPIC_BASE_URL
-  TEST_XAI_API_KEY / TEST_XAI_BASE_URL
   TEST_MINIMAX_API_KEY / TEST_MINIMAX_BASE_URL
-  TEST_DEEPSEEK_API_KEY / TEST_DEEPSEEK_BASE_URL
-  TEST_ZAI_API_KEY / TEST_ZAI_BASE_URL
-  # only set env vars are written into provider rows (no defaults)
-  # openai/openai_response base URLs are normalized to end with /v1 when set
+  # the complete MiniMax pair is synchronized to seed provider id=1 after backend readiness
+  # the base URL is normalized to end with /v1
   JAVA_HOME_21=...
 EOF
 }
@@ -100,7 +94,7 @@ fi
 # 1) ensure stack
 ensure_stack "$REBUILD" "$WITH_TOOLS"
 
-# 2) inject available provider credentials; --real uses the seeded MiniMax model
+# 2) synchronize the MiniMax pair; --real uses the seeded MiniMax model
 if [ "$REAL" = "true" ] || [ "$REBUILD" = "true" ]; then
   sync_e2e_provider_credentials
 fi

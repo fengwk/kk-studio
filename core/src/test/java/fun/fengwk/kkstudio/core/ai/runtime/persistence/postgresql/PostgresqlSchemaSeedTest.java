@@ -90,7 +90,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void e2eProviderIdsMatchCredentialInjectionContract() throws Exception {
+  void e2eSeedCatalogAndMiniMaxCredentialTargetAreDeterministic() throws Exception {
     try (Connection conn = newConnection()) {
       applyE2eDatabase(conn);
       try (Statement st = conn.createStatement()) {
@@ -101,7 +101,13 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
                 st,
                 "select string_agg(id || ':' || name || ':' || provider_type, ',' order by id)"
                     + " from agent_provider"),
-            "scripts/e2e/lib.sh addresses these deterministic provider ids");
+            "the complete E2E seed catalog must retain its deterministic provider ids");
+        assertEquals(
+            "1:minimax:openai_response",
+            singleString(
+                st,
+                "select id || ':' || name || ':' || provider_type from agent_provider where id = 1"),
+            "the MiniMax credential synchronizer targets only deterministic provider id=1");
       }
       long retryPolicyCount;
       try (Statement st = conn.createStatement();

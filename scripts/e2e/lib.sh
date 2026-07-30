@@ -4,7 +4,7 @@
 # 共享函数库：e2e 入口与各 case 共用。
 # 约定：
 # - 默认 backend=127.0.0.1:18081、frontend=127.0.0.1:5173、profile=e2e
-# - 使用 PostgreSQL durable 库；重启 backend 后若 seed 不保留需重新注入 Provider credential
+# - 使用 PostgreSQL durable 库；重启 backend 后由宿主 E2E runner 重新同步 MiniMax credential
 # - frontend Vite 代理必须指向当前 backend：API_PROXY_TARGET=http://$BACKEND_HOST:$BACKEND_PORT
 # - daemon 不是 fat jar，必须用 -cp（daemon jar + 其自身 runtime 依赖 classpath）启动 DaemonMain，而非 harness-runtime 模块 classpath
 
@@ -139,18 +139,12 @@ start_backend() {
   wait_http "$BACKEND_URL/api/ai/catalog/agents?pageNumber=1&pageSize=1" backend 120
 }
 
-# Write only env-provided baseUrl/credential into seeded providers. Missing env => leave DB null/unchanged.
+# Synchronize the complete MiniMax credential pair into the seeded provider after backend readiness.
 sync_e2e_provider_credentials() {
   require_cmd python3
-  step "Syncing e2e provider credentials from env (only set fields; secrets not printed)"
+  step "Syncing MiniMax E2E credentials from env (secrets not printed)"
   BACKEND_URL="$BACKEND_URL" \
-  TEST_OPENAI_API_KEY="${TEST_OPENAI_API_KEY-}" TEST_OPENAI_BASE_URL="${TEST_OPENAI_BASE_URL-}" \
-  TEST_GOOGLE_API_KEY="${TEST_GOOGLE_API_KEY-}" TEST_GOOGLE_BASE_URL="${TEST_GOOGLE_BASE_URL-}" \
-  TEST_ANTHROPIC_API_KEY="${TEST_ANTHROPIC_API_KEY-}" TEST_ANTHROPIC_BASE_URL="${TEST_ANTHROPIC_BASE_URL-}" \
-  TEST_XAI_API_KEY="${TEST_XAI_API_KEY-}" TEST_XAI_BASE_URL="${TEST_XAI_BASE_URL-}" \
   TEST_MINIMAX_API_KEY="${TEST_MINIMAX_API_KEY-}" TEST_MINIMAX_BASE_URL="${TEST_MINIMAX_BASE_URL-}" \
-  TEST_DEEPSEEK_API_KEY="${TEST_DEEPSEEK_API_KEY-}" TEST_DEEPSEEK_BASE_URL="${TEST_DEEPSEEK_BASE_URL-}" \
-  TEST_ZAI_API_KEY="${TEST_ZAI_API_KEY-}" TEST_ZAI_BASE_URL="${TEST_ZAI_BASE_URL-}" \
   python3 "$REPO_ROOT/scripts/e2e/sync_provider_credentials.py" --backend-url "$BACKEND_URL"
 }
 

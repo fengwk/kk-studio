@@ -79,39 +79,22 @@ docker compose -f deploy/local/compose.yaml down -v
 | `KK_STUDIO_PG_PASSWORD` | `kk_studio` | 初始密码 |
 | `KK_STUDIO_SPRING_PROFILES_ACTIVE` | `dev` | 传递给 `SPRING_PROFILES_ACTIVE` |
 
-## E2E 多模型 Provider 环境注入
+## 真实 E2E MiniMax 凭证
 
-E2E seed 的 7 个 Provider 与 19 个 Pi 模型不含任何真实凭证。Compose 会将全部
-`TEST_*_BASE_URL` / `TEST_*_API_KEY` 传给 app；仅当 app 运行在 `e2e` profile
-且 `KK_STUDIO_E2E_PROVIDER_SYNC_ENABLED=true` 时，启动期同步器才会把**成对的非空**
-Base URL 与 API Key 写入对应 Provider。空值或不完整对会被忽略，且不会输出密钥。
+Compose 和 app 不注入、传递或读取任何真实 Provider 凭证。真实 E2E 必须从宿主执行
+`./scripts/e2e.sh --real`；runner 在 backend ready 后调用唯一的
+`scripts/e2e/sync_provider_credentials.py`，通过 backend API 更新 E2E seed 中的
+MiniMax Provider。
 
-| Provider | Base URL | API Key |
-| --- | --- | --- |
-| MiniMax | `TEST_MINIMAX_BASE_URL` | `TEST_MINIMAX_API_KEY` |
-| OpenAI | `TEST_OPENAI_BASE_URL` | `TEST_OPENAI_API_KEY` |
-| xAI | `TEST_XAI_BASE_URL` | `TEST_XAI_API_KEY` |
-| DeepSeek | `TEST_DEEPSEEK_BASE_URL` | `TEST_DEEPSEEK_API_KEY` |
-| Google | `TEST_GOOGLE_BASE_URL` | `TEST_GOOGLE_API_KEY` |
-| Anthropic | `TEST_ANTHROPIC_BASE_URL` | `TEST_ANTHROPIC_API_KEY` |
-| ZAI | `TEST_ZAI_BASE_URL` | `TEST_ZAI_API_KEY` |
+唯一允许的 credential pair 是 `TEST_MINIMAX_BASE_URL` 与 `TEST_MINIMAX_API_KEY`，必须
+同时提供；Base URL 会去除尾部斜杠并补为 `/v1`。真实用例和默认 E2E Agent 固定使用
+`minimax/MiniMax-M2.7`。同步不会输出密钥，也不应通过 app environment 手工同步。
 
-同步使用持久化 Provider 配置，而非让模型调用直接读取环境变量。OpenAI 兼容
-Provider 的 Base URL 在缺少末尾 `/v1` 时自动补齐。Compose 仅在容器创建或重建时
-读取宿主环境；修改 `TEST_*` 后需重建 app。凭证会存在于 app 容器运行时环境，
-因此仅应在受控的本地 E2E 环境使用，并限制 Docker 管理面访问：
-
-```bash
-KK_STUDIO_SPRING_PROFILES_ACTIVE=e2e \
-KK_STUDIO_PG_DATABASE=kk_studio_e2e \
-docker compose -f deploy/local/compose.yaml up -d --build --no-deps --force-recreate app
-```
-
-上述命令由 `e2e` profile 通过 Flyway 执行
+E2E profile 通过 Flyway 执行
 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql) 和
-[`V2__e2e_seed.sql`](../../core/src/main/resources/db/seed/e2e/V2__e2e_seed.sql)，初始化空的
-`kk_studio_e2e` 数据库。常规 dev 栈不会同步
-Provider 凭证；真实凭证不会写入镜像、SQL seed 或仓库。
+[`V2__e2e_seed.sql`](../../core/src/main/resources/db/seed/e2e/V2__e2e_seed.sql)。seed 仍保留
+7 个 Provider 和 19 个 Pi 模型 catalog，但不包含真实凭证；真实凭证不会写入镜像、SQL
+seed 或仓库。
 
 数据库首次初始化的约束：
 
@@ -119,9 +102,8 @@ Provider 凭证；真实凭证不会写入镜像、SQL seed 或仓库。
   Flyway 仅执行 `flyway_schema_history` 尚未记录的版本。
 - `V2__dev_seed.sql` 写入的是 local-only 的 stub provider（`stub-key`），
   不携带任何真实凭证。
-- 真实 Provider（OpenAI / Google / Anthropic / xAI / MiniMax / DeepSeek / ZAI）
-  的 `credential` 必须通过 UI、`PUT /api/ai/catalog/providers/{id}` 或 E2E profile 的环境同步器
-  在运行时注入，**绝不**写入镜像、SQL seed 或仓库。
+- 真实 E2E credential 仅由宿主 runner 的 MiniMax 同步器在运行时注入，绝不写入镜像、
+  SQL seed 或仓库。
 
 ## 清理宿主网络监听
 

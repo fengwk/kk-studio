@@ -21,8 +21,6 @@ spring:
 
 
 kk-studio:
-  e2e-provider-sync:
-    enabled: false
   harness:
     environment-gateway:
       daemon-token: e2e-daemon-token
