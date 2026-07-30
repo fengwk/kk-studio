@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
@@ -27,9 +29,10 @@ public interface ToolInvocationTransactions {
    * before flipping the row to {@link InvocationStatus#RUNNING} and rescheduling the target's
    * {@code available_at} to the worker lease deadline.
    *
-   * <p>Returns {@link Optional#empty()} when the target row is absent or not yet due, or when a
-   * claim precondition fails. A missing owning Thread is a persistence invariant breach and fails
-   * the transaction.
+   * <p>Returns {@link Optional#empty()} when the target row is absent or not yet due, when a claim
+   * precondition fails, or when a RUNNING/PENDING lease has expired and was reset to QUEUED/PENDING
+   * (the target is rescheduled to {@code now} and the caller must re-dispatch). A missing owning
+   * Thread is a persistence invariant breach and fails the transaction.
    */
   Optional<ClaimedToolInvocation> claim(
       long invocationId, String workerToken, Duration workerLeaseDuration, Instant now);
@@ -82,4 +85,38 @@ public interface ToolInvocationTransactions {
       Instant nextAttemptAt,
       Instant lastObservedActivityAt,
       Instant now);
+
+  /**
+   * Persist the final authorized execution plan and transition permission state to {@code ALLOWED}.
+   * The Tool descriptor, arguments, location and environment name are overwritten atomically with
+   * the caller-supplied final plan. The durable target row is preserved (or rescheduled to the
+   * worker lease deadline) so the caller can immediately dispatch the post-allow invocation.
+   */
+  ToolInvocationUpdateOutcome persistPermissionAllowed(
+      ClaimedToolInvocation claimed,
+      ToolBinding finalBinding,
+      String finalArgumentsJson,
+      Instant now);
+
+  /**
+   * Atomically persist the final ASK plan, transition to {@code WAITING_INTERACTION} with {@code
+   * permission_state = ASKED}, clear worker clocks, and insert exactly one OPEN Interaction owned
+   * by this Tool. The execution target is parked (disabled, route/time preserved) in the same
+   * transaction so the FIFO gate is preserved while the prompt is outstanding. {@code expiresAt} is
+   * reserved for the next phase; this slice always passes {@code null}.
+   */
+  ToolInvocationUpdateOutcome awaitPermission(
+      ClaimedToolInvocation claimed,
+      ToolBinding finalBinding,
+      String finalArgumentsJson,
+      PermissionPromptPreview prompt,
+      Instant now);
+
+  /**
+   * Atomically transition permission state to {@code DENIED} and the row to terminal {@code FAILED}
+   * with error kind {@code PERMISSION_DENIED}. The owning Thread is marked runnable, the durable
+   * Tool target is deleted, the owning Thread target is rescheduled, and the next environment head
+   * (if any) is activated atomically. No external Tool I/O is permitted on this path.
+   */
+  ToolInvocationUpdateOutcome denyPermission(ClaimedToolInvocation claimed, Instant now);
 }

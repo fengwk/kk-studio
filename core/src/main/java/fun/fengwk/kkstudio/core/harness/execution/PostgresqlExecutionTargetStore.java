@@ -103,6 +103,44 @@ public class PostgresqlExecutionTargetStore implements ExecutionTargetStore {
   }
 
   @Override
+  public int parkLocked(ExecutionTargetKind kind, long id, String routeKey, Instant availableAt) {
+    requireActiveTransaction();
+    Objects.requireNonNull(kind, "kind");
+    Objects.requireNonNull(availableAt, "availableAt");
+    if (id <= 0) {
+      throw new IllegalArgumentException("id must be positive");
+    }
+    if (routeKey != null && routeKey.isBlank()) {
+      throw new IllegalArgumentException("parkLocked routeKey must not be blank when provided");
+    }
+    // Validate the row is held under lock before flipping dispatch_enabled.
+    if (mapper.lockForUpdate(kind.name(), id) == null) {
+      throw new IllegalStateException(
+          "parkLocked target row missing or lock lost: " + kind + " " + id);
+    }
+    return mapper.parkLocked(kind.name(), id, routeKey, offset(availableAt));
+  }
+
+  @Override
+  public int activateLocked(
+      ExecutionTargetKind kind, long id, String routeKey, Instant availableAt) {
+    requireActiveTransaction();
+    Objects.requireNonNull(kind, "kind");
+    Objects.requireNonNull(availableAt, "availableAt");
+    if (id <= 0) {
+      throw new IllegalArgumentException("id must be positive");
+    }
+    if (routeKey != null && routeKey.isBlank()) {
+      throw new IllegalArgumentException("activateLocked routeKey must not be blank when provided");
+    }
+    if (mapper.lockForUpdate(kind.name(), id) == null) {
+      throw new IllegalStateException(
+          "activateLocked target row missing or lock lost: " + kind + " " + id);
+    }
+    return mapper.activateLocked(kind.name(), id, routeKey, offset(availableAt));
+  }
+
+  @Override
   public int deleteLocked(ExecutionTargetKind kind, long id) {
     requireActiveTransaction();
     Objects.requireNonNull(kind, "kind");

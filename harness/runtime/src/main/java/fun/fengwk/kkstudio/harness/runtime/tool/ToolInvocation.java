@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.tool;
 
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
@@ -10,9 +11,20 @@ import java.util.Objects;
 
 /**
  * Immutable durable aggregate mirroring one final-schema {@code harness_tool_invocation} row.
- * Worker state uses the shared runtime {@link InvocationStatus} and {@link Lease}; permission or
- * external-input waiting is represented by a separate Interaction fact rather than Tool-specific
- * states.
+ * Worker state uses the shared runtime {@link InvocationStatus} and {@link Lease}; the durable Tool
+ * permission decision is recorded separately through {@link ToolPermissionState}.
+ *
+ * <p>State-machine invariants:
+ *
+ * <ul>
+ *   <li>initial {@code QUEUED + PENDING} is valid;
+ *   <li>{@code WAITING_INTERACTION} has no worker lease, no clocks/result/error/next attempt and
+ *       requires {@code permissionState == ASKED};
+ *   <li>{@code ASKED} is valid only for {@code WAITING_INTERACTION};
+ *   <li>{@code DENIED} is valid only for terminal {@code FAILED};
+ *   <li>{@code RETRY_WAIT} requires {@code permissionState == ALLOWED};
+ *   <li>permission state may remain {@code PENDING} on legitimate cancellation/setup-failure cases.
+ * </ul>
  */
 public record ToolInvocation(
     long id,
@@ -36,7 +48,9 @@ public record ToolInvocation(
     Instant appliedAt,
     Instant createdAt,
     Instant startedAt,
-    Instant finishedAt) {
+    Instant finishedAt,
+    ToolPermissionState permissionState,
+    boolean yoloEnabled) {
 
   public ToolInvocation {
     if (id <= 0 || threadId <= 0 || assistantEntryId <= 0) {
@@ -61,8 +75,10 @@ public record ToolInvocation(
       throw new IllegalArgumentException("attempt must be positive");
     }
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
+    permissionState = Objects.requireNonNull(permissionState, "permissionState");
     validateShape(
         status,
+        permissionState,
         nextAttemptAt,
         workerLease,
         deadlineAt,
@@ -112,6 +128,7 @@ public record ToolInvocation(
 
   private static void validateShape(
       InvocationStatus status,
+      ToolPermissionState permissionState,
       Instant nextAttemptAt,
       Lease workerLease,
       Instant deadlineAt,
@@ -169,6 +186,14 @@ public record ToolInvocation(
         requireNull("QUEUED", "finishedAt", finishedAt);
         requireNull("QUEUED", "result", result);
         requireNull("QUEUED", "error", error);
+        // QUEUED may be re-entered from ALLOWED after releaseUnstarted (no external I/O occurred)
+        // and from ALLOWED after next-phase approval. ASKED and DENIED are not legal because
+        // ASKED only pairs with WAITING_INTERACTION and DENIED is terminal-only.
+        if (permissionState != ToolPermissionState.PENDING
+            && permissionState != ToolPermissionState.ALLOWED) {
+          throw new IllegalArgumentException(
+              "QUEUED requires permissionState PENDING or ALLOWED but was " + permissionState);
+        }
       }
       case RUNNING -> {
         requireNull("RUNNING", "nextAttemptAt", nextAttemptAt);
@@ -176,6 +201,26 @@ public record ToolInvocation(
         requireNull("RUNNING", "result", result);
         requireNull("RUNNING", "error", error);
         requireRunningClocks(workerLease, deadlineAt, lastActivityAt);
+        // RUNNING may carry PENDING (decision still pending) or ALLOWED (after
+        // persistPermissionAllowed). ASKED is reserved for WAITING_INTERACTION; the SQL
+        // transition that flips RUNNING+PENDING to WAITING_INTERACTION/ASKED is atomic, so
+        // there is no observable transient RUNNING/ASKED state.
+        if (permissionState != ToolPermissionState.PENDING
+            && permissionState != ToolPermissionState.ALLOWED) {
+          throw new IllegalArgumentException(
+              "RUNNING requires permissionState PENDING or ALLOWED but was " + permissionState);
+        }
+      }
+      case WAITING_INTERACTION -> {
+        requireNull("WAITING_INTERACTION", "nextAttemptAt", nextAttemptAt);
+        requireNull("WAITING_INTERACTION", "workerLease", workerLease);
+        requireNull("WAITING_INTERACTION", "startedAt", startedAt);
+        requireNull("WAITING_INTERACTION", "deadlineAt", deadlineAt);
+        requireNull("WAITING_INTERACTION", "lastActivityAt", lastActivityAt);
+        requireNull("WAITING_INTERACTION", "finishedAt", finishedAt);
+        requireNull("WAITING_INTERACTION", "result", result);
+        requireNull("WAITING_INTERACTION", "error", error);
+        requirePermission("WAITING_INTERACTION", permissionState, ToolPermissionState.ASKED);
       }
       case RETRY_WAIT -> {
         requireNull("RETRY_WAIT", "workerLease", workerLease);
@@ -185,6 +230,7 @@ public record ToolInvocation(
         if (nextAttemptAt == null) {
           throw new IllegalArgumentException("RETRY_WAIT requires nextAttemptAt");
         }
+        requirePermission("RETRY_WAIT", permissionState, ToolPermissionState.ALLOWED);
       }
       case SUCCEEDED -> {
         requireTerminalShape(nextAttemptAt, workerLease, finishedAt);
@@ -193,14 +239,34 @@ public record ToolInvocation(
           throw new IllegalArgumentException("SUCCEEDED requires result");
         }
         requireExecutedClocks(deadlineAt, lastActivityAt);
+        requirePermission("SUCCEEDED", permissionState, ToolPermissionState.ALLOWED);
       }
-      case FAILED, UNKNOWN -> {
+      case FAILED -> {
         requireTerminalShape(nextAttemptAt, workerLease, finishedAt);
         requireNull(status.name(), "result", result);
         if (error == null) {
           throw new IllegalArgumentException(status + " requires error");
         }
         requireExecutedClocks(deadlineAt, lastActivityAt);
+        // FAILED is the terminal sink for setup failures (PENDING) and external execution
+        // failures (ALLOWED) and the explicit permission-deny path (DENIED). ASKED is
+        // unreachable for FAILED: it only pairs with WAITING_INTERACTION.
+        if (permissionState != ToolPermissionState.PENDING
+            && permissionState != ToolPermissionState.ALLOWED
+            && permissionState != ToolPermissionState.DENIED) {
+          throw new IllegalArgumentException(
+              "FAILED requires permissionState PENDING, ALLOWED or DENIED but was "
+                  + permissionState);
+        }
+      }
+      case UNKNOWN -> {
+        requireTerminalShape(nextAttemptAt, workerLease, finishedAt);
+        requireNull(status.name(), "result", result);
+        if (error == null) {
+          throw new IllegalArgumentException(status + " requires error");
+        }
+        requireExecutedClocks(deadlineAt, lastActivityAt);
+        requirePermission("UNKNOWN", permissionState, ToolPermissionState.ALLOWED);
       }
       case CANCELLED -> {
         requireTerminalShape(nextAttemptAt, workerLease, finishedAt);
@@ -212,7 +278,22 @@ public record ToolInvocation(
           throw new IllegalArgumentException(
               "CANCELLED requires no execution clocks or the full running triad");
         }
+        // CANCELLED may keep PENDING (cancel before any permission decision) or carry ALLOWED
+        // (cancel after a successful permission grant). DENIED / ASKED are not legal.
+        if (permissionState != ToolPermissionState.PENDING
+            && permissionState != ToolPermissionState.ALLOWED) {
+          throw new IllegalArgumentException(
+              "CANCELLED requires permissionState PENDING or ALLOWED but was " + permissionState);
+        }
       }
+    }
+  }
+
+  private static void requirePermission(
+      String status, ToolPermissionState actual, ToolPermissionState expected) {
+    if (actual != expected) {
+      throw new IllegalArgumentException(
+          status + " requires permissionState " + expected + " but was " + actual);
     }
   }
 

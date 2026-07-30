@@ -6,7 +6,7 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.core.harness.session.service.impl.HarnessSessionDtoConverter;
 import fun.fengwk.kkstudio.core.harness.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.harness.thread.service.HarnessThreadCommandService;
-import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProvider;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator.EnqueueResult;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator.StopResult;

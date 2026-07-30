@@ -5,7 +5,7 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import java.time.Instant;
 import java.util.Objects;
 
-/** Input for atomically recording an OPEN Interaction and suspending its owner. */
+/** Input for atomically recording an OPEN Interaction and suspending its owning Thread. */
 public record InteractionCreate(
     ExecutionTarget owner,
     String handlerType,
@@ -21,8 +21,7 @@ public record InteractionCreate(
     }
     request = Objects.requireNonNull(request, "request");
     ownerDirective = Objects.requireNonNull(ownerDirective, "ownerDirective");
-    if (ownerDirective.action() != InteractionOwnerAction.SUSPEND_THREAD
-        && ownerDirective.action() != InteractionOwnerAction.SUSPEND_TOOL_INVOCATION) {
+    if (ownerDirective.action() != InteractionOwnerAction.SUSPEND_THREAD) {
       throw new IllegalArgumentException("interaction create directive must suspend the owner");
     }
     createdAt = Objects.requireNonNull(createdAt, "createdAt");

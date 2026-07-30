@@ -754,6 +754,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
   private static void completeTool(long id, String status, String result, String error) {
     execute(
         "update harness_tool_invocation set status = ?, result = cast(? as jsonb), error = cast(? as jsonb),"
+            + " permission_state = 'ALLOWED',"
             + " started_at = greatest(current_timestamp, created_at),"
             + " deadline_at = greatest(current_timestamp, created_at) + interval '1 minute',"
             + " last_activity_at = greatest(current_timestamp, created_at),"

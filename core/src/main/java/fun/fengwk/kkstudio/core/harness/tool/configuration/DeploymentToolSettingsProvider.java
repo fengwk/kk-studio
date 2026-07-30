@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.harness.tool.configuration;
 
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsCodec;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 
 import java.util.Objects;
 

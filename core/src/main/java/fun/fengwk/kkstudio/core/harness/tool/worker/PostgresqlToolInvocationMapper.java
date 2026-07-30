@@ -24,7 +24,8 @@ public interface PostgresqlToolInvocationMapper extends BaseMapper {
       ti.execution_epoch, ti.status, ti.attempt, ti.next_attempt_at,
       ti.worker_token, ti.worker_until, ti.deadline_at, ti.last_activity_at,
       ti.result::text as result_json, ti.error::text as error_json,
-      ti.applied_at, ti.created_at, ti.started_at, ti.finished_at
+      ti.applied_at, ti.created_at, ti.started_at, ti.finished_at,
+      ti.permission_state, ti.yolo_enabled
       """;
 
   @Select(
@@ -57,7 +58,9 @@ public interface PostgresqlToolInvocationMapper extends BaseMapper {
         @Result(column = "applied_at", property = "appliedAt"),
         @Result(column = "created_at", property = "createdAt"),
         @Result(column = "started_at", property = "startedAt"),
-        @Result(column = "finished_at", property = "finishedAt")
+        @Result(column = "finished_at", property = "finishedAt"),
+        @Result(column = "permission_state", property = "permissionState"),
+        @Result(column = "yolo_enabled", property = "yoloEnabled")
       })
   ToolInvocationDO findForUpdate(@Param("id") long id, @Param("threadId") long threadId);
 
@@ -148,9 +151,117 @@ public interface PostgresqlToolInvocationMapper extends BaseMapper {
       @Param("workerUntil") OffsetDateTime workerUntil,
       @Param("now") OffsetDateTime now);
 
+  /**
+   * Recover a RUNNING/PENDING row whose lease expired back to initial QUEUED/PENDING while keeping
+   * the frozen original provider call and clearing all worker clocks. The target reschedule is
+   * owned by the calling transaction.
+   */
   @Update(
       """
-      update harness_tool_invocation set worker_until = greatest(worker_until, #{workerUntil})
+      update harness_tool_invocation
+      set status = 'QUEUED', worker_token = null, worker_until = null,
+          started_at = null, deadline_at = null, last_activity_at = null, next_attempt_at = null
+      where id = #{id} and thread_id = #{threadId} and execution_epoch = #{executionEpoch}
+        and status = 'RUNNING' and attempt = #{attempt}
+        and worker_token = #{expectedToken} and worker_until <= #{now}
+        and permission_state = 'PENDING'
+      """)
+  int recoverPendingLease(
+      @Param("id") long id,
+      @Param("threadId") long threadId,
+      @Param("executionEpoch") long executionEpoch,
+      @Param("attempt") int attempt,
+      @Param("expectedToken") String expectedToken,
+      @Param("now") OffsetDateTime now);
+
+  /**
+   * Atomically persist the final authorized execution plan and transition permission state to
+   * ALLOWED. Caller MUST already hold a row lock on this invocation (RUNNING + PENDING).
+   */
+  @Update(
+      """
+      update harness_tool_invocation
+      set permission_state = 'ALLOWED',
+          descriptor = cast(#{descriptorJson} as jsonb),
+          arguments = cast(#{argumentsJson} as jsonb),
+          location = #{location},
+          environment_name = #{environmentName}
+      where id = #{id} and thread_id = #{threadId} and execution_epoch = #{executionEpoch}
+        and attempt = #{attempt} and status = 'RUNNING' and permission_state = 'PENDING'
+        and worker_token = #{token} and worker_until > #{now}
+      """)
+  int persistPermissionAllowed(
+      @Param("id") long id,
+      @Param("threadId") long threadId,
+      @Param("executionEpoch") long executionEpoch,
+      @Param("attempt") int attempt,
+      @Param("token") String token,
+      @Param("descriptorJson") String descriptorJson,
+      @Param("argumentsJson") String argumentsJson,
+      @Param("location") String location,
+      @Param("environmentName") String environmentName,
+      @Param("now") OffsetDateTime now);
+
+  /**
+   * Atomically persist the final ASK plan, transition to WAITING_INTERACTION, clear worker clocks
+   * and lease, and mark permission state ASKED. Caller MUST already hold a row lock on this
+   * invocation.
+   */
+  @Update(
+      """
+      update harness_tool_invocation
+      set permission_state = 'ASKED', status = 'WAITING_INTERACTION',
+          descriptor = cast(#{descriptorJson} as jsonb),
+          arguments = cast(#{argumentsJson} as jsonb),
+          location = #{location},
+          environment_name = #{environmentName},
+          worker_token = null, worker_until = null,
+          started_at = null, deadline_at = null, last_activity_at = null,
+          next_attempt_at = null, result = null, error = null
+      where id = #{id} and thread_id = #{threadId} and execution_epoch = #{executionEpoch}
+        and attempt = #{attempt} and status = 'RUNNING' and permission_state = 'PENDING'
+        and worker_token = #{token} and worker_until > #{now}
+      """)
+  int awaitPermission(
+      @Param("id") long id,
+      @Param("threadId") long threadId,
+      @Param("executionEpoch") long executionEpoch,
+      @Param("attempt") int attempt,
+      @Param("token") String token,
+      @Param("descriptorJson") String descriptorJson,
+      @Param("argumentsJson") String argumentsJson,
+      @Param("location") String location,
+      @Param("environmentName") String environmentName,
+      @Param("now") OffsetDateTime now);
+
+  @Update(
+      """
+      update harness_tool_invocation
+      set status = 'FAILED', permission_state = 'DENIED', result = null,
+          error = cast(#{errorJson} as jsonb), next_attempt_at = null,
+          worker_token = null, worker_until = null,
+          started_at = #{startedAt}, deadline_at = #{deadlineAt},
+          last_activity_at = #{finishedAt}, finished_at = #{finishedAt}
+      where id = #{id} and thread_id = #{threadId} and execution_epoch = #{executionEpoch}
+        and attempt = #{attempt} and status = 'RUNNING' and permission_state = 'PENDING'
+        and worker_token = #{token} and worker_until > #{now}
+      """)
+  int denyPermission(
+      @Param("id") long id,
+      @Param("threadId") long threadId,
+      @Param("executionEpoch") long executionEpoch,
+      @Param("attempt") int attempt,
+      @Param("token") String token,
+      @Param("errorJson") String errorJson,
+      @Param("startedAt") OffsetDateTime startedAt,
+      @Param("deadlineAt") OffsetDateTime deadlineAt,
+      @Param("finishedAt") OffsetDateTime finishedAt,
+      @Param("now") OffsetDateTime now);
+
+  @Update(
+      """
+      update harness_tool_invocation
+      set worker_until = greatest(worker_until, #{workerUntil})
       where id = #{id} and thread_id = #{threadId} and execution_epoch = #{executionEpoch}
         and status = 'RUNNING' and attempt = #{attempt} and worker_token = #{token}
         and worker_until > #{now}

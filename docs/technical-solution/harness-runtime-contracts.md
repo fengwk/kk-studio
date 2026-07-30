@@ -211,7 +211,9 @@ public record ToolInvocation(
     Instant appliedAt,
     Instant createdAt,
     Instant startedAt,
-    Instant finishedAt) {}
+    Instant finishedAt,
+    ToolPermissionState permissionState,
+    boolean yoloEnabled) {}
 ```
 
 约束：
@@ -221,6 +223,9 @@ public record ToolInvocation(
 - sibling 全部 terminal 后，Reconciler 在一个事务中按 ordinal 写 Tool Result Entry，并设置所有 sibling `appliedAt`
 - ENVIRONMENT 必须有 environmentName，PLATFORM 必须没有
 - 本地：`ToolWorker -> Tool`；远程：`ToolWorker -> RemoteTool -> transport -> Daemon -> Tool`
+- `PENDING` 只允许在 `QUEUED`/`RUNNING` 或未执行的取消/设置失败终态；`ALLOWED` 必须在任何外部 Tool I/O 前持久化
+- `ASKED` 只允许在无 lease/clock 的 `WAITING_INTERACTION`，且对应一个 OPEN `tool-permission` Interaction 与 parked target
+- `DENIED` 只允许在 `FAILED`；批准恢复 `QUEUED + ALLOWED` 并经 target route FIFO gate 调度，拒绝或过期删除 Tool target 并原子唤醒 Thread
 
 ### 3.6 Interaction
 
@@ -395,8 +400,8 @@ head 重定位与 enqueue/Stop 都先锁 Thread 行并校验 `expectedExecutionE
 - claim/renew worker lease
 - resolve retry/timeout/cancel
 - terminal 与 Thread runnable 同事务
-- Interaction 允许继续时转 QUEUED 并返回 Tool signal
-- Interaction 拒绝时 terminal 并返回 Thread signal
+- Tool permission ASK 原子写最终计划、`WAITING_INTERACTION + ASKED`、OPEN Interaction 与 parked target
+- `tool-permission` Interaction 的批准原子转 `QUEUED + ALLOWED` 并启用正确的 Tool target；拒绝/过期原子写 `FAILED + DENIED`、删除 Tool target、调度 Thread target 与下一环境 head
 
 ### 5.5 InteractionTransactions
 

@@ -153,11 +153,22 @@ ModelInvocation 负责 source head、execution epoch、request snapshot、状态
 
 ### 3.5 ToolInvocation
 
-一次 Assistant ToolCall 的 durable 执行事实：Assistant Entry、ordinal、toolCallId、descriptor/arguments snapshot、`ToolExecutionLocation`（`PLATFORM` | `ENVIRONMENT`）、状态、worker lease、deadline/retry、result/error、`appliedAt`。
+一次 Assistant ToolCall 的 durable 执行事实：Assistant Entry、ordinal、toolCallId、descriptor/arguments snapshot、`ToolExecutionLocation`（`PLATFORM` | `ENVIRONMENT`）、状态、worker lease、deadline/retry、result/error、`appliedAt`、permission state 与冻结的 YOLO 开关。
 
 `ToolExecutionLocation` 与 `ToolBinding` 是 runtime 路由状态，不属于 tool 模块的功能描述。
 
 统一 `ToolWorker` 只写 ToolInvocation 与 realtime partial，不写 Entry/head。
+
+权限边界在任何 Tool registry lookup、remote send 或 `Tool.execute` 之前执行：
+
+```text
+QUEUED + PENDING
+  -> ALLOW: persist final plan + ALLOWED -> external Tool I/O
+  -> ASK: WAITING_INTERACTION + ASKED + OPEN tool-permission Interaction + parked target
+  -> DENY: FAILED + DENIED -> delete Tool target + schedule Thread target
+```
+
+批准只把 `WAITING_INTERACTION + ASKED` 恢复为 `QUEUED + ALLOWED`，并通过原 PLATFORM target 或 ENVIRONMENT route FIFO head 启用；它不会再次运行 permission evaluator。ASKED target 保持 route queue 成员身份，因此不能让后续 sibling 越过等待用户决定的 head。
 
 执行路径：
 
@@ -175,14 +186,14 @@ Gateway 只拥有连接与协议，不是第二套 durable 状态机。
 `dispatch_enabled` 作为显式 gate。PLATFORM Tool target 由 `schedule` 创建为 enabled；ENVIRONMENT
 Tool target 由 Reconciler materialization 先 `park`，同一事务完成后只 enable 每个 route 的 oldest
 queued head。route FIFO 使用 Tool invocation 的 `created_at, assistant_entry_id, ordinal, id`，
-RUNNING、RETRY_WAIT 和未来的 WAITING_INTERACTION head 会阻塞后续 sibling。due/nearest dispatcher
+RUNNING、RETRY_WAIT 和 WAITING_INTERACTION head 会阻塞后续 sibling。due/nearest dispatcher
 查询忽略 disabled row，但 inspection/ownership `findAll` 与 `lock` 仍可见 parked state。
 
 ### 3.6 Interaction
 
 对外请求/响应的 durable 事实：owner、handler type、request/response、`OPEN/RESOLVED/CANCELLED/EXPIRED`、deadline/version。
 
-Approval、clarification、resource selection 与 external callback 都是 InteractionHandler。不在 Thread 上建模 `WAITING_APPROVAL`/`ALLOW`/`DENY` 专用状态。
+Approval、clarification、resource selection 与 external callback 都是 InteractionHandler。Tool permission 使用唯一 handler type `tool-permission`：其 request 持久化 preview 与 owner ids，客户端只能提交严格的 `{"approved": true|false}`；handler 决定 `APPROVE_TOOL_PERMISSION` 或 `DENY_TOOL_PERMISSION`，transaction adapter 在 Thread → ToolInvocation → ExecutionTarget 锁序中应用状态和 target 变更。
 
 ### 3.7 Goal / Usage / Artifact / Retry
 

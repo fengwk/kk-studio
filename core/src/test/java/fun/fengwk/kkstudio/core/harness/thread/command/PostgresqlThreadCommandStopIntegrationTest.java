@@ -10,9 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -43,6 +45,7 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
 
   @Autowired private ThreadCommandTransactions transactions;
   @Autowired private PlatformTransactionManager transactionManager;
+  @MockitoBean private EnvironmentReadyListener environmentReadyListener;
 
   /** Stop 只终结尚未执行的 Invocation，RUNNING 依赖 epoch fence 丢失 ownership。 */
   @Test
@@ -70,15 +73,26 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
     long toolQueued = 93_001L;
     long toolRetry = 93_002L;
     long toolRunning = 93_003L;
+    long toolWaitingPermission = 93_004L;
     insertTool(toolQueued, threadId, sessionId, assistantEntryId, 0, epoch, "QUEUED");
     insertTool(toolRetry, threadId, sessionId, assistantEntryId, 1, epoch, "RETRY_WAIT");
     insertTool(toolRunning, threadId, sessionId, assistantEntryId, 2, epoch, "RUNNING");
+    insertTool(
+        toolWaitingPermission,
+        threadId,
+        sessionId,
+        assistantEntryId,
+        3,
+        epoch,
+        "WAITING_INTERACTION");
     insertTarget("MODEL_INVOCATION", modelQueued);
     insertTarget("MODEL_INVOCATION", modelRetry);
     insertTarget("MODEL_INVOCATION", modelRunning);
     insertTarget("TOOL_INVOCATION", toolQueued);
     insertTarget("TOOL_INVOCATION", toolRetry);
     insertTarget("TOOL_INVOCATION", toolRunning);
+    insertTarget("TOOL_INVOCATION", toolWaitingPermission);
+    insertOpenToolPermissionInteraction(94_001L, toolWaitingPermission);
 
     ThreadCommandTransactions.StopResult result =
         transactions.stop(threadId, epoch, BASE.plusSeconds(4));
@@ -96,6 +110,8 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
     assertStillRunning(modelState(modelRunning), "model-running");
     assertSafelyCancelled(toolState(toolQueued));
     assertSafelyCancelled(toolState(toolRetry));
+    assertSafelyCancelled(toolState(toolWaitingPermission));
+    assertEquals("PENDING", toolPermissionState(toolWaitingPermission));
     assertStillRunning(toolState(toolRunning), "tool-running");
     assertEquals(0L, targetCount("THREAD", threadId));
     assertEquals(0L, targetCount("MODEL_INVOCATION", modelQueued));
@@ -104,6 +120,8 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
     assertEquals(0L, targetCount("TOOL_INVOCATION", toolQueued));
     assertEquals(0L, targetCount("TOOL_INVOCATION", toolRetry));
     assertEquals(0L, targetCount("TOOL_INVOCATION", toolRunning));
+    assertEquals(0L, targetCount("TOOL_INVOCATION", toolWaitingPermission));
+    assertEquals("CANCELLED", interactionStatus(94_001L));
   }
 
   /** Input insert 被数据库拒绝时，先发生的 sequence/runnable 更新必须一起回滚。 */
@@ -266,36 +284,67 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
     transitionInvocation("harness_tool_invocation", id, status, "tool-running");
   }
 
+  private static void insertOpenToolPermissionInteraction(long interactionId, long toolInvocationId)
+      throws SQLException {
+    try (Connection connection = newConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                """
+                insert into harness_interaction (
+                    id, owner_kind, owner_id, handler_type, request, status, version, created_at
+                ) values (?, 'TOOL_INVOCATION', ?, 'tool-permission', '{}'::jsonb, 'OPEN', 0, ?)
+                """)) {
+      statement.setLong(1, interactionId);
+      statement.setLong(2, toolInvocationId);
+      statement.setTimestamp(3, Timestamp.from(BASE));
+      assertEquals(1, statement.executeUpdate());
+    }
+  }
+
   private static void transitionInvocation(String table, long id, String status, String workerToken)
       throws SQLException {
     if ("QUEUED".equals(status)) {
       return;
     }
+    String allowedPermissionAssignment =
+        "harness_tool_invocation".equals(table) ? " permission_state = 'ALLOWED'," : "";
     String sql;
     if ("RETRY_WAIT".equals(status)) {
       sql =
           "update "
               + table
-              + " set status = 'RETRY_WAIT', started_at = ?, deadline_at = ?,"
+              + " set status = 'RETRY_WAIT',"
+              + allowedPermissionAssignment
+              + " started_at = ?, deadline_at = ?,"
               + " last_activity_at = ?, next_attempt_at = ? where id = ?";
     } else if ("RUNNING".equals(status)) {
       sql =
           "update "
               + table
-              + " set status = 'RUNNING', started_at = ?, deadline_at = ?,"
+              + " set status = 'RUNNING',"
+              + allowedPermissionAssignment
+              + " started_at = ?, deadline_at = ?,"
               + " last_activity_at = ?, worker_token = ?, worker_until = ? where id = ?";
+    } else if ("WAITING_INTERACTION".equals(status) && "harness_tool_invocation".equals(table)) {
+      sql =
+          "update harness_tool_invocation"
+              + " set status = 'WAITING_INTERACTION', permission_state = 'ASKED' where id = ?";
     } else {
       throw new IllegalArgumentException("unsupported status: " + status);
     }
     try (Connection connection = newConnection();
         PreparedStatement statement = connection.prepareStatement(sql)) {
-      statement.setTimestamp(1, Timestamp.from(BASE.plusSeconds(1)));
-      statement.setTimestamp(2, Timestamp.from(BASE.plusSeconds(10)));
-      statement.setTimestamp(3, Timestamp.from(BASE.plusSeconds(2)));
+      if ("WAITING_INTERACTION".equals(status)) {
+        statement.setLong(1, id);
+      } else {
+        statement.setTimestamp(1, Timestamp.from(BASE.plusSeconds(1)));
+        statement.setTimestamp(2, Timestamp.from(BASE.plusSeconds(10)));
+        statement.setTimestamp(3, Timestamp.from(BASE.plusSeconds(2)));
+      }
       if ("RETRY_WAIT".equals(status)) {
         statement.setTimestamp(4, Timestamp.from(BASE.plusSeconds(3)));
         statement.setLong(5, id);
-      } else {
+      } else if ("RUNNING".equals(status)) {
         statement.setString(4, workerToken);
         statement.setTimestamp(5, Timestamp.from(BASE.plusSeconds(8)));
         statement.setLong(6, id);
@@ -356,6 +405,31 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
 
   private static InvocationState toolState(long invocationId) throws SQLException {
     return invocationState("harness_tool_invocation", invocationId);
+  }
+
+  private static String toolPermissionState(long invocationId) throws SQLException {
+    try (Connection connection = newConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "select permission_state from harness_tool_invocation where id = ?")) {
+      statement.setLong(1, invocationId);
+      try (ResultSet result = statement.executeQuery()) {
+        assertTrue(result.next());
+        return result.getString(1);
+      }
+    }
+  }
+
+  private static String interactionStatus(long interactionId) throws SQLException {
+    try (Connection connection = newConnection();
+        PreparedStatement statement =
+            connection.prepareStatement("select status from harness_interaction where id = ?")) {
+      statement.setLong(1, interactionId);
+      try (ResultSet result = statement.executeQuery()) {
+        assertTrue(result.next());
+        return result.getString(1);
+      }
+    }
   }
 
   private static InvocationState invocationState(String table, long invocationId)

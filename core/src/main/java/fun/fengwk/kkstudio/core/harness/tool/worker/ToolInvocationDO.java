@@ -31,4 +31,6 @@ public class ToolInvocationDO {
   private OffsetDateTime createdAt;
   private OffsetDateTime startedAt;
   private OffsetDateTime finishedAt;
+  private String permissionState;
+  private Boolean yoloEnabled;
 }

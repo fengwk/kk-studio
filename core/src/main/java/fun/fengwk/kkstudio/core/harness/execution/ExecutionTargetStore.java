@@ -16,7 +16,9 @@ import java.util.Optional;
  * {@link #rescheduleLocked(ExecutionTargetKind, long, String, Instant)} or {@link
  * #deleteLocked(ExecutionTargetKind, long)} in the same transaction. {@link
  * #deleteIfExists(ExecutionTargetKind, long)} is the conditional variant for callers that race
- * without a lock.
+ * without a lock. {@link #parkLocked} and {@link #activateLocked} are strict, transaction-bound
+ * variants required by the durable Tool permission state machine: ASK must atomically park the
+ * target so the FIFO gate remains consistent, and approval must atomically re-enable it.
  *
  * <p>The schema-level trigger fires {@code pg_notify('harness_execution_target')} for enabled
  * inserts, enable transitions, and strictly-earlier updates of an enabled row. Parked/disabled rows
@@ -76,6 +78,22 @@ public interface ExecutionTargetStore {
   int rescheduleLocked(ExecutionTargetKind kind, long id, String routeKey, Instant availableAt);
 
   /**
+   * Disable an already-locked target row while preserving its route key and available time. The
+   * caller MUST already hold a row lock on the target acquired via {@link #lock} (or {@link
+   * #lockDue}). Returns 1 when the row was flipped to disabled; 0 when the lock has been lost. A
+   * row that is already disabled is left untouched and the call returns 1.
+   */
+  int parkLocked(ExecutionTargetKind kind, long id, String routeKey, Instant availableAt);
+
+  /**
+   * Enable an already-locked target row and overwrite its route key and available time. The caller
+   * MUST already hold a row lock on the target. Returns 1 when the row was enabled and the route
+   * /time were rewritten; 0 when the lock has been lost. An already-enabled row's NOTIFY trigger is
+   * only fired when the new {@code availableAt} is strictly earlier than the current value.
+   */
+  int activateLocked(ExecutionTargetKind kind, long id, String routeKey, Instant availableAt);
+
+  /**
    * Delete an already-locked row. Returns 1 on success; 0 when the lock has been lost. Use {@link
    * #deleteIfExists(ExecutionTargetKind, long)} when the caller does not hold a lock.
    */
@@ -91,8 +109,8 @@ public interface ExecutionTargetStore {
    * Activate the oldest nonterminal ENVIRONMENT {@code TOOL_INVOCATION} target for {@code routeKey}
    * according to the joined invocation's {@code created_at}, {@code assistant_entry_id}, {@code
    * ordinal}, and {@code id}. The queue-member statuses are {@code QUEUED}, {@code RUNNING}, {@code
-   * RETRY_WAIT}, and the future literal {@code WAITING_INTERACTION}. The target row is selected
-   * with {@code FOR UPDATE SKIP LOCKED}; a locked head does not allow a later sibling to pass.
+   * RETRY_WAIT}, and {@code WAITING_INTERACTION}. The target row is selected with {@code FOR UPDATE
+   * SKIP LOCKED}; a locked head does not allow a later sibling to pass.
    *
    * <p>Only a {@code QUEUED} head can be enabled or moved to {@code availableAt}. A RUNNING,
    * RETRY_WAIT, or WAITING_INTERACTION head leaves the route unchanged and blocks later siblings.
