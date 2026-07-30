@@ -42,6 +42,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -56,6 +58,14 @@ import java.util.function.Supplier;
  * worker is invoked when a {@link
  * fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind#TOOL_INVOCATION} target has
  * already been locked due by the worker transaction.
+ *
+ * <p>Threading: {@link #dispatch(long)} retains the single public entry and runs the durable {@code
+ * transactions.claim(...)} on the caller (the future PostgreSQL execution-target dispatcher
+ * thread). All post-claim external Tool execution ({@code dispatchClaimed}, including {@link
+ * fun.fengwk.kkstudio.harness.tool.execution.Tool#execute} / remote send) is handed off to a
+ * dedicated injected {@link Executor}; watchdogs (heartbeat / deadline / partial flush) remain on
+ * the {@link ScheduledExecutorService scheduler} so that the caller never blocks on external Tool
+ * I/O after a successful claim.
  */
 @Slf4j
 public final class ToolWorker {
@@ -69,6 +79,7 @@ public final class ToolWorker {
   private final ToolWorkerConfig config;
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
+  private final Executor executor;
   private final Supplier<String> workerTokenSupplier;
   private final ConcurrentHashMap<Long, Execution> executions = new ConcurrentHashMap<>();
 
@@ -83,6 +94,7 @@ public final class ToolWorker {
       ToolWorkerConfig config,
       Clock clock,
       ScheduledExecutorService scheduler,
+      Executor executor,
       Supplier<String> workerTokenSupplier) {
     this.transactions = Objects.requireNonNull(transactions, "transactions");
     this.registry = Objects.requireNonNull(registry, "registry");
@@ -94,12 +106,19 @@ public final class ToolWorker {
     this.config = Objects.requireNonNull(config, "config");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+    this.executor = Objects.requireNonNull(executor, "executor");
     this.workerTokenSupplier = Objects.requireNonNull(workerTokenSupplier, "workerTokenSupplier");
   }
 
   /**
-   * Process a single durable ToolInvocation dispatch. The worker transaction locks and advances the
-   * due TOOL_INVOCATION target before external execution begins.
+   * Process a single durable ToolInvocation dispatch. The caller (the execution-target dispatcher
+   * thread) runs the durable {@code transactions.claim(...)} synchronously; post-claim external
+   * Tool execution is handed off to the injected {@link Executor} so the caller never blocks on
+   * Tool I/O after a successful claim.
+   *
+   * @return {@code true} when this process successfully claimed an invocation and either submitted
+   *     the local execution or durably converged a submission rejection; {@code false} only when
+   *     the claim is empty (no due work to dispatch).
    */
   public boolean dispatch(long invocationId) {
     if (invocationId <= 0) {
@@ -115,8 +134,50 @@ public final class ToolWorker {
     if (!workerToken.equals(ownership.invocation().workerLease().token())) {
       throw new IllegalStateException("claim returned an unexpected worker token");
     }
-    dispatchClaimed(ownership);
+    try {
+      executor.execute(() -> dispatchClaimed(ownership));
+    } catch (RejectedExecutionException rejected) {
+      handleSubmissionRejection(ownership, rejected);
+    }
     return true;
+  }
+
+  /**
+   * Conservatively durably converges a successful claim whose post-claim execution was rejected by
+   * the executor (typically a closed / shutting-down executor). No external Tool execution
+   * occurred, so the only safe durable action is to release the unstarted lease back to the queue;
+   * existing target/lease recovery (heartbeat, deadline, re-dispatch) then re-routes the work
+   * without ever leaving it stranded as RUNNING.
+   */
+  private void handleSubmissionRejection(
+      ClaimedToolInvocation ownership, RejectedExecutionException rejected) {
+    log.error(
+        "Tool dispatch executor rejected submission for invocation {}; releasing unstarted claim",
+        ownership.invocation().id(),
+        rejected);
+    InvocationStatus previousStatus = ownership.previousStatus();
+    if (previousStatus != InvocationStatus.QUEUED
+        && previousStatus != InvocationStatus.RETRY_WAIT) {
+      // Invariant breach: a successful claim should always carry QUEUED/RETRY_WAIT as the
+      // pre-flip status. Do not attempt a second terminal mutation with unknown ownership; the
+      // existing heartbeat/deadline/re-dispatch recovery will fence and re-route the row.
+      log.error(
+          "Cannot release unstarted tool invocation {} after executor rejection: unexpected previous status {}",
+          ownership.invocation().id(),
+          previousStatus);
+      return;
+    }
+    try {
+      releaseUnstarted(ownership, clock.instant());
+    } catch (RuntimeException releaseError) {
+      // Do not attempt a second terminal mutation with potentially unknown ownership; the existing
+      // heartbeat/deadline/re-dispatch recovery will fence and re-route the row once the lease
+      // expires or the durable target becomes due again.
+      log.error(
+          "Failed to release unstarted tool invocation {} after executor rejection; relying on lease/target recovery",
+          ownership.invocation().id(),
+          releaseError);
+    }
   }
 
   /** Process-local gate: any in-flight handle. */
