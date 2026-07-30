@@ -2,9 +2,6 @@ import {
   AgentsPage,
   ChatWorkspaceRoute,
   ChatsPage,
-  ComfyuiDeleteDialog,
-  ComfyuiPage,
-  ComfyuiWorkflowEditorDialog,
   CreateChatDialog,
   EnvironmentsRoute,
   HarnessSettingsRoute,
@@ -26,7 +23,6 @@ export const aiExtension: TrustedReactExtension = {
     { id: 'ai.providers', path: 'providers', component: ProvidersPage, priority: 100 },
     { id: 'ai.environments', path: 'environments', component: EnvironmentsRoute, priority: 100 },
     { id: 'ai.settings', path: 'settings', component: HarnessSettingsRoute, priority: 100 },
-    { id: 'ai.comfyui', path: 'comfyui', component: ComfyuiPage, priority: 100 },
   ],
   navigation: [
     { id: 'ai.nav.chats', label: 'Chat', path: 'chats', priority: 100 },
@@ -40,7 +36,5 @@ export const aiExtension: TrustedReactExtension = {
     { id: 'ai.create-chat', component: CreateChatDialog },
     { id: 'ai.resource-editor', component: ResourceEditorDialog },
     { id: 'ai.delete-resource', component: ResourceDeleteDialog },
-    { id: 'ai.comfyui-editor', component: ComfyuiWorkflowEditorDialog },
-    { id: 'ai.comfyui-delete', component: ComfyuiDeleteDialog },
   ],
 }
