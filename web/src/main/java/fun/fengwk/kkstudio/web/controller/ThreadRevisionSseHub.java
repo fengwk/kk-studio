@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import javax.sql.DataSource;
 
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -42,6 +43,12 @@ final class ThreadRevisionSseHub implements SmartLifecycle, ThreadRevisionEventS
 
   @Override
   public AutoCloseable subscribe(long threadId, long afterRevision, Consumer<Event> consumer) {
+    if (threadId <= 0) {
+      throw new IllegalArgumentException("threadId must be positive");
+    }
+    if (afterRevision < 0) {
+      throw new IllegalArgumentException("afterRevision must be non-negative");
+    }
     Objects.requireNonNull(consumer, "consumer");
     Set<Consumer<Event>> threadSubscribers =
         subscribers.computeIfAbsent(threadId, ignored -> new CopyOnWriteArraySet<>());
@@ -132,32 +139,34 @@ final class ThreadRevisionSseHub implements SmartLifecycle, ThreadRevisionEventS
     } catch (NumberFormatException ignored) {
       return;
     }
-    try (Statement statement = connection.createStatement();
-        ResultSet result =
-            statement.executeQuery(
-                "select revision from harness_thread where id = " + Long.toString(threadId))) {
-      if (result.next()) {
-        publish(threadId, new Event(result.getString(1), false));
+    try (PreparedStatement statement =
+        connection.prepareStatement("select revision from harness_thread where id = ?")) {
+      statement.setLong(1, threadId);
+      try (ResultSet result = statement.executeQuery()) {
+        if (result.next()) {
+          publish(threadId, new Event(result.getString(1), false));
+        }
       }
     }
   }
 
   private long currentRevision(long threadId) {
     try (Connection connection = dataSource.getConnection();
-        Statement statement = connection.createStatement();
-        ResultSet result =
-            statement.executeQuery(
-                "select revision from harness_thread where id = " + Long.toString(threadId))) {
-      if (!result.next()) {
-        throw new IllegalArgumentException("unknown thread: " + threadId);
+        PreparedStatement statement =
+            connection.prepareStatement("select revision from harness_thread where id = ?")) {
+      statement.setLong(1, threadId);
+      try (ResultSet result = statement.executeQuery()) {
+        if (!result.next()) {
+          throw new IllegalArgumentException("unknown thread: " + threadId);
+        }
+        return result.getLong(1);
       }
-      return result.getLong(1);
     } catch (SQLException error) {
       throw new IllegalStateException("cannot read current thread revision", error);
     }
   }
 
-  private void broadcastResync() {
+  void broadcastResync() {
     subscribers.forEach((threadId, ignored) -> publish(threadId, new Event(null, true)));
   }
 

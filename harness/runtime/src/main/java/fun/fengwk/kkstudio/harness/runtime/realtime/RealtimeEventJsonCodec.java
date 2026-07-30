@@ -24,7 +24,8 @@ import java.util.Set;
  * 有界 realtime projection 的确定性 strict JSON codec。
  *
  * <p>支持 Model delta 与 Tool partial；top-level exact field set {@code {threadId, subjectKind,
- * subjectId, attempt, type, payload, createdAt}}。{@code attempt} 只出现在 top-level。
+ * subjectId, attempt, sequence, type, payload, createdAt}}。{@code attempt} 与 {@code sequence} 只出现在
+ * top-level。
  *
  * <p>{@code payload} discriminator 严格大小写：
  *
@@ -45,8 +46,18 @@ public final class RealtimeEventJsonCodec {
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
-  private static final Set<String> EVENT_FIELDS =
+  private static final Set<String> TOOL_EVENT_FIELDS =
       orderedSet("threadId", "subjectKind", "subjectId", "attempt", "type", "payload", "createdAt");
+  private static final Set<String> MODEL_EVENT_FIELDS =
+      orderedSet(
+          "threadId",
+          "subjectKind",
+          "subjectId",
+          "attempt",
+          "sequence",
+          "type",
+          "payload",
+          "createdAt");
 
   private static final Set<String> TEXT_PAYLOAD_FIELDS = orderedSet("kind", "text");
   private static final Set<String> THINKING_PAYLOAD_FIELDS = orderedSet("kind", "text");
@@ -103,7 +114,12 @@ public final class RealtimeEventJsonCodec {
   public RealtimeEvent decodeNode(JsonNode value) {
     Objects.requireNonNull(value, "value");
     ObjectNode node = requireObject(value, "realtimeEvent");
-    requireExactFields(node, EVENT_FIELDS, "realtimeEvent");
+    String typeName = requiredText(node, "type", "realtimeEvent");
+    RealtimeEventType type = readEnum(RealtimeEventType.class, typeName, "realtimeEvent.type");
+    requireExactFields(
+        node,
+        type == RealtimeEventType.MODEL_DELTA ? MODEL_EVENT_FIELDS : TOOL_EVENT_FIELDS,
+        "realtimeEvent");
 
     long threadId = requiredPositiveLong(node, "threadId", "realtimeEvent");
     String subjectKindName = requiredText(node, "subjectKind", "realtimeEvent");
@@ -111,8 +127,6 @@ public final class RealtimeEventJsonCodec {
         readEnum(ExecutionTargetKind.class, subjectKindName, "realtimeEvent.subjectKind");
     long subjectId = requiredPositiveLongString(node, "subjectId", "realtimeEvent");
     int attempt = requiredPositiveInt(node, "attempt", "realtimeEvent");
-    String typeName = requiredText(node, "type", "realtimeEvent");
-    RealtimeEventType type = readEnum(RealtimeEventType.class, typeName, "realtimeEvent.type");
     JsonNode payloadNode = node.get("payload");
     if (payloadNode == null || !payloadNode.isObject()) {
       throw new IllegalArgumentException("realtimeEvent.payload must be a JSON object");
@@ -131,8 +145,9 @@ public final class RealtimeEventJsonCodec {
         throw new IllegalArgumentException(
             "MODEL_DELTA subjectKind must be MODEL_INVOCATION: " + subjectKindName);
       }
+      long sequence = requiredPositiveIntegralLong(node, "sequence", "realtimeEvent");
       ProviderStreamEvent delta = decodePayload((ObjectNode) payloadNode);
-      return new RealtimeEvent.ModelDelta(threadId, subjectId, attempt, delta, createdAt);
+      return new RealtimeEvent.ModelDelta(threadId, subjectId, attempt, sequence, delta, createdAt);
     }
     if (type == RealtimeEventType.TOOL_PARTIAL) {
       if (subjectKind != ExecutionTargetKind.TOOL_INVOCATION) {
@@ -153,6 +168,7 @@ public final class RealtimeEventJsonCodec {
     node.put("subjectKind", MODEL_INVOCATION);
     node.put("subjectId", Long.toString(delta.modelInvocationId()));
     node.put("attempt", delta.attempt());
+    node.put("sequence", delta.sequence());
     node.put("type", MODEL_DELTA);
     node.set("payload", encodePayload(delta.delta()));
     node.put("createdAt", delta.createdAt().toString());
@@ -258,7 +274,7 @@ public final class RealtimeEventJsonCodec {
 
   private static String requiredText(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
-    if (!value.isTextual()) {
+    if (value == null || !value.isTextual()) {
       throw new IllegalArgumentException(context + "." + field + " must be text");
     }
     return value.textValue();
@@ -301,6 +317,17 @@ public final class RealtimeEventJsonCodec {
 
   private static long requiredPositiveLongString(ObjectNode node, String field, String context) {
     return requiredPositiveLong(node, field, context);
+  }
+
+  private static long requiredPositiveIntegralLong(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null
+        || !value.isIntegralNumber()
+        || !value.canConvertToLong()
+        || value.longValue() <= 0) {
+      throw new IllegalArgumentException(context + "." + field + " must be a positive long");
+    }
+    return value.longValue();
   }
 
   private static int requiredPositiveInt(ObjectNode node, String field, String context) {

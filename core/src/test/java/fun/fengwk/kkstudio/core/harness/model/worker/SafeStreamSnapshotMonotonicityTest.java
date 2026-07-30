@@ -19,40 +19,40 @@ class SafeStreamSnapshotMonotonicityTest {
   void emptyDurableAcceptsIncomingAsIs() {
     SafeStreamSnapshot merged =
         SafeStreamSnapshotMonotonicity.merge(
-            SafeStreamSnapshot.EMPTY, new SafeStreamSnapshot("hello", "think"));
-    assertEquals(new SafeStreamSnapshot("hello", "think"), merged);
+            SafeStreamSnapshot.EMPTY, new SafeStreamSnapshot("hello", "think", 1L));
+    assertEquals(new SafeStreamSnapshot("hello", "think", 1L), merged);
   }
 
   @Test
   void incomingExtendsDurableTextAndThinking() {
-    SafeStreamSnapshot durable = new SafeStreamSnapshot("hel", "rea");
-    SafeStreamSnapshot incoming = new SafeStreamSnapshot("hello", "reason");
+    SafeStreamSnapshot durable = new SafeStreamSnapshot("hel", "rea", 1L);
+    SafeStreamSnapshot incoming = new SafeStreamSnapshot("hello", "reason", 2L);
     SafeStreamSnapshot merged = SafeStreamSnapshotMonotonicity.merge(durable, incoming);
     assertEquals(incoming, merged);
   }
 
   @Test
   void incomingOldPrefixKeepsDurable() {
-    SafeStreamSnapshot durable = new SafeStreamSnapshot("hello", "reasoning");
-    SafeStreamSnapshot incoming = new SafeStreamSnapshot("hel", "rea");
+    SafeStreamSnapshot durable = new SafeStreamSnapshot("hello", "reasoning", 2L);
+    SafeStreamSnapshot incoming = new SafeStreamSnapshot("hel", "rea", 1L);
     SafeStreamSnapshot merged = SafeStreamSnapshotMonotonicity.merge(durable, incoming);
     assertSame(durable, merged);
   }
 
   @Test
   void equalDurableAndIncomingReturnsDurableInstance() {
-    SafeStreamSnapshot durable = new SafeStreamSnapshot("hello", "think");
-    SafeStreamSnapshot incoming = new SafeStreamSnapshot("hello", "think");
+    SafeStreamSnapshot durable = new SafeStreamSnapshot("hello", "think", 1L);
+    SafeStreamSnapshot incoming = new SafeStreamSnapshot("hello", "think", 1L);
     SafeStreamSnapshot merged = SafeStreamSnapshotMonotonicity.merge(durable, incoming);
     assertSame(durable, merged);
   }
 
   @Test
   void onlyTextFieldExtendsKeepsThinkingIdentical() {
-    SafeStreamSnapshot durable = new SafeStreamSnapshot("hel", "think");
-    SafeStreamSnapshot incoming = new SafeStreamSnapshot("hello", "think");
+    SafeStreamSnapshot durable = new SafeStreamSnapshot("hel", "think", 1L);
+    SafeStreamSnapshot incoming = new SafeStreamSnapshot("hello", "think", 2L);
     SafeStreamSnapshot merged = SafeStreamSnapshotMonotonicity.merge(durable, incoming);
-    assertEquals(new SafeStreamSnapshot("hello", "think"), merged);
+    assertEquals(new SafeStreamSnapshot("hello", "think", 2L), merged);
   }
 
   @Test
@@ -62,10 +62,12 @@ class SafeStreamSnapshotMonotonicityTest {
             SafeStreamSnapshotMonotonicity.IllegalSnapshotForkException.class,
             () ->
                 SafeStreamSnapshotMonotonicity.merge(
-                    new SafeStreamSnapshot("left", ""), new SafeStreamSnapshot("right", "")));
+                    new SafeStreamSnapshot("left", "", 1L),
+                    new SafeStreamSnapshot("right", "", 2L)));
     String message = error.getMessage();
     assertNotNull(message);
-    assertEquals("text safe stream snapshot is divergent", message);
+    assertEquals(
+        "text safe stream snapshot must not shrink or diverge at a newer sequence", message);
   }
 
   @Test
@@ -75,7 +77,33 @@ class SafeStreamSnapshotMonotonicityTest {
             SafeStreamSnapshotMonotonicity.IllegalSnapshotForkException.class,
             () ->
                 SafeStreamSnapshotMonotonicity.merge(
-                    new SafeStreamSnapshot("", "think-a"), new SafeStreamSnapshot("", "think-b")));
-    assertEquals("thinking safe stream snapshot is divergent", error.getMessage());
+                    new SafeStreamSnapshot("", "think-a", 1L),
+                    new SafeStreamSnapshot("", "think-b", 2L)));
+    assertEquals(
+        "thinking safe stream snapshot must not shrink or diverge at a newer sequence",
+        error.getMessage());
+  }
+
+  @Test
+  void equalSequenceCannotChangeContent() {
+    SafeStreamSnapshotMonotonicity.IllegalSnapshotForkException error =
+        assertThrows(
+            SafeStreamSnapshotMonotonicity.IllegalSnapshotForkException.class,
+            () ->
+                SafeStreamSnapshotMonotonicity.merge(
+                    new SafeStreamSnapshot("left", "", 2L),
+                    new SafeStreamSnapshot("left-more", "", 2L)));
+    assertEquals(
+        "safe stream snapshot content changed without advancing sequence", error.getMessage());
+  }
+
+  @Test
+  void newerSequenceCannotShrinkContent() {
+    assertThrows(
+        SafeStreamSnapshotMonotonicity.IllegalSnapshotForkException.class,
+        () ->
+            SafeStreamSnapshotMonotonicity.merge(
+                new SafeStreamSnapshot("complete", "", 2L),
+                new SafeStreamSnapshot("comp", "", 3L)));
   }
 }

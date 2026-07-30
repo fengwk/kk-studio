@@ -5,9 +5,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshot;
 /**
  * 在 Thread -> Invocation 行锁内部判定两次 {@link SafeStreamSnapshot} 的单调合并关系。
  *
- * <p>每个 text/thinking 字段独立判定：{@code incoming} 是 {@code durable} 的延长前缀时输出 {@code incoming} ；{@code
- * incoming} 是 {@code durable} 的旧前缀或与 durable 内容相同时输出 {@code durable}（保留较长 durable，避免
- * 重放覆盖）；两侧内容在同一字段上互不为前缀时视为非法 invocation state 并显式拒绝。
+ * <p>sequence 较旧的重放直接保留 durable；sequence 相同则内容必须完全一致；sequence 更新时，每个 text/thinking 字段都必须延长 durable
+ * 前缀。tool-call delta 可以只推进 sequence 而不改变文本。
  *
  * <p>该判定必须在 Thread + Invocation 锁内完成，避免在并发 worker 重放或 SSE replay 中悄悄写入较短 durable 快照。
  */
@@ -17,34 +16,27 @@ final class SafeStreamSnapshotMonotonicity {
 
   /** 若 {@code durable} 与 {@code incoming} 字段互不为前缀抛出 {@link IllegalSnapshotForkException}。 */
   static SafeStreamSnapshot merge(SafeStreamSnapshot durable, SafeStreamSnapshot incoming) {
-    String text = mergeField("text", durable.text(), incoming.text());
-    String thinking = mergeField("thinking", durable.thinking(), incoming.thinking());
-    if (text.equals(durable.text()) && thinking.equals(durable.thinking())) {
+    if (incoming.sequence() < durable.sequence()) {
       return durable;
     }
-    return new SafeStreamSnapshot(text, thinking);
+    if (incoming.sequence() == durable.sequence()) {
+      if (!incoming.equals(durable)) {
+        throw new IllegalSnapshotForkException(
+            "safe stream snapshot content changed without advancing sequence");
+      }
+      return durable;
+    }
+    String text = requireExtension("text", durable.text(), incoming.text());
+    String thinking = requireExtension("thinking", durable.thinking(), incoming.thinking());
+    return new SafeStreamSnapshot(text, thinking, incoming.sequence());
   }
 
-  private static String mergeField(String name, String durable, String incoming) {
-    if (durable == null) {
-      durable = "";
-    }
-    if (incoming == null) {
-      incoming = "";
-    }
-    if (durable.isEmpty()) {
-      return incoming;
-    }
-    if (incoming.isEmpty()) {
-      return durable;
-    }
+  private static String requireExtension(String name, String durable, String incoming) {
     if (incoming.startsWith(durable)) {
       return incoming;
     }
-    if (durable.startsWith(incoming)) {
-      return durable;
-    }
-    throw new IllegalSnapshotForkException(name + " safe stream snapshot is divergent");
+    throw new IllegalSnapshotForkException(
+        name + " safe stream snapshot must not shrink or diverge at a newer sequence");
   }
 
   /** 两条 SSE 流在同一字段上互不为前缀，视为非法 invocation state。 */

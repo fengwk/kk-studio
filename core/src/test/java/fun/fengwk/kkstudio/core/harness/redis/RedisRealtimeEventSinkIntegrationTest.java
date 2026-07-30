@@ -47,7 +47,7 @@ class RedisRealtimeEventSinkIntegrationTest extends RedisSpringTestSupport {
   void textDeltaAppendAndRead() {
     Instant now = Instant.parse("2026-01-01T00:00:00Z");
     RealtimeEvent.ModelDelta event =
-        new RealtimeEvent.ModelDelta(1L, 42L, 1, new ProviderStreamEvent.TextDelta("hi"), now);
+        new RealtimeEvent.ModelDelta(1L, 42L, 1, 1L, new ProviderStreamEvent.TextDelta("hi"), now);
     sink.append(event);
 
     String key = properties.realtimeKey(1L);
@@ -63,7 +63,8 @@ class RedisRealtimeEventSinkIntegrationTest extends RedisSpringTestSupport {
   void thinkingDeltaAppendAndRead() {
     Instant now = Instant.parse("2026-01-02T00:00:00Z");
     RealtimeEvent.ModelDelta event =
-        new RealtimeEvent.ModelDelta(1L, 9L, 2, new ProviderStreamEvent.ThinkingDelta("plan"), now);
+        new RealtimeEvent.ModelDelta(
+            1L, 9L, 2, 1L, new ProviderStreamEvent.ThinkingDelta("plan"), now);
     sink.append(event);
     List<ObjectRecord<String, String>> records =
         stringRedisTemplate
@@ -78,7 +79,7 @@ class RedisRealtimeEventSinkIntegrationTest extends RedisSpringTestSupport {
     Instant now = Instant.parse("2026-01-03T00:00:00Z");
     ProviderStreamEvent.ToolCallDelta delta =
         new ProviderStreamEvent.ToolCallDelta(0, "call-1", "read", "{\"path\":\"REA");
-    sink.append(new RealtimeEvent.ModelDelta(1L, 7L, 1, delta, now));
+    sink.append(new RealtimeEvent.ModelDelta(1L, 7L, 1, 1L, delta, now));
 
     String key = properties.realtimeKey(1L);
     List<ObjectRecord<String, String>> records =
@@ -102,7 +103,12 @@ class RedisRealtimeEventSinkIntegrationTest extends RedisSpringTestSupport {
     for (int i = 0; i < 8; i++) {
       sink.append(
           new RealtimeEvent.ModelDelta(
-              7L, 100L + i, 1, new ProviderStreamEvent.TextDelta("frag-" + i), now.plusMillis(i)));
+              7L,
+              100L + i,
+              1,
+              1L,
+              new ProviderStreamEvent.TextDelta("frag-" + i),
+              now.plusMillis(i)));
     }
 
     String key = properties.realtimeKey(7L);
@@ -144,9 +150,11 @@ class RedisRealtimeEventSinkIntegrationTest extends RedisSpringTestSupport {
   void perThreadStreamsAreIsolated() {
     Instant now = Instant.parse("2026-01-05T00:00:00Z");
     sink.append(
-        new RealtimeEvent.ModelDelta(1L, 100L, 1, new ProviderStreamEvent.TextDelta("one"), now));
+        new RealtimeEvent.ModelDelta(
+            1L, 100L, 1, 1L, new ProviderStreamEvent.TextDelta("one"), now));
     sink.append(
-        new RealtimeEvent.ModelDelta(2L, 200L, 1, new ProviderStreamEvent.TextDelta("two"), now));
+        new RealtimeEvent.ModelDelta(
+            2L, 200L, 1, 1L, new ProviderStreamEvent.TextDelta("two"), now));
 
     String key1 = properties.realtimeKey(1L);
     String key2 = properties.realtimeKey(2L);
@@ -178,7 +186,7 @@ class RedisRealtimeEventSinkIntegrationTest extends RedisSpringTestSupport {
 
     Instant now = Instant.parse("2026-01-06T00:00:00Z");
     sink.append(
-        new RealtimeEvent.ModelDelta(42L, 1L, 1, new ProviderStreamEvent.TextDelta("x"), now));
+        new RealtimeEvent.ModelDelta(42L, 1L, 1, 1L, new ProviderStreamEvent.TextDelta("x"), now));
 
     String expected = "kk-studio:harness:realtime:thread:42";
     Long length = stringRedisTemplate.opsForStream().size(expected);
@@ -191,6 +199,7 @@ class RedisRealtimeEventSinkIntegrationTest extends RedisSpringTestSupport {
             threadId,
             100L + index,
             1,
+            1L,
             new ProviderStreamEvent.TextDelta("frag-" + index),
             now.plusMillis(index)));
   }

@@ -177,8 +177,8 @@ public class StudioHarnessThreadController {
       @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
     withMissingResourceTranslation(() -> queryService.getThread(threadId));
     long revision =
-        parseRevision(
-            lastEventId != null && !lastEventId.isBlank() ? lastEventId.trim() : afterRevision);
+        withMissingResourceTranslation(
+            () -> parseRevision(lastEventId == null ? afterRevision : lastEventId));
     long id = HarnessIds.parsePositive(threadId, "threadId");
     return StudioHarnessThreadSseEmitter.stream(
         id,
@@ -189,7 +189,7 @@ public class StudioHarnessThreadController {
         eventStreamExecutor);
   }
 
-  private static long parseRevision(String raw) {
+  static long parseRevision(String raw) {
     if (raw == null || !raw.matches("0|[1-9]\\d*")) {
       throw new IllegalArgumentException("afterRevision must be a non-negative decimal bigint");
     }

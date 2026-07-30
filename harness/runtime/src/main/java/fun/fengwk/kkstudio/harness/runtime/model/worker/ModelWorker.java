@@ -255,11 +255,16 @@ public final class ModelWorker {
   }
 
   private void appendDelta(
-      ModelInvocation invocation, ProviderStreamEvent event, Instant createdAt) {
+      ModelInvocation invocation, ProviderStreamEvent event, long sequence, Instant createdAt) {
     try {
       realtimeEventSink.append(
           new RealtimeEvent.ModelDelta(
-              invocation.threadId(), invocation.id(), invocation.attempt(), event, createdAt));
+              invocation.threadId(),
+              invocation.id(),
+              invocation.attempt(),
+              sequence,
+              event,
+              createdAt));
     } catch (RuntimeException failure) {
       log.warn(
           "realtime model delta projection failed for invocation {}", invocation.id(), failure);
@@ -280,6 +285,8 @@ public final class ModelWorker {
     private final AtomicBoolean active = new AtomicBoolean(true);
     private final ModelStreamAccumulator streamAccumulator = new ModelStreamAccumulator();
 
+    private long lastPublishedSequence;
+    private long lastSafeSequence;
     private ModelExecutionHandle handle;
     private Instant lastObservedActivityAt;
     private Instant pendingActivityAt;
@@ -344,7 +351,7 @@ public final class ModelWorker {
       FenceDecision decision = FenceDecision.SKIP;
       try {
         ProviderException timeout;
-        SafeStreamSnapshot pendingSnapshot = null;
+        SafeStreamSnapshot pendingSnapshot;
         synchronized (this) {
           if (terminal.get()) {
             return;
@@ -352,41 +359,37 @@ public final class ModelWorker {
           Instant activityAt = clock.instant();
           timeout = timeoutAt(activityAt);
           if (timeout == null) {
+            long sequence = nextSequence(lastPublishedSequence);
             streamAccumulator.append(delta);
+            pendingSnapshot = streamAccumulator.snapshotSafe(sequence);
             lastObservedActivityAt = activityAt;
             pendingActivityAt = activityAt;
-            // 仅当本次 delta 携带可发布的安全内容（text/thinking）时才在 fenced write 之前准备快照。
-            // tool-call fragment 永远不进入 safe_stream_snapshot；这里静默跳过持久化但不阻塞 SSE。
-            if (delta instanceof ProviderStreamEvent.TextDelta
-                || delta instanceof ProviderStreamEvent.ThinkingDelta) {
-              pendingSnapshot = streamAccumulator.snapshotSafe();
-            }
             if (!scheduleActivityFlushLocked()) {
               return;
             }
             if (!scheduleIdleTimeoutLocked()) {
               return;
             }
-            if (pendingSnapshot != null) {
-              Instant persistAt = activityAt;
-              ModelInvocationUpdateOutcome outcome =
-                  transactions.recordSafeStreamSnapshot(
-                      claimed, pendingSnapshot, persistAt, clock.instant());
-              if (outcome != ModelInvocationUpdateOutcome.APPLIED) {
-                // Fenced snapshot write lost ownership of the row — do NOT publish this delta.
-                // The adapter has already returned, so we exit the synchronized block and run
-                // abandon() from the finally clause below; that keeps the Execution monitor
-                // unlocked before we touch the Provider handle or remove ourselves from the
-                // executions map. Subsequent Provider callbacks will observe terminal == true
-                // and be dropped without being projected as additional deltas.
-                log.warn(
-                    "safe stream snapshot fenced out for invocation {}", claimed.invocation().id());
-                decision = FenceDecision.ABANDON;
-                return;
-              }
+            Instant persistAt = activityAt;
+            ModelInvocationUpdateOutcome outcome =
+                transactions.recordSafeStreamSnapshot(
+                    claimed, pendingSnapshot, persistAt, clock.instant());
+            if (outcome != ModelInvocationUpdateOutcome.APPLIED) {
+              // Fenced snapshot write lost ownership of the row — do NOT publish this delta.
+              // The adapter has already returned, so we exit the synchronized block and run
+              // abandon() from the finally clause below; that keeps the Execution monitor
+              // unlocked before we touch the Provider handle or remove ourselves from the
+              // executions map. Subsequent Provider callbacks will observe terminal == true
+              // and be dropped without being projected as additional deltas.
+              log.warn(
+                  "safe stream snapshot fenced out for invocation {}", claimed.invocation().id());
+              decision = FenceDecision.ABANDON;
+              return;
             }
+            lastPublishedSequence = sequence;
+            lastSafeSequence = sequence;
             decision = FenceDecision.PUBLISH_DELTA;
-            appendDelta(claimed.invocation(), delta, activityAt);
+            appendDelta(claimed.invocation(), delta, sequence, activityAt);
             return;
           }
         }
@@ -481,8 +484,13 @@ public final class ModelWorker {
       try {
         // 在 finalize 之前先把 final response 内的 text/thinking 写入 snapshot，确保 stop 与
         // terminal/apply 并发时也能读到完整 SSE 累积。
-        SafeStreamSnapshot finalSnapshot = streamAccumulator.snapshotSafe();
-        if (finalSnapshot.hasContent()) {
+        List<SequencedDelta> sequencedFinalGaps = sequenceFinalGaps(finalGaps);
+        long finalSequence =
+            sequencedFinalGaps.isEmpty()
+                ? lastPublishedSequence
+                : sequencedFinalGaps.getLast().sequence();
+        SafeStreamSnapshot finalSnapshot = streamAccumulator.snapshotSafe(finalSequence);
+        if (finalSnapshot.hasContent() || finalSequence > lastSafeSequence) {
           ModelInvocationUpdateOutcome snapshotOutcome =
               transactions.recordSafeStreamSnapshot(
                   claimed, finalSnapshot, completedAt, clock.instant());
@@ -490,13 +498,16 @@ public final class ModelWorker {
             log.warn(
                 "final safe stream snapshot fenced out for invocation {}",
                 claimed.invocation().id());
+          } else {
+            lastSafeSequence = finalSequence;
           }
         }
         if (transactions.completeSuccess(
                 claimed, response, lastObservedActivityAt(), clock.instant())
             == ModelInvocationUpdateOutcome.APPLIED) {
-          for (ProviderStreamEvent gap : finalGaps) {
-            appendDelta(claimed.invocation(), gap, completedAt);
+          for (SequencedDelta gap : sequencedFinalGaps) {
+            lastPublishedSequence = gap.sequence();
+            appendDelta(claimed.invocation(), gap.event(), gap.sequence(), completedAt);
           }
           cancel = false;
         }
@@ -733,6 +744,23 @@ public final class ModelWorker {
       return lastObservedActivityAt;
     }
 
+    private List<SequencedDelta> sequenceFinalGaps(List<ProviderStreamEvent> finalGaps) {
+      long sequence = lastPublishedSequence;
+      List<SequencedDelta> sequenced = new ArrayList<>(finalGaps.size());
+      for (ProviderStreamEvent gap : finalGaps) {
+        sequence = nextSequence(sequence);
+        sequenced.add(new SequencedDelta(gap, sequence));
+      }
+      return List.copyOf(sequenced);
+    }
+
+    private static long nextSequence(long current) {
+      if (current == Long.MAX_VALUE) {
+        throw new IllegalStateException("model delta sequence overflow");
+      }
+      return current + 1;
+    }
+
     private long delayMillisUntil(Instant target) {
       Instant now = clock.instant();
       if (!now.isBefore(target)) {
@@ -790,6 +818,15 @@ public final class ModelWorker {
     }
   }
 
+  private record SequencedDelta(ProviderStreamEvent event, long sequence) {
+    private SequencedDelta {
+      event = Objects.requireNonNull(event, "event");
+      if (sequence <= 0) {
+        throw new IllegalArgumentException("sequence must be positive");
+      }
+    }
+  }
+
   private static final class ModelStreamAccumulator {
     private final StringBuilder text = new StringBuilder();
     private final StringBuilder thinking = new StringBuilder();
@@ -809,8 +846,8 @@ public final class ModelWorker {
     }
 
     /** 返回当前已累积的 text + thinking 安全快照；tool-call fragment 永远不参与。 */
-    private SafeStreamSnapshot snapshotSafe() {
-      return new SafeStreamSnapshot(text.toString(), thinking.toString());
+    private SafeStreamSnapshot snapshotSafe(long sequence) {
+      return new SafeStreamSnapshot(text.toString(), thinking.toString(), sequence);
     }
 
     private Completion complete(ProviderResponse response) {

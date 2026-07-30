@@ -64,6 +64,7 @@ class RedisUnavailableTest {
             1L,
             42L,
             1,
+            1L,
             new ProviderStreamEvent.TextDelta("hi"),
             Instant.parse("2026-01-01T00:00:00Z"));
     RuntimeException thrown = assertThrows(RuntimeException.class, () -> sink.append(event));
@@ -79,6 +80,7 @@ class RedisUnavailableTest {
             1L,
             42L,
             1,
+            1L,
             new ProviderStreamEvent.TextDelta("hi"),
             Instant.parse("2026-01-01T00:00:00Z"));
 

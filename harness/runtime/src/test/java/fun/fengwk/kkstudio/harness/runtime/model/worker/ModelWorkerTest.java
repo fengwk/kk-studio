@@ -92,6 +92,7 @@ class ModelWorkerTest {
         List.of(new ProviderStreamEvent.TextDelta("ans"), new ProviderStreamEvent.TextDelta("wer")),
         modelDeltas(fixture.sink.events));
     assertEquals(List.of(1, 1), modelDeltaAttempts(fixture.sink.events));
+    assertEquals(List.of(1L, 2L), modelDeltaSequences(fixture.sink.events));
     assertFalse(fixture.executor.handle.isCancelled());
     assertFalse(fixture.worker.hasActiveExecution());
   }
@@ -175,6 +176,7 @@ class ModelWorkerTest {
     fixture.executor.listener.onDelta(new ProviderStreamEvent.TextDelta("new"));
 
     assertEquals(List.of(1, 2), modelDeltaAttempts(fixture.sink.events));
+    assertEquals(List.of(1L, 1L), modelDeltaSequences(fixture.sink.events));
     assertEquals(2, fixture.executor.request.attempt());
     assertEquals("1:2", fixture.executor.request.idempotencyKey());
     fixture.worker.stop();
@@ -248,11 +250,11 @@ class ModelWorkerTest {
   }
 
   /**
-   * Each text/thinking delta must fence-write its safe snapshot BEFORE the realtime delta is
-   * published; tool-call fragments must never enter the snapshot.
+   * Each delta must fence-write its safe snapshot BEFORE the realtime delta is published; tool-call
+   * fragments advance the sequence but never enter the snapshot text.
    */
   @Test
-  void persistsSafeStreamSnapshotBeforePublishingEachTextAndThinkingDelta() {
+  void persistsSafeStreamSnapshotBeforePublishingEachDelta() {
     Fixture fixture = fixture();
 
     assertTrue(fixture.worker.dispatch(1L));
@@ -262,7 +264,7 @@ class ModelWorkerTest {
 
     // 2 fenced deltas + 1 final-snapshot persistence before completeSuccess fence.
     assertEquals(3, fixture.transactions.recordSafeStreamSnapshotCalls);
-    assertEquals(new SafeStreamSnapshot("answer", "thin"), fixture.transactions.lastSnapshot);
+    assertEquals(new SafeStreamSnapshot("answer", "thin", 2L), fixture.transactions.lastSnapshot);
     assertEquals(
         List.of(
             new ProviderStreamEvent.ThinkingDelta("thin"),
@@ -271,7 +273,7 @@ class ModelWorkerTest {
   }
 
   @Test
-  void toolCallFragmentNeverEntersSnapshot() {
+  void toolCallFragmentAdvancesSnapshotSequenceWithoutEnteringText() {
     Fixture fixture = fixture();
     fixture.transactions.current = queued(requestWithTool(), NOW.minusSeconds(1));
 
@@ -286,8 +288,25 @@ class ModelWorkerTest {
             List.of(new ProviderToolCall("call-1", "tool", "{\"a\":1}")),
             ProviderStopReason.TOOL_CALLS));
 
+    assertEquals(2, fixture.transactions.recordSafeStreamSnapshotCalls);
+    assertEquals(new SafeStreamSnapshot("partial", "", 2L), fixture.transactions.lastSnapshot);
+  }
+
+  @Test
+  void toolCallDeltaIsNotPublishedWhenSnapshotFenceIsLost() {
+    Fixture fixture = fixture();
+    fixture.transactions.current = queued(requestWithTool(), NOW.minusSeconds(1));
+    fixture.transactions.snapshotOutcome = ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
+
+    assertTrue(fixture.worker.dispatch(1L));
+    fixture.executor.listener.onDelta(
+        new ProviderStreamEvent.ToolCallDelta(0, "call-1", "tool", "{}"));
+
     assertEquals(1, fixture.transactions.recordSafeStreamSnapshotCalls);
-    assertEquals(new SafeStreamSnapshot("partial", ""), fixture.transactions.lastSnapshot);
+    assertEquals(new SafeStreamSnapshot("", "", 1L), fixture.transactions.lastSnapshot);
+    assertTrue(fixture.sink.events.isEmpty());
+    assertTrue(fixture.executor.handle.isCancelled());
+    assertFalse(fixture.worker.hasActiveExecution());
   }
 
   /**
@@ -326,7 +345,7 @@ class ModelWorkerTest {
     assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.current.status());
     // 2 fenced deltas + 1 final-snapshot persistence before completeSuccess fence.
     assertEquals(3, fixture.transactions.recordSafeStreamSnapshotCalls);
-    assertEquals(new SafeStreamSnapshot("answer", "a "), fixture.transactions.lastSnapshot);
+    assertEquals(new SafeStreamSnapshot("answer", "a ", 2L), fixture.transactions.lastSnapshot);
   }
 
   /**
@@ -714,6 +733,7 @@ class ModelWorkerTest {
             new ProviderStreamEvent.ThinkingDelta("thin"),
             new ProviderStreamEvent.ThinkingDelta("king")),
         modelDeltas(fixture.sink.events));
+    assertEquals(new SafeStreamSnapshot("", "thinking", 2L), fixture.transactions.lastSnapshot);
   }
 
   /**
@@ -763,6 +783,7 @@ class ModelWorkerTest {
             new ProviderStreamEvent.ToolCallDelta(0, "call", "to", "{\"a\":"),
             new ProviderStreamEvent.ToolCallDelta(0, "-1", "ol", "1}")),
         modelDeltas(fixture.sink.events));
+    assertEquals(new SafeStreamSnapshot("", "", 2L), fixture.transactions.lastSnapshot);
   }
 
   /**
@@ -1341,6 +1362,14 @@ class ModelWorkerTest {
     return events.stream()
         .map(RealtimeEvent.ModelDelta.class::cast)
         .map(RealtimeEvent.ModelDelta::attempt)
+        .toList();
+  }
+
+  private static List<Long> modelDeltaSequences(List<RealtimeEvent> events) {
+    return events.stream()
+        .filter(RealtimeEvent.ModelDelta.class::isInstance)
+        .map(RealtimeEvent.ModelDelta.class::cast)
+        .map(RealtimeEvent.ModelDelta::sequence)
         .toList();
   }
 

@@ -25,11 +25,15 @@ public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta, Realtime
 
   Instant createdAt();
 
-  /** 一条 Model Provider delta。最终完整 response 仍只进入 durable ModelInvocation。 */
+  /**
+   * 一条 Model Provider delta；sequence 在 attempt 内从 1 严格递增。最终完整 response 仍只进入 durable
+   * ModelInvocation。
+   */
   record ModelDelta(
       long threadId,
       long modelInvocationId,
       int attempt,
+      long sequence,
       ProviderStreamEvent delta,
       Instant createdAt)
       implements RealtimeEvent {
@@ -43,6 +47,9 @@ public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta, Realtime
       }
       if (attempt <= 0) {
         throw new IllegalArgumentException("attempt must be positive");
+      }
+      if (sequence <= 0) {
+        throw new IllegalArgumentException("sequence must be positive");
       }
       delta = Objects.requireNonNull(delta, "delta");
       createdAt = Objects.requireNonNull(createdAt, "createdAt");

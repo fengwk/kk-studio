@@ -27,9 +27,11 @@ describe('Thread snapshot architecture', () => {
   it('keeps durable and lossy SSE paths causally separate', () => {
     const realtime = source('features/ai/useHarnessThreadRealtime.ts')
 
-    expect(realtime).toContain('createThreadRealtimeStream(threadId, revision)')
+    expect(realtime).toContain('subscription.revision')
     expect(realtime).toContain("addEventListener('revision', invalidateSnapshot")
     expect(realtime).toContain("addEventListener('resync', invalidateSnapshot")
     expect(realtime).not.toContain("addEventListener('realtime', invalidateSnapshot")
+    expect(realtime.match(/createThreadRealtimeStream\(/g)).toHaveLength(1)
+    expect(realtime).not.toMatch(/setTimeout|setInterval/)
   })
 })

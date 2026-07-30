@@ -769,7 +769,7 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
     String snapshotJson =
         "{\"text\":\""
             + safeText.replace("\\", "\\\\").replace("\"", "\\\"")
-            + "\",\"thinking\":\"\"}";
+            + "\",\"thinking\":\"\",\"sequence\":1}";
     jdbc.update(
         "insert into harness_model_invocation (id, thread_id, source_head_entry_id,"
             + " execution_epoch, request, status, attempt, worker_token, worker_until,"
@@ -828,7 +828,7 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
     String snapshotJson =
         "{\"text\":\""
             + safeText.replace("\\", "\\\\").replace("\"", "\\\"")
-            + "\",\"thinking\":\"\"}";
+            + "\",\"thinking\":\"\",\"sequence\":1}";
     jdbc.update(
         "insert into harness_model_invocation (id, thread_id, source_head_entry_id,"
             + " execution_epoch, request, status, attempt, started_at, deadline_at,"

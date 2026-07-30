@@ -41,6 +41,8 @@ describe('thread timeline', () => {
       createdAt: '2026-07-28T10:00:00Z',
     }
     const live = buildThreadTimeline([], [], stream)
+    // Invocation/appliedAt state clears the overlay before the durable Entry reaches this pure
+    // projection; the timeline does not infer causality from timestamps.
     const durable = buildThreadTimeline(
       [
         {
@@ -56,7 +58,7 @@ describe('thread timeline', () => {
         },
       ],
       [],
-      stream,
+      null,
     )
 
     expect(live.messages).toMatchObject([
