@@ -6,8 +6,8 @@ import { variantOptionsFromDraft } from '@/features/ai/catalog/ai-draft-normaliz
 import { sanitizeDecimalInput, sanitizeIntegerInput } from '@/features/ai/catalog/ai-number-input'
 import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-validation'
 import { VariantListEditor } from '@/features/ai/catalog/AiVariantListEditor'
-import { FieldLabel } from '@/features/ai/shared/FieldLabel'
-import { FormSelect } from '@/features/ai/shared/FormSelect'
+import { FieldLabel } from '@/shared/ui/console/FieldLabel'
+import { FormSelect } from '@/shared/ui/console/FormSelect'
 import type { AgentProviderDTO } from '@/shared/api/contracts'
 
 const AGENT_MODEL_INPUT_MODALITIES: AgentModelInputModality[] = [

@@ -1,9 +1,9 @@
 import type { FormEventHandler } from 'react'
-import { ModalBackdrop, ModalHeader } from '@/features/ai/shared/AiConsoleModalLayout'
-import { StateBlock } from '@/features/ai/shared/AiConsoleCommonCards'
+import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
+import { StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
 import type { ComfyuiWorkflowDraft } from '@/features/comfyui/comfyui-types'
 import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts'
-import { FieldLabel } from '@/features/ai/shared/FieldLabel'
+import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 
 type EditorModal =
   | { mode: 'create'; workflow: null }

@@ -1,5 +1,5 @@
 import { modelRef, type AgentModelView } from '@/features/ai/catalog/AgentModelView'
-import { includesSearch, naturalNameCompare } from '@/features/ai/shared/search-utils'
+import { includesSearch, naturalNameCompare } from '@/shared/lib/search-utils'
 import type {
   AgentDefinitionDTO,
   AgentProviderDTO,

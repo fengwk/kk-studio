@@ -13,6 +13,5 @@ export {
   type ChatPanelLabels,
   type ChatPanelTranscriptInput,
 } from '@/features/ai/runtime/ChatPanel'
-export { ChatTranscript } from '@/features/ai/runtime/ChatTranscript'
 export { createClientMessageId } from '@/features/ai/runtime/useAgentThreadMessageMutation'
 export { useAgentThreadController } from '@/features/ai/runtime/useAgentThreadController'

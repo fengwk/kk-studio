@@ -3,14 +3,14 @@ import { useQuery } from '@tanstack/react-query'
 import type {
   ComfyuiWorkflowDraft,
 } from '@/features/comfyui/comfyui-types'
-import type { ConfirmModalState } from '@/features/ai/shared/confirm-modal'
+import type { ConfirmModalState } from '@/shared/ui/console/confirm-modal'
 import {
   emptyComfyuiWorkflowDraft,
   errorMessage,
   validateComfyuiWorkflowDraft,
   workflowToDraft,
 } from '@/features/comfyui/comfyui-utils'
-import { useInvalidateMutation } from '@/features/ai/shared/useInvalidateMutation'
+import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'
 import { comfyuiService } from '@/shared/api/comfyui-service'
 import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'

@@ -2,7 +2,7 @@ import { AgentResourceCard } from '@/features/ai/catalog/AiAgentResourceCard'
 import { ModelResourceCard } from '@/features/ai/catalog/AiModelResourceCard'
 import { ProviderResourceCard } from '@/features/ai/catalog/AiProviderResourceCard'
 import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
-import { CreateCard } from '@/features/ai/shared/AiConsoleCommonCards'
+import { CreateCard } from '@/shared/ui/console/AiConsoleCommonCards'
 import type {
   AgentDefinitionDTO,
   AgentProviderDTO,

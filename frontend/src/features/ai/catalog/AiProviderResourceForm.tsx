@@ -1,5 +1,5 @@
-import { FieldLabel } from '@/features/ai/shared/FieldLabel'
-import { FormSelect } from '@/features/ai/shared/FormSelect'
+import { FieldLabel } from '@/shared/ui/console/FieldLabel'
+import { FormSelect } from '@/shared/ui/console/FormSelect'
 import { providerTypes } from '@/features/ai/catalog/ai-console-types'
 import type { ProviderDraft } from '@/features/ai/catalog/ai-console-types'
 import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-validation'

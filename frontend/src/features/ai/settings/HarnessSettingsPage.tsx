@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { StateBlock } from '@/features/ai/shared/AiConsoleCommonCards'
-import { FieldLabel } from '@/features/ai/shared/FieldLabel'
-import { FormSelect } from '@/features/ai/shared/FormSelect'
+import { StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
+import { FieldLabel } from '@/shared/ui/console/FieldLabel'
+import { FormSelect } from '@/shared/ui/console/FormSelect'
 import { harnessService } from '@/shared/api/harness-service'
 import type {
   HarnessRealtimeStreamPolicyDTO,

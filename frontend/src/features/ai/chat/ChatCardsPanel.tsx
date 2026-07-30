@@ -1,4 +1,4 @@
-import { CreateCard } from '@/features/ai/shared/AiConsoleCommonCards'
+import { CreateCard } from '@/shared/ui/console/AiConsoleCommonCards'
 import { ChatCard } from '@/features/ai/chat/ChatCard'
 import type { AgentDefinitionDTO, ChatDTO } from '@/shared/api/contracts'
 

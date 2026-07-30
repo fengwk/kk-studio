@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { FormSelect } from '@/features/ai/shared/FormSelect'
+import { FormSelect } from '@/shared/ui/console/FormSelect'
 
 const OPTIONS = [
   { value: 'a', label: 'Alpha' },

@@ -1,6 +1,6 @@
 import { Trash2 } from 'lucide-react'
-import { ModalBackdrop, ModalHeader } from '@/features/ai/shared/AiConsoleModalLayout'
-import type { ConfirmModalState } from '@/features/ai/shared/confirm-modal'
+import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
+import type { ConfirmModalState } from '@/shared/ui/console/confirm-modal'
 
 export function ConfirmActionModal({
   modal,
