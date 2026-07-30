@@ -1097,6 +1097,246 @@ class ToolWorkerFinalTest {
     assertEquals(2, fixture.transactions.claimCalls);
   }
 
+  // ---- scheduler-stop and cleanup regression coverage ----
+
+  @Test
+  void schedulerTasksStopAfterSuccessfulTerminalCompletion() throws Exception {
+    // After onComplete persists SUCCEEDED, the heartbeat / timeout / partial-flush scheduler
+    // futures must all be cancelled so the worker does not keep renewing the lease (which is now
+    // already terminal) and does not keep flushing partial batches. We pick a heartbeat
+    // interval short enough that at least one tick would fire during the test wait if the
+    // scheduler were still armed, then assert renewCalls did not grow after the wait.
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.rebuildWorker(
+        new ToolWorkerConfig(
+            Duration.ofSeconds(30),
+            Duration.ofMillis(20),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(1),
+            8192,
+            8192,
+            1024));
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertTrue(fixture.transactions.renewed.await(2, TimeUnit.SECONDS));
+    int renewsBeforeTerminal = fixture.transactions.renewCalls;
+    assertTrue(renewsBeforeTerminal >= 1);
+
+    fixture.tool.listener.onComplete(result("done"));
+
+    assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.terminalStatus);
+    assertFalse(fixture.worker.hasActiveExecution());
+
+    // Wait long enough for several heartbeat ticks to have fired if the scheduler were still
+    // armed. The wait upper-bounds the duration deterministically.
+    Thread.sleep(150);
+    assertEquals(
+        renewsBeforeTerminal,
+        fixture.transactions.renewCalls,
+        "heartbeat must stop firing after terminal convergence");
+  }
+
+  @Test
+  void schedulerTasksStopAfterHeartbeatOwnershipLoss() throws Exception {
+    // When renew returns LOST_OWNERSHIP the heartbeat path forces terminal convergence; the
+    // remaining heartbeat ticks must not keep firing and re-driving the owner slot removal.
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.renewOutcome = ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
+    fixture.rebuildWorker(
+        new ToolWorkerConfig(
+            Duration.ofSeconds(30),
+            Duration.ofMillis(20),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(1),
+            8192,
+            8192,
+            1024));
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertTrue(fixture.transactions.renewed.await(2, TimeUnit.SECONDS));
+    int renewsAtTerminal = fixture.transactions.renewCalls;
+    assertTrue(renewsAtTerminal >= 1);
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+    while (fixture.worker.hasActiveExecution() && System.nanoTime() < deadline) {
+      Thread.sleep(5);
+    }
+    assertFalse(fixture.worker.hasActiveExecution());
+
+    Thread.sleep(150);
+    assertEquals(
+        renewsAtTerminal,
+        fixture.transactions.renewCalls,
+        "heartbeat must stop firing after LOST_OWNERSHIP forces terminal convergence");
+  }
+
+  @Test
+  void schedulerTasksStopAfterRecordActivityOwnershipLoss() throws Exception {
+    // When recordActivity returns LOST_OWNERSHIP the partial-flush path forces terminal
+    // convergence; subsequent flush ticks must not keep firing and re-driving the owner slot
+    // removal.
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.activityOutcome = ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
+    fixture.rebuildWorker(
+        new ToolWorkerConfig(
+            Duration.ofSeconds(30),
+            Duration.ofSeconds(10),
+            Duration.ofMillis(20),
+            Duration.ofSeconds(1),
+            1,
+            8192,
+            1024));
+
+    assertTrue(fixture.worker.dispatch(1));
+    // Send a partial result; onPartial will accumulate and the partial-flush task will trigger
+    // recordActivity which returns LOST_OWNERSHIP and forces terminal convergence.
+    fixture.tool.listener.onPartial(result("partial-trigger"));
+    assertTrue(fixture.transactions.recordActivityed.await(2, TimeUnit.SECONDS));
+    int recordActivitiesAtTerminal = fixture.transactions.recordActivityCalls;
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+    while (fixture.worker.hasActiveExecution() && System.nanoTime() < deadline) {
+      Thread.sleep(5);
+    }
+    assertFalse(fixture.worker.hasActiveExecution());
+
+    Thread.sleep(150);
+    assertEquals(
+        recordActivitiesAtTerminal,
+        fixture.transactions.recordActivityCalls,
+        "partial-flush must stop firing after LOST_OWNERSHIP forces terminal convergence");
+  }
+
+  @Test
+  void schedulerTasksStopAfterCancellation() throws Exception {
+    // A RemoteToolCancelledException from the daemon must converge to terminal CANCELLED and
+    // tear down all three scheduler futures. We pick a heartbeat interval short enough that a
+    // tick would fire if the schedulers were still armed.
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.rebuildWorker(
+        new ToolWorkerConfig(
+            Duration.ofSeconds(30),
+            Duration.ofMillis(20),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(1),
+            8192,
+            8192,
+            1024));
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertTrue(fixture.transactions.renewed.await(2, TimeUnit.SECONDS));
+    int renewsAtCancel = fixture.transactions.renewCalls;
+
+    fixture.tool.listener.onError(new RemoteToolCancelledException("daemon cancelled"));
+
+    assertEquals(InvocationStatus.CANCELLED, fixture.transactions.terminalStatus);
+    assertFalse(fixture.worker.hasActiveExecution());
+
+    Thread.sleep(150);
+    assertEquals(
+        renewsAtCancel,
+        fixture.transactions.renewCalls,
+        "heartbeat must stop firing after onError(RemoteToolCancelledException)");
+  }
+
+  @Test
+  void schedulerTasksStopAfterUnknownFromAsyncDisconnect() throws Exception {
+    // An async RemoteToolSendUncertainException must converge to terminal UNKNOWN and tear down
+    // all three scheduler futures; otherwise a later heartbeat tick would re-try renew on a
+    // row the durable store already considers terminal.
+    Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT);
+    fixture.rebuildWorker(
+        new ToolWorkerConfig(
+            Duration.ofSeconds(30),
+            Duration.ofMillis(20),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(1),
+            8192,
+            8192,
+            1024));
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertTrue(fixture.transactions.renewed.await(2, TimeUnit.SECONDS));
+    int renewsAtUnknown = fixture.transactions.renewCalls;
+
+    fixture.tool.listener.onError(new RemoteToolSendUncertainException("connection lost"));
+
+    assertEquals(InvocationStatus.UNKNOWN, fixture.transactions.terminalStatus);
+    assertFalse(fixture.worker.hasActiveExecution());
+
+    Thread.sleep(150);
+    assertEquals(
+        renewsAtUnknown,
+        fixture.transactions.renewCalls,
+        "heartbeat must stop firing after onError(RemoteToolSendUncertainException)");
+  }
+
+  @Test
+  void terminalPersistenceExceptionCannotLeakActiveMapOrSchedulers() throws Exception {
+    // If the durable SUCCEEDED write throws (simulating a database outage), the worker must
+    // fail closed: the process-local slot is removed, the underlying handle is cancelled,
+    // schedulers are torn down, and the heartbeat does not continue to fire.
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.throwOnCompleteSuccess = true;
+    fixture.rebuildWorker(
+        new ToolWorkerConfig(
+            Duration.ofSeconds(30),
+            Duration.ofMillis(20),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(1),
+            8192,
+            8192,
+            1024));
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertTrue(fixture.transactions.renewed.await(2, TimeUnit.SECONDS));
+    int renewsBeforeComplete = fixture.transactions.renewCalls;
+
+    fixture.tool.listener.onComplete(result("done"));
+
+    assertFalse(fixture.worker.hasActiveExecution());
+    assertEquals(InvocationStatus.FAILED, fixture.transactions.terminalStatus);
+    assertEquals("RESULT_PERSISTENCE_FAILED", fixture.transactions.error.kind());
+
+    Thread.sleep(150);
+    assertEquals(
+        renewsBeforeComplete,
+        fixture.transactions.renewCalls,
+        "heartbeat must stop firing when terminal persistence throws");
+  }
+
+  @Test
+  void synchronousToolExecuteExceptionReleasesActiveMapAndSchedulers() throws Exception {
+    // The synchronous RuntimeException path in dispatchClaimed must not leak the execution slot
+    // or any scheduler even when onError aborts. The transport is configured to throw
+    // synchronously from invoke so the catch (RuntimeException) branch is exercised; the active
+    // map must be empty and the heartbeat must not have been driven to fire.
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.descriptor = environmentDescriptor();
+    fixture.transactions.terminalOutcome = ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
+    fixture.rebuildWorkerWithTransport(
+        (environmentName, request, listener) -> {
+          throw new RuntimeException("transport exploded before any handle was returned");
+        });
+    fixture.rebuildWorker(
+        new ToolWorkerConfig(
+            Duration.ofSeconds(30),
+            Duration.ofMillis(20),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(1),
+            8192,
+            8192,
+            1024));
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertFalse(fixture.worker.hasActiveExecution());
+
+    Thread.sleep(150);
+    assertEquals(
+        0,
+        fixture.transactions.renewCalls,
+        "synchronous error path must not start a heartbeat task");
+  }
+
   private static ToolInterceptorChain chainWithBoundary(PermissionBoundaryInterceptor boundary) {
     return new ToolInterceptorChain(List.of(boundary), List.of());
   }
@@ -1490,8 +1730,12 @@ class ToolWorkerFinalTest {
     private ToolInvocationUpdateOutcome askOutcome = ToolInvocationUpdateOutcome.APPLIED;
     private ToolInvocationUpdateOutcome denyOutcome = ToolInvocationUpdateOutcome.APPLIED;
     private boolean pastDeadline;
+    private boolean throwOnCompleteSuccess;
     private final CountDownLatch renewed = new CountDownLatch(1);
+    private final CountDownLatch recordActivityed = new CountDownLatch(1);
     private final List<Instant> activities = new ArrayList<>();
+    private int renewCalls;
+    private int recordActivityCalls;
     private int retryCalls;
     private int releaseUnstartedCalls;
     private int persistedAllowCalls;
@@ -1544,6 +1788,7 @@ class ToolWorkerFinalTest {
     public ToolInvocationUpdateOutcome renew(
         ClaimedToolInvocation claimed, Duration workerLeaseDuration, Instant now) {
       renewed.countDown();
+      renewCalls++;
       return renewOutcome;
     }
 
@@ -1551,6 +1796,8 @@ class ToolWorkerFinalTest {
     public ToolInvocationUpdateOutcome recordActivity(
         ClaimedToolInvocation claimed, Instant activityAt, Instant now) {
       activities.add(activityAt);
+      recordActivityed.countDown();
+      recordActivityCalls++;
       return activityOutcome;
     }
 
@@ -1569,6 +1816,9 @@ class ToolWorkerFinalTest {
         Supplier<ToolResult> resultSupplier,
         Instant lastObservedActivityAt,
         Instant now) {
+      if (throwOnCompleteSuccess) {
+        throw new RuntimeException("simulated terminal persistence failure");
+      }
       if (terminalOutcome != ToolInvocationUpdateOutcome.APPLIED) {
         return terminalOutcome;
       }

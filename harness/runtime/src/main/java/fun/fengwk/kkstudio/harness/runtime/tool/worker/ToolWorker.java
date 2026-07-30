@@ -321,37 +321,29 @@ public final class ToolWorker {
                   execution);
       execution.setHandle(handle);
     } catch (RemoteToolUnavailableException unavailable) {
-      execution.markTerminalLocal();
-      try {
-        terminalCompleter.releaseUnstarted(claimed, clock.instant());
-      } finally {
-        execution.cancelSchedulersOnly();
-        executions.remove(invocation.id(), execution);
-      }
+      // The synchronous send failed before any external Tool side effect. Free the slot and
+      // release the claim without invoking any Tool execution.
+      execution.forceTerminal();
+      terminalCompleter.releaseUnstarted(claimed, clock.instant());
     } catch (RemoteToolSendUncertainException uncertain) {
       // Synchronous send uncertainty: side effects may have begun; converge immediately to UNKNOWN.
-      execution.markTerminalLocal();
-      try {
-        terminalCompleter.completeUnknown(
-            claimed,
-            new ToolInvocationError(
-                "REMOTE_UNCERTAIN",
-                failureMessage(
-                    uncertain, "Remote tool send outcome is uncertain; result is unknown.")),
-            claimed.invocation().lastActivityAt());
-      } finally {
-        execution.cancelSchedulersOnly();
-        executions.remove(invocation.id(), execution);
-      }
+      execution.forceTerminal();
+      terminalCompleter.completeUnknown(
+          claimed,
+          new ToolInvocationError(
+              "REMOTE_UNCERTAIN",
+              failureMessage(
+                  uncertain, "Remote tool send outcome is uncertain; result is unknown.")),
+          claimed.invocation().lastActivityAt());
     } catch (RuntimeException error) {
+      // onError may throw before reaching a terminal path. forceTerminal is idempotent so an
+      // unconditional call after onError guarantees the owner slot and all scheduler futures are
+      // released no matter how onError aborts; the conditional remove inside forceTerminal avoids
+      // a double remove.
       try {
         execution.onError(error);
       } finally {
-        // error() stops and clears on success; if it aborted early, still free the slot.
-        if (!executions.containsKey(invocation.id())) {
-          executions.remove(invocation.id(), execution);
-          execution.cancelSchedulersOnly();
-        }
+        execution.forceTerminal();
       }
     }
   }
@@ -367,23 +359,18 @@ public final class ToolWorker {
   private ExecutionCallback newExecutionCallback(
       ClaimedToolInvocation claimed, ToolBinding executeBinding, ToolCall executeCall) {
     long invocationId = claimed.invocation().id();
-    ExecutionCallback[] holder = new ExecutionCallback[1];
-    Runnable ownerRelease = () -> executions.remove(invocationId, holder[0]);
-    ExecutionCallback execution =
-        new ExecutionCallback(
-            claimed,
-            executeBinding,
-            executeCall,
-            transactions,
-            retryPolicyResolver,
-            terminalCompleter,
-            realtimeEventSink::append,
-            config,
-            clock,
-            scheduler,
-            ownerRelease);
-    holder[0] = execution;
-    return execution;
+    return new ExecutionCallback(
+        claimed,
+        executeBinding,
+        executeCall,
+        transactions,
+        retryPolicyResolver,
+        terminalCompleter,
+        realtimeEventSink::append,
+        config,
+        clock,
+        scheduler,
+        callback -> executions.remove(invocationId, callback));
   }
 
   private static String failureMessage(Throwable error, String fallback) {

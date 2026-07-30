@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyResolver;
@@ -43,20 +42,25 @@ import java.util.function.Consumer;
  *       ToolExecutionListener#onPartial onPartial}, {@link ToolExecutionListener#onComplete
  *       onComplete}, and {@link ToolExecutionListener#onError onError} callbacks.
  *   <li>Arms three {@link ScheduledExecutorService scheduler} tasks (heartbeat, deadline, partial
- *       flush) on {@link #schedule() schedule} and cancels them on terminal convergence or {@link
- *       #abandon()}.
- *   <li>Owns the per-invocation process-local entry in {@link ToolWorker#executions}; the owning
- *       worker removes that entry via the {@code ownerRelease} callback on terminal convergence so
- *       the environment slot can be reclaimed before any later FIFO head is allowed to claim it.
+ *       flush) on {@link #schedule() schedule} and cancels them on terminal convergence via {@link
+ *       #forceTerminal()}.
+ *   <li>Releases its slot in the owner's process-local map through the {@code ownerRelease}
+ *       callback (a {@link Consumer Consumer&lt;ExecutionCallback&gt;} that conditionally removes
+ *       this exact instance) on terminal convergence.
  * </ul>
  *
  * <p>Watcher correctness: a heartbeat {@link ToolInvocationUpdateOutcome#LOST_OWNERSHIP
- * LOST_OWNERSHIP} cancels the {@link ToolExecutionHandle} and signals the owner to stop; a deadline
- * on an ENVIRONMENT route converges to {@code UNKNOWN} because the remote side effect may have run,
- * while a PLATFORM deadline converges to {@code FAILED + TIMEOUT}. {@link
+ * LOST_OWNERSHIP} cancels the {@link ToolExecutionHandle} and forces terminal convergence; a
+ * deadline on an ENVIRONMENT route converges to {@code UNKNOWN} because the remote side effect may
+ * have run, while a PLATFORM deadline converges to {@code FAILED + TIMEOUT}. {@link
  * RemoteToolSendUncertainException} is never retried — the durable row converges to {@code UNKNOWN}
  * whether raised synchronously from the {@code Tool.execute} call or asynchronously through {@code
  * onError}.
+ *
+ * <p>Every terminal path routes through {@link #forceTerminal()} so that exactly one of them sets
+ * the terminal flag, cancels all three scheduler futures, and conditionally removes this callback
+ * from the owner's map. The terminal flag is also re-checked at the top of every scheduler task so
+ * a scheduler tick that races the terminal release becomes a no-op.
  */
 @Slf4j
 final class ExecutionCallback implements ToolExecutionListener {
@@ -71,7 +75,7 @@ final class ExecutionCallback implements ToolExecutionListener {
   private final ToolWorkerConfig config;
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
-  private final Runnable ownerRelease;
+  private final Consumer<ExecutionCallback> ownerRelease;
 
   private final List<ToolResult> pending = new ArrayList<>();
   private ToolExecutionHandle handle;
@@ -94,7 +98,7 @@ final class ExecutionCallback implements ToolExecutionListener {
       ToolWorkerConfig config,
       Clock clock,
       ScheduledExecutorService scheduler,
-      Runnable ownerRelease) {
+      Consumer<ExecutionCallback> ownerRelease) {
     this.claimed = Objects.requireNonNull(claimed, "claimed");
     this.binding = Objects.requireNonNull(binding, "binding");
     this.call = Objects.requireNonNull(call, "call");
@@ -160,6 +164,51 @@ final class ExecutionCallback implements ToolExecutionListener {
     return binding;
   }
 
+  /**
+   * The single terminal-convergence primitive used by every terminal path. Marks the callback
+   * terminal (idempotent), cancels all three scheduler futures, and conditionally removes this
+   * callback from the owner's process-local map. Safe to call from any thread; the first caller
+   * does the work and any concurrent caller observes {@code terminal == true} on entry and returns
+   * immediately.
+   */
+  void forceTerminal() {
+    synchronized (this) {
+      if (terminal) {
+        return;
+      }
+      terminal = true;
+    }
+    cancelSchedulers();
+    ownerRelease.accept(this);
+  }
+
+  /**
+   * Process-local stop: the worker is shutting down and no longer wants this callback's callbacks.
+   * Idempotent. Preserves the original semantics of cancelling the underlying handle before tearing
+   * down schedulers and the owner slot.
+   */
+  void abandon() {
+    cancelHandle();
+    forceTerminal();
+  }
+
+  /**
+   * Fences a process-local handle after lease recovery / conflict. Late callbacks become no-ops;
+   * durable state is owned by the recovering claim path.
+   */
+  void abandonStaleLocal() {
+    synchronized (this) {
+      if (terminal) {
+        ownerRelease.accept(this);
+        return;
+      }
+      terminal = true;
+    }
+    cancelHandle();
+    cancelSchedulers();
+    ownerRelease.accept(this);
+  }
+
   @Override
   public void onPartial(ToolResult partial) {
     for (ToolContent content : partial.contents()) {
@@ -209,6 +258,9 @@ final class ExecutionCallback implements ToolExecutionListener {
   }
 
   private void timeout() {
+    if (isTerminal()) {
+      return;
+    }
     if (binding.location() == ToolExecutionLocation.ENVIRONMENT) {
       // Remote deadline: side effects may have run; converge conservatively to UNKNOWN.
       completeUnknownResult(
@@ -219,17 +271,20 @@ final class ExecutionCallback implements ToolExecutionListener {
   }
 
   private void heartbeat() {
+    if (isTerminal()) {
+      return;
+    }
     if (transactions.renew(claimed, config.leaseDuration(), clock.instant())
         != ToolInvocationUpdateOutcome.APPLIED) {
       cancelHandle();
-      ownerRelease.run();
+      forceTerminal();
     }
   }
 
   private void flush() {
     List<ToolResult> batch;
     synchronized (this) {
-      if (pending.isEmpty()) {
+      if (terminal || pending.isEmpty()) {
         return;
       }
       batch = List.copyOf(pending);
@@ -240,7 +295,7 @@ final class ExecutionCallback implements ToolExecutionListener {
     if (transactions.recordActivity(claimed, activityAt, activityAt)
         != ToolInvocationUpdateOutcome.APPLIED) {
       cancelHandle();
-      ownerRelease.run();
+      forceTerminal();
       return;
     }
     lastObservedActivityAt = activityAt;
@@ -260,47 +315,50 @@ final class ExecutionCallback implements ToolExecutionListener {
   }
 
   private void completeSuccessResult(ToolResult result) {
-    synchronized (this) {
-      if (terminal) {
-        return;
-      }
-      terminal = true;
+    if (isTerminal()) {
+      return;
     }
-    boolean terminalPersisted = false;
+    boolean terminalPersisted;
     try {
       flush();
       terminalPersisted =
           terminalCompleter.completeSuccess(claimed, binding, call, result, lastObservedActivityAt);
-    } finally {
-      if (!terminalPersisted) {
-        cancelHandle();
+    } catch (RuntimeException error) {
+      // Terminal persistence threw; fail closed by writing a deterministic terminal failure.
+      terminalPersisted = false;
+      try {
+        terminalCompleter.completeFailure(
+            claimed,
+            new ToolInvocationError(
+                "RESULT_PERSISTENCE_FAILED",
+                failureMessage(error, "Tool result persistence failed.")),
+            lastObservedActivityAt);
+      } catch (RuntimeException suppressed) {
+        error.addSuppressed(suppressed);
       }
-      ownerRelease.run();
     }
+    if (!terminalPersisted) {
+      cancelHandle();
+    }
+    forceTerminal();
   }
 
   private void completeCancelledResult(String message) {
-    synchronized (this) {
-      if (terminal) {
-        return;
-      }
-      terminal = true;
+    if (isTerminal()) {
+      return;
     }
     try {
       flush();
       terminalCompleter.completeCancelled(claimed, lastObservedActivityAt);
     } finally {
       cancelHandle();
-      ownerRelease.run();
+      forceTerminal();
     }
   }
 
   private void completeUnknownResult(String kind, String message) {
-    synchronized (this) {
-      if (terminal) {
-        return;
-      }
-      terminal = true;
+    if (isTerminal()) {
+      return;
     }
     try {
       flush();
@@ -308,16 +366,13 @@ final class ExecutionCallback implements ToolExecutionListener {
           claimed, new ToolInvocationError(kind, message), lastObservedActivityAt);
     } finally {
       cancelHandle();
-      ownerRelease.run();
+      forceTerminal();
     }
   }
 
   private void completeFailureOrRetry(String kind, String message) {
-    synchronized (this) {
-      if (terminal) {
-        return;
-      }
-      terminal = true;
+    if (isTerminal()) {
+      return;
     }
     try {
       flush();
@@ -332,46 +387,17 @@ final class ExecutionCallback implements ToolExecutionListener {
       if (retryable
           && transactions.scheduleRetry(claimed, nextAttemptAt, lastObservedActivityAt, now)
               == ToolInvocationUpdateOutcome.APPLIED) {
+        // A retry re-arms the durable target; the row is no longer RUNNING here, so the local
+        // handle must be torn down deterministically to free the environment slot.
+        forceTerminal();
         return;
       }
       terminalCompleter.completeFailure(
           claimed, new ToolInvocationError(kind, message), lastObservedActivityAt);
     } finally {
       cancelHandle();
-      ownerRelease.run();
+      forceTerminal();
     }
-  }
-
-  /**
-   * Process-local stop: the worker is shutting down and no longer wants this callback's callbacks.
-   * Idempotent.
-   */
-  void abandon() {
-    synchronized (this) {
-      if (terminal) {
-        return;
-      }
-      terminal = true;
-    }
-    cancelHandle();
-    ownerRelease.run();
-  }
-
-  /**
-   * Fences a process-local handle after lease recovery / conflict. Late callbacks become no-ops;
-   * durable state is owned by the recovering claim path.
-   */
-  void abandonStaleLocal() {
-    synchronized (this) {
-      if (terminal) {
-        ownerRelease.run();
-        return;
-      }
-      terminal = true;
-    }
-    cancelHandle();
-    cancelSchedulersOnly();
-    ownerRelease.run();
   }
 
   /** Synchronously request the underlying {@link ToolExecutionHandle} to cancel. */
@@ -382,8 +408,8 @@ final class ExecutionCallback implements ToolExecutionListener {
     }
   }
 
-  /** Cancel only the watchdog scheduler tasks. Does not touch the {@link ToolExecutionHandle}. */
-  synchronized void cancelSchedulersOnly() {
+  /** Cancel the watchdog scheduler tasks. Does not touch the {@link ToolExecutionHandle}. */
+  synchronized void cancelSchedulers() {
     if (heartbeat != null) {
       heartbeat.cancel(false);
     }
@@ -395,28 +421,8 @@ final class ExecutionCallback implements ToolExecutionListener {
     }
   }
 
-  /**
-   * Cancel schedulers and remove this callback from the owner's process-local map. Called by every
-   * terminal convergence path via {@code ownerRelease}.
-   */
-  synchronized void stop() {
-    cancelSchedulersOnly();
-    ownerRelease.run();
-  }
-
   private static String failureMessage(Throwable error, String fallback) {
     String message = error.getMessage();
     return message == null || message.isBlank() ? fallback : message;
-  }
-
-  /**
-   * Internal hook so the owning {@link ToolWorker} can reflect the durable terminal status of this
-   * callback for diagnostics. Mirrors {@link InvocationStatus} but stays package-private.
-   */
-  InvocationStatus durableStatus() {
-    if (terminal) {
-      return InvocationStatus.SUCCEEDED;
-    }
-    return InvocationStatus.RUNNING;
   }
 }
