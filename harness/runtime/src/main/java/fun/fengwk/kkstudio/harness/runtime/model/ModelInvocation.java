@@ -10,9 +10,9 @@ import java.util.Objects;
 
 /**
  * Immutable durable aggregate mirroring the {@code harness_model_invocation} row in the
- * authoritative {@code schema-postgresql.sql} DDL. The aggregate enforces every lifecycle,
- * time-order, lease, payload and {@code appliedAt} invariant declared by the schema at the
- * constructor boundary so callers cannot construct an invalid state.
+ * authoritative {@code V1__schema.sql} DDL. The aggregate enforces every lifecycle, time-order,
+ * lease, payload and {@code appliedAt} invariant declared by the schema at the constructor boundary
+ * so callers cannot construct an invalid state.
  *
  * <p>The lifecycle {@link InvocationStatus} and worker {@link Lease} are imported directly from the
  * shared runtime execution types so this slice does not redefine them. {@code sessionId} is

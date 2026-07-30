@@ -3,9 +3,8 @@ spring:
   application:
     name: kk-studio
 
-  sql:
-    init:
-      mode: never
+  flyway:
+    enabled: false
 
   datasource:
     multi:

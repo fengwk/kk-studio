@@ -1,7 +1,7 @@
--- PostgreSQL-only final schema for kk-studio.
+-- Flyway PostgreSQL baseline schema for kk-studio.
 --
--- Applied by PostgreSQL transaction adapters on an empty database.
--- Each table is created without `IF NOT EXISTS` so schema drift fails loudly.
+-- Applied by Flyway to an empty database as version 1.
+-- Each table is created without `IF NOT EXISTS` so migration drift fails loudly.
 -- Time fields use `timestamptz(3)` (millisecond precision, with time zone).
 -- Structured payloads use `jsonb`; binary uses `bytea`; flags use `boolean`.
 -- `updated_at` is application-managed; PostgreSQL never emulates MySQL's

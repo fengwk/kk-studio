@@ -19,7 +19,7 @@ import fun.fengwk.kkstudio.core.CoreTestApplication;
 public abstract class RedisSpringTestSupport {
 
   private static final String WORKERS_DISABLED = "false";
-  private static final String SQL_INIT_NEVER = "never";
+  private static final String FLYWAY_DISABLED = "false";
 
   @DynamicPropertySource
   static void overrideRuntimeInfrastructure(DynamicPropertyRegistry registry) {
@@ -29,7 +29,7 @@ public abstract class RedisSpringTestSupport {
     registry.add("spring.datasource.multi.primary.url", POSTGRES::getJdbcUrl);
     registry.add("spring.datasource.multi.primary.username", POSTGRES::getUsername);
     registry.add("spring.datasource.multi.primary.password", POSTGRES::getPassword);
-    registry.add("spring.sql.init.mode", () -> SQL_INIT_NEVER);
+    registry.add("spring.flyway.enabled", () -> FLYWAY_DISABLED);
     registry.add("kk-studio.harness.runtime.workers-enabled", () -> WORKERS_DISABLED);
   }
 }

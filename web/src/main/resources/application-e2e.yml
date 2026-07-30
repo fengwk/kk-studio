@@ -1,14 +1,8 @@
 spring:
 
-  sql:
-    init:
-      mode: always
-      # Keep PL/pgSQL durable-target trigger bodies intact for PostgreSQL JDBC.
-      separator: "^^^ END OF SCRIPT ^^^"
-      schema-locations:
-        - classpath:schema-postgresql.sql
-      data-locations:
-        - classpath:data-e2e-postgresql.sql
+  flyway:
+    locations: classpath:db/migration,classpath:db/seed/e2e
+    validate-migration-naming: true
 
   datasource:
     multi:

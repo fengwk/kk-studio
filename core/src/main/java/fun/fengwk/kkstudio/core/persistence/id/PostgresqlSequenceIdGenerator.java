@@ -8,8 +8,8 @@ import java.util.Objects;
  * Single source of truth for application durable ids.
  *
  * <p>Each call advances the PostgreSQL {@code kk_studio_id_seq} (declared in {@code
- * schema-postgresql.sql}) exactly once via {@link SequenceMapper#nextValue()}. The result is the
- * raw {@code bigint} returned by {@code nextval} and is therefore guaranteed to be positive, unique
+ * V1__schema.sql}) exactly once via {@link SequenceMapper#nextValue()}. The result is the raw
+ * {@code bigint} returned by {@code nextval} and is therefore guaranteed to be positive, unique
  * across the cluster, and shared across business and Harness generators that delegate here. No
  * caching, Redis dependency or external id-service fallback participates in allocation.
  *

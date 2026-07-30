@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.core.persistence.test;
 
 import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.POSTGRES;
-import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.applySchema;
+import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.applyBaseline;
 import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.newConnection;
 import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.resetDatabase;
 
@@ -23,9 +23,8 @@ import java.sql.Connection;
  * authoritative multi-datasource configuration to the running container so {@code
  * CoreTestApplication} binds {@code spring.datasource.multi.primary} to PostgreSQL rather than H2.
  *
- * <p>Disables {@code spring.sql.init} so the legacy H2 fixtures are not applied during context
- * startup; each test instead calls {@link #resetAndApplySchema()} to drop public and re-apply
- * {@code schema-postgresql.sql} plus a subclass-supplied seed.
+ * <p>Disables automatic Flyway so each test can reset public and explicitly migrate its baseline
+ * after the cached context is ready.
  *
  * <p>Docker must be available — when it is not, container start fails and the test fails rather
  * than silently skipping.
@@ -33,7 +32,7 @@ import java.sql.Connection;
 @SpringBootTest(classes = CoreTestApplication.class)
 public abstract class PostgresSpringTestSupport {
 
-  private static final String SQL_INIT_NEVER = "never";
+  private static final String FLYWAY_DISABLED = "false";
   private static final String WORKERS_DISABLED = "false";
 
   @DynamicPropertySource
@@ -42,23 +41,20 @@ public abstract class PostgresSpringTestSupport {
     registry.add("spring.datasource.multi.primary.url", POSTGRES::getJdbcUrl);
     registry.add("spring.datasource.multi.primary.username", POSTGRES::getUsername);
     registry.add("spring.datasource.multi.primary.password", POSTGRES::getPassword);
-    registry.add("spring.sql.init.mode", () -> SQL_INIT_NEVER);
+    registry.add("spring.flyway.enabled", () -> FLYWAY_DISABLED);
     registry.add("kk-studio.harness.runtime.workers-enabled", () -> WORKERS_DISABLED);
-  }
-
-  /**
-   * Override point: subclasses may load additional fixtures. Default applies the empty schema only.
-   */
-  protected void applySeed(Connection conn) {
-    // No-op by default.
   }
 
   @BeforeEach
   final void resetAndApplySchema() throws Exception {
     try (Connection conn = newConnection()) {
       resetDatabase(conn);
-      applySchema(conn);
-      applySeed(conn);
+      migrateDatabase(conn);
     }
+  }
+
+  /** Override to select one of the explicit Flyway profile migration locations. */
+  protected void migrateDatabase(Connection conn) {
+    applyBaseline(conn);
   }
 }

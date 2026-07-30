@@ -41,9 +41,9 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
   private static final String EXPECTED_SELECTION_SQL = "select nextval('kk_studio_id_seq')";
 
   /**
-   * Largest deterministic id assigned by {@code data-e2e-postgresql.sql}. The seed's trailing
-   * {@code setval('kk_studio_id_seq', ..., true)} clause advances the sequence past this value so
-   * every subsequent allocation must be strictly greater.
+   * Largest deterministic id assigned by the e2e Flyway seed. The seed's trailing {@code
+   * setval('kk_studio_id_seq', ..., true)} clause advances the sequence past this value so every
+   * subsequent allocation must be strictly greater.
    */
   private static final long E2E_SEED_MAX_ID = 19L;
 
@@ -54,8 +54,7 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
   void setup() throws Exception {
     try (Connection conn = newConnection()) {
       resetDatabase(conn);
-      applySchema(conn);
-      applyScript(conn, "data-e2e-postgresql.sql");
+      applyE2eDatabase(conn);
     }
     jdbcMapper =
         () -> {
@@ -158,7 +157,7 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
     assertEquals(
         E2E_SEED_MAX_ID,
         maxSeeded,
-        "data-e2e-postgresql.sql must keep its expected deterministic id range");
+        "the e2e Flyway seed must keep its expected deterministic id range");
 
     long maxSeen = 0L;
     for (int i = 0; i < 8; i++) {

@@ -36,11 +36,6 @@ services:
     volumes:
       # Durable facts: persisted across `down`; wiped only by `down -v`.
       - kk-studio-postgres:/var/lib/postgresql/data
-      # Schema + dev seed are applied by the postgres entrypoint only when the
-      # data volume is empty. After that, restarts are a no-op. The dev seed
-      # uses INSERT ... ON CONFLICT DO NOTHING for idempotency.
-      - ../../core/src/main/resources/schema-postgresql.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      - ../../core/src/main/resources/data-dev-postgresql.sql:/docker-entrypoint-initdb.d/02-data.sql:ro
 
   redis:
     image: redis:7.4-alpine
@@ -78,9 +73,6 @@ services:
       TEST_ANTHROPIC_API_KEY: ${TEST_ANTHROPIC_API_KEY:-}
       TEST_ZAI_BASE_URL: ${TEST_ZAI_BASE_URL:-}
       TEST_ZAI_API_KEY: ${TEST_ZAI_API_KEY:-}
-      # Schema is already initialized by the postgres entrypoint above. Keep
-      # Spring's classpath-based init disabled so restarts do not re-run it.
-      SPRING_SQL_INIT_MODE: never
       KK_STUDIO_DB_URL: jdbc:postgresql://postgres:5432/${KK_STUDIO_PG_DATABASE:-kk_studio}
       KK_STUDIO_DB_USER: ${KK_STUDIO_PG_USER:-kk_studio}
       KK_STUDIO_DB_PASSWORD: ${KK_STUDIO_PG_PASSWORD:-kk_studio}

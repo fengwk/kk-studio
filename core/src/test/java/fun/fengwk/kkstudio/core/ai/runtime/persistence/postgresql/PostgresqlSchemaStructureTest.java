@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -34,6 +34,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "agent_provider",
           "agent_model",
           "agent_definition",
+          "flyway_schema_history",
           "comfyui_workflow_api",
           "canvas_document",
           "canvas_node",
@@ -78,7 +79,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   void setup() throws SQLException {
     try (Connection conn = newConnection()) {
       resetDatabase(conn);
-      applySchema(conn);
+      applyBaseline(conn);
     }
   }
 
@@ -437,17 +438,15 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void schemaIsNotIdempotentAndFailsOnRerun() throws SQLException {
-    RuntimeException error;
+  void flywayRerunIsANoopAndRecordsBaselineHistory() throws SQLException {
     try (Connection conn = newConnection()) {
-      error = assertThrows(RuntimeException.class, () -> applySchema(conn));
+      assertDoesNotThrow(() -> applyBaseline(conn));
     }
-    Throwable rootCause = error;
-    while (rootCause.getCause() != null) {
-      rootCause = rootCause.getCause();
-    }
-    assertTrue(rootCause instanceof SQLException, "unexpected root cause: " + rootCause);
-    assertEquals("42P07", ((SQLException) rootCause).getSQLState(), "duplicate relation SQLState");
+    assertEquals(
+        1L,
+        singleLong(
+            "select count(*) from flyway_schema_history where version = '1' and success = true"),
+        "the baseline migration must be recorded exactly once");
   }
 
   private static Set<String> tableNames() throws SQLException {

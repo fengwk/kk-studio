@@ -17,7 +17,7 @@ class PostgresqlDurableFactsSchemaTest extends PostgresSchemaSupport {
   void setup() throws SQLException {
     try (Connection conn = newConnection()) {
       resetDatabase(conn);
-      applySchema(conn);
+      applyBaseline(conn);
     }
   }
 
