@@ -17,7 +17,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessRetryPolicyDTO;
 /** 全局 Harness 自动重试策略 API。 */
 @AllArgsConstructor
 @RestController
-@RequestMapping("/api/harness/retry-policy")
+@RequestMapping("/api/ai/runtime/settings/retry-policy")
 public class StudioHarnessRetryPolicyController {
   private final HarnessRetryPolicyService retryPolicyService;
 

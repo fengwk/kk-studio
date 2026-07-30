@@ -54,7 +54,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
         id(
             mockMvc
                 .perform(
-                    post("/api/providers")
+                    post("/api/ai/catalog/providers")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(provider)))
                 .andExpect(status().isCreated())
@@ -76,7 +76,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
     duplicateProvider.setProviderType("openai");
     mockMvc
         .perform(
-            post("/api/providers")
+            post("/api/ai/catalog/providers")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(duplicateProvider)))
         .andExpect(status().isConflict())
@@ -91,7 +91,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
         id(
             mockMvc
                 .perform(
-                    post("/api/models")
+                    post("/api/ai/catalog/models")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(model)))
                 .andExpect(status().isCreated())
@@ -108,7 +108,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
     providerUpdate.setExpectedVersion("0");
     mockMvc
         .perform(
-            put("/api/providers/{id}", providerId)
+            put("/api/ai/catalog/providers/{id}", providerId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(providerUpdate)))
         .andExpect(status().isOk())
@@ -117,7 +117,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
 
     mockMvc
         .perform(
-            put("/api/providers/{id}", providerId)
+            put("/api/ai/catalog/providers/{id}", providerId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(providerUpdate)))
         .andExpect(status().isConflict())
@@ -126,7 +126,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.errors.expectedVersion").value("0"))
         .andExpect(jsonPath("$.errors.actualVersion").value("1"));
     mockMvc
-        .perform(delete("/api/providers/{id}", providerId).param("expectedVersion", "1"))
+        .perform(delete("/api/ai/catalog/providers/{id}", providerId).param("expectedVersion", "1"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("in_use"))
         .andExpect(jsonPath("$.errors.resource").value("agent_provider"));
@@ -138,7 +138,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
     modelUpdate.setExpectedVersion("0");
     mockMvc
         .perform(
-            put("/api/models/{id}", modelId)
+            put("/api/ai/catalog/models/{id}", modelId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(modelUpdate)))
         .andExpect(status().isOk())
@@ -157,7 +157,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
         id(
             mockMvc
                 .perform(
-                    post("/api/agents")
+                    post("/api/ai/catalog/agents")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(agent)))
                 .andExpect(status().isCreated())
@@ -178,7 +178,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
     agentUpdate.setExpectedVersion("0");
     mockMvc
         .perform(
-            put("/api/agents/{id}", agentId)
+            put("/api/ai/catalog/agents/{id}", agentId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(agentUpdate)))
         .andExpect(status().isOk())
@@ -192,7 +192,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
         id(
             mockMvc
                 .perform(
-                    post("/api/providers")
+                    post("/api/ai/catalog/providers")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(disposableProvider)))
                 .andExpect(status().isCreated())
@@ -207,7 +207,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
         id(
             mockMvc
                 .perform(
-                    post("/api/models")
+                    post("/api/ai/catalog/models")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(disposableModel)))
                 .andExpect(status().isCreated())
@@ -215,40 +215,66 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
                 .getResponse()
                 .getContentAsString());
     mockMvc
-        .perform(delete("/api/models/{id}", disposableModelId).param("expectedVersion", "0"))
+        .perform(
+            delete("/api/ai/catalog/models/{id}", disposableModelId).param("expectedVersion", "0"))
         .andExpect(status().isNoContent());
     mockMvc
-        .perform(delete("/api/providers/{id}", disposableProviderId))
+        .perform(delete("/api/ai/catalog/providers/{id}", disposableProviderId))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
     mockMvc
-        .perform(delete("/api/providers/{id}", disposableProviderId).param("expectedVersion", "0"))
+        .perform(
+            delete("/api/ai/catalog/providers/{id}", disposableProviderId)
+                .param("expectedVersion", "0"))
         .andExpect(status().isNoContent());
 
     mockMvc
-        .perform(get("/api/models"))
+        .perform(get("/api/ai/catalog/models"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.results[0].providerId").isString());
     mockMvc
-        .perform(get("/api/providers"))
+        .perform(get("/api/ai/catalog/providers"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.results[0].credential").doesNotExist());
     mockMvc
-        .perform(get("/api/agents"))
+        .perform(get("/api/ai/catalog/agents"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.results[0].modelId").isString());
     mockMvc
-        .perform(delete("/api/agents/{id}", agentId).param("expectedVersion", "1"))
+        .perform(delete("/api/ai/catalog/agents/{id}", agentId).param("expectedVersion", "1"))
         .andExpect(status().isNoContent());
     mockMvc
-        .perform(delete("/api/models/{id}", modelId).param("expectedVersion", "1"))
+        .perform(delete("/api/ai/catalog/models/{id}", modelId).param("expectedVersion", "1"))
         .andExpect(status().isNoContent());
     mockMvc
-        .perform(delete("/api/providers/{id}", providerId).param("expectedVersion", "1"))
+        .perform(delete("/api/ai/catalog/providers/{id}", providerId).param("expectedVersion", "1"))
         .andExpect(status().isNoContent());
     mockMvc.perform(get("/api/workspaces")).andExpect(status().isNotFound());
     mockMvc.perform(get("/api/workspaces/1")).andExpect(status().isNotFound());
     mockMvc.perform(get("/api/workspaces/1/agents")).andExpect(status().isNotFound());
+  }
+
+  @Test
+  public void shouldNotMapLegacyAiApiRoutes() throws Exception {
+    List<String> legacyPaths =
+        List.of(
+            "/api/providers",
+            "/api/models",
+            "/api/agents",
+            "/api/chats",
+            "/api/threads",
+            "/api/sessions",
+            "/api/environments",
+            "/api/harness/retry-policy",
+            "/api/harness/realtime-stream-policy",
+            "/api/interactions/open",
+            "/api/tool-invocations/1",
+            "/api/artifacts/1",
+            "/api/usage/models/1");
+
+    for (String legacyPath : legacyPaths) {
+      mockMvc.perform(get(legacyPath)).andExpect(status().isNotFound());
+    }
   }
 
   @Test
@@ -257,7 +283,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
 
     mockMvc
         .perform(
-            post("/api/agents")
+            post("/api/ai/catalog/agents")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
@@ -269,7 +295,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
 
     mockMvc
         .perform(
-            post("/api/agents")
+            post("/api/ai/catalog/agents")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
@@ -281,7 +307,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
 
     mockMvc
         .perform(
-            post("/api/agents")
+            post("/api/ai/catalog/agents")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """

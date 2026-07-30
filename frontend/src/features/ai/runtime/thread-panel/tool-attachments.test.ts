@@ -29,9 +29,9 @@ describe('tool-attachments', () => {
         type: 'image',
         name: 'artifact',
         mime: 'image/png',
-        data: '/api/artifacts/1',
+        data: '/api/ai/runtime/artifacts/1',
       }),
-    ).toBe('/api/artifacts/1')
+    ).toBe('/api/ai/runtime/artifacts/1')
     expect(
       toToolAttachmentSrc({
         type: 'image',

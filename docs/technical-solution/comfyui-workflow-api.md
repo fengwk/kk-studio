@@ -106,4 +106,4 @@ kk-studio:
 | 运行时 binding / selector / lookup | `core/src/main/java/fun/fengwk/kkstudio/core/comfyui/workflow_api/service/runtime/*` |
 | S3 输入桥 | `core/src/main/java/fun/fengwk/kkstudio/core/storage/S3StorageService(Impl).java` |
 | HTTP 入口 | `web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioComfyui{WorkflowApi,Runtime}Controller.java` |
-| DTO | `share/src/main/java/fun/fengwk/kkstudio/share/model/ComfyuiWorkflow*.java` |
+| DTO | `share/src/main/java/fun/fengwk/kkstudio/share/comfyui/ComfyuiWorkflow*.java` |

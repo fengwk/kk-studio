@@ -17,7 +17,7 @@ import { registerCase, getCase } from '../lib/registry.mjs'
 const PI_MODEL_CATALOG = JSON.parse(
   readFileSync(
     new URL(
-      '../../../core/src/test/resources/fun/fengwk/kkstudio/core/harness/persistence/postgresql/pi-model-catalog.json',
+      '../../../core/src/test/resources/fun/fengwk/kkstudio/core/ai/runtime/persistence/postgresql/pi-model-catalog.json',
       import.meta.url,
     ),
     'utf8',
@@ -28,11 +28,11 @@ registerCase({
   id: 'seed.structured_model_config',
   level: 'L1',
   title: 'Model 公开契约与 Pi 默认目录一致',
-  docs: 'GET /api/models：19 个模型完整匹配 Pi 0.82.1 快照；xAI 仅保留 grok-4.5；禁止旧 JSON 字段',
+  docs: 'GET /api/ai/catalog/models：19 个模型完整匹配 Pi 0.82.1 快照；xAI 仅保留 grok-4.5；禁止旧 JSON 字段',
   async run(ctx) {
-    const { json } = await ctx.call('GET', '/api/models?pageNumber=1&pageSize=50')
+    const { json } = await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=50')
     const models = pageResults(json)
-    const { json: providersJson } = await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=50')
+    const { json: providersJson } = await ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=50')
     const providersById = new Map(
       pageResults(providersJson).map((provider) => [String(provider.id), provider.name]),
     )
@@ -78,13 +78,13 @@ registerCase({
   title: 'Agent/Provider seed 可用',
   docs: 'seed agent 存在；七个 provider 及协议映射正确',
   async run(ctx) {
-    const { json: agentsJson } = await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=50')
+    const { json: agentsJson } = await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=50')
     const agents = pageResults(agentsJson)
     assert(agents.length > 0, 'no agents')
     const agent = agents.find((a) => a.name === 'default-assistant') || agents[0]
     assert(agent.modelId && agent.variant && agent.config, JSON.stringify(agent))
     ctx.vars.agent = agent
-    const { json: providersJson } = await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=50')
+    const { json: providersJson } = await ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=50')
     const providers = pageResults(providersJson)
     const expectedProviderTypes = new Map([
       ['minimax', 'openai_response'],
@@ -106,13 +106,13 @@ registerCase({
 registerCase({
   id: 'thread.unbound_create',
   level: 'L1',
-  title: 'POST /api/threads 创建 UNBOUND Thread',
+  title: 'POST /api/ai/runtime/threads 创建 UNBOUND Thread',
   docs: '无请求体 => 201；status=UNBOUND，headEntryId/sessionId 为空，executionEpoch=0；无路径 Entry',
   async run(ctx) {
     const thread = await createUnboundThread(ctx)
     assert(Number(thread.executionEpoch) === 0, JSON.stringify(thread))
     assert((await snapshotEntries(ctx, thread.threadId)).length === 0, 'unbound thread must have no path entries')
-    const listed = envelopeData((await ctx.call('GET', '/api/threads')).json) || []
+    const listed = envelopeData((await ctx.call('GET', '/api/ai/runtime/threads')).json) || []
     assert(listed.some((t) => t.threadId === thread.threadId), 'created thread missing from global list')
     ctx.vars.unboundThread = thread
   },
@@ -122,13 +122,13 @@ registerCase({
   id: 'thread.unbound_message_rejected',
   level: 'L1',
   title: 'UNBOUND Thread 拒绝 mailbox 输入',
-  docs: 'POST /api/threads/{id}/messages 在未绑定 head 时 => 409 thread is unbound',
+  docs: 'POST /api/ai/runtime/threads/{id}/messages 在未绑定 head 时 => 409 thread is unbound',
   async run(ctx) {
     if (!ctx.vars.unboundThread) await getCase('thread.unbound_create').run(ctx)
     const thread = ctx.vars.unboundThread
     await expectHttpError(
       () =>
-        ctx.call('POST', `/api/threads/${thread.threadId}/messages`, {
+        ctx.call('POST', `/api/ai/runtime/threads/${thread.threadId}/messages`, {
           content: 'before bootstrap',
           clientMessageId: cid(),
           expectedExecutionEpoch: Number(thread.executionEpoch),
@@ -143,7 +143,7 @@ registerCase({
   id: 'thread.bootstrap_binds_session',
   level: 'L1',
   title: 'bootstrap 原子创建 Session/ROOT/RUNTIME_CONFIG 并绑定 head',
-  docs: 'POST /api/threads/{id}/bootstrap => 201 {session, thread}；epoch+1；head 指向 RUNTIME_CONFIG；Thread 派生 sessionId',
+  docs: 'POST /api/ai/runtime/threads/{id}/bootstrap => 201 {session, thread}；epoch+1；head 指向 RUNTIME_CONFIG；Thread 派生 sessionId',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.unboundThread) await getCase('thread.unbound_create').run(ctx)
@@ -187,7 +187,7 @@ registerCase({
     const staleEpoch = Number(thread.executionEpoch) - 1
     await expectHttpError(
       () =>
-        ctx.call('POST', `/api/threads/${thread.threadId}/messages`, {
+        ctx.call('POST', `/api/ai/runtime/threads/${thread.threadId}/messages`, {
           content: 'stale',
           clientMessageId: cid(),
           expectedExecutionEpoch: staleEpoch,
@@ -196,7 +196,7 @@ registerCase({
     )
     await expectHttpError(
       () =>
-        ctx.call('PUT', `/api/threads/${thread.threadId}/head`, {
+        ctx.call('PUT', `/api/ai/runtime/threads/${thread.threadId}/head`, {
           headEntryId: ctx.vars.boundRootEntryId,
           expectedExecutionEpoch: staleEpoch,
         }),
@@ -213,7 +213,7 @@ registerCase({
   id: 'thread.rebind_same_session',
   level: 'L1',
   title: '同 Session 内 PUT /head 回退到历史 Entry',
-  docs: 'PUT /api/threads/{id}/head 指向同 Session 的 ROOT => head 更新、epoch+1、sessionId 不变',
+  docs: 'PUT /api/ai/runtime/threads/{id}/head 指向同 Session 的 ROOT => head 更新、epoch+1、sessionId 不变',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     const { session, thread } = await createBootstrappedThread(ctx, {
@@ -279,7 +279,7 @@ registerCase({
 
     await expectHttpError(
       () =>
-        ctx.call('PUT', `/api/threads/${thread.threadId}/head`, {
+        ctx.call('PUT', `/api/ai/runtime/threads/${thread.threadId}/head`, {
           headEntryId: '999999999999',
           expectedExecutionEpoch: Number(unbound.executionEpoch),
         }),
@@ -299,13 +299,13 @@ registerCase({
       agentDefinitionId: ctx.vars.agent.id,
       title: `e2e-stop-${cid().slice(0, 8)}`,
     })
-    await ctx.call('POST', `/api/threads/${thread.threadId}/messages`, {
+    await ctx.call('POST', `/api/ai/runtime/threads/${thread.threadId}/messages`, {
       content: 'e2e stop then rebind',
       clientMessageId: cid(),
       expectedExecutionEpoch: Number(thread.executionEpoch),
     })
 
-    const { json: stopJson } = await ctx.call('POST', `/api/threads/${thread.threadId}/stop`, {
+    const { json: stopJson } = await ctx.call('POST', `/api/ai/runtime/threads/${thread.threadId}/stop`, {
       expectedExecutionEpoch: Number(thread.executionEpoch),
     })
     const stop = envelopeData(stopJson)
@@ -331,7 +331,7 @@ registerCase({
       agentDefinitionId: ctx.vars.agent.id,
       title: `e2e-first-send-${cid().slice(0, 8)}`,
     })
-    const { json: msgJson } = await ctx.call('POST', `/api/threads/${thread.threadId}/messages`, {
+    const { json: msgJson } = await ctx.call('POST', `/api/ai/runtime/threads/${thread.threadId}/messages`, {
       content: 'e2e L1 ping',
       clientMessageId: cid(),
       expectedExecutionEpoch: Number(thread.executionEpoch),
@@ -363,9 +363,9 @@ registerCase({
   id: 'thread_snapshot.unknown_thread_404',
   level: 'L1',
   title: '未知 Thread snapshot 404',
-  docs: 'GET /api/threads/999999999/snapshot => 404 unknown thread',
+  docs: 'GET /api/ai/runtime/threads/999999999/snapshot => 404 unknown thread',
   async run(ctx) {
-    await expectHttpError(() => ctx.call('GET', '/api/threads/999999999/snapshot'), {
+    await expectHttpError(() => ctx.call('GET', '/api/ai/runtime/threads/999999999/snapshot'), {
       status: 404,
       messageIncludes: /unknown thread/,
     })
@@ -376,10 +376,10 @@ registerCase({
   id: 'frontend.proxy_model_contract',
   level: 'L1',
   title: 'Frontend 代理 model 契约',
-  docs: '5173 /api/models 返回结构化 config',
+  docs: '5173 /api/ai/catalog/models 返回结构化 config',
   async run(ctx) {
     assert(ctx.vars.frontendUrl, 'frontendUrl required')
-    const { json } = await httpJson(ctx.vars.frontendUrl, 'GET', '/api/models?pageNumber=1&pageSize=1')
+    const { json } = await httpJson(ctx.vars.frontendUrl, 'GET', '/api/ai/catalog/models?pageNumber=1&pageSize=1')
     const model = pageResults(json)[0]
     assert(model?.config?.defaultVariant, JSON.stringify(model))
     assert(!('configJson' in model), JSON.stringify(model))
@@ -404,19 +404,19 @@ registerCase({
     const model = ctx.vars.seedModel
     const variant = model.config.defaultVariant
 
-    await ctx.call('PUT', `/api/threads/${tid}/agent`, {
+    await ctx.call('PUT', `/api/ai/runtime/threads/${tid}/agent`, {
       agentDefinitionId: String(ctx.vars.agent.id),
       clientMessageId: cid(),
       expectedExecutionEpoch: epoch,
     })
-    const { json: modelSet } = await ctx.call('PUT', `/api/threads/${tid}/model`, {
+    const { json: modelSet } = await ctx.call('PUT', `/api/ai/runtime/threads/${tid}/model`, {
       modelId: String(model.id),
       variant,
       clientMessageId: cid(),
       expectedExecutionEpoch: epoch,
     })
     assert(String(envelopeData(modelSet).inputType || '').includes('MODEL'), JSON.stringify(modelSet))
-    const { json: yoloSet } = await ctx.call('PUT', `/api/threads/${tid}/yolo`, {
+    const { json: yoloSet } = await ctx.call('PUT', `/api/ai/runtime/threads/${tid}/yolo`, {
       yoloEnabled: true,
       clientMessageId: cid(),
       expectedExecutionEpoch: epoch,
@@ -481,7 +481,7 @@ registerCase({
 
     await expectHttpError(
       () =>
-        ctx.call('PUT', `/api/threads/${thread.threadId}/model`, {
+        ctx.call('PUT', `/api/ai/runtime/threads/${thread.threadId}/model`, {
           modelId: String(model.id),
           variant: '__missing_variant__',
           clientMessageId: cid(),
@@ -497,9 +497,9 @@ registerCase({
   id: 'harness.retry_policy_round_trip',
   level: 'L1',
   title: 'Retry policy GET/PUT 全量替换往返',
-  docs: 'GET /api/harness/retry-policy 读 original；PUT 合法且可观察差异的策略；再 GET 断言四字段一致；finally 恢复 original',
+  docs: 'GET /api/ai/runtime/settings/retry-policy 读 original；PUT 合法且可观察差异的策略；再 GET 断言四字段一致；finally 恢复 original',
   async run(ctx) {
-    const { json: originalJson } = await ctx.call('GET', '/api/harness/retry-policy')
+    const { json: originalJson } = await ctx.call('GET', '/api/ai/runtime/settings/retry-policy')
     const original = envelopeData(originalJson)
     assert(original && typeof original === 'object', JSON.stringify(originalJson))
     assert(
@@ -525,21 +525,21 @@ registerCase({
     )
 
     try {
-      const { json: putJson } = await ctx.call('PUT', '/api/harness/retry-policy', next)
+      const { json: putJson } = await ctx.call('PUT', '/api/ai/runtime/settings/retry-policy', next)
       const putData = envelopeData(putJson)
       assert(Number(putData.maxRetries) === next.maxRetries, JSON.stringify(putData))
       assert(putData.backoffStrategy === next.backoffStrategy, JSON.stringify(putData))
       assert(Number(putData.baseDelayMillis) === next.baseDelayMillis, JSON.stringify(putData))
       assert(Number(putData.maxDelayMillis) === next.maxDelayMillis, JSON.stringify(putData))
 
-      const { json: rereadJson } = await ctx.call('GET', '/api/harness/retry-policy')
+      const { json: rereadJson } = await ctx.call('GET', '/api/ai/runtime/settings/retry-policy')
       const reread = envelopeData(rereadJson)
       assert(Number(reread.maxRetries) === next.maxRetries, JSON.stringify(reread))
       assert(reread.backoffStrategy === next.backoffStrategy, JSON.stringify(reread))
       assert(Number(reread.baseDelayMillis) === next.baseDelayMillis, JSON.stringify(reread))
       assert(Number(reread.maxDelayMillis) === next.maxDelayMillis, JSON.stringify(reread))
     } finally {
-      await ctx.call('PUT', '/api/harness/retry-policy', {
+      await ctx.call('PUT', '/api/ai/runtime/settings/retry-policy', {
         maxRetries: original.maxRetries,
         backoffStrategy: original.backoffStrategy,
         baseDelayMillis: original.baseDelayMillis,
@@ -553,9 +553,9 @@ registerCase({
   id: 'harness.realtime_stream_policy_round_trip',
   level: 'L1',
   title: 'Realtime Stream policy GET/PUT 往返',
-  docs: 'GET /api/harness/realtime-stream-policy 读 original；PUT 合法且可观察差异的 maxLength；再 GET 断言一致；finally 恢复 original',
+  docs: 'GET /api/ai/runtime/settings/realtime-stream-policy 读 original；PUT 合法且可观察差异的 maxLength；再 GET 断言一致；finally 恢复 original',
   async run(ctx) {
-    const { json: originalJson } = await ctx.call('GET', '/api/harness/realtime-stream-policy')
+    const { json: originalJson } = await ctx.call('GET', '/api/ai/runtime/settings/realtime-stream-policy')
     const original = envelopeData(originalJson)
     assert(original && typeof original === 'object' && 'maxLength' in original, JSON.stringify(originalJson))
     const originalMaxLength = Number(original.maxLength)
@@ -563,15 +563,15 @@ registerCase({
 
     const next = { maxLength: originalMaxLength === 5_000 ? 5_001 : 5_000 }
     try {
-      const { json: putJson } = await ctx.call('PUT', '/api/harness/realtime-stream-policy', next)
+      const { json: putJson } = await ctx.call('PUT', '/api/ai/runtime/settings/realtime-stream-policy', next)
       const putData = envelopeData(putJson)
       assert(Number(putData.maxLength) === next.maxLength, JSON.stringify(putData))
 
-      const { json: rereadJson } = await ctx.call('GET', '/api/harness/realtime-stream-policy')
+      const { json: rereadJson } = await ctx.call('GET', '/api/ai/runtime/settings/realtime-stream-policy')
       const reread = envelopeData(rereadJson)
       assert(Number(reread.maxLength) === next.maxLength, JSON.stringify(reread))
     } finally {
-      await ctx.call('PUT', '/api/harness/realtime-stream-policy', { maxLength: originalMaxLength })
+      await ctx.call('PUT', '/api/ai/runtime/settings/realtime-stream-policy', { maxLength: originalMaxLength })
     }
   },
 })

@@ -229,7 +229,7 @@ start_all() {
     --server.address="$BACKEND_HOST" \
     --server.port="$BACKEND_PORT"
   echo "$DETACHED_PID" > "$BACKEND_PID_FILE"
-  wait_http "$BACKEND_URL/api/agents?pageNumber=1&pageSize=1" backend
+  wait_http "$BACKEND_URL/api/ai/catalog/agents?pageNumber=1&pageSize=1" backend
 
   if profile_enabled e2e; then
     sync_e2e_provider_credentials

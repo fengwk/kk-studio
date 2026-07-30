@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 
 /** Global provider CRUD API. */
 @AllArgsConstructor
-@RequestMapping("/api/providers")
+@RequestMapping("/api/ai/catalog/providers")
 @RestController
 public class StudioAgentProviderController {
 

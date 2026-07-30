@@ -19,7 +19,7 @@ import java.util.Objects;
 @Component
 public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandler {
 
-  public static final String PATH = "/api/environments/daemon/v1";
+  public static final String PATH = "/api/ai/environment/daemon/v1";
 
   private final EnvironmentDaemonEndpoint endpoint;
 

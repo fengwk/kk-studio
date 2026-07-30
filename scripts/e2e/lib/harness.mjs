@@ -22,7 +22,7 @@ function listData(json, description) {
 }
 
 export async function createUnboundThread(ctx) {
-  const { status, json } = await ctx.call('POST', '/api/threads')
+  const { status, json } = await ctx.call('POST', '/api/ai/runtime/threads')
   assert(status === 201, `create thread status ${status}: ${JSON.stringify(json)}`)
   const thread = envelopeData(json)
   threadIdOf(thread)
@@ -31,7 +31,7 @@ export async function createUnboundThread(ctx) {
 }
 
 export async function getThread(ctx, threadId) {
-  const { json } = await ctx.call('GET', `/api/threads/${encodeURIComponent(threadId)}`)
+  const { json } = await ctx.call('GET', `/api/ai/runtime/threads/${encodeURIComponent(threadId)}`)
   const thread = envelopeData(json)
   threadIdOf(thread)
   executionEpochOf(thread)
@@ -39,7 +39,7 @@ export async function getThread(ctx, threadId) {
 }
 
 export async function getThreadSnapshot(ctx, threadId) {
-  const { json } = await ctx.call('GET', `/api/threads/${encodeURIComponent(threadId)}/snapshot`)
+  const { json } = await ctx.call('GET', `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/snapshot`)
   const snapshot = envelopeData(json)
   assert(snapshot?.thread, `expected Thread snapshot: ${JSON.stringify(json)}`)
   threadIdOf(snapshot.thread)
@@ -53,7 +53,7 @@ export async function bootstrapThread(ctx, unboundThread, options) {
   assert(/^\d+$/.test(agentDefinitionId), `expected decimal agentDefinitionId: ${agentDefinitionId}`)
   const { status, json } = await ctx.call(
     'POST',
-    `/api/threads/${encodeURIComponent(threadId)}/bootstrap`,
+    `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/bootstrap`,
     {
       title: options?.title,
       agentDefinitionId,
@@ -77,7 +77,7 @@ export async function updateThreadHead(ctx, thread, headEntryId) {
   const threadId = threadIdOf(thread)
   const { status, json } = await ctx.call(
     'PUT',
-    `/api/threads/${encodeURIComponent(threadId)}/head`,
+    `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/head`,
     {
       headEntryId: headEntryId == null ? null : String(headEntryId),
       expectedExecutionEpoch: executionEpochOf(thread),
@@ -100,7 +100,7 @@ export async function snapshotInputs(ctx, threadId) {
 }
 
 export async function listSessionEntries(ctx, sessionId) {
-  const { json } = await ctx.call('GET', `/api/sessions/${encodeURIComponent(sessionId)}/entries`)
+  const { json } = await ctx.call('GET', `/api/ai/runtime/sessions/${encodeURIComponent(sessionId)}/entries`)
   return listData(json, 'session entries')
 }
 
@@ -134,7 +134,7 @@ export async function waitForModelTextDeltaAfterSseConnected(
   try {
     const baseUrl = ctx.baseUrl.replace(/\/$/, '')
     const requestPath =
-      `/api/threads/${encodeURIComponent(expectedThreadId)}/events/stream?afterRevision=0`
+      `/api/ai/runtime/threads/${encodeURIComponent(expectedThreadId)}/events/stream?afterRevision=0`
     const response = await fetch(`${baseUrl}${requestPath}`, {
       method: 'GET',
       headers: {

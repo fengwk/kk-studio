@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.share.ai.chat;
 import lombok.Data;
 
 /**
- * Update request body for {@code /api/chats/{id}}.
+ * Update request body for {@code /api/ai/chat/{id}}.
  *
  * <p>Partial update: {@code null} preserves the current value. Title is required when supplied;
  * blank {@code defaultAgentId} clears that optional field. {@link #expectedVersion} is required on

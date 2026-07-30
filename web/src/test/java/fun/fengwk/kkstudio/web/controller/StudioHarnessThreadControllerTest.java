@@ -30,10 +30,10 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
 
   @Test
   void createsUnboundThreadBootstrapsAndAcceptsTypedInputsWithHttpBoundaries() throws Exception {
-    // POST /api/threads takes no body and yields an UNBOUND Thread.
+    // POST /api/ai/runtime/threads takes no body and yields an UNBOUND Thread.
     MvcResult createdThread =
         mockMvc
-            .perform(post("/api/threads"))
+            .perform(post("/api/ai/runtime/threads"))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.data.threadId").isString())
             .andExpect(jsonPath("$.data.status").value("UNBOUND"))
@@ -45,16 +45,20 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     String epoch = data(createdThread).path("executionEpoch").asText();
     assertEquals("0", epoch);
     mockMvc
-        .perform(get("/api/threads/{id}/events/stream", threadId).param("afterRevision", " 0 "))
+        .perform(
+            get("/api/ai/runtime/threads/{id}/events/stream", threadId)
+                .param("afterRevision", " 0 "))
         .andExpect(status().isBadRequest());
     mockMvc
-        .perform(get("/api/threads/{id}/events/stream", threadId).header("Last-Event-ID", " 1 "))
+        .perform(
+            get("/api/ai/runtime/threads/{id}/events/stream", threadId)
+                .header("Last-Event-ID", " 1 "))
         .andExpect(status().isBadRequest());
 
     // UNBOUND Thread refuses mailbox input (409).
     mockMvc
         .perform(
-            post("/api/threads/{id}/messages", threadId)
+            post("/api/ai/runtime/threads/{id}/messages", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"content\":\"hello\",\"clientMessageId\":\"pre-bootstrap\","
@@ -65,7 +69,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     MvcResult bootstrapped =
         mockMvc
             .perform(
-                post("/api/threads/{id}/bootstrap", threadId)
+                post("/api/ai/runtime/threads/{id}/bootstrap", threadId)
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(
                         "{\"title\":\"web-session\",\"agentDefinitionId\":\"1\","
@@ -84,12 +88,12 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     // Session has no standalone creation endpoint; it only exists through Thread bootstrap.
     mockMvc
         .perform(
-            post("/api/sessions")
+            post("/api/ai/runtime/sessions")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"title\":\"standalone\"}"))
         .andExpect(status().isMethodNotAllowed());
     mockMvc
-        .perform(get("/api/sessions/{id}", sessionId))
+        .perform(get("/api/ai/runtime/sessions/{id}", sessionId))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.sessionId").value(sessionId))
         .andExpect(jsonPath("$.data.rootSessionId").doesNotExist())
@@ -97,13 +101,13 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.parentInvocationId").doesNotExist())
         .andExpect(jsonPath("$.data.depth").doesNotExist());
     mockMvc
-        .perform(get("/api/threads/{id}", threadId))
+        .perform(get("/api/ai/runtime/threads/{id}", threadId))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.sessionId").value(sessionId))
         .andExpect(jsonPath("$.data.headEntryId").value(configEntryId))
         .andExpect(jsonPath("$.data.status").value("IDLE"))
         .andExpect(jsonPath("$.data.inputSequence").value(0));
-    JsonNode entries = readData(get("/api/sessions/{id}/entries", sessionId));
+    JsonNode entries = readData(get("/api/ai/runtime/sessions/{id}/entries", sessionId));
     assertEquals(2, entries.size());
     assertTrue(entries.get(0).path("sessionId").isMissingNode());
     String rootEntryId = entries.get(0).path("entryId").asText();
@@ -111,7 +115,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     // A bootstrap replay on an already bound Thread is a 409.
     mockMvc
         .perform(
-            post("/api/threads/{id}/bootstrap", threadId)
+            post("/api/ai/runtime/threads/{id}/bootstrap", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"title\":\"again\",\"agentDefinitionId\":\"1\","
@@ -121,7 +125,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     MvcResult firstMessage =
         mockMvc
             .perform(
-                post("/api/threads/{id}/messages", threadId)
+                post("/api/ai/runtime/threads/{id}/messages", threadId)
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(
                         "{\"content\":\"hello\",\"clientMessageId\":\"message-1\","
@@ -137,7 +141,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
 
     mockMvc
         .perform(
-            post("/api/threads/{id}/messages", threadId)
+            post("/api/ai/runtime/threads/{id}/messages", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"content\":\"hello\",\"clientMessageId\":\"message-1\","
@@ -147,7 +151,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     // final command path is key-idempotent: same clientMessageId replays the original input.
     mockMvc
         .perform(
-            post("/api/threads/{id}/messages", threadId)
+            post("/api/ai/runtime/threads/{id}/messages", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"content\":\"changed\",\"clientMessageId\":\"message-1\","
@@ -158,7 +162,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
 
     mockMvc
         .perform(
-            post("/api/threads/{id}/messages/custom", threadId)
+            post("/api/ai/runtime/threads/{id}/messages/custom", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"role\":\"system\",\"content\":\"context\","
@@ -168,7 +172,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.status").value("QUEUED"));
     mockMvc
         .perform(
-            post("/api/threads/{id}/messages/custom", threadId)
+            post("/api/ai/runtime/threads/{id}/messages/custom", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"role\":\"assistant\",\"content\":\"forbidden\","
@@ -177,7 +181,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
 
     mockMvc
         .perform(
-            put("/api/threads/{id}/yolo", threadId)
+            put("/api/ai/runtime/threads/{id}/yolo", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"yoloEnabled\":true,\"clientMessageId\":\"yolo-1\","
@@ -186,7 +190,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.inputType").value("SET_YOLO"));
     mockMvc
         .perform(
-            put("/api/threads/{id}/agent", threadId)
+            put("/api/ai/runtime/threads/{id}/agent", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"agentDefinitionId\":\"1\",\"clientMessageId\":\"agent-1\","
@@ -195,7 +199,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.inputType").value("SET_AGENT"));
     mockMvc
         .perform(
-            put("/api/threads/{id}/model", threadId)
+            put("/api/ai/runtime/threads/{id}/model", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"modelId\":\"1\",\"variant\":\"default\","
@@ -206,7 +210,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     // A stale expectedExecutionEpoch is a 409 for every external mutation.
     mockMvc
         .perform(
-            post("/api/threads/{id}/messages", threadId)
+            post("/api/ai/runtime/threads/{id}/messages", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"content\":\"stale\",\"clientMessageId\":\"stale-1\","
@@ -214,7 +218,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isConflict());
     mockMvc
         .perform(
-            post("/api/threads/{id}/stop", threadId)
+            post("/api/ai/runtime/threads/{id}/stop", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedExecutionEpoch\":99}"))
         .andExpect(status().isConflict());
@@ -222,7 +226,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     MvcResult stop =
         mockMvc
             .perform(
-                post("/api/threads/{id}/stop", threadId)
+                post("/api/ai/runtime/threads/{id}/stop", threadId)
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"expectedExecutionEpoch\":1}"))
             .andExpect(status().isOk())
@@ -235,7 +239,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     // stop is pure epoch fencing; repeated stop advances epoch with no remaining queued inputs.
     mockMvc
         .perform(
-            post("/api/threads/{id}/stop", threadId)
+            post("/api/ai/runtime/threads/{id}/stop", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedExecutionEpoch\":2}"))
         .andExpect(status().isOk())
@@ -247,7 +251,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     MvcResult rewound =
         mockMvc
             .perform(
-                put("/api/threads/{id}/head", threadId)
+                put("/api/ai/runtime/threads/{id}/head", threadId)
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(
                         "{\"headEntryId\":\"" + rootEntryId + "\",\"expectedExecutionEpoch\":3}"))
@@ -260,21 +264,24 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     // The command response projects the runtime Thread record; Session is derived on the query
     // side from the head Entry.
     mockMvc
-        .perform(get("/api/threads/{id}", threadId))
+        .perform(get("/api/ai/runtime/threads/{id}", threadId))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.headEntryId").value(rootEntryId))
         .andExpect(jsonPath("$.data.sessionId").value(sessionId));
 
     // Cross-session rebind keeps the same Thread and switches its derived Session.
     String otherThreadId =
-        data(mockMvc.perform(post("/api/threads")).andExpect(status().isCreated()).andReturn())
+        data(mockMvc
+                .perform(post("/api/ai/runtime/threads"))
+                .andExpect(status().isCreated())
+                .andReturn())
             .path("threadId")
             .asText();
     JsonNode otherBoot =
         data(
             mockMvc
                 .perform(
-                    post("/api/threads/{id}/bootstrap", otherThreadId)
+                    post("/api/ai/runtime/threads/{id}/bootstrap", otherThreadId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(
                             "{\"title\":\"other\",\"agentDefinitionId\":\"1\","
@@ -283,24 +290,27 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
                 .andReturn());
     String otherSessionId = otherBoot.path("session").path("sessionId").asText();
     String otherEntryId =
-        readData(get("/api/sessions/{id}/entries", otherSessionId)).get(0).path("entryId").asText();
+        readData(get("/api/ai/runtime/sessions/{id}/entries", otherSessionId))
+            .get(0)
+            .path("entryId")
+            .asText();
     mockMvc
         .perform(
-            put("/api/threads/{id}/head", threadId)
+            put("/api/ai/runtime/threads/{id}/head", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"headEntryId\":\"" + otherEntryId + "\",\"expectedExecutionEpoch\":4}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.threadId").value(threadId))
         .andExpect(jsonPath("$.data.headEntryId").value(otherEntryId));
     mockMvc
-        .perform(get("/api/threads/{id}", threadId))
+        .perform(get("/api/ai/runtime/threads/{id}", threadId))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.sessionId").value(otherSessionId));
 
     // Unbind: a null head returns the Thread to UNBOUND.
     mockMvc
         .perform(
-            put("/api/threads/{id}/head", threadId)
+            put("/api/ai/runtime/threads/{id}/head", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedExecutionEpoch\":5}"))
         .andExpect(status().isOk())
@@ -310,37 +320,37 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     // Head update error mapping: stale epoch 409, unknown entry 404, invalid ids 400.
     mockMvc
         .perform(
-            put("/api/threads/{id}/head", threadId)
+            put("/api/ai/runtime/threads/{id}/head", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"headEntryId\":\"" + rootEntryId + "\",\"expectedExecutionEpoch\":4}"))
         .andExpect(status().isConflict());
     mockMvc
         .perform(
-            put("/api/threads/{id}/head", threadId)
+            put("/api/ai/runtime/threads/{id}/head", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"headEntryId\":\"999999999999\",\"expectedExecutionEpoch\":6}"))
         .andExpect(status().isNotFound());
     mockMvc
         .perform(
-            put("/api/threads/{id}/head", threadId)
+            put("/api/ai/runtime/threads/{id}/head", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"headEntryId\":\"abc\",\"expectedExecutionEpoch\":6}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/threads/{id}/head", threadId)
+            put("/api/ai/runtime/threads/{id}/head", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"headEntryId\":\"" + rootEntryId + "\"}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/threads/{id}/head", "999999999999")
+            put("/api/ai/runtime/threads/{id}/head", "999999999999")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedExecutionEpoch\":0}"))
         .andExpect(status().isNotFound());
     mockMvc
         .perform(
-            post("/api/threads/{id}/bootstrap", "999999999999")
+            post("/api/ai/runtime/threads/{id}/bootstrap", "999999999999")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"agentDefinitionId\":\"1\",\"yoloEnabled\":false,"
@@ -348,7 +358,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isNotFound());
     mockMvc
         .perform(
-            post("/api/threads/{id}/bootstrap", threadId)
+            post("/api/ai/runtime/threads/{id}/bootstrap", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"agentDefinitionId\":\"999999999999\",\"yoloEnabled\":false,"
@@ -358,21 +368,27 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     // Session-scoped Thread creation/listing routes are gone.
     mockMvc
         .perform(
-            post("/api/sessions/{id}/threads", sessionId)
+            post("/api/ai/runtime/sessions/{id}/threads", sessionId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"fromEntryId\":\"" + rootEntryId + "\"}"))
         .andExpect(status().isNotFound());
-    mockMvc.perform(get("/api/sessions/{id}/threads", sessionId)).andExpect(status().isNotFound());
+    mockMvc
+        .perform(get("/api/ai/runtime/sessions/{id}/threads", sessionId))
+        .andExpect(status().isNotFound());
 
     mockMvc
-        .perform(get("/api/threads"))
+        .perform(get("/api/ai/runtime/threads"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[?(@.threadId=='" + threadId + "')]").exists())
         .andExpect(jsonPath("$.data[?(@.threadId=='" + otherThreadId + "')]").exists());
 
-    mockMvc.perform(post("/api/threads/{id}/retry", threadId)).andExpect(status().isNotFound());
-    mockMvc.perform(get("/api/threads/{id}", "abc")).andExpect(status().isBadRequest());
-    mockMvc.perform(get("/api/threads/{id}", "999999999999")).andExpect(status().isNotFound());
+    mockMvc
+        .perform(post("/api/ai/runtime/threads/{id}/retry", threadId))
+        .andExpect(status().isNotFound());
+    mockMvc.perform(get("/api/ai/runtime/threads/{id}", "abc")).andExpect(status().isBadRequest());
+    mockMvc
+        .perform(get("/api/ai/runtime/threads/{id}", "999999999999"))
+        .andExpect(status().isNotFound());
   }
 
   /** 与 agent/model 有关的入队错误映射：非法字段 400，未知资源 404。 */
@@ -382,7 +398,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
 
     mockMvc
         .perform(
-            put("/api/threads/{id}/yolo", bound.threadId())
+            put("/api/ai/runtime/threads/{id}/yolo", bound.threadId())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"clientMessageId\":\"invalid-yolo\",\"expectedExecutionEpoch\":"
@@ -391,7 +407,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/threads/{id}/agent", bound.threadId())
+            put("/api/ai/runtime/threads/{id}/agent", bound.threadId())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"agentDefinitionId\":\"999999999999\","
@@ -402,7 +418,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isNotFound());
     mockMvc
         .perform(
-            put("/api/threads/{id}/model", bound.threadId())
+            put("/api/ai/runtime/threads/{id}/model", bound.threadId())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"modelId\":\"\",\"variant\":\"default\","
@@ -413,7 +429,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/threads/{id}/model", bound.threadId())
+            put("/api/ai/runtime/threads/{id}/model", bound.threadId())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"modelId\":\"1\",\"variant\":\"missing\","
@@ -424,7 +440,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/threads/{id}/model", bound.threadId())
+            put("/api/ai/runtime/threads/{id}/model", bound.threadId())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"modelId\":\"999999999999\",\"variant\":\"default\","
@@ -438,7 +454,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
   @Test
   void exposesCompleteAutomaticRetryPolicyAndRejectsInvalidReplacements() throws Exception {
     mockMvc
-        .perform(get("/api/harness/retry-policy"))
+        .perform(get("/api/ai/runtime/settings/retry-policy"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.maxRetries").value(3))
         .andExpect(jsonPath("$.data.backoffStrategy").value("EXPONENTIAL"))
@@ -447,7 +463,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
 
     mockMvc
         .perform(
-            put("/api/harness/retry-policy")
+            put("/api/ai/runtime/settings/retry-policy")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
@@ -459,7 +475,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.baseDelayMillis").value(4000))
         .andExpect(jsonPath("$.data.maxDelayMillis").value(8000));
     mockMvc
-        .perform(get("/api/harness/retry-policy"))
+        .perform(get("/api/ai/runtime/settings/retry-policy"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.maxRetries").value(2))
         .andExpect(jsonPath("$.data.backoffStrategy").value("FIXED"))
@@ -467,7 +483,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.maxDelayMillis").value(8000));
     mockMvc
         .perform(
-            put("/api/harness/retry-policy")
+            put("/api/ai/runtime/settings/retry-policy")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
@@ -476,13 +492,13 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/harness/retry-policy")
+            put("/api/ai/runtime/settings/retry-policy")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("null"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/harness/retry-policy")
+            put("/api/ai/runtime/settings/retry-policy")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
@@ -499,51 +515,51 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     String suffix = ",\"expectedExecutionEpoch\":" + bound.epoch() + "}";
 
     assertBadRequest(
-        post("/api/threads/{id}/messages", threadId)
+        post("/api/ai/runtime/threads/{id}/messages", threadId)
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"content\":\"message\"" + suffix));
     assertBadRequest(
-        post("/api/threads/{id}/messages", threadId)
+        post("/api/ai/runtime/threads/{id}/messages", threadId)
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"content\":\"message\",\"clientMessageId\":\"\"" + suffix));
     assertBadRequest(
-        post("/api/threads/{id}/messages/custom", threadId)
+        post("/api/ai/runtime/threads/{id}/messages/custom", threadId)
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"role\":\"system\",\"content\":\"context\"" + suffix));
     assertBadRequest(
-        post("/api/threads/{id}/messages/custom", threadId)
+        post("/api/ai/runtime/threads/{id}/messages/custom", threadId)
             .contentType(MediaType.APPLICATION_JSON)
             .content(
                 "{\"role\":\"system\",\"content\":\"context\",\"clientMessageId\":\"\"" + suffix));
     assertBadRequest(
-        put("/api/threads/{id}/yolo", threadId)
+        put("/api/ai/runtime/threads/{id}/yolo", threadId)
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"yoloEnabled\":true" + suffix));
     assertBadRequest(
-        put("/api/threads/{id}/yolo", threadId)
+        put("/api/ai/runtime/threads/{id}/yolo", threadId)
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"yoloEnabled\":true,\"clientMessageId\":\"\"" + suffix));
     assertBadRequest(
-        put("/api/threads/{id}/agent", threadId)
+        put("/api/ai/runtime/threads/{id}/agent", threadId)
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"agentDefinitionId\":\"1\"" + suffix));
     assertBadRequest(
-        put("/api/threads/{id}/agent", threadId)
+        put("/api/ai/runtime/threads/{id}/agent", threadId)
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"agentDefinitionId\":\"1\",\"clientMessageId\":\"\"" + suffix));
     assertBadRequest(
-        put("/api/threads/{id}/model", threadId)
+        put("/api/ai/runtime/threads/{id}/model", threadId)
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"modelId\":\"model\",\"variant\":\"default\"" + suffix));
     assertBadRequest(
-        put("/api/threads/{id}/model", threadId)
+        put("/api/ai/runtime/threads/{id}/model", threadId)
             .contentType(MediaType.APPLICATION_JSON)
             .content(
                 "{\"modelId\":\"model\",\"variant\":\"default\",\"clientMessageId\":\"\""
                     + suffix));
     mockMvc
         .perform(
-            put("/api/threads/{id}/yolo", threadId)
+            put("/api/ai/runtime/threads/{id}/yolo", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"yoloEnabled\":true,\"clientMessageId\":\"replay\"" + suffix))
         .andExpect(status().isAccepted())
@@ -551,7 +567,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     // Payload differences under the same clientMessageId are ignored; original input is returned.
     mockMvc
         .perform(
-            put("/api/threads/{id}/yolo", threadId)
+            put("/api/ai/runtime/threads/{id}/yolo", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"yoloEnabled\":false,\"clientMessageId\":\"replay\"" + suffix))
         .andExpect(status().isAccepted())
@@ -561,14 +577,17 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
   /** UNBOUND Thread + bootstrap，返回可直接用于 mailbox 调用的 threadId/epoch。 */
   private Bound bootstrapThread(String title) throws Exception {
     String threadId =
-        data(mockMvc.perform(post("/api/threads")).andExpect(status().isCreated()).andReturn())
+        data(mockMvc
+                .perform(post("/api/ai/runtime/threads"))
+                .andExpect(status().isCreated())
+                .andReturn())
             .path("threadId")
             .asText();
     JsonNode result =
         data(
             mockMvc
                 .perform(
-                    post("/api/threads/{id}/bootstrap", threadId)
+                    post("/api/ai/runtime/threads/{id}/bootstrap", threadId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(
                             "{\"title\":\""

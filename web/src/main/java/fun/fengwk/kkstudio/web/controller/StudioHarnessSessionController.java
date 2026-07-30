@@ -24,7 +24,7 @@ import java.util.function.Supplier;
  */
 @AllArgsConstructor
 @RestController
-@RequestMapping("/api/sessions")
+@RequestMapping("/api/ai/runtime/sessions")
 public class StudioHarnessSessionController {
 
   private final HarnessSessionQueryService queryService;

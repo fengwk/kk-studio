@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.environment;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -22,6 +23,11 @@ import java.io.IOException;
 
 /** Unit contracts for transport exceptions that cannot be deterministically induced over Tomcat. */
 class EnvironmentDaemonWebSocketHandlerTest {
+
+  @Test
+  void exposesTheAiEnvironmentDaemonPath() {
+    assertEquals("/api/ai/environment/daemon/v1", EnvironmentDaemonWebSocketHandler.PATH);
+  }
 
   /**
    * Socket I/O failures surface as gateway-send failures and transport errors discard the handle.

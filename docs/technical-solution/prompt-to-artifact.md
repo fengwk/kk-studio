@@ -29,7 +29,7 @@ flowchart LR
 
 ## Prompt 构建
 
-1. 用户或自定义消息通过 `POST /api/threads/{threadId}/messages` 写入 `ThreadInput`（202，幂等键）。`ThreadReconciler` 按 TURN_BOUNDARY harvest mailbox，物化 Entry 并推进 head。
+1. 用户或自定义消息通过 `POST /api/ai/runtime/threads/{threadId}/messages` 写入 `ThreadInput`（202，幂等键）。`ThreadReconciler` 按 TURN_BOUNDARY harvest mailbox，物化 Entry 并推进 head。
 2. 有效运行配置来自路径上最近完整 `RUNTIME_CONFIG` Entry，不从 live Definition 补齐历史。`ModelInvocationPlanner` 从 root-to-head path 判定 response debt，投影语义消息、组装 Skill system section 与冻结 Tool definitions，再经 `PromptCacheRequestFinalizer` 得到最终 `ProviderRequest`。
 3. Tool 短名 platform-first，再回退所选 READY Environment。Environment 离线则明确失败。
 4. Provider 执行只回放冻结请求中的 providerType/providerResourceId/model。
@@ -55,13 +55,13 @@ partial 写 Redis realtime；terminal 写 Invocation。当前 Tool batch 全部�
 - ComfyUI/S3 对象走固定 bucket 预签名，不复用 Tool Artifact Store。
 - Studio Canvas 是 Harness / AI 之外独立领域；Artifact 不进入 Canvas domain。
 
-`GET /api/artifacts/{id}` 返回原始 bytes 与有效 media type；异常 media 降级为 `application/octet-stream`。响应带 `X-Content-Type-Options: nosniff` 与 `Content-Security-Policy: sandbox`。
+`GET /api/ai/runtime/artifacts/{id}` 返回原始 bytes 与有效 media type；异常 media 降级为 `application/octet-stream`。响应带 `X-Content-Type-Options: nosniff` 与 `Content-Security-Policy: sandbox`。
 
 ## 前端投影
 
 前端读取 Thread 路径 Entries 为基线，叠加 QUEUED inputs 与 Redis realtime 覆盖层。SSE 事件名 `realtime`，cursor 为 Redis stream-id。
 
-Tool Result 中的 artifact 引用投影为 `/api/artifacts/{artifactId}`。浏览器不接收 Tool Artifact 的 JSON/Base64 副本，也不把 artifact 重新上传到 S3。
+Tool Result 中的 artifact 引用投影为 `/api/ai/runtime/artifacts/{artifactId}`。浏览器不接收 Tool Artifact 的 JSON/Base64 副本，也不把 artifact 重新上传到 S3。
 
 ## 恢复约束
 

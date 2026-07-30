@@ -47,7 +47,7 @@ import java.util.function.Supplier;
  * result.status} 对齐；入队类接口使用 {@link Results#accepted}（202）。
  */
 @RestController
-@RequestMapping("/api")
+@RequestMapping("/api/ai/runtime/threads")
 public class StudioHarnessThreadController {
   private final HarnessThreadCommandService commandService;
   private final HarnessThreadQueryService queryService;
@@ -70,31 +70,31 @@ public class StudioHarnessThreadController {
   }
 
   /** 查询所有 Thread。 */
-  @GetMapping("/threads")
+  @GetMapping
   public Result<List<HarnessThreadDTO>> listAllThreads() {
     return Results.ok(queryService.listAll());
   }
 
   /** 创建 UNBOUND Thread：无请求体，head 为空，尚未绑定任何 Session。 */
-  @PostMapping("/threads")
+  @PostMapping
   public Result<HarnessThreadDTO> createThread() {
     return Results.created(withMissingResourceTranslation(commandService::createThread));
   }
 
   /** 查询指定 Thread 的当前状态。 */
-  @GetMapping("/threads/{threadId}")
+  @GetMapping("/{threadId}")
   public Result<HarnessThreadDTO> getThread(@PathVariable String threadId) {
     return Results.ok(withMissingResourceTranslation(() -> queryService.getThread(threadId)));
   }
 
   /** One coherent PostgreSQL chat-runtime projection, identified by its durable revision cursor. */
-  @GetMapping("/threads/{threadId}/snapshot")
+  @GetMapping("/{threadId}/snapshot")
   public Result<HarnessThreadSnapshotDTO> getSnapshot(@PathVariable String threadId) {
     return Results.ok(withMissingResourceTranslation(() -> queryService.getSnapshot(threadId)));
   }
 
   /** 绑定、跨 Session 切换或清空 Thread head，携带 expectedExecutionEpoch 做 CAS fencing。 */
-  @PutMapping("/threads/{threadId}/head")
+  @PutMapping("/{threadId}/head")
   public Result<HarnessThreadDTO> updateHead(
       @PathVariable String threadId, @RequestBody HarnessThreadHeadUpdateDTO request) {
     return Results.ok(
@@ -102,7 +102,7 @@ public class StudioHarnessThreadController {
   }
 
   /** 为 UNBOUND Thread 原子创建 Session/ROOT/RUNTIME_CONFIG 并绑定 head。 */
-  @PostMapping("/threads/{threadId}/bootstrap")
+  @PostMapping("/{threadId}/bootstrap")
   public Result<HarnessThreadBootstrapResultDTO> bootstrapThread(
       @PathVariable String threadId, @RequestBody HarnessThreadBootstrapDTO request) {
     return Results.created(
@@ -110,7 +110,7 @@ public class StudioHarnessThreadController {
   }
 
   /** 将用户消息异步入队；202 仅表示消息已接受，不代表模型已完成。 */
-  @PostMapping("/threads/{threadId}/messages")
+  @PostMapping("/{threadId}/messages")
   public Result<HarnessThreadInputDTO> submitMessage(
       @PathVariable String threadId, @RequestBody HarnessThreadMessageCreateDTO createDTO) {
     return Results.accepted(
@@ -119,7 +119,7 @@ public class StudioHarnessThreadController {
   }
 
   /** 将自定义消息异步入队。 */
-  @PostMapping("/threads/{threadId}/messages/custom")
+  @PostMapping("/{threadId}/messages/custom")
   public Result<HarnessThreadInputDTO> submitCustomMessage(
       @PathVariable String threadId, @RequestBody HarnessThreadCustomMessageCreateDTO createDTO) {
     return Results.accepted(
@@ -128,7 +128,7 @@ public class StudioHarnessThreadController {
   }
 
   /** 异步更新 Thread 的 YOLO 运行策略。 */
-  @PutMapping("/threads/{threadId}/yolo")
+  @PutMapping("/{threadId}/yolo")
   public Result<HarnessThreadInputDTO> queueYolo(
       @PathVariable String threadId, @RequestBody HarnessThreadYoloSetDTO request) {
     return Results.accepted(
@@ -136,7 +136,7 @@ public class StudioHarnessThreadController {
   }
 
   /** 异步切换 Thread 的当前 Agent。 */
-  @PutMapping("/threads/{threadId}/agent")
+  @PutMapping("/{threadId}/agent")
   public Result<HarnessThreadInputDTO> queueAgent(
       @PathVariable String threadId, @RequestBody HarnessThreadAgentSetDTO request) {
     return Results.accepted(
@@ -144,7 +144,7 @@ public class StudioHarnessThreadController {
   }
 
   /** 异步切换 Thread 的当前 Model 与 Variant。 */
-  @PutMapping("/threads/{threadId}/model")
+  @PutMapping("/{threadId}/model")
   public Result<HarnessThreadInputDTO> queueModel(
       @PathVariable String threadId, @RequestBody HarnessThreadModelSetDTO request) {
     return Results.accepted(
@@ -156,7 +156,7 @@ public class StudioHarnessThreadController {
    * ASSISTANT_ABORTED}；快照不存在、为空或不安全时写入 {@code ASSISTANT_ERROR(CANCELLED)} barrier。随后递增
    * executionEpoch，并取消尚未处理的输入、可安全取消的 Invocation 与 OPEN Interaction。
    */
-  @PostMapping("/threads/{threadId}/stop")
+  @PostMapping("/{threadId}/stop")
   public Result<HarnessThreadStopResultDTO> stop(
       @PathVariable String threadId, @RequestBody HarnessThreadStopDTO request) {
     return Results.ok(withMissingResourceTranslation(() -> commandService.stop(threadId, request)));
@@ -168,9 +168,7 @@ public class StudioHarnessThreadController {
    * <p>{@code Last-Event-ID} overrides {@code afterRevision} after a browser reconnect. Both are
    * canonical decimal durable cursors; Redis delta events deliberately have no SSE id.
    */
-  @GetMapping(
-      path = "/threads/{threadId}/events/stream",
-      produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+  @GetMapping(path = "/{threadId}/events/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
   public SseEmitter streamEvents(
       @PathVariable String threadId,
       @RequestParam(defaultValue = "0") String afterRevision,

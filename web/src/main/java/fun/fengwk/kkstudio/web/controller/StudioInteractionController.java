@@ -21,7 +21,7 @@ import java.util.function.Supplier;
 
 /** Generic Interaction query and response API. No Tool-specific decision endpoint is retained. */
 @RestController
-@RequestMapping("/api")
+@RequestMapping("/api/ai/runtime/interactions")
 public class StudioInteractionController {
   private final InteractionService interactionService;
 
@@ -29,18 +29,18 @@ public class StudioInteractionController {
     this.interactionService = Objects.requireNonNull(interactionService, "interactionService");
   }
 
-  @GetMapping("/interactions/{interactionId}")
+  @GetMapping("/{interactionId}")
   public Result<InteractionDTO> get(@PathVariable String interactionId) {
     return Results.ok(translate(() -> interactionService.get(interactionId)));
   }
 
-  @GetMapping("/interactions/open")
+  @GetMapping("/open")
   public Result<InteractionDTO> getOpenByOwner(
       @RequestParam String ownerKind, @RequestParam String ownerId) {
     return Results.ok(translate(() -> interactionService.getOpenByOwner(ownerKind, ownerId)));
   }
 
-  @PostMapping("/interactions/{interactionId}/response")
+  @PostMapping("/{interactionId}/response")
   public Result<InteractionDTO> respond(
       @PathVariable String interactionId, @RequestBody InteractionResponseDTO response) {
     return Results.ok(translate(() -> interactionService.respond(interactionId, response)));

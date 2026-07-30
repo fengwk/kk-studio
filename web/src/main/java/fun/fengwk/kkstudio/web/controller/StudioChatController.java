@@ -27,7 +27,7 @@ import java.util.List;
  * expectedVersion}；stale 版本由中央 {@code RestControllerAdvice} 翻译为 HTTP 409，缺失资源为 404，其它失败为 400。
  */
 @AllArgsConstructor
-@RequestMapping("/api/chats")
+@RequestMapping("/api/ai/chat")
 @RestController
 public class StudioChatController {
 

@@ -11,6 +11,6 @@ describe('environmentService', () => {
     }
     const service = createEnvironmentService(client)
     await service.listEnvironments()
-    expect(client.get).toHaveBeenCalledWith('/environments')
+    expect(client.get).toHaveBeenCalledWith('/ai/environment')
   })
 })

@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.share.ai.catalog;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
-/** PUT body for {@code /api/models/{id}}; {@link #expectedVersion} is required. */
+/** PUT body for {@code /api/ai/catalog/models/{id}}; {@link #expectedVersion} is required. */
 @Data
 @EqualsAndHashCode(callSuper = true)
 public class AgentModelUpdateDTO extends AgentModelEditablePropertiesDTO {

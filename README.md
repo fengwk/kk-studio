@@ -74,7 +74,7 @@ docker compose -f deploy/local/compose.yaml down -v
 | 资源 | 地址 |
 | --- | --- |
 | Web UI | <http://localhost:8080/> |
-| Harness API | <http://localhost:8080/api/threads> 等 |
+| Harness API | <http://localhost:8080/api/ai/runtime/threads> 等 |
 | Health | <http://localhost:8080/actuator/health> |
 | PostgreSQL | `jdbc:postgresql://localhost:5432/kk_studio`（用户 / 密码：`kk_studio`） |
 | Redis | `redis://localhost:6379` |
@@ -87,6 +87,6 @@ docker compose -f deploy/local/compose.yaml down -v
 - `data-dev-postgresql.sql` 只写入 local-only 的 stub provider（`stub-key`），
   不携带任何真实凭证。
 - 真实 Provider 的 `credential` 必须通过 UI 的 Provider 页面或
-  `PUT /api/providers/{id}` 在运行时注入，**绝不**写入镜像或仓库。
+  `PUT /api/ai/catalog/providers/{id}` 在运行时注入，**绝不**写入镜像或仓库。
 
 端口覆盖与并行 smoke 见 [`deploy/local/README.md`](deploy/local/README.md)。

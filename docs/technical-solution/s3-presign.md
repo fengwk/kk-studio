@@ -68,4 +68,4 @@ kk-studio:
 | 对象键校验 | `core/src/main/java/fun/fengwk/kkstudio/core/storage/S3ObjectKeyNormalizer.java` |
 | 服务端读写 | `core/src/main/java/fun/fengwk/kkstudio/core/storage/S3StorageService(Impl).java` |
 | HTTP 入口 | `web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioS3PresignController.java` |
-| 请求 / 响应 DTO | `share/src/main/java/fun/fengwk/kkstudio/share/model/S3Presigned{Request,Response}DTO.java` |
+| 请求 / 响应 DTO | `share/src/main/java/fun/fengwk/kkstudio/share/storage/S3Presigned{Request,Response}DTO.java` |

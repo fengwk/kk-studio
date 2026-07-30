@@ -27,14 +27,14 @@ registerCase({
       title: `e2e-real-${cid().slice(0, 8)}`,
     })
     const tid = thread.threadId
-    await ctx.call('POST', `/api/threads/${tid}/messages`, {
+    await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
       content: '只回复单词 OK，不要调用工具，不要解释。',
       clientMessageId: cid(),
       expectedExecutionEpoch: Number(thread.executionEpoch),
     })
     let finalStatus = null
     for (let i = 0; i < 90; i++) {
-      const { json } = await ctx.call('GET', `/api/threads/${tid}`)
+      const { json } = await ctx.call('GET', `/api/ai/runtime/threads/${tid}`)
       const thread = envelopeData(json)
       finalStatus = thread.status
       if ((finalStatus === 'IDLE' || finalStatus === 'FAILED') && !thread.processing) break
@@ -92,7 +92,7 @@ registerCase({
         ctx,
         tid,
         () =>
-          ctx.call('POST', `/api/threads/${tid}/messages`, {
+          ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
             content: initialPrompt,
             clientMessageId: cid(),
             expectedExecutionEpoch: Number(thread.executionEpoch),
@@ -105,7 +105,7 @@ registerCase({
     const beforeStop = await getThread(ctx, tid)
     const { status: stopStatus, json: stopJson } = await ctx.call(
       'POST',
-      `/api/threads/${tid}/stop`,
+      `/api/ai/runtime/threads/${tid}/stop`,
       { expectedExecutionEpoch: Number(beforeStop.executionEpoch) },
     )
     assert(stopStatus === 200, `stop status ${stopStatus}: ${JSON.stringify(stopJson)}`)
@@ -150,7 +150,7 @@ registerCase({
       JSON.stringify({ firstDelta, beforeStop, stop, stopped, entriesAfterStop }, null, 2),
     )
 
-    const { status: followUpStatus } = await ctx.call('POST', `/api/threads/${tid}/messages`, {
+    const { status: followUpStatus } = await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
       content: followUpPrompt,
       clientMessageId: cid(),
       expectedExecutionEpoch: Number(stopped.executionEpoch),
@@ -225,14 +225,14 @@ registerCase({
     const branched = await rebindWhenQuiescent(ctx, spare.threadId, ctx.vars.assistantEntryId)
     const branchTid = branched.threadId
     assert(branched.headEntryId === String(ctx.vars.assistantEntryId), JSON.stringify(branched))
-    await ctx.call('POST', `/api/threads/${branchTid}/messages`, {
+    await ctx.call('POST', `/api/ai/runtime/threads/${branchTid}/messages`, {
       content: '在分支上只回复单词 BRANCH，不要调用工具。',
       clientMessageId: cid(),
       expectedExecutionEpoch: Number(branched.executionEpoch),
     })
     let finalStatus = null
     for (let i = 0; i < 90; i++) {
-      const { json } = await ctx.call('GET', `/api/threads/${branchTid}`)
+      const { json } = await ctx.call('GET', `/api/ai/runtime/threads/${branchTid}`)
       const thread = envelopeData(json)
       finalStatus = thread.status
       if ((finalStatus === 'IDLE' || finalStatus === 'FAILED') && !thread.processing) break
@@ -241,7 +241,7 @@ registerCase({
     assert(finalStatus === 'IDLE', `branch expected IDLE, got ${finalStatus}`)
     const mainU = (await getThreadSnapshot(ctx, mainTid)).usage
     const branchU = (await getThreadSnapshot(ctx, branchTid)).usage
-    const sessionU = envelopeData((await ctx.call('GET', `/api/usage/sessions/${sessionId}`)).json)
+    const sessionU = envelopeData((await ctx.call('GET', `/api/ai/runtime/usage/sessions/${sessionId}`)).json)
     const mainN = Number(mainU.recordCount || 0)
     const branchN = Number(branchU.recordCount || 0)
     const sessionN = Number(sessionU.recordCount || 0)
@@ -259,7 +259,7 @@ registerCase({
   requires: ['tools'],
   docs: 'tool-e2e READY 且含 coding tools',
   async run(ctx) {
-    const { json } = await ctx.call('GET', '/api/environments')
+    const { json } = await ctx.call('GET', '/api/ai/environment')
     const match = (envelopeData(json) || []).find((e) => e.name === ctx.daemonEnv)
     assert(match?.status === 'READY', JSON.stringify(match))
     const names = new Set((match.tools || []).map((t) => t.name))
@@ -282,14 +282,14 @@ registerCase({
       yoloEnabled: true,
     })
     const tid = thread.threadId
-    await ctx.call('POST', `/api/threads/${tid}/messages`, {
+    await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
       content: '使用 read 工具读取环境根目录，然后用一句话总结文件数量。',
       clientMessageId: cid(),
       expectedExecutionEpoch: Number(thread.executionEpoch),
     })
     let finalStatus = null
     for (let i = 0; i < 120; i++) {
-      const { json } = await ctx.call('GET', `/api/threads/${tid}`)
+      const { json } = await ctx.call('GET', `/api/ai/runtime/threads/${tid}`)
       const thread = envelopeData(json)
       finalStatus = thread.status
       if ((finalStatus === 'IDLE' || finalStatus === 'FAILED') && !thread.processing) break
