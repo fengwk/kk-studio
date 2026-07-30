@@ -10,8 +10,6 @@ import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
@@ -20,14 +18,14 @@ import java.net.ServerSocket;
 import java.time.Instant;
 
 /**
- * Redis 不可用时两个 adapter 都向上抛 RuntimeException，不吞。直接构造 adapter，避免启动第二个 Spring 上下文；连接指向一个预留后立即释放的本地端口。
+ * Redis unavailable failures remain visible to the realtime projection adapter. The test constructs
+ * the adapter directly; its connection points to a released local port.
  */
 class RedisUnavailableTest {
 
   private LettuceConnectionFactory connectionFactory;
   private StringRedisTemplate stringRedisTemplate;
   private HarnessRedisProperties properties;
-  private ExecutionTargetJsonCodec targetCodec;
   private RealtimeEventJsonCodec eventCodec;
   private int brokenPort;
 
@@ -44,10 +42,8 @@ class RedisUnavailableTest {
     stringRedisTemplate = new StringRedisTemplate(connectionFactory);
 
     properties = new HarnessRedisProperties();
-    properties.setSignalChannel("kk-studio:harness:signal");
     properties.setRealtimeKeyPrefix("kk-studio:harness:realtime:");
 
-    targetCodec = new ExecutionTargetJsonCodec();
     eventCodec = new RealtimeEventJsonCodec();
   }
 
@@ -56,17 +52,6 @@ class RedisUnavailableTest {
     if (connectionFactory != null) {
       connectionFactory.destroy();
     }
-  }
-
-  @Test
-  void activationNotifierPropagatesRedisException() {
-    RedisActivationNotifier notifier =
-        new RedisActivationNotifier(stringRedisTemplate, properties, targetCodec);
-
-    ExecutionTarget target = new ExecutionTarget(ExecutionTargetKind.MODEL_INVOCATION, 42L);
-    RuntimeException thrown =
-        assertThrows(RuntimeException.class, () -> notifier.notifyAfterCommit(target));
-    assertRedisRelated(thrown);
   }
 
   @Test
@@ -86,12 +71,9 @@ class RedisUnavailableTest {
   }
 
   @Test
-  void missingRedisTemplateFailsOnlyWhenAdapterIsCalled() {
-    RedisActivationNotifier notifier =
-        new RedisActivationNotifier(() -> null, properties, targetCodec);
+  void missingRedisTemplateFailsOnlyWhenRealtimeAdapterIsCalled() {
     RedisRealtimeEventSink sink =
         new RedisRealtimeEventSink(() -> null, properties, eventCodec, () -> 5_000L);
-    ExecutionTarget target = new ExecutionTarget(ExecutionTargetKind.THREAD, 1L);
     RealtimeEvent.ModelDelta event =
         new RealtimeEvent.ModelDelta(
             1L,
@@ -100,7 +82,6 @@ class RedisUnavailableTest {
             new ProviderStreamEvent.TextDelta("hi"),
             Instant.parse("2026-01-01T00:00:00Z"));
 
-    assertThrows(IllegalStateException.class, () -> notifier.notifyAfterCommit(target));
     assertThrows(IllegalStateException.class, () -> sink.append(event));
   }
 

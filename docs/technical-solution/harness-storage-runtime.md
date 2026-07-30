@@ -6,15 +6,13 @@
 PostgreSQL
   -> 唯一 durable truth
   -> Entry / Session / Thread / Input / Invocation / Interaction / Usage / Artifact / Goal / RetryPolicy
-
-Redis Pub/Sub
-  -> 可丢失的低延迟 wake hint
+  -> harness_execution_target：唯一 durable activation queue
 
 Redis Streams
   -> 可丢失、有界、短期可重放的 realtime projection
 ```
 
-Redis 重启、清空或网络隔离不会丢失 PostgreSQL 中的用户 Input、Entry/head、Invocation terminal 等 durable facts；但 Pub/Sub signal 丢失不会自动重放，相关 activation 可以保持未唤醒状态。
+Redis 重启、清空或网络隔离不会丢失 PostgreSQL 中的用户 Input、Entry/head、Invocation terminal 等 durable facts；Redis 只影响 realtime tail。`harness_execution_target` 行与其 PostgreSQL `NOTIFY` trigger 负责 activation：通知可丢失，但 listener 启动/重连 wake 与 nearest-due timer 均会重新读取 durable target。
 
 ## 2. PostgreSQL-only
 
@@ -138,26 +136,22 @@ head 重定位额外要求 Thread 逻辑静止：无有效 processor lease、`ru
 
 `/stop` 还要求沿用 Reconciler 的 `ModelInvocationPlanner` 判定当前 head 是否仍有未终结 response debt；若存在 response debt，原子追加 `ASSISTANT_ABORTED`（仅 text/thinking，head-scoped `findSafeStreamSnapshotByHead(threadId, epoch, sourceHeadEntryId)` 拿到的快照）或 `ASSISTANT_ERROR(CANCELLED)` barrier 并 fence epoch。Stop 自身只是一道 epoch fence，不修改已 RUNNING/SUCCEEDED 的 invocation 行；tool/空 partial 不物化 `ToolInvocation` 或 tool fragment。
 
-## 6. Redis Pub/Sub wake
+## 6. PostgreSQL execution-target activation
 
-推荐 channel：
+`harness_execution_target` 是唯一调度事实源。enabled target 的 insert、enable transition 与严格提前 reschedule 由 schema trigger 在事务提交时投递 PostgreSQL `NOTIFY harness_execution_target`；通知本身不是队列，也不承载 target JSON。
+
+生产链路：
 
 ```text
-kk-studio:harness:signal
+durable target mutation
+  -> PostgreSQL NOTIFY
+  -> PostgresqlExecutionTargetListener
+  -> PostgresqlExecutionTargetDispatcher.wake()
+  -> due enabled target scan
+  -> ThreadReconciler.activate / ModelWorker.dispatch / ToolWorker.dispatch
 ```
 
-消息：
-
-```json
-{
-  "targetKind": "THREAD",
-  "targetId": "..."
-}
-```
-
-`targetKind`：`THREAD` / `MODEL_INVOCATION` / `TOOL_INVOCATION`。发布必须 afterCommit。生产 subscriber 严格解码 UTF-8 JSON，并将 target 分发给 `ThreadKick` 或对应 worker scheduler；重复调度由 PostgreSQL lease/fencing 合并。Pub/Sub 丢失不改变 durable facts，也不提供 scan、outbox、Stream consumer group 或其他补偿路径。
-
-Runtime 不感知 wake transport 实现细节。
+dispatcher 在启动、listener 连接或重连、收到 `NOTIFY`、Environment READY 以及 nearest-due timer 时 coalesced wake。每个 handler 重新锁定自己的 target 与领域事实；重复 wake、过期 snapshot 或丢失通知均不改变正确性。ENVIRONMENT eligibility 只读取 `LiveEnvironmentRegistry.listReady()` 的当前快照，READY 回调只调用 `dispatcher.wake()`。
 
 ## 7. Redis Streams realtime projection
 
@@ -226,22 +220,22 @@ Thread
   -> Entry/Input append
 ```
 
-## 11. Activation
+## 11. Activation runtime
 
-PostgreSQL 事务提交后通过 `ActivationNotifier` 发布对应 `ExecutionTarget`。生产 Redis subscriber 不在 listener thread 执行 Model 或 Tool 外部 I/O：Model/Tool target 分别投递到既有 worker scheduler，Thread target 交给 `ThreadKick` 的 reconcile executor。已开始执行的 heartbeat、deadline、idle 与 retry timer 仍是 worker 的局部执行控制，不构成 PostgreSQL 周期扫描调度。
+`PostgresqlExecutionTargetListener` 只监听 PostgreSQL 并调用 dispatcher wake；不执行 Model 或 Tool 外部 I/O。dispatcher 对 Thread target 调用 `ThreadReconciler.activate()`；对 Model target 调用 `ModelWorker.activate()`，后者先同步 durable claim、再把 Provider I/O 交给 worker scheduler；对 Tool target 同步执行 durable claim 后由 ToolWorker 自己的 executor 承担外部 I/O。已开始执行的 heartbeat、deadline、idle 与 retry timer 仍是 worker 的局部执行控制；dispatcher 不做周期性全表扫描，只维护单个 nearest-due timer。
 
 ## 12. 故障语义
 
 | 故障 | 处理 |
 | --- | --- |
-| Redis Pub/Sub 丢消息 | durable row 保持不变；不做 signal-loss 补偿 |
+| PostgreSQL NOTIFY 遗失或 listener 重连 | durable target 保持不变；启动/重连 wake 与 nearest-due timer 重新读取 |
 | Redis Streams 清空 | 客户端 snapshot reload |
 | Runtime 进程退出 | 已提交 durable row 保持不变 |
 | Model worker 在 Provider I/O 后失联 | RUNNING lease 过期后 `UNKNOWN` |
-| QUEUED/RETRY_WAIT signal 丢失 | durable row 保持不变；不做 due scan |
+| QUEUED/RETRY_WAIT wake 未送达 | durable target 保持不变；后续 dispatcher wake 或 nearest-due timer 重新读取 |
 | terminal callback 重复 | invocation token + terminal CAS |
 | Stop / head 重定位与 terminal 并发 | execution epoch fencing |
-| notify 先于 commit | 禁止；只允许 afterCommit |
+| execution-target notify 先于 commit | PostgreSQL 仅在提交后投递 trigger 产生的 NOTIFY |
 | realtime sink 失败 | 不影响 durable terminal |
 
 ## 13. 测试架构
@@ -258,7 +252,7 @@ PostgreSQL 事务提交后通过 `ActivationNotifier` 发布对应 `ExecutionTar
 
 ### 13.3 Redis Integration
 
-- Pub/Sub wake 的严格 decode/dispatch、Streams cursor/trim、snapshot-first SSE
+- Streams cursor/trim、snapshot-first SSE
 
 ### 13.4 E2E
 

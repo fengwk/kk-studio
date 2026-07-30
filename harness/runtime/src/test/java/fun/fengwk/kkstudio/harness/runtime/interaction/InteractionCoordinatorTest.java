@@ -26,7 +26,7 @@ class InteractionCoordinatorTest {
   private static final ExecutionTarget OWNER =
       new ExecutionTarget(ExecutionTargetKind.THREAD, 100L);
 
-  /** Resolution uses the registered handler and returns projection + next activation target. */
+  /** Resolution uses the registered handler and returns its projection. */
   @Test
   void resolvesWithHandlerAndReturnsProjection() {
     Interaction open = open(null);
@@ -34,7 +34,7 @@ class InteractionCoordinatorTest {
     FakeHandler handler = new FakeHandler("confirm");
     FakeTransactions transactions = new FakeTransactions();
     transactions.byId.put(open.id(), open);
-    transactions.resolveResult = new InteractionTransition(resolved, OWNER);
+    transactions.resolveResult = new InteractionTransition(resolved);
 
     InteractionCoordinator coordinator =
         new InteractionCoordinator(
@@ -47,7 +47,6 @@ class InteractionCoordinatorTest {
 
     assertEquals(InteractionStatus.RESOLVED, result.interaction().status());
     assertEquals("{\"question\":true}", result.projection().json());
-    assertSame(OWNER, result.nextTarget());
     assertTrue(handler.resolveCalled);
     assertEquals(1, transactions.resolveCalls);
     assertEquals(0, transactions.expireCalls);
@@ -61,7 +60,7 @@ class InteractionCoordinatorTest {
     FakeHandler handler = new FakeHandler("confirm");
     FakeTransactions transactions = new FakeTransactions();
     transactions.byId.put(open.id(), open);
-    transactions.expireResult = new InteractionTransition(expired, OWNER);
+    transactions.expireResult = new InteractionTransition(expired);
 
     InteractionCoordinator coordinator =
         new InteractionCoordinator(
@@ -76,7 +75,6 @@ class InteractionCoordinatorTest {
     assertEquals(false, handler.resolveCalled);
     assertEquals(0, transactions.resolveCalls);
     assertEquals(1, transactions.expireCalls);
-    assertSame(OWNER, result.nextTarget());
   }
 
   /** Projection is always produced through the registered handler. */

@@ -412,11 +412,11 @@ Agent 配置中的 `tools` 仅为短名。platform-first：先匹配已注册 PL
 
 ### 进程生命周期
 
-- `ThreadReconciler` 由 Redis `THREAD` signal 激活，是 Entry/head 唯一写者。
+- `PostgresqlExecutionTargetDispatcher` 对 Thread target 调用 `ThreadReconciler.activate()`；Reconciler 是 Entry/head 唯一写者。
 - `ModelWorker` / 统一 `ToolWorker` 只写 Invocation 事实与 realtime projection。
 - Provider 调用使用冻结 `ProviderRequest` 的 total/idle deadline；worker lease heartbeat 不是 progress activity。
 - Provider terminal 后 worker 写 ModelInvocation 并标记 Thread runnable；Reconciler apply 写 Assistant Entry 与 `harness_model_usage`。
-- Redis signal 是唯一 activation 路径；没有 runnable、lease 或 due retry 的周期 scan。
+- PostgreSQL durable target + listener/dispatcher wake 是唯一 activation 路径；没有 runnable、lease 或 due retry 的周期性全表 scan。
 
 ## 组件与文件地图
 

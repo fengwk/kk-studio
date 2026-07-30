@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.thread.reconcile;
 
+import lombok.extern.slf4j.Slf4j;
+
 import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
 import fun.fengwk.kkstudio.harness.runtime.execution.Failure;
 import fun.fengwk.kkstudio.harness.runtime.execution.StepResult;
@@ -14,13 +16,17 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * Thread Reconciler：一次 activation 内收敛 durable facts 并返回 {@link StepResult}。
  *
- * <p>它不是常驻 Java 线程。用户 Input、Tool 终态、Interaction 与 Model 完成先在各自事务中提交 durable facts，再于提交后 best-effort
- * 发出 activation 信号；HTTP/SSE/Provider 回调本身都不是待执行工作队列。跨节点单飞由数据库 processor lease + fencing token
- * 保证；丢失的 kick 不会改变 durable facts。
+ * <p>它不是常驻 Java 线程。用户 Input、Tool 终态、Interaction 与 Model 完成先在各自事务中提交 durable facts 和 {@code
+ * harness_execution_target} 的 wake 条件；HTTP/SSE/Provider 回调本身都不是待执行工作队列。跨节点单飞由数据库 processor lease +
+ * fencing token 保证；PostgreSQL dispatcher 的重复或丢失 wake 不会改变 durable facts。
  *
  * <p>严格按以下优先级推进 owned Thread，之间用 bounded step loop 防止死循环：
  *
@@ -38,6 +44,7 @@ import java.util.Optional;
  * SuspendOutcome#WORK_AVAILABLE} 与 {@link QuiesceOutcome#WORK_AVAILABLE} 在不释放 lease 的前提下继续循环。Typed
  * failure 仅 ModelInvocation creation 保留，其余事务的意外错误经 best-effort release 后重新抛出。
  */
+@Slf4j
 public final class ThreadReconciler {
 
   /**
@@ -53,22 +60,104 @@ public final class ThreadReconciler {
   private final ThreadReconcileTransactions transactions;
   private final Clock clock;
   private final int maxSteps;
+  private final Executor activationExecutor;
+  private final ConcurrentHashMap<Long, InFlightActivation> inFlightByThreadId =
+      new ConcurrentHashMap<>();
 
   public ThreadReconciler(ThreadReconcileTransactions transactions) {
-    this(transactions, Clock.systemUTC(), DEFAULT_MAX_STEPS);
+    this(transactions, Clock.systemUTC(), DEFAULT_MAX_STEPS, Runnable::run);
   }
 
   public ThreadReconciler(ThreadReconcileTransactions transactions, Clock clock) {
-    this(transactions, clock, DEFAULT_MAX_STEPS);
+    this(transactions, clock, DEFAULT_MAX_STEPS, Runnable::run);
   }
 
   public ThreadReconciler(ThreadReconcileTransactions transactions, Clock clock, int maxSteps) {
+    this(transactions, clock, maxSteps, Runnable::run);
+  }
+
+  /**
+   * Creates a reconciler whose local activation requests run through {@code activationExecutor}.
+   * The executor is a process-local throughput boundary; PostgreSQL ownership remains
+   * authoritative.
+   */
+  public ThreadReconciler(
+      ThreadReconcileTransactions transactions,
+      Clock clock,
+      int maxSteps,
+      Executor activationExecutor) {
     this.transactions = Objects.requireNonNull(transactions, "transactions");
     this.clock = Objects.requireNonNull(clock, "clock");
     if (maxSteps <= 0) {
       throw new IllegalArgumentException("maxSteps must be positive");
     }
     this.maxSteps = maxSteps;
+    this.activationExecutor = Objects.requireNonNull(activationExecutor, "activationExecutor");
+  }
+
+  /**
+   * Requests one process-local reconciliation activation for a durable Thread target.
+   *
+   * <p>Concurrent requests for the same Thread are coalesced to one active task plus one rerun
+   * edge. Each pass obtains a fresh processor token and lets {@link #reconcile(long, String)}
+   * acquire the durable processor lease; therefore this transient map never acts as a distributed
+   * lock or a source of work truth.
+   */
+  public void activate(long threadId) {
+    if (threadId <= 0) {
+      throw new IllegalArgumentException("threadId must be positive");
+    }
+    InFlightActivation fresh = new InFlightActivation();
+    InFlightActivation activation =
+        inFlightByThreadId.compute(
+            threadId,
+            (ignored, current) -> {
+              if (current == null) {
+                return fresh;
+              }
+              current.rerunRequested = true;
+              return current;
+            });
+    if (activation != fresh) {
+      return;
+    }
+    try {
+      activationExecutor.execute(() -> runCoalescedActivation(threadId, fresh));
+    } catch (RejectedExecutionException rejection) {
+      inFlightByThreadId.remove(threadId, fresh);
+      throw rejection;
+    } catch (RuntimeException failure) {
+      inFlightByThreadId.remove(threadId, fresh);
+      throw failure;
+    }
+  }
+
+  private void runCoalescedActivation(long threadId, InFlightActivation activation) {
+    boolean rerun;
+    do {
+      try {
+        StepResult result = reconcile(threadId, UUID.randomUUID().toString());
+        if (result instanceof StepResult.Failed failed) {
+          log.warn("thread reconcile failed for {}: {}", threadId, failed.failure().code());
+        }
+      } catch (RuntimeException failure) {
+        log.warn("thread activation crashed for {}", threadId, failure);
+      }
+      rerun =
+          inFlightByThreadId.compute(
+                  threadId,
+                  (ignored, current) -> {
+                    if (current != activation) {
+                      return current;
+                    }
+                    if (activation.rerunRequested) {
+                      activation.rerunRequested = false;
+                      return activation;
+                    }
+                    return null;
+                  })
+              == activation;
+    } while (rerun);
   }
 
   /**
@@ -338,5 +427,13 @@ public final class ThreadReconciler {
     } catch (RuntimeException ignored) {
       // Cleanup must not mask the original failure.
     }
+  }
+
+  /**
+   * One locally scheduled Thread activation. Its rerun edge is only accessed inside this Thread's
+   * {@link ConcurrentHashMap#compute(Object, java.util.function.BiFunction)} callbacks.
+   */
+  private static final class InFlightActivation {
+    private boolean rerunRequested;
   }
 }

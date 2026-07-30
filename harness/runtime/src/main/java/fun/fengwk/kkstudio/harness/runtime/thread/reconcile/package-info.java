@@ -9,12 +9,12 @@
  * <p>协作角色严格分离：
  *
  * <ul>
- *   <li>{@link ThreadActivationDispatcher} 只合并本进程的 Thread kick 并提交本地 executor，不决定任何 durable
+ *   <li>{@link ThreadReconciler#activate(long)} 只合并本进程的 Thread wake 并提交本地 executor，不决定任何 durable
  *       transition；
  *   <li>{@link ThreadReconciler} 是有界优先级状态机，选择下一项可推进 durable fact；
  *   <li>{@link ThreadReconcileTransactions} 为每个状态转换提供完整的原子用例，并在数据库中执行 lease/epoch/token fencing；
- *   <li>Model、Tool 与 Interaction Worker 仅提交自己的 terminal facts 并触发 best-effort wake；它们不直接写 Session
- *       Tree 或推进 Thread head。
+ *   <li>Model、Tool 与 Interaction Worker 仅提交自己的 terminal facts 和 durable target wake 条件；它们不直接写
+ *       Session Tree 或推进 Thread head。
  * </ul>
  *
  * <p>运行时依赖仅为 {@code harness.runtime.execution/continuation/thread/session}、{@code

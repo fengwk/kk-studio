@@ -1,6 +1,6 @@
 # Harness Runtime 契约
 
-本文定义实现必须遵守的逻辑契约。方法拆分可为测试与事务适配调整，但不得改变：durable fact 唯一所有者、单一写者、terminal-driven resume、PostgreSQL truth / Redis hint、lock order 与 fencing、模块依赖方向。
+本文定义实现必须遵守的逻辑契约。方法拆分可为测试与事务适配调整，但不得改变：durable fact 唯一所有者、单一写者、terminal-driven resume、PostgreSQL truth / durable execution target、lock order 与 fencing、模块依赖方向。
 
 ## 1. 模块与包
 
@@ -272,7 +272,7 @@ HarnessThread updateHead(long threadId, long expectedExecutionEpoch, Long headEn
 
 `bootstrapThread` 只接受 UNBOUND Thread，在一个事务内创建 Session/ROOT/RUNTIME_CONFIG 并把 head 绑定到 `RUNTIME_CONFIG` Entry。`updateHead` 的 `headEntryId` 可空：非空为 bind/rebind，空为 unbind。二者与所有 mailbox 命令、Stop 一样，都必须携带 `expectedExecutionEpoch`。
 
-Coordinator 不依赖 Spring/DTO/HTTP；Core boundary 负责十进制字符串解析、Spring 外层事务、after-commit signal 与 DTO 映射。
+Coordinator 不依赖 Spring/DTO/HTTP；Core boundary 负责十进制字符串解析、Spring 外层事务、durable target mutation 与 DTO 映射。
 
 ## 4. Runtime ports
 
@@ -293,13 +293,9 @@ public interface HarnessIdGenerator {
 
 PostgreSQL sequence 分配；gap 合法。
 
-### 4.2 ActivationNotifier
+### 4.2 ExecutionTarget
 
 ```java
-public interface ActivationNotifier {
-  void notifyAfterCommit(ExecutionTarget target);
-}
-
 public enum ExecutionTargetKind {
   THREAD,
   MODEL_INVOCATION,
@@ -309,12 +305,12 @@ public enum ExecutionTargetKind {
 public record ExecutionTarget(ExecutionTargetKind kind, long id) {}
 ```
 
-Notifier 失败不得回滚已提交业务事务；Redis Pub/Sub signal 不提供 replay 或 scan 补偿。
-
 Core 的 PostgreSQL target store 为每个 `(kind, id)` 保留唯一 durable row，并以 `dispatch_enabled` 作为
 显式 gate。`schedule` 创建/启用普通 target；ENVIRONMENT Tool materialization 使用 `park` 创建 disabled
 row，随后按 `created_at, assistant_entry_id, ordinal, id` 只启用 route FIFO head。`lockDue`、due scan 和
-nearest-due timing 忽略 disabled row，`lock`/`findAll` 仍可观察 parked row。
+nearest-due timing 忽略 disabled row，`lock`/`findAll` 仍可观察 parked row。schema trigger 在 commit 后
+投递 PostgreSQL `NOTIFY`；`PostgresqlExecutionTargetListener`、startup/reconnect、Environment READY 与
+nearest-due timer 只调用 coalesced dispatcher wake，通知失败或丢失永不回滚业务事务。
 
 ### 4.3 RealtimeEventSink
 
@@ -371,7 +367,7 @@ Runtime 不在多个通用 Repository 之间自行拼事务。PostgreSQL adapter
 - updateHead：静止校验通过后以 `expectedExecutionEpoch` CAS 写入可空 head，epoch++ 并清 lease/`runnable`
 - enqueue Input 并分配 sequence；UNBOUND Thread 拒绝入队
 - Stop：原子 epoch fence + 持久化 `ASSISTANT_ABORTED` 或 `ASSISTANT_ERROR(CANCELLED)` barrier + 取消 queued Input、可安全取消的 Invocation 与该 Thread 的 OPEN Interaction。Stop 必须沿用 Reconciler 的 `ModelInvocationPlanner` 判定当前 head 是否仍有未终结 response debt；若存在 response debt 且 `(threadId, epoch, sourceHeadEntryId)` 下存在 `safe_stream_snapshot is not null AND applied_at is null` 行，则把该快照追加为仅含 text/thinking 的 `ASSISTANT_ABORTED` Entry 并把 head rebind 上去；否则写 `ASSISTANT_ERROR(CANCELLED)`。Stop 不修改已 RUNNING/SUCCEEDED 的 invocation 行——它只是 epoch fence，旧 generation 的 terminal CAS 在新 epoch 下被拒绝。
-- 成功事务返回 afterCommit notify targets
+- 成功事务在同一事务内写入或更新 durable target；schema trigger 负责提交后的 PostgreSQL NOTIFY
 
 head 重定位与 enqueue/Stop 都先锁 Thread 行并校验 `expectedExecutionEpoch`；epoch 不匹配即 stale，事务整体拒绝。
 
@@ -428,18 +424,18 @@ head 重定位与 enqueue/Stop 都先锁 Thread 行并校验 `expectedExecutionE
 ### 7.1 ModelWorker
 
 ```text
-MODEL_INVOCATION signal
+MODEL_INVOCATION target dispatch
   -> find specified claimable ModelInvocation
   -> resolve frozen request 的短生命周期执行资源（仅 QUEUED/RETRY_WAIT）
   -> claim（写入 lease/fencing）
   -> execute Provider
   -> delta to RealtimeEventSink
   -> success/final failure via ModelInvocationTransactions
-  -> afterCommit Thread signal
+  -> terminal transaction schedules Thread target
 
 transient failure
   -> RETRY_WAIT
-  -> due scheduler emits ModelInvocation signal
+  -> durable target reschedule，nearest-due dispatcher wake
 ```
 
 关键协议：
@@ -449,12 +445,12 @@ transient failure
 - 已过期 `RUNNING` lease 落 `UNKNOWN`，不能重新调用 Provider
 - Provider delta 只写 best-effort realtime；terminal CAS 才写 durable terminal 并标记 Thread runnable
 - external idempotency key 稳定于 `(invocationId, attempt)`
-- notifier/realtime 异常不得回滚 durable transition
+- PostgreSQL notification/realtime 异常不得回滚 durable transition
 
 ### 7.2 ThreadReconciler
 
 ```text
-THREAD signal
+THREAD target dispatch
   -> claim runnable Thread reconcile lease
   -> terminal Model apply
   -> terminal Tool sibling apply
@@ -472,13 +468,13 @@ THREAD signal
 ### 7.3 ToolWorker
 
 ```text
-TOOL_INVOCATION signal
+TOOL_INVOCATION target dispatch
   -> claim specified ToolInvocation
   -> check unresolved Interaction
   -> execute PLATFORM Tool 或 ENVIRONMENT RemoteTool
   -> partial to RealtimeEventSink
   -> terminal via ToolInvocationTransactions
-  -> afterCommit Thread signal
+  -> terminal transaction schedules Thread target
 ```
 
 ## 8. Query / API 边界

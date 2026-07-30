@@ -10,7 +10,8 @@ import java.util.Objects;
  * Framework-free Interaction query/response orchestration.
  *
  * <p>Owns handler lookup, generic projection, expiry decision and deterministic resolution. Callers
- * remain responsible for decimal/DTO boundaries and best-effort activation notification.
+ * remain responsible only for decimal/DTO boundaries; the transaction makes the durable target
+ * dispatchable.
  */
 public final class InteractionCoordinator {
 
@@ -63,8 +64,7 @@ public final class InteractionCoordinator {
           transactions.resolve(interactionId, expectedVersion, response, resolution, receivedAt);
     }
     InteractionView view = project(transition.interaction());
-    return new InteractionRespondResult(
-        view.interaction(), view.projection(), transition.nextTarget());
+    return new InteractionRespondResult(view.interaction(), view.projection());
   }
 
   private InteractionView project(Interaction interaction) {
@@ -87,15 +87,12 @@ public final class InteractionCoordinator {
     }
   }
 
-  /**
-   * Response outcome: updated Interaction, projection, and the next best-effort activation target.
-   */
+  /** Response outcome: updated Interaction and handler-controlled projection. */
   public record InteractionRespondResult(
-      Interaction interaction, InteractionProjection projection, ExecutionTarget nextTarget) {
+      Interaction interaction, InteractionProjection projection) {
     public InteractionRespondResult {
       Objects.requireNonNull(interaction, "interaction");
       Objects.requireNonNull(projection, "projection");
-      Objects.requireNonNull(nextTarget, "nextTarget");
     }
   }
 }

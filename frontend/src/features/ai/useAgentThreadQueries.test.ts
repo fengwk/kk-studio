@@ -3,7 +3,7 @@ import { isThreadActive } from '@/features/ai/useAgentThreadQueries'
 
 describe('isThreadActive', () => {
   it('polls RUNNING / WAITING / RUNNABLE and leaves IDLE quiet', () => {
-    // RUNNABLE must stay active so a lost Redis wake cannot freeze the UI mid-activation.
+    // RUNNABLE remains active while durable dispatch converges the Thread.
     expect(isThreadActive('RUNNING')).toBe(true)
     expect(isThreadActive('WAITING')).toBe(true)
     expect(isThreadActive('RUNNABLE')).toBe(true)

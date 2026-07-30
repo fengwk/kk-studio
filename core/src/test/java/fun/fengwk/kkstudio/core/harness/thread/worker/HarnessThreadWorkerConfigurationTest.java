@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.core.harness.thread.worker;
 
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -8,11 +8,11 @@ import static org.mockito.Mockito.mock;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadActivationDispatcher;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconciler;
 
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 class HarnessThreadWorkerConfigurationTest {
@@ -21,7 +21,7 @@ class HarnessThreadWorkerConfigurationTest {
       new HarnessThreadWorkerConfiguration();
 
   @Test
-  void createsBoundedDaemonExecutorAndFinalDispatcher() throws Exception {
+  void createsBoundedDaemonExecutorAndFinalReconciler() throws Exception {
     HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
     properties.setThreadWorkerConcurrency(2);
     ExecutorService executor = configuration.threadReconcileExecutor(properties);
@@ -32,9 +32,9 @@ class HarnessThreadWorkerConfigurationTest {
       assertTrue(reconcileThread.name().startsWith("thread-reconcile"));
 
       ThreadReconciler reconciler =
-          configuration.threadReconciler(mock(ThreadReconcileTransactions.class), properties);
-      assertInstanceOf(
-          ThreadActivationDispatcher.class, configuration.threadKick(reconciler, executor));
+          configuration.threadReconciler(
+              mock(ThreadReconcileTransactions.class), properties, executor);
+      assertNotNull(reconciler);
     } finally {
       executor.shutdownNow();
     }
@@ -48,9 +48,16 @@ class HarnessThreadWorkerConfigurationTest {
         IllegalArgumentException.class, () -> configuration.threadReconcileExecutor(properties));
 
     properties.setThreadReconcilerMaxSteps(0);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> configuration.threadReconciler(mock(ThreadReconcileTransactions.class), properties));
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              configuration.threadReconciler(
+                  mock(ThreadReconcileTransactions.class), properties, executor));
+    } finally {
+      executor.shutdownNow();
+    }
   }
 
   private record ThreadFacts(String name, boolean daemon) {

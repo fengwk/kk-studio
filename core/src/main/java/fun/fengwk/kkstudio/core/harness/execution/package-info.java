@@ -17,8 +17,8 @@
  *   <li>{@link fun.fengwk.kkstudio.core.harness.execution.ExecutionTargetRouteEligibility} —
  *       read-only snapshot of locally READY route keys.
  *   <li>{@link fun.fengwk.kkstudio.core.harness.execution.PostgresqlExecutionTargetDispatcher} —
- *       coalesced-wake drainer; one drain executor, one nearest-due timer; never invokes domain
- *       transactions on its own thread.
+ *       coalesced-wake drainer; one drain executor, one nearest-due timer; it owns no transaction
+ *       or external I/O, while handlers may perform their short target-specific durable claim.
  *   <li>{@link fun.fengwk.kkstudio.core.harness.execution.PostgresqlExecutionTargetListener} —
  *       single-process {@code LISTEN harness_execution_target} loop using a long-lived blocking
  *       {@link org.postgresql.PGConnection#getNotifications(int)}.

@@ -6,8 +6,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadKick;
-import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadActivationDispatcher;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconciler;
 
@@ -20,9 +18,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * Thread activation 的生产 wiring。
  *
- * <p>协作路径为：durable execution-target dispatcher -> {@link ThreadKick} -> {@link
- * ThreadActivationDispatcher} -> bounded reconcile executor -> {@link ThreadReconciler} -> {@link
- * ThreadReconcileTransactions}。跨节点所有权与唤醒事实均由 PostgreSQL durable target 决定。
+ * <p>协作路径为：durable execution-target dispatcher -> {@link ThreadReconciler#activate(long)} ->
+ * bounded reconcile executor -> {@link ThreadReconciler} -> {@link ThreadReconcileTransactions}。
+ * 跨节点所有权与唤醒事实均由 PostgreSQL durable target 决定。
  */
 @Configuration
 @EnableConfigurationProperties(HarnessRuntimeProperties.class)
@@ -50,18 +48,13 @@ public class HarnessThreadWorkerConfiguration {
 
   @Bean
   public ThreadReconciler threadReconciler(
-      ThreadReconcileTransactions transactions, HarnessRuntimeProperties properties) {
+      ThreadReconcileTransactions transactions,
+      HarnessRuntimeProperties properties,
+      @Qualifier("threadReconcileExecutor") ExecutorService threadReconcileExecutor) {
     int maxSteps = properties.getThreadReconcilerMaxSteps();
     if (maxSteps <= 0) {
       throw new IllegalArgumentException("thread reconciler max steps must be positive");
     }
-    return new ThreadReconciler(transactions, Clock.systemUTC(), maxSteps);
-  }
-
-  @Bean
-  public ThreadKick threadKick(
-      ThreadReconciler reconciler,
-      @Qualifier("threadReconcileExecutor") ExecutorService threadReconcileExecutor) {
-    return new ThreadActivationDispatcher(reconciler::reconcile, threadReconcileExecutor);
+    return new ThreadReconciler(transactions, Clock.systemUTC(), maxSteps, threadReconcileExecutor);
   }
 }

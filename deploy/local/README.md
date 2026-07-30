@@ -13,7 +13,7 @@
   `/docker-entrypoint-initdb.d/01-schema.sql` 与 `02-data.sql`；空 volume 首次
   `up` 时执行一次，之后由 `application-dev.yml` 的 `spring.sql.init.mode` 经
   环境变量 `SPRING_SQL_INIT_MODE=never` 跳过，避免重复执行。
-- `redis:7.4-alpine` —— `Harness` 的 wake / realtime projection 与通知；
+- `redis:7.4-alpine` —— `Harness` 的 lossy realtime projection；
   `--save "" --appendonly no`，纯内存使用，重启即清空。
 
 > Harness Daemon 不在当前栈内。

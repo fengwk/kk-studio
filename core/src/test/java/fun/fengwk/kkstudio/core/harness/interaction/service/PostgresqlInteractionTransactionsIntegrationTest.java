@@ -95,7 +95,7 @@ class PostgresqlInteractionTransactionsIntegrationTest extends PostgresSpringTes
     assertEquals(loaded, transactions.findOpenByOwner(OWNER).orElseThrow());
   }
 
-  /** Resolve atomically persists response/version and exposes the handler-selected next target. */
+  /** Resolve atomically persists response/version and enables the handler-selected target. */
   @Test
   void resolvesExactlyOnceWithExpectedVersion() {
     Interaction created = create(null);
@@ -109,7 +109,6 @@ class PostgresqlInteractionTransactionsIntegrationTest extends PostgresSpringTes
             new InteractionResolution(resumeThread(), NEXT),
             resolvedAt);
 
-    assertEquals(NEXT, transition.nextTarget());
     assertEquals(InteractionStatus.RESOLVED, transition.interaction().status());
     assertEquals(1L, transition.interaction().version());
     assertTrue(threadRunnable(OWNER.id()));
@@ -145,7 +144,6 @@ class PostgresqlInteractionTransactionsIntegrationTest extends PostgresSpringTes
             new InteractionResolution(resumeThread(), NEXT),
             expiresAt);
 
-    assertEquals(OWNER, transition.nextTarget());
     assertEquals(InteractionStatus.EXPIRED, transition.interaction().status());
     assertNull(transition.interaction().response());
     assertEquals(1L, transition.interaction().version());
@@ -172,7 +170,6 @@ class PostgresqlInteractionTransactionsIntegrationTest extends PostgresSpringTes
     InteractionTransition cancelled =
         transactions.cancel(created.id(), 0L, resumeThread(), OWNER, CREATED_AT.plusSeconds(1));
     assertEquals(InteractionStatus.CANCELLED, cancelled.interaction().status());
-    assertEquals(OWNER, cancelled.nextTarget());
   }
 
   /**
@@ -190,7 +187,6 @@ class PostgresqlInteractionTransactionsIntegrationTest extends PostgresSpringTes
     InteractionCoordinator.InteractionRespondResult transition =
         coordinator.respond(created.id(), 0L, new InteractionResponse("{\"approved\":true}"));
 
-    assertEquals(TOOL_OWNER, transition.nextTarget());
     assertEquals(InteractionStatus.RESOLVED, transition.interaction().status());
     assertFalse(threadRunnable(OWNER.id()));
     ToolState tool = toolState(TOOL_OWNER.id());
@@ -239,7 +235,6 @@ class PostgresqlInteractionTransactionsIntegrationTest extends PostgresSpringTes
             new InteractionResolution(denyToolPermission(), OWNER),
             CREATED_AT.plusSeconds(1));
 
-    assertEquals(OWNER, transition.nextTarget());
     assertEquals(InteractionStatus.RESOLVED, transition.interaction().status());
     assertTrue(threadRunnable(OWNER.id()));
     ToolState tool = toolState(TOOL_OWNER.id());
@@ -285,7 +280,6 @@ class PostgresqlInteractionTransactionsIntegrationTest extends PostgresSpringTes
 
     InteractionTransition transition = transactions.expire(created.id(), 0L, expiresAt);
 
-    assertEquals(OWNER, transition.nextTarget());
     assertEquals(InteractionStatus.EXPIRED, transition.interaction().status());
     assertNull(transition.interaction().response());
     assertTrue(threadRunnable(OWNER.id()));

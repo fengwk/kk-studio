@@ -44,9 +44,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Queue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
@@ -95,11 +97,54 @@ class ModelWorkerTest {
   }
 
   /**
-   * A transient Provider error only schedules the durable Invocation via the transaction adapter;
-   * the worker does not emit any local signal, leaving wake purely to the durable target.
+   * Durable dispatcher activation claims synchronously but never starts Provider I/O on its thread.
    */
   @Test
-  void schedulesTransientRetryWithoutEmittingAnyLocalSignal() {
+  void activationDefersProviderStartUntilWorkerSchedulerRuns() {
+    Fixture fixture = fixture();
+    Queue<Runnable> deferredStarts = new ArrayDeque<>();
+    fixture.schedulerOverride =
+        new ScheduledThreadPoolExecutor(1) {
+          @Override
+          public void execute(Runnable command) {
+            deferredStarts.add(command);
+          }
+        };
+    fixture.rebuildWorker();
+
+    assertTrue(fixture.worker.activate(1L));
+    assertEquals(InvocationStatus.RUNNING, fixture.transactions.current.status());
+    assertEquals(0, fixture.executor.executeCalls);
+    assertEquals(1, deferredStarts.size());
+
+    deferredStarts.remove().run();
+
+    assertEquals(1, fixture.executor.executeCalls);
+  }
+
+  /** Rejected provider-start submission is retryable because no Provider I/O has begun. */
+  @Test
+  void activationSchedulesRetryWhenProviderStartSubmissionIsRejected() {
+    Fixture fixture = fixture();
+    fixture.retryPolicy = retryPolicy(1, Duration.ofMillis(10));
+    ScheduledExecutorService rejectedScheduler = new ScheduledThreadPoolExecutor(1);
+    rejectedScheduler.shutdownNow();
+    fixture.schedulerOverride = rejectedScheduler;
+    fixture.rebuildWorker();
+
+    assertTrue(fixture.worker.activate(1L));
+
+    assertEquals(InvocationStatus.RETRY_WAIT, fixture.transactions.current.status());
+    assertEquals(0, fixture.executor.executeCalls);
+    assertEquals(1, fixture.transactions.scheduleRetryCalls);
+  }
+
+  /**
+   * A transient Provider error only reschedules the durable Invocation through the transaction
+   * adapter; the worker does not create a process-local retry wake.
+   */
+  @Test
+  void reschedulesTransientRetryWithoutCreatingLocalWake() {
     Fixture fixture = fixture();
     fixture.retryPolicy = retryPolicy(1, Duration.ofMillis(20));
     fixture.rebuildWorker();
@@ -1101,7 +1146,7 @@ class ModelWorkerTest {
     assertTrue(fixture.executor.handle.isCancelled());
   }
 
-  /** Retry persistence failure is similarly local-only and cannot forge a delayed signal. */
+  /** Retry persistence failure is similarly local-only and cannot forge a delayed durable wake. */
   @Test
   void isolatesRetryPersistenceFailure() {
     Fixture fixture = fixture();

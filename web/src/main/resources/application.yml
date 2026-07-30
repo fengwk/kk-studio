@@ -16,7 +16,7 @@ spring:
 
   data:
     redis:
-      # Redis 用于 harness wake/realtime projection；可用环境变量覆盖。
+      # Redis 仅用于 harness realtime projection；可用环境变量覆盖。
       url: ${KK_STUDIO_REDIS_URL:redis://localhost:6379}
 
   # PostgreSQL 连接配置（唯一 durable 数据库）

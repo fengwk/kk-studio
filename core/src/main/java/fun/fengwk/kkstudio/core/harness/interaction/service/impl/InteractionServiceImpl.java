@@ -10,25 +10,22 @@ import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionCoordinator.InteractionRespondResult;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionCoordinator.InteractionView;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionResponse;
-import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.share.model.InteractionDTO;
 import fun.fengwk.kkstudio.share.model.InteractionResponseDTO;
 
 import java.util.Objects;
 
 /**
- * Thin Core Interaction boundary: decimal-string/DTO mapping and notifier isolation. Domain
- * projection, expiry and handler resolution live in {@link InteractionCoordinator}.
+ * Thin Core Interaction boundary for decimal-string/DTO mapping. Domain projection, expiry and
+ * handler resolution live in {@link InteractionCoordinator}; its transaction writes wake the
+ * durable execution-target queue directly.
  */
 @Service
 public class InteractionServiceImpl implements InteractionService {
   private final InteractionCoordinator coordinator;
-  private final ActivationNotifier activationNotifier;
 
-  public InteractionServiceImpl(
-      InteractionCoordinator coordinator, ActivationNotifier activationNotifier) {
+  public InteractionServiceImpl(InteractionCoordinator coordinator) {
     this.coordinator = Objects.requireNonNull(coordinator, "coordinator");
-    this.activationNotifier = Objects.requireNonNull(activationNotifier, "activationNotifier");
   }
 
   @Override
@@ -52,7 +49,6 @@ public class InteractionServiceImpl implements InteractionService {
     // Construct response before domain load so invalid JSON is rejected at the boundary.
     InteractionResponse response = new InteractionResponse(responseDTO.getResponseJson());
     InteractionRespondResult result = coordinator.respond(id, expectedVersion, response);
-    notifyBestEffort(result.nextTarget());
     return toDto(result.interaction(), result.projection().json());
   }
 
@@ -74,14 +70,6 @@ public class InteractionServiceImpl implements InteractionService {
     dto.setCreatedAt(interaction.createdAt());
     dto.setResolvedAt(interaction.resolvedAt());
     return dto;
-  }
-
-  private void notifyBestEffort(ExecutionTarget target) {
-    try {
-      activationNotifier.notifyAfterCommit(target);
-    } catch (RuntimeException ignored) {
-      // Redis notification failure never reverses a committed response.
-    }
   }
 
   private static ExecutionTargetKind parseOwnerKind(String ownerKind) {

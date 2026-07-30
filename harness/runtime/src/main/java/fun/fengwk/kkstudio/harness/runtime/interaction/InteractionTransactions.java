@@ -9,9 +9,8 @@ import java.util.Optional;
  * Use-case atomic persistence port for durable Interactions.
  *
  * <p>Implementations create an OPEN fact while suspending the owner, and atomically terminalize the
- * fact, apply the supplied deterministic resolution, and make the returned target dispatchable.
- * They validate positive ids, OPEN status, and exact expected version. Notifications are
- * deliberately outside this port and occur only after commit.
+ * fact, apply the supplied deterministic resolution, and make its target dispatchable in the same
+ * transaction. They validate positive ids, OPEN status, and exact expected version.
  */
 public interface InteractionTransactions {
 
