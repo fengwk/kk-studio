@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 
-import lombok.extern.slf4j.Slf4j;
-
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.AfterToolCallContext;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
@@ -44,7 +42,6 @@ import java.util.Objects;
  * the {@link ToolWorkerConfig#unavailableRetryDelay() configured retry delay} so a transient
  * environment outage cannot starve siblings.
  */
-@Slf4j
 final class TerminalCompleter {
 
   private final ToolInvocationTransactions transactions;

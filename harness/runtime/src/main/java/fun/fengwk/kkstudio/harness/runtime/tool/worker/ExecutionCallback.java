@@ -209,8 +209,8 @@ final class ExecutionCallback implements ToolExecutionListener {
 
   @Override
   public void onError(Throwable error) {
-    if (error instanceof RemoteToolCancelledException cancelled) {
-      completeCancelledResult(cancelled.getMessage());
+    if (error instanceof RemoteToolCancelledException) {
+      completeCancelledResult();
       return;
     }
     if (error instanceof RemoteToolSendUncertainException uncertain) {
@@ -360,7 +360,7 @@ final class ExecutionCallback implements ToolExecutionListener {
     }
   }
 
-  private void completeCancelledResult(String message) {
+  private void completeCancelledResult() {
     if (!tryBeginTerminal()) {
       return;
     }

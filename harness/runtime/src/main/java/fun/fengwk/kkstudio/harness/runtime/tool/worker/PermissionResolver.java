@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 
-import lombok.extern.slf4j.Slf4j;
-
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
@@ -52,7 +50,6 @@ import java.util.Optional;
  * ExecutablePlan} from the persisted final plan; an empty chain still works because no boundary is
  * required when the row already carries an approved plan.
  */
-@Slf4j
 final class PermissionResolver {
 
   private final ToolInvocationTransactions transactions;
@@ -184,7 +181,7 @@ final class PermissionResolver {
     }
     switch (action) {
       case ALLOW:
-        return persistAllow(claimed, binding, originalCall, decision);
+        return persistAllow(claimed, originalCall, decision);
       case DENY:
         return persistDeny(claimed);
       case ASK:
@@ -200,10 +197,7 @@ final class PermissionResolver {
   }
 
   private PermissionResolution persistAllow(
-      ClaimedToolInvocation claimed,
-      ToolBinding binding,
-      ToolCall originalCall,
-      BeforeToolCallResult decision) {
+      ClaimedToolInvocation claimed, ToolCall originalCall, BeforeToolCallResult decision) {
     ToolInvocationUpdateOutcome outcome =
         transactions.persistPermissionAllowed(
             claimed, decision.binding(), decision.argumentsJson(), clock.instant());
