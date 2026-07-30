@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.core.chat.repo.impl.model;
 
 import lombok.Data;
 
-import java.time.OffsetDateTime;
+import java.time.Instant;
 
 /** {@code chat} 行映射：持久化的多 Session 集合。 */
 @Data
@@ -21,8 +21,8 @@ public class ChatDO {
   private Long version;
 
   /** 创建时间（映射 {@code created_at} timestamptz）。 */
-  private OffsetDateTime createTime;
+  private Instant createTime;
 
   /** 更新时间（映射 {@code updated_at} timestamptz）。 */
-  private OffsetDateTime updateTime;
+  private Instant updateTime;
 }

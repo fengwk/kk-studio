@@ -32,33 +32,38 @@ export function useAiConsoleResourceController() {
     onDeleteCompleted: closeDeleteConfirm,
   })
 
-  function deleteProvider(providerName: string, providerId: AgentResourceId) {
+  function deleteProvider(providerName: string, providerId: AgentResourceId, expectedVersion: string) {
     setDeleteConfirm({
       title: '删除 Provider',
       description: `将删除 Provider ${providerName}。`,
       confirmLabel: '确认删除',
       tone: 'danger',
-      onConfirm: () => mutations.deleteProvider(providerId),
+      onConfirm: () => mutations.deleteProvider(providerId, expectedVersion),
     })
   }
 
-  function deleteModel(providerName: string, modelName: string, modelId: AgentResourceId) {
+  function deleteModel(
+    providerName: string,
+    modelName: string,
+    modelId: AgentResourceId,
+    expectedVersion: string,
+  ) {
     setDeleteConfirm({
       title: '删除 Model',
       description: `将删除 Model ${modelName.includes('/') ? modelName : `${providerName}/${modelName}`}。`,
       confirmLabel: '确认删除',
       tone: 'danger',
-      onConfirm: () => mutations.deleteModel(modelId),
+      onConfirm: () => mutations.deleteModel(modelId, expectedVersion),
     })
   }
 
-  function deleteAgent(agentName: string, agentId: AgentResourceId) {
+  function deleteAgent(agentName: string, agentId: AgentResourceId, expectedVersion: string) {
     setDeleteConfirm({
       title: '删除 Agent',
       description: `将删除 Agent ${agentName}。已有会话会保留，但不能再用该 Agent 新建运行。`,
       confirmLabel: '确认删除',
       tone: 'danger',
-      onConfirm: () => mutations.deleteAgent(agentId),
+      onConfirm: () => mutations.deleteAgent(agentId, expectedVersion),
     })
   }
 

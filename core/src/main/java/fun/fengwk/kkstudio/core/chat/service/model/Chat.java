@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.core.chat.service.model;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 /** Chat collection domain row. */
 @Data
@@ -12,6 +12,6 @@ public class Chat {
   private String title;
   private Long defaultAgentId;
   private Long version;
-  private LocalDateTime createTime;
-  private LocalDateTime updateTime;
+  private Instant createTime;
+  private Instant updateTime;
 }

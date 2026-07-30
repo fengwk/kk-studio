@@ -5,7 +5,7 @@ export interface HttpClient {
   get<T>(url: string, config?: { params?: Record<string, unknown> }): Promise<T>
   post<T>(url: string, data?: unknown): Promise<T>
   put<T>(url: string, data?: unknown): Promise<T>
-  delete<T>(url: string): Promise<T>
+  delete<T>(url: string, config?: { params?: Record<string, unknown> }): Promise<T>
 }
 
 export const apiBaseUrl = '/api'
@@ -52,5 +52,6 @@ export const apiClient: HttpClient = {
   get: <T>(url: string, config?: { params?: Record<string, unknown> }) => axiosClient.get(url, config) as Promise<T>,
   post: <T>(url: string, data?: unknown) => axiosClient.post(url, data) as Promise<T>,
   put: <T>(url: string, data?: unknown) => axiosClient.put(url, data) as Promise<T>,
-  delete: <T>(url: string) => axiosClient.delete(url) as Promise<T>,
+  delete: <T>(url: string, config?: { params?: Record<string, unknown> }) =>
+    (config ? axiosClient.delete(url, config) : axiosClient.delete(url)) as Promise<T>,
 }

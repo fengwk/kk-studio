@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.core.agent.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.core.agent.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.agent.support.AgentEditableSupport;
+import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.model.AgentDefinitionEditablePropertiesDTO;
@@ -16,6 +17,8 @@ import fun.fengwk.kkstudio.share.model.AgentDefinitionEditablePropertiesDTO;
  */
 @Component
 final class AgentDefinitionMutationFactory {
+
+  private static final String RESOURCE = "agent_definition";
 
   private final AgentEditableSupport editableSupport;
   private final AgentDefinitionConfigCodec configCodec;
@@ -32,7 +35,7 @@ final class AgentDefinitionMutationFactory {
 
   AgentDefinition newAgent(long modelId, AgentDefinitionEditablePropertiesDTO properties) {
     if (modelId <= 0) {
-      throw new IllegalArgumentException("modelId must be positive");
+      throw new AiValidationException(RESOURCE, "modelId must be positive");
     }
     Mutation mutation = newMutation(properties);
     AgentDefinition definition = new AgentDefinition();
@@ -56,17 +59,22 @@ final class AgentDefinitionMutationFactory {
 
   private Mutation newMutation(AgentDefinitionEditablePropertiesDTO properties) {
     if (properties == null) {
-      throw new IllegalArgumentException("agent definition body must not be null");
+      throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
     }
     String name = editableSupport.trimToNull(properties.getName());
     if (name == null) {
-      throw new IllegalArgumentException("agent name must not be blank");
+      throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
     }
     AgentDefinitionConfigDTO config = properties.getConfig();
     if (config == null) {
-      throw new IllegalArgumentException("agent config must not be null");
+      throw new AiValidationException(RESOURCE, RESOURCE + " config must not be null");
     }
-    String configJson = configCodec.encode(config);
+    String configJson;
+    try {
+      configJson = configCodec.encode(config);
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException(RESOURCE, error.getMessage(), error);
+    }
     // null/blank = no override; runtime/thread apply resolves model.defaultVariant.
     String variant = editableSupport.trimToNull(properties.getVariant());
     return new Mutation(

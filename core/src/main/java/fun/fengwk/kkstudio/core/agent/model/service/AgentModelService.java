@@ -16,5 +16,5 @@ public interface AgentModelService {
 
   AgentModelDTO updateModel(long id, AgentModelUpdateDTO updateDTO);
 
-  void deleteModel(long id);
+  void deleteModel(long id, String expectedVersion);
 }

@@ -55,7 +55,13 @@ export function ChatWorkspacePage() {
   const agents = agentsQuery.data?.results ?? []
 
   const updateChatMutation = useMutation({
-    mutationFn: (defaultAgentId: string) => chatService.updateChat(chatId, { defaultAgentId }),
+    mutationFn: ({
+      defaultAgentId,
+      expectedVersion,
+    }: {
+      defaultAgentId: string
+      expectedVersion: string
+    }) => chatService.updateChat(chatId, { defaultAgentId, expectedVersion }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.chats.detail(chatId) })
       await queryClient.invalidateQueries({ queryKey: queryKeys.chats.list })
@@ -136,7 +142,10 @@ export function ChatWorkspacePage() {
             onSessionSortChange={setSessionSort}
             onThreadSortChange={setThreadSort}
             onDefaultAgentChange={async (agentId) => {
-              await updateChatMutation.mutateAsync(agentId)
+              await updateChatMutation.mutateAsync({
+                defaultAgentId: agentId,
+                expectedVersion: chat.version,
+              })
             }}
           />
         ))}

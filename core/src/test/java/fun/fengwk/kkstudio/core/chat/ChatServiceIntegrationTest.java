@@ -9,6 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
+import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.core.chat.service.ChatService;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.model.ChatCreateDTO;
@@ -19,7 +22,6 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.Statement;
 import java.util.List;
-import java.util.NoSuchElementException;
 
 /** PostgreSQL-backed Chat service coverage: CRUD, unknown ids, and default Agent validation. */
 class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
@@ -54,6 +56,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
     assertTrue(created.getId().matches("\\d+"));
     assertEquals("alpha", created.getTitle());
     assertEquals("1", created.getDefaultAgentId());
+    assertEquals("0", created.getVersion());
     assertNotNull(created.getCreateTime());
     assertNotNull(created.getUpdateTime());
 
@@ -64,29 +67,38 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       assertEquals("1", loaded.getDefaultAgentId());
 
       ChatCreateDTO blankTitle = new ChatCreateDTO();
-      assertThrows(IllegalArgumentException.class, () -> chatService.createChat(blankTitle));
+      assertThrows(AiValidationException.class, () -> chatService.createChat(blankTitle));
 
       ChatCreateDTO unknownAgent = new ChatCreateDTO();
       unknownAgent.setTitle("orphan");
       unknownAgent.setDefaultAgentId("999999999999");
-      assertThrows(IllegalArgumentException.class, () -> chatService.createChat(unknownAgent));
+      assertThrows(AiValidationException.class, () -> chatService.createChat(unknownAgent));
 
       ChatUpdateDTO badUpdate = new ChatUpdateDTO();
+      assertThrows(AiValidationException.class, () -> chatService.updateChat(chatId, badUpdate));
       badUpdate.setDefaultAgentId("999999999999");
-      assertThrows(IllegalArgumentException.class, () -> chatService.updateChat(chatId, badUpdate));
+      badUpdate.setExpectedVersion("0");
+      assertThrows(AiValidationException.class, () -> chatService.updateChat(chatId, badUpdate));
 
       ChatUpdateDTO blankTitleUpdate = new ChatUpdateDTO();
       blankTitleUpdate.setTitle("   ");
+      blankTitleUpdate.setExpectedVersion("0");
       assertThrows(
-          IllegalArgumentException.class, () -> chatService.updateChat(chatId, blankTitleUpdate));
+          AiValidationException.class, () -> chatService.updateChat(chatId, blankTitleUpdate));
       assertEquals("alpha", chatService.getChat(chatId).getTitle());
 
       ChatUpdateDTO update = new ChatUpdateDTO();
       update.setTitle("beta");
       update.setDefaultAgentId("");
+      update.setExpectedVersion("0");
       ChatDTO updated = chatService.updateChat(chatId, update);
       assertEquals("beta", updated.getTitle());
       assertNull(updated.getDefaultAgentId());
+      assertEquals("1", updated.getVersion());
+
+      ChatUpdateDTO stale = new ChatUpdateDTO();
+      stale.setExpectedVersion("0");
+      assertThrows(AiVersionConflictException.class, () -> chatService.updateChat(chatId, stale));
 
       ChatCreateDTO newer = new ChatCreateDTO();
       newer.setTitle("gamma");
@@ -99,14 +111,14 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
         assertTrue(secondIndex >= 0 && firstIndex >= 0);
         assertTrue(secondIndex < firstIndex, "newest chat must appear first");
       } finally {
-        chatService.deleteChat(second.getId());
+        chatService.deleteChat(second.getId(), "0");
       }
 
-      assertThrows(NoSuchElementException.class, () -> chatService.getChat("999999999999"));
-      assertThrows(IllegalArgumentException.class, () -> chatService.getChat("not-a-number"));
+      assertThrows(AiResourceNotFoundException.class, () -> chatService.getChat("999999999999"));
+      assertThrows(AiValidationException.class, () -> chatService.getChat("not-a-number"));
     } finally {
-      chatService.deleteChat(chatId);
-      assertThrows(NoSuchElementException.class, () -> chatService.getChat(chatId));
+      chatService.deleteChat(chatId, "1");
+      assertThrows(AiResourceNotFoundException.class, () -> chatService.getChat(chatId));
     }
   }
 

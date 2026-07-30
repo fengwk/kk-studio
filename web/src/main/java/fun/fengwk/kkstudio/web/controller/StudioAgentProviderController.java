@@ -47,8 +47,9 @@ public class StudioAgentProviderController {
   }
 
   @DeleteMapping("/{id}")
-  public Result<Void> deleteProvider(@PathVariable long id) {
-    agentProviderService.deleteProvider(id);
+  public Result<Void> deleteProvider(
+      @PathVariable long id, @RequestParam("expectedVersion") String expectedVersion) {
+    agentProviderService.deleteProvider(id, expectedVersion);
     return Results.noContent();
   }
 }

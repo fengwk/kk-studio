@@ -82,6 +82,7 @@ describe('ChatWorkspacePage', () => {
             tools: [],
             skills: [],
           },
+          version: '0',
           createTime: null,
           updateTime: null,
         },
@@ -93,7 +94,7 @@ describe('ChatWorkspacePage', () => {
       id: 'chat-1',
       title: 'Workspace',
       defaultAgentId: 'a1',
-      version: 1,
+      version: '1',
       createTime: null,
       updateTime: null,
     })
@@ -101,7 +102,7 @@ describe('ChatWorkspacePage', () => {
       id: 'chat-1',
       title: 'Workspace',
       defaultAgentId: 'a1',
-      version: 2,
+      version: '2',
       createTime: null,
       updateTime: null,
     })
@@ -178,7 +179,7 @@ describe('ChatWorkspacePage', () => {
       id: 'chat-1',
       title: 'Workspace',
       defaultAgentId: 'missing',
-      version: 1,
+      version: '1',
       createTime: null,
       updateTime: null,
     })

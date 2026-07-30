@@ -11,9 +11,6 @@ import fun.fengwk.kkstudio.core.agent.provider.repo.impl.mapper.AgentProviderMap
 import fun.fengwk.kkstudio.core.agent.provider.repo.impl.model.AgentProviderDO;
 import fun.fengwk.kkstudio.core.agent.provider.service.model.AgentProvider;
 
-import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 
 /** PostgreSQL-backed global provider repository. */
@@ -47,13 +44,13 @@ public class PostgresqlAgentProviderRepository implements AgentProviderRepositor
   }
 
   @Override
-  public boolean updateById(AgentProvider provider) {
-    return agentProviderMapper.updateById(convert(provider)) == 1;
+  public boolean updateById(AgentProvider provider, long expectedVersion) {
+    return agentProviderMapper.updateById(convert(provider), expectedVersion) == 1;
   }
 
   @Override
-  public boolean deleteById(long id) {
-    return agentProviderMapper.deleteById(id) == 1;
+  public boolean deleteById(long id, long expectedVersion) {
+    return agentProviderMapper.deleteById(id, expectedVersion) == 1;
   }
 
   @Override
@@ -89,12 +86,8 @@ public class PostgresqlAgentProviderRepository implements AgentProviderRepositor
     result.setCredential(provider.getCredential());
     result.setConfigJson(provider.getConfigJson());
     result.setVersion(provider.getVersion());
-    result.setCreateTime(toLocalDateTime(provider.getCreateTime()));
-    result.setUpdateTime(toLocalDateTime(provider.getUpdateTime()));
+    result.setCreateTime(provider.getCreateTime());
+    result.setUpdateTime(provider.getUpdateTime());
     return result;
-  }
-
-  private static LocalDateTime toLocalDateTime(OffsetDateTime value) {
-    return value == null ? null : value.withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime();
   }
 }

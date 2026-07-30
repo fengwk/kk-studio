@@ -45,6 +45,7 @@ class E2eProviderCredentialEnvironmentSynchronizerTest {
     assertEquals("google-secret", byName.get("google").getCredential());
     assertEquals("https://zai.example/v1", byName.get("zai").getBaseUrl());
     assertEquals("zai-secret", byName.get("zai").getCredential());
+    assertEquals("0", byName.get("minimax").getExpectedVersion());
   }
 
   @Test
@@ -125,6 +126,7 @@ class E2eProviderCredentialEnvironmentSynchronizerTest {
     provider.setProviderType(providerType);
     provider.setModelCallTimeoutMillis(1_800_000L);
     provider.setModelCallIdleTimeoutMillis(120_000L);
+    provider.setVersion("0");
     return provider;
   }
 

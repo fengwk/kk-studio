@@ -18,14 +18,18 @@ describe('chatService', () => {
     await service.listChats()
     await service.createChat({ title: 'A', defaultAgentId: '9' })
     await service.getChat('chat /1')
-    await service.updateChat('chat /1', { title: 'B', defaultAgentId: '' })
-    await service.deleteChat('chat /1')
+    await service.updateChat('chat /1', { title: 'B', defaultAgentId: '', expectedVersion: '4' })
+    await service.deleteChat('chat /1', '5')
 
     expect(client.get).toHaveBeenNthCalledWith(1, '/chats')
     expect(client.post).toHaveBeenNthCalledWith(1, '/chats', { title: 'A', defaultAgentId: '9' })
     expect(client.get).toHaveBeenNthCalledWith(2, '/chats/chat%20%2F1')
-    expect(client.put).toHaveBeenNthCalledWith(1, '/chats/chat%20%2F1', { title: 'B', defaultAgentId: '' })
-    expect(client.delete).toHaveBeenNthCalledWith(1, '/chats/chat%20%2F1')
+    expect(client.put).toHaveBeenNthCalledWith(1, '/chats/chat%20%2F1', {
+      title: 'B',
+      defaultAgentId: '',
+      expectedVersion: '4',
+    })
+    expect(client.delete).toHaveBeenNthCalledWith(1, '/chats/chat%20%2F1', { params: { expectedVersion: '5' } })
     // Chat-Session membership is gone: Chat never touches /sessions sub-resources.
     expect(client.get).not.toHaveBeenCalledWith(expect.stringContaining('/sessions'))
     expect(client.post).not.toHaveBeenCalledWith(expect.stringContaining('/sessions'), expect.anything())

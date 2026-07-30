@@ -70,12 +70,13 @@ public interface AgentProviderMapper extends BaseMapper {
           provider_type = #{provider.providerType}, base_url = #{provider.baseUrl},
           credential = #{provider.credential}, config = cast(#{provider.configJson} as jsonb),
           updated_at = current_timestamp, version = version + 1
-      where id = #{provider.id}
+      where id = #{provider.id} and version = #{expectedVersion}
       """)
-  int updateById(@Param("provider") AgentProviderDO provider);
+  int updateById(
+      @Param("provider") AgentProviderDO provider, @Param("expectedVersion") long expectedVersion);
 
-  @Delete("delete from agent_provider where id = #{id}")
-  int deleteById(@Param("id") long id);
+  @Delete("delete from agent_provider where id = #{id} and version = #{expectedVersion}")
+  int deleteById(@Param("id") long id, @Param("expectedVersion") long expectedVersion);
 
   @Select("select count(*) from agent_model where provider_id = #{providerId}")
   long countModelsByProviderId(@Param("providerId") long providerId);

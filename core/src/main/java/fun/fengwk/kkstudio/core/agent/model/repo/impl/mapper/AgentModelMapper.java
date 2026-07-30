@@ -70,12 +70,13 @@ public interface AgentModelMapper extends BaseMapper {
       set name = #{model.name}, description = #{model.description},
           config = cast(#{model.configJson} as jsonb),
           updated_at = current_timestamp, version = version + 1
-      where id = #{model.id}
+      where id = #{model.id} and version = #{expectedVersion}
       """)
-  int updateById(@Param("model") AgentModelDO model);
+  int updateById(
+      @Param("model") AgentModelDO model, @Param("expectedVersion") long expectedVersion);
 
-  @Delete("delete from agent_model where id = #{id}")
-  int deleteById(@Param("id") long id);
+  @Delete("delete from agent_model where id = #{id} and version = #{expectedVersion}")
+  int deleteById(@Param("id") long id, @Param("expectedVersion") long expectedVersion);
 
   @Select("select count(*) from agent_definition where model_id = #{modelId}")
   long countAgentsByModelId(@Param("modelId") long modelId);

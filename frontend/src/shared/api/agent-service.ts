@@ -25,8 +25,8 @@ export function createAgentService(client: HttpClient = apiClient) {
     updateProvider: (id: AgentResourceId, data: AgentProviderUpdateDTO): Promise<AgentProviderDTO> =>
       client.put(`/providers/${encodeURIComponent(id)}`, data),
 
-    deleteProvider: (id: AgentResourceId): Promise<void> =>
-      client.delete(`/providers/${encodeURIComponent(id)}`),
+    deleteProvider: (id: AgentResourceId, expectedVersion: string): Promise<void> =>
+      client.delete(`/providers/${encodeURIComponent(id)}`, { params: { expectedVersion } }),
 
     listModels: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentModelDTO>> =>
       client.get('/models', { params: { pageNumber, pageSize } }),
@@ -37,8 +37,8 @@ export function createAgentService(client: HttpClient = apiClient) {
     updateModel: (id: AgentResourceId, data: AgentModelUpdateDTO): Promise<AgentModelDTO> =>
       client.put(`/models/${encodeURIComponent(id)}`, data),
 
-    deleteModel: (id: AgentResourceId): Promise<void> =>
-      client.delete(`/models/${encodeURIComponent(id)}`),
+    deleteModel: (id: AgentResourceId, expectedVersion: string): Promise<void> =>
+      client.delete(`/models/${encodeURIComponent(id)}`, { params: { expectedVersion } }),
 
     listAgents: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentDefinitionDTO>> =>
       client.get('/agents', { params: { pageNumber, pageSize } }),
@@ -49,8 +49,8 @@ export function createAgentService(client: HttpClient = apiClient) {
     updateAgent: (id: AgentResourceId, data: AgentDefinitionUpdateDTO): Promise<AgentDefinitionDTO> =>
       client.put(`/agents/${encodeURIComponent(id)}`, data),
 
-    deleteAgent: (id: AgentResourceId): Promise<void> =>
-      client.delete(`/agents/${encodeURIComponent(id)}`),
+    deleteAgent: (id: AgentResourceId, expectedVersion: string): Promise<void> =>
+      client.delete(`/agents/${encodeURIComponent(id)}`, { params: { expectedVersion } }),
 
     getThreadUsage: (threadId: string): Promise<ModelUsageSummaryDTO> =>
       client.get(`/usage/threads/${encodeURIComponent(threadId)}`),

@@ -56,10 +56,10 @@ public interface ChatMapper extends BaseMapper {
       update chat
       set title = #{chat.title}, default_agent_id = #{chat.defaultAgentId},
           updated_at = current_timestamp, version = version + 1
-      where id = #{chat.id}
+      where id = #{chat.id} and version = #{expectedVersion}
       """)
-  int updateById(@Param("chat") ChatDO chat);
+  int updateById(@Param("chat") ChatDO chat, @Param("expectedVersion") long expectedVersion);
 
-  @Delete("delete from chat where id = #{id}")
-  int deleteById(@Param("id") long id);
+  @Delete("delete from chat where id = #{id} and version = #{expectedVersion}")
+  int deleteById(@Param("id") long id, @Param("expectedVersion") long expectedVersion);
 }

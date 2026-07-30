@@ -4,7 +4,7 @@ import lombok.Data;
 
 import fun.fengwk.kkstudio.share.model.AgentProviderType;
 
-import java.time.OffsetDateTime;
+import java.time.Instant;
 
 /** {@code agent_provider} 行映射：LLM Provider 连接配置。 */
 @Data
@@ -35,8 +35,8 @@ public class AgentProviderDO {
   private Long version;
 
   /** 创建时间（映射 {@code created_at} timestamptz）。 */
-  private OffsetDateTime createTime;
+  private Instant createTime;
 
   /** 更新时间（映射 {@code updated_at} timestamptz）。 */
-  private OffsetDateTime updateTime;
+  private Instant updateTime;
 }

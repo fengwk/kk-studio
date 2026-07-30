@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.chat.service.converter;
 
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.core.ai.error.CatalogVersions;
 import fun.fengwk.kkstudio.core.chat.service.ChatIds;
 import fun.fengwk.kkstudio.core.chat.service.model.Chat;
 import fun.fengwk.kkstudio.share.model.ChatDTO;
@@ -19,7 +20,7 @@ public class ChatConverter {
     dto.setTitle(chat.getTitle());
     dto.setDefaultAgentId(
         chat.getDefaultAgentId() == null ? null : ChatIds.format(chat.getDefaultAgentId()));
-    dto.setVersion(chat.getVersion());
+    dto.setVersion(CatalogVersions.format(chat.getVersion()));
     dto.setCreateTime(chat.getCreateTime());
     dto.setUpdateTime(chat.getUpdateTime());
     return dto;

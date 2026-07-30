@@ -17,5 +17,5 @@ public interface ChatService {
 
   ChatDTO updateChat(String id, ChatUpdateDTO updateDTO);
 
-  void deleteChat(String id);
+  void deleteChat(String id, String expectedVersion);
 }

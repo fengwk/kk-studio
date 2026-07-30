@@ -16,7 +16,9 @@ public interface AgentDefinitionRepository {
 
   boolean create(AgentDefinition agentDefinition);
 
-  boolean updateById(AgentDefinition agentDefinition);
+  /** Atomic CAS update on (id, expectedVersion). */
+  boolean updateById(AgentDefinition agentDefinition, long expectedVersion);
 
-  boolean deleteById(long id);
+  /** Atomic CAS delete on (id, expectedVersion). */
+  boolean deleteById(long id, long expectedVersion);
 }

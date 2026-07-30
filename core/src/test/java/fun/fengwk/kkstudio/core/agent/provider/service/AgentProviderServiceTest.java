@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.agent.provider.service;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -8,6 +9,10 @@ import fun.fengwk.convention4j.api.page.PageQuery;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import fun.fengwk.kkstudio.core.ai.error.AiDuplicateException;
+import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
+import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
@@ -27,8 +32,9 @@ public class AgentProviderServiceTest extends PostgresSpringTestSupport {
 
     assertTrue(provider.isConfigured());
     assertFalse(hasProperty(provider, "credential"));
+    assertEquals("0", provider.getVersion());
     assertThrows(
-        IllegalArgumentException.class,
+        AiDuplicateException.class,
         () -> agentProviderService.createProvider(provider(name, "another")));
     assertTrue(
         agentProviderService.pageProviders(new PageQuery(1, 100)).getResults().stream()
@@ -37,16 +43,40 @@ public class AgentProviderServiceTest extends PostgresSpringTestSupport {
     AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
     update.setProviderType("openai");
     update.setCredential("rotated-secret");
+    update.setExpectedVersion(provider.getVersion());
     AgentProviderDTO updated = agentProviderService.updateProvider(id(provider.getId()), update);
     assertTrue(updated.isConfigured());
+    assertEquals("1", updated.getVersion());
     assertThrows(
-        IllegalArgumentException.class,
-        () -> agentProviderService.updateProvider(Long.MAX_VALUE, update));
+        AiVersionConflictException.class,
+        () -> agentProviderService.updateProvider(id(provider.getId()), update));
 
-    agentProviderService.deleteProvider(id(provider.getId()));
+    AgentProviderUpdateDTO badUpdate = new AgentProviderUpdateDTO();
     assertThrows(
-        IllegalArgumentException.class,
-        () -> agentProviderService.deleteProvider(id(provider.getId())));
+        AiValidationException.class,
+        () -> agentProviderService.updateProvider(id(provider.getId()), badUpdate));
+
+    assertThrows(
+        AiResourceNotFoundException.class,
+        () -> agentProviderService.updateProvider(Long.MAX_VALUE, update));
+    assertThrows(
+        AiVersionConflictException.class,
+        () ->
+            agentProviderService.updateProvider(
+                id(provider.getId()), staleUpdate(provider.getVersion(), "rotated-secret-2")));
+
+    agentProviderService.deleteProvider(id(provider.getId()), updated.getVersion());
+    assertThrows(
+        AiResourceNotFoundException.class,
+        () -> agentProviderService.deleteProvider(id(provider.getId()), "0"));
+  }
+
+  private AgentProviderUpdateDTO staleUpdate(String version, String credential) {
+    AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
+    update.setProviderType("openai");
+    update.setCredential(credential);
+    update.setExpectedVersion(version);
+    return update;
   }
 
   private AgentProviderCreateDTO provider(String name, String credential) {

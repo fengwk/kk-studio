@@ -47,8 +47,9 @@ public class StudioAgentDefinitionController {
   }
 
   @DeleteMapping("/{id}")
-  public Result<Void> deleteAgent(@PathVariable long id) {
-    agentDefinitionService.deleteAgent(id);
+  public Result<Void> deleteAgent(
+      @PathVariable long id, @RequestParam("expectedVersion") String expectedVersion) {
+    agentDefinitionService.deleteAgent(id, expectedVersion);
     return Results.noContent();
   }
 }

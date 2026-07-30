@@ -142,15 +142,15 @@ API 矩阵注册 **58** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 | --- | --- |
 | `crud.provider.invalid_blank_base_url_type_ok_name_only_fails` | 空白 name 在创建校验被拒 |
 | `crud.provider.invalid_missing_type` | 缺 providerType => 400 |
-| `crud.model.invalid_update_config` | 非法 PUT 拒绝且原配置保留 |
+| `crud.model.invalid_update_config` | 带创建时版本的非法 PUT 被拒绝且原配置保留 |
 | `crud.agent.invalid_blank_name` | 空白 name => 400 |
 | `crud.agent.invalid_variant` | Variant 不属于所选 Model => 400 |
-| `crud.provider.lifecycle` | create/list/update/delete + 空白 name 400 |
-| `crud.model.lifecycle` | create/update/delete model（临时 provider） |
-| `crud.agent.lifecycle` | create/update/delete agent |
+| `crud.provider.lifecycle` | create/list/update/delete；PUT 与 DELETE 均回显响应版本 |
+| `crud.model.lifecycle` | create/update/delete model（临时 provider；PUT/DELETE 使用版本） |
+| `crud.agent.lifecycle` | create/update/delete agent（PUT/DELETE 使用版本） |
 | `crud.chat.invalid_agent_id` | 非正整数字符串 defaultAgentId => 400 |
-| `crud.model.delete_unknown_rejected` | 删除不存在 Model => 4xx |
-| `crud.chat.lifecycle` | create/update/delete chat；空白 title 更新拒绝；删后 404。Chat 不持有 Session |
+| `crud.model.delete_unknown_rejected` | 删除不存在 Model（`expectedVersion=0`）=> 404 |
+| `crud.chat.lifecycle` | create/update/delete chat；PUT/DELETE 使用版本；空白 title 更新拒绝；删后 404。Chat 不持有 Session |
 
 ### Model config 矩阵
 
@@ -222,8 +222,8 @@ API 矩阵注册 **58** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 
 ```text
 POST /api/providers|models|agents|chats
-PUT  /api/providers|models|agents|chats/{id}
-DELETE /api/providers|models|agents|chats/{id}
+PUT  /api/providers|models|agents|chats/{id}              # body.expectedVersion 必填十进制字符串
+DELETE /api/providers|models|agents|chats/{id}?expectedVersion={version}
 GET  /api/threads                     # 全局 Thread 列表
 POST /api/threads                     # 无 body => 201 UNBOUND Thread
 POST /api/threads/{id}/bootstrap      # => 201 {session, thread}
@@ -236,6 +236,10 @@ GET  /api/models               # structured config only
 ```
 
 上述 Thread 写接口的请求体均含必填 `expectedExecutionEpoch`：epoch 过期或 Thread 非静止 => `409`，未知资源 => `404`。
+
+Catalog（Provider / Model / Agent / Chat）响应中的 `version` 是十进制字符串，`createTime` /
+`updateTime` 是 Instant 时间戳。每次成功更新版本递增；PUT 的 `expectedVersion` 或 DELETE
+查询参数过期时返回 `409 version_conflict`，资源不存在时返回 `404 resource_not_found`。
 
 ## 维护
 

@@ -46,7 +46,7 @@ function provider(id: string, name: string): AgentProviderDTO {
     configured: true,
     modelCallTimeoutMillis: 1800000,
     modelCallIdleTimeoutMillis: 120000,
-    version: 1,
+    version: '1',
     createTime: null,
     updateTime: null,
   }
@@ -59,7 +59,7 @@ function model(id: string, providerId: string): AgentModelDTO {
     name: id,
     description: null,
     config: modelConfig(),
-    version: 1,
+    version: '1',
     createTime: null,
     updateTime: null,
   }
@@ -78,7 +78,7 @@ function agent(id: string, modelId: string): AgentDefinitionDTO {
       tools: [],
       skills: [],
     },
-    version: 1,
+    version: '1',
     createTime: null,
     updateTime: null,
   }
@@ -116,6 +116,7 @@ describe('ai-resource-editor-open-plans', () => {
     expect(plan.kind).toBe('model')
     if (plan.kind !== 'model') return
     expect(plan.modelDraft.name).toBe('m1')
+    expect(plan.modal).toMatchObject({ mode: 'edit', id: 'm1', expectedVersion: '1' })
   })
 
   it('seeds a new agent plan with the first model', () => {
@@ -140,6 +141,7 @@ describe('ai-resource-editor-open-plans', () => {
     expect(plan).not.toBeNull()
     if (!plan) return
     expect(plan.kind).toBe('agent')
+    expect(plan.modal).toMatchObject({ mode: 'edit', id: 'a1', expectedVersion: '1' })
   })
 
   it('builds a provider edit plan', () => {
@@ -150,6 +152,7 @@ describe('ai-resource-editor-open-plans', () => {
     expect(plan.kind).toBe('provider')
     if (plan.kind !== 'provider') return
     expect(plan.providerDraft.name).toBe('minimax')
+    expect(plan.modal).toMatchObject({ mode: 'edit', id: 'p1', expectedVersion: '1' })
   })
 
   it('returns a provider create plan', () => {

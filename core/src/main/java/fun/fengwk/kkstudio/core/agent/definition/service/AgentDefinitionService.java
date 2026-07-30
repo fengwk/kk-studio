@@ -16,5 +16,5 @@ public interface AgentDefinitionService {
 
   AgentDefinitionDTO updateAgent(long id, AgentDefinitionUpdateDTO updateDTO);
 
-  void deleteAgent(long id);
+  void deleteAgent(long id, String expectedVersion);
 }

@@ -75,7 +75,10 @@ describe('useAiConsoleResourceController', () => {
     await user.click(screen.getByRole('button', { name: 'submit' }))
 
     await waitFor(() => {
-      expect(agentService.updateProvider).toHaveBeenCalledWith('provider-1', expect.objectContaining({ name: 'stub-renamed' }))
+      expect(agentService.updateProvider).toHaveBeenCalledWith(
+        'provider-1',
+        expect.objectContaining({ name: 'stub-renamed', expectedVersion: '0' }),
+      )
       expect(agentService.listModels).toHaveBeenCalledTimes(2)
       expect(agentService.listAgents).toHaveBeenCalledTimes(2)
     })
@@ -87,7 +90,10 @@ describe('useAiConsoleResourceController', () => {
     await user.click(screen.getByRole('button', { name: 'submit' }))
 
     await waitFor(() => {
-      expect(agentService.updateModel).toHaveBeenCalledWith('model-1', expect.objectContaining({ name: 'acceptance-stub-renamed' }))
+      expect(agentService.updateModel).toHaveBeenCalledWith(
+        'model-1',
+        expect.objectContaining({ name: 'acceptance-stub-renamed', expectedVersion: '0' }),
+      )
       expect(agentService.listAgents).toHaveBeenCalledTimes(3)
     })
 
@@ -227,6 +233,7 @@ function provider() {
     configured: true,
     modelCallTimeoutMillis: 1800000,
     modelCallIdleTimeoutMillis: 120000,
+    version: '0',
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
   }
@@ -258,6 +265,7 @@ function model() {
       defaultVariant: 'default',
       variants: [{ id: 'default' }],
     },
+    version: '0',
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
   }
@@ -276,6 +284,7 @@ function agent() {
       tools: [],
       skills: []
     },
+    version: '0',
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
   }

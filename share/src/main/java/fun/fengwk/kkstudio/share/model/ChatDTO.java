@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.share.model;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 /**
  * Public read representation of a Chat collection.
@@ -16,7 +16,10 @@ public class ChatDTO {
   private String id;
   private String title;
   private String defaultAgentId;
-  private Long version;
-  private LocalDateTime createTime;
-  private LocalDateTime updateTime;
+
+  /** Non-negative decimal string version; clients must echo on every update. */
+  private String version;
+
+  private Instant createTime;
+  private Instant updateTime;
 }

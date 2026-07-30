@@ -51,6 +51,7 @@ final class E2eProviderCredentialEnvironmentSynchronizer {
             "E2E provider seed is missing configured provider: " + configuration.name());
       }
       AgentProviderUpdateDTO update = update(provider, configuration);
+      update.setExpectedVersion(provider.getVersion());
       agentProviderService.updateProvider(providerId(provider), update);
       log.info(
           "Synchronized externally supplied E2E configuration for provider {}", provider.getName());

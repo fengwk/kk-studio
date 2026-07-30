@@ -14,12 +14,18 @@ export interface PageResult<T> {
 
 export type BackendDateTime = string | number[] | null
 
+/** Java {@code Instant} timestamp emitted by the backend's Jackson configuration. */
+export type InstantTimestamp = number | string | null
+
 /** Backend resource ids are positive decimal strings and must remain strings on the wire. */
 export type AgentResourceId = string
 
 export type BackendLong = number | string
 
 export type BackendBigDecimal = number | string
+
+/** Non-negative decimal optimistic-lock token. */
+export type CatalogVersion = string
 
 export interface ModelUsageCostSummaryDTO {
   currency: string
@@ -60,9 +66,9 @@ export interface AgentProviderDTO {
   configured: boolean
   modelCallTimeoutMillis: BackendLong
   modelCallIdleTimeoutMillis: BackendLong
-  version: BackendLong
-  createTime: BackendDateTime
-  updateTime: BackendDateTime
+  version: CatalogVersion
+  createTime: InstantTimestamp
+  updateTime: InstantTimestamp
 }
 
 export interface AgentProviderEditablePropertiesDTO {
@@ -79,7 +85,9 @@ export interface AgentProviderCreateDTO extends AgentProviderEditablePropertiesD
   name: string
 }
 
-export type AgentProviderUpdateDTO = AgentProviderEditablePropertiesDTO
+export interface AgentProviderUpdateDTO extends AgentProviderEditablePropertiesDTO {
+  expectedVersion: CatalogVersion
+}
 
 /** Stable enum mirroring the backend {@code AgentModelInputModality}. */
 export type AgentModelInputModality =
@@ -148,9 +156,9 @@ export interface AgentModelDTO {
   name: string
   description: string | null
   config: AgentModelConfigDTO
-  version: BackendLong
-  createTime: BackendDateTime
-  updateTime: BackendDateTime
+  version: CatalogVersion
+  createTime: InstantTimestamp
+  updateTime: InstantTimestamp
 }
 
 /**
@@ -167,7 +175,9 @@ export interface AgentModelCreateDTO extends AgentModelEditablePropertiesDTO {
   providerId: string
 }
 
-export type AgentModelUpdateDTO = AgentModelEditablePropertiesDTO
+export interface AgentModelUpdateDTO extends AgentModelEditablePropertiesDTO {
+  expectedVersion: CatalogVersion
+}
 
 export interface AgentDefinitionConfigDTO {
   /** Optional live Environment name; an omitted or null value means none. */
@@ -186,9 +196,9 @@ export interface AgentDefinitionDTO {
   /** Optional override; null means use the selected Model's defaultVariant. */
   variant: string | null
   config: AgentDefinitionConfigDTO
-  version: BackendLong
-  createTime: BackendDateTime
-  updateTime: BackendDateTime
+  version: CatalogVersion
+  createTime: InstantTimestamp
+  updateTime: InstantTimestamp
 }
 
 /** Complete Agent Definition create/PUT body. */
@@ -204,7 +214,9 @@ export interface AgentDefinitionEditablePropertiesDTO {
 
 export type AgentDefinitionCreateDTO = AgentDefinitionEditablePropertiesDTO
 
-export type AgentDefinitionUpdateDTO = AgentDefinitionEditablePropertiesDTO
+export interface AgentDefinitionUpdateDTO extends AgentDefinitionEditablePropertiesDTO {
+  expectedVersion: CatalogVersion
+}
 
 /** Flat Session query projection; Sessions are only created as a side effect of Thread bootstrap. */
 export interface HarnessSessionDTO {
@@ -220,9 +232,9 @@ export interface ChatDTO {
   id: string
   title: string | null
   defaultAgentId: string | null
-  version?: BackendLong | null
-  createTime: BackendDateTime
-  updateTime: BackendDateTime
+  version: CatalogVersion
+  createTime: InstantTimestamp
+  updateTime: InstantTimestamp
 }
 
 export interface ChatCreateDTO {
@@ -234,6 +246,7 @@ export interface ChatCreateDTO {
 export interface ChatUpdateDTO {
   title?: string | null
   defaultAgentId?: string | null
+  expectedVersion: CatalogVersion
 }
 
 export interface LiveEnvironmentToolDTO {

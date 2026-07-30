@@ -1,4 +1,8 @@
-import type { AgentProviderCreateDTO, AgentProviderDTO, AgentProviderUpdateDTO } from '@/shared/api/contracts'
+import type {
+  AgentProviderCreateDTO,
+  AgentProviderDTO,
+  AgentProviderEditablePropertiesDTO,
+} from '@/shared/api/contracts'
 import type { ProviderDraft } from '@/features/ai/ai-console-types'
 import { numberToNull, trimToNull } from '@/features/ai/ai-resource-draft-primitives'
 
@@ -38,6 +42,6 @@ export function toEditableProvider(draft: ProviderDraft): AgentProviderCreateDTO
   }
 }
 
-export function toEditableProviderUpdate(draft: ProviderDraft): AgentProviderUpdateDTO {
+export function toEditableProviderUpdate(draft: ProviderDraft): AgentProviderEditablePropertiesDTO {
   return toEditableProvider(draft)
 }

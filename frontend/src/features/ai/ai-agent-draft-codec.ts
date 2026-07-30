@@ -2,7 +2,7 @@ import type {
   AgentDefinitionConfigDTO,
   AgentDefinitionCreateDTO,
   AgentDefinitionDTO,
-  AgentDefinitionUpdateDTO,
+  AgentDefinitionEditablePropertiesDTO,
   AgentModelDTO,
 } from '@/shared/api/contracts'
 import type { AgentDraft } from '@/features/ai/ai-console-types'
@@ -109,6 +109,6 @@ export function toEditableAgent(draft: AgentDraft): AgentDefinitionCreateDTO {
   }
 }
 
-export function toEditableAgentUpdate(draft: AgentDraft): AgentDefinitionUpdateDTO {
+export function toEditableAgentUpdate(draft: AgentDraft): AgentDefinitionEditablePropertiesDTO {
   return toEditableAgent(draft)
 }

@@ -8,9 +8,6 @@ import fun.fengwk.kkstudio.core.chat.repo.impl.mapper.ChatMapper;
 import fun.fengwk.kkstudio.core.chat.repo.impl.model.ChatDO;
 import fun.fengwk.kkstudio.core.chat.service.model.Chat;
 
-import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -37,13 +34,13 @@ public class PostgresqlChatRepository implements ChatRepository {
   }
 
   @Override
-  public boolean updateById(Chat chat) {
-    return chatMapper.updateById(toDO(chat)) == 1;
+  public boolean updateById(Chat chat, long expectedVersion) {
+    return chatMapper.updateById(toDO(chat), expectedVersion) == 1;
   }
 
   @Override
-  public boolean deleteById(long id) {
-    return chatMapper.deleteById(id) == 1;
+  public boolean deleteById(long id, long expectedVersion) {
+    return chatMapper.deleteById(id, expectedVersion) == 1;
   }
 
   private ChatDO toDO(Chat chat) {
@@ -66,12 +63,8 @@ public class PostgresqlChatRepository implements ChatRepository {
     target.setTitle(row.getTitle());
     target.setDefaultAgentId(row.getDefaultAgentId());
     target.setVersion(row.getVersion());
-    target.setCreateTime(toLocalDateTime(row.getCreateTime()));
-    target.setUpdateTime(toLocalDateTime(row.getUpdateTime()));
+    target.setCreateTime(row.getCreateTime());
+    target.setUpdateTime(row.getUpdateTime());
     return target;
-  }
-
-  private static LocalDateTime toLocalDateTime(OffsetDateTime value) {
-    return value == null ? null : value.withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime();
   }
 }

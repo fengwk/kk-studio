@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.core.agent.definition.service.model;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 /** Global Agent definition resource. */
 @Data
@@ -16,6 +16,6 @@ public class AgentDefinition {
   private String variant;
   private String configJson;
   private Long version;
-  private LocalDateTime createTime;
-  private LocalDateTime updateTime;
+  private Instant createTime;
+  private Instant updateTime;
 }

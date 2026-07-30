@@ -4,7 +4,7 @@ import lombok.Data;
 
 import fun.fengwk.kkstudio.share.model.AgentProviderType;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 /** Global Agent provider resource. */
 @Data
@@ -18,6 +18,6 @@ public class AgentProvider {
   private String credential;
   private String configJson;
   private Long version;
-  private LocalDateTime createTime;
-  private LocalDateTime updateTime;
+  private Instant createTime;
+  private Instant updateTime;
 }

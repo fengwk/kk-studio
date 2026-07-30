@@ -14,7 +14,13 @@ public interface AgentProviderService {
 
   AgentProviderDTO createProvider(AgentProviderCreateDTO createDTO);
 
+  /**
+   * Atomic CAS update on (id, {@code updateDTO.expectedVersion}). The expectedVersion token is read
+   * from the DTO only; stale values raise {@link
+   * fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException}.
+   */
   AgentProviderDTO updateProvider(long id, AgentProviderUpdateDTO updateDTO);
 
-  void deleteProvider(long id);
+  /** Atomic CAS delete on (id, expectedVersion). */
+  void deleteProvider(long id, String expectedVersion);
 }

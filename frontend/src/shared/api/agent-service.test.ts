@@ -81,8 +81,9 @@ describe('agentService', () => {
       variant: 'default',
       config: { environmentName: null, tools: [], skills: [] },
     }
-    const updateProviderBody = { description: 'updated' }
+    const updateProviderBody = { description: 'updated', expectedVersion: '7' }
     const updateModelBody = {
+      expectedVersion: '8',
       config: {
         limit: { context: 128000, output: 8192 },
         abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
@@ -103,27 +104,27 @@ describe('agentService', () => {
         variants: [{ id: 'fast' }],
       },
     }
-    const updateAgentBody = { description: 'updated' }
+    const updateAgentBody = { description: 'updated', expectedVersion: '9' }
 
     await service.createProvider(providerBody)
     await service.updateProvider(101, updateProviderBody)
-    await service.deleteProvider(101)
+    await service.deleteProvider(101, '8')
     await service.createModel(modelBody)
     await service.updateModel(202, updateModelBody)
-    await service.deleteModel(202)
+    await service.deleteModel(202, '10')
     await service.createAgent(agentBody)
     await service.updateAgent(303, updateAgentBody)
-    await service.deleteAgent(303)
+    await service.deleteAgent(303, '11')
 
     expect(client.post).toHaveBeenNthCalledWith(1, '/providers', providerBody)
     expect(client.put).toHaveBeenNthCalledWith(1, '/providers/101', updateProviderBody)
-    expect(client.delete).toHaveBeenNthCalledWith(1, '/providers/101')
+    expect(client.delete).toHaveBeenNthCalledWith(1, '/providers/101', { params: { expectedVersion: '8' } })
     expect(client.post).toHaveBeenNthCalledWith(2, '/models', modelBody)
     expect(client.put).toHaveBeenNthCalledWith(2, '/models/202', updateModelBody)
-    expect(client.delete).toHaveBeenNthCalledWith(2, '/models/202')
+    expect(client.delete).toHaveBeenNthCalledWith(2, '/models/202', { params: { expectedVersion: '10' } })
     expect(client.post).toHaveBeenNthCalledWith(3, '/agents', agentBody)
     expect(client.put).toHaveBeenNthCalledWith(3, '/agents/303', updateAgentBody)
-    expect(client.delete).toHaveBeenNthCalledWith(3, '/agents/303')
+    expect(client.delete).toHaveBeenNthCalledWith(3, '/agents/303', { params: { expectedVersion: '11' } })
   })
 
   it('maps usage summaries to encoded thread, session and model endpoints', async () => {

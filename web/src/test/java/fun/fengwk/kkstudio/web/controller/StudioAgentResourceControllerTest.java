@@ -59,6 +59,9 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
                         .content(objectMapper.writeValueAsString(provider)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.id").isString())
+                .andExpect(jsonPath("$.data.version").value("0"))
+                .andExpect(jsonPath("$.data.createTime").isNumber())
+                .andExpect(jsonPath("$.data.updateTime").isNumber())
                 .andExpect(jsonPath("$.data.workspaceId").doesNotExist())
                 .andExpect(jsonPath("$.data.configured").value(true))
                 .andExpect(jsonPath("$.data.credential").doesNotExist())
@@ -67,6 +70,17 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
                 .andReturn()
                 .getResponse()
                 .getContentAsString());
+
+    AgentProviderCreateDTO duplicateProvider = new AgentProviderCreateDTO();
+    duplicateProvider.setName(provider.getName());
+    duplicateProvider.setProviderType("openai");
+    mockMvc
+        .perform(
+            post("/api/providers")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(duplicateProvider)))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("duplicate"));
 
     AgentModelCreateDTO model = new AgentModelCreateDTO();
     model.setName("model-" + suffix);
@@ -82,6 +96,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.workspaceId").doesNotExist())
                 .andExpect(jsonPath("$.data.providerId").value(providerId))
+                .andExpect(jsonPath("$.data.version").value("0"))
                 .andReturn()
                 .getResponse()
                 .getContentAsString());
@@ -89,25 +104,41 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
     AgentProviderUpdateDTO providerUpdate = new AgentProviderUpdateDTO();
     providerUpdate.setProviderType("openai");
     providerUpdate.setDescription("updated provider");
+    providerUpdate.setExpectedVersion("0");
     mockMvc
         .perform(
             put("/api/providers/{id}", providerId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(providerUpdate)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.description").value("updated provider"));
+        .andExpect(jsonPath("$.data.description").value("updated provider"))
+        .andExpect(jsonPath("$.data.version").value("1"));
+
+    mockMvc
+        .perform(
+            put("/api/providers/{id}", providerId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(providerUpdate)))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("version_conflict"));
+    mockMvc
+        .perform(delete("/api/providers/{id}", providerId).param("expectedVersion", "1"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("in_use"));
 
     AgentModelUpdateDTO modelUpdate = new AgentModelUpdateDTO();
     modelUpdate.setName(model.getName());
     modelUpdate.setDescription("updated model");
     modelUpdate.setConfig(model.getConfig());
+    modelUpdate.setExpectedVersion("0");
     mockMvc
         .perform(
             put("/api/models/{id}", modelId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(modelUpdate)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.description").value("updated model"));
+        .andExpect(jsonPath("$.data.description").value("updated model"))
+        .andExpect(jsonPath("$.data.version").value("1"));
 
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of());
@@ -139,13 +170,15 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
     agentUpdate.setModelId(modelId);
     agentUpdate.setVariant("default");
     agentUpdate.setConfig(config);
+    agentUpdate.setExpectedVersion("0");
     mockMvc
         .perform(
             put("/api/agents/{id}", agentId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(agentUpdate)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.description").value("updated agent"));
+        .andExpect(jsonPath("$.data.description").value("updated agent"))
+        .andExpect(jsonPath("$.data.version").value("1"));
 
     AgentProviderCreateDTO disposableProvider = new AgentProviderCreateDTO();
     disposableProvider.setName("disposable-provider-" + suffix);
@@ -177,10 +210,14 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
                 .getResponse()
                 .getContentAsString());
     mockMvc
-        .perform(delete("/api/models/{id}", disposableModelId))
+        .perform(delete("/api/models/{id}", disposableModelId).param("expectedVersion", "0"))
         .andExpect(status().isNoContent());
     mockMvc
         .perform(delete("/api/providers/{id}", disposableProviderId))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+    mockMvc
+        .perform(delete("/api/providers/{id}", disposableProviderId).param("expectedVersion", "0"))
         .andExpect(status().isNoContent());
 
     mockMvc
@@ -195,7 +232,15 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
         .perform(get("/api/agents"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.results[0].modelId").isString());
-    mockMvc.perform(delete("/api/agents/{id}", agentId)).andExpect(status().isNoContent());
+    mockMvc
+        .perform(delete("/api/agents/{id}", agentId).param("expectedVersion", "1"))
+        .andExpect(status().isNoContent());
+    mockMvc
+        .perform(delete("/api/models/{id}", modelId).param("expectedVersion", "1"))
+        .andExpect(status().isNoContent());
+    mockMvc
+        .perform(delete("/api/providers/{id}", providerId).param("expectedVersion", "1"))
+        .andExpect(status().isNoContent());
     mockMvc.perform(get("/api/workspaces")).andExpect(status().isNotFound());
     mockMvc.perform(get("/api/workspaces/1")).andExpect(status().isNotFound());
     mockMvc.perform(get("/api/workspaces/1/agents")).andExpect(status().isNotFound());

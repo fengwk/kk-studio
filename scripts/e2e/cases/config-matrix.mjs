@@ -12,7 +12,9 @@ import { registerCase } from '../lib/registry.mjs'
  * 共享一个临时 provider，在第一个 case 创建，最后一个 case 删除。
  */
 let sharedProviderId = null
+let sharedProviderVersion = null
 let sharedModelIdForAgent = null
+let sharedModelVersionForAgent = null
 
 registerCase({
   id: 'matrix.model.setup_provider',
@@ -21,7 +23,9 @@ registerCase({
   docs: '供 config.model.* 复用，避免每行都建 provider',
   async run(ctx) {
     const { json } = await ctx.call('POST', '/api/providers', providerCreateBody(`mx-${cid().slice(0, 6)}`))
-    sharedProviderId = String(envelopeData(json).id)
+    const provider = envelopeData(json)
+    sharedProviderId = String(provider.id)
+    sharedProviderVersion = String(provider.version)
     ctx.vars.matrixProviderId = sharedProviderId
   },
 })
@@ -49,7 +53,7 @@ for (const row of modelConfigMatrix()) {
         assert(model?.id, JSON.stringify(json))
         ctx.writeArtifact(`model-${row.id}.json`, JSON.stringify(model, null, 2))
         // cleanup model immediately to keep list small
-        await ctx.call('DELETE', `/api/models/${model.id}`)
+        await ctx.call('DELETE', `/api/models/${model.id}?expectedVersion=${encodeURIComponent(model.version)}`)
       } else {
         const err = await expectHttpError(() => ctx.call('POST', '/api/models', body), {
           status: row.expectStatus || 400,
@@ -68,8 +72,12 @@ registerCase({
   docs: '删除 matrix.model.setup_provider 创建的 provider',
   async run(ctx) {
     if (sharedProviderId) {
-      await ctx.call('DELETE', `/api/providers/${sharedProviderId}`)
+      await ctx.call(
+        'DELETE',
+        `/api/providers/${sharedProviderId}?expectedVersion=${encodeURIComponent(sharedProviderVersion)}`,
+      )
       sharedProviderId = null
+      sharedProviderVersion = null
     }
   },
 })
@@ -85,15 +93,19 @@ registerCase({
       '/api/providers',
       providerCreateBody(`ag-${cid().slice(0, 6)}`),
     )
-    const providerId = String(envelopeData(pCreate).id)
+    const provider = envelopeData(pCreate)
+    const providerId = String(provider.id)
     ctx.vars.agentMatrixProviderId = providerId
+    ctx.vars.agentMatrixProviderVersion = String(provider.version)
     const { json: mCreate } = await ctx.call('POST', '/api/models', {
       providerId,
       name: `agent-matrix-model-${cid().slice(0, 4)}`,
       description: 'for agent matrix',
       config: baseModelConfig(),
     })
-    sharedModelIdForAgent = String(envelopeData(mCreate).id)
+    const model = envelopeData(mCreate)
+    sharedModelIdForAgent = String(model.id)
+    sharedModelVersionForAgent = String(model.version)
     ctx.vars.agentMatrixModelId = sharedModelIdForAgent
   },
 })
@@ -121,7 +133,7 @@ for (const row of agentConfigMatrix()) {
         assert(agent?.id, JSON.stringify(json))
         if (typeof row.assertCreated === 'function') row.assertCreated(agent)
         ctx.writeArtifact(`agent-${row.id}.json`, JSON.stringify(agent, null, 2))
-        await ctx.call('DELETE', `/api/agents/${agent.id}`)
+        await ctx.call('DELETE', `/api/agents/${agent.id}?expectedVersion=${encodeURIComponent(agent.version)}`)
       } else {
         const err = await expectHttpError(() => ctx.call('POST', '/api/agents', body), {
           status: row.expectStatus || 400,
@@ -147,7 +159,7 @@ registerCase({
         const name = String(agent.name || '')
         if (name.startsWith('ag-') || name.startsWith('e2e-agent-') || name.startsWith('t-[')) {
           try {
-            await ctx.call('DELETE', `/api/agents/${agent.id}`)
+            await ctx.call('DELETE', `/api/agents/${agent.id}?expectedVersion=${encodeURIComponent(agent.version)}`)
           } catch {
             // ignore
           }
@@ -157,12 +169,22 @@ registerCase({
       // ignore list failures
     }
     if (sharedModelIdForAgent) {
-      await ctx.call('DELETE', `/api/models/${sharedModelIdForAgent}`)
+      await ctx.call(
+        'DELETE',
+        `/api/models/${sharedModelIdForAgent}?expectedVersion=${encodeURIComponent(sharedModelVersionForAgent)}`,
+      )
       sharedModelIdForAgent = null
+      sharedModelVersionForAgent = null
     }
     if (ctx.vars.agentMatrixProviderId) {
-      await ctx.call('DELETE', `/api/providers/${ctx.vars.agentMatrixProviderId}`)
+      await ctx.call(
+        'DELETE',
+        `/api/providers/${ctx.vars.agentMatrixProviderId}?expectedVersion=${encodeURIComponent(
+          ctx.vars.agentMatrixProviderVersion,
+        )}`,
+      )
       ctx.vars.agentMatrixProviderId = null
+      ctx.vars.agentMatrixProviderVersion = null
     }
   },
 })

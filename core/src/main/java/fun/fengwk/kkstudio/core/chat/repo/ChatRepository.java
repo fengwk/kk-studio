@@ -13,7 +13,9 @@ public interface ChatRepository {
 
   boolean create(Chat chat);
 
-  boolean updateById(Chat chat);
+  /** Atomic CAS update on (id, expectedVersion). */
+  boolean updateById(Chat chat, long expectedVersion);
 
-  boolean deleteById(long id);
+  /** Atomic CAS delete on (id, expectedVersion). */
+  boolean deleteById(long id, long expectedVersion);
 }

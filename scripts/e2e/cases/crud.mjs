@@ -57,20 +57,23 @@ registerCase({
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const { json: pJson } = await ctx.call('POST', '/api/providers', providerCreateBody(suffix))
-    const providerId = String(envelopeData(pJson).id)
+    const provider = envelopeData(pJson)
+    const providerId = String(provider.id)
     const { json: mJson } = await ctx.call('POST', '/api/models', {
       providerId,
       name: `e2e-model-invupd-${suffix}`,
       description: 'ok',
       config: baseModelConfig(),
     })
-    const modelId = String(envelopeData(mJson).id)
+    const model = envelopeData(mJson)
+    const modelId = String(model.id)
     await expectHttpError(
       () =>
         ctx.call('PUT', `/api/models/${modelId}`, {
           name: `e2e-model-invupd-${suffix}`,
           description: 'bad',
           config: baseModelConfig({ defaultVariant: 'nope' }),
+          expectedVersion: model.version,
         }),
       { status: 400, messageIncludes: /defaultVariant/i },
     )
@@ -78,8 +81,8 @@ registerCase({
     const still = pageResults(getList).find((m) => String(m.id) === modelId)
     assert(still, 'model disappeared after rejected update')
     assert(still.config?.defaultVariant === 'default', JSON.stringify(still.config))
-    await ctx.call('DELETE', `/api/models/${modelId}`)
-    await ctx.call('DELETE', `/api/providers/${providerId}`)
+    await ctx.call('DELETE', `/api/models/${modelId}?expectedVersion=${encodeURIComponent(model.version)}`)
+    await ctx.call('DELETE', `/api/providers/${providerId}?expectedVersion=${encodeURIComponent(provider.version)}`)
   },
 })
 
@@ -152,7 +155,7 @@ registerCase({
     const { json: updateJson } = await ctx.call(
       'PUT',
       `/api/providers/${id}`,
-      providerUpdateBody(`e2e-provider-upd-${suffix}`),
+      { ...providerUpdateBody(`e2e-provider-upd-${suffix}`), expectedVersion: created.version },
     )
     const updated = envelopeData(updateJson)
     assert(updated.name === `e2e-provider-upd-${suffix}`, JSON.stringify(updated))
@@ -171,7 +174,7 @@ registerCase({
       { status: 400, messageIncludes: /name must not be blank/i },
     )
 
-    await ctx.call('DELETE', `/api/providers/${id}`)
+    await ctx.call('DELETE', `/api/providers/${id}?expectedVersion=${encodeURIComponent(updated.version)}`)
     const { json: listAfter } = await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=100')
     assert(!pageResults(listAfter).some((p) => String(p.id) === id), 'provider still listed after delete')
   },
@@ -185,7 +188,8 @@ registerCase({
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const { json: pJson } = await ctx.call('POST', '/api/providers', providerCreateBody(suffix))
-    const providerId = String(envelopeData(pJson).id)
+    const provider = envelopeData(pJson)
+    const providerId = String(provider.id)
     const createBody = {
       providerId,
       name: `e2e-model-${suffix}`,
@@ -210,6 +214,7 @@ registerCase({
       name: `e2e-model-upd-${suffix}`,
       description: 'updated',
       config: updatedConfig,
+      expectedVersion: model.version,
     })
     const updated = envelopeData(uJson)
     assert(updated.name === `e2e-model-upd-${suffix}`, JSON.stringify(updated))
@@ -217,10 +222,10 @@ registerCase({
     assert(updated.config.limit.context === 8192, JSON.stringify(updated.config))
     ctx.writeArtifact('model-updated.json', JSON.stringify(updated, null, 2))
 
-    await ctx.call('DELETE', `/api/models/${modelId}`)
+    await ctx.call('DELETE', `/api/models/${modelId}?expectedVersion=${encodeURIComponent(updated.version)}`)
     const { json: listJson } = await ctx.call('GET', '/api/models?pageNumber=1&pageSize=100')
     assert(!pageResults(listJson).some((m) => String(m.id) === modelId), 'model still listed')
-    await ctx.call('DELETE', `/api/providers/${providerId}`)
+    await ctx.call('DELETE', `/api/providers/${providerId}?expectedVersion=${encodeURIComponent(provider.version)}`)
   },
 })
 
@@ -261,6 +266,7 @@ registerCase({
         tools: [],
         skills: [],
       },
+      expectedVersion: agent.version,
     })
     const updated = envelopeData(uJson)
     assert(updated.name === `e2e-agent-upd-${suffix}`, JSON.stringify(updated))
@@ -278,7 +284,7 @@ registerCase({
     )
     ctx.writeArtifact('agent-updated.json', JSON.stringify(updated, null, 2))
 
-    await ctx.call('DELETE', `/api/agents/${agentId}`)
+    await ctx.call('DELETE', `/api/agents/${agentId}?expectedVersion=${encodeURIComponent(updated.version)}`)
     const { json: listJson } = await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=100')
     assert(!pageResults(listJson).some((a) => String(a.id) === agentId), 'agent still listed')
   },
@@ -305,10 +311,10 @@ registerCase({
   id: 'crud.model.delete_unknown_rejected',
   level: 'L1',
   title: '删除不存在 Model 被拒绝',
-  docs: 'DELETE /api/models/999999999 => 4xx（当前实现为 400 agent model not found）',
+  docs: 'DELETE /api/models/999999999?expectedVersion=0 => 404 resource_not_found',
   async run(ctx) {
-    await expectHttpError(() => ctx.call('DELETE', '/api/models/999999999'), {
-      status: 400,
+    await expectHttpError(() => ctx.call('DELETE', '/api/models/999999999?expectedVersion=0'), {
+      status: 404,
       messageIncludes: /not found|unknown|model/i,
     })
   },
@@ -331,14 +337,15 @@ registerCase({
     const { json: uJson } = await ctx.call('PUT', `/api/chats/${chatId}`, {
       title: 'e2e-chat-upd',
       defaultAgentId: String(agent.id),
+      expectedVersion: chat.version,
     })
     assert(envelopeData(uJson).title === 'e2e-chat-upd', JSON.stringify(uJson))
     await expectHttpError(
-      () => ctx.call('PUT', `/api/chats/${chatId}`, { title: '   ' }),
+      () => ctx.call('PUT', `/api/chats/${chatId}`, { title: '   ', expectedVersion: updated.version }),
       { status: 400, messageIncludes: /title.*blank/i },
     )
 
-    await ctx.call('DELETE', `/api/chats/${chatId}`)
+    await ctx.call('DELETE', `/api/chats/${chatId}?expectedVersion=${encodeURIComponent(updated.version)}`)
     await expectHttpError(() => ctx.call('GET', `/api/chats/${chatId}`), { status: 404 })
   },
 })

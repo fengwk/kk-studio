@@ -348,6 +348,8 @@ describe('ai-console-utils', () => {
     expect(resourceTitle({ kind: 'agent', mode: 'create' })).toBe('新建 Agent')
     expect(formatBackendDate([2026, 6, 20, 2, 1, 0, 0])).toBe('2026-06-20 02:01')
     expect(formatBackendDate('2026-06-20T02:01:00')).toBe('2026-06-20 02:01')
+    expect(formatBackendDate(0)).toBe('-')
+    expect(formatBackendDate(1_782_000_000)).toBe('2026-06-21 00:00')
     expect(formatBackendDate([Number.NaN])).toBe('-')
   })
 
