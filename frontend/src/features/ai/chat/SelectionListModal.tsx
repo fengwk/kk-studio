@@ -1,4 +1,4 @@
-import { ModalBackdrop, ModalHeader } from '@/features/ai/shared/AiConsoleModalLayout'
+import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
 import type { PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
 
 export interface SelectionListItem {

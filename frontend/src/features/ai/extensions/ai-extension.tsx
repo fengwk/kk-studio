@@ -1,7 +1,6 @@
 import { createContext, useContext, type PropsWithChildren, type ReactNode } from 'react'
 import {
   AgentsPanel,
-  ConfirmActionModal,
   ModelsPanel,
   ProvidersPanel,
   ResourceEditorModal,
@@ -16,7 +15,8 @@ import { HarnessSettingsPage } from '@/features/ai/settings'
 import {
   SearchField,
   StateBlock,
-} from '@/features/ai/shared/AiConsoleCommonCards'
+} from '@/shared/ui/console/AiConsoleCommonCards'
+import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
 import { useAiConsoleController } from '@/features/ai/extensions/useAiConsoleController'
 import type { ExtensionComponentProps } from '@/platform/extensions/types'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'

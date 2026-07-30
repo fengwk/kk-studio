@@ -1,5 +1,3 @@
-export { AgentResourceCard } from '@/features/ai/catalog/AiAgentResourceCard'
-export { ConfirmActionModal } from '@/features/ai/shared/ConfirmActionModal'
 export {
   AgentsPanel,
   ModelsPanel,

@@ -1,4 +1,4 @@
-import { includesSearch } from '@/features/ai/shared/search-utils'
+import { includesSearch } from '@/shared/lib/search-utils'
 import type {
   BackendDateTime,
   ChatDTO,

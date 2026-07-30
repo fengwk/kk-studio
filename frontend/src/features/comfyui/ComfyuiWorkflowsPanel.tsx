@@ -1,4 +1,4 @@
-import { CreateCard } from '@/features/ai/shared/AiConsoleCommonCards'
+import { CreateCard } from '@/shared/ui/console/AiConsoleCommonCards'
 import { ComfyuiWorkflowCard } from '@/features/comfyui/ComfyuiWorkflowCard'
 import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts'
 

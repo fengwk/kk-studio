@@ -13,7 +13,7 @@ import { filterEnvironments } from '@/features/ai/environment/environment-utils'
 import {
   includesSearch,
   naturalNameCompare,
-} from '@/features/ai/shared/search-utils'
+} from '@/shared/lib/search-utils'
 import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import type { ModelDraft } from '@/features/ai/catalog/ai-console-types'
 import {
@@ -80,7 +80,7 @@ function model(overrides: Partial<AgentModelDTO> = {}): AgentModelDTO {
   }
 }
 
-describe('ai-console-utils', () => {
+describe('AI domain utilities', () => {
   /** DTO codecs must populate structured current-schema drafts and stable create defaults. */
   it('builds editable drafts from DTOs and default factories', () => {
     expect(emptyProviderDraft()).toMatchObject({

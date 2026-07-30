@@ -1,4 +1,4 @@
-import { FieldLabel } from '@/features/ai/shared/FieldLabel'
+import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import { Plus, Trash2 } from 'lucide-react'
 import type { VariantDraft } from '@/features/ai/catalog/ai-console-types'
 import { sanitizeDecimalInput, sanitizeIntegerInput } from '@/features/ai/catalog/ai-number-input'

@@ -9,7 +9,7 @@ import type {
 } from '@/shared/api/contracts'
 import { agentService } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { useInvalidateMutation } from '@/features/ai/shared/useInvalidateMutation'
+import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'
 
 export function useAiConsoleResourceMutations({
   onResourceSaved,

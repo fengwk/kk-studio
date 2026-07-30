@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { filterEnvironments } from '@/features/ai/environment/environment-utils'
-import { StateBlock } from '@/features/ai/shared/AiConsoleCommonCards'
+import { StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
 import { environmentService } from '@/shared/api/environment-service'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 import { queryKeys } from '@/shared/lib/query-keys'

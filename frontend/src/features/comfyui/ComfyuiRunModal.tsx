@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEventHandler } from 'react'
 import { Download, RefreshCw, Square } from 'lucide-react'
-import { ModalBackdrop, ModalHeader } from '@/features/ai/shared/AiConsoleModalLayout'
-import { StateBlock } from '@/features/ai/shared/AiConsoleCommonCards'
+import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
+import { StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
 import {
   buildComfyuiParameters,
   discoverComfyuiDownloads,
@@ -12,7 +12,7 @@ import {
   parseComfyuiBindings,
   prettyJson,
 } from '@/features/comfyui/comfyui-utils'
-import { FieldLabel } from '@/features/ai/shared/FieldLabel'
+import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import { comfyuiService } from '@/shared/api/comfyui-service'
 import type {
   ComfyuiInputBinding,

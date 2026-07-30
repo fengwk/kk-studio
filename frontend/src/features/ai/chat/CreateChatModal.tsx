@@ -1,7 +1,7 @@
 import type { FormEventHandler } from 'react'
-import { ModalBackdrop, ModalHeader } from '@/features/ai/shared/AiConsoleModalLayout'
-import { FieldLabel } from '@/features/ai/shared/FieldLabel'
-import { FormSelect } from '@/features/ai/shared/FormSelect'
+import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
+import { FieldLabel } from '@/shared/ui/console/FieldLabel'
+import { FormSelect } from '@/shared/ui/console/FormSelect'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts'
 
 export function CreateChatModal({

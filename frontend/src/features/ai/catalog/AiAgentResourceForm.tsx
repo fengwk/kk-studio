@@ -1,4 +1,4 @@
-import { FieldLabel } from '@/features/ai/shared/FieldLabel'
+import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import {
   buildCapabilityCandidates,
   PLATFORM_ENVIRONMENT_NAME,
@@ -10,7 +10,7 @@ import { applyAgentModelSelection, variantOptionsFromModel } from '@/features/ai
 import { modelRef, type AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import { emptyAgentDraft } from '@/features/ai/catalog/ai-resource-draft-codecs'
 import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-validation'
-import { FormSelect } from '@/features/ai/shared/FormSelect'
+import { FormSelect } from '@/shared/ui/console/FormSelect'
 import type {
   AgentDefinitionDTO,
   LiveEnvironmentDTO,

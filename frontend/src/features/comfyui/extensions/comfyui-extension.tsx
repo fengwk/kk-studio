@@ -5,8 +5,8 @@ import {
   type ReactNode,
 } from 'react'
 import { Link } from 'react-router-dom'
-import { ConfirmActionModal } from '@/features/ai/shared/ConfirmActionModal'
-import { SearchField, StateBlock } from '@/features/ai/shared/AiConsoleCommonCards'
+import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
+import { SearchField, StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
 import {
   ComfyuiRunModal,
   ComfyuiWorkflowEditorModal,

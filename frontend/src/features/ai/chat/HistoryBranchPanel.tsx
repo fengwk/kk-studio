@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
-import { ModalBackdrop, ModalHeader } from '@/features/ai/shared/AiConsoleModalLayout'
+import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
 import {
   activeAncestry,
   branchTarget,

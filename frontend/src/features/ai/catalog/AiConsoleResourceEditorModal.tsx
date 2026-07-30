@@ -1,5 +1,5 @@
 import type { FormEventHandler } from 'react'
-import { ModalBackdrop, ModalHeader } from '@/features/ai/shared/AiConsoleModalLayout'
+import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
 import { AgentForm, ModelForm, ProviderForm } from '@/features/ai/catalog/AiResourceForms'
 import type { AgentDraft, ModelDraft, ProviderDraft, ResourceModal } from '@/features/ai/catalog/ai-console-types'
 import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-validation'
