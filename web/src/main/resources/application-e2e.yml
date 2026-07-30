@@ -3,6 +3,8 @@ spring:
   sql:
     init:
       mode: always
+      # Keep PL/pgSQL durable-target trigger bodies intact for PostgreSQL JDBC.
+      separator: "^^^ END OF SCRIPT ^^^"
       schema-locations:
         - classpath:schema-postgresql.sql
       data-locations:

@@ -46,8 +46,7 @@ import java.util.function.Supplier;
  *
  * <p>调度完全由 {@code harness_execution_target} 统一表达：transaction adapter 在同一事务内原子写入 Invocation
  * 与目标行（claim reschedule / renew reschedule / scheduleRetry reschedule / terminal delete+schedule
- * Thread）。本 worker 因此不再注入任何 {@link
- * fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier}，也不本地调度 retry 信号；
+ * Thread）。本 worker 因此没有 outbound activation dependency，也不本地调度 retry wake；
  * lease/deadline/idle/activity-flush watchdog 仍是 process-local best-effort。
  */
 @Slf4j
@@ -83,19 +82,38 @@ public final class ModelWorker {
   }
 
   /**
-   * Processes one signal for a specified durable Invocation.
+   * Processes one direct dispatch for a specified durable Invocation.
    *
    * @return {@code true} only when this process successfully claimed an Invocation and either
    *     dispatched it or made a conservative terminal transition; {@code false} when no current
    *     claimable work exists
    */
   public boolean dispatch(long invocationId) {
+    return claim(invocationId, false);
+  }
+
+  /**
+   * Claims one durable ModelInvocation on the caller thread and starts Provider I/O on this
+   * worker's scheduler.
+   *
+   * <p>Execution-target dispatchers use this method so their durable claim is complete before the
+   * target scan proceeds, while no Provider I/O runs on the dispatcher thread.
+   *
+   * @return {@code true} only when this process successfully claimed an Invocation and either
+   *     queued its local execution or durably converged a pre-I/O failure; {@code false} when no
+   *     current claimable work exists
+   */
+  public boolean activate(long invocationId) {
+    return claim(invocationId, true);
+  }
+
+  private boolean claim(long invocationId, boolean deferExternalStart) {
     if (invocationId <= 0) {
       throw new IllegalArgumentException("invocationId must be positive");
     }
     return transactions
         .findClaimable(invocationId, clock.instant())
-        .map(this::claimAndDispatch)
+        .map(candidate -> claimAndDispatch(candidate, deferExternalStart))
         .orElse(false);
   }
 
@@ -112,7 +130,7 @@ public final class ModelWorker {
     List.copyOf(executions.values()).forEach(Execution::abandon);
   }
 
-  private boolean claimAndDispatch(ModelInvocation candidate) {
+  private boolean claimAndDispatch(ModelInvocation candidate, boolean deferExternalStart) {
     String workerToken = nextWorkerToken();
     ModelExecutionResource resource = null;
     RuntimeException resolutionFailure = null;
@@ -151,7 +169,7 @@ public final class ModelWorker {
           ownership, new IllegalStateException("model execution resource is unavailable"));
       return true;
     }
-    dispatchClaimed(ownership, resource);
+    dispatchClaimed(ownership, resource, deferExternalStart);
     return true;
   }
 
@@ -203,7 +221,8 @@ public final class ModelWorker {
     }
   }
 
-  private void dispatchClaimed(ClaimedModelInvocation claimed, ModelExecutionResource resource) {
+  private void dispatchClaimed(
+      ClaimedModelInvocation claimed, ModelExecutionResource resource, boolean deferExternalStart) {
     Execution execution = new Execution(claimed, resource);
     Execution existing = executions.putIfAbsent(claimed.invocation().id(), execution);
     if (existing != null) {
@@ -220,7 +239,19 @@ public final class ModelWorker {
       }
       return;
     }
-    execution.start();
+    if (!deferExternalStart) {
+      execution.start();
+      return;
+    }
+    try {
+      scheduler.execute(execution::start);
+    } catch (RejectedExecutionException rejection) {
+      execution.onError(
+          new ProviderException(
+              ProviderErrorKind.TRANSIENT,
+              "cannot submit model execution to worker scheduler",
+              rejection));
+    }
   }
 
   private void appendDelta(

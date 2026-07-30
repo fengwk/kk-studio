@@ -6,10 +6,10 @@
 
 Harness 是 PostgreSQL 持久化、可水平扩展的 Agent 执行 runtime：
 
-- PostgreSQL 是唯一 durable truth；Redis activation signal 只负责唤醒本地 worker。
+- PostgreSQL 是唯一 durable truth；`harness_execution_target` 是唯一 durable activation queue。
 - Thread 内 Entry/head 推进严格串行；Model、Tool、Interaction 可独立并发。
 - Thread activation 只做短时状态收敛，不在 activation 内等待外部 I/O。
-- Redis 只提供可丢失的低延迟 wake 与有界 realtime projection；Redis 全部丢失时 PostgreSQL durable state 保留，但没有自动 activation replay。
+- PostgreSQL listener、dispatcher startup/reconnect wake 与 nearest-due timer 驱动 activation；Redis 只提供可丢失、有界的 realtime projection。
 - Runtime domain 不包含 Spring、数据库、Redis、HTTP、WebSocket、Provider SDK 或业务 Tool 实现。
 
 ## 2. 模块与依赖
@@ -43,7 +43,7 @@ flowchart TB
 | `harness-tool` | `ToolDescriptor`、异步 `Tool` API、schema、`RemoteTool`、transport-neutral Daemon wire | Runtime 状态机、Session/Thread、Spring |
 | `harness-runtime` | Session/Entry/HarnessThread/ThreadInput、execution 类型、Reconciler、Model/Tool Invocation、Interaction、retry/realtime ports；Model/provider 契约与 codec（包 `fun.fengwk.kkstudio.harness.runtime.model`） | Provider SDK、Spring、MyBatis、HTTP |
 | `harness-daemon` | Environment 进程：连接、本地 Tool 执行、invocation journal、coding tools | 依赖 runtime / core / Spring |
-| `core` | 薄 application boundary、Spring composition、PostgreSQL/Redis adapter、activation dispatcher、LangChain4j Provider adapter、业务扩展 | 第二套领域状态机 |
+| `core` | 薄 application boundary、Spring composition、PostgreSQL durable dispatcher、Redis realtime adapter、LangChain4j Provider adapter、业务扩展 | 第二套领域状态机 |
 | `web` | HTTP / SSE / WebSocket 适配，只消费 Core API 与 share DTO | Harness 类型和领域状态机 |
 
 Model 契约收敛在 runtime 模块的 `harness.runtime.model` 子树；LangChain4j adapter 与 SDK 依赖位于 `core`。
@@ -61,10 +61,10 @@ Core composition root -> Runtime inbound API
 
 Runtime -> outbound SPI <- Core adapters
   transaction ports / RuntimeConfigSource / Model execution
-  ActivationNotifier / RealtimeEventSink / ArtifactStore / RemoteToolTransport
+  RealtimeEventSink / ArtifactStore / RemoteToolTransport
 ```
 
-Core composition root 直接构造 Runtime concrete coordinator/worker 是正常的 inbound API 使用，不需要再套同义接口。业务编排与状态机留在 Runtime；Core 只保留 Spring 事务和 after-commit bridge、live resource 解析、DTO/十进制 ID 映射与基础设施实现。Web 生产代码和 POM 不直接依赖 Harness 模块。
+Core composition root 直接构造 Runtime concrete coordinator/worker 是正常的 inbound API 使用，不需要再套同义接口。业务编排与状态机留在 Runtime；Core 只保留 Spring 事务、PostgreSQL execution-target composition、live resource 解析、DTO/十进制 ID 映射与基础设施实现。Web 生产代码和 POM 不直接依赖 Harness 模块。
 
 ## 3. Durable 事实所有权
 
@@ -186,8 +186,8 @@ Gateway 只拥有连接与协议，不是第二套 durable 状态机。
 `dispatch_enabled` 作为显式 gate。PLATFORM Tool target 由 `schedule` 创建为 enabled；ENVIRONMENT
 Tool target 由 Reconciler materialization 先 `park`，同一事务完成后只 enable 每个 route 的 oldest
 queued head。route FIFO 使用 Tool invocation 的 `created_at, assistant_entry_id, ordinal, id`，
-RUNNING、RETRY_WAIT 和 WAITING_INTERACTION head 会阻塞后续 sibling。due/nearest dispatcher
-查询忽略 disabled row，但 inspection/ownership `findAll` 与 `lock` 仍可见 parked state。
+RUNNING、RETRY_WAIT 和 WAITING_INTERACTION head 会阻塞后续 sibling。`PostgresqlExecutionTargetDispatcher`
+只查询 due enabled row；nearest-due timing 忽略 disabled row，但 inspection/ownership `findAll` 与 `lock` 仍可见 parked state。
 
 ### 3.6 Interaction
 
@@ -212,13 +212,13 @@ Thread active 视图由 durable facts 即时查询投影。
 | 写者 | 可写 | 不可写 |
 | --- | --- | --- |
 | Thread command coordinator | 新建 Thread；`bootstrapThread` 内部创建 Session / 初始 ROOT/RUNTIME_CONFIG Entry、静止 Thread 的 head 重定位、typed Input | 推进运行中 Thread 的语义 head |
-| `ThreadReconciler` | 已有 Thread 的 Entry/head 推进、Input apply、ModelInvocation 创建、ToolInvocation 创建、Usage apply 路径 | 外部 Provider/Tool I/O |
+| `ThreadReconciler` | 已有 Thread 的 Entry/head 推进、Input apply、ModelInvocation 创建、ToolInvocation 创建、Usage apply 路径；`activate()` 合并本进程 Thread wake | 外部 Provider/Tool I/O |
 | `ModelWorker` | ModelInvocation 状态 / lease / terminal / realtime | Entry/head |
 | `ToolWorker` | ToolInvocation 状态 / lease / terminal / realtime | Entry/head |
 | Interaction transaction | Interaction 与 owner dispatchable/runnable | 越权改 Entry |
 | Thread command transaction | Thread 创建、Session 私有 bootstrap bundle、head rebind、Input enqueue、Stop epoch | 绕过 Reconciler 推进语义 head |
 
-command 侧只负责 bootstrap 与 head 重定位；`ThreadReconciler` 是执行过程中语义推进的唯一写者。一次 activation：
+command 侧只负责 bootstrap 与 head 重定位；`ThreadReconciler` 是执行过程中语义推进的唯一写者。`PostgresqlExecutionTargetDispatcher` 对 Thread target 调用 `ThreadReconciler.activate()`；Environment READY 只触发 dispatcher wake，并在 drain 时按 `LiveEnvironmentRegistry.listReady()` 重新判定 route。一次 activation：
 
 1. claim Thread reconcile lease
 2. 校验 execution epoch 与 fencing token
@@ -249,19 +249,22 @@ flowchart TD
 sequenceDiagram
     participant R as ThreadReconciler
     participant DB as PostgreSQL
+    participant D as ExecutionTargetDispatcher
     participant W as ModelWorker
     participant P as Provider
-    participant N as Notifier / Realtime
+    participant S as RealtimeEventSink
 
-    R->>DB: create ModelInvocation(QUEUED), release Thread
-    DB-->>N: afterCommit dispatch hint
+    R->>DB: create ModelInvocation + durable target, release Thread
+    DB-->>D: committed NOTIFY wake
+    D->>W: dispatch Model target
     W->>DB: claim invocation lease
     W->>P: stream frozen ProviderRequest
     P-->>W: delta
-    W-->>N: append bounded realtime delta
+    W-->>S: append bounded realtime delta
     P-->>W: terminal
-    W->>DB: terminal result + Thread runnable=true
-    DB-->>N: afterCommit Thread wake
+    W->>DB: terminal result + Thread runnable + durable Thread target
+    DB-->>D: committed NOTIFY wake
+    D->>R: activate Thread target
     R->>DB: claim Thread, materialize Assistant Entry
 ```
 
@@ -306,7 +309,7 @@ Stop 是立即控制面，不进入普通 mailbox：
 6. 取消旧 epoch 可安全取消的 Invocation；已开始执行只由 epoch fencing 拒绝 late callback
 7. 取消 queued Inputs
 8. 取消该 Thread 的 OPEN Interaction，使逻辑 stop 后不再被永不解决的 blocker 阻塞
-9. afterCommit wake Thread + Reconciliation（让 Reconciler 立刻 harvest 新 head/新 epoch）
+9. 同事务 target mutation 的 PostgreSQL NOTIFY 唤醒 dispatcher（需要时让 Reconciler harvest 新 head/新 epoch）
 
 `ASSISTANT_ABORTED` 与 `ASSISTANT_ERROR` 共享 barrier contract：都是当前 epoch 内追加的 terminal Entry，不会让 pre-existing `RUNNING`/`SUCCEEDED` invocation 转 CANCELLED。Tool/empty partial 不进入 `ASSISTANT_ABORTED`。`ModelWorker.Execution.onDelta` 在 fence 写入 `safe_stream_snapshot` 返回 `LOST_OWNERSHIP` 时，离开 Execution monitor 之后本地 `abandon()` 释放 handle 并清 timers / map，后续 Provider 回调不再被 publish；该释放属于 worker 进程本地清理，与 stop transaction 内的 epoch fence 是两个独立步骤。
 
@@ -324,23 +327,22 @@ runnable = false
 
 所有 Thread/Invocation terminal 写入携带创建时的 execution epoch 与 lease token；Stop 或 rebind 后旧 epoch 的 late callback 无法提交。
 
-## 9. Redis
+## 9. Redis realtime projection
 
 | 通道 | 用途 | 丢失后果 |
 | --- | --- | --- |
-| Pub/Sub wake | `THREAD` / `MODEL_INVOCATION` / `TOOL_INVOCATION` 提示 | durable facts 不变；不做 scan/replay 补偿 |
 | Streams realtime | Model delta / Tool partial 有界投影 | 客户端重新 REST snapshot |
 
-客户端顺序：REST snapshot（Thread/Entries/Inputs/Invocations/Interactions）→ SSE 事件名 `realtime`，cursor 为 Redis stream-id。realtime 失败不改变 durable outcome。
+activation 只经 PostgreSQL execution-target dispatcher 完成。客户端顺序：REST snapshot（Thread/Entries/Inputs/Invocations/Interactions）→ SSE 事件名 `realtime`，cursor 为 Redis stream-id。realtime 失败不改变 durable outcome。
 
 ## 10. 并发不变量
 
 1. 执行过程中的 Entry/head 推进只由持有有效 Thread token 的 Reconciler 写入；外部改 head 必须走静止校验 + epoch CAS 的 rebind。
 2. Invocation result 只由持有有效 Invocation token 的 worker 写入。
 3. terminal result 与下一推进者的 durable runnable/dispatchable 同事务提交。
-4. Redis notify 只在 PostgreSQL commit 之后。
+4. execution-target trigger 的 PostgreSQL NOTIFY 只在事务 commit 后投递。
 5. quiesce 必须锁 Thread 并 recheck work。
-6. Redis 可重复、乱序或丢失；每次 activation 从 PostgreSQL 重读事实。
+6. dispatcher wake 可重复、乱序或丢失；每次 activation 从 PostgreSQL 重读 durable target 与领域事实。
 7. 外部副作用以 invocation id（及 attempt）为幂等键。
 
 ## 11. 能力装配
@@ -355,7 +357,7 @@ runnable = false
 | 文档 | 用途 |
 | --- | --- |
 | [harness-runtime-contracts.md](harness-runtime-contracts.md) | 类型、状态机、端口与事务契约 |
-| [harness-storage-runtime.md](harness-storage-runtime.md) | PostgreSQL / Redis / activation |
+| [harness-storage-runtime.md](harness-storage-runtime.md) | PostgreSQL durable activation / Redis realtime |
 | [harness-capability-wiring.md](harness-capability-wiring.md) | 能力装配 |
 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Daemon 连接与远程 Tool |
 | [storage-models.md](storage-models.md) | 表结构摘要 |

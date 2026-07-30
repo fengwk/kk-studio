@@ -85,9 +85,9 @@ Java 领域类型使用 `HarnessThread`，避免与 `java.lang.Thread` 冲突。
 | --- | --- |
 | `ThreadCommandCoordinator` | harness-runtime 内 framework-free 命令编排：Thread 创建/bootstrap/head 重定位、payload 构造、配置冻结、幂等短路、映射 coordinator-owned results；Core 不依赖 transaction SPI。Session / ROOT / `RUNTIME_CONFIG` 通过 `bootstrapThread` 内部私有 helper 落库 |
 | `RuntimeConfigSource` | live Agent/Model 冻结 SPI；Core `RuntimeConfigSnapshotResolver` 实现；纯 YOLO 替换在 runtime |
-| `HarnessThreadCommandService` | Core 薄边界：decimal/DTO、after-commit activation；bootstrap 响应内嵌 Session DTO |
+| `HarnessThreadCommandService` | Core 薄边界：decimal/DTO、同事务 durable target mutation；bootstrap 响应内嵌 Session DTO |
 | `InteractionCoordinator` | harness-runtime 内 handler 投影、expiry、resolution |
-| `InteractionService` | Core 薄边界：decimal/DTO、notifier isolation |
+| `InteractionService` | Core 薄边界：decimal/DTO |
 | `HarnessRetryPolicyService` | 全局自动重试策略 |
 | `HarnessRealtimeStreamPolicyService` | 全局 realtime Stream 容量策略；Redis sink 以短期缓存按写入解析 |
 | `HarnessThreadQueryService` | thread、路径 entries、inputs |
@@ -95,7 +95,7 @@ Java 领域类型使用 `HarnessThread`，避免与 `java.lang.Thread` 冲突。
 | `HarnessSessionQueryService` | Session 只读；列表按 derived max-entry `updated_at` desc, id desc 排序 |
 | `HarnessObservabilityQueryService` | tool / model invocations、interactions、artifacts 查询投影 |
 | `ModelUsageAggregationService` | 账本聚合 |
-| Redis activation subscriber / dispatcher | strict target decode 与本地 Thread/Model/Tool 投递 |
+| `PostgresqlExecutionTargetListener` / `PostgresqlExecutionTargetDispatcher` | LISTEN/NOTIFY、startup/reconnect/nearest-due wake 与本地 Thread/Model/Tool target 分发 |
 
 ## 事务与锁
 
@@ -127,7 +127,7 @@ GET /api/threads/{id}/events/stream?afterEventId={redis-stream-id}
 
 Gateway 只管理连接与协议，不是第二套 durable 状态机。Environment 不提供 REST CRUD；`GET /api/environments` 投影当前连接 Daemon 的内存 Registry。协议细节见 [environment-daemon-gateway.md](environment-daemon-gateway.md)。
 
-WebSocket handler 只依赖 Core `EnvironmentDaemonEndpoint`；Gateway 以 `RemoteToolTransport` SPI 接入统一 `ToolWorker`。Daemon READY event 通过不可变 listener bridge 离开 WebSocket 栈后异步调度；没有 `pollOnce` 或 caller-thread fallback。
+WebSocket handler 只依赖 Core `EnvironmentDaemonEndpoint`；Gateway 以 `RemoteToolTransport` SPI 接入统一 `ToolWorker`。Daemon READY event 通过不可变 listener bridge 离开 WebSocket 栈后调用 PostgreSQL dispatcher wake；没有 `pollOnce` 或 caller-thread fallback。
 
 `GET /api/artifacts/{id}` 返回原始 bytes 与有效 media type；异常 media 降级为 `application/octet-stream`，并附加 `X-Content-Type-Options: nosniff` 与 `Content-Security-Policy: sandbox`。
 

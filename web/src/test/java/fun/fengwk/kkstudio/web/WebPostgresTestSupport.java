@@ -5,6 +5,7 @@ import org.postgresql.Driver;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.support.EncodedResource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -55,7 +56,7 @@ public abstract class WebPostgresTestSupport {
         st.execute("drop schema public cascade");
         st.execute("create schema public");
       }
-      ScriptUtils.executeSqlScript(conn, new ClassPathResource("schema-postgresql.sql"));
+      applySchema(conn);
       ScriptUtils.executeSqlScript(conn, new ClassPathResource("data-dev-postgresql.sql"));
       try (Statement st = conn.createStatement();
           ResultSet rs = st.executeQuery("select count(*) from agent_definition where id = 1")) {
@@ -64,5 +65,19 @@ public abstract class WebPostgresTestSupport {
         }
       }
     }
+  }
+
+  private static void applySchema(Connection conn) {
+    // The durable-target triggers contain PL/pgSQL bodies, so the schema must reach PostgreSQL as
+    // one script rather than being split on the function-body semicolons.
+    ScriptUtils.executeSqlScript(
+        conn,
+        new EncodedResource(new ClassPathResource("schema-postgresql.sql")),
+        false,
+        false,
+        ScriptUtils.DEFAULT_COMMENT_PREFIX,
+        ScriptUtils.EOF_STATEMENT_SEPARATOR,
+        ScriptUtils.DEFAULT_BLOCK_COMMENT_START_DELIMITER,
+        ScriptUtils.DEFAULT_BLOCK_COMMENT_END_DELIMITER);
   }
 }

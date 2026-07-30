@@ -6,8 +6,8 @@ import fun.fengwk.kkstudio.share.model.InteractionResponseDTO;
 /**
  * Generic Interaction query/response application boundary.
  *
- * <p>Implementations own decimal/DTO adaptation and best-effort activation notification. Domain
- * orchestration is delegated to harness-runtime.
+ * <p>Implementations own decimal/DTO adaptation. Domain orchestration and durable target mutation
+ * are delegated to harness-runtime and its PostgreSQL transaction adapter.
  */
 public interface InteractionService {
 
@@ -17,8 +17,6 @@ public interface InteractionService {
   /** Gets the sole OPEN Interaction for an owner, or rejects when that owner has none. */
   InteractionDTO getOpenByOwner(String ownerKind, String ownerId);
 
-  /**
-   * Applies a generic response at its received instant, then best-effort signals the next target.
-   */
+  /** Applies a generic response at its received instant. */
   InteractionDTO respond(String interactionId, InteractionResponseDTO responseDTO);
 }

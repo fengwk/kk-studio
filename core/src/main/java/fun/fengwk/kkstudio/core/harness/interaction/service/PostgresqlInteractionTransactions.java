@@ -153,8 +153,7 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
         != 1) {
       throw new IllegalStateException("interaction resolution lost race: " + interactionId);
     }
-    return new InteractionTransition(
-        resolved(current, response, terminalAt), resolution.nextTarget());
+    return new InteractionTransition(resolved(current, response, terminalAt));
   }
 
   @Override
@@ -181,7 +180,7 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
         != 1) {
       throw new IllegalStateException("interaction cancellation lost race: " + interactionId);
     }
-    return new InteractionTransition(cancelled(current, terminalAt), nextTarget);
+    return new InteractionTransition(cancelled(current, terminalAt));
   }
 
   @Override
@@ -216,7 +215,7 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
         != 1) {
       throw new IllegalStateException("interaction expiration lost race: " + current.id());
     }
-    return new InteractionTransition(expired(current, terminalAt), nextTarget);
+    return new InteractionTransition(expired(current, terminalAt));
   }
 
   private InteractionTransition expireLockedDefault(Interaction current, Instant terminalAt) {

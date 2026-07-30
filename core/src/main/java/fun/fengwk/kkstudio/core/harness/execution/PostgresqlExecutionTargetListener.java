@@ -119,13 +119,6 @@ public final class PostgresqlExecutionTargetListener {
       }
       if (notes != null && notes.length > 0) {
         dispatcher.wake();
-        // Coalesce a burst: drain any follow-ups before waking again.
-        for (int i = 0; i < 4; i++) {
-          PGNotification[] tail = pgConn.getNotifications(0);
-          if (tail == null || tail.length == 0) {
-            break;
-          }
-        }
       }
     }
   }

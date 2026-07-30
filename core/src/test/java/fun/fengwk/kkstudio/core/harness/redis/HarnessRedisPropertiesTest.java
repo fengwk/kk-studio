@@ -9,28 +9,13 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 
-/** 配置验证测试。 */
+/** Redis realtime projection configuration validation. */
 class HarnessRedisPropertiesTest {
 
   @Test
   void defaultsAreExposed() {
     HarnessRedisProperties props = new HarnessRedisProperties();
-    assertEquals("kk-studio:harness:signal", props.requireSignalChannel());
     assertEquals("kk-studio:harness:realtime:", props.requireRealtimeKeyPrefix());
-  }
-
-  @Test
-  void blankChannelIsRejected() {
-    HarnessRedisProperties props = new HarnessRedisProperties();
-    props.setSignalChannel(" ");
-    assertThrows(IllegalArgumentException.class, props::requireSignalChannel);
-  }
-
-  @Test
-  void nullChannelIsRejected() {
-    HarnessRedisProperties props = new HarnessRedisProperties();
-    props.setSignalChannel(null);
-    assertThrows(IllegalArgumentException.class, props::requireSignalChannel);
   }
 
   @Test
@@ -58,12 +43,6 @@ class HarnessRedisPropertiesTest {
   void adaptersValidateRedisTransportPropertiesAtConstruction() {
     StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
     HarnessRedisProperties props = new HarnessRedisProperties();
-    props.setSignalChannel(" ");
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new RedisActivationNotifier(redisTemplate, props, new ExecutionTargetJsonCodec()));
-
-    props.setSignalChannel("kk-studio:harness:signal");
     props.setRealtimeKeyPrefix("");
     assertThrows(
         IllegalArgumentException.class,

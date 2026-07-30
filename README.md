@@ -15,7 +15,7 @@
 
 ## 能力摘要
 
-- Harness：Session 共享 append-only Entry Tree；HarnessThread 是可复用 durable runtime process（head 重定位 + epoch fencing + ordered mailbox）；PostgreSQL truth + Redis wake/realtime
+- Harness：Session 共享 append-only Entry Tree；HarnessThread 是可复用 durable runtime process（head 重定位 + epoch fencing + ordered mailbox）；PostgreSQL truth + durable activation queue，Redis 仅用于 realtime
 - Studio：Canvas 持久化 document / node / link / command-dedup（硬删除节点）；FUNCTION 节点只暴露 `system.generate-text` v1
 - 前端：AI 接真实 Thread API；Canvas Library/Create 接真实 API，Editor 仍使用本地交互投影
 

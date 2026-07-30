@@ -2,6 +2,10 @@ package fun.fengwk.kkstudio.core.harness.execution;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,6 +23,7 @@ import java.io.PrintWriter;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
+import java.sql.Statement;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -100,6 +105,28 @@ class PostgresqlExecutionTargetListenerIntegrationTest extends PostgresSpringTes
   }
 
   @Test
+  void successiveNotificationsEachWakeDispatcher() throws Exception {
+    PostgresqlExecutionTargetDispatcher dispatcher =
+        mock(PostgresqlExecutionTargetDispatcher.class);
+    PostgresqlExecutionTargetListener listener =
+        new PostgresqlExecutionTargetListener(dataSource, dispatcher, 100L, 200L);
+    try {
+      listener.start();
+      verify(dispatcher, timeout(5_000).times(1)).wake();
+      clearInvocations(dispatcher);
+
+      // The first NOTIFY must not block the listener or consume the next one without a wake.
+      notifyExecutionTarget();
+      verify(dispatcher, timeout(5_000).times(1)).wake();
+
+      notifyExecutionTarget();
+      verify(dispatcher, timeout(5_000).times(2)).wake();
+    } finally {
+      listener.stop();
+    }
+  }
+
+  @Test
   void listenerHoldsSingleConnectionAcrossMultipleWakeEvents() throws Exception {
     ScheduledExecutorService drain =
         Executors.newSingleThreadScheduledExecutor(
@@ -163,6 +190,13 @@ class PostgresqlExecutionTargetListenerIntegrationTest extends PostgresSpringTes
                     .lockDue(row.targetKind(), row.targetId(), row.availableAt())
                     .map(locked -> store.deleteLocked(locked.targetKind(), locked.targetId()) == 1)
                     .orElse(false)));
+  }
+
+  private void notifyExecutionTarget() throws SQLException {
+    try (Connection conn = dataSource.getConnection();
+        Statement stmt = conn.createStatement()) {
+      stmt.execute("select pg_notify('" + PostgresqlExecutionTargetListener.CHANNEL + "', 'test')");
+    }
   }
 
   /** Wraps a {@link DataSource} to count {@code getConnection()} invocations. */

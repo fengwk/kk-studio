@@ -1,14 +1,11 @@
 package fun.fengwk.kkstudio.harness.runtime.interaction;
 
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
-
 import java.util.Objects;
 
-/** Completed atomic Interaction lifecycle transition and the target to signal after commit. */
-public record InteractionTransition(Interaction interaction, ExecutionTarget nextTarget) {
+/** Completed atomic Interaction lifecycle transition with its target mutation already committed. */
+public record InteractionTransition(Interaction interaction) {
   public InteractionTransition {
     interaction = Objects.requireNonNull(interaction, "interaction");
-    nextTarget = Objects.requireNonNull(nextTarget, "nextTarget");
     if (!interaction.status().isTerminal()) {
       throw new IllegalArgumentException("interaction transition must be terminal");
     }

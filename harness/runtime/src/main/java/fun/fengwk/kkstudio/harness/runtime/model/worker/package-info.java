@@ -5,8 +5,8 @@
  * through {@link fun.fengwk.kkstudio.harness.runtime.model.worker.ModelInvocationTransactions},
  * delegates external I/O to {@link fun.fengwk.kkstudio.harness.runtime.model.worker.ModelExecutor},
  * and accepts Provider callbacks without writing Entry/head/Usage. Terminal state is committed only
- * through the transaction port; the port atomically marks the owning Thread runnable, after which
- * the Worker emits a best-effort activation hint.
+ * through the transaction port; the port atomically marks the owning Thread runnable and schedules
+ * its durable target.
  *
  * <p>Delta is a bounded realtime projection only. Worker lease heartbeat and real Provider activity
  * are deliberately separate: only Provider delta is eligible to advance {@code lastActivityAt}. A

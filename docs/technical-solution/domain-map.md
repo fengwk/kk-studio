@@ -92,4 +92,4 @@ FUNCTION 节点当前唯一实例是 `system.generate-text` v1。
 
 ## 7. 实现进度一句话
 
-Harness 是以 Session Entry Tree、可复用 Thread（可空 head + epoch fencing）、Thread mailbox、Model/Tool Invocation 与 Interaction 为基础的可恢复执行链；PostgreSQL 为 truth，Redis 为 lossy wake/realtime。Studio 当前只承载 Canvas：document / node / link / command-dedup，硬删除节点并通过同 Canvas 复合 FK 级联清理连线。
+Harness 是以 Session Entry Tree、可复用 Thread（可空 head + epoch fencing）、Thread mailbox、Model/Tool Invocation 与 Interaction 为基础的可恢复执行链；PostgreSQL 同时承载 truth 与 durable activation queue，Redis 仅提供 lossy realtime Stream。Studio 当前只承载 Canvas：document / node / link / command-dedup，硬删除节点并通过同 Canvas 复合 FK 级联清理连线。

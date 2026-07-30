@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.environment;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -13,12 +14,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentReadyListener;
+import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
@@ -26,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ClaimedToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationUpdateOutcome;
+import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorker;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
@@ -83,6 +88,8 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
   @MockitoBean private ArtifactStore artifactStore;
   // The Gateway's READY wake is wired by the durable-target dispatcher slice; suppress here.
   @MockitoBean private EnvironmentReadyListener environmentReadyListener;
+  @Autowired private LiveEnvironmentRegistry environmentRegistry;
+  @Autowired private ToolWorker toolWorker;
   private final AtomicReference<ToolResult> completedResult = new AtomicReference<>();
 
   @Test
@@ -92,6 +99,8 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
     configureClaimedInvocation(descriptor);
     try (FakeDaemonClient daemon = FakeDaemonClient.connect(endpointUri(), ENVIRONMENT_NAME)) {
       daemon.handshake(descriptor);
+      awaitEnvironmentReady();
+      dispatchTool();
       daemon.awaitInvokeAndCompleteText("daemon completed");
 
       verify(transactions, timeout(10_000)).claim(eq(INVOCATION_ID), anyString(), any(), any());
@@ -114,6 +123,8 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
     when(artifactStore.save(anyString(), anyString(), any())).thenReturn(global);
     try (FakeDaemonClient daemon = FakeDaemonClient.connect(endpointUri(), ENVIRONMENT_NAME)) {
       daemon.handshake(descriptor);
+      awaitEnvironmentReady();
+      dispatchTool();
       daemon.awaitInvokeAndCompleteBinary("application/octet-stream", bytes);
 
       ArgumentCaptor<byte[]> contentCaptor = ArgumentCaptor.forClass(byte[].class);
@@ -133,6 +144,8 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
     configureClaimedInvocation(descriptor);
     try (FakeDaemonClient daemon = FakeDaemonClient.connect(endpointUri(), ENVIRONMENT_NAME)) {
       daemon.handshake(descriptor);
+      awaitEnvironmentReady();
+      dispatchTool();
       daemon.awaitInvokeAndFail("daemon failed");
 
       ArgumentCaptor<ToolInvocationError> errorCaptor =
@@ -166,6 +179,20 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
     when(transactions.renew(any(), any(), any())).thenReturn(ToolInvocationUpdateOutcome.APPLIED);
     when(transactions.recordActivity(any(), any(), any()))
         .thenReturn(ToolInvocationUpdateOutcome.APPLIED);
+  }
+
+  private void dispatchTool() {
+    assertTrue(toolWorker.dispatch(INVOCATION_ID));
+  }
+
+  private void awaitEnvironmentReady() throws InterruptedException {
+    long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+    while (!environmentRegistry.isReady(ENVIRONMENT_NAME) && System.nanoTime() < deadline) {
+      Thread.sleep(20);
+    }
+    assertTrue(
+        environmentRegistry.isReady(ENVIRONMENT_NAME),
+        "environment did not reach READY before direct ToolWorker dispatch");
   }
 
   private void awaitCompletedResult() throws InterruptedException {
@@ -217,7 +244,9 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
         null,
         now.minusMillis(1),
         now,
-        null);
+        null,
+        ToolPermissionState.ALLOWED,
+        false);
   }
 
   /**
