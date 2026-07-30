@@ -88,8 +88,13 @@ public class AgentProviderMutationFactoryTest {
     assertEquals("u".repeat(512), persisted.getBaseUrl());
     assertEquals("c".repeat(512), persisted.getCredential());
 
+    AgentProvider emojiProvider = factory.newProvider(provider("😀".repeat(64), null));
+    assertEquals(64, emojiProvider.getName().codePointCount(0, emojiProvider.getName().length()));
+
     AgentProviderCreateDTO oversizedName = provider("n".repeat(65), null);
     assertThrows(AiValidationException.class, () -> factory.newProvider(oversizedName));
+    AgentProviderCreateDTO oversizedEmojiName = provider("😀".repeat(65), null);
+    assertThrows(AiValidationException.class, () -> factory.newProvider(oversizedEmojiName));
     AgentProviderCreateDTO oversizedDescription = provider("provider", null);
     oversizedDescription.setDescription("d".repeat(513));
     assertThrows(AiValidationException.class, () -> factory.newProvider(oversizedDescription));
