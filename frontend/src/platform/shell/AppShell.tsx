@@ -1,6 +1,6 @@
 import { Bot, Grid2X2, Menu, UserRound, Wrench, X } from 'lucide-react'
 import { useEffect, useRef, useState, type PropsWithChildren } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation } from 'react-router'
 
 function isAiRoute(pathname: string) {
   return (

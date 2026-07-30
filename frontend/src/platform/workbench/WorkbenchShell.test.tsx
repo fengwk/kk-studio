@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { ExtensionHost } from '@/platform/extensions/ExtensionHost'
 import { ExtensionHostProvider, useExtensionHost } from '@/platform/extensions/ExtensionHostContext'

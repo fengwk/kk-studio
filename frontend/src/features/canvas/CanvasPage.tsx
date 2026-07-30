@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router'
 import { CanvasEditor } from '@/features/canvas/CanvasEditor'
 import { CanvasLibraryView } from '@/features/canvas/CanvasLibraryView'
 import { CanvasOverlays } from '@/features/canvas/CanvasOverlays'

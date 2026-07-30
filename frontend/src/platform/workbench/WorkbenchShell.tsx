@@ -1,4 +1,4 @@
-import { Link, Navigate, Route, Routes } from 'react-router-dom'
+import { Link, Navigate, Route, Routes } from 'react-router'
 import type { PageContribution } from '@/platform/extensions/types'
 import { useExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
 import { AppShell } from '@/platform/shell/AppShell'

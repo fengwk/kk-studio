@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentsPanel, ModelsPanel, ProvidersPanel } from '@/features/ai/catalog/AiConsolePanels'
 import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
