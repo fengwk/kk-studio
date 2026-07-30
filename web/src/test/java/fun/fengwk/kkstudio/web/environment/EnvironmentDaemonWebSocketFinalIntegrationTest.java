@@ -16,6 +16,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
@@ -80,6 +81,8 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
 
   @MockitoBean private ToolInvocationTransactions transactions;
   @MockitoBean private ArtifactStore artifactStore;
+  // The Gateway's READY wake is wired by the durable-target dispatcher slice; suppress here.
+  @MockitoBean private EnvironmentReadyListener environmentReadyListener;
   private final AtomicReference<ToolResult> completedResult = new AtomicReference<>();
 
   @Test
@@ -91,8 +94,7 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
       daemon.handshake(descriptor);
       daemon.awaitInvokeAndCompleteText("daemon completed");
 
-      verify(transactions, timeout(10_000))
-          .claim(eq(INVOCATION_ID), anyString(), eq(Duration.ofSeconds(10)), any(), any());
+      verify(transactions, timeout(10_000)).claim(eq(INVOCATION_ID), anyString(), any(), any());
       verify(transactions, timeout(10_000)).completeSuccess(any(), any(), any(), any());
       awaitCompletedResult();
       assertEquals("provider-call", completedResult.get().toolCallId());
@@ -143,15 +145,13 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
   }
 
   private void configureClaimedInvocation(ToolDescriptor descriptor) {
-    ToolInvocation candidate = queued(descriptor);
-    when(transactions.findNextClaimable(
-            eq(ToolExecutionLocation.ENVIRONMENT), eq(ENVIRONMENT_NAME), any()))
-        .thenReturn(Optional.of(candidate), Optional.empty());
-    when(transactions.claim(eq(INVOCATION_ID), anyString(), any(), any(), any()))
+    when(transactions.claim(eq(INVOCATION_ID), anyString(), any(), any()))
         .thenAnswer(
             invocation -> {
               String token = invocation.getArgument(1);
-              return Optional.of(new ClaimedToolInvocation(running(descriptor, token), false));
+              return Optional.of(
+                  new ClaimedToolInvocation(
+                      running(descriptor, token), InvocationStatus.QUEUED, false));
             });
     when(transactions.completeSuccess(any(), any(), any(), any()))
         .thenAnswer(
@@ -191,33 +191,6 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
         new ToolParamsSchema(null, Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(10));
-  }
-
-  private static ToolInvocation queued(ToolDescriptor descriptor) {
-    Instant now = Instant.now();
-    return new ToolInvocation(
-        INVOCATION_ID,
-        101L,
-        102L,
-        0,
-        "provider-call",
-        descriptor,
-        "{}",
-        ToolExecutionLocation.ENVIRONMENT,
-        ENVIRONMENT_NAME,
-        1L,
-        InvocationStatus.QUEUED,
-        1,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        now,
-        null,
-        null);
   }
 
   private static ToolInvocation running(ToolDescriptor descriptor, String workerToken) {

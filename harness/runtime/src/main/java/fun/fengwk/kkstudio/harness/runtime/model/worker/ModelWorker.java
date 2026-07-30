@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.model.worker;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
@@ -15,7 +13,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
-import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
@@ -46,6 +43,12 @@ import java.util.function.Supplier;
  * ModelExecutor}. All callbacks are fenced through {@link ModelInvocationTransactions}; a failed or
  * late CAS only tears down the process-local handle. The worker never writes Entry/head/Usage
  * directly. {@code workerTokenSupplier} must return a fresh non-blank token for every claim.
+ *
+ * <p>调度完全由 {@code harness_execution_target} 统一表达：transaction adapter 在同一事务内原子写入 Invocation
+ * 与目标行（claim reschedule / renew reschedule / scheduleRetry reschedule / terminal delete+schedule
+ * Thread）。本 worker 因此不再注入任何 {@link
+ * fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier}，也不本地调度 retry 信号；
+ * lease/deadline/idle/activity-flush watchdog 仍是 process-local best-effort。
  */
 @Slf4j
 public final class ModelWorker {
@@ -54,7 +57,6 @@ public final class ModelWorker {
   private final ModelExecutionResolver executionResolver;
   private final InvocationRetryPolicyResolver retryPolicyResolver;
   private final RealtimeEventSink realtimeEventSink;
-  private final ActivationNotifier activationNotifier;
   private final ModelWorkerConfig config;
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
@@ -66,7 +68,6 @@ public final class ModelWorker {
       ModelExecutionResolver executionResolver,
       InvocationRetryPolicyResolver retryPolicyResolver,
       RealtimeEventSink realtimeEventSink,
-      ActivationNotifier activationNotifier,
       ModelWorkerConfig config,
       Clock clock,
       ScheduledExecutorService scheduler,
@@ -75,7 +76,6 @@ public final class ModelWorker {
     this.executionResolver = Objects.requireNonNull(executionResolver, "executionResolver");
     this.retryPolicyResolver = Objects.requireNonNull(retryPolicyResolver, "retryPolicyResolver");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
-    this.activationNotifier = Objects.requireNonNull(activationNotifier, "activationNotifier");
     this.config = Objects.requireNonNull(config, "config");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
@@ -176,11 +176,8 @@ public final class ModelWorker {
             ProviderErrorKind.TRANSIENT,
             "model worker lease expired; provider outcome cannot be confirmed");
     try {
-      if (transactions.completeUnknown(
-              claimed, error, claimed.invocation().lastActivityAt(), clock.instant())
-          == ModelInvocationUpdateOutcome.APPLIED) {
-        notifyThread(claimed.invocation().threadId());
-      }
+      transactions.completeUnknown(
+          claimed, error, claimed.invocation().lastActivityAt(), clock.instant());
     } catch (RuntimeException failure) {
       log.warn(
           "cannot persist UNKNOWN for recovered model invocation {}",
@@ -196,11 +193,8 @@ public final class ModelWorker {
             "cannot resolve model execution resource: "
                 + message(failure, "unknown setup failure"));
     try {
-      if (transactions.completeFailure(
-              claimed, error, claimed.invocation().lastActivityAt(), clock.instant())
-          == ModelInvocationUpdateOutcome.APPLIED) {
-        notifyThread(claimed.invocation().threadId());
-      }
+      transactions.completeFailure(
+          claimed, error, claimed.invocation().lastActivityAt(), clock.instant());
     } catch (RuntimeException terminalFailure) {
       log.warn(
           "cannot persist model execution setup failure for {}",
@@ -219,33 +213,14 @@ public final class ModelWorker {
               ProviderErrorKind.TRANSIENT,
               "a conflicting local model execution retained this invocation handle");
       try {
-        if (transactions.completeUnknown(
-                claimed, error, claimed.invocation().lastActivityAt(), clock.instant())
-            == ModelInvocationUpdateOutcome.APPLIED) {
-          notifyThread(claimed.invocation().threadId());
-        }
+        transactions.completeUnknown(
+            claimed, error, claimed.invocation().lastActivityAt(), clock.instant());
       } catch (RuntimeException failure) {
         log.warn("cannot persist conflicting local model execution", failure);
       }
       return;
     }
     execution.start();
-  }
-
-  private void notifyThread(long threadId) {
-    notifyTarget(new ExecutionTarget(ExecutionTargetKind.THREAD, threadId));
-  }
-
-  private void notifyInvocation(long invocationId) {
-    notifyTarget(new ExecutionTarget(ExecutionTargetKind.MODEL_INVOCATION, invocationId));
-  }
-
-  private void notifyTarget(ExecutionTarget target) {
-    try {
-      activationNotifier.notifyAfterCommit(target);
-    } catch (RuntimeException failure) {
-      log.warn("activation notification failed for {}", target, failure);
-    }
   }
 
   private void appendDelta(
@@ -257,15 +232,6 @@ public final class ModelWorker {
     } catch (RuntimeException failure) {
       log.warn(
           "realtime model delta projection failed for invocation {}", invocation.id(), failure);
-    }
-  }
-
-  private void scheduleRetrySignal(long invocationId, Instant retryAt) {
-    long delayMillis = Math.max(1L, Duration.between(clock.instant(), retryAt).toMillis() + 1L);
-    try {
-      scheduler.schedule(() -> notifyInvocation(invocationId), delayMillis, TimeUnit.MILLISECONDS);
-    } catch (RejectedExecutionException failure) {
-      log.warn("cannot schedule model retry signal for {}", invocationId, failure);
     }
   }
 
@@ -501,7 +467,6 @@ public final class ModelWorker {
           for (ProviderStreamEvent gap : finalGaps) {
             appendDelta(claimed.invocation(), gap, completedAt);
           }
-          notifyThread(claimed.invocation().threadId());
           cancel = false;
         }
       } catch (RuntimeException failure) {
@@ -542,10 +507,7 @@ public final class ModelWorker {
         Instant retryAt = now.plus(policy.delayBeforeRetry(retryOrdinal));
         if (retryAt.isBefore(claimed.invocation().deadlineAt())) {
           try {
-            if (transactions.scheduleRetry(claimed, retryAt, lastObservedActivityAt(), now)
-                == ModelInvocationUpdateOutcome.APPLIED) {
-              scheduleRetrySignal(claimed.invocation().id(), retryAt);
-            }
+            transactions.scheduleRetry(claimed, retryAt, lastObservedActivityAt(), now);
           } catch (RuntimeException failure) {
             log.warn("cannot persist model retry for {}", claimed.invocation().id(), failure);
           } finally {
@@ -561,11 +523,7 @@ public final class ModelWorker {
       ModelInvocationError snapshot =
           new ModelInvocationError(error.kind(), message(error, "model provider failed"));
       try {
-        if (transactions.completeFailure(
-                claimed, snapshot, lastObservedActivityAt(), clock.instant())
-            == ModelInvocationUpdateOutcome.APPLIED) {
-          notifyThread(claimed.invocation().threadId());
-        }
+        transactions.completeFailure(claimed, snapshot, lastObservedActivityAt(), clock.instant());
       } catch (RuntimeException failure) {
         log.warn("cannot persist model failure for {}", claimed.invocation().id(), failure);
       } finally {
@@ -575,10 +533,7 @@ public final class ModelWorker {
 
     private void persistCancelled() {
       try {
-        if (transactions.completeCancelled(claimed, lastObservedActivityAt(), clock.instant())
-            == ModelInvocationUpdateOutcome.APPLIED) {
-          notifyThread(claimed.invocation().threadId());
-        }
+        transactions.completeCancelled(claimed, lastObservedActivityAt(), clock.instant());
       } catch (RuntimeException failure) {
         log.warn("cannot persist model cancellation for {}", claimed.invocation().id(), failure);
       } finally {

@@ -10,7 +10,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelExecutionResolver;
 import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelInvocationTransactions;
 import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelWorker;
 import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelWorkerConfig;
-import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyResolver;
 
@@ -44,7 +43,6 @@ public class HarnessModelWorkerConfiguration {
       ModelExecutionResolver executionResolver,
       InvocationRetryPolicyResolver retryPolicyResolver,
       RealtimeEventSink realtimeEventSink,
-      ActivationNotifier activationNotifier,
       ModelWorkerConfig config,
       Clock clock,
       @Qualifier("modelWorkerScheduler") ScheduledExecutorService modelWorkerScheduler) {
@@ -53,7 +51,6 @@ public class HarnessModelWorkerConfiguration {
         executionResolver,
         retryPolicyResolver,
         realtimeEventSink,
-        activationNotifier,
         config,
         clock,
         modelWorkerScheduler,

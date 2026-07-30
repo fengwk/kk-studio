@@ -1,14 +1,11 @@
 package fun.fengwk.kkstudio.core.harness.tool.worker;
 
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentReadyListener;
-import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyResolver;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
@@ -25,7 +22,7 @@ import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
-/** Wires SPI implementations to the location-agnostic durable Tool worker. */
+/** Wires SPI implementations to the single-path durable Tool worker. */
 @Configuration(proxyBeanMethods = false)
 public class HarnessToolWorkerConfiguration {
   @Bean
@@ -48,18 +45,6 @@ public class HarnessToolWorkerConfiguration {
     return toolFactories::find;
   }
 
-  /**
-   * Production READY bridge. Uses a lazy {@link ToolWorker} so Gateway construction does not form a
-   * cycle with this listener.
-   */
-  @Bean
-  @ConditionalOnMissingBean
-  public EnvironmentReadyListener environmentReadyListener(
-      ObjectProvider<ToolWorker> toolWorker,
-      @Qualifier("toolWorkerScheduler") ScheduledExecutorService toolWorkerScheduler) {
-    return new ToolWorkerEnvironmentReadyListener(toolWorker, toolWorkerScheduler);
-  }
-
   @Bean(destroyMethod = "stop")
   @ConditionalOnBean({ToolRegistry.class, RemoteToolTransport.class})
   @ConditionalOnMissingBean
@@ -71,7 +56,6 @@ public class HarnessToolWorkerConfiguration {
       ArtifactStore artifactStore,
       InvocationRetryPolicyResolver retryPolicyResolver,
       RealtimeEventSink realtimeEventSink,
-      ActivationNotifier activationNotifier,
       ToolWorkerConfig config,
       Clock clock,
       @Qualifier("toolWorkerScheduler") ScheduledExecutorService toolWorkerScheduler) {
@@ -83,7 +67,6 @@ public class HarnessToolWorkerConfiguration {
         artifactStore,
         retryPolicyResolver,
         realtimeEventSink,
-        activationNotifier,
         config,
         clock,
         toolWorkerScheduler,

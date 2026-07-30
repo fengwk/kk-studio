@@ -4,10 +4,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.core.harness.execution.ExecutionTargetStore;
 import fun.fengwk.kkstudio.core.harness.model.worker.HarnessModelInvocationThreadDO;
 import fun.fengwk.kkstudio.core.harness.model.worker.HarnessModelInvocationThreadMapper;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ClaimedToolInvocation;
@@ -22,64 +23,49 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
-/** Final PostgreSQL ToolInvocation worker transaction adapter. */
+/**
+ * PostgreSQL ToolInvocation worker transaction adapter that drives durable scheduling through the
+ * single {@code harness_execution_target} queue.
+ *
+ * <p>Every mutation acquires row locks in the order Thread -> ToolInvocation -> target, then
+ * advances or deletes the {@link ExecutionTargetKind#TOOL_INVOCATION} row in the same transaction.
+ * Terminal mutations additionally mark the owning Thread runnable and reschedule the durable Thread
+ * target.
+ *
+ * <p>Claim returns {@link Optional#empty()} when the target is absent or not due; an owned mutation
+ * whose target row has disappeared throws {@link IllegalStateException} so the transaction rolls
+ * back rather than persisting a half-applied state.
+ */
 @Service
 public class PostgresqlToolInvocationTransactions implements ToolInvocationTransactions {
 
   private static final int MAX_TOKEN_LENGTH = 128;
+  private static final Duration DEFAULT_EXECUTION_TIMEOUT = Duration.ofMinutes(5);
 
   private final PostgresqlToolInvocationMapper invocationMapper;
   private final HarnessModelInvocationThreadMapper threadMapper;
+  private final ExecutionTargetStore executionTargetStore;
 
   public PostgresqlToolInvocationTransactions(
       PostgresqlToolInvocationMapper invocationMapper,
-      HarnessModelInvocationThreadMapper threadMapper) {
+      HarnessModelInvocationThreadMapper threadMapper,
+      ExecutionTargetStore executionTargetStore) {
     this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
     this.threadMapper = Objects.requireNonNull(threadMapper, "threadMapper");
-  }
-
-  @Override
-  @Transactional(readOnly = true)
-  public Optional<ToolInvocation> findClaimable(long invocationId, Instant now) {
-    requirePositive(invocationId, "invocationId");
-    ToolInvocationDO row = invocationMapper.findClaimable(invocationId, offset(now));
-    return row == null
-        ? Optional.empty()
-        : Optional.of(ToolInvocationRowConverter.toAggregate(row));
-  }
-
-  @Override
-  @Transactional(readOnly = true)
-  public Optional<ToolInvocation> findNextClaimable(
-      ToolExecutionLocation location, String environmentName, Instant now) {
-    Objects.requireNonNull(location, "location");
-    if (location == ToolExecutionLocation.PLATFORM && environmentName != null) {
-      throw new IllegalArgumentException("PLATFORM dispatch must not specify environmentName");
-    }
-    if (location == ToolExecutionLocation.ENVIRONMENT
-        && (environmentName == null || environmentName.isBlank())) {
-      throw new IllegalArgumentException("ENVIRONMENT dispatch requires environmentName");
-    }
-    ToolInvocationDO row =
-        invocationMapper.findNextClaimable(location.name(), environmentName, offset(now));
-    return row == null
-        ? Optional.empty()
-        : Optional.of(ToolInvocationRowConverter.toAggregate(row));
+    this.executionTargetStore =
+        Objects.requireNonNull(executionTargetStore, "executionTargetStore");
   }
 
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
   public Optional<ClaimedToolInvocation> claim(
-      long invocationId,
-      String workerToken,
-      Duration executionTimeout,
-      Duration workerLeaseDuration,
-      Instant now) {
+      long invocationId, String workerToken, Duration workerLeaseDuration, Instant now) {
     requirePositive(invocationId, "invocationId");
     requireToken(workerToken);
-    requirePositive(executionTimeout, "executionTimeout");
     requirePositive(workerLeaseDuration, "workerLeaseDuration");
     Instant persistedNow = persistence(now);
+
+    // Step 1: thread row lock + epoch pre-read.
     ToolInvocationDO peek = invocationMapper.findClaimable(invocationId, offset(persistedNow));
     if (peek == null) {
       return Optional.empty();
@@ -91,17 +77,38 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
     if (!Objects.equals(thread.getExecutionEpoch(), peek.getExecutionEpoch())) {
       return Optional.empty();
     }
+
+    // Step 2: tool invocation row lock + validation (no mutation yet).
     ToolInvocationDO row = invocationMapper.findForUpdate(invocationId, peek.getThreadId());
     if (row == null || !Objects.equals(row.getExecutionEpoch(), thread.getExecutionEpoch())) {
       return Optional.empty();
     }
+    InvocationStatus status = InvocationStatus.valueOf(row.getStatus());
+    if (status != InvocationStatus.QUEUED
+        && status != InvocationStatus.RETRY_WAIT
+        && status != InvocationStatus.RUNNING) {
+      return Optional.empty();
+    }
+
+    // Step 3: target gate. If the target row is absent or not yet due, the transaction commits
+    // with no row mutations, leaving the QUEUED / RETRY_WAIT / RUNNING invocation unchanged.
+    if (executionTargetStore
+        .lockDue(ExecutionTargetKind.TOOL_INVOCATION, invocationId, persistedNow)
+        .isEmpty()) {
+      return Optional.empty();
+    }
+
+    // Step 4: status transition (status transition is now conditional on target lockDue success).
     OffsetDateTime nowOffset = offset(persistedNow);
     OffsetDateTime leaseUntil = advance(persistedNow, workerLeaseDuration, "workerLeaseDuration");
-    InvocationStatus status = InvocationStatus.valueOf(row.getStatus());
     int affected;
     boolean recovered = false;
     if (status == InvocationStatus.QUEUED) {
       Instant startedAt = max(persistedNow, row.getCreatedAt().toInstant());
+      Duration descriptorTimeout =
+          ToolInvocationRowConverter.toAggregate(row).descriptor().timeout();
+      Duration executionTimeout =
+          descriptorTimeout.isZero() ? DEFAULT_EXECUTION_TIMEOUT : descriptorTimeout;
       affected =
           invocationMapper.claimQueued(
               row.getId(),
@@ -122,7 +129,7 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
               workerToken,
               leaseUntil,
               nowOffset);
-    } else if (status == InvocationStatus.RUNNING) {
+    } else {
       affected =
           invocationMapper.recoverExpired(
               row.getId(),
@@ -134,12 +141,13 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
               leaseUntil,
               nowOffset);
       recovered = true;
-    } else {
-      return Optional.empty();
     }
     if (affected != 1) {
-      return Optional.empty();
+      throw new IllegalStateException(
+          "claim mutated " + affected + " rows after the target gate passed");
     }
+
+    // Step 5: target advance + final ownership check.
     ToolInvocationDO claimed = invocationMapper.findForUpdate(row.getId(), row.getThreadId());
     if (claimed == null) {
       throw new IllegalStateException("claimed invocation disappeared: " + row.getId());
@@ -150,7 +158,14 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
         || !aggregate.workerLease().token().equals(workerToken)) {
       throw new IllegalStateException("claim result does not match requested ownership");
     }
-    return Optional.of(new ClaimedToolInvocation(aggregate, recovered));
+    requireTargetAffected(
+        executionTargetStore.rescheduleLocked(
+            ExecutionTargetKind.TOOL_INVOCATION,
+            invocationId,
+            routeKey(row),
+            aggregate.workerLease().until()),
+        "reschedule tool invocation target after claim");
+    return Optional.of(new ClaimedToolInvocation(aggregate, status, recovered));
   }
 
   @Override
@@ -158,10 +173,19 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
   public ToolInvocationUpdateOutcome renew(
       ClaimedToolInvocation claimed, Duration workerLeaseDuration, Instant now) {
     requirePositive(workerLeaseDuration, "workerLeaseDuration");
-    ToolInvocationDO row = lockOwned(claimed, now);
-    if (row == null) {
+    LockedTool locked = lockOwned(claimed, now);
+    if (locked == null) {
       return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
+    ToolInvocationDO row = locked.row();
+    Instant persistedNow = persistence(now);
+    Instant leaseBase =
+        max(
+            persistedNow,
+            row.getStartedAt() == null ? persistedNow : row.getStartedAt().toInstant());
+    Instant requestedLeaseDeadline =
+        advance(leaseBase, workerLeaseDuration, "workerLeaseDuration").toInstant();
+    Instant leaseDeadline = max(row.getWorkerUntil().toInstant(), requestedLeaseDeadline);
     int affected =
         invocationMapper.renew(
             row.getId(),
@@ -169,19 +193,24 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
             row.getExecutionEpoch(),
             row.getAttempt(),
             claimed.invocation().workerLease().token(),
-            advance(
-                max(persistence(now), row.getStartedAt().toInstant()),
-                workerLeaseDuration,
-                "workerLeaseDuration"),
-            offset(now));
-    return outcome(affected);
+            offset(leaseDeadline),
+            offset(persistedNow));
+    if (outcome(affected) != ToolInvocationUpdateOutcome.APPLIED) {
+      return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
+    }
+    requireTargetAffected(
+        executionTargetStore.rescheduleLocked(
+            ExecutionTargetKind.TOOL_INVOCATION, row.getId(), routeKey(row), leaseDeadline),
+        "reschedule tool invocation target after renew");
+    return ToolInvocationUpdateOutcome.APPLIED;
   }
 
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
   public ToolInvocationUpdateOutcome recordActivity(
       ClaimedToolInvocation claimed, Instant activityAt, Instant now) {
-    if (lockOwned(claimed, now) == null) {
+    LockedTool locked = lockOwned(claimed, now);
+    if (locked == null) {
       return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
     ToolInvocation invocation = claimed.invocation();
@@ -193,23 +222,23 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
             invocation.attempt(),
             invocation.workerLease().token(),
             offset(activityAt),
-            offset(now)));
+            offset(persistence(now))));
   }
 
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
   public ToolInvocationUpdateOutcome releaseUnstarted(
-      ClaimedToolInvocation claimed,
-      InvocationStatus previousStatus,
-      Instant nextAttemptAt,
-      Instant now) {
-    Objects.requireNonNull(previousStatus, "previousStatus");
-    ToolInvocationDO row = lockOwned(claimed, now);
-    if (row == null) {
+      ClaimedToolInvocation claimed, Instant nextAttemptAt, Instant now) {
+    LockedTool locked = lockOwned(claimed, now);
+    if (locked == null) {
       return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
+    ToolInvocationDO row = locked.row();
     ToolInvocation invocation = claimed.invocation();
+    InvocationStatus previousStatus = claimed.previousStatus();
     int affected;
+    Instant persistedNow = persistence(now);
+    Instant rescheduleAt;
     if (previousStatus == InvocationStatus.QUEUED) {
       if (nextAttemptAt != null || invocation.attempt() != 1) {
         throw new IllegalArgumentException(
@@ -222,7 +251,8 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
               invocation.executionEpoch(),
               invocation.attempt(),
               invocation.workerLease().token(),
-              offset(now));
+              offset(persistedNow));
+      rescheduleAt = persistedNow;
     } else if (previousStatus == InvocationStatus.RETRY_WAIT) {
       if (invocation.attempt() <= 1 || nextAttemptAt == null) {
         throw new IllegalArgumentException(
@@ -243,11 +273,19 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
               invocation.attempt() - 1,
               invocation.workerLease().token(),
               offset(next),
-              offset(now));
+              offset(persistedNow));
+      rescheduleAt = next;
     } else {
       throw new IllegalArgumentException("previousStatus must be QUEUED or RETRY_WAIT");
     }
-    return outcome(affected);
+    if (outcome(affected) != ToolInvocationUpdateOutcome.APPLIED) {
+      return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
+    }
+    requireTargetAffected(
+        executionTargetStore.rescheduleLocked(
+            ExecutionTargetKind.TOOL_INVOCATION, invocation.id(), routeKey(row), rescheduleAt),
+        "reschedule tool invocation target after releaseUnstarted");
+    return ToolInvocationUpdateOutcome.APPLIED;
   }
 
   @Override
@@ -258,8 +296,8 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
       Instant lastObservedActivityAt,
       Instant now) {
     Objects.requireNonNull(resultSupplier, "resultSupplier");
-    ToolInvocationDO row = lockOwned(claimed, now);
-    if (row == null) {
+    LockedTool locked = lockOwned(claimed, now);
+    if (locked == null) {
       return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
     ToolResult result =
@@ -268,7 +306,13 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
       throw new IllegalArgumentException("result.toolCallId must match the claimed invocation");
     }
     return applyTerminal(
-        claimed, row, result, null, lastObservedActivityAt, now, InvocationStatus.SUCCEEDED);
+        claimed,
+        locked.row(),
+        result,
+        null,
+        lastObservedActivityAt,
+        now,
+        InvocationStatus.SUCCEEDED);
   }
 
   @Override
@@ -317,10 +361,11 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
       Instant nextAttemptAt,
       Instant lastObservedActivityAt,
       Instant now) {
-    ToolInvocationDO row = lockOwned(claimed, now);
-    if (row == null) {
+    LockedTool locked = lockOwned(claimed, now);
+    if (locked == null) {
       return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
+    ToolInvocationDO row = locked.row();
     Instant effectiveActivity =
         max(row.getLastActivityAt().toInstant(), persistence(lastObservedActivityAt));
     Instant next = persistence(nextAttemptAt);
@@ -329,16 +374,25 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
           "nextAttemptAt must be after effective activity and before deadline");
     }
     ToolInvocation invocation = claimed.invocation();
-    return outcome(
-        invocationMapper.scheduleRetry(
-            invocation.id(),
-            invocation.threadId(),
-            invocation.executionEpoch(),
-            invocation.attempt(),
-            invocation.workerLease().token(),
-            offset(lastObservedActivityAt),
-            offset(next),
-            offset(now)));
+    ToolInvocationUpdateOutcome outcome =
+        outcome(
+            invocationMapper.scheduleRetry(
+                invocation.id(),
+                invocation.threadId(),
+                invocation.executionEpoch(),
+                invocation.attempt(),
+                invocation.workerLease().token(),
+                offset(lastObservedActivityAt),
+                offset(next),
+                offset(persistence(now))));
+    if (outcome != ToolInvocationUpdateOutcome.APPLIED) {
+      return outcome;
+    }
+    requireTargetAffected(
+        executionTargetStore.rescheduleLocked(
+            ExecutionTargetKind.TOOL_INVOCATION, invocation.id(), routeKey(row), next),
+        "reschedule tool invocation target after scheduleRetry");
+    return ToolInvocationUpdateOutcome.APPLIED;
   }
 
   private ToolInvocationUpdateOutcome complete(
@@ -348,11 +402,12 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
       Instant lastObservedActivityAt,
       Instant now,
       InvocationStatus terminalStatus) {
-    ToolInvocationDO row = lockOwned(claimed, now);
-    if (row == null) {
+    LockedTool locked = lockOwned(claimed, now);
+    if (locked == null) {
       return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
-    return applyTerminal(claimed, row, result, error, lastObservedActivityAt, now, terminalStatus);
+    return applyTerminal(
+        claimed, locked.row(), result, error, lastObservedActivityAt, now, terminalStatus);
   }
 
   private ToolInvocationUpdateOutcome applyTerminal(
@@ -364,7 +419,8 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
       Instant now,
       InvocationStatus terminalStatus) {
     Instant observed = persistence(lastObservedActivityAt);
-    Instant finished = max(persistence(now), max(observed, row.getLastActivityAt().toInstant()));
+    Instant persistedNow = persistence(now);
+    Instant finished = max(persistedNow, max(observed, row.getLastActivityAt().toInstant()));
     ToolInvocation invocation = claimed.invocation();
     int affected;
     if (terminalStatus == InvocationStatus.SUCCEEDED) {
@@ -378,7 +434,7 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
               ToolInvocationRowConverter.encodeResult(result),
               offset(observed),
               offset(finished),
-              offset(now));
+              offset(persistedNow));
     } else if (terminalStatus == InvocationStatus.CANCELLED) {
       affected =
           invocationMapper.completeCancelled(
@@ -389,7 +445,7 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
               invocation.workerLease().token(),
               offset(observed),
               offset(finished),
-              offset(now));
+              offset(persistedNow));
     } else {
       affected =
           invocationMapper.completeError(
@@ -402,7 +458,7 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
               ToolInvocationRowConverter.encodeError(error),
               offset(observed),
               offset(finished),
-              offset(now));
+              offset(persistedNow));
     }
     if (affected != 1) {
       return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
@@ -412,10 +468,22 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
         != 1) {
       throw new IllegalStateException("cannot mark owning thread runnable");
     }
+    requireTargetAffected(
+        executionTargetStore.deleteLocked(ExecutionTargetKind.TOOL_INVOCATION, invocation.id()),
+        "delete tool invocation target after terminal write");
+    // THREAD target scheduling is best-effort: an earlier due time wins and is acceptable.
+    executionTargetStore.schedule(
+        ExecutionTargetKind.THREAD, invocation.threadId(), null, persistedNow);
     return ToolInvocationUpdateOutcome.APPLIED;
   }
 
-  private ToolInvocationDO lockOwned(ClaimedToolInvocation claimed, Instant now) {
+  /**
+   * Acquire the lock chain Thread -> ToolInvocation -> target and verify the caller still owns the
+   * invocation. Returns {@code null} when ownership has been lost (token/attempt/epoch/lease drift,
+   * thread mismatch). Throws {@link IllegalStateException} when the invocation is owned but its
+   * target row is missing, so the transaction rolls back rather than silently persisting.
+   */
+  private LockedTool lockOwned(ClaimedToolInvocation claimed, Instant now) {
     Objects.requireNonNull(claimed, "claimed");
     ToolInvocation invocation = claimed.invocation();
     HarnessModelInvocationThreadDO thread = threadMapper.findForUpdate(invocation.threadId());
@@ -434,13 +502,26 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
         || !row.getWorkerUntil().toInstant().isAfter(persistence(now))) {
       return null;
     }
-    return row;
+    if (executionTargetStore.lock(ExecutionTargetKind.TOOL_INVOCATION, invocation.id()).isEmpty()) {
+      throw new IllegalStateException("owned invocation is missing its target: " + invocation.id());
+    }
+    return new LockedTool(row);
+  }
+
+  private static String routeKey(ToolInvocationDO row) {
+    return "ENVIRONMENT".equals(row.getLocation()) ? row.getEnvironmentName() : null;
   }
 
   private static ToolInvocationUpdateOutcome outcome(int affected) {
     return affected == 1
         ? ToolInvocationUpdateOutcome.APPLIED
         : ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
+  }
+
+  private static void requireTargetAffected(int affected, String operation) {
+    if (affected != 1) {
+      throw new IllegalStateException(operation + " affected " + affected + " rows");
+    }
   }
 
   private static OffsetDateTime offset(Instant value) {
@@ -480,4 +561,6 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
       throw new IllegalArgumentException(name + " must be at least 1ms");
     }
   }
+
+  private record LockedTool(ToolInvocationDO row) {}
 }

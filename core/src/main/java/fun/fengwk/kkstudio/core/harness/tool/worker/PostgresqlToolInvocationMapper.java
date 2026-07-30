@@ -94,38 +94,6 @@ public interface PostgresqlToolInvocationMapper extends BaseMapper {
   @ResultMap("toolInvocationResultMap")
   ToolInvocationDO findClaimable(@Param("id") long id, @Param("now") OffsetDateTime now);
 
-  @Select(
-      "select "
-          + FIELDS
-          + """
-      from harness_tool_invocation ti
-      join harness_thread t on t.id = ti.thread_id
-      where ti.location = #{location}
-        and ti.environment_name is not distinct from #{environmentName}
-        and t.execution_epoch = ti.execution_epoch
-        and not exists (
-          select 1 from harness_interaction i
-          where i.owner_kind = 'TOOL_INVOCATION' and i.owner_id = ti.id and i.status = 'OPEN'
-        )
-        and (
-          (ti.status = 'RUNNING' and ti.worker_until <= #{now})
-          or (ti.status = 'RETRY_WAIT' and ti.next_attempt_at <= #{now})
-          or ti.status = 'QUEUED'
-        )
-      order by
-        case when ti.status = 'RUNNING' then 0 when ti.status = 'RETRY_WAIT' then 1 else 2 end,
-        case when ti.status = 'RUNNING' then ti.worker_until
-             when ti.status = 'RETRY_WAIT' then ti.next_attempt_at
-             else ti.created_at end,
-        ti.id
-      limit 1
-      """)
-  @ResultMap("toolInvocationResultMap")
-  ToolInvocationDO findNextClaimable(
-      @Param("location") String location,
-      @Param("environmentName") String environmentName,
-      @Param("now") OffsetDateTime now);
-
   @Update(
       """
       update harness_tool_invocation

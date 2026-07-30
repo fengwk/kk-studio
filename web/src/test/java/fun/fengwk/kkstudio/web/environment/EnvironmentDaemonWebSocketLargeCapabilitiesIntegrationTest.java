@@ -14,6 +14,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentGatewayProperties;
+import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
@@ -31,7 +32,6 @@ import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
@@ -62,6 +62,8 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
 
   @MockitoBean private ToolInvocationTransactions transactions;
   @MockitoBean private ArtifactStore artifactStore;
+  // The Gateway's READY wake is wired by the durable-target dispatcher slice; suppress here.
+  @MockitoBean private EnvironmentReadyListener environmentReadyListener;
 
   /**
    * A {@code CAPABILITIES} frame comfortably larger than 8 KiB is accepted by the embedded
@@ -69,8 +71,6 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
    */
   @Test
   void largeCapabilitiesFrameReachesReadyWithoutClose1009() throws Exception {
-    when(transactions.findNextClaimable(any(), any(), any())).thenReturn(Optional.empty());
-
     int minBytes = TOMCAT_DEFAULT_TEXT_BUFFER_BYTES + 4 * 1024;
     String capabilitiesPayloadJson = largeCapabilitiesPayload(minBytes);
     assertTrue(

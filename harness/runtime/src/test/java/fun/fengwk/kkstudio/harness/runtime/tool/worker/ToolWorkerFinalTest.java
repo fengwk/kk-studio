@@ -10,8 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
@@ -46,7 +44,6 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -93,12 +90,10 @@ class ToolWorkerFinalTest {
     assertEquals(1, fixture.transactions.releaseUnstartedCalls);
     assertNull(fixture.transactions.terminalStatus);
     assertEquals(0, fixture.tool.executions);
-    assertTrue(fixture.activations.isEmpty());
   }
 
   @Test
-  void dueEnvironmentRetryWaitUnavailabilityReschedulesSameInvocationSignal()
-      throws InterruptedException {
+  void dueEnvironmentRetryWaitUnavailabilityReschedulesSameInvocationTarget() {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
     fixture.transactions.candidate = retryWaiting(environmentDescriptor(), "env-a");
     fixture.transactions.descriptor = environmentDescriptor();
@@ -116,12 +111,6 @@ class ToolWorkerFinalTest {
         NOW.plus(ToolWorkerConfig.DEFAULT.unavailableRetryDelay()),
         fixture.transactions.releasedNextAttemptAt);
     assertEquals(0, fixture.transactions.retryCalls);
-    assertTrue(fixture.activations.isEmpty());
-    assertTrue(
-        fixture.activationSignal.await(5, TimeUnit.SECONDS),
-        "timed out waiting for the rescheduled retry activation signal");
-    assertEquals(
-        List.of(new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, 1L)), fixture.activations);
   }
 
   @Test
@@ -241,7 +230,6 @@ class ToolWorkerFinalTest {
             fixture.artifacts,
             () -> fixture.retryPolicy,
             fixture.realtimeEvents::add,
-            fixture.activations::add,
             ToolWorkerConfig.DEFAULT,
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
@@ -269,7 +257,6 @@ class ToolWorkerFinalTest {
     assertFalse(fixture.worker.hasActiveExecution());
     assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.terminalStatus);
     assertEquals("done", text(fixture.transactions.result));
-    assertEquals(List.of(new ExecutionTarget(ExecutionTargetKind.THREAD, 2L)), fixture.activations);
     assertFalse(fixture.tool.handle.cancelled);
   }
 
@@ -325,10 +312,9 @@ class ToolWorkerFinalTest {
   }
 
   @Test
-  void isolatesRealtimeAndActivationProjectionFailuresFromDurableSuccess() {
+  void isolatesRealtimeProjectionFailuresFromDurableSuccess() {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
     fixture.realtimeFailure = true;
-    fixture.activationFailure = true;
     fixture.rebuildWorker(
         new ToolWorkerConfig(
             Duration.ofSeconds(30),
@@ -359,7 +345,6 @@ class ToolWorkerFinalTest {
     assertEquals(
         "Tool ownership was lost; execution result is unknown.",
         fixture.transactions.error.message());
-    assertEquals(List.of(new ExecutionTarget(ExecutionTargetKind.THREAD, 2L)), fixture.activations);
   }
 
   @Test
@@ -380,7 +365,7 @@ class ToolWorkerFinalTest {
   }
 
   @Test
-  void idempotentFailureSignalsInvocationOnlyWhenRetryIsDue() throws InterruptedException {
+  void idempotentFailureReschedulesTargetWithoutDispatchingAndCancelsLocalHandle() {
     Fixture fixture = fixture(ToolSideEffect.IDEMPOTENT);
     fixture.retryPolicy =
         new InvocationRetryPolicy(
@@ -393,12 +378,6 @@ class ToolWorkerFinalTest {
     assertEquals(1, fixture.transactions.retryCalls);
     assertEquals(NOW.plusSeconds(2), fixture.transactions.nextAttemptAt);
     assertNull(fixture.transactions.terminalStatus);
-    assertTrue(fixture.activations.isEmpty());
-    assertTrue(
-        fixture.activationSignal.await(5, TimeUnit.SECONDS),
-        "timed out waiting for the retry activation signal");
-    assertEquals(
-        List.of(new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, 1L)), fixture.activations);
     assertTrue(fixture.tool.handle.cancelled);
   }
 
@@ -416,7 +395,6 @@ class ToolWorkerFinalTest {
     assertEquals(0, fixture.transactions.retryCalls);
     assertEquals(InvocationStatus.FAILED, fixture.transactions.terminalStatus);
     assertEquals("side effect uncertain", fixture.transactions.error.message());
-    assertEquals(List.of(new ExecutionTarget(ExecutionTargetKind.THREAD, 2L)), fixture.activations);
   }
 
   @Test
@@ -428,7 +406,6 @@ class ToolWorkerFinalTest {
     fixture.tool.listener.onComplete(result("late"));
 
     assertTrue(fixture.tool.handle.cancelled);
-    assertTrue(fixture.activations.isEmpty());
     assertFalse(fixture.worker.hasActiveExecution());
   }
 
@@ -694,8 +671,6 @@ class ToolWorkerFinalTest {
     private final RecordingTool tool;
     private final MemoryArtifacts artifacts = new MemoryArtifacts();
     private final List<RealtimeEvent> realtimeEvents = new ArrayList<>();
-    private final List<ExecutionTarget> activations = new ArrayList<>();
-    private final CountDownLatch activationSignal = new CountDownLatch(1);
 
     private ToolInterceptorChain interceptorChain = new ToolInterceptorChain(List.of(), List.of());
     private Optional<RecordingTool> registryTool;
@@ -703,7 +678,6 @@ class ToolWorkerFinalTest {
         new InvocationRetryPolicy(
             0, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(1), Duration.ofSeconds(1));
     private boolean realtimeFailure;
-    private boolean activationFailure;
     private ToolWorker worker;
     private RemoteToolTransport transport = noopTransport();
 
@@ -740,13 +714,6 @@ class ToolWorkerFinalTest {
                 }
                 realtimeEvents.add(event);
               },
-              target -> {
-                if (activationFailure) {
-                  throw new IllegalStateException("signal unavailable");
-                }
-                activations.add(target);
-                activationSignal.countDown();
-              },
               config,
               Clock.fixed(NOW, ZoneOffset.UTC),
               scheduler,
@@ -760,9 +727,6 @@ class ToolWorkerFinalTest {
     private boolean recoveredLease;
     private boolean forceLocalConflict;
     private int claimCalls;
-    private int findNextCalls;
-    private ToolExecutionLocation queriedLocation;
-    private String queriedEnvironmentName;
     private ToolInvocationUpdateOutcome renewOutcome = ToolInvocationUpdateOutcome.APPLIED;
     private ToolInvocationUpdateOutcome activityOutcome = ToolInvocationUpdateOutcome.APPLIED;
     private ToolInvocationUpdateOutcome terminalOutcome = ToolInvocationUpdateOutcome.APPLIED;
@@ -784,40 +748,20 @@ class ToolWorkerFinalTest {
     }
 
     @Override
-    public Optional<ToolInvocation> findClaimable(long invocationId, Instant now) {
-      return candidate.id() == invocationId ? Optional.of(candidate) : Optional.empty();
-    }
-
-    @Override
-    public Optional<ToolInvocation> findNextClaimable(
-        ToolExecutionLocation location, String environmentName, Instant now) {
-      findNextCalls++;
-      queriedLocation = location;
-      queriedEnvironmentName = environmentName;
-      return candidate.location() == location
-              && Objects.equals(candidate.environmentName(), environmentName)
-          ? Optional.of(candidate)
-          : Optional.empty();
-    }
-
-    @Override
     public Optional<ClaimedToolInvocation> claim(
-        long invocationId,
-        String workerToken,
-        Duration executionTimeout,
-        Duration workerLeaseDuration,
-        Instant now) {
+        long invocationId, String workerToken, Duration workerLeaseDuration, Instant now) {
       claimCalls++;
       assertEquals(1L, invocationId);
       assertEquals("worker-token", workerToken);
-      assertEquals(descriptor.timeout(), executionTimeout);
       assertTrue(workerLeaseDuration.isPositive());
       boolean recovered = recoveredLease || forceLocalConflict;
       // forceLocalConflict still claims with recovered=false so dispatchClaimed hits putIfAbsent.
       if (forceLocalConflict) {
         recovered = false;
       }
-      return Optional.of(new ClaimedToolInvocation(running(descriptor, workerToken), recovered));
+      return Optional.of(
+          new ClaimedToolInvocation(
+              running(descriptor, workerToken), candidate.status(), recovered));
     }
 
     @Override
@@ -836,12 +780,9 @@ class ToolWorkerFinalTest {
 
     @Override
     public ToolInvocationUpdateOutcome releaseUnstarted(
-        ClaimedToolInvocation claimed,
-        InvocationStatus previousStatus,
-        Instant nextAttemptAt,
-        Instant now) {
+        ClaimedToolInvocation claimed, Instant nextAttemptAt, Instant now) {
       releaseUnstartedCalls++;
-      releasedStatus = previousStatus;
+      releasedStatus = claimed.previousStatus();
       releasedNextAttemptAt = nextAttemptAt;
       return ToolInvocationUpdateOutcome.APPLIED;
     }

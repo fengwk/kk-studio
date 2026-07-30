@@ -8,8 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
@@ -35,7 +33,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.port.ActivationNotifier;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
@@ -90,11 +87,6 @@ class ModelWorkerTest {
     assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.current.status());
     assertEquals("answer", fixture.transactions.current.result().text());
     assertEquals(
-        List.of(
-            new ExecutionTarget(
-                ExecutionTargetKind.THREAD, fixture.transactions.current.threadId())),
-        fixture.notifier.targets);
-    assertEquals(
         List.of(new ProviderStreamEvent.TextDelta("ans"), new ProviderStreamEvent.TextDelta("wer")),
         modelDeltas(fixture.sink.events));
     assertEquals(List.of(1, 1), modelDeltaAttempts(fixture.sink.events));
@@ -103,10 +95,11 @@ class ModelWorkerTest {
   }
 
   /**
-   * A transient Provider error only schedules the durable Invocation; it does not wake the Thread.
+   * A transient Provider error only schedules the durable Invocation via the transaction adapter;
+   * the worker does not emit any local signal, leaving wake purely to the durable target.
    */
   @Test
-  void schedulesTransientRetryAndEmitsOnlyDelayedInvocationSignal() throws Exception {
+  void schedulesTransientRetryWithoutEmittingAnyLocalSignal() {
     Fixture fixture = fixture();
     fixture.retryPolicy = retryPolicy(1, Duration.ofMillis(20));
     fixture.rebuildWorker();
@@ -118,10 +111,6 @@ class ModelWorkerTest {
     assertEquals(InvocationStatus.RETRY_WAIT, fixture.transactions.current.status());
     assertEquals(1, fixture.transactions.scheduleRetryCalls);
     assertTrue(fixture.executor.handle.isCancelled());
-    await(fixture.notifier.notified);
-    assertEquals(
-        List.of(new ExecutionTarget(ExecutionTargetKind.MODEL_INVOCATION, 1L)),
-        fixture.notifier.targets);
   }
 
   /** Realtime consumers can reject partial output left by an earlier failed attempt. */
@@ -160,8 +149,6 @@ class ModelWorkerTest {
 
     assertEquals(InvocationStatus.FAILED, fixture.transactions.current.status());
     assertEquals(0, fixture.transactions.scheduleRetryCalls);
-    assertEquals(
-        List.of(new ExecutionTarget(ExecutionTargetKind.THREAD, 2L)), fixture.notifier.targets);
   }
 
   /**
@@ -180,8 +167,6 @@ class ModelWorkerTest {
     assertEquals(1, fixture.transactions.completeUnknownCalls);
     assertEquals(0, fixture.executor.executeCalls);
     assertEquals(0, fixture.resolverCalls);
-    assertEquals(
-        List.of(new ExecutionTarget(ExecutionTargetKind.THREAD, 2L)), fixture.notifier.targets);
   }
 
   /** Realtime projection failure is lossy by design and cannot prevent durable success. */
@@ -195,27 +180,12 @@ class ModelWorkerTest {
     fixture.executor.listener.onComplete(response("answer", ProviderStopReason.COMPLETED));
 
     assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.current.status());
-    assertEquals(
-        List.of(new ExecutionTarget(ExecutionTargetKind.THREAD, 2L)), fixture.notifier.targets);
     assertTrue(fixture.sink.events.isEmpty());
   }
 
-  /** A post-commit activation transport failure cannot roll back a completed Invocation. */
-  @Test
-  void isolatesActivationNotifierFailureFromDurableSuccess() {
-    Fixture fixture = fixture();
-    fixture.notifier.failure = new IllegalStateException("pubsub unavailable");
-
-    assertTrue(fixture.worker.dispatch(1L));
-    fixture.executor.listener.onComplete(response("answer", ProviderStopReason.COMPLETED));
-
-    assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.current.status());
-    assertTrue(fixture.notifier.targets.isEmpty());
-    assertFalse(fixture.worker.hasActiveExecution());
-  }
-
   /**
-   * Lost terminal ownership cancels the local handle and never emits a wake for a stale callback.
+   * Lost terminal ownership cancels the local handle and never re-emits any durable state for a
+   * stale callback.
    */
   @Test
   void stopsLocalHandleWhenTerminalCallbackLosesOwnership() {
@@ -228,7 +198,6 @@ class ModelWorkerTest {
 
     assertEquals(1, fixture.transactions.terminalCalls);
     assertTrue(fixture.executor.handle.isCancelled());
-    assertTrue(fixture.notifier.targets.isEmpty());
     assertTrue(fixture.sink.events.isEmpty());
     assertFalse(fixture.worker.hasActiveExecution());
   }
@@ -293,7 +262,6 @@ class ModelWorkerTest {
     assertTrue(fixture.executor.handle.isCancelled());
     assertFalse(fixture.worker.hasActiveExecution());
     assertEquals(0, fixture.transactions.terminalCalls);
-    assertTrue(fixture.notifier.targets.isEmpty());
   }
 
   /**
@@ -841,7 +809,6 @@ class ModelWorkerTest {
         new ProviderException(ProviderErrorKind.TRANSIENT, "provider unavailable"));
 
     assertTrue(fixture.executor.handle.isCancelled());
-    assertTrue(fixture.notifier.targets.isEmpty());
     assertEquals(0, fixture.transactions.terminalCalls);
   }
 
@@ -1103,7 +1070,6 @@ class ModelWorkerTest {
 
     assertEquals(InvocationStatus.RUNNING, fixture.transactions.current.status());
     assertTrue(fixture.executor.handle.isCancelled());
-    assertTrue(fixture.notifier.targets.isEmpty());
     assertTrue(fixture.sink.events.isEmpty());
   }
 
@@ -1119,7 +1085,6 @@ class ModelWorkerTest {
 
     assertEquals(InvocationStatus.RUNNING, fixture.transactions.current.status());
     assertTrue(fixture.executor.handle.isCancelled());
-    assertTrue(fixture.notifier.targets.isEmpty());
   }
 
   /** Cancellation persistence failure cannot be mistaken for a committed durable cancellation. */
@@ -1134,7 +1099,6 @@ class ModelWorkerTest {
 
     assertEquals(InvocationStatus.RUNNING, fixture.transactions.current.status());
     assertTrue(fixture.executor.handle.isCancelled());
-    assertTrue(fixture.notifier.targets.isEmpty());
   }
 
   /** Retry persistence failure is similarly local-only and cannot forge a delayed signal. */
@@ -1151,7 +1115,6 @@ class ModelWorkerTest {
 
     assertEquals(InvocationStatus.RUNNING, fixture.transactions.current.status());
     assertTrue(fixture.executor.handle.isCancelled());
-    assertTrue(fixture.notifier.targets.isEmpty());
   }
 
   /** Non-TOOL_CALLS stop reasons cannot carry executable tool calls. */
@@ -1225,7 +1188,6 @@ class ModelWorkerTest {
     assertEquals(InvocationStatus.RETRY_WAIT, fixture.transactions.current.status());
     assertEquals(0, fixture.executor.executeCalls);
     assertEquals(1, fixture.transactions.scheduleRetryCalls);
-    assertTrue(fixture.notifier.targets.isEmpty());
   }
 
   /** Scheduler failure after Provider I/O abandons the lease for conservative UNKNOWN recovery. */
@@ -1484,7 +1446,6 @@ class ModelWorkerTest {
     private final RecordingTransactions transactions;
     private final RecordingExecutor executor = new RecordingExecutor();
     private final RecordingSink sink = new RecordingSink();
-    private final RecordingNotifier notifier = new RecordingNotifier();
     private ModelExecutionResource resource;
     private InvocationRetryPolicy retryPolicy = retryPolicy(0, Duration.ofMillis(1));
     private RuntimeException resolutionFailure;
@@ -1533,7 +1494,6 @@ class ModelWorkerTest {
                 return retryPolicy;
               },
               sink,
-              notifier,
               workerConfig,
               clock,
               scheduler,
@@ -1950,21 +1910,6 @@ class ModelWorkerTest {
         throw failure;
       }
       events.add(event);
-    }
-  }
-
-  private static final class RecordingNotifier implements ActivationNotifier {
-    private final List<ExecutionTarget> targets = new CopyOnWriteArrayList<>();
-    private final CountDownLatch notified = new CountDownLatch(1);
-    private RuntimeException failure;
-
-    @Override
-    public void notifyAfterCommit(ExecutionTarget target) {
-      if (failure != null) {
-        throw failure;
-      }
-      targets.add(target);
-      notified.countDown();
     }
   }
 
