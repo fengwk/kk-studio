@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
@@ -71,6 +72,55 @@ class ToolDomainContractsTest {
                 1L, 2L, 3L, 0, "x".repeat(257), "tool", "1", ToolExecutionLocation.PLATFORM, null));
   }
 
+  /**
+   * FAILED must accept PENDING (setup failure), ALLOWED (post-allow execution failure), and DENIED.
+   */
+  @Test
+  void failedAcceptsPendingAllowedAndDenied() {
+    assertEquals(InvocationStatus.FAILED, failed(ToolPermissionState.PENDING).status());
+    assertEquals(
+        ToolPermissionState.PENDING, failed(ToolPermissionState.PENDING).permissionState());
+    assertEquals(InvocationStatus.FAILED, failed(ToolPermissionState.ALLOWED).status());
+    assertEquals(
+        ToolPermissionState.ALLOWED, failed(ToolPermissionState.ALLOWED).permissionState());
+    assertEquals(InvocationStatus.FAILED, failed(ToolPermissionState.DENIED).status());
+    assertEquals(ToolPermissionState.DENIED, failed(ToolPermissionState.DENIED).permissionState());
+  }
+
+  /** FAILED must reject ASKED (only pairs with WAITING_INTERACTION). */
+  @Test
+  void failedRejectsAsked() {
+    assertThrows(IllegalArgumentException.class, () -> failed(ToolPermissionState.ASKED));
+  }
+
+  private static ToolInvocation failed(ToolPermissionState permissionState) {
+    return new ToolInvocation(
+        1L,
+        2L,
+        3L,
+        0,
+        "call-1",
+        descriptor("tool"),
+        "{}",
+        ToolExecutionLocation.PLATFORM,
+        null,
+        0L,
+        InvocationStatus.FAILED,
+        1,
+        null,
+        null,
+        NOW.plusSeconds(30),
+        NOW,
+        null,
+        new ToolInvocationError("EXECUTION_FAILED", "boom"),
+        null,
+        NOW,
+        NOW,
+        NOW,
+        permissionState,
+        false);
+  }
+
   /** Binding 拥有 location；environmentName 只属于 ENVIRONMENT。 */
   @Test
   void validatesFrozenToolBinding() {
@@ -130,7 +180,9 @@ class ToolDomainContractsTest {
         null,
         NOW,
         null,
-        null);
+        null,
+        ToolPermissionState.PENDING,
+        false);
   }
 
   private static ToolDescriptor descriptor(String name) {

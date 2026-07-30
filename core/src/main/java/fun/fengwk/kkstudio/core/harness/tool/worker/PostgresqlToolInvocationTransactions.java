@@ -1,20 +1,33 @@
 package fun.fengwk.kkstudio.core.harness.tool.worker;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.core.harness.execution.ExecutionTargetStore;
+import fun.fengwk.kkstudio.core.harness.interaction.store.mapper.InteractionMapper;
+import fun.fengwk.kkstudio.core.harness.interaction.store.model.InteractionDO;
 import fun.fengwk.kkstudio.core.harness.model.worker.HarnessModelInvocationThreadDO;
 import fun.fengwk.kkstudio.core.harness.model.worker.HarnessModelInvocationThreadMapper;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionInteraction;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
+import fun.fengwk.kkstudio.harness.runtime.port.HarnessIdGenerator;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ClaimedToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationUpdateOutcome;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -25,35 +38,54 @@ import java.util.function.Supplier;
 
 /**
  * PostgreSQL ToolInvocation worker transaction adapter that drives durable scheduling through the
- * single {@code harness_execution_target} queue.
+ * single {@code harness_execution_target} queue and the durable Tool permission state machine.
  *
- * <p>Every mutation acquires row locks in the order Thread -> ToolInvocation -> target, then
- * advances or deletes the {@link ExecutionTargetKind#TOOL_INVOCATION} row in the same transaction.
- * Terminal mutations additionally mark the owning Thread runnable and reschedule the durable Thread
- * target.
+ * <p>Lock order is Thread → ToolInvocation → target; every mutation acquires the durable target row
+ * in the same transaction. Terminal mutations additionally mark the owning Thread runnable and
+ * reschedule the durable Thread target.
  *
- * <p>Claim returns {@link Optional#empty()} when the target is absent or not due; an owned mutation
- * whose target row has disappeared throws {@link IllegalStateException} so the transaction rolls
- * back rather than persisting a half-applied state.
+ * <p>Tool permission state is durable on the invocation row and the OPEN interaction written for
+ * ASK. ASK must atomically: persist the final plan, flip permission state to ASKED, transition the
+ * row to {@code WAITING_INTERACTION}, clear worker clocks, insert exactly one OPEN interaction
+ * owned by the Tool, and park the durable target so the FIFO gate is preserved. ALLOW must
+ * atomically overwrite the final plan and flip permission state to ALLOWED. DENY must atomically
+ * flip permission state to DENIED, terminalize the row to FAILED with error kind {@code
+ * PERMISSION_DENIED}, mark the owning Thread runnable, delete the target, schedule the Thread
+ * target, and activate the next environment head.
+ *
+ * <p>Claim returns {@link Optional#empty()} when the target is absent or not due; a RUNNING/PENDING
+ * row whose lease has expired is reset to initial QUEUED/PENDING, the existing target is
+ * rescheduled to now, and the call returns {@link Optional#empty()} so the dispatcher can
+ * re-dispatch. A RUNNING/ALLOWED expired lease retains the existing conservative UNKNOWN behavior.
  */
 @Service
 public class PostgresqlToolInvocationTransactions implements ToolInvocationTransactions {
 
   private static final int MAX_TOKEN_LENGTH = 128;
   private static final Duration DEFAULT_EXECUTION_TIMEOUT = Duration.ofMinutes(5);
-
   private final PostgresqlToolInvocationMapper invocationMapper;
   private final HarnessModelInvocationThreadMapper threadMapper;
   private final ExecutionTargetStore executionTargetStore;
+  private final InteractionMapper interactionMapper;
+  private final HarnessIdGenerator idGenerator;
+  private final ObjectMapper objectMapper;
+  private final ToolDescriptorJsonCodec descriptorCodec = new ToolDescriptorJsonCodec();
+  private final ToolInvocationErrorJsonCodec errorCodec = new ToolInvocationErrorJsonCodec();
 
   public PostgresqlToolInvocationTransactions(
       PostgresqlToolInvocationMapper invocationMapper,
       HarnessModelInvocationThreadMapper threadMapper,
-      ExecutionTargetStore executionTargetStore) {
+      ExecutionTargetStore executionTargetStore,
+      InteractionMapper interactionMapper,
+      HarnessIdGenerator idGenerator,
+      ObjectMapper objectMapper) {
     this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
     this.threadMapper = Objects.requireNonNull(threadMapper, "threadMapper");
     this.executionTargetStore =
         Objects.requireNonNull(executionTargetStore, "executionTargetStore");
+    this.interactionMapper = Objects.requireNonNull(interactionMapper, "interactionMapper");
+    this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
+    this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
   }
 
   @Override
@@ -84,9 +116,23 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
       return Optional.empty();
     }
     InvocationStatus status = InvocationStatus.valueOf(row.getStatus());
+    if (row.getPermissionState() == null) {
+      throw new IllegalStateException(
+          "tool invocation row " + invocationId + " is missing permission_state");
+    }
+    if (row.getYoloEnabled() == null) {
+      throw new IllegalStateException(
+          "tool invocation row " + invocationId + " is missing yolo_enabled");
+    }
+    ToolPermissionState permissionState = ToolPermissionState.fromValue(row.getPermissionState());
     if (status != InvocationStatus.QUEUED
         && status != InvocationStatus.RETRY_WAIT
         && status != InvocationStatus.RUNNING) {
+      return Optional.empty();
+    }
+    if (status == InvocationStatus.RUNNING
+        && permissionState != ToolPermissionState.PENDING
+        && permissionState != ToolPermissionState.ALLOWED) {
       return Optional.empty();
     }
 
@@ -129,7 +175,33 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
               workerToken,
               leaseUntil,
               nowOffset);
+    } else if (permissionState == ToolPermissionState.PENDING) {
+      // RUNNING/PENDING whose lease expired (or any pre-allow RUNNING with no successful
+      // external I/O because permission decision had not yet been persisted): the worker has
+      // provably not entered external Tool I/O (the ALLOW path persists ALLOWED first). Reset
+      // the row to its initial QUEUED/PENDING shape, reschedule the target to {@code now}, and
+      // return Optional.empty() so the dispatcher re-dispatches the row. The standard claim
+      // precondition will then surface the freshly-due target on the next attempt.
+      int recoveredAffected =
+          invocationMapper.recoverPendingLease(
+              row.getId(),
+              row.getThreadId(),
+              row.getExecutionEpoch(),
+              row.getAttempt(),
+              Objects.requireNonNull(row.getWorkerToken(), "workerToken"),
+              nowOffset);
+      if (recoveredAffected != 1) {
+        throw new IllegalStateException(
+            "PENDING recovery affected " + recoveredAffected + " rows after the target gate");
+      }
+      requireTargetAffected(
+          executionTargetStore.rescheduleLocked(
+              ExecutionTargetKind.TOOL_INVOCATION, invocationId, routeKey(row), persistedNow),
+          "reschedule tool invocation target after PENDING recovery");
+      return Optional.empty();
     } else {
+      // RUNNING/ALLOWED: external Tool I/O may have run; use the existing conservative token-only
+      // re-claim and converge the row to UNKNOWN on completion.
       affected =
           invocationMapper.recoverExpired(
               row.getId(),
@@ -395,6 +467,222 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
     return ToolInvocationUpdateOutcome.APPLIED;
   }
 
+  @Override
+  @Transactional(isolation = Isolation.READ_COMMITTED)
+  public ToolInvocationUpdateOutcome persistPermissionAllowed(
+      ClaimedToolInvocation claimed,
+      ToolBinding finalBinding,
+      String finalArgumentsJson,
+      Instant now) {
+    Objects.requireNonNull(finalBinding, "finalBinding");
+    Objects.requireNonNull(finalArgumentsJson, "finalArgumentsJson");
+    LockedTool locked = lockOwned(claimed, now);
+    if (locked == null) {
+      return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
+    }
+    ToolInvocationDO row = locked.row();
+    ToolInvocation invocation = claimed.invocation();
+    if (invocation.status() != InvocationStatus.RUNNING
+        || invocation.permissionState() != ToolPermissionState.PENDING) {
+      return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
+    }
+    // Route stability: descriptor/arguments may change but the execution route (location and
+    // environment name) must not. A permission boundary that re-routes must be rejected before
+    // any state mutation.
+    if (!routeStable(row, finalBinding)) {
+      throw new IllegalArgumentException(
+          "persistPermissionAllowed rejected route change: locked row is "
+              + row.getLocation()
+              + "/"
+              + row.getEnvironmentName()
+              + " but final binding is "
+              + finalBinding.location()
+              + "/"
+              + finalBinding.environmentName());
+    }
+    int affected =
+        invocationMapper.persistPermissionAllowed(
+            invocation.id(),
+            invocation.threadId(),
+            invocation.executionEpoch(),
+            invocation.attempt(),
+            invocation.workerLease().token(),
+            descriptorCodec.encode(finalBinding.descriptor()),
+            finalArgumentsJson,
+            finalBinding.location().name(),
+            finalBinding.environmentName(),
+            offset(persistence(now)));
+    if (outcome(affected) != ToolInvocationUpdateOutcome.APPLIED) {
+      return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
+    }
+    // The target lease is preserved; rescheduleLocked on the same lease deadline keeps the existing
+    // gate (and triggers NOTIFY only on a strictly earlier move). Use the locked row's route key
+    // so PLATFORM (null) and ENVIRONMENT rows stay on their declared route.
+    requireTargetAffected(
+        executionTargetStore.rescheduleLocked(
+            ExecutionTargetKind.TOOL_INVOCATION,
+            invocation.id(),
+            routeKey(row),
+            invocation.workerLease().until()),
+        "reschedule tool invocation target after persistPermissionAllowed");
+    return ToolInvocationUpdateOutcome.APPLIED;
+  }
+
+  @Override
+  @Transactional(isolation = Isolation.READ_COMMITTED)
+  public ToolInvocationUpdateOutcome awaitPermission(
+      ClaimedToolInvocation claimed,
+      ToolBinding finalBinding,
+      String finalArgumentsJson,
+      PermissionPromptPreview prompt,
+      Instant now) {
+    Objects.requireNonNull(finalBinding, "finalBinding");
+    Objects.requireNonNull(finalArgumentsJson, "finalArgumentsJson");
+    Objects.requireNonNull(prompt, "prompt");
+    LockedTool locked = lockOwned(claimed, now);
+    if (locked == null) {
+      return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
+    }
+    ToolInvocationDO row = locked.row();
+    ToolInvocation invocation = claimed.invocation();
+    if (invocation.status() != InvocationStatus.RUNNING
+        || invocation.permissionState() != ToolPermissionState.PENDING) {
+      return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
+    }
+    // Route stability: the final binding's location/environment must equal the locked row's.
+    if (!routeStable(row, finalBinding)) {
+      throw new IllegalArgumentException(
+          "awaitPermission rejected route change: locked row is "
+              + row.getLocation()
+              + "/"
+              + row.getEnvironmentName()
+              + " but final binding is "
+              + finalBinding.location()
+              + "/"
+              + finalBinding.environmentName());
+    }
+    int affected =
+        invocationMapper.awaitPermission(
+            invocation.id(),
+            invocation.threadId(),
+            invocation.executionEpoch(),
+            invocation.attempt(),
+            invocation.workerLease().token(),
+            descriptorCodec.encode(finalBinding.descriptor()),
+            finalArgumentsJson,
+            finalBinding.location().name(),
+            finalBinding.environmentName(),
+            offset(persistence(now)));
+    if (outcome(affected) != ToolInvocationUpdateOutcome.APPLIED) {
+      return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
+    }
+    // Insert exactly one OPEN interaction owned by this Tool. The DB partial unique index on
+    // (owner_kind, owner_id) where status = 'OPEN' guarantees the uniqueness invariant; a
+    // concurrent insert with the same key would surface as a 0 affected count.
+    long interactionId = idGenerator.nextInteractionId();
+    String requestJson = encodeToolPermissionRequest(invocation, prompt);
+    InteractionDO interactionRow = new InteractionDO();
+    interactionRow.setId(interactionId);
+    interactionRow.setOwnerKind(ExecutionTargetKind.TOOL_INVOCATION.name());
+    interactionRow.setOwnerId(invocation.id());
+    interactionRow.setHandlerType(ToolPermissionInteraction.HANDLER_TYPE);
+    interactionRow.setRequestJson(requestJson);
+    interactionRow.setStatus("OPEN");
+    interactionRow.setExpiresAt(null);
+    interactionRow.setCreatedAt(offset(persistence(now)));
+    if (interactionMapper.insertOpen(interactionRow) != 1) {
+      throw new IllegalStateException(
+          "failed to create tool-permission interaction for invocation " + invocation.id());
+    }
+    // Park the durable target while the prompt is outstanding. WAITING_INTERACTION is a
+    // durable queue-member status: activateOldestEnvironment in the FIFO activation SQL
+    // filters on status = 'QUEUED' (not on dispatch_enabled), so a parked ASK row at the
+    // FIFO head still blocks later siblings and prevents them from being activated while the
+    // user response is pending. The locked row's route key is the canonical one for both
+    // PLATFORM (null) and ENVIRONMENT rows.
+    Instant originalAvailableAt =
+        row.getWorkerUntil() == null
+            ? persistence(now)
+            : max(persistence(now), row.getWorkerUntil().toInstant());
+    int parkAffected =
+        executionTargetStore.parkLocked(
+            ExecutionTargetKind.TOOL_INVOCATION,
+            invocation.id(),
+            routeKey(row),
+            originalAvailableAt);
+    if (parkAffected != 1) {
+      throw new IllegalStateException(
+          "parkLocked tool invocation target after awaitPermission affected " + parkAffected);
+    }
+    return ToolInvocationUpdateOutcome.APPLIED;
+  }
+
+  @Override
+  @Transactional(isolation = Isolation.READ_COMMITTED)
+  public ToolInvocationUpdateOutcome denyPermission(ClaimedToolInvocation claimed, Instant now) {
+    LockedTool locked = lockOwned(claimed, now);
+    if (locked == null) {
+      return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
+    }
+    ToolInvocationDO row = locked.row();
+    ToolInvocation invocation = claimed.invocation();
+    if (invocation.status() != InvocationStatus.RUNNING
+        || invocation.permissionState() != ToolPermissionState.PENDING) {
+      return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
+    }
+    Instant persistedNow = persistence(now);
+    // Preserve valid actual running clocks: startedAt and deadlineAt are immutable for the
+    // lifetime of a RUNNING row, finishedAt is the max of now and lastActivityAt to keep the
+    // invariant finishedAt >= lastActivityAt, startedAt <= finishedAt, and finishedAt >=
+    // createdAt.
+    Instant startedAt = Objects.requireNonNull(row.getStartedAt(), "startedAt").toInstant();
+    Instant deadlineAt = Objects.requireNonNull(row.getDeadlineAt(), "deadlineAt").toInstant();
+    Instant lastActivityAt =
+        Objects.requireNonNull(row.getLastActivityAt(), "lastActivityAt").toInstant();
+    Instant finishedAt = max(persistedNow, max(lastActivityAt, startedAt));
+    ToolInvocationError error =
+        new ToolInvocationError("PERMISSION_DENIED", "Tool permission was denied.");
+    int affected =
+        invocationMapper.denyPermission(
+            invocation.id(),
+            invocation.threadId(),
+            invocation.executionEpoch(),
+            invocation.attempt(),
+            invocation.workerLease().token(),
+            errorCodec.encode(error),
+            offset(startedAt),
+            offset(deadlineAt),
+            offset(finishedAt),
+            offset(persistedNow));
+    if (affected != 1) {
+      throw new IllegalStateException("denyPermission affected " + affected + " rows");
+    }
+    if (threadMapper.markRunnable(
+            invocation.threadId(), invocation.executionEpoch(), offset(finishedAt))
+        != 1) {
+      throw new IllegalStateException("cannot mark owning thread runnable after deny");
+    }
+    requireTargetAffected(
+        executionTargetStore.deleteLocked(ExecutionTargetKind.TOOL_INVOCATION, invocation.id()),
+        "delete tool invocation target after deny");
+    executionTargetStore.schedule(
+        ExecutionTargetKind.THREAD, invocation.threadId(), null, persistedNow);
+    String route = routeKey(row);
+    if (route != null) {
+      executionTargetStore.activateOldestEnvironment(route, persistedNow);
+    }
+    return ToolInvocationUpdateOutcome.APPLIED;
+  }
+
+  private static boolean routeStable(ToolInvocationDO row, ToolBinding finalBinding) {
+    String rowLocation = row.getLocation();
+    String finalLocation = finalBinding.location().name();
+    if (!Objects.equals(rowLocation, finalLocation)) {
+      return false;
+    }
+    return Objects.equals(row.getEnvironmentName(), finalBinding.environmentName());
+  }
+
   private ToolInvocationUpdateOutcome complete(
       ClaimedToolInvocation claimed,
       ToolResult result,
@@ -512,8 +800,26 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
     return new LockedTool(row);
   }
 
+  private String encodeToolPermissionRequest(
+      ToolInvocation invocation, PermissionPromptPreview prompt) {
+    ObjectNode node = objectMapper.createObjectNode();
+    node.put("invocationId", invocation.id());
+    node.put("threadId", invocation.threadId());
+    node.put("tool", prompt.tool());
+    node.put("workdir", prompt.workdir());
+    node.put("arguments", prompt.arguments());
+    try {
+      return objectMapper.writeValueAsString(node);
+    } catch (JsonProcessingException error) {
+      throw new IllegalStateException(
+          "failed to encode tool-permission request for invocation " + invocation.id(), error);
+    }
+  }
+
   private static String routeKey(ToolInvocationDO row) {
-    return "ENVIRONMENT".equals(row.getLocation()) ? row.getEnvironmentName() : null;
+    return ToolExecutionLocation.ENVIRONMENT.name().equals(row.getLocation())
+        ? row.getEnvironmentName()
+        : null;
   }
 
   private static ToolInvocationUpdateOutcome outcome(int affected) {

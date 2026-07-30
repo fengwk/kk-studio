@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.harness.tool.worker;
 
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
@@ -28,6 +29,14 @@ final class ToolInvocationRowConverter {
 
   static ToolInvocation toAggregate(ToolInvocationDO row) {
     Objects.requireNonNull(row, "row");
+    if (row.getPermissionState() == null) {
+      throw new IllegalStateException(
+          "tool invocation row " + row.getId() + " is missing permission_state");
+    }
+    if (row.getYoloEnabled() == null) {
+      throw new IllegalStateException(
+          "tool invocation row " + row.getId() + " is missing yolo_enabled");
+    }
     Lease lease =
         row.getWorkerToken() == null
             ? null
@@ -38,6 +47,8 @@ final class ToolInvocationRowConverter {
         row.getResultJson() == null ? null : ToolResultJsonCodec.decode(row.getResultJson());
     ToolInvocationError error =
         row.getErrorJson() == null ? null : ERROR_CODEC.decode(row.getErrorJson());
+    ToolPermissionState permissionState = ToolPermissionState.fromValue(row.getPermissionState());
+    boolean yoloEnabled = row.getYoloEnabled();
     return new ToolInvocation(
         row.getId(),
         row.getThreadId(),
@@ -60,7 +71,9 @@ final class ToolInvocationRowConverter {
         instant(row.getAppliedAt()),
         Objects.requireNonNull(row.getCreatedAt(), "createdAt").toInstant(),
         instant(row.getStartedAt()),
-        instant(row.getFinishedAt()));
+        instant(row.getFinishedAt()),
+        permissionState,
+        yoloEnabled);
   }
 
   static OffsetDateTime offset(Instant value) {

@@ -24,7 +24,6 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -60,7 +59,9 @@ class ModelInvocationTest {
             unknownBuilder().build());
 
     assertEquals(
-        Set.copyOf(Arrays.asList(InvocationStatus.values())),
+        Arrays.stream(InvocationStatus.values())
+            .filter(s -> s != InvocationStatus.WAITING_INTERACTION)
+            .collect(Collectors.toSet()),
         invocations.stream().map(ModelInvocation::status).collect(Collectors.toSet()));
     assertEquals(0, invocations.get(0).executionEpoch());
     assertEquals(3, retryBuilder().attempt(3).build().attempt());

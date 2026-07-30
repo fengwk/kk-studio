@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsCodec;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 
 class ToolSettingsProviderTest {
   @Test

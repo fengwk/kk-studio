@@ -6,6 +6,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.core.harness.configuration.HarnessRuntimeProperties;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyResolver;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
@@ -17,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorker;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorkerConfig;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
 
+import java.nio.file.Path;
 import java.time.Clock;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -73,7 +76,11 @@ public class HarnessToolWorkerConfiguration {
       ToolWorkerConfig config,
       Clock clock,
       @Qualifier("toolWorkerScheduler") ScheduledExecutorService toolWorkerScheduler,
-      @Qualifier("toolWorkerExecutor") ExecutorService toolWorkerExecutor) {
+      @Qualifier("toolWorkerExecutor") ExecutorService toolWorkerExecutor,
+      ToolSettingsProvider toolSettingsProvider,
+      HarnessRuntimeProperties runtimeProperties) {
+    Path workdir = runtimeProperties.resolvedWorkdir();
+    Path environmentRoot = runtimeProperties.resolvedEnvironmentRoot();
     return new ToolWorker(
         transactions,
         registry,
@@ -86,6 +93,9 @@ public class HarnessToolWorkerConfiguration {
         clock,
         toolWorkerScheduler,
         toolWorkerExecutor,
-        () -> UUID.randomUUID().toString());
+        () -> UUID.randomUUID().toString(),
+        toolSettingsProvider,
+        workdir,
+        environmentRoot);
   }
 }

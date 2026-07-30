@@ -153,7 +153,7 @@ public interface ThreadReconcileMapper extends BaseMapper {
       @Param("now") OffsetDateTime now);
 
   @Insert(
-      "insert into harness_tool_invocation (id, thread_id, session_id, assistant_entry_id, ordinal, tool_call_id, descriptor, arguments, location, environment_name, execution_epoch, status, attempt, created_at) values (#{id}, #{threadId}, #{sessionId}, #{assistantEntryId}, #{ordinal}, #{toolCallId}, cast(#{descriptorJson} as jsonb), cast(#{argumentsJson} as jsonb), #{location}, #{environmentName}, #{epoch}, 'QUEUED', 1, #{now})")
+      "insert into harness_tool_invocation (id, thread_id, session_id, assistant_entry_id, ordinal, tool_call_id, descriptor, arguments, location, environment_name, execution_epoch, status, attempt, permission_state, yolo_enabled, created_at) values (#{id}, #{threadId}, #{sessionId}, #{assistantEntryId}, #{ordinal}, #{toolCallId}, cast(#{descriptorJson} as jsonb), cast(#{argumentsJson} as jsonb), #{location}, #{environmentName}, #{epoch}, 'QUEUED', 1, 'PENDING', #{yoloEnabled}, #{now})")
   int insertToolInvocation(
       @Param("id") long id,
       @Param("threadId") long threadId,
@@ -166,6 +166,7 @@ public interface ThreadReconcileMapper extends BaseMapper {
       @Param("location") String location,
       @Param("environmentName") String environmentName,
       @Param("epoch") long epoch,
+      @Param("yoloEnabled") boolean yoloEnabled,
       @Param("now") OffsetDateTime now);
 
   @Update(

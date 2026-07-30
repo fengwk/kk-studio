@@ -3,11 +3,17 @@ package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
+import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyResolver;
 import fun.fengwk.kkstudio.harness.runtime.tool.AfterToolCallContext;
+import fun.fengwk.kkstudio.harness.runtime.tool.BeforeToolCallResult;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
@@ -34,6 +40,7 @@ import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -91,6 +98,9 @@ public final class ToolWorker {
   private final ScheduledExecutorService scheduler;
   private final Executor executor;
   private final Supplier<String> workerTokenSupplier;
+  private final ToolSettingsProvider toolSettingsProvider;
+  private final Path workdir;
+  private final Path environmentRoot;
   private final ConcurrentHashMap<Long, Execution> executions = new ConcurrentHashMap<>();
   // Per-invocation id: the most recently registered ticket for a deferred dispatch that has not
   // yet been admitted into dispatchClaimed. The Runnable uses conditional remove(id, ticket) as
@@ -112,7 +122,10 @@ public final class ToolWorker {
       Clock clock,
       ScheduledExecutorService scheduler,
       Executor executor,
-      Supplier<String> workerTokenSupplier) {
+      Supplier<String> workerTokenSupplier,
+      ToolSettingsProvider toolSettingsProvider,
+      Path workdir,
+      Path environmentRoot) {
     this.transactions = Objects.requireNonNull(transactions, "transactions");
     this.registry = Objects.requireNonNull(registry, "registry");
     this.remoteTransport = Objects.requireNonNull(remoteTransport, "remoteTransport");
@@ -125,6 +138,11 @@ public final class ToolWorker {
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.executor = Objects.requireNonNull(executor, "executor");
     this.workerTokenSupplier = Objects.requireNonNull(workerTokenSupplier, "workerTokenSupplier");
+    this.toolSettingsProvider =
+        Objects.requireNonNull(toolSettingsProvider, "toolSettingsProvider");
+    this.workdir = Objects.requireNonNull(workdir, "workdir").toAbsolutePath().normalize();
+    this.environmentRoot =
+        Objects.requireNonNull(environmentRoot, "environmentRoot").toAbsolutePath().normalize();
   }
 
   /**
@@ -148,7 +166,8 @@ public final class ToolWorker {
       return false;
     }
     ClaimedToolInvocation ownership = claimed.orElseThrow();
-    if (!workerToken.equals(ownership.invocation().workerLease().token())) {
+    if (ownership.invocation().workerLease() == null
+        || !workerToken.equals(ownership.invocation().workerLease().token())) {
       throw new IllegalStateException("claim returned an unexpected worker token");
     }
     long ticket = ticketSeq.incrementAndGet();
@@ -248,6 +267,14 @@ public final class ToolWorker {
 
   private void dispatchClaimed(ClaimedToolInvocation claimed) {
     ToolInvocation invocation = claimed.invocation();
+    if (invocation.permissionState() == ToolPermissionState.ASKED
+        || invocation.permissionState() == ToolPermissionState.DENIED) {
+      throw new IllegalStateException(
+          "Tool invocation "
+              + invocation.id()
+              + " reached a claimed worker with permissionState="
+              + invocation.permissionState());
+    }
     if (claimed.recoveredLease()) {
       abandonStaleLocalExecution(invocation.id());
       completeUnknown(
@@ -260,16 +287,159 @@ public final class ToolWorker {
       fail(claimed, "Tool execution deadline exceeded.");
       return;
     }
+    // Durable Tool permission gate. Runs strictly before any resolveTool / Execution / Tool.execute
+    // I/O. A PENDING row is the only case where the chain must be evaluated; ALLOWED has a final
+    // plan already persisted on the row and bypasses the chain; ASKED / DENIED reaching a claimed
+    // worker is an invariant violation and must never reach this point.
     ToolBinding binding = bindingFor(invocation);
-    ResolvedTool resolved = resolveTool(binding, invocation);
+    ToolCall originalCall =
+        new ToolCall(invocation.toolCallId(), invocation.toolName(), invocation.argumentsJson());
+    ToolBinding executeBinding;
+    ToolCall executeCall;
+    if (invocation.permissionState() == ToolPermissionState.PENDING) {
+      BeforeToolCallResult decision;
+      try {
+        decision = evaluatePermission(binding, originalCall, invocation);
+      } catch (RuntimeException boundaryError) {
+        // Boundary failed (no boundary, threw, or returned a malformed result): fail closed with
+        // a terminal FAILED, no Tool I/O. The dispatch context is still owned; completeFailure
+        // walks the standard terminal path.
+        completeFailure(
+            claimed,
+            new ToolInvocationError(
+                "PERMISSION_BOUNDARY_MISSING",
+                "Tool permission boundary did not produce a decision: "
+                    + boundaryError.getMessage()),
+            claimed.invocation().lastActivityAt());
+        return;
+      }
+      PermissionAction action = decision.permissionAction();
+      PermissionPromptPreview preview = decision.permissionPromptPreview();
+      if (action == null) {
+        completeFailure(
+            claimed,
+            new ToolInvocationError(
+                "PERMISSION_BOUNDARY_MISSING", "Tool permission boundary returned a null action."),
+            claimed.invocation().lastActivityAt());
+        return;
+      }
+      if (action == PermissionAction.ASK && preview == null) {
+        completeFailure(
+            claimed,
+            new ToolInvocationError(
+                "PERMISSION_BOUNDARY_MISSING",
+                "Tool permission boundary returned ASK without a prompt preview."),
+            claimed.invocation().lastActivityAt());
+        return;
+      }
+      // Route stability: the permission boundary must not silently move an active target across
+      // ENVIRONMENT routes. PLATFORM (null route) is preserved. Descriptor/arguments may change.
+      if (decision.binding().location() != binding.location()
+          || !Objects.equals(decision.binding().environmentName(), binding.environmentName())) {
+        completeFailure(
+            claimed,
+            new ToolInvocationError(
+                "PERMISSION_BOUNDARY_MISSING",
+                "Tool permission boundary attempted to change execution route from "
+                    + binding.location()
+                    + "/"
+                    + binding.environmentName()
+                    + " to "
+                    + decision.binding().location()
+                    + "/"
+                    + decision.binding().environmentName()),
+            claimed.invocation().lastActivityAt());
+        return;
+      }
+      switch (action) {
+        case ALLOW -> {
+          ToolInvocationUpdateOutcome allowOutcome =
+              transactions.persistPermissionAllowed(
+                  claimed, decision.binding(), decision.argumentsJson(), clock.instant());
+          if (allowOutcome != ToolInvocationUpdateOutcome.APPLIED) {
+            // Lost ownership between claim and persistence: the durable row has moved on (e.g.
+            // expired lease recovery). Fail closed with no external I/O.
+            completeFailure(
+                claimed,
+                new ToolInvocationError(
+                    "PERMISSION_BOUNDARY_MISSING",
+                    "Tool permission boundary did not converge; ownership was lost."),
+                claimed.invocation().lastActivityAt());
+            return;
+          }
+          executeBinding = decision.binding();
+          // The final ToolCall must use the decision's arguments JSON so that the actually
+          // executed plan matches the persisted final plan. tool name and call id are immutable.
+          executeCall =
+              new ToolCall(
+                  originalCall.id(),
+                  decision.binding().descriptor().name(),
+                  decision.argumentsJson());
+        }
+        case DENY -> {
+          ToolInvocationUpdateOutcome denyOutcome =
+              transactions.denyPermission(claimed, clock.instant());
+          if (denyOutcome != ToolInvocationUpdateOutcome.APPLIED) {
+            completeFailure(
+                claimed,
+                new ToolInvocationError(
+                    "PERMISSION_BOUNDARY_MISSING",
+                    "Tool permission boundary did not converge; ownership was lost."),
+                claimed.invocation().lastActivityAt());
+          }
+          return;
+        }
+        case ASK -> {
+          ToolInvocationUpdateOutcome askOutcome =
+              transactions.awaitPermission(
+                  claimed, decision.binding(), decision.argumentsJson(), preview, clock.instant());
+          if (askOutcome != ToolInvocationUpdateOutcome.APPLIED) {
+            completeFailure(
+                claimed,
+                new ToolInvocationError(
+                    "PERMISSION_BOUNDARY_MISSING",
+                    "Tool permission boundary did not converge; ownership was lost."),
+                claimed.invocation().lastActivityAt());
+            return;
+          }
+          return;
+        }
+        default -> {
+          completeFailure(
+              claimed,
+              new ToolInvocationError(
+                  "PERMISSION_BOUNDARY_MISSING",
+                  "Tool permission boundary returned an unsupported action: " + action),
+              claimed.invocation().lastActivityAt());
+          return;
+        }
+      }
+    } else if (invocation.permissionState() == ToolPermissionState.ALLOWED) {
+      // Already approved: skip the chain and use the persisted final plan (descriptor, arguments,
+      // location, environment name are all already in the row). The ToolCall is reconstructed
+      // from the persisted arguments, not the original frozen provider call.
+      executeBinding = binding;
+      executeCall =
+          new ToolCall(originalCall.id(), binding.descriptor().name(), invocation.argumentsJson());
+    } else {
+      // ASKED / DENIED are non-claimable; the durable row is in a state the worker must never
+      // execute. The dispatcher claim precondition already filters these, so reaching this
+      // branch is an invariant breach. Throw to surface the bug rather than fabricate a
+      // terminal row: the existing lease will expire and the durable row's state machine
+      // (recoverExpired for ALLOWED, lease-expiry scan for others) re-routes correctly.
+      throw new IllegalStateException(
+          "Tool invocation "
+              + invocation.id()
+              + " reached a claimed worker with permissionState="
+              + invocation.permissionState());
+    }
+    ResolvedTool resolved = resolveTool(executeBinding, invocation);
     if (resolved.failureMessage() != null) {
       fail(claimed, resolved.failureMessage());
       return;
     }
     Tool tool = resolved.tool();
-    ToolCall call =
-        new ToolCall(invocation.toolCallId(), invocation.toolName(), invocation.argumentsJson());
-    Execution execution = new Execution(claimed, binding, call);
+    Execution execution = new Execution(claimed, executeBinding, executeCall);
     Execution previous = executions.putIfAbsent(invocation.id(), execution);
     if (previous != null) {
       // A process-local handle already exists for this invocation id (typically a stale handle
@@ -291,7 +461,7 @@ public final class ToolWorker {
           tool.execute(
               new ToolExecutionRequest(
                   tool.descriptor(),
-                  call,
+                  executeCall,
                   Duration.between(clock.instant(), invocation.deadlineAt()),
                   new ToolExecutionContext(invocation.id(), invocation.threadId())),
               execution);
@@ -332,6 +502,23 @@ public final class ToolWorker {
     }
   }
 
+  private BeforeToolCallResult evaluatePermission(
+      ToolBinding binding, ToolCall originalCall, ToolInvocation invocation) {
+    if (!interceptorChain.hasPermissionBoundary()) {
+      throw new IllegalStateException(
+          "Tool interceptor chain is missing a permission boundary for invocation "
+              + invocation.id());
+    }
+    ToolSettings settings = toolSettingsProvider.get();
+    try {
+      return interceptorChain.before(
+          binding, originalCall, settings, invocation.yoloEnabled(), workdir, environmentRoot);
+    } catch (RuntimeException error) {
+      throw new IllegalStateException(
+          "Tool permission boundary threw for invocation " + invocation.id(), error);
+    }
+  }
+
   private ToolBinding bindingFor(ToolInvocation invocation) {
     if (invocation.location() == ToolExecutionLocation.ENVIRONMENT) {
       return ToolBinding.of(invocation.descriptor(), invocation.environmentName());
@@ -339,26 +526,33 @@ public final class ToolWorker {
     return ToolBinding.of(invocation.descriptor());
   }
 
+  /**
+   * Resolve the {@link Tool} that will execute the persisted final plan. The registry lookup and
+   * {@link RemoteTool} construction MUST use the {@link ToolBinding#descriptor() final binding
+   * descriptor} (which is what {@code transactions.persistPermissionAllowed} wrote to the row)
+   * rather than the {@code invocation.descriptor()} (which is the original frozen provider call).
+   * The persisted final plan and the actually executed plan must be identical.
+   */
   private ResolvedTool resolveTool(ToolBinding binding, ToolInvocation invocation) {
     if (binding.location() == ToolExecutionLocation.PLATFORM) {
-      Optional<Tool> resolved = registry.find(invocation.toolName(), invocation.toolVersion());
-      if (resolved.isEmpty() || !descriptorMatches(invocation, resolved.get())) {
+      Optional<Tool> resolved =
+          registry.find(binding.descriptor().name(), binding.descriptor().version());
+      if (resolved.isEmpty() || !descriptorMatches(binding, resolved.get())) {
         return ResolvedTool.failure(
             "Frozen tool "
-                + invocation.toolName()
+                + binding.descriptor().name()
                 + "@"
-                + invocation.toolVersion()
+                + binding.descriptor().version()
                 + " is unavailable.");
       }
       return ResolvedTool.success(resolved.get());
     }
-    Tool remote =
-        new RemoteTool(invocation.descriptor(), binding.environmentName(), remoteTransport);
+    Tool remote = new RemoteTool(binding.descriptor(), binding.environmentName(), remoteTransport);
     return ResolvedTool.success(remote);
   }
 
-  private boolean descriptorMatches(ToolInvocation invocation, Tool tool) {
-    return tool.descriptor().equals(invocation.descriptor());
+  private boolean descriptorMatches(ToolBinding binding, Tool tool) {
+    return tool.descriptor().equals(binding.descriptor());
   }
 
   private void fail(ClaimedToolInvocation claimed, String message) {

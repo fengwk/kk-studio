@@ -11,10 +11,9 @@ class ToolInvocationErrorJsonCodecTest {
 
   @Test
   void encodesAndDecodesCanonicalError() {
-    ToolInvocationError error = new ToolInvocationError("INTERACTION_REJECTED", "Rejected.");
+    ToolInvocationError error = new ToolInvocationError("PERMISSION_DENIED", "Rejected.");
 
-    assertEquals(
-        "{\"kind\":\"INTERACTION_REJECTED\",\"message\":\"Rejected.\"}", codec.encode(error));
+    assertEquals("{\"kind\":\"PERMISSION_DENIED\",\"message\":\"Rejected.\"}", codec.encode(error));
     assertEquals(error, codec.decode(codec.encode(error)));
   }
 

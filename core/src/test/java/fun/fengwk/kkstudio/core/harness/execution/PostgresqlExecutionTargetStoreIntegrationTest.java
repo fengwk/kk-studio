@@ -4,6 +4,7 @@ import static fun.fengwk.kkstudio.core.harness.persistence.postgresql.PostgresSc
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -592,6 +593,91 @@ class PostgresqlExecutionTargetStoreIntegrationTest extends PostgresSpringTestSu
     } catch (SQLException error) {
       throw new AssertionError(error);
     }
+  }
+
+  // ---- strict locked operations: parkLocked / activateLocked with null platform route ----
+
+  @Test
+  void parkLockedPlatformTargetWithNullRouteDisablesAndPreservesRoute() {
+    Instant initialAt = BASE;
+    assertEquals(1, store.schedule(ExecutionTargetKind.TOOL_INVOCATION, 800L, null, initialAt));
+    Instant parkedAt = BASE.plusSeconds(5);
+
+    assertEquals(
+        1,
+        inTransaction(
+            () -> {
+              // The park path takes the lock first; requireActiveTransaction is the precondition.
+              ExecutionTargetRow row =
+                  store.lock(ExecutionTargetKind.TOOL_INVOCATION, 800L).orElseThrow();
+              assertNull(row.routeKey(), "PLATFORM target carries a null route key");
+              return store.parkLocked(ExecutionTargetKind.TOOL_INVOCATION, 800L, null, parkedAt);
+            }));
+
+    ExecutionTargetRow row = store.findAll().getFirst();
+    assertEquals(800L, row.targetId());
+    assertNull(row.routeKey(), "PLATFORM parkLocked must preserve the null route key");
+    assertFalse(row.dispatchEnabled());
+    assertEquals(parkedAt, row.availableAt());
+  }
+
+  @Test
+  void parkLockedRequiresActiveTransaction() {
+    assertEquals(1, store.schedule(ExecutionTargetKind.TOOL_INVOCATION, 810L, null, BASE));
+    assertThrows(
+        IllegalStateException.class,
+        () -> store.parkLocked(ExecutionTargetKind.TOOL_INVOCATION, 810L, null, BASE));
+  }
+
+  @Test
+  void activateLockedPlatformTargetWithNullRouteEnables() {
+    Instant at = BASE;
+    assertEquals(1, store.schedule(ExecutionTargetKind.TOOL_INVOCATION, 820L, null, at));
+    // Park it.
+    assertEquals(
+        1,
+        inTransaction(
+            () -> {
+              store.lock(ExecutionTargetKind.TOOL_INVOCATION, 820L).orElseThrow();
+              return store.parkLocked(ExecutionTargetKind.TOOL_INVOCATION, 820L, null, at);
+            }));
+    Instant reenabledAt = BASE.plusSeconds(10);
+
+    assertEquals(
+        1,
+        inTransaction(
+            () -> {
+              store.lock(ExecutionTargetKind.TOOL_INVOCATION, 820L).orElseThrow();
+              return store.activateLocked(
+                  ExecutionTargetKind.TOOL_INVOCATION, 820L, null, reenabledAt);
+            }));
+
+    ExecutionTargetRow row = store.findAll().getFirst();
+    assertNull(row.routeKey());
+    assertTrue(row.dispatchEnabled());
+    assertEquals(reenabledAt, row.availableAt());
+  }
+
+  @Test
+  void activateLockedRequiresActiveTransaction() {
+    assertEquals(1, store.schedule(ExecutionTargetKind.TOOL_INVOCATION, 830L, null, BASE));
+    assertThrows(
+        IllegalStateException.class,
+        () -> store.activateLocked(ExecutionTargetKind.TOOL_INVOCATION, 830L, null, BASE));
+  }
+
+  @Test
+  void parkLockedRejectsBlankRouteKey() {
+    assertEquals(1, store.schedule(ExecutionTargetKind.TOOL_INVOCATION, 840L, "env-a", BASE));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          inTransaction(
+              () -> {
+                store.lock(ExecutionTargetKind.TOOL_INVOCATION, 840L).orElseThrow();
+                return store.parkLocked(ExecutionTargetKind.TOOL_INVOCATION, 840L, " ", BASE);
+              });
+        });
   }
 
   private static void markRunning(long invocationId, Instant startedAt) {

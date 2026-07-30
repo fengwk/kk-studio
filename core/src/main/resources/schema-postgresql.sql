@@ -480,7 +480,7 @@ create table harness_tool_invocation (
     location              varchar(16)   not null,
     environment_name      varchar(128),
     execution_epoch       bigint        not null,
-    status                varchar(16)   not null,
+    status                varchar(32)   not null,
     attempt               integer       not null,
     next_attempt_at       timestamptz(3),
     worker_token          varchar(128),
@@ -493,6 +493,8 @@ create table harness_tool_invocation (
     created_at            timestamptz(3) not null default current_timestamp,
     started_at            timestamptz(3),
     finished_at           timestamptz(3),
+    permission_state      varchar(16)   not null default 'PENDING',
+    yolo_enabled          boolean       not null default false,
     constraint uk_harness_tool_invocation_source
         unique (thread_id, assistant_entry_id, execution_epoch, ordinal),
     constraint uk_harness_tool_invocation_session_id unique (session_id, id),
@@ -518,9 +520,12 @@ create table harness_tool_invocation (
     ),
     constraint ck_harness_tool_invocation_status check (
         status in (
-            'QUEUED', 'RUNNING', 'RETRY_WAIT',
+            'QUEUED', 'RUNNING', 'WAITING_INTERACTION', 'RETRY_WAIT',
             'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'
         )
+    ),
+    constraint ck_harness_tool_invocation_permission_state check (
+        permission_state in ('PENDING', 'ALLOWED', 'ASKED', 'DENIED')
     ),
     constraint ck_harness_tool_invocation_execution_epoch_nonneg
         check (execution_epoch >= 0),
@@ -538,7 +543,8 @@ create table harness_tool_invocation (
         or (next_attempt_at is null
             and worker_token is null and worker_until is null
             and started_at is null and deadline_at is null and last_activity_at is null
-            and finished_at is null and result is null and error is null)
+            and finished_at is null and result is null and error is null
+            and permission_state in ('PENDING', 'ALLOWED'))
     ),
     constraint ck_harness_tool_invocation_running check (
         status <> 'RUNNING'
@@ -546,7 +552,16 @@ create table harness_tool_invocation (
             and worker_token is not null and worker_until is not null
             and started_at is not null and deadline_at is not null
             and last_activity_at is not null
-            and finished_at is null and result is null and error is null)
+            and finished_at is null and result is null and error is null
+            and permission_state in ('PENDING', 'ALLOWED'))
+    ),
+    constraint ck_harness_tool_invocation_waiting_interaction check (
+        status <> 'WAITING_INTERACTION'
+        or (next_attempt_at is null
+            and worker_token is null and worker_until is null
+            and started_at is null and deadline_at is null and last_activity_at is null
+            and finished_at is null and result is null and error is null
+            and permission_state = 'ASKED')
     ),
     constraint ck_harness_tool_invocation_retry_wait check (
         status <> 'RETRY_WAIT'
@@ -554,7 +569,8 @@ create table harness_tool_invocation (
             and worker_token is null and worker_until is null
             and started_at is not null and deadline_at is not null
             and last_activity_at is not null
-            and finished_at is null and result is null and error is null)
+            and finished_at is null and result is null and error is null
+            and permission_state = 'ALLOWED')
     ),
     constraint ck_harness_tool_invocation_terminal check (
         status not in ('SUCCEEDED','FAILED','CANCELLED','UNKNOWN')
@@ -572,21 +588,24 @@ create table harness_tool_invocation (
         or (result is not null and error is null
             and started_at is not null
             and deadline_at is not null
-            and last_activity_at is not null)
+            and last_activity_at is not null
+            and permission_state = 'ALLOWED')
     ),
     constraint ck_harness_tool_invocation_failed_payload check (
         status <> 'FAILED'
         or (result is null and error is not null
             and started_at is not null
             and deadline_at is not null
-            and last_activity_at is not null)
+            and last_activity_at is not null
+            and permission_state in ('PENDING', 'ALLOWED', 'DENIED'))
     ),
     constraint ck_harness_tool_invocation_unknown_payload check (
         status <> 'UNKNOWN'
         or (result is null and error is not null
             and started_at is not null
             and deadline_at is not null
-            and last_activity_at is not null)
+            and last_activity_at is not null
+            and permission_state = 'ALLOWED')
     ),
     constraint ck_harness_tool_invocation_cancelled_payload check (
         status <> 'CANCELLED'
@@ -594,7 +613,8 @@ create table harness_tool_invocation (
             and ((started_at is null and deadline_at is null and last_activity_at is null)
                 or (started_at is not null
                     and deadline_at is not null
-                    and last_activity_at is not null)))
+                    and last_activity_at is not null))
+            and permission_state in ('PENDING', 'ALLOWED'))
     ),
     constraint ck_harness_tool_invocation_time_order check (
         (started_at is null or started_at >= created_at)

@@ -8,8 +8,7 @@ package fun.fengwk.kkstudio.harness.runtime.interaction;
  */
 public enum InteractionOwnerAction {
   SUSPEND_THREAD,
-  SUSPEND_TOOL_INVOCATION,
   RESUME_THREAD,
-  RESUME_TOOL_TO_QUEUED,
-  REJECT_TOOL_TO_FAILED
+  APPROVE_TOOL_PERMISSION,
+  DENY_TOOL_PERMISSION
 }

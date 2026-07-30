@@ -108,6 +108,45 @@ public interface ExecutionTargetMapper extends BaseMapper {
       @Param("routeKey") String routeKey,
       @Param("availableAt") OffsetDateTime availableAt);
 
+  /**
+   * Disable an already-locked target row and overwrite its route key and available time. Used by
+   * the durable Tool permission state machine to park an ASK target so the FIFO gate is preserved;
+   * PLATFORM targets (null route key) are supported. The schema-level NOTIFY trigger is silent on a
+   * disable transition.
+   */
+  @Update(
+      """
+      update harness_execution_target
+      set dispatch_enabled = false,
+          route_key = #{routeKey},
+          available_at = #{availableAt}
+      where target_kind = #{kind} and target_id = #{id}
+      """)
+  int parkLocked(
+      @Param("kind") String kind,
+      @Param("id") long id,
+      @Param("routeKey") String routeKey,
+      @Param("availableAt") OffsetDateTime availableAt);
+
+  /**
+   * Enable an already-locked target row and overwrite its route key and available time. The
+   * schema-level NOTIFY trigger only fires when the row was previously disabled or the new {@code
+   * available_at} is strictly earlier than the current value.
+   */
+  @Update(
+      """
+      update harness_execution_target
+      set dispatch_enabled = true,
+          route_key = #{routeKey},
+          available_at = #{availableAt}
+      where target_kind = #{kind} and target_id = #{id}
+      """)
+  int activateLocked(
+      @Param("kind") String kind,
+      @Param("id") long id,
+      @Param("routeKey") String routeKey,
+      @Param("availableAt") OffsetDateTime availableAt);
+
   @Delete(
       """
       delete from harness_execution_target

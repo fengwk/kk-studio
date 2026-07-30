@@ -189,6 +189,8 @@ public record ModelInvocation(
 
     // 3) Status-specific payload and lease shape constraints.
     switch (status) {
+      case WAITING_INTERACTION -> throw new IllegalArgumentException(
+          "WAITING_INTERACTION is reserved for Tool invocations; Model invocations cannot use it");
       case QUEUED -> {
         requireNull("QUEUED", "nextAttemptAt", nextAttemptAt);
         requireNull("QUEUED", "workerLease", workerLease);

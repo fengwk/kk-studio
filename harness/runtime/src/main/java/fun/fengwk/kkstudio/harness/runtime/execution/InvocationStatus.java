@@ -10,11 +10,14 @@ package fun.fengwk.kkstudio.harness.runtime.execution;
  *   <li>{@link #RETRY_WAIT} 必须存在非空的 {@code nextAttemptAt}，用于 due scheduler 重投。
  *   <li>{@link #RUNNING} 必须存在有效 worker lease 与非空的 {@code startedAt}。
  *   <li>{@link #UNKNOWN} 仅用于 worker 在无法确认副作用结果时落库；不视为"成功"。
+ *   <li>{@link #WAITING_INTERACTION} 仅用于 Tool Invocation；它有外部 Interaction 在等待用户/外部决定， 不持有 worker
+ *       lease。Model Invocation 永远不能进入此状态。
  * </ul>
  */
 public enum InvocationStatus {
   QUEUED,
   RUNNING,
+  WAITING_INTERACTION,
   RETRY_WAIT,
   SUCCEEDED,
   FAILED,

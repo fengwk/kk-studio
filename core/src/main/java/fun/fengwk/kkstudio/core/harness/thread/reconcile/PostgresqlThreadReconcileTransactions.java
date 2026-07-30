@@ -576,6 +576,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
               binding.location().name(),
               binding.environmentName(),
               epoch,
+              config.yoloEnabled(),
               timestamp(now))
           != 1) {
         throw new IllegalStateException("cannot materialize tool invocation");

@@ -311,8 +311,17 @@ public interface ThreadCommandMapper extends BaseMapper {
       @Param("threadId") long threadId, @Param("now") OffsetDateTime now);
 
   @Update(
-      "update harness_tool_invocation set status = 'CANCELLED', next_attempt_at = null, worker_token = null, worker_until = null, "
-          + "finished_at = #{now} where thread_id = #{threadId} and status in ('QUEUED', 'RETRY_WAIT')")
+      """
+      update harness_tool_invocation
+      set status = 'CANCELLED',
+          permission_state = case
+              when status = 'WAITING_INTERACTION' then 'PENDING'
+              else permission_state
+          end,
+          next_attempt_at = null, worker_token = null, worker_until = null, finished_at = #{now}
+      where thread_id = #{threadId}
+        and status in ('QUEUED', 'RETRY_WAIT', 'WAITING_INTERACTION')
+      """)
   int cancelSafeToolInvocations(@Param("threadId") long threadId, @Param("now") OffsetDateTime now);
 
   /**

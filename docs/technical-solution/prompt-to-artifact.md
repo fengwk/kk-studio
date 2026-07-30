@@ -38,7 +38,7 @@ Provider 流式 delta 写入 Redis realtime projection。Assistant 完成时，`
 
 ## Tool 执行与上下文回流
 
-Provider Tool Call 经 Binding、interceptor 与 Permission Boundary 后写入 `harness_tool_invocation`。Approval 走 Interaction，不写 Tool 专用 approval 列。
+Provider Tool Call 先作为 `QUEUED + PENDING` 写入 `harness_tool_invocation`。ToolWorker 在任何外部 Tool I/O 前运行 Binding/interceptor/Permission Boundary：ALLOW 持久化最终计划与 `ALLOWED`；ASK 原子写 `WAITING_INTERACTION + ASKED`、`tool-permission` Interaction 和 parked target；DENY 写 `FAILED + DENIED`。用户批准只恢复 `QUEUED + ALLOWED` 并通过原 target route FIFO gate 调度，不会重新评估或改变已经冻结的计划。
 
 统一 `ToolWorker` 从数据库 claim Invocation：
 

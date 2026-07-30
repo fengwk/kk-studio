@@ -28,7 +28,7 @@
  * dispatch gate: due scans and nearest-due timing ignore parked rows, while {@code lock} and {@code
  * findAll} expose them for ownership and inspection. ENVIRONMENT Tool targets are parked at
  * materialization and activated FIFO by route using Tool creation order; a RUNNING, RETRY_WAIT, or
- * future WAITING_INTERACTION head blocks later siblings.
+ * WAITING_INTERACTION head blocks later siblings.
  *
  * <p>Schema triggers notify only enabled inserts, enable transitions, and strictly-earlier moves of
  * enabled rows. No application-level notifier or Redis queue state is involved in this substrate.

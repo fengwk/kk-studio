@@ -9,10 +9,10 @@ import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.core.harness.tool.configuration.DeploymentToolSettingsProvider;
 import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProperties;
-import fun.fengwk.kkstudio.core.harness.tool.configuration.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsCodec;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.tool.AfterToolCallInterceptor;
 import fun.fengwk.kkstudio.harness.runtime.tool.BeforeToolCallInterceptor;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;

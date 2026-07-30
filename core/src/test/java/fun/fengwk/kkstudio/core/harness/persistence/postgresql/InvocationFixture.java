@@ -104,7 +104,8 @@ final class InvocationFixture {
                 "update harness_tool_invocation set status = 'RUNNING', worker_token = ?,"
                     + " worker_until = current_timestamp + interval '1 minute', started_at ="
                     + " current_timestamp, deadline_at = current_timestamp + interval '1 hour',"
-                    + " last_activity_at = current_timestamp where id = ?")) {
+                    + " last_activity_at = current_timestamp, permission_state = 'ALLOWED'"
+                    + " where id = ?")) {
       ps.setString(1, workerToken);
       ps.setLong(2, invocationId);
       assertEquals(1, ps.executeUpdate());

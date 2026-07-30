@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -17,6 +19,9 @@ import fun.fengwk.kkstudio.core.harness.execution.ExecutionTargetRow;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
@@ -62,6 +67,7 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpringTestSupport {
   private static final ToolDescriptorJsonCodec DESCRIPTOR_CODEC = new ToolDescriptorJsonCodec();
+  private static final ObjectMapper JSON = new ObjectMapper();
   private static final Instant BASE = Instant.parse("2026-07-24T00:00:00Z");
   private static final Duration LONG_LEASE = Duration.ofMinutes(5);
   private static final Duration SHORT_LEASE = Duration.ofMillis(50);
@@ -601,6 +607,179 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
     assertEquals("QUEUED", rowFor(fixture.invocationId).getStatus());
   }
 
+  // ---- durable Tool permission state machine ----
+
+  @Test
+  void persistPermissionAllowedFlipsStateAndOverwritesFinalPlan() throws Exception {
+    Fixture fixture =
+        newPendingQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
+    ToolBinding finalBinding = ToolBinding.of(fixture.descriptor);
+    String finalArgs = "{\"rewritten\":true}";
+
+    assertEquals(
+        ToolInvocationUpdateOutcome.APPLIED,
+        transactions.persistPermissionAllowed(
+            claimed, finalBinding, finalArgs, BASE.plusSeconds(1)));
+
+    ToolInvocationDO row = rowFor(fixture.invocationId);
+    assertEquals("RUNNING", row.getStatus());
+    assertEquals("ALLOWED", row.getPermissionState());
+    assertEquals(JSON.readTree(finalArgs), JSON.readTree(row.getArgumentsJson()));
+    assertFalse(row.getYoloEnabled(), "yolo_enabled stays as materialization default");
+  }
+
+  @Test
+  void awaitPermissionCreatesOpenInteractionAndParksTarget() throws Exception {
+    Fixture fixture =
+        newPendingQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
+    PermissionPromptPreview prompt =
+        new PermissionPromptPreview("platformTool", "/work", "{\"k\":\"v\"}");
+
+    assertEquals(
+        ToolInvocationUpdateOutcome.APPLIED,
+        transactions.awaitPermission(
+            claimed,
+            ToolBinding.of(fixture.descriptor),
+            "{\"k\":\"v\"}",
+            prompt,
+            BASE.plusSeconds(1)));
+
+    ToolInvocationDO row = rowFor(fixture.invocationId);
+    assertEquals("WAITING_INTERACTION", row.getStatus());
+    assertEquals("ASKED", row.getPermissionState());
+    assertNull(row.getWorkerToken());
+    assertNull(row.getWorkerUntil());
+    assertNull(row.getStartedAt());
+    assertNull(row.getDeadlineAt());
+    assertNull(row.getLastActivityAt());
+    assertNull(row.getResultJson());
+    assertNull(row.getErrorJson());
+
+    // Exactly one OPEN interaction owned by this Tool, with handler_type tool-permission.
+    assertEquals(1, countOpenInteractionsForTool(fixture.invocationId));
+    JsonNode request = JSON.readTree(onlyOpenInteractionRequestJson(fixture.invocationId));
+    assertEquals(fixture.invocationId, request.required("invocationId").asLong());
+    assertEquals(fixture.threadId, request.required("threadId").asLong());
+    assertEquals("platformTool", request.required("tool").asText());
+    assertEquals("/work", request.required("workdir").asText());
+    assertEquals("{\"k\":\"v\"}", request.required("arguments").asText());
+
+    // Target is parked (disabled) but still present with its (null) PLATFORM route key.
+    ExecutionTargetRow target = targetFor(fixture.invocationId);
+    assertFalse(target.dispatchEnabled(), "ASK target must be parked");
+    assertNull(target.routeKey(), "PLATFORM target carries a null route key");
+  }
+
+  @Test
+  void awaitPermissionMissingTargetRollsBackAndLeavesNoOpenInteraction() throws Exception {
+    Fixture fixture =
+        newPendingQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
+    deleteTarget(fixture.invocationId);
+    PermissionPromptPreview prompt = new PermissionPromptPreview("platformTool", "/work", "{}");
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            transactions.awaitPermission(
+                claimed, ToolBinding.of(fixture.descriptor), "{}", prompt, BASE.plusSeconds(1)));
+
+    // No interaction, no row mutation: the entire awaitPermission is rolled back.
+    assertEquals(0, countOpenInteractionsForTool(fixture.invocationId));
+    assertEquals("RUNNING", rowFor(fixture.invocationId).getStatus());
+    assertEquals("PENDING", rowFor(fixture.invocationId).getPermissionState());
+  }
+
+  @Test
+  void awaitPermissionOnPlatformTargetWithNullRouteParks() throws Exception {
+    Fixture fixture =
+        newPendingQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
+    PermissionPromptPreview prompt = new PermissionPromptPreview("platformTool", "/work", "{}");
+
+    assertEquals(
+        ToolInvocationUpdateOutcome.APPLIED,
+        transactions.awaitPermission(
+            claimed, ToolBinding.of(fixture.descriptor), "{}", prompt, BASE.plusSeconds(1)));
+
+    ExecutionTargetRow target = targetFor(fixture.invocationId);
+    assertFalse(target.dispatchEnabled(), "PLATFORM ASK target must be parked");
+    assertNull(target.routeKey());
+  }
+
+  @Test
+  void awaitPermissionRejectsRouteChange() throws Exception {
+    Fixture fixture =
+        newPendingQueued(ToolExecutionLocation.ENVIRONMENT, "env-a", ToolSideEffect.READ_ONLY, 1L);
+    ClaimedToolInvocation claimed = claim(fixture, "env-worker", BASE, LONG_LEASE);
+    PermissionPromptPreview prompt = new PermissionPromptPreview("environmentTool", "/work", "{}");
+    // The final binding changes the location, which is rejected.
+    ToolBinding badBinding = ToolBinding.of(fixture.descriptor);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> transactions.awaitPermission(claimed, badBinding, "{}", prompt, BASE.plusSeconds(1)));
+  }
+
+  @Test
+  void denyPermissionTerminatesWakesThreadAndActivatesNextEnvironmentHead() throws Exception {
+    Fixture first =
+        newPendingQueued(ToolExecutionLocation.ENVIRONMENT, "env-a", ToolSideEffect.READ_ONLY, 1L);
+    Fixture second =
+        newQueued(ToolExecutionLocation.ENVIRONMENT, "env-a", ToolSideEffect.READ_ONLY, 1L);
+    setInvocationCreatedAt(first.invocationId, BASE);
+    setInvocationCreatedAt(second.invocationId, BASE.plusSeconds(1));
+    setTargetDispatchEnabled(second.invocationId, false);
+
+    ClaimedToolInvocation claimed = claim(first, "env-worker", BASE, LONG_LEASE);
+    assertEquals(
+        ToolInvocationUpdateOutcome.APPLIED,
+        transactions.denyPermission(claimed, BASE.plusSeconds(1)));
+
+    ToolInvocationDO deniedRow = rowFor(first.invocationId);
+    assertEquals("FAILED", deniedRow.getStatus());
+    assertEquals("DENIED", deniedRow.getPermissionState());
+    assertNotNull(deniedRow.getErrorJson());
+    assertNull(deniedRow.getWorkerToken());
+    assertNotNull(deniedRow.getFinishedAt());
+    // Clocks are preserved: deny did not invent new startedAt/deadlineAt.
+    assertNotNull(deniedRow.getStartedAt());
+    assertNotNull(deniedRow.getDeadlineAt());
+
+    assertTrue(toolTargetAbsent(first.invocationId), "deny must delete the tool target");
+    assertTrue(threadRunnable(first.threadId), "deny must mark the owning thread runnable");
+
+    // The next environment head (second) must be activated by the same transaction.
+    ExecutionTargetRow nextTarget = targetFor(second.invocationId);
+    assertTrue(nextTarget.dispatchEnabled(), "deny must activate the next environment head");
+    assertEquals("env-a", nextTarget.routeKey());
+  }
+
+  @Test
+  void pendingExpiredLeaseRecoverResetsRowToQueuedAndReschedulesTarget() throws Exception {
+    Fixture fixture =
+        newPendingQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    // First claim with a very short lease, then a second claim after it expires.
+    ClaimedToolInvocation first = claim(fixture, "old-worker", BASE, SHORT_LEASE);
+    Instant before = BASE.plusMillis(100);
+    // The lease expired; the second claim should hit the PENDING recovery path.
+    Optional<ClaimedToolInvocation> second =
+        transactions.claim(fixture.invocationId, "new-worker", LONG_LEASE, before);
+    assertTrue(second.isEmpty(), "PENDING recovery must return Optional.empty()");
+    // Row is back to initial QUEUED + PENDING and target is rescheduled to {@code before}.
+    ToolInvocationDO row = rowFor(fixture.invocationId);
+    assertEquals("QUEUED", row.getStatus());
+    assertEquals("PENDING", row.getPermissionState());
+    assertNull(row.getWorkerToken());
+    assertNull(row.getStartedAt());
+    assertNull(row.getDeadlineAt());
+    assertNull(row.getLastActivityAt());
+    ExecutionTargetRow target = targetFor(fixture.invocationId);
+    assertEquals(before, target.availableAt());
+  }
+
   private ClaimedToolInvocation claim(
       Fixture fixture, String token, Instant now, Duration leaseDuration) {
     return transactions.claim(fixture.invocationId, token, leaseDuration, now).orElseThrow();
@@ -611,6 +790,27 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
       String environmentName,
       ToolSideEffect sideEffect,
       long executionEpoch)
+      throws SQLException {
+    return newQueued(
+        location, environmentName, sideEffect, executionEpoch, ToolPermissionState.ALLOWED);
+  }
+
+  private Fixture newPendingQueued(
+      ToolExecutionLocation location,
+      String environmentName,
+      ToolSideEffect sideEffect,
+      long executionEpoch)
+      throws SQLException {
+    return newQueued(
+        location, environmentName, sideEffect, executionEpoch, ToolPermissionState.PENDING);
+  }
+
+  private Fixture newQueued(
+      ToolExecutionLocation location,
+      String environmentName,
+      ToolSideEffect sideEffect,
+      long executionEpoch,
+      ToolPermissionState permissionState)
       throws SQLException {
     long sessionId = ids.incrementAndGet();
     long threadId = ids.incrementAndGet();
@@ -662,9 +862,10 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
             connection.prepareStatement(
                 "insert into harness_tool_invocation (id, thread_id, session_id,"
                     + " assistant_entry_id, ordinal, tool_call_id, descriptor, arguments, location,"
-                    + " environment_name, execution_epoch, status, attempt, created_at)"
+                    + " environment_name, execution_epoch, status, attempt, permission_state,"
+                    + " yolo_enabled, created_at)"
                     + " values (?, ?, ?, ?, 0, ?, cast(? as jsonb), '{}'::jsonb, ?, ?, ?,"
-                    + " 'QUEUED', 1, ?)")) {
+                    + " 'QUEUED', 1, ?, false, ?)")) {
           statement.setLong(1, invocationId);
           statement.setLong(2, threadId);
           statement.setLong(3, sessionId);
@@ -674,7 +875,8 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
           statement.setString(7, location.name());
           statement.setString(8, environmentName);
           statement.setLong(9, executionEpoch);
-          statement.setObject(10, offset(BASE));
+          statement.setString(10, permissionState.name());
+          statement.setObject(11, offset(BASE));
           statement.executeUpdate();
         }
         try (PreparedStatement statement =
@@ -746,6 +948,37 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
                     + " where id = ?")) {
       statement.setLong(1, interactionId);
       statement.executeUpdate();
+    }
+  }
+
+  private static int countOpenInteractionsForTool(long invocationId) throws SQLException {
+    try (Connection connection = newConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "select count(*) from harness_interaction where owner_kind = 'TOOL_INVOCATION'"
+                    + " and owner_id = ? and status = 'OPEN'")) {
+      statement.setLong(1, invocationId);
+      try (ResultSet rs = statement.executeQuery()) {
+        rs.next();
+        return (int) rs.getLong(1);
+      }
+    }
+  }
+
+  private static String onlyOpenInteractionRequestJson(long invocationId) throws SQLException {
+    try (Connection connection = newConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "select request::text from harness_interaction where owner_kind = 'TOOL_INVOCATION'"
+                    + " and owner_id = ? and status = 'OPEN' limit 1")) {
+      statement.setLong(1, invocationId);
+      try (ResultSet rs = statement.executeQuery()) {
+        if (!rs.next()) {
+          throw new IllegalStateException(
+              "no open tool-permission interaction for invocation " + invocationId);
+        }
+        return rs.getString(1);
+      }
     }
   }
 
@@ -863,7 +1096,8 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
                     + " location, environment_name, execution_epoch, status, attempt,"
                     + " next_attempt_at, worker_token, worker_until, deadline_at, last_activity_at,"
                     + " result::text as result_json, error::text as error_json, applied_at,"
-                    + " created_at, started_at, finished_at from harness_tool_invocation where id = ?")) {
+                    + " created_at, started_at, finished_at, permission_state, yolo_enabled"
+                    + " from harness_tool_invocation where id = ?")) {
       statement.setLong(1, invocationId);
       try (ResultSet resultSet = statement.executeQuery()) {
         if (!resultSet.next()) {
@@ -894,6 +1128,8 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
         row.setCreatedAt(resultSet.getObject("created_at", OffsetDateTime.class));
         row.setStartedAt(resultSet.getObject("started_at", OffsetDateTime.class));
         row.setFinishedAt(resultSet.getObject("finished_at", OffsetDateTime.class));
+        row.setPermissionState(resultSet.getString("permission_state"));
+        row.setYoloEnabled(resultSet.getBoolean("yolo_enabled"));
         return row;
       }
     } catch (SQLException error) {

@@ -4,6 +4,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.core.harness.execution.ExecutionTargetRow;
+import fun.fengwk.kkstudio.core.harness.execution.ExecutionTargetStore;
 import fun.fengwk.kkstudio.core.harness.interaction.store.mapper.InteractionMapper;
 import fun.fengwk.kkstudio.core.harness.interaction.store.mapper.InteractionOwnerThreadMapper;
 import fun.fengwk.kkstudio.core.harness.interaction.store.mapper.InteractionToolOwnerMapper;
@@ -20,7 +22,9 @@ import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionResponse;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionStatus;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionTransactions;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionTransition;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionInteraction;
 import fun.fengwk.kkstudio.harness.runtime.port.HarnessIdGenerator;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 
@@ -30,35 +34,42 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * PostgreSQL implementation of generic Interaction transactions.
+ * PostgreSQL implementation of durable Interaction transactions.
  *
  * <p>Each terminal mutation locks the fact, validates id/version/OPEN state, then advances exactly
- * once. An already expired response is terminalized as {@code EXPIRED} without applying its handler
- * resolution. The returned target is only a post-commit signal; notifications remain the caller's
- * best-effort responsibility.
+ * once. Tool permission interactions lock Thread → ToolInvocation → ExecutionTarget, so approval
+ * atomically re-enables only the permitted Tool target through the FIFO route gate and denial /
+ * expiry atomically terminalizes the Tool, deletes its target, schedules the owning Thread and
+ * activates the next environment head. An already expired response is terminalized as {@code
+ * EXPIRED} without applying its handler resolution.
  */
 @Service
 public class PostgresqlInteractionTransactions implements InteractionTransactions {
   /**
-   * Canonical durable error payload written when an Interaction rejects a queued Tool invocation.
+   * Canonical durable error payload written when a Tool permission Interaction is denied or
+   * expires.
    */
-  static final String INTERACTION_REJECTED_ERROR_JSON =
+  static final String TOOL_PERMISSION_DENIED_ERROR_JSON =
       new ToolInvocationErrorJsonCodec()
-          .encode(new ToolInvocationError("INTERACTION_REJECTED", "Interaction was rejected."));
+          .encode(new ToolInvocationError("PERMISSION_DENIED", "Tool permission was denied."));
 
   private final InteractionMapper interactionMapper;
   private final InteractionOwnerThreadMapper threadMapper;
   private final InteractionToolOwnerMapper toolMapper;
+  private final ExecutionTargetStore executionTargetStore;
   private final HarnessIdGenerator idGenerator;
 
   public PostgresqlInteractionTransactions(
       InteractionMapper interactionMapper,
       InteractionOwnerThreadMapper threadMapper,
       InteractionToolOwnerMapper toolMapper,
+      ExecutionTargetStore executionTargetStore,
       HarnessIdGenerator idGenerator) {
     this.interactionMapper = Objects.requireNonNull(interactionMapper, "interactionMapper");
     this.threadMapper = Objects.requireNonNull(threadMapper, "threadMapper");
     this.toolMapper = Objects.requireNonNull(toolMapper, "toolMapper");
+    this.executionTargetStore =
+        Objects.requireNonNull(executionTargetStore, "executionTargetStore");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
   }
 
@@ -66,7 +77,7 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
   @Transactional(isolation = Isolation.READ_COMMITTED)
   public Interaction create(InteractionCreate create) {
     Objects.requireNonNull(create, "create");
-    OwnerLock ownerLock = lockOwner(create.owner(), create.ownerDirective());
+    OwnerLock ownerLock = lockThreadOwner(create.owner(), create.ownerDirective());
     applySuspension(ownerLock, create.ownerDirective(), create.createdAt());
     long id = idGenerator.nextInteractionId();
     Interaction interaction =
@@ -128,7 +139,7 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
     Objects.requireNonNull(resolution, "resolution");
     Interaction current = peekInteraction(interactionId);
     Instant terminalAt = Objects.requireNonNull(resolvedAt, "resolvedAt");
-    OwnerLock ownerLock = lockOwner(current.owner(), resolution.ownerDirective());
+    OwnerLock ownerLock = lockOwner(current, resolution.ownerDirective());
     current = lockOpen(interactionId, expectedVersion);
     if (isExpired(current, terminalAt)) {
       return expireLockedDefault(current, terminalAt);
@@ -159,7 +170,7 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
     Objects.requireNonNull(nextTarget, "nextTarget");
     Interaction current = peekInteraction(interactionId);
     Instant terminalAt = Objects.requireNonNull(resolvedAt, "resolvedAt");
-    OwnerLock ownerLock = lockOwner(current.owner(), ownerDirective);
+    OwnerLock ownerLock = lockOwner(current, ownerDirective);
     current = lockOpen(interactionId, expectedVersion);
     applyTerminalOwner(ownerLock, ownerDirective, nextTarget, terminalAt);
     if (interactionMapper.terminalizeWithoutResponse(
@@ -180,17 +191,14 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
     validateIdAndVersion(interactionId, expectedVersion);
     Interaction current = peekInteraction(interactionId);
     Instant terminalAt = Objects.requireNonNull(resolvedAt, "resolvedAt");
-    OwnerLock ownerLock = lockOwner(current.owner(), defaultExpirationDirective(current.owner()));
+    InteractionOwnerDirective ownerDirective = defaultExpirationDirective(current);
+    OwnerLock ownerLock = lockOwner(current, ownerDirective);
     current = lockOpen(interactionId, expectedVersion);
     if (!isExpired(current, terminalAt)) {
       throw new IllegalStateException("interaction has not expired");
     }
     return expireLocked(
-        current,
-        ownerLock,
-        defaultExpirationDirective(current.owner()),
-        defaultExpirationNextTarget(ownerLock),
-        terminalAt);
+        current, ownerLock, ownerDirective, defaultExpirationNextTarget(ownerLock), terminalAt);
   }
 
   private InteractionTransition expireLocked(
@@ -212,17 +220,19 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
   }
 
   private InteractionTransition expireLockedDefault(Interaction current, Instant terminalAt) {
-    InteractionOwnerDirective ownerDirective = defaultExpirationDirective(current.owner());
-    OwnerLock ownerLock = lockOwner(current.owner(), ownerDirective);
+    InteractionOwnerDirective ownerDirective = defaultExpirationDirective(current);
+    OwnerLock ownerLock = lockOwner(current, ownerDirective);
     return expireLocked(
         current, ownerLock, ownerDirective, defaultExpirationNextTarget(ownerLock), terminalAt);
   }
 
-  private static InteractionOwnerDirective defaultExpirationDirective(ExecutionTarget owner) {
-    return switch (owner.kind()) {
+  private static InteractionOwnerDirective defaultExpirationDirective(Interaction interaction) {
+    return switch (interaction.owner().kind()) {
       case THREAD -> new InteractionOwnerDirective(InteractionOwnerAction.RESUME_THREAD);
-      case TOOL_INVOCATION -> new InteractionOwnerDirective(
-          InteractionOwnerAction.REJECT_TOOL_TO_FAILED);
+      case TOOL_INVOCATION -> {
+        requireToolPermissionHandler(interaction);
+        yield new InteractionOwnerDirective(InteractionOwnerAction.DENY_TOOL_PERMISSION);
+      }
       case MODEL_INVOCATION -> throw new IllegalArgumentException(
           "interaction owner action is unsupported for MODEL_INVOCATION");
     };
@@ -243,33 +253,67 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
     return InteractionRowConverter.toAggregate(row);
   }
 
-  private OwnerLock lockOwner(ExecutionTarget owner, InteractionOwnerDirective ownerDirective) {
+  private OwnerLock lockThreadOwner(
+      ExecutionTarget owner, InteractionOwnerDirective ownerDirective) {
     Objects.requireNonNull(owner, "owner");
     Objects.requireNonNull(ownerDirective, "ownerDirective");
+    if (owner.kind() != ExecutionTargetKind.THREAD) {
+      throw new IllegalArgumentException(
+          "interaction creation only supports THREAD owners, but was " + owner.kind());
+    }
+    requireThreadAction(ownerDirective.action());
+    lockThread(owner.id());
+    return new OwnerLock(owner, null, null);
+  }
+
+  /**
+   * Locks the owner facts in the global order Thread → ToolInvocation → ExecutionTarget. Tool
+   * permission interactions are created only by the Tool worker after it has parked a
+   * WAITING_INTERACTION/ASKED target, so any deviation is a durable invariant breach.
+   */
+  private OwnerLock lockOwner(Interaction interaction, InteractionOwnerDirective ownerDirective) {
+    Objects.requireNonNull(interaction, "interaction");
+    Objects.requireNonNull(ownerDirective, "ownerDirective");
+    ExecutionTarget owner = interaction.owner();
     if (owner.kind() == ExecutionTargetKind.THREAD) {
       requireThreadAction(ownerDirective.action());
       lockThread(owner.id());
-      return new OwnerLock(owner, null);
+      return new OwnerLock(owner, null, null);
     }
-    if (owner.kind() == ExecutionTargetKind.TOOL_INVOCATION) {
-      requireToolAction(ownerDirective.action());
-      InteractionToolOwnerDO peek = toolMapper.find(owner.id());
-      if (peek == null) {
-        throw new IllegalStateException("owning tool invocation missing: " + owner.id());
-      }
-      long threadId = Objects.requireNonNull(peek.getThreadId(), "tool threadId");
-      lockThread(threadId);
-      InteractionToolOwnerDO tool = toolMapper.findForUpdate(owner.id(), threadId);
-      if (tool == null) {
-        throw new IllegalStateException("owning tool invocation changed: " + owner.id());
-      }
-      if (!"QUEUED".equals(tool.getStatus())) {
-        throw new IllegalStateException("tool invocation is not interaction-suspendable");
-      }
-      return new OwnerLock(owner, tool);
+    if (owner.kind() != ExecutionTargetKind.TOOL_INVOCATION) {
+      throw new IllegalArgumentException(
+          "interaction owner action is unsupported for " + owner.kind());
     }
-    throw new IllegalArgumentException(
-        "interaction owner action is unsupported for " + owner.kind());
+    requireToolPermissionHandler(interaction);
+    requireToolAction(ownerDirective.action());
+    InteractionToolOwnerDO peek = toolMapper.find(owner.id());
+    if (peek == null) {
+      throw new IllegalStateException("owning tool invocation missing: " + owner.id());
+    }
+    long threadId = Objects.requireNonNull(peek.getThreadId(), "tool threadId");
+    long threadEpoch = lockThread(threadId);
+    InteractionToolOwnerDO tool = toolMapper.findForUpdate(owner.id(), threadId);
+    if (tool == null) {
+      throw new IllegalStateException("owning tool invocation changed: " + owner.id());
+    }
+    if (!Objects.equals(tool.getExecutionEpoch(), threadEpoch)) {
+      throw new IllegalStateException(
+          "tool permission owner execution epoch no longer matches its thread: " + owner.id());
+    }
+    if (!"WAITING_INTERACTION".equals(tool.getStatus())
+        || !"ASKED".equals(tool.getPermissionState())) {
+      throw new IllegalStateException(
+          "tool permission owner is not WAITING_INTERACTION/ASKED: " + owner.id());
+    }
+    ExecutionTargetRow target =
+        executionTargetStore
+            .lock(ExecutionTargetKind.TOOL_INVOCATION, owner.id())
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "tool permission owner is missing its target: " + owner.id()));
+    requireParkedPermissionTarget(tool, target);
+    return new OwnerLock(owner, tool, target);
   }
 
   private void applySuspension(
@@ -277,11 +321,6 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
     if (ownerDirective.action() == InteractionOwnerAction.SUSPEND_THREAD
         && ownerLock.owner().kind() == ExecutionTargetKind.THREAD) {
       setThreadRunnable(ownerLock.owner().id(), false, transitionAt);
-      return;
-    }
-    if (ownerDirective.action() == InteractionOwnerAction.SUSPEND_TOOL_INVOCATION
-        && ownerLock.owner().kind() == ExecutionTargetKind.TOOL_INVOCATION) {
-      setThreadRunnable(requireTool(ownerLock).getThreadId(), false, transitionAt);
       return;
     }
     throw new IllegalArgumentException("interaction suspension directive does not match owner");
@@ -299,39 +338,78 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
       setThreadRunnable(ownerLock.owner().id(), true, transitionAt);
       return;
     }
-    if (action == InteractionOwnerAction.RESUME_TOOL_TO_QUEUED
+    if (action == InteractionOwnerAction.APPROVE_TOOL_PERMISSION
         && ownerLock.owner().kind() == ExecutionTargetKind.TOOL_INVOCATION) {
-      InteractionToolOwnerDO tool = requireTool(ownerLock);
-      requireNextTarget(nextTarget, ExecutionTargetKind.TOOL_INVOCATION, tool.getId());
-      if (toolMapper.keepQueued(tool.getId()) != 1) {
-        throw new IllegalStateException("tool invocation queue resume lost race: " + tool.getId());
-      }
+      approveToolPermission(ownerLock, nextTarget, transitionAt);
       return;
     }
-    if (action == InteractionOwnerAction.REJECT_TOOL_TO_FAILED
+    if (action == InteractionOwnerAction.DENY_TOOL_PERMISSION
         && ownerLock.owner().kind() == ExecutionTargetKind.TOOL_INVOCATION) {
-      InteractionToolOwnerDO tool = requireTool(ownerLock);
-      requireNextTarget(nextTarget, ExecutionTargetKind.THREAD, tool.getThreadId());
-      Instant startedAt = max(transitionAt, tool.getCreatedAt().toInstant());
-      if (toolMapper.rejectQueued(
-              tool.getId(),
-              InteractionRowConverter.toUtcOffsetDateTime(startedAt),
-              InteractionRowConverter.toUtcOffsetDateTime(startedAt.plus(Duration.ofMillis(1))),
-              InteractionRowConverter.toUtcOffsetDateTime(startedAt),
-              INTERACTION_REJECTED_ERROR_JSON)
-          != 1) {
-        throw new IllegalStateException("tool invocation rejection lost race: " + tool.getId());
-      }
-      setThreadRunnable(tool.getThreadId(), true, transitionAt);
+      denyToolPermission(ownerLock, nextTarget, transitionAt);
       return;
     }
     throw new IllegalArgumentException("interaction terminal directive does not match owner");
   }
 
-  private void lockThread(long threadId) {
-    if (threadMapper.findIdForUpdate(threadId) == null) {
+  private void approveToolPermission(
+      OwnerLock ownerLock, ExecutionTarget nextTarget, Instant transitionAt) {
+    InteractionToolOwnerDO tool = requireTool(ownerLock);
+    requireNextTarget(nextTarget, ExecutionTargetKind.TOOL_INVOCATION, tool.getId());
+    if (toolMapper.approveAsked(tool.getId()) != 1) {
+      throw new IllegalStateException("tool permission approval lost race: " + tool.getId());
+    }
+    Instant availableAt = persisted(transitionAt);
+    ExecutionTargetRow target = requireTarget(ownerLock);
+    requireTargetAffected(
+        executionTargetStore.rescheduleLocked(
+            ExecutionTargetKind.TOOL_INVOCATION, tool.getId(), target.routeKey(), availableAt),
+        "reschedule approved tool permission target");
+    if (target.routeKey() == null) {
+      requireTargetAffected(
+          executionTargetStore.activateLocked(
+              ExecutionTargetKind.TOOL_INVOCATION, tool.getId(), null, availableAt),
+          "activate approved platform tool target");
+      return;
+    }
+    // A waiting permission target is a FIFO route member. Re-run the shared FIFO activation query
+    // after its row becomes QUEUED; it enables this head only when no older nonterminal member
+    // exists, never allowing the approval path to bypass another route member.
+    executionTargetStore.activateOldestEnvironment(target.routeKey(), availableAt);
+  }
+
+  private void denyToolPermission(
+      OwnerLock ownerLock, ExecutionTarget nextTarget, Instant transitionAt) {
+    InteractionToolOwnerDO tool = requireTool(ownerLock);
+    requireNextTarget(nextTarget, ExecutionTargetKind.THREAD, tool.getThreadId());
+    Instant terminalAt = persisted(transitionAt);
+    Instant startedAt = max(terminalAt, tool.getCreatedAt().toInstant());
+    Instant deadlineAt = startedAt.plus(Duration.ofMillis(1));
+    if (toolMapper.denyAsked(
+            tool.getId(),
+            InteractionRowConverter.toUtcOffsetDateTime(startedAt),
+            InteractionRowConverter.toUtcOffsetDateTime(deadlineAt),
+            InteractionRowConverter.toUtcOffsetDateTime(startedAt),
+            TOOL_PERMISSION_DENIED_ERROR_JSON)
+        != 1) {
+      throw new IllegalStateException("tool permission denial lost race: " + tool.getId());
+    }
+    setThreadRunnable(tool.getThreadId(), true, terminalAt);
+    requireTargetAffected(
+        executionTargetStore.deleteLocked(ExecutionTargetKind.TOOL_INVOCATION, tool.getId()),
+        "delete denied tool permission target");
+    executionTargetStore.schedule(ExecutionTargetKind.THREAD, tool.getThreadId(), null, terminalAt);
+    String routeKey = requireTarget(ownerLock).routeKey();
+    if (routeKey != null) {
+      executionTargetStore.activateOldestEnvironment(routeKey, terminalAt);
+    }
+  }
+
+  private long lockThread(long threadId) {
+    Long executionEpoch = threadMapper.findExecutionEpochForUpdate(threadId);
+    if (executionEpoch == null) {
       throw new IllegalStateException("owning thread missing: " + threadId);
     }
+    return executionEpoch;
   }
 
   private void setThreadRunnable(long threadId, boolean runnable, Instant transitionAt) {
@@ -350,11 +428,33 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
   }
 
   private static void requireToolAction(InteractionOwnerAction action) {
-    if (action != InteractionOwnerAction.SUSPEND_TOOL_INVOCATION
-        && action != InteractionOwnerAction.RESUME_TOOL_TO_QUEUED
-        && action != InteractionOwnerAction.REJECT_TOOL_TO_FAILED) {
+    if (action != InteractionOwnerAction.APPROVE_TOOL_PERMISSION
+        && action != InteractionOwnerAction.DENY_TOOL_PERMISSION) {
       throw new IllegalArgumentException(
           "interaction directive is unsupported for TOOL_INVOCATION owner");
+    }
+  }
+
+  private static void requireToolPermissionHandler(Interaction interaction) {
+    if (!ToolPermissionInteraction.HANDLER_TYPE.equals(interaction.handlerType())) {
+      throw new IllegalArgumentException(
+          "unsupported TOOL_INVOCATION interaction handler: " + interaction.handlerType());
+    }
+  }
+
+  private static void requireParkedPermissionTarget(
+      InteractionToolOwnerDO tool, ExecutionTargetRow target) {
+    if (target.dispatchEnabled()) {
+      throw new IllegalStateException(
+          "tool permission target must be parked while interaction is open: " + tool.getId());
+    }
+    String expectedRoute =
+        ToolExecutionLocation.ENVIRONMENT.name().equals(tool.getLocation())
+            ? tool.getEnvironmentName()
+            : null;
+    if (!Objects.equals(expectedRoute, target.routeKey())) {
+      throw new IllegalStateException(
+          "tool permission target route does not match invocation: " + tool.getId());
     }
   }
 
@@ -370,11 +470,26 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
     return Objects.requireNonNull(ownerLock.tool(), "tool owner");
   }
 
+  private static ExecutionTargetRow requireTarget(OwnerLock ownerLock) {
+    return Objects.requireNonNull(ownerLock.target(), "tool target");
+  }
+
+  private static void requireTargetAffected(int affected, String operation) {
+    if (affected != 1) {
+      throw new IllegalStateException(operation + " affected " + affected + " rows");
+    }
+  }
+
+  private static Instant persisted(Instant instant) {
+    return InteractionRowConverter.toUtcOffsetDateTime(instant).toInstant();
+  }
+
   private static Instant max(Instant first, Instant second) {
     return first.isAfter(second) ? first : second;
   }
 
-  private record OwnerLock(ExecutionTarget owner, InteractionToolOwnerDO tool) {}
+  private record OwnerLock(
+      ExecutionTarget owner, InteractionToolOwnerDO tool, ExecutionTargetRow target) {}
 
   private Interaction lockOpen(long interactionId, long expectedVersion) {
     InteractionDO row = interactionMapper.findForUpdate(interactionId);

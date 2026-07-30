@@ -12,10 +12,18 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
+import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
+import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.tool.AfterToolCallInterceptor;
+import fun.fengwk.kkstudio.harness.runtime.tool.BeforeToolCallContext;
+import fun.fengwk.kkstudio.harness.runtime.tool.BeforeToolCallResult;
+import fun.fengwk.kkstudio.harness.runtime.tool.PermissionBoundaryInterceptor;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
@@ -37,6 +45,7 @@ import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -63,6 +72,8 @@ class ToolWorkerFinalTest {
   }
 
   private static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
+  private static final Path WORKDIR = Path.of("/work").toAbsolutePath();
+  private static final Path ENV_ROOT = Path.of("/").toAbsolutePath();
 
   private final List<ScheduledExecutorService> schedulers = new ArrayList<>();
 
@@ -236,7 +247,10 @@ class ToolWorkerFinalTest {
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
             Runnable::run,
-            () -> "worker-token");
+            () -> "worker-token",
+            () -> ToolSettings.DEFAULT,
+            WORKDIR,
+            ENV_ROOT);
 
     assertTrue(worker.dispatch(1));
     fixture.tool.listener.onComplete(result("done"));
@@ -671,6 +685,259 @@ class ToolWorkerFinalTest {
     assertFalse(fixture.worker.hasActiveExecution());
   }
 
+  // ---- durable Tool permission gate ----
+
+  @Test
+  void pendingPermissionAllowPersistsBeforeAnyToolExecute() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.candidate = pending(descriptor(ToolSideEffect.READ_ONLY), null);
+    fixture.transactions.descriptor = descriptor(ToolSideEffect.READ_ONLY);
+    fixture.transactions.claimPending = true;
+    fixture.interceptorChain =
+        chainWithBoundary(new AllowingBoundary(new PermissionPromptPreview("tool", "/work", "{}")));
+    fixture.rebuildWorker();
+
+    assertTrue(fixture.worker.dispatch(1));
+
+    // The chain's ALLOW must have been persisted BEFORE Tool.execute is allowed to run.
+    assertEquals(1, fixture.transactions.persistedAllowCalls);
+    assertEquals(0, fixture.transactions.awaitCalls);
+    assertEquals(0, fixture.transactions.denyCalls);
+    assertEquals(1, fixture.tool.executions);
+    assertTrue(fixture.worker.hasActiveExecution());
+
+    fixture.tool.listener.onComplete(result("done"));
+    assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.terminalStatus);
+  }
+
+  @Test
+  void pendingPermissionDenyExecutesZeroToolsAndLeavesNoLocalHandle() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.candidate = pending(descriptor(ToolSideEffect.READ_ONLY), null);
+    fixture.transactions.descriptor = descriptor(ToolSideEffect.READ_ONLY);
+    fixture.transactions.claimPending = true;
+    fixture.interceptorChain =
+        chainWithBoundary(new DenyingBoundary(new PermissionPromptPreview("tool", "/work", "{}")));
+    fixture.rebuildWorker();
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertEquals(0, fixture.tool.executions);
+    assertEquals(0, fixture.transactions.persistedAllowCalls);
+    assertEquals(0, fixture.transactions.awaitCalls);
+    assertEquals(1, fixture.transactions.denyCalls);
+    assertFalse(fixture.worker.hasActiveExecution());
+  }
+
+  @Test
+  void pendingPermissionAskExecutesZeroToolsAndLeavesNoLocalHandle() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.candidate = pending(descriptor(ToolSideEffect.READ_ONLY), null);
+    fixture.transactions.descriptor = descriptor(ToolSideEffect.READ_ONLY);
+    fixture.transactions.claimPending = true;
+    fixture.interceptorChain =
+        chainWithBoundary(new AskingBoundary(new PermissionPromptPreview("tool", "/work", "{}")));
+    fixture.rebuildWorker();
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertEquals(0, fixture.tool.executions);
+    assertEquals(0, fixture.transactions.persistedAllowCalls);
+    assertEquals(1, fixture.transactions.awaitCalls);
+    assertEquals(0, fixture.transactions.denyCalls);
+    assertFalse(fixture.worker.hasActiveExecution());
+  }
+
+  @Test
+  void allowedBypassesPermissionEvaluatorAndExecutesPersistedPlan() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.candidate =
+        allowed(descriptor(ToolSideEffect.READ_ONLY), null, "worker-token");
+    fixture.transactions.descriptor = descriptor(ToolSideEffect.READ_ONLY);
+    // An empty chain with no permission boundary must still work: the ALLOWED branch must skip
+    // the chain entirely.
+    fixture.interceptorChain = new ToolInterceptorChain(List.of(), List.of());
+    fixture.rebuildWorker();
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertEquals(0, fixture.transactions.persistedAllowCalls);
+    assertEquals(0, fixture.transactions.awaitCalls);
+    assertEquals(0, fixture.transactions.denyCalls);
+    assertEquals(1, fixture.tool.executions);
+    fixture.tool.listener.onComplete(result("done"));
+    assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.terminalStatus);
+  }
+
+  @Test
+  void askedReachingDispatchedWorkerThrowsInvariant() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    // Force claim to return a WAITING/ASKED row directly: the dispatcher precondition already
+    // filters this, so we synthesize the breach to prove the worker throws.
+    fixture.transactions.candidate = waiting(descriptor(ToolSideEffect.READ_ONLY), null);
+    fixture.transactions.descriptor = descriptor(ToolSideEffect.READ_ONLY);
+    fixture.transactions.claimAsked = true;
+    fixture.interceptorChain = new ToolInterceptorChain(List.of(), List.of());
+    fixture.rebuildWorker();
+
+    // dispatch() must surface IllegalStateException; no Tool.execute, no terminal write.
+    assertThrows(IllegalStateException.class, () -> fixture.worker.dispatch(1));
+    assertEquals(0, fixture.tool.executions);
+    assertNull(fixture.transactions.terminalStatus);
+  }
+
+  @Test
+  void postAllowExecutionFailureCompletesFailedAllowed() {
+    // After persistPermissionAllowed the row is RUNNING/ALLOWED. An external Tool failure must
+    // converge to FAILED/ALLOWED (the schema/aggregate explicitly allow this).
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.candidate =
+        allowed(descriptor(ToolSideEffect.READ_ONLY), null, "worker-token");
+    fixture.transactions.descriptor = descriptor(ToolSideEffect.READ_ONLY);
+    fixture.interceptorChain = new ToolInterceptorChain(List.of(), List.of());
+    fixture.rebuildWorker();
+
+    assertTrue(fixture.worker.dispatch(1));
+    assertEquals(1, fixture.tool.executions);
+    fixture.tool.listener.onError(new RuntimeException("execution blew up"));
+    assertEquals(InvocationStatus.FAILED, fixture.transactions.terminalStatus);
+  }
+
+  private static ToolInterceptorChain chainWithBoundary(PermissionBoundaryInterceptor boundary) {
+    return new ToolInterceptorChain(List.of(boundary), List.of());
+  }
+
+  private static ToolInvocation pending(ToolDescriptor descriptor, String environmentName) {
+    return new ToolInvocation(
+        1L,
+        2L,
+        3L,
+        0,
+        "call-1",
+        descriptor,
+        "{}",
+        environmentName == null
+            ? ToolExecutionLocation.PLATFORM
+            : ToolExecutionLocation.ENVIRONMENT,
+        environmentName,
+        7L,
+        InvocationStatus.RUNNING,
+        1,
+        null,
+        new Lease("worker-token", NOW.plusSeconds(10)),
+        NOW.plusSeconds(30),
+        NOW,
+        null,
+        null,
+        null,
+        NOW.minusSeconds(1),
+        NOW,
+        null,
+        ToolPermissionState.PENDING,
+        false);
+  }
+
+  private static ToolInvocation allowed(
+      ToolDescriptor descriptor, String environmentName, String token) {
+    String resolvedEnv = environmentName;
+    ToolExecutionLocation location =
+        resolvedEnv == null ? ToolExecutionLocation.PLATFORM : ToolExecutionLocation.ENVIRONMENT;
+    return new ToolInvocation(
+        1L,
+        2L,
+        3L,
+        0,
+        "call-1",
+        descriptor,
+        "{}",
+        location,
+        resolvedEnv,
+        7L,
+        InvocationStatus.RUNNING,
+        1,
+        null,
+        new Lease(token, NOW.plusSeconds(10)),
+        NOW.plusSeconds(30),
+        NOW,
+        null,
+        null,
+        null,
+        NOW.minusSeconds(1),
+        NOW,
+        null,
+        ToolPermissionState.ALLOWED,
+        false);
+  }
+
+  private static ToolInvocation waiting(ToolDescriptor descriptor, String environmentName) {
+    return new ToolInvocation(
+        1L,
+        2L,
+        3L,
+        0,
+        "call-1",
+        descriptor,
+        "{}",
+        environmentName == null
+            ? ToolExecutionLocation.PLATFORM
+            : ToolExecutionLocation.ENVIRONMENT,
+        environmentName,
+        7L,
+        InvocationStatus.WAITING_INTERACTION,
+        1,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        NOW,
+        null,
+        null,
+        ToolPermissionState.ASKED,
+        false);
+  }
+
+  private static final class AllowingBoundary implements PermissionBoundaryInterceptor {
+    private final PermissionPromptPreview preview;
+
+    AllowingBoundary(PermissionPromptPreview preview) {
+      this.preview = preview;
+    }
+
+    @Override
+    public BeforeToolCallResult intercept(BeforeToolCallContext context) {
+      return new BeforeToolCallResult(
+          context.binding(), context.call().argumentsJson(), PermissionAction.ALLOW, preview);
+    }
+  }
+
+  private static final class DenyingBoundary implements PermissionBoundaryInterceptor {
+    private final PermissionPromptPreview preview;
+
+    DenyingBoundary(PermissionPromptPreview preview) {
+      this.preview = preview;
+    }
+
+    @Override
+    public BeforeToolCallResult intercept(BeforeToolCallContext context) {
+      return new BeforeToolCallResult(
+          context.binding(), context.call().argumentsJson(), PermissionAction.DENY, preview);
+    }
+  }
+
+  private static final class AskingBoundary implements PermissionBoundaryInterceptor {
+    private final PermissionPromptPreview preview;
+
+    AskingBoundary(PermissionPromptPreview preview) {
+      this.preview = preview;
+    }
+
+    @Override
+    public BeforeToolCallResult intercept(BeforeToolCallContext context) {
+      return new BeforeToolCallResult(
+          context.binding(), context.call().argumentsJson(), PermissionAction.ASK, preview);
+    }
+  }
+
   private Fixture fixture(ToolSideEffect sideEffect) {
     Fixture fixture = new Fixture(sideEffect);
     fixture.rebuildWorker();
@@ -732,7 +999,9 @@ class ToolWorkerFinalTest {
         null,
         NOW,
         null,
-        null);
+        null,
+        ToolPermissionState.PENDING,
+        false);
   }
 
   private static ToolInvocation retryWaiting(ToolDescriptor descriptor, String environmentName) {
@@ -758,7 +1027,9 @@ class ToolWorkerFinalTest {
         null,
         NOW.minusSeconds(2),
         NOW.minusSeconds(1),
-        null);
+        null,
+        ToolPermissionState.ALLOWED,
+        false);
   }
 
   private static ToolInvocation running(ToolDescriptor descriptor, String token) {
@@ -789,7 +1060,9 @@ class ToolWorkerFinalTest {
         null,
         NOW.minusSeconds(1),
         NOW,
-        null);
+        null,
+        ToolPermissionState.ALLOWED,
+        false);
   }
 
   private final class Fixture {
@@ -850,7 +1123,10 @@ class ToolWorkerFinalTest {
               Clock.fixed(NOW, ZoneOffset.UTC),
               scheduler,
               dispatchExecutor,
-              () -> "worker-token");
+              () -> "worker-token",
+              () -> ToolSettings.DEFAULT,
+              WORKDIR,
+              ENV_ROOT);
     }
   }
 
@@ -859,21 +1135,33 @@ class ToolWorkerFinalTest {
     private ToolDescriptor descriptor;
     private boolean recoveredLease;
     private boolean forceLocalConflict;
+    private boolean claimPending;
+    private boolean claimAsked;
     private int claimCalls;
     private ToolInvocationUpdateOutcome renewOutcome = ToolInvocationUpdateOutcome.APPLIED;
     private ToolInvocationUpdateOutcome activityOutcome = ToolInvocationUpdateOutcome.APPLIED;
     private ToolInvocationUpdateOutcome terminalOutcome = ToolInvocationUpdateOutcome.APPLIED;
     private ToolInvocationUpdateOutcome retryOutcome = ToolInvocationUpdateOutcome.APPLIED;
+    private ToolInvocationUpdateOutcome allowOutcome = ToolInvocationUpdateOutcome.APPLIED;
+    private ToolInvocationUpdateOutcome askOutcome = ToolInvocationUpdateOutcome.APPLIED;
     private final CountDownLatch renewed = new CountDownLatch(1);
     private final List<Instant> activities = new ArrayList<>();
     private int retryCalls;
     private int releaseUnstartedCalls;
+    private int persistedAllowCalls;
+    private int awaitCalls;
+    private int denyCalls;
     private InvocationStatus releasedStatus;
     private Instant releasedNextAttemptAt;
     private Instant nextAttemptAt;
     private InvocationStatus terminalStatus;
     private ToolResult result;
     private ToolInvocationError error;
+    private ToolBinding lastAllowBinding;
+    private String lastAllowArguments;
+    private ToolBinding lastAwaitBinding;
+    private String lastAwaitArguments;
+    private PermissionPromptPreview lastAwaitPrompt;
 
     private RecordingTransactions(ToolInvocation candidate, ToolDescriptor descriptor) {
       this.candidate = candidate;
@@ -892,9 +1180,15 @@ class ToolWorkerFinalTest {
       if (forceLocalConflict) {
         recovered = false;
       }
-      return Optional.of(
-          new ClaimedToolInvocation(
-              running(descriptor, workerToken), candidate.status(), recovered));
+      ToolInvocation claimed;
+      if (claimAsked) {
+        claimed = waiting(descriptor, candidate.environmentName());
+      } else if (claimPending) {
+        claimed = pending(descriptor, candidate.environmentName());
+      } else {
+        claimed = running(descriptor, workerToken);
+      }
+      return Optional.of(new ClaimedToolInvocation(claimed, candidate.status(), recovered));
     }
 
     @Override
@@ -972,6 +1266,38 @@ class ToolWorkerFinalTest {
       retryCalls++;
       this.nextAttemptAt = nextAttemptAt;
       return retryOutcome;
+    }
+
+    @Override
+    public ToolInvocationUpdateOutcome persistPermissionAllowed(
+        ClaimedToolInvocation claimed,
+        ToolBinding finalBinding,
+        String finalArgumentsJson,
+        Instant now) {
+      persistedAllowCalls++;
+      lastAllowBinding = finalBinding;
+      lastAllowArguments = finalArgumentsJson;
+      return allowOutcome;
+    }
+
+    @Override
+    public ToolInvocationUpdateOutcome awaitPermission(
+        ClaimedToolInvocation claimed,
+        ToolBinding finalBinding,
+        String finalArgumentsJson,
+        PermissionPromptPreview prompt,
+        Instant now) {
+      awaitCalls++;
+      lastAwaitBinding = finalBinding;
+      lastAwaitArguments = finalArgumentsJson;
+      lastAwaitPrompt = prompt;
+      return askOutcome;
+    }
+
+    @Override
+    public ToolInvocationUpdateOutcome denyPermission(ClaimedToolInvocation claimed, Instant now) {
+      denyCalls++;
+      return ToolInvocationUpdateOutcome.APPLIED;
     }
   }
 
