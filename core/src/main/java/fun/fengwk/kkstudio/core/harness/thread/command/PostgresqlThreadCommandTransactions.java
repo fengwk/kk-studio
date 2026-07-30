@@ -88,7 +88,7 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
     Instant persistedNow = persistenceInstant(now);
     long threadId = idGenerator.nextThreadId();
     requireAffected(mapper.insertThread(threadId, null, offset(persistedNow)), "insert thread");
-    return new HarnessThread(threadId, null, 0, false, 0, null, persistedNow, persistedNow);
+    return new HarnessThread(threadId, null, 0, false, 0, 0, null, persistedNow, persistedNow);
   }
 
   @Override
@@ -223,6 +223,7 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
         thread.getInputSequence(),
         false,
         nextEpoch,
+        Math.addExact(thread.getRevision(), 1),
         null,
         thread.getCreatedAt().toInstant(),
         persistedNow);

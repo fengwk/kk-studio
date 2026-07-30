@@ -320,14 +320,16 @@ class ThreadCommandCoordinatorTest {
     long lastUpdateThreadId;
     Long lastHeadEntryId;
     Instant lastUpdateNow;
-    final HarnessThread createdThread = new HarnessThread(1L, null, 0L, false, 0L, null, NOW, NOW);
+    final HarnessThread createdThread =
+        new HarnessThread(1L, null, 0L, false, 0L, 0L, null, NOW, NOW);
     final Session bootstrapSession = new Session(10L, "session", NOW);
     final SessionEntry bootstrapRoot = new SessionEntry(11L, null, new RootEntryPayload());
     final SessionEntry bootstrapConfig =
         new SessionEntry(12L, bootstrapRoot.id(), ReconcileTestSupport.configSnapshot());
     final HarnessThread bootstrapThread =
-        new HarnessThread(1L, bootstrapConfig.id(), 0L, false, 5L, null, NOW, NOW);
-    final HarnessThread updatedThread = new HarnessThread(1L, 99L, 0L, false, 5L, null, NOW, NOW);
+        new HarnessThread(1L, bootstrapConfig.id(), 0L, false, 5L, 0L, null, NOW, NOW);
+    final HarnessThread updatedThread =
+        new HarnessThread(1L, 99L, 0L, false, 5L, 0L, null, NOW, NOW);
     final AtomicInteger nextId = new AtomicInteger(100);
 
     @Override

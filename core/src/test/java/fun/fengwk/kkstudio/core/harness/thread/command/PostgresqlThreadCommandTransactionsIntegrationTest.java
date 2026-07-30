@@ -38,6 +38,10 @@ import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeEntryInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 
+import javax.sql.DataSource;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -50,6 +54,7 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
 
   @Autowired private ThreadCommandTransactions transactions;
   @Autowired private JdbcTemplate jdbc;
+  @Autowired private DataSource dataSource;
 
   @Test
   void createThreadProducesUnboundThreadAndBootstrapCreatesBundledSession() {
@@ -81,6 +86,48 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
     assertEquals("ROOT", entryType(bootstrap.rootEntry().id()));
     assertEquals("RUNTIME_CONFIG", entryType(bootstrap.configEntry().id()));
     assertEquals(bootstrap.rootEntry().id(), parentEntryId(bootstrap.configEntry().id()));
+  }
+
+  @Test
+  void revisionAdvancesForProjectionChangesButNotLeasesAndRollsBackWithChildMutation()
+      throws Exception {
+    HarnessThread thread = transactions.createThread(NOW);
+    assertEquals(0L, revision(thread.id()));
+
+    jdbc.update(
+        "update harness_thread set processor_token = ?, processor_until = current_timestamp +"
+            + " interval '1 minute' where id = ?",
+        "lease",
+        thread.id());
+    assertEquals(0L, revision(thread.id()), "lease heartbeats are not snapshot changes");
+
+    jdbc.update(
+        "update harness_thread set processor_token = null, processor_until = null, input_sequence"
+            + " = input_sequence + 1 where id = ?",
+        thread.id());
+    assertEquals(1L, revision(thread.id()), "visible Thread columns advance the cursor");
+
+    jdbc.update(
+        "insert into harness_thread_input (thread_id, sequence, input_type, payload,"
+            + " idempotency_key, status) values (?, 2, 'USER_MESSAGE', '{}'::jsonb, 'committed',"
+            + " 'QUEUED')",
+        thread.id());
+    assertEquals(2L, revision(thread.id()), "committed child facts advance the cursor");
+
+    try (Connection connection = dataSource.getConnection()) {
+      connection.setAutoCommit(false);
+      try (PreparedStatement statement =
+          connection.prepareStatement(
+              "insert into harness_thread_input (thread_id, sequence, input_type, payload,"
+                  + " idempotency_key, status) values (?, 3, 'USER_MESSAGE', '{}'::jsonb,"
+                  + " 'rolled-back', 'QUEUED')")) {
+        statement.setLong(1, thread.id());
+        statement.executeUpdate();
+      }
+      assertEquals(3L, revision(connection, thread.id()));
+      connection.rollback();
+    }
+    assertEquals(2L, revision(thread.id()), "a rolled-back child mutation must not leak a cursor");
   }
 
   @Test
@@ -825,6 +872,22 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
    */
   private long appendUserMessageUnderConfig(TestThreads.Bootstrapped boot, String content) {
     return appendUserMessage(boot.sessionId(), boot.configEntryId(), content);
+  }
+
+  private long revision(long threadId) {
+    return jdbc.queryForObject(
+        "select revision from harness_thread where id = ?", Long.class, threadId);
+  }
+
+  private static long revision(Connection connection, long threadId) throws Exception {
+    try (PreparedStatement statement =
+        connection.prepareStatement("select revision from harness_thread where id = ?")) {
+      statement.setLong(1, threadId);
+      try (var result = statement.executeQuery()) {
+        result.next();
+        return result.getLong(1);
+      }
+    }
   }
 
   private Long headEntryId(long threadId) {

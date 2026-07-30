@@ -946,28 +946,29 @@ create or replace function harness_bump_thread_revision(p_thread_id bigint)
 returns void language plpgsql as $$
 begin
     update harness_thread
-    set revision = revision + 1
+    set revision = revision + 1,
+        updated_at = greatest(updated_at, current_timestamp)
     where id = p_thread_id;
 end $$;
 
-create or replace function harness_thread_revision_from_thread()
+create or replace function harness_thread_revision_before_update()
 returns trigger language plpgsql as $$
 begin
-    if new.revision <> old.revision then
-        return new;
+    if new.head_entry_id is distinct from old.head_entry_id
+       or new.input_sequence is distinct from old.input_sequence
+       or new.runnable is distinct from old.runnable
+       or new.execution_epoch is distinct from old.execution_epoch then
+        new.revision := old.revision + 1;
+        new.updated_at := greatest(old.updated_at, current_timestamp);
+    elsif new.updated_at < old.updated_at then
+        new.updated_at := old.updated_at;
     end if;
-    if (to_jsonb(new) - array['processor_token', 'processor_until', 'updated_at'])
-       is not distinct from
-       (to_jsonb(old) - array['processor_token', 'processor_until', 'updated_at']) then
-        return new;
-    end if;
-    perform harness_bump_thread_revision(new.id);
     return new;
 end $$;
 
-create trigger trg_harness_thread_revision_from_thread
-    after update on harness_thread
-    for each row execute function harness_thread_revision_from_thread();
+create trigger trg_harness_thread_revision_before_update
+    before update on harness_thread
+    for each row execute function harness_thread_revision_before_update();
 
 create or replace function harness_thread_revision_notify()
 returns trigger language plpgsql as $$
@@ -1002,28 +1003,24 @@ end $$;
 create trigger trg_harness_thread_input_revision
     after insert or update or delete on harness_thread_input
     for each row execute function harness_thread_revision_from_child();
-create trigger trg_harness_model_invocation_revision
+create trigger trg_harness_model_invocation_revision_insert_delete
     after insert or delete on harness_model_invocation
     for each row execute function harness_thread_revision_from_child();
 create trigger trg_harness_model_invocation_revision_update
-    after update on harness_model_invocation
+    after update of status, attempt, next_attempt_at, deadline_at, result, error, applied_at,
+        started_at, finished_at, safe_stream_snapshot on harness_model_invocation
     for each row
-    when ((to_jsonb(new) - array['worker_token', 'worker_until', 'last_activity_at'])
-          is distinct from
-          (to_jsonb(old) - array['worker_token', 'worker_until', 'last_activity_at']))
     execute function harness_thread_revision_from_child();
-create trigger trg_harness_tool_invocation_revision
+create trigger trg_harness_tool_invocation_revision_insert_delete
     after insert or delete on harness_tool_invocation
     for each row execute function harness_thread_revision_from_child();
 create trigger trg_harness_tool_invocation_revision_update
-    after update on harness_tool_invocation
+    after update of status, attempt, next_attempt_at, deadline_at, result, error, applied_at,
+        started_at, finished_at, permission_state, yolo_enabled on harness_tool_invocation
     for each row
-    when ((to_jsonb(new) - array['worker_token', 'worker_until', 'last_activity_at'])
-          is distinct from
-          (to_jsonb(old) - array['worker_token', 'worker_until', 'last_activity_at']))
     execute function harness_thread_revision_from_child();
 create trigger trg_harness_model_usage_revision
-    after insert or update or delete on harness_model_usage
+    after insert on harness_model_usage
     for each row execute function harness_thread_revision_from_child();
 
 create or replace function harness_thread_revision_from_interaction()
@@ -1059,30 +1056,6 @@ end $$;
 create trigger trg_harness_interaction_revision
     after insert or update or delete on harness_interaction
     for each row execute function harness_thread_revision_from_interaction();
-
-create or replace function harness_thread_revision_from_entry()
-returns trigger language plpgsql as $$
-declare
-    v_session_id bigint;
-begin
-    if tg_op = 'DELETE' then
-        v_session_id := old.session_id;
-    else
-        v_session_id := new.session_id;
-    end if;
-    update harness_thread t
-    set revision = revision + 1
-    from harness_entry h
-    where h.id = t.head_entry_id and h.session_id = v_session_id;
-    if tg_op = 'DELETE' then
-        return old;
-    end if;
-    return new;
-end $$;
-
-create trigger trg_harness_entry_revision
-    after insert or update or delete on harness_entry
-    for each row execute function harness_thread_revision_from_entry();
 
 ------------------------------------------------------------------------------
 -- 4. Forward FKs whose targets now exist

@@ -55,7 +55,8 @@ class StudioHarnessThreadSseEmitterTest {
               return t;
             });
     try {
-      SseEmitter emitter = StudioHarnessThreadSseEmitter.stream(1L, "0-0", tail, executor);
+      SseEmitter emitter =
+          StudioHarnessThreadSseEmitter.stream(1L, 0L, "$", tail, source(), executor);
       assertNotNull(emitter);
       Thread.sleep(250);
       emitter.complete();
@@ -80,7 +81,8 @@ class StudioHarnessThreadSseEmitterTest {
           throw new RejectedExecutionException("saturated");
         };
 
-    SseEmitter emitter = StudioHarnessThreadSseEmitter.stream(1L, "0-0", tail, rejecting);
+    SseEmitter emitter =
+        StudioHarnessThreadSseEmitter.stream(1L, 0L, "$", tail, source(), rejecting);
 
     assertNotNull(emitter);
     verifyNoInteractions(tail);
@@ -101,16 +103,22 @@ class StudioHarnessThreadSseEmitterTest {
     Future<Object> asyncFuture = mock(Future.class);
     doReturn(asyncFuture).when(async).submit(any(Runnable.class));
 
-    SseEmitter asyncEmitter = StudioHarnessThreadSseEmitter.stream(1L, "0-0", tail, async);
+    SseEmitter asyncEmitter =
+        StudioHarnessThreadSseEmitter.stream(1L, 0L, "$", tail, source(), async);
 
     verify(async).submit(any(Runnable.class));
     asyncEmitter.complete();
 
     AtomicReference<Runnable> submitted = new AtomicReference<>();
-    SseEmitter plainEmitter = StudioHarnessThreadSseEmitter.stream(1L, "0-0", tail, submitted::set);
+    SseEmitter plainEmitter =
+        StudioHarnessThreadSseEmitter.stream(1L, 0L, "$", tail, source(), submitted::set);
 
     assertNotNull(submitted.get());
     plainEmitter.complete();
     verifyNoInteractions(tail);
+  }
+
+  private static ThreadRevisionEventSource source() {
+    return (threadId, afterRevision, consumer) -> () -> {};
   }
 }

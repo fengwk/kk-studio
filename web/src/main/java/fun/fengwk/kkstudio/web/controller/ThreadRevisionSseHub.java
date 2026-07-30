@@ -41,15 +41,29 @@ final class ThreadRevisionSseHub implements SmartLifecycle, ThreadRevisionEventS
   }
 
   @Override
-  public AutoCloseable subscribe(long threadId, Consumer<Event> consumer) {
-    subscribers.computeIfAbsent(threadId, ignored -> new CopyOnWriteArraySet<>()).add(consumer);
-    consumer.accept(new Event(null, true));
+  public AutoCloseable subscribe(long threadId, long afterRevision, Consumer<Event> consumer) {
+    Objects.requireNonNull(consumer, "consumer");
+    Set<Consumer<Event>> threadSubscribers =
+        subscribers.computeIfAbsent(threadId, ignored -> new CopyOnWriteArraySet<>());
+    threadSubscribers.add(consumer);
+    try {
+      long currentRevision = currentRevision(threadId);
+      if (currentRevision > afterRevision) {
+        consumer.accept(new Event(Long.toString(currentRevision), false));
+      }
+    } catch (RuntimeException error) {
+      threadSubscribers.remove(consumer);
+      if (threadSubscribers.isEmpty()) {
+        subscribers.remove(threadId, threadSubscribers);
+      }
+      throw error;
+    }
     return () -> {
-      Set<Consumer<Event>> threadSubscribers = subscribers.get(threadId);
-      if (threadSubscribers != null) {
-        threadSubscribers.remove(consumer);
-        if (threadSubscribers.isEmpty()) {
-          subscribers.remove(threadId, threadSubscribers);
+      Set<Consumer<Event>> currentSubscribers = subscribers.get(threadId);
+      if (currentSubscribers != null) {
+        currentSubscribers.remove(consumer);
+        if (currentSubscribers.isEmpty()) {
+          subscribers.remove(threadId, currentSubscribers);
         }
       }
     };
@@ -125,6 +139,21 @@ final class ThreadRevisionSseHub implements SmartLifecycle, ThreadRevisionEventS
       if (result.next()) {
         publish(threadId, new Event(result.getString(1), false));
       }
+    }
+  }
+
+  private long currentRevision(long threadId) {
+    try (Connection connection = dataSource.getConnection();
+        Statement statement = connection.createStatement();
+        ResultSet result =
+            statement.executeQuery(
+                "select revision from harness_thread where id = " + Long.toString(threadId))) {
+      if (!result.next()) {
+        throw new IllegalArgumentException("unknown thread: " + threadId);
+      }
+      return result.getLong(1);
+    } catch (SQLException error) {
+      throw new IllegalStateException("cannot read current thread revision", error);
     }
   }
 

@@ -13,9 +13,23 @@ import java.util.Objects;
 public interface HarnessRealtimeEventTail {
 
   /**
+   * Cursor positioned at the live edge of a lossy stream.
+   *
+   * <p>New SSE subscriptions deliberately start here rather than replaying retained Redis history:
+   * PostgreSQL snapshot state repairs any missed durable or safe-stream data.
+   */
+  default String initialCursor(long threadId) {
+    if (threadId <= 0) {
+      throw new IllegalArgumentException("threadId must be positive");
+    }
+    return "$";
+  }
+
+  /**
    * Reads records strictly after {@code afterId}. Use {@code "0-0"} (or blank/0) to start from the
-   * beginning of the retained window; use a previous SSE id to resume. When {@code block} is
-   * positive and no records are available, waits up to that duration.
+   * beginning of the retained window. {@code "$"} starts at the live edge; use a previous internal
+   * Redis cursor only within an already-open SSE connection. When {@code block} is positive and no
+   * records are available, waits up to that duration.
    */
   List<Record> readAfter(long threadId, String afterId, int count, Duration block);
 
@@ -30,6 +44,9 @@ public interface HarnessRealtimeEventTail {
       return "0-0";
     }
     String trimmed = afterId.trim();
+    if ("$".equals(trimmed)) {
+      return trimmed;
+    }
     if (!trimmed.matches("\\d+-\\d+")) {
       throw new IllegalArgumentException(
           "afterEventId must be a realtime stream cursor (ms-seq) or 0: " + afterId);

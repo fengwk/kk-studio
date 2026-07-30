@@ -25,11 +25,14 @@ class HarnessThreadDtoConverterTest {
     HarnessThreadDtoConverter converter = new HarnessThreadDtoConverter();
 
     HarnessThreadDTO unbound =
-        converter.convert(new HarnessThread(1L, null, 2L, false, 3L, null, CREATED_AT, UPDATED_AT));
+        converter.convert(
+            new HarnessThread(1L, null, 2L, false, 3L, 0L, null, CREATED_AT, UPDATED_AT));
     HarnessThreadDTO idle =
-        converter.convert(new HarnessThread(2L, 10L, 4L, false, 5L, null, CREATED_AT, UPDATED_AT));
+        converter.convert(
+            new HarnessThread(2L, 10L, 4L, false, 5L, 0L, null, CREATED_AT, UPDATED_AT));
     HarnessThreadDTO runnable =
-        converter.convert(new HarnessThread(3L, 11L, 6L, true, 7L, null, CREATED_AT, UPDATED_AT));
+        converter.convert(
+            new HarnessThread(3L, 11L, 6L, true, 7L, 0L, null, CREATED_AT, UPDATED_AT));
 
     assertEquals("UNBOUND", unbound.getStatus());
     assertNull(unbound.getHeadEntryId());

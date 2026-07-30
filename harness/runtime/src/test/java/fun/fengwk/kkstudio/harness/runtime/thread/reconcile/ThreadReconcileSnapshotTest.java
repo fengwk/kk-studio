@@ -181,6 +181,7 @@ class ThreadReconcileSnapshotTest {
             0L,
             true,
             0L,
+            0L,
             new Lease("tok", ReconcileTestSupport.NOW.plusSeconds(60)),
             ReconcileTestSupport.NOW,
             ReconcileTestSupport.NOW);

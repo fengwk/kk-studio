@@ -57,7 +57,7 @@ public interface ThreadCommandMapper extends BaseMapper {
   ThreadCommandRow findEntry(@Param("entryId") long entryId);
 
   @Select(
-      "select t.id, t.head_entry_id, e.session_id, t.input_sequence, t.runnable, t.execution_epoch,"
+      "select t.id, t.head_entry_id, e.session_id, t.input_sequence, t.runnable, t.execution_epoch, t.revision,"
           + " t.processor_token, t.processor_until, t.created_at, t.updated_at"
           + " from harness_thread t left join harness_entry e on e.id = t.head_entry_id"
           + " where t.id = #{threadId} for no key update of t")
@@ -70,6 +70,7 @@ public interface ThreadCommandMapper extends BaseMapper {
         @Result(column = "input_sequence", property = "inputSequence"),
         @Result(column = "runnable", property = "runnable"),
         @Result(column = "execution_epoch", property = "executionEpoch"),
+        @Result(column = "revision", property = "revision"),
         @Result(column = "processor_token", property = "processorToken"),
         @Result(column = "processor_until", property = "processorUntil"),
         @Result(column = "created_at", property = "createdAt"),

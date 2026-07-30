@@ -63,10 +63,10 @@ public final class RedisRealtimeEventTail implements HarnessRealtimeEventTail {
     if (!block.isZero()) {
       options = options.block(block);
     }
+    ReadOffset offset =
+        "$".equals(exclusiveStart) ? ReadOffset.latest() : ReadOffset.from(exclusiveStart);
     List<MapRecord<String, Object, Object>> records =
-        template
-            .opsForStream()
-            .read(options, StreamOffset.create(key, ReadOffset.from(exclusiveStart)));
+        template.opsForStream().read(options, StreamOffset.create(key, offset));
     if (records == null || records.isEmpty()) {
       return List.of();
     }

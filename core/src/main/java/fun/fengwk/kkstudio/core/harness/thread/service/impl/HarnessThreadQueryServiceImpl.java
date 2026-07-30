@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadSnapshotDTO;
+import fun.fengwk.kkstudio.share.model.ModelUsageSummaryDTO;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -106,10 +107,18 @@ public class HarnessThreadQueryServiceImpl implements HarnessThreadQueryService 
     snapshot.setModelInvocations(observabilityQueryService.listModelInvocations(threadId));
     snapshot.setToolInvocations(observabilityQueryService.listToolInvocations(threadId));
     snapshot.setOpenInteractions(observabilityQueryService.listOpenInteractions(threadId));
-    if (row.getHeadEntryId() != null) {
-      snapshot.setUsage(usageAggregationService.summarizeThread(row.getId()));
-    }
+    snapshot.setUsage(
+        row.getHeadEntryId() == null
+            ? emptyThreadUsage(row.getId())
+            : usageAggregationService.summarizeThread(row.getId()));
     return snapshot;
+  }
+
+  private static ModelUsageSummaryDTO emptyThreadUsage(long threadId) {
+    ModelUsageSummaryDTO usage = new ModelUsageSummaryDTO();
+    usage.setScopeType("thread");
+    usage.setScopeId(Long.toString(threadId));
+    return usage;
   }
 
   private HarnessQueryRow requireThread(String threadId) {
