@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { useEffect, useRef } from 'react'
-import { MemoryRouter } from 'react-router-dom'
+import { useEffect, useRef, type ReactNode } from 'react'
+import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { CanvasGenerationWorkbench } from '@/features/canvas/CanvasGenerationWorkbench'
 import { CanvasOverlays } from '@/features/canvas/CanvasOverlays'
@@ -20,11 +20,10 @@ vi.mock('@/shared/api/studio-service', () => ({
   })),
 }))
 
-vi.mock('@xyflow/react', async () => {
-  const React = await import('react')
+vi.mock('@xyflow/react', () => {
   return {
-    ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    ReactFlow: ({ children }: { children: React.ReactNode }) => <div data-testid="react-flow">{children}</div>,
+    ReactFlowProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+    ReactFlow: ({ children }: { children: ReactNode }) => <div data-testid="react-flow">{children}</div>,
     Background: () => null,
     BackgroundVariant: { Dots: 'dots' },
     MiniMap: () => null,

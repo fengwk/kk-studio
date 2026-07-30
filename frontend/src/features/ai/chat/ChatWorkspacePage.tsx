@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router'
 import { ArrowLeft } from 'lucide-react'
 import { ChatWorkspacePane } from '@/features/ai/chat/ChatWorkspacePane'
 import {

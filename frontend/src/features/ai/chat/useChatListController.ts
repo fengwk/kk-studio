@@ -1,5 +1,5 @@
 import { useState, type FormEventHandler } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'
 import type { AgentDefinitionDTO, ChatDTO } from '@/shared/api/contracts'
 import { chatService } from '@/shared/api/chat-service'

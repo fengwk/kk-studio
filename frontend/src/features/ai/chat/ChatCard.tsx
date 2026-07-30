@@ -1,5 +1,5 @@
 import { ChevronRight, MessageSquare } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { formatBackendDate } from '@/features/ai/chat/chat-utils'
 import type { AgentDefinitionDTO, ChatDTO } from '@/shared/api/contracts'
 

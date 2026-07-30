@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { BrowserRouter } from 'react-router-dom'
+import { BrowserRouter } from 'react-router'
 import { useState, type PropsWithChildren } from 'react'
 import { createApplicationExtensionHost } from '@/app/extension-host'
 import { ExtensionHostProvider } from '@/platform/extensions/ExtensionHostContext'

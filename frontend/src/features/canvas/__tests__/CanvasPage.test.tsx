@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
+import type { ReactNode } from 'react'
+import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import App from '@/app/App'
 import { AppProviders } from '@/app/providers'
@@ -26,11 +27,10 @@ vi.mock('@/shared/api/studio-service', () => ({
   })),
 }))
 
-vi.mock('@xyflow/react', async () => {
-  const React = await import('react')
+vi.mock('@xyflow/react', () => {
   return {
-    ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    ReactFlow: ({ children, nodeTypes }: { children: React.ReactNode; nodeTypes?: Record<string, unknown> }) => {
+    ReactFlowProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+    ReactFlow: ({ children, nodeTypes }: { children: ReactNode; nodeTypes?: Record<string, unknown> }) => {
       // Keep a handle so tests can assert nodeTypes identity stays stable across rerenders.
       ;(globalThis as { __canvasNodeTypes?: unknown }).__canvasNodeTypes = nodeTypes
       return <div data-testid="react-flow">{children}</div>

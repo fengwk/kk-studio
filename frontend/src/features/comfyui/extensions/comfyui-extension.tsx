@@ -4,7 +4,7 @@ import {
   type PropsWithChildren,
   type ReactNode,
 } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
 import { SearchField, StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
 import {

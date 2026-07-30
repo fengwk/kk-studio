@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation } from 'react-router'
 import { useExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
 import type { WorkbenchSlotName } from '@/platform/extensions/types'
 
