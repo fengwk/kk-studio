@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -1161,6 +1162,11 @@ class ToolWorkerFinalTest {
       Thread.sleep(5);
     }
     assertFalse(fixture.worker.hasActiveExecution());
+    assertNull(fixture.transactions.terminalStatus);
+    assertEquals(
+        0,
+        fixture.transactions.terminalMutationCalls,
+        "ownership loss must fence callbacks instead of forging a terminal write");
 
     Thread.sleep(150);
     assertEquals(
@@ -1197,6 +1203,11 @@ class ToolWorkerFinalTest {
       Thread.sleep(5);
     }
     assertFalse(fixture.worker.hasActiveExecution());
+    assertNull(fixture.transactions.terminalStatus);
+    assertEquals(
+        0,
+        fixture.transactions.terminalMutationCalls,
+        "recordActivity ownership loss must not be followed by a terminal write");
 
     Thread.sleep(150);
     assertEquals(
@@ -1335,6 +1346,165 @@ class ToolWorkerFinalTest {
         0,
         fixture.transactions.renewCalls,
         "synchronous error path must not start a heartbeat task");
+  }
+
+  @Test
+  void terminalGateSerializesCompetingCallbacksAndReleasesOwnerOnce() throws Exception {
+    // Hold the first callback inside its durable success write. A competing onError must observe
+    // TERMINATING rather than independently schedule a failure/retry mutation. This direct
+    // callback fixture also observes the conditional owner-release consumer exactly once.
+    ToolDescriptor descriptor = descriptor(ToolSideEffect.READ_ONLY);
+    RecordingTransactions transactions =
+        new RecordingTransactions(queued(descriptor, null), descriptor);
+    transactions.completeSuccessEntered = new CountDownLatch(1);
+    transactions.releaseCompleteSuccess = new CountDownLatch(1);
+    ScheduledExecutorService scheduler = new ScheduledThreadPoolExecutor(2);
+    schedulers.add(scheduler);
+    AtomicInteger ownerReleases = new AtomicInteger();
+    ToolWorkerConfig config =
+        new ToolWorkerConfig(
+            Duration.ofSeconds(30),
+            Duration.ofMillis(20),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(1),
+            8192,
+            8192,
+            1024);
+    ClaimedToolInvocation claimed =
+        new ClaimedToolInvocation(
+            running(descriptor, "worker-token"), InvocationStatus.QUEUED, false);
+    ExecutionCallback callback =
+        new ExecutionCallback(
+            claimed,
+            ToolBinding.of(descriptor),
+            new ToolCall("call-1", descriptor.name(), "{}"),
+            transactions,
+            () ->
+                new InvocationRetryPolicy(
+                    0,
+                    InvocationRetryBackoffStrategy.FIXED,
+                    Duration.ofSeconds(1),
+                    Duration.ofSeconds(1)),
+            new TerminalCompleter(
+                transactions,
+                new ToolInterceptorChain(List.of(), List.of()),
+                new MemoryArtifacts(),
+                config,
+                Clock.fixed(NOW, ZoneOffset.UTC)),
+            ignored -> {},
+            config,
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            scheduler,
+            ignored -> ownerReleases.incrementAndGet());
+    callback.schedule();
+
+    Thread complete = new Thread(() -> callback.onComplete(result("success")));
+    complete.start();
+    assertTrue(transactions.completeSuccessEntered.await(2, TimeUnit.SECONDS));
+    int renewsAfterTerminalOwnership = transactions.renewCalls;
+
+    Thread error =
+        new Thread(
+            () ->
+                callback.onError(new IllegalStateException("competing callback must be ignored")));
+    error.start();
+    error.join(TimeUnit.SECONDS.toMillis(1));
+    assertFalse(error.isAlive(), "competing terminal callback must return without durable work");
+
+    transactions.releaseCompleteSuccess.countDown();
+    complete.join(TimeUnit.SECONDS.toMillis(2));
+    assertFalse(
+        complete.isAlive(), "terminal owner must complete after its durable write is released");
+    assertEquals(1, transactions.terminalMutationCalls);
+    assertEquals(0, transactions.retryCalls);
+    assertEquals(1, ownerReleases.get());
+
+    Thread.sleep(150);
+    assertEquals(
+        renewsAfterTerminalOwnership,
+        transactions.renewCalls,
+        "scheduler work must stop as soon as terminal ownership is acquired");
+  }
+
+  @Test
+  void terminalGatePreventsConcurrentCallbackFromLeakingWorkerSlot() throws Exception {
+    // Repeat the success-vs-error race through ToolWorker so the conditional owner release is
+    // verified against the real active-execution map, not only a direct callback consumer.
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.transactions.completeSuccessEntered = new CountDownLatch(1);
+    fixture.transactions.releaseCompleteSuccess = new CountDownLatch(1);
+    fixture.rebuildWorker(
+        new ToolWorkerConfig(
+            Duration.ofSeconds(30),
+            Duration.ofMillis(20),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(1),
+            8192,
+            8192,
+            1024));
+
+    assertTrue(fixture.worker.dispatch(1));
+    Thread complete = new Thread(() -> fixture.tool.listener.onComplete(result("success")));
+    complete.start();
+    assertTrue(fixture.transactions.completeSuccessEntered.await(2, TimeUnit.SECONDS));
+    int renewsAfterTerminalOwnership = fixture.transactions.renewCalls;
+
+    Thread error =
+        new Thread(
+            () ->
+                fixture.tool.listener.onError(
+                    new IllegalStateException("competing callback must be ignored")));
+    error.start();
+    error.join(TimeUnit.SECONDS.toMillis(1));
+    assertFalse(error.isAlive(), "competing callback must not wait on the terminal transaction");
+
+    fixture.transactions.releaseCompleteSuccess.countDown();
+    complete.join(TimeUnit.SECONDS.toMillis(2));
+    assertFalse(complete.isAlive());
+    assertEquals(1, fixture.transactions.terminalMutationCalls);
+    assertFalse(fixture.worker.hasActiveExecution(), "terminal cleanup must remove the owner slot");
+
+    Thread.sleep(150);
+    assertEquals(
+        renewsAfterTerminalOwnership,
+        fixture.transactions.renewCalls,
+        "no heartbeat may continue after the terminal owner acquires the gate");
+  }
+
+  @Test
+  void terminalOwnerFlushesBufferedPartialExactlyOnce() throws Exception {
+    // A partial below the normal batch threshold remains buffered. onComplete must acquire the
+    // terminal gate first, then drain and persist that partial exactly once even though scheduled
+    // flushes are now rejected in TERMINATING.
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.rebuildWorker(
+        new ToolWorkerConfig(
+            Duration.ofSeconds(30),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(1),
+            8192,
+            8192,
+            1024));
+
+    assertTrue(fixture.worker.dispatch(1));
+    fixture.tool.listener.onPartial(result("buffered"));
+    assertEquals(0, fixture.transactions.recordActivityCalls);
+
+    fixture.tool.listener.onComplete(result("done"));
+
+    assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.terminalStatus);
+    assertEquals(1, fixture.transactions.recordActivityCalls);
+    assertEquals(1, fixture.transactions.activities.size());
+    assertEquals(1, fixture.realtimeEvents.size());
+    assertTrue(fixture.realtimeEvents.get(0) instanceof RealtimeEvent.ToolPartial);
+    assertFalse(fixture.worker.hasActiveExecution());
+
+    Thread.sleep(150);
+    assertEquals(
+        1,
+        fixture.transactions.recordActivityCalls,
+        "terminal-owned partial drain must run once and scheduled flushes must stay cancelled");
   }
 
   private static ToolInterceptorChain chainWithBoundary(PermissionBoundaryInterceptor boundary) {
@@ -1731,12 +1901,15 @@ class ToolWorkerFinalTest {
     private ToolInvocationUpdateOutcome denyOutcome = ToolInvocationUpdateOutcome.APPLIED;
     private boolean pastDeadline;
     private boolean throwOnCompleteSuccess;
+    private CountDownLatch completeSuccessEntered;
+    private CountDownLatch releaseCompleteSuccess;
     private final CountDownLatch renewed = new CountDownLatch(1);
     private final CountDownLatch recordActivityed = new CountDownLatch(1);
     private final List<Instant> activities = new ArrayList<>();
     private int renewCalls;
     private int recordActivityCalls;
     private int retryCalls;
+    private int terminalMutationCalls;
     private int releaseUnstartedCalls;
     private int persistedAllowCalls;
     private int awaitCalls;
@@ -1787,8 +1960,8 @@ class ToolWorkerFinalTest {
     @Override
     public ToolInvocationUpdateOutcome renew(
         ClaimedToolInvocation claimed, Duration workerLeaseDuration, Instant now) {
-      renewed.countDown();
       renewCalls++;
+      renewed.countDown();
       return renewOutcome;
     }
 
@@ -1796,8 +1969,8 @@ class ToolWorkerFinalTest {
     public ToolInvocationUpdateOutcome recordActivity(
         ClaimedToolInvocation claimed, Instant activityAt, Instant now) {
       activities.add(activityAt);
-      recordActivityed.countDown();
       recordActivityCalls++;
+      recordActivityed.countDown();
       return activityOutcome;
     }
 
@@ -1816,6 +1989,8 @@ class ToolWorkerFinalTest {
         Supplier<ToolResult> resultSupplier,
         Instant lastObservedActivityAt,
         Instant now) {
+      terminalMutationCalls++;
+      blockCompleteSuccessIfConfigured();
       if (throwOnCompleteSuccess) {
         throw new RuntimeException("simulated terminal persistence failure");
       }
@@ -1833,6 +2008,7 @@ class ToolWorkerFinalTest {
         ToolInvocationError error,
         Instant lastObservedActivityAt,
         Instant now) {
+      terminalMutationCalls++;
       terminalStatus = InvocationStatus.FAILED;
       this.error = error;
       return terminalOutcome;
@@ -1841,6 +2017,7 @@ class ToolWorkerFinalTest {
     @Override
     public ToolInvocationUpdateOutcome completeCancelled(
         ClaimedToolInvocation claimed, Instant lastObservedActivityAt, Instant now) {
+      terminalMutationCalls++;
       terminalStatus = InvocationStatus.CANCELLED;
       return terminalOutcome;
     }
@@ -1851,6 +2028,7 @@ class ToolWorkerFinalTest {
         ToolInvocationError error,
         Instant lastObservedActivityAt,
         Instant now) {
+      terminalMutationCalls++;
       terminalStatus = InvocationStatus.UNKNOWN;
       this.error = error;
       return terminalOutcome;
@@ -1863,6 +2041,7 @@ class ToolWorkerFinalTest {
         Instant lastObservedActivityAt,
         Instant now) {
       retryCalls++;
+      terminalMutationCalls++;
       this.nextAttemptAt = nextAttemptAt;
       return retryOutcome;
     }
@@ -1897,6 +2076,21 @@ class ToolWorkerFinalTest {
     public ToolInvocationUpdateOutcome denyPermission(ClaimedToolInvocation claimed, Instant now) {
       denyCalls++;
       return denyOutcome;
+    }
+
+    private void blockCompleteSuccessIfConfigured() {
+      if (completeSuccessEntered == null || releaseCompleteSuccess == null) {
+        return;
+      }
+      completeSuccessEntered.countDown();
+      try {
+        if (!releaseCompleteSuccess.await(2, TimeUnit.SECONDS)) {
+          throw new AssertionError("timed out waiting to release completeSuccess");
+        }
+      } catch (InterruptedException error) {
+        Thread.currentThread().interrupt();
+        throw new AssertionError("interrupted while waiting to release completeSuccess", error);
+      }
     }
   }
 

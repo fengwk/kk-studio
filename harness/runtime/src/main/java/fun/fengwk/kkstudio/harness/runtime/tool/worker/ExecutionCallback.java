@@ -42,8 +42,8 @@ import java.util.function.Consumer;
  *       ToolExecutionListener#onPartial onPartial}, {@link ToolExecutionListener#onComplete
  *       onComplete}, and {@link ToolExecutionListener#onError onError} callbacks.
  *   <li>Arms three {@link ScheduledExecutorService scheduler} tasks (heartbeat, deadline, partial
- *       flush) on {@link #schedule() schedule} and cancels them on terminal convergence via {@link
- *       #forceTerminal()}.
+ *       flush) on {@link #schedule() schedule} and cancels them when terminal ownership is acquired
+ *       or the callback is locally fenced.
  *   <li>Releases its slot in the owner's process-local map through the {@code ownerRelease}
  *       callback (a {@link Consumer Consumer&lt;ExecutionCallback&gt;} that conditionally removes
  *       this exact instance) on terminal convergence.
@@ -57,10 +57,11 @@ import java.util.function.Consumer;
  * whether raised synchronously from the {@code Tool.execute} call or asynchronously through {@code
  * onError}.
  *
- * <p>Every terminal path routes through {@link #forceTerminal()} so that exactly one of them sets
- * the terminal flag, cancels all three scheduler futures, and conditionally removes this callback
- * from the owner's map. The terminal flag is also re-checked at the top of every scheduler task so
- * a scheduler tick that races the terminal release becomes a no-op.
+ * <p>A local {@code ACTIVE -> TERMINATING -> TERMINAL} gate gives exactly one callback ownership of
+ * terminal convergence before it can drain partials, schedule a retry, or issue a terminal
+ * transaction. Acquiring {@code TERMINATING} immediately cancels all scheduler futures. A normal
+ * scheduled partial flush only runs while {@code ACTIVE}; the terminal owner alone can drain an
+ * already-buffered partial batch while {@code TERMINATING}.
  */
 @Slf4j
 final class ExecutionCallback implements ToolExecutionListener {
@@ -79,7 +80,8 @@ final class ExecutionCallback implements ToolExecutionListener {
 
   private final List<ToolResult> pending = new ArrayList<>();
   private ToolExecutionHandle handle;
-  private boolean terminal;
+  private Lifecycle lifecycle = Lifecycle.ACTIVE;
+  private boolean ownerReleased;
   private boolean cancelHandleOnAttach;
   private int pendingBytes;
   private Instant lastObservedActivityAt;
@@ -115,6 +117,9 @@ final class ExecutionCallback implements ToolExecutionListener {
 
   /** Arm the heartbeat / deadline / partial-flush watchdogs for this invocation. */
   synchronized void schedule() {
+    if (lifecycle != Lifecycle.ACTIVE) {
+      return;
+    }
     heartbeat =
         scheduler.scheduleAtFixedRate(
             this::heartbeat,
@@ -129,7 +134,7 @@ final class ExecutionCallback implements ToolExecutionListener {
             TimeUnit.MILLISECONDS);
     partialFlush =
         scheduler.scheduleAtFixedRate(
-            this::flush,
+            this::flushScheduled,
             config.partialFlushInterval().toMillis(),
             config.partialFlushInterval().toMillis(),
             TimeUnit.MILLISECONDS);
@@ -143,52 +148,27 @@ final class ExecutionCallback implements ToolExecutionListener {
     }
   }
 
-  /**
-   * Mark the callback as terminal before any external {@link Tool} handle is acquired. Used when
-   * the synchronous send raises {@link
-   * fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException} or {@link
-   * RemoteToolSendUncertainException}: the calling worker must not run any further callbacks on the
-   * returned handle.
-   */
-  synchronized void markTerminalLocal() {
-    terminal = true;
-  }
-
-  /** Whether the callback has already converged to a terminal state. */
-  synchronized boolean isTerminal() {
-    return terminal;
-  }
-
   /** Inspect the route this callback is bound to. */
   ToolBinding binding() {
     return binding;
   }
 
-  /**
-   * The single terminal-convergence primitive used by every terminal path. Marks the callback
-   * terminal (idempotent), cancels all three scheduler futures, and conditionally removes this
-   * callback from the owner's process-local map. Safe to call from any thread; the first caller
-   * does the work and any concurrent caller observes {@code terminal == true} on entry and returns
-   * immediately.
-   */
+  /** Emergency local fence for shutdown, ownership loss, and synchronous dispatch failures. */
   void forceTerminal() {
     synchronized (this) {
-      if (terminal) {
-        return;
-      }
-      terminal = true;
+      lifecycle = Lifecycle.TERMINAL;
+      cancelHandleOnAttach = true;
     }
     cancelSchedulers();
-    ownerRelease.accept(this);
+    cancelHandle();
+    releaseOwner();
   }
 
   /**
    * Process-local stop: the worker is shutting down and no longer wants this callback's callbacks.
-   * Idempotent. Preserves the original semantics of cancelling the underlying handle before tearing
-   * down schedulers and the owner slot.
+   * Idempotent.
    */
   void abandon() {
-    cancelHandle();
     forceTerminal();
   }
 
@@ -197,16 +177,7 @@ final class ExecutionCallback implements ToolExecutionListener {
    * durable state is owned by the recovering claim path.
    */
   void abandonStaleLocal() {
-    synchronized (this) {
-      if (terminal) {
-        ownerRelease.accept(this);
-        return;
-      }
-      terminal = true;
-    }
-    cancelHandle();
-    cancelSchedulers();
-    ownerRelease.accept(this);
+    forceTerminal();
   }
 
   @Override
@@ -217,15 +188,17 @@ final class ExecutionCallback implements ToolExecutionListener {
         return;
       }
     }
+    boolean flushImmediately;
     synchronized (this) {
-      if (terminal) {
+      if (lifecycle != Lifecycle.ACTIVE) {
         return;
       }
       pending.add(partial);
       pendingBytes += ToolResultJsonCodec.encode(partial).length();
-      if (pendingBytes >= config.partialBatchBytes()) {
-        flush();
-      }
+      flushImmediately = pendingBytes >= config.partialBatchBytes();
+    }
+    if (flushImmediately) {
+      flushScheduled();
     }
   }
 
@@ -251,6 +224,11 @@ final class ExecutionCallback implements ToolExecutionListener {
     error(error);
   }
 
+  /** Converges a synchronous dispatch uncertainty through the same terminal gate as callbacks. */
+  void completeUnknown(String kind, String message) {
+    completeUnknownResult(kind, message);
+  }
+
   private void error(Throwable error) {
     String message =
         error == null || error.getMessage() == null ? "Tool execution failed." : error.getMessage();
@@ -258,9 +236,6 @@ final class ExecutionCallback implements ToolExecutionListener {
   }
 
   private void timeout() {
-    if (isTerminal()) {
-      return;
-    }
     if (binding.location() == ToolExecutionLocation.ENVIRONMENT) {
       // Remote deadline: side effects may have run; converge conservatively to UNKNOWN.
       completeUnknownResult(
@@ -271,34 +246,73 @@ final class ExecutionCallback implements ToolExecutionListener {
   }
 
   private void heartbeat() {
-    if (isTerminal()) {
-      return;
+    RuntimeException failure = null;
+    boolean ownershipLost = false;
+    synchronized (this) {
+      if (lifecycle != Lifecycle.ACTIVE) {
+        return;
+      }
+      try {
+        if (transactions.renew(claimed, config.leaseDuration(), clock.instant())
+            != ToolInvocationUpdateOutcome.APPLIED) {
+          lifecycle = Lifecycle.TERMINAL;
+          ownershipLost = true;
+        }
+      } catch (RuntimeException error) {
+        lifecycle = Lifecycle.TERMINAL;
+        failure = error;
+      }
     }
-    if (transactions.renew(claimed, config.leaseDuration(), clock.instant())
-        != ToolInvocationUpdateOutcome.APPLIED) {
-      cancelHandle();
+    if (ownershipLost || failure != null) {
       forceTerminal();
+      if (failure != null) {
+        log.warn("Tool heartbeat failed; fenced local execution", failure);
+      }
     }
   }
 
-  private void flush() {
+  /**
+   * Regular partial batch flush. This path is only legal in {@link Lifecycle#ACTIVE}; it holds the
+   * lifecycle monitor through {@code recordActivity} so a concurrent terminal owner cannot begin
+   * after the activity write has lost ownership.
+   */
+  private void flushScheduled() {
     List<ToolResult> batch;
+    Instant activityAt;
+    RuntimeException failure = null;
+    boolean ownershipLost = false;
     synchronized (this) {
-      if (terminal || pending.isEmpty()) {
+      if (lifecycle != Lifecycle.ACTIVE || pending.isEmpty()) {
         return;
       }
       batch = List.copyOf(pending);
       pending.clear();
       pendingBytes = 0;
+      activityAt = clock.instant();
+      try {
+        if (transactions.recordActivity(claimed, activityAt, activityAt)
+            != ToolInvocationUpdateOutcome.APPLIED) {
+          lifecycle = Lifecycle.TERMINAL;
+          ownershipLost = true;
+        } else {
+          lastObservedActivityAt = activityAt;
+        }
+      } catch (RuntimeException error) {
+        lifecycle = Lifecycle.TERMINAL;
+        failure = error;
+      }
     }
-    Instant activityAt = clock.instant();
-    if (transactions.recordActivity(claimed, activityAt, activityAt)
-        != ToolInvocationUpdateOutcome.APPLIED) {
-      cancelHandle();
+    if (ownershipLost || failure != null) {
       forceTerminal();
+      if (failure != null) {
+        log.warn("Tool partial activity persistence failed; fenced local execution", failure);
+      }
       return;
     }
-    lastObservedActivityAt = activityAt;
+    publishPartials(batch, activityAt);
+  }
+
+  private void publishPartials(List<ToolResult> batch, Instant activityAt) {
     for (ToolResult partial : batch) {
       try {
         realtimeEventSink.accept(
@@ -315,67 +329,74 @@ final class ExecutionCallback implements ToolExecutionListener {
   }
 
   private void completeSuccessResult(ToolResult result) {
-    if (isTerminal()) {
+    if (!tryBeginTerminal()) {
       return;
     }
-    boolean terminalPersisted;
+    boolean terminalPersisted = false;
     try {
-      flush();
+      if (!flushPendingForTerminal()) {
+        return;
+      }
       terminalPersisted =
-          terminalCompleter.completeSuccess(claimed, binding, call, result, lastObservedActivityAt);
+          terminalCompleter.completeSuccess(
+              claimed, binding, call, result, lastObservedActivityAt());
     } catch (RuntimeException error) {
       // Terminal persistence threw; fail closed by writing a deterministic terminal failure.
-      terminalPersisted = false;
       try {
         terminalCompleter.completeFailure(
             claimed,
             new ToolInvocationError(
                 "RESULT_PERSISTENCE_FAILED",
                 failureMessage(error, "Tool result persistence failed.")),
-            lastObservedActivityAt);
+            lastObservedActivityAt());
       } catch (RuntimeException suppressed) {
         error.addSuppressed(suppressed);
       }
+    } finally {
+      if (!terminalPersisted) {
+        cancelHandle();
+      }
+      finishTerminal();
     }
-    if (!terminalPersisted) {
-      cancelHandle();
-    }
-    forceTerminal();
   }
 
   private void completeCancelledResult(String message) {
-    if (isTerminal()) {
+    if (!tryBeginTerminal()) {
       return;
     }
     try {
-      flush();
-      terminalCompleter.completeCancelled(claimed, lastObservedActivityAt);
+      if (flushPendingForTerminal()) {
+        terminalCompleter.completeCancelled(claimed, lastObservedActivityAt());
+      }
     } finally {
       cancelHandle();
-      forceTerminal();
+      finishTerminal();
     }
   }
 
   private void completeUnknownResult(String kind, String message) {
-    if (isTerminal()) {
+    if (!tryBeginTerminal()) {
       return;
     }
     try {
-      flush();
-      terminalCompleter.completeUnknown(
-          claimed, new ToolInvocationError(kind, message), lastObservedActivityAt);
+      if (flushPendingForTerminal()) {
+        terminalCompleter.completeUnknown(
+            claimed, new ToolInvocationError(kind, message), lastObservedActivityAt());
+      }
     } finally {
       cancelHandle();
-      forceTerminal();
+      finishTerminal();
     }
   }
 
   private void completeFailureOrRetry(String kind, String message) {
-    if (isTerminal()) {
+    if (!tryBeginTerminal()) {
       return;
     }
     try {
-      flush();
+      if (!flushPendingForTerminal()) {
+        return;
+      }
       InvocationRetryPolicy policy = retryPolicyResolver.resolve();
       int retryOrdinal = claimed.invocation().attempt();
       Instant now = clock.instant();
@@ -385,19 +406,101 @@ final class ExecutionCallback implements ToolExecutionListener {
               && policy.allowsRetry(retryOrdinal)
               && nextAttemptAt.isBefore(claimed.invocation().deadlineAt());
       if (retryable
-          && transactions.scheduleRetry(claimed, nextAttemptAt, lastObservedActivityAt, now)
+          && transactions.scheduleRetry(claimed, nextAttemptAt, lastObservedActivityAt(), now)
               == ToolInvocationUpdateOutcome.APPLIED) {
         // A retry re-arms the durable target; the row is no longer RUNNING here, so the local
         // handle must be torn down deterministically to free the environment slot.
-        forceTerminal();
         return;
       }
       terminalCompleter.completeFailure(
-          claimed, new ToolInvocationError(kind, message), lastObservedActivityAt);
+          claimed, new ToolInvocationError(kind, message), lastObservedActivityAt());
     } finally {
       cancelHandle();
-      forceTerminal();
+      finishTerminal();
     }
+  }
+
+  /**
+   * Atomically acquires the sole terminal-convergence ownership. Scheduler cancellation follows
+   * immediately after publishing {@code TERMINATING}; a tick that wins the small scheduling race
+   * sees a non-active lifecycle and becomes a no-op before issuing durable work.
+   */
+  private boolean tryBeginTerminal() {
+    synchronized (this) {
+      if (lifecycle != Lifecycle.ACTIVE) {
+        return false;
+      }
+      lifecycle = Lifecycle.TERMINATING;
+    }
+    cancelSchedulers();
+    return true;
+  }
+
+  /**
+   * Drains partials for the terminal owner. Unlike {@link #flushScheduled()}, this is allowed in
+   * {@code TERMINATING} so output received before terminal ownership is neither lost nor recorded
+   * more than once.
+   *
+   * @return {@code false} when activity persistence lost ownership or failed, in which case no
+   *     terminal transaction may be forged
+   */
+  private boolean flushPendingForTerminal() {
+    List<ToolResult> batch;
+    Instant activityAt;
+    synchronized (this) {
+      if (lifecycle != Lifecycle.TERMINATING) {
+        return false;
+      }
+      if (pending.isEmpty()) {
+        return true;
+      }
+      batch = List.copyOf(pending);
+      pending.clear();
+      pendingBytes = 0;
+      activityAt = clock.instant();
+    }
+    try {
+      if (transactions.recordActivity(claimed, activityAt, activityAt)
+          != ToolInvocationUpdateOutcome.APPLIED) {
+        forceTerminal();
+        return false;
+      }
+    } catch (RuntimeException error) {
+      forceTerminal();
+      log.warn("Tool terminal partial activity persistence failed; fenced local execution", error);
+      return false;
+    }
+    synchronized (this) {
+      if (lifecycle != Lifecycle.TERMINATING) {
+        return false;
+      }
+      lastObservedActivityAt = activityAt;
+    }
+    publishPartials(batch, activityAt);
+    return true;
+  }
+
+  private synchronized Instant lastObservedActivityAt() {
+    return lastObservedActivityAt;
+  }
+
+  /** Completes a terminal owner's cleanup even when its durable mutation threw. */
+  private void finishTerminal() {
+    synchronized (this) {
+      lifecycle = Lifecycle.TERMINAL;
+    }
+    cancelSchedulers();
+    releaseOwner();
+  }
+
+  private void releaseOwner() {
+    synchronized (this) {
+      if (ownerReleased) {
+        return;
+      }
+      ownerReleased = true;
+    }
+    ownerRelease.accept(this);
   }
 
   /** Synchronously request the underlying {@link ToolExecutionHandle} to cancel. */
@@ -424,5 +527,11 @@ final class ExecutionCallback implements ToolExecutionListener {
   private static String failureMessage(Throwable error, String fallback) {
     String message = error.getMessage();
     return message == null || message.isBlank() ? fallback : message;
+  }
+
+  private enum Lifecycle {
+    ACTIVE,
+    TERMINATING,
+    TERMINAL
   }
 }
