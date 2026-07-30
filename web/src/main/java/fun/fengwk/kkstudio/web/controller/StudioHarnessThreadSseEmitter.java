@@ -13,14 +13,15 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Thread realtime SSE tail backed by Core {@link HarnessRealtimeEventTail}. Snapshot-first clients
- * load PostgreSQL state first, then resume from a stream id; backend failures only disconnect the
- * emitter.
+ * load PostgreSQL state first. Revision events carry the durable revision as SSE id while lossy
+ * Redis delta events intentionally carry no id, so Last-Event-ID cannot be corrupted by Redis.
  */
 final class StudioHarnessThreadSseEmitter {
   private static final Duration BLOCK = Duration.ofSeconds(2);
@@ -29,7 +30,11 @@ final class StudioHarnessThreadSseEmitter {
   private StudioHarnessThreadSseEmitter() {}
 
   static SseEmitter stream(
-      long threadId, String afterStreamId, HarnessRealtimeEventTail tail, Executor executor) {
+      long threadId,
+      String afterStreamId,
+      HarnessRealtimeEventTail tail,
+      ThreadRevisionEventSource revisionHub,
+      Executor executor) {
     Objects.requireNonNull(tail, "tail");
     Objects.requireNonNull(executor, "executor");
     SseEmitter emitter = new SseEmitter(0L);
@@ -37,12 +42,20 @@ final class StudioHarnessThreadSseEmitter {
     AtomicReference<String> cursor =
         new AtomicReference<>(HarnessRealtimeEventTail.normalizeAfterId(afterStreamId));
     AtomicReference<Future<?>> futureRef = new AtomicReference<>();
+    LinkedBlockingQueue<ThreadRevisionEventSource.Event> revisionEvents =
+        new LinkedBlockingQueue<>();
+    AutoCloseable subscription = revisionHub.subscribe(threadId, revisionEvents::offer);
     Runnable close =
         () -> {
           closed.set(true);
           Future<?> future = futureRef.getAndSet(null);
           if (future != null) {
             future.cancel(true);
+          }
+          try {
+            subscription.close();
+          } catch (Exception ignored) {
+            // Subscription cleanup is best-effort after transport teardown.
           }
         };
     emitter.onCompletion(close);
@@ -52,14 +65,25 @@ final class StudioHarnessThreadSseEmitter {
         () -> {
           try {
             while (!closed.get() && !Thread.currentThread().isInterrupted()) {
+              ThreadRevisionEventSource.Event revision;
+              while ((revision = revisionEvents.poll()) != null) {
+                if (revision.resync()) {
+                  emitter.send(SseEmitter.event().name("resync").data("{}"));
+                } else {
+                  emitter.send(
+                      SseEmitter.event()
+                          .id(revision.revision())
+                          .name("revision")
+                          .data("{\"revision\":\"" + revision.revision() + "\"}"));
+                }
+              }
               List<HarnessRealtimeEventTail.Record> batch =
                   tail.readAfter(threadId, cursor.get(), BATCH, BLOCK);
               if (closed.get()) {
                 return;
               }
               for (HarnessRealtimeEventTail.Record record : batch) {
-                emitter.send(
-                    SseEmitter.event().id(record.id()).name("realtime").data(record.payloadJson()));
+                emitter.send(SseEmitter.event().name("realtime").data(record.payloadJson()));
                 cursor.set(record.id());
               }
             }
@@ -90,6 +114,11 @@ final class StudioHarnessThreadSseEmitter {
       }
     }
     return emitter;
+  }
+
+  static SseEmitter stream(
+      long threadId, String afterStreamId, HarnessRealtimeEventTail tail, Executor executor) {
+    return stream(threadId, afterStreamId, tail, (ignored, consumer) -> () -> {}, executor);
   }
 
   private static Future<?> submit(Executor executor, Runnable work) {

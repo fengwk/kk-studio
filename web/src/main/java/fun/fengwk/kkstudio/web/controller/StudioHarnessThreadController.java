@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.share.model.HarnessThreadHeadUpdateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadMessageCreateDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadModelSetDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadYoloSetDTO;
@@ -52,6 +53,7 @@ public class StudioHarnessThreadController {
   private final HarnessThreadCommandService commandService;
   private final HarnessThreadQueryService queryService;
   private final HarnessRealtimeEventTail realtimeEventTail;
+  private final ThreadRevisionSseHub revisionHub;
   private final Executor eventStreamExecutor;
 
   /** 创建 Thread API Controller。 */
@@ -59,10 +61,12 @@ public class StudioHarnessThreadController {
       HarnessThreadCommandService commandService,
       HarnessThreadQueryService queryService,
       HarnessRealtimeEventTail realtimeEventTail,
+      ThreadRevisionSseHub revisionHub,
       @Qualifier("harnessEventStreamTaskExecutor") Executor eventStreamExecutor) {
     this.commandService = Objects.requireNonNull(commandService, "commandService");
     this.queryService = Objects.requireNonNull(queryService, "queryService");
     this.realtimeEventTail = Objects.requireNonNull(realtimeEventTail, "realtimeEventTail");
+    this.revisionHub = Objects.requireNonNull(revisionHub, "revisionHub");
     this.eventStreamExecutor = Objects.requireNonNull(eventStreamExecutor, "eventStreamExecutor");
   }
 
@@ -82,6 +86,12 @@ public class StudioHarnessThreadController {
   @GetMapping("/threads/{threadId}")
   public Result<HarnessThreadDTO> getThread(@PathVariable String threadId) {
     return Results.ok(withMissingResourceTranslation(() -> queryService.getThread(threadId)));
+  }
+
+  /** One coherent PostgreSQL chat-runtime projection, identified by its durable revision cursor. */
+  @GetMapping("/threads/{threadId}/snapshot")
+  public Result<HarnessThreadSnapshotDTO> getSnapshot(@PathVariable String threadId) {
+    return Results.ok(withMissingResourceTranslation(() -> queryService.getSnapshot(threadId)));
   }
 
   /** 绑定、跨 Session 切换或清空 Thread head，携带 expectedExecutionEpoch 做 CAS fencing。 */
@@ -168,8 +178,8 @@ public class StudioHarnessThreadController {
   /**
    * Snapshot-first realtime SSE tail over Redis Streams.
    *
-   * <p>{@code afterEventId} / {@code Last-Event-ID} are Redis stream ids ({@code ms-seq}). Clients
-   * must load the PostgreSQL snapshot before connecting; Redis loss only drops the lossy tail.
+   * <p>{@code Last-Event-ID} is the durable revision emitted by {@code revision}; Redis delta
+   * events deliberately have no SSE id and always restart from their lossy tail cursor.
    */
   @GetMapping(
       path = "/threads/{threadId}/events/stream",
@@ -179,10 +189,10 @@ public class StudioHarnessThreadController {
       @RequestParam(defaultValue = "0-0") String afterEventId,
       @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
     withMissingResourceTranslation(() -> queryService.getThread(threadId));
-    String cursor =
-        lastEventId != null && !lastEventId.isBlank() ? lastEventId.trim() : afterEventId;
+    String cursor = afterEventId;
     long id = HarnessIds.parsePositive(threadId, "threadId");
-    return StudioHarnessThreadSseEmitter.stream(id, cursor, realtimeEventTail, eventStreamExecutor);
+    return StudioHarnessThreadSseEmitter.stream(
+        id, cursor, realtimeEventTail, revisionHub, eventStreamExecutor);
   }
 
   /** 将服务层异常转换为统一的 HTTP 错误响应。 */

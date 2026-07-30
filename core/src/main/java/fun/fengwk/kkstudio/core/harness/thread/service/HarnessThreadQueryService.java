@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.harness.thread.service;
 import fun.fengwk.kkstudio.share.model.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.model.HarnessThreadInputDTO;
+import fun.fengwk.kkstudio.share.model.HarnessThreadSnapshotDTO;
 
 import java.util.List;
 
@@ -16,4 +17,7 @@ public interface HarnessThreadQueryService {
   List<HarnessSessionEntryDTO> listPathEntries(String threadId);
 
   List<HarnessThreadInputDTO> listInputs(String threadId);
+
+  /** Returns the complete chat-runtime projection from one PostgreSQL read snapshot. */
+  HarnessThreadSnapshotDTO getSnapshot(String threadId);
 }
