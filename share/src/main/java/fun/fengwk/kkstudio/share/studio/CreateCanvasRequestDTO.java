@@ -1,0 +1,8 @@
+package fun.fengwk.kkstudio.share.studio;
+
+import lombok.Data;
+
+@Data
+public class CreateCanvasRequestDTO {
+  private String title;
+}

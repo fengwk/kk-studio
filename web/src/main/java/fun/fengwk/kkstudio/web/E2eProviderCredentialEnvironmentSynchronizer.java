@@ -3,9 +3,9 @@ package fun.fengwk.kkstudio.web;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.core.agent.provider.service.AgentProviderService;
-import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
-import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
+import fun.fengwk.kkstudio.core.ai.catalog.provider.service.AgentProviderService;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 
 import java.util.ArrayList;
 import java.util.List;

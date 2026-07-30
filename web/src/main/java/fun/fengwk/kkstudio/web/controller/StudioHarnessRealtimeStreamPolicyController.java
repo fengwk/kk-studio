@@ -11,8 +11,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import fun.fengwk.kkstudio.core.harness.realtime.stream.HarnessRealtimeStreamPolicyService;
-import fun.fengwk.kkstudio.share.model.HarnessRealtimeStreamPolicyDTO;
+import fun.fengwk.kkstudio.core.ai.runtime.realtime.stream.HarnessRealtimeStreamPolicyService;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessRealtimeStreamPolicyDTO;
 
 /** 全局 Harness realtime Stream 保留策略 API。 */
 @AllArgsConstructor

@@ -16,8 +16,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
-import fun.fengwk.kkstudio.share.model.ChatCreateDTO;
-import fun.fengwk.kkstudio.share.model.ChatUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
+import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 /**

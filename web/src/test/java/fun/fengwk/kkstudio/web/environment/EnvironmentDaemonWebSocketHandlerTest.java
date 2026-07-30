@@ -15,8 +15,8 @@ import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
-import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonConnection;
-import fun.fengwk.kkstudio.core.environment.gateway.EnvironmentDaemonEndpoint;
+import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonConnection;
+import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonEndpoint;
 
 import java.io.IOException;
 

@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.core.persistence.test;
 
-import static fun.fengwk.kkstudio.core.harness.persistence.postgresql.PostgresSchemaSupport.POSTGRES;
-import static fun.fengwk.kkstudio.core.harness.persistence.postgresql.PostgresSchemaSupport.applySchema;
-import static fun.fengwk.kkstudio.core.harness.persistence.postgresql.PostgresSchemaSupport.newConnection;
-import static fun.fengwk.kkstudio.core.harness.persistence.postgresql.PostgresSchemaSupport.resetDatabase;
+import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.POSTGRES;
+import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.applySchema;
+import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.newConnection;
+import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.resetDatabase;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.postgresql.Driver;
@@ -19,7 +19,7 @@ import java.sql.Connection;
  * Shared Spring PostgreSQL Testcontainers support for non-Harness business integration tests.
  *
  * <p>Reuses the single {@code postgres:17-alpine} container declared on {@link
- * fun.fengwk.kkstudio.core.harness.persistence.postgresql.PostgresSchemaSupport}. Wires the
+ * fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport}. Wires the
  * authoritative multi-datasource configuration to the running container so {@code
  * CoreTestApplication} binds {@code spring.datasource.multi.primary} to PostgreSQL rather than H2.
  *

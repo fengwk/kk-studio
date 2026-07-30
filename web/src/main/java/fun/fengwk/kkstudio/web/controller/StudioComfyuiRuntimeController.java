@@ -20,10 +20,10 @@ import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.core.comfyui.ComfyuiFileDownload;
 import fun.fengwk.kkstudio.core.comfyui.ComfyuiRuntimeService;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowCancelDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowJobDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowRunRequestDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowCancelDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowJobDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunRequestDTO;
 
 import java.nio.charset.StandardCharsets;
 

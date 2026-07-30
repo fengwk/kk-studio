@@ -23,8 +23,8 @@
  *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.provider}: Provider-facing request,
  *       response, message, content-block, stream and exception contracts that all SDK adapters must
  *       speak. Specific Provider SDK adapter implementations live in the {@code core} module under
- *       {@code fun.fengwk.kkstudio.core.harness.model.provider} and must never leak SDK types back
- *       into this boundary.
+ *       {@code fun.fengwk.kkstudio.core.ai.runtime.model.provider} and must never leak SDK types
+ *       back into this boundary.
  *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.codec} and {@link
  *       fun.fengwk.kkstudio.harness.runtime.model.provider.codec}: strict deterministic JSON codecs
  *       used at the Model/Provider wire boundary. {@link

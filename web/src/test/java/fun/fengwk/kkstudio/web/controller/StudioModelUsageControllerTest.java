@@ -12,7 +12,7 @@ import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
-import fun.fengwk.kkstudio.core.harness.usage.store.PostgresqlModelUsageRecordStore;
+import fun.fengwk.kkstudio.core.ai.runtime.usage.store.PostgresqlModelUsageRecordStore;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;

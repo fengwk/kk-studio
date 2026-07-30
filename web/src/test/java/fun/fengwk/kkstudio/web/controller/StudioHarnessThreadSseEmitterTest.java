@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import fun.fengwk.kkstudio.core.harness.realtime.HarnessRealtimeEventTail;
+import fun.fengwk.kkstudio.core.ai.runtime.realtime.HarnessRealtimeEventTail;
 
 import java.time.Duration;
 import java.util.List;

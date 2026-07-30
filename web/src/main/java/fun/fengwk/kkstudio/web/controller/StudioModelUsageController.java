@@ -8,8 +8,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.core.harness.usage.service.ModelUsageAggregationService;
-import fun.fengwk.kkstudio.share.model.ModelUsageSummaryDTO;
+import fun.fengwk.kkstudio.core.ai.runtime.usage.service.ModelUsageAggregationService;
+import fun.fengwk.kkstudio.share.ai.runtime.ModelUsageSummaryDTO;
 
 /** 模型调用账本的 Session 与 Model 聚合 API；Thread usage belongs to its snapshot. */
 @AllArgsConstructor

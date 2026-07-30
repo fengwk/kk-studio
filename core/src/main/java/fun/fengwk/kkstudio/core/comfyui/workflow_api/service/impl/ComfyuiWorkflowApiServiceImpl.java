@@ -9,9 +9,9 @@ import fun.fengwk.kkstudio.core.comfyui.workflow_api.repo.ComfyuiWorkflowApiRepo
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.ComfyuiWorkflowApiService;
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.converter.ComfyuiWorkflowApiConverter;
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.model.ComfyuiWorkflowApi;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiCreateDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiUpdateDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiCreateDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiUpdateDTO;
 
 /**
  * @author fengwk

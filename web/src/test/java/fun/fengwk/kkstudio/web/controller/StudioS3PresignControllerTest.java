@@ -17,7 +17,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
-import fun.fengwk.kkstudio.share.model.S3PresignedRequestDTO;
+import fun.fengwk.kkstudio.share.storage.S3PresignedRequestDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 /**

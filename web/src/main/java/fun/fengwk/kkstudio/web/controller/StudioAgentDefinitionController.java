@@ -15,10 +15,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.core.agent.definition.service.AgentDefinitionService;
-import fun.fengwk.kkstudio.share.model.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentDefinitionDTO;
-import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
+import fun.fengwk.kkstudio.core.ai.catalog.definition.service.AgentDefinitionService;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 
 /** Global Agent definition CRUD API. */
 @AllArgsConstructor

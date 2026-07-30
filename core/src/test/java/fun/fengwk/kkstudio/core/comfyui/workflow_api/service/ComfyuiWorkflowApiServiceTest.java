@@ -12,9 +12,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiCreateDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiUpdateDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiCreateDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiUpdateDTO;
 
 import java.util.NoSuchElementException;
 

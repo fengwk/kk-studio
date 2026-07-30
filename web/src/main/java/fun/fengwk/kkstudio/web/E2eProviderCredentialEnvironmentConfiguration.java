@@ -7,7 +7,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.env.Environment;
 
-import fun.fengwk.kkstudio.core.agent.provider.service.AgentProviderService;
+import fun.fengwk.kkstudio.core.ai.catalog.provider.service.AgentProviderService;
 
 /** Synchronizes externally supplied E2E provider credentials after the E2E seed is available. */
 @Configuration(proxyBeanMethods = false)

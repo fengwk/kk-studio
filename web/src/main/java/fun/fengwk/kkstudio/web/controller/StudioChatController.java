@@ -13,10 +13,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.core.chat.service.ChatService;
-import fun.fengwk.kkstudio.share.model.ChatCreateDTO;
-import fun.fengwk.kkstudio.share.model.ChatDTO;
-import fun.fengwk.kkstudio.share.model.ChatUpdateDTO;
+import fun.fengwk.kkstudio.core.ai.chat.service.ChatService;
+import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
+import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
+import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 
 import java.util.List;
 

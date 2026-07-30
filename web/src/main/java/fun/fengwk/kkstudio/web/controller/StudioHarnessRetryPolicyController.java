@@ -11,8 +11,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import fun.fengwk.kkstudio.core.harness.retry.HarnessRetryPolicyService;
-import fun.fengwk.kkstudio.share.model.HarnessRetryPolicyDTO;
+import fun.fengwk.kkstudio.core.ai.runtime.retry.HarnessRetryPolicyService;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessRetryPolicyDTO;
 
 /** 全局 Harness 自动重试策略 API。 */
 @AllArgsConstructor

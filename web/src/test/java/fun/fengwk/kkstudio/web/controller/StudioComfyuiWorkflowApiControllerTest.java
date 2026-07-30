@@ -18,8 +18,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiCreateDTO;
-import fun.fengwk.kkstudio.share.model.ComfyuiWorkflowApiUpdateDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiCreateDTO;
+import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiUpdateDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 /**

@@ -15,10 +15,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.core.agent.provider.service.AgentProviderService;
-import fun.fengwk.kkstudio.share.model.AgentProviderCreateDTO;
-import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
-import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
+import fun.fengwk.kkstudio.core.ai.catalog.provider.service.AgentProviderService;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 
 /** Global provider CRUD API. */
 @AllArgsConstructor

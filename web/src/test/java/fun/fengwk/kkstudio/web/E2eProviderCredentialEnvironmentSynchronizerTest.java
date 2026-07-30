@@ -15,9 +15,9 @@ import fun.fengwk.convention4j.api.page.Page;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import fun.fengwk.kkstudio.core.agent.provider.service.AgentProviderService;
-import fun.fengwk.kkstudio.share.model.AgentProviderDTO;
-import fun.fengwk.kkstudio.share.model.AgentProviderUpdateDTO;
+import fun.fengwk.kkstudio.core.ai.catalog.provider.service.AgentProviderService;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 
 import java.util.HashMap;
 import java.util.List;
