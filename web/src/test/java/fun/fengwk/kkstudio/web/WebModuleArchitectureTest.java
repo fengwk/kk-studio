@@ -22,14 +22,14 @@ import java.util.stream.Stream;
 class WebModuleArchitectureTest {
 
   private static final String HARNESS_REFERENCE_PREFIX = "fun.fengwk.kkstudio.harness.";
-  private static final String CORE_REFERENCE_PREFIX = "fun.fengwk.kkstudio.core.";
+  private static final String CORE_AI_REFERENCE_PREFIX = "fun.fengwk.kkstudio.core.ai.";
   private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
       List.of(
           HARNESS_REFERENCE_PREFIX,
-          CORE_REFERENCE_PREFIX + "environment.gateway." + "EnvironmentDaemonGateway",
-          CORE_REFERENCE_PREFIX + "environment.registry." + "LiveEnvironment",
-          CORE_REFERENCE_PREFIX + "environment.registry." + "LiveEnvironmentRegistry",
-          CORE_REFERENCE_PREFIX + "harness.redis." + "RedisRealtimeEventTail");
+          CORE_AI_REFERENCE_PREFIX + "environment.gateway." + "EnvironmentDaemonGateway",
+          CORE_AI_REFERENCE_PREFIX + "environment.registry." + "LiveEnvironment",
+          CORE_AI_REFERENCE_PREFIX + "environment.registry." + "LiveEnvironmentRegistry",
+          CORE_AI_REFERENCE_PREFIX + "runtime.redis." + "RedisRealtimeEventTail");
   private static final List<String> FORBIDDEN_POM_ARTIFACTS =
       List.of("kk-studio-harness-runtime", "kk-studio-harness-tool", "kk-studio-harness-daemon");
 
