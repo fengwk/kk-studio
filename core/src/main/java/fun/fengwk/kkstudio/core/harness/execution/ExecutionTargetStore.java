@@ -18,22 +18,39 @@ import java.util.Optional;
  * #deleteIfExists(ExecutionTargetKind, long)} is the conditional variant for callers that race
  * without a lock.
  *
- * <p>The schema-level trigger fires {@code pg_notify('harness_execution_target')} on every insert
- * and on every strictly-earlier update of {@code available_at}; no application-level notifier is
- * involved.
+ * <p>The schema-level trigger fires {@code pg_notify('harness_execution_target')} for enabled
+ * inserts, enable transitions, and strictly-earlier updates of an enabled row. Parked/disabled rows
+ * are durable but excluded from due scans and nearest-due timing; {@link #lock} and {@link
+ * #findAll} still expose them. ENVIRONMENT Tool route heads are activated FIFO by their joined Tool
+ * invocation's {@code created_at}, {@code assistant_entry_id}, {@code ordinal}, and {@code id}; an
+ * active nonterminal head blocks later siblings.
  */
 public interface ExecutionTargetStore {
 
   /**
    * Schedule a target or earlier-reschedule an existing one. If the row does not exist, it is
-   * inserted with {@code availableAt}. If the row exists and the requested {@code availableAt} is
-   * strictly earlier than the current value, the row is updated to the earlier time. If the current
-   * value is already at or before the requested time, no change is made.
+   * inserted enabled with {@code availableAt}. If the row exists disabled, it is enabled and its
+   * route/time are replaced with the requested normal target values. If the row is already enabled,
+   * the route and time are updated only when {@code availableAt} is strictly earlier than the
+   * current value. If the current enabled value is already at or before the requested time, no
+   * change is made.
    *
-   * <p>Returns the number of affected rows: 1 when a row was inserted or moved earlier; 0 when the
-   * existing earlier value was preserved.
+   * <p>Returns the number of affected rows: 1 when a row was inserted, enabled, or moved earlier; 0
+   * only when an existing enabled value at or before the requested time was preserved.
    */
   int schedule(ExecutionTargetKind kind, long id, String routeKey, Instant availableAt);
+
+  /**
+   * Create one initially parked target. Parking inserts a disabled row and never updates an
+   * existing row. It is reserved for newly materialized ENVIRONMENT {@code TOOL_INVOCATION}
+   * targets; callers must activate the route head separately after the complete batch is present.
+   *
+   * <p>Inputs are validated like {@link #schedule}, with a non-blank route key and {@link
+   * ExecutionTargetKind#TOOL_INVOCATION} required. Returns 1 when the row is newly inserted and 0
+   * when the primary key already exists; a 0 result leaves the existing row untouched and must be
+   * treated as a conflict by a caller that requires initial creation.
+   */
+  int park(ExecutionTargetKind kind, long id, String routeKey, Instant availableAt);
 
   /**
    * Acquire a row-level lock on {@code (kind, id)} regardless of its due time. Used by an existing
@@ -42,18 +59,19 @@ public interface ExecutionTargetStore {
   Optional<ExecutionTargetRow> lock(ExecutionTargetKind kind, long id);
 
   /**
-   * Acquire a row-level lock on {@code (kind, id)} and return the row iff it currently exists and
-   * its {@code availableAt} is at or before {@code now}. The caller MUST advance the row in the
-   * same transaction via {@link #rescheduleLocked(ExecutionTargetKind, long, String, Instant)} or
-   * {@link #deleteLocked(ExecutionTargetKind, long)}; otherwise the durable state is unchanged.
+   * Acquire a row-level lock on {@code (kind, id)} and return the row iff it currently exists, is
+   * dispatch-enabled, and its {@code availableAt} is at or before {@code now}. Disabled rows are
+   * intentionally invisible to this gate. The caller MUST advance the row in the same transaction
+   * via {@link #rescheduleLocked(ExecutionTargetKind, long, String, Instant)} or {@link
+   * #deleteLocked(ExecutionTargetKind, long)}; otherwise the durable state is unchanged.
    */
   Optional<ExecutionTargetRow> lockDue(ExecutionTargetKind kind, long id, Instant now);
 
   /**
-   * Overwrite an already-locked row's route key and available time. Returns 1 on success; 0 when
-   * the lock has been lost (should not happen for a caller that holds a lock from {@link
-   * #lockDue}). Lease extensions ({@code availableAt} later than the current value) do not fire
-   * NOTIFY.
+   * Overwrite an already-locked row's route key and available time while preserving its {@code
+   * dispatch_enabled} state. Returns 1 on success; 0 when the lock has been lost (should not happen
+   * for a caller that holds a lock from {@link #lockDue}). Lease extensions ({@code availableAt}
+   * later than the current value) do not fire NOTIFY, and a disabled row remains disabled.
    */
   int rescheduleLocked(ExecutionTargetKind kind, long id, String routeKey, Instant availableAt);
 
@@ -70,13 +88,16 @@ public interface ExecutionTargetStore {
   int deleteIfExists(ExecutionTargetKind kind, long id);
 
   /**
-   * Activate the oldest eligible ENVIRONMENT tool target for {@code routeKey} by moving its {@code
-   * availableAt} earlier to {@code availableAt}, iff the current value is strictly later. The
-   * selection uses {@code FOR UPDATE SKIP LOCKED} so concurrent callers converge without blocking.
+   * Activate the oldest nonterminal ENVIRONMENT {@code TOOL_INVOCATION} target for {@code routeKey}
+   * according to the joined invocation's {@code created_at}, {@code assistant_entry_id}, {@code
+   * ordinal}, and {@code id}. The queue-member statuses are {@code QUEUED}, {@code RUNNING}, {@code
+   * RETRY_WAIT}, and the future literal {@code WAITING_INTERACTION}. The target row is selected
+   * with {@code FOR UPDATE SKIP LOCKED}; a locked head does not allow a later sibling to pass.
    *
-   * <p>Returns {@code true} when one row was moved earlier; {@code false} when no row matched (no
-   * environment target, the oldest is already at or before the requested time, or another caller
-   * holds the oldest row's lock).
+   * <p>Only a {@code QUEUED} head can be enabled or moved to {@code availableAt}. A RUNNING,
+   * RETRY_WAIT, or WAITING_INTERACTION head leaves the route unchanged and blocks later siblings.
+   * If an enabled head is already at or before the requested time, the operation is a normal no-op.
+   * Returns {@code true} only when the head was enabled or moved earlier.
    */
   boolean activateOldestEnvironment(String routeKey, Instant availableAt);
 

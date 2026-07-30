@@ -379,6 +379,29 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
   }
 
   @Test
+  void terminalEnvironmentToolActivatesNextRouteHead() throws Exception {
+    Fixture first =
+        newQueued(ToolExecutionLocation.ENVIRONMENT, "env-a", ToolSideEffect.READ_ONLY, 1L);
+    Fixture second =
+        newQueued(ToolExecutionLocation.ENVIRONMENT, "env-a", ToolSideEffect.READ_ONLY, 1L);
+    setInvocationCreatedAt(first.invocationId, BASE);
+    setInvocationCreatedAt(second.invocationId, BASE.plusSeconds(1));
+    setTargetDispatchEnabled(second.invocationId, false);
+
+    ClaimedToolInvocation claimed = claim(first, "env-worker", BASE, LONG_LEASE);
+    assertEquals(
+        ToolInvocationUpdateOutcome.APPLIED,
+        transactions.completeSuccess(
+            claimed, () -> result(first.toolCallId, "done"), BASE, BASE.plusSeconds(1)));
+
+    assertTrue(toolTargetAbsent(first.invocationId));
+    ExecutionTargetRow next = targetFor(second.invocationId);
+    assertTrue(next.dispatchEnabled(), "terminal completion must enable the next route head");
+    assertEquals(BASE.plusSeconds(1), next.availableAt());
+    assertEquals("QUEUED", rowFor(second.invocationId).getStatus());
+  }
+
+  @Test
   void failureUnknownAndCancellationPersistTheirStrictPayloadShapes() throws Exception {
     Fixture failure = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
     Fixture unknown = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
@@ -760,6 +783,30 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
     }
   }
 
+  private static void setInvocationCreatedAt(long invocationId, Instant value) throws SQLException {
+    try (Connection connection = newConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "update harness_tool_invocation set created_at = ? where id = ?")) {
+      statement.setObject(1, offset(value));
+      statement.setLong(2, invocationId);
+      assertEquals(1, statement.executeUpdate());
+    }
+  }
+
+  private static void setTargetDispatchEnabled(long invocationId, boolean enabled)
+      throws SQLException {
+    try (Connection connection = newConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "update harness_execution_target set dispatch_enabled = ?"
+                    + " where target_kind = 'TOOL_INVOCATION' and target_id = ?")) {
+      statement.setBoolean(1, enabled);
+      statement.setLong(2, invocationId);
+      assertEquals(1, statement.executeUpdate());
+    }
+  }
+
   private static void setTargetAvailableAt(long invocationId, Instant value) throws SQLException {
     try (Connection connection = newConnection();
         PreparedStatement statement =
@@ -858,7 +905,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
     try (Connection connection = newConnection();
         PreparedStatement statement =
             connection.prepareStatement(
-                "select target_kind, target_id, route_key, available_at"
+                "select target_kind, target_id, route_key, dispatch_enabled, available_at"
                     + " from harness_execution_target"
                     + " where target_kind = 'TOOL_INVOCATION' and target_id = ?")) {
       statement.setLong(1, invocationId);
@@ -869,8 +916,9 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
         ExecutionTargetKind kind = ExecutionTargetKind.valueOf(resultSet.getString("target_kind"));
         long targetId = resultSet.getLong("target_id");
         String routeKey = resultSet.getString("route_key");
+        boolean dispatchEnabled = resultSet.getBoolean("dispatch_enabled");
         Instant availableAt = resultSet.getObject("available_at", OffsetDateTime.class).toInstant();
-        return new ExecutionTargetRow(kind, targetId, routeKey, availableAt);
+        return new ExecutionTargetRow(kind, targetId, routeKey, availableAt, dispatchEnabled);
       }
     } catch (SQLException error) {
       throw new IllegalStateException(error);
@@ -897,7 +945,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
     try (Connection connection = newConnection();
         PreparedStatement statement =
             connection.prepareStatement(
-                "select target_kind, target_id, route_key, available_at"
+                "select target_kind, target_id, route_key, dispatch_enabled, available_at"
                     + " from harness_execution_target"
                     + " where target_kind = 'THREAD' and target_id = ?")) {
       statement.setLong(1, threadId);
@@ -908,8 +956,9 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
         ExecutionTargetKind kind = ExecutionTargetKind.valueOf(resultSet.getString("target_kind"));
         long targetId = resultSet.getLong("target_id");
         String routeKey = resultSet.getString("route_key");
+        boolean dispatchEnabled = resultSet.getBoolean("dispatch_enabled");
         Instant availableAt = resultSet.getObject("available_at", OffsetDateTime.class).toInstant();
-        return new ExecutionTargetRow(kind, targetId, routeKey, availableAt);
+        return new ExecutionTargetRow(kind, targetId, routeKey, availableAt, dispatchEnabled);
       }
     } catch (SQLException error) {
       throw new IllegalStateException(error);

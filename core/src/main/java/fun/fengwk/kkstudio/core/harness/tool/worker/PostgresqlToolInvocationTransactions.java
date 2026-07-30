@@ -474,6 +474,10 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
     // THREAD target scheduling is best-effort: an earlier due time wins and is acceptable.
     executionTargetStore.schedule(
         ExecutionTargetKind.THREAD, invocation.threadId(), null, persistedNow);
+    String route = routeKey(row);
+    if (route != null) {
+      executionTargetStore.activateOldestEnvironment(route, persistedNow);
+    }
     return ToolInvocationUpdateOutcome.APPLIED;
   }
 

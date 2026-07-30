@@ -15,5 +15,6 @@ public class ExecutionTargetDO {
   private String targetKind;
   private Long targetId;
   private String routeKey;
+  private boolean dispatchEnabled;
   private OffsetDateTime availableAt;
 }

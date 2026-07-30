@@ -8,8 +8,8 @@
  *   <li>{@link fun.fengwk.kkstudio.core.harness.execution.ExecutionTargetRow} — immutable row
  *       projection handed to handlers.
  *   <li>{@link fun.fengwk.kkstudio.core.harness.execution.ExecutionTargetStore} — narrow port:
- *       {@code schedule}, {@code lock}, {@code lockDue}, {@code rescheduleLocked}, {@code
- *       deleteLocked}, {@code deleteIfExists}, {@code activateOldestEnvironment}, plus the
+ *       {@code schedule}, {@code park}, {@code lock}, {@code lockDue}, {@code rescheduleLocked},
+ *       {@code deleteLocked}, {@code deleteIfExists}, {@code activateOldestEnvironment}, plus the
  *       dispatcher's lock-free reads.
  *   <li>{@link fun.fengwk.kkstudio.core.harness.execution.ExecutionTargetHandler} — synchronous
  *       per-row handler invoked outside any transaction. Returning {@code false} reports a stale
@@ -24,11 +24,13 @@
  *       {@link org.postgresql.PGConnection#getNotifications(int)}.
  * </ul>
  *
- * <p>No Redis or Redis Pub/Sub is involved. Domain integration of Thread / Model / Tool
- * transactions will compose {@link
- * fun.fengwk.kkstudio.core.harness.execution.ExecutionTargetStore#lockDue} with {@link
- * fun.fengwk.kkstudio.core.harness.execution.ExecutionTargetStore#rescheduleLocked} or {@link
- * fun.fengwk.kkstudio.core.harness.execution.ExecutionTargetStore#deleteLocked} in their own
- * transactions to advance the durable state.
+ * <p>The schema stores one row per durable target. {@code dispatch_enabled} is the explicit
+ * dispatch gate: due scans and nearest-due timing ignore parked rows, while {@code lock} and {@code
+ * findAll} expose them for ownership and inspection. ENVIRONMENT Tool targets are parked at
+ * materialization and activated FIFO by route using Tool creation order; a RUNNING, RETRY_WAIT, or
+ * future WAITING_INTERACTION head blocks later siblings.
+ *
+ * <p>Schema triggers notify only enabled inserts, enable transitions, and strictly-earlier moves of
+ * enabled rows. No application-level notifier or Redis queue state is involved in this substrate.
  */
 package fun.fengwk.kkstudio.core.harness.execution;

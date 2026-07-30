@@ -22,9 +22,9 @@ import java.util.Set;
  * <p>{@link #lockDue(ExecutionTargetKind, long, Instant)} and the matching {@link
  * #rescheduleLocked} / {@link #deleteLocked} pair run inside the caller's transaction. The
  * dispatcher's reads ({@link #findEligibleDue}, {@link #findNearestEligibleAvailableAt}) are
- * lock-free; domain transactions own the row lock from {@code lockDue} onward. {@link #schedule}
- * and {@link #activateOldestEnvironment} are short single-statement operations safe for use by any
- * thread.
+ * lock-free and ignore disabled targets; domain transactions own the row lock from {@code lockDue}
+ * onward. {@link #schedule}, {@link #park}, and {@link #activateOldestEnvironment} are short
+ * operations safe for use by any thread (and join an existing transaction when one is active).
  */
 @Repository
 public class PostgresqlExecutionTargetStore implements ExecutionTargetStore {
@@ -46,6 +46,22 @@ public class PostgresqlExecutionTargetStore implements ExecutionTargetStore {
       throw new IllegalArgumentException("routeKey must not be blank");
     }
     return mapper.schedule(kind.name(), id, routeKey, offset(availableAt));
+  }
+
+  @Override
+  public int park(ExecutionTargetKind kind, long id, String routeKey, Instant availableAt) {
+    Objects.requireNonNull(kind, "kind");
+    Objects.requireNonNull(availableAt, "availableAt");
+    if (kind != ExecutionTargetKind.TOOL_INVOCATION) {
+      throw new IllegalArgumentException("park is only valid for TOOL_INVOCATION targets");
+    }
+    if (id <= 0) {
+      throw new IllegalArgumentException("id must be positive");
+    }
+    if (routeKey == null || routeKey.isBlank()) {
+      throw new IllegalArgumentException("park requires a non-blank routeKey");
+    }
+    return mapper.park(kind.name(), id, routeKey, offset(availableAt));
   }
 
   @Override
@@ -155,7 +171,11 @@ public class PostgresqlExecutionTargetStore implements ExecutionTargetStore {
     Objects.requireNonNull(d, "row");
     ExecutionTargetKind kind = ExecutionTargetKind.valueOf(d.getTargetKind());
     return new ExecutionTargetRow(
-        kind, d.getTargetId(), d.getRouteKey(), d.getAvailableAt().toInstant());
+        kind,
+        d.getTargetId(),
+        d.getRouteKey(),
+        d.getAvailableAt().toInstant(),
+        d.isDispatchEnabled());
   }
 
   private static OffsetDateTime offset(Instant value) {

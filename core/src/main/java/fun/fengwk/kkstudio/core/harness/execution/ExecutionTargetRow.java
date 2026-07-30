@@ -17,9 +17,14 @@ public final class ExecutionTargetRow {
   private final long targetId;
   private final String routeKey;
   private final Instant availableAt;
+  private final boolean dispatchEnabled;
 
   public ExecutionTargetRow(
-      ExecutionTargetKind targetKind, long targetId, String routeKey, Instant availableAt) {
+      ExecutionTargetKind targetKind,
+      long targetId,
+      String routeKey,
+      Instant availableAt,
+      boolean dispatchEnabled) {
     this.targetKind = Objects.requireNonNull(targetKind, "targetKind");
     this.availableAt = Objects.requireNonNull(availableAt, "availableAt");
     if (targetId <= 0) {
@@ -30,6 +35,7 @@ public final class ExecutionTargetRow {
     }
     this.targetId = targetId;
     this.routeKey = routeKey;
+    this.dispatchEnabled = dispatchEnabled;
   }
 
   public ExecutionTargetKind targetKind() {
@@ -48,6 +54,10 @@ public final class ExecutionTargetRow {
     return availableAt;
   }
 
+  public boolean dispatchEnabled() {
+    return dispatchEnabled;
+  }
+
   @Override
   public String toString() {
     return "ExecutionTargetRow{"
@@ -60,6 +70,8 @@ public final class ExecutionTargetRow {
         + '\''
         + ", availableAt="
         + availableAt
+        + ", dispatchEnabled="
+        + dispatchEnabled
         + '}';
   }
 }
