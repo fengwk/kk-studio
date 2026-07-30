@@ -22,6 +22,7 @@ public class HarnessThreadDtoConverter {
     HarnessThreadDTO dto = new HarnessThreadDTO();
     dto.setThreadId(Long.toString(thread.id()));
     dto.setExecutionEpoch(thread.executionEpoch());
+    dto.setRevision(Long.toString(thread.revision()));
     dto.setHeadEntryId(thread.headEntryId() == null ? null : Long.toString(thread.headEntryId()));
     dto.setStatus(
         thread.runnable() ? "RUNNABLE" : (thread.headEntryId() == null ? "UNBOUND" : "IDLE"));

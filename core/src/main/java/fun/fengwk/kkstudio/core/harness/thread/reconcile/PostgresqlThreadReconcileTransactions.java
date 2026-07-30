@@ -717,6 +717,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         row.getInputSequence(),
         row.isRunnable(),
         row.getExecutionEpoch(),
+        row.getRevision(),
         lease,
         row.getCreatedAt().toInstant(),
         row.getUpdatedAt().toInstant());

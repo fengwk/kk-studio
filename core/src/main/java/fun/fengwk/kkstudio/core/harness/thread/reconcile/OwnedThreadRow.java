@@ -13,6 +13,7 @@ public class OwnedThreadRow {
   private long inputSequence;
   private boolean runnable;
   private long executionEpoch;
+  private long revision;
   private String processorToken;
   private OffsetDateTime processorUntil;
   private OffsetDateTime createdAt;

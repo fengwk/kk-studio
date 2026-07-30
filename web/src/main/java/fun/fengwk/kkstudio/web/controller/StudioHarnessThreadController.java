@@ -178,21 +178,39 @@ public class StudioHarnessThreadController {
   /**
    * Snapshot-first realtime SSE tail over Redis Streams.
    *
-   * <p>{@code Last-Event-ID} is the durable revision emitted by {@code revision}; Redis delta
-   * events deliberately have no SSE id and always restart from their lossy tail cursor.
+   * <p>{@code Last-Event-ID} overrides {@code afterRevision} after a browser reconnect. Both are
+   * canonical decimal durable cursors; Redis delta events deliberately have no SSE id.
    */
   @GetMapping(
       path = "/threads/{threadId}/events/stream",
       produces = MediaType.TEXT_EVENT_STREAM_VALUE)
   public SseEmitter streamEvents(
       @PathVariable String threadId,
-      @RequestParam(defaultValue = "0-0") String afterEventId,
+      @RequestParam(defaultValue = "0") String afterRevision,
       @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
     withMissingResourceTranslation(() -> queryService.getThread(threadId));
-    String cursor = afterEventId;
+    long revision =
+        parseRevision(
+            lastEventId != null && !lastEventId.isBlank() ? lastEventId.trim() : afterRevision);
     long id = HarnessIds.parsePositive(threadId, "threadId");
     return StudioHarnessThreadSseEmitter.stream(
-        id, cursor, realtimeEventTail, revisionHub, eventStreamExecutor);
+        id,
+        revision,
+        realtimeEventTail.initialCursor(id),
+        realtimeEventTail,
+        revisionHub,
+        eventStreamExecutor);
+  }
+
+  private static long parseRevision(String raw) {
+    if (raw == null || !raw.matches("0|[1-9]\\d*")) {
+      throw new IllegalArgumentException("afterRevision must be a non-negative decimal bigint");
+    }
+    try {
+      return Long.parseLong(raw);
+    } catch (NumberFormatException error) {
+      throw new IllegalArgumentException("afterRevision exceeds bigint range", error);
+    }
   }
 
   /** 将服务层异常转换为统一的 HTTP 错误响应。 */

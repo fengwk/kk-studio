@@ -13,7 +13,6 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -24,13 +23,14 @@ import java.util.concurrent.atomic.AtomicReference;
  * Redis delta events intentionally carry no id, so Last-Event-ID cannot be corrupted by Redis.
  */
 final class StudioHarnessThreadSseEmitter {
-  private static final Duration BLOCK = Duration.ofSeconds(2);
+  private static final Duration BLOCK = Duration.ofMillis(250);
   private static final int BATCH = 100;
 
   private StudioHarnessThreadSseEmitter() {}
 
   static SseEmitter stream(
       long threadId,
+      long afterRevision,
       String afterStreamId,
       HarnessRealtimeEventTail tail,
       ThreadRevisionEventSource revisionHub,
@@ -42,9 +42,25 @@ final class StudioHarnessThreadSseEmitter {
     AtomicReference<String> cursor =
         new AtomicReference<>(HarnessRealtimeEventTail.normalizeAfterId(afterStreamId));
     AtomicReference<Future<?>> futureRef = new AtomicReference<>();
-    LinkedBlockingQueue<ThreadRevisionEventSource.Event> revisionEvents =
-        new LinkedBlockingQueue<>();
-    AutoCloseable subscription = revisionHub.subscribe(threadId, revisionEvents::offer);
+    AtomicReference<ThreadRevisionEventSource.Event> revisionEvent = new AtomicReference<>();
+    AutoCloseable subscription =
+        revisionHub.subscribe(
+            threadId,
+            afterRevision,
+            event ->
+                revisionEvent.accumulateAndGet(
+                    event,
+                    (current, incoming) ->
+                        current == null
+                            ? incoming
+                            : incoming.resync()
+                                ? incoming
+                                : current.resync()
+                                    ? current
+                                    : Long.parseLong(incoming.revision())
+                                            > Long.parseLong(current.revision())
+                                        ? incoming
+                                        : current));
     Runnable close =
         () -> {
           closed.set(true);
@@ -65,8 +81,8 @@ final class StudioHarnessThreadSseEmitter {
         () -> {
           try {
             while (!closed.get() && !Thread.currentThread().isInterrupted()) {
-              ThreadRevisionEventSource.Event revision;
-              while ((revision = revisionEvents.poll()) != null) {
+              ThreadRevisionEventSource.Event revision = revisionEvent.getAndSet(null);
+              if (revision != null) {
                 if (revision.resync()) {
                   emitter.send(SseEmitter.event().name("resync").data("{}"));
                 } else {
@@ -106,7 +122,7 @@ final class StudioHarnessThreadSseEmitter {
       }
     } catch (RejectedExecutionException rejected) {
       // Bounded overload: fail the emitter immediately instead of leaving an inert SSE open.
-      closed.set(true);
+      close.run();
       try {
         emitter.completeWithError(rejected);
       } catch (IllegalStateException ignored) {
@@ -114,11 +130,6 @@ final class StudioHarnessThreadSseEmitter {
       }
     }
     return emitter;
-  }
-
-  static SseEmitter stream(
-      long threadId, String afterStreamId, HarnessRealtimeEventTail tail, Executor executor) {
-    return stream(threadId, afterStreamId, tail, (ignored, consumer) -> () -> {}, executor);
   }
 
   private static Future<?> submit(Executor executor, Runnable work) {

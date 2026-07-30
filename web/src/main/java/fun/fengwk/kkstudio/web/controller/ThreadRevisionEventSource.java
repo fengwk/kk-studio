@@ -7,5 +7,5 @@ import java.util.function.Consumer;
 interface ThreadRevisionEventSource {
   record Event(String revision, boolean resync) {}
 
-  AutoCloseable subscribe(long threadId, Consumer<Event> consumer);
+  AutoCloseable subscribe(long threadId, long afterRevision, Consumer<Event> consumer);
 }

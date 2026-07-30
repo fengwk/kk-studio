@@ -16,6 +16,7 @@ public class ThreadCommandRow {
   private Long inputSequence;
   private Boolean runnable;
   private Long executionEpoch;
+  private Long revision;
   private String processorToken;
   private OffsetDateTime processorUntil;
   private String entryType;
