@@ -613,6 +613,37 @@ class ToolWorkerFinalTest {
     assertEquals(0, fixture.tool.executions);
   }
 
+  @Test
+  void stopInvalidatesPendingDispatchBeforeExecutorRuns() {
+    DeferredExecutor deferred = new DeferredExecutor();
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    fixture.rebuildWorkerWithExecutor(deferred);
+
+    // dispatch registers a ticket and submits a deferred Runnable that has not yet executed.
+    assertTrue(fixture.worker.dispatch(1));
+    assertEquals(1, fixture.transactions.claimCalls);
+    assertEquals(0, fixture.tool.executions);
+    assertTrue(deferred.hasPending());
+    assertFalse(fixture.worker.hasActiveExecution());
+
+    // stop() must invalidate the pending ticket before any active execution is abandoned, so the
+    // deferred Runnable becomes a no-op instead of invoking external Tool I/O.
+    fixture.worker.stop();
+
+    // Now drive the deferred executor; the dispatched task must do nothing.
+    deferred.runPending();
+
+    // No external tool execution occurred.
+    assertEquals(0, fixture.tool.executions);
+    // No terminal persistence (no completeSuccess / completeFailure / completeUnknown /
+    // scheduleRetry / releaseUnstarted calls beyond the initial claim).
+    assertNull(fixture.transactions.terminalStatus);
+    assertEquals(0, fixture.transactions.releaseUnstartedCalls);
+    assertEquals(0, fixture.transactions.retryCalls);
+    // The execution map is gated only on actual handles, never on pending tickets.
+    assertFalse(fixture.worker.hasActiveExecution());
+  }
+
   private Fixture fixture(ToolSideEffect sideEffect) {
     Fixture fixture = new Fixture(sideEffect);
     fixture.rebuildWorker();
