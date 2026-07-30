@@ -3,6 +3,7 @@ export interface ResultEnvelope<T> {
   code: string
   message: string
   data: T
+  errors?: Record<string, unknown>
 }
 
 export interface PageResult<T> {

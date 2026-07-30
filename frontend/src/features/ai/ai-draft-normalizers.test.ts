@@ -48,7 +48,7 @@ function model(overrides: Partial<AgentModelDTO>): AgentModelDTO {
     name: 'MiniMax-M2.7',
     description: null,
     config: modelConfig(),
-    version: 1,
+    version: '1',
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
     ...overrides,
@@ -65,7 +65,7 @@ function provider(id: string, name: string): AgentProviderDTO {
     configured: true,
     modelCallTimeoutMillis: 1800000,
     modelCallIdleTimeoutMillis: 120000,
-    version: 1,
+    version: '1',
     createTime: null,
     updateTime: null,
   }

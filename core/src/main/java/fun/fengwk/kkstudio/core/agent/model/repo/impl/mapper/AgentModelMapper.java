@@ -69,7 +69,7 @@ public interface AgentModelMapper extends BaseMapper {
       update agent_model
       set name = #{model.name}, description = #{model.description},
           config = cast(#{model.configJson} as jsonb),
-          updated_at = current_timestamp, version = version + 1
+          updated_at = greatest(updated_at, current_timestamp), version = version + 1
       where id = #{model.id} and version = #{expectedVersion}
       """)
   int updateById(

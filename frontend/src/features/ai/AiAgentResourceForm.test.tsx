@@ -38,7 +38,7 @@ function modelWithVariants(): AgentModelView {
     name: 'MiniMax',
     description: null,
     config: baseConfig,
-    version: 1,
+    version: '1',
     createTime: null,
     updateTime: null,
   }

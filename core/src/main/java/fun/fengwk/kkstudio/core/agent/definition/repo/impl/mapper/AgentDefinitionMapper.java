@@ -71,7 +71,7 @@ public interface AgentDefinitionMapper extends BaseMapper {
       set name = #{agent.name}, description = #{agent.description},
           system_prompt = #{agent.systemPrompt}, model_id = #{agent.modelId},
           variant = #{agent.variant}, config = cast(#{agent.configJson} as jsonb),
-          updated_at = current_timestamp, version = version + 1
+          updated_at = greatest(updated_at, current_timestamp), version = version + 1
       where id = #{agent.id} and version = #{expectedVersion}
       """)
   int updateById(

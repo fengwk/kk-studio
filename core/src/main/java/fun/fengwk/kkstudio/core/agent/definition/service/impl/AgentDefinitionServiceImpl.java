@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.agent.definition.service.impl;
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import lombok.AllArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +30,7 @@ import fun.fengwk.kkstudio.share.model.AgentDefinitionUpdateDTO;
 public class AgentDefinitionServiceImpl implements AgentDefinitionService {
 
   private static final String RESOURCE = "agent_definition";
+  private static final String MODEL_RESOURCE = "agent_model";
 
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentDefinitionConverter agentDefinitionConverter;
@@ -59,6 +61,9 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     } catch (DuplicateKeyException error) {
       throw new AiDuplicateException(
           RESOURCE, "agent definition name already exists: " + definition.getName(), error);
+    } catch (DataIntegrityViolationException error) {
+      throw new AiResourceNotFoundException(
+          MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + modelId);
     }
     AgentDefinition loaded = agentDefinitionRepository.getById(definition.getId());
     return agentDefinitionConverter.convert(loaded);
@@ -73,6 +78,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     }
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
     AgentDefinition definition = referenceResolver.requireAgent(id);
+    ensureExpectedVersion(definition, id, rawExpected, expected);
     long modelId = parseModelId(updateDTO == null ? null : updateDTO.getModelId());
     referenceResolver.requireModel(modelId);
     String currentName = definition.getName();
@@ -93,6 +99,9 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     } catch (DuplicateKeyException error) {
       throw new AiDuplicateException(
           RESOURCE, "agent definition name already exists: " + definition.getName(), error);
+    } catch (DataIntegrityViolationException error) {
+      throw new AiResourceNotFoundException(
+          MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + modelId);
     }
     AgentDefinition reloaded = agentDefinitionRepository.getById(id);
     return agentDefinitionConverter.convert(reloaded);
@@ -102,7 +111,8 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
   @Transactional
   public void deleteAgent(long id, String expectedVersion) {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
-    referenceResolver.requireAgent(id);
+    AgentDefinition definition = referenceResolver.requireAgent(id);
+    ensureExpectedVersion(definition, id, expectedVersion, expected);
     if (!agentDefinitionRepository.deleteById(id, expected)) {
       AgentDefinition reread = agentDefinitionRepository.getById(id);
       if (reread == null) {
@@ -113,6 +123,17 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
           Long.toString(id),
           expectedVersion,
           CatalogVersions.format(reread.getVersion()));
+    }
+  }
+
+  private static void ensureExpectedVersion(
+      AgentDefinition definition, long id, String expectedVersion, long expected) {
+    if (definition.getVersion() != expected) {
+      throw new AiVersionConflictException(
+          RESOURCE,
+          Long.toString(id),
+          expectedVersion,
+          CatalogVersions.format(definition.getVersion()));
     }
   }
 

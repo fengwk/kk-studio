@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { apiClient } from '@/shared/api/client'
+import { ApiError, apiClient, isConflictError, isVersionConflictError } from '@/shared/api/client'
 
 const axiosMock = vi.hoisted(() => {
   const client = {
@@ -41,6 +41,50 @@ describe('apiClient', () => {
     await expect(normalizeError({ response: { data: { message: 'backend failed' } } })).rejects.toThrow('backend failed')
     await expect(normalizeError({ message: 'network failed' })).rejects.toThrow('network failed')
     await expect(normalizeError({})).rejects.toThrow('请求失败')
+  })
+
+  it('preserves backend code and error context without changing generic conflict handling', async () => {
+    const [unwrap, normalizeError] = axiosMock.client.interceptors.response.use.mock.calls[0]
+
+    let envelopeError: ApiError | undefined
+    try {
+      await unwrap({
+        data: {
+          status: 409,
+          code: 'version_conflict',
+          message: 'stale',
+          errors: { resource: 'agent_model', expectedVersion: '2', actualVersion: '3' },
+        },
+      })
+    } catch (error) {
+      envelopeError = error as ApiError
+    }
+    expect(envelopeError).toMatchObject({
+      status: 409,
+      code: 'version_conflict',
+      errors: { resource: 'agent_model', expectedVersion: '2', actualVersion: '3' },
+    })
+    expect(isConflictError(envelopeError)).toBe(true)
+    expect(isVersionConflictError(envelopeError)).toBe(true)
+
+    let transportError: ApiError | undefined
+    try {
+      await normalizeError({
+        response: {
+          status: 409,
+          data: { code: 'in_use', message: 'referenced', errors: { resource: 'agent_model' } },
+        },
+      })
+    } catch (error) {
+      transportError = error as ApiError
+    }
+    expect(transportError).toMatchObject({
+      status: 409,
+      code: 'in_use',
+      errors: { resource: 'agent_model' },
+    })
+    expect(isConflictError(new ApiError('thread conflict', 409))).toBe(true)
+    expect(isVersionConflictError(transportError)).toBe(false)
   })
 
   it('delegates http requests to axios instance', async () => {

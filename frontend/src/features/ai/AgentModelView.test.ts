@@ -35,7 +35,7 @@ function model(id: string, providerId: string): AgentModelDTO {
     name: id,
     description: null,
     config: baseConfig(),
-    version: 1,
+    version: '1',
     createTime: null,
     updateTime: null,
   }
@@ -51,7 +51,7 @@ function provider(id: string, name: string): AgentProviderDTO {
     configured: true,
     modelCallTimeoutMillis: 1800000,
     modelCallIdleTimeoutMillis: 120000,
-    version: 1,
+    version: '1',
     createTime: null,
     updateTime: null,
   }
