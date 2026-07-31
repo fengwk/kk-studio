@@ -4,10 +4,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
 import {
   filterThreadCommands,
-  firstEnabledThreadCommand,
   threadCommandsForScene,
   THREAD_COMMANDS,
 } from '@/features/ai/runtime/thread-panel/thread-commands'
+import { firstEnabledCommandIndex } from '@/features/ai/runtime/thread-panel/thread-command-navigation'
 
 describe('ThreadComposer and commands', () => {
   it('keeps stable command order and grays unsupported blank-scene commands', () => {
@@ -37,7 +37,7 @@ describe('ThreadComposer and commands', () => {
     expect(filterThreadCommands('tree')[0]?.id).toBe('tree')
     expect(['history', 'branch', 'rebind', 'head'].every((keyword) => filterThreadCommands(keyword).some((command) => command.id === 'tree'))).toBe(true)
     expect(filterThreadCommands('', blank).map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
-    expect(firstEnabledThreadCommand('', blank)?.id).toBe('thread')
+    expect(firstEnabledCommandIndex(blank)).toBe(1)
     expect(filterThreadCommands('missing')).toEqual([])
   })
 

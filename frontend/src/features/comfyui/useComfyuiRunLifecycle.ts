@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { comfyuiService } from '@/shared/api/comfyui-service'
 import { errorMessage, isComfyuiPollingStatus } from '@/features/comfyui/comfyui-utils'
 import type {
+  ComfyuiWorkflowRunFileDTO,
   ComfyuiWorkflowJobDTO,
   ComfyuiWorkflowRunDTO,
 } from '@/shared/api/contracts/comfyui'
-import type { ComfyuiWorkflowRunFileDTO } from '@/shared/api/contracts/storage'
 
 const pollIntervalMillis = 1500
 

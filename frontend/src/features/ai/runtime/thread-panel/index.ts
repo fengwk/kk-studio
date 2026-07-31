@@ -21,7 +21,6 @@ export type {
 export {
   THREAD_COMMANDS,
   filterThreadCommands,
-  firstEnabledThreadCommand,
   threadCommandsForScene,
   type ThreadCommand,
   type ThreadCommandScene,

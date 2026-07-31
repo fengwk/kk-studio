@@ -1,5 +1,4 @@
 import type { BackendDateTime } from '@/shared/api/contracts/base'
-import type { ComfyuiWorkflowRunFileDTO } from '@/shared/api/contracts/storage'
 
 export type ComfyuiWorkflowId = string
 
@@ -43,6 +42,12 @@ export interface ComfyuiWorkflowApiEditablePropertiesDTO {
 
 export type ComfyuiWorkflowApiCreateDTO = ComfyuiWorkflowApiEditablePropertiesDTO
 export type ComfyuiWorkflowApiUpdateDTO = ComfyuiWorkflowApiEditablePropertiesDTO
+
+export interface ComfyuiWorkflowRunFileDTO {
+  key: string
+  filename: string
+  contentType: string
+}
 
 export interface ComfyuiWorkflowRunRequestDTO {
   parameters: Record<string, unknown>

@@ -1,4 +1,4 @@
-import { asRecord, getString } from '@/features/ai/runtime/payload-json'
+import { getString } from '@/features/ai/runtime/payload-json'
 import type { ToolAttachment, ToolAttachmentType } from '@/features/ai/runtime/thread-timeline-types'
 
 export function contentText(content: Record<string, unknown>): string {
@@ -86,8 +86,4 @@ export function formatCompactTokens(count: number): string {
     return `${Math.round(count / 1000)}k`
   }
   return `${(count / 1_000_000).toFixed(1)}M`
-}
-
-export function asRecordOrEmpty(value: unknown): Record<string, unknown> {
-  return asRecord(value)
 }

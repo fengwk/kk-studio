@@ -41,6 +41,24 @@ class ResizeObserverStub {
 
 globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver
 
+// Thread status packing measures text through a 2D canvas context.
+if (typeof HTMLCanvasElement !== 'undefined') {
+  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+    configurable: true,
+    value(contextId: string) {
+      if (contextId !== '2d') {
+        return null
+      }
+      return {
+        font: '',
+        measureText(text: string) {
+          return { width: text.length * 7 }
+        },
+      } as unknown as CanvasRenderingContext2D
+    },
+  })
+}
+
 // React Flow measurement path constructs DOMMatrixReadOnly in jsdom.
 if (typeof globalThis.DOMMatrixReadOnly === 'undefined') {
   class DOMMatrixReadOnlyStub {
