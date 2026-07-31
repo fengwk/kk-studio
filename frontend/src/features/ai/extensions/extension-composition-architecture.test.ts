@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { createApplicationExtensionHost } from '@/app/extension-host'
 import { aiExtension } from '@/features/ai/extensions/ai-extension.definition'
@@ -48,4 +49,40 @@ describe('AI extension composition architecture', () => {
       canvasExtension.pages?.[0].component,
     )
   })
+
+  it('keeps global dialog hooks context-only and feature controllers outside the default path', () => {
+    const chatController = source('../chat/useChatPageController.ts')
+    const chatContext = source('../chat/ChatRuntimeContext.ts')
+    const catalogContext = source('../catalog/CatalogRuntimeContext.ts')
+    const aiExtensionSource = source('./ai-extension.tsx')
+    const comfyuiContext = source('../../comfyui/ComfyuiContext.ts')
+    const comfyuiExtensionSource = source('../../comfyui/extensions/comfyui-extension.tsx')
+
+    expect(chatController).not.toContain('@/features/ai/catalog')
+    expect(chatController).toContain('@/shared/api/agent-service')
+    expect(chatContext).toContain(
+      "import type { ChatPageController } from '@/features/ai/chat/useChatPageController'",
+    )
+    expect(catalogContext).toContain(
+      "import type { CatalogPageController } from '@/features/ai/catalog/useCatalogPageController'",
+    )
+    expect(aiExtensionSource).toContain(
+      "from '@/features/ai/chat/ChatRuntimeContext'",
+    )
+    expect(aiExtensionSource).toContain(
+      "from '@/features/ai/catalog/CatalogRuntimeContext'",
+    )
+    expect(aiExtensionSource).not.toContain('useCatalogPageController')
+    expect(comfyuiContext).toContain(
+      "import type { ComfyuiPageController } from '@/features/comfyui/useComfyuiPageController'",
+    )
+    expect(comfyuiExtensionSource).toContain(
+      "from '@/features/comfyui/ComfyuiContext'",
+    )
+    expect(comfyuiExtensionSource).not.toContain('useComfyuiPageController')
+  })
 })
+
+function source(relativePath: string) {
+  return readFileSync(new URL(relativePath, import.meta.url), 'utf8')
+}

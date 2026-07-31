@@ -4,12 +4,13 @@ import {
   ChatWorkspacePage,
   CreateChatModal,
 } from '@/features/ai/chat'
+import { ChatRuntime } from '@/features/ai/chat/ChatRuntime'
 import {
-  AiConsoleFrame,
-  AiConsoleRuntime,
-  useAiConsole,
-  useOptionalAiConsole,
-} from '@/features/ai/extensions/AiConsoleRuntime'
+  useChatRuntime,
+  useOptionalChatRuntime,
+} from '@/features/ai/chat/ChatRuntimeContext'
+import { useOptionalCatalogRuntime } from '@/features/ai/catalog/CatalogRuntimeContext'
+import { AiConsoleFrame } from '@/features/ai/extensions/AiConsoleFrame'
 import type { ExtensionComponentProps } from '@/platform/extensions/types'
 
 const AgentsPage = lazy(async () => {
@@ -43,17 +44,31 @@ const ConfirmActionModal = lazy(async () => {
 
 export function ChatsPage({ children }: ExtensionComponentProps) {
   return (
-    <AiConsoleRuntime scope="chats">
-      <AiConsoleFrame content={<ChatsPanel />}>
-        {children}
-      </AiConsoleFrame>
-    </AiConsoleRuntime>
+    <ChatRuntime>
+      <ChatsFrame>{children}</ChatsFrame>
+    </ChatRuntime>
   )
 }
 
 function ChatsPanel() {
-  const controller = useAiConsole()
+  const controller = useChatRuntime()
   return <ChatCardsPanel {...controller.chatPanelProps} />
+}
+
+function ChatsFrame({ children }: ExtensionComponentProps) {
+  const controller = useChatRuntime()
+  return (
+    <AiConsoleFrame
+      search={controller.search}
+      onSearchChange={controller.setSearch}
+      busy={controller.busy}
+      error={controller.error}
+      mutationError={controller.mutationError}
+      content={<ChatsPanel />}
+    >
+      {children}
+    </AiConsoleFrame>
+  )
 }
 
 export function AgentsRoute({ children }: ExtensionComponentProps) {
@@ -81,12 +96,12 @@ export function ProvidersRoute({ children }: ExtensionComponentProps) {
 }
 
 export function CreateChatDialog() {
-  const controller = useOptionalAiConsole()
+  const controller = useOptionalChatRuntime()
   return controller ? <CreateChatModal {...controller.createChatModal} /> : null
 }
 
 export function ResourceEditorDialog() {
-  const controller = useOptionalAiConsole()
+  const controller = useOptionalCatalogRuntime()
   if (!controller?.resourceEditorModal.modal) {
     return null
   }
@@ -98,7 +113,7 @@ export function ResourceEditorDialog() {
 }
 
 export function ResourceDeleteDialog() {
-  const controller = useOptionalAiConsole()
+  const controller = useOptionalCatalogRuntime()
   if (!controller?.resourceDeleteConfirmModal.modal) {
     return null
   }

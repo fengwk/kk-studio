@@ -1,36 +1,24 @@
 import { useDeferredValue, useMemo, useState } from 'react'
-import {
-  modelRef,
-  useAiConsoleResourceController,
-  type AgentModelView,
-} from '@/features/ai/catalog'
-import type { AiConsoleResourceQueryEnabled } from '@/features/ai/catalog/useAiConsoleResourceQueries'
+import { toUserFacingErrorMessage } from '@/features/ai/ai-user-facing-error'
 import {
   filterAgents,
   filterModels,
   filterProviders,
 } from '@/features/ai/catalog/catalog-utils'
-import { toUserFacingErrorMessage } from '@/features/ai/catalog/ai-resource-form-validation'
-import { filterChats } from '@/features/ai/chat/chat-utils'
-import { useChatListController } from '@/features/ai/chat'
+import { modelRef, type AgentModelView } from '@/features/ai/catalog/AgentModelView'
+import { useAiConsoleResourceController } from '@/features/ai/catalog/useAiConsoleResourceController'
+import type { AiConsoleResourceQueryEnabled } from '@/features/ai/catalog/useAiConsoleResourceQueries'
 import type {
   AgentDefinitionDTO,
   AgentProviderDTO,
 } from '@/shared/api/contracts/ai-catalog'
-import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 
-export type AiConsolePageScope = 'chats' | 'agents' | 'models' | 'providers'
+export type CatalogPageScope = 'agents' | 'models' | 'providers'
 
 const resourceQueryEnabledByScope: Record<
-  AiConsolePageScope,
+  CatalogPageScope,
   AiConsoleResourceQueryEnabled
 > = {
-  chats: {
-    providers: false,
-    models: false,
-    agents: true,
-    environments: false,
-  },
   agents: {
     providers: true,
     models: true,
@@ -51,32 +39,23 @@ const resourceQueryEnabledByScope: Record<
   },
 }
 
-export function useAiConsoleController(scope: AiConsolePageScope) {
+export function useCatalogPageController(scope: CatalogPageScope) {
   const [search, setSearch] = useState('')
   const deferredSearch = useDeferredValue(search.trim().toLowerCase())
-
   const resourceQueryEnabled = resourceQueryEnabledByScope[scope]
-  const chatsEnabled = scope === 'chats'
   const resourceController = useAiConsoleResourceController(resourceQueryEnabled)
-  const chatController = useChatListController(resourceController.agents, chatsEnabled)
-
-  const filteredChats = useMemo(
-    () => filterChats(chatController.chats, deferredSearch),
-    [chatController.chats, deferredSearch],
-  )
-  const filteredAgents = useMemo(
+  const agents = useMemo(
     () => filterAgents(resourceController.agents, deferredSearch),
     [deferredSearch, resourceController.agents],
   )
-  const filteredModels = useMemo(
+  const models = useMemo(
     () => filterModels(resourceController.models, deferredSearch),
     [deferredSearch, resourceController.models],
   )
-  const filteredProviders = useMemo(
+  const providers = useMemo(
     () => filterProviders(resourceController.providers, deferredSearch),
     [deferredSearch, resourceController.providers],
   )
-
   const queryResults = [
     ...(resourceQueryEnabled.providers ? [resourceController.providersQuery] : []),
     ...(resourceQueryEnabled.models ? [resourceController.modelsQuery] : []),
@@ -84,49 +63,36 @@ export function useAiConsoleController(scope: AiConsolePageScope) {
     ...(resourceQueryEnabled.environments
       ? [resourceController.environmentsQuery]
       : []),
-    ...(chatsEnabled ? [chatController.chatsQuery] : []),
   ]
   const resourceModalOpen = Boolean(resourceController.resourceEditorModal.modal)
-  // 资源编辑模态打开时：本地校验/API 错误都只在模态内展示，页面外层不重复报错。
-  const mutationErrors = [
-    resourceModalOpen ? null : resourceController.resourceMutationError,
-    chatController.chatMutationError,
-  ]
-
-  const busy = queryResults.some((query) => query.isLoading)
-  const error = queryResults.find((query) => query.error)?.error ?? null
   const rawMutationError = resourceModalOpen
     ? null
-    : (mutationErrors.find((candidate) => candidate != null) ?? null)
-  const mutationError = rawMutationError
-    ? new Error(toUserFacingErrorMessage(rawMutationError))
-    : null
+    : resourceController.resourceMutationError
 
   return {
     search,
     setSearch,
-    busy,
-    error,
-    mutationError,
-    chatPanelProps: {
-      chats: filteredChats,
-      agents: resourceController.agents,
-      onCreate: () => chatController.openCreateChat(),
-    },
+    busy: queryResults.some((query) => query.isLoading),
+    error: queryResults.find((query) => query.error)?.error ?? null,
+    mutationError: rawMutationError
+      ? new Error(toUserFacingErrorMessage(rawMutationError))
+      : null,
     agentPanelProps: {
-      agents: filteredAgents,
+      agents,
       models: resourceController.models,
       deletePending: resourceController.agentDeletePending,
       onCreate: resourceController.openCreateAgent,
-      onEdit: (agent: AgentDefinitionDTO) => resourceController.openEditAgent(agent.id),
+      onEdit: (agent: AgentDefinitionDTO) =>
+        resourceController.openEditAgent(agent.id),
       onDelete: (agent: AgentDefinitionDTO) =>
         resourceController.deleteAgent(agent.name, agent.id, agent.version),
     },
     modelPanelProps: {
-      models: filteredModels,
+      models,
       deletePending: resourceController.modelDeletePending,
       onCreate: resourceController.openCreateModel,
-      onEdit: (model: AgentModelView) => resourceController.openEditModel(model.id),
+      onEdit: (model: AgentModelView) =>
+        resourceController.openEditModel(model.id),
       onDelete: (model: AgentModelView) =>
         resourceController.deleteModel(
           model.providerName || String(model.providerId),
@@ -136,17 +102,21 @@ export function useAiConsoleController(scope: AiConsolePageScope) {
         ),
     },
     providerPanelProps: {
-      providers: filteredProviders,
+      providers,
       deletePending: resourceController.providerDeletePending,
       onCreate: resourceController.openCreateProvider,
-      onEdit: (provider: AgentProviderDTO) => resourceController.openEditProvider(provider.id),
+      onEdit: (provider: AgentProviderDTO) =>
+        resourceController.openEditProvider(provider.id),
       onDelete: (provider: AgentProviderDTO) =>
-        resourceController.deleteProvider(provider.name, provider.id, provider.version),
+        resourceController.deleteProvider(
+          provider.name,
+          provider.id,
+          provider.version,
+        ),
     },
-    createChatModal: chatController.createChatModal,
     resourceEditorModal: resourceController.resourceEditorModal,
     resourceDeleteConfirmModal: resourceController.deleteConfirmModal,
   }
 }
 
-export type { ChatDTO }
+export type CatalogPageController = ReturnType<typeof useCatalogPageController>

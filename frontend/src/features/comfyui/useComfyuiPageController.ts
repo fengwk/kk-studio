@@ -41,3 +41,5 @@ export function useComfyuiPageController() {
     comfyuiRunModal: comfyuiController.runModalProps,
   }
 }
+
+export type ComfyuiPageController = ReturnType<typeof useComfyuiPageController>

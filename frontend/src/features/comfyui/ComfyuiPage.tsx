@@ -1,8 +1,9 @@
 import { type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { SearchField, StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
+import { useComfyui } from '@/features/comfyui/ComfyuiContext'
 import { ComfyuiRunModal } from '@/features/comfyui/ComfyuiRunModal'
-import { ComfyuiRuntime, useOptionalComfyui } from '@/features/comfyui/ComfyuiRuntime'
+import { ComfyuiRuntime } from '@/features/comfyui/ComfyuiRuntime'
 import { ComfyuiWorkflowsPanel } from '@/features/comfyui/ComfyuiWorkflowsPanel'
 import type { ExtensionComponentProps } from '@/platform/extensions/types'
 
@@ -19,10 +20,7 @@ function ComfyuiFrame({
   content,
   children,
 }: ExtensionComponentProps & { content: ReactNode }) {
-  const controller = useOptionalComfyui()
-  if (!controller) {
-    throw new Error('ComfyuiRuntime is required')
-  }
+  const controller = useComfyui()
   return (
     <section className="screen active">
       <nav className="subbar">
@@ -63,24 +61,20 @@ function ComfyuiFrame({
 }
 
 function ComfyuiPanel() {
-  const controller = useOptionalComfyui()
-  if (!controller) {
-    throw new Error('ComfyuiRuntime is required')
-  }
+  const controller = useComfyui()
   return <ComfyuiWorkflowsPanel {...controller.comfyuiPanelProps} />
 }
 
 function ComfyuiRunModalHost() {
-  const controller = useOptionalComfyui()
-  const runModal = controller?.comfyuiRunModal
-  const workflow = runModal?.workflow
-  if (!workflow || !runModal) {
+  const controller = useComfyui()
+  const runModal = controller.comfyuiRunModal
+  if (!runModal.workflow) {
     return null
   }
   return (
     <ComfyuiRunModal
-      key={String(workflow.id)}
-      workflow={workflow}
+      key={String(runModal.workflow.id)}
+      workflow={runModal.workflow}
       onClose={runModal.onClose}
     />
   )

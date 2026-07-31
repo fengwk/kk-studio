@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEventHandler } from 'react'
 import { buildResourceSubmitPlan } from '@/features/ai/catalog/ai-resource-editor-submit-plans'
 import type { ConfirmModalState } from '@/shared/ui/console/confirm-modal'
+import { toUserFacingErrorMessage } from '@/features/ai/ai-user-facing-error'
 import {
-  toUserFacingErrorMessage,
   validateResourceDraft,
   type ResourceFieldKey,
 } from '@/features/ai/catalog/ai-resource-form-validation'
