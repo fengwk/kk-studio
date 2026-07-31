@@ -95,7 +95,7 @@ reports/e2e/LATEST_RUN.txt
 | L1 | 默认 | 免费 | seed 契约、CRUD、配置校验、Thread 生命周期与 head 重定位、Thread snapshot 404、proxy |
 | L2 | `--real` | `minimax/MiniMax-M2.7` | 文本轮次 + usage 入账；流式 `/stop` 持久化 partial assistant barrier，并在其后继续 follow-up |
 | L3 | `--real --with-branch` | `minimax/MiniMax-M2.7` | rebind 到历史 Entry 后的分支路径 usage |
-| L4 | `--with-tools` / `--real --with-tools` | daemon / `minimax/MiniMax-M2.7` | Environment READY、tool invocation |
+| L4 | `--with-tools` / `--real --with-tools` | daemon / `minimax/MiniMax-M2.7` | Environment READY；临时 Agent 显式绑定 `read` 后完成 YOLO tool invocation |
 | L5 | `--ui` | 本地浏览器 | 页面可达、列表渲染、打开新建模态、无致命 pageerror；截图入报告 |
 
 API 矩阵注册 **58** 条（以 `./scripts/e2e.sh --list` 为准）。默认执行全部免费 L1（**53** 条）。`--ui` 额外 **14** 条 UI smoke（`--real` 时再 +1 真实首发）。
@@ -188,7 +188,7 @@ API 矩阵注册 **58** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 | `real.stop_partial_continue` | `--real` | 首个非空文本 delta 后 stop；durable `ASSISTANT_ABORTED` 仅含安全 text/thinking；follow-up 位于 barrier 后，旧 debt 不重派 |
 | `branch.path_usage` | `--real --with-branch` | 另一条 Thread rebind 到历史 assistant Entry 后再发一轮；session 去重 vs thread 可重复计共享前缀 |
 | `daemon.ready` | `--with-tools` | Daemon Environment READY |
-| `tool.read_turn` | `--real --with-tools` | YOLO 下 tool invocation |
+| `tool.read_turn` | `--real --with-tools` | 创建仅绑定当前 READY Environment 与 `read` 的临时 MiniMax Agent；YOLO 调用 `read({"path":"."})` 且 invocation `SUCCEEDED` |
 
 ## UI smoke（L5）
 
