@@ -12,18 +12,19 @@ import {
   type SessionTreeFilter,
 } from '@/features/ai/chat/session-entry-tree'
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
+import { useI18n } from '@/shared/i18n'
 
-const FILTERS: Array<{ value: SessionTreeFilter; label: string }> = [
-  { value: 'conversation', label: '对话' },
-  { value: 'all', label: '全部记录' },
+const FILTERS: Array<{ value: SessionTreeFilter; labelKey: string }> = [
+  { value: 'conversation', labelKey: 'ai.chat.history.conversation' },
+  { value: 'all', labelKey: 'ai.chat.history.allRecords' },
 ]
 
-const ENTRY_KIND_LABELS: Record<SessionEntryKind, string> = {
-  user: '用户',
-  assistant: '助手',
-  tool: '工具',
-  custom: '自定义',
-  other: '系统',
+const ENTRY_KIND_LABEL_KEYS: Record<SessionEntryKind, string> = {
+  user: 'ai.chat.history.user',
+  assistant: 'ai.chat.history.assistant',
+  tool: 'ai.chat.history.tool',
+  custom: 'ai.chat.history.custom',
+  other: 'ai.chat.history.system',
 }
 
 export function HistoryBranchPanel({
@@ -47,12 +48,16 @@ export function HistoryBranchPanel({
   /** Relocates the current Thread head onto the selected Entry via PUT /threads/{id}/head. */
   onRebind: (entry: HarnessSessionEntryDTO) => void
 }) {
+  const { t, locale } = useI18n()
   const [filter, setFilter] = useState<SessionTreeFilter>('conversation')
   const [searchQuery, setSearchQuery] = useState('')
   const searchTokens = useMemo(() => parseHistorySearchTokens(searchQuery), [searchQuery])
   const rows = useMemo(
-    () => buildSessionEntryTree(entries, filter, searchTokens),
-    [entries, filter, searchTokens],
+    () => {
+      void locale
+      return buildSessionEntryTree(entries, filter, searchTokens)
+    },
+    [entries, filter, locale, searchTokens],
   )
   const ancestry = useMemo(
     () => activeAncestry(entries, currentHeadEntryId ?? null),
@@ -91,52 +96,54 @@ export function HistoryBranchPanel({
         className="modal-card history-branch-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="历史分支"
+        aria-label={t('ai.chat.history.title')}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <ModalHeader title="历史分支" onClose={effectiveClose} closeDisabled={pending} />
+        <ModalHeader title={t('ai.chat.history.title')} onClose={effectiveClose} closeDisabled={pending} />
         <div className="modal-body history-branch-body">
           <div className="history-branch-controls">
             <select
               className="history-branch-filter"
               value={filter}
-              aria-label="显示记录"
+              aria-label={t('ai.chat.history.filter')}
               disabled={pending}
               onChange={(event) => changeFilter(event.target.value as SessionTreeFilter)}
             >
               {FILTERS.map((item) => (
                 <option key={item.value} value={item.value}>
-                  {item.label}
+                  {t(item.labelKey)}
                 </option>
               ))}
             </select>
             <label className="history-branch-search">
-              <span className="sr-only">搜索记录</span>
+              <span className="sr-only">{t('ai.chat.history.search')}</span>
               <input
                 type="search"
                 value={searchQuery}
-                placeholder="搜索记录"
-                aria-label="搜索记录"
+                placeholder={t('ai.chat.history.search')}
+                aria-label={t('ai.chat.history.search')}
                 disabled={pending}
                 onChange={(event) => changeSearch(event.target.value)}
               />
             </label>
           </div>
-          {loading ? <div className="state-block">正在加载历史分支…</div> : null}
+          {loading ? <div className="state-block">{t('ai.chat.history.loading')}</div> : null}
           {queryError ? (
-            <div className="state-block danger" role="alert">历史分支加载失败</div>
+            <div className="state-block danger" role="alert">{t('ai.chat.history.loadFailed')}</div>
           ) : null}
           {!loading && !queryError && searchTokens.length > 0 && rows.length === 0 ? (
-            <div className="state-block">没有匹配 “{searchQuery.trim()}” 的记录</div>
+            <div className="state-block">
+              {t('ai.chat.history.noMatch', { query: searchQuery.trim() })}
+            </div>
           ) : null}
           {!loading && !queryError && searchTokens.length === 0 && rows.length === 0 ? (
-            <div className="state-block">没有可显示的记录</div>
+            <div className="state-block">{t('ai.chat.history.empty')}</div>
           ) : null}
           {!loading && !queryError && rows.length > 0 ? (
             <div
               className="history-branch-list"
               role="list"
-              aria-label="历史列表"
+              aria-label={t('ai.chat.history.list')}
             >
               {rows.map((row) => (
                 <HistoryBranchRow
@@ -157,7 +164,7 @@ export function HistoryBranchPanel({
         </div>
         <div className="modal-footer history-branch-footer">
           <button type="button" className="ghost-btn" onClick={effectiveClose} disabled={pending}>
-            取消
+            {t('ai.chat.history.cancel')}
           </button>
           <button
             type="button"
@@ -165,7 +172,7 @@ export function HistoryBranchPanel({
             disabled={!canRebind}
             onClick={() => selectedEntry && onRebind(selectedEntry)}
           >
-            从这里继续当前 Thread
+            {t('ai.chat.history.continue')}
           </button>
         </div>
       </section>
@@ -192,8 +199,14 @@ function HistoryBranchRow({
   isHead: boolean
   isBranchable: boolean
 }) {
+  const { t } = useI18n()
   const connectorText = renderTreePrefix(row)
-  const ariaLabel = `${ENTRY_KIND_LABELS[row.kind]} · ${row.preview}${isOnPath ? ' · 当前路径' : ''}${isHead ? ' · 当前线程位置' : ''}`
+  const ariaLabel = t('ai.chat.history.entryAria', {
+    kind: t(ENTRY_KIND_LABEL_KEYS[row.kind]),
+    preview: row.preview,
+    path: isOnPath ? ` · ${t('ai.chat.history.currentPath')}` : '',
+    head: isHead ? ` · ${t('ai.chat.history.currentPosition')}` : '',
+  })
   return (
     <div role="listitem">
       <button
@@ -207,11 +220,15 @@ function HistoryBranchRow({
         onClick={() => onSelect(row.entry)}
       >
         {connectorText ? <span className="history-branch-entry-glyphs" aria-hidden="true">{connectorText}</span> : null}
-        <span className="history-branch-entry-kind">{ENTRY_KIND_LABELS[row.kind]}</span>
+        <span className="history-branch-entry-kind">{t(ENTRY_KIND_LABEL_KEYS[row.kind])}</span>
         <span className="history-branch-entry-sep" aria-hidden="true">·</span>
         <span className="history-branch-entry-preview">{row.preview}</span>
         {isOnPath ? <span className="history-branch-entry-path" aria-hidden="true">•</span> : null}
-        {isHead ? <span className="history-branch-entry-head">当前线程位置</span> : null}
+        {isHead ? (
+          <span className="history-branch-entry-head">
+            {t('ai.chat.history.currentPosition')}
+          </span>
+        ) : null}
       </button>
     </div>
   )

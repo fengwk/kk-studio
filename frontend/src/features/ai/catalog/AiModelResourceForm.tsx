@@ -9,6 +9,7 @@ import { VariantListEditor } from '@/features/ai/catalog/AiVariantListEditor'
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import { FormSelect } from '@/shared/ui/console/FormSelect'
 import type { AgentProviderDTO } from '@/shared/api/contracts/ai-catalog'
+import { useI18n } from '@/shared/i18n'
 
 const AGENT_MODEL_INPUT_MODALITIES: AgentModelInputModality[] = [
   'TEXT',
@@ -21,14 +22,14 @@ const AGENT_MODEL_INPUT_MODALITIES: AgentModelInputModality[] = [
 /** User-editable per-million-token prices; currency / tier metadata is fixed by the wire contract. */
 const PRICING_UNIT_FIELDS: ReadonlyArray<{
   field: keyof ModelPricingDraft
-  label: string
+  labelKey: string
 }> = [
-  { field: 'inputPerMillionTokens', label: 'Input' },
-  { field: 'outputPerMillionTokens', label: 'Output' },
-  { field: 'cacheReadPerMillionTokens', label: 'Cache Read' },
-  { field: 'cacheWritePerMillionTokens', label: 'Cache Write' },
-  { field: 'cacheWriteLongPerMillionTokens', label: 'Long Cache Write' },
-  { field: 'reasoningPerMillionTokens', label: 'Reasoning' },
+  { field: 'inputPerMillionTokens', labelKey: 'ai.catalog.form.inputPrice' },
+  { field: 'outputPerMillionTokens', labelKey: 'ai.catalog.form.outputPrice' },
+  { field: 'cacheReadPerMillionTokens', labelKey: 'ai.catalog.form.cacheReadPrice' },
+  { field: 'cacheWritePerMillionTokens', labelKey: 'ai.catalog.form.cacheWritePrice' },
+  { field: 'cacheWriteLongPerMillionTokens', labelKey: 'ai.catalog.form.longCacheWritePrice' },
+  { field: 'reasoningPerMillionTokens', labelKey: 'ai.catalog.form.reasoningPrice' },
 ]
 
 export function ModelForm({
@@ -44,6 +45,7 @@ export function ModelForm({
   fieldErrors?: Partial<Record<ResourceFieldKey, string>>
   onChange: (draft: ModelDraft) => void
 }) {
+  const { t } = useI18n()
   const variantOptions = variantOptionsFromDraft(draft.variants)
   const selectedDefaultVariant = variantOptions.includes(draft.defaultVariant.trim())
     ? draft.defaultVariant.trim()
@@ -101,9 +103,9 @@ export function ModelForm({
   return (
     <>
       <label className={`form-group${fieldErrors.providerId ? ' is-error' : ''}`}>
-        <FieldLabel required>Provider</FieldLabel>
+        <FieldLabel required>{t('ai.catalog.form.provider')}</FieldLabel>
         <FormSelect
-          aria-label="Provider"
+          aria-label={t('ai.catalog.form.provider')}
           value={draft.providerId}
           required
           disabled={mode === 'edit'}
@@ -114,7 +116,7 @@ export function ModelForm({
       </label>
 
       <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
-        <FieldLabel required>Name</FieldLabel>
+        <FieldLabel required>{t('ai.catalog.form.name')}</FieldLabel>
         <input
           value={draft.name}
           onChange={(event) => onChange({ ...draft, name: event.target.value })}
@@ -125,21 +127,21 @@ export function ModelForm({
       </label>
 
       <label className="form-group">
-        <FieldLabel>Description</FieldLabel>
+        <FieldLabel>{t('ai.catalog.form.description')}</FieldLabel>
         <input
           value={draft.description}
           onChange={(event) => onChange({ ...draft, description: event.target.value })}
-          placeholder="模型说明"
+          placeholder={t('ai.catalog.form.modelDescriptionPlaceholder')}
         />
       </label>
 
       <section className="structured-section" aria-labelledby="model-limit-heading">
         <div className="structured-section-head">
-          <h3 id="model-limit-heading">Limit</h3>
+          <h3 id="model-limit-heading">{t('ai.catalog.form.limit')}</h3>
         </div>
         <div className="form-grid-2">
           <label className={`form-group${fieldErrors.contextWindow ? ' is-error' : ''}`}>
-            <FieldLabel required>Context Window</FieldLabel>
+            <FieldLabel required>{t('ai.catalog.form.contextWindow')}</FieldLabel>
             <input
               type="number"
               inputMode="numeric"
@@ -157,7 +159,7 @@ export function ModelForm({
             ) : null}
           </label>
           <label className={`form-group${fieldErrors.maxOutputTokens ? ' is-error' : ''}`}>
-            <FieldLabel required>Max Output Tokens</FieldLabel>
+            <FieldLabel required>{t('ai.catalog.form.maxOutputTokens')}</FieldLabel>
             <input
               type="number"
               inputMode="numeric"
@@ -179,7 +181,7 @@ export function ModelForm({
 
       <section className="structured-section" aria-labelledby="model-abilities-heading">
         <div className="structured-section-head">
-          <h3 id="model-abilities-heading">功能</h3>
+          <h3 id="model-abilities-heading">{t('ai.catalog.form.abilities')}</h3>
         </div>
         <div className="ability-toggle-row">
           <label className="checkbox-field">
@@ -188,7 +190,7 @@ export function ModelForm({
               checked={draft.tools}
               onChange={(event) => onChange({ ...draft, tools: event.target.checked })}
             />
-            <span>Tools</span>
+            <span>{t('ai.catalog.form.tools')}</span>
           </label>
           <label className="checkbox-field">
             <input
@@ -196,7 +198,7 @@ export function ModelForm({
               checked={draft.reasoning}
               onChange={(event) => setReasoning(event.target.checked)}
             />
-            <span>Reasoning</span>
+            <span>{t('ai.catalog.form.reasoning')}</span>
           </label>
         </div>
       </section>
@@ -204,8 +206,8 @@ export function ModelForm({
       <fieldset
         className={`form-group capability-picker${fieldErrors.inputModalities ? ' is-error' : ''}`}
       >
-        <legend><FieldLabel required>输入类型</FieldLabel></legend>
-        <p className="inline-hint">模型可接受的输入模态；至少保留一种（不能全部取消）。</p>
+        <legend><FieldLabel required>{t('ai.catalog.form.inputTypes')}</FieldLabel></legend>
+        <p className="inline-hint">{t('ai.catalog.form.inputModalityHint')}</p>
         <div className="capability-options">
           {AGENT_MODEL_INPUT_MODALITIES.map((item) => {
             const checked = draft.inputModalities.includes(item)
@@ -231,11 +233,13 @@ export function ModelForm({
         aria-labelledby="model-pricing-heading"
       >
         <div className="structured-section-head">
-          <h3 id="model-pricing-heading">Pricing</h3>
+          <h3 id="model-pricing-heading">{t('ai.catalog.form.pricing')}</h3>
         </div>
-        <p className="inline-hint">单价为 USD / 百万 tokens。币种固定 USD。</p>
+        <p className="inline-hint">{t('ai.catalog.form.priceHint')}</p>
         <div className="form-grid-2">
-          {PRICING_UNIT_FIELDS.map(({ field, label }) => (
+          {PRICING_UNIT_FIELDS.map(({ field, labelKey }) => {
+            const label = t(labelKey)
+            return (
             <label className="form-group" key={field}>
               <FieldLabel required>{label}</FieldLabel>
               <div className="price-input">
@@ -253,22 +257,23 @@ export function ModelForm({
                   }
                   placeholder="0"
                   required
-                  aria-label={`${label} USD per million tokens`}
+                  aria-label={t('ai.catalog.form.priceAriaLabel', { label })}
                 />
                 <span className="price-suffix" aria-hidden="true">
-                  /1M
+                  {t('ai.catalog.form.priceSuffix')}
                 </span>
               </div>
             </label>
-          ))}
+            )
+          })}
         </div>
         {fieldErrors.pricing ? <span className="field-error">{fieldErrors.pricing}</span> : null}
       </section>
 
       <label className={`form-group${fieldErrors.defaultVariant ? ' is-error' : ''}`}>
-        <FieldLabel required>Default Variant</FieldLabel>
+        <FieldLabel required>{t('ai.catalog.form.defaultVariant')}</FieldLabel>
         <FormSelect
-          aria-label="Default Variant"
+          aria-label={t('ai.catalog.form.defaultVariant')}
           value={selectedDefaultVariant}
           options={variantOptions.map((name) => ({ value: name, label: name }))}
           onChange={(defaultVariant) => onChange({ ...draft, defaultVariant })}
@@ -284,7 +289,7 @@ export function ModelForm({
         }
       >
         <VariantListEditor
-          label="Variants"
+          label={t('ai.catalog.form.variants')}
           variants={draft.variants}
           defaultVariant={selectedDefaultVariant}
           reasoning={draft.reasoning}

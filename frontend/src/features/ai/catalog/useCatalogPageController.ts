@@ -12,6 +12,7 @@ import type {
   AgentDefinitionDTO,
   AgentProviderDTO,
 } from '@/shared/api/contracts/ai-catalog'
+import { useI18n } from '@/shared/i18n'
 
 export type CatalogPageScope = 'agents' | 'models' | 'providers'
 
@@ -40,6 +41,7 @@ const resourceQueryEnabledByScope: Record<
 }
 
 export function useCatalogPageController(scope: CatalogPageScope) {
+  const { locale } = useI18n()
   const [search, setSearch] = useState('')
   const deferredSearch = useDeferredValue(search.trim().toLowerCase())
   const resourceQueryEnabled = resourceQueryEnabledByScope[scope]
@@ -68,15 +70,20 @@ export function useCatalogPageController(scope: CatalogPageScope) {
   const rawMutationError = resourceModalOpen
     ? null
     : resourceController.resourceMutationError
+  const mutationError = useMemo(
+    () => {
+      void locale
+      return rawMutationError ? new Error(toUserFacingErrorMessage(rawMutationError)) : null
+    },
+    [locale, rawMutationError],
+  )
 
   return {
     search,
     setSearch,
     busy: queryResults.some((query) => query.isLoading),
     error: queryResults.find((query) => query.error)?.error ?? null,
-    mutationError: rawMutationError
-      ? new Error(toUserFacingErrorMessage(rawMutationError))
-      : null,
+    mutationError,
     agentPanelProps: {
       agents,
       models: resourceController.models,

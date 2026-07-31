@@ -8,6 +8,7 @@ import {
   toEditableProvider,
   toEditableProviderUpdate,
 } from '@/features/ai/catalog/ai-resource-draft-codecs'
+import { translate } from '@/shared/i18n'
 
 export type ResourceFieldKey =
   | 'name'
@@ -41,7 +42,7 @@ function mapError(error: unknown): ResourceFormValidationResult {
     return {
       ok: false,
       message,
-      fields: { reasoningEffort: '请填写思考强度', variants: message },
+      fields: { reasoningEffort: translate('ai.catalog.form.reasoningEffortError'), variants: message },
     }
   }
   if (/^variant must not be blank$/i.test(raw)) {
@@ -98,7 +99,11 @@ export function validateResourceDraft(
   try {
     if (modal.kind === 'provider') {
       if (!drafts.providerDraft.name.trim()) {
-        return { ok: false, message: '请填写 Provider 名称', fields: { name: '请填写名称' } }
+        return {
+          ok: false,
+          message: translate('ai.catalog.validation.providerName'),
+          fields: { name: translate('ai.catalog.validation.name') },
+        }
       }
       if (modal.mode === 'edit') {
         toEditableProviderUpdate(drafts.providerDraft)
@@ -132,29 +137,37 @@ export function validateResourceDraft(
       if (ids.length === 0) {
         return {
           ok: false,
-          message: '请至少添加一个 Variant',
-          fields: { variants: '请添加 Variant' },
+          message: translate('ai.catalog.validation.variantAddOne'),
+          fields: { variants: translate('ai.catalog.validation.addVariant') },
         }
       }
       if (!ids.includes(modelDraft.defaultVariant.trim())) {
         return {
           ok: false,
-          message: '请选择一个有效的默认 Variant',
-          fields: { defaultVariant: '请选择默认 Variant' },
+          message: translate('ai.catalog.validation.defaultVariant'),
+          fields: { defaultVariant: translate('ai.catalog.validation.defaultVariantField') },
         }
       }
 
       if (!modelDraft.name.trim()) {
-        return { ok: false, message: '请填写 Model 名称', fields: { name: '请填写名称' } }
+        return {
+          ok: false,
+          message: translate('ai.catalog.validation.modelName'),
+          fields: { name: translate('ai.catalog.validation.name') },
+        }
       }
       if (!modelDraft.providerId.trim()) {
-        return { ok: false, message: '请选择 Provider', fields: { providerId: '请选择 Provider' } }
+        return {
+          ok: false,
+          message: translate('ai.catalog.validation.provider'),
+          fields: { providerId: translate('ai.catalog.validation.provider') },
+        }
       }
       if (modelDraft.inputModalities.length === 0) {
         return {
           ok: false,
-          message: '请至少选择一种输入类型（建议保留 TEXT）',
-          fields: { inputModalities: '请至少选择一种输入类型' },
+          message: translate('ai.catalog.validation.inputModality'),
+          fields: { inputModalities: translate('ai.catalog.validation.inputModality') },
         }
       }
       // 写回 Reasoning effort 补全结果，供后续 submit 使用。
@@ -169,10 +182,18 @@ export function validateResourceDraft(
     }
 
     if (!drafts.agentDraft.name.trim()) {
-      return { ok: false, message: '请填写 Agent 名称', fields: { name: '请填写名称' } }
+      return {
+        ok: false,
+        message: translate('ai.catalog.validation.agentName'),
+        fields: { name: translate('ai.catalog.validation.name') },
+      }
     }
     if (!drafts.agentDraft.modelId.trim()) {
-      return { ok: false, message: '请选择 Model', fields: { modelId: '请选择 Model' } }
+      return {
+        ok: false,
+        message: translate('ai.catalog.validation.agentModel'),
+        fields: { modelId: translate('ai.catalog.validation.agentModel') },
+      }
     }
     if (modal.mode === 'edit') {
       toEditableAgentUpdate(drafts.agentDraft)

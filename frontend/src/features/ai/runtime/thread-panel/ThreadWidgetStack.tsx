@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { ThreadWorkingStatus } from '@/features/ai/runtime/thread-panel/ThreadWorkingStatus'
 import type { QueuedThreadMessage } from '@/features/ai/runtime/thread-timeline-types'
+import { useI18n } from '@/shared/i18n'
 
 /**
  * Component zone under the dialogue transcript.
@@ -17,6 +18,7 @@ export function ThreadWidgetStack({
   queuedMessages?: QueuedThreadMessage[]
   children?: ReactNode
 }) {
+  const { t } = useI18n()
   const hasQueuedMessages = queuedMessages.length > 0
   const showWorking = working
 
@@ -26,13 +28,13 @@ export function ThreadWidgetStack({
   }
 
   return (
-    <section className="thread-widget-zone" aria-label="会话组件区">
+    <section className="thread-widget-zone" aria-label={t('ai.runtime.thread.widgetZone')}>
       <ThreadWorkingStatus active={showWorking} />
       {hasQueuedMessages ? (
-        <ol className="thread-input-queue" aria-label="等待处理的消息">
+        <ol className="thread-input-queue" aria-label={t('ai.runtime.thread.queue')}>
           {queuedMessages.map((message) => (
             <li key={message.inputId} className="thread-input-queue-item">
-              <span className="thread-input-queue-label">queued</span>
+              <span className="thread-input-queue-label">{t('ai.runtime.thread.queued')}</span>
               <span className="thread-input-queue-content">{message.text}</span>
             </li>
           ))}

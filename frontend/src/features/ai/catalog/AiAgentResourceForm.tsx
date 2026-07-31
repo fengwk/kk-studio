@@ -15,6 +15,7 @@ import type {
   AgentDefinitionDTO,
 } from '@/shared/api/contracts/ai-catalog'
 import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import { translate, useI18n } from '@/shared/i18n'
 
 function toggleName(items: string[], name: string): string[] {
   return items.includes(name) ? items.filter((item) => item !== name) : [...items, name]
@@ -34,6 +35,7 @@ export function AgentForm({
   fieldErrors?: Partial<Record<ResourceFieldKey, string>>
   onChange: (draft: AgentDraft) => void
 }) {
+  const { t } = useI18n()
   const selectedModel = models.find((model) => String(model.id) === draft.modelId)
   const variantOptions = variantOptionsFromModel(selectedModel)
   const selectedVariant = draft.variant.trim()
@@ -57,18 +59,22 @@ export function AgentForm({
   return (
     <>
       <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
-        <FieldLabel required>Name</FieldLabel>
+        <FieldLabel required>{t('ai.catalog.form.name')}</FieldLabel>
         <input value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} placeholder="default-assistant" required />
         {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}
       </label>
       <label className="form-group">
-        <FieldLabel>Description</FieldLabel>
-        <input value={draft.description} onChange={(event) => onChange({ ...draft, description: event.target.value })} placeholder="用途说明" />
+        <FieldLabel>{t('ai.catalog.form.description')}</FieldLabel>
+        <input
+          value={draft.description}
+          onChange={(event) => onChange({ ...draft, description: event.target.value })}
+          placeholder={t('ai.catalog.form.descriptionPlaceholder')}
+        />
       </label>
       <label className={`form-group${fieldErrors.modelId ? ' is-error' : ''}`}>
-        <FieldLabel required>Default Model</FieldLabel>
+        <FieldLabel required>{t('ai.catalog.form.defaultModel')}</FieldLabel>
         <FormSelect
-          aria-label="Default Model"
+          aria-label={t('ai.catalog.form.defaultModel')}
           value={draft.modelId}
           required
           options={models.map((model) => ({
@@ -80,14 +86,14 @@ export function AgentForm({
         {fieldErrors.modelId ? <span className="field-error">{fieldErrors.modelId}</span> : null}
       </label>
       <label className={`form-group${fieldErrors.variant ? ' is-error' : ''}`}>
-        <FieldLabel>Default Variant Override</FieldLabel>
+        <FieldLabel>{t('ai.catalog.form.defaultVariantOverride')}</FieldLabel>
         <FormSelect
-          aria-label="Default Variant Override"
+          aria-label={t('ai.catalog.form.defaultVariantOverride')}
           value={selectedVariant}
           disabled={models.length === 0}
-          placeholder="（使用模型默认）"
+          placeholder={t('ai.catalog.form.useModelDefault')}
           options={[
-            { value: '', label: '（使用模型默认）' },
+            { value: '', label: t('ai.catalog.form.useModelDefault') },
             ...variantOptions.map((variantName) => ({ value: variantName, label: variantName })),
           ]}
           onChange={(variant) => onChange({ ...draft, variant })}
@@ -95,18 +101,23 @@ export function AgentForm({
         {fieldErrors.variant ? <span className="field-error">{fieldErrors.variant}</span> : null}
       </label>
       <label className="form-group">
-        <FieldLabel>System Prompt</FieldLabel>
-        <textarea value={draft.systemPrompt} onChange={(event) => onChange({ ...draft, systemPrompt: event.target.value })} placeholder="系统提示词" rows={4} />
+        <FieldLabel>{t('ai.catalog.form.systemPrompt')}</FieldLabel>
+        <textarea
+          value={draft.systemPrompt}
+          onChange={(event) => onChange({ ...draft, systemPrompt: event.target.value })}
+          placeholder={t('ai.catalog.form.systemPromptPlaceholder')}
+          rows={4}
+        />
       </label>
 
       <label className={`form-group${fieldErrors.environmentName ? ' is-error' : ''}`}>
-        <FieldLabel>Environment</FieldLabel>
+        <FieldLabel>{t('ai.catalog.form.environment')}</FieldLabel>
         <FormSelect
-          aria-label="Environment"
+          aria-label={t('ai.catalog.form.environment')}
           value={draft.environmentName}
-          placeholder="（无）"
+          placeholder={t('ai.catalog.form.none')}
           options={[
-            { value: '', label: '（无）' },
+            { value: '', label: t('ai.catalog.form.none') },
             ...readyEnvironments.map((environment) => ({
               value: environment.name,
               label: environment.name,
@@ -115,7 +126,11 @@ export function AgentForm({
               ? [
                   {
                     value: draft.environmentName,
-                    label: `${draft.environmentName}${environmentMissing ? '（缺失）' : '（离线）'}`,
+                    label: `${draft.environmentName}（${
+                      environmentMissing
+                        ? t('ai.catalog.form.unavailable')
+                        : t('ai.catalog.form.offline')
+                    }）`,
                   },
                 ]
               : []),
@@ -127,26 +142,26 @@ export function AgentForm({
         ) : null}
       </label>
       <div className="inline-hint" role="note">
-        切换 Environment 只会刷新可选 Tools/Skills 列表；已勾选项会尽量保留，不会自动清空。离线/暂不可用项置灰，仍可取消勾选并保存。
+        {t('ai.catalog.form.environmentHint')}
       </div>
 
       <fieldset className={`form-group capability-picker${fieldErrors.tools ? ' is-error' : ''}`}>
-        <legend>Tools</legend>
+        <legend>{t('ai.catalog.form.tools')}</legend>
         <CapabilityChecklist
           options={toolCandidates}
           selected={draft.tools}
-          emptyText="暂无候选 Tools"
+          emptyText={t('ai.catalog.form.noCandidateTools')}
           onToggle={(name) => onChange({ ...draft, tools: toggleName(draft.tools, name) })}
         />
         {fieldErrors.tools ? <span className="field-error">{fieldErrors.tools}</span> : null}
       </fieldset>
 
       <fieldset className={`form-group capability-picker${fieldErrors.skills ? ' is-error' : ''}`}>
-        <legend>Skills</legend>
+        <legend>{t('ai.catalog.card.skills')}</legend>
         <CapabilityChecklist
           options={skillCandidates}
           selected={draft.skills}
-          emptyText="暂无候选 Skills"
+          emptyText={t('ai.catalog.form.noCandidateSkills')}
           onToggle={(name) => onChange({ ...draft, skills: toggleName(draft.skills, name) })}
         />
         {fieldErrors.skills ? <span className="field-error">{fieldErrors.skills}</span> : null}
@@ -154,12 +169,12 @@ export function AgentForm({
 
       {models.length === 0 && (
         <div className="inline-hint" role="status">
-          需要先创建 Model 才能配置 Agent。
+          {t('ai.catalog.form.needModel')}
         </div>
       )}
       {models.length > 0 && !draft.modelId && (
         <button className="ghost-inline-btn" type="button" onClick={() => onChange(emptyAgentDraft(models[0]))}>
-          使用第一个 Model 填充默认配置
+          {t('ai.catalog.form.fillFirstModel')}
         </button>
       )}
     </>
@@ -213,8 +228,8 @@ function CapabilityChecklist({
                 <input type="checkbox" checked={checked} onChange={() => onToggle(option.name)} />
                 <span>
                   <code className="capability-name">{label}</code>
-                  {option.missing ? <small>不可用</small> : null}
-                  {!option.missing && option.offline ? <small>offline</small> : null}
+                  {option.missing ? <small>{translate('ai.catalog.form.unavailable')}</small> : null}
+                  {!option.missing && option.offline ? <small>{translate('ai.catalog.form.offline')}</small> : null}
                 </span>
               </label>
             )

@@ -1,5 +1,6 @@
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/runtime/payload-json'
+import { translate } from '@/shared/i18n'
 
 export type SessionTreeFilter = 'conversation' | 'all'
 
@@ -236,7 +237,7 @@ function sessionEntryText(entry: HarnessSessionEntryDTO): string {
 /** Single-line preview used by the tree row. Explicit `thinking` blocks are excluded. */
 function sessionEntryPreview(entry: HarnessSessionEntryDTO, limit: number = PROJECTED_PREVIEW_LIMIT): string {
   const flat = flattenVisibleText(sessionEntryVisibleText(entry))
-  return flat ? truncatePreview(flat, limit) : '无正文'
+  return flat ? truncatePreview(flat, limit) : translate('ai.chat.history.noBody')
 }
 
 /** Lower-cased visible text used for keyword matching. Preview limits never apply to search. */

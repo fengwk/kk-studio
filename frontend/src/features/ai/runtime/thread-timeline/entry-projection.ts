@@ -10,6 +10,7 @@ import {
   projectUnsupportedMessageEntry,
 } from '@/features/ai/runtime/thread-timeline/entry-event-projection'
 import { projectTurnUsageFromAssistantMetadata } from '@/features/ai/runtime/thread-timeline/meta-projection'
+import { translate } from '@/shared/i18n'
 
 export function projectDurableEntry(
   entry: HarnessSessionEntryDTO,
@@ -32,7 +33,7 @@ export function projectDurableEntry(
       id: entry.entryId,
       role: 'assistant',
       subjectEntryId: entry.entryId,
-      text: getString(error.message) || '助手请求失败',
+      text: getString(error.message) || translate('ai.runtime.entry.assistantRequestFailed'),
       createdAt: entry.createTime,
       status: 'error',
     })
@@ -182,7 +183,7 @@ function projectToolResult(
     arguments: argumentsJson,
     text: contents.map(contentText).filter(Boolean).join('\n'),
     attachments: contents.flatMap(toArtifactAttachment),
-    errorMessage: error ? '工具执行失败。' : undefined,
+    errorMessage: error ? translate('ai.runtime.entry.toolFailed') : undefined,
     createdAt: entry.createTime,
     status: error ? 'error' : 'done',
   }

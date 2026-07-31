@@ -4,6 +4,7 @@ import {
   StateBlock,
 } from '@/shared/ui/console/AiConsoleCommonCards'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
+import { useI18n } from '@/shared/i18n'
 
 export function AiConsoleFrame({
   search,
@@ -22,6 +23,8 @@ export function AiConsoleFrame({
   content: ReactNode
   children?: ReactNode
 }) {
+  const { t } = useI18n()
+
   return (
     <section className="screen active">
       <nav className="subbar">
@@ -29,16 +32,16 @@ export function AiConsoleFrame({
         <SearchField value={search} onChange={onSearchChange} />
       </nav>
       <div className="screen-body">
-        {busy && <StateBlock title="正在加载资源" />}
+        {busy && <StateBlock title={t('ai.common.loadingResources')} />}
         {Boolean(error) && (
           <StateBlock
-            title={error instanceof Error ? error.message : '资源加载失败'}
+            title={error instanceof Error ? error.message : t('ai.common.resourceLoadFailed')}
             tone="danger"
           />
         )}
         {mutationError && (
           <StateBlock
-            title={mutationError.message || '操作失败，请稍后重试'}
+            title={mutationError.message || t('ai.common.operationFailed')}
             tone="danger"
           />
         )}

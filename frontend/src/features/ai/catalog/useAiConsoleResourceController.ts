@@ -13,10 +13,12 @@ import {
   useAiConsoleResourceQueries,
   type AiConsoleResourceQueryEnabled,
 } from '@/features/ai/catalog/useAiConsoleResourceQueries'
+import { useI18n } from '@/shared/i18n'
 
 export function useAiConsoleResourceController(
   enabled: AiConsoleResourceQueryEnabled,
 ) {
+  const { t, locale } = useI18n()
   const [deleteConfirm, setDeleteConfirm] = useState<ConfirmModalState | null>(null)
   const [formError, setFormError] = useState<string>('')
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<ResourceFieldKey, string>>>({})
@@ -39,9 +41,9 @@ export function useAiConsoleResourceController(
 
   function deleteProvider(providerName: string, providerId: AgentResourceId, expectedVersion: string) {
     setDeleteConfirm({
-      title: '删除 Provider',
-      description: `将删除 Provider ${providerName}。`,
-      confirmLabel: '确认删除',
+      title: t('ai.catalog.deleteProviderTitle'),
+      description: t('ai.catalog.deleteProviderDescription', { name: providerName }),
+      confirmLabel: t('ai.catalog.action.confirmDelete'),
       tone: 'danger',
       onConfirm: () => mutations.deleteProvider(providerId, expectedVersion),
     })
@@ -54,9 +56,11 @@ export function useAiConsoleResourceController(
     expectedVersion: string,
   ) {
     setDeleteConfirm({
-      title: '删除 Model',
-      description: `将删除 Model ${modelName.includes('/') ? modelName : `${providerName}/${modelName}`}。`,
-      confirmLabel: '确认删除',
+      title: t('ai.catalog.deleteModelTitle'),
+      description: t('ai.catalog.deleteModelDescription', {
+        name: modelName.includes('/') ? modelName : `${providerName}/${modelName}`,
+      }),
+      confirmLabel: t('ai.catalog.action.confirmDelete'),
       tone: 'danger',
       onConfirm: () => mutations.deleteModel(modelId, expectedVersion),
     })
@@ -64,9 +68,9 @@ export function useAiConsoleResourceController(
 
   function deleteAgent(agentName: string, agentId: AgentResourceId, expectedVersion: string) {
     setDeleteConfirm({
-      title: '删除 Agent',
-      description: `将删除 Agent ${agentName}。已有会话会保留，但不能再用该 Agent 新建运行。`,
-      confirmLabel: '确认删除',
+      title: t('ai.catalog.deleteAgentTitle'),
+      description: t('ai.catalog.deleteAgentDescription', { name: agentName }),
+      confirmLabel: t('ai.catalog.action.confirmDelete'),
       tone: 'danger',
       onConfirm: () => mutations.deleteAgent(agentId, expectedVersion),
     })
@@ -88,7 +92,7 @@ export function useAiConsoleResourceController(
     setFieldErrors((current) =>
       Object.keys(current).length > 0 ? current : { general: message },
     )
-  }, [editorState.resourceModal, mutations.resourceMutationError])
+  }, [editorState.resourceModal, mutations.resourceMutationError, locale])
 
   const submitResource: FormEventHandler<HTMLFormElement> = (event) => {
     event.preventDefault()

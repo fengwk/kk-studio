@@ -4,6 +4,7 @@ import {
   type ThreadStatusModelInput,
 } from '@/features/ai/runtime/thread-panel/thread-status-format'
 import { ThreadStatusSegmentRows } from '@/features/ai/runtime/thread-panel/thread-status-segments'
+import { useI18n } from '@/shared/i18n'
 
 /**
  * Footer：agent | model | usage
@@ -24,9 +25,11 @@ export function ThreadStatusFooter({
   onModelClick,
   onVariantClick,
 }: ThreadStatusModelInput) {
+  const { t, locale } = useI18n()
   const model = useMemo(
-    () =>
-      buildThreadStatusModel({
+    () => {
+      void locale
+      return buildThreadStatusModel({
         agentName,
         providerName,
         modelName,
@@ -37,8 +40,10 @@ export function ThreadStatusFooter({
         onAgentClick,
         onModelClick,
         onVariantClick,
-      }),
+      })
+    },
     [
+      locale,
       agentName,
       providerName,
       modelName,
@@ -53,7 +58,7 @@ export function ThreadStatusFooter({
   )
 
   return (
-    <footer className="thread-status-footer" aria-label="会话状态">
+    <footer className="thread-status-footer" aria-label={t('ai.runtime.thread.status')}>
       <ThreadStatusSegmentRows segments={model.segments} />
     </footer>
   )

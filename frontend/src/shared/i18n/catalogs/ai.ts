@@ -1,8 +1,1532 @@
 import type { LocaleCatalog } from '@/shared/i18n/types'
 
 export const aiCatalog = {
+  'ai.nav.chats': {
+    'en-US': 'Chat',
+    'zh-CN': 'Chat',
+  },
+  'ai.nav.agents': {
+    'en-US': 'Agent',
+    'zh-CN': 'Agent',
+  },
+  'ai.nav.models': {
+    'en-US': 'Model',
+    'zh-CN': 'Model',
+  },
+  'ai.nav.providers': {
+    'en-US': 'Provider',
+    'zh-CN': 'Provider',
+  },
+  'ai.nav.environments': {
+    'en-US': 'Environment',
+    'zh-CN': 'Environment',
+  },
   'ai.nav.setting': {
     'en-US': 'Setting',
     'zh-CN': '设置',
+  },
+  'ai.common.loadingResources': {
+    'en-US': 'Loading resources',
+    'zh-CN': '正在加载资源',
+  },
+  'ai.common.resourceLoadFailed': {
+    'en-US': 'Failed to load resources',
+    'zh-CN': '资源加载失败',
+  },
+  'ai.common.operationFailed': {
+    'en-US': 'Operation failed. Please try again.',
+    'zh-CN': '操作失败，请稍后重试',
+  },
+  'ai.common.loadingAgent': {
+    'en-US': 'Loading Agent',
+    'zh-CN': '正在加载 Agent',
+  },
+  'ai.common.loadingModel': {
+    'en-US': 'Loading Model',
+    'zh-CN': '正在加载 Model',
+  },
+  'ai.common.loadingProvider': {
+    'en-US': 'Loading Provider',
+    'zh-CN': '正在加载 Provider',
+  },
+  'ai.common.loadingEnvironment': {
+    'en-US': 'Loading Environment',
+    'zh-CN': '正在加载 Environment',
+  },
+  'ai.common.loadingSettings': {
+    'en-US': 'Loading settings',
+    'zh-CN': '正在加载设置',
+  },
+  'ai.common.loadingResourceEditor': {
+    'en-US': 'Loading resource editor',
+    'zh-CN': '正在加载资源编辑器',
+  },
+  'ai.common.loadingConfirmDialog': {
+    'en-US': 'Loading confirmation dialog',
+    'zh-CN': '正在加载确认对话框',
+  },
+  'ai.catalog.createAgent': {
+    'en-US': 'Create Agent',
+    'zh-CN': '新建 Agent',
+  },
+  'ai.catalog.createPrefix': {
+    'en-US': 'Create',
+    'zh-CN': '新建',
+  },
+  'ai.catalog.editPrefix': {
+    'en-US': 'Edit',
+    'zh-CN': '编辑',
+  },
+  'ai.catalog.createAgentDescription': {
+    'en-US': 'Combine Model, Environment, tools, skills, and policy',
+    'zh-CN': '配置聚合：Model / Environment / tools / skills / policy',
+  },
+  'ai.catalog.createModel': {
+    'en-US': 'Create Model',
+    'zh-CN': '新建 Model',
+  },
+  'ai.catalog.createModelDescription': {
+    'en-US': 'Define model information and variants',
+    'zh-CN': '定义模型信息与 variants',
+  },
+  'ai.catalog.createProvider': {
+    'en-US': 'Create Provider',
+    'zh-CN': '新建 Provider',
+  },
+  'ai.catalog.createProviderDescription': {
+    'en-US': 'Configure provider and credentials',
+    'zh-CN': '配置供应商与凭据',
+  },
+  'ai.catalog.action.createSession': {
+    'en-US': 'Start session',
+    'zh-CN': '创建会话',
+  },
+  'ai.catalog.action.enterConversation': {
+    'en-US': 'Open chat',
+    'zh-CN': '进入对话',
+  },
+  'ai.catalog.action.edit': {
+    'en-US': 'Edit',
+    'zh-CN': '编辑',
+  },
+  'ai.catalog.action.delete': {
+    'en-US': 'Delete',
+    'zh-CN': '删除',
+  },
+  'ai.catalog.action.confirmCreate': {
+    'en-US': 'Create',
+    'zh-CN': '确认创建',
+  },
+  'ai.catalog.action.saveChanges': {
+    'en-US': 'Save changes',
+    'zh-CN': '保存修改',
+  },
+  'ai.catalog.action.confirmDelete': {
+    'en-US': 'Delete',
+    'zh-CN': '确认删除',
+  },
+  'ai.catalog.card.defaultModel': {
+    'en-US': 'Default Model',
+    'zh-CN': 'Default Model',
+  },
+  'ai.catalog.card.variant': {
+    'en-US': 'Variant',
+    'zh-CN': 'Variant',
+  },
+  'ai.catalog.card.modelDefault': {
+    'en-US': 'Model default',
+    'zh-CN': '模型默认',
+  },
+  'ai.catalog.card.environment': {
+    'en-US': 'Environment',
+    'zh-CN': 'Env',
+  },
+  'ai.catalog.card.tools': {
+    'en-US': 'Tools',
+    'zh-CN': 'Tools',
+  },
+  'ai.catalog.card.skills': {
+    'en-US': 'Skills',
+    'zh-CN': 'Skills',
+  },
+  'ai.catalog.card.ref': {
+    'en-US': 'Ref',
+    'zh-CN': 'Ref',
+  },
+  'ai.catalog.card.limit': {
+    'en-US': 'Limit',
+    'zh-CN': 'Limit',
+  },
+  'ai.catalog.card.ability': {
+    'en-US': 'Ability',
+    'zh-CN': 'Ability',
+  },
+  'ai.catalog.card.default': {
+    'en-US': 'Default',
+    'zh-CN': 'Default',
+  },
+  'ai.catalog.card.variants': {
+    'en-US': 'Variants',
+    'zh-CN': 'Variants',
+  },
+  'ai.catalog.card.type': {
+    'en-US': 'Type',
+    'zh-CN': 'Type',
+  },
+  'ai.catalog.card.url': {
+    'en-US': 'URL',
+    'zh-CN': 'URL',
+  },
+  'ai.catalog.card.apiKey': {
+    'en-US': 'API Key',
+    'zh-CN': 'API Key',
+  },
+  'ai.catalog.card.timeout': {
+    'en-US': 'Timeout',
+    'zh-CN': 'Timeout',
+  },
+  'ai.catalog.card.idle': {
+    'en-US': 'Idle',
+    'zh-CN': 'Idle',
+  },
+  'ai.catalog.card.configured': {
+    'en-US': 'Configured',
+    'zh-CN': '已配置',
+  },
+  'ai.catalog.card.unconfiguredApiKey': {
+    'en-US': 'No API key (unauthenticated request)',
+    'zh-CN': '无 API Key（无认证请求）',
+  },
+  'ai.catalog.card.emptyValue': {
+    'en-US': '—',
+    'zh-CN': '—',
+  },
+  'ai.catalog.card.unknownModel': {
+    'en-US': 'unknown-model',
+    'zh-CN': 'unknown-model',
+  },
+  'ai.catalog.card.contextLimit': {
+    'en-US': 'ctx {{value}}',
+    'zh-CN': 'ctx {{value}}',
+  },
+  'ai.catalog.card.outputLimit': {
+    'en-US': 'out {{value}}',
+    'zh-CN': 'out {{value}}',
+  },
+  'ai.catalog.card.seconds': {
+    'en-US': '{{value}}s',
+    'zh-CN': '{{value}}s',
+  },
+  'ai.catalog.card.milliseconds': {
+    'en-US': '{{value}}ms',
+    'zh-CN': '{{value}}ms',
+  },
+  'ai.catalog.card.toolsAbility': {
+    'en-US': 'tools',
+    'zh-CN': 'tools',
+  },
+  'ai.catalog.card.reasoningAbility': {
+    'en-US': 'reasoning',
+    'zh-CN': 'reasoning',
+  },
+  'ai.catalog.form.name': {
+    'en-US': 'Name',
+    'zh-CN': 'Name',
+  },
+  'ai.catalog.form.description': {
+    'en-US': 'Description',
+    'zh-CN': 'Description',
+  },
+  'ai.catalog.form.descriptionPlaceholder': {
+    'en-US': 'Purpose or description',
+    'zh-CN': '用途说明',
+  },
+  'ai.catalog.form.modelDescriptionPlaceholder': {
+    'en-US': 'Model description',
+    'zh-CN': '模型说明',
+  },
+  'ai.catalog.form.defaultModel': {
+    'en-US': 'Default Model',
+    'zh-CN': 'Default Model',
+  },
+  'ai.catalog.form.defaultVariantOverride': {
+    'en-US': 'Default Variant Override',
+    'zh-CN': 'Default Variant Override',
+  },
+  'ai.catalog.form.systemPrompt': {
+    'en-US': 'System Prompt',
+    'zh-CN': 'System Prompt',
+  },
+  'ai.catalog.form.systemPromptPlaceholder': {
+    'en-US': 'System prompt',
+    'zh-CN': '系统提示词',
+  },
+  'ai.catalog.form.environment': {
+    'en-US': 'Environment',
+    'zh-CN': 'Environment',
+  },
+  'ai.catalog.form.apiKeyOptional': {
+    'en-US': 'API Key (optional)',
+    'zh-CN': 'API Key（可选）',
+  },
+  'ai.catalog.form.provider': {
+    'en-US': 'Provider',
+    'zh-CN': 'Provider',
+  },
+  'ai.catalog.form.providerType': {
+    'en-US': 'Provider Type',
+    'zh-CN': 'Provider Type',
+  },
+  'ai.catalog.form.baseUrl': {
+    'en-US': 'Base URL',
+    'zh-CN': 'Base URL',
+  },
+  'ai.catalog.form.modelCallTimeout': {
+    'en-US': 'Model Call Timeout (ms)',
+    'zh-CN': 'Model Call Timeout (ms)',
+  },
+  'ai.catalog.form.modelCallIdleTimeout': {
+    'en-US': 'Model Call Idle Timeout (ms)',
+    'zh-CN': 'Model Call Idle Timeout (ms)',
+  },
+  'ai.catalog.form.contextWindow': {
+    'en-US': 'Context Window',
+    'zh-CN': 'Context Window',
+  },
+  'ai.catalog.form.maxOutputTokens': {
+    'en-US': 'Max Output Tokens',
+    'zh-CN': 'Max Output Tokens',
+  },
+  'ai.catalog.form.limit': {
+    'en-US': 'Limit',
+    'zh-CN': 'Limit',
+  },
+  'ai.catalog.form.abilities': {
+    'en-US': 'Abilities',
+    'zh-CN': '功能',
+  },
+  'ai.catalog.form.tools': {
+    'en-US': 'Tools',
+    'zh-CN': 'Tools',
+  },
+  'ai.catalog.form.reasoning': {
+    'en-US': 'Reasoning',
+    'zh-CN': 'Reasoning',
+  },
+  'ai.catalog.form.inputTypes': {
+    'en-US': 'Input types',
+    'zh-CN': '输入类型',
+  },
+  'ai.catalog.form.pricing': {
+    'en-US': 'Pricing',
+    'zh-CN': 'Pricing',
+  },
+  'ai.catalog.form.inputPrice': {
+    'en-US': 'Input',
+    'zh-CN': 'Input',
+  },
+  'ai.catalog.form.outputPrice': {
+    'en-US': 'Output',
+    'zh-CN': 'Output',
+  },
+  'ai.catalog.form.cacheReadPrice': {
+    'en-US': 'Cache Read',
+    'zh-CN': 'Cache Read',
+  },
+  'ai.catalog.form.cacheWritePrice': {
+    'en-US': 'Cache Write',
+    'zh-CN': 'Cache Write',
+  },
+  'ai.catalog.form.longCacheWritePrice': {
+    'en-US': 'Long Cache Write',
+    'zh-CN': 'Long Cache Write',
+  },
+  'ai.catalog.form.reasoningPrice': {
+    'en-US': 'Reasoning',
+    'zh-CN': 'Reasoning',
+  },
+  'ai.catalog.form.defaultVariant': {
+    'en-US': 'Default Variant',
+    'zh-CN': 'Default Variant',
+  },
+  'ai.catalog.form.variants': {
+    'en-US': 'Variants',
+    'zh-CN': 'Variants',
+  },
+  'ai.catalog.form.variantId': {
+    'en-US': 'Variant ID',
+    'zh-CN': 'Variant ID',
+  },
+  'ai.catalog.form.reasoningEffort': {
+    'en-US': 'Reasoning Effort',
+    'zh-CN': '思考强度',
+  },
+  'ai.catalog.form.reasoningEffortAria': {
+    'en-US': 'Reasoning Effort',
+    'zh-CN': 'Reasoning Effort',
+  },
+  'ai.catalog.form.maxOutput': {
+    'en-US': 'Max Output',
+    'zh-CN': 'Max Output',
+  },
+  'ai.catalog.form.maxOutputAria': {
+    'en-US': 'Variant Max Output Tokens',
+    'zh-CN': 'Variant Max Output Tokens',
+  },
+  'ai.catalog.form.temperature': {
+    'en-US': 'Temperature',
+    'zh-CN': 'Temperature',
+  },
+  'ai.catalog.form.topP': {
+    'en-US': 'Top P',
+    'zh-CN': 'Top P',
+  },
+  'ai.catalog.form.topK': {
+    'en-US': 'Top K',
+    'zh-CN': 'Top K',
+  },
+  'ai.catalog.form.frequencyPenalty': {
+    'en-US': 'Freq Penalty',
+    'zh-CN': 'Freq Penalty',
+  },
+  'ai.catalog.form.presencePenalty': {
+    'en-US': 'Pres Penalty',
+    'zh-CN': 'Pres Penalty',
+  },
+  'ai.catalog.form.stop': {
+    'en-US': 'Stop',
+    'zh-CN': 'Stop',
+  },
+  'ai.catalog.form.stopAria': {
+    'en-US': 'Stop Sequences',
+    'zh-CN': 'Stop Sequences',
+  },
+  'ai.catalog.form.useModelDefault': {
+    'en-US': '(Use model default)',
+    'zh-CN': '（使用模型默认）',
+  },
+  'ai.catalog.form.none': {
+    'en-US': '(None)',
+    'zh-CN': '（无）',
+  },
+  'ai.catalog.form.optionalCredential': {
+    'en-US': 'Optional',
+    'zh-CN': '可留空',
+  },
+  'ai.catalog.form.keepCredential': {
+    'en-US': 'Leave blank to keep the current key',
+    'zh-CN': '留空保留当前密钥',
+  },
+  'ai.catalog.form.credentialEditHint': {
+    'en-US': 'Leave blank to keep the configured API Key; the secret is never echoed.',
+    'zh-CN': '留空会保留已配置的 API Key；密钥不会回显。',
+  },
+  'ai.catalog.form.credentialCreateHint': {
+    'en-US': 'Leave blank to call the OpenAI-compatible endpoint without Authorization.',
+    'zh-CN': '留空会以无 Authorization 方式请求 OpenAI-compatible 端点。',
+  },
+  'ai.catalog.form.environmentHint': {
+    'en-US': 'Changing Environment refreshes the available Tools/Skills; selected items are retained when possible and are not cleared automatically. Offline or unavailable items are dimmed but can still be deselected and saved.',
+    'zh-CN': '切换 Environment 只会刷新可选 Tools/Skills 列表；已勾选项会尽量保留，不会自动清空。离线/暂不可用项置灰，仍可取消勾选并保存。',
+  },
+  'ai.catalog.form.noCandidateTools': {
+    'en-US': 'No candidate Tools',
+    'zh-CN': '暂无候选 Tools',
+  },
+  'ai.catalog.form.noCandidateSkills': {
+    'en-US': 'No candidate Skills',
+    'zh-CN': '暂无候选 Skills',
+  },
+  'ai.catalog.form.needModel': {
+    'en-US': 'Create a Model first to configure an Agent.',
+    'zh-CN': '需要先创建 Model 才能配置 Agent。',
+  },
+  'ai.catalog.form.fillFirstModel': {
+    'en-US': 'Use the first Model to fill the default configuration',
+    'zh-CN': '使用第一个 Model 填充默认配置',
+  },
+  'ai.catalog.form.unavailable': {
+    'en-US': 'Unavailable',
+    'zh-CN': '不可用',
+  },
+  'ai.catalog.form.offline': {
+    'en-US': 'Offline',
+    'zh-CN': 'offline',
+  },
+  'ai.catalog.form.variantHint': {
+    'en-US': 'A Variant is a named parameter preset; IDs must be unique, and Default Variant must point to one of them.',
+    'zh-CN': 'Variant 是命名参数预设；id 唯一，Default Variant 必须指向其中一项。',
+  },
+  'ai.catalog.form.reasoningHint': {
+    'en-US': ' Reasoning effort is free-form (written to reasoning_effort).',
+    'zh-CN': ' 思考强度为自由字符串（写入 reasoning_effort）。',
+  },
+  'ai.catalog.form.reasoningDisabledHint': {
+    'en-US': ' To configure reasoning effort, enable Reasoning above first.',
+    'zh-CN': ' 若需配置思考强度，请先勾选上方 Reasoning。',
+  },
+  'ai.catalog.form.reasoningEffortError': {
+    'en-US': 'Enter a reasoning effort',
+    'zh-CN': '请填写思考强度',
+  },
+  'ai.catalog.form.maxOutputPlaceholder': {
+    'en-US': 'Empty = model limit',
+    'zh-CN': '空=模型上限',
+  },
+  'ai.catalog.form.advancedOptions': {
+    'en-US': 'Advanced options',
+    'zh-CN': '高级选项',
+  },
+  'ai.catalog.form.advancedHint': {
+    'en-US': 'Usually unnecessary; empty means provider default.',
+    'zh-CN': '一般无需配置，留空=厂商默认。',
+  },
+  'ai.catalog.form.emptyPlaceholder': {
+    'en-US': 'Empty',
+    'zh-CN': '空',
+  },
+  'ai.catalog.form.inputModalityHint': {
+    'en-US': 'Input modalities accepted by the model; keep at least one (do not clear all).',
+    'zh-CN': '模型可接受的输入模态；至少保留一种（不能全部取消）。',
+  },
+  'ai.catalog.form.priceHint': {
+    'en-US': 'Price is USD per million tokens. Currency is fixed to USD.',
+    'zh-CN': '单价为 USD / 百万 tokens。币种固定 USD。',
+  },
+  'ai.catalog.form.priceAriaLabel': {
+    'en-US': '{{label}} USD per million tokens',
+    'zh-CN': '{{label}} USD per million tokens',
+  },
+  'ai.catalog.form.priceSuffix': {
+    'en-US': '/1M',
+    'zh-CN': '/1M',
+  },
+  'ai.catalog.form.deleteVariant': {
+    'en-US': 'Delete Variant',
+    'zh-CN': '删除 Variant',
+  },
+  'ai.catalog.form.addVariant': {
+    'en-US': 'Add Variant',
+    'zh-CN': '添加 Variant',
+  },
+  'ai.catalog.form.stopPlaceholder': {
+    'en-US': 'END,STOP',
+    'zh-CN': 'END,STOP',
+  },
+  'ai.catalog.deleteProviderTitle': {
+    'en-US': 'Delete Provider',
+    'zh-CN': '删除 Provider',
+  },
+  'ai.catalog.deleteProviderDescription': {
+    'en-US': 'Provider {{name}} will be deleted.',
+    'zh-CN': '将删除 Provider {{name}}。',
+  },
+  'ai.catalog.deleteModelTitle': {
+    'en-US': 'Delete Model',
+    'zh-CN': '删除 Model',
+  },
+  'ai.catalog.deleteModelDescription': {
+    'en-US': 'Model {{name}} will be deleted.',
+    'zh-CN': '将删除 Model {{name}}。',
+  },
+  'ai.catalog.deleteAgentTitle': {
+    'en-US': 'Delete Agent',
+    'zh-CN': '删除 Agent',
+  },
+  'ai.catalog.deleteAgentDescription': {
+    'en-US': 'Agent {{name}} will be deleted. Existing sessions remain, but new runs cannot use this Agent.',
+    'zh-CN': '将删除 Agent {{name}}。已有会话会保留，但不能再用该 Agent 新建运行。',
+  },
+  'ai.catalog.validation.saveForm': {
+    'en-US': 'Save failed. Check the form and try again.',
+    'zh-CN': '保存失败，请检查表单后重试',
+  },
+  'ai.catalog.validation.saveRequired': {
+    'en-US': 'Save failed. Check required fields and try again.',
+    'zh-CN': '保存失败，请检查必填项后重试',
+  },
+  'ai.catalog.validation.reasoningEnabled': {
+    'en-US': 'Reasoning is enabled. Enter a reasoning effort for each configuration (for example, low / medium / high).',
+    'zh-CN': '已开启 Reasoning，请为每个配置填写思考强度（如 low / medium / high）',
+  },
+  'ai.catalog.validation.variantRequired': {
+    'en-US': 'Select a valid Variant',
+    'zh-CN': '请选择有效的 Variant',
+  },
+  'ai.catalog.validation.variantAddOne': {
+    'en-US': 'Add at least one Variant and enter its ID',
+    'zh-CN': '请至少添加一个 Variant，并填写 ID',
+  },
+  'ai.catalog.validation.variantDuplicate': {
+    'en-US': 'Variant IDs must be unique',
+    'zh-CN': 'Variant ID 不能重复',
+  },
+  'ai.catalog.validation.defaultVariant': {
+    'en-US': 'Select a valid default Variant',
+    'zh-CN': '请选择一个有效的默认 Variant',
+  },
+  'ai.catalog.validation.maxOutputContext': {
+    'en-US': 'Max output length cannot exceed the context window',
+    'zh-CN': '最大输出长度不能超过上下文窗口',
+  },
+  'ai.catalog.validation.contextWindow': {
+    'en-US': 'Enter a valid context window (a positive integer)',
+    'zh-CN': '请填写有效的上下文窗口（正整数）',
+  },
+  'ai.catalog.validation.maxOutput': {
+    'en-US': 'Enter a valid max output length (a positive integer)',
+    'zh-CN': '请填写有效的最大输出长度（正整数）',
+  },
+  'ai.catalog.validation.inputModality': {
+    'en-US': 'Select at least one input type (TEXT is recommended)',
+    'zh-CN': '请至少选择一种输入类型（建议保留 TEXT）',
+  },
+  'ai.catalog.validation.temperature': {
+    'en-US': 'Temperature must be 0 or greater',
+    'zh-CN': 'Temperature 必须为 0 或正数',
+  },
+  'ai.catalog.validation.topP': {
+    'en-US': 'Top P must be greater than 0 and no more than 1',
+    'zh-CN': 'Top P 必须大于 0 且不超过 1',
+  },
+  'ai.catalog.validation.topK': {
+    'en-US': 'Top K must be a positive integer',
+    'zh-CN': 'Top K 必须为正整数',
+  },
+  'ai.catalog.validation.penalty': {
+    'en-US': 'Penalty must be a valid number',
+    'zh-CN': 'Penalty 必须为有效数字',
+  },
+  'ai.catalog.validation.pricing': {
+    'en-US': 'Check pricing; use zero or a positive number.',
+    'zh-CN': '请检查价格：填写 0 或正数即可',
+  },
+  'ai.catalog.validation.duplicateModel': {
+    'en-US': 'A Model with this name already exists under the current Provider. Choose another name.',
+    'zh-CN': '当前 Provider 下已存在同名 Model，请换一个名称',
+  },
+  'ai.catalog.validation.duplicateProvider': {
+    'en-US': 'A Provider with this name already exists. Choose another name.',
+    'zh-CN': 'Provider 名称已存在，请换一个名称',
+  },
+  'ai.catalog.validation.duplicateAgent': {
+    'en-US': 'An Agent with this name already exists. Choose another name.',
+    'zh-CN': 'Agent 名称已存在，请换一个名称',
+  },
+  'ai.catalog.validation.provider': {
+    'en-US': 'Select a Provider',
+    'zh-CN': '请选择 Provider',
+  },
+  'ai.catalog.validation.model': {
+    'en-US': 'Select a Default Model',
+    'zh-CN': '请选择 Default Model',
+  },
+  'ai.catalog.validation.baseUrl': {
+    'en-US': 'Enter a Base URL',
+    'zh-CN': '请填写 Base URL',
+  },
+  'ai.catalog.validation.toolsConflict': {
+    'en-US': 'Tool names conflict. Check the selected items.',
+    'zh-CN': 'Tools 名称冲突，请检查勾选项',
+  },
+  'ai.catalog.validation.skillsConflict': {
+    'en-US': 'Skill names conflict. Check the selected items.',
+    'zh-CN': 'Skills 名称冲突，请检查勾选项',
+  },
+  'ai.catalog.validation.capabilityDuplicate': {
+    'en-US': '{{kind}} names conflict after removing environment prefixes: {{names}}',
+    'zh-CN': '{{kind}} 去前缀后存在重名：{{names}}',
+  },
+  'ai.catalog.validation.network': {
+    'en-US': 'Network error. Please try again later.',
+    'zh-CN': '网络异常，请稍后重试',
+  },
+  'ai.catalog.validation.unauthorized': {
+    'en-US': 'You do not have permission to perform this action.',
+    'zh-CN': '没有权限执行此操作',
+  },
+  'ai.catalog.validation.notFound': {
+    'en-US': 'The resource does not exist or has been deleted.',
+    'zh-CN': '资源不存在或已被删除',
+  },
+  'ai.catalog.validation.conflict': {
+    'en-US': 'Resource conflict. Refresh and try again.',
+    'zh-CN': '资源冲突，请刷新后重试',
+  },
+  'ai.catalog.validation.server': {
+    'en-US': 'The service is temporarily unavailable. Please try again later.',
+    'zh-CN': '服务暂时异常，请稍后重试',
+  },
+  'ai.catalog.validation.providerName': {
+    'en-US': 'Enter a Provider name',
+    'zh-CN': '请填写 Provider 名称',
+  },
+  'ai.catalog.validation.name': {
+    'en-US': 'Enter a name',
+    'zh-CN': '请填写名称',
+  },
+  'ai.catalog.validation.addVariant': {
+    'en-US': 'Add a Variant',
+    'zh-CN': '请添加 Variant',
+  },
+  'ai.catalog.validation.defaultVariantField': {
+    'en-US': 'Select a default Variant',
+    'zh-CN': '请选择默认 Variant',
+  },
+  'ai.catalog.validation.modelName': {
+    'en-US': 'Enter a Model name',
+    'zh-CN': '请填写 Model 名称',
+  },
+  'ai.catalog.validation.agentName': {
+    'en-US': 'Enter an Agent name',
+    'zh-CN': '请填写 Agent 名称',
+  },
+  'ai.catalog.validation.agentModel': {
+    'en-US': 'Select a Model',
+    'zh-CN': '请选择 Model',
+  },
+  'ai.chat.create': {
+    'en-US': 'Create Chat',
+    'zh-CN': '新建 Chat',
+  },
+  'ai.chat.createDescription': {
+    'en-US': 'Create a persistent Chat workspace (a default Agent is required)',
+    'zh-CN': '创建持久 Chat 工作区（必须选择默认 Agent）',
+  },
+  'ai.chat.untitled': {
+    'en-US': 'Untitled Chat',
+    'zh-CN': 'Untitled Chat',
+  },
+  'ai.chat.chatLabel': {
+    'en-US': 'Chat',
+    'zh-CN': 'Chat',
+  },
+  'ai.chat.defaultAgent': {
+    'en-US': 'Default Agent',
+    'zh-CN': 'Default Agent',
+  },
+  'ai.chat.updated': {
+    'en-US': 'Updated',
+    'zh-CN': 'Updated',
+  },
+  'ai.chat.enterAria': {
+    'en-US': 'Open Chat {{label}}',
+    'zh-CN': '进入 Chat {{label}}',
+  },
+  'ai.chat.missingAgent': {
+    'en-US': '(Deleted or missing)',
+    'zh-CN': '（已删除/缺失）',
+  },
+  'ai.chat.namePlaceholder': {
+    'en-US': 'Chat name (duplicates allowed)',
+    'zh-CN': 'Chat 名称（可重名）',
+  },
+  'ai.chat.selectAgent': {
+    'en-US': 'Select an Agent',
+    'zh-CN': '请选择 Agent',
+  },
+  'ai.chat.selectAgentTitle': {
+    'en-US': 'Select Agent',
+    'zh-CN': '选择 Agent',
+  },
+  'ai.chat.nameRequired': {
+    'en-US': 'Enter a Chat name',
+    'zh-CN': '请填写 Chat 名称',
+  },
+  'ai.chat.nameFieldRequired': {
+    'en-US': 'Enter a name',
+    'zh-CN': '请填写名称',
+  },
+  'ai.chat.agentRequired': {
+    'en-US': 'Select a Default Agent',
+    'zh-CN': '请选择 Default Agent',
+  },
+  'ai.chat.loading': {
+    'en-US': 'Loading Chat…',
+    'zh-CN': '正在加载 Chat…',
+  },
+  'ai.chat.loadFailed': {
+    'en-US': 'Chat failed to load',
+    'zh-CN': 'Chat 加载失败',
+  },
+  'ai.chat.backToList': {
+    'en-US': 'Back to Chat list',
+    'zh-CN': '返回列表',
+  },
+  'ai.chat.backToChatList': {
+    'en-US': 'Back to Chat list',
+    'zh-CN': '返回 Chat 列表',
+  },
+  'ai.chat.layout': {
+    'en-US': 'Layout',
+    'zh-CN': '布局',
+  },
+  'ai.chat.blankTitle': {
+    'en-US': 'New conversation',
+    'zh-CN': '新对话',
+  },
+  'ai.chat.blankDescription': {
+    'en-US': 'Send a message to create and bootstrap a new Thread; /agent selects the default Agent and /thread reuses an existing Thread.',
+    'zh-CN': '输入后创建并 bootstrap 新 Thread；/agent 选默认 Agent，/thread 复用已有 Thread。',
+  },
+  'ai.chat.scope': {
+    'en-US': 'Scope',
+    'zh-CN': '范围',
+  },
+  'ai.chat.currentChat': {
+    'en-US': 'Current Chat',
+    'zh-CN': '当前 Chat',
+  },
+  'ai.chat.globalThread': {
+    'en-US': 'Global Thread',
+    'zh-CN': '全局 Thread',
+  },
+  'ai.chat.sort': {
+    'en-US': 'Sort',
+    'zh-CN': '排序',
+  },
+  'ai.chat.recentlyUpdated': {
+    'en-US': 'Recently updated',
+    'zh-CN': '最近更新',
+  },
+  'ai.chat.createdAt': {
+    'en-US': 'Created',
+    'zh-CN': '创建时间',
+  },
+  'ai.chat.loadingList': {
+    'en-US': 'Loading…',
+    'zh-CN': '加载中…',
+  },
+  'ai.chat.loadMore': {
+    'en-US': 'Load more',
+    'zh-CN': '继续加载',
+  },
+  'ai.chat.noOptions': {
+    'en-US': 'No options',
+    'zh-CN': '暂无选项',
+  },
+  'ai.chat.noAgents': {
+    'en-US': 'No Agents available',
+    'zh-CN': '暂无可用 Agent',
+  },
+  'ai.chat.selectSession': {
+    'en-US': 'Select Session',
+    'zh-CN': '选择 Session',
+  },
+  'ai.chat.noSessions': {
+    'en-US': 'No Sessions',
+    'zh-CN': '暂无 Session',
+  },
+  'ai.chat.selectThread': {
+    'en-US': 'Select Thread',
+    'zh-CN': '选择 Thread',
+  },
+  'ai.chat.noThreads': {
+    'en-US': 'No Threads',
+    'zh-CN': '暂无 Thread',
+  },
+  'ai.chat.selectModel': {
+    'en-US': 'Select Model',
+    'zh-CN': '选择 Model',
+  },
+  'ai.chat.noModels': {
+    'en-US': 'No Models available',
+    'zh-CN': '暂无可用 Model',
+  },
+  'ai.chat.selectVariant': {
+    'en-US': 'Select Variant',
+    'zh-CN': '选择 Variant',
+  },
+  'ai.chat.noVariantsForModel': {
+    'en-US': 'This Model has no Variants',
+    'zh-CN': '当前 Model 暂无 Variant',
+  },
+  'ai.chat.setModelFirst': {
+    'en-US': 'Set a Model first',
+    'zh-CN': '请先设置 Model',
+  },
+  'ai.chat.history.title': {
+    'en-US': 'History branches',
+    'zh-CN': '历史分支',
+  },
+  'ai.chat.history.filter': {
+    'en-US': 'Show records',
+    'zh-CN': '显示记录',
+  },
+  'ai.chat.history.search': {
+    'en-US': 'Search records',
+    'zh-CN': '搜索记录',
+  },
+  'ai.chat.history.list': {
+    'en-US': 'History list',
+    'zh-CN': '历史列表',
+  },
+  'ai.chat.history.conversation': {
+    'en-US': 'Conversation',
+    'zh-CN': '对话',
+  },
+  'ai.chat.history.allRecords': {
+    'en-US': 'All records',
+    'zh-CN': '全部记录',
+  },
+  'ai.chat.history.user': {
+    'en-US': 'User',
+    'zh-CN': '用户',
+  },
+  'ai.chat.history.assistant': {
+    'en-US': 'Assistant',
+    'zh-CN': '助手',
+  },
+  'ai.chat.history.tool': {
+    'en-US': 'Tool',
+    'zh-CN': '工具',
+  },
+  'ai.chat.history.custom': {
+    'en-US': 'Custom',
+    'zh-CN': '自定义',
+  },
+  'ai.chat.history.system': {
+    'en-US': 'System',
+    'zh-CN': '系统',
+  },
+  'ai.chat.history.loading': {
+    'en-US': 'Loading history branches…',
+    'zh-CN': '正在加载历史分支…',
+  },
+  'ai.chat.history.loadFailed': {
+    'en-US': 'History branches failed to load',
+    'zh-CN': '历史分支加载失败',
+  },
+  'ai.chat.history.noMatch': {
+    'en-US': 'No records match “{{query}}”',
+    'zh-CN': '没有匹配 “{{query}}” 的记录',
+  },
+  'ai.chat.history.empty': {
+    'en-US': 'No records to display',
+    'zh-CN': '没有可显示的记录',
+  },
+  'ai.chat.history.noBody': {
+    'en-US': 'No content',
+    'zh-CN': '无正文',
+  },
+  'ai.chat.history.currentPath': {
+    'en-US': 'current path',
+    'zh-CN': '当前路径',
+  },
+  'ai.chat.history.currentPosition': {
+    'en-US': 'current Thread position',
+    'zh-CN': '当前线程位置',
+  },
+  'ai.chat.history.entryAria': {
+    'en-US': '{{kind}} · {{preview}}{{path}}{{head}}',
+    'zh-CN': '{{kind}} · {{preview}}{{path}}{{head}}',
+  },
+  'ai.chat.history.cancel': {
+    'en-US': 'Cancel',
+    'zh-CN': '取消',
+  },
+  'ai.chat.history.continue': {
+    'en-US': 'Continue current Thread from here',
+    'zh-CN': '从这里继续当前 Thread',
+  },
+  'ai.chat.sessionSubtitle': {
+    'en-US': 'Session {{id}}',
+    'zh-CN': 'Session {{id}}',
+  },
+  'ai.chat.unboundSession': {
+    'en-US': 'Unbound Session',
+    'zh-CN': '未绑定 Session',
+  },
+  'ai.runtime.composer.placeholder': {
+    'en-US': 'Enter a task (/ for commands)',
+    'zh-CN': '输入任务（/打开命令）',
+  },
+  'ai.runtime.composer.ariaLabel': {
+    'en-US': 'Send a message to AI',
+    'zh-CN': '给 AI 发送消息',
+  },
+  'ai.runtime.composer.send': {
+    'en-US': 'Send message',
+    'zh-CN': '发送消息',
+  },
+  'ai.runtime.command.palette': {
+    'en-US': 'Command palette',
+    'zh-CN': '命令表',
+  },
+  'ai.runtime.command.search': {
+    'en-US': 'Search commands…',
+    'zh-CN': '搜索命令…',
+  },
+  'ai.runtime.command.noMatch': {
+    'en-US': 'No matching commands',
+    'zh-CN': '无匹配命令',
+  },
+  'ai.runtime.command.unavailable': {
+    'en-US': 'Currently unavailable',
+    'zh-CN': '当前不可用',
+  },
+  'ai.runtime.command.meta': {
+    'en-US': '{{enabled}} available / {{total}} total',
+    'zh-CN': '可用 {{enabled}} / 共 {{total}}',
+  },
+  'ai.runtime.command.matches': {
+    'en-US': ' · {{count}} matches',
+    'zh-CN': ' · 匹配 {{count}}',
+  },
+  'ai.runtime.command.hint': {
+    'en-US': ' · ↑↓ select · Enter confirm',
+    'zh-CN': ' · ↑↓ 选择 · Enter 确认',
+  },
+  'ai.runtime.command.disabledReason': {
+    'en-US': 'Select or create a Thread first',
+    'zh-CN': '选择或创建 Thread 后可用',
+  },
+  'ai.runtime.command.session': {
+    'en-US': 'Relocate the current Thread to a history position in the selected Session',
+    'zh-CN': '把当前 Thread 重定位到所选 Session 的历史位置',
+  },
+  'ai.runtime.command.thread': {
+    'en-US': 'Switch the Thread bound to this Pane (does not modify any Thread)',
+    'zh-CN': '切换当前 Pane 绑定的 Thread（不修改任何 Thread）',
+  },
+  'ai.runtime.command.agent': {
+    'en-US': 'Switch Agent (change the blank pane default or enqueue SET_AGENT in a conversation)',
+    'zh-CN': '切换 Agent（空白页改默认 Agent；对话中入队 SET_AGENT）',
+  },
+  'ai.runtime.command.model': {
+    'en-US': 'Switch Model (enqueue SET_MODEL)',
+    'zh-CN': '切换 Model（入队 SET_MODEL）',
+  },
+  'ai.runtime.command.variant': {
+    'en-US': 'Switch Variant (enqueue SET_MODEL)',
+    'zh-CN': '切换 Variant（入队 SET_MODEL）',
+  },
+  'ai.runtime.command.yolo': {
+    'en-US': 'Toggle automatic approval of Tool calls',
+    'zh-CN': '切换 YOLO 自动批准工具调用',
+  },
+  'ai.runtime.command.tree': {
+    'en-US': 'Open history and relocate the current Thread to the selected Entry',
+    'zh-CN': '打开历史面板，把当前 Thread 重定位到所选 Entry',
+  },
+  'ai.runtime.command.stop': {
+    'en-US': 'Stop the current Thread and restore unprocessed messages',
+    'zh-CN': '停止当前 Thread 并恢复尚未处理的消息',
+  },
+  'ai.runtime.command.new': {
+    'en-US': 'Return to a blank pane; sending creates a new Session / Thread',
+    'zh-CN': '回到空面板；发送后创建新的 Session / Thread',
+  },
+  'ai.runtime.command.sessionLabel': {
+    'en-US': 'session',
+    'zh-CN': 'session',
+  },
+  'ai.runtime.command.threadLabel': {
+    'en-US': 'thread',
+    'zh-CN': 'thread',
+  },
+  'ai.runtime.command.agentLabel': {
+    'en-US': 'agent',
+    'zh-CN': 'agent',
+  },
+  'ai.runtime.command.modelLabel': {
+    'en-US': 'model',
+    'zh-CN': 'model',
+  },
+  'ai.runtime.command.variantLabel': {
+    'en-US': 'variant',
+    'zh-CN': 'variant',
+  },
+  'ai.runtime.command.yoloLabel': {
+    'en-US': 'yolo',
+    'zh-CN': 'yolo',
+  },
+  'ai.runtime.command.treeLabel': {
+    'en-US': 'tree',
+    'zh-CN': 'tree',
+  },
+  'ai.runtime.command.stopLabel': {
+    'en-US': 'stop',
+    'zh-CN': 'stop',
+  },
+  'ai.runtime.command.newLabel': {
+    'en-US': 'new',
+    'zh-CN': 'new',
+  },
+  'ai.runtime.thread.loading': {
+    'en-US': 'Loading conversation…',
+    'zh-CN': '正在加载会话…',
+  },
+  'ai.runtime.thread.transcript': {
+    'en-US': 'Conversation messages',
+    'zh-CN': '会话消息',
+  },
+  'ai.runtime.thread.loadFailed': {
+    'en-US': 'Conversation failed to load',
+    'zh-CN': '会话加载失败',
+  },
+  'ai.runtime.thread.empty': {
+    'en-US': 'Send a message to start the conversation',
+    'zh-CN': '发送消息，开始对话',
+  },
+  'ai.runtime.thread.keyboardHint': {
+    'en-US': 'Enter to send · Shift+Enter for a new line',
+    'zh-CN': 'Enter 发送 · Shift+Enter 换行',
+  },
+  'ai.runtime.thread.error': {
+    'en-US': 'Error',
+    'zh-CN': '错误',
+  },
+  'ai.runtime.thread.dismissError': {
+    'en-US': 'Dismiss error',
+    'zh-CN': '关闭错误',
+  },
+  'ai.runtime.thread.status': {
+    'en-US': 'Thread status',
+    'zh-CN': '会话状态',
+  },
+  'ai.runtime.thread.widgetZone': {
+    'en-US': 'Thread activity',
+    'zh-CN': '会话组件区',
+  },
+  'ai.runtime.thread.queue': {
+    'en-US': 'Queued messages',
+    'zh-CN': '等待处理的消息',
+  },
+  'ai.runtime.thread.queued': {
+    'en-US': 'queued',
+    'zh-CN': 'queued',
+  },
+  'ai.runtime.thread.working': {
+    'en-US': 'Working...',
+    'zh-CN': 'Working...',
+  },
+  'ai.runtime.message.stopped': {
+    'en-US': 'Stopped',
+    'zh-CN': '已停止',
+  },
+  'ai.runtime.message.copyAll': {
+    'en-US': 'Copy all',
+    'zh-CN': '复制全文',
+  },
+  'ai.runtime.message.assistantFailed': {
+    'en-US': 'Assistant response failed',
+    'zh-CN': '助手回复失败',
+  },
+  'ai.runtime.message.noArguments': {
+    'en-US': '(no arguments)',
+    'zh-CN': '（无参数）',
+  },
+  'ai.runtime.message.openRaw': {
+    'en-US': 'Open raw content',
+    'zh-CN': '打开原始内容',
+  },
+  'ai.runtime.message.toolCall': {
+    'en-US': 'Tool call ·',
+    'zh-CN': '工具调用 ·',
+  },
+  'ai.runtime.message.toolResult': {
+    'en-US': 'Tool result ·',
+    'zh-CN': '工具结果 ·',
+  },
+  'ai.runtime.message.running': {
+    'en-US': 'running',
+    'zh-CN': 'running',
+  },
+  'ai.runtime.message.done': {
+    'en-US': 'done',
+    'zh-CN': 'done',
+  },
+  'ai.runtime.message.error': {
+    'en-US': 'error',
+    'zh-CN': 'error',
+  },
+  'ai.runtime.message.toolFailed': {
+    'en-US': 'Tool execution failed.',
+    'zh-CN': '工具执行失败。',
+  },
+  'ai.runtime.message.waitingTool': {
+    'en-US': 'Waiting for tool result…',
+    'zh-CN': '等待工具结果…',
+  },
+  'ai.runtime.message.noTextOutput': {
+    'en-US': 'No text output',
+    'zh-CN': '无文本输出',
+  },
+  'ai.runtime.message.rawEntry': {
+    'en-US': 'View raw Entry',
+    'zh-CN': '查看原始 Entry',
+  },
+  'ai.runtime.message.attachment': {
+    'en-US': '{{type}} attachment',
+    'zh-CN': '{{type}} attachment',
+  },
+  'ai.runtime.message.binaryPayload': {
+    'en-US': 'binary payload',
+    'zh-CN': 'binary payload',
+  },
+  'ai.runtime.status.agentFallback': {
+    'en-US': 'agent',
+    'zh-CN': 'agent',
+  },
+  'ai.runtime.status.modelFallback': {
+    'en-US': 'unknown-model',
+    'zh-CN': 'unknown-model',
+  },
+  'ai.runtime.status.variantFallback': {
+    'en-US': 'unknown-variant',
+    'zh-CN': 'unknown-variant',
+  },
+  'ai.runtime.status.agentSwitchTitle': {
+    'en-US': 'Click to switch Agent',
+    'zh-CN': '点击切换 Agent',
+  },
+  'ai.runtime.status.modelSwitchTitle': {
+    'en-US': 'Click to switch Model; right-click to switch Variant',
+    'zh-CN': '点击切换 Model，右键切换 Variant',
+  },
+  'ai.runtime.status.agentText': {
+    'en-US': 'agent:{{name}}',
+    'zh-CN': 'agent:{{name}}',
+  },
+  'ai.runtime.status.agentYoloText': {
+    'en-US': 'agent:{{name}} · YOLO',
+    'zh-CN': 'agent:{{name}} · YOLO',
+  },
+  'ai.runtime.status.modelText': {
+    'en-US': '{{model}} · {{variant}}',
+    'zh-CN': '{{model}} · {{variant}}',
+  },
+  'ai.runtime.entry.rootTitle': {
+    'en-US': 'Conversation started',
+    'zh-CN': '会话开始',
+  },
+  'ai.runtime.entry.rootText': {
+    'en-US': 'The conversation tree root was created.',
+    'zh-CN': '已创建会话树根节点。',
+  },
+  'ai.runtime.entry.unknownAgent': {
+    'en-US': 'Unknown Agent',
+    'zh-CN': '未知 Agent',
+  },
+  'ai.runtime.entry.unknownModel': {
+    'en-US': 'unknown-model',
+    'zh-CN': 'unknown-model',
+  },
+  'ai.runtime.entry.defaultVariant': {
+    'en-US': 'default',
+    'zh-CN': 'default',
+  },
+  'ai.runtime.entry.yoloOn': {
+    'en-US': 'enabled',
+    'zh-CN': '开启',
+  },
+  'ai.runtime.entry.yoloOff': {
+    'en-US': 'disabled',
+    'zh-CN': '关闭',
+  },
+  'ai.runtime.entry.yoloUnknown': {
+    'en-US': 'unknown',
+    'zh-CN': '未知',
+  },
+  'ai.runtime.entry.runtimeConfigTitle': {
+    'en-US': 'Runtime configuration recorded',
+    'zh-CN': '运行配置已记录',
+  },
+  'ai.runtime.entry.unknownType': {
+    'en-US': 'unknown type',
+    'zh-CN': '未知类型',
+  },
+  'ai.runtime.entry.agentLine': {
+    'en-US': 'Agent: {{value}}',
+    'zh-CN': 'Agent：{{value}}',
+  },
+  'ai.runtime.entry.modelLine': {
+    'en-US': 'Model: {{value}}',
+    'zh-CN': '模型：{{value}}',
+  },
+  'ai.runtime.entry.yoloLine': {
+    'en-US': 'YOLO: {{value}}',
+    'zh-CN': 'YOLO：{{value}}',
+  },
+  'ai.runtime.entry.toolsLine': {
+    'en-US': 'Tools: {{value}}',
+    'zh-CN': '工具：{{value}}',
+  },
+  'ai.runtime.entry.skillsLine': {
+    'en-US': 'Skills: {{value}}',
+    'zh-CN': '技能：{{value}}',
+  },
+  'ai.runtime.entry.listSeparator': {
+    'en-US': ', ',
+    'zh-CN': '、',
+  },
+  'ai.runtime.entry.unknownRole': {
+    'en-US': 'Unknown role',
+    'zh-CN': '未知角色',
+  },
+  'ai.runtime.entry.emptyTitle': {
+    'en-US': '{{role}} message',
+    'zh-CN': '{{role}} 消息',
+  },
+  'ai.runtime.entry.emptyText': {
+    'en-US': 'This Entry has no displayable text, thinking, Tool call, or Tool result.',
+    'zh-CN': '该消息 Entry 没有可展示的文本、思考、工具调用或工具结果。',
+  },
+  'ai.runtime.entry.unsupportedTitle': {
+    'en-US': 'Unrecognized message Entry',
+    'zh-CN': '无法识别消息 Entry',
+  },
+  'ai.runtime.entry.unsupportedRoleText': {
+    'en-US': 'Message role not supported: {{role}}. Expand the raw payload to inspect it.',
+    'zh-CN': '暂不支持的消息角色：{{role}}。原始 payload 可展开查看。',
+  },
+  'ai.runtime.entry.unsupportedText': {
+    'en-US': 'Message role or payload is invalid. Expand the raw payload to inspect it.',
+    'zh-CN': '消息角色或 payload 无效。原始 payload 可展开查看。',
+  },
+  'ai.runtime.entry.unknownTitle': {
+    'en-US': 'Unrecognized Entry: {{type}}',
+    'zh-CN': '未识别 Entry：{{type}}',
+  },
+  'ai.runtime.entry.unknownText': {
+    'en-US': 'This Entry type has no dedicated renderer yet. Expand the raw payload to inspect it.',
+    'zh-CN': '该 Entry 类型尚无专用渲染器，原始 payload 可展开查看。',
+  },
+  'ai.runtime.entry.assistantRequestFailed': {
+    'en-US': 'Assistant request failed',
+    'zh-CN': '助手请求失败',
+  },
+  'ai.runtime.entry.toolFailed': {
+    'en-US': 'Tool execution failed.',
+    'zh-CN': '工具执行失败。',
+  },
+  'ai.runtime.action.requestFailed': {
+    'en-US': 'Request failed',
+    'zh-CN': '请求失败',
+  },
+  'ai.runtime.action.threadStateChanged': {
+    'en-US': '{{action}}: Thread state changed ({{error}}); refreshed. Please try again',
+    'zh-CN': '{{action}}：Thread 状态已变化（{{error}}），已刷新，请重试',
+  },
+  'ai.runtime.action.unboundThread': {
+    'en-US': 'This Thread is not bound to a Session. Use /session or /tree to select a position first.',
+    'zh-CN': '当前 Thread 未绑定 Session，请先用 /session 或 /tree 选择位置',
+  },
+  'ai.runtime.action.unknownCommand': {
+    'en-US': 'Unknown command: {{command}}',
+    'zh-CN': '未知命令：{{command}}',
+  },
+  'ai.runtime.action.unboundAction': {
+    'en-US': '{{action}}: this Thread is not bound to a Session',
+    'zh-CN': '{{action}}：当前 Thread 未绑定 Session',
+  },
+  'ai.runtime.action.blankAgent': {
+    'en-US': '(no Agent)',
+    'zh-CN': '（无 Agent）',
+  },
+  'ai.runtime.action.agentMissing': {
+    'en-US': '(Agent deleted or missing)',
+    'zh-CN': '（Agent 已删除/缺失）',
+  },
+  'ai.runtime.action.firstSendFailed': {
+    'en-US': 'First send failed',
+    'zh-CN': '首发失败',
+  },
+  'ai.runtime.action.associateThreadFailed': {
+    'en-US': 'Failed to associate Thread',
+    'zh-CN': '关联 Thread 失败',
+  },
+  'ai.runtime.action.updateAgentFailed': {
+    'en-US': 'Failed to update default Agent',
+    'zh-CN': '更新默认 Agent 失败',
+  },
+  'ai.runtime.action.unavailableScene': {
+    'en-US': 'This scene cannot use /{{command}}',
+    'zh-CN': '当前场景不可用：/{{command}}',
+  },
+  'ai.runtime.action.rebindConflict': {
+    'en-US': 'Unable to relocate Thread: state changed ({{error}}); refresh and try again',
+    'zh-CN': '无法重定位 Thread：状态已变化（{{error}}），请刷新后重试',
+  },
+  'ai.runtime.action.rebindFailed': {
+    'en-US': 'Failed to relocate Thread',
+    'zh-CN': '重定位 Thread 失败',
+  },
+  'ai.runtime.action.rootNotBranchable': {
+    'en-US': 'The root Entry cannot be used as an editable message branch',
+    'zh-CN': '根节点不能作为可编辑消息分支',
+  },
+  'ai.runtime.action.threadNotLoaded': {
+    'en-US': 'Thread has not loaded yet',
+    'zh-CN': 'Thread 尚未加载',
+  },
+  'ai.runtime.action.threadRunning': {
+    'en-US': 'This Thread is running and cannot be relocated; use /stop first',
+    'zh-CN': '当前 Thread 正在运行，无法重定位；请先 /stop',
+  },
+  'ai.runtime.action.sendFailed': {
+    'en-US': 'Send message failed',
+    'zh-CN': '发送消息失败',
+  },
+  'ai.runtime.action.stopFailed': {
+    'en-US': 'Stop failed',
+    'zh-CN': '停止失败',
+  },
+  'ai.runtime.action.switchYoloFailed': {
+    'en-US': 'Failed to switch YOLO',
+    'zh-CN': '切换 YOLO 失败',
+  },
+  'ai.runtime.action.switchAgentFailed': {
+    'en-US': 'Failed to switch Agent',
+    'zh-CN': '切换 Agent 失败',
+  },
+  'ai.runtime.action.switchModelFailed': {
+    'en-US': 'Failed to switch Model',
+    'zh-CN': '切换 Model 失败',
+  },
+  'ai.environment.loading': {
+    'en-US': 'Loading Environments',
+    'zh-CN': '正在加载 Environments',
+  },
+  'ai.environment.loadFailed': {
+    'en-US': 'Failed to load environments',
+    'zh-CN': '加载失败',
+  },
+  'ai.environment.empty': {
+    'en-US': 'There are no live Environments',
+    'zh-CN': '当前没有 live Environment',
+  },
+  'ai.environment.lastSeen': {
+    'en-US': 'Last seen',
+    'zh-CN': '最近查看',
+  },
+  'ai.environment.tools': {
+    'en-US': 'Tools',
+    'zh-CN': 'Tools',
+  },
+  'ai.environment.skills': {
+    'en-US': 'Skills',
+    'zh-CN': 'Skills',
+  },
+  'ai.settings.loadingRetry': {
+    'en-US': 'Loading retry policy',
+    'zh-CN': '正在加载重试策略',
+  },
+  'ai.settings.retryLoadFailed': {
+    'en-US': 'Failed to load retry policy',
+    'zh-CN': '加载重试策略失败',
+  },
+  'ai.settings.retryTitle': {
+    'en-US': 'Automatic retry',
+    'zh-CN': '自动重试',
+  },
+  'ai.settings.retryDescription': {
+    'en-US': 'Applies only to transient Provider failures such as network, rate-limit, and server errors. Authentication, billing, parameter errors, and cancellation stop immediately.',
+    'zh-CN': '仅对网络、限流和服务端等瞬态 Provider 故障生效。鉴权、计费、参数错误和取消会立即停止。',
+  },
+  'ai.settings.maxRetries': {
+    'en-US': 'Maximum retries',
+    'zh-CN': '最大重试次数',
+  },
+  'ai.settings.maxRetriesHint': {
+    'en-US': 'Does not include the initial request; 0 disables automatic retry.',
+    'zh-CN': '不包含首次请求；设为 0 时不自动重试。',
+  },
+  'ai.settings.backoffStrategy': {
+    'en-US': 'Backoff strategy',
+    'zh-CN': '退避策略',
+  },
+  'ai.settings.exponentialBackoff': {
+    'en-US': 'Exponential backoff',
+    'zh-CN': '指数退避',
+  },
+  'ai.settings.fixedInterval': {
+    'en-US': 'Fixed interval',
+    'zh-CN': '固定间隔',
+  },
+  'ai.settings.baseDelay': {
+    'en-US': 'Base interval (seconds)',
+    'zh-CN': '基础间隔（秒）',
+  },
+  'ai.settings.maxDelay': {
+    'en-US': 'Maximum interval (seconds)',
+    'zh-CN': '最大间隔（秒）',
+  },
+  'ai.settings.fixedExplanation': {
+    'en-US': 'Wait {{seconds}} seconds after each failure.',
+    'zh-CN': '每次失败后固定等待 {{seconds}} 秒。',
+  },
+  'ai.settings.exponentialExplanation': {
+    'en-US': 'The wait doubles after each failure, up to {{seconds}} seconds.',
+    'zh-CN': '等待间隔按 2 倍递增，最大不超过 {{seconds}} 秒。',
+  },
+  'ai.settings.saving': {
+    'en-US': 'Saving…',
+    'zh-CN': '保存中…',
+  },
+  'ai.settings.saveRetry': {
+    'en-US': 'Save retry policy',
+    'zh-CN': '保存重试策略',
+  },
+  'ai.settings.saveRetryFailed': {
+    'en-US': 'Failed to save retry policy',
+    'zh-CN': '保存重试策略失败',
+  },
+  'ai.settings.invalidInteger': {
+    'en-US': '{{label}} must be an integer',
+    'zh-CN': '{{label}}必须是整数',
+  },
+  'ai.settings.integerRange': {
+    'en-US': '{{label}} must be between {{min}} and {{max}}',
+    'zh-CN': '{{label}}必须在 {{min}} 到 {{max}} 之间',
+  },
+  'ai.settings.invalidSeconds': {
+    'en-US': '{{label}} must be a number of seconds with at most three decimal places',
+    'zh-CN': '{{label}}必须是秒数，最多保留三位小数',
+  },
+  'ai.settings.secondsRange': {
+    'en-US': '{{label}} must be between 1 and 60 seconds',
+    'zh-CN': '{{label}}必须在 1 到 60 秒之间',
+  },
+  'ai.settings.maxLessThanBase': {
+    'en-US': 'Maximum interval cannot be less than the base interval',
+    'zh-CN': '最大间隔不能小于基础间隔',
+  },
+  'ai.settings.loadingRealtime': {
+    'en-US': 'Loading realtime stream settings',
+    'zh-CN': '正在加载实时流设置',
+  },
+  'ai.settings.realtimeLoadFailed': {
+    'en-US': 'Failed to load realtime stream settings',
+    'zh-CN': '加载实时流设置失败',
+  },
+  'ai.settings.realtimeTitle': {
+    'en-US': 'Realtime stream cache',
+    'zh-CN': '实时流缓存',
+  },
+  'ai.settings.realtimeDescription': {
+    'en-US': 'Controls how many realtime events each Thread keeps in Redis. This is a short-lived projection and does not affect PostgreSQL history.',
+    'zh-CN': '控制每个 Thread 在 Redis 中最多保留多少条 realtime event；它是短期投影，不影响 PostgreSQL 历史。',
+  },
+  'ai.settings.maxEvents': {
+    'en-US': 'Maximum retained events',
+    'zh-CN': '最大保留事件数',
+  },
+  'ai.settings.maxEventsHint': {
+    'en-US': 'A larger value raises the Redis memory ceiling for each Thread.',
+    'zh-CN': '数值越大，单个 Thread 的 Redis 内存上限越高。',
+  },
+  'ai.settings.realtimeHelp': {
+    'en-US': 'After saving, the next write to any existing or new Thread Stream in this instance uses the value; other instances refresh within about one second. Lowering trims on the next write; raising does not restore trimmed events. No TTL is set and idle Streams are not actively processed.',
+    'zh-CN': '保存后在本实例的任意既有或新 Thread Stream 下一次写入生效；其他实例最多约一秒刷新。调小会在下一次写入裁剪；调大不会恢复已裁掉的事件。当前不设置 TTL，也不会主动处理空闲 Stream。',
+  },
+  'ai.settings.saveRealtime': {
+    'en-US': 'Save realtime stream settings',
+    'zh-CN': '保存实时流设置',
+  },
+  'ai.settings.saveRealtimeFailed': {
+    'en-US': 'Failed to save realtime stream settings',
+    'zh-CN': '保存实时流设置失败',
   },
 } satisfies LocaleCatalog

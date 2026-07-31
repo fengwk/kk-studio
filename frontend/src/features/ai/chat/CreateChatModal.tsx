@@ -3,6 +3,7 @@ import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLa
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import { FormSelect } from '@/shared/ui/console/FormSelect'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
+import { useI18n } from '@/shared/i18n'
 
 export function CreateChatModal({
   open,
@@ -29,6 +30,7 @@ export function CreateChatModal({
   onTitleChange: (title: string) => void
   onSubmit: FormEventHandler<HTMLFormElement>
 }) {
+  const { t } = useI18n()
   if (!open) {
     return null
   }
@@ -37,12 +39,12 @@ export function CreateChatModal({
     <ModalBackdrop onClose={onClose}>
       <form
         className="modal-card"
-        aria-label="新建 Chat"
+        aria-label={t('ai.chat.create')}
         onSubmit={onSubmit}
         onMouseDown={(event) => event.stopPropagation()}
         noValidate
       >
-        <ModalHeader title="新建 Chat" onClose={onClose} />
+        <ModalHeader title={t('ai.chat.create')} onClose={onClose} />
         <div className="modal-body">
           {formError ? (
             <div className="form-error-banner" role="alert">
@@ -50,20 +52,20 @@ export function CreateChatModal({
             </div>
           ) : null}
           <label className={`form-group${nameError ? ' is-error' : ''}`}>
-            <FieldLabel required>Name</FieldLabel>
+            <FieldLabel required>{t('ai.catalog.form.name')}</FieldLabel>
             <input
               value={title}
               onChange={(event) => onTitleChange(event.target.value)}
-              placeholder="Chat 名称（可重名）"
+              placeholder={t('ai.chat.namePlaceholder')}
             />
             {nameError ? <span className="field-error">{nameError}</span> : null}
           </label>
           <label className="form-group">
-            <FieldLabel required>Default Agent</FieldLabel>
+            <FieldLabel required>{t('ai.chat.defaultAgent')}</FieldLabel>
             <FormSelect
-              aria-label="Default Agent"
+              aria-label={t('ai.chat.defaultAgent')}
               value={selectedAgentId}
-              placeholder="请选择 Agent"
+              placeholder={t('ai.chat.selectAgent')}
               options={agents.map((agent) => ({ value: String(agent.id), label: agent.name }))}
               onChange={onSelectAgent}
             />
@@ -71,7 +73,7 @@ export function CreateChatModal({
         </div>
         <div className="modal-footer">
           <button type="submit" className="btn-primary" disabled={pending}>
-            确认创建
+            {t('ai.catalog.action.confirmCreate')}
           </button>
         </div>
       </form>

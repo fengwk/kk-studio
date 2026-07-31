@@ -1,5 +1,6 @@
 import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
 import type { PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
+import { useI18n } from '@/shared/i18n'
 
 export interface SelectionListItem {
   id: string
@@ -19,7 +20,7 @@ export function SelectionListModal({
   showSort = true,
   onSelect,
   onClose,
-  emptyText = '暂无选项',
+  emptyText,
   scope,
   onScopeChange,
   loading = false,
@@ -45,6 +46,7 @@ export function SelectionListModal({
   onLoadMore?: () => void
   selectionPending?: boolean
 }) {
+  const { t } = useI18n()
   if (!open) {
     return null
   }
@@ -58,7 +60,7 @@ export function SelectionListModal({
             <div className="selection-controls-row">
               {onScopeChange ? (
                 <div className="selection-sort-row">
-                  <span>范围</span>
+                  <span>{t('ai.chat.scope')}</span>
                   <div className="selection-sort-actions">
                     <button
                       type="button"
@@ -66,7 +68,7 @@ export function SelectionListModal({
                       onClick={() => onScopeChange('current')}
                       disabled={selectionPending}
                     >
-                      当前 Chat
+                      {t('ai.chat.currentChat')}
                     </button>
                     <button
                       type="button"
@@ -74,28 +76,28 @@ export function SelectionListModal({
                       onClick={() => onScopeChange('global')}
                       disabled={selectionPending}
                     >
-                      全局 Thread
+                      {t('ai.chat.globalThread')}
                     </button>
                   </div>
                 </div>
               ) : null}
               {showSort ? (
                 <div className="selection-sort-row">
-                  <span>排序</span>
+                  <span>{t('ai.chat.sort')}</span>
                   <div className="selection-sort-actions">
                     <button
                       type="button"
                       className={sort === 'recent' ? 'active' : undefined}
                       onClick={() => onSortChange('recent')}
                     >
-                      最近更新
+                      {t('ai.chat.recentlyUpdated')}
                     </button>
                     <button
                       type="button"
                       className={sort === 'created' ? 'active' : undefined}
                       onClick={() => onSortChange('created')}
                     >
-                      创建时间
+                      {t('ai.chat.createdAt')}
                     </button>
                   </div>
                 </div>
@@ -103,9 +105,9 @@ export function SelectionListModal({
             </div>
           ) : null}
           <ul className="selection-list" aria-busy={loading || selectionPending}>
-            {loading ? <li className="selection-empty">加载中…</li> : null}
+            {loading ? <li className="selection-empty">{t('ai.chat.loadingList')}</li> : null}
             {!loading && items.length === 0 ? (
-              <li className="selection-empty">{emptyText}</li>
+              <li className="selection-empty">{emptyText ?? t('ai.chat.noOptions')}</li>
             ) : null}
             {items.map((item) => (
               <li key={item.id}>
@@ -131,7 +133,7 @@ export function SelectionListModal({
               onClick={onLoadMore}
               disabled={loadingMore || selectionPending}
             >
-              {loadingMore ? '加载中…' : '继续加载'}
+              {loadingMore ? t('ai.chat.loadingList') : t('ai.chat.loadMore')}
             </button>
           ) : null}
         </div>
@@ -151,16 +153,23 @@ export function AgentSelectionModal({
   onSelect: (agentId: string) => void
   onClose: () => void
 }) {
+  const { t } = useI18n()
   if (!open) {
     return null
   }
   return (
     <ModalBackdrop onClose={onClose}>
-      <div className="modal-card selection-modal" aria-label="选择 Agent" onMouseDown={(event) => event.stopPropagation()}>
-        <ModalHeader title="选择 Agent" onClose={onClose} />
+      <div
+        className="modal-card selection-modal"
+        aria-label={t('ai.chat.selectAgentTitle')}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <ModalHeader title={t('ai.chat.selectAgentTitle')} onClose={onClose} />
         <div className="modal-body">
           <ul className="selection-list">
-            {agents.length === 0 ? <li className="selection-empty">暂无可用 Agent</li> : null}
+            {agents.length === 0 ? (
+              <li className="selection-empty">{t('ai.chat.noAgents')}</li>
+            ) : null}
             {agents.map((agent) => (
               <li key={agent.id}>
                 <button type="button" className="selection-item" onClick={() => onSelect(agent.id)}>

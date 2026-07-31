@@ -4,6 +4,7 @@ import {
   toToolAttachmentSrc,
 } from '@/features/ai/runtime/thread-panel/tool-attachments'
 import type { ToolAttachment, ToolDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
+import { translate, useI18n } from '@/shared/i18n'
 
 interface ToolRenderContext {
   toolName: string
@@ -17,6 +18,7 @@ interface ToolRenderContext {
 
 /** Tool turn as separate full-width call/result blocks. */
 export function ToolMessageBlock({ message }: { message: ToolDialogueMessage }) {
+  const { t } = useI18n()
   const context: ToolRenderContext = {
     toolName: message.toolName || 'Tool',
     toolCallId: message.toolCallId,
@@ -33,7 +35,7 @@ export function ToolMessageBlock({ message }: { message: ToolDialogueMessage }) 
       {call ? (
         <section className="thread-block thread-block-tool-call">
           <div className="thread-block-label">
-            tool call ·
+            {t('ai.runtime.message.toolCall')}
             {' '}
             {context.toolName}
             <span className={`thread-tool-status ${message.status ?? 'done'}`}>
@@ -45,7 +47,7 @@ export function ToolMessageBlock({ message }: { message: ToolDialogueMessage }) 
       ) : (
         <section className="thread-block thread-block-tool-result">
           <div className="thread-block-label">
-            tool result ·
+            {t('ai.runtime.message.toolResult')}
             {' '}
             {context.toolName}
             <span className={`thread-tool-status ${message.status ?? 'done'}`}>
@@ -61,7 +63,7 @@ export function ToolMessageBlock({ message }: { message: ToolDialogueMessage }) 
 
 function DefaultToolCall({ context }: { context: ToolRenderContext }) {
   if (!context.arguments.trim()) {
-    return <span className="thread-tool-placeholder">（无参数）</span>
+    return <span className="thread-tool-placeholder">{translate('ai.runtime.message.noArguments')}</span>
   }
   return <pre className="thread-tool-pre">{context.arguments}</pre>
 }
@@ -106,7 +108,7 @@ function AttachmentPreview({ attachment }: { attachment: ToolAttachment }) {
       )}
       {src ? (
         <a href={src} target="_blank" rel="noreferrer">
-          打开原始内容
+          {translate('ai.runtime.message.openRaw')}
         </a>
       ) : null}
     </figure>
@@ -115,20 +117,20 @@ function AttachmentPreview({ attachment }: { attachment: ToolAttachment }) {
 
 function formatToolStatus(status?: ToolDialogueMessage['status']): string {
   if (status === 'streaming') {
-    return 'running'
+    return translate('ai.runtime.message.running')
   }
   if (status === 'error') {
-    return 'error'
+    return translate('ai.runtime.message.error')
   }
-  return 'done'
+  return translate('ai.runtime.message.done')
 }
 
 function placeholder(context: ToolRenderContext): string {
   if (context.status === 'error') {
-    return '工具执行失败。'
+    return translate('ai.runtime.message.toolFailed')
   }
   if (context.status === 'streaming') {
-    return '等待工具结果…'
+    return translate('ai.runtime.message.waitingTool')
   }
-  return '无文本输出'
+  return translate('ai.runtime.message.noTextOutput')
 }

@@ -5,16 +5,19 @@ import type {
   AgentProviderDTO,
 } from '@/shared/api/contracts/ai-catalog'
 import type { ResourceModal } from '@/features/ai/catalog/ai-console-types'
+import { translate } from '@/shared/i18n'
 
 export function resourceTitle(modal: ResourceModal): string {
-  const prefix = modal.mode === 'create' ? '新建' : '编辑'
+  const prefix = modal.mode === 'create'
+    ? translate('ai.catalog.createPrefix')
+    : translate('ai.catalog.editPrefix')
   if (modal.kind === 'provider') {
-    return `${prefix} Provider`
+    return `${prefix} ${translate('ai.nav.providers')}`
   }
   if (modal.kind === 'model') {
-    return `${prefix} Model`
+    return `${prefix} ${translate('ai.nav.models')}`
   }
-  return `${prefix} Agent`
+  return `${prefix} ${translate('ai.nav.agents')}`
 }
 
 export function filterAgents(agents: AgentDefinitionDTO[], search: string): AgentDefinitionDTO[] {

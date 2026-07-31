@@ -10,6 +10,7 @@ import type {
 } from '@/shared/api/contracts/ai-runtime'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
+import { translate, useI18n } from '@/shared/i18n'
 
 interface RetryPolicyDraft {
   maxRetries: string
@@ -29,11 +30,11 @@ function toRetryDraft(policy: HarnessRetryPolicyDTO): RetryPolicyDraft {
 
 function readWholeNumber(value: string, label: string, min: number, max: number): number {
   if (!/^\d+$/.test(value.trim())) {
-    throw new Error(`${label}必须是整数`)
+    throw new Error(translate('ai.settings.invalidInteger', { label }))
   }
   const parsed = Number(value)
   if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
-    throw new Error(`${label}必须在 ${min} 到 ${max} 之间`)
+    throw new Error(translate('ai.settings.integerRange', { label, min, max }))
   }
   return parsed
 }
@@ -41,21 +42,32 @@ function readWholeNumber(value: string, label: string, min: number, max: number)
 function readDelayMillis(value: string, label: string): number {
   const normalized = value.trim()
   if (!/^\d+(?:\.\d{1,3})?$/.test(normalized)) {
-    throw new Error(`${label}必须是秒数，最多保留三位小数`)
+    throw new Error(translate('ai.settings.invalidSeconds', { label }))
   }
   const millis = Math.round(Number(normalized) * 1_000)
   if (!Number.isSafeInteger(millis) || millis < 1_000 || millis > 60_000) {
-    throw new Error(`${label}必须在 1 到 60 秒之间`)
+    throw new Error(translate('ai.settings.secondsRange', { label }))
   }
   return millis
 }
 
 function toRetryPolicy(draft: RetryPolicyDraft): HarnessRetryPolicyDTO {
-  const maxRetries = readWholeNumber(draft.maxRetries, '最大重试次数', 0, 10)
-  const baseDelayMillis = readDelayMillis(draft.baseDelaySeconds, '基础间隔')
-  const maxDelayMillis = readDelayMillis(draft.maxDelaySeconds, '最大间隔')
+  const maxRetries = readWholeNumber(
+    draft.maxRetries,
+    translate('ai.settings.maxRetries'),
+    0,
+    10,
+  )
+  const baseDelayMillis = readDelayMillis(
+    draft.baseDelaySeconds,
+    translate('ai.settings.baseDelay'),
+  )
+  const maxDelayMillis = readDelayMillis(
+    draft.maxDelaySeconds,
+    translate('ai.settings.maxDelay'),
+  )
   if (maxDelayMillis < baseDelayMillis) {
-    throw new Error('最大间隔不能小于基础间隔')
+    throw new Error(translate('ai.settings.maxLessThanBase'))
   }
   return {
     maxRetries,
@@ -87,6 +99,7 @@ export function HarnessSettingsPage() {
 }
 
 function RetryPolicySettingsCard() {
+  const { t, locale } = useI18n()
   const queryClient = useQueryClient()
   const policyQuery = useQuery({
     queryKey: queryKeys.harness.retryPolicy,
@@ -112,14 +125,15 @@ function RetryPolicySettingsCard() {
   })
 
   const explanation = useMemo(() => {
+    void locale
     if (!draft) {
       return ''
     }
     if (draft.backoffStrategy === 'FIXED') {
-      return `每次失败后固定等待 ${draft.baseDelaySeconds || '?'} 秒。`
+      return t('ai.settings.fixedExplanation', { seconds: draft.baseDelaySeconds || '?' })
     }
-    return `等待间隔按 2 倍递增，最大不超过 ${draft.maxDelaySeconds || '?'} 秒。`
-  }, [draft])
+    return t('ai.settings.exponentialExplanation', { seconds: draft.maxDelaySeconds || '?' })
+  }, [draft, locale, t])
 
   function submit() {
     if (!draft) {
@@ -129,15 +143,15 @@ function RetryPolicySettingsCard() {
       setValidationError(null)
       saveMutation.mutate(toRetryPolicy(draft))
     } catch (error) {
-      setValidationError(errorMessage(error, '保存重试策略失败'))
+      setValidationError(errorMessage(error, t('ai.settings.saveRetryFailed')))
     }
   }
 
   if (policyQuery.isLoading) {
-    return <StateBlock title="正在加载重试策略" />
+    return <StateBlock title={t('ai.settings.loadingRetry')} />
   }
   if (policyQuery.error) {
-    return <StateBlock title={errorMessage(policyQuery.error, '加载重试策略失败')} tone="danger" />
+    return <StateBlock title={errorMessage(policyQuery.error, t('ai.settings.retryLoadFailed'))} tone="danger" />
   }
   if (!draft) {
     return null
@@ -146,8 +160,8 @@ function RetryPolicySettingsCard() {
   return (
     <section className="harness-settings-card">
       <header>
-        <h2>自动重试</h2>
-        <p>仅对网络、限流和服务端等瞬态 Provider 故障生效。鉴权、计费、参数错误和取消会立即停止。</p>
+        <h2>{t('ai.settings.retryTitle')}</h2>
+        <p>{t('ai.settings.retryDescription')}</p>
       </header>
       <form
         className="harness-settings-form"
@@ -159,13 +173,13 @@ function RetryPolicySettingsCard() {
       >
         {validationError || saveMutation.error ? (
           <p className="form-error-banner" role="alert">
-            {validationError ?? errorMessage(saveMutation.error, '保存重试策略失败')}
+            {validationError ?? errorMessage(saveMutation.error, t('ai.settings.saveRetryFailed'))}
           </p>
         ) : null}
         <label className="form-group">
-          <FieldLabel required>最大重试次数</FieldLabel>
+          <FieldLabel required>{t('ai.settings.maxRetries')}</FieldLabel>
           <input
-            aria-label="最大重试次数"
+            aria-label={t('ai.settings.maxRetries')}
             type="number"
             min="0"
             max="10"
@@ -174,17 +188,17 @@ function RetryPolicySettingsCard() {
             value={draft.maxRetries}
             onChange={(event) => setDraft({ ...draft, maxRetries: event.target.value })}
           />
-          <small>不包含首次请求；设为 0 时不自动重试。</small>
+          <small>{t('ai.settings.maxRetriesHint')}</small>
         </label>
         <label className="form-group">
-          <FieldLabel required>退避策略</FieldLabel>
+          <FieldLabel required>{t('ai.settings.backoffStrategy')}</FieldLabel>
           <FormSelect
-            aria-label="退避策略"
+            aria-label={t('ai.settings.backoffStrategy')}
             value={draft.backoffStrategy}
             required
             options={[
-              { value: 'EXPONENTIAL', label: '指数退避' },
-              { value: 'FIXED', label: '固定间隔' },
+              { value: 'EXPONENTIAL', label: t('ai.settings.exponentialBackoff') },
+              { value: 'FIXED', label: t('ai.settings.fixedInterval') },
             ]}
             onChange={(backoffStrategy) =>
               setDraft({
@@ -195,9 +209,9 @@ function RetryPolicySettingsCard() {
           />
         </label>
         <label className="form-group">
-          <FieldLabel required>基础间隔（秒）</FieldLabel>
+          <FieldLabel required>{t('ai.settings.baseDelay')}</FieldLabel>
           <input
-            aria-label="基础间隔（秒）"
+            aria-label={t('ai.settings.baseDelay')}
             type="number"
             min="1"
             max="60"
@@ -209,9 +223,9 @@ function RetryPolicySettingsCard() {
           />
         </label>
         <label className="form-group">
-          <FieldLabel required>最大间隔（秒）</FieldLabel>
+          <FieldLabel required>{t('ai.settings.maxDelay')}</FieldLabel>
           <input
-            aria-label="最大间隔（秒）"
+            aria-label={t('ai.settings.maxDelay')}
             type="number"
             min="1"
             max="60"
@@ -225,7 +239,7 @@ function RetryPolicySettingsCard() {
         <p className="harness-settings-help">{explanation}</p>
         <div className="harness-settings-actions">
           <button className="btn-primary" type="submit" disabled={saveMutation.isPending}>
-            {saveMutation.isPending ? '保存中…' : '保存重试策略'}
+            {saveMutation.isPending ? t('ai.settings.saving') : t('ai.settings.saveRetry')}
           </button>
         </div>
       </form>
@@ -234,6 +248,7 @@ function RetryPolicySettingsCard() {
 }
 
 function RealtimeStreamPolicySettingsCard() {
+  const { t } = useI18n()
   const queryClient = useQueryClient()
   const policyQuery = useQuery({
     queryKey: queryKeys.harness.realtimeStreamPolicy,
@@ -263,25 +278,35 @@ function RealtimeStreamPolicySettingsCard() {
     try {
       setValidationError(null)
       saveMutation.mutate({
-        maxLength: readWholeNumber(maxLength, '最大保留事件数', 1, Number.MAX_SAFE_INTEGER),
+        maxLength: readWholeNumber(
+          maxLength,
+          t('ai.settings.maxEvents'),
+          1,
+          Number.MAX_SAFE_INTEGER,
+        ),
       })
     } catch (error) {
-      setValidationError(errorMessage(error, '保存实时流设置失败'))
+      setValidationError(errorMessage(error, t('ai.settings.saveRealtimeFailed')))
     }
   }
 
   if (policyQuery.isLoading) {
-    return <StateBlock title="正在加载实时流设置" />
+    return <StateBlock title={t('ai.settings.loadingRealtime')} />
   }
   if (policyQuery.error) {
-    return <StateBlock title={errorMessage(policyQuery.error, '加载实时流设置失败')} tone="danger" />
+    return (
+      <StateBlock
+        title={errorMessage(policyQuery.error, t('ai.settings.realtimeLoadFailed'))}
+        tone="danger"
+      />
+    )
   }
 
   return (
     <section className="harness-settings-card">
       <header>
-        <h2>实时流缓存</h2>
-        <p>控制每个 Thread 在 Redis 中最多保留多少条 realtime event；它是短期投影，不影响 PostgreSQL 历史。</p>
+        <h2>{t('ai.settings.realtimeTitle')}</h2>
+        <p>{t('ai.settings.realtimeDescription')}</p>
       </header>
       <form
         className="harness-settings-form"
@@ -293,13 +318,13 @@ function RealtimeStreamPolicySettingsCard() {
       >
         {validationError || saveMutation.error ? (
           <p className="form-error-banner" role="alert">
-            {validationError ?? errorMessage(saveMutation.error, '保存实时流设置失败')}
+            {validationError ?? errorMessage(saveMutation.error, t('ai.settings.saveRealtimeFailed'))}
           </p>
         ) : null}
         <label className="form-group">
-          <FieldLabel required>最大保留事件数</FieldLabel>
+          <FieldLabel required>{t('ai.settings.maxEvents')}</FieldLabel>
           <input
-            aria-label="最大保留事件数"
+            aria-label={t('ai.settings.maxEvents')}
             type="number"
             min="1"
             step="1"
@@ -308,14 +333,12 @@ function RealtimeStreamPolicySettingsCard() {
             value={maxLength}
             onChange={(event) => setMaxLength(event.target.value)}
           />
-          <small>数值越大，单个 Thread 的 Redis 内存上限越高。</small>
+          <small>{t('ai.settings.maxEventsHint')}</small>
         </label>
-        <p className="harness-settings-help">
-          保存后在本实例的任意既有或新 Thread Stream 下一次写入生效；其他实例最多约一秒刷新。调小会在下一次写入裁剪；调大不会恢复已裁掉的事件。当前不设置 TTL，也不会主动处理空闲 Stream。
-        </p>
+        <p className="harness-settings-help">{t('ai.settings.realtimeHelp')}</p>
         <div className="harness-settings-actions">
           <button className="btn-primary" type="submit" disabled={saveMutation.isPending}>
-            {saveMutation.isPending ? '保存中…' : '保存实时流设置'}
+            {saveMutation.isPending ? t('ai.settings.saving') : t('ai.settings.saveRealtime')}
           </button>
         </div>
       </form>

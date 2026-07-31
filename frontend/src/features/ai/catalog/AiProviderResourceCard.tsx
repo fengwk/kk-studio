@@ -1,18 +1,19 @@
 import { ResourceCardLayout } from '@/features/ai/catalog/AiResourceCardLayout'
 import type { AgentProviderDTO } from '@/shared/api/contracts/ai-catalog'
+import { translate, useI18n } from '@/shared/i18n'
 
 function formatMs(value: number | string | null | undefined): string {
   if (value == null || value === '') {
-    return '—'
+    return translate('ai.catalog.card.emptyValue')
   }
   const n = Number(value)
   if (!Number.isFinite(n)) {
     return String(value)
   }
   if (n >= 60_000) {
-    return `${Math.round(n / 1000)}s`
+    return translate('ai.catalog.card.seconds', { value: Math.round(n / 1000) })
   }
-  return `${n}ms`
+  return translate('ai.catalog.card.milliseconds', { value: n })
 }
 
 export function ProviderResourceCard({
@@ -26,19 +27,25 @@ export function ProviderResourceCard({
   onDelete: () => void
   deletePending: boolean
 }) {
+  const { t } = useI18n()
   return (
     <ResourceCardLayout
       icon="provider"
       title={provider.name}
       subtitle={provider.description || provider.baseUrl || provider.providerType}
       rows={[
-        ['Type', provider.providerType],
-        ['URL', provider.baseUrl || '—'],
-        ['API Key', provider.configured ? '已配置' : '无 API Key（无认证请求）'],
+        [t('ai.catalog.card.type'), provider.providerType],
+        [t('ai.catalog.card.url'), provider.baseUrl || t('ai.catalog.card.emptyValue')],
+        [
+          t('ai.catalog.card.apiKey'),
+          provider.configured
+            ? t('ai.catalog.card.configured')
+            : t('ai.catalog.card.unconfiguredApiKey'),
+        ],
         {
           pairs: [
-            { label: 'Timeout', value: formatMs(provider.modelCallTimeoutMillis) },
-            { label: 'Idle', value: formatMs(provider.modelCallIdleTimeoutMillis) },
+            { label: t('ai.catalog.card.timeout'), value: formatMs(provider.modelCallTimeoutMillis) },
+            { label: t('ai.catalog.card.idle'), value: formatMs(provider.modelCallIdleTimeoutMillis) },
           ],
         },
       ]}

@@ -7,6 +7,7 @@ import type {
 } from '@/shared/api/contracts/ai-catalog'
 import type { AgentDraft } from '@/features/ai/catalog/ai-console-types'
 import { trimToNull } from '@/features/ai/catalog/ai-resource-draft-primitives'
+import { translate } from '@/shared/i18n'
 
 function normalizeNames(items: string[] | null | undefined): string[] {
   if (!items?.length) {
@@ -47,7 +48,12 @@ function normalizeCapabilityShortNames(
     seen.add(name)
   }
   if (duplicates.size > 0) {
-    throw new Error(`${kind} 去前缀后存在重名：${[...duplicates].join(', ')}`)
+    throw new Error(
+      translate('ai.catalog.validation.capabilityDuplicate', {
+        kind,
+        names: [...duplicates].join(', '),
+      }),
+    )
   }
   return shortNames
 }
