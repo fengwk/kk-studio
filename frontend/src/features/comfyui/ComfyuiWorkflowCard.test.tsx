@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ComfyuiWorkflowCard } from '@/features/comfyui/ComfyuiWorkflowCard'
 import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts/comfyui'
+import { setLocale } from '@/shared/i18n'
 
 function makeWorkflow(overrides: Partial<ComfyuiWorkflowApiDTO> = {}): ComfyuiWorkflowApiDTO {
   return {
@@ -46,7 +47,7 @@ describe('ComfyuiWorkflowCard', () => {
     expect(screen.getByText('Upscale reference image')).toBeInTheDocument()
     expect(screen.getByText('POST /api/comfyui/workflows/image-upscale/runs')).toBeInTheDocument()
     expect(screen.getByText('2')).toBeInTheDocument()
-    expect(screen.getByText('Enabled')).toHaveClass('enabled')
+    expect(screen.getByText('已启用')).toHaveClass('enabled')
     expect(screen.getByText('$.outputs')).toBeInTheDocument()
     expect(screen.queryByText(/绑定配置无法解析/)).not.toBeInTheDocument()
   })
@@ -76,9 +77,9 @@ describe('ComfyuiWorkflowCard', () => {
       />,
     )
 
-    expect(screen.getByText('Disabled')).toHaveClass('disabled')
+    expect(screen.getByText('已禁用')).toHaveClass('disabled')
     expect(screen.getByRole('button', { name: '运行 Image Upscale' })).toBeDisabled()
-    expect(screen.getByText('whole result')).toBeInTheDocument()
+    expect(screen.getByText('完整结果')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '编辑 Image Upscale' })).not.toBeDisabled()
   })
 
@@ -135,5 +136,26 @@ describe('ComfyuiWorkflowCard', () => {
     expect(onRun).toHaveBeenCalledTimes(1)
     expect(onEdit).toHaveBeenCalledTimes(1)
     expect(onDelete).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders the card catalog in English without translating workflow data', () => {
+    setLocale('en-US')
+    render(
+      <ComfyuiWorkflowCard
+        workflow={makeWorkflow()}
+        deletePending={false}
+        onRun={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Enabled')).toBeInTheDocument()
+    expect(screen.getByText('Bindings')).toBeInTheDocument()
+    expect(screen.getByText('Selector')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Run Image Upscale' })).toHaveTextContent('Run')
+    expect(screen.getByRole('button', { name: 'Edit Image Upscale' })).toHaveTextContent('Edit')
+    expect(screen.getByRole('button', { name: 'Delete Image Upscale' })).toHaveTextContent('Delete')
+    expect(screen.getByText('Upscale reference image')).toBeInTheDocument()
   })
 })

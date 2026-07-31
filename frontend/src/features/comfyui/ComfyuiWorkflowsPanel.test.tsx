@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ComfyuiWorkflowsPanel } from '@/features/comfyui/ComfyuiWorkflowsPanel'
 import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts/comfyui'
+import { setLocale } from '@/shared/i18n'
 
 function makeWorkflow(id: string, name: string, apiName: string, enabled = true): ComfyuiWorkflowApiDTO {
   return {
@@ -96,5 +97,26 @@ describe('ComfyuiWorkflowsPanel', () => {
     expect(onEdit).toHaveBeenCalledWith(beta)
     expect(onDelete).toHaveBeenCalledTimes(1)
     expect(onDelete).toHaveBeenCalledWith(alpha)
+  })
+
+  it('renders the workflow list actions in English', () => {
+    setLocale('en-US')
+    render(
+      <ComfyuiWorkflowsPanel
+        workflows={[makeWorkflow('1', 'Alpha', 'alpha')]}
+        deletePending={false}
+        onCreate={vi.fn()}
+        onRun={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'New ComfyUI Workflow' })).toHaveTextContent(
+      'Configure an API-format workflow, input bindings, and a result selector',
+    )
+    expect(screen.getByRole('button', { name: 'Run Alpha' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Edit Alpha' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Delete Alpha' })).toBeEnabled()
   })
 })

@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { useOptionalComfyui } from '@/features/comfyui/ComfyuiContext'
 import type { ExtensionComponentProps } from '@/platform/extensions/types'
+import { useI18n } from '@/shared/i18n'
 
 const ComfyuiPage = lazy(async () => {
   const module = await import('@/features/comfyui/ComfyuiPage')
@@ -16,8 +17,9 @@ const ConfirmActionModal = lazy(async () => {
 })
 
 export function ComfyuiRoute({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
   return (
-    <Suspense fallback={<div className="state-block" role="status">正在加载 ComfyUI</div>}>
+    <Suspense fallback={<div className="state-block" role="status">{t('comfyui.extension.loading')}</div>}>
       <ComfyuiPage>{children}</ComfyuiPage>
     </Suspense>
   )
@@ -25,11 +27,12 @@ export function ComfyuiRoute({ children }: ExtensionComponentProps) {
 
 export function ComfyuiWorkflowEditorDialog() {
   const controller = useOptionalComfyui()
+  const { t } = useI18n()
   if (!controller?.comfyuiEditorModal.modal) {
     return null
   }
   return (
-    <Suspense fallback={<div className="state-block" role="status">正在加载工作流编辑器</div>}>
+    <Suspense fallback={<div className="state-block" role="status">{t('comfyui.extension.loadingEditor')}</div>}>
       <ComfyuiWorkflowEditorModal {...controller.comfyuiEditorModal} />
     </Suspense>
   )
@@ -37,11 +40,12 @@ export function ComfyuiWorkflowEditorDialog() {
 
 export function ComfyuiDeleteDialog() {
   const controller = useOptionalComfyui()
+  const { t } = useI18n()
   if (!controller?.comfyuiDeleteConfirmModal.modal) {
     return null
   }
   return (
-    <Suspense fallback={<div className="state-block" role="status">正在加载确认对话框</div>}>
+    <Suspense fallback={<div className="state-block" role="status">{t('comfyui.extension.loadingConfirmDialog')}</div>}>
       <ConfirmActionModal {...controller.comfyuiDeleteConfirmModal} />
     </Suspense>
   )

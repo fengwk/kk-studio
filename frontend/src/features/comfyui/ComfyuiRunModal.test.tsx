@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ComfyuiRunModal } from '@/features/comfyui/ComfyuiRunModal'
 import { comfyuiService } from '@/shared/api/comfyui-service'
+import { setLocale } from '@/shared/i18n'
 import type {
   ComfyuiWorkflowApiDTO,
   ComfyuiWorkflowJobDTO,
@@ -129,7 +130,7 @@ describe('ComfyuiRunModal', () => {
   it('renders dynamic fields, endpoint, default values, and locks submit while binding parse error blocks the form', () => {
     renderModal({ workflow: makeWorkflow({ inputBindingsJson: '{broken' }) })
     expect(screen.getByText(/输入绑定配置错误/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Run workflow' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '运行工作流' })).toBeDisabled()
     expect(screen.getByText('POST /api/comfyui/workflows/image-upscale/runs')).toBeInTheDocument()
   })
 
@@ -141,7 +142,7 @@ describe('ComfyuiRunModal', () => {
     fireEvent.change(screen.getByLabelText('image *'), {
       target: { files: [new File(['pixels'], 'input.png', { type: 'image/png' })] },
     })
-    await user.click(screen.getByRole('button', { name: 'Run workflow' }))
+    await user.click(screen.getByRole('button', { name: '运行工作流' }))
 
     // The required steps value comes from the default, the prompt comes from the default.
     expect(comfyuiService.uploadFile).toHaveBeenCalledTimes(1)
@@ -181,9 +182,9 @@ describe('ComfyuiRunModal', () => {
     vi.mocked(comfyuiService.uploadFile).mockClear()
     renderModal({ workflow })
     // Submit must be guarded client-side before any upload or run happens.
-    expect(screen.queryByRole('button', { name: 'Run workflow' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '运行工作流' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('image *'), { target: { files: [] } })
-    fireEvent.submit(screen.getByRole('button', { name: 'Run workflow' }).closest('form')!)
+    fireEvent.submit(screen.getByRole('button', { name: '运行工作流' }).closest('form')!)
     await flushPromises()
     expect(comfyuiService.runWorkflow).not.toHaveBeenCalled()
     expect(comfyuiService.uploadFile).not.toHaveBeenCalled()
@@ -196,7 +197,7 @@ describe('ComfyuiRunModal', () => {
     fireEvent.change(screen.getByLabelText('image *'), {
       target: { files: [new File(['strict'], 'strict.png', { type: 'image/png' })] },
     })
-    await user.click(screen.getByRole('button', { name: 'Run workflow' }))
+    await user.click(screen.getByRole('button', { name: '运行工作流' }))
     // Default mock for getRun returns 'completed' so the polling cycle eventually surfaces it.
     expect(await screen.findByText('completed', undefined, { timeout: 3000 })).toBeInTheDocument()
     expect(comfyuiService.getRun).toHaveBeenCalledWith('run-1', '$.outputs')
@@ -211,7 +212,7 @@ describe('ComfyuiRunModal', () => {
     fireEvent.change(screen.getByLabelText('image *'), {
       target: { files: [new File(['pixels'], 'input.png', { type: 'image/png' })] },
     })
-    await user.click(screen.getByRole('button', { name: 'Run workflow' }))
+    await user.click(screen.getByRole('button', { name: '运行工作流' }))
     // Polling interval is 1500ms; wait for the terminal payload before asserting the download link.
     const download = await screen.findByRole('link', { name: 'result.png' }, { timeout: 3000 })
     expect(download).toHaveAttribute('href', '/api/comfyui/runs/run-1/files/9/images/0')
@@ -228,10 +229,10 @@ describe('ComfyuiRunModal', () => {
     fireEvent.change(screen.getByLabelText('image *'), {
       target: { files: [new File(['pixels'], 'input.png', { type: 'image/png' })] },
     })
-    await user.click(screen.getByRole('button', { name: 'Run workflow' }))
+    await user.click(screen.getByRole('button', { name: '运行工作流' }))
     await waitFor(() => expect(screen.getByRole('button', { name: '刷新结果' })).toBeEnabled())
     // Change selector and refresh.
-    fireEvent.change(screen.getByLabelText('JSONPath selector'), { target: { value: '$.userSelection' } })
+    fireEvent.change(screen.getByLabelText('JSONPath 选择器'), { target: { value: '$.userSelection' } })
     await user.click(screen.getByRole('button', { name: '刷新结果' }))
     await waitFor(() =>
       expect(comfyuiService.getRun).toHaveBeenLastCalledWith('run-1', '$.userSelection'),
@@ -248,7 +249,7 @@ describe('ComfyuiRunModal', () => {
     fireEvent.change(screen.getByLabelText('image *'), {
       target: { files: [new File(['pixels'], 'input.png', { type: 'image/png' })] },
     })
-    await user.click(screen.getByRole('button', { name: 'Run workflow' }))
+    await user.click(screen.getByRole('button', { name: '运行工作流' }))
     // Two polling cycles at 1500ms each must end in a terminal status.
     expect(await screen.findByText('completed', undefined, { timeout: 4500 })).toBeInTheDocument()
     expect(comfyuiService.getRun).toHaveBeenCalledTimes(3)
@@ -261,7 +262,7 @@ describe('ComfyuiRunModal', () => {
     fireEvent.change(screen.getByLabelText('image *'), {
       target: { files: [new File(['pixels'], 'input.png', { type: 'image/png' })] },
     })
-    await user.click(screen.getByRole('button', { name: 'Run workflow' }))
+    await user.click(screen.getByRole('button', { name: '运行工作流' }))
     expect(await screen.findByText('S3 upload rejected')).toBeInTheDocument()
     expect(comfyuiService.runWorkflow).not.toHaveBeenCalled()
   })
@@ -273,12 +274,12 @@ describe('ComfyuiRunModal', () => {
     fireEvent.change(screen.getByLabelText('image *'), {
       target: { files: [new File(['pixels'], 'input.png', { type: 'image/png' })] },
     })
-    await user.click(screen.getByRole('button', { name: 'Run workflow' }))
-    expect(await screen.findByRole('button', { name: 'Cancel' }, { timeout: 3000 })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await user.click(screen.getByRole('button', { name: '运行工作流' }))
+    expect(await screen.findByRole('button', { name: '取消' }, { timeout: 3000 })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '取消' }))
     await waitFor(() => expect(comfyuiService.cancelRun).toHaveBeenCalledWith('run-1'))
     expect(await screen.findByText('cancelled', undefined, { timeout: 3000 })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument()
   })
 
   it('re-loads the job when cancel returns cancelled=false', async () => {
@@ -289,8 +290,8 @@ describe('ComfyuiRunModal', () => {
     fireEvent.change(screen.getByLabelText('image *'), {
       target: { files: [new File(['pixels'], 'input.png', { type: 'image/png' })] },
     })
-    await user.click(screen.getByRole('button', { name: 'Run workflow' }))
-    const cancel = await screen.findByRole('button', { name: 'Cancel' })
+    await user.click(screen.getByRole('button', { name: '运行工作流' }))
+    const cancel = await screen.findByRole('button', { name: '取消' })
     await user.click(cancel)
     await waitFor(() => expect(comfyuiService.cancelRun).toHaveBeenCalledWith('run-1'))
     // cancelRun returned cancelled=false -> the modal must refetch via loadJob.
@@ -313,13 +314,13 @@ describe('ComfyuiRunModal', () => {
     fireEvent.change(screen.getByLabelText('image *'), {
       target: { files: [new File(['pixels'], 'input.png', { type: 'image/png' })] },
     })
-    await user.click(screen.getByRole('button', { name: 'Run workflow' }))
-    await user.click(await screen.findByRole('button', { name: 'Cancel' }))
-    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: '运行工作流' }))
+    await user.click(await screen.findByRole('button', { name: '取消' }))
+    expect(screen.getByRole('button', { name: '取消' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '刷新结果' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Run again' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '再次运行' })).toBeDisabled()
     // Submitting the form while cancel is pending must be a no-op.
-    fireEvent.submit(screen.getByRole('button', { name: 'Run again' }).closest('form')!)
+    fireEvent.submit(screen.getByRole('button', { name: '再次运行' }).closest('form')!)
     expect(comfyuiService.runWorkflow).toHaveBeenCalledTimes(1)
     await act(async () => {
       release()
@@ -344,10 +345,10 @@ describe('ComfyuiRunModal', () => {
       target: { files: [new File(['pixels'], 'input.png', { type: 'image/png' })] },
     })
     // First submit lands but stops polling because the stale job's status (running) schedules a poll.
-    await user.click(screen.getByRole('button', { name: 'Run workflow' }))
-    expect(await screen.findByRole('button', { name: 'Run again' }, { timeout: 3000 })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '运行工作流' }))
+    expect(await screen.findByRole('button', { name: '再次运行' }, { timeout: 3000 })).toBeInTheDocument()
     // Second submit bumps generation. The prior run-state must be discarded.
-    await user.click(screen.getByRole('button', { name: 'Run again' }))
+    await user.click(screen.getByRole('button', { name: '再次运行' }))
     // The fresh submission must land as completed, never re-paint the stale running state.
     expect(await screen.findByText('completed', undefined, { timeout: 3000 })).toBeInTheDocument()
     expect(comfyuiService.runWorkflow).toHaveBeenCalledTimes(2)
@@ -356,9 +357,9 @@ describe('ComfyuiRunModal', () => {
   it('treats bad binding config as a hard block (cannot submit)', () => {
     const workflow = makeWorkflow({ inputBindingsJson: '[]' })
     renderModal({ workflow })
-    expect(screen.getByRole('button', { name: 'Run workflow' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '运行工作流' })).toBeEnabled()
     // No required file bindings - submit must succeed with empty parameters and empty files.
-    fireEvent.submit(screen.getByRole('button', { name: 'Run workflow' }).closest('form')!)
+    fireEvent.submit(screen.getByRole('button', { name: '运行工作流' }).closest('form')!)
     return flushPromises().then(() => {
       expect(comfyuiService.uploadFile).not.toHaveBeenCalled()
       expect(comfyuiService.runWorkflow).toHaveBeenCalledWith('image-upscale', {
@@ -366,5 +367,28 @@ describe('ComfyuiRunModal', () => {
         files: {},
       })
     })
+  })
+
+  it('renders the run modal in English and rerenders when the locale changes', () => {
+    setLocale('en-US')
+    renderModal({
+      workflow: makeWorkflow({
+        inputBindingsJson: JSON.stringify([
+          { name: 'requiredFlag', kind: 'parameter', nodeId: '3', inputName: 'flag', valueType: 'boolean', required: true },
+          { name: 'optionalFlag', kind: 'parameter', nodeId: '3', inputName: 'optional', valueType: 'boolean' },
+        ]),
+      }),
+    })
+
+    expect(screen.getByRole('heading', { name: 'Run · Image Upscale' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Run workflow' })).toBeEnabled()
+    expect(screen.getByLabelText('JSONPath selector')).toHaveAttribute('placeholder', 'whole result')
+    expect(screen.getByText('Select true or false')).toBeInTheDocument()
+    expect(screen.getByText('Not provided (keep workflow value)')).toBeInTheDocument()
+
+    act(() => {
+      setLocale('zh-CN')
+    })
+    expect(screen.getByRole('heading', { name: '运行 · Image Upscale' })).toBeInTheDocument()
   })
 })

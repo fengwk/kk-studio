@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createComfyuiService } from '@/shared/api/comfyui-service'
+import { setLocale } from '@/shared/i18n'
 import type { HttpClient } from '@/shared/api/client'
 
 function createClient(): HttpClient {
@@ -122,5 +123,39 @@ describe('comfyuiService', () => {
     })
     const failedService = createComfyuiService(client, vi.fn(async () => ({ ok: false, status: 403 }) as Response) as typeof fetch)
     await expect(failedService.uploadFile('workflow', new File(['x'], 'input.bin'))).rejects.toThrow('HTTP 403')
+  })
+
+  it('translates upload failures in English at call time', async () => {
+    setLocale('en-US')
+    const client = createClient()
+    vi.mocked(client.post).mockResolvedValue({
+      bucket: 'studio',
+      key: 'input.bin',
+      method: 'POST',
+      url: 'https://s3.example/upload-token',
+      headers: {},
+      expiresAt: null,
+    })
+    const service = createComfyuiService(client, vi.fn())
+
+    await expect(service.uploadFile('workflow', new File(['x'], 'input.bin'))).rejects.toThrow(
+      'Invalid presigned upload method: POST',
+    )
+
+    vi.mocked(client.post).mockResolvedValueOnce({
+      bucket: 'studio',
+      key: 'input.bin',
+      method: 'PUT',
+      url: 'https://s3.example/upload-token',
+      headers: {},
+      expiresAt: null,
+    })
+    const failedService = createComfyuiService(
+      client,
+      vi.fn(async () => ({ ok: false, status: 403 }) as Response) as typeof fetch,
+    )
+    await expect(failedService.uploadFile('workflow', new File(['x'], 'input.bin'))).rejects.toThrow(
+      'Direct file upload failed (HTTP 403)',
+    )
   })
 })
