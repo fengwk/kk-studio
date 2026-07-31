@@ -52,8 +52,6 @@ export function createHarnessService(client: HttpClient = apiClient) {
     ): Promise<HarnessRealtimeStreamPolicyDTO> =>
       client.put('/ai/runtime/settings/realtime-stream-policy', data),
     listSessions: (): Promise<HarnessSessionDTO[]> => client.get('/ai/runtime/sessions'),
-    getSession: (sessionId: string): Promise<HarnessSessionDTO> =>
-      client.get(`/ai/runtime/sessions/${encodeURIComponent(sessionId)}`),
     listSessionEntries: (sessionId: string): Promise<HarnessSessionEntryDTO[]> =>
       client.get(`/ai/runtime/sessions/${encodeURIComponent(sessionId)}/entries`),
     /** Snapshot-first SSE: durable revisions get ids; lossy Redis deltas deliberately do not. */

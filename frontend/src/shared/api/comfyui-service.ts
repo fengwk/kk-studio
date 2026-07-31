@@ -77,9 +77,6 @@ export function createComfyuiService(client: HttpClient = apiClient, fetchImpl: 
     createPresignedUpload: (data: S3PresignedRequestDTO): Promise<S3PresignedResponseDTO> =>
       client.post('/s3/presigned-uploads', data),
 
-    createPresignedDownload: (data: S3PresignedRequestDTO): Promise<S3PresignedResponseDTO> =>
-      client.post('/s3/presigned-downloads', data),
-
     runWorkflow: (apiName: string, data: ComfyuiWorkflowRunRequestDTO): Promise<ComfyuiWorkflowRunDTO> =>
       client.post(`/comfyui/workflows/${encodeURIComponent(apiName)}/runs`, data),
 
