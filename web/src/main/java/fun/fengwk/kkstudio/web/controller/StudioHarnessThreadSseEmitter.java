@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -24,6 +25,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * load PostgreSQL state first. Revision events carry the durable revision as SSE id while lossy
  * Redis delta events intentionally carry no id, so Last-Event-ID cannot be corrupted by Redis.
  */
+@Slf4j
 final class StudioHarnessThreadSseEmitter {
   private static final Duration BLOCK = Duration.ofMillis(250);
   private static final int BATCH = 100;
@@ -68,8 +70,8 @@ final class StudioHarnessThreadSseEmitter {
           }
           try {
             subscription.close();
-          } catch (Exception ignored) {
-            // Subscription cleanup is best-effort after transport teardown.
+          } catch (Exception closeFailure) {
+            log.debug("Failed to close Thread revision subscription {}", threadId, closeFailure);
           }
         };
     emitter.onCompletion(close);

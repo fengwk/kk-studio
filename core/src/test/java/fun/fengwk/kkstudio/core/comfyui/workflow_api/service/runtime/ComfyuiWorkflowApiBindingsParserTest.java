@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Locale;
 
 /**
@@ -55,6 +56,13 @@ public class ComfyuiWorkflowApiBindingsParserTest {
     assertEquals(ComfyuiWorkflowApiBindings.ValueType.INTEGER, b.parameterOptions().valueType());
     assertEquals(42L, b.parameterOptions().defaultValue());
     assertEquals("$['3'].inputs.seed", parsed.defaultSelector());
+    assertThrows(UnsupportedOperationException.class, () -> parsed.bindings().clear());
+
+    ArrayList<ComfyuiWorkflowApiBindings.Binding> source = new ArrayList<>(parsed.bindings());
+    ComfyuiWorkflowApiBindings copied =
+        new ComfyuiWorkflowApiBindings(parsed.workflow(), source, parsed.defaultSelector());
+    source.clear();
+    assertEquals(1, copied.bindings().size());
   }
 
   @Test

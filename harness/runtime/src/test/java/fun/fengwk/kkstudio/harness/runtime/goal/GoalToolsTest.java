@@ -74,6 +74,9 @@ class GoalToolsTest {
 
     ToolResult badBudget = execute(create, 9, "{\"objective\":\"x\",\"tokenBudget\":0}");
     assertTrue(badBudget.error());
+    assertFalse(execute(create, 9, "{\"objective\":\"x\",\"tokenBudget\":1.0}").error());
+    assertTrue(execute(create, 9, "{\"objective\":\"x\",\"tokenBudget\":1.5}").error());
+    assertTrue(execute(create, 9, "{\"objective\":\"x\",\"tokenBudget\":1e20}").error());
 
     ToolResult blankObjective = execute(create, 9, "{\"objective\":\"   \"}");
     assertTrue(blankObjective.error());

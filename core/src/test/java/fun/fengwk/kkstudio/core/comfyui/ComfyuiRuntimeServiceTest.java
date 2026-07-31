@@ -244,13 +244,17 @@ public class ComfyuiRuntimeServiceTest {
     JsonNode outputs =
         objectMapper.readTree(
             "{\"9\":{\"images\":[{\"filename\":\"safe.png\",\"subfolder\":\"final\",\"type\":\"output\"}]}}");
+    byte[] payload = new byte[] {4, 5};
     when(client.getJob("run-9")).thenReturn(Mono.just(job("run-9", "completed", outputs)));
-    when(client.getFile("safe.png", "final", "output")).thenReturn(Mono.just(new byte[] {4, 5}));
+    when(client.getFile("safe.png", "final", "output")).thenReturn(Mono.just(payload));
 
     // URL 只携带 node/media/index，真实 filename/subfolder/type 必须从该 job 重新解析。
     ComfyuiFileDownload download = runtimeService.downloadFile("run-9", "9", "images", 0);
     assertEquals("safe.png", download.getFilename());
     assertEquals("image/png", download.getContentType());
+    payload[0] = 0;
+    assertArrayEquals(new byte[] {4, 5}, download.getBytes());
+    download.getBytes()[1] = 0;
     assertArrayEquals(new byte[] {4, 5}, download.getBytes());
 
     assertThrows(

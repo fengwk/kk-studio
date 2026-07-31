@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
+import java.math.BigDecimal;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -91,14 +92,12 @@ final class PlatformToolSupport {
       throw new IllegalArgumentException(field + " must be a positive integer when provided");
     }
     long parsed;
-    if (value.isIntegralNumber()) {
-      parsed = value.longValue();
-    } else {
-      double asDouble = value.doubleValue();
-      if (!Double.isFinite(asDouble) || Math.rint(asDouble) != asDouble) {
-        throw new IllegalArgumentException(field + " must be a positive integer when provided");
-      }
-      parsed = (long) asDouble;
+    try {
+      BigDecimal decimal = value.decimalValue();
+      parsed = decimal.longValueExact();
+    } catch (ArithmeticException | NumberFormatException error) {
+      throw new IllegalArgumentException(
+          field + " must be a positive integer when provided", error);
     }
     if (parsed <= 0) {
       throw new IllegalArgumentException(field + " must be a positive integer when provided");
