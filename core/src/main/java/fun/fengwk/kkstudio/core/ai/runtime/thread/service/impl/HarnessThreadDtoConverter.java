@@ -24,8 +24,7 @@ public class HarnessThreadDtoConverter {
     dto.setExecutionEpoch(thread.executionEpoch());
     dto.setRevision(Long.toString(thread.revision()));
     dto.setHeadEntryId(thread.headEntryId() == null ? null : Long.toString(thread.headEntryId()));
-    dto.setStatus(
-        thread.runnable() ? "RUNNABLE" : (thread.headEntryId() == null ? "UNBOUND" : "IDLE"));
+    dto.setStatus(status(thread));
     dto.setInputSequence(thread.inputSequence());
     dto.setProcessing(thread.hasActiveProcessorAt(Instant.now()));
     dto.setCreateTime(LocalDateTime.ofInstant(thread.createdAt(), ZoneOffset.UTC));
@@ -48,5 +47,12 @@ public class HarnessThreadDtoConverter {
             : LocalDateTime.ofInstant(input.appliedAt(), ZoneOffset.UTC));
     dto.setCreateTime(LocalDateTime.ofInstant(input.createdAt(), ZoneOffset.UTC));
     return dto;
+  }
+
+  private static String status(HarnessThread thread) {
+    if (thread.runnable()) {
+      return "RUNNABLE";
+    }
+    return thread.headEntryId() == null ? "UNBOUND" : "IDLE";
   }
 }
