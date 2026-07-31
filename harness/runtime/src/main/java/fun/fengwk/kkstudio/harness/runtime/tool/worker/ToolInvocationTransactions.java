@@ -102,8 +102,7 @@ public interface ToolInvocationTransactions {
    * Atomically persist the final ASK plan, transition to {@code WAITING_INTERACTION} with {@code
    * permission_state = ASKED}, clear worker clocks, and insert exactly one OPEN Interaction owned
    * by this Tool. The execution target is parked (disabled, route/time preserved) in the same
-   * transaction so the FIFO gate is preserved while the prompt is outstanding. {@code expiresAt} is
-   * reserved for the next phase; this slice always passes {@code null}.
+   * transaction so the FIFO gate is preserved while the prompt is outstanding.
    */
   ToolInvocationUpdateOutcome awaitPermission(
       ClaimedToolInvocation claimed,

@@ -78,10 +78,7 @@ public interface ThreadCommandMapper extends BaseMapper {
       })
   ThreadCommandRow findThreadForUpdate(@Param("threadId") long threadId);
 
-  /**
-   * 当前 epoch 是否仍有可向 Entry Tree 提交结果的执行事实：非终态 Model/Tool Invocation，或它们与 Thread 自身的 OPEN
-   * Interaction。这些状态下禁止外部 rebind。
-   */
+  /** 当前 epoch 是否仍有可向 Entry Tree 提交结果的执行事实：非终态 Model/Tool Invocation。这些状态下禁止外部 rebind。 */
   @Select(
       """
       select exists (
@@ -92,28 +89,6 @@ public interface ThreadCommandMapper extends BaseMapper {
         select 1 from harness_tool_invocation ti
         where ti.thread_id = #{threadId} and ti.execution_epoch = #{epoch}
           and ti.status not in ('SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN')
-      ) or exists (
-        select 1 from harness_interaction hi
-        where hi.status = 'OPEN'
-          and (
-            (hi.owner_kind = 'THREAD' and hi.owner_id = #{threadId})
-            or (
-              hi.owner_kind = 'MODEL_INVOCATION'
-              and exists (
-                select 1 from harness_model_invocation mi
-                where mi.id = hi.owner_id and mi.thread_id = #{threadId}
-                  and mi.execution_epoch = #{epoch}
-              )
-            )
-            or (
-              hi.owner_kind = 'TOOL_INVOCATION'
-              and exists (
-                select 1 from harness_tool_invocation ti
-                where ti.id = hi.owner_id and ti.thread_id = #{threadId}
-                  and ti.execution_epoch = #{epoch}
-              )
-            )
-          )
       )
       """)
   boolean hasActiveExecution(@Param("threadId") long threadId, @Param("epoch") long epoch);
@@ -131,31 +106,14 @@ public interface ThreadCommandMapper extends BaseMapper {
       @Param("headEntryId") Long headEntryId,
       @Param("now") OffsetDateTime now);
 
-  /** stop 取消该 Thread 关联的全部 OPEN Interaction，使逻辑停止后立即可 rebind。 */
-  @Update(
+  /** Stop discards unresolvable OPEN Tool permission prompts for the stopped Thread. */
+  @Delete(
       """
-      update harness_interaction
-      set status = 'CANCELLED', response = null, resolved_at = #{now}, version = version + 1
-      where status = 'OPEN'
-        and (
-          (owner_kind = 'THREAD' and owner_id = #{threadId})
-          or (
-            owner_kind = 'MODEL_INVOCATION'
-            and exists (
-              select 1 from harness_model_invocation mi
-              where mi.id = harness_interaction.owner_id and mi.thread_id = #{threadId}
-            )
-          )
-          or (
-            owner_kind = 'TOOL_INVOCATION'
-            and exists (
-              select 1 from harness_tool_invocation ti
-              where ti.id = harness_interaction.owner_id and ti.thread_id = #{threadId}
-            )
-          )
-        )
+      delete from harness_interaction hi
+      using harness_tool_invocation ti
+      where hi.tool_invocation_id = ti.id and hi.status = 'OPEN' and ti.thread_id = #{threadId}
       """)
-  int cancelOpenInteractions(@Param("threadId") long threadId, @Param("now") OffsetDateTime now);
+  int deleteOpenToolPermissionInteractions(@Param("threadId") long threadId);
 
   @Select(
       """

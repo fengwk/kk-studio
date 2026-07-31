@@ -3,8 +3,6 @@ package fun.fengwk.kkstudio.core.ai.runtime.interaction.service.impl;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.core.ai.runtime.interaction.service.InteractionService;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.interaction.Interaction;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionCoordinator.InteractionRespondResult;
@@ -16,8 +14,8 @@ import fun.fengwk.kkstudio.share.ai.runtime.InteractionResponseDTO;
 import java.util.Objects;
 
 /**
- * Thin Core Interaction boundary for decimal-string/DTO mapping. Domain projection, expiry and
- * handler resolution live in {@link InteractionCoordinator}; its transaction writes wake the
+ * Thin Core Tool permission Interaction boundary for decimal-string/DTO mapping. Domain projection
+ * and approval resolution live in {@link InteractionCoordinator}; its transaction writes wake the
  * durable execution-target queue directly.
  */
 @Service
@@ -34,10 +32,10 @@ public class InteractionServiceImpl implements InteractionService {
   }
 
   @Override
-  public InteractionDTO getOpenByOwner(String ownerKind, String ownerId) {
-    ExecutionTarget owner =
-        new ExecutionTarget(parseOwnerKind(ownerKind), parsePositiveDecimal(ownerId, "ownerId"));
-    return toDto(coordinator.getOpenByOwner(owner));
+  public InteractionDTO getOpenByToolInvocation(String toolInvocationId) {
+    return toDto(
+        coordinator.getOpenByToolInvocation(
+            parsePositiveDecimal(toolInvocationId, "toolInvocationId")));
   }
 
   @Override
@@ -59,28 +57,14 @@ public class InteractionServiceImpl implements InteractionService {
   private InteractionDTO toDto(Interaction interaction, String projectionJson) {
     InteractionDTO dto = new InteractionDTO();
     dto.setId(Long.toString(interaction.id()));
-    dto.setOwnerKind(interaction.owner().kind().name());
-    dto.setOwnerId(Long.toString(interaction.owner().id()));
-    dto.setHandlerType(interaction.handlerType());
+    dto.setToolInvocationId(Long.toString(interaction.toolInvocationId()));
     dto.setProjectionJson(projectionJson);
     dto.setStatus(interaction.status().name());
     dto.setResponseJson(interaction.response() == null ? null : interaction.response().json());
-    dto.setExpiresAt(interaction.expiresAt());
     dto.setVersion(Long.toString(interaction.version()));
     dto.setCreatedAt(interaction.createdAt());
     dto.setResolvedAt(interaction.resolvedAt());
     return dto;
-  }
-
-  private static ExecutionTargetKind parseOwnerKind(String ownerKind) {
-    if (ownerKind == null || ownerKind.isBlank()) {
-      throw new IllegalArgumentException("ownerKind must not be blank");
-    }
-    try {
-      return ExecutionTargetKind.valueOf(ownerKind);
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException("invalid ownerKind: " + ownerKind, error);
-    }
   }
 
   private static long parsePositiveDecimal(String value, String name) {

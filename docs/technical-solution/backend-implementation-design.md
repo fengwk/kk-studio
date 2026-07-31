@@ -85,7 +85,7 @@ Java 领域类型使用 `HarnessThread`，避免与 `java.lang.Thread` 冲突。
 | `ThreadCommandCoordinator` | harness-runtime 内 framework-free 命令编排：Thread 创建/bootstrap/head 重定位、payload 构造、配置冻结、幂等短路、映射 coordinator-owned results；Core 不依赖 transaction SPI。Session / ROOT / `RUNTIME_CONFIG` 通过 `bootstrapThread` 内部私有 helper 落库 |
 | `RuntimeConfigSource` | live Agent/Model 冻结 SPI；Core `RuntimeConfigSnapshotResolver` 实现；纯 YOLO 替换在 runtime |
 | `HarnessThreadCommandService` | Core 薄边界：decimal/DTO、同事务 durable target mutation；bootstrap 响应内嵌 Session DTO |
-| `InteractionCoordinator` | harness-runtime 内 handler 投影、expiry、resolution |
+| `InteractionCoordinator` | harness-runtime 内 Tool permission 投影与 approval resolution |
 | `InteractionService` | Core 薄边界：decimal/DTO |
 | `HarnessRetryPolicyService` | 全局自动重试策略 |
 | `HarnessRealtimeStreamPolicyService` | 全局 realtime Stream 容量策略；Redis sink 以短期缓存按写入解析 |

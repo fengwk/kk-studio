@@ -8,9 +8,9 @@ import org.apache.ibatis.annotations.Update;
 
 import java.time.OffsetDateTime;
 
-/** Narrow Thread owner mapper; every use locks the Thread before an owned Invocation. */
+/** Narrow Thread mapper; every use locks the Thread before its Tool invocation. */
 @Mapper
-public interface InteractionOwnerThreadMapper extends BaseMapper {
+public interface InteractionThreadMapper extends BaseMapper {
   @Select("select execution_epoch from harness_thread where id = #{threadId} for update")
   Long findExecutionEpochForUpdate(@Param("threadId") long threadId);
 

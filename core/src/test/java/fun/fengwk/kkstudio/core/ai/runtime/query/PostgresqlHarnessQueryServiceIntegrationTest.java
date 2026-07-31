@@ -264,13 +264,6 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
         leafEntryId,
         executionEpoch,
         OffsetDateTime.ofInstant(NOW.plusSeconds(4), ZoneOffset.UTC));
-    long interactionId = Long.parseLong(threadId) + 80;
-    jdbc.update(
-        "insert into harness_interaction (id, owner_kind, owner_id, handler_type, request, status,"
-            + " version, created_at) values (?, 'THREAD', ?, 'ASK', '{\"q\":1}'::jsonb, 'OPEN', 0, ?)",
-        interactionId,
-        Long.parseLong(threadId),
-        OffsetDateTime.ofInstant(NOW.plusSeconds(5), ZoneOffset.UTC));
     long toolInvocationId = Long.parseLong(threadId) + 50;
     jdbc.update(
         "insert into harness_tool_invocation (id, thread_id, session_id, assistant_entry_id, ordinal,"
@@ -285,6 +278,13 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
         executionEpoch,
         OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC),
         OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
+    long interactionId = Long.parseLong(threadId) + 80;
+    jdbc.update(
+        "insert into harness_interaction (id, tool_invocation_id, request, status, version, created_at)"
+            + " values (?, ?, '{\"q\":1}'::jsonb, 'OPEN', 0, ?)",
+        interactionId,
+        toolInvocationId,
+        OffsetDateTime.ofInstant(NOW.plusSeconds(5), ZoneOffset.UTC));
 
     List<ModelInvocationDTO> models = observabilityQueryService.listModelInvocations(threadId);
     assertEquals(1, models.size());
@@ -299,7 +299,7 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
     assertEquals(1, opens.size());
     assertEquals(Long.toString(interactionId), opens.get(0).getId());
     assertEquals("OPEN", opens.get(0).getStatus());
-    assertEquals("THREAD", opens.get(0).getOwnerKind());
+    assertEquals(Long.toString(toolInvocationId), opens.get(0).getToolInvocationId());
   }
 
   @Test

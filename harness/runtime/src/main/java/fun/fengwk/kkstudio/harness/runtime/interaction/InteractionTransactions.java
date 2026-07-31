@@ -1,38 +1,24 @@
 package fun.fengwk.kkstudio.harness.runtime.interaction;
 
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
-
 import java.time.Instant;
 import java.util.Optional;
 
 /**
  * Use-case atomic persistence port for durable Interactions.
  *
- * <p>Implementations create an OPEN fact while suspending the owner, and atomically terminalize the
- * fact, apply the supplied deterministic resolution, and make its target dispatchable in the same
- * transaction. They validate positive ids, OPEN status, and exact expected version.
+ * <p>Implementations atomically resolve an OPEN Tool permission fact, apply the supplied approval
+ * decision, and make its owned target dispatchable or terminal in the same transaction.
  */
 public interface InteractionTransactions {
 
-  Interaction create(InteractionCreate create);
-
   Optional<Interaction> find(long interactionId);
 
-  Optional<Interaction> findOpenByOwner(ExecutionTarget owner);
+  Optional<Interaction> findOpenByToolInvocation(long toolInvocationId);
 
   InteractionTransition resolve(
       long interactionId,
       long expectedVersion,
       InteractionResponse response,
-      InteractionResolution resolution,
+      ToolPermissionDecision decision,
       Instant resolvedAt);
-
-  InteractionTransition cancel(
-      long interactionId,
-      long expectedVersion,
-      InteractionOwnerDirective ownerDirective,
-      ExecutionTarget nextTarget,
-      Instant resolvedAt);
-
-  InteractionTransition expire(long interactionId, long expectedVersion, Instant resolvedAt);
 }

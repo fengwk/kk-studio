@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.core.ai.runtime.model.worker.HarnessModelInvocationTh
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
-import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionInteraction;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
 import fun.fengwk.kkstudio.harness.runtime.port.HarnessIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
@@ -576,19 +575,16 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
     if (outcome(affected) != ToolInvocationUpdateOutcome.APPLIED) {
       return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
-    // Insert exactly one OPEN interaction owned by this Tool. The DB partial unique index on
-    // (owner_kind, owner_id) where status = 'OPEN' guarantees the uniqueness invariant; a
+    // Insert exactly one OPEN Tool permission interaction. The DB partial unique index on
+    // tool_invocation_id where status = 'OPEN' guarantees the uniqueness invariant; a
     // concurrent insert with the same key would surface as a 0 affected count.
     long interactionId = idGenerator.nextInteractionId();
     String requestJson = encodeToolPermissionRequest(invocation, prompt);
     InteractionDO interactionRow = new InteractionDO();
     interactionRow.setId(interactionId);
-    interactionRow.setOwnerKind(ExecutionTargetKind.TOOL_INVOCATION.name());
-    interactionRow.setOwnerId(invocation.id());
-    interactionRow.setHandlerType(ToolPermissionInteraction.HANDLER_TYPE);
+    interactionRow.setToolInvocationId(invocation.id());
     interactionRow.setRequestJson(requestJson);
     interactionRow.setStatus("OPEN");
-    interactionRow.setExpiresAt(null);
     interactionRow.setCreatedAt(offset(persistence(now)));
     if (interactionMapper.insertOpen(interactionRow) != 1) {
       throw new IllegalStateException(

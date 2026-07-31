@@ -2,130 +2,49 @@ package fun.fengwk.kkstudio.core.ai.runtime.interaction.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.ai.runtime.interaction.service.impl.InteractionServiceImpl;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.interaction.Interaction;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionCoordinator;
-import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionCoordinator.InteractionRespondResult;
-import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionCoordinator.InteractionView;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionProjection;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionRequest;
-import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionResponse;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionStatus;
 import fun.fengwk.kkstudio.share.ai.runtime.InteractionDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.InteractionResponseDTO;
 
 import java.time.Instant;
 
-/**
- * Thin Core wrapper tests: decimal boundary and DTO mapping. Domain handler/expiry semantics are
- * covered in runtime InteractionCoordinatorTest.
- */
+/** DTO boundary exposes only the Tool invocation identity and preserves decimal validation. */
 class InteractionServiceTest {
-  private static final Instant NOW = Instant.parse("2026-01-01T00:00:10Z");
-  private static final ExecutionTarget OWNER =
-      new ExecutionTarget(ExecutionTargetKind.THREAD, 100L);
-
-  /** Resolved domain result is mapped to share DTO fields. */
   @Test
-  void mapsResolvedResult() {
+  void getsOpenInteractionByToolInvocation() {
     InteractionCoordinator coordinator = mock(InteractionCoordinator.class);
-    Interaction resolved = resolved(open(null));
-    when(coordinator.respond(eq(1L), eq(0L), any()))
+    Interaction interaction =
+        new Interaction(
+            1L,
+            41L,
+            new InteractionRequest(
+                "{\"invocationId\":41,\"threadId\":7,\"tool\":\"bash\",\"workdir\":\"/work\",\"arguments\":\"{}\"}"),
+            InteractionStatus.OPEN,
+            null,
+            0L,
+            Instant.parse("2026-01-01T00:00:00Z"),
+            null);
+    when(coordinator.getOpenByToolInvocation(41L))
         .thenReturn(
-            new InteractionRespondResult(
-                resolved, new InteractionProjection("{\"question\":true}")));
-    InteractionService service = new InteractionServiceImpl(coordinator);
+            new InteractionCoordinator.InteractionView(
+                interaction, new InteractionProjection("{}")));
 
-    InteractionDTO result = service.respond("1", response("0", "{\"yes\":true}"));
+    InteractionDTO dto = new InteractionServiceImpl(coordinator).getOpenByToolInvocation("41");
 
-    assertEquals("RESOLVED", result.getStatus());
-    assertEquals("1", result.getVersion());
-    assertEquals("{\"question\":true}", result.getProjectionJson());
-  }
-
-  /** Invalid decimal version and raw JSON are rejected before domain orchestration. */
-  @Test
-  void rejectsInvalidResponseBoundaryBeforeCoordinator() {
-    InteractionCoordinator coordinator = mock(InteractionCoordinator.class);
-    InteractionService service = new InteractionServiceImpl(coordinator);
-
+    assertEquals("41", dto.getToolInvocationId());
+    verify(coordinator).getOpenByToolInvocation(41L);
     assertThrows(
-        IllegalArgumentException.class, () -> service.respond("1", response("01", "true")));
-    assertThrows(
-        IllegalArgumentException.class, () -> service.respond("1", response("0", "{} {}")));
-    verify(coordinator, never()).respond(anyLong(), anyLong(), any());
-  }
-
-  /** Owner kind/id are parsed as exact generic execution-target values before a query is issued. */
-  @Test
-  void rejectsInvalidOwnerBoundaryBeforeCoordinator() {
-    InteractionCoordinator coordinator = mock(InteractionCoordinator.class);
-    InteractionService service = new InteractionServiceImpl(coordinator);
-
-    assertThrows(IllegalArgumentException.class, () -> service.getOpenByOwner("TOOL", "1"));
-    assertThrows(IllegalArgumentException.class, () -> service.getOpenByOwner("THREAD", "01"));
-    verify(coordinator, never()).getOpenByOwner(any());
-  }
-
-  /** get maps projection and identity fields. */
-  @Test
-  void mapsGetProjection() {
-    InteractionCoordinator coordinator = mock(InteractionCoordinator.class);
-    Interaction open = open(null);
-    when(coordinator.get(1L))
-        .thenReturn(new InteractionView(open, new InteractionProjection("{\"p\":1}")));
-    InteractionService service = new InteractionServiceImpl(coordinator);
-
-    InteractionDTO dto = service.get("1");
-    assertEquals("1", dto.getId());
-    assertEquals("THREAD", dto.getOwnerKind());
-    assertEquals("{\"p\":1}", dto.getProjectionJson());
-  }
-
-  private static Interaction open(Instant expiresAt) {
-    return new Interaction(
-        1L,
-        OWNER,
-        "confirm",
-        new InteractionRequest("{\"question\":true}"),
-        InteractionStatus.OPEN,
-        null,
-        expiresAt,
-        0L,
-        Instant.parse("2026-01-01T00:00:00Z"),
-        null);
-  }
-
-  private static Interaction resolved(Interaction open) {
-    return new Interaction(
-        open.id(),
-        open.owner(),
-        open.handlerType(),
-        open.request(),
-        InteractionStatus.RESOLVED,
-        new InteractionResponse("{\"yes\":true}"),
-        open.expiresAt(),
-        1L,
-        open.createdAt(),
-        NOW);
-  }
-
-  private static InteractionResponseDTO response(String expectedVersion, String responseJson) {
-    InteractionResponseDTO dto = new InteractionResponseDTO();
-    dto.setExpectedVersion(expectedVersion);
-    dto.setResponseJson(responseJson);
-    return dto;
+        IllegalArgumentException.class,
+        () -> new InteractionServiceImpl(coordinator).getOpenByToolInvocation("041"));
   }
 }

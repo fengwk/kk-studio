@@ -659,25 +659,16 @@ create index idx_harness_tool_invocation_terminal_unapplied
 
 create table harness_interaction (
     id              bigint        primary key default nextval('kk_studio_id_seq'),
-    owner_kind      varchar(16)   not null,
-    owner_id        bigint        not null,
-    handler_type    varchar(64)   not null,
+    tool_invocation_id bigint     not null,
     request         jsonb         not null,
     status          varchar(16)   not null,
     response        jsonb,
-    expires_at      timestamptz(3),
     version         bigint        not null,
     created_at      timestamptz(3) not null default current_timestamp,
     resolved_at     timestamptz(3),
-    constraint ck_harness_interaction_owner_kind check (
-        owner_kind in ('THREAD','MODEL_INVOCATION','TOOL_INVOCATION')
-    ),
-    constraint ck_harness_interaction_owner_id_pos check (owner_id > 0),
-    constraint ck_harness_interaction_handler_type check (
-        char_length(btrim(handler_type)) > 0
-    ),
+    constraint ck_harness_interaction_tool_invocation_id_pos check (tool_invocation_id > 0),
     constraint ck_harness_interaction_status check (
-        status in ('OPEN','RESOLVED','CANCELLED','EXPIRED')
+        status in ('OPEN','RESOLVED')
     ),
     constraint ck_harness_interaction_version_nonneg check (version >= 0),
     -- OPEN: no response, not resolved.
@@ -690,25 +681,16 @@ create table harness_interaction (
         status <> 'RESOLVED'
         or (response is not null and resolved_at is not null)
     ),
-    constraint ck_harness_interaction_cancelled_or_expired check (
-        status not in ('CANCELLED','EXPIRED')
-        or (response is null and resolved_at is not null)
-    ),
     constraint ck_harness_interaction_time_order check (
-        (expires_at is null or expires_at > created_at)
-        and (resolved_at is null or resolved_at >= created_at)
-        and (status <> 'EXPIRED'
-            or (expires_at is not null and resolved_at >= expires_at))
+        resolved_at is null or resolved_at >= created_at
     )
 );
 
 create unique index uk_harness_interaction_open
-    on harness_interaction (owner_kind, owner_id)
+    on harness_interaction (tool_invocation_id)
     where status = 'OPEN';
-create index idx_harness_interaction_owner
-    on harness_interaction (owner_kind, owner_id);
-create index idx_harness_interaction_expires
-    on harness_interaction (expires_at, id) where status = 'OPEN';
+create index idx_harness_interaction_tool_invocation
+    on harness_interaction (tool_invocation_id);
 
 create table harness_retry_policy (
     id                  integer       primary key,
@@ -1026,24 +1008,17 @@ create trigger trg_harness_model_usage_revision
 create or replace function harness_thread_revision_from_interaction()
 returns trigger language plpgsql as $$
 declare
-    v_owner_kind varchar(16);
-    v_owner_id bigint;
+    v_tool_invocation_id bigint;
     v_thread_id bigint;
 begin
     if tg_op = 'DELETE' then
-        v_owner_kind := old.owner_kind;
-        v_owner_id := old.owner_id;
+        v_tool_invocation_id := old.tool_invocation_id;
     else
-        v_owner_kind := new.owner_kind;
-        v_owner_id := new.owner_id;
+        v_tool_invocation_id := new.tool_invocation_id;
     end if;
-    if v_owner_kind = 'THREAD' then
-        v_thread_id := v_owner_id;
-    elsif v_owner_kind = 'MODEL_INVOCATION' then
-        select thread_id into v_thread_id from harness_model_invocation where id = v_owner_id;
-    else
-        select thread_id into v_thread_id from harness_tool_invocation where id = v_owner_id;
-    end if;
+    select thread_id into v_thread_id
+    from harness_tool_invocation
+    where id = v_tool_invocation_id;
     if v_thread_id is not null then
         perform harness_bump_thread_revision(v_thread_id);
     end if;

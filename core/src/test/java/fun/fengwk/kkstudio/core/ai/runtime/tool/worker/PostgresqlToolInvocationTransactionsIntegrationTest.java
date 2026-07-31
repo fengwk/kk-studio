@@ -657,7 +657,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
     assertNull(row.getResultJson());
     assertNull(row.getErrorJson());
 
-    // Exactly one OPEN interaction owned by this Tool, with handler_type tool-permission.
+    // Exactly one OPEN Tool permission interaction is attached to this Tool.
     assertEquals(1, countOpenInteractionsForTool(fixture.invocationId));
     JsonNode request = JSON.readTree(onlyOpenInteractionRequestJson(fixture.invocationId));
     assertEquals(fixture.invocationId, request.required("invocationId").asLong());
@@ -930,9 +930,8 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
     try (Connection connection = newConnection();
         PreparedStatement statement =
             connection.prepareStatement(
-                "insert into harness_interaction (id, owner_kind, owner_id, handler_type, request,"
-                    + " status, version, created_at) values (?, 'TOOL_INVOCATION', ?, 'approval',"
-                    + " '{}'::jsonb, 'OPEN', 0, current_timestamp)")) {
+                "insert into harness_interaction (id, tool_invocation_id, request, status, version,"
+                    + " created_at) values (?, ?, '{}'::jsonb, 'OPEN', 0, current_timestamp)")) {
       statement.setLong(1, interactionId);
       statement.setLong(2, invocationId);
       statement.executeUpdate();
@@ -944,8 +943,8 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
     try (Connection connection = newConnection();
         PreparedStatement statement =
             connection.prepareStatement(
-                "update harness_interaction set status = 'CANCELLED', resolved_at = current_timestamp"
-                    + " where id = ?")) {
+                "update harness_interaction set status = 'RESOLVED', response = '{\"approved\":false}'"
+                    + "::jsonb, resolved_at = current_timestamp where id = ?")) {
       statement.setLong(1, interactionId);
       statement.executeUpdate();
     }
@@ -955,8 +954,8 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
     try (Connection connection = newConnection();
         PreparedStatement statement =
             connection.prepareStatement(
-                "select count(*) from harness_interaction where owner_kind = 'TOOL_INVOCATION'"
-                    + " and owner_id = ? and status = 'OPEN'")) {
+                "select count(*) from harness_interaction where tool_invocation_id = ?"
+                    + " and status = 'OPEN'")) {
       statement.setLong(1, invocationId);
       try (ResultSet rs = statement.executeQuery()) {
         rs.next();
@@ -969,8 +968,8 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
     try (Connection connection = newConnection();
         PreparedStatement statement =
             connection.prepareStatement(
-                "select request::text from harness_interaction where owner_kind = 'TOOL_INVOCATION'"
-                    + " and owner_id = ? and status = 'OPEN' limit 1")) {
+                "select request::text from harness_interaction where tool_invocation_id = ?"
+                    + " and status = 'OPEN' limit 1")) {
       statement.setLong(1, invocationId);
       try (ResultSet rs = statement.executeQuery()) {
         if (!rs.next()) {

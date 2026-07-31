@@ -15,21 +15,20 @@ import fun.fengwk.kkstudio.core.ai.runtime.interaction.store.model.InteractionDO
 import java.time.OffsetDateTime;
 import java.util.List;
 
-/** PostgreSQL mapper confined to the durable generic {@code harness_interaction} fact. */
+/** PostgreSQL mapper confined to durable Tool permission {@code harness_interaction} facts. */
 @Mapper
 public interface InteractionMapper extends BaseMapper {
   String COLUMNS =
-      "i.id, i.owner_kind, i.owner_id, i.handler_type, i.request, i.status, i.response, "
-          + "i.expires_at, i.version, i.created_at, i.resolved_at";
+      "i.id, i.tool_invocation_id, i.request, i.status, i.response, i.version, i.created_at,"
+          + " i.resolved_at";
 
   @Insert(
       """
       insert into harness_interaction (
-          id, owner_kind, owner_id, handler_type, request, status, response, expires_at, version,
-          created_at, resolved_at
+          id, tool_invocation_id, request, status, response, version, created_at, resolved_at
       ) values (
-          #{id}, #{ownerKind}, #{ownerId}, #{handlerType}, cast(#{requestJson} as jsonb), #{status},
-          null, #{expiresAt}, 0, #{createdAt}, null
+          #{id}, #{toolInvocationId}, cast(#{requestJson} as jsonb), #{status}, null, 0,
+          #{createdAt}, null
       )
       """)
   int insertOpen(InteractionDO interaction);
@@ -39,13 +38,10 @@ public interface InteractionMapper extends BaseMapper {
       id = "interactionResultMap",
       value = {
         @Result(column = "id", property = "id"),
-        @Result(column = "owner_kind", property = "ownerKind"),
-        @Result(column = "owner_id", property = "ownerId"),
-        @Result(column = "handler_type", property = "handlerType"),
+        @Result(column = "tool_invocation_id", property = "toolInvocationId"),
         @Result(column = "request", property = "requestJson"),
         @Result(column = "status", property = "status"),
         @Result(column = "response", property = "responseJson"),
-        @Result(column = "expires_at", property = "expiresAt"),
         @Result(column = "version", property = "version"),
         @Result(column = "created_at", property = "createdAt"),
         @Result(column = "resolved_at", property = "resolvedAt")
@@ -55,34 +51,17 @@ public interface InteractionMapper extends BaseMapper {
   @Select(
       "select "
           + COLUMNS
-          + " from harness_interaction i where i.owner_kind = #{ownerKind} and i.owner_id = #{ownerId}"
+          + " from harness_interaction i where i.tool_invocation_id = #{toolInvocationId}"
           + " and i.status = 'OPEN'")
   @ResultMap("interactionResultMap")
-  InteractionDO findOpenByOwner(
-      @Param("ownerKind") String ownerKind, @Param("ownerId") long ownerId);
+  InteractionDO findOpenByToolInvocation(@Param("toolInvocationId") long toolInvocationId);
 
   @Select(
       "select "
           + COLUMNS
           + " from harness_interaction i"
-          + " where i.status = 'OPEN'"
-          + " and ("
-          + " (i.owner_kind = 'THREAD' and i.owner_id = #{threadId})"
-          + " or ("
-          + " i.owner_kind = 'MODEL_INVOCATION'"
-          + " and exists ("
-          + " select 1 from harness_model_invocation mi"
-          + " where mi.id = i.owner_id and mi.thread_id = #{threadId}"
-          + " )"
-          + " )"
-          + " or ("
-          + " i.owner_kind = 'TOOL_INVOCATION'"
-          + " and exists ("
-          + " select 1 from harness_tool_invocation ti"
-          + " where ti.id = i.owner_id and ti.thread_id = #{threadId}"
-          + " )"
-          + " )"
-          + " )"
+          + " join harness_tool_invocation ti on ti.id = i.tool_invocation_id"
+          + " where i.status = 'OPEN' and ti.thread_id = #{threadId}"
           + " order by i.created_at, i.id")
   @ResultMap("interactionResultMap")
   List<InteractionDO> listOpenByThread(@Param("threadId") long threadId);
@@ -102,17 +81,5 @@ public interface InteractionMapper extends BaseMapper {
       @Param("id") long id,
       @Param("expectedVersion") long expectedVersion,
       @Param("responseJson") String responseJson,
-      @Param("resolvedAt") OffsetDateTime resolvedAt);
-
-  @Update(
-      """
-      update harness_interaction
-      set status = #{status}, response = null, resolved_at = #{resolvedAt}, version = version + 1
-      where id = #{id} and status = 'OPEN' and version = #{expectedVersion}
-      """)
-  int terminalizeWithoutResponse(
-      @Param("id") long id,
-      @Param("expectedVersion") long expectedVersion,
-      @Param("status") String status,
       @Param("resolvedAt") OffsetDateTime resolvedAt);
 }

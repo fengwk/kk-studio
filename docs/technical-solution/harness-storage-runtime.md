@@ -71,14 +71,14 @@ Assistant Entry、ordinal、ToolCall、descriptor/arguments、`PLATFORM/ENVIRONM
 
 - 新行是 `QUEUED + PENDING`；`yolo_enabled` 从生成该 ToolCall 的冻结 RuntimeConfig 复制。
 - `ALLOW` 先在同一 Tool worker lease 内持久化最终 descriptor/arguments 与 `ALLOWED`，然后才允许任何外部 Tool I/O。
-- `ASK` 原子写入最终计划、`WAITING_INTERACTION + ASKED`、一个 owner 为该 Tool 的 `tool-permission` OPEN Interaction，并 park 该 Tool target。
-- 用户批准把行转为 `QUEUED + ALLOWED` 并仅经原 route FIFO gate 重新启用 target；拒绝或过期转为 `FAILED + DENIED`，删除 Tool target、唤醒 Thread 并激活下一个环境 route head。
+- `ASK` 原子写入最终计划、`WAITING_INTERACTION + ASKED`、一个以 `tool_invocation_id` 关联该 Tool 的 OPEN Interaction，并 park 该 Tool target。
+- 用户批准把行转为 `QUEUED + ALLOWED` 并仅经原 route FIFO gate 重新启用 target；拒绝转为 `FAILED + DENIED`，删除 Tool target、唤醒 Thread 并激活下一个环境 route head。
 
 Model/Tool Invocation 与 `harness_model_usage` 的 Thread 归属都是单列 `thread_id` FK。`harness_model_invocation` 不持有 `session_id`，`source_head_entry_id` 单列 FK 到 `harness_entry(id)`；`harness_tool_invocation` 与 `harness_model_usage` 的 `session_id` 仍作为约束载体，保证所引用的 Entry 与其属于同一 Session。
 
 ### 4.7 `harness_interaction`
 
-owner reference、handler type、request/response jsonb、状态、deadline/version。
+`tool_invocation_id`、request/response jsonb、`OPEN/RESOLVED` 状态与 version；每个 Tool 最多一个 OPEN 行。
 
 ### 4.8 其他 durable 表
 
